@@ -8,7 +8,7 @@
 **不覆盖：** `POLLPRI` / exception readiness、epoll persistent interest、Linux UAPI layout、具体 source predicate 定义
 **实现位置：** `anemone-kernel/src/fs/iomux.rs`、`anemone-kernel/src/fs/api/iomux/`、各 pollable source 的 `poll` 路径
 **依赖：** `SCHED-LATCH-001..003`、`SCHED-WAKE-001..004`
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260726-epoll R0](../../rfcs/epoll/invariants.md#contract-impact)，等待 `SUBSCRIPTION-CUTOVER`
 **最后核验：** 2026-07-26
 
 ## 状态与能力所有权

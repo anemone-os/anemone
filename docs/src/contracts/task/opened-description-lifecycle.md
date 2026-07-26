@@ -8,7 +8,7 @@
 **不覆盖：** VFS inode lifetime、transient `Arc<FileDesc>` borrow、epoll watch identity、尚不存在的动态 lifecycle observer registry
 **实现位置：** `anemone-kernel/src/task/files.rs`
 **依赖：** None
-**Pending Successor：** None
+**Pending Successor：** [RFC-20260726-epoll R0](../../rfcs/epoll/invariants.md#contract-impact)，等待 `OPENED-DESC-CAPABILITY-CUTOVER`
 **最后核验：** 2026-07-26
 
 ## 状态与能力所有权

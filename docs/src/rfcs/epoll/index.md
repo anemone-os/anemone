@@ -1,22 +1,24 @@
 # RFC-20260726-epoll
 
-**状态：** Draft（公开评审；Not Accepted / Not Effective）
-**修订：** Draft
+**状态：** Accepted for Implementation / Stage 0 Active / Not Effective
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-26
 **领域：** fs / iomux / epoll / task files / scheduler wait
-**事务日志：** None
-**影响契约：** Preserve `SCHED-LATCH-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-003`；Refine `IOMUX-POLL-001`、`OPENED-DESC-001/002`；Replace `IOMUX-POLL-002`；Introduce `OPENED-DESC-LIVENESS-001`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
+**事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
+**影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-003`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001`、`OPENED-DESC-001/002`；Replace `IOMUX-POLL-002`；Introduce `OPENED-DESC-LIVENESS-001`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无开放 Keter。
-**下一步：** 对公共 Draft 做文档层 review；只有接受为 R0 并建立 transaction 后，才可另行授权 Stage 0 从 Ready 进入 Active。
+**下一步：** 按已授权的 Stage 0 checkpoint 顺序执行 0A terminal liveness；0A 关闭前不得进入 0B。
 
 ## 文档状态
 
-本文是 epoll 提案与 target delta 的公共 canonical source。它把已经形成的
-epoll 定位共识整理为共享评审中的 Draft，并通过
+本文是 epoll R0 accepted target 与 target delta 的公共 canonical source。它把已经形成的
+epoll 定位共识整理为已接受的实现目标，并通过
 [Contract Impact](./invariants.md#contract-impact) 区分 current effective contract、
 尚未生效的 target delta 与 RFC-local proof obligations。[实施计划](./implementation.md)
-已经解析三阶段滚动路线与首个 Ready stage，但公共 Draft 本身不创建 transaction，也不授权代码执行。
+已经解析三阶段滚动路线与首个 Ready stage；R0 acceptance、transaction bootstrap 与本轮开发者授权
+已在 [事务日志](../../devlog/transactions/2026-07-26-epoll.md) 中记录。current contract 在对应
+cutover 前保持不变，且本轮授权只覆盖 Stage 0 的 0A、0B。
 
 ## 摘要
 
@@ -110,7 +112,7 @@ epoll 额外要求：
   follow-up target；首版 `EPOLL_CTL_ADD` 对 epoll target 返回 `EINVAL` 并记录 notice，
   不能让尚未验证 cycle/depth 与并发 admission 的 nesting 因对象可组合而意外生效。
 - 不要求复制 Linux `eventpoll` 的红黑树、RCU、slab 或 `ovflist` 具体结构。
-- 当前 implementation plan 不替代 R0 acceptance、transaction 或阶段启动授权。
+- R0 acceptance 与 Stage 0 activation 不替代 checkpoint gate，也不授权 0C、0D 或后续 Stage。
 
 ## 文档地图
 
@@ -122,8 +124,10 @@ Target proposal：
 Current effective baseline：
 
 - [Scheduler Latch wait round](../../contracts/scheduler/latch-wait-round.md)
+- [Signal temporary-mask delivery handoff](../../contracts/signal/temporary-mask-delivery.md)
 - [Poll wait 与 source registration](../../contracts/iomux/poll-wait.md)
 - [Opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)
+- [Serial TTY data plane](../../contracts/tty/data-plane.md)
 
 Review 状态：
 
@@ -141,8 +145,14 @@ Review 状态：
 [实施计划](./implementation.md) 已按开发者授权补充 rolling stages，并把 Stage 0 解析为
 0A terminal liveness、0B observer/pipe、0C timerfd noirq、0D TTY/closure 四个顺序
 checkpoint，分别冻结 write subset、proof-first validation floor、review 与停止/恢复条件。当前所有
-Keter 均已在 Draft target 中 neutralize；Stage 0 的 Ready 只表示计划已解析，不自动形成
-accepted R0、transaction 或执行授权。
+Keter 均已在 R0 target 中 neutralize；Stage 0 已通过 transaction preflight 进入 Active，但每个
+checkpoint 仍需按自己的交付、review、验证和停止/恢复条件独立关闭。
+
+## 修订记录
+
+| 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
+| --- | --- | --- | --- | --- |
+| R0 | 2026-07-26 | Accepted for Implementation | 初始 accepted target；定义 source-neutral subscription、terminal opened-description liveness、epoll owner/ready/file 语义与三个 cutover unit。 | [初始事务](../../devlog/transactions/2026-07-26-epoll.md) |
 
 ## 方案
 
@@ -241,9 +251,9 @@ Linux `epoll_event`、ctl opcode、`EPOLL_*` bits、timeout layout 与 user poin
 `IOMUX-POLL-*` 与 `OPENED-DESC-*` 拥有；完整 delta、变化分类和未来 cutover unit 见
 [不变量需求](./invariants.md#contract-impact)。
 
-Draft target 要求：
+R0 target 要求：
 
-- Preserve `SCHED-LATCH-*` 与 final readiness recheck；
+- Preserve `SCHED-LATCH-*`、`SIGNAL-TEMP-MASK-*` 与 final readiness recheck；
 - Refine / Replace 当前 one-round iomux source registration，使 poll/select 经 adapter
   使用 source-owned persistent observer routes；
 - Refine published-ref truth 为 terminal retirement，并 Introduce non-owning
@@ -251,14 +261,16 @@ Draft target 要求：
   不预设 dynamic observer registry；
 - Introduce epoll watch、ready protocol 与 epoll-file pollability 的长期规则；nested
   epoll 不属于首版 `EPOLL-CUTOVER`。
+- Preserve `TTY-TERM-001` / `TTY-INPUT-001` 的 Terminal/input readiness truth；TTY
+  representative slice 只替换 poll route，不改变 record boundary。
 
-以上 target 在本 Draft 被接受为 R0 且对应 cutover 完成前都不是 effective behavior。本轮只做
-公共 RFC promotion 与文档分层迁移，不修改 current contract 语义，也不开始 transaction。
+以上 target 在对应 cutover 完成前都不是 effective behavior。R0 acceptance 与 Stage 0
+production-shaped slice 不修改 current contract 语义；Stage 0 的 contract cutover 固定为 `None`。
 
 ## 接受边界
 
-本文仍是 Draft，不表示方案已经 Accepted for Implementation，更不表示任何
-`Contract Impact` 已经 cut over。当前文档层已经闭合七项边界：统一只约束
+本文已经作为 R0 Accepted for Implementation，但不表示任何 `Contract Impact` 已经 cut over。
+当前文档层已经闭合七项边界：统一只约束
 source-facing subscription protocol，不强制统一 source-local registry/lock/handoff；每个
 `Epoll` 使用一个 sleepable operation mutex 串行 ctl、teardown 与 harvest；source
 notification 只发布
@@ -268,7 +280,8 @@ consumer-owned validity/lifetime 与 source-owned 有界 route cleanup 分别承
 资源卫生；opened description 通过 non-owning terminal liveness capability 被 epoll
 验证，final close 不同步进入 epoll。
 
-[实施计划](./implementation.md) 已把首个 proof-first slice 解析为 Stage 0 Ready：0A 先
+[实施计划](./implementation.md) 已把首个 proof-first slice 解析为 Stage 0，并在本轮授权下进入
+Active：0A 先
 fail-fast 验证 opened-description terminal liveness，0B 用 pipe 建立公共 observer/route 与
 ordinary task-context slice，0C/0D 再分别证明 timerfd noirq/fixed-capacity 与 TTY 预分配
 handoff，最后由 0D 完成一次 Stage 级 runtime/review closure。Stage 0 不执行 contract cutover，
@@ -329,6 +342,6 @@ completion 边界。
 
 ## 收口
 
-尚未进入实现阶段。当前公共 Draft 的 Keter 已 neutralize，target / current / RFC-local
-分层和 [实施计划](./implementation.md) 已完成本轮解析；这不自动形成 accepted R0、创建
-transaction、启动 Stage 0，或修改 current contract。
+R0 已接受，transaction 已建立，Stage 0 已按开发者授权进入 Active。当前 Keter 已 neutralize，
+target / current / RFC-local 分层和 [实施计划](./implementation.md) 保持权威；本轮只执行 0A、0B，
+不会自动进入 0C、0D、Stage 1，也不会修改 current contract。

@@ -3,9 +3,9 @@
 **状态：** Active
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
-**事务日志：** None
+**事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
-本文只跟踪当前仍影响 Draft target、实现顺序、review gate、停止边界或验收判断
+本文只跟踪当前仍影响 R0 target、实现顺序、review gate、停止边界或验收判断
 的 confirmed design issues。普通实现 TODO、具体 Rust encoding 选择和尚未验证的
 性能猜测不放在这里。
 
@@ -22,8 +22,9 @@ protocol、保留 source-local registry/lock/handoff”与 future proof-first ga
 neutralize，不再把统一误判为单一通用 wrapper 或纯机械迁移。
 开发者随后授权创建 [实施计划](./implementation.md)；该文件只把 Stage 0 解析为 Ready，并在
 后续 review 中按 owner 与恢复边界拆成 0A terminal liveness、0B observer/pipe、0C timerfd
-noirq、0D TTY/closure 四个 checkpoint；这不改变本页 issue 结论，也不形成 accepted R0、
-transaction 或代码执行授权。
+noirq、0D TTY/closure 四个 checkpoint；这不改变本页 issue 结论。2026-07-26 文档层复核
+补齐 K5 的 current-contract 最小闭包后，R0 已接受、transaction 已建立，Stage 0 已按开发者
+授权进入 Active；本轮只授权 0A、0B。
 
 ## Apollyon
 
@@ -42,6 +43,30 @@ None.
 None.
 
 ## Neutralized
+
+### EPOLL-DRAFT-K5 - Stage 0 直接依赖未完整登记到 Contract Impact
+
+**状态：** Neutralized in R0 / 2026-07-26
+**影响范围：** contract minimum closure / ppoll-pselect signal handoff / TTY readiness
+**来源：** R0 acceptance document review
+
+**原问题：** Draft 已登记 scheduler latch、iomux registration 与 opened-description
+lifecycle，但 0B 会直接改动 `fs::api::iomux` 的 wait-round orchestration，必须保持
+`SIGNAL-TEMP-MASK-001..003` 的 mask / reservation / restore owner；0D 会替换 Terminal poll
+route，必须保持 `TTY-TERM-001` 与 `TTY-INPUT-001` 的 readiness/input truth。缺少这些
+Preserve 项会让 Stage 0 review 与 transaction 无法证明 current-contract 最小闭包。
+
+**关闭决策：** R0 `Contract Impact`、RFC 概览与 implementation protected boundary 显式加入
+上述 Preserve IDs。Stage 0 不修改这些 effective contract 正文；0B 仍由现有 Signal classifier
+收口 temporary-mask outcome，0D 只迁移 TTY poll route，不取得 Terminal readiness/input owner。
+transaction 同步记录全部 Preserve IDs 与 `contract cutover: None`。
+
+**修复位置：** [RFC Contract Impact 概览](./index.md#contract-impact-概览)、
+[Contract Impact](./invariants.md#contract-impact) 与
+[实施计划全局受保护边界](./implementation.md#全局受保护边界)。
+
+**重新打开条件：** `IomuxWaitRound` 开始持有或复制 Signal mask/restore truth；TTY route 迁移
+改变 input/readiness predicate 或 record boundary；或 Stage 0 需要更新这些 effective contract 正文。
 
 ### EPOLL-DRAFT-K4 - 协议统一被误判为单一 wrapper / registry
 

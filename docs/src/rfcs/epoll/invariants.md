@@ -1,14 +1,13 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** Draft target / Not Effective
+**状态：** Accepted Target / Not Effective
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
-本文保存 epoll Draft 相对 current effective contract 的 target delta，以及本 RFC
-自己的 proof obligations。当前生效规则以 `docs/src/contracts/` 为唯一权威；本文在
-本 Draft 被接受为 R0 前不是 accepted target，在 contract cutover 前也不是 current
-behavior。
+本文保存 epoll R0 相对 current effective contract 的 target delta，以及本 RFC
+自己的 proof obligations。当前生效规则以 `docs/src/contracts/` 为唯一权威；本文是
+accepted target，但在 contract cutover 前不是 current behavior。
 
 ## Contract Impact
 
@@ -19,6 +18,7 @@ Stage 0 不切换 contract，Stage 1 / Stage 2 分别拥有 foundation 与 epoll
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
 | [`SCHED-LATCH-001..003`](../../contracts/scheduler/latch-wait-round.md) | Preserve | 单轮 wait identity、owner-bound lifecycle、no-return stale-safe trigger | `Latch` 继续只承载 task-local 单轮等待；persistent subscription 不进入 scheduler | 全程 |
+| [`SIGNAL-TEMP-MASK-001..003`](../../contracts/signal/temporary-mask-delivery.md) | Preserve | temporary mask、delivery reservation 与 restore responsibility 由 Signal owner 线性收口 | `IomuxWaitRound` 只替换 readiness registration owner，不取得或复制 mask/restore truth，现有 ppoll/pselect outcome classification 保持 | 全程 |
 | [`IOMUX-POLL-001`](../../contracts/iomux/poll-wait.md#iomux-poll-001--阻塞前必须完成-snapshotregister-gate) | Refine | snapshot/register/final-scan 使用单轮 `LatchTrigger` register | poll/select 通过 `IomuxWaitRound` 建立 persistent observer routes，仍保留阻塞前完整 arm gate | `SUBSCRIPTION-CUTOVER` |
 | [`IOMUX-POLL-002`](../../contracts/iomux/poll-wait.md#iomux-poll-002--source-锁拥有-readiness-与-trigger-publication) | Replace | source 锁内发布并 detach 单轮 `LatchTrigger`，锁外 trigger | source 锁内安装非拥有 observer route 并返回 current readiness；状态变化锁内选择 observer、锁外 callback；consumer retirement 使旧 hint fail closed，source 有界清理 stale routes | `SUBSCRIPTION-CUTOVER` |
 | [`IOMUX-POLL-003`](../../contracts/iomux/poll-wait.md#iomux-poll-003--wake-只是-hint最终-predicate-决定返回) | Preserve | wake 只是 hint，final predicate 决定返回 | poll/select 与 epoll 都不得把 callback/queue payload 当成 target readiness truth | 全程 |
@@ -29,6 +29,8 @@ Stage 0 不切换 contract，Stage 1 / Stage 2 分别拥有 foundation 与 epoll
 | `EPOLL-WATCH-001` | Introduce | None（尚未生效） | `Epoll` / `EpollWatch` 唯一拥有 interest、generation、policy 与 publication；每个 `Epoll` 的 operation mutex 只串行 ctl、teardown 与 harvest，不保存第二份状态 | `EPOLL-CUTOVER` |
 | `EPOLL-READY-001` | Introduce | None（尚未生效） | ready queue 只保存 candidate；notification 只发布可合并的 sticky recheck obligation；harvest/requeue/disable 由 epoll owner 线性化 | `EPOLL-CUTOVER` |
 | `EPOLL-FILE-001` | Introduce | None（尚未生效） | epoll file 通过同一 source subscription contract 暴露 readability；首版不开放 nested epoll | `EPOLL-CUTOVER` |
+| [`TTY-TERM-001`](../../contracts/tty/data-plane.md#tty-term-001--endpoint共享唯一terminal-semantic-truth) | Preserve | 共享 `Terminal` 唯一拥有 termios、input 与 readiness predicate | Stage 0/1 只替换 poll routing capability，不复制或下沉 Terminal readiness truth | 全程 |
+| [`TTY-INPUT-001`](../../contracts/tty/data-plane.md#tty-input-001--input-ownershiprecord-boundary与readiness同源) | Preserve | input publication、read/poll predicate 与 durable recheck 同源 | TTY representative slice 保留 record/readiness owner 与预分配 dirty handoff，只迁移 consumer route | 全程 |
 
 `SUBSCRIPTION-CUTOVER` 必须让所有参与阻塞的 source 与 poll/select adapter 同时离开旧
 one-round source protocol；失败时保持当前 `IOMUX-POLL-*` effective rules，不能长期保留
@@ -76,7 +78,7 @@ notice。future nesting 必须经独立 target review 与 cutover 才能把该�
     通用 wrapper 的代码复用程度替代 owner-local correctness 证明。
 
 任何一项未闭合时，只能称为 Draft 或受控 probe，不能声明 epoll 核心语义可实现。
-当前 Keter 已在公共 Draft target 中 neutralize；future implementation resolution 仍需用 live
+当前 Keter 已在公共 R0 target 中 neutralize；future implementation resolution 仍需用 live
 source probe 证明 terminal retirement 与 transient lease，但不要求提前伪造具体 Rust
 encoding，也不自动获得执行授权。
 
@@ -439,16 +441,18 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
   把名义上的统一协议拼出来。
 - target owner、ABI、可见语义或 acceptance boundary 若因实现证据需要改变，必须进入
   Target Renegotiation Gate，不能在 future implementation stage 中静默降低语义。
-- Stage 0 已在 document review 前解析为 Ready，但 Draft 状态不创建 transaction、
-  不进入 Active。R0 acceptance、transaction 与开发者启动授权仍是执行前置条件。
+- Stage 0 已在 document review 前解析为 Ready；R0 acceptance、transaction 与开发者启动授权
+  已于 2026-07-26 完成，Stage 0 现为 Active。checkpoint authorization 仍逐项生效，本轮只覆盖
+  0A、0B，不能自动进入 0C、0D 或后续 Stage。
 
 ### 文档层完成标准
 
-Draft target 只有在以下证据齐备后才能声明文档层闭合：
+R0 target 已由以下文档层证据闭合：
 
 - 所有 Keter tracking issues 已 neutralize，或转成具有受保护 target、解析触发点、停止条件
   与回写路径的明确 stage gate；当前所有 Keter 已 neutralize，且
-  [实施计划](./implementation.md) 已解析 Stage 0，但不自动形成 accepted R0 或进入执行 gate；
+  [实施计划](./implementation.md) 已解析 Stage 0；R0 acceptance 与 Stage 0 activation 由
+  [事务日志](../../devlog/transactions/2026-07-26-epoll.md) 独立记录，不授权后续 checkpoint / Stage；
 - registration publication、consumer retirement、watch publication、ready harvest 与
   opened-description terminal retirement 的线性化点可组成无丢 wake、无旧数据交付的
   完整状态机；

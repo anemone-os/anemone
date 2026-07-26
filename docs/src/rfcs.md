@@ -103,11 +103,11 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260726-epoll](./rfcs/epoll/index.md)：公共 Draft；提议以 source-neutral persistent
+- [RFC-20260726-epoll](./rfcs/epoll/index.md)：R0 已接受；以 source-neutral persistent
   readiness subscription 统一 poll/select 与 epoll 的 source-facing protocol，并由 `Epoll` / `EpollWatch`
-  单独拥有 watch、generation、ready policy 和 harvest。当前 contract 仍以 `SCHED-LATCH-*`、
-  `IOMUX-POLL-*` 与 `OPENED-DESC-*` 为准；Stage 0 已解析为 proof-first Ready，但尚未接受为 R0、
-  未建立 transaction，也未获得实现授权。
+  单独拥有 watch、generation、ready policy 和 harvest。Stage 0 已进入 Active，本轮只授权 0A terminal
+  liveness 与 0B observer/pipe；current contract 保持有效且全部 Not Cut Over。执行证据见
+  [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
   ATA block facade与2K1000 platform integration文档入口；本次merge保留其RFC、transaction和register

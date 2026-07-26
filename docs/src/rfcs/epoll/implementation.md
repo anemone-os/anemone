@@ -1,18 +1,18 @@
 # Epoll 实施计划
 
-**状态：** Draft implementation plan / Not Authorized
-**适用修订：** Draft
+**状态：** Active / Stage 0
+**适用修订：** R0
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **目标不变量：** [Epoll 与 Poll Subscription 不变量需求](./invariants.md)
-**当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)
+**当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`SIGNAL-TEMP-MASK-*`](../../contracts/signal/temporary-mask-delivery.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)、[`TTY-TERM-001` / `TTY-INPUT-001`](../../contracts/tty/data-plane.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无开放 Keter
-**事务日志：** None
+**事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
-本文把公共 Draft 中已经闭合的 target proposal 解析成滚动实施路线。它不是
-transaction 或执行授权。Stage 0 已解析为 Ready；这里的 Ready 只表示
-交付、停止条件、验证和代码 write set 已经足够执行，不表示可以在 Draft 状态下开始写
-代码。本 Draft 被接受为 R0、transaction 建立和开发者明确启动授权仍是进入 Active 的前置条件。
+本文把公共 R0 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
+Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
+本轮授权只覆盖 0A、0B；前一 checkpoint 的交付、review 与验证关闭后才能进入后一项，
+且不会自动授权 0C、0D 或后续 Stage。
 
 ## 实施原则
 
@@ -37,6 +37,8 @@ transaction 或执行授权。Stage 0 已解析为 Ready；这里的 Ready 只�
 
 - `SCHED-LATCH-001..003` 保持有效；persistent subscription 不进入 scheduler，source 不保存
   `Task`、`WakeToken` 或 runqueue capability。
+- `SIGNAL-TEMP-MASK-001..003` 保持有效；`IomuxWaitRound` 不取得 current mask、reserved
+  delivery target 或 restore responsibility，ppoll/pselect 继续由现有 Signal classifier 收口。
 - readiness truth 与 routing storage 始终由具体 source state 拥有；consumer acceptance、
   watch generation、policy 与 ready protocol 不进入 source。
 - source lock 内只更新 readiness、安装/筛选 route；observer notification、wait completion、
@@ -53,18 +55,24 @@ transaction 或执行授权。Stage 0 已解析为 Ready；这里的 Ready 只�
   Linux-shaped event/flag state。
 - 首版拒绝 nested epoll。对 epoll target 的 `EPOLL_CTL_ADD` 固定返回 `EINVAL` 并记录
   notice；不为通过 Linux nesting 用例暗中开放 cycle/depth 路径。
+- `TTY-TERM-001` 与 `TTY-INPUT-001` 保持有效；TTY representative slice 只替换 poll
+  routing capability，不复制 Terminal readiness/input truth，也不改变 record boundary。
 
 ## 阶段路线图
 
 | 阶段 | 成熟度 | 目的 | contract cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 | Ready | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 已完成 |
+| Stage 0 | Active | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | Ready 解析与 activation preflight 已完成 |
 | Stage 1 | Outline | 迁移全部 pollable source 与 poll/select，删除 `LatchTrigger` source bridge，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` | Stage 0 独立关闭后 |
 | Stage 2 | Outline | 实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER` | Stage 1 独立关闭后 |
 
 ## Stage 0 Ready：Subscription 与 Liveness Proof-First Slice
 
 ### 前置条件
+
+以下前置条件已于 2026-07-26 满足，证据见
+[事务日志](../../devlog/transactions/2026-07-26-epoll.md)；它们不替代各 checkpoint 自己的
+关闭条件：
 
 - 公共 Draft 已完成文档层 review 并被接受为 R0；accepted target、Contract Impact 与本文三阶段
   路线没有语义变化。
@@ -258,7 +266,8 @@ focused iomux runtime 在同一 current image 中运行；最后 review 完整 S
 
 ### Contract cutover 与代码去留
 
-`None`。`IOMUX-POLL-*` 与 `OPENED-DESC-*` current contract 全部保持有效；0A-0D 任一
+`None`。`SCHED-LATCH-*`、`SIGNAL-TEMP-MASK-*`、`IOMUX-POLL-*`、`OPENED-DESC-*`、
+`TTY-TERM-001` 与 `TTY-INPUT-001` current contract 全部保持有效；0A-0D 任一
 checkpoint 或其组合都不能单独合入有效分支，也不能被公共调用者解释为 epoll capability。
 
 - 成功：production-shaped slice 可以保留在 transaction 分支，由 Stage 1 原子吸收；旧 bridge
