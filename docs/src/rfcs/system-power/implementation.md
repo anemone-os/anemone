@@ -1,14 +1,14 @@
 # System Power 迁移实施计划
 
-**状态：** Ready / Not Authorized
+**状态：** Completed
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-system-power](./index.md)
 **不变量：** [System Power 目标与不变量](./invariants.md)
 **当前契约：** [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)、
 [`SYSTEM-POWER-EMERGENCY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-emergency-001)、
 [`SYSTEM-POWER-MACHINE-001`](../../contracts/power/shutdown-lifecycle.md#system-power-machine-001)
-**当前修订：** `Draft`
-**事务日志：** None；`R0` 接受、transaction 创建与代码启动均需后续独立授权
+**当前修订：** `R0`
+**事务日志：** [2026-07-26-system-power](../../devlog/transactions/2026-07-26-system-power.md)
 
 > 本计划只有一个 `Ready` stage，不再设内部 checkpoint 或强制提交边界。交付按 owner 分组只为
 > 便于 review；完整实现统一进入一次 validation/cutover gate，`Ready` 不自动授予执行或
@@ -46,7 +46,7 @@
 
 ## 单一 Stage：Terminal Episode 与 Shutdown Cutover
 
-**状态：** Ready / Not Authorized
+**状态：** Closed
 
 ### 输入基线
 
@@ -135,8 +135,11 @@
    `StopExecution` 失败路径，以及 superblock/inode 单次 snapshot 去重、lock-before-callback 释放
    和单 inode 失败后继续/最终 `sync_fs`。
 2. **Static and architecture validation：** 运行 `just fmt kernel --check`，并串行执行
-   `just build --preset qemu-virt-rv64-release` 与 `just build --preset qemu-virt-la64-release`，避免共享
-   `build/generated/kernel.lds` 被并发覆盖。LA64 若没有已注册 platform machine-action handler，只用
+   `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G` 与
+   `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`，避免共享
+   `build/generated/kernel.lds` 被并发覆盖。显式 provider bind 是当前 build resolver 的完整输入；原
+   validation 文本遗漏它们，修正只改变执行路线，不改变 target。LA64 若没有已注册 platform
+   machine-action handler，只用
    build/source audit 证明两个 intent 均落到默认 halt，并记录 power-off/reboot `Not Cut Over`；
    只有存在或新增 handler 时才需要对应 QEMU/硬件运行 evidence。
 3. **RV64 runtime：** 只执行两条直接对应 target 的路径：
@@ -216,3 +219,18 @@ validation-only write set：
 闭合时才是 `Completed`。callback 卡死、best-effort `StopExecution`、snapshot 后 redirty、unsupported
 backend、machine-handler 列表/handler 导致的 emergency 不前进与 LA64 Not Cut Over 可以
 作为明确限制存在；它们不应诱发额外阶段或推测性恢复机制。
+
+## Completion Record — 2026-07-26
+
+单一 stage 已按冻结 production/write-back manifest 完成，未命中停止条件。实现建立唯一 terminal
+episode publication、静态 `filesystem -> device -> machine` plan、独立 emergency handoff、永久末尾
+halt、resident inode best-effort snapshot writeback 与 SBI 返回后继续 fallback。最终 source audit、
+双架构串行 build、257 项 RV64 KUnit、orderly 两次启动持久化 probe、emergency boot panic probe 与
+文档/差异检查证据统一记录在
+[transaction](../../devlog/transactions/2026-07-26-system-power.md)。
+
+四个 contract ID 已作为一个 unit 完成 cutover。RV64 power-off 的 orderly/emergency machine action
+有 QEMU runtime evidence；RV64 reboot 只有共享 production path、focused KUnit 与 SBI registration
+source proof，未运行 reboot runtime；LA64 未发现普通 machine handler，power-off/reboot 均明确
+`Not Cut Over` 并落到永久末尾 halt。callback/lock 不前进、best-effort `StopExecution`、snapshot 后
+redirty 与 backend shutdown 缺口保留为 current limitations，不扩大为额外 stage。

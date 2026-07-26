@@ -1,12 +1,12 @@
 # System Power 目标与不变量
 
-**状态：** Draft
+**状态：** Accepted Target / Implemented
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-system-power](./index.md)
-**适用修订：** `Draft`
+**适用修订：** `R0`
 
-> 本文定义 public RFC Draft 的 proposed target、owner、跨 subsystem handoff 和 RFC-local proof
-> obligations。`SP-*` 是 Draft-local target label，不是已经生效的 current contract ID。
+> 本文保存 R0 accepted target、owner、跨 subsystem handoff 和 RFC-local proof obligations。
+> R0 已实现；`SP-*` 仍是 RFC-local label，生效后的 current truth 使用 `SYSTEM-POWER-*` contract ID。
 
 ## 规则分类
 
@@ -21,21 +21,18 @@
 
 ## Contract Impact
 
-promotion preflight 已从 live `power`、panic、filesystem、device 与 RISC-V bootstrap owner 提取
-minimum effective baseline。本 Draft 不把“首次写 contract 文档”误分类为新语义，也不提前覆盖
-current behavior：
+promotion preflight 从当时的 live `power`、panic、filesystem、device 与 RISC-V bootstrap owner 提取
+minimum effective baseline；R0 cutover 按以下真实 delta 原子更新 current contract：
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
-| `SYSTEM-POWER-EPISODE-001` | Introduce | None（尚未生效） | 唯一 publication、first winner、固定 executor/intent 与单向 terminal episode | 单一 Ready stage final cutover |
-| `SYSTEM-POWER-ORDERLY-001` | Refine | [当前 orderly baseline](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) | best-effort CPU stop、显式静态 plan、resident inode snapshot writeback 与 fail-forward handoff | 单一 Ready stage final cutover |
-| `SYSTEM-POWER-EMERGENCY-001` | Replace | [当前 panic baseline](../../contracts/power/shutdown-lifecycle.md#system-power-emergency-001) | panic/emergency 跳过 ordinary subsystem plan，按冻结 intent 进入共享 machine helper | 单一 Ready stage final cutover |
-| `SYSTEM-POWER-MACHINE-001` | Refine | [当前 handler-list baseline](../../contracts/power/shutdown-lifecycle.md#system-power-machine-001) | 两个列表永久以唯一 halt 收尾，并由 orderly/emergency 共用同一执行入口 | 单一 Ready stage final cutover |
+| `SYSTEM-POWER-EPISODE-001` | Introduce | [Active](../../contracts/power/shutdown-lifecycle.md#system-power-episode-001) | 唯一 publication、first winner、固定 executor/intent 与单向 terminal episode | 2026-07-26 single-stage cutover |
+| `SYSTEM-POWER-ORDERLY-001` | Refine | [Active](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) | best-effort CPU stop、显式静态 plan、resident inode snapshot writeback 与 fail-forward handoff | 2026-07-26 single-stage cutover |
+| `SYSTEM-POWER-EMERGENCY-001` | Replace | [Active](../../contracts/power/shutdown-lifecycle.md#system-power-emergency-001) | panic/emergency 跳过 ordinary subsystem plan，按冻结 intent 进入共享 machine helper | 2026-07-26 single-stage cutover |
+| `SYSTEM-POWER-MACHINE-001` | Refine | [Active](../../contracts/power/shutdown-lifecycle.md#system-power-machine-001) | 两个列表永久以唯一 halt 收尾，并由 orderly/emergency 共用同一执行入口 | 2026-07-26 single-stage cutover |
 
-四个 ID 是同一个 cutover unit。在 final cutover 前，三个 existing ID 继续由 current contract 表达
-effective baseline，`SYSTEM-POWER-EPISODE-001` 保持尚未生效；`SP-*` 不得被实现或后续 RFC 当作
-effective contract ID。Public Draft 尚未接受，因此 current contract 的 `Pending Successor` 仍为
-`None`；`R0` 接受后才可添加 pending-successor 导航。
+四个 ID 已作为同一个 cutover unit 生效。`SP-*` 继续只标识本 RFC 的 target/proof，不得被后续 RFC
+当作 effective contract ID；跨 RFC 依赖必须引用 current contract 的 `SYSTEM-POWER-*` ID。
 
 ## Target Invariants
 
@@ -356,7 +353,7 @@ timeout、retry、第二轮 snapshot、全局 participant registry 或平行 mac
 
 ## 完成标准
 
-Public Draft 文档层完成至少要求：
+R0 acceptance 时的文档层完成标准为：
 
 - `SP-EPISODE-001` 到 `SP-MACHINE-001` 以及 `SP-USER-001` 的 owner、handoff、failure 和禁止退化项
   通过 review；
@@ -372,3 +369,7 @@ RFC 最终 closure 至少要求：
 - transaction、register/current limitations 与 RFC 状态完成一致收口；
 - 未实现的 general writeback、strong durability、userspace lifecycle 和 reversible device lifecycle 仍
   保持在本 RFC target 之外。
+
+上述 closure 已于 2026-07-26 完成。逐项 production/source/runtime evidence、architecture coverage 与
+Not Run 边界见 [transaction](../../devlog/transactions/2026-07-26-system-power.md)；生效规则见
+[System Power 当前契约](../../contracts/power/shutdown-lifecycle.md)。

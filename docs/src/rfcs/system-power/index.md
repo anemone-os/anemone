@@ -1,33 +1,32 @@
 # RFC-20260726-system-power
 
-**状态：** Draft / Public Review（单一 Ready stage 未授权）
-**修订：** `Draft`
+**状态：** Closed
+**修订：** `R0`
 **负责人：** doruche
 **最后更新：** 2026-07-26
 **领域：** system power / panic / filesystem / storage / device lifecycle
-**事务日志：** None
-**影响契约：** `SYSTEM-POWER-EPISODE-001`（Introduce；尚未生效）；
+**事务日志：** [2026-07-26-system-power](../../devlog/transactions/2026-07-26-system-power.md)
+**影响契约：** [`SYSTEM-POWER-EPISODE-001`](../../contracts/power/shutdown-lifecycle.md#system-power-episode-001)（Introduce）；
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)（Refine）、
 [`SYSTEM-POWER-EMERGENCY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-emergency-001)（Replace）、
 [`SYSTEM-POWER-MACHINE-001`](../../contracts/power/shutdown-lifecycle.md#system-power-machine-001)（Refine）
 **开放问题：** None；callback 卡死、StopExecution best-effort、machine-handler 遍历可能
 不前进与单次 snapshot coverage 是已接受边界
-**下一步：** review 本公开 Draft 与 [迁移实施计划](./implementation.md) 的单一 Ready stage；
-`R0` 接受、transaction 创建与代码启动仍需后续独立授权
+**下一步：** None；后续能力扩展或 limitation 收敛由独立 owner/RFC gate 承担
 
-> 本目录是 `system-power` 提案与 target 的公共 Draft authority。它不是 accepted target 或 current
-> contract，也不授予实现、transaction 创建或 contract cutover 权限；已经生效的 shutdown baseline
-> 由 [System Power 当前契约](../../contracts/power/shutdown-lifecycle.md) 记录。
+> 本目录保存 `system-power` R0 accepted target 与迁移历史。R0 已由单一 stage 完成实现；四个
+> contract ID 的 effective current truth 统一由
+> [System Power 当前契约](../../contracts/power/shutdown-lifecycle.md) 维护。
 
 ## 摘要
 
-当前内核把正常关机、重启和 panic 后的掉电收敛到相近的直接调用链，但没有一份由 `power`
+R0 接受前的内核把正常关机、重启和 panic 后的掉电收敛到相近的直接调用链，但没有一份由 `power`
 唯一拥有的全局 shutdown episode，也没有把 producer quiesce、filesystem writeback、storage
 flush、device shutdown 与 machine action 建模为明确的单向 handoff。panic 在停止其它 CPU 后仍会
 进入普通 filesystem/device shutdown；正常 shutdown 则可能在 resident dirty page 尚未进入
 filesystem block cache 时直接开始 device traversal。
 
-本 RFC 提议由 `power` 唯一拥有全局 terminal episode 和跨子系统顺序，建立彼此独立的 orderly 与
+R0 由 `power` 唯一拥有全局 terminal episode 和跨子系统顺序，建立彼此独立的 orderly 与
 emergency 路径。第一个成功发布 episode 的发起者成为唯一 executor；orderly shutdown 先通过
 `StopExecution` IPI 尽可能停止其它 CPU，再使用源码中显式、编译期固定的静态 callback plan，沿依赖
 方向执行一次 filesystem page/inode writeback snapshot、filesystem commit、storage drain/flush、
@@ -127,21 +126,20 @@ driver `shutdown()`。该 traversal 是 device subsystem 的 owner-local 机制�
 
 RFC target：
 
-- [目标与不变量](./invariants.md)：Draft target、owner、handoff、失败边界和 proof obligations；
-- [迁移实施计划](./implementation.md)：单一 Ready stage、resolved write set、验证与 cutover gate；
+- [目标与不变量](./invariants.md)：R0 accepted target、owner、handoff、失败边界和 proof obligations；
+- [迁移实施计划](./implementation.md)：已关闭的唯一 stage、resolved write set、验证与 cutover gate；
 - `tracking-issues.md`：当前没有经过 design review 确认、需要独立状态跟踪的 finding，因此不创建。
 
 Current contracts：
 
-- [System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)：记录当前
-  orderly、panic/emergency 与 machine-handler baseline；本 Draft 只提议 delta，不提前 cutover。
-- `SYSTEM-POWER-EPISODE-001` 当前为 `None（尚未生效）`，只存在于本 RFC 的 Introduce target。
+- [System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)：四个已生效
+  `SYSTEM-POWER-*` ID 的 current authority。
 
 背景材料：
 
 - [定位共识](./backgrounds/positioning.md)：正文形成前的方向讨论和 Draft readiness 结论。
 
-公共外部源码证据：None。本 Draft 只依赖当前仓库 source、register 与已经记录的 project facts。
+公共外部源码证据：None。R0 只依赖当前仓库 source、register 与已经记录的 project facts。
 
 ## 方案
 
@@ -265,7 +263,7 @@ best-effort `StopExecution` IPI；该广播不是完成 barrier，发送失败�
 
 ## Contract Impact
 
-本 Draft 确认 system-power 会形成跨 `power`、panic、filesystem、storage 与 device 的共享 handoff。
+R0 确认 system-power 会形成跨 `power`、panic、filesystem、storage 与 device 的共享 handoff。
 promotion preflight 已把以下 live baseline 提取到
 [System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)：`power_off()` / `reboot()` 各自
 直接执行 filesystem 与 device shutdown 后遍历动态 machine-handler `Vec`；panic 在广播
@@ -283,24 +281,22 @@ promotion preflight 已把以下 live baseline 提取到
   machine-action surface。未支持的 architecture/action 仍可由 halt 收口，并按真实能力记录
   limitation/coverage；emergency progress 不由当前有锁列表保证。
 
-四个 ID 在同一 stage 的最终 cutover gate 作为一个最小 contract unit 切换；届时才创建
-`SYSTEM-POWER-EPISODE-001` Active 条目，并原子更新其它三个 current baseline。部分代码、单一
-architecture 或单次 QEMU 成功都不能提前改变任何 current ID。在该 gate 前，
-[目标与不变量](./invariants.md) 中的 `SP-*` 仍只是 Draft-local target label。
+四个 ID 已在同一 stage 的最终 cutover gate 作为一个最小 contract unit 切换：建立
+`SYSTEM-POWER-EPISODE-001` Active 条目，并原子更新其它三个 current baseline。
+[目标与不变量](./invariants.md) 中的 `SP-*` 继续只作为 RFC-local target/proof label；current dependency
+必须引用 `SYSTEM-POWER-*` contract ID。
 
 ## 接受边界
 
-### 当前 Public Draft review 接受什么
+### R0 接受什么
 
-当前 review 只判断 owner boundary、两条 terminal path、静态 plan、分层 flush、fail-forward 和
-userspace 非管理边界是否足以形成 proposed target。它不产生 `R0`、不创建 transaction、不授权代码
-写入，也不执行 contract cutover。
+R0 接受 owner boundary、两条 terminal path、静态 plan、分层 flush、fail-forward、userspace 非管理
+边界及四个 contract ID 的原子 cutover unit。用户于 2026-07-26 授权完成唯一 stage，因此建立
+transaction 并把已解析的 Ready stage 激活；接受本身不提前改变 current contract。
 
-本轮已经闭合 episode arbitration、callback non-return、machine handler fallback、reboot intent、snapshot 与
-minimum effective baseline，并把完整实现压在 [迁移实施计划](./implementation.md) 的一个 `Ready`
-stage 中。`Ready` 只表示交付、write set、验证、停止条件和 cutover 已解析；`R0` 接受、transaction
-创建和代码执行仍分别需要后续授权。若 review 形成 confirmed design issue，再创建
-`tracking-issues.md`，不以预填空分类代替 review。
+episode arbitration、callback non-return、machine handler fallback、reboot intent、single snapshot 与
+minimum effective baseline 已闭合。若实现形成 confirmed design issue，再创建 `tracking-issues.md`，
+不以预填空分类代替 review。
 
 ### Target 变化边界
 
@@ -367,8 +363,21 @@ best-effort attempt，而不扩大 scheduler/task lifecycle。
   best-effort machine-action attempt，不承诺 panic-safe progress。源码审计仍需证明 IPI
   allocation/send 失败不会主动跳过该 attempt。
 
+## Revision Record
+
+- `R0`（2026-07-26）：接受唯一 terminal episode owner、orderly/emergency 分离、静态 shutdown plan、
+  resident inode best-effort snapshot writeback、共享 machine-handler list 与永久末尾 halt；同日由唯一
+  stage 完成实现和四个 contract ID 的原子 cutover。
+
 ## 收口
 
-当前为公共 Draft，尚未接受、实现或验证。单一 Ready stage 已解析；minimum effective baseline 与
-公共导航已在 promotion preflight 建立，但没有 transaction、target contract cutover 或新增 register
-条目，也不授权开始代码；当前没有 confirmed tracking issue。
+R0 已实现并关闭，单一 stage 与 transaction 均为 `Completed`。production candidate 保持在冻结
+write set 内；source audit 未发现 power-off/reboot/panic/machine action 旁路，也未让 `power` 接管
+task/mm、filesystem cache 或 device tree 私有 traversal。257 项 RV64 KUnit、RV64 orderly 两次启动、
+受控 emergency panic、RV64/LA64 串行 build 与文档/差异检查完成 closure proof。
+
+`SYSTEM-POWER-EPISODE-001` 已 Introduce，`SYSTEM-POWER-ORDERLY-001` 已 Refine，
+`SYSTEM-POWER-EMERGENCY-001` 已 Replace，`SYSTEM-POWER-MACHINE-001` 已 Refine；四项在同一 cutover
+生效。RV64 power-off 有 orderly/emergency QEMU runtime evidence；RV64 reboot 未运行 runtime；LA64
+没有 ordinary machine handler，两个 intent 均落到永久末尾 halt并明确 `Not Cut Over`。accepted
+best-effort 与 architecture gap 已进入 current limitations，当前没有 confirmed tracking issue。

@@ -24,6 +24,9 @@
 
 ## Completed
 
+- [System Power](./2026-07-26-system-power.md)：唯一 stage 已完成 terminal episode、orderly/emergency
+  分路、resident inode best-effort writeback 与共享 machine fallback；四个 contract ID 已原子 cutover。
+  RV64 power-off 有两条 QEMU evidence；RV64 reboot runtime、LA64 machine capability 与 hardware未运行。
 - [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
 - [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
 - [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。
