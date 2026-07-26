@@ -593,13 +593,26 @@ impl FwNode for OpenFirmwareNode {
     }
 
     fn interrupt_parent(&self) -> Option<Arc<dyn FwNode>> {
-        if let Some(parent) = self.node().interrupt_parent() {
-            of_with_node_by_phandle(parent, |node| node.handle())
-                .ok()
-                .map(get_of_node)
-                .map(|node| node as Arc<dyn FwNode>)
-        } else {
-            None
+        let mut child = self.handle;
+        loop {
+            // DTSpec defines a missing `interrupt-parent` as the devicetree
+            // parent, not as ordinary property inheritance. Follow that edge,
+            // then continue through intermediate nodes until reaching the
+            // node that defines the interrupt domain.
+            let parent = {
+                let child = child.node();
+                if let Some(property) = child.property("interrupt-parent") {
+                    let phandle = property.value_as_phandle()?;
+                    of_with_node_by_phandle(phandle, |node| node.handle()).ok()?
+                } else {
+                    child.parent()?.handle()
+                }
+            };
+
+            if parent.node().interrupt_cells().is_some() {
+                return Some(get_of_node(parent) as Arc<dyn FwNode>);
+            }
+            child = parent;
         }
     }
 
