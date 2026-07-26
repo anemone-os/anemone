@@ -442,8 +442,8 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
 - target owner、ABI、可见语义或 acceptance boundary 若因实现证据需要改变，必须进入
   Target Renegotiation Gate，不能在 future implementation stage 中静默降低语义。
 - Stage 0 已在 document review 前解析为 Ready；R0 acceptance、transaction 与开发者启动授权
-  已于 2026-07-26 完成，Stage 0 现为 Active。checkpoint authorization 仍逐项生效，本轮只覆盖
-  0A、0B，不能自动进入 0C、0D 或后续 Stage。
+  已于 2026-07-26 完成，Stage 0 现为 Active。checkpoint authorization 仍逐项生效：初始授权覆盖
+  0A、0B，后续明确授权覆盖 0C、0D；0A-0C 已独立关闭，0D closure 不自动授权后续 Stage。
 
 ### 文档层完成标准
 

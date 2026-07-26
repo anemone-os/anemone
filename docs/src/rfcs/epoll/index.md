@@ -8,7 +8,7 @@
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 **影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-003`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001`、`OPENED-DESC-001/002`；Replace `IOMUX-POLL-002`；Introduce `OPENED-DESC-LIVENESS-001`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无开放 Keter。
-**下一步：** 按已授权的 Stage 0 checkpoint 顺序执行 0A terminal liveness；0A 关闭前不得进入 0B。
+**下一步：** 执行已授权的 Stage 0 Checkpoint 0D TTY/closure；0D 关闭后停止，不自动进入 Stage 1 resolution gate。
 
 ## 文档状态
 
@@ -18,7 +18,8 @@ epoll 定位共识整理为已接受的实现目标，并通过
 尚未生效的 target delta 与 RFC-local proof obligations。[实施计划](./implementation.md)
 已经解析三阶段滚动路线与首个 Ready stage；R0 acceptance、transaction bootstrap 与本轮开发者授权
 已在 [事务日志](../../devlog/transactions/2026-07-26-epoll.md) 中记录。current contract 在对应
-cutover 前保持不变，且本轮授权只覆盖 Stage 0 的 0A、0B。
+cutover 前保持不变；初始授权覆盖 Stage 0 的 0A、0B，后续明确授权覆盖 0C、0D，且 Stage 1
+resolution gate 尚未授权。
 
 ## 摘要
 
@@ -112,7 +113,8 @@ epoll 额外要求：
   follow-up target；首版 `EPOLL_CTL_ADD` 对 epoll target 返回 `EINVAL` 并记录 notice，
   不能让尚未验证 cycle/depth 与并发 admission 的 nesting 因对象可组合而意外生效。
 - 不要求复制 Linux `eventpoll` 的红黑树、RCU、slab 或 `ovflist` 具体结构。
-- R0 acceptance 与 Stage 0 activation 不替代 checkpoint gate，也不授权 0C、0D 或后续 Stage。
+- R0 acceptance 与 Stage 0 activation 不替代 checkpoint gate；0C、0D 由后续明确授权单独激活，
+  任何 Stage 0 checkpoint 都不授权后续 Stage。
 
 ## 文档地图
 
@@ -343,5 +345,5 @@ completion 边界。
 ## 收口
 
 R0 已接受，transaction 已建立，Stage 0 已按开发者授权进入 Active。当前 Keter 已 neutralize，
-target / current / RFC-local 分层和 [实施计划](./implementation.md) 保持权威；本轮只执行 0A、0B，
-不会自动进入 0C、0D、Stage 1，也不会修改 current contract。
+target / current / RFC-local 分层和 [实施计划](./implementation.md) 保持权威；0A-0C 已独立关闭，
+0D 已获授权但尚未关闭。Stage 0 closure 不会自动进入 Stage 1，也不会修改 current contract。

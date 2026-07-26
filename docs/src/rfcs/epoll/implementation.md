@@ -265,6 +265,14 @@ notify/drop 或削弱容量耗尽的可观察失败，停止 Stage 并进入 Tar
 **执行状态：** Authorized / Not Started。0C 已独立关闭；0D 仍须在自己的 write subset、review、
 runtime closure 与 write-back 全部闭合后才能关闭 Stage 0。
 
+**0B correction 前置项：** 0D 的真实-route KUnit preflight 发现 `IomuxWaitRound` 与 private
+`fs::iomux` façade 只允许 `crate::fs` 命名，`device::tty` 因而既不能保存 production `PollRoute`，
+也不能让既有 KUnit 经真实 round 构造 route。开发者已批准把 `fs/mod.rs` 加入 Stage manifest，并
+最小重开 0B subset 修改 `fs/iomux/{mod,wait}.rs`：只精确导出 crate-internal `PollRoute`，且只在
+`kunit` 构建向 TTY 暴露 production `IomuxWaitRound`；observer、route constructor 与
+`register_with_route` 继续保持原 owner-private。该 correction 必须独立验证、review、提交并重新关闭
+0B，随后 0D code subset 仍只修改 `terminal.rs`。
+
 **交付与 write subset：** 只修改 `anemone-kernel/src/device/tty/terminal.rs`、本文与对应 transaction。
 把 TTY poll entry 迁移到 0B protocol，保持 `poll_triggers` / `poll_spare` 的预分配容量、
 `poll_handoff_active` / `poll_dirty` 重入 handoff 与 guard-out notify/drop；改写既有 focused KUnit，
@@ -300,6 +308,8 @@ Stage 0 Active 时允许修改下列并集；每个 checkpoint 的实际 write s
 - `anemone-kernel/src/fs/iomux/mod.rs`
 - `anemone-kernel/src/fs/iomux/subscription.rs`（新建）
 - `anemone-kernel/src/fs/iomux/wait.rs`（新建）
+- `anemone-kernel/src/fs/mod.rs`（0D preflight 后批准，仅精确导出 TTY production 所需的
+  `PollRoute` 与 KUnit-only `IomuxWaitRound` test seam）
 - `anemone-kernel/src/fs/api/iomux/wait.rs`
 - `anemone-kernel/src/fs/api/iomux/ppoll.rs`
 - `anemone-kernel/src/fs/api/iomux/pselect6.rs`
@@ -307,8 +317,10 @@ Stage 0 Active 时允许修改下列并集；每个 checkpoint 的实际 write s
 - `anemone-kernel/src/fs/timerfd.rs`
 - `anemone-kernel/src/device/tty/terminal.rs`
 - `anemone-kernel/src/task/files.rs`
-- 本 RFC 的 `implementation.md` 与对应 transaction 条目，仅用于记录 Stage 0
-  preflight、反馈、验证和 closure；target 变化时必须先停止，不在本 manifest 内直接改写。
+- 本 RFC 的 `implementation.md`、对应 transaction 条目、`index.md` 与 `invariants.md`。后两者由
+  开发者在 0D 前显式批准加入，只用于同步已发生的 checkpoint authorization、Stage 0 closure 与
+  Not Effective / no-cutover 边界；不得借此修改 R0 target、owner、ABI、visible semantics、
+  acceptance boundary 或 contract delta。target 变化时仍必须先停止。
 
 Validation-only 输入：
 

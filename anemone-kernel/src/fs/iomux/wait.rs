@@ -34,14 +34,14 @@ impl PollObserver for IomuxWaitObserver {
 /// The source-facing route is non-owning. This owner retains callback
 /// acceptance and the latch until `finish`, which always retires acceptance
 /// before retiring the wait identity.
-pub(in crate::fs) struct IomuxWaitRound {
+pub(crate) struct IomuxWaitRound {
     latch: Option<Latch>,
     observer: Arc<IomuxWaitObserver>,
     route: PollRoute,
 }
 
 impl IomuxWaitRound {
-    pub(in crate::fs) fn begin_current() -> Self {
+    pub(crate) fn begin_current() -> Self {
         let latch = Latch::begin_current(true);
         let observer = Arc::new(IomuxWaitObserver {
             accepting: AtomicBool::new(true),
@@ -58,7 +58,7 @@ impl IomuxWaitRound {
         }
     }
 
-    pub(in crate::fs) fn poll_request(&self, interests: super::PollEvent) -> PollRequest<'_> {
+    pub(crate) fn poll_request(&self, interests: super::PollEvent) -> PollRequest<'_> {
         PollRequest::register_with_route(interests, &self.route, &self.observer.trigger)
     }
 
@@ -66,21 +66,21 @@ impl IomuxWaitRound {
         self.observer.trigger.wait_id()
     }
 
-    pub(in crate::fs) fn cancel(&self, reason: LatchCancelReason) {
+    pub(crate) fn cancel(&self, reason: LatchCancelReason) {
         self.latch
             .as_ref()
             .expect("iomux wait round cancel after finish")
             .cancel(reason);
     }
 
-    pub(in crate::fs) fn schedule_with_timeout(&self, timeout: Option<Duration>) -> Duration {
+    pub(crate) fn schedule_with_timeout(&self, timeout: Option<Duration>) -> Duration {
         self.latch
             .as_ref()
             .expect("iomux wait round schedule after finish")
             .schedule_with_timeout(timeout)
     }
 
-    pub(in crate::fs) fn finish(mut self) -> LatchWaitOutcome {
+    pub(crate) fn finish(mut self) -> LatchWaitOutcome {
         let retired = self.observer.retire();
         let latch = self.latch.take().expect("iomux wait round double finish");
         let outcome = latch.finish();

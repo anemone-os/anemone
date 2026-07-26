@@ -6,7 +6,7 @@ mod subscription;
 mod wait;
 
 pub(crate) use subscription::PollRoute;
-pub(in crate::fs) use wait::IomuxWaitRound;
+pub(crate) use wait::IomuxWaitRound;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
