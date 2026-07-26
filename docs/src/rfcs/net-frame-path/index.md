@@ -1,23 +1,22 @@
 # RFC-20260726-net-frame-path
 
-**状态：** Draft / Public Document Review
-**修订：** `Draft`
+**状态：** Accepted for Implementation
+**修订：** `R0`
 **负责人：** doruche
 **最后更新：** 2026-07-26
 **领域：** network-device / VirtIO / frame-path / smoltcp integration
-**事务日志：** None
+**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 **影响契约：** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
 `NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001`（均为 proposed
 `Introduce`；尚未生效）；
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)
 （proposed `Refine`）
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-002
-已由 System Power R0 与本 Draft 的 best-effort cleanup boundary neutralize
-**下一步：** 完成公共文档层 review；[实施计划](./implementation.md) 的 Stage 1 已解析为 Ready，
-但尚未获得 R0 acceptance、transaction 或 implementation activation 权限
+已由 System Power R0 与本 R0 的 best-effort cleanup boundary neutralize
+**下一步：** Stage 1 Checkpoint 1 已关闭；Checkpoint 2 未激活，等待独立执行授权
 
-> 本目录是 `net-frame-path` proposal / target 的公共 canonical source。当前修订仍是 Draft，
-> 不是 accepted target 或 current contract，也不授予实现、transaction 创建或 contract cutover 权限。
+> 本目录是 `net-frame-path` R0 accepted target 的公共 canonical source。R0 尚未成为 current contract；
+> 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。
 
 ## 摘要
 
@@ -269,12 +268,13 @@ Refine 都达到验证 floor，后续 sibling RFC 才能把它们作为 effectiv
 
 ## 接受边界
 
-### Draft review 接受什么
+### R0 acceptance
 
-当前 Draft review 只决定 proposed target 是否足以进入后续 implementation planning。它不产生 `R0`、
-不创建 transaction、不授权代码写入，也不让 proposed contract IDs 生效。
+2026-07-26 公共 review 确认 proposed target 足以进入 implementation，用户明确接受当前文本为
+`R0 / Accepted for Implementation`、授权建立 transaction 并激活 Stage 1 Checkpoint 1。R0 acceptance
+不让 proposed contract IDs 生效。
 
-进入 `R0 / Accepted for Implementation` 前至少需要：
+本次 acceptance 已确认：
 
 - 文档层确认六个 network stable IDs 与 `SYSTEM-POWER-ORDERLY-001` Refine 的 owner、handoff、failure
   与 proof boundary 自洽；
@@ -351,9 +351,9 @@ power-off。只有 live frame path 无法在现有 framework 中安全表达时�
 
 ## 修订记录
 
-Draft 阶段不建立 `R0` 行。2026-07-26 提升前 review 已把 platform acceptance 从 RV64+LA64 收窄为
-RV64-only；因为旧 target 尚未接受或生效，该变化直接折入当前 Draft，不建立 revision row。第一次 target
-被接受后再记录语义修订；普通措辞、证据和后续 implementation 路线调整不递增修订。
+| 修订 | 日期 | 状态 | 摘要 | 事务 |
+| --- | --- | --- | --- | --- |
+| R0 | 2026-07-26 | Accepted for Implementation | 接受 RV64-only frame path target、六个 proposed network IDs 与 System Power Refine；Stage 1 Checkpoint 1 激活 | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
 
 ## 收口
 

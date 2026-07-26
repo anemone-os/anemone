@@ -3,7 +3,7 @@
 **状态：** Active
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
-**事务日志：** None
+**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 
 本文只跟踪会影响 implementation readiness、owner boundary、停止条件或最终验收的 design / feasibility
 问题。普通类型选择、stage TODO、case inventory 和未运行证据不进入本页。
@@ -20,7 +20,7 @@
 
 当前无项。RV64 virtio-mmio 尚未取得 network runtime evidence 是后续 validation gap，不是已经确认的
 设计缺陷；它由 RFC acceptance floor 和后续 implementation gate 负责。LA64 / virtio-pci 不属于当前
-Draft target。如果实际证据要求改变 shared ownership、public semantic surface 或 acceptance boundary，
+R0 target。如果实际证据要求改变 shared ownership、public semantic surface 或 acceptance boundary，
 再新增对应 finding。
 
 ## Safe
@@ -32,7 +32,7 @@ Draft target。如果实际证据要求改变 shared ownership、public semantic
 
 ### NFP-002 — System Power R0 已提供显式 network cleanup route
 
-**状态：** Neutralized by System Power R0 and Draft best-effort cleanup boundary
+**状态：** Neutralized by System Power R0 and accepted R0 best-effort cleanup boundary
 **来源：** 2026-07-26 live source audit；2026-07-26 System Power R0 cutover；2026-07-26 NFP scope review
 **影响：** `NET-ATTACH-001`、`SYSTEM-POWER-ORDERLY-001` Refine、shutdown acceptance
 **依据：** [System Power current contract](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)
@@ -67,7 +67,7 @@ implementation 中静默扩张。
 
 ### NFP-001 — 当前 VirtIO HAL sharing 路径尚不满足有界帧资源前提
 
-**状态：** Neutralized by Draft allocation boundary
+**状态：** Neutralized by accepted R0 allocation boundary
 **来源：** 2026-07-26 live source audit；2026-07-26 engineering tradeoff review
 **依据：** [RFC 的适度 IRQ-off allocation 原则](./index.md#适度-irq-off-allocation-优先于扭曲对象模型)
 与 [`NET-FRAME-PROGRESS-001`](./invariants.md#net-frame-progress-001--有界资源normal-backpressure-与-recheck)
@@ -78,7 +78,7 @@ implementation 中静默扩张。
 `unshare()` 在 completion 时回收并 copy back。若不修改 dependency，这条路径不能把 allocator OOM
 自然转换成可重试 outcome。
 
-本 Draft 接受适度 IRQ-off allocation 与该路径的 kernel-fatal OOM 边界。frame/queue exhaustion 仍是
+本 R0 接受适度 IRQ-off allocation 与该路径的 kernel-fatal OOM 边界。frame/queue exhaustion 仍是
 normal backpressure；全局 allocator OOM 不属于该语义。默认不修改或 fork `virtio-drivers`，也不为
 消除 allocation 引入侵入式 frame、跨层 DMA token、镜像 credit 状态或通用 packet pool。低成本的
 capacity reserve、owner-local reuse 与 high-water 观测可以 best effort 收敛，但不是 acceptance
@@ -96,12 +96,12 @@ dependency adjustment。
 
 ### NFP-003 — 通用 packet/lease framework 被误当作 frame path 前提
 
-**状态：** Neutralized by Draft target
+**状态：** Neutralized by accepted R0 target
 **依据：** [RFC 的 frame capability](./index.md#frame-capability) 与
 [`NET-FRAME-OWN-001`](./invariants.md#net-frame-own-001--frame-backing-的独占-ownership-与-handoff)
 
 早期讨论可能把“统一 ownership/handoff”扩大成跨 driver、protocol socket storage 和 userspace I/O
-的统一 buffer/lease object。当前 Draft 已将它收窄为 move-only resource token + owner-controlled
+的统一 buffer/lease object。当前 R0 已将它收窄为 move-only resource token + owner-controlled
 consume scope，并明确 concrete backing、pool、wrapper、clone/COW 与 fragment metadata 均不预建。
 
 只有后续出现第二个真实 production provider 或 transport consumer，且证明共同机制会改变核心

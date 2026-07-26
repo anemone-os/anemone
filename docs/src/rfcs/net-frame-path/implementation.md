@@ -1,20 +1,20 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** Draft / Stage 1 Ready
+**状态：** R0 / Stage 1 Active；Checkpoint 1 Closed，Checkpoint 2 Not Activated
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
 **当前契约：**
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)；
 六个 proposed network IDs 尚未生效
-**当前修订：** `Draft`
-**事务日志：** None
+**当前修订：** `R0`
+**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 **平台验收范围：** RV64 QEMU virtio-mmio；LA64 / virtio-pci 不属于本修订的 build、runtime 或
 cutover 要求
 
-> 本文是公共 Draft 的实施顺序、stage maturity、验证与 write-set 权威。Stage 1 已完整解析为
-> `Ready`，但 `Ready` 不授予代码实现、R0 acceptance、transaction 创建或 contract cutover 权限。
-> 在 R0 接受、transaction 建立和独立 activation 授权前，不得进入任何 checkpoint。
+> 本文是 R0 的实施顺序、stage maturity、验证与 write-set 权威。用户已于 2026-07-26 接受 R0、
+> 授权建立 transaction，并独立激活 Stage 1 Checkpoint 1。Checkpoint 1 已关闭；该授权不进入
+> Checkpoint 2，也不授予 contract cutover。
 
 ## 1. 计划角色与 authority
 
@@ -135,13 +135,13 @@ contract，再把下一个 Outline 完整解析为 Ready。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 |
 | --- | --- | --- | --- |
-| Stage 1 — Four-layer walking skeleton | Ready | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
+| Stage 1 — Four-layer walking skeleton | Active | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | Outline | exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 saturation proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
-**状态：** Ready / Not Active
+**状态：** Active / Checkpoint 1 Closed；Checkpoint 2 Not Activated
 
 ### 6.1 目的与退出形状
 
@@ -177,6 +177,9 @@ obligations。
    先更新本文再激活。
 
 ### 6.3 Checkpoint 1 — Hostable seam 与 frame-token representation probe
+
+**状态：** Closed（2026-07-26）；执行证据见
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。本状态不激活 Checkpoint 2。
 
 **交付：**
 

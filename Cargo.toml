@@ -5,6 +5,8 @@ resolver = "2"
 members = [
     "anemone-kernel",
     "anemone-kernel/crates/buddy-system",
+    "anemone-kernel/crates/anemone-net-api",
+    "anemone-kernel/crates/anemone-smoltcp-stack",
     "anemone-kernel/crates/device-tree",
     "anemone-kernel/crates/idalloc",
     "anemone-kernel/crates/kernel-macros",

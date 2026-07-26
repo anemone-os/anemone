@@ -4,13 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-kunit = []
+kunit = ["anemone-smoltcp-stack/kunit-probe"]
 fs_ext4 = []
 kernel_preempt = []
 spin_lock_irqsave = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }
+anemone-net-api = { path = "crates/anemone-net-api" }
+anemone-smoltcp-stack = { path = "crates/anemone-smoltcp-stack", default-features = false }
 bitflags = { workspace = true }
 fdt = { workspace = true }
 spin = { workspace = true }

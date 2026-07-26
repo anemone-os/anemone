@@ -62,6 +62,7 @@
 		- [2026-06-07 - Signal LTP Tgkill Sigqueueinfo](./devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md)
 		- [2026-06-05 - Block Byte I/O Loop Mkfs](./devlog/changes/2026-06-05-block-byte-io-loop-mkfs.md)
 	- [事务日志](./devlog/transactions/index.md)
+		- [Network Frame Path](./devlog/transactions/2026-07-26-net-frame-path.md)
 		- [System Power](./devlog/transactions/2026-07-26-system-power.md)
 		- [AHCI Controller](./devlog/transactions/2026-07-23-ahci-controller.md)
 		- [System Target Model R6 Named Bind and Initial Argv](./devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)

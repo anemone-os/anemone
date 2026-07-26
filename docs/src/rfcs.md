@@ -105,10 +105,11 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 网络
 
-- [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：公共 Draft；建立 boot-time netdev、
+- [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R0 Accepted for Implementation；建立 boot-time netdev、
   VirtIO-Net frame provider、move-only frame ownership、single-owner bounded pump、kernel attach 与
-  System Power best-effort cleanup 的目标边界。Stage 1 已解析为 Ready，但尚未形成 R0、transaction、
-  implementation activation 或 effective network contract。后续 `net-udp` 与 `net-tcp` 是 sibling RFC，
+  System Power best-effort cleanup 的目标边界。Stage 1 Checkpoint 1 已关闭，执行见
+  [transaction](./devlog/transactions/2026-07-26-net-frame-path.md)；network contract 仍全部 Not Effective。
+  后续 `net-udp` 与 `net-tcp` 是 sibling RFC，
   只依赖完成 cutover 的 current contract，不以目录或 parent RFC 建立权威关系。
 
 ### 其它领域

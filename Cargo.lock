@@ -29,6 +29,8 @@ name = "anemone-kernel"
 version = "0.1.0"
 dependencies = [
  "anemone-abi",
+ "anemone-net-api",
+ "anemone-smoltcp-stack",
  "bimap",
  "bitflags 2.11.0",
  "buddy-system",
@@ -56,6 +58,18 @@ dependencies = [
  "virtio-drivers",
  "wavltree",
  "yansi",
+]
+
+[[package]]
+name = "anemone-net-api"
+version = "0.1.0"
+
+[[package]]
+name = "anemone-smoltcp-stack"
+version = "0.1.0"
+dependencies = [
+ "anemone-net-api",
+ "smoltcp",
 ]
 
 [[package]]

@@ -1,9 +1,9 @@
 # Network Frame Path 目标与不变量
 
-**状态：** Draft Target
+**状态：** Accepted Target / Not Effective
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
-**适用修订：** `Draft`
+**适用修订：** `R0`
 
 本文定义 `net-frame-path` proposed contract delta、尚未 cutover 的 target invariants，以及只服务
 本 RFC 验收的 proof obligations。当前没有 network frame-path effective contract；本文也不是
@@ -374,7 +374,7 @@ point 表达，返回 RFC review，而不是增加第二套 lifecycle state。
 
 ## 完成标准
 
-Draft 文档层完成至少要求：
+R0 文档层 acceptance 已确认：
 
 - 六个 proposed network contract IDs 与 `SYSTEM-POWER-ORDERLY-001` Refine 的 owner、依赖、failure 与
   cutover proof 已经 review；
