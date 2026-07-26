@@ -107,7 +107,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   readiness subscription 统一 poll/select 与 epoll 的 source-facing protocol，并由 `Epoll` / `EpollWatch`
   单独拥有 watch、generation、ready policy 和 harvest。Stage 0-1 已完成并关闭；eventfd/fanotify 已迁移
   到 source-neutral route，source bridge 已删除，subscription 与 opened-description 两个 foundation
-  cutover 已同步生效。epoll core/ABI 与三个 `EPOLL-*` ID 仍未生效，Stage 2 resolution 未授权。执行证据见
+  cutover 已同步生效。独立 resolution gate 已把 Stage 2 core/ABI/test/cutover 解析为 Ready / Not Started；
+  epoll core/ABI 与三个 `EPOLL-*` ID 仍未生效，Stage 2 实现未授权。执行证据见
   [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、

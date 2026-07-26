@@ -1,6 +1,6 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** Accepted Target / Foundation Effective / Epoll Not Effective
+**状态：** Accepted Target / Foundation Effective / Stage 2 Ready / Epoll Not Effective
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **适用修订：** R0
@@ -449,7 +449,7 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
 - Stage 0 已在 document review 前解析为 Ready；R0 acceptance、transaction 与开发者启动授权
   已于 2026-07-26 完成。0A-0D 已逐项独立关闭，Stage 0 现为 Closed；该 closure 不执行任何
   contract cutover。后续独立 `0 -> 1` resolution gate 与新的实现授权已完成 Stage 1 原子 checkpoint；
-  两个 foundation cutover 同步生效，Stage 2 resolution 仍未进入或获授权。
+  两个 foundation cutover 同步生效；Stage 2 resolution 已完成但实现未获授权。
 
 ### 文档层完成标准
 
