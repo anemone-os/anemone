@@ -1,11 +1,11 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 1 and Boundary Interlude Closed; Stage 2 Outline Not Resolved
+**Status:** Active / Stage 1 and Boundary Interlude Closed; Stage 2 Ready Not Started
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
 [目标与不变量](../../rfcs/net-frame-path/invariants.md),
-[Stage 1 Ready definition](../../rfcs/net-frame-path/implementation.md#6-stage-1-readyfour-layer-walking-skeleton)
+[Stage 2 Ready definition](../../rfcs/net-frame-path/implementation.md#8-stage-2-readybounded-progress-conformance)
 **Canonical Revision:** R0
 **Contract Impact:** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
 `NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001` proposed Introduce；
@@ -28,6 +28,10 @@ review/validation/write-back 与单 checkpoint commit 合同执行，不授予 t
 用户现已独立授权完成 Stage 1 Checkpoint 4，并要求持续推进至 checkpoint closure 或停止条件；本授权只覆盖
 kernel attach、IRQ/worker/time wiring、RV64 双向 vertical slice、stage-wide review、validation 与 write-back，
 不得自动解析或进入 Stage 2，仍不授予 current-contract cutover。
+
+Stage 1 与 Boundary Interlude 关闭后，用户独立授权解析 Stage 2 implementation。本授权仅覆盖只读
+`1 -> 2 Implementation Resolution Gate`与docs write-back，不授权Stage 2 Checkpoint 1或任何实现、runtime
+validation、contract cutover。
 
 ## R0 acceptance and activation preflight
 
@@ -395,3 +399,48 @@ diagnostic counters不驱动queue/worker/probe completion；非KUnit build不编
 NFP-004、NFP-005与NFP-006已Neutralized。间章没有触发停止条件，也没有改变R0 target/revision、owner、
 shared `FrameProvider` semantics、ABI、visible behavior或acceptance；current contracts继续Not Effective。
 Stage 2保持**Outline / Not Resolved / Unauthorized**，本次没有运行resolution gate或进入Stage 2。
+
+### 2026-07-26 - Stage 1 -> 2 Implementation Resolution Gate completed
+
+**Authorization / entry:** 用户在Stage 1与Boundary Interlude独立关闭后明确要求解析Stage 2 implementation；
+本gate只获docs-only resolution授权，没有Stage 2代码、Checkpoint 1 activation、runtime validation或contract
+cutover权限。入口为`dev/drc/alpha@609f8fff`，worktree clean；Boundary Interlude commit之后没有tracked或
+untracked dirty change。
+
+**Preflight evidence:** 重新读取R0 target/invariants/tracking、System Power current contract、register、
+Stage 1与Boundary Interlude aggregate diff/transaction evidence，以及live shared API、stack、VirtIO-Net、
+kernel-local provider port、worker、validation、KernelConfig、RV64 Platform/wrapper和Just/xtask CLI。当前
+provider固定拥有32个RX slot与32个TX slot；正常boot保持32个persistent RX mappings，Stage 1单echo evidence
+只到live/high-water 32/33且queue-full 0。四个unsafe begin/complete window仍以matching queue token与stable
+boxed backing闭合，IRQ只ack并提交recheck bit，worker只读kernel-local predicate。
+
+live source确认三个Stage 2 implementation gap：adapter没有把link unavailable记作owner-blocked；pump在
+TX/link blocked时仍可能因due deadline/budget返回immediate并持续repoll/yield；固定ingress-first可能在连续
+response流中先耗尽每轮TX credit，使queued egress长期没有software admission机会。这些都属于R0已承诺的
+bounded-progress conformance范围，不改变owner、shared API、ABI/visible semantics、contract delta或acceptance，
+因此不增加tracking issue、不递增R0。
+
+**Resolved route:** canonical
+[Stage 2 Ready](../../rfcs/net-frame-path/implementation.md#8-stage-2-readybounded-progress-conformance)
+冻结三个顺序checkpoint：
+
+1. validation-only ICMP burst先在RV64真实路径证明queue saturation可观察、可completion/IRQ恢复；若只能靠
+   暂停completion、伪造queue state或sleep-as-correctness，删除probe并停止；
+2. host fixture按test owner拆分，闭合token cancel/unwind、matching completion、bounded exhaustion、link
+   recovery、coalesced recheck、deadline/budget与alternating RX/TX admission；
+3. driver-private durable recheck latch、slot/mapping assertions、finite worker repoll与两次fresh-disk RV64
+   saturation acceptance收口。
+
+authoritative stage同时冻结review/unsafe/wake/validation-bypass audit、observability、Not Run、contract None、
+停止/退出条件与exact tracked write set。`anemone-net-api`、vendored smoltcp/virtio dependency、`device/net`、
+generic IRQ/task/kthread/timer/scheduler/power、apps/rootfs/LTP、platform/wrapper、current contracts/register均只读。
+
+**Contract / lifecycle:** 本gate没有改变R0语义。六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续
+Not Effective；Stage 2 contract cutover为None，Stage 3仍是Outline。Stage 2现在是**Ready / Not Started /
+Unauthorized**；Checkpoint 1没有激活，后续必须取得独立实现授权并按checkpoint边界推进。
+
+**Validation boundary:** 本gate只执行read-only source/config/command审计与docs write-back。`just --list`、
+`just build --help`、`just qemu --help`、`just fmt --help`和RV64 `--show-bindings`确认当前显式preset、provider
+`smp`/`memory`与runtime disk绑定路线；没有运行cargo test/check、formatter、kernel build、QEMU、LA64、hardware、
+LTP或final harness，Stage 2 saturation/recovery全部Not Run。`git diff --check`与`mdbook build docs`通过；
+mdBook只报告既有large search-index warning，新增Stage 2 anchor与跨页链接命中生成HTML。
