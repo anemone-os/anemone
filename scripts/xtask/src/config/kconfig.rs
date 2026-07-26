@@ -72,6 +72,7 @@ pub struct Parameters {
     pub oom_kill_threshold: Option<u8>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
+    pub initial_umask: Option<u16>,
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
@@ -144,6 +145,7 @@ impl Parameters {
         materialize!(oom_kill_threshold);
         materialize!(symlink_resolve_limit);
         materialize!(max_fd_per_process);
+        materialize!(initial_umask);
         materialize!(ramdisk_count);
         materialize!(loop_device_count);
         materialize!(ns16550a_default_baud);
@@ -275,6 +277,8 @@ pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Default maximum number of file descriptors per process.
 /// Might be overridden by certain syscalls.
 pub const MAX_FD_PER_PROCESS: usize = {};
+/// Initial file creation mask for user filesystem contexts.
+pub const INITIAL_UMASK: u16 = {};
 /// Number of static ramdisk block devices to publish at boot.
 pub const RAMDISK_COUNT: usize = {};
 /// Number of static loop block devices to publish at boot.
@@ -350,6 +354,7 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             resolved!(oom_kill_threshold),
             resolved!(symlink_resolve_limit),
             resolved!(max_fd_per_process),
+            resolved!(initial_umask),
             resolved!(ramdisk_count),
             resolved!(loop_device_count),
             resolved!(ns16550a_default_baud),

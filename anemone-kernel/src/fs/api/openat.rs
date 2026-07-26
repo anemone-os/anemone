@@ -412,7 +412,11 @@ fn sys_openat(
     flags: u32,
     mode: u32,
 ) -> Result<u64, SysError> {
-    let how = OpenHow::from_linux(flags, mode)?;
+    let task = get_current_task();
+    let mut how = OpenHow::from_linux(flags, mode)?;
+    if how.create.creat || how.create.tmpfile {
+        how.perm = task.mask_creation_perm(how.perm);
+    }
     let path = Path::new(pathname.as_ref());
     let checker = FsPermChecker::for_current_fs();
 

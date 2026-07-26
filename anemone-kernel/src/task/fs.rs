@@ -5,13 +5,26 @@
 
 use crate::prelude::*;
 
+const _: () = assert!(INITIAL_UMASK <= InodePerm::all_rwx().bits());
+
 #[derive(Debug, Clone)]
 pub enum FsState {
     Hanging,
-    Ready { root: PathRef, cwd: PathRef },
+    Ready {
+        root: PathRef,
+        cwd: PathRef,
+        /// The task filesystem context is the single owner of this mask.
+        /// Only ordinary rwx bits are stored; special inode bits are never mask
+        /// state.
+        umask: InodePerm,
+    },
 }
 
 impl FsState {
+    fn initial_umask() -> InodePerm {
+        InodePerm::from_bits_retain(INITIAL_UMASK)
+    }
+
     /// Create a hanging [FsState], which is used for kernel threads that do not
     /// have a filesystem context.
     ///
@@ -22,13 +35,18 @@ impl FsState {
     }
 
     pub fn new(root: PathRef, cwd: PathRef) -> Self {
-        Self::Ready { root, cwd }
+        Self::Ready {
+            root,
+            cwd,
+            umask: Self::initial_umask(),
+        }
     }
 
     pub fn new_root() -> Self {
         Self::Ready {
             root: root_pathref(),
             cwd: root_pathref(),
+            umask: Self::initial_umask(),
         }
     }
 
@@ -60,15 +78,31 @@ impl FsState {
         }
     }
 
+    fn replace_umask(&mut self, umask: InodePerm) -> InodePerm {
+        let umask = umask & InodePerm::all_rwx();
+        match self {
+            Self::Hanging => panic!("FsState is hanging"),
+            Self::Ready { umask: current, .. } => core::mem::replace(current, umask),
+        }
+    }
+
+    fn mask_creation_perm(&self, requested: InodePerm) -> InodePerm {
+        match self {
+            Self::Hanging => panic!("FsState is hanging"),
+            Self::Ready { umask, .. } => requested & !*umask,
+        }
+    }
+
     /// Currently this implementation is the same as default `clone`. But it's
     /// still necessary to have a separate function to emphasize the semantic of
     /// this operation.
     pub fn fork(&self) -> Self {
         match self {
             Self::Hanging => Self::Hanging,
-            Self::Ready { root, cwd } => Self::Ready {
+            Self::Ready { root, cwd, umask } => Self::Ready {
                 root: root.clone(),
                 cwd: cwd.clone(),
+                umask: *umask,
             },
         }
     }
@@ -113,6 +147,17 @@ impl Task {
 
     pub fn set_cwd(&self, cwd: PathRef) {
         self.fs_state.write().set_cwd(cwd);
+    }
+
+    /// Atomically install a new file creation mask and return the previous
+    /// mask.
+    pub fn replace_umask(&self, umask: InodePerm) -> InodePerm {
+        self.fs_state.write().replace_umask(umask)
+    }
+
+    /// Apply a snapshot of this filesystem context's umask to a requested mode.
+    pub fn mask_creation_perm(&self, requested: InodePerm) -> InodePerm {
+        self.fs_state.read().mask_creation_perm(requested)
     }
 
     /// Lookup a path in this task's filesystem context.
@@ -263,5 +308,58 @@ impl Task {
             let cwd = fs_state.cwd().to_pathbuf();
             cwd.join(path)
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn perm(bits: u16) -> InodePerm {
+        InodePerm::from_bits(bits).unwrap()
+    }
+
+    fn fs_state() -> FsState {
+        let root = root_pathref();
+        FsState::new(root.clone(), root)
+    }
+
+    #[kunit]
+    fn test_umask_masks_creation_permissions_and_preserves_special_bits() {
+        let mut state = fs_state();
+        assert_eq!(state.replace_umask(perm(0o022)).bits(), INITIAL_UMASK);
+        assert_eq!(state.mask_creation_perm(perm(0o666)).bits(), 0o644);
+        assert_eq!(state.mask_creation_perm(perm(0o777)).bits(), 0o755);
+        assert_eq!(state.mask_creation_perm(perm(0o600)).bits(), 0o600);
+
+        state.replace_umask(InodePerm::all_rwx() | InodePerm::ISVTX);
+        assert_eq!(
+            state
+                .mask_creation_perm(InodePerm::all_rwx() | InodePerm::ISVTX)
+                .bits(),
+            InodePerm::ISVTX.bits()
+        );
+    }
+
+    #[kunit]
+    fn test_fork_copies_umask_without_sharing_mutations() {
+        let mut parent = fs_state();
+        parent.replace_umask(perm(0o022));
+        let mut child = parent.fork();
+
+        child.replace_umask(perm(0o077));
+
+        assert_eq!(parent.mask_creation_perm(perm(0o777)).bits(), 0o755);
+        assert_eq!(child.mask_creation_perm(perm(0o777)).bits(), 0o700);
+    }
+
+    #[kunit]
+    fn test_shared_fs_state_observes_umask_mutations() {
+        let shared = Arc::new(RwLock::new(fs_state()));
+        let peer = shared.clone();
+
+        shared.write().replace_umask(perm(0o027));
+
+        assert_eq!(peer.read().mask_creation_perm(perm(0o777)).bits(), 0o750);
     }
 }

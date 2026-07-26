@@ -15,8 +15,8 @@ fn sys_mkdirat(
     mode: LinuxInodePerm,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
-    let perm = InodePerm::try_from(mode)?;
     let task = get_current_task();
+    let perm = task.mask_creation_perm(InodePerm::try_from(mode)?);
     let dir_path = if path.is_relative() {
         Some(dirfd.to_pathref(true)?)
     } else {
