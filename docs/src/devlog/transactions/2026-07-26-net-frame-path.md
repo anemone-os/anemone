@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 1 Checkpoint 1 Closed; Checkpoint 2 Not Activated
+**Status:** Active / Stage 1 Checkpoint 1-2 Closed; Checkpoint 3 Not Activated
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
@@ -17,6 +17,10 @@
 授权建立本 transaction，并独立激活 Stage 1 Checkpoint 1。本授权只覆盖 hostable seam 与 frame-token
 representation probe；不自动进入 Checkpoint 2，不允许越出 Stage 1 frozen manifest、修改默认只读
 owner、改变 target/owner/public API/shared contract/ABI/visible semantics/acceptance，或提前 cutover。
+
+用户随后在同日独立授权 Stage 1 Checkpoint 2，要求完成 real smoltcp owner 与 host vertical slice，按
+checkpoint 执行 review、validation、write-back 并单独提交。该授权不进入 Checkpoint 3，其余 frozen
+manifest、默认只读 owner、target 与 cutover 边界保持不变。
 
 ## R0 acceptance and activation preflight
 
@@ -99,3 +103,73 @@ Checkpoint 1 delivery、representation probe、review 与 validation floor 已�
 停止条件。共享 surface 仍按 canonical plan 保持 provisional，不冻结为 current contract。六个 network
 IDs 与 System Power Refine 继续 Not Effective；Stage 1 保持 Active，但 Checkpoint 2 未激活，本事务停在
 Checkpoint 1 closure。
+
+### 2026-07-26 - Stage 1 Checkpoint 2 activated
+
+Checkpoint 2 从 commit `f804b370` 的干净 `dev/drc/alpha` 工作树独立激活。Preflight 重新读取 R0、Stage 1
+Ready 定义、tracking issues、register、current System Power contract、Checkpoint 1 transaction 与 live
+smoltcp/frame-provider source；`poll_ingress_single()`、bounded `poll_egress()`、`poll_at()`、associated
+paired token 和 production `default-features = false` dependency 均仍符合 Ready baseline。
+
+**Write-set lock:** 只写 frozen manifest 内的 stack crate manifest、`src/{lib.rs,adapter.rs,pump.rs}`、
+`tests/frame_path.rs`、`Cargo.lock` 与 canonical docs。`anemone-net-api`、vendored smoltcp、kernel/device/
+driver/config/power owner 全部保持只读。
+
+**Activation-time cutover:** Not Cut Over。六个 network IDs 与 System Power Refine 全部保持 pending；
+Checkpoint 3 未激活。
+
+### 2026-07-26 - Checkpoint 2 implementation and review
+
+`anemone-smoltcp-stack` 新增 crate-private `FrameDevice` adapter，将正式 GAT frame token 适配为 smoltcp
+`Device`/RX/TX token；smoltcp 的 token、interface、socket 与 hardware-address 类型均不出 crate。adapter
+只在 smoltcp 已按 provider capacity 建立 interface 后把不可失败的 TX consume 转交给正式 token；capacity
+漂移由每次 pump 的普通 `assert!` 暴露。
+
+`Stack` 唯一拥有 smoltcp `Interface`、private `SocketSet`、实例内 `InterfaceId` namespace/mapping 与
+namespace cursor。所有改变协议状态的入口都要求 `&mut Stack`，该独占借用是本层唯一 pump capability；
+future kernel attach/worker owner 才决定是否在外层放置锁、如何竞争、try-lock 后如何 requeue/yield，以及
+如何同 IRQ/timer 协作。已取得 pump capability 的调用路径只通过一次性 token 借用 provider，不持
+provider-global guard。frame capacity 是 smoltcp 所需的 attach-time stable snapshot，provider 仍是真相源，
+pump 每次校验 snapshot 未 stale。
+
+一次 pump 先执行单次 bounded maintenance，再分别按非零 ingress/egress budget 调用
+`poll_ingress_single()` 与 `poll_egress()`，最后由真实 `poll_at()` 产生 deadline。budget 未确认队列已空、
+deadline 已到或 provider 报告 blocked work 时，outcome 分别表达 work remaining、immediate recheck 与
+next deadline；stack 不读取 host wall clock，也不访问 kernel/provider registry。
+
+默认 `host-test` 额外只为 host fixture 启用 smoltcp auto echo reply；kernel 的 no-default dependency 不
+包含该行为。IPv4 配置入口同样只在 `host-test` 编译，带明确退出条件，不形成 production address、ICMP
+endpoint 或 control-plane API。fixture 先用真实 ARP request 建立邻居事实，再注入 ICMP echo request，
+由真实 interface 产生 echo reply 并通过正式 provider TX token 观察。两个独立 stack/provider pair 与
+并发 pump caller 分别验证隔离和串行化。
+
+首轮 checkpoint-scoped architecture review 发现两个 Keter：stack-local `spin::Mutex`/`Busy` 把 runtime
+admission policy 错放进协议状态 owner；进程全局 atomic `InterfaceId` allocator 又把实例 namespace truth
+移出 concrete stack owner。提交前修正移除了 `spin` 与 `Busy`，将协议推进收窄为 `&mut Stack`，并把
+namespace cursor 移入 `Stack`；host 并发 fixture 改由调用方的 `std::sync::Mutex` 验证外层 admission。
+复审后无剩余 Apollyon、Keter 或 Euclid。实现没有 unsafe、type erasure、trait object、provider-global
+callback guard、descriptor/DMA/backing identity、kernel object、公开 smoltcp object、production endpoint/
+socket/readiness/control-plane surface，也未命中 Stage 1 停止条件。
+
+### 2026-07-26 - Checkpoint 2 validation and closure
+
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`：通过；1 个 stack unit test、9 个 integration
+  tests 与 2 个 compile-fail doctests 全部通过。新增证据覆盖真实 ARP + ICMP echo、单次 ingress 调用上限、
+  blocked egress 的单次调用上限、due deadline、`&mut Stack` 独占推进、外层 runtime lock admission，
+  以及两个 stack/provider pair 的 mapping、frame credit、TX output 与 manual time 隔离。
+- `cargo check -p anemone-smoltcp-stack --no-default-features` 与
+  `cargo test -p anemone-smoltcp-stack --no-default-features`：通过；production `no_std + alloc` 形状不含
+  host auto echo/address control，host integration fixture按 `required-features` 跳过。
+- production dependency audit：stack 只有 `anemone-net-api + smoltcp` normal dependencies，kernel
+  继续以 `default-features = false` 消费；source/public-surface audit 未发现 smoltcp object、socket handle、
+  host clock、test control 或 unsafe 泄漏到 production signature。
+- `just fmt kernel --check`：已运行，exit 1；formatter diff 仍只位于 frozen read-only 的既有
+  `anemone-kernel/crates/anemos/smoltcp/**` 与 generated `anemone-kernel/src/boot_defs.rs`，本 checkpoint
+  修改文件没有 formatter diff，未扩大 write set。
+- `git diff --check`：通过。
+- `mdbook build docs`：通过；仅有 search index size warning。
+
+Checkpoint 2 delivery、review 与 validation floor 已闭合；没有改变 R0 target、owner、ABI、visible
+semantics 或 acceptance，也没有 current contract cutover。kernel build、RV64/LA64、QEMU、hardware、LTP
+与 final harness 均 Not Run，且不属于本 checkpoint floor。Stage 1 保持 Active，shared surface 继续
+provisional；Checkpoint 3 未激活，本事务停在 Checkpoint 2 closure。

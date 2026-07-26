@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R0 / Stage 1 Active；Checkpoint 1 Closed，Checkpoint 2 Not Activated
+**状态：** R0 / Stage 1 Active；Checkpoint 1-2 Closed，Checkpoint 3 Not Activated
 **最后更新：** 2026-07-26
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -13,8 +13,8 @@
 cutover 要求
 
 > 本文是 R0 的实施顺序、stage maturity、验证与 write-set 权威。用户已于 2026-07-26 接受 R0、
-> 授权建立 transaction，并独立激活 Stage 1 Checkpoint 1。Checkpoint 1 已关闭；该授权不进入
-> Checkpoint 2，也不授予 contract cutover。
+> 授权建立 transaction，并独立激活 Stage 1 Checkpoint 1。用户随后独立授权并关闭 Checkpoint 2；
+> 当前授权不进入 Checkpoint 3，也不授予 contract cutover。
 
 ## 1. 计划角色与 authority
 
@@ -141,7 +141,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
-**状态：** Active / Checkpoint 1 Closed；Checkpoint 2 Not Activated
+**状态：** Active / Checkpoint 1-2 Closed；Checkpoint 3 Not Activated
 
 ### 6.1 目的与退出形状
 
@@ -223,6 +223,9 @@ concrete buffer、共享 `Arc<Mutex<_>>` backing、让 Drop 调复杂 callback�
 Checkpoint 1 关闭不冻结共享 surface，不自动进入 Checkpoint 2。
 
 ### 6.4 Checkpoint 2 — Real smoltcp owner 与 host vertical slice
+
+**状态：** Closed（2026-07-26）；执行证据见
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。本状态不激活 Checkpoint 3。
 
 **交付：**
 
