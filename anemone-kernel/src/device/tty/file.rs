@@ -302,7 +302,7 @@ fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError
         }
         let pgid = foreground.pgid();
         if relation::commit_foreground(&snapshot, foreground) {
-            kinfoln!(
+            kdebugln!(
                 "TTY: foreground commit sid={} pgid={}",
                 caller.session().sid(),
                 pgid
