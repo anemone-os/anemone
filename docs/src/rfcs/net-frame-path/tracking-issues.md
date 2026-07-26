@@ -1,7 +1,7 @@
 # Network Frame Path Tracking Issues
 
 **状态：** Active RFC / 当前无开放 Apollyon、Keter 或 Euclid
-**最后更新：** 2026-07-26
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 
@@ -26,6 +26,25 @@
 后续 stage 解析输入，不作为 Safe issue 堆放。
 
 ## Neutralized
+
+### NFP-007 — QEMU saturation proof 依赖非确定性 completion 时序
+
+**状态：** Neutralized by R1 acceptance proof correction
+**来源：** 2026-07-27 Stage 2 Checkpoint 1 negative evidence
+**影响：** `NET-FRAME-PROGRESS-001` cutover proof、Stage 2 Checkpoint 1/3、validation floor
+**依据：** [R1 acceptance](./index.md#r1-acceptance)、
+[R1 Stage 2 Ready](./implementation.md#8-stage-2-readybounded-progress-conformance)与
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)
+
+原路线假设预排超过 TX slot 数的 ICMP burst 必然使 RV64 TCG 至少一次返回 normal exhaustion。真实运行没有
+观察到`queue-full > 0`：总 packet 数大于 capacity 不等于 concurrent outstanding 超过 capacity，provider又会
+在每次 admission 前回收已经完成的 TX。为制造 PASS 而延迟 completion、降低 production capacity或伪造queue
+state都会污染被验证对象。
+
+R1 保持 normal exhaustion/recovery target 不变，只修正 proof owner：host real-stack + deterministic provider
+负责确定性 credit exhaustion、matching completion/recheck与恢复；RV64负责真实VirtIO bounded outstanding、
+TX/RX completion、IRQ、mapping回落、有限worker action和正常关机。自然观察到的RV64 exhaustion形成附加恢复
+证据，但`queue-full == 0`本身不再是失败。旧probe失败与删除事实保留，不改写为成功。
 
 ### NFP-004 — concrete VirtIO boundary 泄漏到通用 worker
 

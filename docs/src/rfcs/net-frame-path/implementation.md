@@ -1,23 +1,24 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R0 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Checkpoint 1 Stopped / Not Closed
+**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Ready / Checkpoint 1 Not Started / Unauthorized
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
 **当前契约：**
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)；
 六个 proposed network IDs 尚未生效
-**当前修订：** `R0`
+**当前修订：** `R1`
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 **平台验收范围：** RV64 QEMU virtio-mmio；LA64 / virtio-pci 不属于本修订的 build、runtime 或
 cutover 要求
 
-> 本文是 R0 的实施顺序、stage maturity、验证与 write-set 权威。用户已于 2026-07-26 接受 R0、
+> 本文是 R1 的实施顺序、stage maturity、验证与 write-set 权威。用户已于 2026-07-26 接受 R0、
 > 授权建立 transaction，并独立激活 Stage 1 Checkpoint 1。用户随后分别独立授权并关闭 Checkpoint 2
 > 与 Checkpoint 3，并独立授权、关闭 Checkpoint 4 与 Stage 1。Stage 1 关闭后的 module-boundary review
 > 又发现 concrete driver、通用 worker 与 validation vocabulary 之间的局部耦合；用户已授权在 Stage 1
 > 与 Stage 2 之间完成本文定义的 Boundary Interlude。本授权不授予 contract cutover，也不自动解析或
-> 进入 Stage 2。
+> 进入 Stage 2。2026-07-27 的首条 RV64 saturation route 命中 failure signal后，用户接受 R1
+> proof-boundary correction并授权本次docs-only route resolution；Checkpoint 1重新达到Ready，但未获实现授权。
 
 ## 1. 计划角色与 authority
 
@@ -86,7 +87,8 @@ KernelConfig schema 与 xtask 只负责字段反序列化、默认值 materializ
 `static_assert!` 在编译期检查；非法配置必须让 kernel 编译失败，不能由 xtask 提前拒绝、静默 clamp、选择
 fallback 或推迟到运行期处理。
 
-具体数值是 implementation policy，不是 RFC invariant。Stage 2 可以根据真实 saturation evidence 调整，
+具体数值是 implementation policy，不是 RFC invariant。Stage 2 可以根据 host deterministic exhaustion 与
+RV64 bounded production-path evidence 调整，
 但必须继续满足 finite work、bounded live resource 与跨方向进展边界。
 
 ### 2.5 RV64-only production proof
@@ -140,7 +142,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | --- | --- | --- | --- |
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
-| Stage 2 — Bounded progress conformance | Stopped / Checkpoint 1 Not Closed | exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 saturation proof | 全部 Not Effective |
+| Stage 2 — Bounded progress conformance | R1 Ready / Checkpoint 1 Not Started / Unauthorized | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
@@ -590,118 +592,138 @@ Unauthorized，必须由后续独立 resolution gate解析。
 
 ## 8. Stage 2 Ready：Bounded progress conformance
 
-**状态：** Stopped at Checkpoint 1 failure signal / Not Closed。2026-07-27 的真实RV64 burst未观察到
-TX exhaustion，临时probe已删除；Checkpoint 2/3均未激活。原Ready route不再可执行。
+**状态：** R1 Ready / Checkpoint 1 Not Started / Unauthorized。2026-07-27 的 R0 RV64 burst route因未观察到
+TX exhaustion而按failure signal停止并删除probe；该历史不重写。用户随后接受R1 proof-boundary correction并
+授权本次docs-only resolution，不授权Checkpoint 1实现、runtime validation或Checkpoint 2/3。
 
-继续前必须运行独立的Checkpoint 1 route-correction gate：读取本次负证据与live pump/provider时序，只更新
-保持R0 target所需的probe路线、failure signal、validation和下游复用关系，并重新建立Ready状态。该gate未获
-授权前不得机械重跑下述burst、激活Checkpoint 2/3或进入Stage 3。
+R1 保持normal exhaustion/recovery target不变：host real-stack + deterministic provider负责确定性制造并证明
+exhaustion；RV64负责真实VirtIO bounded completion/IRQ/reclaim。`queue-full == 0`只表示本次production workload
+未发生failed admission，不再单独构成失败。
 
-### 8.1 Resolution preflight 与 live gap
+### 8.1 R1 resolution preflight 与 live gap
 
-解析输入为 Stage 1 与 Boundary Interlude aggregate diff、transaction 中的 host/RV64 evidence、四个
-VirtIO unsafe begin/complete window、NFP-004/005/006 neutralization、R0 target/current contracts，以及
-live shared API、stack pump、VirtIO provider、kernel-local provider port、worker、validation feature、
-KernelConfig 和 QEMU wrapper。
+解析输入为 Stage 1 与 Boundary Interlude aggregate diff、R0 Checkpoint 1负证据、transaction中的host/RV64
+evidence、四个VirtIO unsafe begin/complete window、NFP-004/005/006/007 neutralization、R1 target/current
+contracts，以及live shared API、stack pump、VirtIO provider、kernel-local provider port、worker、validation
+feature、KernelConfig和QEMU wrapper。
 
-当前 owner route 可以在不改变 shared semantic surface 的前提下完成本阶段：
+当前 owner route 可以在不改变shared semantic surface的前提下完成本阶段：
 
-- `FrameProvider` 的 associated token 与 outcome 已能表达 callback-scoped ownership、normal exhaustion 和
-  link unavailable；`PumpOutcome` 已分别表达“仍有工作”与“无需等待 owner fact 即可立即重查”；
-- concrete provider 以固定 RX/TX slot、queue token 和 matching completion 独占资源，IRQ 只 ack 并先提交
-  durable recheck bit、再尝试 wake；worker 不读取 queue truth；
-- `Stack` 的独占 `&mut self` 已是唯一 pump capability；kernel worker 只拥有 activation、显式 work、
-  immediate repoll 与 deadline scheduling；
-- RV64 validation 目前只发送一个 echo，实际 evidence 为 queue-full 0、live/high-water mappings 32/33，
-  因而不能证明 Stage 2 saturation/recovery。
+- `FrameProvider` associated token/outcome已经表达callback-scoped ownership、normal exhaustion和link
+  unavailable；deterministic host provider可以在test owner内控制自己的有限credit、matching completion、
+  link和recheck edge，不需要production test-control；
+- concrete VirtIO provider以固定RX/TX slot、queue token和matching completion独占资源；每次admission前回收
+  已完成TX是正常progress行为，不能为测试延迟；
+- IRQ只ack并先提交durable recheck bit、再尝试wake；worker不读取queue truth；`Stack`的独占`&mut self`仍是
+  唯一pump capability；
+- R0的128-packet probe只证明累计workload大于credit，不保证concurrent outstanding超过credit。当前保留日志
+  没有最终counter summary，故completion时序仍只作为工作假设；R1不把该假设升级为事实。
 
-live code 同时给出三项必须在本阶段闭合、但不改变 R0 target 的 implementation gap：
+live code同时保留三项Stage 2必须闭合、但不改变R1 target的implementation gap：
 
-1. adapter 只把 TX exhaustion 记作 blocked work；link unavailable 尚未进入同一“等待 owner fact 变化”边界；
-2. pump 即使已经被 TX/link 阻塞，仍会因 due deadline 或 budget boundary 返回 immediate recheck；worker按
-   `NET_WORKER_REPOLL_ROUNDS`重复 pump、request/yield，可能在资源恢复前持续消耗 CPU；
-3. 每次 pump 固定 ingress-first；持续 ingress response 可以先消耗本轮所有 TX credit，使已排队 egress
-   在普通 workload 下长期失去尝试机会。
+1. adapter只把TX exhaustion记作blocked work；link unavailable尚未进入同一“等待owner fact变化”边界；
+2. pump即使已被TX/link阻塞，仍会因due deadline或budget boundary返回immediate recheck；worker按
+   `NET_WORKER_REPOLL_ROUNDS`重复pump、request/yield，可能在资源恢复前持续消耗CPU；
+3. 每次pump固定ingress-first；持续ingress response可以先耗尽本轮TX credit，使queued egress在普通workload
+   下长期失去software admission机会。
 
-这些是 Stage 2 原本承诺的 bounded-progress 缺口，不是新的 owner/contract finding；本 gate 不增加
-tracking issue，不递增 R0，也不改变六个 network ID 的 Not Effective 状态。
+这些是原bounded-progress target内的implementation gap。R1只调整proof assignment，不改变owner、public API、
+ABI/visible semantics、contract delta或六个network ID的Not Effective状态。
 
 ### 8.2 交付、边界与 checkpoint 顺序
 
-Stage 2 关闭时必须交付：
+Stage 2关闭时必须交付：
 
-- host deterministic provider 对 token cancel/unwind、paired RX/TX、bounded exhaustion/completion、link
-  down/up、recheck coalescing、budget/deadline 与跨方向公平性的完整矩阵；
-- stack pump 在 owner-blocked 时不 immediate repoll，在无需等待 owner fact 且达到 budget 时仍有限重查；
-- concrete VirtIO provider 的 slot/queue/mapping 上界、completion reclaim 与 durable recheck protocol审计；
-- RV64 virtio-mmio 中真实 queue saturation、normal exhaustion、completion/IRQ recovery、mapping回落、有限
-  worker repoll 和正常关机证据。
+- host deterministic provider对token cancel/unwind、paired RX/TX、bounded exhaustion/completion、link
+  down/up、recheck coalescing、budget/deadline与跨方向公平性的完整矩阵；
+- stack pump在owner-blocked时不immediate repoll，在无需等待owner fact且达到budget时仍有限重查；
+- concrete VirtIO provider的slot/queue/mapping上界、completion reclaim与durable recheck protocol审计；
+- RV64 virtio-mmio真实bounded burst上的TX/RX completion、IRQ recheck、outstanding上界、mapping回落、有限
+  worker action和正常关机证据；自然观察到exhaustion时还要证明其后恢复。
 
-本阶段按以下 checkpoint 依次执行；每个 checkpoint 都需要独立 activation、review、validation、transaction
-write-back 与 closure，前一项关闭不自动激活后一项：
+本阶段按以下checkpoint依次执行；每项都需要独立activation、review、validation、transaction write-back与
+closure，前一项关闭不自动激活后一项：
 
-1. Checkpoint 1 — RV64 saturation observability probe；
+1. Checkpoint 1 — deterministic exhaustion seam与RV64 production observability；
 2. Checkpoint 2 — host ownership/progress/pump conformance；
-3. Checkpoint 3 — VirtIO provider/recheck/worker closure 与 RV64 acceptance。
+3. Checkpoint 3 — VirtIO provider/recheck/worker closure与RV64 acceptance。
 
-每次activation前，transaction必须记录当时branch/HEAD/dirty state、上一checkpoint closure、manifest与用户改动
-重叠、live KernelConfig/feature graph、`just` help和RV64 wrapper是否漂移。发现非本stage dirty overlap时先确认归属；
-发现owner/API/validation route漂移时重新解析对应checkpoint，不机械执行本文旧路径。
+每次activation前，transaction必须记录branch/HEAD/dirty state、上一checkpoint closure、manifest与用户改动
+重叠、live KernelConfig/feature graph、`just` help和RV64 wrapper是否漂移。发现非本stage dirty overlap时先确认
+归属；发现owner/API/validation route漂移时重新解析对应checkpoint，不机械执行本文路径。
 
 受保护边界：
 
-- frame/DMA 唯一 owner、callback-scoped access、matching completion 与 callback 期间无 device-wide lock不得
-  弱化；
-- notification 只是 edge，queue/link/resource durable truth 仍由 concrete provider 拥有，deadline仍由
-  stack拥有；
-- hard IRQ不推进 smoltcp、不触碰 frame slot、不执行复杂 callback/drop；
-- allocator OOM仍是已接受的system-level fatal boundary，不能伪装为 normal network backpressure；
-- 不改变 `anemone-net-api` public surface，不修改 vendored smoltcp / `virtio-drivers`，不引入 endpoint、
-  socket/control-plane、通用 buffer/pool/workqueue 或第二种 production provider；
-- 多 netdev attach/rollback、shutdown、System Power Refine 与 contract cutover继续属于 Stage 3。
+- frame/DMA唯一owner、callback-scoped access、matching completion与callback期间无device-wide lock不得弱化；
+- notification只是edge，queue/link/resource durable truth仍由provider拥有，deadline仍由stack拥有；
+- hard IRQ不推进smoltcp、不触碰frame slot、不执行复杂callback/drop；
+- allocator OOM仍是已接受的system-level fatal boundary，不能伪装为normal network backpressure；
+- 不改变`anemone-net-api` public surface，不修改vendored smoltcp/`virtio-drivers`，不引入endpoint、socket/
+  control-plane、通用buffer/pool/workqueue或第二种production provider；
+- 多netdev attach/rollback、shutdown、System Power Refine与contract cutover继续属于Stage 3。
 
-### 8.3 Checkpoint 1 — RV64 saturation observability probe
+### 8.3 Checkpoint 1 — deterministic exhaustion seam与RV64 production observability
 
-**执行状态：** Stopped / Not Closed。以下内容保留2026-07-26解析出的失败路线；它不是当前可执行计划。
-128-packet真实RV64 probe未观察到`queue-full > 0`，已按本节failure signal删除并停止Stage 2；负证据见
-[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。
+**状态：** Ready / Not Started / Unauthorized。
 
-**假设：** 现有 validation-only ICMP seam 可以在同一个真实 stack/provider/worker 路径预排超过
-`TX_SLOT_COUNT` 的有界 burst，使 RV64 TCG 至少一次观察到正常 `TransmitOutcome::Exhausted`，随后由真实
-VirtIO completion/IRQ恢复并把 live TX mappings归还，而不需要暂停device、伪造completion或sleep决定正确性。
+**假设与proof split：** shared frame/pump surface已经足够让真实stack与test-owned小容量provider确定性走过
+`Ready -> Exhausted -> matching completion/recheck -> resumed submission`，同时现有RV64 validation seam可以在
+不控制device completion的前提下证明真实VirtIO bounded completion/reclaim。两条证据必须分别通过，互不替代。
 
-**最小路线：**
+**Host deterministic probe：**
 
-1. 保留现有 `icmp-validation-probe` feature与object fence；stack validation owner按调用者给出的有界burst
-   数准备 ICMP metadata/payload，并只导出enqueue/drain/reply completion fact，不导出`SocketHandle`、地址或
-   packet injection；
-2. kernel KUnit validation把burst固定为`2 * VIRTIO_NET_QUEUE_SIZE`（checked arithmetic），继续通过
-   `PumpControl`请求worker工作；该值只属于validation，不进入KernelConfig；
-3. concrete driver只扩大KUnit-only owner-scoped snapshot，使测试能比较本次probe前后的TX submit/completion、
-   queue-full、IRQ recheck与live/high-water mapping；这些计数只做assert/日志，不驱动queue或production worker；
-4. stack报告burst已排出后，KUnit使用`yield_now()` + monotonic deadline的有界predicate loop，让普通worker
-   继续消费真实recheck，直到diagnostic显示TX submit/completion匹配、live mapping回到本次probe前的
-   persistent RX baseline，再形成PASS。
+1. 按test owner最小拆分现有integration fixture：walking-skeleton/identity保留在`tests/frame_path.rs`，共享
+   provider/clock/frame builder移入`tests/support/mod.rs`，新增`tests/bounded_progress.rs`承载本probe；不创建
+   test-support crate或production API；
+2. 使用真实`Stack::pump`、现有packet builder/socket路径与capacity为2的deterministic provider，预排3个可区分
+   egress frame；test provider先不归还completion，pump egress budget至少允许尝试第三个frame；
+3. 证明前两个frame提交、第三次admission返回normal exhaustion、live TX不超过2、未发送frame仍由stack/socket
+   owner保留且无重复/丢失。记录当前`PumpOutcome`作为Checkpoint 2输入；Checkpoint 1不提前要求修正已知的
+   blocked-immediate gap；
+4. 无credit时再做一次有界调用，证明没有新submission或owner corruption；随后只归还一个matching completion，
+   发布重复/coalesced recheck edge，再pump并证明第三个frame提交。最终归还全部completion，slot/live resource
+   回到baseline；
+5. host test-control只修改test provider自己的credit、completion、link和edge，不进入shared trait、kernel port或
+   concrete VirtIO provider。
 
-**禁止：** validation mode不得延迟/吞掉真实completion、强制queue-full、改写slot ownership、向generic
-provider port加入production test-control、使用任意sleep作为成功条件，或把driver diagnostics变成行为真相。
+**RV64 production-path probe：**
 
-**验证与退出：** 先运行host gate和RV64 release build，再运行一次RV64 wrapper。probe必须观察
-`queue-full > 0`、TX completion恢复、live mapping回落、IRQ recheck和正常shutdown。若burst在当前QEMU route
-不能稳定制造exhaustion，或只能靠上述禁止路径工作，删除未完成probe、把证据追加transaction并停止Stage 2；
-不得默默把QEMU saturation降级为host-only proof。成功后validation seam保留到Checkpoint 3复用，并在Stage 3
-final audit删除或由accepted production control-plane替换。
+1. 保留`icmp-validation-probe` feature与object fence；stack validation owner按调用者给出的有界burst准备ICMP
+   metadata/payload，只导出enqueue/drain/reply completion fact，不导出`SocketHandle`、地址或packet injection；
+2. kernel KUnit把workload固定为`2 * VIRTIO_NET_QUEUE_SIZE`个不同sequence（checked arithmetic）。该值只表达
+   bounded validation workload，不声称能够强制并发outstanding超过credit，也不进入KernelConfig；
+3. concrete provider只增加KUnit-only、owner-scoped diagnostic mirror：TX submit/completion、normal exhaustion、
+   current/high-water outstanding、IRQ recheck与live/high-water mapping；worker只镜像action count、单次最大pump
+   rounds和yield/request次数。字段声明必须注明纯诊断，不能驱动queue、pump、worker或probe completion；
+4. stack报告全部reply完成后，KUnit用`yield_now()` + monotonic deadline的bounded predicate loop等待TX
+   submit/completion匹配、outstanding归零、live mapping回到probe前persistent RX baseline；每个sequence必须只
+   完成一次；
+5. 在最终assertion前打印一次摘要，包含burst、reply、submit/completion、normal exhaustion、outstanding、IRQ、
+   live/high-water mapping、worker action/round/yield和baseline，确保失败日志保留判定证据；
+6. mandatory PASS不要求`normal exhaustion > 0`。若自然观察到exhaustion，diagnostic还必须证明first exhaustion
+   后存在新的submission与matching completion；若为0，只能记录“本次未观察到”，host probe仍负责确定性proof。
+
+**Checkpoint review：** 确认host fixture使用真实stack和正式frame contract；RV64仍走普通pump/provider/IRQ/
+completion路径；diagnostics只镜像owner transition；没有为测试改变production capacity、harvest顺序、worker
+policy或public surface；旧R0 probe没有被改写为PASS。
+
+**禁止：** 不得延迟/吞掉真实completion、强制queue-full、降低production slot/queue capacity、改写slot
+ownership、向generic provider port加入test-control、使用sleep决定正确性，或让diagnostics成为行为真相。
+
+**验证与退出：** 运行host gate、两种feature check、focused/repository format、RV64 release build、一次RV64
+wrapper、source/dependency/diagnostic-boundary audit、whitespace与mdBook。Checkpoint 1只有在host确定性观察并恢复
+exhaustion，且RV64完成全部reply、matching completion、IRQ、outstanding/mapping回落、bounded worker action、
+全量KUnit与正常关机后才能Closed。若host无法在不改变shared semantics的条件下制造exhaustion，或RV64真实路径
+出现leak、timeout、panic、无界repoll/丢包，删除未完成probe并停止；RV64`normal exhaustion == 0`本身不停止。
+
+成功后host support与RV64 validation seam保留给Checkpoint 2/3复用，并在Stage 3 final audit删除或由accepted
+production control-plane替换。Checkpoint 1关闭后立即停止，不自动激活Checkpoint 2。
 
 ### 8.4 Checkpoint 2 — host ownership/progress/pump conformance
 
 **状态：** Not Activated / Unauthorized。Checkpoint 1未关闭，不得进入本checkpoint。
 
-先把当前单个、已超过六百行的 integration test按测试owner做最小拆分：现有walking-skeleton/identity test
-保留在`tests/frame_path.rs`；共享 deterministic provider/clock/frame builder移入`tests/support/mod.rs`；新增
-`tests/bounded_progress.rs`承载本阶段矩阵。该拆分不创建`net-test-support` crate、不进入production API，
-也不提前抽象第二个provider。
-
-deterministic provider扩展为小容量、可枚举slot的test owner，并覆盖：
+在Checkpoint 1最小fixture上扩展deterministic provider矩阵：
 
 - RX/TX token未consume、oversize与callback unwind均恢复原owner状态；callback外slice不可逃逸的doctest继续
   通过；paired RX/TX callback不重入provider-global lock；
@@ -721,31 +743,35 @@ pump只有在本轮未被owner-blocked且budget耗尽/deadline到期时返回`Re
 ingress-first/egress-first，两个方向仍各自受`PumpBudget`约束。它不是第二份queue/deadline truth，也不保证
 device saturation下无暂时停顿。
 
-Checkpoint 2 不调整默认KernelConfig数值。若host矩阵只能通过改变`PumpOutcome`字段/含义、shared
+Checkpoint 2不调整默认KernelConfig数值。若host矩阵只能通过改变`PumpOutcome`字段/含义、shared
 `FrameProvider` outcome、smoltcp fork或固定response reserve才能通过，立即停止并进入RFC review。
 
-### 8.5 Checkpoint 3 — provider/recheck/worker closure 与 RV64 acceptance
+### 8.5 Checkpoint 3 — provider/recheck/worker closure与RV64 acceptance
 
-**状态：** Not Activated / Unauthorized。原“复用Checkpoint 1 burst”依赖已失效，必须由后续
-Checkpoint 1 route-correction gate同步更新后才可重新解析或执行。
+**状态：** Not Activated / Unauthorized。Checkpoint 2关闭后必须独立复核其diff与Checkpoint 1 RV64 evidence；
+本节为R1预解析结果，不授予执行权限。
 
 concrete provider保持slot为唯一frame/queue-token owner，并只做以下局部硬化：
 
 - 把当前recheck bit + weak wake收拢为driver-private owner-local latch；publish必须先commit predicate再wake，
   take只清除predicate。KUnit覆盖wake尚未安装、重复/coalesced publish、take后再次publish，证明wake丢失或
   合并不丢durable fact；该latch不进入`device/net` shared port或`anemone-net-api`；
-- 对RX/TX slot transition、matching queue token、live mapping增减与capacity上界保留release `assert!`；
-  diagnostic snapshot继续只镜像owner transition，不反向决定生产行为；
+- 对RX/TX slot transition、matching queue token、outstanding/live mapping增减与capacity上界保留release
+  `assert!`；diagnostic snapshot继续只镜像owner transition，不反向决定production行为；
 - completion harvest保持由provider在process context执行，工作量受固定slot/queue capacity约束；IRQ仍只
   ack、publish recheck和wake，不取得slot或协议callback；
-- worker继续只把`Recheck::Immediate`作为同一wake cycle的repoll依据；owner-blocked `work_remaining`等待
+- worker继续只把`Recheck::Immediate`作为同一wake cycle的repoll依据；owner-blocked`work_remaining`等待
   provider predicate，due time等待stack deadline。达到`NET_WORKER_REPOLL_ROUNDS`必须request、yield后重新竞争，
   不在一个worker action内无限循环。
 
-复用Checkpoint 1 burst，把KUnit-only单NIC query重命名为Stage 2 conformance语义；它仍带Stage 3多设备前
-删除/替换条件，不形成control-plane。Checkpoint 3可根据host与两次RV64证据调整现有
-`net_pump_*_budget` / `net_worker_repoll_rounds`数值，但不得新增配置维度、把测试burst写入KernelConfig或由
-xtask拥有合法性；所有non-zero/capacity关系仍由kernel compile-time assertion验证。
+复用Checkpoint 1 bounded burst与summary，把KUnit-only单NIC query重命名为Stage 2 conformance语义；它仍带
+Stage 3多设备前删除/替换条件，不形成control-plane。以fresh runtime disk连续运行两次RV64：每次都要求全部
+reply、matching completion、IRQ、outstanding/mapping回落、bounded worker action、全量KUnit和正常关机；若任次
+自然观察到exhaustion，还必须证明其后恢复。两次均未观察到exhaustion不阻塞，因为该proof由host矩阵拥有。
+
+Checkpoint 3可根据host与两次RV64 evidence调整现有`net_pump_*_budget` / `net_worker_repoll_rounds`数值，但不得
+新增配置维度、把test burst写入KernelConfig或由xtask拥有合法性；所有non-zero/capacity关系仍由kernel
+compile-time assertion验证。
 
 ### 8.6 Review、审计与可观测性
 
@@ -753,32 +779,36 @@ Stage-wide review至少逐项确认：
 
 - `RxOwnership` / `TxOwnership`每条成功、normal exhaustion、Drop、callback unwind与completion路径只有一个
   owner；四个unsafe begin/complete block仍使用matching token与stable boxed backing，CPU/DMA窗口不重叠；
-- live mapping不超过固定RX+TX slot credit，TX completion后回落，persistent RX mapping不被误报成leak；
+- outstanding/live mapping不超过固定RX+TX slot credit，TX completion后回落，persistent RX mapping不被误报
+  成leak；
 - adapter/pump没有把notification、diagnostic counter或priority cursor当作queue/link/deadline truth；
 - IRQ/raw lock不跨protocol callback，wake publication顺序不丢predicate，worker clear与并发publish可重查；
 - alternating phase只保证software admission公平，不承诺真实device saturation下同步双向进展；每次pump、
-  每个wake cycle与completion scan都有静态上界；
+  每个worker action与completion scan都有静态上界；
 - validation feature不出现在非KUnit production build，不公开endpoint/socket/control-plane或driver test-control；
 - `anemone-net-api`、vendored smoltcp、generic IRQ/kthread/timer/scheduler、attach registry与power均无diff。
 
-可观测性只保留本stage需要的KUnit snapshot与单次probe摘要：burst、pump/yield、RX/TX completion、queue-full、
-IRQ recheck、live/high-water mapping和最终baseline。禁止每packet、每completion、每IRQ或每repoll日志。纯诊断
-字段必须在声明处标注，不参与production state decision。
+可观测性只保留本stage需要的KUnit snapshot与单次summary：burst/reply、pump action/round/yield、RX/TX
+completion、natural exhaustion、outstanding、IRQ recheck、live/high-water mapping和最终baseline。禁止每packet、
+每completion、每IRQ或每repoll日志。纯诊断字段必须在声明处标注，不参与production state decision；summary在
+最终assertion前输出。
 
 ### 8.7 验证 floor
 
 每个checkpoint按其范围运行子集；Stage 2最终至少需要：
 
-1. `cargo test -p anemone-net-api -p anemone-smoltcp-stack`；
-2. `cargo check -p anemone-smoltcp-stack --no-default-features` 与
+1. `cargo test -p anemone-net-api -p anemone-smoltcp-stack`，其中host deterministic probe必须实际观察并恢复
+   exhaustion；
+2. `cargo check -p anemone-smoltcp-stack --no-default-features`与
    `cargo check -p anemone-smoltcp-stack --no-default-features --features icmp-validation-probe`；
 3. `just fmt kernel --check`与所有Stage 2 changed Rust file的focused format check；若repository-wide命令仍
    失败，只能接受与Stage 1 baseline完全相同的三个vendored smoltcp formatter diff，任何新增diff都阻塞；
 4. `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`；
-5. Checkpoint 1一次RV64 wrapper probe；Checkpoint 3再以fresh runtime disk连续运行两次
-   `./scripts/run-user-test-rv64.sh <sdcard-image> <log>`；调用者每次显式选择同一只读pretest master，wrapper
-   复制为worktree-local runtime disk。每次都要求全量KUnit、真实
-   saturation/recovery、mapping回落、无timeout/panic/busy-spin迹象和正常关机；
+5. Checkpoint 1运行一次RV64 wrapper；Checkpoint 3再以fresh runtime disk连续运行两次
+   `./scripts/run-user-test-rv64.sh <sdcard-image> <log>`。调用者每次显式选择同一只读pretest master，wrapper复制
+   为worktree-local runtime disk。每次都要求全量KUnit、bounded burst全部reply、matching completion、IRQ、
+   outstanding/mapping回落、bounded worker action、无timeout/panic/busy-spin迹象和正常关机；natural
+   exhaustion只在观察到时追加恢复义务；
 6. dependency/public-surface、slot/mapping/unsafe、IRQ/wake/worker、deadline/fairness、validation-bypass与
    manifest audit；`git diff --check`与`mdbook build docs`。
 
@@ -792,12 +822,15 @@ Not Effective；不创建或修改network current contract。
 
 除各checkpoint局部failure signal外，以下任一情况立即停止并上报manifest expansion或Target Renegotiation：
 
-- 需要改变shared API、状态owner、public visibility、ABI/visible semantics或R0 acceptance boundary；
+- 需要改变shared API、状态owner、public visibility、ABI/visible semantics或R1 acceptance boundary；
 - 需要修改vendored smoltcp/virtio dependency、generic IRQ/task/kthread/timer/scheduler、attach lifecycle、power、
   apps/rootfs/LTP或QEMU platform/wrapper来制造PASS；
 - queue/link/resource truth必须复制到worker，diagnostics必须驱动production，或callback必须持device-wide lock；
-- exhaustion仍panic/无限repoll、wake可丢durable predicate、mapping不回落或普通workload方向永久饥饿；
-- RV64 saturation不能稳定复现/恢复、两次final run任一失败或review仍有Apollyon/Keter/Euclid。
+- host deterministic provider不能在正式frame contract内制造/恢复exhaustion，或host conformance仍出现panic、
+  无界repoll、lost durable predicate、mapping leak或普通workload方向永久饥饿；
+- RV64任次burst丢失completion/reply/IRQ、outstanding或mapping不回落、worker action越界、无法正常关机，或两次
+  final run任一失败；`normal exhaustion == 0`本身不是停止条件；
+- review仍有Apollyon/Keter/Euclid。
 
 退出要求三个checkpoint全部Closed、所有矩阵与audit达到floor、probe/temporary query带明确Stage 3退出条件、
 transaction追加完整evidence并同步lifecycle文档。随后Stage 2记为Closed并立即停止；不得自动运行`2 -> 3`
@@ -821,11 +854,11 @@ resolution gate、进入Stage 3或cutover contract。
 
 允许文档写回：
 
-- 本文只用于获准的route correction/manifest expansion与closure；
+- `docs/src/rfcs/net-frame-path/{index.md,invariants.md,implementation.md,tracking-issues.md}`用于获准的R1
+  Target Renegotiation、route correction、manifest expansion与closure；
 - `docs/src/devlog/transactions/2026-07-26-net-frame-path.md`逐checkpoint追加activation、probe、review、validation、
   Not Run与closure事实；
-- `docs/src/rfcs/net-frame-path/index.md`、`docs/src/rfcs.md`、transaction index与当前双周devlog只同步stage
-  lifecycle；`tracking-issues.md`仅在真实owner/target finding触发RFC review后经扩展写入。
+- `docs/src/rfcs.md`、transaction index与当前双周devlog只同步revision/stage lifecycle。
 
 明确只读：`anemone-net-api`、vendored smoltcp、`virtio-drivers`/`Cargo.lock`、`anemone-kernel/Cargo.toml`、
 `device/net/**`、`net/mod.rs`、generic device/bus/IRQ/task/kthread/timer/scheduler/power、xtask/Justfile/platform、

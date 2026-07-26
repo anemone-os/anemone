@@ -1,12 +1,12 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / Stage 2 Stopped at Checkpoint 1 Failure Signal
+**Status:** Active / R1 Stage 2 Ready / Checkpoint 1 Not Started / Unauthorized
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
-**Canonical Plan:** [RFC-20260726-net-frame-path R0](../../rfcs/net-frame-path/index.md),
+**Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
 [目标与不变量](../../rfcs/net-frame-path/invariants.md),
 [Stage 2 Ready definition](../../rfcs/net-frame-path/implementation.md#8-stage-2-readybounded-progress-conformance)
-**Canonical Revision:** R0
+**Canonical Revision:** R1
 **Contract Impact:** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
 `NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001` proposed Introduce；
 `SYSTEM-POWER-ORDERLY-001` proposed Refine；全部只在 `NFP-FINAL-CUTOVER` 原子生效
@@ -36,6 +36,11 @@ validation、contract cutover。
 用户于2026-07-27独立授权完成Stage 2 Checkpoint 1，并要求持续推进至checkpoint closure或停止条件；本授权
 只覆盖RV64 saturation observability probe、checkpoint-scoped review/validation/write-back与单独commit，
 不得自动进入Checkpoint 2，也不授予target、owner、shared API/current contract或resolved manifest扩展。
+
+R0 Checkpoint 1按failure signal停止后，用户接受将proof boundary修正为host deterministic exhaustion与RV64
+bounded production-path completion/reclaim的互补证据，并授权只更新文档、最后提交一个commit。本授权形成R1
+Target Renegotiation与Checkpoint 1 route-correction docs gate；不授权任何实现、host/build/QEMU/runtime验证、
+Checkpoint 1 activation、current-contract cutover或Stage 3工作。
 
 ## R0 acceptance and activation preflight
 
@@ -507,3 +512,31 @@ route并更新authoritative implementation route，不能机械重跑当前burst
 **Contract / Not Run:** Stage 2 cutover仍为None；六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续
 Not Effective。RV64 saturation/recovery acceptance、完整KUnit、两次fresh-disk final run、SMP、LA64、
 virtio-pci、hardware、LTP、final harness与Stage 3均Not Run / Not Achieved。
+
+### 2026-07-27 - R1 Target Renegotiation and Checkpoint 1 route correction
+
+**Authority / evidence:** 用户明确接受docs-only proof-boundary correction并要求单commit。Gate读取R0 target/
+invariants、Stage 2原Ready route、Checkpoint 1临时probe形状与保留日志、live pump/provider admission顺序、
+KernelConfig的64-entry queue/32 TX slots/32 egress budget、Stage 1的32/33 mapping evidence、tracking issues、
+current contracts与transaction。结论是累计128 packet不等于同时占用超过32个TX credit；provider每次admission
+前回收completion是正确production progress，不能为测试推迟。保留日志只证明exhaustion assertion失败，不足以
+固定TCG completion精确时序。
+
+**Accepted R1 correction:** normal exhaustion必须保持normal、bounded且可由matching completion/recheck恢复，
+owner/public API/ABI/visible semantics/contract delta均不变。确定性exhaustion proof改由真实stack + capacity-2
+deterministic host provider以3-frame transaction完成；RV64改为bounded burst上的真实TX/RX completion、IRQ、
+outstanding上界、mapping回落、bounded worker action与正常关机。RV64自然观察到exhaustion时必须追加恢复证据；
+未观察到只记录事实，不再构成失败。`NET-FRAME-PROGRESS-001` cutover与新增`NFP-PROOF-005`已经折回canonical
+invariants；NFP-007记录问题来源并由R1 neutralize。
+
+**Resolved Checkpoint 1:** authoritative Stage 2现在按顺序包含：(1) host deterministic exhaustion seam + 一次
+RV64 production observability；(2) host ownership/progress/pump完整矩阵与production gap修复；(3) provider/
+recheck/worker closure与两次fresh-disk RV64 acceptance。Checkpoint 1明确冻结host capacity 2 / 3-frame
+exhaustion-recovery transaction、128-sequence RV64 workload、diagnostic-only outstanding/worker summary、条件式
+natural-exhaustion义务、review/validation/failure signal与原write set。Ready不授予执行权限。
+
+**Contract / validation boundary:** R1没有cutover；六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续Not
+Effective，current contracts/register/current limitations均未修改。R1 docs gate只执行source/doc审计、whitespace、
+链接与mdBook验证；没有运行host test、cargo check、formatter、kernel build、QEMU、KUnit、SMP、LA64、hardware、
+LTP或final harness。旧Checkpoint 1仍为历史Stopped / Not Closed，临时probe仍已删除；新R1 Checkpoint 1为
+**Ready / Not Started / Unauthorized**，Checkpoint 2/3均未激活。

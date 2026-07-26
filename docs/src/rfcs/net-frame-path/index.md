@@ -1,7 +1,7 @@
 # RFC-20260726-net-frame-path
 
 **状态：** Accepted for Implementation
-**修订：** `R0`
+**修订：** `R1`
 **负责人：** doruche
 **最后更新：** 2026-07-27
 **领域：** network-device / VirtIO / frame-path / smoltcp integration
@@ -11,13 +11,12 @@
 `Introduce`；尚未生效）；
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)
 （proposed `Refine`）
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-002
-已由 System Power R0 与本 R0 的 best-effort cleanup boundary neutralize
-**下一步：** Stage 2 Checkpoint 1 的真实 RV64 burst 未能稳定制造 TX exhaustion，已按局部 failure signal
-删除 probe 并停止；Checkpoint 1 未关闭，Checkpoint 2 未激活。继续前须独立 review saturation route 并更新
-authoritative implementation route
+**开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-007
+已由 R1 proof-boundary correction neutralize
+**下一步：** R1 已把 Stage 2 重新解析为 Ready / Checkpoint 1 Not Started / Unauthorized；后续若获独立实现授权，
+从 host deterministic exhaustion seam 与 RV64 production-path observability 的互补 probe 开始
 
-> 本目录是 `net-frame-path` R0 accepted target 的公共 canonical source。R0 尚未成为 current contract；
+> 本目录是 `net-frame-path` R1 accepted target 的公共 canonical source。R1 尚未成为 current contract；
 > 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。
 
 ## 摘要
@@ -285,6 +284,23 @@ Refine 都达到验证 floor，后续 sibling RFC 才能把它们作为 effectiv
 - `implementation.md` 已建立，并且第一个可执行阶段独立达到 Ready；
 - 任何 target reduction 经过明确 review，而不是把较弱实现写成原目标。
 
+### R1 acceptance
+
+2026-07-27 Stage 2 Checkpoint 1 的真实 RV64 128-packet probe 到达 exhaustion assertion，但没有观察到
+`queue-full > 0`。累计 burst 大于 TX slot 数只证明总工作量，不保证同一时刻的 in-flight TX 超过 credit：
+production provider 会在每次 admission 前回收已经完成的 TX，TCG/VirtIO 可以在相邻 admission 之间归还
+credit。用户据此接受 R1，将错误的“QEMU 必须确定性制造一次 exhaustion”验收前提替换为互补 proof：
+
+- host real-stack + deterministic provider 必须确定性制造 credit exhaustion、保持未发送工作、归还 matching
+  completion/recheck 后恢复，并覆盖 budget、deadline、fairness 与 link matrix；
+- RV64 QEMU 必须证明真实 virtio-mmio 路径上的 bounded outstanding、TX/RX completion、IRQ recheck、mapping
+  回落、有限 worker action 与正常关机；若运行中自然观察到 exhaustion，还必须证明其后继续提交并完成；
+- RV64 未自然观察到 exhaustion 不是失败，也不能替代 host 的确定性 exhaustion proof。validation 不得延迟/
+  吞掉 completion、降低 production capacity、伪造 queue state 或让 diagnostics 驱动行为来制造 PASS。
+
+R1 不改变 frame/progress 语义、owner、public API、contract delta、platform scope 或最终 cutover；它只修正
+acceptance proof assignment。旧 Checkpoint 1 的失败、probe 删除与 Not Achieved 结论继续保留在 transaction。
+
 ### 最终 closure floor
 
 `NFP-FINAL-CUTOVER` 至少要求以下互补证据：
@@ -298,8 +314,8 @@ Refine 都达到验证 floor，后续 sibling RFC 才能把它们作为 effectiv
 - acceptance audit：没有 endpoint/socket/control-plane 旁路，没有 fake/fake self-proof，没有把未验证的
   双向收发、IRQ 或 DMA 行为记为 PASS，也没有把 LA64/virtio-pci 写成本修订 coverage。
 
-Host 成功不替代 RV64 QEMU，单次 packet smoke 不替代 ownership/exhaustion proof。未运行项目必须保留
-Not Run。
+Host 成功不替代 RV64 QEMU，单次 packet smoke 不替代 production completion/reclaim proof；RV64 burst
+成功也不替代 host 的确定性 exhaustion proof。未运行项目必须保留 Not Run。
 
 ## 备选方案与取舍
 
@@ -355,10 +371,11 @@ power-off。只有 live frame path 无法在现有 framework 中安全表达时�
 
 | 修订 | 日期 | 状态 | 摘要 | 事务 |
 | --- | --- | --- | --- | --- |
+| R1 | 2026-07-27 | Accepted for Implementation | 保持 R0 target/owner/contract delta，将 exhaustion 确定性证明归给 host provider，并把 RV64 验收修正为真实 bounded completion/IRQ/reclaim；Stage 2 Checkpoint 1 重新达到 Ready | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
 | R0 | 2026-07-26 | Accepted for Implementation | 接受 RV64-only frame path target、六个 proposed network IDs 与 System Power Refine；Stage 1 Checkpoint 1 激活 | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
 
 ## 收口
 
-当前尚未收口。本文不记录任何 build、host test、QEMU 或 runtime PASS；本轮只进行文档与 live
-source audit。实现期证据以后进入独立 transaction devlog，current contract 只在
-`NFP-FINAL-CUTOVER` 更新。
+当前尚未收口。Stage 1 已完成的 host/build/RV64 evidence、R0 Checkpoint 1 的失败证据与 R1 docs-only
+renegotiation 均由 transaction 记录；R1 尚未运行任何新 host、build、QEMU 或 runtime validation。
+current contract 只在 `NFP-FINAL-CUTOVER` 更新。

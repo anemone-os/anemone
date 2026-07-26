@@ -1,9 +1,9 @@
 # Network Frame Path 目标与不变量
 
 **状态：** Accepted Target / Not Effective
-**最后更新：** 2026-07-26
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
-**适用修订：** `R0`
+**适用修订：** `R1`
 
 本文定义 `net-frame-path` proposed contract delta、尚未 cutover 的 target invariants，以及只服务
 本 RFC 验收的 proof obligations。当前没有 network frame-path effective contract；本文也不是
@@ -182,9 +182,10 @@ edge 并重新读取，不缓存并列 resource truth。
 为了消除适度 allocation 引入跨层 DMA identity、侵入式 frame 或镜像 credit truth；TX exhaustion 后
 completion 无法唤起重查；notification 自身被当作唯一 state；一侧在普通 workload 下永久饥饿。
 
-**Cutover：** host exhaustion/completion/recheck/fairness tests、IRQ source audit、VirtIO mapping
-identity/lifetime/reclaim audit，以及 QEMU queue saturation 后可恢复且 live mapping 回落的
-production-path evidence。
+**Cutover：** host real-stack + deterministic provider 的 exhaustion/completion/recheck/fairness tests、IRQ
+source audit、VirtIO mapping identity/lifetime/reclaim audit，以及 QEMU bounded burst 的真实 TX/RX
+completion、IRQ recheck、outstanding 上界、live mapping 回落与正常关机 evidence。QEMU 若自然观察到
+exhaustion，必须额外证明其后恢复提交和 completion；未自然观察到不替代、也不否定 host exhaustion proof。
 
 ### NET-STACK-PUMP-001 — stack instance 的唯一逻辑推进 owner
 
@@ -296,6 +297,18 @@ route/control plane。
 correction、accepted reduced target、follow-up RFC 或 Not Cut Over；不能用更强 fake、缩小 case 或
 只验单向收发/无 IRQ 路径冒充 closure。
 
+### NFP-PROOF-005 — Exhaustion 与 production runtime 使用互补证据
+
+normal exhaustion/recovery 必须由真实 stack 与实现正式 frame contract 的 deterministic host provider
+确定性制造：test owner 可以控制自己的有限 credit、matching completion、link 与 recheck edge，但这些
+control 不得进入 production capability。RV64 QEMU 必须独立证明真实 VirtIO queue/DMA/IRQ/worker 路径的
+bounded completion/reclaim；不能因为 TCG 回收足够快而把 `queue-full == 0` 判为 production failure，也不能
+通过延迟 completion、降低 production capacity、伪造 queue state 或 diagnostics 驱动行为来制造 exhaustion。
+
+若 RV64 自然出现 exhaustion，验收必须证明之后仍有新 submission、matching completion、IRQ recheck 与
+最终 mapping baseline；若没有出现，只能结论为“本次 production burst 未观察到 exhaustion”，host 的确定性
+proof 仍必须独立通过。
+
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
@@ -374,7 +387,7 @@ point 表达，返回 RFC review，而不是增加第二套 lifecycle state。
 
 ## 完成标准
 
-R0 文档层 acceptance 已确认：
+R1 文档层 acceptance 已确认：
 
 - 六个 proposed network contract IDs 与 `SYSTEM-POWER-ORDERLY-001` Refine 的 owner、依赖、failure 与
   cutover proof 已经 review；
@@ -386,7 +399,7 @@ R0 文档层 acceptance 已确认：
 
 RFC 最终完成至少要求：
 
-- `NFP-PROOF-001` 到 `NFP-PROOF-004` 全部有可审计证据；
+- `NFP-PROOF-001` 到 `NFP-PROOF-005` 全部有可审计证据；
 - RV64 runtime、host ownership/exhaustion/multi-instance 与 source audits 全部达到 floor；
 - 六个 network IDs 与 `SYSTEM-POWER-ORDERLY-001` Refine 在 `NFP-FINAL-CUTOVER` 原子写入 current
   contract 并成为 Effective；
