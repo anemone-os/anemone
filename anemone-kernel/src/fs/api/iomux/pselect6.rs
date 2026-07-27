@@ -58,6 +58,7 @@ fn scan_pselect_fdset(
     nready: &mut usize,
     has_source: &mut bool,
     unsupported: &mut bool,
+    recheck: &mut bool,
 ) -> Result<(), SysError> {
     let Some(interest_fds) = interest_fds else {
         return Ok(());
@@ -74,6 +75,30 @@ fn scan_pselect_fdset(
         let fd = task.get_fd(fd)?;
 
         match fd.poll(&request) {
+            Ok(PollRegisterResult::Subscribed(revents)) if request.is_register() => {
+                if !revents.is_empty() {
+                    ready_fds.set(fd_idx);
+                    *nready += 1;
+                }
+            },
+            Ok(PollRegisterResult::Subscribed(_)) => {
+                kwarningln!(
+                    "sys_pselect6: snapshot scan unexpectedly subscribed fd {}",
+                    fd_idx,
+                );
+                return Err(SysError::IO);
+            },
+            Ok(PollRegisterResult::SubscribedRecheck) if request.is_register() => {
+                *recheck = true;
+                return Ok(());
+            },
+            Ok(PollRegisterResult::SubscribedRecheck) => {
+                kwarningln!(
+                    "sys_pselect6: snapshot scan unexpectedly requested recheck fd {}",
+                    fd_idx,
+                );
+                return Err(SysError::IO);
+            },
             Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
                 ready_fds.set(fd_idx);
                 *nready += 1;
@@ -87,14 +112,6 @@ fn scan_pselect_fdset(
                 *unsupported = true;
             },
             Ok(PollRegisterResult::Ready(_)) => {},
-            Ok(PollRegisterResult::Armed) if request.is_register() => {},
-            Ok(PollRegisterResult::Armed) => {
-                kwarningln!(
-                    "sys_pselect6: snapshot scan unexpectedly armed fd {}",
-                    fd_idx
-                );
-                return Err(SysError::IO);
-            },
             Ok(PollRegisterResult::Unsupported) => {
                 kdebugln!(
                     "sys_pselect6: unsupported register source fd {} interests={:?}",
@@ -150,6 +167,7 @@ fn scan_pselect_fds(
     let mut nready = 0;
     let mut has_source = false;
     let mut unsupported = false;
+    let mut recheck = false;
 
     scan_pselect_fdset(
         task,
@@ -160,18 +178,22 @@ fn scan_pselect_fds(
         &mut nready,
         &mut has_source,
         &mut unsupported,
+        &mut recheck,
     )?;
 
-    scan_pselect_fdset(
-        task,
-        n,
-        out_interests,
-        out_ready.as_mut(),
-        mode.poll_request(PollEvent::WRITABLE),
-        &mut nready,
-        &mut has_source,
-        &mut unsupported,
-    )?;
+    if !recheck {
+        scan_pselect_fdset(
+            task,
+            n,
+            out_interests,
+            out_ready.as_mut(),
+            mode.poll_request(PollEvent::WRITABLE),
+            &mut nready,
+            &mut has_source,
+            &mut unsupported,
+            &mut recheck,
+        )?;
+    }
 
     // Exception readiness has no internal PollEvent yet. Keep output empty and
     // treat it as not ready instead of failing register scans: current Anemone
@@ -184,6 +206,8 @@ fn scan_pselect_fds(
         Ok(IomuxScanOutcome::Ready(nready))
     } else if unsupported {
         Ok(IomuxScanOutcome::Unsupported)
+    } else if recheck {
+        Ok(IomuxScanOutcome::Recheck)
     } else if !has_source {
         Ok(IomuxScanOutcome::NoSources)
     } else {

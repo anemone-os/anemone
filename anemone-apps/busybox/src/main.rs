@@ -16,11 +16,7 @@ use anemone_rs::{
 };
 
 const BUSYBOX_PATH: &str = "/.anemone/busybox";
-const BUSYBOX_ENV: &[&str] = &[
-    "HOME=/",
-    "PATH=/bin:/sbin:/usr/bin:/usr/sbin",
-    "TERM=linux",
-];
+const BUSYBOX_ENV: &[&str] = &["HOME=/", "PATH=/bin:/sbin:/usr/bin:/usr/sbin", "TERM=linux"];
 
 #[cfg(target_arch = "riscv64")]
 const BUSYBOX_IMAGE: &[u8] = include_bytes!("../bin/riscv64/busybox");

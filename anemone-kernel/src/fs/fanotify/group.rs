@@ -142,10 +142,14 @@ impl FanGroup {
         self.state.lock().queue.queued_bytes()
     }
 
-    pub fn poll(&self, request: &PollRequest<'_>) -> PollRegisterResult {
-        let mut state = self.state.lock();
-        let dead = state.dead;
-        state.queue.poll(request, dead)
+    pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        let (result, previous_routes) = {
+            let mut state = self.state.lock();
+            let dead = state.dead;
+            state.queue.poll(request, dead)?
+        };
+        drop(previous_routes);
+        Ok(result)
     }
 
     pub fn mark_dead(&self) {

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{TimerEvent, expire_ticks_after, push_timer_event};
+use super::{TimerEvent, deadline_after, push_timer_event};
 
 /// Schedule a timer event to run in interrupt context on the local CPU after
 /// the given duration.
@@ -13,5 +13,5 @@ pub unsafe fn schedule_local_irq_timer_event(
     expire: Duration,
     callback: Box<dyn FnOnce() + Send + 'static>,
 ) {
-    push_timer_event(TimerEvent::new_irq(expire_ticks_after(expire), callback));
+    push_timer_event(TimerEvent::new_irq(deadline_after(expire), callback));
 }

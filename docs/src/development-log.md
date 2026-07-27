@@ -34,7 +34,7 @@
 
 小迭代记录用于承载不值得开 RFC、但又不适合塞进双周日志的一次局部迭代。它必须是自洽、可自描述的记录：读者只打开这一页，就能理解问题是什么、为什么按当前方案处理、实际推进到哪里、验证到哪里、还剩哪些局部风险。
 
-小迭代记录不只记录完成后的事实。对于仍在推进的小问题，它可以在记录内部维护 `Problem`、`Solution` 和 `Tracking Issues` 章节，用来说明本轮问题、局部方案、review concern、验证缺口和关闭依据。但这些 tracking issues 只服务于当前小迭代本身，不承担仓库级 accepted target / current contract、跨子系统不变量或长期阶段计划。
+小迭代记录不只记录完成后的事实。对于仍在推进的小问题，它可以在记录内部维护 `Problem`、`Solution` 和 `Tracking Issues` 章节，用来说明本轮问题、局部方案、review concern、验证缺口和关闭依据。但这些 tracking issues 只服务于当前小迭代本身，不承担仓库级 accepted target、跨子系统不变量或长期阶段计划。严格的 contract-bearing small change 可以在同一原子 checkpoint 中声明 `Contract Impact / Cutover`；effective 规则仍只写入 current contract，不能由 tracking issue 或 change record 建立第二份长期权威。
 
 适合建立小迭代记录的情况：
 
@@ -59,6 +59,8 @@
 - 双周开发日志追加一条短摘要并链接小迭代记录。
 - 小迭代记录可以被 register、current limitations、RFC 背景材料或后续事务日志引用。
 - `Tracking Issues` 章节可以记录本迭代内的 review concern、方案缺口、验证缺口和关闭依据；问题关闭后应把结论折回 `Solution`、`Change`、`Validation` 或 `Risk / Follow-up`，不要只在 tracker 中留下最终语义。
+- contract-bearing small change 只适用于 target、owner、handoff、failure、cleanup、有限 write set 和验证矩阵都已解析，且代码与 contract 只有一个原子 cutover 的局部变化。记录必须列出 baseline、变化分类、cutover 证据和失败时保持旧 contract 的边界。
+- 一旦需要 probe、多个 implementation checkpoint、transitional contract、滚动 stage resolution、target renegotiation，或存在本轮无法关闭的 Apollyon / Keter，就升级 RFC；不得继续扩张 small-change record。
 - 如果小迭代后来升级为 RFC，原记录保留事实历史，并在 `Status`、`Follow-up` 或 `Tracking Issues` 中标明被哪个 RFC 或事务日志取代。
 - 如果记录后来被证明有误，追加更正说明；不要静默改写已经完成的事实判断。
 
@@ -69,7 +71,7 @@
 - 调查结论没有进入 RFC，但背景材料会被后续反复引用；
 - 单文件已经影响扫读。
 
-目录形态只是让小迭代记录容纳证据包和局部跟踪，不是小型 RFC。`index.md` 仍是唯一的自描述记录本体；`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。如果记录开始需要仓库级 accepted target / current contract、非平凡不变量、跨阶段实施计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。
+目录形态只是让小迭代记录容纳证据包和局部跟踪，不是小型 RFC。`index.md` 仍是唯一的自描述记录本体；`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。除上述单一原子 contract cutover 外，如果记录开始需要仓库级 accepted target、非平凡不变量、跨阶段实施计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。
 
 ## 事务日志
 

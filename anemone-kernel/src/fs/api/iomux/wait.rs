@@ -5,6 +5,7 @@
 //! conversion stays in the syscall adapters.
 
 use crate::{
+    fs::iomux::IomuxWaitRound,
     prelude::*,
     task::sig::{
         TemporaryMaskWaitCandidate, TemporaryMaskWaitContext, TemporaryMaskWaitDecision,
@@ -12,17 +13,17 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub(super) enum IomuxScanMode<'a> {
     Snapshot,
-    Register(&'a LatchTrigger),
+    Register(&'a IomuxWaitRound),
 }
 
 impl<'a> IomuxScanMode<'a> {
     pub(super) fn poll_request(self, interests: PollEvent) -> PollRequest<'a> {
         match self {
             Self::Snapshot => PollRequest::snapshot(interests),
-            Self::Register(trigger) => PollRequest::register(interests, trigger),
+            Self::Register(round) => round.poll_request(interests),
         }
     }
 
@@ -34,6 +35,7 @@ impl<'a> IomuxScanMode<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum IomuxScanOutcome {
     Ready(usize),
+    Recheck,
     NotReady,
     NoSources,
     Unsupported,
@@ -177,14 +179,13 @@ where
             None => None,
         };
 
-        let latch = Latch::begin_current(true);
-        let trigger = latch.make_trigger();
-        let wait_id = trigger.wait_id();
+        let round = IomuxWaitRound::begin_current();
+        let wait_id = round.wait_id();
 
-        match scan(IomuxScanMode::Register(&trigger)) {
+        match scan(IomuxScanMode::Register(&round)) {
             Ok(IomuxScanOutcome::Ready(nready)) if nready > 0 => {
-                latch.cancel(LatchCancelReason::PredicateReady);
-                let outcome = latch.finish();
+                round.cancel(LatchCancelReason::PredicateReady);
+                let outcome = round.finish();
                 kdebugln!(
                     "{}: register scan found ready wait={:#x} nready={} wait outcome={:?}",
                     context,
@@ -192,7 +193,44 @@ where
                     nready,
                     outcome,
                 );
-                return IomuxWaitOutcome::Ready(nready);
+                match snapshot_scan(context, &mut scan) {
+                    Ok(SnapshotScanOutcome::Ready(nready)) => {
+                        return IomuxWaitOutcome::Ready(nready);
+                    },
+                    Ok(SnapshotScanOutcome::NotReady | SnapshotScanOutcome::NoSources) => {
+                        match map_register_ready_outcome(context, outcome) {
+                            IomuxWaitDisposition::Retry => continue,
+                            IomuxWaitDisposition::Done(outcome) => return outcome,
+                        }
+                    },
+                    Err(err) => return IomuxWaitOutcome::Error(err),
+                }
+            },
+            Ok(IomuxScanOutcome::Recheck) => {
+                // PredicateReady is the existing non-error latch cancellation
+                // carrier. SubscribedRecheck is not counted as readiness: it
+                // only prevents parking until this round is retired and the
+                // final snapshot has classified the predicate.
+                round.cancel(LatchCancelReason::PredicateReady);
+                let outcome = round.finish();
+                kdebugln!(
+                    "{}: register scan requested recheck wait={:#x} outcome={:?}",
+                    context,
+                    wait_id,
+                    outcome,
+                );
+                match snapshot_scan(context, &mut scan) {
+                    Ok(SnapshotScanOutcome::Ready(nready)) => {
+                        return IomuxWaitOutcome::Ready(nready);
+                    },
+                    Ok(SnapshotScanOutcome::NotReady | SnapshotScanOutcome::NoSources) => {
+                        match map_register_ready_outcome(context, outcome) {
+                            IomuxWaitDisposition::Retry => continue,
+                            IomuxWaitDisposition::Done(outcome) => return outcome,
+                        }
+                    },
+                    Err(err) => return IomuxWaitOutcome::Error(err),
+                }
             },
             Ok(
                 register_outcome @ (IomuxScanOutcome::Ready(_)
@@ -208,8 +246,8 @@ where
                 );
             },
             Ok(IomuxScanOutcome::Unsupported) => {
-                latch.cancel(LatchCancelReason::RegisterError);
-                let outcome = latch.finish();
+                round.cancel(LatchCancelReason::RegisterError);
+                let outcome = round.finish();
                 kwarningln!(
                     "{}: unsupported poll source during register scan wait={:#x} outcome={:?}",
                     context,
@@ -223,8 +261,8 @@ where
                 }
             },
             Err(err) => {
-                latch.cancel(LatchCancelReason::SyscallError);
-                let outcome = latch.finish();
+                round.cancel(LatchCancelReason::SyscallError);
+                let outcome = round.finish();
                 kwarningln!(
                     "{}: register scan failed wait={:#x} err={:?} outcome={:?}",
                     context,
@@ -240,8 +278,8 @@ where
             },
         }
 
-        let remaining_after_wait = latch.schedule_with_timeout(remaining);
-        let outcome = latch.finish();
+        let remaining_after_wait = round.schedule_with_timeout(remaining);
+        let outcome = round.finish();
         kdebugln!(
             "{}: latch wait finished outcome={:?} remaining={:?}",
             context,
@@ -299,6 +337,10 @@ where
             Ok(SnapshotScanOutcome::NotReady)
         },
         IomuxScanOutcome::NoSources => Ok(SnapshotScanOutcome::NoSources),
+        IomuxScanOutcome::Recheck => {
+            kwarningln!("{}: snapshot scan returned recheck", context);
+            Err(SysError::IO)
+        },
         IomuxScanOutcome::Unsupported => {
             kwarningln!("{}: snapshot scan returned unsupported", context);
             Err(SysError::NotSupported)
@@ -350,6 +392,28 @@ fn wait_without_iomux_sources(
 enum IomuxWaitDisposition {
     Retry,
     Done(IomuxWaitOutcome),
+}
+
+fn map_register_ready_outcome(
+    context: &'static str,
+    outcome: LatchWaitOutcome,
+) -> IomuxWaitDisposition {
+    match outcome {
+        // The register snapshot was only a hint. If the final predicate is no
+        // longer ready, an accepted producer hint or our own predicate cancel
+        // simply starts a fresh snapshot/register round.
+        LatchWaitOutcome::Triggered | LatchWaitOutcome::Cancelled => IomuxWaitDisposition::Retry,
+        LatchWaitOutcome::Signal => IomuxWaitDisposition::Done(IomuxWaitOutcome::Signal),
+        LatchWaitOutcome::Force => IomuxWaitDisposition::Done(IomuxWaitOutcome::Force),
+        LatchWaitOutcome::Timeout | LatchWaitOutcome::Unexpected => {
+            kwarningln!(
+                "{}: unexpected latch outcome after register-ready recheck: {:?}",
+                context,
+                outcome,
+            );
+            IomuxWaitDisposition::Done(IomuxWaitOutcome::Error(SysError::IO))
+        },
+    }
 }
 
 fn map_latch_outcome(context: &'static str, outcome: LatchWaitOutcome) -> IomuxWaitDisposition {

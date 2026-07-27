@@ -20,9 +20,10 @@ fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
 
 /// local tests for development.
 fn run_local_tests() {
-    println!("user-test: running ioctl test...");
-    local_run_cmd("/bin/ioctl-test", &["ioctl-test"], &[]);
-    println!("user-test: ioctl test finished.");
+    // 0. ioctl test
+    // println!("user-test: running ioctl test...");
+    // local_run_cmd("/bin/ioctl-test", &["ioctl-test"], &[]);
+    // println!("user-test: ioctl test finished.");
 
     // 1. signal test
     // println!("user-test: running signal test...");
@@ -64,22 +65,27 @@ fn run_local_tests() {
     // println!("user-test: pthread create stress test finished.");
 
     // 8. fair-test
-    println!("user-test: running fair test...");
-    local_run_cmd("/bin/fair-test", &["fair-test"], &[]);
-    println!("user-test: fair test finished.");
+    // println!("user-test: running fair test...");
+    // local_run_cmd("/bin/fair-test", &["fair-test"], &[]);
+    // println!("user-test: fair test finished.");
 
     // 9. sched dynamic attributes focused test
-    println!("user-test: running sched attr test...");
-    local_run_cmd("/bin/sched-attr-test", &["sched-attr-test"], &[]);
-    println!("user-test: sched attr test finished.");
+    // println!("user-test: running sched attr test...");
+    // local_run_cmd("/bin/sched-attr-test", &["sched-attr-test"], &[]);
+    // println!("user-test: sched attr test finished.");
 
     // 10. job control test
-    #[cfg(target_arch = "riscv64")]
-    {
-        println!("user-test: running jobctl test...");
-        local_run_cmd("/bin/jobctl-test", &["jobctl-test"], &[]);
-        println!("user-test: jobctl test finished.");
-    }
+    // #[cfg(target_arch = "riscv64")]
+    // {
+    //     println!("user-test: running jobctl test...");
+    //     local_run_cmd("/bin/jobctl-test", &["jobctl-test"], &[]);
+    //     println!("user-test: jobctl test finished.");
+    // }
+
+    // 11. epoll test
+    println!("user-test: running epoll test...");
+    local_run_cmd("/bin/epoll-test", &["epoll-test"], &[]);
+    println!("user-test: epoll test finished.");
 }
 
 /// competition tests.

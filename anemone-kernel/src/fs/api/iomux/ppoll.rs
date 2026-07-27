@@ -77,6 +77,7 @@ fn scan_ppoll_fds(
     let mut nready = 0;
     let mut has_source = false;
     let mut unsupported = false;
+    let mut recheck = false;
 
     for poll_fd in poll_fds.iter_mut() {
         poll_fd.revents = LinuxPollEvent::empty();
@@ -93,6 +94,31 @@ fn scan_ppoll_fds(
         };
 
         match file.poll(&mode.poll_request(poll_fd.events)) {
+            Ok(PollRegisterResult::Subscribed(revents)) if mode.is_register() => {
+                if !revents.is_empty() {
+                    poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
+                    nready += 1;
+                    break;
+                }
+            },
+            Ok(PollRegisterResult::Subscribed(_)) => {
+                kwarningln!(
+                    "sys_ppoll: snapshot scan unexpectedly subscribed fd {:?}",
+                    fd,
+                );
+                return Err(SysError::IO);
+            },
+            Ok(PollRegisterResult::SubscribedRecheck) if mode.is_register() => {
+                recheck = true;
+                break;
+            },
+            Ok(PollRegisterResult::SubscribedRecheck) => {
+                kwarningln!(
+                    "sys_ppoll: snapshot scan unexpectedly requested recheck fd {:?}",
+                    fd,
+                );
+                return Err(SysError::IO);
+            },
             Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
                 poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
                 nready += 1;
@@ -109,11 +135,6 @@ fn scan_ppoll_fds(
                 break;
             },
             Ok(PollRegisterResult::Ready(_)) => {},
-            Ok(PollRegisterResult::Armed) if mode.is_register() => {},
-            Ok(PollRegisterResult::Armed) => {
-                kwarningln!("sys_ppoll: snapshot scan unexpectedly armed fd {:?}", fd);
-                return Err(SysError::IO);
-            },
             Ok(PollRegisterResult::Unsupported) => {
                 kdebugln!(
                     "sys_ppoll: unsupported register source fd {:?} interests={:?}",
@@ -136,6 +157,8 @@ fn scan_ppoll_fds(
 
     if unsupported {
         Ok(IomuxScanOutcome::Unsupported)
+    } else if recheck {
+        Ok(IomuxScanOutcome::Recheck)
     } else if !has_source {
         Ok(IomuxScanOutcome::NoSources)
     } else {

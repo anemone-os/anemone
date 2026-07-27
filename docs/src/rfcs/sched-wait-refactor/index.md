@@ -2,15 +2,19 @@
 
 **状态：** 已完成
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-15
+**最后更新：** 2026-07-25
 **领域：** scheduler / event / timer / signal / wait core
 **事务日志：** [2026-06-01 - Sched Wait Refactor](../../devlog/transactions/2026-06-01-sched-wait-refactor.md)
-**开放问题：** [KETER-WAIT-001：synchronous remote placement 不能组合进 cross-CPU IPI completion](./tracking-issues.md#keter-wait-001synchronous-remote-placement-不能组合进-cross-cpu-ipi-completion)
-**下一步：** R0 保持已完成；为 KETER-WAIT-001 做 post-close 文档 review，接受修复后按语义修订建立新 transaction
+**开放问题：** None；KETER-WAIT-001 已由后续 current contract neutralize，见 [Tracking Issues](./tracking-issues.md)
+**当前后继：** [SCHED-WAKE 当前契约](../../contracts/scheduler/wake-delivery.md)
+**下一步：** R0 保持历史已完成；当前 wake-delivery 语义只由后继 contract 维护
 
 ## 摘要
 
 本 RFC 定义 `Event` wake race 的共享修复计划：通过稳定等待轮次身份、单一 wait completion 事务、stale-safe wake placement、park latch handoff 和受约束的 Event listener requeue，把旧 wake tail 撞上新 wait round 的竞态收敛到一套可审查协议中。
+
+本页保留 R0 accepted target 与历史实现边界。2026-07-25 起，remote placement handoff 的
+effective 语义由 [SCHED-WAKE 当前契约](../../contracts/scheduler/wake-delivery.md)维护；本页不原地改写为后继规则。
 
 公开 canonical 文档是：
 

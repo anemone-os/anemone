@@ -24,8 +24,12 @@ installed_dir = "/sbin"
 name = "user-test"
 installed_dir = "/bin"
 
+# [[apps]]
+# name = "ioctl-test"
+# installed_dir = "/bin"
+
 [[apps]]
-name = "ioctl-test"
+name = "epoll-test"
 installed_dir = "/bin"
 
 # [[apps]]

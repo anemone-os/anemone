@@ -38,13 +38,15 @@ Draft 和 `Accepted for Implementation` 阶段不能把 target 写成当前事�
 
 `Introduce` 只用于此前不存在 effective contract 规则、由本 RFC 新增的 stable ID。它在 cutover 前只有 RFC target，没有可链接的 current authority；`Contract Impact` 的当前规则栏写 `None（尚未生效）`，cutover 时才在 `docs/src/contracts/` 创建 Active 条目。已有行为只是尚未提取到 contract 层时，不能因为“没有文档”而标成 `Introduce`；应先从 live owner、Closed RFC 和执行证据提取最小 effective baseline，再按真实语义使用 `Preserve`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。
 
+局部变化只有同时满足以下条件，才可以用 contract-bearing small change 代替 RFC：target 在实现前已经完整解析；只有一个原子 implementation cutover；不需要 probe、target renegotiation、滚动 stage resolution 或 transitional contract；唯一 protocol owner、每份状态 owner、handoff、failure 和 cleanup 均明确；write set 与验证矩阵能在同一 checkpoint 完整闭合；记录只保存 baseline、local target、`Contract Impact / Cutover`、实现与证据，effective 正文仍只存在于 current contract。代码和 contract 必须同一 checkpoint 生效，失败时保持旧 contract。任一条件不成立，或出现第二阶段、未决 owner、本轮无法关闭的 Apollyon / Keter，就升级 RFC。
+
 不变量按范围分流：局部实现约束优先使用 assertion、关键注释和定向测试；只服务单个 RFC 的规则留在 RFC；需要跨 RFC/模块引用的规则进入 contract surface。文档按 owner 和共同变化、共同证明的协议边界组织，不机械镜像源文件，也不为每条小规则单独建页。
 
 跨领域规则如果只是依赖，使用 contract ID 引用，不复制对方规则；如果正确性依赖跨域 handoff、顺序、能力移交、取消或 teardown，建立接口级 contract，并明确唯一协议 owner、各份状态的唯一 owner和参与方局部义务。无法指出唯一 owner、两边都缓存同一可变状态或 cleanup 没有最终负责方时，属于文档层 blocker，不能写成“共同 owner”后进入实现。
 
 ## 适用范围
 
-满足以下任一条件时，应走 RFC 工作流：
+满足以下任一条件时，默认走 RFC 工作流；上述 contract-bearing small change 是唯一的局部原子例外：
 
 - 改动跨多个子系统，或会改变 shared contract；
 - 改动涉及 ABI、兼容性、调度、等待、生命周期、锁序或资源所有权；
@@ -52,7 +54,7 @@ Draft 和 `Accepted for Implementation` 阶段不能把 target 写成当前事�
 - 后续实现预计跨多天、多个 agent 或多个 checkpoint；
 - devlog、register 或后续 RFC 需要长期引用该计划。
 
-简单 bugfix、局部清理、一次性实验和不影响公共契约的小补丁不需要 RFC。它们可以只写普通 devlog、register 条目、小迭代记录，或不写正式文档。小迭代记录可以在单页内写清局部问题、解决方案和本迭代内部 tracking issues；如果这些内容开始需要仓库级 contract、不变量、阶段 gate 或多轮 review，再升级为 RFC。
+简单 bugfix、局部清理、一次性实验和不影响公共契约的小补丁不需要 RFC。它们可以只写普通 devlog、register 条目、小迭代记录，或不写正式文档。小迭代记录可以在单页内写清局部问题、解决方案和本迭代内部 tracking issues；除严格的单一原子 contract cutover 外，如果这些内容开始需要仓库级 accepted target、不变量、阶段 gate 或多轮 review，再升级为 RFC。
 
 ## 生命周期
 

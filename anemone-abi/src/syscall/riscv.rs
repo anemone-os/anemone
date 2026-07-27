@@ -50,6 +50,9 @@ pub unsafe fn syscall(
 /// reference.
 pub mod linux {
     pub const SYS_EVENTFD2: u64 = 19;
+    pub const SYS_EPOLL_CREATE1: u64 = 20;
+    pub const SYS_EPOLL_CTL: u64 = 21;
+    pub const SYS_EPOLL_PWAIT: u64 = 22;
 
     pub const SYS_GETCWD: u64 = 17;
 
@@ -251,6 +254,7 @@ pub mod linux {
     pub const SYS_CLOSE_RANGE: u64 = 436;
 
     pub const SYS_FACCESSAT2: u64 = 439;
+    pub const SYS_EPOLL_PWAIT2: u64 = 441;
 }
 
 pub use linux::*;

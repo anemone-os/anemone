@@ -53,6 +53,7 @@ pub enum TemporaryMaskWaitContext {
     RtSigsuspend,
     Ppoll,
     Pselect6,
+    EpollPwait,
 }
 
 impl TemporaryMaskWaitContext {
@@ -61,6 +62,7 @@ impl TemporaryMaskWaitContext {
             Self::RtSigsuspend => "rt_sigsuspend",
             Self::Ppoll => "ppoll",
             Self::Pselect6 => "pselect6",
+            Self::EpollPwait => "epoll_pwait",
         }
     }
 }
