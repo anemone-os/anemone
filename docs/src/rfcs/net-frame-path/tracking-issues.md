@@ -1,12 +1,15 @@
 # Network Frame Path Tracking Issues
 
-**状态：** Active RFC / 当前无开放 Apollyon、Keter 或 Euclid
+**状态：** Closed / 当前无开放 Apollyon、Keter 或 Euclid
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 
 本文只跟踪会影响 implementation readiness、owner boundary、停止条件或最终验收的 design / feasibility
 问题。普通类型选择、stage TODO、case inventory 和未运行证据不进入本页。
+
+R1、Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；final review为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe。
+以下neutralized项保留原问题、依据与重新打开条件，不成为current contract或进度账本。
 
 ## Apollyon
 
@@ -97,10 +100,11 @@ attach owner 先关闭 pump/timer/wake/frame acquisition 的跨层顺序；把�
 反转依赖方向。
 
 System Power R0 已由 `power` 唯一拥有 terminal episode，并把 orderly participant 固定为源码显式、
-编译期静态 plan；emergency 则跳过全部 ordinary callback。当前 effective plan 仍是
-`filesystem -> device`，因此 NFP 将 `SYSTEM-POWER-ORDERLY-001` Refine 为在 `device` 前调用唯一 network
-owner facade。global order 属于 `power`，network-local admission/cancel/drain attempt 属于 attach
-authority，driver 继续只拥有 IRQ/queue/DMA/device-local shutdown。
+编译期静态 plan；emergency 则跳过全部 ordinary callback。R1 acceptance 时的 effective plan 仍是
+`filesystem -> device`，因此 NFP target 将 `SYSTEM-POWER-ORDERLY-001` Refine 为在 `device` 前调用唯一
+network owner facade；该 Refine 现已由 `NFP-FINAL-CUTOVER` 生效。global order 属于 `power`，
+network-local admission/cancel/drain attempt 属于 attach authority，driver 继续只拥有
+IRQ/queue/DMA/device-local shutdown。
 
 shutdown 不是本 RFC 的重点。第一版只要求复用既有 owner/token/worker 关系做一次有限、可观测的
 best-effort cleanup：关闭或抑制新工作，尝试取消/排空已进入访问；不为提高 cleanup 完整性重塑对象

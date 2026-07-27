@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use anemone_net_api::EthernetAddress;
 use virtio_drivers::{Error as VirtIOError, device::net::VirtIONetRaw, transport::SomeTransport};
@@ -6,164 +6,11 @@ use virtio_drivers::{Error as VirtIOError, device::net::VirtIONetRaw, transport:
 use crate::{device::net::RecheckWake, driver::virtio::VirtIOHalImpl, prelude::*};
 
 use super::{
-    HEADER_RESERVE, QUEUE_SIZE, RX_SLOT_COUNT, TX_SLOT_COUNT,
+    HEADER_RESERVE, QUEUE_SIZE,
     frame::{RxOwnership, RxSlot, TxOwnership, TxSlot},
 };
 
 type RawNet = VirtIONetRaw<VirtIOHalImpl, SomeTransport<'static>, QUEUE_SIZE>;
-
-/// Diagnostic-only provider counters. They never drive queue or worker state.
-#[cfg(feature = "kunit")]
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct VirtIONetStats {
-    rx_completions: usize,
-    tx_submissions: usize,
-    tx_completions: usize,
-    irq_rechecks: usize,
-    queue_full: usize,
-    tx_outstanding: usize,
-    tx_outstanding_high_water: usize,
-    last_exhaustion_submissions: usize,
-    live_mappings: usize,
-    mapping_high_water: usize,
-}
-
-#[cfg(feature = "kunit")]
-impl VirtIONetStats {
-    pub(crate) const fn rx_completions(self) -> usize {
-        self.rx_completions
-    }
-    pub(crate) const fn tx_submissions(self) -> usize {
-        self.tx_submissions
-    }
-    pub(crate) const fn tx_completions(self) -> usize {
-        self.tx_completions
-    }
-    pub(crate) const fn irq_rechecks(self) -> usize {
-        self.irq_rechecks
-    }
-    pub(crate) const fn queue_full(self) -> usize {
-        self.queue_full
-    }
-    pub(crate) const fn tx_outstanding(self) -> usize {
-        self.tx_outstanding
-    }
-    pub(crate) const fn tx_outstanding_high_water(self) -> usize {
-        self.tx_outstanding_high_water
-    }
-    pub(crate) const fn last_exhaustion_submissions(self) -> Option<usize> {
-        if self.last_exhaustion_submissions == usize::MAX {
-            None
-        } else {
-            Some(self.last_exhaustion_submissions)
-        }
-    }
-    pub(crate) const fn live_mappings(self) -> usize {
-        self.live_mappings
-    }
-    pub(crate) const fn mapping_high_water(self) -> usize {
-        self.mapping_high_water
-    }
-}
-
-/// Diagnostic-only mirrors of provider-owner transitions.
-///
-/// Relaxed snapshots may be stale or cross-field inconsistent. Neither these
-/// counters nor their invariant assertions select queue, provider, or worker
-/// behavior; the assertions only expose bugs in the owning transitions.
-pub(super) struct VirtIONetDiagnostics {
-    pub(super) rx_completions: AtomicUsize,
-    pub(super) tx_submissions: AtomicUsize,
-    pub(super) tx_completions: AtomicUsize,
-    pub(super) irq_rechecks: AtomicUsize,
-    pub(super) queue_full: AtomicUsize,
-    tx_outstanding: AtomicUsize,
-    #[cfg(feature = "kunit")]
-    tx_outstanding_high_water: AtomicUsize,
-    #[cfg(feature = "kunit")]
-    last_exhaustion_submissions: AtomicUsize,
-    live_mappings: AtomicUsize,
-    mapping_high_water: AtomicUsize,
-}
-
-impl VirtIONetDiagnostics {
-    const fn new() -> Self {
-        Self {
-            rx_completions: AtomicUsize::new(0),
-            tx_submissions: AtomicUsize::new(0),
-            tx_completions: AtomicUsize::new(0),
-            irq_rechecks: AtomicUsize::new(0),
-            queue_full: AtomicUsize::new(0),
-            tx_outstanding: AtomicUsize::new(0),
-            #[cfg(feature = "kunit")]
-            tx_outstanding_high_water: AtomicUsize::new(0),
-            #[cfg(feature = "kunit")]
-            last_exhaustion_submissions: AtomicUsize::new(usize::MAX),
-            live_mappings: AtomicUsize::new(0),
-            mapping_high_water: AtomicUsize::new(0),
-        }
-    }
-
-    pub(super) fn mapping_opened(&self) {
-        let live = self.live_mappings.fetch_add(1, Ordering::Relaxed) + 1;
-        assert!(
-            live <= RX_SLOT_COUNT + TX_SLOT_COUNT,
-            "VirtIO-Net live mappings exceeded slot capacity"
-        );
-        self.mapping_high_water.fetch_max(live, Ordering::Relaxed);
-    }
-
-    pub(super) fn mapping_closed(&self) {
-        let previous = self.live_mappings.fetch_sub(1, Ordering::Relaxed);
-        assert!(previous > 0, "VirtIO-Net mapping counter underflow");
-    }
-
-    pub(super) fn tx_submitted(&self) {
-        self.tx_submissions.fetch_add(1, Ordering::Relaxed);
-        let outstanding = self.tx_outstanding.fetch_add(1, Ordering::Relaxed) + 1;
-        assert!(
-            outstanding <= TX_SLOT_COUNT,
-            "VirtIO-Net TX outstanding exceeded slot capacity"
-        );
-        #[cfg(feature = "kunit")]
-        {
-            self.tx_outstanding_high_water
-                .fetch_max(outstanding, Ordering::Relaxed);
-        }
-    }
-
-    pub(super) fn tx_completed(&self) {
-        self.tx_completions.fetch_add(1, Ordering::Relaxed);
-        let previous = self.tx_outstanding.fetch_sub(1, Ordering::Relaxed);
-        assert!(previous > 0, "VirtIO-Net TX outstanding counter underflow");
-    }
-
-    pub(super) fn normal_exhaustion(&self) {
-        #[cfg(feature = "kunit")]
-        {
-            let submissions = self.tx_submissions.load(Ordering::Relaxed);
-            self.last_exhaustion_submissions
-                .store(submissions, Ordering::Relaxed);
-        }
-        self.queue_full.fetch_add(1, Ordering::Relaxed);
-    }
-
-    #[cfg(feature = "kunit")]
-    fn snapshot(&self) -> VirtIONetStats {
-        VirtIONetStats {
-            rx_completions: self.rx_completions.load(Ordering::Relaxed),
-            tx_submissions: self.tx_submissions.load(Ordering::Relaxed),
-            tx_completions: self.tx_completions.load(Ordering::Relaxed),
-            irq_rechecks: self.irq_rechecks.load(Ordering::Relaxed),
-            queue_full: self.queue_full.load(Ordering::Relaxed),
-            tx_outstanding: self.tx_outstanding.load(Ordering::Relaxed),
-            tx_outstanding_high_water: self.tx_outstanding_high_water.load(Ordering::Relaxed),
-            last_exhaustion_submissions: self.last_exhaustion_submissions.load(Ordering::Relaxed),
-            live_mappings: self.live_mappings.load(Ordering::Relaxed),
-            mapping_high_water: self.mapping_high_water.load(Ordering::Relaxed),
-        }
-    }
-}
 
 /// Driver-private durable recheck predicate with an optional stateless wake.
 ///
@@ -214,8 +61,6 @@ pub(super) struct VirtIONetDevice {
     pub(super) raw: SpinLock<RawNet>,
     /// Owner-local predicate plus edge-only wake. Queue truth stays in RawNet.
     recheck: RecheckLatch,
-    /// Diagnostic-only mirrors of owner transitions; never behavior inputs.
-    pub(super) diagnostics: VirtIONetDiagnostics,
 }
 
 impl VirtIONetDevice {
@@ -228,7 +73,6 @@ impl VirtIONetDevice {
             Arc::new(Self {
                 raw: SpinLock::new(raw),
                 recheck: RecheckLatch::new(),
-                diagnostics: VirtIONetDiagnostics::new(),
             }),
             mac,
         ))
@@ -246,7 +90,6 @@ impl VirtIONetDevice {
         // was committed, so the provider retains CPU ownership.
         let queue_token = unsafe { raw.receive_begin(&mut slot.backing)? };
         slot.ownership = RxOwnership::Device { queue_token };
-        self.diagnostics.mapping_opened();
         Ok(())
     }
 
@@ -268,16 +111,11 @@ impl VirtIONetDevice {
             queue_token,
             total_len,
         };
-        self.diagnostics.tx_submitted();
-        self.diagnostics.mapping_opened();
         Ok(())
     }
 
     pub(super) fn handle_irq(&self) {
         if !self.raw.lock_irqsave().ack_interrupt().is_empty() {
-            self.diagnostics
-                .irq_rechecks
-                .fetch_add(1, Ordering::Relaxed);
             self.recheck.publish();
         }
     }
@@ -299,10 +137,6 @@ impl VirtIONetDevice {
     }
     pub(super) fn disable_interrupts(&self) {
         self.raw.lock_irqsave().disable_interrupts();
-    }
-    #[cfg(feature = "kunit")]
-    pub(super) fn stats(&self) -> VirtIONetStats {
-        self.diagnostics.snapshot()
     }
 }
 

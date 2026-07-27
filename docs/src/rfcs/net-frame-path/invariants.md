@@ -1,14 +1,14 @@
 # Network Frame Path 目标与不变量
 
-**状态：** Accepted Target / Not Effective
+**状态：** R1 / Closed / Effective via `NFP-FINAL-CUTOVER`
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **适用修订：** `R1`
 
-本文定义 `net-frame-path` proposed contract delta、尚未 cutover 的 target invariants，以及只服务
-本 RFC 验收的 proof obligations。当前没有 network frame-path effective contract；本文也不是
-current contract。六个 proposed network stable IDs 在 `NFP-FINAL-CUTOVER` 前均为 Not Effective；
-`SYSTEM-POWER-ORDERLY-001` 的现行规则保持 Active，直至同一 gate 完成 proposed Refine。
+本文保留`net-frame-path` R1的accepted contract delta、target invariants与RFC-local proof obligations。
+`NFP-FINAL-CUTOVER`已经完成；当前共享规则以[Network current contracts](../../contracts/net/index.md)与
+[System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)为唯一权威，本页不成为并列
+current contract。
 
 ## 规则分类
 
@@ -23,18 +23,17 @@ current contract。六个 proposed network stable IDs 在 `NFP-FINAL-CUTOVER` �
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
-| `SYSTEM-POWER-ORDERLY-001` | Refine | [Active：`filesystem -> device` 静态 plan](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) | 在 `device` 前显式调用 network owner 的有限 best-effort cleanup facade；保持 single episode、静态 plan 与 fail-forward | `NFP-FINAL-CUTOVER` |
-| `NET-BOUNDARY-001` | Introduce | None（尚未生效） | 固定 frame slice 的依赖方向、共享语义与 object fence | `NFP-FINAL-CUTOVER` |
-| `NETDEV-LIFE-001` | Introduce | None（尚未生效） | 固定 boot-time netdev identity、publication、link facts 与 lifecycle owner | `NFP-FINAL-CUTOVER` |
-| `NET-FRAME-OWN-001` | Introduce | None（尚未生效） | 固定 RX/TX backing 的独占 ownership、consume scope 与 completion handoff | `NFP-FINAL-CUTOVER` |
-| `NET-FRAME-PROGRESS-001` | Introduce | None（尚未生效） | 固定有界资源、normal backpressure、recheck 与跨方向进展边界 | `NFP-FINAL-CUTOVER` |
-| `NET-STACK-PUMP-001` | Introduce | None（尚未生效） | 固定 stack instance 的唯一逻辑推进 owner、显式时间与 bounded pump | `NFP-FINAL-CUTOVER` |
-| `NET-ATTACH-001` | Introduce | None（尚未生效） | 固定 netdev attach publication、rollback 与 best-effort shutdown cleanup handoff | `NFP-FINAL-CUTOVER` |
+| `SYSTEM-POWER-ORDERLY-001` | Refine | [Active：`filesystem -> network -> device`静态plan](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) | 在`device`前显式调用network owner的有限best-effort cleanup facade；保持single episode、静态plan与fail-forward | `NFP-FINAL-CUTOVER`（Effective） |
+| `NET-BOUNDARY-001` | Introduce | [Active](../../contracts/net/frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence) | 固定frame slice的依赖方向、共享语义与object fence | `NFP-FINAL-CUTOVER`（Effective） |
+| `NETDEV-LIFE-001` | Introduce | [Active](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction) | 固定boot-time netdev identity、publication、link facts与lifecycle owner | `NFP-FINAL-CUTOVER`（Effective） |
+| `NET-FRAME-OWN-001` | Introduce | [Active](../../contracts/net/frame-path.md#net-frame-own-001--frame-backing只有一个访问owner) | 固定RX/TX backing的独占ownership、consume scope与completion handoff | `NFP-FINAL-CUTOVER`（Effective） |
+| `NET-FRAME-PROGRESS-001` | Introduce | [Active](../../contracts/net/frame-path.md#net-frame-progress-001--有界资源normal-backpressure与durable-recheck) | 固定有界resource、normal backpressure、recheck与跨方向进展边界 | `NFP-FINAL-CUTOVER`（Effective） |
+| `NET-STACK-PUMP-001` | Introduce | [Active](../../contracts/net/frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state) | 固定stack instance唯一逻辑推进owner、显式时间与bounded pump | `NFP-FINAL-CUTOVER`（Effective） |
+| `NET-ATTACH-001` | Introduce | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | 固定netdev attach publication、rollback与best-effort shutdown cleanup handoff | `NFP-FINAL-CUTOVER`（Effective） |
 
-六个 network 规则此前没有 live production implementation 或 effective contract baseline，因此使用
-`Introduce`。System Power 已有 current contract，本 RFC 只 Refine 其显式 orderly participant plan；
-在 `NFP-FINAL-CUTOVER` 前，当前 `filesystem -> device` 规则继续有效。本轮不提前创建 network current
-contract；cutover 时才按 owner/surface 建立最小 `docs/src/contracts/net/` 闭包并更新 power contract。
+六个network规则在R1 acceptance时没有effective baseline，因此delta仍记为`Introduce`；它们现已Active。
+System Power已有current contract，本RFC只Refine显式orderly participant plan；episode、fail-forward、
+emergency与machine semantics保持不变。
 
 ## Target Invariants
 

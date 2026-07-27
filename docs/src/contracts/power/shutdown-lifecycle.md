@@ -3,13 +3,13 @@
 **Contract ID：** `SYSTEM-POWER`
 **状态：** Active
 **Owner：** `power` terminal episode、跨 subsystem shutdown sequencing 与 machine-handler registry
-**参与领域：** power / panic / filesystem / device / storage drivers / architecture bootstrap
+**参与领域：** power / panic / filesystem / network / device / storage drivers / architecture bootstrap
 **覆盖范围：** 当前 orderly power-off/reboot、panic/emergency handoff、最终 machine-action attempt
 **不覆盖：** strong durability、userspace lifecycle、driver-local flush/quiesce 完整性或 firmware ABI
-**实现位置：** `anemone-kernel/src/{power.rs,panic.rs,fs/mod.rs,fs/superblock.rs,device/mod.rs,arch/riscv64/bootstrap.rs}`
+**实现位置：** `anemone-kernel/src/{power.rs,panic.rs,fs/mod.rs,fs/superblock.rs,net,device/mod.rs,arch/riscv64/bootstrap.rs}`
 **依赖：** filesystem/device/driver owner-local lifecycle 与 best-effort `StopExecution` transport
 **Pending Successor：** None
-**最后核验：** 2026-07-26
+**最后核验：** 2026-07-27
 
 本页是 System Power R0 cutover 后的 current authority。`power` 只拥有全局 terminal episode、静态
 subsystem handoff 和最终 machine capability 选择；filesystem resident cache、device tree、driver
@@ -22,6 +22,7 @@ queue/hardware 与 task/mm 状态继续由各自 owner 独占。
 | terminal episode / executor / frozen intent / phase | `power` | subsystem facade invocation | first-winner 仲裁与单向 terminal progression |
 | panic diagnostics 与 stop broadcast | panic owner | `power` emergency publication 和 machine-action capability | 诊断后跳过 ordinary plan |
 | resident inode snapshot / filesystem commit | VFS 与 concrete filesystem | `power` 的单次 facade invocation | best-effort writeback 后 commit |
+| network attach admission / worker stop与unsafe-resource retention | [network attach authority](../net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | `power` 的单次 facade invocation | device shutdown前关闭新pump并请求non-waiting stop |
 | device tree / driver-local flush 与 shutdown | device subsystem 与 concrete driver | `power` 的单次 facade invocation | child-before-parent traversal |
 | power-off / reboot handler lists | `power` | platform/driver 注册的 boxed capability | 按 frozen intent 尝试 machine action |
 | userspace task / mapping lifecycle | task/mm owner | system-power 不取得 capability | 不属于 shutdown episode |
@@ -57,27 +58,33 @@ release build 与全入口 source audit覆盖同一 production type，无 global
 
 **规则：** `power_off()` 与 `reboot()` 只提供 intent，并进入同一个 orderly executor。publication 后、
 第一个 callback 前，winner 发起一次 best-effort `IpiPayload::StopExecution` broadcast；发送失败记录后
-继续。全局 participant 是 `power` 中源码固定的 `filesystem -> device` function array，machine action
-是数组后的终止点。callback 返回后无条件进入下一 step；没有 retry、rollback、timeout 或替代 executor。
+继续。全局 participant 是 `power` 中源码固定的 `filesystem -> network -> device` function array，machine
+action是数组后的终止点。callback 返回后无条件进入下一 step；没有 retry、rollback、timeout 或替代 executor。
 
 filesystem owner 一次 snapshot anonymous + visible mount tree 的 superblock，并按 `Arc` identity 跨树
 去重。每个 superblock 一次 snapshot `indexed + ghosts` resident inode，释放 cache lock 后逐项调用
 `sync_inode`；单项失败记录并继续，随后仍调用该 filesystem 的 `sync_fs`。snapshot 后新 load/redirty
-不追赶。device owner继续独占 child-before-parent traversal；storage flush 只由 concrete driver 在自己的
-callback 中承担，`power` 不遍历 filesystem cache、block backend 或 device tree。
+不追赶。network step只调用[`NET-ATTACH-001`](../net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown)
+的唯一facade：attach authority关闭admission并发出non-waiting worker stop，不等待join或取得driver queue
+truth；无法证明安全的provider/backing可保留到reset/power-off。device owner继续独占child-before-parent
+traversal；storage flush只由concrete driver在自己的callback中承担，`power`不遍历filesystem cache、network
+path、block backend或device tree。
 
-**违反表现：** runtime registry/priority 隐藏全局 participant；device 在 filesystem attempt 前关闭；
+**违反表现：** runtime registry/priority隐藏全局participant；network step缺失、位于filesystem前或device后；
+network facade反向取得global episode/device queue truth；device在filesystem/network attempt前关闭；
 单项失败跳过后续 step/machine action；持 inode-cache lock 调 backend；重复 snapshot 追赶 dirty set。
 
-**验证 / Enforcement：** source audit确认静态 literal、无条件循环推进、跨树去重和 lock-before-callback
-释放。RV64 orderly 两次启动在 open fd、无 `fsync` 条件下观察 `filesystem -> device -> PowerOff machine`
-顺序，第二次复用同一磁盘读回 marker；该证据只覆盖一次 ext4/VirtIO best-effort attempt，不是 strong
-durability。RV64/LA64 release build 均通过。
+**验证 / Enforcement：** source audit确认静态literal、无条件循环推进、跨树去重、lock-before-callback
+释放与network facade的owner方向。Network Frame Path Stage 3 Checkpoint 2以真实traffic观察network summary
+位于device shutdown前；Checkpoint 3删除validation seam后的final exact-code RV64 boot再次观察
+`filesystem -> network -> device -> PowerOff machine`并正常退出。System Power R0的open-fd/磁盘marker证据
+继续只证明一次ext4/VirtIO best-effort attempt，不是strong durability；LA64未运行本次Refine。
 
 **最初来源：** R0 前的直接 `filesystem -> device -> machine` baseline。
 
-**当前来源：** [System Power RFC R0](../../rfcs/system-power/index.md) 与
-[cutover transaction](../../devlog/transactions/2026-07-26-system-power.md)。
+**当前来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md) 与
+[`NFP-FINAL-CUTOVER` transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)；episode、fail-forward
+与machine boundary仍来自[System Power R0 transaction](../../devlog/transactions/2026-07-26-system-power.md)。
 
 ## SYSTEM-POWER-EMERGENCY-001
 
@@ -88,11 +95,11 @@ orderly executor panic 时原地切换并保留已冻结 intent。winner 屏蔽�
 `StopExecution`、打印 panic/backtrace，然后直接调用与 orderly 相同的 machine-action helper。
 allocation/send 失败只记录，不能主动跳过 machine-action attempt。
 
-emergency 不调用 `power_off()` / `reboot()` ordinary entry，不运行 filesystem/device callback，不等待
+emergency 不调用 `power_off()` / `reboot()` ordinary entry，不运行 filesystem/network/device callback，不等待
 worker，也不触发 reclaim/eviction。recursive emergency、非 executor panic 或 machine handler panic
 直接进入最小本地 halt；当前有锁 handler registry 不承诺 panic-safe progress。
 
-**违反表现：** panic 复用 ordinary shutdown；emergency 取得 filesystem/device 普通 lifecycle 能力；
+**违反表现：** panic 复用 ordinary shutdown；emergency 取得 filesystem/network/device 普通 lifecycle 能力；
 IPI send 失败直接放弃 machine attempt；另建绕过共享列表的 architecture emergency 通道。
 
 **验证 / Enforcement：** RV64 validation-only boot panic 显示 panic diagnostics 后直接出现共享

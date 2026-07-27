@@ -6,9 +6,6 @@
 
 ## Active
 
-- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 2已关闭；Stage 3 Checkpoint 1-2已依次闭合
-  multi-instance/attach conformance与shutdown handoff traffic/order slice，Stage 3保持Active。Checkpoint 3已授权但
-  尚未激活，全部network contract仍Not Effective。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
@@ -27,6 +24,9 @@
 
 ## Completed
 
+- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；
+  validation seam退出后的final RV64 exact-code boot通过260/260 remaining KUnit、active attach与严格
+  `filesystem -> network -> device -> PowerOff`。六个network ID及Power Refine均已原子Effective。
 - [System Power](./2026-07-26-system-power.md)：唯一 stage 已完成 terminal episode、orderly/emergency
   分路、resident inode best-effort writeback 与共享 machine fallback；四个 contract ID 已原子 cutover。
   RV64 power-off 有两条 QEMU evidence；RV64 reboot runtime、LA64 machine capability 与 hardware未运行。

@@ -1,5 +1,3 @@
-use core::sync::atomic::Ordering;
-
 use anemone_net_api::{
     EthernetAddress, FrameCapabilities, FrameProvider, FrameSizeError, Instant, LinkState,
     ReceiveOutcome, RxToken, TransmitOutcome, TxToken,
@@ -151,11 +149,6 @@ impl VirtIONetProvider {
             raw.receive_complete(queue_token, &mut slot.backing)
                 .unwrap_or_else(|error| panic!("VirtIO-Net RX completion failed: {error}"))
         };
-        self.device.diagnostics.mapping_closed();
-        self.device
-            .diagnostics
-            .rx_completions
-            .fetch_add(1, Ordering::Relaxed);
         assert!(
             frame_offset
                 .checked_add(len)
@@ -196,8 +189,6 @@ impl VirtIONetProvider {
                 raw.transmit_complete(queue_token, &slot.backing[..total_len])
                     .unwrap_or_else(|error| panic!("VirtIO-Net TX completion failed: {error}"));
             }
-            self.device.diagnostics.mapping_closed();
-            self.device.diagnostics.tx_completed();
             slot.ownership = TxOwnership::Available;
         }
     }
@@ -297,12 +288,10 @@ impl FrameProvider for VirtIONetProvider {
             return ReceiveOutcome::Empty;
         };
         if !self.device.raw.lock_irqsave().can_send() {
-            self.device.diagnostics.normal_exhaustion();
             self.rx_slots[rx_index].cancel_reservation();
             return ReceiveOutcome::TransmitExhausted;
         }
         let Some(tx_index) = self.tx_slots.iter_mut().position(TxSlot::reserve) else {
-            self.device.diagnostics.normal_exhaustion();
             self.rx_slots[rx_index].cancel_reservation();
             return ReceiveOutcome::TransmitExhausted;
         };
@@ -323,11 +312,9 @@ impl FrameProvider for VirtIONetProvider {
     fn transmit(&mut self, _now: Instant) -> TransmitOutcome<Self::TxToken<'_>> {
         self.harvest_tx();
         if !self.device.raw.lock_irqsave().can_send() {
-            self.device.diagnostics.normal_exhaustion();
             return TransmitOutcome::Exhausted;
         }
         let Some(index) = self.tx_slots.iter_mut().position(TxSlot::reserve) else {
-            self.device.diagnostics.normal_exhaustion();
             return TransmitOutcome::Exhausted;
         };
         TransmitOutcome::Ready(VirtIOTxToken {

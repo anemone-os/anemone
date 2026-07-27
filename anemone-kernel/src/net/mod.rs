@@ -1,12 +1,6 @@
 //! Kernel-side network attach authority.
 
-use core::ops::Deref;
-
-#[cfg(all(feature = "kunit", target_arch = "riscv64"))]
-mod validation;
 mod worker;
-
-use anemone_net_api::InterfaceId;
 
 use crate::{device::net::NetdevSnapshot, driver::net::take_published_netdevs, prelude::*};
 
@@ -14,9 +8,6 @@ use worker::{AttachFailure, PumpControl};
 
 struct ActivePath {
     snapshot: NetdevSnapshot,
-    /// Diagnostic-only projection of the stack-owned mapping identity. It does
-    /// not authorize protocol access or drive attach/worker decisions.
-    interface: InterfaceId,
     control: Arc<PumpControl>,
 }
 
@@ -33,17 +24,6 @@ impl AttachAuthority {
             active_paths: Vec::new(),
             shutdown_started: false,
         }
-    }
-}
-
-// The validation-only Stage 2 probe reads the active slice while holding this
-// owner lock. Deref does not expose the shutdown admission fact or permit a
-// second publication route.
-impl Deref for AttachAuthority {
-    type Target = [ActivePath];
-
-    fn deref(&self) -> &Self::Target {
-        &self.active_paths
     }
 }
 
@@ -73,7 +53,6 @@ fn attach_published_netdevs() {
                 }
                 authority.active_paths.push(ActivePath {
                     snapshot: snapshot.clone(),
-                    interface,
                     control: prepared.control(),
                 });
                 // Readers cannot observe the registry entry until its worker

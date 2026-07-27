@@ -7,8 +7,6 @@ use smoltcp::{
 };
 
 use crate::adapter::FrameDevice;
-#[cfg(feature = "icmp-validation-probe")]
-use crate::validation::IcmpEchoProbe;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PumpError {
@@ -41,8 +39,6 @@ pub(crate) struct InterfaceEntry {
     // It is not queue, link, resource, or deadline truth and never bypasses
     // either direction's finite PumpBudget.
     pub(crate) next_pump_order: PumpOrder,
-    #[cfg(feature = "icmp-validation-probe")]
-    pub(crate) validation_probe: Option<IcmpEchoProbe>,
 }
 
 /// Owns the private smoltcp interface resources and their opaque ID mapping.
@@ -92,8 +88,6 @@ impl Stack {
             interface,
             sockets: SocketSet::new(Vec::new()),
             next_pump_order: PumpOrder::IngressFirst,
-            #[cfg(feature = "icmp-validation-probe")]
-            validation_probe: None,
         });
         id
     }

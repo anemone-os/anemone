@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Closed / Stage 3 Checkpoint 1-2 Closed / Checkpoint 3 Authorized, Not Activated
+**Status:** Completed / R1 Stage 1-3 Closed / `NFP-FINAL-CUTOVER` Effective
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
@@ -8,8 +8,8 @@
 [Stage 3 Ready definition](../../rfcs/net-frame-path/implementation.md#9-stage-3-readymulti-instancelifecycle-与最终-cutover)
 **Canonical Revision:** R1
 **Contract Impact:** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
-`NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001` proposed Introduce；
-`SYSTEM-POWER-ORDERLY-001` proposed Refine；全部只在 `NFP-FINAL-CUTOVER` 原子生效
+`NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001` Introduce与
+`SYSTEM-POWER-ORDERLY-001` Refine均已由`NFP-FINAL-CUTOVER`原子Effective
 
 ## Scope and authorization
 
@@ -928,3 +928,63 @@ action/max-round/request/yield 2/7/0/0。随后日志严格记录
 **Authorized / Not Activated**，必须在本checkpoint独立commit后再激活。六个network IDs与Power Refine继续
 **Not Effective**，Stage 2 validation seam仍完整保留。`smp>1`、LA64、virtio-pci、hardware、final harness、
 完整LTP、runtime hotplug/detach/restart、完整teardown与socket/control-plane均Not Run。
+
+### 2026-07-27 - R1 Stage 3 Checkpoint 3 activated
+
+**Authorization / entry:** 当前唯一GOAL已显式授权Checkpoint 3；入口为Checkpoint 2独立closure commit
+`dev/drc/alpha@19b6e847`，tracked与untracked worktree均clean。Preflight重新读取AGENTS/LOCAL、R1正文/
+invariants/Stage 3 Ready、tracking、register、System Power current contract、transaction与live stack/worker/
+VirtIO validation seam。Checkpoint 2的traffic/order evidence已闭合，Checkpoint 3只允许删除9.5列出的production
+probe/diagnostic/single-NIC seam，保持host conformance、ordinary frame/pump/recheck/shutdown语义不变。
+
+**Activation-time contract state:** 六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective。
+只有seam删除后的host/base-no-default/formatter/RV64 build与fresh-disk final boot全部通过，且source/review确认
+没有validation bypass或ordinary-behavior变化后，才允许原子执行`NFP-FINAL-CUTOVER`；任一final evidence失败
+立即停止且不更新current contracts。
+
+### 2026-07-27 - R1 Stage 3 Checkpoint 3 implementation, review, cutover and closure
+
+**Validation exit / behavior preservation:** 删除kernel到stack的`icmp-validation-probe` forwarding与feature、
+stack `validation.rs`和probe field/method、kernel `net/validation.rs`、worker request/event/action mirrors、
+VirtIO diagnostic counters/snapshot及single-NIC query/re-export。`kunit`现在为空feature；`host-test`、正式
+deterministic provider、host frame/multi-instance tests与base `socket-raw` compile anchor保留。最终diff/source
+audit确认ordinary frame outcomes、slot/token matching assertions、unsafe begin/complete、driver-private recheck
+latch、worker budget/deadline/stop、terminal retention与power route均未改变；non-host build没有ICMP/raw endpoint
+construction、packet injection、single-NIC truth或diagnostics-driven behavior。
+
+**Host / build validation:** `cargo test -p anemone-net-api -p anemone-smoltcp-stack`通过：2个stack unit、
+7个bounded-progress、9个frame-path、2个multi-instance与2个compile-fail doctest；
+`cargo check -p anemone-smoltcp-stack --no-default-features`通过。`just fmt kernel --check`对所有changed Rust
+files无diff，只报告Stage 1以来相同的3处vendored smoltcp baseline。canonical
+`just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`在sandbox内复现既有lwext4
+`SIGSYS / Bad system call`，沙箱外同一仓库命令通过；final wrapper又以exact source完成同一release build。
+
+**Final fresh-disk RV64 exact-code boot:** 运行
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage3-final-rv64.log`；wrapper
+重建tracked pretest rootfs并从4 GiB只读master覆盖worktree-local runtime disk，以`smp=1`、`memory=1G`启动。
+删除Stage 2 probe后全部260/260 remaining KUnit通过，`eth0 / ifindex 1 / InterfaceId(0)`完成publication与active
+attach；日志无packet probe summary，随后严格记录
+`filesystem -> network summary(admission closed, stop requested, retained) -> device -> PowerOff`并正常退出。
+随行`sys` profile glibc/musl合计4/4只作环境回归，不作为network proof或完整LTP。本轮不宣称packet traffic；
+Checkpoint 2紧邻源码的128/128 reply、129/129 TX completion、IRQ与mapping/outstanding回落证据，加上本checkpoint
+只删除validation的diff/source audit，共同证明production frame path没有被test bypass替代。
+
+**Final review:** dependency/public-surface、multi-instance/failure、publication/attach、slot/token/unsafe/Weak、
+IRQ/wake/timer/worker、shutdown retention、power/emergency、validation-bypass与resolved-manifest逐项复核，结论为
+Apollyon 0、Keter 0、Euclid 0、Safe 0。没有改变R1 target、owner、shared API、ABI/visible semantics、platform
+scope或acceptance；没有修改vendored dependency、generic runtime API、KernelConfig/xtask/Justfile、wrapper、
+apps/rootfs/LTP、register/current limitations或manifest外tracked source。
+
+**`NFP-FINAL-CUTOVER`:** 全部pre-cutover evidence通过后，同一checkpoint原子创建
+`contracts/net/{frame-path,netdev-lifecycle,attach-lifecycle}`三个surface与owner index，使
+`NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、`NET-FRAME-PROGRESS-001`、
+`NET-STACK-PUMP-001`、`NET-ATTACH-001`全部Active；同时把`SYSTEM-POWER-ORDERLY-001`从
+`filesystem -> device` Refine为`filesystem -> network -> device`，episode、fail-forward、emergency与machine
+contract保持不变。没有partial/Transitional状态；current contract、RFC、tracking、transaction、双周devlog与
+导航同步更新。
+
+**Closure / Not Run:** Stage 3 Checkpoint 3、Stage 3、R1 RFC与本transaction均Closed/Completed，所有临时
+production validation seam已退出，`NFP-PROOF-001`到`005`可由host、Checkpoint 1/2、final exact-code boot与
+source audit逐项定位。`smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、runtime
+hotplug/detach/restart、完整teardown与socket/control-plane均Not Run或非目标；RV64/single-core与随行`sys`
+profile不外推到这些范围。本事务在Checkpoint 3独立commit后停止，不进入`net-udp`、`net-tcp`或其它gate。

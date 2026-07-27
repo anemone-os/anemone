@@ -1,12 +1,11 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Closed / Checkpoint 1-3 Closed；Stage 3 Active / Checkpoint 1-2 Closed / Checkpoint 3 Authorized, Not Activated
+**状态：** R1 Closed / Stage 1-3 Closed / `NFP-FINAL-CUTOVER` Effective
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
-**当前契约：**
-[`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)；
-六个 proposed network IDs 尚未生效
+**当前契约：** [Network current contracts](../../contracts/net/index.md)中的六个ID与
+[`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) Refine均Active
 **当前修订：** `R1`
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 **平台验收范围：** RV64 QEMU virtio-mmio；LA64 / virtio-pci 不属于本修订的 build、runtime 或
@@ -146,7 +145,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | R1 Closed / Checkpoint 1-3 Closed | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
-| Stage 3 — Multi-instance/lifecycle closure | Active / Checkpoint 1-2 Closed / Checkpoint 3 Authorized, Not Activated | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
+| Stage 3 — Multi-instance/lifecycle closure | Closed / Checkpoint 1-3 Closed | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
@@ -896,8 +895,7 @@ apps/rootfs/LTP、register/current limitations与current contracts。若测试�
 
 ## 9. Stage 3 Ready：Multi-instance、lifecycle 与最终 cutover
 
-**状态：** Active / Checkpoint 1-2 Closed（2026-07-27）/ Checkpoint 3 Authorized / Not Activated。本文完整
-解析Stage 3；Checkpoint 2 closure不提前执行validation seam退出、contract cutover或RFC closure。
+**状态：** Closed / Checkpoint 1-3 Closed（2026-07-27）/ `NFP-FINAL-CUTOVER` Effective。
 
 ### 9.1 Resolution preflight 与 live gap
 
@@ -1074,7 +1072,8 @@ manifest扩张或contract cutover。Checkpoint 2关闭后先形成独立commit�
 
 ### 9.5 Checkpoint 3 — Validation exit、final acceptance与`NFP-FINAL-CUTOVER`
 
-**状态：** Ready / Authorized / Not Activated；只有Checkpoint 2 closure commit形成后才能激活。
+**状态：** Closed（2026-07-27）；Checkpoint 2 closure commit `19b6e847`形成后激活，validation exit、
+final exact-code evidence与原子cutover均已闭合。
 
 **Temporary seam退出：** 删除只服务Stage 1/2 production probe的全部路径：
 
@@ -1113,6 +1112,14 @@ target内错误仍进open issue或Target Renegotiation，不能用limitation换�
 **退出：** final review为Apollyon 0/Keter 0/Euclid 0，`NFP-PROOF-001`到`005`证据可逐项定位，所有临时
 production validation seam已删除，host/build/RV64/docs floor通过，contract原子更新完成，RFC改为Closed、
 transaction改为Completed。随后立即停止，不自动进入`net-udp`或`net-tcp`。
+
+实际执行删除kernel/stack ICMP probe、worker request/event/action mirrors、VirtIO diagnostic counters/snapshot、
+single-NIC query与feature forwarding；长期host conformance、ordinary frame/pump/slot/recheck/shutdown路径保持。
+Host gate、base no-default check与RV64 release build通过；sandbox内lwext4 `SIGSYS`由沙箱外同一build通过确认
+为环境噪声。final fresh-disk wrapper通过260/260 remaining KUnit、netdev publication/active attach、network
+summary、严格`filesystem -> network -> device -> PowerOff`与正常退出；本轮不宣称packet traffic，production
+traffic/completion/IRQ由紧邻的Checkpoint 2 evidence与只删除validation的diff/source audit证明未被旁路替代。
+最终review为Apollyon 0、Keter 0、Euclid 0、Safe 0；六个network IDs与Power Refine已原子Effective。
 
 ### 9.6 Stage-wide review、审计与可观测性
 

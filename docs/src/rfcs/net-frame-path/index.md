@@ -1,23 +1,23 @@
 # RFC-20260726-net-frame-path
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **修订：** `R1`
 **负责人：** doruche
 **最后更新：** 2026-07-27
 **领域：** network-device / VirtIO / frame-path / smoltcp integration
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
 **影响契约：** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
-`NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001`（均为 proposed
-`Introduce`；尚未生效）；
+`NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001`已由
+[Network current contracts](../../contracts/net/index.md)登记为Active；
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)
-（proposed `Refine`）
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-007
-已由 R1 proof-boundary correction neutralize
-**下一步：** Stage 3 Checkpoint 1-2已关闭，Stage 3保持Active；Checkpoint 3已由当前GOAL显式授权但尚未激活，
-必须先形成Checkpoint 2独立commit，再执行validation exit与`NFP-FINAL-CUTOVER`
+Refine已Effective
+**开放问题：** None；历史finding与neutralization依据见[Tracking Issues](./tracking-issues.md)
+**下一步：** None；R1、Stage 1-3与`NFP-FINAL-CUTOVER`均已关闭，后续socket/control-plane或
+runtime lifecycle能力由独立RFC拥有
 
-> 本目录是 `net-frame-path` R1 accepted target 的公共 canonical source。R1 尚未成为 current contract；
-> 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。
+> 本目录保留`net-frame-path` R1 accepted target与实施边界。`NFP-FINAL-CUTOVER`已经完成；当前生效的
+> 共享规则以[Network](../../contracts/net/index.md)与[System Power](../../contracts/power/index.md)
+> current contracts为唯一权威，本RFC不成为并列current contract。
 
 ## 摘要
 
@@ -44,9 +44,10 @@ VirtIO-Net driver、netdev registry、frame handoff 到真实 smoltcp interface 
 - kernel 已有 monotonic time、IRQ、kthread 与 threaded timer 基础能力，但没有 `device/net`、
   VirtIO-Net driver、`anemone-net-api`、`anemone-smoltcp-stack` 或 `anemone-kernel::net` wiring。
 
-live source 也暴露了不能在 RFC 中假装已经消失的工程事实：当前 `VirtIOHalImpl::share()` 会为
+R1 acceptance-time live source 也暴露了不能在 RFC 中假装已经消失的工程事实：当时
+`VirtIOHalImpl::share()` 会为
 每次 virtqueue buffer sharing 分配 bounce DMA 并在失败时 panic。System Power R0 已建立由 `power`
-唯一拥有的 orderly 静态 plan 与 emergency 绕过；当前 effective plan 仍是 `filesystem -> device`，
+唯一拥有的 orderly 静态 plan 与 emergency 绕过；当时 effective plan 仍是 `filesystem -> device`，
 尚未列入 network participant。前者已由
 [NFP-001](./tracking-issues.md#nfp-001--当前-virtio-hal-sharing-路径尚不满足有界帧资源前提)
 记录为本 Draft 接受的 allocation boundary；后者不再是 owner/hook 设计缺口，并由
@@ -139,10 +140,11 @@ RFC target：
 
 Current contracts：
 
-- [System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)：当前
-  `SYSTEM-POWER-ORDERLY-001` 固定 `filesystem -> device` 静态 plan；本 RFC 只 proposed Refine 为在
-  `device` 前显式调用 network owner facade。网络 frame path 尚无 effective contract，本 RFC 的六个
-  network stable IDs 在 `NFP-FINAL-CUTOVER` 前都只是 proposed target。
+- [Network frame path](../../contracts/net/frame-path.md)：四个frame boundary/ownership/progress/pump ID均Active；
+- [Netdev lifecycle](../../contracts/net/netdev-lifecycle.md)：`NETDEV-LIFE-001` Active；
+- [Network attach lifecycle](../../contracts/net/attach-lifecycle.md)：`NET-ATTACH-001` Active；
+- [System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)：
+  `SYSTEM-POWER-ORDERLY-001`当前固定`filesystem -> network -> device`静态plan。
 
 背景材料：
 
@@ -258,14 +260,12 @@ closure 条件。
 
 ## Contract Impact
 
-完整规则见 [目标与不变量](./invariants.md#contract-impact)。六个 network stable IDs 当前均为
-`Introduce`，current rule 为 `None（尚未生效）`；`SYSTEM-POWER-ORDERLY-001` proposed `Refine` 当前
-`filesystem -> device` 静态 plan，在 NFP cutover 时加入显式 network owner facade。本 RFC 不提前创建
-`docs/src/contracts/net/`，也不建立 RFC-local `contracts/` 子目录。
+完整历史delta见[目标与不变量](./invariants.md#contract-impact)。六个network stable IDs已由
+`NFP-FINAL-CUTOVER`从proposed `Introduce`原子变为Active；`SYSTEM-POWER-ORDERLY-001` proposed
+`Refine`也在同一gate把current静态plan更新为`filesystem -> network -> device`。
 
-最终 `NFP-FINAL-CUTOVER` 是一个原子 contract cutover boundary。只有六项 network 规则与 power plan
-Refine 都达到验证 floor，后续 sibling RFC 才能把它们作为 effective baseline；implementation 解析
-可以安排多个 build/probe 阶段，但不能让未闭合的中间形状成为长期共享 contract。
+`NFP-FINAL-CUTOVER`作为单一原子boundary已完成，没有partial或Transitional contract。后续sibling RFC
+可引用current contract，但不能把本RFC的临时probe或transaction diagnostics当作长期baseline。
 
 ## 接受边界
 
@@ -371,14 +371,16 @@ power-off。只有 live frame path 无法在现有 framework 中安全表达时�
 
 | 修订 | 日期 | 状态 | 摘要 | 事务 |
 | --- | --- | --- | --- | --- |
-| R1 | 2026-07-27 | Accepted for Implementation | 保持 R0 target/owner/contract delta，将 exhaustion 确定性证明归给 host provider，并把 RV64 验收修正为真实 bounded completion/IRQ/reclaim；Stage 2 Checkpoint 1 重新达到 Ready | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
+| R1 | 2026-07-27 | Closed | 保持 R0 target/owner/contract delta，将 exhaustion 确定性证明归给 host provider，并把 RV64 验收修正为真实 bounded completion/IRQ/reclaim；Stage 1-3与`NFP-FINAL-CUTOVER`已关闭 | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
 | R0 | 2026-07-26 | Accepted for Implementation | 接受 RV64-only frame path target、六个 proposed network IDs 与 System Power Refine；Stage 1 Checkpoint 1 激活 | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
 
 ## 收口
 
-当前RFC尚未收口，但Stage 2已经关闭。Stage 1 evidence、R0 Checkpoint 1失败、R1 docs-only renegotiation，
-以及R1 Stage 2三个checkpoint closure均由transaction记录；Checkpoint 3补齐provider/recheck/worker closure与
-两次fresh-disk RV64 acceptance。Stage 3 Checkpoint 1已用host multi-instance、registry/attach source/KUnit
-与fresh-disk RV64回归闭合；Checkpoint 2已闭合attach-owner shutdown admission、non-waiting stop、terminal
-retention与`filesystem -> network -> device` traffic/order slice。Checkpoint 3已授权但尚未激活，current
-contract只在`NFP-FINAL-CUTOVER`更新。
+R1已经收口。Stage 1-2建立并加固frame path；Stage 3分别闭合host multi-instance/attach isolation、
+non-waiting shutdown retention与final validation-seam退出。Checkpoint 2保留的真实traffic证据与Checkpoint 3
+只删除probe/diagnostic的source audit互补；final exact-code RV64 boot通过260/260 remaining KUnit、netdev
+publication/active attach、network summary、严格`filesystem -> network -> device -> PowerOff`与正常退出。
+六个network IDs及Power Refine已在`NFP-FINAL-CUTOVER`原子生效。
+
+`smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、runtime hotplug/detach/restart、
+完整teardown与socket/control-plane均Not Run或非目标，不从RV64单核证据外推。

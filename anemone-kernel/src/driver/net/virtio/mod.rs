@@ -18,8 +18,6 @@ use crate::{
 mod device;
 mod frame;
 
-#[cfg(feature = "kunit")]
-pub(crate) use device::VirtIONetStats;
 pub(crate) use frame::VirtIONetProvider;
 
 const QUEUE_SIZE: usize = VIRTIO_NET_QUEUE_SIZE;
@@ -184,28 +182,6 @@ pub(crate) fn take_published_netdevs() -> Vec<PublishedNetdev<VirtIONetProvider>
         }
     });
     published
-}
-
-#[cfg(feature = "kunit")]
-pub(crate) fn stage2_conformance_stats() -> Option<VirtIONetStats> {
-    // Temporary single-NIC evidence query for Stage 2 conformance.
-    // Replace it with owner-scoped multi-device validation before Stage 3
-    // acceptance instead of turning this shape into a control-plane API.
-    let driver: &dyn Driver = VIRTIO_NET_DRIVER.as_ref();
-    let mut stats = None;
-    driver.for_each_device(|device| {
-        let state = device
-            .drv_state()
-            .cast::<VirtIONetState>()
-            .expect("VirtIO-Net device must carry VirtIONetState");
-        if let Some(netdev) = state.device.upgrade() {
-            assert!(
-                stats.replace(netdev.stats()).is_none(),
-                "multiple VirtIO-Net devices cannot supply one Stage 2 conformance snapshot"
-            );
-        }
-    });
-    stats
 }
 
 fn irq_handler(prv_data: &AnyOpaque) {
