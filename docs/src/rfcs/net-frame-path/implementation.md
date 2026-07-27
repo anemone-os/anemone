@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Ready / Checkpoint 1 Not Started / Unauthorized
+**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Not Activated / Unauthorized
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -18,7 +18,8 @@ cutover 要求
 > 又发现 concrete driver、通用 worker 与 validation vocabulary 之间的局部耦合；用户已授权在 Stage 1
 > 与 Stage 2 之间完成本文定义的 Boundary Interlude。本授权不授予 contract cutover，也不自动解析或
 > 进入 Stage 2。2026-07-27 的首条 RV64 saturation route 命中 failure signal后，用户接受 R1
-> proof-boundary correction并授权本次docs-only route resolution；Checkpoint 1重新达到Ready，但未获实现授权。
+> proof-boundary correction并授权docs-only route resolution。用户随后独立授权并关闭R1 Checkpoint 1；
+> Checkpoint 2仍未激活且未获授权。
 
 ## 1. 计划角色与 authority
 
@@ -142,7 +143,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | --- | --- | --- | --- |
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
-| Stage 2 — Bounded progress conformance | R1 Ready / Checkpoint 1 Not Started / Unauthorized | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
+| Stage 2 — Bounded progress conformance | R1 Active / Checkpoint 1 Closed / Checkpoint 2 Not Activated / Unauthorized | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
@@ -592,9 +593,9 @@ Unauthorized，必须由后续独立 resolution gate解析。
 
 ## 8. Stage 2 Ready：Bounded progress conformance
 
-**状态：** R1 Ready / Checkpoint 1 Not Started / Unauthorized。2026-07-27 的 R0 RV64 burst route因未观察到
-TX exhaustion而按failure signal停止并删除probe；该历史不重写。用户随后接受R1 proof-boundary correction并
-授权本次docs-only resolution，不授权Checkpoint 1实现、runtime validation或Checkpoint 2/3。
+**状态：** R1 Active / Checkpoint 1 Closed（2026-07-27）/ Checkpoint 2 Not Activated / Unauthorized。
+2026-07-27 的 R0 RV64 burst route因未观察到TX exhaustion而按failure signal停止并删除probe；该历史不重写。
+用户随后接受R1 proof-boundary correction，并独立授权、关闭R1 Checkpoint 1；该closure不授权Checkpoint 2/3。
 
 R1 保持normal exhaustion/recovery target不变：host real-stack + deterministic provider负责确定性制造并证明
 exhaustion；RV64负责真实VirtIO bounded completion/IRQ/reclaim。`queue-full == 0`只表示本次production workload
@@ -664,7 +665,9 @@ closure，前一项关闭不自动激活后一项：
 
 ### 8.3 Checkpoint 1 — deterministic exhaustion seam与RV64 production observability
 
-**状态：** Ready / Not Started / Unauthorized。
+**状态：** Closed（2026-07-27）。Host deterministic exhaustion与fresh RV64 production-path evidence均通过；
+执行、review与验证证据见[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。本状态不激活
+Checkpoint 2。
 
 **假设与proof split：** shared frame/pump surface已经足够让真实stack与test-owned小容量provider确定性走过
 `Ready -> Exhausted -> matching completion/recheck -> resumed submission`，同时现有RV64 validation seam可以在
@@ -721,7 +724,8 @@ production control-plane替换。Checkpoint 1关闭后立即停止，不自动�
 
 ### 8.4 Checkpoint 2 — host ownership/progress/pump conformance
 
-**状态：** Not Activated / Unauthorized。Checkpoint 1未关闭，不得进入本checkpoint。
+**状态：** Not Activated / Unauthorized。Checkpoint 1已关闭，但本checkpoint仍需独立授权，不得因前一项
+closure自动进入。
 
 在Checkpoint 1最小fixture上扩展deterministic provider矩阵：
 

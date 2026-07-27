@@ -126,4 +126,41 @@ impl Stack {
         });
         Ok(())
     }
+
+    /// Queues complete IPv4 packets solely for the deterministic host fixture.
+    ///
+    /// The socket and its handle stay private to this stack owner. `host-test`
+    /// is absent from the kernel dependency, so this cannot become a
+    /// production packet-injection or control-plane API.
+    #[cfg(feature = "host-test")]
+    pub fn queue_ipv4_for_host_validation(
+        &mut self,
+        id: InterfaceId,
+        packets: &[&[u8]],
+    ) -> Result<(), PumpError> {
+        use alloc::vec;
+        use smoltcp::{socket::raw, wire::IpVersion};
+
+        let entry = self.interface_mut(id)?;
+        let payload_capacity = packets
+            .iter()
+            .try_fold(0usize, |total, packet| total.checked_add(packet.len()))
+            .expect("host validation packet storage capacity overflow");
+        let mut socket = raw::Socket::new(
+            Some(IpVersion::Ipv4),
+            None,
+            raw::PacketBuffer::new(vec![raw::PacketMetadata::EMPTY], vec![0; 1]),
+            raw::PacketBuffer::new(
+                vec![raw::PacketMetadata::EMPTY; packets.len()],
+                vec![0; payload_capacity],
+            ),
+        );
+        for packet in packets {
+            socket
+                .send_slice(packet)
+                .expect("sized host validation socket must accept every packet");
+        }
+        entry.sockets.add(socket);
+        Ok(())
+    }
 }

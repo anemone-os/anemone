@@ -5,6 +5,8 @@ use virtio_drivers::{Error as VirtIOError, device::net::VirtIONetRaw, transport:
 
 use crate::{device::net::RecheckWake, driver::virtio::VirtIOHalImpl, prelude::*};
 
+#[cfg(feature = "kunit")]
+use super::TX_SLOT_COUNT;
 use super::{
     HEADER_RESERVE, QUEUE_SIZE,
     frame::{RxOwnership, RxSlot, TxOwnership, TxSlot},
@@ -21,6 +23,9 @@ pub(crate) struct VirtIONetStats {
     tx_completions: usize,
     irq_rechecks: usize,
     queue_full: usize,
+    tx_outstanding: usize,
+    tx_outstanding_high_water: usize,
+    last_exhaustion_submissions: usize,
     live_mappings: usize,
     mapping_high_water: usize,
 }
@@ -42,6 +47,19 @@ impl VirtIONetStats {
     pub(crate) const fn queue_full(self) -> usize {
         self.queue_full
     }
+    pub(crate) const fn tx_outstanding(self) -> usize {
+        self.tx_outstanding
+    }
+    pub(crate) const fn tx_outstanding_high_water(self) -> usize {
+        self.tx_outstanding_high_water
+    }
+    pub(crate) const fn last_exhaustion_submissions(self) -> Option<usize> {
+        if self.last_exhaustion_submissions == usize::MAX {
+            None
+        } else {
+            Some(self.last_exhaustion_submissions)
+        }
+    }
     pub(crate) const fn live_mappings(self) -> usize {
         self.live_mappings
     }
@@ -50,12 +68,23 @@ impl VirtIONetStats {
     }
 }
 
+/// Diagnostic-only mirrors of provider-owner transitions.
+///
+/// Relaxed snapshots may be stale or cross-field inconsistent. Neither these
+/// counters nor their invariant assertions select queue, provider, or worker
+/// behavior; the assertions only expose bugs in the owning transitions.
 pub(super) struct VirtIONetDiagnostics {
     pub(super) rx_completions: AtomicUsize,
     pub(super) tx_submissions: AtomicUsize,
     pub(super) tx_completions: AtomicUsize,
     pub(super) irq_rechecks: AtomicUsize,
     pub(super) queue_full: AtomicUsize,
+    #[cfg(feature = "kunit")]
+    tx_outstanding: AtomicUsize,
+    #[cfg(feature = "kunit")]
+    tx_outstanding_high_water: AtomicUsize,
+    #[cfg(feature = "kunit")]
+    last_exhaustion_submissions: AtomicUsize,
     live_mappings: AtomicUsize,
     mapping_high_water: AtomicUsize,
 }
@@ -68,6 +97,12 @@ impl VirtIONetDiagnostics {
             tx_completions: AtomicUsize::new(0),
             irq_rechecks: AtomicUsize::new(0),
             queue_full: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
+            tx_outstanding: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
+            tx_outstanding_high_water: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
+            last_exhaustion_submissions: AtomicUsize::new(usize::MAX),
             live_mappings: AtomicUsize::new(0),
             mapping_high_water: AtomicUsize::new(0),
         }
@@ -83,6 +118,39 @@ impl VirtIONetDiagnostics {
         assert!(previous > 0, "VirtIO-Net mapping counter underflow");
     }
 
+    pub(super) fn tx_submitted(&self) {
+        self.tx_submissions.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "kunit")]
+        {
+            let outstanding = self.tx_outstanding.fetch_add(1, Ordering::Relaxed) + 1;
+            assert!(
+                outstanding <= TX_SLOT_COUNT,
+                "VirtIO-Net TX outstanding exceeded slot capacity"
+            );
+            self.tx_outstanding_high_water
+                .fetch_max(outstanding, Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn tx_completed(&self) {
+        self.tx_completions.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "kunit")]
+        {
+            let previous = self.tx_outstanding.fetch_sub(1, Ordering::Relaxed);
+            assert!(previous > 0, "VirtIO-Net TX outstanding counter underflow");
+        }
+    }
+
+    pub(super) fn normal_exhaustion(&self) {
+        #[cfg(feature = "kunit")]
+        {
+            let submissions = self.tx_submissions.load(Ordering::Relaxed);
+            self.last_exhaustion_submissions
+                .store(submissions, Ordering::Relaxed);
+        }
+        self.queue_full.fetch_add(1, Ordering::Relaxed);
+    }
+
     #[cfg(feature = "kunit")]
     fn snapshot(&self) -> VirtIONetStats {
         VirtIONetStats {
@@ -91,6 +159,9 @@ impl VirtIONetDiagnostics {
             tx_completions: self.tx_completions.load(Ordering::Relaxed),
             irq_rechecks: self.irq_rechecks.load(Ordering::Relaxed),
             queue_full: self.queue_full.load(Ordering::Relaxed),
+            tx_outstanding: self.tx_outstanding.load(Ordering::Relaxed),
+            tx_outstanding_high_water: self.tx_outstanding_high_water.load(Ordering::Relaxed),
+            last_exhaustion_submissions: self.last_exhaustion_submissions.load(Ordering::Relaxed),
             live_mappings: self.live_mappings.load(Ordering::Relaxed),
             mapping_high_water: self.mapping_high_water.load(Ordering::Relaxed),
         }
@@ -160,9 +231,7 @@ impl VirtIONetDevice {
             queue_token,
             total_len,
         };
-        self.diagnostics
-            .tx_submissions
-            .fetch_add(1, Ordering::Relaxed);
+        self.diagnostics.tx_submitted();
         self.diagnostics.mapping_opened();
         Ok(())
     }

@@ -24,6 +24,8 @@ static_assert!(
 
 const PUMP_BUDGET: PumpBudget =
     PumpBudget::new(NET_PUMP_INGRESS_BUDGET_FRAMES, NET_PUMP_EGRESS_BUDGET_STEPS);
+#[cfg(feature = "kunit")]
+pub(super) const WORKER_REPOLL_LIMIT: usize = NET_WORKER_REPOLL_ROUNDS;
 
 #[derive(Debug)]
 pub(super) enum AttachFailure {
@@ -68,9 +70,46 @@ pub(super) struct PumpControl {
     #[cfg(feature = "kunit")]
     probe_requested: AtomicBool,
     #[cfg(feature = "kunit")]
+    probe_burst: AtomicUsize,
+    #[cfg(feature = "kunit")]
     probe_completed: AtomicBool,
     #[cfg(feature = "kunit")]
     probe_event: Event,
+    /// Diagnostic-only mirrors of worker actions. They never decide whether
+    /// work, a provider recheck, or a stack deadline is ready.
+    #[cfg(feature = "kunit")]
+    probe_worker_actions: AtomicUsize,
+    #[cfg(feature = "kunit")]
+    probe_max_pump_rounds: AtomicUsize,
+    #[cfg(feature = "kunit")]
+    probe_repoll_requests: AtomicUsize,
+    #[cfg(feature = "kunit")]
+    probe_yields: AtomicUsize,
+}
+
+#[cfg(feature = "kunit")]
+#[derive(Clone, Copy, Debug)]
+pub(super) struct WorkerProbeStats {
+    worker_actions: usize,
+    max_pump_rounds: usize,
+    repoll_requests: usize,
+    yields: usize,
+}
+
+#[cfg(feature = "kunit")]
+impl WorkerProbeStats {
+    pub(super) const fn worker_actions(self) -> usize {
+        self.worker_actions
+    }
+    pub(super) const fn max_pump_rounds(self) -> usize {
+        self.max_pump_rounds
+    }
+    pub(super) const fn repoll_requests(self) -> usize {
+        self.repoll_requests
+    }
+    pub(super) const fn yields(self) -> usize {
+        self.yields
+    }
 }
 
 impl PumpControl {
@@ -82,9 +121,19 @@ impl PumpControl {
             #[cfg(feature = "kunit")]
             probe_requested: AtomicBool::new(false),
             #[cfg(feature = "kunit")]
+            probe_burst: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
             probe_completed: AtomicBool::new(false),
             #[cfg(feature = "kunit")]
             probe_event: Event::new(),
+            #[cfg(feature = "kunit")]
+            probe_worker_actions: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
+            probe_max_pump_rounds: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
+            probe_repoll_requests: AtomicUsize::new(0),
+            #[cfg(feature = "kunit")]
+            probe_yields: AtomicUsize::new(0),
         }
     }
 
@@ -116,10 +165,16 @@ impl PumpControl {
     }
 
     #[cfg(feature = "kunit")]
-    pub(super) fn request_kunit_probe(&self) {
+    pub(super) fn request_kunit_probe(&self, burst: usize) {
+        assert!(burst > 0, "network KUnit probe burst must be non-zero");
         assert!(
             !self.probe_completed.load(Ordering::Acquire),
             "completed network KUnit probe restarted"
+        );
+        assert_eq!(
+            self.probe_burst.swap(burst, Ordering::AcqRel),
+            0,
+            "network KUnit probe burst installed twice"
         );
         let already_requested = self.probe_requested.swap(true, Ordering::AcqRel);
         assert!(!already_requested, "network KUnit probe requested twice");
@@ -127,8 +182,13 @@ impl PumpControl {
     }
 
     #[cfg(feature = "kunit")]
-    fn take_kunit_probe_request(&self) -> bool {
-        self.probe_requested.swap(false, Ordering::AcqRel)
+    fn take_kunit_probe_request(&self) -> Option<usize> {
+        if !self.probe_requested.swap(false, Ordering::AcqRel) {
+            return None;
+        }
+        let burst = self.probe_burst.swap(0, Ordering::AcqRel);
+        assert!(burst > 0, "requested network KUnit probe lost its burst");
+        Some(burst)
     }
 
     #[cfg(feature = "kunit")]
@@ -158,6 +218,16 @@ impl PumpControl {
             !matches!(outcome, Some(TimeoutListenException::Signaled)),
             "RV64 network vertical slice wait was interrupted"
         );
+    }
+
+    #[cfg(feature = "kunit")]
+    pub(super) fn worker_probe_stats(&self) -> WorkerProbeStats {
+        WorkerProbeStats {
+            worker_actions: self.probe_worker_actions.load(Ordering::Relaxed),
+            max_pump_rounds: self.probe_max_pump_rounds.load(Ordering::Relaxed),
+            repoll_requests: self.probe_repoll_requests.load(Ordering::Relaxed),
+            yields: self.probe_yields.load(Ordering::Relaxed),
+        }
     }
 }
 
@@ -286,12 +356,15 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
         core.provider.take_recheck_requested();
 
         #[cfg(feature = "kunit")]
-        if control.take_kunit_probe_request() {
+        if let Some(burst) = control.take_kunit_probe_request() {
             core.stack
-                .start_icmp_echo_probe(core.interface, [10, 0, 2, 15], 24, [10, 0, 2, 2])
+                .start_icmp_echo_probe(core.interface, [10, 0, 2, 15], 24, [10, 0, 2, 2], burst)
                 .expect("active network path lost its KUnit interface mapping");
             probe_started = true;
         }
+
+        #[cfg(feature = "kunit")]
+        control.probe_worker_actions.fetch_add(1, Ordering::Relaxed);
 
         let mut rounds = 0;
         loop {
@@ -320,8 +393,19 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
             }
         }
 
+        #[cfg(feature = "kunit")]
+        control
+            .probe_max_pump_rounds
+            .fetch_max(rounds, Ordering::Relaxed);
+
         if immediate_repoll {
+            #[cfg(feature = "kunit")]
+            control
+                .probe_repoll_requests
+                .fetch_add(1, Ordering::Relaxed);
             control.request_work();
+            #[cfg(feature = "kunit")]
+            control.probe_yields.fetch_add(1, Ordering::Relaxed);
             yield_now();
         } else if let Some(deadline) = next_deadline {
             if armed_deadline != Some(deadline) {

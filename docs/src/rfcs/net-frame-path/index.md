@@ -13,8 +13,8 @@
 （proposed `Refine`）
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-007
 已由 R1 proof-boundary correction neutralize
-**下一步：** R1 已把 Stage 2 重新解析为 Ready / Checkpoint 1 Not Started / Unauthorized；后续若获独立实现授权，
-从 host deterministic exhaustion seam 与 RV64 production-path observability 的互补 probe 开始
+**下一步：** Stage 2 Checkpoint 1已关闭；Checkpoint 2仍为Not Activated / Unauthorized，后续只能在新的独立
+授权下进入host ownership/progress/pump conformance，不得由本次closure自动激活
 
 > 本目录是 `net-frame-path` R1 accepted target 的公共 canonical source。R1 尚未成为 current contract；
 > 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。

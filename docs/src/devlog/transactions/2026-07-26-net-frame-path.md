@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Ready / Checkpoint 1 Not Started / Unauthorized
+**Status:** Active / R1 Stage 2 Checkpoint 1 Closed / Checkpoint 2 Not Activated / Unauthorized
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
@@ -540,3 +540,71 @@ Effective，current contracts/register/current limitations均未修改。R1 docs
 链接与mdBook验证；没有运行host test、cargo check、formatter、kernel build、QEMU、KUnit、SMP、LA64、hardware、
 LTP或final harness。旧Checkpoint 1仍为历史Stopped / Not Closed，临时probe仍已删除；新R1 Checkpoint 1为
 **Ready / Not Started / Unauthorized**，Checkpoint 2/3均未激活。
+
+### 2026-07-27 - R1 Stage 2 Checkpoint 1 activated
+
+**Authorization / entry:** 用户创建唯一GOAL并明确授权只完成Stage 2 Checkpoint 1，要求review、validation、
+write-back、closure与单独`frame-path:`提交，不得自动进入下一gate。入口为`dev/drc/alpha@c530a237`，tracked与
+untracked worktree均clean；该commit只包含已接受的R1 route correction。Checkpoint 2/3未激活，contract cutover
+仍为None。
+
+**Preflight / frozen boundary:** 重新读取AGENTS/LOCAL、R1正文与invariants、Stage 2 Ready、tracking issues、
+register、System Power current contract、当前transaction与live stack/provider/worker/validation owner。
+KernelConfig仍为64-entry VirtIO-Net queue，feature graph仍只由kernel `kunit`启用stack
+`icmp-validation-probe`；build与wrapper接口、RV64 `smp=1` / `memory=1G` bind及显式pretest master路线未漂移。
+source与test写入冻结为8.9 manifest的stack、VirtIO diagnostics、worker/validation及host fixture文件；
+`anemone-net-api`、vendored dependencies、`device/net`、generic runtime owner、platform/wrapper、apps/rootfs、
+register、current limitations与current contracts保持只读。wrapper获准覆盖worktree-local rootfs/runtime disk；
+只读master不被QEMU或写挂载直接使用。
+
+### 2026-07-27 - R1 Stage 2 Checkpoint 1 implementation, review and closure
+
+**Host deterministic proof:** integration fixture按test owner拆为walking-skeleton tests、共享`support/mod.rs`与
+独立`bounded_progress.rs`。新增probe使用真实`Stack::pump`、正式`FrameProvider`和capacity-2 provider预排3个
+可区分IPv4 frame：前2个提交、第三次normal exhaustion，第二次bounded pump仍无新submission；归还一个matching
+completion并发布重复/coalesced edge后，第三个frame按序提交，最终全部completion使live TX回到0。未发送frame
+始终由stack/socket owner保留，test-control只改变fixture自有credit/completion/edge；当前blocked-immediate
+`PumpOutcome`按计划只记录为Checkpoint 2输入。
+
+**RV64 production observability:** validation-only ICMP seam接受调用者给出的bounded burst，并对128个不同sequence
+做exact-once reply tracking。KUnit沿普通stack/provider/IRQ/completion/worker路径运行；concrete VirtIO owner仅镜像
+TX submit/completion、normal exhaustion、outstanding、IRQ recheck与mapping，worker仅镜像action/max-round/
+request/yield。字段声明明确这些relaxed snapshot可stale或跨字段不一致，且字段与断言均不驱动production行为。
+最终等待只使用`yield_now()`与monotonic deadline，并在assertion前打印单次summary。
+
+**Independent review:** 未参与实现写入的独立reviewer首先发现1个Keter：exhaustion marker记录设备生命周期
+第一次事件，却与本轮`queue_full` delta配对，可能用旧marker伪造恢复；修复改为每次事件覆盖
+`last_exhaustion_submissions`，从而在本轮自然exhaustion存在时要求最后一次事件后仍有新submission，最终
+submit/completion equality继续闭合matching completion。review同时要求在diagnostic struct声明处明确stale与
+non-behavioral边界；修复后复审结论为Apollyon 0、Keter 0、Euclid 0，未见需记录的Safe项。review确认旧R0
+negative evidence未改写，shared API、owner、dependency、public visibility、ABI/visible semantics、acceptance与
+Checkpoint 2/3均无越界。
+
+**Validation:** 当前最终源码完成以下验证：
+
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`通过：1个stack unit、1个deterministic bounded-progress、
+  9个walking-skeleton integration与2个compile-fail doctest；
+- base与`icmp-validation-probe`两种`--no-default-features` check通过；warning仅来自既有vendored smoltcp；
+- 全部changed Rust file的focused `rustfmt --check`通过；`just fmt kernel --check`仍只报告Stage 1 baseline的三个
+  vendored smoltcp formatter diff，没有新增diff；
+- `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`在sandbox外以当前源码通过；已知
+  lwext4 sandbox `SIGSYS`只属于环境噪声；
+- fresh wrapper `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img
+  build/net-frame-stage2-r1-c1-final-rv64.log`通过。首次非交互式rootfs物化因sudo无法读取密码而在QEMU前停止；
+  同一repository wrapper在交互式TTY中重跑成功。260/260 KUnit通过；summary为burst/reply `128/128`、TX
+  submit/completion `129/129`、natural exhaustion `0`、outstanding current/high-water `0/8`、IRQ recheck `58`、
+  mappings baseline/current/high-water `32/32/40`、worker action/max-round/request/yield `3/6/0/0`。focused app与
+  当前`sys` LTP profile均通过，随后观察到orderly `filesystem -> device -> PowerOff`正常关机；LTP结果只作
+  wrapper回归，不扩大network proof；
+- dependency/public-surface、diagnostic-only、slot/mapping/unsafe、IRQ/worker、validation-bypass与manifest audit
+  通过；`git diff --check`与`mdbook build docs`在最终docs write-back后通过。
+
+**Closure / boundaries:** host确定性制造并恢复exhaustion，RV64证明真实VirtIO bounded completion、IRQ、
+outstanding/mapping回落、有限worker action、全量KUnit与正常关机；本次RV64未自然观察到exhaustion，按R1只记录
+事实，不是失败。未命中8.3或8.8停止条件，未扩大manifest，也未改变R1、owner、shared API、ABI/visible
+semantics或acceptance。Checkpoint 1 **Closed**，Stage 2保持**Active**；Checkpoint 2为**Not Activated /
+Unauthorized**，不得由本closure自动进入。六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续Not
+Effective，current contracts/register/current limitations无修改。
+
+**Not Run:** `smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、socket/control-plane、
+Stage 2 Checkpoint 2/3与Stage 3均Not Run；RV64/single-core证据不外推到这些层级。

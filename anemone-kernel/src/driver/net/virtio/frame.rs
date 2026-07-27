@@ -170,10 +170,7 @@ impl VirtIONetProvider {
                     .unwrap_or_else(|error| panic!("VirtIO-Net TX completion failed: {error}"));
             }
             self.device.diagnostics.mapping_closed();
-            self.device
-                .diagnostics
-                .tx_completions
-                .fetch_add(1, Ordering::Relaxed);
+            self.device.diagnostics.tx_completed();
             slot.ownership = TxOwnership::Available;
         }
     }
@@ -273,18 +270,12 @@ impl FrameProvider for VirtIONetProvider {
             return ReceiveOutcome::Empty;
         };
         if !self.device.raw.lock_irqsave().can_send() {
-            self.device
-                .diagnostics
-                .queue_full
-                .fetch_add(1, Ordering::Relaxed);
+            self.device.diagnostics.normal_exhaustion();
             self.rx_slots[rx_index].cancel_reservation();
             return ReceiveOutcome::TransmitExhausted;
         }
         let Some(tx_index) = self.tx_slots.iter_mut().position(TxSlot::reserve) else {
-            self.device
-                .diagnostics
-                .queue_full
-                .fetch_add(1, Ordering::Relaxed);
+            self.device.diagnostics.normal_exhaustion();
             self.rx_slots[rx_index].cancel_reservation();
             return ReceiveOutcome::TransmitExhausted;
         };
@@ -305,17 +296,11 @@ impl FrameProvider for VirtIONetProvider {
     fn transmit(&mut self, _now: Instant) -> TransmitOutcome<Self::TxToken<'_>> {
         self.harvest_tx();
         if !self.device.raw.lock_irqsave().can_send() {
-            self.device
-                .diagnostics
-                .queue_full
-                .fetch_add(1, Ordering::Relaxed);
+            self.device.diagnostics.normal_exhaustion();
             return TransmitOutcome::Exhausted;
         }
         let Some(index) = self.tx_slots.iter_mut().position(TxSlot::reserve) else {
-            self.device
-                .diagnostics
-                .queue_full
-                .fetch_add(1, Ordering::Relaxed);
+            self.device.diagnostics.normal_exhaustion();
             return TransmitOutcome::Exhausted;
         };
         TransmitOutcome::Ready(VirtIOTxToken {
