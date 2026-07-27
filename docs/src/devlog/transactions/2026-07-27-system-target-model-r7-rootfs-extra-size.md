@@ -25,10 +25,14 @@ Rootfs `Fs`新增optional `extra-size`。Folder materialization将值映射为`-
 - `just xtask-test`运行57项，新增folder parse、image rejection与既有absolute-size rejection测试通过；
   总结果55 passed / 2 failed。两个失败分别是当前工作树既有resolver fixture mismatch与DT `/bin/false`
   error-text断言，不属于R7路径。
-- xtask format check、`git diff --check`与`mdbook build docs`结果见最终交付记录。
-- Agent host没有`virt-make-fs`，2k1000实际materialization Not Run；不得据此声称`ENOSPC`已经完成runtime复验。
+- 在`gallant_lamarr`中执行`just rootfs mkfs -c conf/rootfs/2k1000/rootfs.toml`成功；实际命令包含
+  `virt-make-fs --size=+256M`。`virt-df`显示ext4为487 MiB、235 MiB已用、217 MiB可用，原失败Git
+  pack及其idx/rev通过显式只读挂载检查存在。
+- `just fmt all --check`中kernel与xtask通过，随后停在未修改
+  `anemone-apps/busybox/src/main.rs`的既有格式差异。`git diff --check`通过。
+- Host与`gallant_lamarr`均未安装`mdbook`，文档构建Not Run。
 
 ## Closure
 
 R7A完成folder增量余量、image ownership拒绝、2k1000配置和canonical documentation同步。Contract cutover为
-None；后续只需在具备libguestfs的Linux环境运行repository-owned rootfs命令验证实际镜像生成。
+None；2k1000实际镜像已在具备libguestfs的Linux环境完成生成和只读内容验证。

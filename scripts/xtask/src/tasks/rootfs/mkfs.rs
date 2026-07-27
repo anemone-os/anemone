@@ -90,15 +90,12 @@ pub fn run(args: MkfsArgs) -> anyhow::Result<()> {
             args.sudo,
         )?;
     } else {
-        rootfs
-            .fs
-            .fstype
-            .mkfs(
-                &staging_dir,
-                &image_path,
-                rootfs.fs.extra_size.as_deref(),
-                args.sudo,
-            )?;
+        rootfs.fs.fstype.mkfs(
+            &staging_dir,
+            &image_path,
+            rootfs.fs.extra_size.as_deref(),
+            args.sudo,
+        )?;
     }
 
     Ok(())

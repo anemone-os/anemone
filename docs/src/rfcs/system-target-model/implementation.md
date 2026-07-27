@@ -1596,10 +1596,12 @@ current contracts保持不变。
 
 **Validation / Exit：** `just xtask-test`编译新命令路径，新增folder parse与image rejection测试均通过；
 全套57项中55项通过，两个失败是当前工作树既有resolver fixture和DT error-text断言，与本checkpoint无关。
-执行xtask format check、`git diff --check`与`mdbook build docs`。当前agent环境没有`virt-make-fs`，因此
-2k1000实际materialization Not Run，不将源码测试写成镜像成功证据。
+`just fmt all --check`中kernel与xtask通过，随后停在未修改BusyBox app的既有格式差异；
+`git diff --check`通过，`mdbook`在host与容器均未安装而Not Run。在`gallant_lamarr`中通过
+repository-owned rootfs入口实际生成2k1000镜像；命令包含`--size=+256M`，ext4最终235 MiB已用、
+217 MiB可用，原失败Git pack及其idx/rev均存在。
 
 ### R7A closure（2026-07-27）
 
 R7A已完成optional增量余量接线、2k1000配置与所有current documentation surface同步。Contract impact为
-None；R7A与RFC Closed。实际2k1000镜像生成仍需在具备libguestfs的Linux环境复验。
+None；R7A与RFC Closed。2k1000实际materialization已在具备libguestfs的Linux容器中通过。
