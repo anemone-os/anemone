@@ -126,6 +126,8 @@ define_csr!(64, tlbrsave, 0x8b);
 define_csr!(64, tlbrehi, 0x8e);
 define_csr!(64, tlbrentry, 0x88);
 define_csr!(64, tlbrbadv, 0x89);
+define_csr!(64, tlbrelo0, 0x8c);
+define_csr!(64, tlbrelo1, 0x8d);
 define_csr!(64, stlbps, 0x1e);
 define_csr!(32, pwcl, 0x1c, Pwcl);
 define_csr!(32, pwch, 0x1d, Pwch);
