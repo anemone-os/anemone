@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Closed / Checkpoint 1-3 Closed；Stage 3 Active / Checkpoint 1 Closed / Checkpoint 2-3 Unauthorized
+**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Closed / Checkpoint 1-3 Closed；Stage 3 Active / Checkpoint 1-2 Closed / Checkpoint 3 Authorized, Not Activated
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -146,7 +146,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | R1 Closed / Checkpoint 1-3 Closed | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
-| Stage 3 — Multi-instance/lifecycle closure | Active / Checkpoint 1 Closed / Checkpoint 2-3 Unauthorized | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
+| Stage 3 — Multi-instance/lifecycle closure | Active / Checkpoint 1-2 Closed / Checkpoint 3 Authorized, Not Activated | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
@@ -896,8 +896,8 @@ apps/rootfs/LTP、register/current limitations与current contracts。若测试�
 
 ## 9. Stage 3 Ready：Multi-instance、lifecycle 与最终 cutover
 
-**状态：** Active / Checkpoint 1 Closed（2026-07-27）/ Checkpoint 2-3 Unauthorized。本文完整解析Stage 3；
-Checkpoint 1 closure不授权shutdown handoff、后续runtime validation、contract cutover或RFC closure。
+**状态：** Active / Checkpoint 1-2 Closed（2026-07-27）/ Checkpoint 3 Authorized / Not Activated。本文完整
+解析Stage 3；Checkpoint 2 closure不提前执行validation seam退出、contract cutover或RFC closure。
 
 ### 9.1 Resolution preflight 与 live gap
 
@@ -1012,7 +1012,8 @@ Checkpoint 1关闭后立即停止，Checkpoint 2未激活。
 
 ### 9.4 Checkpoint 2 — Shutdown handoff vertical slice
 
-**状态：** Ready / Not Started / Unauthorized；只有Checkpoint 1 Closed后才能激活。
+**状态：** Closed（2026-07-27）。Shutdown handoff、独立review、validation与write-back已闭合；Checkpoint 3
+已由当前GOAL显式授权，但尚未激活。
 
 **Attach-owner route：** 用`anemone-kernel::net`中一个owner-local lock保护active-path records与唯一
 `shutdown_started` admission fact；不新增综合`NetdevLifecycle` enum。active publication与shutdown publication
@@ -1055,11 +1056,25 @@ power literal order、emergency bypass与driver dependency direction。
 **停止/退出：** 任何正常Drop provider/backing、shutdown wait/join/timeout、timer cancellation framework、
 driver反向调用stack、network facade取得raw queue lock、active path在shutdown后重新activate、RV64 traffic或order
 失败、panic/busy-spin都立即停止。通过后Checkpoint 2 Closed并停止；code已实现但六个network IDs与power Refine
-仍Not Effective，Checkpoint 3未授权。
+仍Not Effective，Checkpoint 3未激活。
+
+实际执行把active-path records与唯一`shutdown_started`放入同一attach-authority lock；attach与shutdown在该锁
+下线性化，shutdown snapshot窄`PumpControl`后锁外逐path撤销admission、清除explicit work并只请求一次kthread
+stop/wake。worker在bounded round之间检查stop，停止后不再repoll/arm deadline，并显式保留`PumpCore`到terminal
+reset/power-off；排队timer仍只持stateless wake。Power静态plan改为
+`filesystem -> network -> device`，emergency保持直接machine path，device注释不再声称unsupported quiesce会释放
+network backing。
+
+首轮RV64完整运行暴露shutdown摘要使用普通notice级别而未进入terminal evidence，checkpoint review将其作为阻塞
+observability finding修正为terminal可见摘要后重跑。最终host gate、两种no-default feature check、RV64 release
+build与fresh-disk wrapper通过；wrapper记录261/261 KUnit、128/128 reply、129/129 TX completion、IRQ 63、
+outstanding/mapping回落至0/32、worker最多7轮，以及network摘要严格位于network step内和device step前。最终review
+为Apollyon 0、Keter 0、Euclid 0、Safe 0；没有wait/join/timeout、timer framework、driver反向依赖、normal Drop、
+manifest扩张或contract cutover。Checkpoint 2关闭后先形成独立commit，再激活Checkpoint 3。
 
 ### 9.5 Checkpoint 3 — Validation exit、final acceptance与`NFP-FINAL-CUTOVER`
 
-**状态：** Ready / Not Started / Unauthorized；只有Checkpoint 2 Closed后才能激活。
+**状态：** Ready / Authorized / Not Activated；只有Checkpoint 2 closure commit形成后才能激活。
 
 **Temporary seam退出：** 删除只服务Stage 1/2 production probe的全部路径：
 

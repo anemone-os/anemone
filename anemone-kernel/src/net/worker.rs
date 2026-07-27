@@ -56,13 +56,18 @@ impl PreparedPath {
         self.control.active.store(true, Ordering::Release);
         self.control.request_work();
     }
+
+    pub(super) fn stop_and_retain(self) {
+        self.control.request_shutdown();
+    }
 }
 
 /// Worker lifecycle and pure wake/work predicates owned by the attach path.
 ///
 /// The provider remains the durable completion/recheck truth and `Stack`
-/// remains the protocol/deadline truth. These atomics only publish activation,
-/// explicit work, and validation requests that originate in this owner.
+/// remains the protocol/deadline truth. These atomics only project activation,
+/// explicit work, and validation requests that originate in this owner; the
+/// attach authority lock owns terminal shutdown admission.
 pub(super) struct PumpControl {
     worker: spin::Once<KThreadHandle>,
     active: AtomicBool,
@@ -152,7 +157,17 @@ impl PumpControl {
     }
 
     fn request_work(&self) {
+        if !self.active.load(Ordering::Acquire) {
+            return;
+        }
         self.explicit_work.store(true, Ordering::Release);
+        // Shutdown closes `active` before clearing explicit work. Rechecking
+        // prevents an in-flight requester from restoring work after that
+        // linearization point.
+        if !self.active.load(Ordering::Acquire) {
+            self.explicit_work.store(false, Ordering::Release);
+            return;
+        }
         self.wake_worker();
     }
 
@@ -162,6 +177,17 @@ impl PumpControl {
 
     fn take_work_request(&self) -> bool {
         self.explicit_work.swap(false, Ordering::AcqRel)
+    }
+
+    pub(super) fn request_shutdown(&self) {
+        // Revoke pump admission before touching the worker. A queued timer or
+        // recheck edge may still wake it, but cannot reactivate the predicate.
+        self.active.store(false, Ordering::Release);
+        self.explicit_work.store(false, Ordering::Release);
+        self.worker
+            .get()
+            .expect("prepared network path must have an installed worker")
+            .request_stop();
     }
 
     #[cfg(feature = "kunit")]
@@ -334,7 +360,7 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
     #[cfg(feature = "kunit")]
     let mut probe_started = false;
 
-    loop {
+    'worker: loop {
         ctx.wait_until(|| {
             control.active.load(Ordering::Acquire)
                 && (control.work_requested()
@@ -388,6 +414,13 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
                 probe_started = false;
             }
 
+            // Stop is rechecked between bounded pump rounds. The current
+            // callback is allowed to finish, but no later round, repoll, or
+            // deadline arm may be initiated after stop is observed.
+            if ctx.should_stop() {
+                break 'worker;
+            }
+
             if !immediate_repoll || rounds == NET_WORKER_REPOLL_ROUNDS {
                 break;
             }
@@ -397,6 +430,10 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
         control
             .probe_max_pump_rounds
             .fetch_max(rounds, Ordering::Relaxed);
+
+        if ctx.should_stop() {
+            break;
+        }
 
         if immediate_repoll {
             #[cfg(feature = "kunit")]
@@ -415,6 +452,12 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
         }
     }
 
+    // IRQ registration cannot currently be removed and the VirtIO queues have
+    // no reset/quiesce proof. Dropping `PumpCore` here would release the sole
+    // provider/slot/DMA owner while the device or IRQ Weak capability could
+    // still access it. A future runtime-removal path may delete this retention
+    // only after preventing Weak upgrades and proving queue/device quiescence.
+    core::mem::forget(core);
     0
 }
 
@@ -429,6 +472,9 @@ fn deadline_due(deadline: Option<NetworkInstant>) -> bool {
 }
 
 fn schedule_deadline(control: Arc<PumpControl>, deadline: NetworkInstant) {
+    if !control.active.load(Ordering::Acquire) {
+        return;
+    }
     let now = network_now();
     if deadline <= now {
         control.request_work();

@@ -1,6 +1,6 @@
 //! System Power Subsystem.
 
-use crate::prelude::*;
+use crate::{net as kernel_net, prelude::*};
 
 pub trait PowerOffHandler: Send {
     unsafe fn poweroff(&self);
@@ -261,10 +261,14 @@ static REBOOT_HANDLERS: SpinLock<RebootHandlerList> = SpinLock::new(RebootHandle
 
 // This literal order is the global orderly plan. Participant discovery and
 // owner-local traversal stay in the subsystem facades referenced here.
-static ORDERLY_PLAN: [OrderlyStep; 2] = [
+static ORDERLY_PLAN: [OrderlyStep; 3] = [
     OrderlyStep {
         name: "filesystem",
         run: fs::on_shutdown,
+    },
+    OrderlyStep {
+        name: "network",
+        run: kernel_net::shutdown,
     },
     OrderlyStep {
         name: "device",

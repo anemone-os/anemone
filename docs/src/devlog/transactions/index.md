@@ -6,9 +6,9 @@
 
 ## Active
 
-- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 2已关闭；Stage 3 Checkpoint 1以host双实例、
-  registry/attach conformance与fresh-disk RV64回归关闭，Stage 3保持Active。Checkpoint 2-3仍Unauthorized，
-  全部network contract仍Not Effective。
+- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 2已关闭；Stage 3 Checkpoint 1-2已依次闭合
+  multi-instance/attach conformance与shutdown handoff traffic/order slice，Stage 3保持Active。Checkpoint 3已授权但
+  尚未激活，全部network contract仍Not Effective。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

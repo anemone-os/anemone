@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Closed / Stage 3 Checkpoint 1 Closed / Checkpoint 2-3 Unauthorized
+**Status:** Active / R1 Stage 2 Closed / Stage 3 Checkpoint 1-2 Closed / Checkpoint 3 Authorized, Not Activated
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
@@ -49,6 +49,10 @@ current-contract cutover、RFC closure或后续sibling RFC。
 用户随后独立授权并要求持续推进Stage 3 Checkpoint 1至closure或停止条件。本授权只覆盖host真实stack/provider
 multi-instance矩阵、registry KUnit、attach/source audit、checkpoint review/validation/write-back与单独
 `frame-path:`提交；不授权Checkpoint 2、shutdown/power修改、shared API/current contract扩张或cutover。
+
+用户现创建唯一GOAL，显式授权依次完成Stage 3 Checkpoint 2与3，并要求每个checkpoint独立review、validation、
+write-back和`frame-path:`commit。Checkpoint 3只能在Checkpoint 2 closure commit形成后激活；本授权不允许越出
+9.9 manifest、改变R1 target/owner/shared API/ABI/visible semantics/acceptance，也不自动进入后续sibling RFC。
 
 ## R0 acceptance and activation preflight
 
@@ -871,3 +875,56 @@ timeout或busy-spin。随行`sys` profile为glibc/musl各2例、合计4/4通过�
 **Not Run:** Checkpoint 2 shutdown/power traffic-order slice、Checkpoint 3 validation exit/final exact-code boot与
 cutover、`smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、runtime hotplug/teardown、
 socket/control-plane均Not Run；host与单核RV64证据不外推到这些范围。
+
+### 2026-07-27 - R1 Stage 3 Checkpoint 2 activated
+
+**Authorization / entry:** 当前唯一GOAL显式授权依次完成Checkpoint 2与3；Checkpoint 2从
+`dev/drc/alpha@046dbc31`的clean worktree激活，该commit只关闭Checkpoint 1。Preflight重新读取AGENTS/LOCAL、
+R1正文/invariants/Stage 3 Ready、tracking、register、System Power current contract、transaction与live
+attach/worker/kthread/timer/provider/driver/power owner。实现限定于9.9 manifest中的`net/{mod.rs,worker.rs}`、
+`power.rs`、`device/mod.rs`与canonical write-back；driver、timer、kthread、shared API、dependencies、config、
+wrapper、apps/rootfs、register/current limitations与current contracts保持只读。
+
+**Activation-time contract state:** Checkpoint 2 cutover为None。六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective；Checkpoint 3虽已获同一GOAL显式授权，但在Checkpoint 2
+closure commit前不激活。
+
+### 2026-07-27 - R1 Stage 3 Checkpoint 2 implementation, review and closure
+
+**Delivery:** `AttachAuthority`把active-path records与唯一`shutdown_started`收进同一owner lock。正常attach只在
+锁内确认admission开放后publish并activate；shutdown在锁内先发布terminal fact、snapshot窄`PumpControl`，随后
+锁外逐path撤销`active`、清除explicit work并调用既有non-waiting `request_stop()`。shutdown后完成prepare的path
+保持published/unattached，worker同样被stop并走retention，不产生第二份lifecycle enum或driver->stack route。
+
+worker现在在每个bounded pump round之间重查stop，观察后不再request repoll或arm deadline；已排队timer仍只持
+stateless wake且inactive control不能重新进入pump。terminal exit显式`forget(PumpCore)`并记录退出条件：只有未来
+runtime removal先阻止IRQ Weak upgrade、证明queue/device quiesce后才允许Drop provider/slot/DMA backing。Power
+静态literal改为`filesystem -> network -> device`，network facade不持owner lock调用kthread/provider/driver；
+emergency仍绕过ordinary plan。`device::shutdown()`注释同步为unsupported quiesce可保留resource到power-off。
+
+**Review / correction:** 首轮fresh-disk run通过traffic与global order，但per-path summary使用`knoticeln!`而没有
+进入terminal日志，形成1个阻塞Keter observability finding；改为terminal可见`kemergln!`后完整重跑。最终source
+review覆盖admission/publication线性化、request-work与shutdown交错、round/repoll/deadline stop边界、timer wake、
+terminal retention、IRQ Weak lifetime、Power literal、emergency bypass与driver dependency direction，结论为
+Apollyon 0、Keter 0、Euclid 0、Safe 0。没有wait/join/timeout、timer cancellation framework、raw queue lock、
+normal provider Drop、active reopen或manifest扩张。
+
+**Host / build validation:** host gate通过2个stack unit、7个bounded-progress、9个walking-skeleton、2个
+multi-instance与2个compile-fail doctest；base与`icmp-validation-probe`两种no-default feature check通过。
+`just fmt kernel --check`对changed files无diff，仍只报告3处既有vendored smoltcp baseline。canonical RV64
+release build在sandbox内复现既有lwext4 `SIGSYS / Bad system call`，同一仓库命令在sandbox外通过；最终wrapper又
+以exact source完成同一build。`git diff --check`通过，docs floor在write-back后复核。
+
+**Fresh-disk RV64 traffic/order evidence:** 最终运行
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage3-c2-rv64.log`；wrapper从
+4 GiB只读master覆盖worktree-local runtime disk，以`smp=1`、`memory=1G`启动。261/261 KUnit通过；Stage 2
+probe记录burst/reply 128/128、TX submit/completion 129/129、RX completion 129、IRQ recheck 63、natural
+exhaustion 0、outstanding 0/high-water 4、mapping baseline/current/high-water 32/32/36、worker
+action/max-round/request/yield 2/7/0/0。随后日志严格记录
+`filesystem -> network summary(eth0, ifindex 1, admission closed, stop requested, retained) -> device -> PowerOff`；
+无panic、timeout或busy-spin。`sys` profile的glibc/musl合计4/4只作环境回归。
+
+**Closure / boundaries:** Checkpoint 2 **Closed**，Stage 3保持**Active**；Checkpoint 3为
+**Authorized / Not Activated**，必须在本checkpoint独立commit后再激活。六个network IDs与Power Refine继续
+**Not Effective**，Stage 2 validation seam仍完整保留。`smp>1`、LA64、virtio-pci、hardware、final harness、
+完整LTP、runtime hotplug/detach/restart、完整teardown与socket/control-plane均Not Run。

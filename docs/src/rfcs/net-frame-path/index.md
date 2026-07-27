@@ -13,8 +13,8 @@
 （proposed `Refine`）
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前没有 Apollyon、Keter 或 Euclid；NFP-007
 已由 R1 proof-boundary correction neutralize
-**下一步：** Stage 3 Checkpoint 1已关闭，Stage 3保持Active；Checkpoint 2为Ready / Not Started /
-Unauthorized，必须另行授权，且不得提前进入shutdown handoff或cutover
+**下一步：** Stage 3 Checkpoint 1-2已关闭，Stage 3保持Active；Checkpoint 3已由当前GOAL显式授权但尚未激活，
+必须先形成Checkpoint 2独立commit，再执行validation exit与`NFP-FINAL-CUTOVER`
 
 > 本目录是 `net-frame-path` R1 accepted target 的公共 canonical source。R1 尚未成为 current contract；
 > 六个 network IDs 与 power Refine 只可在 `NFP-FINAL-CUTOVER` 原子生效。
@@ -379,5 +379,6 @@ power-off。只有 live frame path 无法在现有 framework 中安全表达时�
 当前RFC尚未收口，但Stage 2已经关闭。Stage 1 evidence、R0 Checkpoint 1失败、R1 docs-only renegotiation，
 以及R1 Stage 2三个checkpoint closure均由transaction记录；Checkpoint 3补齐provider/recheck/worker closure与
 两次fresh-disk RV64 acceptance。Stage 3 Checkpoint 1已用host multi-instance、registry/attach source/KUnit
-与fresh-disk RV64回归闭合并停止；Checkpoint 2仍Not Started / Unauthorized，current contract只在
-`NFP-FINAL-CUTOVER`更新。
+与fresh-disk RV64回归闭合；Checkpoint 2已闭合attach-owner shutdown admission、non-waiting stop、terminal
+retention与`filesystem -> network -> device` traffic/order slice。Checkpoint 3已授权但尚未激活，current
+contract只在`NFP-FINAL-CUTOVER`更新。
