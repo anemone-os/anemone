@@ -1,6 +1,6 @@
 # Epoll RFC Tracking Issues
 
-**状态：** Active
+**状态：** Closed
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
@@ -29,13 +29,14 @@ active wait 内获取 sleepable mutex 的 Apollyon；R1 已在 target 层以 ope
 per-watch dirty 与三态 non-sleeping wait publication neutralize，2R implementation、focused runtime与
 独立review现已关闭对应proof gate。第二次2D runtime暴露的MM COW shadow ancestry stack overflow
 由R2从epoll acceptance denominator分离，并由register独立跟踪。R2 matrix继续运行后又暴露两个
-cross-owner acceptance blocker，2D现已暂停。
+cross-owner acceptance blocker；开发者批准同时扩入pipe与timer owner后，两项修复与R2 closure matrix均已
+通过，2D已执行`EPOLL-CUTOVER`并关闭。本页保留finding与neutralize依据，不再有epoll target内开放项。
 
-## Apollyon
+## Closed Runtime Findings
 
 ### EPOLL-RUNTIME-A4 - pipe WRITABLE predicate 使 ET writer edge 过早到达
 
-**状态：** Open / blocks R2 2D acceptance / 2026-07-27
+**状态：** Neutralized by pipe owner correction / R2 matrix proven / 2026-07-27
 **影响范围：** `epoll_wait06` / pipe source readiness / EPOLLET
 **来源：** R2 `epoll + iomux` RV64 runtime
 
@@ -44,16 +45,18 @@ fixed test要求writer只有在空出足够的原子写空间后才形成edge；
 `!pipe.buf.is_full()`作为`WRITABLE` truth。读半页后pipe source发布writer hint，epoll对source-owned
 predicate重检后诚实交付该事件。
 
-**边界：** 不能在epoll watch中缓存pipe容量、复刻`PIPE_BUF`策略或吞掉source readiness；正确修复属于
-`fs::pipe` owner，而该production file在2D validation-only集合中。从R2 matrix删除case则会改变accepted
-denominator，必须经过新的target revision。
+**边界：** 不能在epoll watch中缓存pipe容量、复刻`PIPE_BUF`策略或吞掉source readiness；开发者已批准
+扩入`fs::pipe` owner，只允许由source统一修正WRITABLE predicate并重跑poll/epoll matrix。从R2 matrix
+删除case仍会改变accepted denominator，必须经过新的target revision。
 
-**退出条件：** 获准扩入pipe owner并使其writability predicate/notification transition与Linux原子写阈值
-一致，随后重跑pipe poll与R2 matrix；或者由有权review明确接受新的target revision。
+**关闭证据：** pipe owner以`pipe_capacity_pages = 2`将固定后备/默认逻辑容量与一页atomic-write阈值分离，
+`F_SETPIPE_SZ`在固定后备上界内维护逻辑容量，
+writer predicate统一要求至少一页空间；这同时保留small-write后的LT writability与一页pipe只读半页时的
+ET抑制。双root的`epoll_ctl01`、`epoll_wait01`、`epoll_wait06`以及iomux组全部PASS；未降低R2 denominator。
 
 ### EPOLL-RUNTIME-A3 - epoll timeout case 与共享 iomux 同样早唤醒
 
-**状态：** Open / blocks R2 2D acceptance / 2026-07-27
+**状态：** Neutralized by timer owner correction / R2 matrix proven / 2026-07-27
 **影响范围：** `epoll_wait02` / shared iomux timeout / validation denominator
 **来源：** R2 `epoll + iomux` RV64 runtime
 
@@ -61,11 +64,14 @@ denominator，必须经过新的target revision。
 `poll02`、`pselect01`与`pselect01_64`出现相同signature。该failure family跨越epoll、poll与pselect，
 不支持把根因归到epoll readiness protocol，但`epoll_wait02`仍是R2 target case，因而阻止cutover。
 
-**边界：** 正确修复需要进入shared timer/wait owner并证明deadline rounding与clock accounting，超出2D
-manifest；不能在epoll timeout adapter添加case-specific slack。若改为排除该case，同样需要新的target revision。
+**边界：** 开发者已批准扩入shared timer owner；修复只允许把soft timer queue从忽略当前tick phase的
+relative-tick expiry改为monotonic absolute deadline，不改scheduler wait API，也不能在epoll timeout adapter
+添加case-specific slack。若需要继续进入wait core/timekeeper/architecture timer，重新触发扩集停止条件；
+若改为排除该case，同样需要新的target revision。
 
-**退出条件：** 获准扩入shared timeout owner并让epoll/poll/pselect timing cases通过，或由有权review明确
-接受新的target revision；随后从头重跑R2 matrix。
+**关闭证据：** soft timer queue改为monotonic absolute `Instant` deadline，periodic IRQ只决定不早于deadline
+的delivery opportunity。双root的`epoll_wait02`、`poll02`、`pselect01`、`pselect01_64`与timerfd组全部
+PASS；未修改scheduler wait API、timekeeper或architecture timer。
 
 ## Keter
 

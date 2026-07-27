@@ -4,7 +4,7 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-use super::{TimerEvent, expire_ticks_after, push_timer_event};
+use super::{TimerEvent, deadline_after, push_timer_event};
 
 const READY_BACKLOG_LOG_THRESHOLD: usize = 1024;
 
@@ -93,10 +93,7 @@ pub fn schedule_threaded_timer_event(
         "threaded timer event scheduled before local worker initialization"
     );
     THREADED_STATS.submitted.fetch_add(1, Ordering::Relaxed);
-    push_timer_event(TimerEvent::new_threaded(
-        expire_ticks_after(expire),
-        callback,
-    ));
+    push_timer_event(TimerEvent::new_threaded(deadline_after(expire), callback));
 }
 
 fn threaded_worker_ready() -> bool {

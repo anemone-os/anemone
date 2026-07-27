@@ -1,6 +1,6 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** R2 Accepted Target / Foundation Effective / 2D Suspended / 2R Closed / Epoll Not Effective
+**状态：** R2 Closed / Foundation and EPOLL-CUTOVER Effective
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **适用修订：** R2
@@ -9,40 +9,36 @@
 自己的 proof obligations。当前生效规则以 `docs/src/contracts/` 为唯一权威；Stage 1 已完成
 foundation cutover。R2完整继承R1对owner、ABI、lifecycle、bounded scan与wait publication的要求；
 本次revision只把确认属于MM COW shadow ancestry的`epoll01`从epoll acceptance denominator移除。
-R2 对 `IOMUX-POLL-001/002` 的再次 Refine、epoll core target 与三个
-`EPOLL-*` contract ID 仍未生效。
+R2 对 `IOMUX-POLL-001/002` 的再次 Refine与三个`EPOLL-*` contract ID已由`EPOLL-CUTOVER`生效。
 
 ## Contract Impact
 
 下表中的 cutover 名称只是语义切换单元，不是 implementation stage，也不授权执行。
 [实施计划](./implementation.md) 已把它们绑定到三阶段滚动路线、验证和回滚边界；
 Stage 0 不切换 contract，Stage 1 / Stage 2 分别拥有 foundation 与 epoll cutover。
-表中“当前规则”是 Stage 1 closure 后的 effective baseline。R1/R2 acceptance 与 Checkpoint 2R 都不修改它；
-`IOMUX-POLL-001/002` 的 R2 Refine 和 `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`
-必须在最终 `EPOLL-CUTOVER` 同时生效。
+表中“当前规则”现反映最终`EPOLL-CUTOVER`后的effective状态；具体规范正文以链接的current contract
+为唯一权威。历史上R1/R2 acceptance与Checkpoint 2R均未提前修改Stage 1 baseline，R2 Refine与三个
+`EPOLL-*` ID只在最终cutover同步生效。
 
 | Contract ID | 变化 | 当前 effective 规则 | R2 Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
 | [`SCHED-LATCH-001..003`](../../contracts/scheduler/latch-wait-round.md) | Preserve | 单轮 wait identity、owner-bound lifecycle、no-return stale-safe trigger | `Latch` 继续只承载 task-local 单轮等待；persistent subscription 不进入 scheduler | 全程 |
 | [`SIGNAL-TEMP-MASK-001..003`](../../contracts/signal/temporary-mask-delivery.md) | Preserve | temporary mask、delivery reservation 与 restore responsibility 由 Signal owner 线性收口 | `IomuxWaitRound` 只替换 readiness registration owner，不取得或复制 mask/restore truth，现有 ppoll/pselect outcome classification 保持 | 全程 |
-| [`IOMUX-POLL-001`](../../contracts/iomux/poll-wait.md#iomux-poll-001--阻塞前必须完成-snapshotregister-gate) | Refine | register 只返回 `Subscribed(current)`、非空 `Ready` 或 `Unsupported` | 增加 `SubscribedRecheck`：route 已安装但 current readiness 未知；consumer 必须取消本轮 park 并 final snapshot，不能把它计为 ready 或进入睡眠 | `EPOLL-CUTOVER` |
-| [`IOMUX-POLL-002`](../../contracts/iomux/poll-wait.md#iomux-poll-002--source-锁拥有-readiness-与-route-publication) | Refine | source-state 临界区内发布 route 并取得 publication-point current snapshot | 普通 source 规则不变；若 exact predicate 只能在另一个 sleepable owner 下读取，source 可在 non-sleeping publication lock 下用 `EmptyCovered` certificate 返回空，否则安装 route、锁外 self-hint 并返回 `SubscribedRecheck` | `EPOLL-CUTOVER` |
+| [`IOMUX-POLL-001`](../../contracts/iomux/poll-wait.md#iomux-poll-001--阻塞前必须完成-snapshotregister-gate) | Refine | 已包含`SubscribedRecheck` final-snapshot gate | route已安装但current readiness未知时consumer不得计ready或park | `EPOLL-CUTOVER`已生效 |
+| [`IOMUX-POLL-002`](../../contracts/iomux/poll-wait.md#iomux-poll-002--source-锁拥有-readiness-与-route-publication) | Refine | 已包含compound source certificate / self-hint规则 | exact predicate不在publication guard时使用`EmptyCovered`或`SubscribedRecheck` | `EPOLL-CUTOVER`已生效 |
 | [`IOMUX-POLL-003`](../../contracts/iomux/poll-wait.md#iomux-poll-003--wake-只是-hint最终-predicate-决定返回) | Preserve | wake 只是 hint，final predicate 决定返回 | poll/select 与 epoll 都不得把 callback/queue payload 当成 target readiness truth | 全程 |
 | [`OPENED-DESC-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-001--published-slot-refcount-是-final-release-的唯一真相) | Preserve | lifecycle 单调推进 `Unpublished -> Live(n) -> Retired`；published fd-slot truth 决定 terminal final release | 不变 | 全程 |
 | [`OPENED-DESC-002`](../../contracts/task/opened-description-lifecycle.md#opened-desc-002--dupfork-共享-descriptionfd-table-只拥有-publication) | Preserve | dup/fork sharing、identity 与 non-owning capability 已 effective | 不变；watch key 继续组合 identity 与用户 fd key | 全程 |
 | [`OPENED-DESC-003`](../../contracts/task/opened-description-lifecycle.md#opened-desc-003--当前-final-release-callback-是创建时固定的单-hook) | Preserve | 创建时固定的单 `final_release` hook | 保留现有 hook，不覆盖、不动态组合，也不把它扩张成 epoll observer registry | 全程 |
 | [`OPENED-DESC-LIVENESS-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-liveness-001--non-owning-capability-只验证-terminal-opened-description-liveness) | Preserve | `task::files` 提供 opaque、non-owning、terminal identity/liveness capability 与 operation-local lease | 不变 | 全程 |
-| `EPOLL-WATCH-001` | Introduce | None（尚未生效） | `Epoll` / `EpollWatch` 唯一拥有 interest、generation、policy 与 publication；per-instance sleepable operation mutex 串行 ctl、teardown、scan 与 copyout policy | `EPOLL-CUTOVER` |
-| `EPOLL-READY-001` | Introduce | None（尚未生效） | 不建立 ready queue；operation 对固定 watch table 做 bounded scan，LT 每轮求值，ET 使用 generation-bound sticky dirty claim，ONESHOT/copyout 由 operation owner提交或回滚 | `EPOLL-CUTOVER` |
-| `EPOLL-FILE-001` | Introduce | None（尚未生效） | epoll file 以三态 empty-coverage certificate 与 fixed route slots 提供 non-sleeping pollability；coverage 不是 readiness truth；首版不开放 nested epoll | `EPOLL-CUTOVER` |
+| [`EPOLL-WATCH-001`](../../contracts/epoll/protocol.md#epoll-watch-001--watch-ownership) | Introduce | Active current rule | `Epoll` / `EpollWatch`唯一拥有interest、generation、policy与publication | `EPOLL-CUTOVER`已生效 |
+| [`EPOLL-READY-001`](../../contracts/epoll/protocol.md#epoll-ready-001--bounded-exact-scan) | Introduce | Active current rule | bounded scan、LT求值、generation dirty与copyout rollback | `EPOLL-CUTOVER`已生效 |
+| [`EPOLL-FILE-001`](../../contracts/epoll/protocol.md#epoll-file-001--non-sleeping-wait-publication) | Introduce | Active current rule | 三态coverage、fixed routes、`SubscribedRecheck`与nested rejection | `EPOLL-CUTOVER`已生效 |
 | [`TTY-TERM-001`](../../contracts/tty/data-plane.md#tty-term-001--endpoint共享唯一terminal-semantic-truth) | Preserve | 共享 `Terminal` 唯一拥有 termios、input 与 readiness predicate | Stage 0/1 只替换 poll routing capability，不复制或下沉 Terminal readiness truth | 全程 |
 | [`TTY-INPUT-001`](../../contracts/tty/data-plane.md#tty-input-001--input-ownershiprecord-boundary与readiness同源) | Preserve | input publication、read/poll predicate 与 durable recheck 同源 | TTY representative slice 保留 record/readiness owner 与预分配 dirty handoff，只迁移 consumer route | 全程 |
 
-`SUBSCRIPTION-CUTOVER` 与 `OPENED-DESC-CAPABILITY-CUTOVER` 已由 Stage 1 生效；其 current
-文本在 R2 最终 cutover 前保持不变。`EPOLL-CUTOVER` 只有在 epoll ABI、bounded scan、ET dirty
-causality、non-sleeping wait publication 与 target proof obligations 通过后，才能同时开放 syscalls、
-三个新 contract IDs 并 Refine `IOMUX-POLL-001/002`。失败时 Stage 1 effective contract 原样保留，
-不能只切 `SubscribedRecheck` 或 partial epoll core。该 cutover
+`SUBSCRIPTION-CUTOVER` 与 `OPENED-DESC-CAPABILITY-CUTOVER` 已由 Stage 1 生效；`EPOLL-CUTOVER`已在
+Stage 2 closure同时开放syscalls、三个新contract IDs并Refine `IOMUX-POLL-001/002`。该cutover
 不包含 nested epoll；首版对 epoll target 的 `EPOLL_CTL_ADD` 返回 `EINVAL` 并记录
 notice。future nesting 必须经独立 target review 与 cutover 才能把该拒绝改成成功。
 
@@ -491,9 +487,8 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
 
 以下规则只约束本 RFC 的迁移、review 与验收，不自动成为长期 current contract：
 
-- 三个 cutover unit 必须保持 effective / target 分离；任何 probe、partial integration
-  或 R0 acceptance 都不能提前改变 `docs/src/contracts/`。Stage 1 已原子完成两个 foundation
-  cutover；`EPOLL-CUTOVER` 仍保持 Not Cut Over。
+- 三个cutover unit在执行前必须保持effective / target分离；Stage 1已原子完成两个foundation cutover，
+  Stage 2已在全部floor闭合后原子完成`EPOLL-CUTOVER`。
 - `PollRequest::register(&LatchTrigger)` 是 `SUBSCRIPTION-CUTOVER` 前的 historical effective
   path；Stage 1 已删除该 bridge，current source-facing protocol 只保留 non-owning route 与
   publication-point snapshot，不得重新引入 poll/select 与 epoll 的并列 registry。
@@ -513,8 +508,8 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
   contract cutover。后续独立 `0 -> 1` resolution gate 与新的实现授权已完成 Stage 1 原子 checkpoint；
   两个 foundation cutover 同步生效；Stage 2 的 2A-2C 已关闭。首次2D runtime Apollyon触发R1 target
   renegotiation，2R随后Closed且未执行contract cutover；第二次2D runtime的MM-owned failure由R2从epoll
-  acceptance分离并重新activation，修订后的matrix又因shared timeout与pipe source两个target内failure
-  恢复Suspended。
+  acceptance分离；修订后的matrix发现的shared timeout与pipe source failure已由批准的owner扩集修复，
+  2D closure与contract cutover已完成。
 - R0 2B 的 ready bitmap、LT requeue、global notification sequence 与 epoll-file COW registry 是已完成但
   被 R1 supersede 的 implementation evidence；它们不得进入最终 current contract。2R 必须删除这些长期
   路径并保留 per-watch ET dirty correctness obligation，不能因沉没成本保留双协议。
@@ -537,6 +532,7 @@ R2 target 已由以下文档层证据闭合；R2完整继承R1协议，只修订
 - poll/select 迁移不会回退既有 latch final-scan/outcome contract；
 - 首版对 epoll target 保持稳定 fail-closed，文档和实现都不宣称 nested epoll 已进入
   `EPOLL-CUTOVER`；
-- R1 对 active-wait register 的修正已解析为独立 2R proof gate，且 2D 在其关闭前保持暂停；
+- R1 对active-wait register的修正已由独立2R proof gate关闭；2D随后完成cross-owner修复、matrix、review
+  与`EPOLL-CUTOVER`；
 - 剩余不确定性已经能归入 future probe、accepted limitation 或公开 tracking issue，
   而不是隐藏在类型实现中。

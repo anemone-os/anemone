@@ -30,21 +30,21 @@ impl Debug for TimerLane {
 }
 
 struct TimerEvent {
-    expire_ticks: u64,
+    deadline: Instant,
     lane: TimerLane,
 }
 
 impl TimerEvent {
-    fn new_irq(expire_ticks: u64, callback: Box<dyn FnOnce() + Send + 'static>) -> Self {
+    fn new_irq(deadline: Instant, callback: Box<dyn FnOnce() + Send + 'static>) -> Self {
         Self {
-            expire_ticks,
+            deadline,
             lane: TimerLane::Irq(callback),
         }
     }
 
-    fn new_threaded(expire_ticks: u64, callback: Box<dyn FnOnce() + Send + 'static>) -> Self {
+    fn new_threaded(deadline: Instant, callback: Box<dyn FnOnce() + Send + 'static>) -> Self {
         Self {
-            expire_ticks,
+            deadline,
             lane: TimerLane::Threaded(callback),
         }
     }
@@ -53,7 +53,7 @@ impl TimerEvent {
 impl Debug for TimerEvent {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TimerEvent")
-            .field("expire_ticks", &self.expire_ticks)
+            .field("deadline", &self.deadline)
             .field("lane", &self.lane)
             .finish()
     }
@@ -61,7 +61,7 @@ impl Debug for TimerEvent {
 
 impl PartialEq for TimerEvent {
     fn eq(&self, other: &Self) -> bool {
-        self.expire_ticks == other.expire_ticks
+        self.deadline == other.deadline
     }
 }
 
@@ -70,7 +70,7 @@ impl Eq for TimerEvent {}
 impl PartialOrd for TimerEvent {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         // Reverse ordering lets BinaryHeap pop the earliest deadline first.
-        Some(self.expire_ticks.cmp(&other.expire_ticks).reverse())
+        Some(self.deadline.cmp(&other.deadline).reverse())
     }
 }
 
@@ -84,8 +84,22 @@ impl Ord for TimerEvent {
 static TIMER_QUEUE: alloc::collections::binary_heap::BinaryHeap<TimerEvent> =
     alloc::collections::binary_heap::BinaryHeap::new();
 
-fn expire_ticks_after(expire: Duration) -> u64 {
-    ticks() + duration_to_ticks(expire)
+fn deadline_after(expire: Duration) -> Instant {
+    // A relative tick count loses the current tick phase: at 100 Hz, a 10 ms
+    // timeout submitted just before the next tick could expire almost
+    // immediately. `Instant::checked_add` converts the duration by rounding
+    // down to counter units, so advance every nonzero timeout by one unit to
+    // keep the representable deadline on or after the requested instant. An
+    // exactly representable timeout may therefore be late by one counter unit,
+    // which is below the periodic interrupt's delivery granularity.
+    let deadline = Instant::now()
+        .checked_add(expire)
+        .unwrap_or(Instant::from_mono(u64::MAX));
+    if expire.is_zero() {
+        deadline
+    } else {
+        Instant::from_mono(deadline.mono().saturating_add(1))
+    }
 }
 
 fn push_timer_event(event: TimerEvent) {
@@ -100,11 +114,12 @@ pub fn on_timer_interrupt() {
             // This batch bounds each IRQ critical section. Remaining expired
             // events stay queued and are handled by the next loop iteration.
             let mut events = heapless::Vec::<TimerEvent, 8>::new();
+            let now = Instant::now();
             while let Some(event) = queue.peek() {
                 if events.is_full() {
                     break;
                 }
-                if event.expire_ticks <= ticks() {
+                if event.deadline <= now {
                     events.push(queue.pop().unwrap()).unwrap();
                 } else {
                     break;

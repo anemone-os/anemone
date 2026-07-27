@@ -103,7 +103,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260726-epoll](./rfcs/epoll/index.md)：R2 已接受；以 source-neutral persistent
+- [RFC-20260726-epoll](./rfcs/epoll/index.md)：R2 已实现并关闭；以 source-neutral persistent
   readiness subscription 统一 poll/select 与 epoll 的 source-facing protocol，并由 `Epoll` / `EpollWatch`
   单独拥有 watch、generation、policy、bounded scan与ET dirty causality。Stage 0-1 已完成并关闭；eventfd/fanotify 已迁移
   到 source-neutral route，source bridge 已删除，subscription 与 opened-description 两个 foundation
@@ -113,7 +113,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   2R已按独立授权完成协议修正、两架构build、RV64 focused runtime与review。第二次2D runtime证明
   `epoll01`稳定触发MM COW shadow ancestry stack overflow；R2将该fork-stress case移出epoll验收并登记
   MM Apollyon。修订后的matrix又以`epoll_wait02`命中shared timeout early wake、以`epoll_wait06`命中pipe
-  writability predicate缺口；2D因此再次Suspended。epoll ABI、`IOMUX-POLL-001/002`的R2 Refine与三个`EPOLL-*` ID仍未cutover生效。执行证据见
+  capacity/atomic-threshold缺口；批准的timer与pipe owner修复使双root closure全部通过。`EPOLL-CUTOVER`
+  已使epoll ABI、`IOMUX-POLL-001/002` Refine与三个`EPOLL-*` ID同步生效；current truth见
+  [Epoll contract](./contracts/epoll/protocol.md)。执行证据见
   [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、

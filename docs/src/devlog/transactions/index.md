@@ -6,7 +6,6 @@
 
 ## Active
 
-- [Epoll](./2026-07-26-epoll.md)：R2 Stage 0-1 已关闭，subscription 与 opened-description foundation contract 已生效；2R已修复active-wait blocker并独立关闭。`epoll01`的MM overflow已移出分母；修订后的matrix又暴露shared timeout early wake与pipe writability predicate两个Apollyon，2D Suspended，epoll ABI、iomux R2 Refine与三个`EPOLL-*` ID保持Not Cut Over。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
@@ -25,6 +24,7 @@
 
 ## Completed
 
+- [Epoll](./2026-07-26-epoll.md)：R2 Stage 0-2与2R/2D均已关闭；timer absolute deadline与pipe capacity/atomic-threshold修复通过双root closure，`EPOLL-CUTOVER`已使epoll ABI、iomux Refine与三个`EPOLL-*` ID同步生效。MM COW issue继续由register独立跟踪。
 - [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
 - [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
 - [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。

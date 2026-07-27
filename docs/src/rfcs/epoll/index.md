@@ -1,18 +1,17 @@
 # RFC-20260726-epoll
 
-**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Closed / Epoll Not Effective
+**状态：** Closed / Stage 0-2 Closed / EPOLL-CUTOVER Effective
 **修订：** R2
 **负责人：** doruche
 **最后更新：** 2026-07-27
 **领域：** fs / iomux / epoll / task files / scheduler wait
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 **影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-001..003`、`OPENED-DESC-LIVENESS-001`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001/002`；Introduce `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前有两个 R2 acceptance Apollyon：
-`epoll_wait02` 与 iomux timeout cases 同样早唤醒，`epoll_wait06` 则暴露 pipe `WRITABLE` predicate
-不满足测试依赖的原子写阈值。active-wait blocker 已由 R1/2R neutralize，MM COW shadow overflow已由R2
-分离并进入 [register](../../register/open-issues.md#ane-20260727-mm-cow-shadow-ancestry-stack-overflow)。
-**下一步：** Checkpoint 2R 已关闭；2D 因 R2 target内两个cross-owner runtime failure暂停。修复需要扩入
-timeout或pipe source owner，排除则需要新的target revision；当前不得执行`EPOLL-CUTOVER`或进入下一gate。
+**开放问题：** epoll target内无开放finding；[Tracking Issues](./tracking-issues.md) 已关闭。MM COW shadow
+overflow仍由 [register](../../register/open-issues.md#ane-20260727-mm-cow-shadow-ancestry-stack-overflow)
+独立跟踪，不属于epoll closure。
+**下一步：** 本RFC已关闭；本事务不得自动进入任何后续gate。future nested epoll、socket readiness或
+能力扩展必须另行立项/接受。
 
 ## 文档状态
 
@@ -35,8 +34,8 @@ scan 取代 ready queue，并把 epoll-file wait publication 收窄到独立的 
 2D 已暂停，2R 已独立关闭；随后 2D 组合运行证明 fixed `epoll01` 的高频 protected-fork workload 会触发
 MM COW shadow ancestry stack overflow。该缺陷不经过 epoll owner、ABI 或 readiness protocol，开发者据此
 接受 R2：从 epoll closure denominator 删除 `epoll01`，把 MM 缺陷登记到 register，并重新激活 2D。
-修订后的matrix又命中shared timeout early wake与pipe source writability两个target内failure，2D因此
-恢复Suspended；三个 `EPOLL-*` target ID 仍未生效。
+修订后的matrix又命中shared timeout early wake与pipe source writability两个target内failure；开发者已批准
+对应cross-owner扩集；修复、完整matrix与review闭合后，2D已执行`EPOLL-CUTOVER`，三个`EPOLL-*` ID生效。
 
 ## 摘要
 
@@ -155,6 +154,7 @@ Current effective baseline：
 - [Scheduler Latch wait round](../../contracts/scheduler/latch-wait-round.md)
 - [Signal temporary-mask delivery handoff](../../contracts/signal/temporary-mask-delivery.md)
 - [Poll wait 与 source registration](../../contracts/iomux/poll-wait.md)
+- [Epoll protocol](../../contracts/epoll/protocol.md)
 - [Opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)
 - [Serial TTY data plane](../../contracts/tty/data-plane.md)
 
@@ -180,7 +180,8 @@ resolved manifest 已按授权完成。后续 `1 -> 2` gate 已依据 live owner
 2B 与 2C 也已依次关闭；2D 首次 RV64 runtime 发现前序 epoll-file 协议 blocker 后暂停。R1
 target renegotiation 已接受，Checkpoint 2R 已按独立授权关闭。第二次 2D runtime 暴露 MM COW shadow
 stack overflow后，R2已把`epoll01`移出epoll acceptance、登记MM issue并重新激活2D；修订后的matrix
-因shared timeout与pipe source两个blocker再次暂停。
+因shared timeout与pipe source两个blocker再次暂停，随后获批扩入两个owner。两项owner-local修复、
+双libc closure与review通过后，Stage 2已关闭并执行`EPOLL-CUTOVER`。
 
 ## 修订记录
 
@@ -188,7 +189,7 @@ stack overflow后，R2已把`epoll01`移出epoll acceptance、登记MM issue并�
 | --- | --- | --- | --- | --- |
 | R0 | 2026-07-26 | Implementation Stopped before Epoll Cutover | 初始 accepted target；定义 source-neutral subscription、terminal opened-description liveness、epoll owner/ready/file 语义与三个 cutover unit；foundation 已 cut over，epoll target 未生效。 | [初始事务](../../devlog/transactions/2026-07-26-epoll.md) |
 | R1 | 2026-07-27 | Accepted for Implementation | 保留 owner、ABI、lifecycle 与首版能力；以 operation-serialized bounded scan 取代 ready queue/COW/sequence，并以三态 coverage + fixed routes 形成 non-sleeping wait publication；`IOMUX-POLL-001/002` 增加 `SubscribedRecheck` target。 | [R1 decision / 2R resolution](../../devlog/transactions/2026-07-26-epoll.md#r1-target-renegotiation-and-checkpoint-2r-resolution---2026-07-27) |
-| R2 | 2026-07-27 | Accepted for Implementation / 2D Suspended | 完整保留 R1 epoll 语义与 contract delta；确认 `epoll01` 的失败属于 MM COW shadow ancestry，于是从 epoll closure denominator删除该fork-stress case并登记独立MM issue。修订后的runtime又命中timeout与pipe source两个acceptance blocker。 | [R2 decision / 2D reactivation](../../devlog/transactions/2026-07-26-epoll.md#r2-acceptance-boundary-correction-and-2d-reactivation---2026-07-27) |
+| R2 | 2026-07-27 | Closed / Effective | 完整保留 R1 epoll 语义与 contract delta；确认 `epoll01` 的失败属于 MM COW shadow ancestry，于是从 epoll closure denominator删除该fork-stress case并登记独立MM issue。timeout与pipe source blocker经批准扩集后修复，2D closure执行`EPOLL-CUTOVER`。 | [2D closure / cutover](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27) |
 
 ## 方案
 
@@ -311,14 +312,12 @@ R2 target 继承 R1 的以下要求：
 - Preserve `TTY-TERM-001` / `TTY-INPUT-001` 的 Terminal/input readiness truth；TTY
   representative slice 只替换 poll route，不改变 record boundary。
 
-R2 中对 `IOMUX-POLL-001/002` 的再次 Refine 与三个 `EPOLL-*` ID 只在最终
-`EPOLL-CUTOVER` 原子生效；接受 R1/R2 与关闭 2R 都不提前更新 current contract。Stage 1 已生效的
-foundation contract 在此之前继续保持唯一 effective 规则。
+R2 中对 `IOMUX-POLL-001/002` 的再次 Refine 与三个 `EPOLL-*` ID 已在最终
+`EPOLL-CUTOVER` 原子生效；current contract现由iomux与epoll contract页共同保存。
 
 ## 接受边界
 
-本文已经作为 R2 Accepted for Implementation，但不表示 R2 `Contract Impact` 已经 cut over。
-当前文档层已经闭合以下边界：统一只约束
+本文已经作为 R2 完成实现并关闭，R2 `Contract Impact` 已经 cut over。闭合边界为：统一只约束
 source-facing subscription protocol，不强制统一 source-local registry/lock/handoff；每个
 `Epoll` 使用一个 sleepable operation mutex 串行 ctl、teardown、bounded scan 与 copyout policy；
 source notification 只发布对应 watch 的 sticky dirty obligation，并通过独立 wait-publication
@@ -342,8 +341,8 @@ poll bridge，并把全量 source migration、bridge 删除与两个 foundation 
 该 checkpoint 已完成并使 foundation contract 生效；独立 resolution gate 已把 Stage 2 epoll ABI/core
 解析为 Ready，2A-2C 也已按独立授权关闭。2D runtime blocker 触发的 R1 review 已完成；2R 的 authoritative
 closure 位于 [实施计划](./implementation.md#checkpoint-2r-closedoperation-serialized-scan-与-non-sleeping-wait-publication)。
-2R 关闭本身不执行 `EPOLL-CUTOVER`。R2 acceptance 已独立重新激活 2D；影响 owner、ABI、可见语义或
-接受边界的后续反馈仍必须回到 RFC review。
+2R 关闭本身没有执行 `EPOLL-CUTOVER`；后续2D closure已独立执行该cutover。影响owner、ABI、可见语义或
+接受边界的future变化仍必须进入新的RFC/revision review。
 
 ## 备选方案
 
@@ -416,10 +415,7 @@ R1 只让 active-wait 可达的 coverage/route publication 使用极短 spinlock
 
 ## 收口
 
-R1 已接受，transaction 继续记录本次尚未 cut over 的语义修订。Stage 0 已完成 0A-0D，Stage 1 也已按
-独立授权完成并关闭。当前 target-level blocker 已 neutralize，target / current / RFC-local 分层和
-[实施计划](./implementation.md) 保持权威；两个
-foundation cutover 已在同一 checkpoint 生效，epoll core 与三个 `EPOLL-*` contract ID 仍未生效。
-2A-2C 已关闭；2D 因 runtime blocker 暂停。R1 Checkpoint 2R 已按独立授权、实现、runtime proof与review
-关闭，但不自动恢复2D。`EPOLL-CUTOVER` 与三个 `EPOLL-*` ID 保持 Not Effective，
-`IOMUX-POLL-001/002` 也继续保持 Stage 1 effective 文本，Stage 2 不得关闭。
+R2实现已完成。Stage 0的0A-0D、Stage 1、Stage 2的2A-2C、2R与2D均已独立关闭；两个foundation
+cutover及最终`EPOLL-CUTOVER`均已生效。current truth由
+[iomux contract](../../contracts/iomux/poll-wait.md)与
+[epoll contract](../../contracts/epoll/protocol.md)保存；本RFC保留target、取舍与迁移历史。

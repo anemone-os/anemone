@@ -1,14 +1,13 @@
 # Epoll 实施计划
 
-**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Closed
+**状态：** Stage 0-2 Closed / EPOLL-CUTOVER Effective
 **适用修订：** R2
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **目标不变量：** [Epoll 与 Poll Subscription 不变量需求](./invariants.md)
 **当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`SIGNAL-TEMP-MASK-*`](../../contracts/signal/temporary-mask-delivery.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)、[`TTY-TERM-001` / `TTY-INPUT-001`](../../contracts/tty/data-plane.md)
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前有两个 R2 acceptance Apollyon：共享timeout
-路径的早唤醒，以及pipe source `WRITABLE` predicate与`epoll_wait06`要求不符；active-wait与MM blocker
-已分别由R1/2R和R2 routing neutralize
+**开放问题：** epoll target内无开放finding；[Tracking Issues](./tracking-issues.md)已关闭。MM issue仍在
+register独立开放
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
 本文把公共 R2 中已经闭合的 accepted target 解析成滚动实施路线。R2完整继承R1的epoll协议，只修订2D
@@ -23,7 +22,8 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence route。Checkpoint 2R 已按独立
 授权关闭。2D第二次runtime命中MM COW shadow ancestry stack overflow后，开发者接受R2、删除
 `epoll01` closure case、登记MM issue并重新激活2D。修订后的matrix随后命中两个cross-owner target
-failure，2D再次暂停；`EPOLL-CUTOVER`仍未执行。
+failure，开发者批准两个owner扩集；修复、closure matrix、review与write-back完成后，2D已执行
+`EPOLL-CUTOVER`并关闭Stage 2。
 
 ## 实施原则
 
@@ -78,7 +78,7 @@ failure，2D再次暂停；`EPOLL-CUTOVER`仍未执行。
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 已独立完成 |
-| Stage 2 | 2D Suspended / 2R Closed | 2A-2C 已形成 candidate core/ABI；2R 已替换 R0 ready/wait route；R2排除MM-owned `epoll01`后，13-case matrix又暴露共享timeout和pipe predicate blocker | `EPOLL-CUTOVER`，尚未生效 | 由owner expansion修复两个blocker，或经新target revision重订分母后重新activation |
+| Stage 2 | Closed | 2A-2C、2R与2D均已关闭；R2排除MM-owned `epoll01`，其余13-case与iomux/timerfd matrix通过 | `EPOLL-CUTOVER`已生效 | 本RFC不得自动进入后续gate |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
@@ -674,7 +674,7 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 
 ### 阶段成熟度与授权边界
 
-- **Checkpoint 2D Suspended / Checkpoint 2R Closed。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
+- **Checkpoint 2D Closed / Checkpoint 2R Closed。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
   `OPENED-DESC-CAPABILITY-CUTOVER` 已 effective；上一节 resolution gate 已完成 live owner、ABI、LTP、
   test harness 与 current-contract preflight。
 - 开发者先授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
@@ -682,13 +682,14 @@ Stage 1 独立关闭后已执行一次只读 preflight：
   2D 首次 QEMU 在 focused test 内 panic，LTP 与 `EPOLL-CUTOVER` 均未到达，原2D执行授权随暂停耗尽。
   R1 acceptance 当时只授权 target correction 与 2R resolution；后续独立授权已关闭2R。开发者随后重新
   激活2D；第二次runtime暴露MM COW shadow stack overflow后，又明确接受R2并授权按修订后的matrix继续2D。
-  修订后的运行在`epoll_wait02/06`命中target内FAIL，按本节停止条件再次暂停。
+  修订后的运行在`epoll_wait02/06`命中target内FAIL，按本节停止条件再次暂停；开发者随后明确批准扩入
+  pipe与timer production owner，并按下述扩集记录重新激活2D；两项修复与closure现已完成。
 - Stage 2 保持一个原子 integration / acceptance unit。2A-2C 只形成
   不可独立合入的 stacked implementation evidence；在 2D 完成 kernel ABI、focused test、LTP、review、current
   contract 与 transaction write-back 前，任何 partial core、syscall handler 或单独 contract page 都不得合入
   有效分支或被其它功能依赖。
 - 原 Stage 2 activation / checkpoint授权事实保留在transaction；任一 checkpoint closure都不自动授权下一个。
-  2R已按独立授权关闭，2D曾由R2 decision重新activation，现因新runtime blocker暂停。每次activation、closure、validation与
+  2R已按独立授权关闭，2D曾由R2 decision重新activation，并在cross-owner扩集获批后完成closure。每次activation、closure、validation与
   partial-code disposition只追加到transaction，不复制本文的authoritative delivery/write-set定义。
 
 ### 阶段内 checkpoint 路线
@@ -1285,6 +1286,44 @@ R2组合运行完成正常QEMU退出：257项KUnit与11项focused oracle通过�
 两个修复都需要越出2D manifest进入timer/wait或pipe source production owner；从matrix排除则会再次改变
 acceptance boundary。2D因此Suspended，current contract与`EPOLL-CUTOVER`保持不变。
 
+#### 2D cross-owner expansion approval - 2026-07-27
+
+开发者明确批准同时扩入pipe与timer owner，优先修复两个target内failure，而不是降低R2 acceptance。
+2D据此重新Active；本次授权不改变R2 target invariant、epoll owner、ABI、Contract Impact或13-case
+denominator，也不授权进入下一gate。
+
+- pipe修复进入`anemone-kernel/src/fs/pipe.rs`，并复用本阶段已列的Kconfig物化文件：由pipe owner把
+  一页atomic-write threshold与`pipe_capacity_pages = 2`固定后备/默认逻辑容量分开，统一修正WRITABLE
+  predicate，并让`F_SETPIPE_SZ`在后备上界内维护诚实的逻辑容量；epoll不得缓存pipe容量或增加consumer特判。
+- timer修复只进入`anemone-kernel/src/time/timer/{mod.rs,irq.rs,threaded.rs}`：soft timer queue改用
+  monotonic absolute deadline，消除`ticks() + duration_to_ticks()`忽略当前tick phase造成的early expiry；
+  scheduler wait API、wait identity、timer callback lane与periodic interrupt programming均保持不变。
+- owner-local修复必须先通过两架构build；RV64 closure临时选择`epoll + iomux + timerfd`，除原2D matrix外
+  还要证明共享timeout family与timerfd regression。若修复需要继续扩入scheduler/wait core、timekeeper、
+  architecture timer或其它source，重新触发write-set stop，不得静默扩大。
+
+上述修复是对现有source/timer visible semantics的correctness correction；current contract正文不变，
+`EPOLL-CUTOVER`仍只在完整2D floor、review与write-back全部闭合后执行。
+开发者随后明确批准该pipe visible-semantics route及
+`docs/src/register/current-limitations.md`写集扩展；原“单页固定、不可扩容”限制在同一checkpoint收窄，
+但动态backing、资源账本与procfs knobs仍保持限制。
+
+#### 2D closure - 2026-07-27
+
+**Closed。** timer owner以向上取整的monotonic absolute deadline消除tick-phase early expiry；pipe owner以
+`pipe_capacity_pages = 2`把固定后备/默认逻辑容量与一页atomic-write threshold分开，并让
+`F_SETPIPE_SZ`在后备上界内维护逻辑容量。
+最终RV64 repository wrapper完成257项KUnit、11项focused oracle与双root `epoll + iomux + timerfd`
+matrix：glibc `27/27`、musl `26/26`且仅精确skip `epoll_create02`，总计
+`attempted=53 passed=53 failed=0 infra_failed=0 skipped=1`。两架构focused app build、RV64/LA64 release build、
+format/diff/docs与最终review闭合；profile和master image哈希恢复/保持。
+
+同一checkpoint已执行唯一`EPOLL-CUTOVER`：四个syscall handlers、`IOMUX-POLL-001/002` Refine与
+`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`同步生效。完整命令、日志hash、case分类、
+review与Not Run证据见
+[transaction closure](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27)。
+Stage 2与RFC关闭，本计划不得自动进入任何后续gate。
+
 ### Resolved Write Set Manifest
 
 本节是 Stage 2 从 R0 延续的整体 integration manifest；Checkpoint 2R 的 closed subset 以上一节为权威。
@@ -1305,6 +1344,8 @@ R1 新增的 config / iomux 文件已并入整体 manifest；R2另批准register
 - `anemone-kernel/src/task/files.rs`
 - `anemone-kernel/src/task/sig/delivery.rs`
 - `anemone-kernel/src/fs/api/iomux/{wait.rs,ppoll.rs,pselect6.rs}`
+- `anemone-kernel/src/fs/pipe.rs`（本次获批的WRITABLE predicate、Kconfig固定后备/逻辑容量与notification修复）
+- `anemone-kernel/src/time/timer/{mod.rs,irq.rs,threaded.rs}`（仅本次获批的absolute-deadline修复）
 
 允许修改的 kernel ABI/syscall adapter：
 
@@ -1322,7 +1363,7 @@ R1 新增的 config / iomux 文件已并入整体 manifest；R2另批准register
 - `anemone-apps/user-test/src/ltp/config.rs`
 - `anemone-apps/user-test/ltp/groups/epoll.txt`（新增）
 - `conf/rootfs/pretest-{rv64,la64}.toml`
-- `anemone-apps/user-test/ltp/profile.txt`：只允许验证时临时选择 `epoll` + `iomux`；必须恢复且diff不得
+- `anemone-apps/user-test/ltp/profile.txt`：只允许验证时临时选择 `epoll` + `iomux` + `timerfd`；必须恢复且diff不得
   进入checkpoint
 
 允许修改的 contract/RFC/transaction/navigation：
@@ -1334,10 +1375,11 @@ R1 新增的 config / iomux 文件已并入整体 manifest；R2另批准register
 - `docs/src/devlog/transactions/index.md`
 - `docs/src/devlog/2026-07-20_to_2026-08-02.md`
 - `docs/src/register/open-issues.md`（只允许登记本次MM COW shadow ancestry issue）
+- `docs/src/register/current-limitations.md`（只允许收窄本次pipe固定容量/F_SETPIPE_SZ限制）
 
 Validation-only 输入：
 
-- `anemone-kernel/src/fs/{anonymous/mod.rs,pipe.rs,eventfd.rs,timerfd.rs}`、
+- `anemone-kernel/src/fs/{anonymous/mod.rs,eventfd.rs,timerfd.rs}`、
   `anemone-kernel/src/fs/fanotify/{file.rs,group.rs,queue.rs}`、
   `anemone-kernel/src/device/{console.rs,tty/file.rs,tty/terminal.rs,block/devfs.rs,char/devfs.rs}`
 - snapshot-only poll owners under `anemone-kernel/src/fs/{devfs,ext4,proc,ramfs}/**`；只做分类/audit，不修改
@@ -1349,10 +1391,14 @@ Validation-only 输入：
 不得修改：
 
 - `anemone-kernel/src/sched/**`、wait core、除已列context枚举外的Signal owner、architecture trap/IPI、`Event`
-- pipe/eventfd/timerfd/fanotify/TTY/socket等source production code；Stage 2只消费已生效subscription contract
+- eventfd/timerfd/fanotify/TTY/socket等未获扩集的source production code；pipe只允许上述predicate、
+  Kconfig固定容量与notification修复
+- `anemone-kernel/src/time/timekeeper.rs`、scheduler/wait core与architecture timer programming；timer扩集只限
+  owner-local queue deadline表示与两个现有submission adapter
 - `task::files` publication/refcount/final-release语义、`FileDescOps`形状或dynamic final-release observer；只增加
   lease窄操作面并使用既有static hook
-- nested epoll、socket persistent readiness、除已列MM issue外的register/current-limitations、LTP固定source与master image
+- nested epoll、socket persistent readiness、除已列MM issue和pipe限制收窄外的register/current-limitations、
+  LTP固定source与master image
 - build orchestration、额外wrapper、通用test framework或未列current contract
 
 若真实owner boundary需要触碰未列文件，worker必须先报告文件、原因、contract/ABI/验证影响；批准后先更新

@@ -23,7 +23,12 @@ use crate::{
 
 use super::iomux::PollRoute;
 
-const PIPE_CAPACITY_BYTES: usize = PagingArch::PAGE_SIZE_BYTES;
+const PIPE_ATOMIC_WRITE_BYTES: usize = PagingArch::PAGE_SIZE_BYTES;
+const PIPE_STORAGE_BYTES: usize = PIPE_CAPACITY_PAGES * PIPE_ATOMIC_WRITE_BYTES;
+static_assert!(
+    PIPE_CAPACITY_PAGES >= 2,
+    "pipe_capacity_pages must be at least two so total capacity and the atomic-write threshold remain distinct"
+);
 
 #[derive(Clone, Debug)]
 struct PipePollRoute {
@@ -80,7 +85,12 @@ struct Pipe {
     ///
     /// Currently we use a statically allocated ring buffer. In future we may
     /// extend it to support dynamic resizing.
-    buf: Box<RingBuffer<u8, { PagingArch::PAGE_SIZE_BYTES }>>,
+    buf: Box<RingBuffer<u8, PIPE_STORAGE_BYTES>>,
+    /// User-visible capacity within the fixed backing store. Keeping this
+    /// separate from the one-page atomic-write bound lets a default pipe
+    /// remain writable after a small write while a one-page pipe only becomes
+    /// writable again after a complete page has been drained.
+    capacity: usize,
 
     rx_cnt: usize,
     tx_cnt: usize,
@@ -97,6 +107,7 @@ impl Pipe {
     fn new_anonymous() -> (PipeRx, PipeTx) {
         let pipe = Pipe {
             buf: Box::new(RingBuffer::new()),
+            capacity: PIPE_STORAGE_BYTES,
             rx_cnt: 1,
             tx_cnt: 1,
             rx_poll_routes: Arc::new(Vec::new()),
@@ -109,7 +120,12 @@ impl Pipe {
     }
 
     fn capacity(&self) -> usize {
-        self.buf.len() + self.buf.available()
+        self.capacity
+    }
+
+    fn available(&self) -> usize {
+        assert!(self.buf.len() <= self.capacity);
+        self.capacity - self.buf.len()
     }
 }
 
@@ -270,7 +286,12 @@ fn pipe_rx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
 fn pipe_tx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
     let mut revents = PollEvent::empty();
 
-    if interests.contains(PollEvent::WRITABLE) && !pipe.buf.is_full() {
+    // Linux-compatible writer readiness requires a complete atomic write to
+    // fit. Partially draining a one-page pipe may let a smaller nonblocking
+    // write succeed, but must not publish a new poll/epoll edge.
+    // Read-side notifications remain hints; this source-owned predicate is the
+    // single truth used by poll, select, and epoll rechecks.
+    if interests.contains(PollEvent::WRITABLE) && pipe.available() >= PIPE_ATOMIC_WRITE_BYTES {
         revents |= PollEvent::WRITABLE;
     }
 
@@ -292,7 +313,8 @@ fn pipe_read_locked(pipe: &mut Pipe, buf: &mut [u8]) -> (usize, Option<Arc<Vec<P
 }
 
 fn pipe_write_locked(pipe: &mut Pipe, buf: &[u8]) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
-    let written = pipe.buf.try_push_slice(buf);
+    let to_write = pipe.available().min(buf.len());
+    let written = pipe.buf.try_push_slice(&buf[..to_write]);
     let routes = if written > 0 {
         Some(pipe.rx_poll_routes.clone())
     } else {
@@ -408,12 +430,12 @@ fn pipe_tx_write(
     }
 
     let (result, routes) = if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
-        let available = pipe.buf.available();
-        if available == 0 || (buf.len() <= PIPE_CAPACITY_BYTES && available < buf.len()) {
+        let available = pipe.available();
+        if available == 0 || (buf.len() <= PIPE_ATOMIC_WRITE_BYTES && available < buf.len()) {
             return Err(SysError::Again);
         }
 
-        let to_write = if buf.len() > PIPE_CAPACITY_BYTES {
+        let to_write = if buf.len() > PIPE_ATOMIC_WRITE_BYTES {
             available.min(buf.len())
         } else {
             buf.len()
@@ -421,13 +443,13 @@ fn pipe_tx_write(
         let (written, routes) = pipe_write_locked(&mut pipe, &buf[..to_write]);
         (Ok(written), routes)
     } else {
-        let needs_atomic_write = buf.len() <= PIPE_CAPACITY_BYTES;
+        let needs_atomic_write = buf.len() <= PIPE_ATOMIC_WRITE_BYTES;
 
         while pipe.rx_cnt > 0
             && if needs_atomic_write {
-                pipe.buf.available() < buf.len()
+                pipe.available() < buf.len()
             } else {
-                pipe.buf.available() == 0
+                pipe.available() == 0
             }
         {
             if get_current_task().has_unmasked_signal() {
@@ -449,7 +471,7 @@ fn pipe_tx_write(
             );
             (Ok(written), routes)
         } else {
-            let to_write = pipe.buf.available().min(buf.len());
+            let to_write = pipe.available().min(buf.len());
             let (written, routes) = pipe_write_locked(&mut pipe, &buf[..to_write]);
             (Ok(written), routes)
         }
@@ -523,12 +545,15 @@ fn pipe_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     }
 }
 
-fn pipe_set_capacity(pipe: &SpinLock<Pipe>, requested: u64) -> Result<usize, SysError> {
+fn pipe_set_capacity(
+    pipe: &SpinLock<Pipe>,
+    requested: u64,
+) -> Result<(usize, Option<Arc<Vec<PipePollRoute>>>), SysError> {
     if requested > i32::MAX as u64 {
         return Err(SysError::InvalidArgument);
     }
 
-    let pipe = pipe.lock();
+    let mut pipe = pipe.lock();
     let requested = requested as usize;
     let rounded = if requested == 0 {
         PagingArch::PAGE_SIZE_BYTES
@@ -537,12 +562,17 @@ fn pipe_set_capacity(pipe: &SpinLock<Pipe>, requested: u64) -> Result<usize, Sys
     };
 
     if rounded < pipe.buf.len() {
-        Err(SysError::Busy)
-    } else if rounded <= pipe.capacity() {
-        Ok(pipe.capacity())
-    } else {
-        Err(SysError::PermissionDenied)
+        return Err(SysError::Busy);
     }
+    if rounded > PIPE_STORAGE_BYTES {
+        return Err(SysError::PermissionDenied);
+    }
+
+    let was_writable = pipe.available() >= PIPE_ATOMIC_WRITE_BYTES;
+    pipe.capacity = rounded;
+    let became_writable = !was_writable && pipe.available() >= PIPE_ATOMIC_WRITE_BYTES;
+    let routes = became_writable.then(|| pipe.tx_poll_routes.clone());
+    Ok((pipe.capacity(), routes))
 }
 
 fn pipe_fcntl(file: &File, ctx: &FcntlCtx) -> Result<FileFcntlOutcome, SysError> {
@@ -550,10 +580,11 @@ fn pipe_fcntl(file: &File, ctx: &FcntlCtx) -> Result<FileFcntlOutcome, SysError>
 
     match ctx.cmd() {
         FileFcntlCmd::GetPipeSize => Ok(FileFcntlOutcome::Handled(pipe.lock().capacity() as u64)),
-        FileFcntlCmd::SetPipeSize => Ok(FileFcntlOutcome::Handled(pipe_set_capacity(
-            pipe,
-            ctx.arg(),
-        )? as u64)),
+        FileFcntlCmd::SetPipeSize => {
+            let (capacity, routes) = pipe_set_capacity(pipe, ctx.arg())?;
+            notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "set_capacity");
+            Ok(FileFcntlOutcome::Handled(capacity as u64))
+        },
     }
 }
 
