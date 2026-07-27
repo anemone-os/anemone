@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Checkpoint 1-2 Closed / Checkpoint 3 Not Activated / Unauthorized
+**Status:** Active / R1 Stage 2 Closed / Stage 3 Outline / Unauthorized
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
@@ -673,3 +673,78 @@ limitations无修改。
 **Not Run:** QEMU/runtime KUnit、Checkpoint 3的两次fresh-disk RV64 acceptance、`smp>1`、LA64 build/runtime、
 virtio-pci、hardware、final harness、完整LTP、socket/control-plane与Stage 3均Not Run；host/build证据不外推到
 这些层级。
+
+### 2026-07-27 - R1 Stage 2 Checkpoint 3 activated and manifest expansion approved
+
+**Authorization / entry:** 用户延续唯一GOAL并明确授权只完成Stage 2 Checkpoint 3，入口为
+`dev/drc/alpha@b044bcfb`；tracked与untracked worktree在实现前均clean，该commit只关闭Checkpoint 2。
+Checkpoint 3覆盖provider/recheck/worker closure、两次fresh-disk RV64 acceptance、review、validation、
+write-back与单独`frame-path:`提交；不得自动运行`2 -> 3`resolution、进入Stage 3或cutover contract。
+
+**Preflight / frozen boundary:** 重新读取AGENTS/LOCAL、R1正文与invariants、Stage 2 Ready、tracking issues、
+register、System Power current contract、当前transaction、Checkpoint 2 diff与live VirtIO provider、worker、
+validation、KernelConfig/feature graph、Just/xtask help和RV64 wrapper。queue仍为64，RX/TX slot各32，pump budget
+为32/32，repoll round为8；kernel`kunit`仍只向stack启用`icmp-validation-probe`。wrapper仍用`smp=1`、
+`memory=1G`并在每次运行前从调用者指定的4 GiB只读pretest master覆盖worktree-local runtime disk。
+
+实现把现有recheck bit + weak wake收拢为driver-private latch，并补release slot/token/outstanding/mapping
+assertion；worker继续只按`Recheck::Immediate`同wake-cycle repoll，达到静态round上限后request/yield。KUnit-only
+单NIC query按Stage 2 conformance重命名，仍带Stage 3多设备前替换条件。
+
+**Manifest expansion:** 首次kernel build发现query定义与调用虽在8.9原manifest内，唯一crate-private re-export
+位于未列出的`anemone-kernel/src/driver/net/mod.rs`。实现立即停止并恢复可编译旧命名；用户随后明确批准只把
+该文件的一行re-export命名同步加入Checkpoint 3 manifest。扩展属于同一driver owner，不扩大public API或
+visibility，不改变shared contract、ABI、visible semantics、R1 acceptance或validation floor；authoritative
+manifest已先更新，随后才继续实现。
+
+**Activation-time contract state:** Stage 2 cutover为None；六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective。Stage 3仍为Outline / Unauthorized。
+
+### 2026-07-27 - R1 Stage 2 Checkpoint 3 implementation, review and closure
+
+**Delivery:** `VirtIONetDevice`把原recheck bit与weak wake收拢为driver-private `RecheckLatch`：publication先以
+release ordering提交durable predicate，再调用stateless wake；take只清predicate，wake未安装、失效或重复
+publication均不丢fact。KUnit覆盖无wake publication、重复/coalesced publication与take后重新publication。
+IRQ仍只ack、计数、publish与wake，不取得slot或进入protocol callback；worker源码无修改，继续只对
+`Recheck::Immediate`在同一action内repoll，并受8轮静态上界约束。
+
+RX/TX completion现在断言matching queue token恰有一个owner slot与backing bound；live mapping与TX
+outstanding的capacity/underflow断言在release build也保留，diagnostic snapshot仍不驱动production。KUnit-only
+single-NIC query/test改为Stage 2 conformance命名，保持crate-private、feature-gated并保留Stage 3多设备前替换
+条件。没有调整三个KernelConfig数值，没有修改shared API、worker、current contract、ABI、visible semantics或
+R1 acceptance。
+
+**Review / audit:** 独立只读review逐项复核latch publish/take交错、weak wake lifetime、IRQ/raw-lock边界、
+slot/token/unsafe owner window、outstanding/mapping assertion、worker repoll上界、validation visibility与获批manifest
+扩展，结论为Apollyon 0、Keter 0、Euclid 0、Safe 0。dependency/public-surface、slot/mapping/unsafe、
+IRQ/wake/worker、deadline/fairness、validation-bypass与manifest audit均未发现停止条件；
+`driver/net/mod.rs`的diff只有获批的一行crate-private re-export重命名。
+
+**Host / build validation:** `cargo test -p anemone-net-api -p anemone-smoltcp-stack`通过：2个stack unit、
+7个bounded-progress test、9个walking-skeleton integration与2个compile-fail doctest；deterministic host provider
+实际制造并恢复exhaustion。`cargo check -p anemone-smoltcp-stack --no-default-features`与
+`cargo check -p anemone-smoltcp-stack --no-default-features --features icmp-validation-probe`均通过。canonical
+`just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`在sandbox内因已知lwext4 `SIGSYS`
+环境噪声失败，相同仓库命令在sandbox外通过。
+`just fmt kernel --check`只报告与Stage 1 baseline完全相同的3处vendored smoltcp diff，changed Rust files没有
+新增formatter diff。
+
+**Two fresh-disk RV64 runs:** 连续运行
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage2-c3-rv64-run1.log`
+与
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage2-c3-rv64-run2.log`；
+wrapper每次都从同一4 GiB只读pretest master覆盖worktree-local runtime disk，拓扑为`smp=1`、`memory=1G`。
+run1/run2均为261/261 KUnit通过，新latch KUnit通过，burst/reply均为128/128，TX submit/completion均为
+129/129，outstanding均回落至0，mapping均回落至baseline 32；high-water分别为outstanding 3/6、mapping
+35/38，IRQ recheck分别为63/61。worker action/max-round/request/yield两轮均为`2/7/0/0`，没有越过8轮上界；
+natural exhaustion均为0，按R1 proof分工不阻塞closure，因为host matrix拥有确定性exhaustion/recovery proof。
+两轮都无panic、timeout或busy-spin迹象，并按`filesystem -> device -> PowerOff`正常关机。随wrapper运行的
+`sys` profile为glibc/musl各2例、合计4/4通过，只是环境回归证据，不作为network closure或完整LTP证明。
+
+**Closure / contract state:** Checkpoint 3与Stage 2均为**Closed**。六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine继续**Not Effective**，没有创建或修改network current contract、register或
+current limitations。本事务立即停在Stage 2 closure；`2 -> 3 Implementation Resolution Gate`、Stage 3与
+`NFP-FINAL-CUTOVER`均未获授权且未运行。
+
+**Not Run:** `smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、
+socket/control-plane、Stage 3与contract cutover均Not Run；host与RV64/single-core证据不外推到这些层级。

@@ -187,8 +187,8 @@ pub(crate) fn take_published_netdevs() -> Vec<PublishedNetdev<VirtIONetProvider>
 }
 
 #[cfg(feature = "kunit")]
-pub(crate) fn stage1_probe_stats() -> Option<VirtIONetStats> {
-    // Temporary single-NIC evidence query for the Stage 1 vertical slice.
+pub(crate) fn stage2_conformance_stats() -> Option<VirtIONetStats> {
+    // Temporary single-NIC evidence query for Stage 2 conformance.
     // Replace it with owner-scoped multi-device validation before Stage 3
     // acceptance instead of turning this shape into a control-plane API.
     let driver: &dyn Driver = VIRTIO_NET_DRIVER.as_ref();
@@ -201,7 +201,7 @@ pub(crate) fn stage1_probe_stats() -> Option<VirtIONetStats> {
         if let Some(netdev) = state.device.upgrade() {
             assert!(
                 stats.replace(netdev.stats()).is_none(),
-                "multiple VirtIO-Net devices cannot supply one Stage 1 probe snapshot"
+                "multiple VirtIO-Net devices cannot supply one Stage 2 conformance snapshot"
             );
         }
     });

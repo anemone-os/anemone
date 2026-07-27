@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Active / Checkpoint 1-2 Closed / Checkpoint 3 Not Activated / Unauthorized
+**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Closed / Checkpoint 1-3 Closed；Stage 3 Outline / Unauthorized
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -18,8 +18,8 @@ cutover 要求
 > 又发现 concrete driver、通用 worker 与 validation vocabulary 之间的局部耦合；用户已授权在 Stage 1
 > 与 Stage 2 之间完成本文定义的 Boundary Interlude。本授权不授予 contract cutover，也不自动解析或
 > 进入 Stage 2。2026-07-27 的首条 RV64 saturation route 命中 failure signal后，用户接受 R1
-> proof-boundary correction并授权docs-only route resolution。用户随后分别独立授权并关闭R1 Checkpoint 1与
-> Checkpoint 2；Checkpoint 3仍未激活且未获授权。
+> proof-boundary correction并授权docs-only route resolution。用户随后分别独立授权并关闭R1 Checkpoint 1、
+> Checkpoint 2与Checkpoint 3；Stage 2已关闭，但`2 -> 3`resolution与Stage 3仍未获授权。
 
 ## 1. 计划角色与 authority
 
@@ -143,8 +143,8 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | --- | --- | --- | --- |
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
-| Stage 2 — Bounded progress conformance | R1 Active / Checkpoint 1-2 Closed / Checkpoint 3 Not Activated / Unauthorized | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
-| Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
+| Stage 2 — Bounded progress conformance | R1 Closed / Checkpoint 1-3 Closed | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
+| Stage 3 — Multi-instance/lifecycle closure | Outline / Unauthorized | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
@@ -593,10 +593,10 @@ Unauthorized，必须由后续独立 resolution gate解析。
 
 ## 8. Stage 2 Ready：Bounded progress conformance
 
-**状态：** R1 Active / Checkpoint 1-2 Closed（2026-07-27）/ Checkpoint 3 Not Activated / Unauthorized。
+**状态：** R1 Closed / Checkpoint 1-3 Closed（2026-07-27）；`2 -> 3`resolution与Stage 3均未授权。
 2026-07-27 的 R0 RV64 burst route因未观察到TX exhaustion而按failure signal停止并删除probe；该历史不重写。
-用户随后接受R1 proof-boundary correction，并分别独立授权、关闭R1 Checkpoint 1与Checkpoint 2；后者closure
-不授权Checkpoint 3。
+用户随后接受R1 proof-boundary correction，并分别独立授权、关闭R1 Checkpoint 1、Checkpoint 2与Checkpoint 3；
+Stage 2 closure不授权后续resolution gate或Stage 3。
 
 R1 保持normal exhaustion/recovery target不变：host real-stack + deterministic provider负责确定性制造并证明
 exhaustion；RV64负责真实VirtIO bounded completion/IRQ/reclaim。`queue-full == 0`只表示本次production workload
@@ -767,8 +767,10 @@ shared API、current contract或acceptance。Checkpoint 3继续Not Activated / U
 
 ### 8.5 Checkpoint 3 — provider/recheck/worker closure与RV64 acceptance
 
-**状态：** Not Activated / Unauthorized。Checkpoint 2关闭后必须独立复核其diff与Checkpoint 1 RV64 evidence；
-本节为R1预解析结果，不授予执行权限。
+**状态：** Closed（2026-07-27）。provider/recheck/worker closure、独立review、validation floor与两次
+fresh-disk RV64 acceptance均已通过；执行证据见
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。本状态不运行`2 -> 3`resolution或
+激活Stage 3。
 
 concrete provider保持slot为唯一frame/queue-token owner，并只做以下局部硬化：
 
@@ -860,9 +862,15 @@ resolution gate、进入Stage 3或cutover contract。
 允许production/source写入：
 
 - `anemone-kernel/crates/anemone-smoltcp-stack/src/{adapter.rs,pump.rs,stack.rs,validation.rs}`；
+- `anemone-kernel/src/driver/net/mod.rs`，仅允许Checkpoint 3同步KUnit-only conformance query的
+  crate-private re-export命名；
 - `anemone-kernel/src/driver/net/virtio/{device.rs,frame.rs,mod.rs}`；
 - `anemone-kernel/src/net/{worker.rs,validation.rs}`；
 - `conf/.defconfig`只允许Checkpoint 3依据证据调整已经存在的三个pump/repoll数值；不得增加schema字段。
+
+2026-07-27 Checkpoint 3 preflight发现conformance query的定义与调用均在原manifest内，但唯一crate-private
+re-export位于`driver/net/mod.rs`。用户批准把该文件按上述单行命名同步加入manifest；扩展仍在同一driver owner
+内，不改变public API、shared contract、ABI、visible semantics或acceptance，验证floor保持不变。
 
 允许validation与test写入：
 

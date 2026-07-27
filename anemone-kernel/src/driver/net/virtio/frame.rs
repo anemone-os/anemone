@@ -131,11 +131,20 @@ impl VirtIONetProvider {
         let Some(queue_token) = raw.poll_receive() else {
             return;
         };
-        let slot = self
+        let mut matching = self
             .rx_slots
-            .iter_mut()
-            .find(|slot| slot.ownership == (RxOwnership::Device { queue_token }))
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.ownership == (RxOwnership::Device { queue_token }));
+        let slot_index = matching
+            .next()
+            .map(|(index, _)| index)
             .expect("VirtIO-Net RX completion must have one owner slot");
+        assert!(
+            matching.next().is_none(),
+            "VirtIO-Net RX queue token had multiple owner slots"
+        );
+        let slot = &mut self.rx_slots[slot_index];
         // SAFETY: the queue token and exact backing were stored together by
         // `submit_rx`; completion unshares/syncs before Ready becomes visible.
         let (frame_offset, len) = unsafe {
@@ -147,7 +156,12 @@ impl VirtIONetProvider {
             .diagnostics
             .rx_completions
             .fetch_add(1, Ordering::Relaxed);
-        assert!(frame_offset + len <= slot.backing.len());
+        assert!(
+            frame_offset
+                .checked_add(len)
+                .is_some_and(|end| end <= slot.backing.len()),
+            "VirtIO-Net RX completion exceeded its owner backing"
+        );
         slot.ownership = RxOwnership::Ready { frame_offset, len };
     }
 
@@ -157,12 +171,25 @@ impl VirtIONetProvider {
             let Some(queue_token) = raw.poll_transmit() else {
                 return;
             };
-            let slot = self.tx_slots.iter_mut().find(|slot| {
+            let mut matching = self.tx_slots.iter().enumerate().filter(|(_, slot)| {
                 matches!(slot.ownership, TxOwnership::Device { queue_token: owned, .. } if owned == queue_token)
-            }).expect("VirtIO-Net TX completion must have one owner slot");
+            });
+            let slot_index = matching
+                .next()
+                .map(|(index, _)| index)
+                .expect("VirtIO-Net TX completion must have one owner slot");
+            assert!(
+                matching.next().is_none(),
+                "VirtIO-Net TX queue token had multiple owner slots"
+            );
+            let slot = &mut self.tx_slots[slot_index];
             let TxOwnership::Device { total_len, .. } = slot.ownership else {
                 unreachable!()
             };
+            assert!(
+                total_len <= slot.backing.len(),
+                "VirtIO-Net TX completion exceeded its owner backing"
+            );
             // SAFETY: this is the same stable backing prefix and matching token
             // committed by `submit_tx`; completion precedes CPU reuse.
             unsafe {

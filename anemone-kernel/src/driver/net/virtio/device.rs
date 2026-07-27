@@ -5,10 +5,8 @@ use virtio_drivers::{Error as VirtIOError, device::net::VirtIONetRaw, transport:
 
 use crate::{device::net::RecheckWake, driver::virtio::VirtIOHalImpl, prelude::*};
 
-#[cfg(feature = "kunit")]
-use super::TX_SLOT_COUNT;
 use super::{
-    HEADER_RESERVE, QUEUE_SIZE,
+    HEADER_RESERVE, QUEUE_SIZE, RX_SLOT_COUNT, TX_SLOT_COUNT,
     frame::{RxOwnership, RxSlot, TxOwnership, TxSlot},
 };
 
@@ -79,7 +77,6 @@ pub(super) struct VirtIONetDiagnostics {
     pub(super) tx_completions: AtomicUsize,
     pub(super) irq_rechecks: AtomicUsize,
     pub(super) queue_full: AtomicUsize,
-    #[cfg(feature = "kunit")]
     tx_outstanding: AtomicUsize,
     #[cfg(feature = "kunit")]
     tx_outstanding_high_water: AtomicUsize,
@@ -97,7 +94,6 @@ impl VirtIONetDiagnostics {
             tx_completions: AtomicUsize::new(0),
             irq_rechecks: AtomicUsize::new(0),
             queue_full: AtomicUsize::new(0),
-            #[cfg(feature = "kunit")]
             tx_outstanding: AtomicUsize::new(0),
             #[cfg(feature = "kunit")]
             tx_outstanding_high_water: AtomicUsize::new(0),
@@ -110,6 +106,10 @@ impl VirtIONetDiagnostics {
 
     pub(super) fn mapping_opened(&self) {
         let live = self.live_mappings.fetch_add(1, Ordering::Relaxed) + 1;
+        assert!(
+            live <= RX_SLOT_COUNT + TX_SLOT_COUNT,
+            "VirtIO-Net live mappings exceeded slot capacity"
+        );
         self.mapping_high_water.fetch_max(live, Ordering::Relaxed);
     }
 
@@ -120,13 +120,13 @@ impl VirtIONetDiagnostics {
 
     pub(super) fn tx_submitted(&self) {
         self.tx_submissions.fetch_add(1, Ordering::Relaxed);
+        let outstanding = self.tx_outstanding.fetch_add(1, Ordering::Relaxed) + 1;
+        assert!(
+            outstanding <= TX_SLOT_COUNT,
+            "VirtIO-Net TX outstanding exceeded slot capacity"
+        );
         #[cfg(feature = "kunit")]
         {
-            let outstanding = self.tx_outstanding.fetch_add(1, Ordering::Relaxed) + 1;
-            assert!(
-                outstanding <= TX_SLOT_COUNT,
-                "VirtIO-Net TX outstanding exceeded slot capacity"
-            );
             self.tx_outstanding_high_water
                 .fetch_max(outstanding, Ordering::Relaxed);
         }
@@ -134,11 +134,8 @@ impl VirtIONetDiagnostics {
 
     pub(super) fn tx_completed(&self) {
         self.tx_completions.fetch_add(1, Ordering::Relaxed);
-        #[cfg(feature = "kunit")]
-        {
-            let previous = self.tx_outstanding.fetch_sub(1, Ordering::Relaxed);
-            assert!(previous > 0, "VirtIO-Net TX outstanding counter underflow");
-        }
+        let previous = self.tx_outstanding.fetch_sub(1, Ordering::Relaxed);
+        assert!(previous > 0, "VirtIO-Net TX outstanding counter underflow");
     }
 
     pub(super) fn normal_exhaustion(&self) {
@@ -168,14 +165,55 @@ impl VirtIONetDiagnostics {
     }
 }
 
+/// Driver-private durable recheck predicate with an optional stateless wake.
+///
+/// `publish()` commits the predicate before invoking the wake capability.
+/// Repeated publications may coalesce in the predicate, and `take()` clears
+/// only the committed fact; queue and link truth remain owned by the device.
+struct RecheckLatch {
+    requested: AtomicBool,
+    wake: spin::Once<Weak<dyn RecheckWake>>,
+}
+
+impl RecheckLatch {
+    fn new() -> Self {
+        Self {
+            requested: AtomicBool::new(false),
+            wake: spin::Once::new(),
+        }
+    }
+
+    fn install_wake(&self, wake: Weak<dyn RecheckWake>) {
+        assert!(
+            self.wake.get().is_none(),
+            "VirtIO-Net recheck wake installed twice"
+        );
+        self.wake.call_once(|| wake);
+    }
+
+    fn publish(&self) {
+        self.requested.store(true, Ordering::Release);
+        if let Some(wake) = self.wake.get().and_then(Weak::upgrade) {
+            wake.wake();
+        }
+    }
+
+    fn requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+
+    fn take(&self) -> bool {
+        self.requested.swap(false, Ordering::AcqRel)
+    }
+}
+
 /// IRQ-shared device facts. Frame slots are deliberately absent: the provider
 /// owns them exclusively, so protocol callbacks need no lock and cannot race
 /// the IRQ path.
 pub(super) struct VirtIONetDevice {
     pub(super) raw: SpinLock<RawNet>,
-    /// Edge-only wake hint. Queue completion remains the durable truth.
-    recheck_requested: AtomicBool,
-    recheck_wake: spin::Once<Weak<dyn RecheckWake>>,
+    /// Owner-local predicate plus edge-only wake. Queue truth stays in RawNet.
+    recheck: RecheckLatch,
     /// Diagnostic-only mirrors of owner transitions; never behavior inputs.
     pub(super) diagnostics: VirtIONetDiagnostics,
 }
@@ -189,8 +227,7 @@ impl VirtIONetDevice {
         Ok((
             Arc::new(Self {
                 raw: SpinLock::new(raw),
-                recheck_requested: AtomicBool::new(false),
-                recheck_wake: spin::Once::new(),
+                recheck: RecheckLatch::new(),
                 diagnostics: VirtIONetDiagnostics::new(),
             }),
             mac,
@@ -238,30 +275,23 @@ impl VirtIONetDevice {
 
     pub(super) fn handle_irq(&self) {
         if !self.raw.lock_irqsave().ack_interrupt().is_empty() {
-            self.recheck_requested.store(true, Ordering::Release);
             self.diagnostics
                 .irq_rechecks
                 .fetch_add(1, Ordering::Relaxed);
-            if let Some(wake) = self.recheck_wake.get().and_then(Weak::upgrade) {
-                wake.wake();
-            }
+            self.recheck.publish();
         }
     }
 
     pub(super) fn install_recheck_wake(&self, wake: Weak<dyn RecheckWake>) {
-        assert!(
-            self.recheck_wake.get().is_none(),
-            "VirtIO-Net recheck wake installed twice"
-        );
-        self.recheck_wake.call_once(|| wake);
+        self.recheck.install_wake(wake);
     }
 
     pub(super) fn recheck_requested(&self) -> bool {
-        self.recheck_requested.load(Ordering::Acquire)
+        self.recheck.requested()
     }
 
     pub(super) fn take_recheck_requested(&self) -> bool {
-        self.recheck_requested.swap(false, Ordering::AcqRel)
+        self.recheck.take()
     }
 
     pub(super) fn enable_interrupts(&self) {
@@ -273,5 +303,44 @@ impl VirtIONetDevice {
     #[cfg(feature = "kunit")]
     pub(super) fn stats(&self) -> VirtIONetStats {
         self.diagnostics.snapshot()
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    struct WakeProbe(AtomicUsize);
+
+    impl RecheckWake for WakeProbe {
+        fn wake(&self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[kunit]
+    fn recheck_latch_preserves_fact_without_wake_and_coalesces_publications() {
+        let latch = RecheckLatch::new();
+        latch.publish();
+        assert!(latch.requested());
+
+        let wake = Arc::new(WakeProbe(AtomicUsize::new(0)));
+        let wake_capability: Arc<dyn RecheckWake> = wake.clone();
+        latch.install_wake(Arc::downgrade(&wake_capability));
+        drop(wake_capability);
+        assert!(latch.requested());
+        assert_eq!(wake.0.load(Ordering::Relaxed), 0);
+        assert!(latch.take());
+        assert!(!latch.take());
+
+        latch.publish();
+        latch.publish();
+        assert_eq!(wake.0.load(Ordering::Relaxed), 2);
+        assert!(latch.take());
+        assert!(!latch.take());
+
+        latch.publish();
+        assert_eq!(wake.0.load(Ordering::Relaxed), 3);
+        assert!(latch.take());
     }
 }

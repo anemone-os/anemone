@@ -1,9 +1,9 @@
-use crate::{driver::net::stage1_probe_stats, prelude::*};
+use crate::{driver::net::stage2_conformance_stats, prelude::*};
 
 use super::{ACTIVE_PATHS, worker::WORKER_REPOLL_LIMIT};
 
 #[kunit]
-fn rv64_virtio_net_vertical_slice() {
+fn rv64_virtio_net_stage2_conformance() {
     let burst = VIRTIO_NET_QUEUE_SIZE
         .checked_mul(2)
         .expect("VirtIO-Net validation burst overflow");
@@ -12,20 +12,20 @@ fn rv64_virtio_net_vertical_slice() {
         assert_eq!(
             paths.len(),
             1,
-            "RV64 Stage 1 validation requires exactly one active network path"
+            "RV64 Stage 2 conformance requires exactly one active network path"
         );
         let path = &paths[0];
         (path.snapshot.clone(), path.interface, path.control.clone())
     };
 
     let baseline =
-        stage1_probe_stats().expect("active network path must expose driver diagnostics");
+        stage2_conformance_stats().expect("active network path must expose driver diagnostics");
     let worker_baseline = control.worker_probe_stats();
     control.request_kunit_probe(burst);
     control.wait_for_kunit_probe(Duration::from_secs(5));
     let deadline = crate::time::Instant::now() + Duration::from_secs(5);
     let stats = loop {
-        let stats = stage1_probe_stats()
+        let stats = stage2_conformance_stats()
             .expect("completed network KUnit probe must expose driver diagnostics");
         let tx_submissions = stats
             .tx_submissions()
@@ -142,7 +142,7 @@ fn rv64_virtio_net_vertical_slice() {
         stats.mapping_high_water(),
     );
     kinfoln!(
-        "RV64 net-frame vertical slice passed for {} (ifindex {}, {:?})",
+        "RV64 net-frame Stage 2 conformance passed for {} (ifindex {}, {:?})",
         snapshot.name(),
         snapshot.ifindex(),
         interface,
