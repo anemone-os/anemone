@@ -1,13 +1,15 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 Closed / Stage 1-3 Closed / `NFP-FINAL-CUTOVER` Effective
+**状态：** R1 Accepted for Implementation / Stage 1-3 Historical Closed / Stage 4 Ready, Unauthorized /
+`NFP-FINAL-CUTOVER` Effective
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
 **当前契约：** [Network current contracts](../../contracts/net/index.md)中的六个ID与
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) Refine均Active
 **当前修订：** `R1`
-**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
+**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)已Completed；
+Stage 4激活时另建transaction
 **平台验收范围：** RV64 QEMU virtio-mmio；LA64 / virtio-pci 不属于本修订的 build、runtime 或
 cutover 要求
 
@@ -19,21 +21,25 @@ cutover 要求
 > 进入 Stage 2。2026-07-27 的首条 RV64 saturation route 命中 failure signal后，用户接受 R1
 > proof-boundary correction并授权docs-only route resolution。用户随后分别独立授权并关闭R1 Checkpoint 1、
 > Checkpoint 2与Checkpoint 3；Stage 2已关闭。用户随后只授权完成`2 -> 3 Implementation Resolution
-> Gate`与docs write-back。用户随后独立授权并关闭Stage 3 Checkpoint 1；Stage 3保持Active，Checkpoint 2、
-> shutdown/power handoff、current-contract cutover与RFC closure仍未获授权。
+> Gate`与docs write-back。用户随后分别授权并关闭Stage 3全部checkpoint与原子contract cutover。2026-07-27
+> post-close review发现三项in-target conformance defect；用户授权本次docs-only反馈修订，将单一Stage 4解析为
+> Ready。本次授权不创建transaction、不修改源码，也不激活Stage 4。
 
 ## 1. 计划角色与 authority
 
 四层架构是长期 owner、object fence 与依赖方向，不是四个依次完成的施工阶段。实施单位必须是可执行的
 跨层结果；“API crate 完成”“smoltcp stack 完成”或“driver 完成”都不能单独构成 stage closure。
 
-本计划采用一个纵向 walking skeleton 和两个后续加固阶段：
+本计划原实现采用一个纵向 walking skeleton 和两个后续加固阶段：
 
 1. Stage 1 在同一个 stage 内建立 hostable semantic seam、真实 smoltcp consumer、真实 VirtIO frame
    provider、`device/net` publication 与 kernel attach/IRQ/worker wiring；
 2. Stage 2 对 ownership、completion、exhaustion、recheck、budget、deadline 与公平性做确定性硬化；
 3. Stage 3 完成多实例隔离、attach/lifecycle、System Power handoff、RV64 production acceptance 与
    `NFP-FINAL-CUTOVER`。
+
+Stage 4是post-close contract-conformance correction：它不增加能力或contract，只在一个checkpoint内修正
+pending handoff owner、完整`Late`之后的network activation顺序与长期host test metadata。
 
 Stage 内 checkpoint 只用于缩小 review 和验证批次。任一 checkpoint 的代码、测试或 commit 都不是
 effective contract，也不能被后续 sibling RFC 当成 baseline。只有 Stage 3 的原子 cutover 可以让六个
@@ -146,6 +152,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | R1 Closed / Checkpoint 1-3 Closed | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Closed / Checkpoint 1-3 Closed | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` Effective |
+| Stage 4 — Post-close contract conformance correction | Ready / Unauthorized / 单一checkpoint | `device/net` pending handoff、post-`Late` network activation、host-only test metadata与aggregate revalidation | 既有contract保持Effective；无cutover |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
@@ -1216,7 +1223,161 @@ KernelConfig/xtask/Justfile、generic bus/IRQ/task/kthread/timer/scheduler/devic
 Platform/QEMU/wrappers、apps/rootfs/LTP、register/current limitations与其它RFC/current contracts。若实际实现需要
 触碰只读边界，必须先停止，说明owner/contract/validation影响并申请逐文件扩展；不得先改后追认。
 
-## 10. 全局反馈分流
+## 10. Stage 4 Ready：Post-close contract conformance correction
+
+**状态：** Ready / Unauthorized / 单一checkpoint。当前只完成docs resolution；没有Stage 4 transaction、源码
+修改或执行授权。激活时必须新建独立transaction，并且只激活本stage整体，不拆出额外probe/checkpoint。
+
+### 10.1 反馈定性与交付边界
+
+Stage 3 post-close review确认[NFP-008](./tracking-issues.md#nfp-008--network-activation依赖同级late-initcall的偶然顺序)、
+[NFP-009](./tracking-issues.md#nfp-009--published-capability的pending-handoff绕过devicenet-owner)与
+[NFP-010](./tracking-issues.md#nfp-010--长期host-conformance-target缺少required-features)。它们分别是boot
+ordering、published capability owner与test target metadata的实现偏差；没有新能力、target reduction、ABI、
+public API、platform scope、acceptance boundary或contract delta。
+
+本stage在一个checkpoint内完成以下aggregate result：
+
+1. `device/net` registry同时拥有publication record与异构pending handoff；concrete driver完成owner-local准备后
+   只调用通用publish，不保存或导出`PublishedNetdev<VirtIONetProvider>`，kernel net不再发现或drain concrete
+   driver state。
+2. dynamic dispatch只位于registry向attach authority移交one-shot pending capability的边界。内部接口至少提供
+   immutable publication snapshot与一次性consume/attach操作；其concrete implementation立即回到
+   `worker::prepare<P>`等价的generic路径。`PumpCore<P>`、worker entry、frame token、queue/resource truth与data
+   plane继续保留concrete `P`，不得引入`dyn FrameProvider`。
+3. attach逐项drain；失败先撤销transaction-local stack mapping，再把同一个未attach capability交还
+   registry-owned pending retention。本次drain不得立即重试，第一版仍没有自动retry、runtime unpublish或
+   lifecycle framework。publication snapshot与capability由同一registry owner保持可达，不能只留下snapshot并
+   `forget` provider。
+4. network activation移除`#[initcall(late)]`，由BSP boot coordinator在
+   `run_initcalls(InitCallLevel::Late)`完整返回后、用户态init exec前显式调用。threaded timer继续作为普通
+   `Late` provider；不修改initcall macro、level、linker section或timer readiness API。
+5. `frame_path`、`bounded_progress`与`multi_instance`三个长期host integration target都用显式`[[test]]`和
+   `required-features = ["host-test"]`描述。后两项不是Stage 3遗留probe，不能删除；已经退出的
+   `icmp-validation-probe`不恢复。
+
+内部trait、erased wrapper与attach result的确切名称不构成新contract。实现preflight必须在下述冻结文件内选择
+最窄形状，并证明registry只保存/移交opaque capability、不理解provider或smoltcp policy；这是同一checkpoint的
+普通source设计，不建立独立probe gate。一次性dynamic call的性能不作为阻塞因素。
+
+### 10.2 Activation preflight 与实施顺序
+
+Stage 4激活前，新transaction必须记录branch/HEAD/dirty state、原Completed transaction、三个open finding、
+current `NETDEV-LIFE-001` / `NET-ATTACH-001`、threaded timer的`Late`无相对顺序规则、Cargo target graph与
+本stage resolved manifest。发现用户dirty change与source write set重叠时先确认归属；不得覆写或续写
+2026-07-26 Completed transaction。
+
+单checkpoint内按以下顺序实施并作为一个aggregate接受：
+
+1. 先收拢`device/net` pending storage与one-shot erased attach route，删除VirtIO driver-owned pending slot、
+   driver-specific drain和相应visibility；用local KUnit/source audit先确认异构publication、one-shot drain、
+   failure reinsertion与record isolation。
+2. 再把network attach改为boot coordinator的post-`Late`显式调用；保持attach内部逐netdev failure isolation、
+   active publication与shutdown admission逻辑不变。
+3. 最后补齐Cargo test metadata，运行本stage全部host/source/build/runtime验证与独立review；统一写回RFC、
+   tracking、register和新transaction后才允许关闭。
+
+以上顺序只约束同一checkpoint内的reviewability，不形成三个子checkpoint，不要求中间commit，也不产生中间
+contract状态。任何步骤失败都使整个Stage 4保持Active/Not Closed。
+
+### 10.3 Owner、failure 与 dependency audit
+
+Stage-wide source review至少逐项确认：
+
+- registry在同一个publication transaction中提交stable record与pending capability；duplicate/identity/name
+  failure不留下任一半，snapshot仍明确允许link stale且不驱动runtime；
+- pending collection可以同时保存至少两个不同concrete provider type；erasure不要求公共associated token、
+  不把provider-specific branch、downcast、smoltcp object或driver discovery放入registry；
+- drain只消费每个capability一次；attach success把concrete provider移入唯一worker core，attach failure撤销
+  mapping并将capability重新交给registry，当前drain不循环重取；一个entry失败不阻塞或回滚其它entry；
+- `anemone-kernel::net`只依赖`device/net`窄drain/attach input，不import concrete VirtIO provider或driver facade；
+  VirtIO driver不依赖stack/worker并且drv state只保留owner-local shutdown capability；
+- `run_initcalls(Late)`返回是network activation的源码可见前置；timer、inode shrinker、OOM等Late consumer之间
+  仍无相对顺序假设，boot coordinator没有按provider名称重放通用initcall policy；
+- active publication仍发生在mapping、worker、wake与time wiring全部成功后；shutdown_started、terminal
+  retention、network-before-device与emergency bypass均保持Stage 3行为；
+- host tests在default feature下实际运行，在no-default feature下被Cargo按metadata排除；test source、
+  `host-test` helper与production feature graph没有被删减或旁路。
+
+KUnit可以使用两个最小dummy concrete provider证明heterogeneous pending container与failure retention，但test
+control不得进入production trait或shared API。observability沿用现有publication/active/shutdown摘要；本stage不
+增加per-frame、IRQ、completion、dynamic-dispatch或initcall日志，也不增加长期diagnostic field。
+
+### 10.4 验证 floor 与结论边界
+
+Stage 4必须在同一最终源码上至少完成：
+
+1. `cargo test -p anemone-net-api -p anemone-smoltcp-stack`，确认三个长期integration target实际执行；
+2. `cargo test -p anemone-smoltcp-stack --no-default-features --no-run`，确认host-only target由Cargo metadata
+   排除且production feature set可编译；另运行`cargo check -p anemone-smoltcp-stack --no-default-features`；
+3. registry/owner/erasure/failure、dependency/public-surface、boot/post-`Late` ordering、attach/shutdown与
+   feature/test-target source audit；
+4. `just fmt kernel --check`与所有changed Rust/TOML file的focused formatter检查；任何新增formatter diff阻塞；
+5. `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`；
+6. 一次fresh-disk
+   `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage4-rv64.log`，要求全部
+   KUnit、netdev publication/active attach、network shutdown summary、严格
+   `filesystem -> network -> device -> PowerOff`与正常退出；本stage没有packet injection probe，因此不把该轮
+   boot写成新的traffic/completion证明，Stage 2/3历史证据保持原结论；
+7. 独立software-engineering review达到Apollyon 0/Keter 0/Euclid 0；`git diff --check`与`mdbook build docs`。
+
+RV64 wrapper仍只证明smp=1 virtio-mmio product path。LA64、virtio-pci、hardware、smp>1、final harness、完整
+LTP、runtime hotplug/retry/restart、完整teardown与socket/control-plane均Not Run或非目标，不能从本次修正外推。
+
+### 10.5 Contract、停止与退出条件
+
+Stage 4 contract cutover为None。六个Network ID与`SYSTEM-POWER-ORDERLY-001`继续以现有current contract为
+Effective authority；本stage只证明implementation重新conform，不更新其规则、状态、来源或最后核验，不创建
+Transitional contract或pending successor。
+
+以下任一情况立即停止整个Stage 4并回到RFC/owner review，不得增加兼容bridge后继续：
+
+- heterogeneous handoff要求`dyn FrameProvider`、公开token type、provider-specific registry policy、downcast、
+  driver-to-stack dependency、第二份publication/lifecycle truth或`anemone-net-api`变化；
+- attach failure无法把capability交还registry owner，或只能通过自动retry、runtime lifecycle framework、
+  generic device rollback、unsafe Drop已注册IRQ/DMA backing来处理；
+- boot顺序需要新增initcall level/priority、linker排序、timer readiness/cancellation API，或修改其它Late consumer；
+- test修正删除/弱化`bounded_progress`或`multi_instance`，恢复旧ICMP probe，或只用production build替代
+  no-default test compile gate；
+- 需要修改current contract、ABI/visible semantics、accepted target/platform scope/acceptance boundary，或超出
+  resolved manifest；
+- host/no-default/build/RV64任一mandatory gate失败，source audit仍见concrete driver drain/偶然Late顺序/
+  capability loss，或review仍有Apollyon/Keter/Euclid。
+
+退出要求单checkpoint aggregate diff、review与全部验证通过；新transaction记录activation、实现、证据、Not
+Run与closure；NFP-008/009/010和register umbrella issue同步关闭；RFC状态回到Closed。随后立即停止，不自动进入
+`net-udp`、`net-tcp`或任何runtime lifecycle工作。
+
+### 10.6 Resolved Write Set Manifest
+
+允许production/source写入：
+
+- `anemone-kernel/src/device/net/{mod.rs,registry.rs}`；
+- `anemone-kernel/src/net/{mod.rs,worker.rs}`；
+- `anemone-kernel/src/driver/net/mod.rs`与`anemone-kernel/src/driver/net/virtio/mod.rs`，仅用于删除driver-owned
+  pending storage/drain、同步publication handoff和收窄visibility；
+- `anemone-kernel/src/main.rs`，仅用于post-`Late` network activation；
+- `anemone-kernel/crates/anemone-smoltcp-stack/Cargo.toml`，仅用于长期host test target metadata。
+
+允许local test与验证产物写入：
+
+- `anemone-kernel/src/device/net/registry.rs`中的local KUnit；
+- repository owner生成的`build/**`、pretest rootfs与wrapper worktree-local runtime disk copy。
+
+允许canonical docs与新执行记录写入：
+
+- `docs/src/rfcs/net-frame-path/{index.md,invariants.md,implementation.md,tracking-issues.md}`；
+- `docs/src/register/open-issues.md`与`docs/src/rfcs.md`；
+- 激活时新建`docs/src/devlog/transactions/2026-07-27-net-frame-path-stage4.md`，并同步transaction index、
+  `docs/src/SUMMARY.md`与当前双周devlog。原`2026-07-26-net-frame-path.md`明确只读。
+
+明确只读：`anemone-net-api`、smoltcp stack source与`tests/{frame_path.rs,bounded_progress.rs,multi_instance.rs,
+support/**}`、vendored smoltcp、`virtio-drivers`/`Cargo.lock`、`device/net/provider.rs`、VirtIO frame/device data
+plane、timer/initcall macro/linker实现、其它Late consumer、generic bus/device/IRQ/task/kthread/scheduler/power、
+KernelConfig/xtask/Justfile/Platform/QEMU wrapper、apps/rootfs/LTP、current contracts/current limitations与其它RFC。
+若正确实现需要触碰任一只读边界，必须先停止并上报逐文件扩展、owner/contract影响与验证变化；不得先改后追认。
+
+## 11. 全局反馈分流
 
 | 反馈影响 | 处理位置 | 当前 gate 行为 |
 | --- | --- | --- |
@@ -1230,11 +1391,13 @@ Platform/QEMU/wrappers、apps/rootfs/LTP、register/current limitations与其它
 影响、correctness invariant、已完成代码处置、候选新语义、验证和剩余 gap 路由；接受前保持 Not Cut
 Over。
 
-## 11. 全局完成定义
+## 12. 全局完成定义
 
-本 RFC 只有在 Stage 1 到 Stage 3 依次 Closed、`NFP-PROOF-001` 到 `NFP-PROOF-005` 都有可审计证据、
+本 RFC 只有在 Stage 1 到 Stage 3 的历史closure保持，Stage 4重新Closed、`NFP-PROOF-001` 到
+`NFP-PROOF-005` 都有可审计证据、
 host 与 RV64 production proof 互补闭合、所有临时 probe/旁路按边界收口，并在一个原子 gate 更新六个
-network contract 与 `SYSTEM-POWER-ORDERLY-001` Refine 后才完成。
+network contract 与 `SYSTEM-POWER-ORDERLY-001` Refine，且post-close owner/order/test conformance defect全部
+关闭后才完成。Stage 4不重复cutover，也不重写Stage 1-3证据。
 
 任何 Stage 的 host PASS、RV64 单次 packet smoke、build success、container shape 或 source plausibility
 都不能单独形成 closure。未进入 target 的 LA64/virtio-pci、socket/control-plane、hotplug 与完整 teardown

@@ -1,5 +1,36 @@
 # 开放问题
 
+## ANE-20260727-NET-FRAME-PATH-CONFORMANCE
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Keter
+**Area:** network-device / attach lifecycle / boot ordering / host conformance
+
+**Symptom / Trigger:** `net-frame-path` post-close review确认三项已交付target内偏差：network activation依赖
+同级`Late` initcall的偶然link order；published capability的pending storage/drain落在concrete VirtIO-Net
+driver而不是`device/net` owner；两个长期host integration target缺少`host-test` required feature，导致
+no-default test compile gate失败。
+
+**Impact:** timer service尚未ready时active network path即可见；publication record与pending capability形成
+分裂owner并让attach依赖concrete driver discovery；production feature isolation缺少稳定compile regression gate。
+六个Network contract与System Power contract仍保持Active，本项记录live implementation未完整符合current
+contract，而不是接受限制或新target。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-27
+**Exit Condition:** [Net Frame Path Stage 4](../rfcs/net-frame-path/implementation.md#10-stage-4-readypost-close-contract-conformance-correction)
+以新transaction完成单checkpoint修正：`device/net`拥有异构pending handoff且失败capability仍由registry保留，
+network只在完整`Late`返回后激活，三个长期host target具备一致feature metadata；host/no-default/build/RV64、
+source audit与独立review全部通过后关闭NFP-008/009/010。
+
+**Related:** [Net Frame Path RFC](../rfcs/net-frame-path/index.md),
+[Tracking Issues](../rfcs/net-frame-path/tracking-issues.md),
+[Network current contracts](../contracts/net/index.md)
+
+**Workaround:** 当前不要把偶然initcall排列、driver-specific drain或普通production build通过当成contract
+conformance证据；Stage 4关闭前仍按开放缺陷处理。
+
 ## ANE-20260723-AHCI-PROBE-LIFECYCLE-AND-CAPACITY
 
 **Type:** Issue

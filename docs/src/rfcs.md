@@ -105,6 +105,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
+- [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
+  保持，六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine仍为Effective；post-close review发现pending
+  capability owner、`Late` boot order与host-test target metadata三项in-target缺陷，当前回到Accepted for
+  Implementation。单一Stage 4已Ready但未授权，激活时另建transaction，不续写原Completed transaction。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
@@ -138,11 +142,6 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 已关闭或延期 RFC
 
-- [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1、Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；
-  boot-time netdev、VirtIO-Net frame provider、move-only ownership、bounded stack pump、attach rollback与
-  network-before-device shutdown均已交付。六个network ID由[Network current contracts](./contracts/net/index.md)
-  拥有并全部Active，`SYSTEM-POWER-ORDERLY-001` Refine也已Effective。后续`net-udp`与`net-tcp`是sibling RFC，
-  只依赖current contract，不以本RFC目录或transaction作为并列baseline。
 - [RFC-20260722-tty-subsystem](./rfcs/tty-subsystem/index.md)：R1已实现并关闭；serial TTY的专属Terminal/FileOps、稳定`/dev/ttyS<N>`与`/dev/tty`、termios/data-plane、controlling relation和BusyBox ash/vi foreground job-control包络均已交付。`TTY-DATA-CUTOVER`与`TTY-JOBCTL-CUTOVER`分别由[data-plane](./contracts/tty/data-plane.md)和[job-control](./contracts/tty/job-control.md) current contract拥有九个Active ID。RV64自动、focused与用户人工证据通过；LA64、hardware和LTP明确Not Run。
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：已实现并关闭；完成 `ioctl(2)` VFS 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl。扩展 loop sysfs、partscan、direct I/O、autoclear 和 ioctl LTP 缺口继续由 register 跟踪。
 - [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；关闭时 default 曾恢复为 RR，后续已由 Fair / Stride 切换为 Fair。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。

@@ -1,15 +1,17 @@
 # Network Frame Path Tracking Issues
 
-**状态：** Closed / 当前无开放 Apollyon、Keter 或 Euclid
+**状态：** Open / 0 Apollyon / 2 Keter / 1 Euclid
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
-**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)
+**事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)已Completed；
+Stage 4激活时另建transaction
 
 本文只跟踪会影响 implementation readiness、owner boundary、停止条件或最终验收的 design / feasibility
 问题。普通类型选择、stage TODO、case inventory 和未运行证据不进入本页。
 
-R1、Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；final review为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe。
-以下neutralized项保留原问题、依据与重新打开条件，不成为current contract或进度账本。
+R1、Stage 1-3与`NFP-FINAL-CUTOVER`的历史closure保持；post-close review新增NFP-008/009/010并让R1回到
+Accepted for Implementation。以下open项由单一Stage 4处理；neutralized项继续保留原问题、依据与重新打开
+条件，不成为current contract或进度账本。
 
 ## Apollyon
 
@@ -17,11 +19,59 @@ R1、Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；final review为0 Apollyon / 0 Ke
 
 ## Keter
 
-当前无项。
+### NFP-008 — network activation依赖同级Late initcall的偶然顺序
+
+**状态：** Open / routed to Stage 4
+**来源：** 2026-07-27 Stage 3 post-close software-engineering review
+**影响：** `NET-ATTACH-001` time wiring publication obligation、boot ordering
+**依据：** [Stage 4 Ready](./implementation.md#10-stage-4-readypost-close-contract-conformance-correction)与
+[`Late` initcall boundary](../threaded-timer-event/index.md#late-initcall)
+
+network attach与threaded timer worker当前都使用`#[initcall(late)]`，但`Late`只表达共同启动窗口，不提供
+consumer之间的相对顺序。attach会在worker/wake/time wiring准备后发布active path，后续future deadline可能
+立即进入threaded timer；若network恰好先执行，timer未初始化会触发correctness assertion。当前ELF排列恰好
+timer在前不构成contract。
+
+Stage 4不增加initcall level、priority或readiness framework，也不调整linker section。network attach退出
+`Late` initcall，由boot coordinator在`run_initcalls(InitCallLevel::Late)`完整返回后显式调用；timer继续是普通
+`Late` provider。若该直接顺序不能满足其它platform boot边界，必须停止并回到boot/initcall design review。
+
+### NFP-009 — published capability的pending handoff绕过device/net owner
+
+**状态：** Open / routed to Stage 4
+**来源：** 2026-07-27 Stage 3 post-close software-engineering review
+**影响：** `NETDEV-LIFE-001`、`NET-ATTACH-001`、dependency direction与attach failure retention
+**依据：** [Stage 4 Ready](./implementation.md#10-stage-4-readypost-close-contract-conformance-correction)、
+[netdev lifecycle current contract](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction)与
+[attach lifecycle current contract](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown)
+
+registry当前只保留`NetdevSnapshot`，真正的`PublishedNetdev<VirtIONetProvider>`由concrete VirtIO-Net driver
+保存，并由kernel net通过driver-specific drain取得。这样publication record与pending frame capability分属两个
+owner，kernel attach还反向依赖concrete driver discovery；attach失败消费capability后只保留registry snapshot，
+不再有registry-owned可达handoff。
+
+Stage 4把异构pending storage/drain归还`device/net`。dynamic dispatch只允许出现在一次性pending attach边界；
+concrete `P`进入generic prepare后，worker的`PumpCore<P>`、token与data plane继续单态化，不能改成
+`dyn FrameProvider`。失败必须把未attach capability交还registry-owned pending retention，且本次drain不自动
+重试。若实现要求registry理解provider policy/smoltcp、driver依赖stack、shared API扩张或第二份lifecycle truth，
+必须停止而不能用兼容旁路收口。
 
 ## Euclid
 
-当前无项。
+### NFP-010 — 长期host conformance target缺少required-features
+
+**状态：** Open / routed to Stage 4
+**来源：** 2026-07-27 Stage 3 post-close software-engineering review
+**影响：** production no-default feature proof与长期host conformance discoverability
+**依据：** [Stage 4 Ready](./implementation.md#10-stage-4-readypost-close-contract-conformance-correction)
+
+`frame_path`已显式声明`required-features = ["host-test"]`，但同为长期host conformance的
+`bounded_progress`与`multi_instance`仍由Cargo自动发现。两者调用只在`host-test`下存在的stack helper，导致
+`cargo test -p anemone-smoltcp-stack --no-default-features --no-run`产生13个`E0599`。production kernel build
+不受影响，因此定为Euclid而非产品blocker。
+
+Stage 4为两个target补齐与`frame_path`一致的显式metadata，并恢复独立no-default test compile gate。
+`bounded_progress`与`multi_instance`不得删除或降为临时probe；已删除的`icmp-validation-probe`仍保持删除。
 
 ## Safe
 
