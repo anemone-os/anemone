@@ -26,7 +26,8 @@ noirq、0D TTY/closure 四个 checkpoint；这不改变本页 issue 结论。202
 补齐 K5 的 current-contract 最小闭包后，R0 已接受、transaction 已建立，Stage 0 已按开发者
 授权进入 Active；本轮只授权 0A、0B。后续 0C-2C 执行事实见 transaction。2D 首次 runtime 暴露
 active wait 内获取 sleepable mutex 的 Apollyon；R1 已在 target 层以 operation-serialized bounded scan、
-per-watch dirty 与三态 non-sleeping wait publication neutralize，2R 已 Ready / Not Authorized。
+per-watch dirty 与三态 non-sleeping wait publication neutralize，2R implementation、focused runtime与
+独立review现已关闭对应proof gate。
 
 ## Apollyon
 
@@ -48,7 +49,7 @@ None.
 
 ### EPOLL-RUNTIME-A1 - epoll-file register 在 active wait 内获取 sleepable operation mutex
 
-**状态：** Neutralized in R1 target / implementation pending / 2026-07-27
+**状态：** Neutralized in R1 implementation / focused runtime proven / 2026-07-27
 **影响范围：** epoll-file pollability / iomux register gate / ready protocol / multiple waiter
 **来源：** Stage 2 Checkpoint 2D 首次 RV64 focused runtime
 
@@ -69,10 +70,10 @@ coverage不足时 route已安装、锁外self-hint并返回 `SubscribedRecheck`�
 不是仅调整 implementation route。它不改变主要对象 owner、Linux ABI、首版 capability或最终
 `EPOLL-CUTOVER`；current contract在2D最终cutover前保持不变。
 
-**证明 gate：** [Checkpoint 2R Ready](./implementation.md#checkpoint-2r-readyoperation-serialized-scan-与-non-sleeping-wait-publication)
-要求删除旧协议、证明三态coverage、ET dirty claim/rollback、ONESHOT commit、fixed-capacity guard-out
-notify/drop和multiple waiter，并重跑两架构build与RV64 focused runtime。2R尚未授权/实现，故这里的
-Neutralized只表示 target-level设计 blocker已闭合，不是runtime defect已经修复；2D继续Suspended。
+**证明 gate：** [Checkpoint 2R Closed](./implementation.md#checkpoint-2r-closedoperation-serialized-scan-与-non-sleeping-wait-publication)
+已删除旧协议并证明三态coverage、ET dirty claim/rollback、ONESHOT commit、fixed-capacity guard-out
+notify/drop和multiple waiter；两架构build、RV64 focused runtime与独立review通过。原nested-wait runtime
+defect已修复，2D仍因activation边界保持Suspended。
 
 **修复位置：** [RFC epoll owner](./index.md#epoll-owner)、
 [Operation-serialized Scan、Dirty 与 Copyout](./invariants.md#operation-serialized-scandirty-与-copyout)、

@@ -44,19 +44,19 @@ fn harvest_ready<'a>(
 
 fn terminal_after_empty(
     outcome: LatchWaitOutcome,
-    register_ready: bool,
+    register_retry: bool,
 ) -> Option<IomuxWaitOutcome> {
     match outcome {
         LatchWaitOutcome::Triggered => None,
-        LatchWaitOutcome::Cancelled if register_ready => None,
-        LatchWaitOutcome::Timeout if !register_ready => Some(IomuxWaitOutcome::Timeout),
+        LatchWaitOutcome::Cancelled if register_retry => None,
+        LatchWaitOutcome::Timeout if !register_retry => Some(IomuxWaitOutcome::Timeout),
         LatchWaitOutcome::Signal => Some(IomuxWaitOutcome::Signal),
         LatchWaitOutcome::Force => Some(IomuxWaitOutcome::Force),
         LatchWaitOutcome::Cancelled | LatchWaitOutcome::Timeout | LatchWaitOutcome::Unexpected => {
             kwarningln!(
-                "epoll wait: unexpected empty final harvest outcome={:?} register_ready={}",
+                "epoll wait: unexpected empty final harvest outcome={:?} register_retry={}",
                 outcome,
-                register_ready,
+                register_retry,
             );
             Some(IomuxWaitOutcome::Error(SysError::IO))
         },
@@ -104,9 +104,10 @@ fn wait_for_harvest<'a>(
 
         let round = IomuxWaitRound::begin_current();
         let request = round.poll_request(PollEvent::READABLE);
-        let register_ready = match epoll_file.poll(&request) {
-            Ok(PollRegisterResult::Subscribed(events)) => !events.is_empty(),
-            Ok(PollRegisterResult::Ready(events)) if !events.is_empty() => true,
+        let (register_ready, register_recheck) = match epoll_file.poll(&request) {
+            Ok(PollRegisterResult::Subscribed(events)) => (!events.is_empty(), false),
+            Ok(PollRegisterResult::SubscribedRecheck) => (false, true),
+            Ok(PollRegisterResult::Ready(events)) if !events.is_empty() => (true, false),
             Ok(PollRegisterResult::Ready(_) | PollRegisterResult::Unsupported) => {
                 round.cancel(LatchCancelReason::RegisterError);
                 let outcome = round.finish();
@@ -148,7 +149,10 @@ fn wait_for_harvest<'a>(
             },
         };
 
-        if register_ready {
+        if register_ready || register_recheck {
+            // PredicateReady is only the established cancellation carrier for
+            // SubscribedRecheck. The recheck branch is not counted as an event;
+            // it retires this round before the final harvest and never parks.
             round.cancel(LatchCancelReason::PredicateReady);
         } else {
             let _ = round.schedule_with_timeout(remaining);
@@ -160,7 +164,7 @@ fn wait_for_harvest<'a>(
             Ok(None) => {},
             Err(err) => return EpollWaitResult::Terminal(IomuxWaitOutcome::Error(err)),
         }
-        if let Some(terminal) = terminal_after_empty(outcome, register_ready) {
+        if let Some(terminal) = terminal_after_empty(outcome, register_ready || register_recheck) {
             return EpollWaitResult::Terminal(terminal);
         }
     }
@@ -233,8 +237,8 @@ fn run_epoll_wait(
     let task = get_current_task();
     {
         // Validate the complete Linux-requested output range before claiming
-        // candidates. Copyout revalidates its actual prefix; any later fault
-        // still drops the uncommitted harvest and restores every claim.
+        // ET obligations. Copyout revalidates its actual prefix; any later
+        // fault still drops the uncommitted harvest and restores every claim.
         let usp_handle = task.clone_uspace_handle();
         let mut usp = usp_handle.lock();
         let _ = UserWriteSlice::<u8>::try_new(events_addr, output_capacity, &mut usp)?;

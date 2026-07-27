@@ -7,28 +7,26 @@ mod file;
 mod ready;
 mod watch;
 
-use file::EpollFileRoutes;
+use file::EpollWaitPublication;
 pub(in crate::fs) use file::{create_epoll_file, epoll_from_file, teardown_epoll_file};
-use ready::{DirtySlots, ReadySlots, SLOT_COUNT, SlotId, WatchSlots};
+use ready::{SLOT_COUNT, ScanSlots, SlotId, WatchSlots};
 use watch::EpollWatch;
 pub(in crate::fs) use watch::WatchPolicy;
 
 struct EpollOperation {
     closing: bool,
     slots: WatchSlots,
-    ready: ReadySlots,
+    scan: ScanSlots,
 }
 
 /// Owner of one epoll instance's watch and ready protocols.
 ///
-/// The mutex serializes ctl/teardown/refresh/harvest decisions; it does not own
+/// The mutex serializes ctl/teardown/scan/harvest decisions; it does not own
 /// target readiness or opened-description liveness. Source callbacks only
-/// publish sticky dirty bits and an epoll-file notification sequence.
+/// publish per-watch ET causality and invalidate the epoll-file wait coverage.
 pub(in crate::fs) struct Epoll {
     operation: Mutex<EpollOperation>,
-    dirty: DirtySlots,
-    notification_sequence: AtomicU64,
-    file_routes: EpollFileRoutes,
+    wait_publication: EpollWaitPublication,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,14 +48,16 @@ impl EpollEvent {
 struct HarvestClaim {
     slot: SlotId,
     watch: Arc<EpollWatch>,
+    edge_claimed: bool,
 }
 
-/// Operation-serialized candidate batch awaiting syscall copyout policy.
+/// Operation-serialized event batch awaiting syscall copyout policy.
 ///
-/// Dropping an uncommitted batch restores every claimed candidate. The future
+/// Dropping an uncommitted batch restores every claimed ET obligation. The
 /// syscall adapter may therefore validate/copy bytes without turning partial
 /// user-memory progress into an event or ONESHOT policy commit.
 pub(in crate::fs) struct EpollHarvest<'a> {
+    epoll: &'a Epoll,
     operation: MutexGuard<'a, EpollOperation>,
     claims: Vec<HarvestClaim>,
     events: Vec<EpollEvent>,
@@ -90,12 +90,7 @@ impl EpollHarvest<'_> {
 
             let policy = claim.watch.policy();
             if policy.one_shot() {
-                self.operation.ready.disable(claim.slot);
-            } else if !policy.edge_triggered() {
-                // The pre-copyout snapshot remains a candidate hint only. A
-                // concurrent not-ready transition publishes dirty and the next
-                // operation rechecks it before reporting epoll-file readiness.
-                self.operation.ready.make_candidate(claim.slot);
+                self.operation.scan.disable(claim.slot);
             }
         }
         self.committed = true;
@@ -119,10 +114,18 @@ impl Drop for EpollHarvest<'_> {
                 "epoll harvest rollback crossed watch generation"
             );
             assert!(
-                !self.operation.ready.is_disabled(claim.slot),
+                !self.operation.scan.is_disabled(claim.slot),
                 "uncommitted epoll harvest disabled ONESHOT"
             );
-            self.operation.ready.make_candidate(claim.slot);
+            if claim.edge_claimed {
+                claim.watch.restore_dirty();
+            }
+        }
+        if !self.claims.is_empty() {
+            // Copyout failure keeps every event and ONESHOT policy unconsumed.
+            // Re-publish activity so already-armed peer waiters cannot remain
+            // asleep after this operation releases the table permit.
+            self.epoll.publish_wait_activity();
         }
     }
 }
@@ -130,16 +133,14 @@ impl Drop for EpollHarvest<'_> {
 impl Epoll {
     pub(in crate::fs) fn try_new() -> Result<Arc<Self>, SysError> {
         let slots = WatchSlots::try_new()?;
-        let file_routes = EpollFileRoutes::try_new()?;
+        let wait_publication = EpollWaitPublication::try_new()?;
         Arc::try_new(Self {
             operation: Mutex::new(EpollOperation {
                 closing: false,
                 slots,
-                ready: ReadySlots::new(),
+                scan: ScanSlots::new(),
             }),
-            dirty: DirtySlots::new(),
-            notification_sequence: AtomicU64::new(0),
-            file_routes,
+            wait_publication,
         })
         .map_err(|_| SysError::OutOfMemory)
     }
@@ -194,10 +195,14 @@ impl Epoll {
         }
 
         let slot = reservation.slot();
-        operation.ready.reset(slot);
+        operation.scan.reset(slot);
         operation.slots.publish_reserved(reservation, watch);
+        // Mapping publication precedes coverage invalidation while the
+        // operation owner still excludes scans. Notifications run outside the
+        // publication spinlock, in the permitted operation -> publication
+        // lock direction.
+        self.publish_wait_activity();
         drop(operation);
-        self.note_dirty(slot);
         Ok(())
     }
 
@@ -236,11 +241,11 @@ impl Epoll {
         assert_eq!(still_current.0, slot);
         assert!(Arc::ptr_eq(&still_current.1, &current));
         let retired = operation.slots.replace_current(slot, replacement);
-        operation.ready.reset(slot);
+        operation.scan.reset(slot);
         assert!(Arc::ptr_eq(&retired, &current));
         assert!(retired.retire(), "epoll MOD replaced a retired watch");
+        self.publish_wait_activity();
         drop(operation);
-        self.note_dirty(slot);
         Ok(())
     }
 
@@ -256,14 +261,14 @@ impl Epoll {
             .find_current(target, fd)
             .ok_or(SysError::NotFound)?;
         let retired = operation.slots.remove_current(slot);
-        operation.ready.reset(slot);
+        operation.scan.reset(slot);
         assert!(Arc::ptr_eq(&retired, &current));
         assert!(retired.retire(), "epoll DEL removed a retired watch");
         Ok(())
     }
 
-    /// Build a candidate batch while retaining the per-instance operation
-    /// permit for the future syscall adapter's all-or-rollback copyout.
+    /// Build a bounded-scan batch while retaining the per-instance operation
+    /// permit for the syscall adapter's all-or-rollback copyout.
     pub(in crate::fs) fn harvest(&self, maxevents: usize) -> Result<EpollHarvest<'_>, SysError> {
         if maxevents == 0 {
             return Err(SysError::InvalidArgument);
@@ -278,28 +283,42 @@ impl Epoll {
             .try_reserve_exact(limit)
             .map_err(|_| SysError::OutOfMemory)?;
 
-        let operation = self.operation.lock();
+        let mut operation = self.operation.lock();
         Self::ensure_open(&operation)?;
+        // Final target close deliberately does not enter epoll or publish a
+        // wake. Every exact scan therefore includes a bounded liveness sweep.
+        Self::prune_retired(&mut operation);
+        self.wait_publication.begin_check();
         let mut batch = EpollHarvest {
+            epoll: self,
             operation,
             claims,
             events,
             committed: false,
         };
-        self.refresh_dirty(&mut batch.operation)?;
+        let start = batch.operation.scan.cursor();
+        let mut scanned = 0;
 
-        for _ in 0..SLOT_COUNT {
+        for offset in 0..SLOT_COUNT {
             if batch.events.len() == limit {
                 break;
             }
-            let Some(slot) = batch.operation.ready.claim_next() else {
-                break;
+            let slot = SlotId::from_index((start + offset) % SLOT_COUNT);
+            scanned += 1;
+            if batch.operation.scan.is_disabled(slot) {
+                continue;
+            }
+            let Some(watch) = batch.operation.slots.current(slot) else {
+                continue;
             };
-            let watch = batch
-                .operation
-                .slots
-                .current(slot)
-                .expect("epoll ready candidate has no current watch");
+            let edge_claimed = if watch.policy().edge_triggered() {
+                if !watch.claim_dirty() {
+                    continue;
+                }
+                true
+            } else {
+                false
+            };
             let Some(lease) = watch.target().try_lease() else {
                 Self::retire_current(&mut batch.operation, slot, &watch);
                 continue;
@@ -307,7 +326,10 @@ impl Epoll {
             let snapshot = match watch.snapshot(&lease) {
                 Ok(snapshot) => snapshot,
                 Err(err) => {
-                    self.dirty.mark(slot);
+                    if edge_claimed {
+                        watch.restore_dirty();
+                    }
+                    self.wait_publication.finish_active_check();
                     return Err(err);
                 },
             };
@@ -323,13 +345,22 @@ impl Epoll {
             batch.claims.push(HarvestClaim {
                 slot,
                 watch: watch.clone(),
+                edge_claimed,
             });
             batch.events.push(EpollEvent {
                 events: deliverable,
                 user_data: watch.policy().user_data(),
             });
+            batch.operation.scan.advance_after(slot);
         }
 
+        if batch.events.is_empty() && scanned == SLOT_COUNT {
+            self.wait_publication.finish_empty_check();
+        } else {
+            // A ready result or maxevents truncation cannot certify that the
+            // complete watch table was empty.
+            self.wait_publication.finish_active_check();
+        }
         Ok(batch)
     }
 
@@ -344,94 +375,9 @@ impl Epoll {
         }
         operation.closing = true;
         operation.slots.retire_all();
-        operation.ready.reset_all();
+        operation.scan.reset_all();
+        self.wait_publication.close();
         drop(operation);
-        self.publish_file_hint();
-    }
-
-    fn refresh_dirty(&self, operation: &mut EpollOperation) -> Result<(), SysError> {
-        // Final target close deliberately does not enter epoll or publish a
-        // wake. Operations therefore perform this bounded liveness sweep so
-        // disabled/quiet watches cannot consume all slots until teardown.
-        Self::prune_retired(operation);
-        let dirty = self.dirty.take();
-        let mut first_error = None;
-        for slot in dirty.slots() {
-            if operation.ready.is_disabled(slot) {
-                continue;
-            }
-            if let Err(err) = self.refresh_slot(operation, slot)
-                && first_error.is_none()
-            {
-                first_error = Some(err);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
-    }
-
-    fn refresh_slot(&self, operation: &mut EpollOperation, slot: SlotId) -> Result<(), SysError> {
-        let Some(watch) = operation.slots.current(slot) else {
-            operation.ready.reset(slot);
-            return Ok(());
-        };
-        let Some(lease) = watch.target().try_lease() else {
-            Self::retire_current(operation, slot, &watch);
-            return Ok(());
-        };
-        let snapshot = match watch.snapshot(&lease) {
-            Ok(snapshot) => snapshot,
-            Err(err) => {
-                // The target did not produce a stable snapshot. Keep the slot
-                // dirty so the error does not silently consume the obligation.
-                self.dirty.mark(slot);
-                return Err(err);
-            },
-        };
-        if !lease.is_live() {
-            Self::retire_current(operation, slot, &watch);
-            return Ok(());
-        }
-
-        if watch.policy().deliverable(snapshot).is_empty() {
-            operation.ready.consume_candidate(slot);
-        } else {
-            operation.ready.make_candidate(slot);
-        }
-        Ok(())
-    }
-
-    fn has_deliverable_candidate(&self, operation: &mut EpollOperation) -> Result<bool, SysError> {
-        for index in 0..SLOT_COUNT {
-            let slot = SlotId::from_index(index);
-            if !operation.ready.is_candidate(slot) {
-                continue;
-            }
-            let watch = operation
-                .slots
-                .current(slot)
-                .expect("epoll ready candidate has no current watch");
-            let Some(lease) = watch.target().try_lease() else {
-                Self::retire_current(operation, slot, &watch);
-                continue;
-            };
-            let snapshot = match watch.snapshot(&lease) {
-                Ok(snapshot) => snapshot,
-                Err(err) => {
-                    self.dirty.mark(slot);
-                    return Err(err);
-                },
-            };
-            if !lease.is_live() {
-                Self::retire_current(operation, slot, &watch);
-                continue;
-            }
-            if watch.policy().deliverable(snapshot).is_empty() {
-                operation.ready.consume_candidate(slot);
-                continue;
-            }
-            return Ok(true);
-        }
-        Ok(false)
     }
 
     fn retire_current(operation: &mut EpollOperation, slot: SlotId, expected: &Arc<EpollWatch>) {
@@ -444,7 +390,7 @@ impl Epoll {
             "epoll retirement crossed watch generation"
         );
         let retired = operation.slots.remove_current(slot);
-        operation.ready.reset(slot);
+        operation.scan.reset(slot);
         assert!(Arc::ptr_eq(&retired, expected));
         assert!(
             retired.retire(),
@@ -466,10 +412,7 @@ impl Epoll {
 
     fn poll_file(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         if !request.is_register() {
-            let mut operation = self.operation.lock();
-            Self::ensure_open(&operation)?;
-            self.refresh_dirty(&mut operation)?;
-            let readable = self.has_deliverable_candidate(&mut operation)?;
+            let readable = self.scan_file_readable()?;
             let events = if readable {
                 PollEvent::READABLE & request.interests()
             } else {
@@ -484,27 +427,67 @@ impl Epoll {
         let route = request
             .route()
             .expect("epoll-file register request lost its route");
-        let before = self.notification_sequence.load(Ordering::Acquire);
+        // Register never enters the sleepable operation domain. EmptyCovered
+        // was established by the preceding exact snapshot; otherwise the
+        // publication owner returns SubscribedRecheck and self-hints.
+        self.wait_publication.subscribe(route)
+    }
+
+    fn scan_file_readable(&self) -> Result<bool, SysError> {
         let mut operation = self.operation.lock();
         Self::ensure_open(&operation)?;
-        self.refresh_dirty(&mut operation)?;
-        let mut readable = self.has_deliverable_candidate(&mut operation)?;
-        self.file_routes.subscribe(route)?;
+        Self::prune_retired(&mut operation);
+        self.wait_publication.begin_check();
 
-        // A callback between the first sequence sample and route publication
-        // either changes this value and is absorbed below, or occurs after
-        // publication and also notifies the installed route.
-        let after = self.notification_sequence.load(Ordering::Acquire);
-        if after != before {
-            self.refresh_dirty(&mut operation)?;
-            readable = self.has_deliverable_candidate(&mut operation)?;
+        for index in 0..SLOT_COUNT {
+            let slot = SlotId::from_index(index);
+            if operation.scan.is_disabled(slot) {
+                continue;
+            }
+            let Some(watch) = operation.slots.current(slot) else {
+                continue;
+            };
+            let edge_claimed = if watch.policy().edge_triggered() {
+                if !watch.claim_dirty() {
+                    continue;
+                }
+                true
+            } else {
+                false
+            };
+            let Some(lease) = watch.target().try_lease() else {
+                Self::retire_current(&mut operation, slot, &watch);
+                continue;
+            };
+            let snapshot = match watch.snapshot(&lease) {
+                Ok(snapshot) => snapshot,
+                Err(err) => {
+                    if edge_claimed {
+                        watch.restore_dirty();
+                    }
+                    self.wait_publication.finish_active_check();
+                    return Err(err);
+                },
+            };
+            if !lease.is_live() {
+                Self::retire_current(&mut operation, slot, &watch);
+                continue;
+            }
+            if watch.policy().deliverable(snapshot).is_empty() {
+                continue;
+            }
+
+            if edge_claimed {
+                // poll(epfd) is a non-consuming readability probe. Only an
+                // epoll_wait copyout commit may consume ET causality.
+                watch.restore_dirty();
+            }
+            self.wait_publication.finish_active_check();
+            return Ok(true);
         }
-        let current = if readable {
-            PollEvent::READABLE
-        } else {
-            PollEvent::empty()
-        };
-        Ok(PollRegisterResult::Subscribed(current))
+
+        self.wait_publication.finish_empty_check();
+        Ok(false)
     }
 
     fn ensure_open(operation: &EpollOperation) -> Result<(), SysError> {
@@ -515,27 +498,7 @@ impl Epoll {
         }
     }
 
-    fn note_dirty(&self, slot: SlotId) {
-        self.dirty.mark(slot);
-        self.publish_file_hint();
-    }
-
-    fn publish_file_hint(&self) {
-        let mut observed = self.notification_sequence.load(Ordering::Relaxed);
-        loop {
-            let next = observed
-                .checked_add(1)
-                .expect("epoll notification sequence exhausted");
-            match self.notification_sequence.compare_exchange_weak(
-                observed,
-                next,
-                Ordering::Release,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(current) => observed = current,
-            }
-        }
-        self.file_routes.notify();
+    pub(super) fn publish_wait_activity(&self) {
+        self.wait_publication.invalidate_and_notify();
     }
 }

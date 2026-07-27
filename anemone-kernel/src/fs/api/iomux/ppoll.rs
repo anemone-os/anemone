@@ -77,6 +77,7 @@ fn scan_ppoll_fds(
     let mut nready = 0;
     let mut has_source = false;
     let mut unsupported = false;
+    let mut recheck = false;
 
     for poll_fd in poll_fds.iter_mut() {
         poll_fd.revents = LinuxPollEvent::empty();
@@ -103,6 +104,17 @@ fn scan_ppoll_fds(
             Ok(PollRegisterResult::Subscribed(_)) => {
                 kwarningln!(
                     "sys_ppoll: snapshot scan unexpectedly subscribed fd {:?}",
+                    fd,
+                );
+                return Err(SysError::IO);
+            },
+            Ok(PollRegisterResult::SubscribedRecheck) if mode.is_register() => {
+                recheck = true;
+                break;
+            },
+            Ok(PollRegisterResult::SubscribedRecheck) => {
+                kwarningln!(
+                    "sys_ppoll: snapshot scan unexpectedly requested recheck fd {:?}",
                     fd,
                 );
                 return Err(SysError::IO);
@@ -145,6 +157,8 @@ fn scan_ppoll_fds(
 
     if unsupported {
         Ok(IomuxScanOutcome::Unsupported)
+    } else if recheck {
+        Ok(IomuxScanOutcome::Recheck)
     } else if !has_source {
         Ok(IomuxScanOutcome::NoSources)
     } else {

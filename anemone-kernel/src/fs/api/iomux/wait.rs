@@ -35,6 +35,7 @@ impl<'a> IomuxScanMode<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum IomuxScanOutcome {
     Ready(usize),
+    Recheck,
     NotReady,
     NoSources,
     Unsupported,
@@ -205,6 +206,32 @@ where
                     Err(err) => return IomuxWaitOutcome::Error(err),
                 }
             },
+            Ok(IomuxScanOutcome::Recheck) => {
+                // PredicateReady is the existing non-error latch cancellation
+                // carrier. SubscribedRecheck is not counted as readiness: it
+                // only prevents parking until this round is retired and the
+                // final snapshot has classified the predicate.
+                round.cancel(LatchCancelReason::PredicateReady);
+                let outcome = round.finish();
+                kdebugln!(
+                    "{}: register scan requested recheck wait={:#x} outcome={:?}",
+                    context,
+                    wait_id,
+                    outcome,
+                );
+                match snapshot_scan(context, &mut scan) {
+                    Ok(SnapshotScanOutcome::Ready(nready)) => {
+                        return IomuxWaitOutcome::Ready(nready);
+                    },
+                    Ok(SnapshotScanOutcome::NotReady | SnapshotScanOutcome::NoSources) => {
+                        match map_register_ready_outcome(context, outcome) {
+                            IomuxWaitDisposition::Retry => continue,
+                            IomuxWaitDisposition::Done(outcome) => return outcome,
+                        }
+                    },
+                    Err(err) => return IomuxWaitOutcome::Error(err),
+                }
+            },
             Ok(
                 register_outcome @ (IomuxScanOutcome::Ready(_)
                 | IomuxScanOutcome::NotReady
@@ -310,6 +337,10 @@ where
             Ok(SnapshotScanOutcome::NotReady)
         },
         IomuxScanOutcome::NoSources => Ok(SnapshotScanOutcome::NoSources),
+        IomuxScanOutcome::Recheck => {
+            kwarningln!("{}: snapshot scan returned recheck", context);
+            Err(SysError::IO)
+        },
         IomuxScanOutcome::Unsupported => {
             kwarningln!("{}: snapshot scan returned unsupported", context);
             Err(SysError::NotSupported)

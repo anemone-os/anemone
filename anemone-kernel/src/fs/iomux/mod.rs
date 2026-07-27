@@ -75,6 +75,10 @@ pub enum PollRegisterResult {
     Ready(PollEvent),
     /// A persistent route was installed before this readiness snapshot.
     Subscribed(PollEvent),
+    /// A persistent route was installed, but the registration point cannot
+    /// classify current readiness. The consumer must retire this wait round
+    /// without counting readiness or parking, then take a final snapshot.
+    SubscribedRecheck,
     Unsupported,
 }
 

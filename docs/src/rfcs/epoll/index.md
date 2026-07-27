@@ -1,6 +1,6 @@
 # RFC-20260726-epoll
 
-**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Ready, Not Authorized / Epoll Not Effective
+**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Closed / Epoll Not Effective
 **修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-07-27
@@ -8,9 +8,9 @@
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 **影响契约：** Preserve `SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`、`IOMUX-POLL-003`、`OPENED-DESC-001..003`、`OPENED-DESC-LIVENESS-001`、`TTY-TERM-001`、`TTY-INPUT-001`；Refine `IOMUX-POLL-001/002`；Introduce `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`。完整 delta 与 cutover 见 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 R1 target-level 开放 Apollyon / Keter；2D 暴露的
-active-wait / sleepable-mutex Apollyon 已由 R1 target 与 2R proof gate neutralize，但修正尚未实现。
-**下一步：** Checkpoint 2R 已解析为 Ready，但未获执行授权；不得自动启动 2R、恢复 2D、执行
-`EPOLL-CUTOVER` 或更新 current contract。
+active-wait / sleepable-mutex Apollyon 已由 R1 target、2R implementation、focused runtime 与 review neutralize。
+**下一步：** Checkpoint 2R 已关闭；2D 仍 Suspended，只有开发者另行授权新的 activation 后才可恢复。
+不得自动执行 `EPOLL-CUTOVER` 或更新 current contract。
 
 ## 文档状态
 
@@ -28,7 +28,7 @@ ready/wait protocol 与 2C ABI/focused oracle。2D 首次 RV64 wrapper 在 focus
 register 于 active wait 内获取 sleepable mutex 并 panic。该证据触发 target renegotiation：R1 保留
 `Epoll` / `EpollWatch` owner、ABI、lifecycle 与 nested-epoll rejection，但用 operation-serialized bounded
 scan 取代 ready queue，并把 epoll-file wait publication 收窄到独立的 non-sleeping spinlock domain。
-2D 已暂停，2R 已完整解析但未获授权；三个 `EPOLL-*` target ID 仍未生效。
+2D 已暂停，2R 已独立关闭；三个 `EPOLL-*` target ID 仍未生效。
 
 ## 摘要
 
@@ -168,7 +168,7 @@ Keter 与 2D runtime Apollyon 均已在当前 R1 target 中 neutralize；独立 
 resolved manifest 已按授权完成。后续 `1 -> 2` gate 已依据 live owner、ABI与固定LTP资产冻结
 [Stage 2 Ready](./implementation.md#stage-2-readyepoll-coreabi-与最终-cutover)；2A已按独立授权与扩集批准关闭，
 2B 与 2C 也已依次关闭；2D 首次 RV64 runtime 发现前序 epoll-file 协议 blocker 后暂停。R1
-target renegotiation 已接受，Checkpoint 2R 已解析为 Ready / Not Authorized；它关闭前不能恢复 2D。
+target renegotiation 已接受，Checkpoint 2R 已按独立授权关闭；2D仍需新的activation才能恢复。
 
 ## 修订记录
 
@@ -328,8 +328,8 @@ handoff，最后由 0D 完成一次 Stage 级 runtime/review closure。Stage 0 �
 poll bridge，并把全量 source migration、bridge 删除与两个 foundation cutover 解析为一个原子 Stage 1；
 该 checkpoint 已完成并使 foundation contract 生效；独立 resolution gate 已把 Stage 2 epoll ABI/core
 解析为 Ready，2A-2C 也已按独立授权关闭。2D runtime blocker 触发的 R1 review 已完成；2R 的 authoritative
-Ready 定义位于 [实施计划](./implementation.md#checkpoint-2r-readyoperation-serialized-scan-与-non-sleeping-wait-publication)，
-但尚未授权。2R 关闭只允许恢复 2D，不执行 `EPOLL-CUTOVER`；影响 owner、ABI、可见语义或接受边界的后续反馈
+closure 位于 [实施计划](./implementation.md#checkpoint-2r-closedoperation-serialized-scan-与-non-sleeping-wait-publication)。
+2R 关闭只允许未来重新激活 2D，不执行 `EPOLL-CUTOVER`；影响 owner、ABI、可见语义或接受边界的后续反馈
 仍必须回到 RFC review。
 
 ## 备选方案
@@ -407,6 +407,6 @@ R1 已接受，transaction 继续记录本次尚未 cut over 的语义修订。S
 独立授权完成并关闭。当前 target-level blocker 已 neutralize，target / current / RFC-local 分层和
 [实施计划](./implementation.md) 保持权威；两个
 foundation cutover 已在同一 checkpoint 生效，epoll core 与三个 `EPOLL-*` contract ID 仍未生效。
-2A-2C 已关闭；2D 因 runtime blocker 暂停。R1 Checkpoint 2R 已 Ready / Not Authorized；在独立授权、实现、
-runtime proof 与 review 前不得恢复 2D。`EPOLL-CUTOVER` 与三个 `EPOLL-*` ID 保持 Not Effective，
+2A-2C 已关闭；2D 因 runtime blocker 暂停。R1 Checkpoint 2R 已按独立授权、实现、runtime proof与review
+关闭，但不自动恢复2D。`EPOLL-CUTOVER` 与三个 `EPOLL-*` ID 保持 Not Effective，
 `IOMUX-POLL-001/002` 也继续保持 Stage 1 effective 文本，Stage 2 不得关闭。

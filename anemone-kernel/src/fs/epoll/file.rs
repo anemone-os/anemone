@@ -9,57 +9,137 @@ use crate::{
 
 use super::Epoll;
 
-/// COW registry for tasks polling the epoll file itself.
-///
-/// Writers are serialized by the epoll operation mutex. The spin lock only
-/// lets callback context clone an already-published snapshot; allocation and
-/// last-reference drops remain outside that short critical section. Every
-/// access explicitly saves IRQ state because target callbacks may arrive from
-/// no-IRQ sources even when the build-wide `SpinLock::lock` mode does not.
-pub(super) struct EpollFileRoutes {
-    routes: SpinLock<Arc<Vec<PollRoute>>>,
+static_assert!(
+    EPOLL_FILE_MAX_WAITERS > 0 && (EPOLL_FILE_MAX_WAITERS as u64) <= MAX_PROCESSES,
+    "epoll_file_max_waiters must be in 1..=MAX_PROCESSES"
+);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WaitCoverage {
+    Uncovered,
+    Checking,
+    EmptyCovered,
 }
 
-impl EpollFileRoutes {
+struct WaitPublicationInner {
+    /// Subscription admission only. Epoll object closure remains owned by
+    /// `EpollOperation::closing` and must not be inferred from this flag.
+    accepting_routes: bool,
+    coverage: WaitCoverage,
+    routes: Vec<Option<PollRoute>>,
+}
+
+/// Non-sleeping handoff domain for tasks polling the epoll file itself.
+///
+/// The fixed route table and three-state coverage certificate share one
+/// irqsave spinlock. Readiness remains owned by the operation-serialized table
+/// scan; this object only decides whether a published route may safely park.
+pub(super) struct EpollWaitPublication {
+    inner: SpinLock<WaitPublicationInner>,
+}
+
+impl EpollWaitPublication {
     pub(super) fn try_new() -> Result<Self, SysError> {
-        let routes = Arc::try_new(Vec::new()).map_err(|_| SysError::OutOfMemory)?;
+        let mut routes = Vec::new();
+        routes
+            .try_reserve_exact(EPOLL_FILE_MAX_WAITERS)
+            .map_err(|_| SysError::OutOfMemory)?;
+        routes.resize_with(EPOLL_FILE_MAX_WAITERS, || None);
         Ok(Self {
-            routes: SpinLock::new(routes),
+            inner: SpinLock::new(WaitPublicationInner {
+                accepting_routes: true,
+                coverage: WaitCoverage::Uncovered,
+                routes,
+            }),
         })
     }
 
-    pub(super) fn subscribe(&self, route: &PollRoute) -> Result<(), SysError> {
-        let current = self.routes.lock_irqsave().clone();
-        let mut replacement = Vec::new();
-        replacement
-            .try_reserve_exact(current.len().saturating_add(1))
-            .map_err(|_| SysError::OutOfMemory)?;
-        replacement.extend(current.iter().filter(|entry| !entry.is_prunable()).cloned());
-        // Wait routes use the existing system task bound. The watch-table fd
-        // bound is unrelated and would reject valid waiter concurrency before
-        // that established consumer limit is reached.
-        if replacement.len() >= MAX_PROCESSES as usize {
-            return Err(SysError::ResourceExhausted);
-        }
-        replacement.push(route.clone());
-        let replacement = Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)?;
-
-        let previous = {
-            let mut routes = self.routes.lock_irqsave();
-            assert!(
-                Arc::ptr_eq(&routes, &current),
-                "epoll-file route writer escaped operation serialization"
-            );
-            core::mem::replace(&mut *routes, replacement)
-        };
-        drop(previous);
-        Ok(())
+    pub(super) fn begin_check(&self) {
+        let mut inner = self.inner.lock_irqsave();
+        assert!(
+            inner.accepting_routes,
+            "closed epoll wait publication began an exact scan"
+        );
+        inner.coverage = WaitCoverage::Checking;
     }
 
-    pub(super) fn notify(&self) {
-        let routes = self.routes.lock_irqsave().clone();
-        for route in routes.iter() {
+    /// Commit coverage only when no concurrent activity invalidated Checking.
+    /// The caller may invoke this only after a complete empty table scan.
+    pub(super) fn finish_empty_check(&self) {
+        let mut inner = self.inner.lock_irqsave();
+        if inner.coverage == WaitCoverage::Checking {
+            inner.coverage = WaitCoverage::EmptyCovered;
+        }
+    }
+
+    pub(super) fn finish_active_check(&self) {
+        self.inner.lock_irqsave().coverage = WaitCoverage::Uncovered;
+    }
+
+    pub(super) fn subscribe(&self, route: &PollRoute) -> Result<PollRegisterResult, SysError> {
+        let (replaced, result) = {
+            let mut inner = self.inner.lock_irqsave();
+            if !inner.accepting_routes {
+                return Err(SysError::IdentifierRemoved);
+            }
+            let Some(index) = inner
+                .routes
+                .iter()
+                .position(|entry| entry.as_ref().is_none_or(PollRoute::is_prunable))
+            else {
+                knoticeln!(
+                    "epoll: epoll-file waiter capacity exhausted capacity={}",
+                    EPOLL_FILE_MAX_WAITERS,
+                );
+                return Err(SysError::ResourceExhausted);
+            };
+            let replaced = core::mem::replace(&mut inner.routes[index], Some(route.clone()));
+            let result = if inner.coverage == WaitCoverage::EmptyCovered {
+                PollRegisterResult::Subscribed(PollEvent::empty())
+            } else {
+                PollRegisterResult::SubscribedRecheck
+            };
+            (replaced, result)
+        };
+        drop(replaced);
+
+        if result == PollRegisterResult::SubscribedRecheck {
+            // Registration under Checking/Uncovered cannot prove that parking
+            // is safe. Self-hint after publication and outside the spinlock so
+            // the consumer retires this round and performs a final snapshot.
             route.notify();
+        }
+        Ok(result)
+    }
+
+    pub(super) fn invalidate_and_notify(&self) {
+        self.inner.lock_irqsave().coverage = WaitCoverage::Uncovered;
+        self.notify_routes();
+    }
+
+    pub(super) fn close(&self) {
+        {
+            let mut inner = self.inner.lock_irqsave();
+            inner.accepting_routes = false;
+            inner.coverage = WaitCoverage::Uncovered;
+        }
+
+        for index in 0..EPOLL_FILE_MAX_WAITERS {
+            let route = self.inner.lock_irqsave().routes[index].take();
+            if let Some(route) = route {
+                route.notify();
+                drop(route);
+            }
+        }
+    }
+
+    fn notify_routes(&self) {
+        for index in 0..EPOLL_FILE_MAX_WAITERS {
+            let route = self.inner.lock_irqsave().routes[index].clone();
+            if let Some(route) = route {
+                route.notify();
+                drop(route);
+            }
         }
     }
 }

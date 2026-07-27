@@ -1,13 +1,13 @@
 # Epoll 实施计划
 
-**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Ready, Not Authorized
+**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Closed
 **适用修订：** R1
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **目标不变量：** [Epoll 与 Poll Subscription 不变量需求](./invariants.md)
 **当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`SIGNAL-TEMP-MASK-*`](../../contracts/signal/temporary-mask-delivery.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)、[`TTY-TERM-001` / `TTY-INPUT-001`](../../contracts/tty/data-plane.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 R1 target-level 开放 Apollyon / Keter；
-2D runtime blocker 已由 R1 target 与 2R proof gate neutralize，implementation 尚未执行
+2D runtime blocker 已由 R1 target、2R implementation、focused runtime 与独立 review neutralize
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
 本文把公共 R1 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
@@ -18,8 +18,8 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 该 gate 已把 Stage 2 完整解析为 Ready。后续独立授权与精确 write-set expansion 批准已完成 2A，新的独立授权
 也已完成 R0 2B ready/wait protocol。2C 已关闭，2D 首次 runtime 命中 epoll-file register blocker 后
 暂停。开发者接受 R1 target revision：保留 owner / ABI / lifecycle / capability，但以 operation-serialized
-bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence route。Checkpoint 2R 已完整
-解析为 Ready，但未获执行授权；`EPOLL-CUTOVER` 仍未执行。
+bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence route。Checkpoint 2R 已按独立
+授权关闭；2D 仍 Suspended，`EPOLL-CUTOVER` 仍未执行。
 
 ## 实施原则
 
@@ -74,7 +74,7 @@ bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence rout
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 已独立完成 |
-| Stage 2 | 2D Suspended / 2R Ready, Not Authorized | 2A-2C 已形成 candidate core/ABI；2R 以 R1 简化协议替换 R0 ready/wait route，随后恢复 2D integration 并完成首版 cutover | `EPOLL-CUTOVER`，尚未生效 | 2R 独立授权并关闭后，2D 才可由新的 activation 恢复 |
+| Stage 2 | 2D Suspended / 2R Closed | 2A-2C 已形成 candidate core/ABI；2R 已以 R1 简化协议替换 R0 ready/wait route，后续需重新激活 2D integration 才能完成首版 cutover | `EPOLL-CUTOVER`，尚未生效 | 等待开发者另行授权新的 2D activation |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
@@ -670,19 +670,19 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 
 ### 阶段成熟度与授权边界
 
-- **Checkpoint 2D Suspended / Checkpoint 2R Ready, Not Authorized。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
+- **Checkpoint 2D Suspended / Checkpoint 2R Closed。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
   `OPENED-DESC-CAPABILITY-CUTOVER` 已 effective；上一节 resolution gate 已完成 live owner、ABI、LTP、
   test harness 与 current-contract preflight。
 - 开发者先授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
   `anemone-apps` 纳入写集；后续独立授权已分别关闭 2A 与 2B，原授权随后关闭2C并激活2D。
   2D 首次 QEMU 在 focused test 内 panic，LTP 与 `EPOLL-CUTOVER` 均未到达，原2D执行授权随暂停耗尽。
-  R1 acceptance 只授权 target correction 与 2R resolution，不授权2R实现或未来2D恢复。
+  R1 acceptance 当时只授权 target correction 与 2R resolution；后续独立授权已关闭2R，但未授权2D恢复。
 - Stage 2 保持一个原子 integration / acceptance unit。2A-2C 只形成
   不可独立合入的 stacked implementation evidence；在 2D 完成 kernel ABI、focused test、LTP、review、current
   contract 与 transaction write-back 前，任何 partial core、syscall handler 或单独 contract page 都不得合入
   有效分支或被其它功能依赖。
 - 原 Stage 2 activation / checkpoint授权事实保留在transaction；任一 checkpoint closure都不自动授权下一个。
-  当前2R必须独立授权，2R closure后2D也必须重新activation。每次activation、closure、validation与
+  2R已按独立授权关闭，2D仍必须重新activation。每次activation、closure、validation与
   partial-code disposition只追加到transaction，不复制本文的authoritative delivery/write-set定义。
 
 ### 阶段内 checkpoint 路线
@@ -695,7 +695,7 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 | 2R - R1 Protocol Correction | 删除 R0 ready/COW/sequence route，以 operation-serialized scan、per-watch dirty 与 non-sleeping wait publication 修复 nested wait | epoll/iomux core、iomux adapters、专用 Kconfig capacity；2D harness 只作临时 validation input | focused runtime证明无 nested wait/lost wake，R1 concurrency review通过；不切 contract、不自动恢复2D |
 | 2D - Integration / Cutover | 2R关闭后重新激活；接入user-test/LTP/rootfs，运行组合closure并完成唯一contract cutover | harness/LTP/rootfs、前序finding修正、contract/RFC/transaction/navigation | focused + LTP matrix、iomux组合、LA64 build、review与docs全部闭合后执行唯一 `EPOLL-CUTOVER` |
 
-2A-2C 与未来 2R 的 checkpoint commit 只是回滚、review 与证据边界，不是 transitional contract。前序 checkpoint 的
+2A-2C 与 2R 的 checkpoint commit 只是回滚、review 与证据边界，不是 transitional contract。前序 checkpoint 的
 production 文件可以在后续 checkpoint 为真实 finding 做局部修正，但不能借此绕过 manifest expansion 或把尚未
 验证的 partial capability 当作当前事实。
 
@@ -1045,13 +1045,13 @@ owner、target invariant、public ABI或acceptance boundary，转入Target Reneg
 R1 acceptance 后，本段 disposition 更新为：2D 保持 **Suspended**，不再直接承接协议修正；其历史 failure、
 撤回与 Not Run 事实不变。只有下列 2R 独立关闭并经新的 activation 记录后，2D 才能恢复。
 
-### Checkpoint 2R Ready：Operation-serialized Scan 与 Non-sleeping Wait Publication
+### Checkpoint 2R Closed：Operation-serialized Scan 与 Non-sleeping Wait Publication
 
 #### 阶段成熟度与授权边界
 
-- **Ready / Not Authorized。** 2D runtime stop、R1 target acceptance 与 live 2A-2C source preflight 已完成；
-  本节交付、实现路线、审计、验证、停止/退出条件和 manifest 已解析。
-- R1 acceptance、文档修改或 Ready 状态都不授权实现。开发者必须单独授权 2R；2R closure 也只允许
+- **Closed / 2026-07-27。** 2D runtime stop、R1 target acceptance、live 2A-2C source preflight、独立
+  2R activation、实现、验证、review 与 closure write-back 已完成。
+- 2R closure 只允许
   重新 activation 2D，不自动恢复 integration、不执行 `EPOLL-CUTOVER`、不更新 current contract。
 - 2A watch/lifecycle、2C ABI/focused oracle、opened-description capability、source subscription 与 Signal
   contract 保留。2R 只替换 R0 2B 的 ready/COW/sequence route，不借修正重开 scheduler、source owner、
@@ -1157,6 +1157,7 @@ LT当前无candidate、route list为空或诊断字段推导。
 允许修改的 production kernel / config 文件：
 
 - `kconfig`
+- `conf/.defconfig`
 - `scripts/xtask/src/config/kconfig.rs`
 - `anemone-kernel/src/fs/epoll/{mod.rs,ready.rs,file.rs,watch.rs}`
 - `anemone-kernel/src/fs/iomux/mod.rs`
@@ -1227,14 +1228,33 @@ validation-only 输入：
 - 完整2R diff无未关闭Apollyon、Keter或Euclid，validation/Not Run与resource default写入transaction；
 - 2R标记Closed，但2D仍Suspended，直到开发者另行授权新的2D activation。
 
+#### 2R closure - 2026-07-27
+
+R0 `ReadySlots` candidate/LT requeue、slot-wide dirty、notification sequence/CAS 与
+`Arc<Vec<PollRoute>>` COW registry 已删除。当前实现只保留 operation-serialized bounded scan、绑定不可变
+watch generation 的 ET dirty，以及拥有三态 coverage / fixed route slots 的 `EpollWaitPublication`；
+`SubscribedRecheck` 在 ppoll、pselect 与 epoll wait 中均只取消 park并触发final snapshot，不增加ready count。
+
+`epoll_file_max_waiters` 在 local `kconfig` 与 tracked `conf/.defconfig` 默认64，xtask只生成常量，kernel以
+compile-time assertion约束`1..=MAX_PROCESSES`。两架构app/kernel build、RV64 repository wrapper、257项
+KUnit与11项focused oracle通过；临时user-test/rootfs/profile已按原字节恢复，初赛RV64 master image hash未变。
+独立architecture/concurrency/resource review逐项关闭三态coverage、dirty generation、锁序、guard-out
+notify/drop、ET rollback、LT fairness、multiple waiter与closing，没有未关闭Apollyon、Keter或Euclid。
+
+wrapper/QEMU返回成功且focused summary为`PASS:11`；日志在summary后结束，未打印显式user-test shutdown
+marker，因此不把本次证据外推为marker级正常关机证明。SMP>1、LA64 runtime、hardware、LTP matrix、
+broad/final harness均Not Run；route容量耗尽与closing/register极限交错由静态审计而非focused runtime证明。
+2R contract cutover为`None`，2D继续Suspended。
+
 ### Resolved Write Set Manifest
 
-本节是 Stage 2 从 R0 延续的整体 integration manifest；Checkpoint 2R 的当前 frozen subset 以上一节为权威。
-R1 新增的 config / iomux 文件已并入整体 manifest，但不构成 2R execution authorization。
+本节是 Stage 2 从 R0 延续的整体 integration manifest；Checkpoint 2R 的 closed subset 以上一节为权威。
+R1 新增的 config / iomux 文件已并入整体 manifest；这不构成新的2D execution authorization。
 
 允许修改的配置物化文件：
 
 - `kconfig`
+- `conf/.defconfig`
 - `scripts/xtask/src/config/kconfig.rs`
 
 允许修改的 kernel/core 文件：

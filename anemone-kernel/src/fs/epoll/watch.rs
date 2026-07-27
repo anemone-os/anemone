@@ -73,6 +73,9 @@ pub(super) struct EpollWatch {
     /// Sole watch-side truth for whether late source callbacks may publish a
     /// recheck obligation. It never represents target readiness or liveness.
     accepting: AtomicBool,
+    /// Sticky ET recheck obligation for this immutable watch generation.
+    /// It is protocol state, not a cached target-readiness snapshot.
+    dirty: AtomicBool,
 }
 
 impl EpollWatch {
@@ -92,6 +95,9 @@ impl EpollWatch {
             target,
             policy,
             accepting: AtomicBool::new(true),
+            // ADD and successful MOD must snapshot the new generation once
+            // even when the source publishes no concurrent transition.
+            dirty: AtomicBool::new(true),
         })
         .map_err(|_| SysError::OutOfMemory)
     }
@@ -127,6 +133,10 @@ impl EpollWatch {
 
         match lease.poll(&request)? {
             PollRegisterResult::Subscribed(current) => Ok(current),
+            // The route is installed, but only a later snapshot can classify
+            // readiness. Initial dirty publication makes that recheck part of
+            // the ADD/MOD operation instead of sleeping on an unknown state.
+            PollRegisterResult::SubscribedRecheck => Ok(PollEvent::empty()),
             PollRegisterResult::Ready(_) | PollRegisterResult::Unsupported => {
                 Err(SysError::PermissionDenied)
             },
@@ -147,6 +157,14 @@ impl EpollWatch {
         }
     }
 
+    pub(super) fn claim_dirty(&self) -> bool {
+        self.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    pub(super) fn restore_dirty(&self) {
+        self.dirty.store(true, Ordering::Release);
+    }
+
     /// Returns whether this call performed the only live-to-retired transition.
     pub(super) fn retire(&self) -> bool {
         self.accepting.swap(false, Ordering::AcqRel)
@@ -162,9 +180,10 @@ impl PollObserver for EpollWatch {
             return;
         };
 
-        // Retirement may race after the acceptance check. Such a callback may
-        // only dirty this immutable slot identity; the operation owner later
-        // rejects an empty/reused slot by generation before behavior or copyout.
-        owner.note_dirty(self.slot);
+        // Retirement may race after the acceptance check. Dirty belongs to
+        // this immutable watch generation, so a late callback cannot create
+        // ET delivery for a replacement that reuses the same slot.
+        self.restore_dirty();
+        owner.publish_wait_activity();
     }
 }

@@ -1,6 +1,6 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** R1 Accepted Target / Foundation Effective / 2D Suspended / 2R Ready, Not Authorized / Epoll Not Effective
+**状态：** R1 Accepted Target / Foundation Effective / 2D Suspended / 2R Closed / Epoll Not Effective
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **适用修订：** R1
@@ -510,7 +510,7 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
   已于 2026-07-26 完成。0A-0D 已逐项独立关闭，Stage 0 现为 Closed；该 closure 不执行任何
   contract cutover。后续独立 `0 -> 1` resolution gate 与新的实现授权已完成 Stage 1 原子 checkpoint；
   两个 foundation cutover 同步生效；Stage 2 的 2A-2C 已关闭。2D runtime Apollyon 触发 R1 target
-  renegotiation；2D 当前暂停，2R 已 Ready / Not Authorized，且不执行 contract cutover。
+  renegotiation；2D 当前暂停，2R 已 Closed 且未执行 contract cutover，未来2D仍需独立activation。
 - R0 2B 的 ready bitmap、LT requeue、global notification sequence 与 epoll-file COW registry 是已完成但
   被 R1 supersede 的 implementation evidence；它们不得进入最终 current contract。2R 必须删除这些长期
   路径并保留 per-watch ET dirty correctness obligation，不能因沉没成本保留双协议。

@@ -110,7 +110,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   cutover 已同步生效。2A dormant watch/lifecycle core、R0 2B ready/wait protocol与2C ABI/focused oracle已关闭；
   2D首次RV64 runtime发现epoll-file在active wait内获取sleepable mutex并panic。R1以per-instance operation BKL
   的bounded scan取代ready queue/COW/sequence，并用三态coverage + fixed routes形成non-sleeping wait publication；
-  2D已暂停，2R Ready但未授权。epoll ABI、`IOMUX-POLL-001/002`的R1 Refine与三个`EPOLL-*` ID仍未cutover生效。执行证据见
+  2R已按独立授权完成协议修正、两架构build、RV64 focused runtime与review；2D仍暂停且需新的activation。
+  epoll ABI、`IOMUX-POLL-001/002`的R1 Refine与三个`EPOLL-*` ID仍未cutover生效。执行证据见
   [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
