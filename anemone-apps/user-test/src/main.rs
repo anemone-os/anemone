@@ -80,6 +80,11 @@ fn run_local_tests() {
         local_run_cmd("/bin/jobctl-test", &["jobctl-test"], &[]);
         println!("user-test: jobctl test finished.");
     }
+
+    // 11. epoll focused test
+    println!("user-test: running epoll test...");
+    local_run_cmd("/bin/epoll-test", &["epoll-test"], &[]);
+    println!("user-test: epoll test finished.");
 }
 
 /// competition tests.

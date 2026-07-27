@@ -5,7 +5,7 @@
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
-本文只跟踪当前仍影响 R1 target、实现顺序、review gate、停止边界或验收判断
+本文只跟踪当前仍影响 R2 target、实现顺序、review gate、停止边界或验收判断
 的 confirmed design issues。普通实现 TODO、具体 Rust encoding 选择和尚未验证的
 性能猜测不放在这里。
 
@@ -27,11 +27,45 @@ noirq、0D TTY/closure 四个 checkpoint；这不改变本页 issue 结论。202
 授权进入 Active；本轮只授权 0A、0B。后续 0C-2C 执行事实见 transaction。2D 首次 runtime 暴露
 active wait 内获取 sleepable mutex 的 Apollyon；R1 已在 target 层以 operation-serialized bounded scan、
 per-watch dirty 与三态 non-sleeping wait publication neutralize，2R implementation、focused runtime与
-独立review现已关闭对应proof gate。
+独立review现已关闭对应proof gate。第二次2D runtime暴露的MM COW shadow ancestry stack overflow
+由R2从epoll acceptance denominator分离，并由register独立跟踪。R2 matrix继续运行后又暴露两个
+cross-owner acceptance blocker，2D现已暂停。
 
 ## Apollyon
 
-None.
+### EPOLL-RUNTIME-A4 - pipe WRITABLE predicate 使 ET writer edge 过早到达
+
+**状态：** Open / blocks R2 2D acceptance / 2026-07-27
+**影响范围：** `epoll_wait06` / pipe source readiness / EPOLLET
+**来源：** R2 `epoll + iomux` RV64 runtime
+
+**问题：** glibc与musl的`epoll_wait06`都在满pipe只读一半后得到一次unexpected `EPOLLOUT`并exit 1。
+fixed test要求writer只有在空出足够的原子写空间后才形成edge；live `pipe_tx_revents()`却以
+`!pipe.buf.is_full()`作为`WRITABLE` truth。读半页后pipe source发布writer hint，epoll对source-owned
+predicate重检后诚实交付该事件。
+
+**边界：** 不能在epoll watch中缓存pipe容量、复刻`PIPE_BUF`策略或吞掉source readiness；正确修复属于
+`fs::pipe` owner，而该production file在2D validation-only集合中。从R2 matrix删除case则会改变accepted
+denominator，必须经过新的target revision。
+
+**退出条件：** 获准扩入pipe owner并使其writability predicate/notification transition与Linux原子写阈值
+一致，随后重跑pipe poll与R2 matrix；或者由有权review明确接受新的target revision。
+
+### EPOLL-RUNTIME-A3 - epoll timeout case 与共享 iomux 同样早唤醒
+
+**状态：** Open / blocks R2 2D acceptance / 2026-07-27
+**影响范围：** `epoll_wait02` / shared iomux timeout / validation denominator
+**来源：** R2 `epoll + iomux` RV64 runtime
+
+**问题：** glibc与musl的`epoll_wait02`都在10ms timeout bucket稳定报告约四成early wake并exit 1；同次
+`poll02`、`pselect01`与`pselect01_64`出现相同signature。该failure family跨越epoll、poll与pselect，
+不支持把根因归到epoll readiness protocol，但`epoll_wait02`仍是R2 target case，因而阻止cutover。
+
+**边界：** 正确修复需要进入shared timer/wait owner并证明deadline rounding与clock accounting，超出2D
+manifest；不能在epoll timeout adapter添加case-specific slack。若改为排除该case，同样需要新的target revision。
+
+**退出条件：** 获准扩入shared timeout owner并让epoll/poll/pselect timing cases通过，或由有权review明确
+接受新的target revision；随后从头重跑R2 matrix。
 
 ## Keter
 
@@ -46,6 +80,29 @@ None.
 None.
 
 ## Neutralized
+
+### EPOLL-RUNTIME-A2 - 高频 fork 触发 MM COW shadow ancestry stack overflow
+
+**状态：** Neutralized for epoll acceptance in R2 / MM issue remains Open / 2026-07-27
+**影响范围：** 2D LTP closure denominator / cross-owner failure classification
+**来源：** Stage 2 Checkpoint 2D 第二次 RV64 runtime
+
+**原问题：** fixed `epoll01` 的 `epoll_ctl` 组合为每次受保护调用执行一次 fork。live
+`VmArea::fork()` 会逐次增加 parent VMA 的 `ShadowObject` ancestry，而缺页解析通过
+`ShadowObject::resolve_frame()` 递归遍历该 ancestry，最终稳定耗尽 kernel stack。257项KUnit与11项
+focused oracle已在同次启动先通过；panic调用链不经过epoll owner、ABI、readiness或wait protocol。
+
+**R2 关闭决策：** 开发者确认该故障属于MM而非epoll。R2完整保留R1的epoll target、correctness
+invariant与contract delta，只从glibc/musl的epoll closure denominator删除`epoll01`；其余13项和
+`epoll + iomux`组合验证不变。缺陷以
+[`ANE-20260727-MM-COW-SHADOW-ANCESTRY-STACK-OVERFLOW`](../../register/open-issues.md#ane-20260727-mm-cow-shadow-ancestry-stack-overflow)
+作为Apollyon继续开放，不能把排除外推到其它case或伪造PASS。
+
+**修复位置：** [R2 acceptance boundary](./index.md#非目标)、
+[Checkpoint 2D matrix](./implementation.md#ltp-group-与-profile-角色)和上述MM register issue。
+
+**重新打开条件：** 其余13项、focused oracle或iomux组合仍在epoll路径内触发同类stack overflow；
+新证据表明`epoll01`在MM故障之前已暴露epoll target内失败；或后续尝试把MM workaround塞入epoll owner。
 
 ### EPOLL-RUNTIME-A1 - epoll-file register 在 active wait 内获取 sleepable operation mutex
 
@@ -73,7 +130,7 @@ coverage不足时 route已安装、锁外self-hint并返回 `SubscribedRecheck`�
 **证明 gate：** [Checkpoint 2R Closed](./implementation.md#checkpoint-2r-closedoperation-serialized-scan-与-non-sleeping-wait-publication)
 已删除旧协议并证明三态coverage、ET dirty claim/rollback、ONESHOT commit、fixed-capacity guard-out
 notify/drop和multiple waiter；两架构build、RV64 focused runtime与独立review通过。原nested-wait runtime
-defect已修复，2D仍因activation边界保持Suspended。
+defect已修复。2D此后曾因activation边界保持Suspended，由R2 decision重新激活后又因A3/A4恢复Suspended。
 
 **修复位置：** [RFC epoll owner](./index.md#epoll-owner)、
 [Operation-serialized Scan、Dirty 与 Copyout](./invariants.md#operation-serialized-scandirty-与-copyout)、

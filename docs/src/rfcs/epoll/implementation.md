@@ -1,16 +1,18 @@
 # Epoll 实施计划
 
 **状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Closed
-**适用修订：** R1
+**适用修订：** R2
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **目标不变量：** [Epoll 与 Poll Subscription 不变量需求](./invariants.md)
 **当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`SIGNAL-TEMP-MASK-*`](../../contracts/signal/temporary-mask-delivery.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)、[`TTY-TERM-001` / `TTY-INPUT-001`](../../contracts/tty/data-plane.md)
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 R1 target-level 开放 Apollyon / Keter；
-2D runtime blocker 已由 R1 target、2R implementation、focused runtime 与独立 review neutralize
+**开放问题：** [Tracking Issues](./tracking-issues.md) 当前有两个 R2 acceptance Apollyon：共享timeout
+路径的早唤醒，以及pipe source `WRITABLE` predicate与`epoll_wait06`要求不符；active-wait与MM blocker
+已分别由R1/2R和R2 routing neutralize
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
-本文把公共 R1 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
+本文把公共 R2 中已经闭合的 accepted target 解析成滚动实施路线。R2完整继承R1的epoll协议，只修订2D
+acceptance denominator。Stage 0 已解析为
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
 初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭。开发者随后授权
 执行 `0 -> 1` resolution gate；该 gate 把 Stage 1 完整解析为 Ready。后续独立授权完成了 Stage 1
@@ -19,7 +21,9 @@ Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后
 也已完成 R0 2B ready/wait protocol。2C 已关闭，2D 首次 runtime 命中 epoll-file register blocker 后
 暂停。开发者接受 R1 target revision：保留 owner / ABI / lifecycle / capability，但以 operation-serialized
 bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence route。Checkpoint 2R 已按独立
-授权关闭；2D 仍 Suspended，`EPOLL-CUTOVER` 仍未执行。
+授权关闭。2D第二次runtime命中MM COW shadow ancestry stack overflow后，开发者接受R2、删除
+`epoll01` closure case、登记MM issue并重新激活2D。修订后的matrix随后命中两个cross-owner target
+failure，2D再次暂停；`EPOLL-CUTOVER`仍未执行。
 
 ## 实施原则
 
@@ -74,7 +78,7 @@ bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence rout
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 已独立完成 |
-| Stage 2 | 2D Suspended / 2R Closed | 2A-2C 已形成 candidate core/ABI；2R 已以 R1 简化协议替换 R0 ready/wait route，后续需重新激活 2D integration 才能完成首版 cutover | `EPOLL-CUTOVER`，尚未生效 | 等待开发者另行授权新的 2D activation |
+| Stage 2 | 2D Suspended / 2R Closed | 2A-2C 已形成 candidate core/ABI；2R 已替换 R0 ready/wait route；R2排除MM-owned `epoll01`后，13-case matrix又暴露共享timeout和pipe predicate blocker | `EPOLL-CUTOVER`，尚未生效 | 由owner expansion修复两个blocker，或经新target revision重订分母后重新activation |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
@@ -676,13 +680,15 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 - 开发者先授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
   `anemone-apps` 纳入写集；后续独立授权已分别关闭 2A 与 2B，原授权随后关闭2C并激活2D。
   2D 首次 QEMU 在 focused test 内 panic，LTP 与 `EPOLL-CUTOVER` 均未到达，原2D执行授权随暂停耗尽。
-  R1 acceptance 当时只授权 target correction 与 2R resolution；后续独立授权已关闭2R，但未授权2D恢复。
+  R1 acceptance 当时只授权 target correction 与 2R resolution；后续独立授权已关闭2R。开发者随后重新
+  激活2D；第二次runtime暴露MM COW shadow stack overflow后，又明确接受R2并授权按修订后的matrix继续2D。
+  修订后的运行在`epoll_wait02/06`命中target内FAIL，按本节停止条件再次暂停。
 - Stage 2 保持一个原子 integration / acceptance unit。2A-2C 只形成
   不可独立合入的 stacked implementation evidence；在 2D 完成 kernel ABI、focused test、LTP、review、current
   contract 与 transaction write-back 前，任何 partial core、syscall handler 或单独 contract page 都不得合入
   有效分支或被其它功能依赖。
 - 原 Stage 2 activation / checkpoint授权事实保留在transaction；任一 checkpoint closure都不自动授权下一个。
-  2R已按独立授权关闭，2D仍必须重新activation。每次activation、closure、validation与
+  2R已按独立授权关闭，2D曾由R2 decision重新activation，现因新runtime blocker暂停。每次activation、closure、validation与
   partial-code disposition只追加到transaction，不复制本文的authoritative delivery/write-set定义。
 
 ### 阶段内 checkpoint 路线
@@ -925,14 +931,13 @@ anonymous epoll file 与 route publication 已按独立授权完成；实现、r
 
 #### LTP group 与 profile 角色
 
-新建 `epoll` group，只执行不依赖 nested epoll或 socket的 14 项：
+新建 `epoll` group，只执行不依赖 nested epoll、socket或MM高频fork压力的 13 项：
 
 ```text
 epoll_create01
 epoll_create02
 epoll_create1_01
 epoll_create1_02
-epoll01 epoll-ltp
 epoll_ctl01
 epoll_ctl02
 epoll_ctl03
@@ -947,6 +952,10 @@ epoll_wait07
 - `epoll_ctl04/05` 作为注释保留，明确依赖首版 target外的 nested epoll；`epoll_wait05` 注明依赖 socket
   persistent readiness。开发者已接受 `epoll_pwait01..05` 五项不做测试，同样只以注释记录 socketpair原因，
   不把它们计入 attempted、PASS、TCONF或closure分母。
+- `epoll01` 的 `epoll_ctl` 穷举为每个组合执行 protected fork，稳定触发MM COW shadow ancestry
+  stack overflow；R2确认该路径不经过epoll协议，因而从两个libc的epoll closure denominator删除，并由
+  [`ANE-20260727-MM-COW-SHADOW-ANCESTRY-STACK-OVERFLOW`](../../register/open-issues.md#ane-20260727-mm-cow-shadow-ancestry-stack-overflow)
+  独立跟踪。不能把该排除外推到其它13项或伪造PASS。
 - glibc执行 `epoll_create02`；musl root在 `LTP_ROOTS.disabled_cases` 增加精确的 `epoll_create02`，原因是
   musl wrapper在 syscall前丢弃 legacy size，kernel无法观察测试的 invalid input。该排除只限musl root，
   不能扩成两个 libc都跳过或伪造 TPASS。
@@ -992,9 +1001,11 @@ Checkpoint 2D执行Stage 2唯一 `EPOLL-CUTOVER`：
    `./scripts/run-user-test-rv64.sh <preliminary-rv64-sdcard-image> build/epoll-stage2-rv64.log`。wrapper必须完成
    repository-owned rootfs/kernel build、全部enabled KUnit、`epoll-test`、glibc/musl组合matrix与正常关机；
    随后恢复profile并复核caller选择的master image未写入。
-6. 逐case记录 focused summary、glibc/musl LTP attempted/PASS/FAIL/TCONF/disabled与明确排除；
+6. 逐case记录 focused summary、glibc/musl LTP attempted/PASS/FAIL/TCONF/disabled与明确排除；runtime exit
+   code/summary、静态root `disabled_cases` audit与transaction记录共同形成分类证据，runner为赛方兼容打印的
+   `FAIL LTP CASE ... : 0`不表示失败，disabled case当前不单独打印marker；
    `epoll_pwait01..05` 不运行，musl `epoll_create02` 记为libc-wrapper disabled，nested/socket cases不冒充
-   target regression。任何target内 FAIL、panic、deadlock、timeout、lost wake、stale user data或unexpected
+   target regression；`epoll01`记为R2 MM-owner exclusion。任何target内 FAIL、panic、deadlock、timeout、lost wake、stale user data或unexpected
    unsupported都在cutover前停止。
 7. 对完整2A-2R-2D stacked diff做 architecture/concurrency/ABI/resource review，重点检查operation mutex释放点、
    per-watch dirty generation、bounded scan、ADD/MOD rollback、DEL/close retirement、ET claim、LT
@@ -1022,12 +1033,12 @@ Checkpoint 2D执行Stage 2唯一 `EPOLL-CUTOVER`：
 - create/ctl/pwait/pwait2、watch identity/liveness、ADD/MOD/DEL rollback、bounded scan/dirty/harvest/copyout、
   LT/ET/ONESHOT、epoll-file pollability与teardown全部满足本节协议；source与Signal/current task contract
   无第二truth。
-- focused app两架构build通过；RV64 closure中focused全部PASS，14项LTP对glibc/musl形成可归因matrix，
+- focused app两架构build通过；RV64 closure中focused全部PASS，13项LTP对glibc/musl形成可归因matrix，
   accepted exclusions精确保持，iomux组合无新regression且正常关机；LA64 release build通过。
 - profile和master image恢复/未写入；SMP>1、LA64 runtime、hardware、broad/final harness等未运行项逐项
   写明，不从docs/build/RV64外推。
 - 完整diff无未关闭Apollyon、Keter或Euclid；三个current contract ID、RFC状态、transaction cutover证据与
-  navigation在2D同一cutover生效。Stage 2 Closed后RFC R1才回到 Closed。
+  navigation在2D同一cutover生效。Stage 2 Closed后RFC R2才回到 Closed。
 
 #### 2D runtime stop - 2026-07-27
 
@@ -1246,10 +1257,38 @@ marker，因此不把本次证据外推为marker级正常关机证明。SMP>1、
 broad/final harness均Not Run；route容量耗尽与closing/register极限交错由静态审计而非focused runtime证明。
 2R contract cutover为`None`，2D继续Suspended。
 
+#### 2D fork-depth runtime stop 与 R2 acceptance - 2026-07-27
+
+2R关闭后的2D组合运行中，257项KUnit与11项focused oracle通过；fixed `epoll01`进入`epoll_ctl`穷举后，
+其每组合一次的protected fork稳定触发MM COW shadow ancestry递归解析，最终在kernel guard page形成
+stack-overflow panic。符号化backtrace连续落在`ShadowObject::resolve_frame()`的parent递归返回点；该调用链
+不经过epoll owner、ABI、readiness或wait protocol。
+
+开发者据此接受R2：完整保留R1 epoll target与contract delta，只从两个libc的epoll acceptance denominator
+删除`epoll01`，并把MM缺陷登记到register。该decision也neutralize了musl `epoll01`内部legacy-size assertion
+无法到达kernel的问题。R2已重新激活2D；本段不执行cutover，实际runtime/decision与输入恢复证据仍以
+transaction为权威。
+
+#### R2 matrix runtime stop - 2026-07-27
+
+R2组合运行完成正常QEMU退出：257项KUnit与11项focused oracle通过；glibc epoll为
+`attempted=13 passed=11 failed=2`，musl精确disable `epoll_create02`后为
+`attempted=12 passed=10 failed=2 skipped=1`。两个root均由`epoll_wait02`和`epoll_wait06`返回exit 1；
+这与赛方兼容的`FAIL ... : 0`打印不同。
+
+- `epoll_wait02`在10ms bucket稳定报告约四成early wake；同次`poll02`、`pselect01`和`pselect01_64`
+  呈现同一signature，因此是共享timeout/wait路径而非epoll-only行为。
+- `epoll_wait06`在满pipe只读一半后收到`EPOLLOUT`。live pipe owner只要buffer非满就报告
+  `WRITABLE`，但测试要求保留至少一个原子写阈值后才形成writer edge；epoll只能recheck source predicate，
+  不能在consumer内复制pipe容量或writability truth。
+
+两个修复都需要越出2D manifest进入timer/wait或pipe source production owner；从matrix排除则会再次改变
+acceptance boundary。2D因此Suspended，current contract与`EPOLL-CUTOVER`保持不变。
+
 ### Resolved Write Set Manifest
 
 本节是 Stage 2 从 R0 延续的整体 integration manifest；Checkpoint 2R 的 closed subset 以上一节为权威。
-R1 新增的 config / iomux 文件已并入整体 manifest；这不构成新的2D execution authorization。
+R1 新增的 config / iomux 文件已并入整体 manifest；R2另批准register issue write-back并重新授权2D。
 
 允许修改的配置物化文件：
 
@@ -1294,6 +1333,7 @@ R1 新增的 config / iomux 文件已并入整体 manifest；这不构成新的2
 - `docs/src/{contracts.md,SUMMARY.md,rfcs.md}`
 - `docs/src/devlog/transactions/index.md`
 - `docs/src/devlog/2026-07-20_to_2026-08-02.md`
+- `docs/src/register/open-issues.md`（只允许登记本次MM COW shadow ancestry issue）
 
 Validation-only 输入：
 
@@ -1312,7 +1352,7 @@ Validation-only 输入：
 - pipe/eventfd/timerfd/fanotify/TTY/socket等source production code；Stage 2只消费已生效subscription contract
 - `task::files` publication/refcount/final-release语义、`FileDescOps`形状或dynamic final-release observer；只增加
   lease窄操作面并使用既有static hook
-- nested epoll、socket persistent readiness、register/current-limitations、LTP固定source与master image
+- nested epoll、socket persistent readiness、除已列MM issue外的register/current-limitations、LTP固定source与master image
 - build orchestration、额外wrapper、通用test framework或未列current contract
 
 若真实owner boundary需要触碰未列文件，worker必须先报告文件、原因、contract/ABI/验证影响；批准后先更新

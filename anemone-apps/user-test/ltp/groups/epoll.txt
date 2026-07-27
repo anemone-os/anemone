@@ -1,0 +1,29 @@
+# Epoll R2 closure matrix. epoll01 is excluded because its protected-fork
+# stress reliably triggers the separately tracked MM COW shadow ancestry bug;
+# it is not counted as an epoll result.
+
+epoll_create01
+epoll_create02
+epoll_create1_01
+epoll_create1_02
+epoll_ctl01
+epoll_ctl02
+epoll_ctl03
+epoll_wait01
+epoll_wait02
+epoll_wait03
+epoll_wait04
+epoll_wait06
+epoll_wait07
+
+# Nested epoll is outside the first cutover target:
+# epoll_ctl04
+# epoll_ctl05
+
+# Socket-backed persistent readiness is outside this matrix:
+# epoll_wait05
+# epoll_pwait01
+# epoll_pwait02
+# epoll_pwait03
+# epoll_pwait04
+# epoll_pwait05

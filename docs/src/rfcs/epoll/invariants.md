@@ -1,13 +1,15 @@
 # Epoll 与 Poll Subscription 不变量需求
 
-**状态：** R1 Accepted Target / Foundation Effective / 2D Suspended / 2R Closed / Epoll Not Effective
+**状态：** R2 Accepted Target / Foundation Effective / 2D Suspended / 2R Closed / Epoll Not Effective
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
-**适用修订：** R1
+**适用修订：** R2
 
-本文保存 epoll R1 相对 current effective contract 的 target delta，以及本 RFC
+本文保存 epoll R2 相对 current effective contract 的 target delta，以及本 RFC
 自己的 proof obligations。当前生效规则以 `docs/src/contracts/` 为唯一权威；Stage 1 已完成
-foundation cutover，但 R1 对 `IOMUX-POLL-001/002` 的再次 Refine、epoll core target 与三个
+foundation cutover。R2完整继承R1对owner、ABI、lifecycle、bounded scan与wait publication的要求；
+本次revision只把确认属于MM COW shadow ancestry的`epoll01`从epoll acceptance denominator移除。
+R2 对 `IOMUX-POLL-001/002` 的再次 Refine、epoll core target 与三个
 `EPOLL-*` contract ID 仍未生效。
 
 ## Contract Impact
@@ -15,11 +17,11 @@ foundation cutover，但 R1 对 `IOMUX-POLL-001/002` 的再次 Refine、epoll co
 下表中的 cutover 名称只是语义切换单元，不是 implementation stage，也不授权执行。
 [实施计划](./implementation.md) 已把它们绑定到三阶段滚动路线、验证和回滚边界；
 Stage 0 不切换 contract，Stage 1 / Stage 2 分别拥有 foundation 与 epoll cutover。
-表中“当前规则”是 Stage 1 closure 后的 effective baseline。R1 acceptance 与 Checkpoint 2R 都不修改它；
-`IOMUX-POLL-001/002` 的 R1 Refine 和 `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`
+表中“当前规则”是 Stage 1 closure 后的 effective baseline。R1/R2 acceptance 与 Checkpoint 2R 都不修改它；
+`IOMUX-POLL-001/002` 的 R2 Refine 和 `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`
 必须在最终 `EPOLL-CUTOVER` 同时生效。
 
-| Contract ID | 变化 | 当前 effective 规则 | R1 Target 摘要 | 生效边界 |
+| Contract ID | 变化 | 当前 effective 规则 | R2 Target 摘要 | 生效边界 |
 | --- | --- | --- | --- | --- |
 | [`SCHED-LATCH-001..003`](../../contracts/scheduler/latch-wait-round.md) | Preserve | 单轮 wait identity、owner-bound lifecycle、no-return stale-safe trigger | `Latch` 继续只承载 task-local 单轮等待；persistent subscription 不进入 scheduler | 全程 |
 | [`SIGNAL-TEMP-MASK-001..003`](../../contracts/signal/temporary-mask-delivery.md) | Preserve | temporary mask、delivery reservation 与 restore responsibility 由 Signal owner 线性收口 | `IomuxWaitRound` 只替换 readiness registration owner，不取得或复制 mask/restore truth，现有 ppoll/pselect outcome classification 保持 | 全程 |
@@ -37,7 +39,7 @@ Stage 0 不切换 contract，Stage 1 / Stage 2 分别拥有 foundation 与 epoll
 | [`TTY-INPUT-001`](../../contracts/tty/data-plane.md#tty-input-001--input-ownershiprecord-boundary与readiness同源) | Preserve | input publication、read/poll predicate 与 durable recheck 同源 | TTY representative slice 保留 record/readiness owner 与预分配 dirty handoff，只迁移 consumer route | 全程 |
 
 `SUBSCRIPTION-CUTOVER` 与 `OPENED-DESC-CAPABILITY-CUTOVER` 已由 Stage 1 生效；其 current
-文本在 R1 最终 cutover 前保持不变。`EPOLL-CUTOVER` 只有在 epoll ABI、bounded scan、ET dirty
+文本在 R2 最终 cutover 前保持不变。`EPOLL-CUTOVER` 只有在 epoll ABI、bounded scan、ET dirty
 causality、non-sleeping wait publication 与 target proof obligations 通过后，才能同时开放 syscalls、
 三个新 contract IDs 并 Refine `IOMUX-POLL-001/002`。失败时 Stage 1 effective contract 原样保留，
 不能只切 `SubscribedRecheck` 或 partial epoll core。该 cutover
@@ -435,7 +437,7 @@ final-release observer registry 不是 target，只有 [EPOLL-DRAFT-K2](./tracki
 - IRQ-off/noirq source callback handoff 不得依赖不可用的动态分配或睡眠锁。
 
 operation serialization、generation-bound dirty、三态 coverage 与 non-owning terminal liveness 的
-R1 target 边界已经闭合；2R 必须在 cutover 前以 live implementation / runtime 证明，current contract
+R1 target 边界已经闭合；2R 已以 live implementation / runtime 完成证明，current contract
 在 `EPOLL-CUTOVER` 前保持不变。
 
 ### 引用与 Teardown
@@ -509,15 +511,17 @@ UAPI parser 位于 `fs::api::iomux::epoll*` 或保持同一依赖方向的现有
 - Stage 0 已在 document review 前解析为 Ready；R0 acceptance、transaction 与开发者启动授权
   已于 2026-07-26 完成。0A-0D 已逐项独立关闭，Stage 0 现为 Closed；该 closure 不执行任何
   contract cutover。后续独立 `0 -> 1` resolution gate 与新的实现授权已完成 Stage 1 原子 checkpoint；
-  两个 foundation cutover 同步生效；Stage 2 的 2A-2C 已关闭。2D runtime Apollyon 触发 R1 target
-  renegotiation；2D 当前暂停，2R 已 Closed 且未执行 contract cutover，未来2D仍需独立activation。
+  两个 foundation cutover 同步生效；Stage 2 的 2A-2C 已关闭。首次2D runtime Apollyon触发R1 target
+  renegotiation，2R随后Closed且未执行contract cutover；第二次2D runtime的MM-owned failure由R2从epoll
+  acceptance分离并重新activation，修订后的matrix又因shared timeout与pipe source两个target内failure
+  恢复Suspended。
 - R0 2B 的 ready bitmap、LT requeue、global notification sequence 与 epoll-file COW registry 是已完成但
   被 R1 supersede 的 implementation evidence；它们不得进入最终 current contract。2R 必须删除这些长期
   路径并保留 per-watch ET dirty correctness obligation，不能因沉没成本保留双协议。
 
 ### 文档层完成标准
 
-R1 target 已由以下文档层证据闭合：
+R2 target 已由以下文档层证据闭合；R2完整继承R1协议，只修订2D acceptance denominator：
 
 - 所有 Keter tracking issues 已 neutralize，或转成具有受保护 target、解析触发点、停止条件
   与回写路径的明确 stage gate；当前所有 Keter 已 neutralize，且
