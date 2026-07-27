@@ -3,6 +3,56 @@ use anemone_abi::{errno::Errno, syscall::*};
 pub mod fs {
     use super::*;
 
+    pub fn epoll_create1(flags: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_EPOLL_CREATE1, flags, 0, 0, 0, 0, 0) }
+    }
+
+    pub fn epoll_ctl(epfd: u64, op: u64, fd: u64, event_ptr: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_EPOLL_CTL, epfd, op, fd, event_ptr, 0, 0) }
+    }
+
+    pub fn epoll_pwait(
+        epfd: u64,
+        events_ptr: u64,
+        maxevents: u64,
+        timeout_ms: u64,
+        sigmask_ptr: u64,
+        sigsetsize: u64,
+    ) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_EPOLL_PWAIT,
+                epfd,
+                events_ptr,
+                maxevents,
+                timeout_ms,
+                sigmask_ptr,
+                sigsetsize,
+            )
+        }
+    }
+
+    pub fn epoll_pwait2(
+        epfd: u64,
+        events_ptr: u64,
+        maxevents: u64,
+        timeout_ptr: u64,
+        sigmask_ptr: u64,
+        sigsetsize: u64,
+    ) -> Result<u64, Errno> {
+        unsafe {
+            syscall(
+                SYS_EPOLL_PWAIT2,
+                epfd,
+                events_ptr,
+                maxevents,
+                timeout_ptr,
+                sigmask_ptr,
+                sigsetsize,
+            )
+        }
+    }
+
     pub fn openat(dirfd: u64, path_ptr: u64, flags: u64, mode: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_OPENAT, dirfd, path_ptr, flags, mode, 0, 0) }
     }

@@ -30,19 +30,23 @@ installed_dir = "/bin"
 # [[apps]]
 # name = "ioctl-test"
 # installed_dir = "/bin"
-# 
+
 # [[apps]]
 # name = "fair-test"
 # installed_dir = "/bin"
-# 
+
 # [[apps]]
 # name = "sched-attr-test"
 # installed_dir = "/bin"
-# 
+
 # [[apps]]
 # name = "jobctl-test"
 # installed_dir = "/bin"
-# 
+
+[[apps]]
+name = "epoll-test"
+installed_dir = "/bin"
+
 # [[apps]]
 # name = "float-test"
 # installed_dir = "/bin"

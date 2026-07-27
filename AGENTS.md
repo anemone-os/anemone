@@ -149,6 +149,8 @@ RFC `index.md` / `invariants.md` 原地维护当前修订的 accepted target、c
 
 不批量把既有 RFC 整理成全领域不变量目录。后续 RFC 第一次跨文档复用、扩展或替换既有共享规则时，只提取本次变化所需的最小 contract 闭包：受影响规则、唯一 owner 和必要直接依赖。RFC 用稳定 ID 声明 `Contract Impact` 与生效 gate；Draft / Accepted target 不得提前覆盖 effective contract，只有 transaction cutover 达到验证和停止条件后才更新 current contract。旧 RFC 正文不要求逐份反向改写。
 
+小迭代只有在 target 已完整解析、owner / handoff / failure / cleanup 明确、write set 与验证有限，且代码和 contract 只有一个原子 cutover 时，才可以声明 `Contract Impact / Cutover`。change record 只保存 local target、baseline、实现和证据；effective 正文仍只在 current contract。需要 probe、多个 checkpoint、transitional contract、滚动 stage resolution、target renegotiation 或本轮无法关闭的 Apollyon / Keter 时必须升级 RFC，不能把 small change 扩成第二套 RFC。
+
 Contract 文档按 owner 和共同变化/共同证明的协议边界组织，不机械镜像源文件，不为每条小规则单独建页，也不建立 `misc` / `small-invariants` 容器。局部实现约束留在 assertion、关键注释和测试；只服务单个 RFC 的规则留在 RFC；跨 RFC / 模块共享规则才进入 contract。跨领域 contract 必须区分普通依赖与真实 handoff：后者必须声明唯一协议 owner、每份状态的唯一 owner、局部义务、线性化点和 cleanup，不能用“共同 owner”掩盖双重真相源。
 
 ---

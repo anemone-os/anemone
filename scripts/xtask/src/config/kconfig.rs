@@ -57,6 +57,8 @@ pub struct Parameters {
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
+    pub epoll_file_max_waiters: Option<usize>,
+    pub pipe_capacity_pages: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -133,6 +135,8 @@ impl Parameters {
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
         materialize!(max_processes);
+        materialize!(epoll_file_max_waiters);
+        materialize!(pipe_capacity_pages);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -234,6 +238,10 @@ pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 pub const MAX_PATH_LEN_BYTES: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
+/// Fixed waiter-route capacity per epoll instance.
+pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Fixed pipe backing and default logical capacity in pages.
+pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -351,6 +359,8 @@ pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
             resolved!(max_processes),
+            resolved!(epoll_file_max_waiters),
+            resolved!(pipe_capacity_pages),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),

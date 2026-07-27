@@ -11,25 +11,22 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
+use super::iomux::PollRoute;
+
 const EVENTFD_MAX_COUNTER: u64 = u64::MAX - 1;
 
 #[derive(Clone, Debug)]
-struct EventFdPollTrigger {
-    trigger: LatchTrigger,
-    // Diagnostic only: readiness is recomputed under the eventfd state lock.
+struct EventFdPollRoute {
+    route: PollRoute,
     interests: PollEvent,
 }
 
-impl EventFdPollTrigger {
-    fn new(trigger: &LatchTrigger, interests: PollEvent) -> Self {
+impl EventFdPollRoute {
+    fn new(route: &PollRoute, interests: PollEvent) -> Self {
         Self {
-            trigger: trigger.clone(),
+            route: route.clone(),
             interests,
         }
-    }
-
-    fn is_prunable(&self) -> bool {
-        self.trigger.is_prunable()
     }
 }
 
@@ -54,7 +51,8 @@ impl EventFdIoTrigger {
 struct EventFdDetachedTriggers {
     read: Vec<EventFdIoTrigger>,
     write: Vec<EventFdIoTrigger>,
-    poll: Vec<EventFdPollTrigger>,
+    poll_routes: Option<Arc<Vec<EventFdPollRoute>>>,
+    changed: PollEvent,
 }
 
 impl EventFdDetachedTriggers {
@@ -62,12 +60,13 @@ impl EventFdDetachedTriggers {
         Self {
             read: Vec::new(),
             write: Vec::new(),
-            poll: Vec::new(),
+            poll_routes: None,
+            changed: PollEvent::empty(),
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.read.is_empty() && self.write.is_empty() && self.poll.is_empty()
+        self.read.is_empty() && self.write.is_empty() && self.poll_routes.is_none()
     }
 }
 
@@ -76,7 +75,10 @@ struct EventFdState {
     counter: u64,
     read_triggers: Vec<EventFdIoTrigger>,
     write_triggers: Vec<EventFdIoTrigger>,
-    poll_triggers: Vec<EventFdPollTrigger>,
+    /// Registration allocates a replacement before publication. Predicate
+    /// transitions only clone this snapshot under the state lock; route
+    /// notification and the old snapshot's final drop happen after unlock.
+    poll_routes: Arc<Vec<EventFdPollRoute>>,
 }
 
 impl EventFdState {
@@ -85,7 +87,7 @@ impl EventFdState {
             counter,
             read_triggers: Vec::new(),
             write_triggers: Vec::new(),
-            poll_triggers: Vec::new(),
+            poll_routes: Arc::new(Vec::new()),
         }
     }
 
@@ -120,28 +122,12 @@ impl EventFdState {
         );
     }
 
-    fn register_poll_wait(&mut self, trigger: &LatchTrigger, interests: PollEvent) {
-        self.prune_poll_triggers();
-        self.poll_triggers
-            .push(EventFdPollTrigger::new(trigger, interests));
-        kdebugln!(
-            "eventfd: armed poll wait={:#x} interests={:?} queue_len={}",
-            trigger.wait_id(),
-            interests,
-            self.poll_triggers.len(),
-        );
-    }
-
     fn prune_read_triggers(&mut self) {
         self.read_triggers.retain(|trigger| !trigger.is_prunable());
     }
 
     fn prune_write_triggers(&mut self) {
         self.write_triggers.retain(|trigger| !trigger.is_prunable());
-    }
-
-    fn prune_poll_triggers(&mut self) {
-        self.poll_triggers.retain(|trigger| !trigger.is_prunable());
     }
 
     fn detach_read_triggers(&mut self, reason: &'static str) -> Vec<EventFdIoTrigger> {
@@ -170,40 +156,12 @@ impl EventFdState {
         detached
     }
 
-    fn detach_poll_triggers(
-        &mut self,
-        interests: PollEvent,
-        reason: &'static str,
-    ) -> Vec<EventFdPollTrigger> {
-        self.prune_poll_triggers();
-        let mut kept = Vec::new();
-        let mut detached = Vec::new();
-
-        for trigger in core::mem::take(&mut self.poll_triggers) {
-            if trigger.interests.intersects(interests) {
-                detached.push(trigger);
-            } else {
-                kept.push(trigger);
-            }
-        }
-        self.poll_triggers = kept;
-
-        if !detached.is_empty() {
-            kdebugln!(
-                "eventfd: detached {} poll triggers interests={:?} reason={}",
-                detached.len(),
-                interests,
-                reason,
-            );
-        }
-        detached
-    }
-
     fn detach_readable_triggers(&mut self, reason: &'static str) -> EventFdDetachedTriggers {
         EventFdDetachedTriggers {
             read: self.detach_read_triggers(reason),
             write: Vec::new(),
-            poll: self.detach_poll_triggers(PollEvent::READABLE, reason),
+            poll_routes: Some(self.poll_routes.clone()),
+            changed: PollEvent::READABLE,
         }
     }
 
@@ -211,9 +169,37 @@ impl EventFdState {
         EventFdDetachedTriggers {
             read: Vec::new(),
             write: self.detach_write_triggers(reason),
-            poll: self.detach_poll_triggers(PollEvent::WRITABLE, reason),
+            poll_routes: Some(self.poll_routes.clone()),
+            changed: PollEvent::WRITABLE,
         }
     }
+}
+
+fn replace_eventfd_poll_routes(
+    routes: &mut Arc<Vec<EventFdPollRoute>>,
+    route: &PollRoute,
+    interests: PollEvent,
+) -> Result<(Arc<Vec<EventFdPollRoute>>, usize), SysError> {
+    let retained = routes
+        .iter()
+        .filter(|entry| !entry.route.is_prunable())
+        .count();
+    let capacity = retained.checked_add(1).ok_or(SysError::OutOfMemory)?;
+    let mut replacement = Vec::new();
+    replacement
+        .try_reserve(capacity)
+        .map_err(|_| SysError::OutOfMemory)?;
+    replacement.extend(
+        routes
+            .iter()
+            .filter(|entry| !entry.route.is_prunable())
+            .cloned(),
+    );
+    let pruned = routes.len() - replacement.len();
+    replacement.push(EventFdPollRoute::new(route, interests));
+
+    let replacement = Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)?;
+    Ok((core::mem::replace(routes, replacement), pruned))
 }
 
 #[derive(Debug, Opaque)]
@@ -348,14 +334,12 @@ fn trigger_detached_triggers(triggers: EventFdDetachedTriggers, reason: &'static
         trigger.trigger.trigger();
     }
 
-    for trigger in triggers.poll {
-        kdebugln!(
-            "eventfd: trigger poll wait={:#x} interests={:?} reason={}",
-            trigger.trigger.wait_id(),
-            trigger.interests,
-            reason,
-        );
-        trigger.trigger.trigger();
+    if let Some(routes) = triggers.poll_routes {
+        for entry in routes.iter() {
+            if entry.interests.intersects(triggers.changed) {
+                entry.route.notify();
+            }
+        }
     }
 }
 
@@ -457,23 +441,37 @@ fn eventfd_write(
 fn eventfd_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
     let eventfd = EventFd::from_file(file);
     let mut state = eventfd.state.lock();
-    let revents = state.revents(request.interests());
-    if !revents.is_empty() || !request.is_register() {
-        return Ok(PollRegisterResult::Ready(revents));
+    if !request.is_register() {
+        return Ok(PollRegisterResult::Ready(
+            state.revents(request.interests()),
+        ));
     }
 
-    let armable = request
+    let subscribable = request
         .interests()
         .intersects(PollEvent::READABLE | PollEvent::WRITABLE);
-    if !armable {
+    if !subscribable {
         return Ok(PollRegisterResult::Unsupported);
     }
 
-    let trigger = request
-        .trigger()
+    let route = request
+        .route()
         .expect("register request disappeared after is_register");
-    state.register_poll_wait(trigger, request.interests());
-    Ok(PollRegisterResult::Armed)
+    let (previous_routes, pruned) =
+        replace_eventfd_poll_routes(&mut state.poll_routes, route, request.interests())?;
+    let revents = state.revents(request.interests());
+    let queue_len = state.poll_routes.len();
+    drop(state);
+    drop(previous_routes);
+
+    kdebugln!(
+        "eventfd: subscribed poll interests={:?} queue_len={} pruned={}",
+        request.interests(),
+        queue_len,
+        pruned,
+    );
+
+    Ok(PollRegisterResult::Subscribed(revents))
 }
 
 fn eventfd_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(), SysError> {

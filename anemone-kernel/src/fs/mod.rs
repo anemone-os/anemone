@@ -4,6 +4,7 @@
 mod anonymous;
 mod cache_stats;
 mod dentry;
+mod epoll;
 mod eventfd;
 pub mod fanotify;
 // mod error;
@@ -32,6 +33,8 @@ mod ramfs;
 
 pub mod api;
 
+#[cfg(feature = "kunit")]
+pub(crate) use self::iomux::IomuxWaitRound;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
@@ -60,6 +63,7 @@ pub use self::{
 };
 pub(crate) use self::{
     inode::RenameFlags,
+    iomux::PollRoute,
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };
 pub use cache_stats::resident_file_inode_cache_pages;

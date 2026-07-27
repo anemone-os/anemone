@@ -15,6 +15,8 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
+use super::iomux::PollRoute;
+
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 const TIMERFD_TRIGGER_QUEUE_CAPACITY: usize = 16;
 
@@ -25,22 +27,22 @@ pub struct TimerFdSettimeFlags {
 }
 
 #[derive(Clone, Debug)]
-struct TimerFdPollTrigger {
-    trigger: LatchTrigger,
+struct TimerFdPollRoute {
+    route: PollRoute,
     // Diagnostic only: readiness is recomputed under the timerfd state lock.
     interests: PollEvent,
 }
 
-impl TimerFdPollTrigger {
-    fn new(trigger: &LatchTrigger, interests: PollEvent) -> Self {
+impl TimerFdPollRoute {
+    fn new(route: &PollRoute, interests: PollEvent) -> Self {
         Self {
-            trigger: trigger.clone(),
+            route: route.clone(),
             interests,
         }
     }
 
     fn is_prunable(&self) -> bool {
-        self.trigger.is_prunable()
+        self.route.is_prunable()
     }
 }
 
@@ -62,24 +64,26 @@ impl TimerFdIoTrigger {
 }
 
 #[derive(Debug)]
-struct TimerFdTriggerBatch {
-    // Caller-owned handoff for triggers removed while holding TimerFdState's
-    // no-IRQ lock. Dropping a LatchTrigger can release wait-core state, so stale
-    // entries must be moved here and consumed only after the lock is released.
+struct TimerFdHandoffBatch {
+    // Caller-owned handoff built while holding TimerFdState's no-IRQ lock.
+    // Read triggers and stale routes are removed; live poll routes are cloned
+    // for notification. Every notify and drop is consumed after unlock.
     read: heapless::Vec<TimerFdIoTrigger, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
-    poll: heapless::Vec<TimerFdPollTrigger, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
+    poll_notify: heapless::Vec<TimerFdPollRoute, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
+    poll_stale: heapless::Vec<TimerFdPollRoute, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
 }
 
-impl TimerFdTriggerBatch {
+impl TimerFdHandoffBatch {
     fn empty() -> Self {
         Self {
             read: heapless::Vec::new(),
-            poll: heapless::Vec::new(),
+            poll_notify: heapless::Vec::new(),
+            poll_stale: heapless::Vec::new(),
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.read.is_empty() && self.poll.is_empty()
+        self.read.is_empty() && self.poll_notify.is_empty() && self.poll_stale.is_empty()
     }
 
     fn push_read(&mut self, trigger: TimerFdIoTrigger) {
@@ -89,10 +93,17 @@ impl TimerFdTriggerBatch {
         );
     }
 
-    fn push_poll(&mut self, trigger: TimerFdPollTrigger) {
+    fn push_poll_notify(&mut self, route: TimerFdPollRoute) {
         assert!(
-            self.poll.push(trigger).is_ok(),
-            "timerfd poll trigger batch overflow"
+            self.poll_notify.push(route).is_ok(),
+            "timerfd poll notify batch overflow"
+        );
+    }
+
+    fn push_poll_stale(&mut self, route: TimerFdPollRoute) {
+        assert!(
+            self.poll_stale.push(route).is_ok(),
+            "timerfd stale poll route batch overflow"
         );
     }
 }
@@ -112,7 +123,7 @@ struct TimerFdState {
     schedule: TimerFdSchedule,
     expirations: u64,
     read_triggers: Vec<TimerFdIoTrigger>,
-    poll_triggers: Vec<TimerFdPollTrigger>,
+    poll_routes: Vec<TimerFdPollRoute>,
     // Diagnostic only: accepted no-op state for the stage-1
     // TFD_TIMER_CANCEL_ON_SET compatibility bridge. It must not drive read
     // errors until clock-set cancellation is implemented.
@@ -126,7 +137,7 @@ impl TimerFdState {
             schedule: TimerFdSchedule::Disarmed,
             expirations: 0,
             read_triggers: queue_with_capacity()?,
-            poll_triggers: queue_with_capacity()?,
+            poll_routes: queue_with_capacity()?,
             cancel_on_set_accepted: false,
         })
     }
@@ -142,43 +153,32 @@ impl TimerFdState {
     fn register_read_wait(
         &mut self,
         trigger: &LatchTrigger,
-        stale: &mut TimerFdTriggerBatch,
+        stale: &mut TimerFdHandoffBatch,
     ) -> Result<(), SysError> {
         self.detach_prunable_read_triggers(stale);
-        if self.read_triggers.len() == self.read_triggers.capacity() {
+        if self.read_triggers.len() >= TIMERFD_TRIGGER_QUEUE_CAPACITY {
             return Err(SysError::OutOfMemory);
         }
         self.read_triggers.push(TimerFdIoTrigger::new(trigger));
-        kdebugln!(
-            "timerfd: armed read wait={:#x} queue_len={}",
-            trigger.wait_id(),
-            self.read_triggers.len(),
-        );
         Ok(())
     }
 
-    fn register_poll_wait(
+    fn register_poll_route(
         &mut self,
-        trigger: &LatchTrigger,
+        route: &PollRoute,
         interests: PollEvent,
-        stale: &mut TimerFdTriggerBatch,
+        stale: &mut TimerFdHandoffBatch,
     ) -> bool {
-        self.detach_prunable_poll_triggers(stale);
-        if self.poll_triggers.len() == self.poll_triggers.capacity() {
+        self.detach_prunable_poll_routes(stale);
+        if self.poll_routes.len() >= TIMERFD_TRIGGER_QUEUE_CAPACITY {
             return false;
         }
-        self.poll_triggers
-            .push(TimerFdPollTrigger::new(trigger, interests));
-        kdebugln!(
-            "timerfd: armed poll wait={:#x} interests={:?} queue_len={}",
-            trigger.wait_id(),
-            interests,
-            self.poll_triggers.len(),
-        );
+        self.poll_routes
+            .push(TimerFdPollRoute::new(route, interests));
         true
     }
 
-    fn detach_prunable_read_triggers(&mut self, stale: &mut TimerFdTriggerBatch) {
+    fn detach_prunable_read_triggers(&mut self, stale: &mut TimerFdHandoffBatch) {
         let mut index = 0;
         while index < self.read_triggers.len() {
             if self.read_triggers[index].is_prunable() {
@@ -189,37 +189,36 @@ impl TimerFdState {
         }
     }
 
-    fn detach_prunable_poll_triggers(&mut self, stale: &mut TimerFdTriggerBatch) {
+    fn detach_prunable_poll_routes(&mut self, stale: &mut TimerFdHandoffBatch) {
         let mut index = 0;
-        while index < self.poll_triggers.len() {
-            if self.poll_triggers[index].is_prunable() {
-                stale.push_poll(self.poll_triggers.swap_remove(index));
+        while index < self.poll_routes.len() {
+            if self.poll_routes[index].is_prunable() {
+                stale.push_poll_stale(self.poll_routes.swap_remove(index));
             } else {
                 index += 1;
             }
         }
     }
 
-    fn detach_readable_triggers(&mut self, reason: &'static str) -> TimerFdTriggerBatch {
-        // Expiry detaches every registered waiter and lets wait-core identity
-        // filter stale triggers after unlock; pruning here would drop stale
-        // LatchTriggers in IRQ-disabled context.
-        let mut detached = TimerFdTriggerBatch::empty();
+    fn collect_readable_waiters(&mut self) -> TimerFdHandoffBatch {
+        // Blocking-read triggers remain one-shot and are detached. Poll routes
+        // are persistent: clone live routes into the caller-owned notify batch,
+        // retain them in the registry, and move only stale routes out. All
+        // notification and drop then happens after the no-IRQ guard is released.
+        let mut handoff = TimerFdHandoffBatch::empty();
         while let Some(trigger) = self.read_triggers.pop() {
-            detached.push_read(trigger);
+            handoff.push_read(trigger);
         }
-        while let Some(trigger) = self.poll_triggers.pop() {
-            detached.push_poll(trigger);
+        let mut index = 0;
+        while index < self.poll_routes.len() {
+            if self.poll_routes[index].is_prunable() {
+                handoff.push_poll_stale(self.poll_routes.swap_remove(index));
+            } else {
+                handoff.push_poll_notify(self.poll_routes[index].clone());
+                index += 1;
+            }
         }
-        if !detached.read.is_empty() || !detached.poll.is_empty() {
-            kdebugln!(
-                "timerfd: detached read={} poll={} triggers reason={}",
-                detached.read.len(),
-                detached.poll.len(),
-                reason,
-            );
-        }
-        detached
+        handoff
     }
 }
 
@@ -335,25 +334,37 @@ fn snapshot_itimerspec(clockid: i32, state: &TimerFdState) -> ITimerSpec {
     }
 }
 
-fn drop_stale_triggers(triggers: TimerFdTriggerBatch, reason: &'static str) {
-    if triggers.is_empty() {
+fn drop_stale_waiters(waiters: TimerFdHandoffBatch, reason: &'static str) {
+    if waiters.is_empty() {
         return;
     }
+    assert!(
+        waiters.poll_notify.is_empty(),
+        "timerfd dropped a live poll notification batch"
+    );
 
     kdebugln!(
-        "timerfd: dropped stale read={} poll={} triggers reason={}",
-        triggers.read.len(),
-        triggers.poll.len(),
+        "timerfd: dropped stale read={} poll={} waiters reason={}",
+        waiters.read.len(),
+        waiters.poll_stale.len(),
         reason,
     );
 }
 
-fn trigger_detached_triggers(triggers: TimerFdTriggerBatch, reason: &'static str) {
-    if triggers.is_empty() {
+fn notify_waiters_after_unlock(waiters: TimerFdHandoffBatch, reason: &'static str) {
+    if waiters.is_empty() {
         return;
     }
 
-    for trigger in triggers.read {
+    kdebugln!(
+        "timerfd: detached read={} poll_notify={} poll_stale={} waiters reason={}",
+        waiters.read.len(),
+        waiters.poll_notify.len(),
+        waiters.poll_stale.len(),
+        reason,
+    );
+
+    for trigger in waiters.read {
         kdebugln!(
             "timerfd: trigger read wait={:#x} reason={}",
             trigger.trigger.wait_id(),
@@ -362,14 +373,13 @@ fn trigger_detached_triggers(triggers: TimerFdTriggerBatch, reason: &'static str
         trigger.trigger.trigger();
     }
 
-    for trigger in triggers.poll {
+    for route in waiters.poll_notify {
         kdebugln!(
-            "timerfd: trigger poll wait={:#x} interests={:?} reason={}",
-            trigger.trigger.wait_id(),
-            trigger.interests,
+            "timerfd: notify poll route interests={:?} reason={}",
+            route.interests,
             reason,
         );
-        trigger.trigger.trigger();
+        route.route.notify();
     }
 }
 
@@ -410,7 +420,6 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
             core.now_ns(),
             next_expire_at_ns,
             interval_ns,
-            "expire",
         );
         if let Some(timeout) = timeout {
             // Submit the successor event before publishing the updated armed
@@ -421,25 +430,24 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
         detached
     };
 
-    trigger_detached_triggers(detached, "expire");
+    notify_waiters_after_unlock(detached, "expire");
 }
 
 fn refresh_due_expiration_locked(
     core: &Arc<TimerFdCore>,
     state: &mut TimerFdState,
-    reason: &'static str,
-) -> TimerFdTriggerBatch {
+) -> TimerFdHandoffBatch {
     let TimerFdSchedule::Armed {
         next_expire_at_ns,
         interval_ns,
     } = state.schedule
     else {
-        return TimerFdTriggerBatch::empty();
+        return TimerFdHandoffBatch::empty();
     };
 
     let now_ns = core.now_ns();
     if now_ns < next_expire_at_ns {
-        return TimerFdTriggerBatch::empty();
+        return TimerFdHandoffBatch::empty();
     }
 
     // Read/poll readiness is derived from the timerfd object's clock state, not
@@ -449,7 +457,7 @@ fn refresh_due_expiration_locked(
     state.generation = state.generation.wrapping_add(1);
     let generation = state.generation;
     let (detached, timeout) =
-        account_due_expiration_locked(state, now_ns, next_expire_at_ns, interval_ns, reason);
+        account_due_expiration_locked(state, now_ns, next_expire_at_ns, interval_ns);
     if let Some(timeout) = timeout {
         schedule_timerfd_callback(core, generation, timeout);
     }
@@ -461,11 +469,10 @@ fn account_due_expiration_locked(
     now_ns: u64,
     next_expire_at_ns: u64,
     interval_ns: Option<u64>,
-    reason: &'static str,
-) -> (TimerFdTriggerBatch, Option<Duration>) {
+) -> (TimerFdHandoffBatch, Option<Duration>) {
     if now_ns < next_expire_at_ns {
         return (
-            TimerFdTriggerBatch::empty(),
+            TimerFdHandoffBatch::empty(),
             Some(deadline_timeout(now_ns, next_expire_at_ns)),
         );
     }
@@ -481,11 +488,11 @@ fn account_due_expiration_locked(
             interval_ns: Some(interval_ns),
         };
         let timeout = deadline_timeout(now_ns, next_expire_at_ns);
-        (state.detach_readable_triggers(reason), Some(timeout))
+        (state.collect_readable_waiters(), Some(timeout))
     } else {
         state.expirations = state.expirations.saturating_add(1);
         state.schedule = TimerFdSchedule::Disarmed;
-        (state.detach_readable_triggers(reason), None)
+        (state.collect_readable_waiters(), None)
     }
 }
 
@@ -498,17 +505,17 @@ fn timerfd_wait_for_readable(timerfd: &TimerFdFile) -> Result<(), SysError> {
         let latch = Latch::begin_current(true);
         let trigger = latch.make_trigger();
 
-        let mut stale = TimerFdTriggerBatch::empty();
+        let mut stale = TimerFdHandoffBatch::empty();
         let (register_result, due, ready) = {
             let mut state = timerfd.core.state.lock();
-            let due = refresh_due_expiration_locked(&timerfd.core, &mut state, "read_refresh");
+            let due = refresh_due_expiration_locked(&timerfd.core, &mut state);
             if state.expirations > 0 {
                 (Ok(()), due, true)
             } else {
                 (state.register_read_wait(&trigger, &mut stale), due, false)
             }
         };
-        trigger_detached_triggers(due, "read_refresh");
+        notify_waiters_after_unlock(due, "read_refresh");
         if ready {
             latch.cancel(LatchCancelReason::PredicateReady);
             let outcome = latch.finish();
@@ -518,7 +525,7 @@ fn timerfd_wait_for_readable(timerfd: &TimerFdFile) -> Result<(), SysError> {
             );
             return Ok(());
         }
-        drop_stale_triggers(stale, "read_register");
+        drop_stale_waiters(stale, "read_register");
         if let Err(err) = register_result {
             latch.cancel(LatchCancelReason::RegisterError);
             let outcome = latch.finish();
@@ -563,7 +570,7 @@ fn timerfd_read(
     loop {
         let (value, due) = {
             let mut state = timerfd.core.state.lock();
-            let due = refresh_due_expiration_locked(&timerfd.core, &mut state, "read_refresh");
+            let due = refresh_due_expiration_locked(&timerfd.core, &mut state);
             let value = if state.expirations == 0 {
                 None
             } else {
@@ -573,7 +580,7 @@ fn timerfd_read(
             };
             (value, due)
         };
-        trigger_detached_triggers(due, "read_refresh");
+        notify_waiters_after_unlock(due, "read_refresh");
 
         if let Some(value) = value {
             buf[..size_of::<u64>()].copy_from_slice(&value.to_le_bytes());
@@ -590,29 +597,36 @@ fn timerfd_read(
 fn timerfd_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
     let timerfd = TimerFdFile::from_file(file).expect("timerfd file without timerfd private data");
 
-    let mut stale = TimerFdTriggerBatch::empty();
-    let (result, due) = {
+    let mut stale = TimerFdHandoffBatch::empty();
+    let (result, due, capacity_exhausted) = {
         let mut state = timerfd.core.state.lock();
-        let due = refresh_due_expiration_locked(&timerfd.core, &mut state, "poll_refresh");
+        let due = refresh_due_expiration_locked(&timerfd.core, &mut state);
         let revents = state.revents(request.interests());
-        let result = if !revents.is_empty() || !request.is_register() {
+        let mut capacity_exhausted = false;
+        let result = if !request.is_register() {
             PollRegisterResult::Ready(revents)
         } else if !request.interests().contains(PollEvent::READABLE) {
             PollRegisterResult::Unsupported
-        } else {
-            let trigger = request
-                .trigger()
-                .expect("register request disappeared after is_register");
-            if state.register_poll_wait(trigger, request.interests(), &mut stale) {
-                PollRegisterResult::Armed
+        } else if let Some(route) = request.route() {
+            if state.register_poll_route(route, request.interests(), &mut stale) {
+                PollRegisterResult::Subscribed(revents)
             } else {
+                capacity_exhausted = true;
                 PollRegisterResult::Unsupported
             }
+        } else {
+            PollRegisterResult::Unsupported
         };
-        (result, due)
+        (result, due, capacity_exhausted)
     };
-    trigger_detached_triggers(due, "poll_refresh");
-    drop_stale_triggers(stale, "poll_register");
+    notify_waiters_after_unlock(due, "poll_refresh");
+    drop_stale_waiters(stale, "poll_register");
+    if capacity_exhausted {
+        kwarningln!(
+            "timerfd: poll route capacity exhausted capacity={}",
+            TIMERFD_TRIGGER_QUEUE_CAPACITY,
+        );
+    }
     Ok(result)
 }
 
@@ -708,7 +722,7 @@ pub fn settime(
 ) -> Result<ITimerSpec, SysError> {
     let (value_ns, interval_ns) = validate_itimerspec(new_value)?;
     let core = TimerFdFile::core_from_file(file)?;
-    let mut detached = TimerFdTriggerBatch::empty();
+    let mut detached = TimerFdHandoffBatch::empty();
 
     let old_value = {
         let mut state = core.state.lock();
@@ -736,13 +750,8 @@ pub fn settime(
                 next_expire_at_ns,
                 interval_ns,
             };
-            let (new_detached, timeout) = account_due_expiration_locked(
-                &mut state,
-                now_ns,
-                next_expire_at_ns,
-                interval_ns,
-                "settime",
-            );
+            let (new_detached, timeout) =
+                account_due_expiration_locked(&mut state, now_ns, next_expire_at_ns, interval_ns);
             detached = new_detached;
             if let Some(timeout) = timeout {
                 // Normal settime has no recoverable timer-core submit failure:
@@ -755,7 +764,81 @@ pub fn settime(
         old_value
     };
 
-    trigger_detached_triggers(detached, "settime");
+    notify_waiters_after_unlock(detached, "settime");
 
     Ok(old_value)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::fs::iomux::IomuxWaitRound;
+    use anemone_abi::time::linux::clock::CLOCK_MONOTONIC;
+
+    #[kunit]
+    fn poll_route_notifies_after_unlock_and_reuses_stale_capacity() {
+        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+
+        let ready_round = IomuxWaitRound::begin_current();
+        let ready_request = ready_round.poll_request(PollEvent::READABLE);
+        {
+            let mut state = core.state.lock();
+            state.expirations = 1;
+        }
+        assert_eq!(
+            file.poll(&ready_request).unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::READABLE)
+        );
+        assert_eq!(core.state.lock().poll_routes.len(), 1);
+        ready_round.cancel(LatchCancelReason::PredicateReady);
+        let _ = ready_round.finish();
+
+        let notified_round = IomuxWaitRound::begin_current();
+        let notified_request = notified_round.poll_request(PollEvent::READABLE);
+        {
+            let mut state = core.state.lock();
+            state.expirations = 0;
+        }
+        for _ in 0..TIMERFD_TRIGGER_QUEUE_CAPACITY {
+            assert_eq!(
+                file.poll(&notified_request).unwrap(),
+                PollRegisterResult::Subscribed(PollEvent::empty())
+            );
+        }
+        assert_eq!(
+            core.state.lock().poll_routes.len(),
+            TIMERFD_TRIGGER_QUEUE_CAPACITY
+        );
+        assert_eq!(
+            file.poll(&notified_request).unwrap(),
+            PollRegisterResult::Unsupported
+        );
+
+        let detached = {
+            let mut state = core.state.lock();
+            account_due_expiration_locked(&mut state, 1, 1, None).0
+        };
+        assert_eq!(detached.poll_notify.len(), TIMERFD_TRIGGER_QUEUE_CAPACITY);
+        assert!(detached.poll_stale.is_empty());
+        assert_eq!(
+            core.state.lock().poll_routes.len(),
+            TIMERFD_TRIGGER_QUEUE_CAPACITY
+        );
+        notify_waiters_after_unlock(detached, "kunit_expire");
+
+        notified_round.schedule_with_timeout(Some(Duration::from_secs(1)));
+        assert_eq!(notified_round.finish(), LatchWaitOutcome::Triggered);
+
+        let reused_round = IomuxWaitRound::begin_current();
+        let reused_request = reused_round.poll_request(PollEvent::READABLE);
+        core.state.lock().expirations = 0;
+        assert_eq!(
+            file.poll(&reused_request).unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+        assert_eq!(core.state.lock().poll_routes.len(), 1);
+        reused_round.cancel(LatchCancelReason::PredicateReady);
+        let _ = reused_round.finish();
+    }
 }

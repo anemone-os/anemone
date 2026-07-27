@@ -130,6 +130,20 @@ RFC `invariants.md` 在涉及共享 contract 时加入：
 - 明确哪些临时规则在什么 gate 删除，不能自然沉淀成长期 contract。
 ```
 
+## Small-change `Contract Impact / Cutover`
+
+只有满足单一原子 cutover 资格的小迭代才使用：
+
+```md
+## Contract Impact / Cutover
+
+| Contract ID | 变化 | Cutover 前 effective baseline | 新 effective 规则 | 生效证据 |
+| --- | --- | --- | --- | --- |
+| SCHED-WAKE-001 | Replace | live owner + Closed RFC / 历史 transaction | 新规则摘要 | 当前 change record 的 source / runtime evidence |
+```
+
+change record 必须链接唯一 current contract 正文，说明代码与 contract 同 checkpoint 生效、失败时保持旧规则，并且不得保存 pending 多阶段 target、独立 invariants / implementation / tracking 文件或 transitional contract。任何这类需求都升级 RFC。
+
 ## 拆页检查
 
 不要按“一条不变量一个文件”拆分。出现以下情况时才建立或拆出独立 surface：

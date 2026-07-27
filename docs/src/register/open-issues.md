@@ -34,6 +34,31 @@ capability；network只在完整`Late`返回后激活；三个长期host target�
 与no-default gates、RV64 build、fresh-disk 260/260 KUnit/active attach/strict shutdown order、source audit与
 独立Apollyon/Keter/Euclid/Safe全0 review通过。contract cutover为None，既有current contracts保持Effective。
 
+## ANE-20260727-MM-COW-SHADOW-ANCESTRY-STACK-OVERFLOW
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Apollyon
+**Area:** mm / uspace / COW fork / VMO shadow
+
+**Symptom / Trigger:** 同一长寿父进程连续执行大量受保护 fork 时，`VmArea::fork()` 会反复把父 VMA
+backing 替换为新的 `ShadowObject(parent = old backing)`。后续缺页由
+`ShadowObject::resolve_frame()` 递归遍历 parent ancestry；fixed LTP `epoll01` 的 `epoll_ctl`
+组合为每次受保护调用执行一次 fork，稳定把该 ancestry 推到 kernel stack guard page并触发
+stack-overflow panic。2026-07-27 用户本地多次复现；核验日志中 257 项 KUnit 与 11 项 epoll focused
+oracle 已先通过，backtrace 随后连续返回到 `ShadowObject::resolve_frame()` 的 parent 调用点。
+
+**Impact:** 高频 sequential fork 可以不经过 epoll 行为路径而稳定使内核崩溃；任何长寿父进程累积的
+COW shadow depth 都可能触发同类故障。递归解析还使 kernel stack 消耗随 ancestry 深度无界增长。
+
+**Owner:** mm
+**Last Verified:** 2026-07-27
+**Exit Condition:** 由 MM owner 为 COW shadow ancestry 建立有界、可证明的迭代解析、压平或合并策略；
+增加同一父进程连续大量 fork 后 parent/child 分别读写 COW 页的定向回归，并以 MM/KUnit、RV64/LA64
+build及 runtime stress 证明不再递归耗尽 kernel stack且 COW 隔离保持。
+**Related:** [Epoll R2 acceptance boundary](../rfcs/epoll/index.md),
+[Epoll 2D runtime evidence](../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-reactivation-runtime-stop---2026-07-27)
+
 ## ANE-20260723-AHCI-PROBE-LIFECYCLE-AND-CAPACITY
 
 **Type:** Issue

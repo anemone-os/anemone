@@ -10,7 +10,7 @@
 
 - `docs/src/contracts/` 下的条目只表达已经生效的共享规则。对已经登记的 contract ID，它是当前语义的唯一文档权威。
 - RFC `index.md` / `invariants.md` 表达 accepted target、相对当前契约的 delta，以及只服务该方案或迁移的 RFC-local proof obligations。它们不能在 cutover 前把目标规则写成当前事实。
-- transaction devlog 记录阶段事实、review、验证和 contract cutover 证据，不重新定义规则。
+- transaction devlog 记录 RFC 阶段事实、review、验证和 contract cutover 证据，不重新定义规则。满足单一原子 cutover 资格的小迭代由公开 small-change record 保存同等 cutover 证据。
 - Git 保存所有物理文本历史。契约文档不建立 `v1` / `v2` 副本，也不维护第二套修订号；语义变化由来源 RFC 和生效 transaction 解释。
 - register / current limitations 继续保存当前开放问题和已接受缺口，不承担 contract 或迁移计划。
 
@@ -87,6 +87,8 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 
 `Introduce` 表示 RFC 新增此前不存在的 effective contract ID。该 ID 在 cutover 前只存在于 RFC target，current rule 为 `None（尚未生效）`；达到 cutover gate 后才在契约层创建 Active 条目。若规则已经由 live code 或 Closed RFC 生效、只是尚未迁入契约层，应先提取最小 baseline，再按真实 delta 分类，不能使用 `Introduce` 把既有行为伪装成新增语义。
 
+严格的 contract-bearing small change 可以使用同一组变化分类，但只能在 target、owner、handoff、failure、cleanup、write set 与验证均已解析，且实现和 contract 只有一个原子 cutover 时采用。change record 是 local target 与 cutover 证据入口，不保存另一份 effective 正文；`docs/src/contracts/` 在 checkpoint 完成后立即成为唯一 current authority。若需要多阶段、probe、transitional contract、target renegotiation 或未关闭的高等级 finding，必须改走 RFC / transaction 生命周期。
+
 生命周期如下：
 
 | 阶段 | RFC | 当前契约 | Transaction |
@@ -107,7 +109,7 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 
 ## 当前登记
 
-契约层从本规则生效后按触达迁移。当前不批量把既有 RFC 的不变量搬入 `docs/src/contracts/`；首个需要跨 RFC 修改或复用既有共享规则的 RFC，应按本页提取最小 contract 闭包，并把新入口加入本节和 `docs/src/SUMMARY.md`。
+契约层从本规则生效后按触达迁移。当前不批量把既有 RFC 的不变量搬入 `docs/src/contracts/`；首个需要跨 RFC 修改或复用既有共享规则的 RFC 或合格的 contract-bearing small change，应按本页提取最小 contract 闭包，并把新入口加入本节和 `docs/src/SUMMARY.md`。
 
 - [VFS 当前契约](./contracts/vfs/index.md)
   - [Mount admission](./contracts/vfs/mount-admission.md)
@@ -122,11 +124,19 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
   - [Attach lifecycle](./contracts/net/attach-lifecycle.md)
 - [System Power 当前契约](./contracts/power/index.md)
   - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
+- [Scheduler 当前契约](./contracts/scheduler/index.md)
+  - [Asynchronous wake delivery](./contracts/scheduler/wake-delivery.md)
+  - [Latch wait round](./contracts/scheduler/latch-wait-round.md)
+- [I/O Multiplexing 当前契约](./contracts/iomux/index.md)
+  - [Poll wait 与 source registration](./contracts/iomux/poll-wait.md)
+- [Epoll 当前契约](./contracts/epoll/index.md)
+  - [Epoll protocol](./contracts/epoll/protocol.md)
 - [Task 当前契约](./contracts/task/index.md)
   - [Process-group signal targeting](./contracts/task/process-group-signaling.md)
   - [ThreadGroup lifecycle](./contracts/task/thread-group-lifecycle.md)
   - [Unix job control](./contracts/task/job-control.md)
   - [Child wait](./contracts/task/child-wait.md)
+  - [Opened-description lifecycle](./contracts/task/opened-description-lifecycle.md)
   - [Anemone Boot Protocol](./contracts/task/boot-protocol.md)
   - [User entry](./contracts/task/user-entry.md)
 - [TTY 当前契约](./contracts/tty/index.md)

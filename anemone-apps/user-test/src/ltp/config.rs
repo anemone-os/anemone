@@ -91,7 +91,10 @@ pub(super) const LTP_ROOTS: &[LtpRoot] = &[
         label: "ltp-musl",
         workdir: "/musl",
         envp: MUSL_LTP_ENV,
-        disabled_cases: &["sbrk01"],
+        // musl implements legacy epoll_create(size) through epoll_create1(0),
+        // so the kernel cannot observe epoll_create02's invalid size. Keep the
+        // exclusion root-local; glibc still exercises the legacy ABI.
+        disabled_cases: &["sbrk01", "epoll_create02"],
     },
 ];
 
@@ -160,6 +163,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
         name: "iomux",
         cases: include_str!("../../ltp/groups/iomux.txt"),
+    },
+    LtpGroup {
+        name: "epoll",
+        cases: include_str!("../../ltp/groups/epoll.txt"),
     },
     LtpGroup {
         name: "ipc",

@@ -1,7 +1,14 @@
 pub mod fs {
     use alloc::ffi::CString;
     use anemone_abi::{
-        fs::linux::{fcntl, ioctl, open, poll::PollFd, select::FdSet, stat::Stat},
+        fs::linux::{
+            epoll,
+            fcntl, ioctl, open,
+            poll::PollFd,
+            select::FdSet,
+            stat::Stat,
+        },
+        process::linux::signal::SigSet as LinuxSigSet,
         time::linux::TimeSpec,
     };
     use bitflags::bitflags;
@@ -11,6 +18,8 @@ pub mod fs {
     pub use anemone_abi::fs::linux::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
     pub type Fd = u32;
+
+    pub use anemone_abi::fs::linux::epoll::EpollEvent;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum AtFd {
@@ -33,6 +42,172 @@ pub mod fs {
             const CLOEXEC = open::O_CLOEXEC;
             const NONBLOCK = open::O_NONBLOCK;
         }
+    }
+
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        pub struct EpollCreateFlags: u32 {
+            const CLOEXEC = epoll::EPOLL_CLOEXEC;
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum EpollCtlOp {
+        Add,
+        Delete,
+        Modify,
+    }
+
+    impl EpollCtlOp {
+        const fn to_linux(self) -> i32 {
+            match self {
+                Self::Add => epoll::EPOLL_CTL_ADD,
+                Self::Delete => epoll::EPOLL_CTL_DEL,
+                Self::Modify => epoll::EPOLL_CTL_MOD,
+            }
+        }
+    }
+
+    pub fn epoll_create(size: i32) -> Result<Fd, Errno> {
+        if size <= 0 {
+            return Err(EINVAL);
+        }
+        epoll_create1(EpollCreateFlags::empty())
+    }
+
+    pub fn epoll_create1(flags: EpollCreateFlags) -> Result<Fd, Errno> {
+        fs::epoll_create1(flags.bits() as u64).map(|fd| fd as Fd)
+    }
+
+    /// Low-level epoll ABI entry for conformance tests and libc shims that
+    /// must exercise invalid flag combinations.
+    pub unsafe fn epoll_create1_raw(flags: u32) -> Result<Fd, Errno> {
+        fs::epoll_create1(flags as u64).map(|fd| fd as Fd)
+    }
+
+    pub fn epoll_ctl(
+        epfd: Fd,
+        op: EpollCtlOp,
+        fd: Fd,
+        event: Option<&EpollEvent>,
+    ) -> Result<(), Errno> {
+        fs::epoll_ctl(
+            epfd as u64,
+            op.to_linux() as u64,
+            fd as u64,
+            event.map_or(0, |event| event as *const EpollEvent as u64),
+        )
+        .map(|_| ())
+    }
+
+    /// Low-level byte-pointer form of `epoll_ctl`.
+    ///
+    /// # Safety
+    /// `event` must satisfy the Linux syscall contract for `op`, unless the
+    /// caller deliberately tests kernel pointer validation.
+    pub unsafe fn epoll_ctl_raw(
+        epfd: i32,
+        op: i32,
+        fd: i32,
+        event: *const u8,
+    ) -> Result<(), Errno> {
+        fs::epoll_ctl(
+            epfd as i64 as u64,
+            op as i64 as u64,
+            fd as i64 as u64,
+            event as u64,
+        )
+        .map(|_| ())
+    }
+
+    pub fn epoll_wait(
+        epfd: Fd,
+        events: &mut [EpollEvent],
+        timeout_ms: i32,
+    ) -> Result<usize, Errno> {
+        epoll_pwait(epfd, events, timeout_ms, None)
+    }
+
+    pub fn epoll_pwait(
+        epfd: Fd,
+        events: &mut [EpollEvent],
+        timeout_ms: i32,
+        sigmask: Option<&LinuxSigSet>,
+    ) -> Result<usize, Errno> {
+        fs::epoll_pwait(
+            epfd as u64,
+            events.as_mut_ptr() as u64,
+            events.len() as u64,
+            timeout_ms as i64 as u64,
+            sigmask.map_or(0, |mask| mask as *const LinuxSigSet as u64),
+            sigmask.map_or(0, |_| core::mem::size_of::<LinuxSigSet>() as u64),
+        )
+        .map(|ready| ready as usize)
+    }
+
+    pub fn epoll_pwait2(
+        epfd: Fd,
+        events: &mut [EpollEvent],
+        timeout: Option<&TimeSpec>,
+        sigmask: Option<&LinuxSigSet>,
+    ) -> Result<usize, Errno> {
+        fs::epoll_pwait2(
+            epfd as u64,
+            events.as_mut_ptr() as u64,
+            events.len() as u64,
+            timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
+            sigmask.map_or(0, |mask| mask as *const LinuxSigSet as u64),
+            sigmask.map_or(0, |_| core::mem::size_of::<LinuxSigSet>() as u64),
+        )
+        .map(|ready| ready as usize)
+    }
+
+    /// Low-level byte-pointer form of `epoll_pwait` for ABI conformance tests.
+    ///
+    /// # Safety
+    /// Pointer/length pairs must satisfy the syscall contract unless the
+    /// caller deliberately tests validation and handles `EFAULT`.
+    pub unsafe fn epoll_pwait_raw(
+        epfd: i32,
+        events: *mut u8,
+        maxevents: i32,
+        timeout_ms: i32,
+        sigmask: *const LinuxSigSet,
+        sigsetsize: usize,
+    ) -> Result<usize, Errno> {
+        fs::epoll_pwait(
+            epfd as i64 as u64,
+            events as u64,
+            maxevents as i64 as u64,
+            timeout_ms as i64 as u64,
+            sigmask as u64,
+            sigsetsize as u64,
+        )
+        .map(|ready| ready as usize)
+    }
+
+    /// Low-level byte-pointer form of `epoll_pwait2` for ABI conformance tests.
+    ///
+    /// # Safety
+    /// Pointer/length pairs must satisfy the syscall contract unless the
+    /// caller deliberately tests validation and handles `EFAULT`.
+    pub unsafe fn epoll_pwait2_raw(
+        epfd: i32,
+        events: *mut u8,
+        maxevents: i32,
+        timeout: *const TimeSpec,
+        sigmask: *const LinuxSigSet,
+        sigsetsize: usize,
+    ) -> Result<usize, Errno> {
+        fs::epoll_pwait2(
+            epfd as i64 as u64,
+            events as u64,
+            maxevents as i64 as u64,
+            timeout as u64,
+            sigmask as u64,
+            sigsetsize as u64,
+        )
+        .map(|ready| ready as usize)
     }
 
     pub fn chroot(path: &str) -> Result<(), Errno> {
@@ -97,6 +272,10 @@ pub mod fs {
 
     pub fn fcntl_getfl(fd: Fd) -> Result<u32, Errno> {
         fs::fcntl(fd as u64, fcntl::F_GETFL as u64, 0).map(|flags| flags as u32)
+    }
+
+    pub fn fcntl_getfd(fd: Fd) -> Result<u32, Errno> {
+        fs::fcntl(fd as u64, fcntl::F_GETFD as u64, 0).map(|flags| flags as u32)
     }
 
     pub fn fcntl_setfl(fd: Fd, flags: u32) -> Result<(), Errno> {

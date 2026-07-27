@@ -25,12 +25,12 @@ pub use nice::Nice;
 pub(crate) mod config;
 
 mod processor;
-pub(crate) use processor::pick_next_cpu_in;
 pub use processor::{
     PendingResched, enqueue_new_task, get_current_task, init_routines, local_enqueue_new_task,
     local_sched_tick, pick_next_cpu, remote_enqueue_new_task, request_resched,
-    restore_pending_resched, take_pending_resched, wake_enqueue,
+    restore_pending_resched, take_pending_resched,
 };
+pub(crate) use processor::{handle_remote_wake_placement, pick_next_cpu_in, submit_wake_placement};
 mod switch;
 pub use switch::load_context;
 
@@ -48,7 +48,7 @@ pub(crate) use request::SchedRequest;
 pub mod class;
 mod wait;
 pub(crate) use wait::assert_current_not_in_active_wait;
-pub use wait::{ParkState, TaskSchedState, WaitState, WakeEnqueueResult};
+pub use wait::{ParkState, TaskSchedState, WaitState};
 
 /// Core scheduler loop. Called by bootstrap code.
 ///

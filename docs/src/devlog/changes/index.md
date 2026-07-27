@@ -11,7 +11,7 @@
 - 验证到什么程度；
 - 还有哪些局部 tracking issues、风险、延期项或 register / current limitations 链接。
 
-小迭代记录不是 backlog，也不是中大型设计草案。它可以在记录本体中包含 `Problem`、`Solution` 和 `Tracking Issues` 章节，让这次局部迭代自洽可读；但 tracking issues 只服务于当前记录，不承担仓库级 accepted contract、跨子系统不变量或长期阶段计划。未定稿的中大型方案应走私有草案或 RFC 工作流；跨多天、跨子系统、需要阶段 gate 或审计证据的实现应走事务日志。
+小迭代记录不是 backlog，也不是中大型设计草案。它可以在记录本体中包含 `Problem`、`Solution` 和 `Tracking Issues` 章节，让这次局部迭代自洽可读；但 tracking issues 只服务于当前记录，不承担仓库级 accepted contract、跨子系统不变量或长期阶段计划。严格的 contract-bearing small change 可以在一个已完整解析的原子 checkpoint 中记录 `Contract Impact / Cutover`，effective 正文仍只位于 current contract。未定稿的中大型方案应走私有草案或 RFC 工作流；跨多天、跨子系统、需要阶段 gate 或审计证据的实现应走事务日志。
 
 ## 命名与链接
 
@@ -28,10 +28,11 @@
 
 目录版记录仍以 `index.md` 为记录本体，回答 problem、scope、solution、change、validation、tracking issues、risk 和 links。`backgrounds/` 只保存事实材料，不定义计划、不变量、阶段 gate 或独立 review issue。
 
-如果一个小迭代记录开始需要仓库级 accepted contract、非平凡不变量、跨阶段计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，它应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。升级时，原小迭代记录保留为事实历史，并链接到新的 RFC 或事务日志。
+除单一原子 contract cutover 外，如果一个小迭代记录开始需要仓库级 accepted target、非平凡不变量、跨阶段计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，它应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。升级时，原小迭代记录保留为事实历史，并链接到新的 RFC 或事务日志。
 
 ## 当前记录
 
+- [2026-07-25 - Asynchronous wake delivery](./2026-07-25-asynchronous-wake-delivery.md)
 - [2026-07-24 - QEMU SMP Platform用途别名](./2026-07-24-qemu-smp-platform-aliases.md)
 - [2026-07-24 - mount fstype/source compatibility](./2026-07-24-mount-fstype-source-compat.md)
 - [2026-07-24 - FIONBIO opened-description status 更新](./2026-07-24-fionbio.md)
