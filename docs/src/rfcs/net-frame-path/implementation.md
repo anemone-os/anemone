@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Active / Checkpoint 1 Closed / Checkpoint 2 Not Activated / Unauthorized
+**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Active / Checkpoint 1-2 Closed / Checkpoint 3 Not Activated / Unauthorized
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -18,8 +18,8 @@ cutover 要求
 > 又发现 concrete driver、通用 worker 与 validation vocabulary 之间的局部耦合；用户已授权在 Stage 1
 > 与 Stage 2 之间完成本文定义的 Boundary Interlude。本授权不授予 contract cutover，也不自动解析或
 > 进入 Stage 2。2026-07-27 的首条 RV64 saturation route 命中 failure signal后，用户接受 R1
-> proof-boundary correction并授权docs-only route resolution。用户随后独立授权并关闭R1 Checkpoint 1；
-> Checkpoint 2仍未激活且未获授权。
+> proof-boundary correction并授权docs-only route resolution。用户随后分别独立授权并关闭R1 Checkpoint 1与
+> Checkpoint 2；Checkpoint 3仍未激活且未获授权。
 
 ## 1. 计划角色与 authority
 
@@ -143,7 +143,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | --- | --- | --- | --- |
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
-| Stage 2 — Bounded progress conformance | R1 Active / Checkpoint 1 Closed / Checkpoint 2 Not Activated / Unauthorized | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
+| Stage 2 — Bounded progress conformance | R1 Active / Checkpoint 1-2 Closed / Checkpoint 3 Not Activated / Unauthorized | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Outline | 双实例隔离、attach rollback、shutdown handoff、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
@@ -593,9 +593,10 @@ Unauthorized，必须由后续独立 resolution gate解析。
 
 ## 8. Stage 2 Ready：Bounded progress conformance
 
-**状态：** R1 Active / Checkpoint 1 Closed（2026-07-27）/ Checkpoint 2 Not Activated / Unauthorized。
+**状态：** R1 Active / Checkpoint 1-2 Closed（2026-07-27）/ Checkpoint 3 Not Activated / Unauthorized。
 2026-07-27 的 R0 RV64 burst route因未观察到TX exhaustion而按failure signal停止并删除probe；该历史不重写。
-用户随后接受R1 proof-boundary correction，并独立授权、关闭R1 Checkpoint 1；该closure不授权Checkpoint 2/3。
+用户随后接受R1 proof-boundary correction，并分别独立授权、关闭R1 Checkpoint 1与Checkpoint 2；后者closure
+不授权Checkpoint 3。
 
 R1 保持normal exhaustion/recovery target不变：host real-stack + deterministic provider负责确定性制造并证明
 exhaustion；RV64负责真实VirtIO bounded completion/IRQ/reclaim。`queue-full == 0`只表示本次production workload
@@ -724,8 +725,9 @@ production control-plane替换。Checkpoint 1关闭后立即停止，不自动�
 
 ### 8.4 Checkpoint 2 — host ownership/progress/pump conformance
 
-**状态：** Not Activated / Unauthorized。Checkpoint 1已关闭，但本checkpoint仍需独立授权，不得因前一项
-closure自动进入。
+**状态：** Closed（2026-07-27）。Host ownership/progress/pump matrix与checkpoint-scoped review、validation、
+write-back均已闭合；执行证据见
+[transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)。本状态不激活Checkpoint 3。
 
 在Checkpoint 1最小fixture上扩展deterministic provider矩阵：
 
@@ -749,6 +751,19 @@ device saturation下无暂时停顿。
 
 Checkpoint 2不调整默认KernelConfig数值。若host矩阵只能通过改变`PumpOutcome`字段/含义、shared
 `FrameProvider` outcome、smoltcp fork或固定response reserve才能通过，立即停止并进入RFC review。
+
+**Closure：** deterministic provider现覆盖RX/TX未consume、oversize、RX/TX callback unwind、paired consume、
+matching completion、RX-under-TX-exhaustion、capacity bound、resource/link coalesced recheck、link recovery、
+nonzero ingress/egress exact budget、future/due deadline与连续ingress + queued egress公平性。adapter把TX
+exhaustion和link unavailable统一归为owner-blocked；pump只在未blocked时按budget/deadline返回Immediate，并在
+blocked且deadline已到期时清除本次到期deadline，避免只读worker的deadline predicate立即重新进入。每个
+interface的private `PumpOrder`只轮换下次software admission顺序，不缓存queue/link/resource/deadline truth。
+
+独立只读review pass先发现blocked pump虽返回Idle、但保留due deadline仍会让worker outer predicate busy-repoll
+这一Keter；上述due-deadline suppression修复后复审为Apollyon 0、Keter 0、Euclid 0。host gate、两种
+no-default feature check与RV64 release build通过；repository formatter只保留Stage 1已有的三个vendored
+smoltcp baseline diff。本checkpoint没有运行QEMU/runtime，也没有修改KernelConfig、production provider、worker、
+shared API、current contract或acceptance。Checkpoint 3继续Not Activated / Unauthorized。
 
 ### 8.5 Checkpoint 3 — provider/recheck/worker closure与RV64 acceptance
 

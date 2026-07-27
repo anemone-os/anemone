@@ -6,9 +6,9 @@
 
 ## Active
 
-- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 2 Checkpoint 1已关闭host deterministic
-  exhaustion与RV64 bounded production-path completion/reclaim proof；Checkpoint 2仍Not Activated / Unauthorized，
-  全部network contract仍Not Effective。
+- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 2 Checkpoint 1-2已关闭host deterministic
+  exhaustion、ownership/progress/pump conformance与RV64 bounded production-path observability；Checkpoint 3仍
+  Not Activated / Unauthorized，全部network contract仍Not Effective。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

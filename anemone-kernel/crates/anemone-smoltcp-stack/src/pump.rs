@@ -3,7 +3,7 @@ use smoltcp::iface::{PollIngressSingleResult, PollResult};
 
 use crate::{
     adapter::{FrameDevice, from_smoltcp_instant, to_smoltcp_instant},
-    stack::{PumpError, Stack},
+    stack::{InterfaceEntry, PumpError, PumpOrder, Stack},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,48 +45,98 @@ impl Stack {
         let mut device = FrameDevice::new(provider);
         entry.interface.poll_maintenance(smoltcp_now);
 
-        let mut ingress_processed = 0;
-        while ingress_processed < budget.ingress_frames {
-            match entry
-                .interface
-                .poll_ingress_single(smoltcp_now, &mut device, &mut entry.sockets)
-            {
-                PollIngressSingleResult::None => break,
-                PollIngressSingleResult::PacketProcessed
-                | PollIngressSingleResult::SocketStateChanged => ingress_processed += 1,
-            }
-        }
-        let ingress_may_remain = ingress_processed == budget.ingress_frames;
-
-        let mut egress_processed = 0;
-        while egress_processed < budget.egress_steps {
-            match entry
-                .interface
-                .poll_egress(smoltcp_now, &mut device, &mut entry.sockets)
-            {
-                PollResult::None => break,
-                PollResult::SocketStateChanged => egress_processed += 1,
-            }
-        }
-        let egress_may_remain = egress_processed == budget.egress_steps;
+        let (ingress_may_remain, egress_may_remain) = match entry.next_pump_order {
+            PumpOrder::IngressFirst => (
+                poll_ingress(entry, &mut device, smoltcp_now, budget.ingress_frames),
+                poll_egress(entry, &mut device, smoltcp_now, budget.egress_steps),
+            ),
+            PumpOrder::EgressFirst => {
+                let egress_may_remain =
+                    poll_egress(entry, &mut device, smoltcp_now, budget.egress_steps);
+                let ingress_may_remain =
+                    poll_ingress(entry, &mut device, smoltcp_now, budget.ingress_frames);
+                (ingress_may_remain, egress_may_remain)
+            },
+        };
+        entry.next_pump_order = entry.next_pump_order.next();
 
         let next_deadline = entry
             .interface
             .poll_at(smoltcp_now, &entry.sockets)
             .map(from_smoltcp_instant);
-        let deadline_due = next_deadline.is_some_and(|deadline| deadline <= now);
-        let immediate = ingress_may_remain || egress_may_remain || deadline_due;
-
-        Ok(PumpOutcome {
-            work_remaining: immediate || device.blocked_work(),
-            recheck: if immediate {
-                Recheck::Immediate
-            } else {
-                Recheck::Idle
-            },
+        Ok(pump_outcome(
+            device.blocked_work(),
+            ingress_may_remain,
+            egress_may_remain,
+            now,
             next_deadline,
-        })
+        ))
     }
+}
+
+fn pump_outcome(
+    owner_blocked: bool,
+    ingress_may_remain: bool,
+    egress_may_remain: bool,
+    now: Instant,
+    next_deadline: Option<Instant>,
+) -> PumpOutcome {
+    let deadline_due = next_deadline.is_some_and(|deadline| deadline <= now);
+    let immediate = !owner_blocked && (ingress_may_remain || egress_may_remain || deadline_due);
+    // A due protocol deadline cannot make progress while the provider owns a
+    // blocking link/resource fact. Keeping that already-due deadline would
+    // make the outer worker predicate immediately true again and busy-repoll.
+    // A future deadline remains useful and may wake the worker once.
+    let next_deadline = if owner_blocked && deadline_due {
+        None
+    } else {
+        next_deadline
+    };
+    PumpOutcome {
+        work_remaining: immediate || owner_blocked,
+        recheck: if immediate {
+            Recheck::Immediate
+        } else {
+            Recheck::Idle
+        },
+        next_deadline,
+    }
+}
+
+fn poll_ingress<P: FrameProvider>(
+    entry: &mut InterfaceEntry,
+    device: &mut FrameDevice<'_, P>,
+    now: smoltcp::time::Instant,
+    budget: usize,
+) -> bool {
+    let mut processed = 0;
+    while processed < budget {
+        match entry
+            .interface
+            .poll_ingress_single(now, device, &mut entry.sockets)
+        {
+            PollIngressSingleResult::None => break,
+            PollIngressSingleResult::PacketProcessed
+            | PollIngressSingleResult::SocketStateChanged => processed += 1,
+        }
+    }
+    processed == budget
+}
+
+fn poll_egress<P: FrameProvider>(
+    entry: &mut InterfaceEntry,
+    device: &mut FrameDevice<'_, P>,
+    now: smoltcp::time::Instant,
+    budget: usize,
+) -> bool {
+    let mut processed = 0;
+    while processed < budget {
+        match entry.interface.poll_egress(now, device, &mut entry.sockets) {
+            PollResult::None => break,
+            PollResult::SocketStateChanged => processed += 1,
+        }
+    }
+    processed == budget
 }
 
 #[cfg(test)]
@@ -104,6 +154,30 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn deadline_recheck_waits_for_time_or_owner_progress() {
+        let future = Instant::from_micros(11);
+        let before = pump_outcome(false, false, false, Instant::from_micros(10), Some(future));
+        assert!(!before.work_remaining);
+        assert_eq!(before.recheck, Recheck::Idle);
+        assert_eq!(before.next_deadline, Some(future));
+
+        let blocked_future =
+            pump_outcome(true, false, false, Instant::from_micros(10), Some(future));
+        assert!(blocked_future.work_remaining);
+        assert_eq!(blocked_future.recheck, Recheck::Idle);
+        assert_eq!(blocked_future.next_deadline, Some(future));
+
+        let due = pump_outcome(false, false, false, future, Some(future));
+        assert!(due.work_remaining);
+        assert_eq!(due.recheck, Recheck::Immediate);
+
+        let blocked = pump_outcome(true, true, true, future, Some(future));
+        assert!(blocked.work_remaining);
+        assert_eq!(blocked.recheck, Recheck::Idle);
+        assert_eq!(blocked.next_deadline, None);
+    }
 
     struct UnusedRxToken;
 
@@ -161,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn queued_real_socket_reports_due_deadline_when_provider_is_blocked() {
+    fn queued_real_socket_waits_for_owner_when_provider_is_blocked() {
         let mut stack = Stack::new();
         let mut provider = UnavailableProvider { transmit_calls: 0 };
         let interface = stack.add_interface(
@@ -204,8 +278,8 @@ mod tests {
             .unwrap();
 
         assert!(outcome.work_remaining);
-        assert_eq!(outcome.recheck, Recheck::Immediate);
-        assert_eq!(outcome.next_deadline, Some(Instant::ZERO));
+        assert_eq!(outcome.recheck, Recheck::Idle);
+        assert_eq!(outcome.next_deadline, None);
         assert_eq!(provider.transmit_calls, 1);
     }
 }

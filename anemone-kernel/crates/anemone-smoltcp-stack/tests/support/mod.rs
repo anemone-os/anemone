@@ -313,7 +313,7 @@ impl Drop for BoundedTxToken<'_> {
 /// durable truth. The recheck bit is only a fixture edge and never decides
 /// whether a slot is available.
 pub(crate) struct BoundedProvider {
-    rx: RxLane,
+    rx: Vec<RxLane>,
     tx: Vec<TxLane>,
     facts: InterfaceFacts,
     submission_log: Vec<Vec<u8>>,
@@ -324,9 +324,14 @@ pub(crate) struct BoundedProvider {
 
 impl BoundedProvider {
     pub(crate) fn with_mac(mac: [u8; 6], tx_capacity: usize) -> Self {
+        Self::with_capacities(mac, 1, tx_capacity)
+    }
+
+    pub(crate) fn with_capacities(mac: [u8; 6], rx_capacity: usize, tx_capacity: usize) -> Self {
+        assert!(rx_capacity > 0);
         assert!(tx_capacity > 0);
         Self {
-            rx: RxLane::new(),
+            rx: (0..rx_capacity).map(|_| RxLane::new()).collect(),
             tx: (0..tx_capacity).map(|_| TxLane::new()).collect(),
             facts: InterfaceFacts {
                 ethernet_address: Some(EthernetAddress::new(mac)),
@@ -341,7 +346,11 @@ impl BoundedProvider {
     }
 
     pub(crate) fn inject(&mut self, frame: &[u8]) {
-        self.rx.inject(frame);
+        self.rx
+            .iter_mut()
+            .find(|lane| lane.slot == RxSlot::Available)
+            .expect("bounded RX capacity exhausted")
+            .inject(frame);
     }
 
     pub(crate) fn complete(&mut self, index: usize) {
@@ -371,6 +380,33 @@ impl BoundedProvider {
             .count()
     }
 
+    pub(crate) fn ready_rx(&self) -> usize {
+        self.rx
+            .iter()
+            .filter(|lane| lane.slot == RxSlot::Ready)
+            .count()
+    }
+
+    pub(crate) fn tx_slot(&self, index: usize) -> TxSlot {
+        self.tx[index].slot
+    }
+
+    pub(crate) fn tx_cancellations(&self) -> usize {
+        self.tx.iter().map(|lane| lane.cancellations).sum()
+    }
+
+    pub(crate) fn tx_rejections(&self) -> usize {
+        self.tx.iter().map(|lane| lane.rejections).sum()
+    }
+
+    pub(crate) fn rx_cancellations(&self) -> usize {
+        self.rx.iter().map(|lane| lane.cancellations).sum()
+    }
+
+    pub(crate) fn rx_recycles(&self) -> usize {
+        self.rx.iter().map(|lane| lane.recycles).sum()
+    }
+
     pub(crate) fn submissions(&self) -> usize {
         self.submission_log.len()
     }
@@ -395,6 +431,10 @@ impl BoundedProvider {
     pub(crate) fn recheck_publications(&self) -> usize {
         self.recheck_publications
     }
+
+    pub(crate) fn set_link_state(&mut self, state: LinkState) {
+        self.facts.link_state = state;
+    }
 }
 
 impl FrameProvider for BoundedProvider {
@@ -405,9 +445,9 @@ impl FrameProvider for BoundedProvider {
         if self.facts.link_state != LinkState::Up {
             return ReceiveOutcome::LinkUnavailable;
         }
-        if self.rx.slot != RxSlot::Ready {
+        let Some(rx_index) = self.rx.iter().position(|lane| lane.slot == RxSlot::Ready) else {
             return ReceiveOutcome::Empty;
-        }
+        };
         let Some(index) = self.tx.iter_mut().position(|lane| {
             if lane.slot != TxSlot::Available {
                 return false;
@@ -419,10 +459,10 @@ impl FrameProvider for BoundedProvider {
             return ReceiveOutcome::TransmitExhausted;
         };
 
-        self.rx.slot = RxSlot::Reserved;
+        self.rx[rx_index].slot = RxSlot::Reserved;
         ReceiveOutcome::Ready {
             rx: DeterministicRxToken {
-                lane: &mut self.rx,
+                lane: &mut self.rx[rx_index],
                 consumed: false,
             },
             tx: BoundedTxToken {

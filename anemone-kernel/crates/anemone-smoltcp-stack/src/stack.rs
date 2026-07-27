@@ -15,6 +15,21 @@ pub enum PumpError {
     UnknownInterface(InterfaceId),
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum PumpOrder {
+    IngressFirst,
+    EgressFirst,
+}
+
+impl PumpOrder {
+    pub(crate) const fn next(self) -> Self {
+        match self {
+            Self::IngressFirst => Self::EgressFirst,
+            Self::EgressFirst => Self::IngressFirst,
+        }
+    }
+}
+
 pub(crate) struct InterfaceEntry {
     pub(crate) id: InterfaceId,
     // Stable attach-time snapshot required by smoltcp. The provider remains
@@ -22,6 +37,10 @@ pub(crate) struct InterfaceEntry {
     pub(crate) frame_capacity: usize,
     pub(crate) interface: Interface,
     pub(crate) sockets: SocketSet<'static>,
+    // This owner-local cursor chooses only the next software admission order.
+    // It is not queue, link, resource, or deadline truth and never bypasses
+    // either direction's finite PumpBudget.
+    pub(crate) next_pump_order: PumpOrder,
     #[cfg(feature = "icmp-validation-probe")]
     pub(crate) validation_probe: Option<IcmpEchoProbe>,
 }
@@ -72,6 +91,7 @@ impl Stack {
             frame_capacity,
             interface,
             sockets: SocketSet::new(Vec::new()),
+            next_pump_order: PumpOrder::IngressFirst,
             #[cfg(feature = "icmp-validation-probe")]
             validation_probe: None,
         });

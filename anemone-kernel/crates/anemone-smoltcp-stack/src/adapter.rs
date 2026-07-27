@@ -84,7 +84,11 @@ impl<P: FrameProvider> Device for FrameDevice<'_, P> {
                 self.blocked_work = true;
                 None
             },
-            ReceiveOutcome::Empty | ReceiveOutcome::LinkUnavailable => None,
+            ReceiveOutcome::Empty => None,
+            ReceiveOutcome::LinkUnavailable => {
+                self.blocked_work = true;
+                None
+            },
         }
     }
 
@@ -95,7 +99,10 @@ impl<P: FrameProvider> Device for FrameDevice<'_, P> {
                 self.blocked_work = true;
                 None
             },
-            TransmitOutcome::LinkUnavailable => None,
+            TransmitOutcome::LinkUnavailable => {
+                self.blocked_work = true;
+                None
+            },
         }
     }
 

@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Checkpoint 1 Closed / Checkpoint 2 Not Activated / Unauthorized
+**Status:** Active / R1 Stage 2 Checkpoint 1-2 Closed / Checkpoint 3 Not Activated / Unauthorized
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
@@ -608,3 +608,68 @@ Effective，current contracts/register/current limitations无修改。
 
 **Not Run:** `smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、socket/control-plane、
 Stage 2 Checkpoint 2/3与Stage 3均Not Run；RV64/single-core证据不外推到这些层级。
+
+### 2026-07-27 - R1 Stage 2 Checkpoint 2 activated
+
+**Authorization / entry:** 用户延续唯一GOAL并明确授权只完成Stage 2 Checkpoint 2，要求按canonical gate执行
+review、validation、write-back与单独`frame-path:`提交，不得自动进入下一gate。入口为
+`dev/drc/alpha@a4088911`，tracked与untracked worktree均clean；该commit只关闭Checkpoint 1。Checkpoint 3未
+激活，Stage 2 contract cutover仍为None。
+
+**Preflight / frozen boundary:** 重新读取AGENTS/LOCAL、R1正文与invariants、Stage 2 Ready、tracking issues、
+register、System Power current contract、当前transaction与live shared API、stack adapter/pump/interface、
+deterministic provider、VirtIO provider和只读worker。`just --list`与build/qemu/fmt help、stack feature graph及
+RV64 preset/bind路线未漂移；不存在用户dirty overlap。production/test写入冻结为8.9 manifest中的stack
+`adapter.rs`、`pump.rs`、`stack.rs`与host `bounded_progress.rs`/`support/mod.rs`；`anemone-net-api`、vendored
+dependencies、VirtIO provider、`device/net`、worker、KernelConfig、platform/wrapper、apps/rootfs、register、
+current limitations与current contracts保持只读。
+
+**Activated route:** 只补三项resolved gap：link unavailable与TX exhaustion统一进入owner-blocked；blocked
+pump不在同一wake cycle immediate repoll；每个interface以private owner-local cursor交替ingress/egress
+software admission。host矩阵覆盖token cleanup/unwind、matching completion、capacity、coalesced edge、link
+recovery、budget/deadline与双向公平性；不得改变`PumpOutcome`字段/含义、shared `FrameProvider`、smoltcp、
+KernelConfig或固定response reserve。
+
+### 2026-07-27 - R1 Stage 2 Checkpoint 2 implementation, review and closure
+
+**Implementation / matrix:** `FrameDevice`现在把TX exhaustion与RX/TX link unavailable都标为owner-blocked；
+`Stack::pump`把ingress/egress循环保持各自有限budget，并按interface-private `PumpOrder`在每次pump后轮换下轮
+priority。该cursor只决定software admission order，不缓存queue/link/resource/deadline truth。owner-blocked时
+`work_remaining`保持true、`Recheck`为Idle；未来deadline继续交给worker，已经到期的deadline在blocked结果中
+清除，等待provider durable recheck，避免立即重新进入。
+
+host `BoundedProvider`仍是test-owned正式`FrameProvider` implementation，只扩展为有限RX lane集合、matching
+slot observation、link与coalesced-edge control。新增矩阵证明：RX/TX未consume、oversize、RX/TX callback
+unwind都恢复owner；paired RX/TX callback无需provider-global lock；matching TX completion不释放其它slot；RX
+ready在无TX credit/link down时保持原frame；resource/link edge在wait前或重复发布仍由durable predicate恢复；
+zero budget拒绝、ingress/egress nonzero exact boundary、future/due deadline与连续ingress + queued egress在有限
+pump次数内分别取得admission。既有outer mutex serialization、双stack/provider隔离与callback borrow
+compile-fail继续回归。
+
+**Review:** checkpoint-scoped只读review先发现1个Keter：初版blocked pump虽然返回Idle，但仍保留已经到期的
+`next_deadline`；只读worker的wait predicate会立即重新成立并形成outer-loop busy repoll。修复把
+owner-blocked + due deadline折叠为`work_remaining=true`、`Recheck::Idle`、`next_deadline=None`；future deadline
+仍保留并最多唤醒一次。复审确认priority cursor不驱动provider truth、不扩大public surface，adapter/pump无
+notification/diagnostic truth，shared API、VirtIO unsafe/slot、worker、IRQ与KernelConfig均无diff；最终结论为
+Apollyon 0、Keter 0、Euclid 0，无需记录Safe项。
+
+**Validation:** 最终源码完成以下验证：
+
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`通过：2个stack unit、7个bounded-progress、9个
+  walking-skeleton integration与2个compile-fail doctest；
+- base与`icmp-validation-probe`两种`--no-default-features` check通过；warning只来自既有vendored smoltcp；
+- `just fmt kernel --check`对本checkpoint文件无diff，仍只报告Stage 1 baseline的三个vendored smoltcp diff；
+- `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`最终源码在sandbox外通过；sandbox内
+  首次仍由既有lwext4 C compile `SIGSYS / Bad system call`环境限制阻断；
+- dependency/public-surface、owner/blocking、deadline/worker交叉、budget/fairness、validation-bypass与manifest
+  audit通过；`git diff --check`与`mdbook build docs`在最终write-back后验证。
+
+**Closure / boundaries:** Checkpoint 2全部delivery、review、validation与write-back闭合，未命中8.4/8.8停止
+条件，未扩大manifest，也未改变R1 target、owner、shared API、ABI/visible semantics或acceptance。Checkpoint 2
+**Closed**，Stage 2保持**Active**；Checkpoint 3为**Not Activated / Unauthorized**，不得由本closure自动进入。
+六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective，current contracts/register/current
+limitations无修改。
+
+**Not Run:** QEMU/runtime KUnit、Checkpoint 3的两次fresh-disk RV64 acceptance、`smp>1`、LA64 build/runtime、
+virtio-pci、hardware、final harness、完整LTP、socket/control-plane与Stage 3均Not Run；host/build证据不外推到
+这些层级。
