@@ -320,6 +320,9 @@ pub(crate) struct BoundedProvider {
     normal_exhaustions: usize,
     recheck_requested: bool,
     recheck_publications: usize,
+    observed_at: Option<Instant>,
+    receive_calls: usize,
+    transmit_calls: usize,
 }
 
 impl BoundedProvider {
@@ -342,6 +345,9 @@ impl BoundedProvider {
             normal_exhaustions: 0,
             recheck_requested: false,
             recheck_publications: 0,
+            observed_at: None,
+            receive_calls: 0,
+            transmit_calls: 0,
         }
     }
 
@@ -371,6 +377,9 @@ impl BoundedProvider {
         self.normal_exhaustions = 0;
         self.recheck_requested = false;
         self.recheck_publications = 0;
+        self.observed_at = None;
+        self.receive_calls = 0;
+        self.transmit_calls = 0;
     }
 
     pub(crate) fn live_tx(&self) -> usize {
@@ -432,6 +441,18 @@ impl BoundedProvider {
         self.recheck_publications
     }
 
+    pub(crate) fn observed_at(&self) -> Option<Instant> {
+        self.observed_at
+    }
+
+    pub(crate) fn receive_calls(&self) -> usize {
+        self.receive_calls
+    }
+
+    pub(crate) fn transmit_calls(&self) -> usize {
+        self.transmit_calls
+    }
+
     pub(crate) fn set_link_state(&mut self, state: LinkState) {
         self.facts.link_state = state;
     }
@@ -441,7 +462,9 @@ impl FrameProvider for BoundedProvider {
     type RxToken<'a> = DeterministicRxToken<'a>;
     type TxToken<'a> = BoundedTxToken<'a>;
 
-    fn receive(&mut self, _now: Instant) -> ReceiveOutcome<Self::RxToken<'_>, Self::TxToken<'_>> {
+    fn receive(&mut self, now: Instant) -> ReceiveOutcome<Self::RxToken<'_>, Self::TxToken<'_>> {
+        self.observed_at = Some(now);
+        self.receive_calls += 1;
         if self.facts.link_state != LinkState::Up {
             return ReceiveOutcome::LinkUnavailable;
         }
@@ -473,7 +496,9 @@ impl FrameProvider for BoundedProvider {
         }
     }
 
-    fn transmit(&mut self, _now: Instant) -> TransmitOutcome<Self::TxToken<'_>> {
+    fn transmit(&mut self, now: Instant) -> TransmitOutcome<Self::TxToken<'_>> {
+        self.observed_at = Some(now);
+        self.transmit_calls += 1;
         if self.facts.link_state != LinkState::Up {
             return TransmitOutcome::LinkUnavailable;
         }

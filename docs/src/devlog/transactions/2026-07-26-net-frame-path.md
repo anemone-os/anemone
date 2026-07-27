@@ -1,6 +1,6 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Closed / Stage 3 Ready / Not Started / Unauthorized
+**Status:** Active / R1 Stage 2 Closed / Stage 3 Checkpoint 1 Closed / Checkpoint 2-3 Unauthorized
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
@@ -45,6 +45,10 @@ Checkpoint 1 activation、current-contract cutover或Stage 3工作。
 用户在Stage 2独立关闭后要求解析Stage 3 implementation。本授权只覆盖只读`2 -> 3 Implementation Resolution
 Gate`与canonical docs write-back；不授权Stage 3 Checkpoint 1、任何实现、host/build/QEMU/runtime validation、
 current-contract cutover、RFC closure或后续sibling RFC。
+
+用户随后独立授权并要求持续推进Stage 3 Checkpoint 1至closure或停止条件。本授权只覆盖host真实stack/provider
+multi-instance矩阵、registry KUnit、attach/source audit、checkpoint review/validation/write-back与单独
+`frame-path:`提交；不授权Checkpoint 2、shutdown/power修改、shared API/current contract扩张或cutover。
 
 ## R0 acceptance and activation preflight
 
@@ -797,3 +801,73 @@ Checkpoint 1必须另行授权，Checkpoint 1/2不cutover，只有Checkpoint 3�
 host test、cargo check、formatter、kernel build、QEMU、KUnit、LA64、hardware、LTP或final harness；Stage 3全部
 behavior evidence仍Not Run。`git diff --check`与`mdbook build docs`通过；mdBook只报告既有large
 search-index warning，新增Stage 3 anchor与跨页链接命中生成HTML。
+
+### 2026-07-27 - R1 Stage 3 Checkpoint 1 activated
+
+**Authorization / entry:** 用户独立授权只完成Stage 3 Checkpoint 1，入口为
+`dev/drc/alpha@6279994d`；tracked与untracked worktree均clean。授权覆盖host multi-instance、registry KUnit、
+attach/source audit、review、validation、write-back与一个`frame-path:`commit，不自动进入Checkpoint 2。
+
+**Preflight / frozen boundary:** 重新读取AGENTS/LOCAL、R1正文/invariants/Stage 3 Ready、tracking、register、
+System Power current contract、transaction、Stage 2 aggregate evidence与live registry/driver/attach/worker/stack/
+provider/test support。production/test写入冻结为9.9 manifest中的`device/net/registry.rs`、host
+`tests/support/mod.rs`与新建`tests/multi_instance.rs`；canonical docs只做checkpoint write-back。
+`anemone-net-api`、stack ordinary adapter/pump、worker、driver、power、generic runtime owners、dependencies、
+KernelConfig/xtask/Justfile、Platform/wrapper、apps/rootfs、register/current limitations与current contracts保持只读。
+
+**Activation-time contract state:** Stage 3开始执行但cutover为None；六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective。Checkpoint 2、shutdown handoff与
+`NFP-FINAL-CUTOVER`均Unauthorized。
+
+### 2026-07-27 - R1 Stage 3 Checkpoint 1 implementation, review and closure
+
+**Host multi-instance delivery:** 新增独立`multi_instance` integration test；两个真实`Stack`与两个正式
+`BoundedProvider`分别拥有MAC、link、有限RX/TX credit、matching completion、manual time、recheck predicate与
+private mapping。一侧TX exhausted、completion withheld且link down时，另一侧仍消费RX、提交reply并回收matching
+credit；resource与link recheck只改变第一侧，第二侧的credit、output、time、pump-call与recheck observation保持
+不变。rollback矩阵证明撤销一侧transaction-local mapping后原ID返回`UnknownInterface`、下一ID单调不复用、
+失败侧queued socket不发送frame且ready RX/TX credit仍归provider，另一stack的数值同为0但owner-local的ID继续
+正常推进。test support新增的time/call observation只服务断言，不参与provider行为。
+
+**Registry / attach audit:** local registry KUnit现在用不同origin、MAC、frame capacity、link与provider marker
+证明boot-local netdev ID、ifindex/name、publication snapshot、duplicate failure返回值与后续publication互不污染。
+字段注释明确identity稳定但link只是publication-time snapshot、允许stale且不驱动runtime pump。source audit确认
+VirtIO provider先建立queue与全部RX refill，再注册IRQ、enable notification并publish；registry record保留snapshot，
+provider只移动一次。`attach_published_netdevs()`逐netdev继续；spawn failure在active publication前只
+`remove_interface()`撤销stack-local mapping并保留IRQ后不能安全Drop的provider，不回滚其它netdev。host rollback
+与该live error control flow已经形成互补proof，无需增加production factory、manager或KUnit-only spawn seam。
+
+**Independent review / manifest audit:** 独立只读review复核identity domain、credit/completion/link/recheck隔离、
+mapping rollback、snapshot/diagnostic truth、driver publication顺序、attach failure与unsafe retention，结论为
+Apollyon 0、Keter 0、Euclid 0、Safe 0。最终source diff只涉及冻结的三个implementation/test文件；没有修改
+shared API、Cargo/dependency、worker/driver/power、generic owner、ABI/visible semantics、R1 acceptance或current
+contract，未命中9.3/9.8停止条件。
+
+**Host / build validation:** 最终源码完成：
+
+- `cargo test -p anemone-net-api -p anemone-smoltcp-stack`通过：2个stack unit、7个bounded-progress、9个
+  walking-skeleton、2个multi-instance与2个compile-fail doctest；
+- base与`icmp-validation-probe`两种`--no-default-features` check通过；warning只来自既有vendored smoltcp；
+- `just fmt kernel --check`对本checkpoint文件无diff，仍只报告Stage 1 baseline的三个vendored smoltcp diff；
+- `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`在sandbox内仍由既有lwext4
+  `SIGSYS / Bad system call`环境限制阻断，相同仓库命令在sandbox外通过并编译新增registry KUnit；
+- dependency/public-surface、identity/mapping/failure-isolation、publication/attach、diagnostic truth与resolved
+  manifest audit通过；`git diff --check`与`mdbook build docs`在最终write-back后验证。
+
+**Fresh-disk RV64 regression:** 运行
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-frame-stage3-c1-rv64.log`。首次
+non-PTY尝试只在rootfs materialization的sudo credential前置处停止，尚未复制runtime disk或启动QEMU；按LOCAL
+授权以交互式sudo完整重跑后，wrapper从4 GiB只读master覆盖worktree-local runtime disk，以`smp=1`、
+`memory=1G`启动。最终261/261 KUnit通过，新增registry case通过；既有Stage 2 probe记录active path
+`eth0 / ifindex 1 / InterfaceId(0)`、burst/reply 128/128、TX submit/completion 129/129、outstanding回落0、
+mapping回落baseline 32、high-water 39、IRQ recheck 64、worker action/max-round/request/yield 2/7/0/0，且无panic、
+timeout或busy-spin。随行`sys` profile为glibc/musl各2例、合计4/4通过，只作环境回归；最后按当前effective
+`filesystem -> device -> PowerOff`正常关机。本轮是单NIC hardware回归，不冒充host双实例hardware proof。
+
+**Closure / boundaries:** Stage 3 Checkpoint 1 **Closed**，Stage 3保持**Active**并立即停止。Checkpoint 2为
+**Ready / Not Started / Unauthorized**；power、worker lifecycle、Stage 2 validation seam与current contract均未
+修改。六个network IDs与`SYSTEM-POWER-ORDERLY-001` Refine继续**Not Effective**。
+
+**Not Run:** Checkpoint 2 shutdown/power traffic-order slice、Checkpoint 3 validation exit/final exact-code boot与
+cutover、`smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、runtime hotplug/teardown、
+socket/control-plane均Not Run；host与单核RV64证据不外推到这些范围。

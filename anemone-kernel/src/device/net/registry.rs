@@ -24,6 +24,9 @@ pub struct NetdevSnapshot {
     ifindex: u32,
     name: GeneralIdentity,
     origin: AnyIdentity,
+    /// Stable facts captured at publication. Link state may become stale and
+    /// is never consulted by the runtime pump, whose provider remains the
+    /// owner of current link and frame-resource truth.
     facts: InterfaceFacts,
 }
 
@@ -82,9 +85,10 @@ impl<P> ReadyNetdev<P> {
 
 /// Typed publication capability minted by the registry.
 ///
-/// The snapshot is an immutable copy of the registry's publication record, so
-/// it cannot become stale in the boot-only R0 lifecycle. The provider remains
-/// opaque and is moved exactly once to the later attach authority.
+/// The snapshot is an immutable copy of the registry's publication record.
+/// Identity stays stable in the boot-only lifecycle, while observed facts such
+/// as link state may become stale. The provider remains opaque and is moved
+/// exactly once to the later attach authority.
 pub(crate) struct PublishedNetdev<P> {
     snapshot: NetdevSnapshot,
     provider: P,
@@ -175,36 +179,88 @@ mod kunits {
     use super::*;
 
     #[kunit]
-    fn identity_and_name_are_monotonic_and_duplicate_publication_is_rejected() {
-        fn ready(origin: &str) -> ReadyNetdev<()> {
+    fn publication_identity_facts_and_failures_remain_record_local() {
+        fn ready(
+            origin: &str,
+            ethernet_address: [u8; 6],
+            max_frame_len: usize,
+            link_state: LinkState,
+            provider: usize,
+        ) -> ReadyNetdev<usize> {
             ReadyNetdev::new(
                 AnyIdentity::try_from(origin).unwrap(),
-                None,
-                FrameCapabilities { max_frame_len: 128 },
-                LinkState::Unknown,
-                (),
+                Some(EthernetAddress::new(ethernet_address)),
+                FrameCapabilities { max_frame_len },
+                link_state,
+                provider,
             )
         }
 
         let mut registry = Registry::new();
-        let first = match registry.publish(ready("virtio0")) {
+        let first_facts = InterfaceFacts {
+            ethernet_address: Some(EthernetAddress::new([0x02, 0, 0, 0, 0, 1])),
+            max_frame_len: 128,
+            link_state: LinkState::Up,
+        };
+        let first = match registry.publish(ready(
+            "virtio0",
+            [0x02, 0, 0, 0, 0, 1],
+            128,
+            LinkState::Up,
+            11,
+        )) {
             Ok(published) => published,
             Err(_) => panic!("first publication must succeed"),
         };
         assert_eq!(first.snapshot().id().index(), 0);
         assert_eq!(first.snapshot().ifindex(), 1);
         assert_eq!(first.snapshot().name(), "eth0");
-        assert!(matches!(
-            registry.publish(ready("virtio0")),
-            Err((PublishError::DuplicateOrigin, _))
-        ));
+        assert_eq!(first.snapshot().origin(), "virtio0");
+        assert_eq!(first.snapshot().facts(), first_facts);
 
-        let second = match registry.publish(ready("virtio1")) {
+        let duplicate = match registry.publish(ready(
+            "virtio0",
+            [0x02, 0, 0, 0, 0, 9],
+            512,
+            LinkState::Down,
+            99,
+        )) {
+            Ok(_) => panic!("duplicate origin must be rejected"),
+            Err(duplicate) => duplicate,
+        };
+        assert_eq!(duplicate.0, PublishError::DuplicateOrigin);
+        assert_eq!(duplicate.1.provider, 99);
+        assert_eq!(registry.records, [first.snapshot().clone()]);
+
+        let second = match registry.publish(ready(
+            "virtio1",
+            [0x02, 0, 0, 0, 0, 2],
+            256,
+            LinkState::Unknown,
+            22,
+        )) {
             Ok(published) => published,
             Err(_) => panic!("second unique publication must succeed"),
         };
         assert_eq!(second.snapshot().id().index(), 1);
         assert_eq!(second.snapshot().ifindex(), 2);
         assert_eq!(second.snapshot().name(), "eth1");
+        assert_eq!(second.snapshot().origin(), "virtio1");
+        assert_eq!(
+            second.snapshot().facts(),
+            InterfaceFacts {
+                ethernet_address: Some(EthernetAddress::new([0x02, 0, 0, 0, 0, 2])),
+                max_frame_len: 256,
+                link_state: LinkState::Unknown,
+            }
+        );
+        assert_eq!(first.snapshot().facts(), first_facts);
+        assert_eq!(registry.records.len(), 2);
+
+        let (first_snapshot, first_provider) = first.into_parts();
+        let (second_snapshot, second_provider) = second.into_parts();
+        assert_eq!(first_provider, 11);
+        assert_eq!(second_provider, 22);
+        assert_ne!(first_snapshot.id(), second_snapshot.id());
     }
 }

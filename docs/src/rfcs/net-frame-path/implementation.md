@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Closed / Checkpoint 1-3 Closed；Stage 3 Ready / Not Started / Unauthorized
+**状态：** R1 / Stage 1 Closed；Stage 1 -> 2 Boundary Interlude Closed；Stage 2 Closed / Checkpoint 1-3 Closed；Stage 3 Active / Checkpoint 1 Closed / Checkpoint 2-3 Unauthorized
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **目标与不变量：** [Network Frame Path 目标与不变量](./invariants.md)
@@ -20,8 +20,8 @@ cutover 要求
 > 进入 Stage 2。2026-07-27 的首条 RV64 saturation route 命中 failure signal后，用户接受 R1
 > proof-boundary correction并授权docs-only route resolution。用户随后分别独立授权并关闭R1 Checkpoint 1、
 > Checkpoint 2与Checkpoint 3；Stage 2已关闭。用户随后只授权完成`2 -> 3 Implementation Resolution
-> Gate`与docs write-back；Stage 3现已完整解析为Ready，但Checkpoint 1、任何实现/runtime validation、
-> current-contract cutover与RFC closure仍未获授权。
+> Gate`与docs write-back。用户随后独立授权并关闭Stage 3 Checkpoint 1；Stage 3保持Active，Checkpoint 2、
+> shutdown/power handoff、current-contract cutover与RFC closure仍未获授权。
 
 ## 1. 计划角色与 authority
 
@@ -146,7 +146,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | Stage 1 — Four-layer walking skeleton | Closed | hostable seam、真实 stack/provider、VirtIO-Net、netdev publication、kernel attach/IRQ/worker、RV64 一次真实双向纵切 | 全部 Not Effective |
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | R1 Closed / Checkpoint 1-3 Closed | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
-| Stage 3 — Multi-instance/lifecycle closure | Ready / Not Started / Unauthorized | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
+| Stage 3 — Multi-instance/lifecycle closure | Active / Checkpoint 1 Closed / Checkpoint 2-3 Unauthorized | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` 后 Effective |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
@@ -896,8 +896,8 @@ apps/rootfs/LTP、register/current limitations与current contracts。若测试�
 
 ## 9. Stage 3 Ready：Multi-instance、lifecycle 与最终 cutover
 
-**状态：** Ready / Not Started / Unauthorized。本文完整解析Stage 3，但不授权Checkpoint 1、实现、runtime
-validation、contract cutover或RFC closure。
+**状态：** Active / Checkpoint 1 Closed（2026-07-27）/ Checkpoint 2-3 Unauthorized。本文完整解析Stage 3；
+Checkpoint 1 closure不授权shutdown handoff、后续runtime validation、contract cutover或RFC closure。
 
 ### 9.1 Resolution preflight 与 live gap
 
@@ -962,7 +962,8 @@ Stage 3按以下三个checkpoint顺序执行；任一checkpoint关闭后立即�
 
 ### 9.3 Checkpoint 1 — Multi-instance与attach conformance
 
-**状态：** Ready / Not Started / Unauthorized。
+**状态：** Closed（2026-07-27）。Host multi-instance、registry/attach conformance、独立review、validation与
+write-back已闭合；Checkpoint 2仍Not Started / Unauthorized。
 
 **Host real-stack matrix：** 在现有deterministic provider support上建立独立multi-instance test，不增加通用
 test-support crate。两个`Stack`与两个bounded provider分别拥有MAC、link、credit、completion、manual time与
@@ -995,6 +996,19 @@ proof。本checkpoint不修改power、worker lifecycle、current contract或Stag
 **退出：** host矩阵、registry KUnit/source audit与独立review达到Apollyon 0/Keter 0/Euclid 0后Checkpoint 1
 Closed并停止。任何需要global interface ID、shared lifecycle enum、driver->stack callback、generic device rollback
 framework或shared API扩张的结果立即停止并返回RFC/manifest review。
+
+实际执行新增独立`multi_instance` host矩阵，以两个真实`Stack`和两个bounded provider闭合exhaustion、
+withheld completion、link、matching completion、recheck、manual time、mapping rollback与stack-local identity
+namespace隔离；registry KUnit同步覆盖不同origin/facts、publication snapshot与duplicate failure isolation，
+并明确link只是在publication point取得、允许stale且不驱动runtime pump。live source audit确认driver在queue/
+RX refill、IRQ与notification准备后才publish，registry保留identity record，attach按netdev继续，spawn failure只
+撤销stack-local mapping并保留unsafe provider。无需新增production或KUnit fault-injection seam。
+
+Host gate、两种no-default feature check、RV64 release build、formatter changed-file audit与fresh-disk RV64
+wrapper通过；wrapper记录261/261 KUnit、新registry case、单NIC active attach、128/128 reply、129/129 TX
+completion、IRQ与mapping/outstanding回落，并正常`filesystem -> device -> PowerOff`。独立review为Apollyon 0、
+Keter 0、Euclid 0、Safe 0；没有manifest、owner、shared API、ABI/visible semantics、acceptance或contract变化。
+Checkpoint 1关闭后立即停止，Checkpoint 2未激活。
 
 ### 9.4 Checkpoint 2 — Shutdown handoff vertical slice
 
