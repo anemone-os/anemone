@@ -103,14 +103,14 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
-- [RFC-20260726-epoll](./rfcs/epoll/index.md)：R0 已接受；以 source-neutral persistent
+- [RFC-20260726-epoll](./rfcs/epoll/index.md)：R1 已接受；以 source-neutral persistent
   readiness subscription 统一 poll/select 与 epoll 的 source-facing protocol，并由 `Epoll` / `EpollWatch`
-  单独拥有 watch、generation、ready policy 和 harvest。Stage 0-1 已完成并关闭；eventfd/fanotify 已迁移
+  单独拥有 watch、generation、policy、bounded scan与ET dirty causality。Stage 0-1 已完成并关闭；eventfd/fanotify 已迁移
   到 source-neutral route，source bridge 已删除，subscription 与 opened-description 两个 foundation
-  cutover 已同步生效。独立 resolution gate 已把 Stage 2 core/ABI/test/cutover 解析为 Ready，2A dormant
-  watch/lifecycle core、2B ready/wait protocol与2C ABI/focused oracle已按各自授权、复审与验证关闭；2D首次
-  RV64 runtime发现epoll-file在active wait内获取sleepable mutex并panic，当前停止且Stage 2未关闭，epoll ABI
-  与三个`EPOLL-*` ID仍未cutover生效。执行证据见
+  cutover 已同步生效。2A dormant watch/lifecycle core、R0 2B ready/wait protocol与2C ABI/focused oracle已关闭；
+  2D首次RV64 runtime发现epoll-file在active wait内获取sleepable mutex并panic。R1以per-instance operation BKL
+  的bounded scan取代ready queue/COW/sequence，并用三态coverage + fixed routes形成non-sleeping wait publication；
+  2D已暂停，2R Ready但未授权。epoll ABI、`IOMUX-POLL-001/002`的R1 Refine与三个`EPOLL-*` ID仍未cutover生效。执行证据见
   [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、

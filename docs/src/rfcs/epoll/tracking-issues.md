@@ -1,11 +1,11 @@
 # Epoll RFC Tracking Issues
 
 **状态：** Active
-**最后更新：** 2026-07-26
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
-本文只跟踪当前仍影响 R0 target、实现顺序、review gate、停止边界或验收判断
+本文只跟踪当前仍影响 R1 target、实现顺序、review gate、停止边界或验收判断
 的 confirmed design issues。普通实现 TODO、具体 Rust encoding 选择和尚未验证的
 性能猜测不放在这里。
 
@@ -24,7 +24,9 @@ neutralize，不再把统一误判为单一通用 wrapper 或纯机械迁移。
 后续 review 中按 owner 与恢复边界拆成 0A terminal liveness、0B observer/pipe、0C timerfd
 noirq、0D TTY/closure 四个 checkpoint；这不改变本页 issue 结论。2026-07-26 文档层复核
 补齐 K5 的 current-contract 最小闭包后，R0 已接受、transaction 已建立，Stage 0 已按开发者
-授权进入 Active；本轮只授权 0A、0B。
+授权进入 Active；本轮只授权 0A、0B。后续 0C-2C 执行事实见 transaction。2D 首次 runtime 暴露
+active wait 内获取 sleepable mutex 的 Apollyon；R1 已在 target 层以 operation-serialized bounded scan、
+per-watch dirty 与三态 non-sleeping wait publication neutralize，2R 已 Ready / Not Authorized。
 
 ## Apollyon
 
@@ -43,6 +45,42 @@ None.
 None.
 
 ## Neutralized
+
+### EPOLL-RUNTIME-A1 - epoll-file register 在 active wait 内获取 sleepable operation mutex
+
+**状态：** Neutralized in R1 target / implementation pending / 2026-07-27
+**影响范围：** epoll-file pollability / iomux register gate / ready protocol / multiple waiter
+**来源：** Stage 2 Checkpoint 2D 首次 RV64 focused runtime
+
+**原问题：** `IomuxWaitRound::begin_current()` 已建立 active scheduler wait identity 后，epoll-file
+register 为了同时执行 candidate refresh、COW route writer serialization 与 current snapshot，进入
+per-instance sleepable operation mutex并触发 `nested scheduler wait attempt` panic。直接删除 mutex又会失去
+COW writer串行化、empty-publication handoff、LT requeue/copyout rollback与multiple-waiter closure，因此不是
+局部换锁即可修复。
+
+**R1 关闭决策：** 保留 `Epoll` / `EpollWatch` owner、ABI、lifecycle、source subscription 与 nested-epoll
+rejection，但删除 ready queue/bitmap、LT requeue、global notification sequence/CAS 与
+`Arc<Vec<PollRoute>>` COW registry。per-instance sleepable operation mutex成为 ctl、teardown、bounded full
+scan、harvest与copyout policy的局部 BKL；source callback只发布 generation-bound dirty。active-wait register
+只进入独立 irqsave spinlock，后者保护 fixed route slots与 `Uncovered / Checking / EmptyCovered` certificate。
+coverage不足时 route已安装、锁外self-hint并返回 `SubscribedRecheck`，iomux owner强制final snapshot且不睡眠。
+
+这改变了 R0 `EPOLL-READY-001` target与 effective `IOMUX-POLL-001/002` 的 pending delta，因而形成 R1，
+不是仅调整 implementation route。它不改变主要对象 owner、Linux ABI、首版 capability或最终
+`EPOLL-CUTOVER`；current contract在2D最终cutover前保持不变。
+
+**证明 gate：** [Checkpoint 2R Ready](./implementation.md#checkpoint-2r-readyoperation-serialized-scan-与-non-sleeping-wait-publication)
+要求删除旧协议、证明三态coverage、ET dirty claim/rollback、ONESHOT commit、fixed-capacity guard-out
+notify/drop和multiple waiter，并重跑两架构build与RV64 focused runtime。2R尚未授权/实现，故这里的
+Neutralized只表示 target-level设计 blocker已闭合，不是runtime defect已经修复；2D继续Suspended。
+
+**修复位置：** [RFC epoll owner](./index.md#epoll-owner)、
+[Operation-serialized Scan、Dirty 与 Copyout](./invariants.md#operation-serialized-scandirty-与-copyout)、
+[Epoll File Readiness](./invariants.md#epoll-file-readiness) 与上述 2R gate。
+
+**重新打开条件：** 2R仍需在 active wait 内取得 operation mutex；`SubscribedRecheck`可能进入真实sleep或
+计入ready；coverage/dirty无法在不保留sequence/ready cache第二truth的条件下闭合；spinlock guard内需要
+allocation、target poll、notify或final-reference drop；或focused runtime仍出现panic/deadlock/lost wake。
 
 ### EPOLL-DRAFT-K5 - Stage 0 直接依赖未完整登记到 Contract Impact
 
@@ -223,7 +261,7 @@ instance 的行为状态；或实现证据表明 operation serialization 无法�
 `Idle / Queued / Harvesting { pending } / Disabled` 的精确状态机。这把内部 callback
 记账、copyout failure recovery 与未来优化形状抬成了用户可见语义和文档层前置条件。
 
-**关闭决策：** callback 次数不对应 ABI event 次数。每个 `Epoll` 的 operation mutex
+**R0 关闭决策：** callback 次数不对应 ABI event 次数。每个 `Epoll` 的 operation mutex
 串行 ctl、teardown 与 harvest；source notification 不获取该 mutex，只需 callback-safe
 地发布一个 sticky pending/dirty recheck obligation。多个 notification 可以合并，实际
 observer callback、ready-queue insertion 与 deferred processing 可以延后。harvest 在
@@ -239,9 +277,14 @@ fail closed，target final close 则由 terminal opened-description liveness 使
 partial-progress recovery 留给 future implementation / ABI resolution，不作为逐 callback
 proof obligation。
 
+**R1 supersession：** 2D runtime 证明 R0 ready/sequence/COW implementation 会把 non-sleeping register
+重新耦合到 operation mutex。R1 进一步删除 ready queue 与 global sequence；operation owner 直接 bounded
+scan，ET 保留 per-watch dirty，empty wait由三态coverage闭合。该修订保持本条“callback不是event计数、
+readiness只来自target”的原结论，并由 `EPOLL-RUNTIME-A1` / Checkpoint 2R 承接当前证明。
+
 **修复位置：** [RFC 摘要与 epoll owner](./index.md#epoll-owner)、
 [Source Notification 线性化](./invariants.md#source-notification-线性化)、
-[Ready Queue 与 Harvest](./invariants.md#ready-queue-与-harvest)和
+[Operation-serialized Scan、Dirty 与 Copyout](./invariants.md#operation-serialized-scandirty-与-copyout)和
 [锁序与执行上下文](./invariants.md#锁序与执行上下文)。
 
 **重新打开条件：** implementation 只能依赖 callback 逐次、立即执行才能避免永久睡眠；

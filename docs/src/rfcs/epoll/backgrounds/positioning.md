@@ -10,7 +10,7 @@
 本文保留 Anemone 展开 epoll 公共 RFC 前形成的设计定位共识。
 
 本文不是 RFC canonical target，不是 current contract，不是 `invariants.md`，也不是
-implementation plan。当前公共 Draft target 已展开到 [RFC 入口](../index.md)、
+implementation plan。当前公共 RFC target 已展开到 [RFC 入口](../index.md)、
 [不变量需求](../invariants.md) 和 [Tracking Issues](../tracking-issues.md)，实施路线由
 [实施计划](../implementation.md) 单独拥有；当前 effective
 baseline 只由仓库 `docs/src/contracts/` 拥有。若本文与 target proposal 或 current
@@ -676,7 +676,8 @@ sched::latch -> sched::wait
   Stage 0 Ready；
 - 剩余问题可以被分类为 implementation gate、accepted limitation 或 backgrounds evidence。
 
-[实施计划](../implementation.md) 已从 [RFC 入口](../index.md) 和
+[实施计划](../implementation.md) 当时从 [RFC 入口](../index.md) 和
 [Tracking Issues](../tracking-issues.md) 展开阶段、write set、probe、验证 floor 与停止条件。
-它仍是公共 Draft / Not Authorized，不表示 target 已接受为 R0、transaction 已创建或 Stage 0
-已经 Active。
+本段只记录 promotion 前的 Draft / Not Authorized 判断；当前修订、transaction 与阶段状态只以
+[RFC 入口](../index.md)、[实施计划](../implementation.md) 和
+[事务日志](../../../devlog/transactions/2026-07-26-epoll.md) 为准。

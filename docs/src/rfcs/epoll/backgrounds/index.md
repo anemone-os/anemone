@@ -1,6 +1,6 @@
 # Epoll 背景材料
 
-本目录保存 [RFC-20260726-epoll](../index.md) 的历史定位输入。背景材料不覆盖当前公共 Draft target，不构成 current contract、implementation plan、write set 或执行授权。
+本目录保存 [RFC-20260726-epoll](../index.md) 的历史定位输入。背景材料不覆盖当前公共 RFC target，不构成 current contract、implementation plan、write set 或执行授权。
 
 RFC target：
 

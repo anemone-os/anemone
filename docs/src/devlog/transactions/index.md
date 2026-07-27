@@ -6,7 +6,7 @@
 
 ## Active
 
-- [Epoll](./2026-07-26-epoll.md)：R0 Stage 0-1 已关闭，subscription 与 opened-description foundation contract 已生效；Stage 2的2D首次RV64 runtime命中epoll-file active-wait/sleepable-mutex blocker并停止，Stage 2未关闭，epoll ABI与三个`EPOLL-*` ID保持Not Cut Over。
+- [Epoll](./2026-07-26-epoll.md)：R1 Stage 0-1 已关闭，subscription 与 opened-description foundation contract 已生效；2D首次RV64 runtime命中epoll-file active-wait/sleepable-mutex blocker后暂停。R1以operation-serialized bounded scan与non-sleeping wait publication取代ready/COW/sequence；2R Ready但未授权，epoll ABI、iomux R1 Refine与三个`EPOLL-*` ID保持Not Cut Over。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

@@ -1,23 +1,25 @@
 # Epoll 实施计划
 
-**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2D Active, Stopped at Runtime Blocker
-**适用修订：** R0
+**状态：** Stage 0-1 Closed / Stage 2 Checkpoint 2D Suspended / Checkpoint 2R Ready, Not Authorized
+**适用修订：** R1
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-epoll](./index.md)
 **目标不变量：** [Epoll 与 Poll Subscription 不变量需求](./invariants.md)
 **当前契约：** [`SCHED-LATCH-*`](../../contracts/scheduler/latch-wait-round.md)、[`SIGNAL-TEMP-MASK-*`](../../contracts/signal/temporary-mask-delivery.md)、[`IOMUX-POLL-*`](../../contracts/iomux/poll-wait.md)、[`OPENED-DESC-*`](../../contracts/task/opened-description-lifecycle.md)、[`TTY-TERM-001` / `TTY-INPUT-001`](../../contracts/tty/data-plane.md)
-**开放问题：** [Tracking Issues](./tracking-issues.md) 当前无RFC target-level开放Keter；2D runtime blocker见
-[事务日志](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-runtime-stop---2026-07-27)
+**开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 R1 target-level 开放 Apollyon / Keter；
+2D runtime blocker 已由 R1 target 与 2R proof gate neutralize，implementation 尚未执行
 **事务日志：** [2026-07-26-epoll](../../devlog/transactions/2026-07-26-epoll.md)
 
-本文把公共 R0 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
+本文把公共 R1 中已经闭合的 accepted target 解析成滚动实施路线。Stage 0 已解析为
 Ready，并在 R0 acceptance、transaction bootstrap 与开发者明确授权后进入 Active。
 初始授权覆盖 0A、0B；后续授权覆盖 0C、0D。四个 checkpoint 已逐项独立关闭。开发者随后授权
 执行 `0 -> 1` resolution gate；该 gate 把 Stage 1 完整解析为 Ready。后续独立授权完成了 Stage 1
 代码、review、验证与两个 foundation cutover。开发者随后授权执行 `1 -> 2` resolution gate；
 该 gate 已把 Stage 2 完整解析为 Ready。后续独立授权与精确 write-set expansion 批准已完成 2A，新的独立授权
-也已完成 2B ready/wait protocol。当前目标授权覆盖2C与2D；2C已关闭，2D首次runtime已激活但命中
-epoll-file register blocker并停止，`EPOLL-CUTOVER`仍未执行。
+也已完成 R0 2B ready/wait protocol。2C 已关闭，2D 首次 runtime 命中 epoll-file register blocker 后
+暂停。开发者接受 R1 target revision：保留 owner / ABI / lifecycle / capability，但以 operation-serialized
+bounded scan 和 non-sleeping wait publication 取代 2B ready/COW/sequence route。Checkpoint 2R 已完整
+解析为 Ready，但未获执行授权；`EPOLL-CUTOVER` 仍未执行。
 
 ## 实施原则
 
@@ -45,17 +47,20 @@ epoll-file register blocker并停止，`EPOLL-CUTOVER`仍未执行。
 - `SIGNAL-TEMP-MASK-001..003` 保持有效；`IomuxWaitRound` 不取得 current mask、reserved
   delivery target 或 restore responsibility，ppoll/pselect 继续由现有 Signal classifier 收口。
 - readiness truth 与 routing storage 始终由具体 source state 拥有；consumer acceptance、
-  watch generation、policy 与 ready protocol 不进入 source。
+  watch generation、policy、dirty causality与scan/copyout protocol 不进入 source。
 - source lock 内只更新 readiness、安装/筛选 route；observer notification、wait completion、
   epoll operation 和用户 copyout 都发生在 source lock 外。
 - source route 不拥有 consumer lifetime；consumer retirement 后的晚到 notification 必须
   内存安全并 fail closed。eager unlink / lazy pruning 只承担有界资源卫生。
 - opened-description identity、published ref 与 terminal retirement 只由 `task::files` 拥有；
   epoll 不缓存第二份 alive truth，也不让 final close 同步进入 epoll。
-- 每个 `Epoll` 只有一个 sleepable operation mutex 串行 ctl、teardown 与 harvest；source
-  notification、IRQ/noirq handoff 和 task sleep 不获取它。
-- ready entry 与 callback 只表示 recheck obligation；交付前重新读取 target predicate，并在
-  commit 前验证 opened-description liveness。
+- 每个 `Epoll` 只有一个 sleepable operation mutex 串行 ctl、teardown、bounded scan、harvest 与
+  copyout policy；source notification、IRQ/noirq handoff 和 task sleep 不获取它。
+- 不维护 ready queue / bitmap / LT requeue。LT 每个 operation 扫描当前 predicate；ET 只消费绑定 live
+  watch/generation 的 sticky dirty claim；交付前重验 opened-description liveness。
+- active-wait register 只进入 wait-publication spinlock。该锁只保护 fixed route slots 与
+  `Uncovered / Checking / EmptyCovered` certificate；guard 内禁止 allocation、target snapshot、notify、
+  final-reference drop 或 operation mutex。
 - Linux UAPI 只位于 `anemone_abi` 与 `fs::api`。`fs::epoll` 不读写用户指针，不保存
   Linux-shaped event/flag state。
 - 首版拒绝 nested epoll。对 epoll target 的 `EPOLL_CTL_ADD` 固定返回 `EINVAL` 并记录
@@ -69,7 +74,7 @@ epoll-file register blocker并停止，`EPOLL-CUTOVER`仍未执行。
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 用 production-shaped vertical slice 证明 observer route、consumer retirement、terminal liveness 与三类 source context 可以共存 | None | 0A-0D closure evidence 已记录 |
 | Stage 1 | Closed | 迁移 eventfd/fanotify 两个剩余 poll bridge，删除 source-facing `LatchTrigger` / `Armed` 路径，并原子切换 subscription / opened-description contract | `SUBSCRIPTION-CUTOVER`、`OPENED-DESC-CAPABILITY-CUTOVER` 已同步生效 | closure evidence 已记录；Stage 2 gate 已独立完成 |
-| Stage 2 | Active / 2D Stopped at Runtime Blocker | 以2A-2D四个有序checkpoint实现 epoll core、anonymous file、syscall ABI、focused tests 与 LTP，完成首版 epoll cutover | `EPOLL-CUTOVER`，尚未生效 | 2A-2C closure evidence 已记录；2D需先解析epoll-file non-sleeping register修正 |
+| Stage 2 | 2D Suspended / 2R Ready, Not Authorized | 2A-2C 已形成 candidate core/ABI；2R 以 R1 简化协议替换 R0 ready/wait route，随后恢复 2D integration 并完成首版 cutover | `EPOLL-CUTOVER`，尚未生效 | 2R 独立授权并关闭后，2D 才可由新的 activation 恢复 |
 
 ## Stage 0 Closed：Subscription 与 Liveness Proof-First Slice
 
@@ -665,19 +670,20 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 
 ### 阶段成熟度与授权边界
 
-- **Active / Checkpoint 2D Stopped at Runtime Blocker。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
+- **Checkpoint 2D Suspended / Checkpoint 2R Ready, Not Authorized。** Stage 0-1 已 Closed，`SUBSCRIPTION-CUTOVER` 与
   `OPENED-DESC-CAPABILITY-CUTOVER` 已 effective；上一节 resolution gate 已完成 live owner、ABI、LTP、
   test harness 与 current-contract preflight。
 - 开发者先授权解析 Stage 2 implementation，并明确允许后续测试需要时把 `anemone-rs` 与
-  `anemone-apps` 纳入写集；后续独立授权已分别关闭 2A 与 2B，当前目标授权继续覆盖2C与2D。
-  2C已完成build-only closure；2D首次QEMU在focused test内panic，LTP与`EPOLL-CUTOVER`均未到达。
-- Stage 2 保持一个原子 integration / acceptance unit，但实现拆成 2A-2D 四个有序 checkpoint。2A-2C 只形成
+  `anemone-apps` 纳入写集；后续独立授权已分别关闭 2A 与 2B，原授权随后关闭2C并激活2D。
+  2D 首次 QEMU 在 focused test 内 panic，LTP 与 `EPOLL-CUTOVER` 均未到达，原2D执行授权随暂停耗尽。
+  R1 acceptance 只授权 target correction 与 2R resolution，不授权2R实现或未来2D恢复。
+- Stage 2 保持一个原子 integration / acceptance unit。2A-2C 只形成
   不可独立合入的 stacked implementation evidence；在 2D 完成 kernel ABI、focused test、LTP、review、current
   contract 与 transaction write-back 前，任何 partial core、syscall handler 或单独 contract page 都不得合入
   有效分支或被其它功能依赖。
-- 除非开发者明确一次授权多个 checkpoint，Stage 2 activation 只进入 2A；任一 checkpoint 关闭都不自动授权
-  下一个。每次 activation、closure、validation 与 partial-code disposition 只追加到 transaction，不复制本文
-  的 authoritative delivery/write-set 定义。
+- 原 Stage 2 activation / checkpoint授权事实保留在transaction；任一 checkpoint closure都不自动授权下一个。
+  当前2R必须独立授权，2R closure后2D也必须重新activation。每次activation、closure、validation与
+  partial-code disposition只追加到transaction，不复制本文的authoritative delivery/write-set定义。
 
 ### 阶段内 checkpoint 路线
 
@@ -686,9 +692,10 @@ Stage 1 独立关闭后已执行一次只读 preflight：
 | 2A - Watch / Lifecycle Core | 先固定 instance、watch identity/generation、operation serialization、ADD/MOD/DEL replacement 与 logical retirement | `fs::epoll::{mod,watch,ready}` 的 dormant core、iomux visibility、opened-description lease 窄接口 | core 不接收用户指针、不开放 syscall；lifecycle/rollback review 与 RV64 build 通过 |
 | 2B - Ready / Wait Protocol | 独立闭合 callback-safe dirty、refresh/harvest、LT/ET/ONESHOT、epoll-file route publication 与 wait handoff | `fs::epoll::{mod,watch,ready,file}` 及同 owner integration corrections | lost-wake / stale-delivery / copyout-policy obligation 可审查，2B concurrency review 无未关闭 finding；仍不开放 ABI |
 | 2C - ABI / Focused Oracle | 接入四个 adapter、两架构 UAPI/syscall table、temporary-mask context 与 focused userspace oracle | kernel ABI/adapter、`task::sig::delivery`、`anemone-abi`、`anemone-rs`、`epoll-test` | 两架构 app/kernel build 与 ABI audit 通过；candidate handlers 只留在 stacked branch，不得独立合入 |
-| 2D - Integration / Cutover | 接入 user-test/LTP/rootfs，运行组合 closure，完成 full-diff review 与唯一 contract cutover | harness/LTP/rootfs、前序 finding 修正、contract/RFC/transaction/navigation | focused + LTP matrix、iomux组合、LA64 build、review与docs全部闭合后执行唯一 `EPOLL-CUTOVER` |
+| 2R - R1 Protocol Correction | 删除 R0 ready/COW/sequence route，以 operation-serialized scan、per-watch dirty 与 non-sleeping wait publication 修复 nested wait | epoll/iomux core、iomux adapters、专用 Kconfig capacity；2D harness 只作临时 validation input | focused runtime证明无 nested wait/lost wake，R1 concurrency review通过；不切 contract、不自动恢复2D |
+| 2D - Integration / Cutover | 2R关闭后重新激活；接入user-test/LTP/rootfs，运行组合closure并完成唯一contract cutover | harness/LTP/rootfs、前序finding修正、contract/RFC/transaction/navigation | focused + LTP matrix、iomux组合、LA64 build、review与docs全部闭合后执行唯一 `EPOLL-CUTOVER` |
 
-2A-2C 的 checkpoint commit 只是回滚、review 与证据边界，不是 transitional contract。前序 checkpoint 的
+2A-2C 与未来 2R 的 checkpoint commit 只是回滚、review 与证据边界，不是 transitional contract。前序 checkpoint 的
 production 文件可以在后续 checkpoint 为真实 finding 做局部修正，但不能借此绕过 manifest expansion 或把尚未
 验证的 partial capability 当作当前事实。
 
@@ -696,12 +703,13 @@ production 文件可以在后续 checkpoint 为真实 finding 做局部修正，
 
 - `fs::epoll` 是 policy/protocol owner，拆成 `mod.rs`、`watch.rs`、`ready.rs` 与 `file.rs`：
   `mod.rs` 组合 instance 与 operation surface，`watch.rs` 拥有 watch identity/generation/policy，
-  `ready.rs` 拥有 bounded slot、dirty/ready/harvest，`file.rs` 拥有 anonymous `EpollFile` 与普通 pollability。
+  `ready.rs` 拥有 bounded slot 与 per-watch/generation dirty claim，`file.rs` 拥有 anonymous `EpollFile` 与
+  non-sleeping wait-publication state。
   这只是同一 owner 内按 lifecycle/ops 拆分，不增加 public API 或第二抽象层。
 - `fs::api::iomux::epoll/{create,ctl,wait}.rs` 是 Linux ABI adapter：只在这里解析 syscall args、
   `epoll_event`、ctl opcode、flags、timeout/sigmask、errno 与 user copy。`fs::epoll` 只接收内部 event/policy
   类型，不读写用户指针，不保存 Linux-shaped bits。
-- 每个 `Epoll` 拥有一个 sleepable operation mutex，串行 ADD/MOD/DEL、instance teardown、candidate refresh、
+- 每个 `Epoll` 拥有一个 sleepable operation mutex，串行 ADD/MOD/DEL、instance teardown、bounded scan、
   harvest 与 copyout commit/rollback。task sleep 不持有该 mutex；source callback 与 epoll-file route notify
   也不获取它，否则 ctl 无法使已睡眠的 wait 可见新 readiness。
 - watch table 的 key 是 `(OpenedDescriptionCapability identity, user fd key)`；fd reuse 不继承旧 entry，dup
@@ -710,12 +718,13 @@ production 文件可以在后续 checkpoint 为真实 finding 做局部修正，
 - `EpollWatch` 实现 `PollObserver`，持 immutable slot/generation、fd key、internal interests、LT/ET/ONESHOT
   policy、user data、`accepting: AtomicBool`、target capability 与 `Weak<Epoll>`。source route 不拥有 watch；
   logical retirement 先清除 accepting/移出 current slot，晚到 callback 只能成为 stale recheck hint。
-- watch slots 与 dirty bitmap 以现有 `MAX_FD_PER_PROCESS=1024` 为上界；slot table 中的 current generation
-  是 user data/policy 的唯一当前映射。旧 callback 命中空 slot或已复用 slot最多触发一次额外 recheck，
-  不能交付旧 generation 的 user data。
-- epoll-file route registry 使用 owner-local fallible COW snapshot，live route 数以现有进程容量为界；
-  callback 只在短 non-sleeping guard 内 clone 已发布 snapshot，guard 外 notify/drop。它不获取 operation
-  mutex、不在 notification path 分配，也不进入 target snapshot。
+- watch slots 与 bounded scan 以现有 `MAX_FD_PER_PROCESS=1024` 为上界；slot table 中的 current generation
+  是 user data/policy 的唯一当前映射。dirty 必须绑定产生 callback 的 live watch/generation；旧 callback
+  不能通过 slot reuse 为 replacement 制造 ET delivery。
+- epoll-file wait publication 使用 owner-local preallocated slots，数量由
+  `epoll_file_max_waiters = 64` 控制，kernel compile-time assertion 要求 `1..=MAX_PROCESSES`。capacity
+  exhaustion 显式失败并记录，不允许睡在未 armed route 上。其 spinlock 只保护 slots 与三态 coverage；
+  callback/registration 在 guard 外 notify/drop，不获取 operation mutex、不分配、不进入 target snapshot。
 - `PollObserver` 与 `PollRoute::new` 只扩大到 `crate::fs`，`PollRoute` 的 source-facing capability 与
   `notify/is_prunable` contract 不变。不得向 source 暴露 observer、epoll类型或 callback result。
 - `OpenedDescriptionLease` 增加 feature-neutral 的 operation-local `poll(request)` 和
@@ -775,7 +784,9 @@ production 文件可以在后续 checkpoint 为真实 finding 做局部修正，
 **执行状态：** Closed / 2026-07-26。callback-safe dirty/sequence、refresh/harvest、LT/ET/ONESHOT、
 anonymous epoll file 与 route publication 已按独立授权完成；实现、review、验证和 KUnit 取舍见
 [transaction checkpoint log](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2b-closure---2026-07-26)。
-本项关闭只证明 core protocol 可进入 ABI 接线；不开放 syscall、不切 current contract、不授权 2C。
+本项关闭只证明当时的 R0 candidate core 可进入 ABI 接线；不开放 syscall、不切 current contract。
+2D runtime 已使该 checkpoint 的 ready bitmap、LT requeue、notification sequence 与 epoll-file COW route
+结论失效；R1 Checkpoint 2R 明确 supersede 这些 implementation choices，但保留本节作为历史执行证据。
 
 #### Dirty、Ready、Harvest 与 Copyout 协议
 
@@ -985,18 +996,19 @@ Checkpoint 2D执行Stage 2唯一 `EPOLL-CUTOVER`：
    `epoll_pwait01..05` 不运行，musl `epoll_create02` 记为libc-wrapper disabled，nested/socket cases不冒充
    target regression。任何target内 FAIL、panic、deadlock、timeout、lost wake、stale user data或unexpected
    unsupported都在cutover前停止。
-7. 对完整2A-2D stacked diff做 architecture/concurrency/ABI/resource review，重点检查operation mutex释放点、
-   callback-safe dirty publication、generation reuse、ADD/MOD rollback、DEL/close retirement、ET pending、LT
-   fairness、ONESHOT copyout commit、epoll-file publication window、unaligned UAPI与Signal restore。finding在
+7. 对完整2A-2R-2D stacked diff做 architecture/concurrency/ABI/resource review，重点检查operation mutex释放点、
+   per-watch dirty generation、bounded scan、ADD/MOD rollback、DEL/close retirement、ET claim、LT
+   fairness、ONESHOT copyout commit、三态coverage/route publication、unaligned UAPI与Signal restore。finding在
    原owner checkpoint subset内修正并重跑受影响证据；不另建形式化review gate。
 
 #### 2D停止条件
 
-- dirty bitmap + sequence不能在callback-safe、无分配、无operation-mutex条件下闭合 ET/empty-wait lost wake，
-  或需要把callback payload提升为readiness truth；
+- per-watch dirty + 三态coverage不能在callback-safe、无分配、register不取operation-mutex条件下闭合
+  ET/empty-wait lost wake，或需要把callback payload/coverage提升为readiness truth；
 - ADD/MOD/DEL只有通过source强持watch、同步cancel/drain、target长期strong hold、close-driven target callback
   或第二alive truth才能正确；
-- epoll-file pollability必须开放nested epoll、引入跨instance graph owner或让wait重订阅全部targets；
+- epoll-file pollability必须开放nested epoll、引入跨instance graph owner、让wait重订阅全部targets，或使
+  `SubscribedRecheck` 进入真实sleep/计入ready；
 - 真实 ABI/LTP证据要求改变16-byte layout、syscall numbers、首版flags/errno、pwait target或接受边界，而非
   修复adapter实现；
 - fixed source capacity（包括timerfd 16 routes）无法作为owner-local resource failure诚实暴露，必须改写
@@ -1007,7 +1019,7 @@ Checkpoint 2D执行Stage 2唯一 `EPOLL-CUTOVER`：
 
 #### 2D退出条件
 
-- create/ctl/pwait/pwait2、watch identity/liveness、ADD/MOD/DEL rollback、dirty/ready/harvest/copyout、
+- create/ctl/pwait/pwait2、watch identity/liveness、ADD/MOD/DEL rollback、bounded scan/dirty/harvest/copyout、
   LT/ET/ONESHOT、epoll-file pollability与teardown全部满足本节协议；source与Signal/current task contract
   无第二truth。
 - focused app两架构build通过；RV64 closure中focused全部PASS，14项LTP对glibc/musl形成可归因matrix，
@@ -1015,7 +1027,7 @@ Checkpoint 2D执行Stage 2唯一 `EPOLL-CUTOVER`：
 - profile和master image恢复/未写入；SMP>1、LA64 runtime、hardware、broad/final harness等未运行项逐项
   写明，不从docs/build/RV64外推。
 - 完整diff无未关闭Apollyon、Keter或Euclid；三个current contract ID、RFC状态、transaction cutover证据与
-  navigation在2D同一cutover生效。Stage 2 Closed后RFC R0才回到 Closed。
+  navigation在2D同一cutover生效。Stage 2 Closed后RFC R1才回到 Closed。
 
 #### 2D runtime stop - 2026-07-27
 
@@ -1024,13 +1036,206 @@ epoll-file register仍进入sleepable per-instance operation mutex，触发neste
 mutex会同时失去`EpollFileRoutes` COW writer串行化、current candidate recheck以及LT/rollback与多个waiter之间的
 publication闭包，因此该修复不是2D内可直接落地的小补丁。
 
-2D保持Active / Stopped，Stage 2与三个`EPOLL-*` ID保持Not Cut Over。恢复前必须依据live 2A-2C diff单独解析
+当时的 disposition 是2D保持Active / Stopped，Stage 2与三个`EPOLL-*` ID保持Not Cut Over。恢复前必须依据live 2A-2C diff单独解析
 non-sleeping register与route/candidate publication修正，证明不新增readiness第二truth、不让allocation/notify进入
 callback guard，并覆盖empty-wait、LT requeue、copyout rollback和multiple-waiter lost wake。若修正要求改变
 owner、target invariant、public ABI或acceptance boundary，转入Target Renegotiation Gate；不得为赶过runtime
 在本checkpoint内暗加parallel wait protocol。
 
+R1 acceptance 后，本段 disposition 更新为：2D 保持 **Suspended**，不再直接承接协议修正；其历史 failure、
+撤回与 Not Run 事实不变。只有下列 2R 独立关闭并经新的 activation 记录后，2D 才能恢复。
+
+### Checkpoint 2R Ready：Operation-serialized Scan 与 Non-sleeping Wait Publication
+
+#### 阶段成熟度与授权边界
+
+- **Ready / Not Authorized。** 2D runtime stop、R1 target acceptance 与 live 2A-2C source preflight 已完成；
+  本节交付、实现路线、审计、验证、停止/退出条件和 manifest 已解析。
+- R1 acceptance、文档修改或 Ready 状态都不授权实现。开发者必须单独授权 2R；2R closure 也只允许
+  重新 activation 2D，不自动恢复 integration、不执行 `EPOLL-CUTOVER`、不更新 current contract。
+- 2A watch/lifecycle、2C ABI/focused oracle、opened-description capability、source subscription 与 Signal
+  contract 保留。2R 只替换 R0 2B 的 ready/COW/sequence route，不借修正重开 scheduler、source owner、
+  lifecycle、UAPI 或 nested epoll。
+
+#### 交付与实现路线
+
+1. `EpollOperation` 只保留 closing、watch slots、ONESHOT disabled 与 round-robin cursor。删除 ready
+   bitmap/candidate queue、LT requeue 与依赖 candidate membership 的 refresh/harvest path。
+2. source callback 为产生 callback 的 live watch/generation 发布 sticky dirty。ADD / successful MOD 为新
+   watch 发布初始 dirty；旧 watch callback只能污染旧 watch 的 claim，不能通过 slot reuse 为 replacement
+   产生 ET delivery。
+3. `harvest` / epoll-file snapshot 在 per-instance sleepable operation mutex 下做 bounded table scan：LT 每轮
+   snapshot；ET 只在 claim dirty 后 snapshot；disabled ONESHOT 跳过；cursor只决定起点。达到 `maxevents`
+   可以提前结束，但只有完整 empty scan 才能提交 empty coverage。
+   epoll-file readability probe发现deliverable ET时必须恢复/保留dirty，不能因`poll(epfd)`消费用户event；
+   对已确认not-ready的ET只消费本次recheck obligation。
+4. harvest batch 在完整用户 copyout前继续持 operation permit。成功 commit消费已交付 ET claim并 disable
+   ONESHOT；error / partial copy / Drop恢复 claimed ET dirty、保持 ONESHOT enabled，并发布 wait activity。
+   LT 不保存或 rollback requeue state。
+5. 删除 `notification_sequence` CAS 与 `Arc<Vec<PollRoute>>` COW registry。增加
+   `EpollWaitPublication`：一个 irqsave spinlock 同时保护 fixed/preallocated route slots 与
+   `Uncovered / Checking / EmptyCovered`。route table在 `Epoll::try_new()` 一次预留，不在 register或
+   callback路径扩容。
+6. exact scan 在持 operation mutex 时短暂进入 wait-publication lock：begin写 `Checking`；完整 empty结束仅
+   将仍为 `Checking` 的状态写为 `EmptyCovered`；ready/error结束写 `Uncovered`。callback、ADD/MOD commit、
+   copyout rollback 与 closing 先发布行为状态，再把 coverage写为 `Uncovered`。任何 notify与被替换 route
+   drop都在 spinlock guard 外。
+7. register 只进入 wait-publication lock。`EmptyCovered` 下安装 route并返回
+   `Subscribed(PollEvent::empty())`；`Checking/Uncovered` 下安装 route，锁外 self-hint并返回
+   `SubscribedRecheck`。capacity、allocation或closing失败显式返回 error，不能伪造 armed success。
+8. `PollRegisterResult` 增加 `SubscribedRecheck`。ppoll/pselect register scan 与 epoll wait adapter把它聚合为
+   独立 recheck outcome：不增加 ready count、不进入 task park，retire/finish round后执行 final snapshot；
+   final snapshot仍空才开始下一轮。普通 source继续返回 `Subscribed(current)`，不得批量改写。
+9. 新增 `epoll_file_max_waiters = 64` Kconfig；xtask只物化生成常量，kernel以 compile-time assertion约束
+   `1..=MAX_PROCESSES`。64 是首版 resource-policy default，用来避免每个 epoll instance 按当前
+   `MAX_PROCESSES=32768` 预分配 route slots；它不是 readiness correctness truth。容量耗尽记录
+   notice并返回现有 resource error，后续只可经配置/证据调整，不能静默睡在未发布 route 上。
+
+#### 三态 coverage 线性化审计
+
+```text
+initial: Uncovered
+
+exact scan begins:
+    any -> Checking
+
+callback / ADD / MOD / rollback / closing:
+    any -> Uncovered
+    snapshot/clone routes under spinlock
+    notify/drop outside spinlock
+
+exact scan finishes empty:
+    Checking -> EmptyCovered
+    Uncovered -> Uncovered
+
+exact scan finishes ready/error:
+    any -> Uncovered
+
+register:
+    EmptyCovered -> install route -> Subscribed(empty)
+    Checking/Uncovered -> install route -> unlock -> self-hint -> SubscribedRecheck
+```
+
+review 必须对以下交错逐项给出 owner/linearization 结论：activity 在 scan begin 前、scan 中、empty commit
+前后；route publication 在 empty commit 前后；ADD/MOD与 sleeping waiter；ET callback在 claim前后；copyout
+rollback与另一个 waiter；closing与 register。`EmptyCovered` 只能由完整 table scan建立，不能由 dirty==0、
+LT当前无candidate、route list为空或诊断字段推导。
+
+#### 资源、锁序与代码去留
+
+- 唯一允许的嵌套方向是 `operation mutex -> wait-publication spinlock`，且 spin guard 内只做 certificate、
+  slot move/clone 与 bounded metadata操作。register/callback只有 spinlock，绝不反向获取 operation mutex。
+- notify一个 slot时可在短 guard内 clone capability、解锁后 notify，再处理下一个稳定 slot；prunable slot的
+  replacement把旧 route移出 guard后 drop。不得为一次 broadcast分配临时 Vec，也不得在 guard内调用
+  `PollRoute::notify()` 或释放最后引用。
+- 删除 `ReadySlots`、ready claim/requeue、`notification_sequence`、COW replacement与相应 assertion/comment；
+  `WatchSlots`、generation、liveness capability、per-watch dirty与 round-robin cursor保留。不得同时保留旧新
+  两套行为路径作为 fallback。
+- `EpollWaitPublication` 是 `Epoll` owner 内的并发子域，不是第二个 epoll object或 readiness owner。coverage
+  与 route slots不能反向驱动 LT/ET/ONESHOT；full scan结果仍来自 target owner。
+
+#### 审计与可观测性
+
+- 搜索并分类 `ReadySlots`、candidate、requeue、`notification_sequence`、`compare_exchange`、
+  `Arc<Vec<PollRoute>>`、COW、`Subscribed(current)` exhaustiveness 与所有 epoll-file `operation.lock()`。
+- 常开 assertion覆盖：只有完整 scan提交 `EmptyCovered`；empty commit不能覆盖 `Uncovered`；dirty claim属于
+  current watch/generation；rollback恢复所有 ET claim；ONESHOT只在commit后disabled；route push不超过预留
+  capacity；wait-publication guard不跨 target/notify接口。
+- 只在 `SubscribedRecheck` unexpected adapter path、route capacity exhaustion、scan/typed-poll error与
+  fail-closed internal inconsistency记录日志；callback/scan热路径不逐slot打印。coverage、slot id与wait id均
+  作为协议/诊断字段明确区分，诊断字段不得驱动行为。
+
+#### Contract cutover 与失败原子性
+
+- 2R contract cutover 为 `None`。R1 对 `IOMUX-POLL-001/002` 的 Refine与三个 `EPOLL-*` ID继续等待2D
+  唯一 `EPOLL-CUTOVER`；2R代码仍属于 stacked candidate implementation。
+- 任一实现、build、runtime或review条件失败时，2D保持Suspended，syscall/current contract保持Not Cut Over。
+  不恢复R0 ready/COW/sequence作为兼容路径，也不把 R1 target内失败登记为 limitation。
+
+#### Resolved Write Set Manifest
+
+允许修改的 production kernel / config 文件：
+
+- `kconfig`
+- `scripts/xtask/src/config/kconfig.rs`
+- `anemone-kernel/src/fs/epoll/{mod.rs,ready.rs,file.rs,watch.rs}`
+- `anemone-kernel/src/fs/iomux/mod.rs`
+- `anemone-kernel/src/fs/api/iomux/{wait.rs,ppoll.rs,pselect6.rs}`
+- `anemone-kernel/src/fs/api/iomux/epoll/wait.rs`
+
+允许修改的 R1 文档回写面：
+
+- `docs/src/rfcs/epoll/{index.md,invariants.md,implementation.md,tracking-issues.md}`
+- `docs/src/devlog/transactions/2026-07-26-epoll.md`
+- `docs/src/rfcs.md`
+- `docs/src/devlog/{2026-07-20_to_2026-08-02.md,transactions/index.md}`
+
+validation-only 输入：
+
+- `anemone-apps/epoll-test/src/main.rs` 与现有两架构 build/export；除非 runtime oracle本身确认错误，不修改；
+- 2D 已登记的 `anemone-apps/user-test/src/main.rs`、`conf/rootfs/pretest-{rv64,la64}.toml` 与
+  `anemone-apps/user-test/ltp/profile.txt` 可只为 focused RV64 run临时接线，运行后必须按原字节恢复，diff不得
+  进入2R checkpoint；
+- `anemone-kernel/src/fs/{pipe.rs,eventfd.rs,timerfd.rs}`、`anemone-kernel/src/fs/fanotify/**`、TTY poll
+  owner与 `task/files.rs` 只做 source/lifecycle audit，不修改；
+- `Justfile`、`scripts/xtask` 其它文件、`scripts/run-user-test-rv64.sh`、调用者明确选择的初赛RV64 master
+  image只读使用。
+
+不得修改：
+
+- scheduler / wait core、source production owner、`task::files` lifecycle、Signal、ABI layout/syscall number、
+  `anemone-rs` wrapper、socket、nested epoll、current contract、register/current-limitations；
+- build wrapper、通用 registry/pool/framework或新的后台 scan worker。
+
+若 live implementation 需要未列 production 文件，先停止并报告 owner/contract/ABI/验证影响，批准并更新
+本 manifest / transaction 后再继续。临时 validation wiring不构成2D恢复或write-set扩大。
+
+#### 验证与 review
+
+1. 运行 `just fmt all --check`、`git diff --check` 与 `mdbook build docs`。
+2. 运行 `just app build epoll-test --arch riscv64` 与 `--arch loongarch64`；app不修改时也重新核对export。
+3. 串行运行
+   `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G` 与
+   `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`。
+4. 临时恢复已审计的 focused harness接线并运行
+   `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/epoll-stage2r-rv64.log`；至少要求
+   `wait-copyout-rollback`、`lt-et-oneshot`、`lifecycle-epoll-file`、`producer-transition-race`、
+   `wide-harvest-producer-race`、`ctl-callback-race`、`multiple-waiters` 与 `pwait-pwait2` 全部PASS，kernel
+   不出现 nested wait panic、deadlock、timeout、lost wake或stale user data。2R不要求LTP matrix closure。
+5. runtime后恢复临时 harness/profile并核对 master image hash未变；逐项记录QEMU/KUnit/focused与Not Run。
+6. 对2R完整diff做独立 architecture/concurrency/resource review，重点检查三态coverage、dirty generation、
+   lock direction、route容量、guard-out notify/drop、ET claim/rollback、LT scan fairness、multiple waiter与closing。
+
+#### 停止条件
+
+- exact empty与route publication不能仅由三态coverage闭合，或仍需 notification sequence/ready cache作为
+  correctness truth；
+- `SubscribedRecheck` 需要 scheduler/wait-core变化、会进入真实sleep、被计为ready，或普通 source必须放弃
+  publication-point snapshot；
+- fixed routes只有通过guard内allocation/notify/drop、unbounded storage或通用pool/framework才能实现；
+- per-watch dirty不能在generation replacement、claim/callback与copyout rollback下闭合ET；
+- bounded scan无法在operation mutex下完成，或必须把target snapshot/copyout放进spinlock；
+- runtime/ABI证据要求改变R1 owner、nested-epoll rejection、UAPI、visible semantics、Contract Impact或
+  acceptance boundary。命中后保持2D Suspended并进入write-set expansion或Target Renegotiation Gate。
+
+#### 退出条件
+
+- R0 ready/COW/sequence行为路径已删除，R1只有 operation BKL + per-watch dirty + wait-publication spinlock
+  三个职责清晰且无第二truth；
+- `SubscribedRecheck`、coverage、ET claim/rollback、ONESHOT commit与multiple waiter的source/lock审计闭合；
+- 两架构app/kernel build、RV64 focused runtime与docs检查通过，临时harness/profile已恢复；
+- 完整2R diff无未关闭Apollyon、Keter或Euclid，validation/Not Run与resource default写入transaction；
+- 2R标记Closed，但2D仍Suspended，直到开发者另行授权新的2D activation。
+
 ### Resolved Write Set Manifest
+
+本节是 Stage 2 从 R0 延续的整体 integration manifest；Checkpoint 2R 的当前 frozen subset 以上一节为权威。
+R1 新增的 config / iomux 文件已并入整体 manifest，但不构成 2R execution authorization。
+
+允许修改的配置物化文件：
+
+- `kconfig`
+- `scripts/xtask/src/config/kconfig.rs`
 
 允许修改的 kernel/core 文件：
 
@@ -1040,6 +1245,7 @@ owner、target invariant、public ABI或acceptance boundary，转入Target Reneg
 - `anemone-kernel/src/fs/epoll/{mod.rs,watch.rs,ready.rs,file.rs}`（新增）
 - `anemone-kernel/src/task/files.rs`
 - `anemone-kernel/src/task/sig/delivery.rs`
+- `anemone-kernel/src/fs/api/iomux/{wait.rs,ppoll.rs,pselect6.rs}`
 
 允许修改的 kernel ABI/syscall adapter：
 
@@ -1062,7 +1268,7 @@ owner、target invariant、public ABI或acceptance boundary，转入Target Reneg
 
 允许修改的 contract/RFC/transaction/navigation：
 
-- `docs/src/rfcs/epoll/{index.md,invariants.md,implementation.md}`
+- `docs/src/rfcs/epoll/{index.md,invariants.md,implementation.md,tracking-issues.md}`
 - `docs/src/devlog/transactions/2026-07-26-epoll.md`
 - `docs/src/contracts/epoll/{index.md,protocol.md}`（cutover时新增）
 - `docs/src/{contracts.md,SUMMARY.md,rfcs.md}`
@@ -1075,7 +1281,7 @@ Validation-only 输入：
   `anemone-kernel/src/fs/fanotify/{file.rs,group.rs,queue.rs}`、
   `anemone-kernel/src/device/{console.rs,tty/file.rs,tty/terminal.rs,block/devfs.rs,char/devfs.rs}`
 - snapshot-only poll owners under `anemone-kernel/src/fs/{devfs,ext4,proc,ramfs}/**`；只做分类/audit，不修改
-- `anemone-kernel/src/fs/api/iomux/{wait.rs,ppoll.rs,pselect6.rs}` 与所有 `task/files.rs` publication callers
+- 所有 `task/files.rs` publication callers
 - 固定 LTP epoll source、调用者明确选择的初赛 RV64 master image与其中glibc/musl executable；它们只作为
   只读验证输入，私人路径不进入公共命令接口
 - repository `Justfile`、`scripts/xtask` 与 `scripts/run-user-test-rv64.sh`；只核对/使用现有入口，不修改
