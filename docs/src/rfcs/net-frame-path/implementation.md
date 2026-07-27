@@ -1,6 +1,6 @@
 # Network Frame Path 迁移实施计划
 
-**状态：** R1 Accepted for Implementation / Stage 1-3 Historical Closed / Stage 4 Ready, Unauthorized /
+**状态：** R1 Closed / Stage 1-3 Historical Closed / Stage 4 Closed /
 `NFP-FINAL-CUTOVER` Effective
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
@@ -9,7 +9,7 @@
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001) Refine均Active
 **当前修订：** `R1`
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)已Completed；
-Stage 4激活时另建transaction
+[Stage 4 transaction](../../devlog/transactions/2026-07-27-net-frame-path-stage4.md)已Completed
 **平台验收范围：** RV64 QEMU virtio-mmio；LA64 / virtio-pci 不属于本修订的 build、runtime 或
 cutover 要求
 
@@ -152,7 +152,7 @@ contract，再把下一个 Outline 完整解析为 Ready。
 | Stage 1 -> 2 Boundary Interlude | Closed | same-owner module split、kernel-local provider/wake handoff、artifact-neutral validation seam 与 visibility 收窄 | 全部 Not Effective |
 | Stage 2 — Bounded progress conformance | R1 Closed / Checkpoint 1-3 Closed | host deterministic exhaustion/completion/recheck、budget/deadline、公平性、link recovery 与 RV64 bounded production-path proof | 全部 Not Effective |
 | Stage 3 — Multi-instance/lifecycle closure | Closed / Checkpoint 1-3 Closed | 双实例隔离、attach rollback、shutdown handoff、validation seam退出、RV64 final acceptance 与原子 cutover | `NFP-FINAL-CUTOVER` Effective |
-| Stage 4 — Post-close contract conformance correction | Ready / Unauthorized / 单一checkpoint | `device/net` pending handoff、post-`Late` network activation、host-only test metadata与aggregate revalidation | 既有contract保持Effective；无cutover |
+| Stage 4 — Post-close contract conformance correction | Closed / 单一checkpoint | `device/net` pending handoff、post-`Late` network activation、host-only test metadata与aggregate revalidation | 既有contract保持Effective；无cutover |
 
 ## 6. Stage 1 Ready：Four-layer walking skeleton
 
@@ -1225,8 +1225,8 @@ Platform/QEMU/wrappers、apps/rootfs/LTP、register/current limitations与其它
 
 ## 10. Stage 4 Ready：Post-close contract conformance correction
 
-**状态：** Ready / Unauthorized / 单一checkpoint。当前只完成docs resolution；没有Stage 4 transaction、源码
-修改或执行授权。激活时必须新建独立transaction，并且只激活本stage整体，不拆出额外probe/checkpoint。
+**状态：** Closed / 单一checkpoint（2026-07-27）。Stage 4通过独立transaction完成aggregate实现、review、
+validation与write-back；没有拆出额外probe/checkpoint，也没有执行第二次contract cutover。
 
 ### 10.1 反馈定性与交付边界
 
@@ -1376,6 +1376,23 @@ support/**}`、vendored smoltcp、`virtio-drivers`/`Cargo.lock`、`device/net/pr
 plane、timer/initcall macro/linker实现、其它Late consumer、generic bus/device/IRQ/task/kthread/scheduler/power、
 KernelConfig/xtask/Justfile/Platform/QEMU wrapper、apps/rootfs/LTP、current contracts/current limitations与其它RFC。
 若正确实现需要触碰任一只读边界，必须先停止并上报逐文件扩展、owner/contract影响与验证变化；不得先改后追认。
+
+### 10.7 Closure
+
+`device/net` registry现在原子拥有publication record与异构pending capability；one-shot erasure立即回到generic
+`worker::prepare<P>`，attach failure撤销mapping并把同一capability交还registry，当前drain不自动retry。VirtIO
+driver-owned pending slot与driver-specific drain已经删除。network activation在完整`Late`返回后由boot
+coordinator显式执行；三个长期host target均具备一致的`host-test`metadata。
+
+host/default与no-default gates、RV64 release build、fresh-disk RV64 260/260 KUnit与strict shutdown order、
+source/write-set audit、独立Apollyon/Keter/Euclid/Safe全0 review、`git diff --check`与mdBook均通过。formatter只
+保留冻结write set外三处既有vendored smoltcp baseline。该fresh-disk boot没有packet injection probe，不形成
+新的traffic/completion proof；完整Not Run边界见
+[Stage 4 transaction](../../devlog/transactions/2026-07-27-net-frame-path-stage4.md)。
+
+NFP-008/009/010与register umbrella同步关闭，R1重新Closed。contract cutover为None：六个Network ID与
+`SYSTEM-POWER-ORDERLY-001`继续保持Effective，current contract文本、来源和最后核验均未修改。Stage 4 closure
+后立即停止，不自动进入`net-udp`、`net-tcp`、runtime lifecycle或其它gate。
 
 ## 11. 全局反馈分流
 

@@ -9,7 +9,7 @@ use crate::{
     device::{
         bus::virtio::VirtIODriver,
         kobject::{KObjIdent, KObject, KObjectBase, KObjectOps},
-        net::{PublishError, PublishedNetdev, ReadyNetdev, publish},
+        net::{PublishError, ReadyNetdev, publish},
     },
     prelude::*,
     utils::{any_opaque::AnyOpaque, identity::AnyIdentity},
@@ -18,7 +18,7 @@ use crate::{
 mod device;
 mod frame;
 
-pub(crate) use frame::VirtIONetProvider;
+use frame::VirtIONetProvider;
 
 const QUEUE_SIZE: usize = VIRTIO_NET_QUEUE_SIZE;
 const BACKING_CAPACITY: usize = VIRTIO_NET_FRAME_CAPACITY_BYTES;
@@ -49,9 +49,6 @@ struct VirtIONetState {
     /// Non-owning shutdown capability. The provider is the only durable strong
     /// owner so driver state cannot keep RawNet alive beyond its slot backing.
     device: Weak<device::VirtIONetDevice>,
-    /// One-shot typed capability, not a second lifecycle truth. Checkpoint 4
-    /// moves it to the attach authority before any protocol callback runs.
-    published: SpinLock<Option<PublishedNetdev<VirtIONetProvider>>>,
 }
 
 #[derive(Opaque)]
@@ -100,7 +97,7 @@ impl DriverOps for VirtIONetDriver {
             provider.link_state(),
             provider,
         );
-        let published = publish(ready).map_err(|(error, ready)| {
+        let snapshot = publish(ready).map_err(|(error, ready)| {
             // IRQ registration is not removable. Retain the ready provider so
             // its RX mappings/backing stay valid until reset instead of
             // freeing memory that the device may still access. Suppress further
@@ -122,7 +119,6 @@ impl DriverOps for VirtIONetDriver {
             }
             SysError::ProbeFailed
         })?;
-        let snapshot = published.snapshot();
         kinfoln!(
             "VirtIO-Net {} published as {} (ifindex {}, MAC {:?}, frame capacity {})",
             vdev.name(),
@@ -132,10 +128,7 @@ impl DriverOps for VirtIONetDriver {
             snapshot.facts().max_frame_len,
         );
 
-        vdev.set_drv_state(AnyOpaque::new(VirtIONetState {
-            device,
-            published: SpinLock::new(Some(published)),
-        }));
+        vdev.set_drv_state(AnyOpaque::new(VirtIONetState { device }));
         Ok(())
     }
 
@@ -168,21 +161,6 @@ static VIRTIO_NET_DRIVER: Lazy<Arc<VirtIONetDriver>> = Lazy::new(|| {
         drv_base: DriverBase::new(),
     })
 });
-
-pub(crate) fn take_published_netdevs() -> Vec<PublishedNetdev<VirtIONetProvider>> {
-    let mut published = Vec::new();
-    let driver: &dyn Driver = VIRTIO_NET_DRIVER.as_ref();
-    driver.for_each_device(|device| {
-        let state = device
-            .drv_state()
-            .cast::<VirtIONetState>()
-            .expect("VirtIO-Net device must carry VirtIONetState");
-        if let Some(netdev) = state.published.lock().take() {
-            published.push(netdev);
-        }
-    });
-    published
-}
 
 fn irq_handler(prv_data: &AnyOpaque) {
     let irq = prv_data

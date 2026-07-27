@@ -24,6 +24,9 @@
 
 ## Completed
 
+- [Network Frame Path Stage 4](./2026-07-27-net-frame-path-stage4.md)：单一post-close conformance checkpoint已完成
+  registry-owned pending handoff、post-`Late` activation与host-test metadata修正；NFP-008/009/010关闭，既有
+  contracts保持Effective且无第二次cutover。
 - [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；
   validation seam退出后的final RV64 exact-code boot通过260/260 remaining KUnit、active attach与严格
   `filesystem -> network -> device -> PowerOff`。六个network ID及Power Refine均已原子Effective。

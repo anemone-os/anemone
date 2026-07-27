@@ -1,26 +1,26 @@
 # RFC-20260726-net-frame-path
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **修订：** `R1`
 **负责人：** doruche
 **最后更新：** 2026-07-27
 **领域：** network-device / VirtIO / frame-path / smoltcp integration
 **事务日志：** [2026-07-26 net-frame-path](../../devlog/transactions/2026-07-26-net-frame-path.md)已Completed，
-仅保留Stage 1-3历史；Stage 4尚未创建新transaction
+仅保留Stage 1-3历史；[Stage 4 transaction](../../devlog/transactions/2026-07-27-net-frame-path-stage4.md)已Completed
 **影响契约：** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
 `NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001`已由
 [Network current contracts](../../contracts/net/index.md)登记为Active；
 [`SYSTEM-POWER-ORDERLY-001`](../../contracts/power/shutdown-lifecycle.md#system-power-orderly-001)
 Refine已Effective
-**开放问题：** [NFP-008](./tracking-issues.md#nfp-008--network-activation依赖同级late-initcall的偶然顺序)、
+**开放问题：** 无；[NFP-008](./tracking-issues.md#nfp-008--network-activation依赖同级late-initcall的偶然顺序)、
 [NFP-009](./tracking-issues.md#nfp-009--published-capability的pending-handoff绕过devicenet-owner)与
-[NFP-010](./tracking-issues.md#nfp-010--长期host-conformance-target缺少required-features)
-**下一步：** Stage 4已解析为Ready但未获实现授权；激活时必须新建独立transaction，不续写原Completed transaction
+[NFP-010](./tracking-issues.md#nfp-010--长期host-conformance-target缺少required-features)已由Stage 4 neutralize
+**下一步：** 本RFC已Closed；不得从本轮自动进入`net-udp`、`net-tcp`、runtime lifecycle或其它gate
 
 > 本目录保留`net-frame-path` R1 accepted target与实施边界。`NFP-FINAL-CUTOVER`已经完成；当前生效的
 > 共享规则仍以[Network](../../contracts/net/index.md)与[System Power](../../contracts/power/index.md)
-> current contracts为唯一权威。当前状态回到Accepted for Implementation，只表示Stage 4需要让live
-> implementation重新符合这些既有规则，不产生pending contract successor或第二次contract cutover。
+> current contracts为唯一权威。Stage 4已让live implementation重新符合这些既有规则，没有产生pending
+> contract successor或第二次contract cutover。
 
 ## 摘要
 
@@ -137,9 +137,9 @@ RFC target：
 
 - [目标与不变量](./invariants.md)：proposed contract IDs、owner、handoff、lifecycle 与 proof
   obligations；
-- [Tracking Issues](./tracking-issues.md)：仍影响 implementation readiness 或 acceptance 的问题；
-- [实施计划](./implementation.md)：Stage 1-3历史closure与单一Stage 4 Ready定义、验证、停止条件和
-  resolved write set；Ready不授予执行权限。
+- [Tracking Issues](./tracking-issues.md)：已neutralize问题、依据与重新打开条件；
+- [实施计划](./implementation.md)：Stage 1-3历史closure与单一Stage 4 Ready/closure、验证、停止条件和
+  resolved write set；历史Ready本身不授予执行权限。
 
 Current contracts：
 
@@ -333,6 +333,10 @@ target没有像`frame_path`一样声明`host-test` required feature，导致no-d
 继续保持concrete generic；三个长期host integration target统一声明`host-test` requirement并恢复no-default
 test compile gate。完整实现、验证、停止条件和write set见[Stage 4 Ready](./implementation.md#10-stage-4-readypost-close-contract-conformance-correction)。
 
+Stage 4已经按该路线关闭：registry-owned pending handoff、post-`Late`显式activation与三个host target metadata
+均完成，NFP-008/009/010 neutralize。aggregate host/no-default/build/RV64/static/docs gates与独立review通过；
+contract cutover为None，current contracts未修改。
+
 ## 备选方案与取舍
 
 ### driver 直接实现 `smoltcp::phy::Device`
@@ -387,7 +391,7 @@ power-off。只有 live frame path 无法在现有 framework 中安全表达时�
 
 | 修订 | 日期 | 状态 | 摘要 | 事务 |
 | --- | --- | --- | --- | --- |
-| R1 | 2026-07-27 | Accepted for Implementation | 保持 R0 target/owner/contract delta；Stage 1-3与`NFP-FINAL-CUTOVER`曾关闭，post-close review现要求Stage 4修正pending owner、boot顺序与host-test metadata | [原Completed transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)；Stage 4 transaction待激活时创建 |
+| R1 | 2026-07-27 | Closed | 保持 R0 target/owner/contract delta；Stage 1-3与`NFP-FINAL-CUTOVER`历史closure保持，Stage 4修正post-close pending owner、boot顺序与host-test metadata偏差 | [原Completed transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)；[Stage 4 Completed transaction](../../devlog/transactions/2026-07-27-net-frame-path-stage4.md) |
 | R0 | 2026-07-26 | Accepted for Implementation | 接受 RV64-only frame path target、六个 proposed network IDs 与 System Power Refine；Stage 1 Checkpoint 1 激活 | [transaction](../../devlog/transactions/2026-07-26-net-frame-path.md) |
 
 ## 历史收口与当前边界
@@ -398,9 +402,9 @@ non-waiting shutdown retention与final validation-seam退出。Checkpoint 2保�
 publication/active attach、network summary、严格`filesystem -> network -> device -> PowerOff`与正常退出。
 六个network IDs及Power Refine已在`NFP-FINAL-CUTOVER`原子生效。
 
-Post-close finding不撤销上述历史证据或effective contract，但证明live implementation尚未完整遵守
-`NETDEV-LIFE-001` / `NET-ATTACH-001`，且一条长期host compile gate已回归。R1只有在Stage 4使用新transaction
-完成修正、review与验证并关闭NFP-008/009/010后，才重新回到Closed。
+Post-close finding不撤销上述历史证据或effective contract；Stage 4已经使用新transaction恢复
+`NETDEV-LIFE-001` / `NET-ATTACH-001`实现一致性与长期host compile gate，完成review/validation并关闭
+NFP-008/009/010。R1因此重新Closed，没有第二次contract cutover。
 
 `smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、runtime hotplug/detach/restart、
 完整teardown与socket/control-plane均Not Run或非目标，不从RV64单核证据外推。

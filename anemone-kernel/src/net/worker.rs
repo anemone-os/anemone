@@ -25,10 +25,12 @@ static_assert!(
 const PUMP_BUDGET: PumpBudget =
     PumpBudget::new(NET_PUMP_INGRESS_BUDGET_FRAMES, NET_PUMP_EGRESS_BUDGET_STEPS);
 
-#[derive(Debug)]
-pub(super) enum AttachFailure {
-    MissingEthernetAddress,
-    WorkerSpawn(SysError),
+pub(super) enum AttachFailure<P> {
+    MissingEthernetAddress(PublishedNetdev<P>),
+    WorkerSpawn {
+        error: SysError,
+        published: PublishedNetdev<P>,
+    },
 }
 
 pub(super) struct PreparedPath {
@@ -169,14 +171,12 @@ struct WorkerArg<P: NetdevFrameProvider> {
 
 pub(super) fn prepare<P: NetdevFrameProvider>(
     published: PublishedNetdev<P>,
-) -> Result<PreparedPath, AttachFailure> {
+) -> Result<PreparedPath, AttachFailure<P>> {
     let (snapshot, mut provider) = published.into_parts();
     let Some(ethernet_address) = snapshot.facts().ethernet_address else {
-        // The IRQ is already registered and the device may still own RX
-        // mappings. R0 has no removable IRQ/reset rollback, so retain provider
-        // backing to power-off while leaving the registry entry unattached.
-        core::mem::forget(provider);
-        return Err(AttachFailure::MissingEthernetAddress);
+        return Err(AttachFailure::MissingEthernetAddress(
+            PublishedNetdev::from_parts(snapshot, provider),
+        ));
     };
 
     let mut stack = Stack::new();
@@ -204,9 +204,8 @@ pub(super) fn prepare<P: NetdevFrameProvider>(
             core.stack
                 .remove_interface(interface)
                 .expect("failed network attach lost its stack-local mapping");
-            // As above, IRQ/device ownership prevents safe provider teardown.
-            core::mem::forget(core.provider);
-            return Err(AttachFailure::WorkerSpawn(error));
+            let published = PublishedNetdev::from_parts(snapshot, core.provider);
+            return Err(AttachFailure::WorkerSpawn { error, published });
         },
     };
     control.install_worker(worker);

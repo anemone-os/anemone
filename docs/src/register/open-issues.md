@@ -3,7 +3,7 @@
 ## ANE-20260727-NET-FRAME-PATH-CONFORMANCE
 
 **Type:** Issue
-**Status:** Open
+**Status:** Closed / neutralized by net-frame-path Stage 4
 **Severity:** Keter
 **Area:** network-device / attach lifecycle / boot ordering / host conformance
 
@@ -26,10 +26,13 @@ source audit与独立review全部通过后关闭NFP-008/009/010。
 
 **Related:** [Net Frame Path RFC](../rfcs/net-frame-path/index.md),
 [Tracking Issues](../rfcs/net-frame-path/tracking-issues.md),
-[Network current contracts](../contracts/net/index.md)
+[Network current contracts](../contracts/net/index.md),
+[Stage 4 transaction](../devlog/transactions/2026-07-27-net-frame-path-stage4.md)
 
-**Workaround:** 当前不要把偶然initcall排列、driver-specific drain或普通production build通过当成contract
-conformance证据；Stage 4关闭前仍按开放缺陷处理。
+**Resolution:** Stage 4将pending capability与publication record原子收归`device/net`，attach失败回插同一
+capability；network只在完整`Late`返回后激活；三个长期host target均具有显式`host-test`metadata。host/default
+与no-default gates、RV64 build、fresh-disk 260/260 KUnit/active attach/strict shutdown order、source audit与
+独立Apollyon/Keter/Euclid/Safe全0 review通过。contract cutover为None，既有current contracts保持Effective。
 
 ## ANE-20260723-AHCI-PROBE-LIFECYCLE-AND-CAPACITY
 

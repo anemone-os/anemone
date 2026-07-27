@@ -26,3 +26,13 @@ smoltcp = { path = "../anemos/smoltcp", default-features = false, features = [
 name = "frame_path"
 path = "tests/frame_path.rs"
 required-features = ["host-test"]
+
+[[test]]
+name = "bounded_progress"
+path = "tests/bounded_progress.rs"
+required-features = ["host-test"]
+
+[[test]]
+name = "multi_instance"
+path = "tests/multi_instance.rs"
+required-features = ["host-test"]

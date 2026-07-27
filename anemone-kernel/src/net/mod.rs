@@ -2,7 +2,13 @@
 
 mod worker;
 
-use crate::{device::net::NetdevSnapshot, driver::net::take_published_netdevs, prelude::*};
+use crate::{
+    device::net::{
+        NetdevFrameProvider, NetdevSnapshot, PendingAttachProvider, PublishedNetdev,
+        retain_pending, take_pending,
+    },
+    prelude::*,
+};
 
 use worker::{AttachFailure, PumpControl};
 
@@ -33,49 +39,68 @@ impl AttachAuthority {
 static ACTIVE_PATHS: Lazy<SpinLock<AttachAuthority>> =
     Lazy::new(|| SpinLock::new(AttachAuthority::new()));
 
-#[initcall(late)]
-fn attach_published_netdevs() {
-    for published in take_published_netdevs() {
-        match worker::prepare(published) {
-            Ok(prepared) => {
-                let snapshot = prepared.snapshot().clone();
-                let interface = prepared.interface();
-                let mut authority = ACTIVE_PATHS.lock();
-                if authority.shutdown_started {
-                    drop(authority);
-                    prepared.stop_and_retain();
-                    kerrln!(
-                        "network shutdown already started; leaving {} (ifindex {}) published/unattached",
-                        snapshot.name(),
-                        snapshot.ifindex(),
-                    );
-                    continue;
-                }
-                authority.active_paths.push(ActivePath {
-                    snapshot: snapshot.clone(),
-                    control: prepared.control(),
-                });
-                // Readers cannot observe the registry entry until its worker
-                // predicate is active; preparation has already completed all
-                // mapping, worker, IRQ-wake, and time wiring.
-                prepared.activate();
+impl<P: NetdevFrameProvider> PendingAttachProvider for P {
+    fn attach(published: PublishedNetdev<Self>) -> Result<(), PublishedNetdev<Self>> {
+        attach_one(published)
+    }
+}
+
+fn attach_one<P: NetdevFrameProvider>(
+    published: PublishedNetdev<P>,
+) -> Result<(), PublishedNetdev<P>> {
+    match worker::prepare(published) {
+        Ok(prepared) => {
+            let snapshot = prepared.snapshot().clone();
+            let interface = prepared.interface();
+            let mut authority = ACTIVE_PATHS.lock();
+            if authority.shutdown_started {
                 drop(authority);
-                kinfoln!(
-                    "network path {} (ifindex {}) active as {:?}",
+                prepared.stop_and_retain();
+                kerrln!(
+                    "network shutdown already started; leaving {} (ifindex {}) published/unattached",
                     snapshot.name(),
                     snapshot.ifindex(),
-                    interface,
                 );
-            },
-            Err(AttachFailure::MissingEthernetAddress) => {
-                kerrln!("published network device has no Ethernet address; leaving it unattached");
-            },
-            Err(AttachFailure::WorkerSpawn(error)) => {
-                kerrln!(
-                    "failed to spawn network pump worker: {:?}; leaving netdev published/unattached",
-                    error
-                );
-            },
+                return Ok(());
+            }
+            authority.active_paths.push(ActivePath {
+                snapshot: snapshot.clone(),
+                control: prepared.control(),
+            });
+            // Readers cannot observe the registry entry until its worker
+            // predicate is active; preparation has already completed all
+            // mapping, worker, IRQ-wake, and time wiring.
+            prepared.activate();
+            drop(authority);
+            kinfoln!(
+                "network path {} (ifindex {}) active as {:?}",
+                snapshot.name(),
+                snapshot.ifindex(),
+                interface,
+            );
+            Ok(())
+        },
+        Err(AttachFailure::MissingEthernetAddress(published)) => {
+            kerrln!("published network device has no Ethernet address; leaving it unattached");
+            Err(published)
+        },
+        Err(AttachFailure::WorkerSpawn { error, published }) => {
+            kerrln!(
+                "failed to spawn network pump worker: {:?}; leaving netdev published/unattached",
+                error
+            );
+            Err(published)
+        },
+    }
+}
+
+/// Attach every capability that was pending when the boot-time drain began.
+/// Failed entries are returned to registry ownership but are not retried by
+/// this drain; runtime retry is outside the boot-only lifecycle.
+pub(crate) fn attach_published_netdevs() {
+    for pending in take_pending() {
+        if let Err(pending) = pending.attach() {
+            retain_pending(pending);
         }
     }
 }

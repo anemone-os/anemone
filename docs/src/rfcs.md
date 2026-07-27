@@ -106,9 +106,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 ### 其它领域
 
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
-  保持，六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine仍为Effective；post-close review发现pending
-  capability owner、`Late` boot order与host-test target metadata三项in-target缺陷，当前回到Accepted for
-  Implementation。单一Stage 4已Ready但未授权，激活时另建transaction，不续写原Completed transaction。
+  保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
+  NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
+  Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入

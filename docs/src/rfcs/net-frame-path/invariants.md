@@ -1,6 +1,6 @@
 # Network Frame Path 目标与不变量
 
-**状态：** R1 / Accepted for Implementation / Effective via `NFP-FINAL-CUTOVER`
+**状态：** R1 / Closed / Effective via `NFP-FINAL-CUTOVER`
 **最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260726-net-frame-path](./index.md)
 **适用修订：** `R1`
@@ -10,8 +10,8 @@
 [System Power shutdown lifecycle](../../contracts/power/shutdown-lifecycle.md)为唯一权威，本页不成为并列
 current contract。
 
-2026-07-27 post-close反馈只要求live implementation重新符合已经生效的owner、publication与attach规则；
-不改变本页target invariant、Contract Impact或`NFP-FINAL-CUTOVER`的历史生效事实。
+2026-07-27 Stage 4已关闭post-close反馈，使live implementation重新符合已经生效的owner、publication与attach
+规则；它没有改变本页target invariant、Contract Impact或`NFP-FINAL-CUTOVER`的历史生效事实。
 
 ## 规则分类
 
