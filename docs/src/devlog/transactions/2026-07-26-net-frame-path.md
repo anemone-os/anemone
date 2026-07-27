@@ -1,11 +1,11 @@
 # 2026-07-26 - Network Frame Path
 
-**Status:** Active / R1 Stage 2 Closed / Stage 3 Outline / Unauthorized
+**Status:** Active / R1 Stage 2 Closed / Stage 3 Ready / Not Started / Unauthorized
 **Date:** 2026-07-26
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260726-net-frame-path R1](../../rfcs/net-frame-path/index.md),
 [目标与不变量](../../rfcs/net-frame-path/invariants.md),
-[Stage 2 Ready definition](../../rfcs/net-frame-path/implementation.md#8-stage-2-readybounded-progress-conformance)
+[Stage 3 Ready definition](../../rfcs/net-frame-path/implementation.md#9-stage-3-readymulti-instancelifecycle-与最终-cutover)
 **Canonical Revision:** R1
 **Contract Impact:** `NET-BOUNDARY-001`、`NETDEV-LIFE-001`、`NET-FRAME-OWN-001`、
 `NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NET-ATTACH-001` proposed Introduce；
@@ -41,6 +41,10 @@ R0 Checkpoint 1按failure signal停止后，用户接受将proof boundary修正�
 bounded production-path completion/reclaim的互补证据，并授权只更新文档、最后提交一个commit。本授权形成R1
 Target Renegotiation与Checkpoint 1 route-correction docs gate；不授权任何实现、host/build/QEMU/runtime验证、
 Checkpoint 1 activation、current-contract cutover或Stage 3工作。
+
+用户在Stage 2独立关闭后要求解析Stage 3 implementation。本授权只覆盖只读`2 -> 3 Implementation Resolution
+Gate`与canonical docs write-back；不授权Stage 3 Checkpoint 1、任何实现、host/build/QEMU/runtime validation、
+current-contract cutover、RFC closure或后续sibling RFC。
 
 ## R0 acceptance and activation preflight
 
@@ -748,3 +752,48 @@ current limitations。本事务立即停在Stage 2 closure；`2 -> 3 Implementat
 
 **Not Run:** `smp>1`、LA64 build/runtime、virtio-pci、hardware、final harness、完整LTP、
 socket/control-plane、Stage 3与contract cutover均Not Run；host与RV64/single-core证据不外推到这些层级。
+
+### 2026-07-27 - Stage 2 -> 3 Implementation Resolution Gate completed
+
+**Authorization / entry:** 用户在Stage 2独立关闭后明确要求解析Stage 3 implementation；本gate只获docs-only
+resolution授权，没有Stage 3 Checkpoint 1、实现、host/build/QEMU/runtime validation、contract cutover或RFC
+closure权限。入口为`dev/drc/alpha@7fad0f67`，tracked与untracked worktree均clean；该commit只关闭Stage 2。
+
+**Preflight evidence:** 重新读取AGENTS/LOCAL、R1 target/invariants/tracking、register、System Power current
+contract、Stage 2 aggregate diff/review/validation与live netdev registry、stack mapping、attach publication、
+worker/kthread/threaded timer、VirtIO provider/driver shutdown、power static plan、KUnit feature graph、RV64 Platform/
+wrapper和Just/xtask CLI。Stage 2 host matrix、provider/recheck/worker hardening与两次fresh-disk RV64 evidence保持
+闭合；live plan仍是`filesystem -> device`，network current contract尚不存在。
+
+**Live gaps and safety finding:** host双实例case尚未组合证明credit/completion/link/mapping/failure isolation；
+attach rollback只有真实source route；publication link field尚未标注stale snapshot边界。kernel没有network shutdown
+facade或shutdown-admission truth，threaded timer也没有cancel。更关键的是worker拥有唯一strong
+`VirtIONetProvider`；在IRQ不可移除、device未证明reset/quiesce的当前路径上，简单stop并正常Drop worker core会释放
+仍可能被DMA/IRQ访问的slot/backing。这不是允许接受的cleanup缺口，Stage 3 route必须先关闭admission，再请求
+bounded worker stop，并在terminal exit显式retention到reset/power-off。
+
+**Resolved route:** canonical
+[Stage 3 Ready](../../rfcs/net-frame-path/implementation.md#9-stage-3-readymulti-instancelifecycle-与最终-cutover)
+冻结三个顺序checkpoint：(1) host real-stack multi-instance与registry/attach conformance；(2) attach-owner shutdown
+admission、non-waiting stop/retention、`filesystem -> network -> device` vertical slice和一次保留Stage 2 probe的
+RV64 traffic/order evidence；(3)删除ICMP/single-NIC/diagnostic validation seam，完成final exact-code RV64 boot、
+source audit与`NFP-FINAL-CUTOVER`。最终cutover一次性建立三个network contract surface中的六个Active ID并
+Refine`SYSTEM-POWER-ORDERLY-001`，不得partial/Transitional cutover。
+
+authoritative stage同时冻结每个checkpoint的review、observability、validation、failure/exit条件与exact write
+set。现有host-only conformance保留；production probe和diagnostic mirror必须在final cutover前删除。
+`anemone-net-api`、vendored dependencies、generic runtime APIs、KernelConfig/xtask/Justfile、Platform/wrapper、
+apps/rootfs/LTP、register/current limitations与其它current contracts均只读。
+
+**Contract / lifecycle:** 本gate不改变R1语义或任何effective rule。六个network IDs与
+`SYSTEM-POWER-ORDERLY-001` Refine继续Not Effective；Stage 3现在是**Ready / Not Started / Unauthorized**。
+Checkpoint 1必须另行授权，Checkpoint 1/2不cutover，只有Checkpoint 3满足全部floor后才可执行原子
+`NFP-FINAL-CUTOVER`。
+
+**Validation boundary:** 本gate只执行read-only source/config/command审计与docs write-back。
+`just --list`、build/qemu/fmt help、RV64 `--show-bindings`与wrapper确认当前显式preset、provider
+`smp`/`memory`、单张tracked virtio-net-device和runtime disk路线；一次误把bind value与`--show-bindings`合用被CLI
+按预期拒绝，随后使用合法show-only命令确认required/optional binds，没有产生build/runtime side effect。没有运行
+host test、cargo check、formatter、kernel build、QEMU、KUnit、LA64、hardware、LTP或final harness；Stage 3全部
+behavior evidence仍Not Run。`git diff --check`与`mdbook build docs`通过；mdBook只报告既有large
+search-index warning，新增Stage 3 anchor与跨页链接命中生成HTML。
