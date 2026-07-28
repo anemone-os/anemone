@@ -274,7 +274,7 @@ fn ata_string(words: &[u16]) -> Box<str> {
         .into_boxed_str()
 }
 
-#[kunit]
+#[cfg(feature = "kunit")]
 /// Covers required features, capacity decoding, strings, and sector-size
 /// rejection.
 fn identify_requires_lba48_dma_flush_and_512_byte_sectors() {

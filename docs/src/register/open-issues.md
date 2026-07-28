@@ -1,5 +1,64 @@
 # 开放问题
 
+## ANE-20260727-NET-FRAME-PATH-CONFORMANCE
+
+**Type:** Issue
+**Status:** Closed / neutralized by net-frame-path Stage 4
+**Severity:** Keter
+**Area:** network-device / attach lifecycle / boot ordering / host conformance
+
+**Symptom / Trigger:** `net-frame-path` post-close review确认三项已交付target内偏差：network activation依赖
+同级`Late` initcall的偶然link order；published capability的pending storage/drain落在concrete VirtIO-Net
+driver而不是`device/net` owner；两个长期host integration target缺少`host-test` required feature，导致
+no-default test compile gate失败。
+
+**Impact:** timer service尚未ready时active network path即可见；publication record与pending capability形成
+分裂owner并让attach依赖concrete driver discovery；production feature isolation缺少稳定compile regression gate。
+六个Network contract与System Power contract仍保持Active，本项记录live implementation未完整符合current
+contract，而不是接受限制或新target。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-27
+**Exit Condition:** [Net Frame Path Stage 4](../rfcs/net-frame-path/implementation.md#10-stage-4-readypost-close-contract-conformance-correction)
+以新transaction完成单checkpoint修正：`device/net`拥有异构pending handoff且失败capability仍由registry保留，
+network只在完整`Late`返回后激活，三个长期host target具备一致feature metadata；host/no-default/build/RV64、
+source audit与独立review全部通过后关闭NFP-008/009/010。
+
+**Related:** [Net Frame Path RFC](../rfcs/net-frame-path/index.md),
+[Tracking Issues](../rfcs/net-frame-path/tracking-issues.md),
+[Network current contracts](../contracts/net/index.md),
+[Stage 4 transaction](../devlog/transactions/2026-07-27-net-frame-path-stage4.md)
+
+**Resolution:** Stage 4将pending capability与publication record原子收归`device/net`，attach失败回插同一
+capability；network只在完整`Late`返回后激活；三个长期host target均具有显式`host-test`metadata。host/default
+与no-default gates、RV64 build、fresh-disk 260/260 KUnit/active attach/strict shutdown order、source audit与
+独立Apollyon/Keter/Euclid/Safe全0 review通过。contract cutover为None，既有current contracts保持Effective。
+
+## ANE-20260727-MM-COW-SHADOW-ANCESTRY-STACK-OVERFLOW
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Apollyon
+**Area:** mm / uspace / COW fork / VMO shadow
+
+**Symptom / Trigger:** 同一长寿父进程连续执行大量受保护 fork 时，`VmArea::fork()` 会反复把父 VMA
+backing 替换为新的 `ShadowObject(parent = old backing)`。后续缺页由
+`ShadowObject::resolve_frame()` 递归遍历 parent ancestry；fixed LTP `epoll01` 的 `epoll_ctl`
+组合为每次受保护调用执行一次 fork，稳定把该 ancestry 推到 kernel stack guard page并触发
+stack-overflow panic。2026-07-27 用户本地多次复现；核验日志中 257 项 KUnit 与 11 项 epoll focused
+oracle 已先通过，backtrace 随后连续返回到 `ShadowObject::resolve_frame()` 的 parent 调用点。
+
+**Impact:** 高频 sequential fork 可以不经过 epoll 行为路径而稳定使内核崩溃；任何长寿父进程累积的
+COW shadow depth 都可能触发同类故障。递归解析还使 kernel stack 消耗随 ancestry 深度无界增长。
+
+**Owner:** mm
+**Last Verified:** 2026-07-27
+**Exit Condition:** 由 MM owner 为 COW shadow ancestry 建立有界、可证明的迭代解析、压平或合并策略；
+增加同一父进程连续大量 fork 后 parent/child 分别读写 COW 页的定向回归，并以 MM/KUnit、RV64/LA64
+build及 runtime stress 证明不再递归耗尽 kernel stack且 COW 隔离保持。
+**Related:** [Epoll R2 acceptance boundary](../rfcs/epoll/index.md),
+[Epoll 2D runtime evidence](../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-reactivation-runtime-stop---2026-07-27)
+
 ## ANE-20260723-AHCI-PROBE-LIFECYCLE-AND-CAPACITY
 
 **Type:** Issue
@@ -270,12 +329,12 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 
 **Symptom / Trigger:** 单核、关抢占的 LTP 长 profile 仍可能在 case summary 或 `PASS/FAIL LTP CASE ...` 附近卡死。2026-06-22 审查中发现若干 hard IRQ 或 IRQ-off return-tail 路径仍会执行可能扩容的堆分配或 allocator side effect：例如 trap interrupt return 在重新开中断前调用 deferred task disposal，disposal 扫描时用 `Vec` 临时收集 task 并可能在日志中 clone task name；threaded timer 的 IRQ 到 worker ready queue 交接使用 `VecDeque::push_back()`；kmalloc OOM handler 还可能向 frame allocator 要页，而 frame allocation 后会检查水位并唤醒 OOM killer。
 
-**Impact:** allocator 内部使用 noirq lock 只能降低 allocator 自身锁被硬中断重入的风险，不能证明这些路径适合在 hard IRQ 或 IRQ-off tail 中运行。堆扩容、OOM handler、日志格式化、对象析构、worker wake 或后续普通锁访问都可能把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；当前 `spin_lock_irqsave` 构建开关也不能作为设计闭合证据。
+**Impact:** 当前工程阶段允许简单、适度且有界的 IRQ-safe allocation；allocation 本身不再是禁止项，也不应为了消除它引入侵入式对象、镜像状态或额外 owner。未收敛风险是 allocation 周围的 blocking/reclaim protocol、普通锁或 remote placement、日志格式化、复杂对象析构和递归 OOM side effect，它们可能把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；allocator 内部使用 noirq lock 或开启 `spin_lock_irqsave` 仍不能单独证明这些副作用安全。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-22
-**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；把这些路径改成 allocation-free，或只允许预分配/固定容量/显式 fallible 且无 OOM side effect 的最小入队；确认 IRQ-off tail 不再执行 task Drop、普通日志/name clone、OOM wake、sleepable lock 或其它可能进入 wait/scheduler 的工作。随后用定向 source audit 和长 LTP profile 复跑确认 post-summary hang 不再由 IRQ/off-tail allocation 类风险解释。
+**Last Verified:** 2026-07-26
+**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；允许与一次有界操作绑定、同时存活数量受现有 credit/capacity 约束且不制造第二套状态 truth 的简单 IRQ-safe allocation，但必须移除或隔离 blocking/synchronous reclaim、普通锁、remote placement、task Drop、普通日志/name clone、复杂 callback 和递归 OOM handling 等副作用。随后用定向 source audit 和长 LTP profile 复跑，确认 post-summary hang 不再由 IRQ/off-tail 的复杂 allocator side effect 或重入路径解释。
 **Related:** [LTP post-summary hang](#ane-20260616-ltp-post-summary-hang), [fanotify tracking issues](../rfcs/fanotify/tracking-issues.md)
 
 **Severity:** High
-**Workaround:** 当前只能把此类路径视为未收敛风险；不要用 noirq allocator、`spin_lock_irqsave` 或偶然通过的 LTP case 作为关闭依据。优先避免在 IRQ/off-tail 新增任何可能分配、格式化日志、drop 复杂对象或唤醒普通 worker 的代码。
+**Workaround:** 当前把复杂 allocator side effect 与重入路径视为未收敛风险，不把所有 IRQ/off-tail allocation 一概禁止。保持对象模型直接，分配量和 live count 有界；避免 blocking/reclaim、普通锁、remote placement、日志格式化、complex drop/callback 与递归 OOM 路径。不要用 noirq allocator、`spin_lock_irqsave` 或偶然通过的 LTP case 作为关闭依据。

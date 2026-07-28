@@ -1,6 +1,6 @@
 ---
 name: anemone-code-review-principles
-description: Use when reviewing Anemone kernel changes or writing review guidance for agents and developers. Focus on architecture, subsystem boundaries, concurrency, clean code, directness, observability, ABI containment, resource lifetime, safety boundaries, and failure paths rather than syntax or basic compilation.
+description: Use when reviewing Anemone kernel changes, running bounded periodic software-engineering audits of a subsystem or implementation stage, or writing review guidance for agents and developers. Focus on architecture, owner and module boundaries, local semantic integrity, cross-owner protocols, concurrency, directness, observability, ABI containment, resource lifetime, safety boundaries, failure paths, and justified complexity rather than syntax or basic compilation.
 ---
 
 # Anemone Code Review Principles
@@ -14,6 +14,17 @@ Keep the review scoped to the requested files, subsystem, or patch unless eviden
 Also check the repository-level coding rules in `AGENTS.md`, especially the kernel code-shape constraints. Treat violations of single-source-of-truth, diagnostic-field boundaries, narrow interfaces, assertion policy, or temporary-bridge exit conditions as review issues, not as cosmetic style comments.
 
 For an RFC-driven or cross-subsystem change, read `docs/src/contracts.md`, the relevant effective contract IDs, the RFC `Contract Impact` / target invariants, and the transaction cutover record before treating a rule as current. Existing RFC text may be historical or proposal-local; it must not override an extracted current contract. If no contract has been extracted yet and the change is the first cross-RFC reuse or replacement, require the minimum contract closure rather than a repository-wide invariant inventory.
+
+## Review Modes
+
+Choose the review mode explicitly and keep its evidence boundary visible:
+
+- In a **change review**, judge whether the requested patch or stage preserves correctness, current contracts, architecture, maintainability, and diagnosis. Follow a risk across files only when the patch exposes a real boundary dependency.
+- In a **periodic engineering audit**, inspect a bounded subsystem, owner surface, or completed implementation slice even when no failing behavior is known. Check whether the code still expresses a coherent responsibility topology, local semantic model, and interaction protocol. Read the live implementation and its current callers; do not infer the design from file names or an RFC alone.
+
+Schedule periodic audits at natural semantic boundaries: after a meaningful implementation slice, before an `N -> N+1 Implementation Resolution Gate` or cutover, or when repeated edits add new roles, compatibility bridges, state carriers, or cross-owner coordination to the same surface. Do not use a fixed line, file, or commit-count threshold.
+
+An audit authorizes findings, not an automatic refactor. Keep proposed repairs bounded by the current owner and known work. Stop and request a write-set, public-API, owner, ABI, or contract decision when the repair would cross one of those boundaries.
 
 ## RFC Plan Maturity and Engineering Compromise
 
@@ -39,6 +50,42 @@ Use explicit issue levels to keep reviews bounded by real risk. Always use the c
 For file/module size findings, classify by responsibility rather than line count. A long table or ABI definition file can be Safe; a file that mixes syscall ABI, core state ownership, backend operations, compatibility bridges, and lifecycle rules is at least Euclid, and becomes Keter when the mixed shape is already causing owner-boundary mistakes, duplicated truth, ABI leakage, or blocked follow-up work.
 
 When reviewing, stop issue hunting once remaining observations are Safe unless the user explicitly asks for polish or cleanup. Do not promote Safe or Euclid items into blockers to keep a review going.
+
+Require a Keter engineering finding to name concrete evidence that the current shape already confuses an owner or truth source, leaks an ABI or private representation, makes a lifecycle or protocol unauditable, or blocks a named current or accepted next-stage path. A speculative future maintenance concern alone is Euclid or Safe.
+
+## Periodic Engineering Audit
+
+Treat code organization as a visible projection of the system design. Review friction, duplication, and ceremony as evidence that the model may be unclear, but do not treat them as proof until a concrete state, owner, lifecycle, protocol, or change path explains the risk.
+
+### Responsibility topology
+
+- Identify each important authoritative fact, who may mutate it, the invariants around it, its lifecycle and failure policy, and the contract visible outside its owner.
+- Distinguish a file or module split from a semantic owner split. Prefer a behavior-preserving same-owner split when one owner has stable sub-roles such as ABI, state, operations, lifecycle, compatibility, or tests. Split semantic ownership only when the resulting owners truly have independent authoritative facts, lifecycles, and contracts.
+- Treat two regions that both decide the same fact as a duplicated-authority defect to resolve toward one owner, not as justification for creating more owners.
+- Judge semantic span rather than size. Ask whether a change requires understanding unrelated state machines, lifetimes, policies, or backends, and whether a split would reduce that proof surface instead of adding forwarding layers.
+
+### Local semantic model
+
+- Trace duplicated facts, writable derived state, diagnostic data that drives behavior, loose flags that admit contradictory combinations, and mutation paths that bypass the authoritative transition API.
+- Place mutation with the owner that can preserve the invariant. Keep complete-input computation pure where useful, and leave stateless behavior as a free function when that is the most direct shape. Do not prescribe OOP, FP, methods, or facades as style goals by themselves.
+- Require every new wrapper, type, phase, token, or state variant to eliminate a reachable illegal state, encode a real capability or owner boundary, or materially reduce the proof surface. Merely naming every procedural step does not justify a type system or state machine.
+- Classify failures before judging checks: validate untrusted input, handle expected environment failure at the layer that owns recovery, assert lightweight internal correctness invariants, and isolate a local device or task failure when the architecture supports it. Do not silently turn an impossible internal state into success or a no-op. In cleanup and `Drop`, withdraw publication or release resources before asserting, as required by `AGENTS.md`.
+
+### Interaction protocol
+
+- Trace ownership transfer, publication, linearization or commit points, rollback or fail-forward responsibility, lock order, re-entry, cancellation, and final cleanup across owners.
+- Ask whether every externally visible phase is a real domain or correctness boundary, or whether lock and implementation mechanics have leaked into the caller-facing protocol.
+- Keep notification, diagnostic identity, and wake capability distinct from ownership transfer unless the protocol explicitly promotes them into authoritative state.
+
+### Protocol tax and justified complexity
+
+For protocols or abstractions with multiple phases, carriers, registrations, acknowledgements, retry paths, retirement states, or compatibility bridges:
+
+- Map each piece of machinery to a concrete race, ABI obligation, lifetime transition, failure path, or proven reuse.
+- Check whether choosing a later and more local decision or linearization point would remove compensating re-drive, rollback, retirement, or cross-lifecycle state.
+- Check whether one consumer's special path has been generalized into a subsystem-wide framework without another real consumer or proof benefit.
+- Compare against the simplest direct design that preserves every identified obligation. Do not remove justified round identities, exact-wake capabilities, cleanup owners, or other correctness machinery until the replacement boundary is explicit.
+- Treat complexity without a named obligation as a smell requiring evidence, not as an automatic blocker; treat a simpler sketch without a race and lifecycle proof as incomplete, not as a demonstrated repair.
 
 ## Review Priorities
 
@@ -115,7 +162,9 @@ When reviewing, stop issue hunting once remaining observations are Safe unless t
 
 ## Review Output
 
-Lead with findings, ordered by severity, and label each finding as Apollyon, Keter, Euclid, or Safe. Each finding should include the affected file or code path, the violated invariant or user-visible behavior, why it matters, and a concrete fix direction when possible.
+Lead with findings, ordered by severity, and label each finding as Apollyon, Keter, Euclid, or Safe. Each finding should include the affected file or code path, the violated invariant, owner boundary, engineering property, or user-visible behavior, why it matters, and a concrete fix direction when possible.
+
+For a periodic engineering finding, state the observed code friction, the intended owner or state model, the model the code actually expresses, the concrete current or named next-stage risk, and the smallest repair boundary. Mark any conclusion that still needs a source probe, test, or owner decision instead of presenting a preferred refactor as confirmed fact.
 
 Separate confirmed issues from questions, assumptions, and optional cleanup. Do not block a review on style preferences unless the style issue hides a real correctness, maintainability, or diagnostic risk.
 

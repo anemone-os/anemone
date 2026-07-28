@@ -1409,13 +1409,13 @@ fn stress_worker(shared: &SharedStress, index: usize) -> ! {
     exit(0)
 }
 
-fn test_remote_gate_stress(initial_mask: CpuSet) -> Result<(), Errno> {
+fn test_remote_submission_stress(initial_mask: CpuSet) -> Result<(), Errno> {
     if initial_mask.count() < 2 {
-        println!("sched-attr-test: CASE remote-gate-stress SKIP single CPU");
+        println!("sched-attr-test: CASE remote-submission-stress SKIP single CPU");
         return Ok(());
     }
 
-    println!("sched-attr-test: CASE remote-gate-stress start");
+    println!("sched-attr-test: CASE remote-submission-stress start");
     let mapping = mmap(
         0,
         size_of::<SharedStress>(),
@@ -1475,7 +1475,7 @@ fn test_remote_gate_stress(initial_mask: CpuSet) -> Result<(), Errno> {
     }
     munmap(mapping.as_ptr(), size_of::<SharedStress>())?;
     println!(
-        "sched-attr-test: CASE remote-gate-stress ok cpus=({first_cpu},{second_cpu}) rounds={STRESS_ROUNDS}"
+        "sched-attr-test: CASE remote-submission-stress ok cpus=({first_cpu},{second_cpu}) rounds={STRESS_ROUNDS}"
     );
     Ok(())
 }
@@ -1496,7 +1496,7 @@ pub fn main() -> Result<(), Errno> {
     test_clone_reset_matrix(initial_mask)?;
     test_external_runnable_policy_target()?;
     test_pipe_blocked_policy_target()?;
-    test_remote_gate_stress(initial_mask)?;
+    test_remote_submission_stress(initial_mask)?;
     println!("sched-attr-test: END all available cases passed");
     Ok(())
 }

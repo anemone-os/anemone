@@ -4,6 +4,7 @@
 mod anonymous;
 mod cache_stats;
 mod dentry;
+mod epoll;
 mod eventfd;
 pub mod fanotify;
 // mod error;
@@ -32,6 +33,8 @@ mod ramfs;
 
 pub mod api;
 
+#[cfg(feature = "kunit")]
+pub(crate) use self::iomux::IomuxWaitRound;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
@@ -60,6 +63,7 @@ pub use self::{
 };
 pub(crate) use self::{
     inode::RenameFlags,
+    iomux::PollRoute,
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };
 pub use cache_stats::resident_file_inode_cache_pages;
@@ -249,24 +253,30 @@ mod vfs {
         mounted_superblocks_for(&VFS.visible)
     }
 
-    /// Called when the system is shutting down. This will flush all cached data
-    /// to storage devices of file systems, if exist, and perform any necessary
-    /// cleanup.
+    /// Called when the system is shutting down. This makes one best-effort
+    /// resident snapshot per mounted superblock, writes it back, and then asks
+    /// each filesystem to commit its filesystem-wide state.
     pub unsafe fn on_shutdown() {
-        fn sync_superblocks(tree: &MountTree) {
-            for sb in mounted_superblocks_for(tree) {
-                if let Err(err) = sb.fs().sync_fs(&sb) {
-                    kerrln!(
-                        "failed to sync filesystem {} during shutdown: {:?}",
-                        sb.fs().name(),
-                        err
-                    );
-                }
+        let mut superblocks = mounted_superblocks_for(&VFS.anonymous);
+        for sb in mounted_superblocks_for(&VFS.visible) {
+            if !superblocks
+                .iter()
+                .any(|existing| Arc::ptr_eq(existing, &sb))
+            {
+                superblocks.push(sb);
             }
         }
 
-        sync_superblocks(&VFS.anonymous);
-        sync_superblocks(&VFS.visible);
+        for sb in superblocks {
+            sb.sync_resident_inodes_best_effort();
+            if let Err(err) = sb.fs().sync_fs(&sb) {
+                kerrln!(
+                    "failed to sync filesystem {} during shutdown: {:?}",
+                    sb.fs().name(),
+                    err
+                );
+            }
+        }
     }
 
     pub fn mount_stack_top_at(parent: &Arc<Mount>, mountpoint: &Arc<Dentry>) -> Option<Arc<Mount>> {

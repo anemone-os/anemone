@@ -33,6 +33,7 @@ pub(crate) mod boot_io;
 pub mod char;
 pub mod console;
 pub mod mmc;
+pub(crate) mod net;
 pub(crate) mod tty;
 
 /// Common data shared by all devices.
@@ -148,11 +149,12 @@ pub static ROOT: Lazy<Arc<PlatformDevice>> = Lazy::new(|| {
 /// proper resource cleanup and to avoid potential issues with dependencies
 /// between devices.
 ///
-/// This notifies all drivers to clean up their state.
+/// This notifies all drivers to make one owner-local shutdown attempt.
 /// - For block devices, this will flush all pending writes to the storage
 ///   device.
-/// - For network devices, this will close all network connections and release
-///   all buffers.
+/// - For network devices, the preceding network step has already closed pump
+///   admission. Drivers suppress interrupts here, but without queue quiesce or
+///   reset proof frame resources may remain retained until terminal power-off.
 /// - For USB devices, this will send USB reset signals to the devices, etc.
 pub unsafe fn shutdown() {
     fn shutdown_from(parent: &dyn Device) {

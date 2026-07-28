@@ -53,6 +53,14 @@
 
 实际发生的行为或结构变化。必要时列出关键文件、commit 或语义边界。
 
+## Contract Impact / Cutover（仅 contract-bearing small change）
+
+| Contract ID | 变化 | Cutover 前 effective baseline | 新 effective 规则 | 生效证据 |
+| --- | --- | --- | --- | --- |
+| SCHED-WAKE-001 | Replace | 旧规则与来源 | 新规则摘要 | 本 checkpoint 的 source / validation |
+
+说明唯一原子 cutover、失败时保持旧 contract 的边界，以及 current contract 的唯一正文链接。普通小迭代删除本节。
+
 ## Validation
 
 实际运行的命令、测试、复现步骤，或说明验证由用户运行 / 尚未运行。
@@ -95,6 +103,8 @@ docs/src/devlog/changes/2026-05-22-short-slug/
 ```
 
 `backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。小迭代可以在记录本体中维护 `Tracking Issues` 章节，但不要在小迭代目录下拆出独立 `tracking-issues.md`、`invariants.md` 或 `implementation.md`；如果需要这些文件，说明问题已经进入 RFC 工作流。
+
+contract-bearing small change 只允许一个原子 implementation cutover。target、owner、handoff、failure、cleanup、write set 和验证必须在实现前已解析；effective contract 正文只写入 `docs/src/contracts/`。需要 probe、多个 checkpoint、transitional contract、滚动 stage resolution、target renegotiation 或无法在本轮关闭的 Apollyon / Keter 时，必须升级 RFC。
 
 ## 事务日志
 

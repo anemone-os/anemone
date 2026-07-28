@@ -2,12 +2,11 @@
 
 use crate::{debug::backtrace::CapturedBacktrace, prelude::*};
 
-/// TODO: double panic.
-static PANIC_OCCURRED: AtomicBool = AtomicBool::new(false);
-
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    PANIC_OCCURRED.store(true, Ordering::SeqCst);
+    if power::enter_emergency() == power::EmergencyDisposition::Halt {
+        power::halt_current_cpu();
+    }
 
     unsafe {
         IntrArch::local_intr_disable();
@@ -22,7 +21,5 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     let backtrace = CapturedBacktrace::capture();
     kemergln!("Backtrace:\n{}", backtrace);
 
-    unsafe {
-        power_off();
-    }
+    unsafe { power::run_emergency_machine_action() }
 }

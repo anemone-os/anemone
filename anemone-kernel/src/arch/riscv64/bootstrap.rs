@@ -271,15 +271,15 @@ fn register_basic_power_handlers() {
 
     impl PowerOffHandler for SbiPower {
         unsafe fn poweroff(&self) {
-            sbi_rt::system_reset(sbi_rt::Shutdown, sbi_rt::NoReason);
-            unreachable!()
+            let result = sbi_rt::system_reset(sbi_rt::Shutdown, sbi_rt::NoReason);
+            kemergln!("SBI power-off request returned: {:?}", result);
         }
     }
 
     impl RebootHandler for SbiPower {
         unsafe fn reboot(&self) {
-            sbi_rt::system_reset(sbi_rt::ColdReboot, sbi_rt::NoReason);
-            unreachable!()
+            let result = sbi_rt::system_reset(sbi_rt::ColdReboot, sbi_rt::NoReason);
+            kemergln!("SBI cold-reboot request returned: {:?}", result);
         }
     }
 

@@ -16,5 +16,6 @@ Dockerfile_*
 rcopy.sh
 local_docker.toml
 LOCAL.md
+.devcontainer/local/
 .codex
 **/__pycache__

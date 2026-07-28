@@ -103,6 +103,31 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ## 当前 RFC
 
+### 其它领域
+
+- [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
+  保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
+  NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
+  Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
+- [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
+  episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
+  ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
+  [System Power current contract](./contracts/power/shutdown-lifecycle.md)，执行与 architecture coverage见
+  [transaction](./devlog/transactions/2026-07-26-system-power.md)。
+- [RFC-20260726-epoll](./rfcs/epoll/index.md)：R2 已实现并关闭；以 source-neutral persistent
+  readiness subscription 统一 poll/select 与 epoll 的 source-facing protocol，并由 `Epoll` / `EpollWatch`
+  单独拥有 watch、generation、policy、bounded scan与ET dirty causality。Stage 0-1 已完成并关闭；eventfd/fanotify 已迁移
+  到 source-neutral route，source bridge 已删除，subscription 与 opened-description 两个 foundation
+  cutover 已同步生效。2A dormant watch/lifecycle core、R0 2B ready/wait protocol与2C ABI/focused oracle已关闭；
+  2D首次RV64 runtime发现epoll-file在active wait内获取sleepable mutex并panic。R1以per-instance operation BKL
+  的bounded scan取代ready queue/COW/sequence，并用三态coverage + fixed routes形成non-sleeping wait publication；
+  2R已按独立授权完成协议修正、两架构build、RV64 focused runtime与review。第二次2D runtime证明
+  `epoll01`稳定触发MM COW shadow ancestry stack overflow；R2将该fork-stress case移出epoll验收并登记
+  MM Apollyon。修订后的matrix又以`epoll_wait02`命中shared timeout early wake、以`epoll_wait06`命中pipe
+  capacity/atomic-threshold缺口；批准的timer与pipe owner修复使双root closure全部通过。`EPOLL-CUTOVER`
+  已使epoll ABI、`IOMUX-POLL-001/002` Refine与三个`EPOLL-*` ID同步生效；current truth见
+  [Epoll contract](./contracts/epoll/protocol.md)。执行证据见
+  [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
   ATA block facade与2K1000 platform integration文档入口；本次merge保留其RFC、transaction和register
@@ -115,7 +140,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260618-sched-wait-preempt-arming](./rfcs/sched-wait-preempt-arming/index.md)：阶段 3 已关闭；定义 wait-core 在 kernel preempt 下的 wake-prerequisite / parkability contract、scheduler entry split、preempt-defer、token-bound wait sleep、single-active-wait 诊断和 feedback routing 边界；未运行的 trace / fairness evidence gap 见事务日志。
 - [RFC-20260711-sched-rt-class](./rfcs/sched-rt-class/index.md)：R0 已完成共享 `Realtime` class、FIFO/RR policy、typed priority、99 个 priority bucket 与 RR quantum；R1 已由 `39ba07a9` 完成并关闭，删除 class-visible resched cause continuation，以 RR-owned `rotation_due` 表达 committed rotation，并把 pending 收窄为 processor-owned single bit。R0 证据见 [2026-07-12-sched-rt-class](./devlog/transactions/2026-07-12-sched-rt-class.md)，R1 证据见 [2026-07-14-sched-rt-class-r1](./devlog/transactions/2026-07-14-sched-rt-class-r1.md)。
 - [RFC-20260713-sched-fair-stride](./rfcs/sched-fair-stride/index.md)：已完成第一版；稳定 `Fair` class identity、经典 fixed-tick Stride、Linux nice weight、最小 pass heap、placement floor、yield handoff与 compile-time default selector已经落地。用户完成 Fair default `all` LTP profile和 `fair-test`，并接受相对 RT/RR约 13–14%的同量级耗时差距；IRQ-off heap allocation继续由 register跟踪。事务证据见 [2026-07-13-sched-fair-stride](./devlog/transactions/2026-07-13-sched-fair-stride.md)。
-- [RFC-20260714-sched-dynamic-attributes](./rfcs/sched-dynamic-attributes/index.md)：R1 已完成并关闭；scheduler-owned config patch与固定owner-CPU `RunQueue` transaction统一动态nice、Fair/RT policy、RT priority、reset-on-fork与fixed-CPU affinity，async IPI、persistent-phase one-shot completion和临时全局remote submission gate保持同步syscall语义。scheduler request为single-owner `Box`，无通用payload clone，broadcast误用在发送副作用前panic。实现、验证、Not Run与最终review证据见 [Completed事务](./devlog/transactions/2026-07-15-sched-dynamic-attributes.md)。
+- [RFC-20260714-sched-dynamic-attributes](./rfcs/sched-dynamic-attributes/index.md)：R1 已完成并关闭；scheduler-owned config patch与固定owner-CPU `RunQueue` transaction统一动态nice、Fair/RT policy、RT priority、reset-on-fork与fixed-CPU affinity，async IPI和persistent-phase one-shot completion保持同步syscall语义。R1 的临时全局remote submission gate 已由 [SCHED-WAKE 当前契约](./contracts/scheduler/wake-delivery.md)取代并删除；历史实现、验证、Not Run与最终review证据见 [Completed事务](./devlog/transactions/2026-07-15-sched-dynamic-attributes.md)。
 - [RFC-20260616-kthread-core](./rfcs/kthread-core/index.md)：已接受、阶段 6 implementation gate 已关闭；纠偏 kthread core，定义 procfs-visible singleton thread group、固定 `kthreadd` TID 2、strong handle、专用 exit、user-facing API fail-closed，以及移除 service/park 的迁移 gate。
 - [RFC-20260614-kthread](./rfcs/kthread/index.md)：历史基线；记录已落地的轻量 kthread 创建代理、typed entry、stop/park 生命周期和 `KThreadService` 后台 worker 合同，已由 `kthread-core` supersede。
 - [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：自循环 `io_shrink_threshold` gate 的 inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
@@ -127,7 +152,7 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260604-mount-tree-legacy-api](./rfcs/mount-tree-legacy-api/index.md)：第一版已实现并完成阶段 7 收口；保留 shared/slave/unbindable propagation、mount flag matrix、fstype alias bridge、ROFS mmap/writeback 和 unmount cleanup 等 register limitations。
 - [RFC-20260604-proc-tgid-fd](./rfcs/proc-tgid-fd/index.md)：`/proc/<tgid>/fd` 目录枚举、fd symlink `readlink()` 和第一阶段 procfs/fd 兼容计划。
 - [RFC-20260603-sched-latch](./rfcs/sched-latch/index.md)：`poll` / `select` OR wait 所需的 wait-core latch 原语和 iomux 迁移计划。
-- [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：R0 已完成；post-close tracker 记录 synchronous remote placement 与 cross-CPU IPI completion 的组合问题。
+- [RFC-20260601-sched-wait-refactor](./rfcs/sched-wait-refactor/index.md)：R0 已完成；post-close synchronous remote placement 问题已由 [SCHED-WAKE 当前契约](./contracts/scheduler/wake-delivery.md)取代并 neutralize。
 
 ## 已关闭或延期 RFC
 

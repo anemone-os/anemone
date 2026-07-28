@@ -57,6 +57,8 @@ pub struct Parameters {
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
+    pub epoll_file_max_waiters: Option<usize>,
+    pub pipe_capacity_pages: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -97,6 +99,11 @@ pub struct Parameters {
     pub eevdf_wake_clamp_us: Option<u64>,
     pub eevdf_yield_penalty_us: Option<u64>,
     pub eevdf_anomaly_threshold: Option<u64>,
+    pub virtio_net_queue_size: Option<usize>,
+    pub virtio_net_frame_capacity_bytes: Option<usize>,
+    pub net_pump_ingress_budget_frames: Option<usize>,
+    pub net_pump_egress_budget_steps: Option<usize>,
+    pub net_worker_repoll_rounds: Option<usize>,
 }
 
 impl Parameters {
@@ -130,6 +137,8 @@ impl Parameters {
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
         materialize!(max_processes);
+        materialize!(epoll_file_max_waiters);
+        materialize!(pipe_capacity_pages);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -170,6 +179,11 @@ impl Parameters {
         materialize!(eevdf_wake_clamp_us);
         materialize!(eevdf_yield_penalty_us);
         materialize!(eevdf_anomaly_threshold);
+        materialize!(virtio_net_queue_size);
+        materialize!(virtio_net_frame_capacity_bytes);
+        materialize!(net_pump_ingress_budget_frames);
+        materialize!(net_pump_egress_budget_steps);
+        materialize!(net_worker_repoll_rounds);
         Ok(())
     }
 
@@ -228,6 +242,10 @@ pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 pub const MAX_PATH_LEN_BYTES: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
+/// Fixed waiter-route capacity per epoll instance.
+pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Fixed pipe backing and default logical capacity in pages.
+pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -327,6 +345,16 @@ pub const EEVDF_WAKE_CLAMP_US: u64 = {};
 pub const EEVDF_YIELD_PENALTY_US: u64 = {};
 /// Consecutive EEVDF no-eligible fallback count before an extra error summary.
 pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
+/// Descriptor capacity of each VirtIO-Net queue.
+pub const VIRTIO_NET_QUEUE_SIZE: usize = {};
+/// Bytes owned by each VirtIO-Net frame backing, including the VirtIO header.
+pub const VIRTIO_NET_FRAME_CAPACITY_BYTES: usize = {};
+/// Maximum ingress frames advanced by one stack pump.
+pub const NET_PUMP_INGRESS_BUDGET_FRAMES: usize = {};
+/// Maximum egress steps advanced by one stack pump.
+pub const NET_PUMP_EGRESS_BUDGET_STEPS: usize = {};
+/// Maximum immediate repoll rounds before a network worker yields.
+pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -339,6 +367,8 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
             resolved!(max_processes),
+            resolved!(epoll_file_max_waiters),
+            resolved!(pipe_capacity_pages),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),
@@ -379,6 +409,11 @@ pub const EEVDF_ANOMALY_THRESHOLD: u64 = {};
             resolved!(eevdf_wake_clamp_us),
             resolved!(eevdf_yield_penalty_us),
             resolved!(eevdf_anomaly_threshold),
+            resolved!(virtio_net_queue_size),
+            resolved!(virtio_net_frame_capacity_bytes),
+            resolved!(net_pump_ingress_budget_frames),
+            resolved!(net_pump_egress_budget_steps),
+            resolved!(net_worker_repoll_rounds),
         )
     }
 }

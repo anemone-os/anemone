@@ -2,6 +2,13 @@
 
 use crate::prelude::*;
 
+mod subscription;
+mod wait;
+
+pub(in crate::fs) use subscription::PollObserver;
+pub(crate) use subscription::PollRoute;
+pub(crate) use wait::IomuxWaitRound;
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PollEvent: u32 {
@@ -16,21 +23,24 @@ bitflags! {
 #[derive(Debug, Clone, Copy)]
 pub struct PollRequest<'a> {
     interests: PollEvent,
-    trigger: Option<&'a LatchTrigger>,
+    route: Option<&'a PollRoute>,
 }
 
 impl<'a> PollRequest<'a> {
     pub const fn snapshot(interests: PollEvent) -> Self {
         Self {
             interests,
-            trigger: None,
+            route: None,
         }
     }
 
-    pub const fn register(interests: PollEvent, trigger: &'a LatchTrigger) -> Self {
+    pub(in crate::fs) const fn register_with_route(
+        interests: PollEvent,
+        route: &'a PollRoute,
+    ) -> Self {
         Self {
             interests,
-            trigger: Some(trigger),
+            route: Some(route),
         }
     }
 
@@ -38,18 +48,18 @@ impl<'a> PollRequest<'a> {
         self.interests
     }
 
-    pub const fn trigger(&self) -> Option<&'a LatchTrigger> {
-        self.trigger
+    pub(crate) const fn route(&self) -> Option<&'a PollRoute> {
+        self.route
     }
 
     pub const fn is_register(&self) -> bool {
-        self.trigger.is_some()
+        self.route.is_some()
     }
 
     /// Convert a source-local readiness snapshot into the typed poll result.
     ///
     /// Snapshot requests may return an empty ready set. Register requests must
-    /// fail closed when the source cannot arm a trigger for a currently
+    /// fail closed when the source cannot publish a route for a currently
     /// not-ready predicate.
     pub fn ready_or_unsupported(&self, events: PollEvent) -> PollRegisterResult {
         if self.is_register() && events.is_empty() {
@@ -63,7 +73,12 @@ impl<'a> PollRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRegisterResult {
     Ready(PollEvent),
-    Armed,
+    /// A persistent route was installed before this readiness snapshot.
+    Subscribed(PollEvent),
+    /// A persistent route was installed, but the registration point cannot
+    /// classify current readiness. The consumer must retire this wait round
+    /// without counting readiness or parking, then take a final snapshot.
+    SubscribedRecheck,
     Unsupported,
 }
 

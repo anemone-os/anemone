@@ -34,6 +34,7 @@ pub mod exception;
 pub mod fs;
 pub mod initcall;
 pub mod mm;
+pub mod net;
 pub mod panic;
 pub mod percpu;
 pub mod power;
@@ -151,6 +152,10 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
         run_initcalls(InitCallLevel::Late);
+        // `Late` is a shared provider window and deliberately gives consumers
+        // no relative ordering. Network activation may arm threaded deadlines,
+        // so it starts only after every Late provider has returned.
+        net::attach_published_netdevs();
         let init_stdio = device::boot_io::finalize(console_selection)
             .expect("failed to finalize boot console and TTY endpoints");
         kinfoln!("BSP {} kinit finished", bsp_id);

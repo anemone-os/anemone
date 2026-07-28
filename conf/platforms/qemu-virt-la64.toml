@@ -24,7 +24,16 @@ args = [
     "-no-reboot",
     "-device",
     "pcie-root-port,id=pcie.1,bus=pcie.0",
+    "-device",
+    "virtio-net-pci,netdev=net0",
 ]
+
+# The Platform fixes the user backend and `net0` identity; callers only select
+# backend options such as the final-harness port forwarding rules.
+[[qemu.bind]]
+name = "net-user-options"
+optional = false
+template = ["-netdev", "user,id=net0,{{net-user-options}}"]
 
 [[qemu.bind]]
 name = "kernel-image"

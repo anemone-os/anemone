@@ -11,16 +11,6 @@ use crate::{
     },
 };
 
-/// Temporary global serialization permit for remote scheduler requests.
-///
-/// It protects only the publish-to-terminal-receive producer graph needed to
-/// avoid reverse completion through the current synchronous wait placement.
-/// It is not a scheduler-state lock and is never acquired by the IPI handler.
-/// Remove it only after wait core accepts hardirq-safe cross-CPU placement and
-/// the same bidirectional remote-setter stress passes without this gate; until
-/// then KETER-WAIT-001 remains open.
-static REMOTE_SCHED_REQUEST_GATE: Mutex<()> = Mutex::new(());
-
 #[derive(Debug)]
 pub(in crate::sched) enum SubmitError {
     Transaction(SchedError),
@@ -55,20 +45,6 @@ pub(in crate::sched) fn submit_config_patch(
         return result;
     }
 
-    kdebugln!(
-        "remote scheduler request: waiting gate caller={} target={} owner={}",
-        current_task_id(),
-        target.tid(),
-        target.cpuid(),
-    );
-    let gate = REMOTE_SCHED_REQUEST_GATE.lock();
-    kdebugln!(
-        "remote scheduler request: acquired gate caller={} target={} owner={}",
-        current_task_id(),
-        target.tid(),
-        target.cpuid(),
-    );
-
     let (sender, receiver) = oneshot::channel();
     let request = SchedRequest::new(target.clone(), patch, permit, sender);
     let request_addr = request.as_ref() as *const SchedRequest as usize;
@@ -98,14 +74,13 @@ pub(in crate::sched) fn submit_config_patch(
     };
 
     kdebugln!(
-        "remote scheduler request: releasing gate request={:#x} caller={} target={} owner={} result={:?}",
+        "remote scheduler request: completed request={:#x} caller={} target={} owner={} result={:?}",
         request_addr,
         current_task_id(),
         target.tid(),
         target.cpuid(),
         result,
     );
-    drop(gate);
     result
 }
 

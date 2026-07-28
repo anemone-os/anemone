@@ -436,13 +436,12 @@ impl Event {
 
         let result = wait::wake_wait(&task, listener.token(), WaitReason::Event, mode);
         match result {
-            WakeResult::Woke { placement } => {
+            WakeResult::Woke => {
                 kdebugln!(
-                    "event: listener woke event={:#x} task={} listener={:?} placement={:?}",
+                    "event: listener woke event={:#x} task={} listener={:?}",
                     self.debug_id(),
                     task.tid(),
                     listener,
-                    placement,
                 );
                 true
             },

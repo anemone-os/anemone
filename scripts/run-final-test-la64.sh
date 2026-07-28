@@ -84,5 +84,6 @@ just build "${selection[@]}" "${provider_bindings[@]}"
 
 log_progress "FINAL" "running qemu"
 just qemu "${selection[@]}" "${provider_bindings[@]}" \
+    --bind 'net-user-options=hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555' \
     --bind kernel-image=build/anemone.elf \
     --bind disk-x0="$disk_target" 2>&1 | tee "$log_file"

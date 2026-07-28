@@ -358,10 +358,10 @@ pub struct FileOps {
     /// Check if the file is ready for IO operations described by `request`.
     ///
     /// Snapshot requests return `Ready(events)`, including an empty ready set.
-    /// Register requests must return `Armed` only after the source has saved
-    /// the request's latch trigger under the same lock that checked readiness.
-    /// Sources that cannot arm a not-ready register request must return
-    /// `Unsupported`, so syscall code cannot sleep on an unarmed source.
+    /// Register requests return `Subscribed` only after the source has saved
+    /// the request's non-owning route under the same lock that checked
+    /// readiness. Sources that cannot publish a persistent route must return
+    /// `Unsupported`, so a consumer cannot sleep on an unsubscribed source.
     pub poll: for<'a> fn(&File, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
 
     /// Optional backend hook for the narrowed file-object fcntl subset.
@@ -631,6 +631,14 @@ impl File {
     /// can only retrieve the concrete capability type it installed.
     pub(crate) fn private<T: Opaque>(&self) -> Option<&T> {
         self.prv.cast::<T>()
+    }
+
+    /// Test backend identity without exposing the file object's private state.
+    ///
+    /// This is an operation-local capability probe. It must not be used as file
+    /// identity or cached as lifecycle truth.
+    pub(crate) fn uses_file_ops(&self, ops: &'static FileOps) -> bool {
+        core::ptr::eq(self.ops, ops)
     }
 }
 

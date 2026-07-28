@@ -24,6 +24,16 @@
 
 ## Completed
 
+- [Network Frame Path Stage 4](./2026-07-27-net-frame-path-stage4.md)：单一post-close conformance checkpoint已完成
+  registry-owned pending handoff、post-`Late` activation与host-test metadata修正；NFP-008/009/010关闭，既有
+  contracts保持Effective且无第二次cutover。
+- [Network Frame Path](./2026-07-26-net-frame-path.md)：R1 Stage 1-3与`NFP-FINAL-CUTOVER`已关闭；
+  validation seam退出后的final RV64 exact-code boot通过260/260 remaining KUnit、active attach与严格
+  `filesystem -> network -> device -> PowerOff`。六个network ID及Power Refine均已原子Effective。
+- [System Power](./2026-07-26-system-power.md)：唯一 stage 已完成 terminal episode、orderly/emergency
+  分路、resident inode best-effort writeback 与共享 machine fallback；四个 contract ID 已原子 cutover。
+  RV64 power-off 有两条 QEMU evidence；RV64 reboot runtime、LA64 machine capability 与 hardware未运行。
+- [Epoll](./2026-07-26-epoll.md)：R2 Stage 0-2与2R/2D均已关闭；timer absolute deadline与pipe capacity/atomic-threshold修复通过双root closure，`EPOLL-CUTOVER`已使epoll ABI、iomux Refine与三个`EPOLL-*` ID同步生效。MM COW issue继续由register独立跟踪。
 - [System Target Model R7 Rootfs Incremental Extra Size](./2026-07-27-system-target-model-r7-rootfs-extra-size.md)：folder rootfs新增optional `extra-size`并映射为`virt-make-fs --size=+<value>`；image base继续拥有容量，2k1000配置256 MiB增量余量。
 - [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
 - [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。

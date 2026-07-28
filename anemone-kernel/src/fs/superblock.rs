@@ -77,11 +77,9 @@ pub(super) struct SuperBlockOps {
     /// re-inserted into the cache. The eviction will be retried later.
     pub evict_inode: fn(Arc<Inode>) -> Result<(), SysError>,
 
-    /// Write back the inode to the backing store. This is used to synchronize
-    /// metadata updates that may have been made to the inode while it was
-    /// resident in the cache.
-    ///
-    /// **Note that this operation only writes back metadata, not file data.**
+    /// Write back the inode's resident data and metadata supported by the
+    /// concrete filesystem. Backends without persistent inode state may make
+    /// this a no-op.
     pub sync_inode: fn(&InodeRef) -> Result<(), SysError>,
 
     /// Report filesystem-wide statistics for statfs/statvfs.
@@ -385,6 +383,24 @@ impl SuperBlock {
         }
 
         snapshot
+    }
+
+    /// Make one owner-local resident snapshot and attempt to sync every inode.
+    /// Individual failures are logged and do not abort the remaining snapshot.
+    /// The cache lock is released before calling a filesystem backend; objects
+    /// loaded or redirtied after this snapshot are deliberately not chased.
+    pub(super) fn sync_resident_inodes_best_effort(&self) {
+        for inode in self.cached_inode_snapshot(true) {
+            let inode_ref = InodeRef::new(inode.clone());
+            if let Err(err) = (self.ops.sync_inode)(&inode_ref) {
+                kerrln!(
+                    "failed to sync resident inode {:?} on {}: {:?}",
+                    inode.ino(),
+                    self.fs.name(),
+                    err
+                );
+            }
+        }
     }
 
     /// Try to evict a specific inode.

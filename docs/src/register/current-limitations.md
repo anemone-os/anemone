@@ -2,6 +2,54 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260726-SYSTEM-POWER-BEST-EFFORT-BOUNDARIES
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** system power / panic / filesystem / storage / device lifecycle
+
+**Summary:** 当前 terminal episode 只提供有序、单次、best-effort shutdown attempt。`StopExecution`
+broadcast 不等待 remote completion，已经停住的 CPU 可以遗留 ordinary lock/worker；ordinary callback、
+machine-handler list lock 或 handler 自身卡住时没有 timeout、takeover、cancel 或 watchdog。filesystem
+只 snapshot 一次 resident `indexed + ghosts` inode，snapshot 后的新 load/redirty、并发 shared writable
+mapping 和 userspace mutation 不追赶，因此不形成 strong durability frontier。VirtIO block 会在 device
+callback 中尝试 flush，SD memory 当前没有异步待排空 queue；AHCI 和 DW-MSHC 仍明确报告
+shutdown/quiesce unsupported，不能把单次 ext4/VirtIO QEMU 成功扩大成所有 backend durability。
+
+**Exit Condition:** 分别由 IPI/scheduler、filesystem/mmap、block/storage 与具体 driver owner建立可证明的
+completion、dirty-frontier 或 shutdown capability；若要增加 timeout/takeover、emergency-safe handler
+registry 或强 durability，先经新的 RFC/contract gate明确 owner、线性化、失败与 architecture proof，
+再更新 `SYSTEM-POWER-*` contract。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-26
+**Related:** [System Power 当前契约](../contracts/power/shutdown-lifecycle.md),
+[System Power transaction](../devlog/transactions/2026-07-26-system-power.md),
+[AHCI stage-1 scope](#ane-20260723-ahci-stage1-scope)
+
+## ANE-20260726-SYSTEM-POWER-ARCH-COVERAGE
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** system power / architecture / RISC-V / LoongArch
+
+**Summary:** RV64 orderly 与 emergency power-off 已通过 QEMU 的 SBI handler 正常退出；RV64 reboot 只有
+frozen-intent KUnit、共享 machine-helper 与 SBI cold-reboot registration source proof，未运行 reboot
+runtime。LA64 release build通过，但 source audit 未发现普通 power-off/reboot machine handler；两个
+intent 当前都只能到达永久末尾 halt，因此 LA64 power-off/reboot 明确 `Not Cut Over`。DTS 中存在
+syscon 节点不等于已经注册、验证的 machine capability。
+
+**Exit Condition:** 对 RV64 cold reboot完成直接 runtime evidence；由 LA64 platform owner提供并注册经过
+source/build/QEMU 或 hardware验证的 power-off/reboot capability，证明 handler 返回、fallback 与真实
+machine termination，再更新 current contract 的 architecture coverage。不得只凭 DTS node宣称 cutover。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-26
+**Related:** [System Power 当前契约](../contracts/power/shutdown-lifecycle.md),
+[System Power transaction](../devlog/transactions/2026-07-26-system-power.md)
+
 ## ANE-20260723-AHCI-STAGE1-SCOPE
 
 **Type:** Limitation
@@ -479,13 +527,13 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Severity:** Low
 **Area:** pipe / fcntl / procfs / user-test
 
-**Summary:** 当前匿名 pipe 的基础语义已覆盖 `SIGPIPE`、`O_NONBLOCK`、`F_GETPIPE_SZ`、`F_SETPIPE_SZ(0)` 与 `FIONREAD`，但容量仍是单页固定 stage-1；`F_SETPIPE_SZ` 不支持真实扩容，`O_DIRECT` 只保留可观察 flag 而未实现 packet-mode pipe。LTP `pipe15` 还依赖 `/proc/sys/fs/pipe-user-pages-soft`，`pipe2_04` 的阻塞状态检查依赖 `/proc/<pid>/stat`，这些 procfs knobs/process stat 入口尚未提供。
+**Summary:** 当前匿名 pipe 的基础语义已覆盖 `SIGPIPE`、`O_NONBLOCK`、`F_GETPIPE_SZ`、`F_SETPIPE_SZ(0)` 与 `FIONREAD`。固定 backing 与默认逻辑容量由 `pipe_capacity_pages` 配置（当前为两页），`F_SETPIPE_SZ` 可以在一页到该固定上界之间调整逻辑容量；它仍不提供超出 backing 的动态增长、per-user 资源账本或 Linux 全量容量策略。`O_DIRECT` 只保留可观察 flag 而未实现 packet-mode pipe。LTP `pipe15` 还依赖 `/proc/sys/fs/pipe-user-pages-soft`，`pipe2_04` 的阻塞状态检查依赖 `/proc/<pid>/stat`，这些 procfs knobs/process stat 入口尚未提供。
 
-**Exit Condition:** 为 pipe 容量引入可增长/可收缩的真实 backing 和资源限制账本，补齐 `/proc/sys/fs/pipe-*` 与 `/proc/<pid>/stat` 中测试所需的最小可观察语义，并重新验证 `pipe15`、`pipe2_04` 及 `fcntl(F_SETPIPE_SZ)` 边界测例。
+**Exit Condition:** 为 pipe 容量引入超出固定 backing 的可增长/可收缩存储和资源限制账本，补齐 `/proc/sys/fs/pipe-*` 与 `/proc/<pid>/stat` 中测试所需的最小可观察语义，并重新验证 `pipe15`、`pipe2_04` 及更大范围的 `fcntl(F_SETPIPE_SZ)` 边界测例。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-28
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-07-27
+**Related:** [Epoll Stage 2D transaction](../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260617-SPLICE-FAMILY-COPY-BACKED-STAGE1
 

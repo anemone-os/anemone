@@ -49,9 +49,8 @@ RUN apt update && apt install -y \
     linux-image-kvm \
     libglib2.0-0 \
     libslirp0 \
-    device-tree-compiler \
-    u-boot-tools \
     sudo
+RUN apt install -y device-tree-compiler u-boot-tools
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
     LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross 
@@ -113,10 +112,8 @@ RUN apt update && apt install -y \
     linux-image-kvm \
     libglib2.0-0 \
     libslirp0 \
-    device-tree-compiler \
-    u-boot-tools \
     sudo
-
+RUN apt install -y device-tree-compiler u-boot-tools
 COPY --from=build_lwext4_toolchains /opt/toolchains /opt/toolchains
 ENV LWEXT4_TOOLCHAIN_RISCV64=/opt/toolchains/riscv64-linux-musl-cross \
     LWEXT4_TOOLCHAIN_LOONGARCH64=/opt/toolchains/loongarch64-linux-musl-cross 

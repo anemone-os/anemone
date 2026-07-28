@@ -309,7 +309,7 @@ fn fanotify_write(
 }
 
 fn fanotify_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
-    Ok(FanGroupFile::group(file).poll(request))
+    FanGroupFile::group(file).poll(request)
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
