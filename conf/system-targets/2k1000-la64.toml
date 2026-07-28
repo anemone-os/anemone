@@ -6,3 +6,4 @@ source = { type = "block", path = "sda" }
 
 [initial-program]
 type = "rootfs-entry"
+argv = ["busybox", "--materialize", "--args", "init"]

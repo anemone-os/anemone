@@ -8,6 +8,7 @@ kunit = true # Enable KUnit testing
 fs_ext4 = true # Enable ext4 filesystem support
 kernel_preempt = false # Enable trap-exit kernel preemption
 spin_lock_irqsave = true # Make ordinary spin locks disable local interrupts
+soft_unaligned_access = true # Emulate supported unaligned user-memory accesses in architecture trap handlers
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
 # intr_stack = true # Enable Interrupt Stack support
