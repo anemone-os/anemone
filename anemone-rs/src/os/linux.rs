@@ -22,6 +22,38 @@ pub mod fs {
     pub use anemone_abi::fs::linux::epoll::EpollEvent;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum FlockOperation {
+        Shared,
+        SharedNonblocking,
+        Exclusive,
+        ExclusiveNonblocking,
+        Unlock,
+    }
+
+    impl FlockOperation {
+        const fn to_linux(self) -> u32 {
+            use anemone_abi::fs::linux::flock::{LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN};
+
+            match self {
+                Self::Shared => LOCK_SH,
+                Self::SharedNonblocking => LOCK_SH | LOCK_NB,
+                Self::Exclusive => LOCK_EX,
+                Self::ExclusiveNonblocking => LOCK_EX | LOCK_NB,
+                Self::Unlock => LOCK_UN,
+            }
+        }
+    }
+
+    pub fn flock(fd: Fd, operation: FlockOperation) -> Result<(), Errno> {
+        fs::flock(fd as u64, operation.to_linux() as u64).map(|_| ())
+    }
+
+    /// Raw Linux flock entry for invalid-fd and invalid-flag ABI cases.
+    pub fn flock_raw(fd: i32, operation: u32) -> Result<(), Errno> {
+        fs::flock(fd as i64 as u64, operation as u64).map(|_| ())
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum AtFd {
         Cwd,
         Fd(Fd),

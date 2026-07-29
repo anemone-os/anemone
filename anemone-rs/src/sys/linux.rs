@@ -3,6 +3,10 @@ use anemone_abi::{errno::Errno, syscall::*};
 pub mod fs {
     use super::*;
 
+    pub fn flock(fd: u64, operation: u64) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_FLOCK, fd, operation, 0, 0, 0, 0) }
+    }
+
     pub fn epoll_create1(flags: u64) -> Result<u64, Errno> {
         unsafe { syscall(SYS_EPOLL_CREATE1, flags, 0, 0, 0, 0, 0) }
     }

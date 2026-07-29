@@ -1,6 +1,6 @@
 # Flock 迁移实施计划
 
-**状态：** Stage 0 Active / Checkpoint 0A Closed；Stage 1 Outline
+**状态：** Stage 0 Active / Checkpoint 0B Closed；Stage 1 Outline
 **适用修订：** R0
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
@@ -10,8 +10,9 @@
 **事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 
 本文把 cooperative-retirement R0 解析成一条 proof-first 实施路线。2026-07-29 的独立 R0 review 已接受
-target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并依次完成 Checkpoint 0S、0A。
-0A 已关闭，Checkpoint 0B 仍未激活。本阶段不修改 current contract/register，也不执行 `FLOCK-CUTOVER`。
+target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并依次完成 Checkpoint 0S、0A、
+0B。0B 已关闭，Checkpoint 0C 仍未激活。本阶段不修改 current contract/register，也不执行
+`FLOCK-CUTOVER`。
 
 旧版围绕 precise cancellation、retirement-first 唯一 `EBADF`、同步 waiter cleanup 与
 identity-preserving restart 形成的 Stage 1-3、probe 和 manifest 继续失效；下文是当前唯一 implementation
@@ -59,7 +60,7 @@ authority。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 | 下一解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Owner / lifecycle vertical slice | Active / Checkpoint 0A Closed | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 0B仍需开发者独立授权；Stage 0全部checkpoint、review与证据关闭后，另行运行`0 -> 1 Implementation Resolution Gate` |
+| Stage 0 — Owner / lifecycle vertical slice | Active / Checkpoint 0B Closed | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 0C仍需开发者独立授权；Stage 0全部checkpoint、review与证据关闭后，另行运行`0 -> 1 Implementation Resolution Gate` |
 | Stage 1 — Acceptance closure | Outline | 根据 Stage 0 实际 diff 补齐 target matrix、LTP、双架构 runtime、contract write-back 与原子 `FLOCK-CUTOVER` | 只有 Stage 1 closure 可切换 | Stage 0 Closed 后由开发者单独授权解析；`Ready` 后仍需独立 `Active` 授权 |
 
 `Outline` 只固定目的、依赖、受保护边界与解析触发点；不冻结具体类型、文件、算法或命令。`Ready` 表示当前
@@ -70,8 +71,8 @@ stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 R
 
 ### 4.1 状态与 activation preflight
 
-**状态：** Active / Checkpoint 0A Closed。Stage 0 已依次关闭 Checkpoint 0S、0A；0B、0C 仍须依次独立授权和
-关闭，不得跳过 owner/lifecycle review 直接运行 ABI oracle。
+**状态：** Active / Checkpoint 0B Closed。Stage 0 已依次关闭 Checkpoint 0S、0A、0B；0C 仍须独立授权和
+关闭，不得把0B编译证据当作runtime oracle。
 
 进入 `Active` 前必须同时满足：
 
@@ -232,8 +233,8 @@ source review但没有运行时注入，已取得旧lease与terminal close并发
 
 ### 4.5 Checkpoint 0B — Linux ABI 与 Focused Consumer
 
-**前置：** 0S、0A 交付，KUnit 编译与 owner/lifecycle review 已关闭；Stage 0 仍为 Active，contract仍Not
-Effective。该前置现已满足，但 0B 仍须开发者独立授权，不因 0A closure 自动进入。
+**状态：** Closed / 2026-07-29。0S、0A交付、KUnit编译与owner/lifecycle review已关闭后，开发者独立授权
+0B；Stage 0保持Active，contract仍Not Effective，0C没有被自动激活。
 
 **交付：**
 
@@ -284,6 +285,16 @@ git diff --check
 
 四次 app build 与两次 kernel build 只证明各自架构编译；它们不替代 rootfs composition、KUnit 或 guest
 runtime。
+
+**Closure evidence：** 两个architecture table登记asm-generic `SYS_FLOCK = 32`，四个raw flag只在
+`anemone-abi::fs::linux::flock`定义。`fs::api::flock`先normalization flags再fd admission，并把normalized
+operation交给private VFS owner；`O_PATH`、`EAGAIN`、`EBADF`与ordinary restart mapping均停留在ABI adapter。
+`anemone-rs`提供raw/typed两层wrapper；`flock-test`的八组case覆盖flag/admission、conflict、alias/fork/final
+close、blocking/shared waiter、双向conversion、`CLONE_FILES` terminal wait、signal/restart与concurrent final
+close admissible outcomes；restart case还让handler关闭并复用fd以确认ordinary replay重新lookup。consumer由两个
+pretest manifest安装、由user-test local phase调用。四次app build与两次
+kernel build通过；focused oracle、KUnit、rootfs composition与guest runtime均Not Run，留给0C。change review的
+Apollyon/Keter/Euclid/Safe均为0；完整证据见transaction。
 
 ### 4.6 Checkpoint 0C — Runtime、Observability、Review 与 Probe Exit
 
@@ -465,5 +476,5 @@ contracts，再把Stage 1完整解析为`Ready`：精确交付、checkpoints、w
 
 ## 7. 当前结论
 
-当前 R0 已 Accepted for Implementation，Stage 0 Active 且 Checkpoint 0A Closed。Checkpoint 0B 仍未激活，
+当前 R0 已 Accepted for Implementation，Stage 0 Active 且 Checkpoint 0B Closed。Checkpoint 0C 仍未激活，
 本轮不得进入；current contract 与 register 未修改，`FLOCK-CUTOVER` 未执行，全部新 ID 保持 Not Effective。

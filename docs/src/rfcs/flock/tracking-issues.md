@@ -7,12 +7,12 @@
 
 本文保留已经影响 flock Draft target、ABI、owner/contract boundary、implementation readiness或acceptance
 判断的design finding及其neutralize依据。2026-07-29 cooperative direction correction在R0前直接更新Draft，
-不形成R1；后续独立R0 review与0A change review没有发现新的Apollyon、Keter或Euclid，R0 acceptance、Stage 0
-activation与0S/0A closure见transaction。
+不形成R1；后续独立R0 review与0A/0B change review没有发现新的Apollyon、Keter或Euclid，R0 acceptance、Stage 0
+activation与0S/0A/0B closure见transaction。
 
 同日独立implementation-resolution任务已从live source形成新的Stage 0 Ready plan。下文历史状态中的
 “No Ready Stage”与“implementation shape未解析”描述的是cooperative correction刚完成时的事实；它们不恢复
-旧precise-cancellation plan。Stage 0现已Active且关闭至0A；当前authority见
+旧precise-cancellation plan。Stage 0现已Active且关闭至0B；当前authority见
 [迁移实施计划](./implementation.md)。
 
 ## Apollyon

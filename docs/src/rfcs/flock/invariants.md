@@ -373,10 +373,10 @@ resolution gate。
 5. implementation preferences未被提升为target，`implementation.md`的Stage 0达到完整`Ready`，Stage 1保持
    依赖、受保护边界与resolution trigger完整的`Outline`；
 6. R0 acceptance、transaction bootstrap 与 Stage 0 Active authorization 分别记录在
-   [transaction](../../devlog/transactions/2026-07-29-flock.md)，Checkpoint 0S、0A 的独立授权与closure没有自动
+   [transaction](../../devlog/transactions/2026-07-29-flock.md)，Checkpoint 0S、0A、0B 的独立授权与closure没有自动
    授权后续checkpoint；
 7. `OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs保持Not Effective，0A的private substrate不提供partial flock
-   capability。
+   capability；0B增加的ABI adapter与focused consumer在runtime前同样不是effective capability。
 
-第一个可执行stage已按独立授权进入Active且关闭至Checkpoint 0A；Checkpoint 0B仍未激活。最终implementation
+第一个可执行stage已按独立授权进入Active且关闭至Checkpoint 0B；Checkpoint 0C仍未激活。最终implementation
 closure仍需逐项记录每个ID的Effective / Not Cut Over结果，并区分agent-run、developer-run与Not Run evidence。

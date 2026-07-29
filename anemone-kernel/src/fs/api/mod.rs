@@ -23,6 +23,7 @@ pub mod fallocate;
 pub mod fchmod;
 pub mod fchown;
 pub mod fcntl;
+pub mod flock;
 pub mod getcwd;
 pub mod getdents64;
 pub mod getrandom;

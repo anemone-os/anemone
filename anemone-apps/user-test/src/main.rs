@@ -82,7 +82,12 @@ fn run_local_tests() {
     //     println!("user-test: jobctl test finished.");
     // }
 
-    // 11. epoll test
+    // 11. flock test
+    println!("user-test: running flock test...");
+    local_run_cmd("/bin/flock-test", &["flock-test"], &[]);
+    println!("user-test: flock test finished.");
+
+    // 12. epoll test
     println!("user-test: running epoll test...");
     local_run_cmd("/bin/epoll-test", &["epoll-test"], &[]);
     println!("user-test: epoll test finished.");
