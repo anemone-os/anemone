@@ -8,6 +8,7 @@ kunit = []
 fs_ext4 = []
 kernel_preempt = []
 spin_lock_irqsave = []
+soft_unaligned_access = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }

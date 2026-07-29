@@ -27,6 +27,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "soft_unaligned_access")]
+use crate::arch::loongarch64::exception::unaligned::handle_user_unaligned_access;
+
 // User trap entry point. The kernel does not save or restore floating-point
 // registers here because user-mode traps currently do not use them.
 // Hidden trap entries and local PC-relative loads avoid preemptible address
@@ -322,6 +325,28 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                     unsafe {
                         init_fpu_for_current_task(trapframe);
                         kinfoln!("({}) enabled fpu for {}", cur_cpu_id(), current_task_id());
+                    }
+                },
+                LA64Exception::AddressAlignment => {
+                    #[cfg(feature = "soft_unaligned_access")]
+                    handle_user_unaligned_access(trapframe, VirtAddr::new(trapframe.badv));
+
+                    #[cfg(not(feature = "soft_unaligned_access"))]
+                    {
+                        kerrln!(
+                            "({}) unsupported unaligned access for task {}: soft_unaligned_access is disabled, pc={:#x}, address={:#x}",
+                            cur_cpu_id(),
+                            current_task_id(),
+                            trapframe.era,
+                            trapframe.badv,
+                        );
+                        get_current_task().recv_signal(Signal::new(
+                            SigNo::SIGBUS,
+                            SiCode::BusAdraln,
+                            SigInfoFields::Fault(SigFault {
+                                addr: VirtAddr::new(trapframe.badv),
+                            }),
+                        ));
                     }
                 },
                 _ => {

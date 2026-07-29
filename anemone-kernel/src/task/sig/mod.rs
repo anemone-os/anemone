@@ -206,9 +206,10 @@ impl Signal {
 
     fn is_kernel_synchronous_fault(&self) -> bool {
         // SI_KERNEL also describes asynchronous producers such as SIGPIPE and
-        // internal SIGKILL. Only typed fault/illegal-instruction fields prove
-        // that an occurrence arose from the current user exception.
-        matches!(self.code, SiCode::Kernel) && self.fields.is_synchronous_fault()
+        // internal SIGKILL. Positive hardware-fault codes such as BUS_ADRALN
+        // are synchronous too, but still require typed fault fields.
+        matches!(self.code, SiCode::Kernel | SiCode::BusAdraln)
+            && self.fields.is_synchronous_fault()
     }
 
     pub fn to_linux_siginfo(self) -> SigInfoWrapper {

@@ -537,6 +537,9 @@ pub mod linux {
         /// sent by glibc async name lookup completion
         pub const SI_ASYNCNL: i32 = -60;
 
+        /// Invalid address alignment (`SIGBUS`).
+        pub const BUS_ADRALN: i32 = 1;
+
         pub mod sifields {
             use core::fmt::Debug;
 

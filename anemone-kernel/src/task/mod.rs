@@ -121,6 +121,10 @@ pub struct Task {
     /// Whether this task has used FPU. This is used to optimize FPU context
     /// switching.
     fpu_used: AtomicBool,
+    /// Monotonic latch used only to emit the first software-unaligned-access
+    /// notice for this task. Access correctness never depends on this field.
+    #[cfg(feature = "soft_unaligned_access")]
+    soft_unaligned_access_enabled: AtomicBool,
 
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
@@ -452,6 +456,8 @@ impl Task {
             },
             sched_entity: SpinLock::new(sched),
             fpu_used: AtomicBool::new(false),
+            #[cfg(feature = "soft_unaligned_access")]
+            soft_unaligned_access_enabled: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
             cred: RwLock::new(CredentialSet::new_root()),
@@ -502,6 +508,8 @@ impl Task {
                 },
                 sched_entity: SpinLock::new(SchedEntity::new_idle()),
                 fpu_used: AtomicBool::new(false),
+                #[cfg(feature = "soft_unaligned_access")]
+                soft_unaligned_access_enabled: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
                 cred: RwLock::new(CredentialSet::new_root()),
@@ -701,6 +709,17 @@ impl Task {
 
     pub fn set_fpu_used(&self) {
         self.fpu_used.store(true, Ordering::Release);
+    }
+
+    /// Mark this task as having entered software unaligned access.
+    ///
+    /// Returns `true` only for the first transition. The latch controls the
+    /// one-time performance notice and does not publish any other state.
+    #[cfg(feature = "soft_unaligned_access")]
+    pub fn enable_soft_unaligned_access(&self) -> bool {
+        !self
+            .soft_unaligned_access_enabled
+            .swap(true, Ordering::Relaxed)
     }
 
     /// Return a credential snapshot.

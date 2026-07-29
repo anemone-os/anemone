@@ -8,6 +8,8 @@ use crate::prelude::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiCode {
     Kernel,
+    /// Address alignment fault (`BUS_ADRALN`).
+    BusAdraln,
     ChldExited,
     ChldKilled,
     ChldStopped,
@@ -40,6 +42,7 @@ impl SiCode {
         use anemone_abi::process::linux::signal::*;
         match self {
             Self::Kernel => SI_KERNEL,
+            Self::BusAdraln => BUS_ADRALN,
             Self::ChldExited => CLD_EXITED,
             Self::ChldKilled => CLD_KILLED,
             Self::ChldStopped => CLD_STOPPED,
@@ -207,7 +210,7 @@ impl SigInfoFields {
                 | SiCode::ChldStopped
                 | SiCode::ChldContinued,
             ) => true,
-            (Self::Fault(_), SiCode::Kernel) => true,
+            (Self::Fault(_), SiCode::Kernel | SiCode::BusAdraln) => true,
             (Self::Ill(_), SiCode::Kernel) => true,
             (Self::TKill(_), SiCode::TKill) => true,
             _ => {

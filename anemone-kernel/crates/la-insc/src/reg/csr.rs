@@ -116,6 +116,7 @@ define_csr!(64, ecfg, 0x4, Ecfg);
 define_csr!(64, estat, 0x5, Estat);
 define_csr!(64, era, 0x6);
 define_csr!(64, badv, 0x7);
+define_csr!(32, badi, 0x8);
 define_csr!(64, eentry, 0xc);
 define_csr!(64, tlbidx, 0x10);
 define_csr!(64, cpuid, 0x20);
