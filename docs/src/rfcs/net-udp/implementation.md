@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-1 Closed / Stage 2-5 Outline
+**状态：** R0 / Stage 0-1 Closed / Stage 2 Ready / Not Active / Stage 3-5 Outline
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -15,7 +15,8 @@
 > 本文是R0的canonical实施顺序、stage maturity、probe、验证和resolved write set。R0已由public review接受，
 > transaction已经建立；Checkpoint 0B关闭后的工程审查确认两个Keter和一个Euclid，0B Feedback Correction已
 > 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；独立的`0 -> 1`resolution与后续
-> Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效，Stage 2-5仍是Outline。
+> Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效；独立的`1 -> 2`
+> resolution也已完成，Stage 2现为Ready但未获得实现授权，Stage 3-5仍是Outline。
 
 ## 1. 计划角色与 authority
 
@@ -24,8 +25,8 @@
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
-Stage 0和Stage 1已经独立关闭；本计划当前停在`1 -> 2 Implementation Resolution Gate`之前。Stage 2-5仍是future Outline，其中列出的目录、
-模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须
+Stage 0和Stage 1已经独立关闭；本计划现在冻结下一个可执行的Stage 2。Stage 3-5仍是future Outline，其中列出的
+目录、模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须
 先按自己的验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析
 完成只让下一阶段达到Ready，不自动进入Active。
 
@@ -33,8 +34,8 @@ Stage 0和Stage 1已经独立关闭；本计划当前停在`1 -> 2 Implementatio
 
 1. R0由独立public review接受；Draft promotion本身不构成acceptance；
 2. 建立独立transaction，并重新读取当时的live source、current contracts、register、branch/HEAD与dirty state；
-3. 确认Stage 1的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
-4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 1仍须
+3. 确认Stage 2的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
+4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 2仍须
    获得独立启动授权。
 
 ## 2. Live baseline 与首阶段选择
@@ -131,7 +132,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | --- | --- | --- | --- | --- |
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
-| Stage 2 — Static control plane与production loopback | Outline | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed | 候选`STM-TARGET-001` Refine与`NET-CONTROL-PLANE-001` Introduce；是否本stage cutover由1->2 gate决定 |
+| Stage 2 — Static control plane与production loopback | Ready / Not Active | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`计划Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001`；Stage 2关闭前均保持当前Effective/Pending边界 |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
@@ -439,37 +440,331 @@ IP traffic、virtio-pci、hardware、network LTP和final harness均Not Run。
 claim boundary见[transaction](../../devlog/transactions/2026-07-29-net-udp.md)。Stage 1在此Closed，未运行或解析
 `1 -> 2`gate。
 
-### 6.2 Stage 2 Outline — Static control plane与production loopback
+### 6.2 Stage 2 Ready — Static control plane与production loopback
 
-概括目的：
+**阶段成熟度与授权：** Ready / Not Active。2026-07-29的`1 -> 2`resolution已经冻结本节两个checkpoint、
+module/file切分、配置和runtime路线、contract cutover、验证、停止/退出条件与Resolved Write Set Manifest。本轮只
+授权文档解析，不授权Stage 2 source、SystemTarget/KConfig/current-contract修改或进入Stage 3。
 
-- 扩展SystemTarget schema并materialize有限typed IPv4 deployment input；
-- 建立唯一control-plane owner、connected/default/local route与source/interface selection；
-- 建立first-class `lo`与bounded IP-medium software link，使local traffic经protocol egress和normal ingress；
-- 证明self-external address走local software handoff而不是external backend hairpin。
+**前置条件与live baseline：**
 
-前置依赖：
+- Stage 1已在`dev/drc/alpha@5cc0669c`独立Closed；进入本resolution时tracked/untracked worktree clean，最终review
+  为Apollyon 0、Keter 0、Euclid 0、Safe 0，`NET-UDP-DOMAIN-CUTOVER`三项current contract已经生效；
+- production `InitialDomain`现在唯一组合`LogicalInterfaces`与`DomainStack`。boot `lo`只有logical membership；
+  global Stack仍没有local protocol mapping、IP projection或production local worker；
+- external worker只持`ExternalPumpPort`与concrete provider，raw Stack仍只在`DomainStack`的private lock内；
+  `ActivePath`保存device/logical diagnostic snapshot和shutdown control，但没有control-plane behavior state；
+- Stage 0保留的`LocalLink`/`LocalPort`/`pump_local` candidate已经在host matrix证明IP-medium、bounded handoff、
+  normal ingress、queue full/recovery、Endpoint-local blocking与retire cleanup；它仍是crate-private dormant route，
+  kernel dependency未编译host validation surface；
+- live SystemTarget只拥有Platform/root/initial-program，resolver完整保存target snapshot；kernel build在
+  `tasks/build`物化ignored `kconfig_defs.rs`、`platform_defs.rs`和`boot_defs.rs`，kernel不解析TOML；
+- RV64与LA64 QEMU Platform都使用user network backend；普通pretest preset分别选择
+  `qemu-virt-{rv64,la64}`。两份SystemTarget尚未声明`eth0`、IPv4/prefix或gateway；
+- register、R0 target、current SystemTarget/Network contracts与Stage 1 exact diff没有发现会改变本stage owner、
+  ABI、acceptance或顺序的active issue。Stage 2不需要新的probe，也不修改vendored smoltcp。
 
-- Stage 1 Closed且logical-interface/global Stack owner已经稳定；
-- live SystemTarget resolver/materializer与selected RV64/LA64 target重新审计。
+#### 6.2.1 Resolved owner与数据流
 
-受保护边界：
+Stage 2保持Stage 1的三个owner分离，并只增加一个control-plane owner：
 
-- SystemTarget只拥有deployment declaration；Platform/KernelConfig/Preset/rootfs不得复制IP/route truth；
-- control plane唯一拥有address/route/selection policy，Stack只消费projection和operation-local selection；
-- `lo`不伪造Device/Driver/Ethernet/IRQ/DMA，software link不拥有membership/address/Endpoint/readiness；
-- missing/mismatched `eth0`不触发fallback、alternate selector或第二配置truth；
-- 任何local queue都必须bounded、可重查并受pump budget约束。
+- `LogicalInterfaces`继续唯一拥有membership、logical identity、ifindex/name/kind；不保存address、route或protocol
+  mapping；
+- `DomainStack`继续唯一拥有raw Stack、protocol `InterfaceId` mapping和mutation window；Stack只保存smoltcp所需
+  address/default-route projection，不执行route/source/interface policy；
+- `Ipv4ControlPlane`唯一拥有boot-time local-address set、loopback/local/connected/default route precedence、
+  explicit-source validity与每次operation的source/interface selection。它保存logical-to-protocol association的
+  immutable boot-lifetime snapshot和窄pump-wake capability；这些是行为协议状态，不是diagnostic field。真实mapping
+  仍由DomainStack拥有，第一版无runtime detach/reuse，因此snapshot不允许stale；
+- external/local worker各自拥有自己的pump scheduling、deadline与stop projection。external provider继续拥有
+  queue/DMA/IRQ/resource truth；bounded local software link只拥有packet从protocol egress到后续normal ingress之间
+  的访问权与capacity truth；
+- SystemTarget只声明deployment input；xtask resolver/materializer生成只读typed Rust projection。Platform、
+  KernelConfig、BuildPreset、rootfs和generated file都不成为IP/route truth。
 
-解析触发点：
+control-plane selection固定为一次pure owner-local decision，结果只携带protocol `InterfaceId`、selected source
+IPv4和窄`PumpWake`：
 
-- Stage 1 Closed后的只读preflight。该gate解析schema、typed input、boot ordering、control-plane representation、
-  local medium/queue、capacity/KConfig inventory、contract cutover与validation commands。
+1. destination命中任一configured local unicast address时选择local protocol port；destination是external local
+   address时默认source就是该address，不进入external provider；
+2. destination位于`127.0.0.0/8`时选择local port，未约束source时使用`127.0.0.1`；local Stack projection可以
+   使用smoltcp AnyIP，但该mechanism只允许接收control plane已经选择到bounded local link的packet，不建立第二
+   route policy；
+3. 其后才检查configured external connected prefix，最后检查该SystemTarget显式声明的default gateway；两者都
+   选择对应external protocol mapping和该interface的configured address；
+4. explicit source必须属于当前domain。local destination可以使用任一local source；external connected/default
+   route只接受该external interface的configured source。失败返回owner-local typed `NoRoute`、`SourceUnavailable`
+   或`InterfaceUnavailable`，不得fallback到其它interface；
+5. selection不修改binding或address truth，不执行Stack admission，也不把一次source写回Socket/Endpoint。
 
-预计范围：
+Stage 2只建立上述private kernel control-plane capability。Stage 3解析真实Socket/Endpoint consumer后才能决定
+该capability是否需要进一步跨module收窄；本stage不增加通用`RouteTable` trait、runtime configurator或TCP框架。
 
-- `scripts/xtask/src/config/`与build materializer、`conf/system-targets/`、必要KernelConfig owner、kernel net/domain、
-  stack local-link与双架构build。具体路径由1->2 gate冻结。
+#### 6.2.2 Checkpoint 2A — same-owner module split only
+
+2A先做行为保持的目录化切分，避免把Stage 2职责继续写进已经混合多个proof surface的文件：
+
+1. `net/domain.rs`迁移为`net/domain/{mod.rs,interfaces.rs,stack.rs}`：`mod.rs`只组合`InitialDomain`，
+   `interfaces.rs`保存logical membership/reservation与其KUnit，`stack.rs`保存DomainStack、mapping transaction和
+   narrow pump port；
+2. `net/worker.rs`迁移为`net/worker/{mod.rs,control.rs,external.rs}`：shared bounded time/budget入口保持在
+   `mod.rs`，wake/deadline/stop projection位于`control.rs`，provider/PumpCore/prepare path位于`external.rs`；
+3. stack crate的`stack/mod.rs`把existing external-interface mapping/`InterfaceEntry`与dormant UDP operations分别
+   迁入`stack/interfaces.rs`与`stack/udp_ops.rs`；root只保存Stack composition/error与保持原visibility的窄re-export，
+   `host_validation.rs`保持conditional child module；
+4. `pump.rs`迁移为`pump/{mod.rs,external.rs,local.rs,common.rs}`：`external.rs`保存public `Stack::pump`与
+   provider-facing ingress/egress，`local.rs`保存private `pump_local`与local ingress/egress，`common.rs`保存
+   `PumpBudget`、fair-order和outcome computation；existing tests随被测职责迁入`common.rs`/`external.rs`，
+   `mod.rs`只做module wiring和保持既有public re-export。`local_link.rs`仍是单一packet/capacity owner，不拆；
+5. `tasks/build/mod.rs`把existing kconfig/platform/boot defs rendering和相关unit test迁入
+   `tasks/build/generated_defs.rs`；embedded-artifact validation及其test继续留在build orchestration，app export、DT与
+   kernel-output owner不变。
+
+2A不得新增type/method/feature/config field、扩大owner-external/public visibility或exported surface、修改生成文本、
+移动owner、激活local path或更新current contract。只允许目录拆分所必需的owner-internal `pub(super)`/private
+import/re-export机械调整，且原consumer callsite与可见能力集合必须不变。git rename detection不是closure条件；
+行为、依赖方向和callsite surface不变才是。2A完成host/no-default/xtask/双架构compile和change review后独立
+Closed；不得自动进入2B。
+
+#### 6.2.3 Checkpoint 2B — static IPv4与production loopback cutover
+
+2B是本stage唯一semantic checkpoint，配置、control plane、Stack projection、local worker、runtime proof和
+current contract必须一起闭合：
+
+1. SystemTarget增加optional `[network.ipv4]`，第一版只描述一个external interface：
+   `interface`、`address`、`prefix`和optional `default-gateway`。loader拒绝unknown field、空interface、非法IPv4、
+   prefix `> 32`、unspecified/multicast/broadcast/loopback external address及非法gateway；不做Platform topology、
+   interface存在性、gateway reachability或backend匹配证明。section缺失表示该target只有implicit loopback，不触发
+   fallback/default external configuration；
+2. tracked `qemu-virt-rv64.toml`与`qemu-virt-la64.toml`显式声明`eth0 = 10.0.2.15/24`、default gateway
+   `10.0.2.2`，与其tracked QEMU user backend配套；`example.toml`/schema同步字段形状。physical与final-harness
+   SystemTarget本stage不自动获得external IPv4配置；
+3. resolver继续把canonical SystemTarget放入`ResolvedSystemBuild`。`generated_defs.rs`从resolved target生成独立
+   ignored `anemone-kernel/src/network_defs.rs`，其closed typed value只包含optional static IPv4 deployment；
+   `main.rs`声明private generated module，只有kernel `net` owner读取。不得把network字段塞进
+   `Platform::gen_platform_defs`、kconfig defs或boot defs，kernel不得解析manifest；`clean`删除该generated file；
+4. `anemone-net-api/src/ipv4.rs`只增加cross-crate `no_std` value：IPv4 address/CIDR及必要checked construction/
+   observation。它不包含route table、Socket/Endpoint、errno、smoltcp type、worker或mutable owner；
+5. Stack提供由真实kernel consumer使用的窄ordinary methods：建立唯一IP-medium local port、对指定
+   `InterfaceId`安装IPv4 CIDR/default-gateway projection，以及bounded local pump。local port使用
+   `127.0.0.1/8`与local-only AnyIP projection；它不会自行决定route/source，也不暴露`LocalPort`、queue、
+   `SocketSet`或smoltcp handle；
+6. `InitialDomain`构造时在同一global Stack建立唯一local mapping并准备sleeping local worker。local worker只持
+   `LocalPumpPort + PumpControl`，被explicit work/deadline唤醒，每轮复用既有PumpBudget与
+   `NET_WORKER_REPOLL_ROUNDS`，round间释放Stack lock；local ingress可释放full queue时必须继续有限进展，真正无
+   progress时睡眠，不能因`work_remaining`或已到期deadline busy-repoll；
+7. tracked KernelConfig新增`net_local_link_packet_capacity = 64`与`net_local_link_mtu_bytes = 1500`。前者是
+   shared ingress+egress packet slot上限，后者是IP-medium packet byte上限；两者在resolved kconfig defs中物化，
+   kernel以`static_assert!`要求capacity非零且MTU至少容纳IPv4+UDP固定header。既有pump budget/repoll常量继续
+   约束local worker，不新增同义knob；
+8. boot attach drain完成后，attach authority把committed logical snapshot、stable protocol mapping和窄wake
+   capability交给`InitialDomain`一次性激活control plane：先验证configured interface恰好命中已发布external
+   logical name，再在Stack window安装lo/external projection，最后发布control plane。missing/duplicate/mismatched
+   `eth0`记录target/interface诊断并fail closed；不搜索替代NIC、不降级为别的address，也不留下可供Stage 3读取的
+   partial control plane；
+9. network shutdown先在现有authority关闭global admission，再锁外请求local与external worker stop。local link和
+   Stack仍由boot-persistent domain拥有，不引入join、runtime detach或resource reclamation；queued wake/deadline
+   不能重新activate control plane或pump admission；
+10. stack crate增加独立于`std`的no-std `kunit` feature，kernel的existing `kunit` feature显式转发
+    `anemone-smoltcp-stack/kunit`；ordinary dependency继续`default-features = false`且不无条件启用该feature。该
+    conditional surface只允许kernel test调用opaque Endpoint/local operation与有限observation。RV64 KUnit必须
+    通过production control-plane selection、real DomainStack/local worker和normal protocol ingress，完成
+    `127.0.0.1`、另一`127/8`地址与self-external
+    address datagram交付，并在测试后retire；不得用direct Endpoint injection、Socket copy或kernel packet injection
+    替代。Stage 3真实Socket consumer出现后，逐项删除不再必要的KUnit operation bridge；长期host topology matrix
+    可以保留其最窄conditional facade。
+
+#### 6.2.4 Concurrency、failure与旁路审计
+
+- 唯一锁序保持attach authority/control-plane publication在外、DomainStack window在内；任何provider/local
+  device callback都不能持authority lock运行或反向进入logical/control owner。pure selection在owner lock内完成并
+  返回immutable result，后续Stack operation不持control-plane lock；
+- `PumpWake`只是请求重查的capability，不是route、capacity、work或lifecycle truth。shutdown关闭control active
+  projection后，late wake只能产生无害唤醒；
+- local packet从TX token commit到RX token consume始终只有LocalLink owner；未消费RX token按原队首恢复，Endpoint
+  retire先withdraw aggregate identity再清owner-tagged local packet。AnyIP不允许external ingress绕入local port；
+- SystemTarget parse/build failure不生成半份network defs；runtime interface mismatch不回写generated/config值，
+  不创建alternate selector。tracked manifests是canonical input，generated file是一次build projection；
+- source audit必须确认production `Stack::new()`仍只有DomainStack一个调用点、local port只创建一次、route/source
+  decision只在Ipv4ControlPlane、smoltcp route只作projection、kernel没有smoltcp/private handle、Platform/rootfs/
+  Preset没有network copy；
+- 2A re-export若变宽、2B需要vendored smoltcp变化、raw Stack泄露、第二route table、local Socket fast path、无界
+  queue、busy-poll、automatic fallback或不能在conditional build删除的test bridge，当前checkpoint立即停止并按
+  manifest/owner/target影响上报。
+
+#### 6.2.5 可观测性
+
+- build resolution摘要只增加`network=loopback-only`或configured external interface/address/prefix/gateway；不把
+  generated text或QEMU backend推断写成另一份truth；
+- control-plane activation一次记录target、logical name/ifindex、configured IPv4/prefix、default-route有无与local
+  port ready；runtime mismatch在fail closed前记录期待/实际logical names。protocol `InterfaceId`只可作为opaque
+  diagnostic，不暴露smoltcp handle；
+- local worker只记录prepare/activation、unexpected pump failure与shutdown摘要；normal packet、full/recovery和
+  每轮pump不打日志。轻量correctness不变量使用`assert!`；配置/ordinary环境失败使用typed error或明确boot failure；
+- KUnit marker分别标明control-plane table、loopback worker、self-external local handoff；host、RV64 runtime、LA64
+  compile与Not Run结果不得合并成一个“network works”结论。
+
+#### 6.2.6 Contract cutover — `NET-UDP-CONTROL-CUTOVER`
+
+Checkpoint 2A Contract Impact为None。Checkpoint 2B只有在final source/config/runtime evidence一起满足时，才原子：
+
+- Refine `STM-TARGET-001`：SystemTarget可以声明上述optional first-version static IPv4 deployment；Platform、
+  KernelConfig、Preset和rootfs owner边界不变，generated projection不成为canonical truth；
+- Introduce `NET-CONTROL-PLANE-001`：initial-domain control plane唯一拥有local address、route precedence、
+  source/interface selection、stable mapping/wake capability projection，以及bounded production local-handoff协议；
+- Preserve `STM-OWNER-001`、`STM-RESOLVE-001`、`NET-BOUNDARY-001`、`NET-FRAME-OWN-001`、
+  `NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`、`NETDEV-LIFE-001`、`NET-ATTACH-001`和
+  `NET-IFACE-DOMAIN-001`。implementation location/navigation可同步，语义owner和现有attach/frame contract不改；
+- `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
+  `NET-SOCKET-WAIT-001`继续Pending。conditional Endpoint KUnit不使Socket/UAPI/bind/receive transaction或Linux
+  readiness contract提前生效。
+
+本cutover的proof floor是deterministic multi-interface selection、self-external local routing，以及RV64 production
+control-plane/local-worker/normal-ingress closure。Stage 2尚无用户态UDP consumer，真实remote external UDP
+ingress/egress因此继续Not Run；它仍是R0 Evidence Matrix与Stage 5 final acceptance的强制项，必须在后续
+`NET-UDP-TRANSACTION-001`/external-path closure由final exact code证明。该proof-stage分工不降低R0 target、
+`NET-CONTROL-PLANE-001`规则或最终验收边界。
+
+cutover前current SystemTarget contract仍不包含network schema，`NET-CONTROL-PLANE-001`仍为None。2B任一Keter/
+Apollyon、production local-traffic failure、RV64 runtime未运行/失败或config/code/contract不能原子切换时，撤销或
+保留partial code作未发布证据，但不得更新current contract、把logical `lo`称为functional或进入Stage 3。
+
+#### 6.2.7 Resolved Write Set Manifest
+
+**Checkpoint 2A tracked source：**
+
+- `anemone-kernel/src/net/{domain.rs,domain/mod.rs,domain/interfaces.rs,domain/stack.rs}`；
+- `anemone-kernel/src/net/{worker.rs,worker/mod.rs,worker/control.rs,worker/external.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/stack/{mod.rs,interfaces.rs,udp_ops.rs,host_validation.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/{pump.rs,pump/mod.rs,pump/common.rs,pump/external.rs,pump/local.rs}`；
+- `scripts/xtask/src/tasks/build/{mod.rs,generated_defs.rs}`。
+
+2A只允许move、module declaration、owner-internal visibility/import/re-export和为保持原测试位置所需的机械调整；
+这些调整不得扩大owner-external consumer surface。上述new/old path都列出是为了允许tracked rename。
+
+**Checkpoint 2A docs/status write-back：**
+
+- `docs/src/rfcs/net-udp/{implementation.md,index.md}`；
+- `docs/src/devlog/transactions/{2026-07-29-net-udp.md,index.md}`；
+- `docs/src/devlog/2026-07-20_to_2026-08-02.md`、`docs/src/rfcs.md`。
+
+这些文档只记录2A activation/closure、exact diff、review、验证与2B Not Active状态，不得改变R0 target、candidate
+contract或2B manifest。`local_link.rs`、`udp.rs`、kernel `net/mod.rs`、Cargo/config、`invariants.md`与current
+contracts均只读。
+
+**Checkpoint 2B tracked source/config：**
+
+- `scripts/xtask/src/config/{system_target.rs,kconfig.rs}`；
+- `scripts/xtask/src/tasks/{clean.rs,build/mod.rs,build/generated_defs.rs}`；
+- `conf/.defconfig`、`conf/system-targets/{schema.jsonc,example.toml,qemu-virt-rv64.toml,qemu-virt-la64.toml}`；
+- `anemone-kernel/Cargo.toml`、`anemone-kernel/src/{main.rs,net/mod.rs}`；
+- `anemone-kernel/src/net/domain/{mod.rs,interfaces.rs,stack.rs,control_plane.rs}`；
+- `anemone-kernel/src/net/worker/{mod.rs,control.rs,external.rs,local.rs}`；
+- `anemone-kernel/src/net/kunit.rs`；
+- `anemone-kernel/crates/anemone-net-api/src/{lib.rs,ipv4.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/Cargo.toml`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/{lib.rs,local_link.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/stack/{mod.rs,interfaces.rs,udp_ops.rs,host_validation.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/pump/{mod.rs,common.rs,local.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/tests/udp_topology.rs`。
+
+repository build可覆盖ignored generated outputs
+`anemone-kernel/src/{kconfig_defs.rs,platform_defs.rs,boot_defs.rs,network_defs.rs}`；这些文件不得手工编辑或作为
+canonical evidence提交。`kconfig`仍是ignored developer-local input，不在tracked write set；Stage 2 build通过
+selected preset解析`conf/.defconfig`。
+
+**Checkpoint 2B contract/docs closure：**
+
+- `docs/src/contracts/configuration/system-target.md`；
+- `docs/src/contracts/net/{index.md,interface-domain.md,control-plane.md}`、`docs/src/contracts.md`、
+  `docs/src/SUMMARY.md`；
+- `docs/src/rfcs/net-udp/{implementation.md,index.md,invariants.md}`；
+- `docs/src/devlog/transactions/{2026-07-29-net-udp.md,index.md}`、
+  `docs/src/devlog/2026-07-20_to_2026-08-02.md`、`docs/src/rfcs.md`。
+
+current-contract文件只在2B final cutover checkpoint写入；2A和2B implementation中途保持只读。若closure日期跨出
+当前biweekly窗口，只能改当时current devlog，不回写旧timeline。没有confirmed design issue时不创建
+`tracking-issues.md`或register条目。
+
+**Validation-only inputs（只读）：**
+
+- `Justfile`、`scripts/xtask/src/main.rs`、`scripts/run-user-test-{rv64,la64}.sh`；
+- `conf/build-presets/qemu-virt-{rv64,la64}-release.toml`、`conf/platforms/qemu-virt-{rv64,la64}.toml`、
+  `conf/rootfs/pretest-{rv64,la64}.toml`；
+- caller-selected `etc/preliminary/images/sdcard-{rv,la}.img`只作为只读master；wrapper生成的worktree-local runtime
+  disk/log是validation output，不是source write set；
+- vendored `anemone-kernel/crates/anemos/smoltcp/**`、`anemone-abi`、device/driver/provider、VFS/syscall/iomux/epoll、
+  rootfs/app test content、final-harness scripts/config与其它RFC/current contract保持只读。
+
+对manifest外tracked file的任何修改都是write-set expansion。formatter触及的既有风格diff按AGENTS规则可以保留，
+但必须在checkpoint review中单列；owner/public API/shared contract/ABI/acceptance变化不能按formatter例外处理。
+
+#### 6.2.8 验证
+
+**Checkpoint 2A：**
+
+1. `cargo test -p anemone-net-api -p anemone-smoltcp-stack`；确认existing stack unit、`bounded_progress`、
+   `frame_path`、`multi_instance`、`multi_interface`、`udp_topology`和net-api doctest数量/结果不退化；
+2. `cargo test -p anemone-smoltcp-stack --no-default-features --no-run`与
+   `cargo check -p anemone-smoltcp-stack --no-default-features`；
+3. repository-owned `just xtask-test`与`just fmt kernel --check`；authored file不得增加formatter diff，既有vendored
+   baseline单列；
+4. `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`与对应LA64 command；只证明split后的
+   双架构compile integration，不外推runtime；
+5. `git diff --summary`、callsite/visibility/source audit、`git diff --check`与final change review。2A不运行QEMU/
+   LTP，不更新contract，完成后独立Closed。
+
+**Checkpoint 2B focused/config/host：**
+
+1. `just xtask-test`必须覆盖network section absent/present、unknown/invalid field、IPv4/prefix/gateway/interface
+   validation、preset/tuple同一resolved target、generated network defs exact shape、clean output清单和Platform/rootfs/
+   Preset rejection；
+2. `cargo test -p anemone-net-api -p anemone-smoltcp-stack`新增/保持：`127.0.0.1`与另一`127/8`destination、
+   self-external address走selected local port、connected/default selection projection、bounded full/recovery、local
+   ingress finite progress、retire cleanup和external isolation；
+3. `cargo test -p anemone-smoltcp-stack --no-default-features --no-run`、
+   `cargo check -p anemone-smoltcp-stack --no-default-features`、
+   `cargo check -p anemone-smoltcp-stack --no-default-features --features kunit`与kernel dependency feature audit，
+   证明no-std KUnit surface可单独编译，ordinary kernel不携带conditional validation facade；
+4. kernel owner KUnit覆盖route precedence、explicit-source matrix、missing interface fail-closed前的pure validation、
+   one-time control publication、late wake/shutdown predicate和local queue finite progress；
+5. `just fmt kernel --check`、`git diff --check`、new-file whitespace、manifest-file-existence、generated-file
+   provenance/clean、source bypass audit和最终change review。
+
+**Checkpoint 2B build/runtime：**
+
+1. 使用fresh generated output分别运行RV64/LA64 release build：
+   `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`与
+   `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`；检查本次`network_defs.rs`确实来自各自
+   selected SystemTarget，不使用stale projection；
+2. 使用caller-selected preliminary RV64 master运行
+   `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-udp-stage2-rv64.log`。必须实际执行
+   control-plane/local-worker KUnit，证明`127.0.0.1`、另一`127/8`与self-external local handoff都经production
+   selection、protocol egress、bounded local link、后续normal ingress完成，并保持真实VirtIO active attach与strict
+   `filesystem -> network -> device -> PowerOff`；
+3. 不为Stage 2修改`profile.txt`或增加用户态UDP测试；syscall尚未生效。现有pretest其它PASS/FAIL只作regression
+   observation，不能替代focused KUnit或声明network LTP；
+4. LA64 runtime、SMP > 1、remote external UDP/frame traffic、UDP syscall/UAPI、VFS/iomux、virtio-pci functional
+   traffic、hardware、full network LTP和final harness均为Not Run。LA64 build不能外推LA64 runtime；Stage 5的
+   mandatory LA64同源用户测试不因本stage缩减。
+
+docs closure最后运行`mdbook build docs`和whitespace/link/heading检查。若sandbox内repository build命中已知
+lwext4 `Bad system call`/`SIGSYS`，只有同一command在sandbox外PASS才能分类为environmental；不得改成bare cargo
+或删减selected target输入。
+
+#### 6.2.9 停止与退出条件
+
+任一checkpoint发现下列情况立即停止：module split扩大production public surface或移动semantic owner；SystemTarget
+需要Platform/rootfs/Preset fallback；control plane/Stack各自决定route；`127/8`或self-external只能靠Socket fast
+path/direct injection；local queue无法以有限pump/wake恢复；需要vendored smoltcp、第二Stack、unbounded storage、
+busy-poll或non-conditional validation facade。保持R0的private API/file/capacity修正可走Route Correction并更新本文；
+owner、contract classification、visible semantics或acceptance改变则进入Target Renegotiation Gate。
+
+2A退出要求行为保持split、全部2A验证和review通过，source以独立checkpoint关闭且2B仍未Active。2B退出要求typed
+config、one-time control publication、Stack projection、production local worker、三类RV64 local KUnit、双架构build、
+source audit、final review与`NET-UDP-CONTROL-CUTOVER`全部在final exact code满足；conditional bridge带Stage 3删除
+条件，current contract与status同步。Stage 2随后独立Closed，但Stage 3仍是Outline；`2 -> 3`resolution不得由2B
+closure自动执行。
 
 ### 6.3 Stage 3 Outline — Endpoint/socket nonblocking vertical slice
 
@@ -1035,7 +1330,53 @@ Resolution结果：
 - 本resolution保持R0 target、owner、ABI、Contract Impact与acceptance boundary，不增加RFC修订，不更新current
   contract或register。Stage 1为Ready / Not Active；Stage 2 resolution与任何implementation均未授权。
 
-## 9. 旁路审计清单
+## 9. Stage 1 -> Stage 2 Implementation Resolution Gate — Completed 2026-07-29
+
+前置条件：
+
+- Stage 1已按6.1独立Closed，transaction保存final diff、review、host/no-default、RV64 compile/runtime和
+  `NET-UDP-DOMAIN-CUTOVER`证据；
+- current `NETDEV-LIFE-001`、`NET-ATTACH-001`和`NET-IFACE-DOMAIN-001`已经与live source一致；
+- R0 target、SystemTarget/current Network contracts、register与Stage 0 topology conclusion没有漂移。
+
+只读preflight：
+
+- 读取Stage 1 exact source/commit、`net::{mod,domain,worker}`、Stack/local-link/pump/UDP candidate、current contract、
+  register与transaction，确认global Stack access、logical/protocol identity、attach rollback和shutdown边界；
+- 读取live SystemTarget loader/resolver、kernel build generated-def materializer、clean、selected QEMU SystemTarget/
+  Platform/Preset/KConfig和双架构wrapper，确认network deployment的唯一配置owner与runtime input path；
+- 审计module pressure：`domain.rs`已混合logical/Stack/KUnit，`worker.rs`混合control与provider progression，
+  stack root/pump同时承载external与dormant local/UDP role，build root同时承载orchestration和defs rendering；
+- 核对Stage 0 local candidate能否由production DomainStack和local worker直接消费，是否需要vendored/shared seam、
+  新probe或target变化；核对`127/8`、self-external local route、bounded recovery与conditional KUnit proof是否可达。
+
+解析输出：
+
+- 采用“2A same-owner split -> 2B atomic static-control/loopback cutover”，不建立新的probe或transitional current
+  contract；2A不改变behavior，2B才一次发布config/control plane/local path；
+- SystemTarget使用optional single-external `[network.ipv4]` typed input；ordinary QEMU RV64/LA64 target显式声明
+  `eth0 10.0.2.15/24`和`10.0.2.2` gateway，loopback保持implicit，missing/mismatch fail closed且无fallback；
+- control plane是route/source/interface唯一policy owner，Stack只保存address/default-route/AnyIP projection；
+  production local worker复用bounded pump/control，KConfig只增加真实独立的packet capacity和IP MTU；
+- Stage 0 candidate、conditional facade和no-default object fence足以形成production route；只需在
+  `anemone-net-api`增加IPv4 address/CIDR value，不需要vendored smoltcp change或generic protocol trait；
+- Stage 2 cutover proof只覆盖control-plane/local-path closure；真实remote external UDP仍由Stage 5 final
+  acceptance强制证明，不从本stage的Not Run降低或外推；
+- authoritative Stage 2 Ready、两个checkpoint、`NET-UDP-CONTROL-CUTOVER`、audit/validation/stop boundary与exact
+  manifest已经冻结在[6.2](#62-stage-2-ready--static-control-plane与production-loopback)。
+
+授权与文档结果：
+
+- 本resolution保持R0 target、state owner、ABI/visible semantics、Contract Impact分类与acceptance boundary；只是
+  解析implementation preference、module layout、stage order、validation和cutover arrangement，因此不增加R1、
+  tracking issue或register条目；
+- current contracts、source、SystemTarget/KConfig/generated defs均未修改。只同步canonical RFC/transaction/
+  navigation/devlog状态并运行docs gate；文档/source audit不能冒充未来2A/2B build、host、KUnit或runtime evidence；
+- Stage 2为**Ready / Not Active**。下一步只能在新的明确授权下激活Checkpoint 2A，并先在transaction重新核对
+  branch/HEAD、dirty state、live owners和2A frozen manifest；不得由本resolution修改source、执行2B/cutover、
+  更新current contract、解析Stage 3或把conditional KUnit写成用户态UDP能力。
+
+## 10. 旁路审计清单
 
 后续每个Ready stage都必须按实际scope细化本清单；至少持续检查：
 
@@ -1051,7 +1392,7 @@ Resolution结果：
 - `cfg(test)`/feature/log/diagnostic fields，确认validation-only state不驱动production behavior；
 - temporary bridge/fallback/legacy owner，确认有日志/注释、唯一behavior authority和明确删除gate。
 
-## 10. 可观测性清单
+## 11. 可观测性清单
 
 实现期可观测性服务于owner、handoff、failure与validation，不建立第二truth：
 
@@ -1064,7 +1405,7 @@ Resolution结果：
 - validation marker必须标注host、RV64 agent-run、LA64 user-run与Not Run，不从一个轨道生成另一轨道结论；
 - production per-packet dump、长期queue mirror和unbounded日志不作为默认方案。
 
-## 11. 停止边界
+## 12. 停止边界
 
 以下情况继续在implementation层解析，不重开target：private type/方法名、module placement、lock/actor/worker、
 queue或allocator形状、port选择算法、capacity数值、test case拆分、vendored narrow seam与Stack-private aggregate
@@ -1082,7 +1423,7 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 若issue追查后只剩Safe级实现偏好，不继续为“更通用”而扩展设计；按当前Ready gate执行并把未来可能性留给
 真实consumer或后续RFC。
 
-## 12. 实现期反馈记录
+## 13. 实现期反馈记录
 
 - `2026-07-29`：Checkpoint 0A / Execution Fact。真实UDP path确认naive shared-engine topology缺少
   selected-interface admission seam；wrong-interface-first可消费queue并通过错误provider egress。结论保持R0，
@@ -1110,18 +1451,24 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   acceptance变化。`NET-UDP-DOMAIN-CUTOVER`原子生效，Stage 1 Closed；Stage 2仍Outline且`1 -> 2`gate未执行。
   精确source、review、validation与Not Run边界见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-1-checkpoint-1a-implementation-validation-and-domain-cutover)。
+- `2026-07-29`：`1 -> 2` Implementation Resolution / Module and Route Selection。live source确认Stage 0 local-link
+  candidate可由Stage 1 DomainStack直接激活，不需要新probe或vendored change；同时确认kernel domain/worker、stack
+  root/pump和xtask build materializer都需要在加入新职责前做same-owner split。resolution把Stage 2解析为2A
+  split-only与2B atomic static-control/loopback cutover，保持R0 target/owner/ABI/Contract Impact/acceptance不变；
+  Stage 2达到Ready / Not Active。精确preflight见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-1---stage-2-implementation-resolution-gate)。
 
-## 13. Target Renegotiation Gates
+## 14. Target Renegotiation Gates
 
 当前没有proposed gate。只有真实接口、代码、测试或集成证据表明R0 target代价/可行性需要重新判断时才增加。
 提案不等于批准；决定前当前stage保持停止且不得cut over。correctness invariant不能作为reduced target妥协项。
 
-## 14. Write Set扩展记录
+## 15. Write Set扩展记录
 
-当前没有扩展。Stage 1按冻结manifest完成；没有修改shared/vendored API、build configuration、Stage 2 surface或
-其它owner。future Outline只有达到Ready后才形成新的write set。
+当前没有Active-stage扩展。Stage 1按冻结manifest完成；`1 -> 2`resolution为future Outline首次解析，6.2.7现在
+冻结新的Stage 2 manifest但尚未授权写入。2A/2B Active后任何manifest外tracked write仍须先上报。
 
-## 15. 结构维护记录
+## 16. 结构维护记录
 
 Stage 0在0B Feedback Correction中执行same-owner private module split：ordinary Stack owner位于
 `src/stack/mod.rs`，conditional facade/DTO/conversion位于`src/stack/host_validation.rs`；0C确认该拆分长期保留到
@@ -1129,3 +1476,8 @@ Stage 1已经由production initial-domain唯一Stack接管ordinary aggregate can
 host-only control/observation，因此conditional facade继续只服务长期deterministic matrix，待Stage 2/3真实
 control-plane/Endpoint consumer出现时按方法逐项删除或保留；它仍不进入kernel dependency。拆分没有改变public
 production API、owner或shared contract。
+
+`1 -> 2`resolution确认继续向现有flat files加入职责会扩大proof surface，因此把2A冻结为独立split-only
+checkpoint：kernel domain按membership/Stack composition拆分，worker按control/external progression拆分，stack
+root/pump按interface/UDP/local progression拆分，xtask build把generated-def rendering移入child module。该决定只
+改变同owner physical layout，不建立新facade、public API或contract；是否成功必须由2A final diff和validation证明。
