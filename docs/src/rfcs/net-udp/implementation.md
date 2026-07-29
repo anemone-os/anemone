@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** Draft / Stage 0 Ready / Stage 1-5 Outline / 全部未授权
+**状态：** R0 / Stage 0 Active / Checkpoint 0A Closed / 0B-0C Not Authorized / Stage 1-5 Outline
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -9,17 +9,16 @@
 [Poll wait / source registration](../../contracts/iomux/poll-wait.md)、
 [Epoll protocol](../../contracts/epoll/protocol.md)、
 [System Target](../../contracts/configuration/system-target.md)
-**当前修订：** Draft
-**事务日志：** None
+**当前修订：** R0
+**事务日志：** [2026-07-29 net-udp](../../devlog/transactions/2026-07-29-net-udp.md)
 
-> 本文是Public Draft的canonical实施顺序、stage maturity、probe、验证和resolved write-set proposal。它补齐了
-> 第一个可执行阶段的Ready定义，但不接受R0、不创建transaction、不修改current contract，也不授权Stage 0
-> 进入Active。任何源码实施前仍须先完成R0 review、建立transaction、重新核验live source与dirty worktree，
-> 并由用户或对应编排协议独立授权Stage 0。
+> 本文是R0的canonical实施顺序、stage maturity、probe、验证和resolved write set。R0已由public review接受，
+> transaction已经建立；本轮独立授权覆盖的Stage 0 Checkpoint 0A已经关闭。Stage 0本身尚未关闭，当前停止并
+> 等待0B独立授权；Stage 0不修改current contract。
 
 ## 1. 计划角色与 authority
 
-本计划把[Public RFC Draft](./index.md)和[目标与不变量](./invariants.md)已收口的proposed target转化为可滚动解析的
+本计划把[R0 accepted target](./index.md)和[目标与不变量](./invariants.md)转化为可滚动解析的
 实施路径。它不得重新选择以下 target：initial domain 内唯一 global protocol `Stack`、domain-local logical
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
@@ -129,7 +128,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 
 | Stage | 成熟度 | 概括目的 | 前置依赖 | Contract 状态 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Multi-interface UDP topology probe | Ready / 未授权 | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
+| Stage 0 — Multi-interface UDP topology probe | Active；Checkpoint 0A Closed；0B/0C未授权 | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Outline | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed | 候选`NETDEV-LIFE-001`/`NET-ATTACH-001` Refine与`NET-IFACE-DOMAIN-001` Introduce；解析前均Pending |
 | Stage 2 — Static control plane与production loopback | Outline | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed | 候选`STM-TARGET-001` Refine与`NET-CONTROL-PLANE-001` Introduce；是否本stage cutover由1->2 gate决定 |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
@@ -324,7 +323,7 @@ capacity数值或精确命令；这些只在对应stage变为Ready时冻结。
 
 ### 7.1 阶段状态与 activation preflight
 
-**成熟度：** Ready / 未授权。Ready只表示本节已完整解析，不表示可以开始修改源码。
+**成熟度：** Active；Checkpoint 0A Closed。0B与0C仍未授权，当前不得继续Stage 0执行。
 
 进入Active前必须同时满足：
 
@@ -351,7 +350,7 @@ ingress。
 `NET-STACK-PUMP-001`。本probe不得以per-interface Linux Endpoint/binding truth、Socket fast path、unbounded queue、
 success后source-drop、fake UDP encoder/decoder或第二route table换取PASS。
 
-**Contract Impact：** None。所有current contracts保持Effective；全部Draft candidate保持Not Effective。
+**Contract Impact：** None。所有current contracts保持Effective；全部R0 candidate保持Pending / Not Effective。
 
 **Non-goals：** kernel functional integration、production cross-crate API、syscall/File/iomux、port0 allocator、
 完整bind conflict matrix、exact Linux errno、SystemTarget/KConfig、production VirtIO、fragment gate、runtime
@@ -378,6 +377,12 @@ shutdown、QEMU或contract cutover。独立integration test所需的feature-gate
   semantics、更新Stage 0 definition后再review；不能继续按旧假设修改Stack；
 - 若只能通过packet injection、raw socket或手工UDP packet构造重现，说明fixture没有覆盖真实Endpoint路径，
   0A不能关闭。
+
+**关闭记录：** 2026-07-29，0A以真实smoltcp UDP socket enqueue/egress路径稳定复现wrong-interface-first会
+消费共享engine queue并从错误provider发包；ARP输入只用于准备普通Ethernet neighbor，没有注入或手工构造UDP
+packet。风险归类为candidate egress-admission seam，不是current per-netdev production缺陷。精确证据见
+[transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0a-implementation-source-audit-and-closure)。
+预期错误行为测试按0A退出条件保留；0B形成正确路径时必须删除或改写，且本记录不授权进入0B。
 
 ### 7.4 Checkpoint 0B — Stack-private production-shaped candidate
 
@@ -724,10 +729,11 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 
 ## 12. 实现期反馈记录
 
-当前没有execution feedback。执行开始后只追加：
-
-- `YYYY-MM-DD`：来源、Execution Fact / Route Correction / Target Renegotiation分类、是否保持R0、代码处置、
-  本文/RFC/Contract Impact/tracking/register写回位置与transaction链接。
+- `2026-07-29`：Checkpoint 0A / Execution Fact。真实UDP path确认naive shared-engine topology缺少
+  selected-interface admission seam；wrong-interface-first可消费queue并通过错误provider egress。结论保持R0，
+  不是production baseline defect；0A characterization保留到0B正确路径形成时删除或改写。没有Route Correction、
+  Target Renegotiation、Contract Impact、tracking issue或register写回；精确source/review/validation证据见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0a-implementation-source-audit-and-closure)。
 
 ## 13. Target Renegotiation Gates
 

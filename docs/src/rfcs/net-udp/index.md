@@ -1,11 +1,11 @@
 # RFC-20260729-net-udp
 
-**状态：** Draft / Public Document Review
-**修订：** Draft
+**状态：** Accepted for Implementation / Stage 0 Active / Checkpoint 0A Closed / 0B Not Authorized
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
 **领域：** network / socket / VFS / iomux / build configuration
-**事务日志：** None
+**事务日志：** [2026-07-29 net-udp](../../devlog/transactions/2026-07-29-net-udp.md)
 **影响契约：** [Network](../../contracts/net/index.md)中的`NETDEV-LIFE-001`、`NET-ATTACH-001`、
 `NET-BOUNDARY-001`、`NET-FRAME-OWN-001`、`NET-FRAME-PROGRESS-001`、`NET-STACK-PUMP-001`；
 [Opened-description](../../contracts/task/opened-description-lifecycle.md)中的`OPENED-DESC-001..003`；
@@ -16,13 +16,11 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** None（当前没有已确认的文档层 blocker；实现技术路线按滚动stage后延）
-**下一步：** 完成公共文档review；之后独立决定是否接受R0并建立transaction。Stage 0虽已解析为Ready，
-但未获得执行授权
+**下一步：** 等待独立Checkpoint 0B启动授权；不得由0A关闭自动进入0B
 
-本目录是`net-udp`公共提案与后续accepted target的canonical source。当前仍处于Draft review，不是accepted
-target、current contract或implementation authority。[迁移实施计划](./implementation.md)已经把第一个可执行阶段
-解析为Ready，但本文件和Ready状态都不授予实现或contract cutover权限；任何源码实施仍须先接受R0、建立
-transaction并获得独立Stage 0启动授权。
+本目录是`net-udp` R0 accepted target的canonical source。R0不覆盖current contract；候选contract仍须在后续
+implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)已关闭Stage 0
+Checkpoint 0A；Stage 0本身尚未关闭，0B及后续checkpoint/stage仍未授权。
 
 ## 摘要
 
@@ -101,7 +99,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0 Ready；Stage 1-5 Outline；全部未授权
+- [迁移实施计划](./implementation.md)：Stage 0的Checkpoint 0A已关闭；Stage 1-5 Outline；0B及后续未授权
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -123,7 +121,9 @@ RFC target：
 
 ## 修订记录
 
-当前没有accepted revision。第一次target接受后才建立`R0`；Draft review中的文字修改不进入修订表。
+| 修订 | 日期 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| R0 | 2026-07-29 | 接受initial domain/global Stack、logical interface/control plane、Socket/Endpoint owner fence、IPv4 unconnected UDP能力包络与五项用户可见决定；全部候选contract保持Pending | [R0 review与Stage 0 activation](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---r0-public-review-and-stage-0-activation-preflight) |
 
 ## 方案
 
@@ -360,7 +360,7 @@ hardware、virtio-pci、final harness 或完整 LTP。
 
 ## R0 前已关闭的 Target 决策
 
-下列用户可见 target / contract delta 已在本 Draft 的 normative sections 中关闭，implementation route 不得静默
+下列用户可见 target / contract delta 已在R0 normative sections中关闭，implementation route 不得静默
 改变：
 
 1. 本地产生并发往本机 external-interface address 的 datagram 进入 domain-local software delivery 与正常 ingress，
@@ -383,7 +383,7 @@ Renegotiation Gate。
 implementation feedback boundary；不让任何新语义立即 effective，也不授权实现或 contract cutover。current
 contracts 在实际 cutover 前继续有效。
 
-本Public Draft的target / contract proposal已经完成自洽收口，可进入公共文档review：
+R0 public review确认target / contract proposal已经自洽收口：
 
 - 五项已关闭的用户可见决定与[目标与不变量](./invariants.md)一致且没有重新悬空；
 - `NETDEV-LIFE-001`与`NET-ATTACH-001`均固定为Refine，新logical-interface/control-plane/socket-endpoint
@@ -392,12 +392,12 @@ contracts 在实际 cutover 前继续有效。
   `STM-TARGET-001`的真实Refine delta。
 - 每份mutable state、跨owner handoff、linearization、failure与cleanup均已在目标与不变量中声明唯一owner。
 
-Implementation readiness proposal已经完成：
+Implementation readiness已经完成：
 
 - [迁移实施计划](./implementation.md)只把Stage 0 multi-interface UDP topology probe完整解析为Ready；
-  Stage 1-5保持Outline，且任一stage都未获得执行授权。
+  Stage 1-5保持Outline；当前独立授权覆盖的Stage 0 Checkpoint 0A已经关闭，0B尚未授权。
 
-R0 可以把 concrete types、内部 API、module placement、lock/worker/queue、capacity、port algorithm、loopback
+R0把 concrete types、内部 API、module placement、lock/worker/queue、capacity、port algorithm、loopback
 medium 和 stage-later probe 后延，只要对应 Outline 明确保护本 target、contract IDs、owner、ABI 与 acceptance
 boundary。实现证据若只改变内部路线，更新 implementation/transaction；若要求改变上述 target、owner、ABI、
 contract 或 claim boundary，必须在 cutover 前停止并返回 RFC review / Target Renegotiation Gate。
@@ -452,6 +452,6 @@ fallback或provenance系统不能证明实际网络正确，反而扩大owner和
 
 ## 收口
 
-当前是Public Draft，未接受、未实现、未cut over，全部runtime/build验证均`Not Run`。target正文、五项R0
-语义决定、现有network contract分类、SystemTarget baseline提取以及首个Ready probe均已形成。后续先完成公共
-文档review，再独立决定是否接受R0并建立transaction；Ready不自动获得接受或执行授权。
+R0已经接受但尚未实现或cut over。Checkpoint 0A已用真实smoltcp UDP路径刻画candidate engine
+egress-admission seam并写入transaction；RV64 compile integration通过，rootfs、QEMU、LTP、双架构runtime与
+用户可见UDP能力均`Not Run`。Stage 0尚未关闭，当前停在0B独立授权门前。

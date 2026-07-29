@@ -1,13 +1,13 @@
 # net-udp 目标与不变量
 
-**状态：** Draft
+**状态：** R0 Accepted Target / Not Cut Over
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
-本文定义`net-udp` Public Draft的候选contract delta、target invariants与RFC-local proof obligations。它不是
-accepted target 或 current contract；当前 effective 规则仍以 `docs/src/contracts/` 及已完成 cutover 的 source
-为准。下文新增ID只是Draft candidate，只有R0接受并完成相应cutover后才能进入current contract。
+本文定义`net-udp` R0的accepted contract delta、target invariants与RFC-local proof obligations。它不是current
+contract；当前 effective 规则仍以 `docs/src/contracts/` 及已完成 cutover 的 source为准。下文新增ID仍是
+Pending candidate，只有完成相应implementation cutover后才能进入current contract。
 
 本文不承担 implementation plan。concrete Rust type、internal API、lock primitive、worker、queue、buffer、
 algorithm、module path、write set、probe 与验证命令均由[迁移实施计划](./implementation.md)按滚动阶段解析。
@@ -23,10 +23,10 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 
 ## Contract Impact
 
-下表是 Draft target 的最小 contract closure。current links指向当前effective规则；SystemTarget相关规则已从
+下表是 R0 target 的最小 contract closure。current links指向当前effective规则；SystemTarget相关规则已从
 关闭的RFC与cutover history提取为本次触及的最小current baseline，没有批量迁移整个build/config领域。
 
-| Contract ID | 变化 | 当前规则 | Draft Target 摘要 | 生效 Gate |
+| Contract ID | 变化 | 当前规则 | R0 Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
 | `NET-BOUNDARY-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence) | 保持frame shared API / kernel / stack / driver依赖方向和private object fence；不把Endpoint/UDP规则挤入frame-only ID | 全程保持 |
 | `NET-FRAME-OWN-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-own-001--frame-backing只有一个访问owner) | external frame ownership与DMA/CPU handoff不变；loopback另受同等唯一packet-owner义务约束 | 全程保持 |
@@ -47,24 +47,24 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 | `STM-TARGET-001` | Refine | [Active](../../contracts/configuration/system-target.md#stm-target-001--systemtarget-是-bootdeploy-contract) | SystemTarget增加first-version static IPv4 deployment；不把network value移入Platform/rootfs/Preset | SystemTarget network-schema cutover |
 | `STM-RESOLVE-001` | Preserve | [Active](../../contracts/configuration/system-target.md#stm-resolve-001--resolved-build-是不可手写的派生-snapshot) | resolver只物化本次typed input，不建立runtime deployment truth或兼容fallback | 全程保持 |
 
-`NETDEV-LIFE-001` 当前把external netdev publication identity与ifindex/name共同交给`device/net`。Draft target采用
+`NETDEV-LIFE-001` 当前把external netdev publication identity与ifindex/name共同交给`device/net`。R0 target采用
 最小拆分：原ID继续描述external NIC publication transaction，但不再声称拥有domain-local ifindex/name；新的
 `NET-IFACE-DOMAIN-001`承接logical-interface namespace。因为external publication identity/facts/capability与
-publication-last、failure isolation仍由原owner和原协议延续，本Draft固定将该变化分类为Refine而不是Replace；
+publication-last、failure isolation仍由原owner和原协议延续，R0固定将该变化分类为Refine而不是Replace；
 不能通过并行registry或兼容字段同时保留两份ifindex/name truth。
 
-`NET-ATTACH-001`继续由kernel attach authority拥有完整external NIC admission协议。本Draft将它分类为Refine：
+`NET-ATTACH-001`继续由kernel attach authority拥有完整external NIC admission协议。R0将它分类为Refine：
 原有publication-last、mapping rollback、failure isolation、shutdown admission与provider retention继续有效，新增
 logical-interface admission并把mapping destination改为initial domain/global Stack。把这段handoff另建为并列
 协议会分裂同一次attach transaction，因此不采用Preserve加第二attach owner的表达。
 
 SystemTarget三项已经提取到`docs/src/contracts/configuration/system-target.md`。`STM-OWNER-001`与
-`STM-RESOLVE-001`保持current baseline；`STM-TARGET-001`当前仍不包含network deployment schema，本Draft只在
+`STM-RESOLVE-001`保持current baseline；`STM-TARGET-001`当前仍不包含network deployment schema，R0只在
 未来SystemTarget network-schema cutover对其Refine。Platform/KernelConfig/Preset的必要直接边界由同页owner
 table覆盖，不额外批量迁移System Target Model的其它RFC-local invariant。
 
 下文`NET-IFACE-DOMAIN-001`、`NET-CONTROL-PLANE-001`、`NET-PROTOCOL-BOUNDARY-001`、
-`NET-SOCKET-ENDPOINT-001`和`NET-SOCKET-WAIT-001`直接对应候选current-contract条目。其它`NET-UDP-*`标题是Draft target/proof ID；其中
+`NET-SOCKET-ENDPOINT-001`和`NET-SOCKET-WAIT-001`直接对应候选current-contract条目。其它`NET-UDP-*`标题是R0 target/proof ID；其中
 bind、datagram和capability规则在cutover时按共同owner/proof surface聚合进`NET-UDP-TRANSACTION-001`，不为每条
 局部规则新建一份contract文档。
 
@@ -459,9 +459,9 @@ RV64结果外推LA64；unsupported flag静默改变用户可见行为。
 
 ## RFC-local Invariants
 
-- RFC前私有定位只作为历史讨论输入；公共Draft形成后，target修正折回`index.md`/本文件，私有材料不成为
+- RFC前私有定位只作为历史讨论输入；公共R0形成后，target修正折回`index.md`/本文件，私有材料不成为
   公共链接或并列target authority。
-- Draft/accepted-before-cutover不得把global Stack、logical interface、UDP syscall或SystemTarget network schema
+- accepted-before-cutover不得把global Stack、logical interface、UDP syscall或SystemTarget network schema
   写成current fact；current per-netdev wiring和existing contracts继续有效。
 - implementation probe只能验证route、Stack integration、loopback handoff、readiness/copy等假设；probe code不得
   在target/contract未接受时自然沉淀为长期public API、第二owner或compatibility bridge。
@@ -536,7 +536,7 @@ RV64结果外推LA64；unsupported flag静默改变用户可见行为。
 
 ## 锁序与生命周期规则
 
-本Draft不冻结lock primitive或完整lock order，但冻结以下不可违反的边界：
+R0不冻结lock primitive或完整lock order，但冻结以下不可违反的边界：
 
 - Stack owner外不得持有或暴露Stack-private lock；所有protocol mutation经过唯一access window。
 - provider/driver callback不得在持有protocol-owner或device-wide lock时执行可能重入的cross-owner operation。
@@ -619,7 +619,7 @@ claim owner和最低证据类别，不成为执行计划。
 
 ## 完成标准
 
-Draft target可以进入R0 acceptance review的前提：
+R0 acceptance review已经确认：
 
 - 本文五项R0 target decision已关闭并折回normative sections；
 - Contract Impact已完成最小current baseline提取，并固定`NETDEV-LIFE-001`与`NET-ATTACH-001`均为Refine；

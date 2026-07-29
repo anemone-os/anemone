@@ -20,6 +20,7 @@ smoltcp = { path = "../anemos/smoltcp", default-features = false, features = [
     # when smoltcp supports a socketless Ethernet interface or an accepted
     # production socket feature replaces it.
     "socket-raw",
+    "socket-udp",
 ] }
 
 [[test]]
@@ -35,4 +36,9 @@ required-features = ["host-test"]
 [[test]]
 name = "multi_instance"
 path = "tests/multi_instance.rs"
+required-features = ["host-test"]
+
+[[test]]
+name = "udp_topology"
+path = "tests/udp_topology.rs"
 required-features = ["host-test"]
