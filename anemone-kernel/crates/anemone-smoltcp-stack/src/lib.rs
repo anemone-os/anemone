@@ -14,11 +14,8 @@ mod udp;
 pub use pump::PumpBudget;
 pub use stack::{Ipv4ConfigError, PumpError, Stack};
 
-#[cfg(feature = "kunit")]
-pub use stack::{
-    KunitEndpointCreateError, KunitEndpointId, KunitReceivedDatagram, KunitRetireError,
-    KunitSendError,
-};
+#[cfg(feature = "udp-validation-probe")]
+pub use stack::udp_probe;
 
 #[cfg(feature = "host-test")]
 pub use stack::{

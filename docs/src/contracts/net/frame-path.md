@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/crates/{anemone-net-api,anemone-smoltcp-stack}`、`anemone-kernel/src/{device/net,driver/net,net}`
 **依赖：** 本页内部依赖按条目声明
 **Pending Successor：** None
-**最后核验：** 2026-07-29
+**最后核验：** 2026-07-30
 
 ## 状态与能力所有权
 
@@ -32,20 +32,27 @@ smoltcp object，也不拥有runtime registry。stack只依赖shared API与smolt
 driver/device停在frame/link边界，不依赖endpoint、socket或protocol object。descriptor、DMA address、VirtIO
 header、hardware queue token、driver backing、smoltcp object identity与Linux readiness不得越过各自object fence。
 
+conditional validation seam同样服从依赖方向：不拥有或运行某一test harness的crate不得让feature、type、method或
+module理解该harness vocabulary。确需跨crate验证时，下层只暴露按能力命名的artifact-neutral seam，ordinary
+dependency不启用它，并为临时probe声明正式consumer出现后的替换/删除gate。`anemone-net-api`不承载具体harness
+feature、runtime或test-control type。
+
 **Owner：** `anemone-net-api`拥有共享semantic surface；runtime state仍由provider、netdev、stack与attach
 authority分别唯一拥有。
 
 **违反表现：** driver公开实现`smoltcp::phy::Device`；shared API返回concrete kernel/smoltcp object；kernel
-按smoltcp handle决策；API crate形成第二个runtime registry或解释Linux errno/readiness。
+按smoltcp handle决策；API crate形成第二个runtime registry或解释Linux errno/readiness；kernel KUnit等具体
+harness vocabulary进入不拥有该harness的stack/shared API crate，或临时probe在正式consumer出现后继续作为
+production capability。
 
 **验证 / Enforcement：** crate dependency/public-surface audit；host gate以真实stack和正式deterministic
 provider完成ownership、exhaustion、deadline与双实例matrix；non-host base build无packet injection或endpoint
-construction。
+construction；source audit确认具体harness vocabulary停在其owner，conditional probe按能力命名并带退出条件。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
 **当前来源：** [Network Frame Path transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)的
-`NFP-FINAL-CUTOVER`。
+`NFP-FINAL-CUTOVER`与[net-udp Stage 2 post-close boundary correction](../../devlog/transactions/2026-07-29-net-udp.md)。
 
 ## NET-FRAME-OWN-001 — frame backing只有一个访问owner
 

@@ -8,17 +8,13 @@ use crate::{local_link::LocalPort, udp::UdpEndpoints};
 mod host_validation;
 mod interfaces;
 mod udp_ops;
+#[cfg(feature = "udp-validation-probe")]
+pub mod udp_probe;
 
 #[cfg(feature = "host-test")]
 pub use host_validation::{
     HostEndpointCreateError, HostEndpointId, HostEndpointObservation, HostLocalLinkObservation,
     HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
-};
-
-#[cfg(feature = "kunit")]
-pub use udp_ops::{
-    KunitEndpointCreateError, KunitEndpointId, KunitReceivedDatagram, KunitRetireError,
-    KunitSendError,
 };
 
 pub(crate) use interfaces::{InterfaceEntry, PumpOrder};

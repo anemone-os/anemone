@@ -790,6 +790,62 @@ Pending。LA64 runtime、SMP > 1、remote external UDP、UDP syscall/UAPI、VFS/
 network LTP与final harness均Not Run。Stage 2 Closed，并在进入`2 -> 3`resolution前停止；精确命令、review与
 claim boundary见[transaction](../../devlog/transactions/2026-07-29-net-udp.md)。
 
+### 6.2A Stage 2 post-close boundary correction — Closed
+
+Stage 2关闭后的periodic engineering review发现，item 10把kernel `kunit`直接传播为stack crate的同名feature，
+并让stack的conditional type/method理解具体KUnit harness；这重复了net-frame-path已经Neutralized的`NFP-005`。
+同一review还确认kernel测试应与最低共同semantic owner共置，而不是只因使用KUnit就建立独立`kunit.rs`。这些反馈不
+改变R0 target、runtime owner、ABI、visible semantics、acceptance或Stage 2既有proof，因此不增加RFC revision，
+也不重新打开Stage 2；本节是进入`2 -> 3`resolution前独立关闭的behavior-preserving boundary correction。
+
+**实现与生命周期：**
+
+1. kernel `kunit`只启用stack的artifact-neutral `udp-validation-probe`；`anemone-smoltcp-stack`和
+   `anemone-net-api`不得出现KUnit vocabulary。stack把conditional DTO、错误转换和create/send/receive/retire
+   入口集中到`stack::udp_probe` namespace；ordinary `udp_ops.rs`不含validation `cfg`或conditional public method；
+2. kernel删除独立`net/kunit.rs`，三项production local-path KUnit进入最低共同composition owner
+   `net/mod.rs::kunits`。`LogicalInterfaceSnapshot`与`DomainStack`的KUnit-only support分别集中在对应owner文件
+   底部，不建立单用途测试文件，也不散入ordinary impl；
+3. `host_validation.rs`继续是长期、kernel dependency不会启用的host fixture facade。其packet injection与只读
+   observation只有host test consumer；Stage 3解析真实Endpoint capability时逐项删除被正式surface替代的operation
+   wrapper，保留项仍必须有真实host consumer；
+4. `udp-validation-probe`是Stage 2缺少真实Socket consumer时的临时跨crate bridge。Stage 3 real
+   Socket-to-Endpoint capability出现后必须删除feature、stack probe module和DomainStack probe support；现有三项
+   KUnit改走真实consumer或由更强functional test替代，不能把probe重命名后沉淀为production API；
+5. repo `AGENTS.md`记录KUnit与被测semantic owner共置、独立validation/probe文件必须有真实编译/consumer/
+   lifecycle边界的编码规范。该module-layout规则是implementation preference，不进入current contract。
+
+**Contract Impact：** `NET-BOUNDARY-001`保持Preserve。本checkpoint只把net-frame-path已接受、但当前contract
+正文未完整保留的harness-owner边界补入current rule，并让live source重新符合它；其它network/configuration/
+power/task/iomux/epoll ID全部保持当前状态。没有Socket/Endpoint/UDP transaction或wait candidate提前cut over。
+
+**Resolved Write Set：** `AGENTS.md`；`anemone-kernel/Cargo.toml`；
+`anemone-smoltcp-stack/{Cargo.toml,src/lib.rs,src/udp.rs,src/stack/{mod.rs,udp_ops.rs,udp_probe.rs}}`；
+kernel `src/net/{mod.rs,kunit.rs,domain/{interfaces.rs,stack.rs}}`，其中`net/kunit.rs`只允许删除；以及本RFC
+`{index.md,invariants.md,implementation.md}`、current `contracts/net/frame-path.md`、本transaction与当前biweekly
+devlog。`anemone-net-api`、vendored smoltcp、host tests、SystemTarget/build configuration、Socket/VFS/syscall/
+user-test、register与其它RFC保持只读。
+
+**Validation / exit：** 两种stack no-default build、artifact-neutral probe feature build、完整stack/net-api host
+gate、kernel formatter、双架构release build与fresh-disk RV64 wrapper必须通过；RV64必须实际执行三项local-path
+KUnit并保持strict shutdown。source/dependency audit必须证明两个外部crate没有KUnit vocabulary、ordinary stack
+owner source没有validation `cfg`、host facade未进入kernel dependency、probe仍带Stage 3退出条件。whitespace与
+mdBook通过后追加transaction/biweekly closure；LA64 runtime、SMP>1、remote external traffic、UDP syscall/LTP、
+hardware和final harness继续Not Run。本checkpoint关闭后仍停在Stage 3 Outline，不自动运行`2 -> 3`resolution。
+
+**Closure：** kernel `kunit`现只转发artifact-neutral `udp-validation-probe`；stack crate的feature、module、type和
+operation均不再理解KUnit，`anemone-net-api`仍无validation feature。独立`net/kunit.rs`已删除，三项测试进入
+`net/mod.rs::kunits`；owner-local conditional support集中在对应owner文件底部。长期`host_validation.rs`未进入
+kernel dependency，临时probe明确以Stage 3 real Socket-to-Endpoint consumer为删除gate。
+
+最终stack/net-api host gate、两种no-default gate、probe feature check、60项xtask、双架构release build与
+fresh-disk RV64 wrapper均通过；RV64实际执行270/270 KUnit、三项local-path测试、LTP whitelist 4/4与strict
+`filesystem -> network -> device -> PowerOff`。RV64 build首次在sandbox内遇到既有`lwext4` `SIGSYS`，相同命令
+在sandbox外通过。source/dependency audit、authored formatting、whitespace与mdBook gate通过；formatter整命令只
+保留三处未触及vendored smoltcp baseline。LA64 runtime、SMP>1、remote external traffic、UDP syscall/LTP、
+hardware与final harness继续Not Run。`NET-BOUNDARY-001`为Preserve，R0 revision、Stage 2 runtime closure与其它
+contract状态不变；本checkpoint已Closed，并继续停在Stage 3 Outline。
+
 ### 6.3 Stage 3 Outline — Endpoint/socket nonblocking vertical slice
 
 概括目的：

@@ -14,12 +14,12 @@ const UDP_HEADER_LEN: usize = 8;
 pub(crate) struct EndpointId(u32);
 
 impl EndpointId {
-    #[cfg(any(feature = "host-test", feature = "kunit"))]
+    #[cfg(feature = "host-test")]
     pub(crate) const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    #[cfg(any(feature = "host-test", feature = "kunit"))]
+    #[cfg(feature = "host-test")]
     pub(crate) const fn raw(self) -> u32 {
         self.0
     }

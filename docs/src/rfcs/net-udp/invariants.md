@@ -1,7 +1,7 @@
 # net-udp 目标与不变量
 
 **状态：** R0 Accepted Target / Stage 1 Domain与Stage 2 Control Contract Cut Over / Later Candidates Pending
-**最后更新：** 2026-07-29
+**最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **适用修订：** R0
 
@@ -29,7 +29,7 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 
 | Contract ID | 变化 | 当前规则 | R0 Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
-| `NET-BOUNDARY-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence) | 保持frame shared API / kernel / stack / driver依赖方向和private object fence；不把Endpoint/UDP规则挤入frame-only ID | 全程保持 |
+| `NET-BOUNDARY-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence) | 保持frame shared API / kernel / stack / driver依赖方向和private object fence；具体test harness vocabulary停在其owner，跨crate probe按artifact-neutral capability命名并带退出条件 | 全程保持；Stage 2 post-close correction重申并恢复该边界 |
 | `NET-FRAME-OWN-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-own-001--frame-backing只有一个访问owner) | external frame ownership与DMA/CPU handoff不变；loopback另受同等唯一packet-owner义务约束 | 全程保持 |
 | `NET-FRAME-PROGRESS-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-progress-001--有界资源normal-backpressure与durable-recheck) | provider capacity、normal backpressure、durable recheck与fair progression不变 | 全程保持 |
 | `NET-STACK-PUMP-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state) | current contract已允许一个Stack拥有多interface；target改为initial domain唯一Stack，不改变单instance唯一推进规则 | 全程保持 |

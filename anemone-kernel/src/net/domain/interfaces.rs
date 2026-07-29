@@ -51,17 +51,6 @@ impl LogicalInterfaceSnapshot {
     pub(in crate::net) const fn netdev(&self) -> Option<NetdevId> {
         self.netdev
     }
-
-    #[cfg(feature = "kunit")]
-    pub(in crate::net) fn for_control_plane_kunit(name: &str, netdev: NetdevId) -> Self {
-        Self {
-            id: LogicalInterfaceId(u32::MAX),
-            ifindex: u32::MAX,
-            name: GeneralIdentity::try_from(name).expect("KUnit interface name must fit"),
-            kind: LogicalInterfaceKind::External,
-            netdev: Some(netdev),
-        }
-    }
 }
 
 pub(in crate::net) struct LogicalInterfaceReservation {
@@ -171,6 +160,19 @@ impl LogicalInterfaces {
         let loopback = &self.members[0];
         assert_eq!(loopback.kind, LogicalInterfaceKind::Loopback);
         loopback
+    }
+}
+
+#[cfg(feature = "kunit")]
+impl LogicalInterfaceSnapshot {
+    pub(in crate::net) fn for_control_plane_kunit(name: &str, netdev: NetdevId) -> Self {
+        Self {
+            id: LogicalInterfaceId(u32::MAX),
+            ifindex: u32::MAX,
+            name: GeneralIdentity::try_from(name).expect("KUnit interface name must fit"),
+            kind: LogicalInterfaceKind::External,
+            netdev: Some(netdev),
+        }
     }
 }
 
