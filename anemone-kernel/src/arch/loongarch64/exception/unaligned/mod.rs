@@ -45,8 +45,7 @@ pub(super) fn handle_user_unaligned_access(
     // this Rust handler runs.
     let instruction = {
         let mut guard = uspace.lock();
-        UserReadPtr::<u32>::try_new(pc, &mut guard)
-            .map(|instruction| with_intr_disabled(|| instruction.read()))
+        UserReadPtr::<u32>::try_new(pc, &mut guard).and_then(|mut instruction| instruction.read())
     };
     let instruction = match instruction {
         Ok(instruction) => instruction,

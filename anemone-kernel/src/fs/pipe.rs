@@ -528,7 +528,7 @@ fn readable_bytes(file: &File) -> Result<usize, SysError> {
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
     ctx.uspace().with_usp(|usp| {
-        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value);
+        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value)?;
         Ok(())
     })
 }

@@ -26,13 +26,13 @@ fn sys_getresuid(
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
     {
-        UserWritePtr::<Uid>::try_new(ruidp, &mut usp)?.write(cred.uid.real);
+        UserWritePtr::<Uid>::try_new(ruidp, &mut usp)?.write(cred.uid.real)?;
     }
     {
-        UserWritePtr::<Uid>::try_new(euidp, &mut usp)?.write(cred.uid.effective);
+        UserWritePtr::<Uid>::try_new(euidp, &mut usp)?.write(cred.uid.effective)?;
     }
     {
-        UserWritePtr::<Uid>::try_new(suidp, &mut usp)?.write(cred.uid.saved);
+        UserWritePtr::<Uid>::try_new(suidp, &mut usp)?.write(cred.uid.saved)?;
     }
     Ok(0)
 }

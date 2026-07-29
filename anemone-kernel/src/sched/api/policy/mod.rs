@@ -31,8 +31,8 @@ fn read_sched_param(addr: u64) -> Result<SchedParam, SysError> {
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
-    let user = UserReadSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?;
-    user.copy_to_slice(&mut raw);
+    let mut user = UserReadSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?;
+    user.copy_to_slice(&mut raw)?;
     Ok(SchedParam {
         sched_priority: i32::from_ne_bytes(raw),
     })
@@ -44,7 +44,7 @@ fn write_sched_param(addr: u64, param: SchedParam) -> Result<(), SysError> {
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
     let mut user = UserWriteSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?;
-    user.copy_from_slice(&raw);
+    user.copy_from_slice(&raw)?;
     Ok(())
 }
 

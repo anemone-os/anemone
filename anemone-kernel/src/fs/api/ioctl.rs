@@ -35,7 +35,7 @@ fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
     if cmd == FIONBIO {
         let usp = task.clone_uspace_handle();
         let enabled = usp.with_usp(|usp| {
-            Ok(UserReadPtr::<i32>::try_new(VirtAddr::new(arg), usp)?.read() != 0)
+            Ok(UserReadPtr::<i32>::try_new(VirtAddr::new(arg), usp)?.read()? != 0)
         })?;
         file.set_nonblocking(enabled)?;
         return Ok(0);

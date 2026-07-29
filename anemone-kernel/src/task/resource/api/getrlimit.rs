@@ -57,7 +57,7 @@ fn sys_getrlimit(
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();
 
-    UserWritePtr::<RLimit>::try_new(rlim, &mut usp)?.write(rlimit);
+    UserWritePtr::<RLimit>::try_new(rlim, &mut usp)?.write(rlimit)?;
 
     Ok(0)
 }

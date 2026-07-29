@@ -41,32 +41,20 @@ pub(super) fn emulate_user(
 
     match access.kind() {
         AccessKind::SignedLoad | AccessKind::UnsignedLoad => {
-            let source = UserReadPtr::<[u8]>::try_new(access.address(), length, uspace)?;
+            let mut source = UserReadPtr::<[u8]>::try_new(access.address(), length, uspace)?;
             let mut bytes = [0u8; 8];
-
-            // UserPtr validation stays outside this diagnostic IRQ-off window:
-            // page-fault completion may synchronously broadcast a TLB IPI. The
-            // UserSpace lock keeps the validated mapping stable while the copy
-            // and trapframe commit run without hardware-interrupt interleaving.
-            with_intr_disabled(|| {
-                source.copy_to_slice(&mut bytes[..length]);
-                let value = extend_load(bytes, access.width(), access.kind());
-                trapframe.write_gpr(access.register(), value);
-                trapframe.advance_era_after_emulated_instruction();
-            });
+            source.copy_to_slice(&mut bytes[..length])?;
+            let value = extend_load(bytes, access.width(), access.kind());
+            trapframe.write_gpr(access.register(), value);
+            trapframe.advance_era_after_emulated_instruction();
         },
         AccessKind::Store => {
             let mut destination =
                 UserWritePtr::<[u8]>::try_new(access.address(), length, uspace)?;
 
-            // Keep this paired with the load path until the 2K1000 ramdisk.c
-            // stress run confirms or rejects hardware-interrupt interleaving as
-            // the corruption source.
-            with_intr_disabled(|| {
-                let bytes = trapframe.read_gpr(access.register()).to_le_bytes();
-                destination.copy_from_slice(&bytes[..length]);
-                trapframe.advance_era_after_emulated_instruction();
-            });
+            let bytes = trapframe.read_gpr(access.register()).to_le_bytes();
+            destination.copy_from_slice(&bytes[..length])?;
+            trapframe.advance_era_after_emulated_instruction();
         },
     }
     Ok(())

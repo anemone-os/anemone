@@ -58,7 +58,7 @@ fn sys_sendfile(
         let update_offset = |offset: usize| -> Result<(), SysError> {
             let usp_handle = task.clone_uspace_handle();
             let offset = i64::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
-            UserWritePtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.write(offset);
+            UserWritePtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.write(offset)?;
             Ok(())
         };
 
@@ -66,7 +66,7 @@ fn sys_sendfile(
         let init_offset = {
             let usp_handle = task.clone_uspace_handle();
             // kernel_long_t
-            let offset = UserReadPtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.read();
+            let offset = UserReadPtr::<i64>::try_new(offset_ptr, &mut usp_handle.lock())?.read()?;
             if offset < 0 {
                 return Err(SysError::InvalidArgument);
             }

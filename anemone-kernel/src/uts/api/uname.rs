@@ -30,7 +30,7 @@ fn sys_uname(#[validate_with(user_addr)] buf: VirtAddr) -> Result<u64, SysError>
         let mut guard = usp.lock();
 
         let mut buf = UserWritePtr::<OldUtsName>::try_new(buf, &mut guard)?;
-        buf.write(uname);
+        buf.write(uname)?;
     }
     Ok(0)
 }

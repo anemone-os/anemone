@@ -46,12 +46,12 @@ fn sys_setgroups(gidsetsize: i32, grouplist: u64) -> Result<u64, SysError> {
         let mut usp = uspace.lock();
         let mut groups = vec![Gid::ROOT; gidsetsize];
         {
-            let list = UserReadPtr::<[Gid]>::try_new(
+            let mut list = UserReadPtr::<[Gid]>::try_new(
                 user_addr(grouplist).map_err(|_| SysError::BadAddress)?,
                 gidsetsize,
                 &mut usp,
             )?;
-            list.copy_to_slice(&mut groups);
+            list.copy_to_slice(&mut groups)?;
         }
         groups
     };

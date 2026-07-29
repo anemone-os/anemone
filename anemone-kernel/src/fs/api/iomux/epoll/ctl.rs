@@ -57,7 +57,7 @@ fn read_event(addr: Option<VirtAddr>) -> Result<EpollEvent, SysError> {
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();
     let mut bytes = [0u8; size_of::<EpollEvent>()];
-    UserReadSlice::<u8>::try_new(addr, bytes.len(), &mut usp)?.copy_to_slice(&mut bytes);
+    UserReadSlice::<u8>::try_new(addr, bytes.len(), &mut usp)?.copy_to_slice(&mut bytes)?;
     Ok(EpollEvent::new(
         u32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
         u64::from_ne_bytes(bytes[8..16].try_into().unwrap()),

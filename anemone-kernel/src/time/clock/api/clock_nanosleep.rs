@@ -52,7 +52,7 @@ pub(crate) fn clock_nanosleep(
     let usp_handle = task.clone_uspace_handle();
     let duration = {
         let mut usp = usp_handle.lock();
-        timespec_to_duration(UserReadPtr::<TimeSpec>::try_new(rqtp, &mut usp)?.read())?
+        timespec_to_duration(UserReadPtr::<TimeSpec>::try_new(rqtp, &mut usp)?.read()?)?
     };
 
     let mut rem = duration;
@@ -110,6 +110,6 @@ fn write_remaining_time(rmtp: Option<VirtAddr>, rem: Duration) -> Result<(), Sys
     let task = get_current_task();
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();
-    UserWritePtr::<TimeSpec>::try_new(rmtp, &mut usp)?.write(duration_to_timespec(rem));
+    UserWritePtr::<TimeSpec>::try_new(rmtp, &mut usp)?.write(duration_to_timespec(rem))?;
     Ok(())
 }

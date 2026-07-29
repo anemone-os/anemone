@@ -76,7 +76,7 @@ fn sys_statx(
     let mut guard = usp.lock();
 
     let mut statxbuf = UserWritePtr::<StatX>::try_new(statxbuf, &mut guard)?;
-    statxbuf.write(kbuf);
+    statxbuf.write(kbuf)?;
 
     Ok(0)
 }

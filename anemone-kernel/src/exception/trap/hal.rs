@@ -1,6 +1,9 @@
+use crate::prelude::{SysError, UserSpace, VirtAddr};
+
 pub trait TrapArchTrait {
     type TrapFrame: TrapFrameArch;
     type SyscallCtx: SyscallCtxArch;
+    type UserPtrAccessor: UserPtrAccessorArch;
 
     unsafe fn load_utrapframe(trapframe: Self::TrapFrame) -> !;
 
@@ -15,6 +18,50 @@ pub trait TrapArchTrait {
     ///
     /// Mainly used to restart a system call after handling signals.
     fn restore_syscall_ctx(trapframe: &mut Self::TrapFrame, syscall_ctx: &Self::SyscallCtx);
+}
+
+/// Failure from an architecture-owned user-memory copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserPtrAccessError {
+    error: SysError,
+    copied: usize,
+}
+
+impl UserPtrAccessError {
+    pub fn new(error: SysError, copied: usize) -> Self {
+        Self { error, copied }
+    }
+
+    pub fn error(&self) -> SysError {
+        self.error
+    }
+
+    pub fn copied(&self) -> usize {
+        self.copied
+    }
+}
+
+/// Architecture-specific, exception-backed access to the active user address
+/// space.
+///
+/// The architecture owns range validation, mapping stabilization, page-fault
+/// resolution, retry policy, and the exact trap-fixup protocol. A successful
+/// operation copies the full buffer. On failure, `copied()` reports the prefix
+/// already made visible to the destination.
+pub trait UserPtrAccessorArch {
+    /// Copy a user-memory range into a kernel buffer.
+    fn read(
+        uspace: &mut UserSpace,
+        dst: &mut [u8],
+        src: VirtAddr,
+    ) -> Result<usize, UserPtrAccessError>;
+
+    /// Copy a kernel buffer into a user-memory range.
+    fn write(
+        uspace: &mut UserSpace,
+        dst: VirtAddr,
+        src: &[u8],
+    ) -> Result<usize, UserPtrAccessError>;
 }
 
 pub trait TrapFrameArch: SyscallCtxArch {

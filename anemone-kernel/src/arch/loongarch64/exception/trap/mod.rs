@@ -16,6 +16,8 @@ mod utrap;
 pub use utrap::*;
 mod signal;
 pub use signal::*;
+mod user_ptr;
+pub use user_ptr::LA64UserPtrAccessor;
 
 /// LoongArch64 trap architecture implementation.
 pub struct LA64TrapArch;
@@ -23,6 +25,7 @@ pub struct LA64TrapArch;
 impl TrapArchTrait for LA64TrapArch {
     type TrapFrame = LA64TrapFrame;
     type SyscallCtx = LA64SyscallCtx;
+    type UserPtrAccessor = LA64UserPtrAccessor;
 
     unsafe fn load_utrapframe(mut trapframe: Self::TrapFrame) -> ! {
         unsafe { utrap_return_to_task(&mut trapframe) }

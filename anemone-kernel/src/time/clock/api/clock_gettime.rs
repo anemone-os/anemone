@@ -32,7 +32,7 @@ fn sys_clock_gettime(
         let usp_handle = get_current_task().clone_uspace_handle();
         {
             let mut usp = usp_handle.lock();
-            UserWritePtr::<TimeSpec>::try_new(tp, &mut usp)?.write(ts);
+            UserWritePtr::<TimeSpec>::try_new(tp, &mut usp)?.write(ts)?;
         }
 
         Ok(0)

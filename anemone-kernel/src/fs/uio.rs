@@ -83,7 +83,7 @@ impl<'a> UserBufferSink<'a> {
                 Ok(mut dst) => dst.copy_from_slice(&src[copied..copied + copy_len]),
                 Err(err) if copied > 0 => return Ok(copied),
                 Err(err) => return Err(err),
-            }
+            }?;
 
             self.cursor = advance_cursor(self.segments, cursor, copy_len);
             self.written = self
@@ -159,7 +159,8 @@ impl<'a> UserBufferSink<'a> {
                 return Err(SysError::InvalidArgument);
             };
             let len = (record.len() - checked).min(available);
-            let _ = UserWriteSlice::<u8>::try_new(addr, len, &mut guard)?;
+            let mut dst = UserWriteSlice::<u8>::try_new(addr, len, &mut guard)?;
+            dst.fault_in()?;
             cursor = advance_cursor(self.segments, normalized, len);
             checked += len;
         }
@@ -175,9 +176,8 @@ impl<'a> UserBufferSink<'a> {
                 unreachable!("validated exact user-buffer record lost its target range");
             };
             let len = (record.len() - copied).min(available);
-            let mut dst = UserWriteSlice::<u8>::try_new(addr, len, &mut guard)
-                .expect("validated exact user-buffer record became invalid");
-            dst.copy_from_slice(&record[copied..copied + len]);
+            let mut dst = UserWriteSlice::<u8>::try_new(addr, len, &mut guard)?;
+            dst.copy_from_slice(&record[copied..copied + len])?;
             cursor = advance_cursor(self.segments, normalized, len);
             copied += len;
         }
@@ -235,10 +235,10 @@ impl<'a> UserBufferSource<'a> {
                 .min(bytes_until_page_end(addr));
 
             match UserReadSlice::<u8>::try_new(addr, copy_len, &mut guard) {
-                Ok(src) => src.copy_to_slice(&mut dst[copied..copied + copy_len]),
+                Ok(mut src) => src.copy_to_slice(&mut dst[copied..copied + copy_len]),
                 Err(err) if copied > 0 => return Ok(copied),
                 Err(err) => return Err(err),
-            }
+            }?;
 
             self.cursor = advance_cursor(self.segments, cursor, copy_len);
             self.consumed = self

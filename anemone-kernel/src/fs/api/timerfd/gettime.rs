@@ -20,7 +20,7 @@ fn sys_timerfd_gettime(
 
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
-    UserWritePtr::<ITimerSpec>::try_new(curr_value, &mut usp)?.write(snapshot);
+    UserWritePtr::<ITimerSpec>::try_new(curr_value, &mut usp)?.write(snapshot)?;
 
     Ok(0)
 }

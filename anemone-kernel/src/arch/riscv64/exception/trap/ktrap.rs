@@ -3,7 +3,9 @@ use core::mem::offset_of;
 use crate::{
     arch::riscv64::exception::{
         intr::handle_intr,
-        trap::{RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame},
+        trap::{
+            RiscV64Exception, RiscV64Interrupt, RiscV64TrapFrame, RiscV64UserPtrAccessor,
+        },
     },
     prelude::*,
 };
@@ -143,6 +145,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
     let scause = riscv::register::scause::read();
     let code = scause.code();
     if scause.is_interrupt() {
+        RiscV64UserPtrAccessor::assert_hwirq_not_armed();
         percpu::on_entering_hwirq();
 
         let reason = RiscV64Interrupt::try_from(code)
@@ -180,6 +183,9 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
         let stval = riscv::register::stval::read();
         let reason = RiscV64Exception::try_from(code)
             .unwrap_or_else(|_| panic!("unknown exception with code {}", code));
+        if RiscV64UserPtrAccessor::dispatch_exception(trapframe, reason, stval) {
+            return;
+        }
         match reason {
             RiscV64Exception::InstructionMisaligned => {
                 panic!("instruction address misaligned: {:#x}", trapframe.sepc)
@@ -221,11 +227,13 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut RiscV64TrapFrame) {
                     trapframe.sepc
                 )
             },
-            RiscV64Exception::InstructionPageFault => handle_kernel_page_fault(PageFaultInfo::new(
-                VirtAddr::new(trapframe.sepc),
-                VirtAddr::new(stval as u64),
-                PageFaultType::Execute,
-            )),
+            RiscV64Exception::InstructionPageFault => handle_kernel_page_fault(
+                PageFaultInfo::new(
+                    VirtAddr::new(trapframe.sepc),
+                    VirtAddr::new(stval as u64),
+                    PageFaultType::Execute,
+                ),
+            ),
             RiscV64Exception::LoadPageFault => handle_kernel_page_fault(PageFaultInfo::new(
                 VirtAddr::new(trapframe.sepc),
                 VirtAddr::new(stval as u64),

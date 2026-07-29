@@ -214,7 +214,7 @@ fn sys_ppoll(
 
             let mut poll_fds_kbuf = vec![LinuxPollFd::default(); nfds as usize];
             UserReadSlice::<LinuxPollFd>::try_new(ufds, nfds as usize, &mut usp)?
-                .copy_to_slice(&mut poll_fds_kbuf);
+                .copy_to_slice(&mut poll_fds_kbuf)?;
             let poll_fds = poll_fds_kbuf
                 .into_iter()
                 .map(|pollfd| PollFd::try_from_linux(pollfd.fd, pollfd.events))
@@ -224,7 +224,7 @@ fn sys_ppoll(
         };
 
         let timeout = if let Some(tsp_ptr) = tsp {
-            let ts = UserReadPtr::<TimeSpec>::try_new(tsp_ptr, &mut usp)?.read();
+            let ts = UserReadPtr::<TimeSpec>::try_new(tsp_ptr, &mut usp)?.read()?;
             if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
                 knoticeln!("sys_ppoll: invalid timeout: {:?}", ts);
                 return Err(SysError::InvalidArgument);
@@ -237,7 +237,7 @@ fn sys_ppoll(
         let sigmask = if let Some(sigmask_ptr) = sigmask {
             let mut sigmask = SigSet::new_with_mask(
                 UserReadPtr::<LinuxSigSet>::try_new(sigmask_ptr, &mut usp)?
-                    .read()
+                    .read()?
                     .bits,
             );
             sigmask.clear(SigNo::SIGKILL);
@@ -270,7 +270,8 @@ fn sys_ppoll(
         let mut usp = usp_handle.lock();
 
         for (poll_fd, revent_ptr) in poll_fds.iter().zip(revent_ptrs.iter()) {
-            UserWritePtr::<LinuxPollEvent>::try_new(*revent_ptr, &mut usp)?.write(poll_fd.revents);
+            UserWritePtr::<LinuxPollEvent>::try_new(*revent_ptr, &mut usp)?
+                .write(poll_fd.revents)?;
         }
     }
 

@@ -41,7 +41,7 @@ fn copy_affinity_to_user(mask_addr: u64, raw: &[u8]) -> Result<(), SysError> {
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
     let mut user = UserWriteSlice::<u8>::try_new(user_addr(mask_addr)?, raw.len(), &mut usp)?;
-    user.copy_from_slice(raw);
+    user.copy_from_slice(raw)?;
     Ok(())
 }
 

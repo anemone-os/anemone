@@ -5,7 +5,7 @@ use crate::{
         UserBufferSegment, UserBufferSource,
         fanotify::{FanMask, notify_opened_file_event},
     },
-    prelude::{user_access::UserReadSlice, *},
+    prelude::*,
     task::files::FileDesc,
 };
 
@@ -178,9 +178,10 @@ fn copy_user_read_buffer(
         return Ok(kbuf);
     }
 
-    let mut guard = uspace.lock();
-    let slice = UserReadSlice::try_new(buf, count, &mut guard)?;
-    slice.copy_to_slice(&mut kbuf);
+    let segment = UserBufferSegment::new(buf, count);
+    let mut source = UserBufferSource::new(uspace, core::slice::from_ref(&segment));
+    let copied = source.copy_into_slice(&mut kbuf)?;
+    kbuf.truncate(copied);
 
     Ok(kbuf)
 }

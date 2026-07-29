@@ -54,9 +54,9 @@ fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, Sys
     let kbuf = {
         let usp = task.clone_uspace_handle();
         let mut guard = usp.lock();
-        let uinfo =
+        let mut uinfo =
             UserReadPtr::<linux_signal::SigInfoWrapper>::try_new(VirtAddr::new(uinfo), &mut guard)?;
-        uinfo.read()
+        uinfo.read()?
     };
 
     // parse kbuf to our internal data structure.

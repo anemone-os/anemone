@@ -24,7 +24,7 @@ fn sys_rt_sigreturn() -> Result<u64, SysError> {
     let read_sigframe = {
         let mut guard = usp.lock();
         match UserReadPtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
-            Ok(uptr) => Ok(uptr.read()),
+            Ok(mut uptr) => uptr.read(),
             Err(e) => Err(e),
         }
     };

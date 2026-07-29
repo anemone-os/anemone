@@ -90,7 +90,7 @@ fn sys_pipe2(
         task.close_fd(tx);
         e
     })?;
-    pipefd.copy_from_slice(&[rx.raw() as i32, tx.raw() as i32]);
+    pipefd.copy_from_slice(&[rx.raw() as i32, tx.raw() as i32])?;
 
     kdebugln!(
         "sys_pipe2: created pipe with rx fd {} and tx fd {}",

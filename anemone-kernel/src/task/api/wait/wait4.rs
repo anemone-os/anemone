@@ -92,7 +92,16 @@ fn sys_wait4(
         let usp = task.clone_uspace_handle();
         let mut guard = usp.lock();
         match UserWritePtr::<i32>::try_new(wstatus_ptr, &mut guard) {
-            Ok(mut uptr) => uptr.write(kbuf),
+            Ok(mut uptr) => {
+                if let Err(e) = uptr.write(kbuf) {
+                    knoticeln!(
+                        "wait4: failed to write wstatus for reaped child {}: {:?} at address {:#x}",
+                        outcome.tgid,
+                        e,
+                        wstatus_ptr.get()
+                    );
+                }
+            },
             Err(e) => {
                 knoticeln!(
                     "wait4: failed to write wstatus for reaped child {}: {:?} at address {:#x}",

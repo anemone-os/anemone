@@ -51,7 +51,7 @@ fn sys_statfs(
 
     {
         let mut usp = usp_handle.lock();
-        UserWritePtr::<LinuxStatFs>::try_new(buf, &mut usp)?.write(linux_stat);
+        UserWritePtr::<LinuxStatFs>::try_new(buf, &mut usp)?.write(linux_stat)?;
     }
 
     Ok(0)

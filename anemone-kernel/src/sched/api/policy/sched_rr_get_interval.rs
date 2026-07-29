@@ -35,6 +35,6 @@ fn write_interval(addr: u64, interval: Duration) -> Result<(), SysError> {
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
     let mut user = UserWriteSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?;
-    user.copy_from_slice(&raw);
+    user.copy_from_slice(&raw)?;
     Ok(())
 }

@@ -36,20 +36,20 @@ pub(super) fn read_cap_version(
     header_addr: VirtAddr,
     usp: &mut UserSpace,
 ) -> Result<u32, SysError> {
-    UserReadPtr::<u32>::try_new(header_addr, usp).map(|version| version.read())
+    UserReadPtr::<u32>::try_new(header_addr, usp).and_then(|mut version| version.read())
 }
 
 pub(super) fn write_preferred_cap_version(
     header_addr: VirtAddr,
     usp: &mut UserSpace,
 ) -> Result<(), SysError> {
-    UserWritePtr::<u32>::try_new(header_addr, usp)?.write(abi::_KERNEL_CAPABILITY_VERSION);
+    UserWritePtr::<u32>::try_new(header_addr, usp)?.write(abi::_KERNEL_CAPABILITY_VERSION)?;
     Ok(())
 }
 
 pub(super) fn read_cap_pid(header_addr: VirtAddr, usp: &mut UserSpace) -> Result<i32, SysError> {
     let pid_addr = user_addr_offset(header_addr.get(), offset_of!(abi::UserCapHeader, pid))?;
-    UserReadPtr::<i32>::try_new(pid_addr, usp).map(|pid| pid.read())
+    UserReadPtr::<i32>::try_new(pid_addr, usp).and_then(|mut pid| pid.read())
 }
 
 pub(super) fn capability_from_user_words(low: u32, high: u32) -> Result<Capability, SysError> {

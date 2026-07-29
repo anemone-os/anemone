@@ -97,7 +97,7 @@ fn sys_prlimit64(
                 return Err(SysError::NotYetImplemented);
             },
         };
-        UserWritePtr::<RLimit>::try_new(old_limit, &mut usp)?.write(rlimit);
+        UserWritePtr::<RLimit>::try_new(old_limit, &mut usp)?.write(rlimit)?;
     }
 
     Ok(0)
