@@ -41,7 +41,7 @@ macro_rules! set_field {
 /// [RFC 6282 § 3.1] specifies the format of the header.
 ///
 /// The header always start with the following base format (from [RFC 6282 §
-/// 3.1.1]): 
+/// 3.1.1]):
 /// ```txt
 ///    0                                       1
 ///    0   1   2   3   4   5   6   7   8   9   0   1   2   3   4   5
@@ -766,8 +766,8 @@ impl Repr {
         len += 2; // The minimal header length
 
         len += match self.next_header {
-            NextHeader::Compressed => 0, /* The next header is compressed (we don't need to
-                                           * inline what the next header is) */
+            NextHeader::Compressed => 0, /* The next header is compressed (we don't need to */
+            // inline what the next header is)
             NextHeader::Uncompressed(_) => 1, // The next header field is inlined
         };
 
