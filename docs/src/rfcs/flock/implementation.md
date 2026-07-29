@@ -1,11 +1,12 @@
 # Flock 迁移实施计划
 
-**状态：** Stage 0 Closed；Stage 1 Ready / Not Active
+**状态：** Stage 0 Closed；Stage 1 Closed；FLOCK-CUTOVER Completed
 **适用修订：** R0
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
 **目标与不变量：** [Flock 目标与不变量](./invariants.md)
 **当前契约：** [Opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)、
+[VFS local whole-file flock](../../contracts/vfs/flock.md)、
 [Asynchronous wake delivery](../../contracts/scheduler/wake-delivery.md)
 **事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 
@@ -13,9 +14,9 @@
 target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并依次完成 Checkpoint 0S、0A、
 0B、0C。Stage 0 已关闭。本阶段没有修改 current contract/register，也没有执行`FLOCK-CUTOVER`。
 
-2026-07-29开发者已在Stage 0独立关闭后单独授权`0 -> 1 Implementation Resolution Gate`，并明确要求最终
-QEMU runtime由开发者本人执行。该gate已从live source、实际diff、测试缺口、两架构runner与current contract
-把Stage 1解析为`Ready / Not Active`；本次解析没有激活test edit、runtime或cutover。
+2026-07-29开发者在Stage 0独立关闭后单独授权`0 -> 1 Implementation Resolution Gate`，并明确要求最终QEMU
+runtime由开发者本人执行。该gate从live source、实际diff、测试缺口、两架构runner与current contract解析
+Stage 1；后续Checkpoint 1A、1B分别获得执行授权并关闭，最终完成`FLOCK-CUTOVER`。
 
 旧版围绕 precise cancellation、retirement-first 唯一 `EBADF`、同步 waiter cleanup 与
 identity-preserving restart 形成的 Stage 1-3、probe 和 manifest 继续失效；下文是当前唯一 implementation
@@ -63,8 +64,8 @@ authority。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 | 下一解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Owner / lifecycle vertical slice | Closed | inode domain、cooperative retirement、syscall ABI、focused userspace oracle与RV64 runtime形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 2026-07-29已独立关闭 |
-| Stage 1 — Acceptance closure | Ready / Not Active | 补齐focused target matrix与独立flock LTP group，由开发者运行RV64/LA64 acceptance wrapper，随后完成contract write-back与原子`FLOCK-CUTOVER` | 只有Stage 1 closure可切换 | 等待开发者独立授权Stage 1 Active；Ready不构成执行授权 |
+| Stage 0 — Owner / lifecycle vertical slice | Closed | inode domain、cooperative retirement、syscall ABI、focused userspace oracle与RV64 runtime形成一条真实纵切 | closure时全部新ID保持Not Effective；cutover None | 2026-07-29已独立关闭 |
+| Stage 1 — Acceptance closure | Closed | focused target matrix、独立flock LTP group、双架构developer-run runtime、final review与docs交接完成 | 四个新ID由`FLOCK-CUTOVER`原子Effective | 2026-07-29已独立关闭 |
 
 `Outline` 只固定目的、依赖、受保护边界与解析触发点；不冻结具体类型、文件、算法或命令。`Ready` 表示当前
 stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 Resolved Write Set Manifest 已解析，但不表示可以
@@ -479,10 +480,10 @@ contracts。结果如下：
 
 ### 7.1 阶段成熟度与授权边界
 
-- **状态：** Ready / Not Active。Stage 0已Closed，本节完整冻结交付、audit、validation、开发者runtime handoff、
+- **状态：** Closed / 2026-07-29。本节保留当时冻结的交付、audit、validation、开发者runtime handoff、
   stop/exit、contract cutover与Resolved Write Set Manifest。
-- Stage 1仍需开发者独立授权进入`Active`。resolution完成、test checkpoint关闭或用户运行wrapper，均不单独授权
-  下一checkpoint或`FLOCK-CUTOVER`。
+- Stage 1、Checkpoint 1A/1B与`FLOCK-CUTOVER`曾分别等待独立授权；resolution完成、test checkpoint关闭或用户
+  运行wrapper均没有单独授权下一动作。
 - Stage 1只补测试资产和文档交接，不修改production kernel、ABI常量、syscall/flock wrapper语义、rootfs
   manifest、scheduler、signal、filesystem backend、record-lock或Kconfig。
 - cooperative retirement、ordinary replay、generic local default、independent record-lock namespace与全部
@@ -500,6 +501,9 @@ Checkpoint 1A closure不自动激活1B。1A测试资产与Stage 0代码在1B cut
 以“测试已通过编译”宣称effective flock。
 
 ### 7.3 Checkpoint 1A — Acceptance assets
+
+**状态：** Closed / 2026-07-29。交付与验证事实见transaction；1A closure时contract仍Not Effective，未自动
+激活1B。
 
 **Focused oracle交付：**
 
@@ -558,6 +562,10 @@ LTP只证明其实际ABI/conflict case，不替代hard link、exec、signal、no
 在某架构Not Run时，该架构final acceptance保持Not Run；另一架构或build不得代替。
 
 ### 7.5 Developer runtime handoff
+
+**状态：** Closed / developer-run。两架构日志均完成flock acceptance；LA64在orderly shutdown进入machine action
+后因`ANE-20260726-SYSTEM-POWER-ARCH-COVERAGE`所记录的power handler缺失停在末尾halt，该外部边界不替代也不
+否定已经完成的flock predicate evidence。
 
 1B激活且agent完成1A、确认worktree/profile基线后，agent先把`profile.txt`临时设为唯一group `flock`，然后明确
 通知开发者进入runtime handoff。开发者只需在同一worktree按顺序执行：
@@ -682,9 +690,23 @@ judge/timeout/disabled cases、LTP source/`full.txt`、scheduler/signal/wait cor
 Kconfig、register/current limitations与其它current contract。若真实测试修复需要超出manifest，先报告文件、
 owner、contract/acceptance与重验影响，批准后更新本文与transaction再继续。
 
+### 7.11 Closure result
+
+Checkpoint 1A补齐hard-link、exec/`FD_CLOEXEC`、regular/directory/pipe与advisory I/O focused cases，并建立精确
+五项的独立flock LTP group；双架构app build、format/source/matrix review与whitespace通过。Checkpoint 1B恢复
+测试profile后读取developer-run RV64/LA64日志：两边264项enabled KUnit、11项focused oracle、glibc与musl各
+`flock01/02/03/04/06`五项均通过。RV64正常完成machine power-off；LA64完成filesystem/network/device orderly
+shutdown并进入machine action，随后因已登记的LoongArch power driver缺失记录
+`no power off handler succeeded, halting the system`，按外部register limitation分类。
+
+完整`c69e2143..7396a90f` production/test diff复核确认inode domain继续是grant/mode/conflict唯一真相，
+wait notification仅为recheck hint，terminal handoff顺序与全部published-ref release caller闭合，record-lock与
+backend没有进入flock state，临时probe已退出。Apollyon、Keter、Euclid、Safe均为0。task/VFS current contracts、
+RFC、transaction与navigation在同一closure更新，`OPENED-DESC-RETIRE-001`、`FLOCK-DOMAIN-001`、
+`FLOCK-WAIT-001`、`FLOCK-LIFECYCLE-001`由`FLOCK-CUTOVER`一起Effective；Stage 1之后没有自动follow-up gate。
+
 ## 8. 当前结论
 
-当前R0已Accepted for Implementation，Stage 0已Closed，`0 -> 1 Implementation Resolution Gate`已完成，
-Stage 1为`Ready / Not Active`。current contract与register未修改，`FLOCK-CUTOVER`未执行，全部新ID保持Not
-Effective。后续只能在开发者独立授权后从Checkpoint 1A进入Stage 1；本次resolution不授权test edit、runtime、
-contract write-back或cutover。
+R0、Stage 0与Stage 1均已Closed，`FLOCK-CUTOVER`已Completed。四个新ID一起Effective，保留ID保持Preserve；
+current truth见task opened-description与VFS flock contracts。transaction保存每个checkpoint、developer-run
+双架构runtime、LA64外部power限制、final review与docs验证证据。register未修改，后续没有自动gate。

@@ -1,14 +1,14 @@
 # Flock 目标与不变量
 
-**状态：** R0 Accepted / Not Cut Over
+**状态：** R0 Effective / Cut Over
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
 **适用修订：** R0
 
-本文定义第一版本地 flock 相对 current effective contract 的 R0 delta、尚未 cutover 的 target
-invariants，以及只服务本 RFC 的 proof obligations。当前 effective 规则仍以 `docs/src/contracts/` 为唯一
-权威；本文拟 Introduce 的 `OPENED-DESC-RETIRE-001` 与 `FLOCK-*` IDs 在 `FLOCK-CUTOVER` 前都不是 current
-contract。
+本文定义第一版本地flock的R0 contract delta、target invariants与只服务本RFC的proof obligations。
+`FLOCK-CUTOVER`已经完成；当前effective规则以task
+[opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)与VFS
+[local flock](../../contracts/vfs/flock.md) current contracts为唯一权威，本文保留accepted target与迁移理由。
 
 2026-07-29 Draft review 已把 concurrent final close 从 precise cancellation 调整为 cooperative retirement。
 该调整放宽的是 waiter execution、errno 胜负、restart identity 与物理 cleanup timing，不放宽 grant 单一真相、
@@ -26,8 +26,8 @@ terminal liveness、final-close grant cleanup、no-late-persistent-grant 或 wai
 
 ## Contract Impact
 
-`FLOCK-CUTOVER` 是 R0 接受的语义切换单元，不是 implementation stage，也不授权执行。只有 future
-transaction 完成代码、验证、review 与 contract write-back 后，新 IDs 才能成为 effective。
+`FLOCK-CUTOVER`是R0接受并已完成的原子语义切换单元，不是implementation stage。transaction在代码、验证、
+review与contract write-back全部闭合后同步激活四个新ID。
 
 | Contract ID | 变化 | 当前规则 | R0 Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
@@ -36,10 +36,10 @@ transaction 完成代码、验证、review 与 contract write-back 后，新 IDs
 | [`OPENED-DESC-003`](../../contracts/task/opened-description-lifecycle.md#opened-desc-003--当前-final-release-callback-是创建时固定的单-hook) | Preserve | creation-time固定的单`FileDescOps::final_release` hook | static hook保持；flock使用独立的mandatory VFS handoff，不覆盖或组合该hook | 全程 |
 | [`OPENED-DESC-LIVENESS-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-liveness-001--non-owning-capability-只验证-terminal-opened-description-liveness) | Preserve | opaque non-owning capability与operation-local lease只验证terminal liveness | VFS commit前重验liveness，但不取得lifecycle word、长期strong hold或restart identity | 全程 |
 | [`SCHED-WAKE-001..004`](../../contracts/scheduler/wake-delivery.md) | Preserve | wait core拥有logical completion，scheduler拥有physical placement obligation | flock只提交recheck hint；不观察placement，不等待task运行，不把wake当grant或errno | 全程 |
-| `OPENED-DESC-RETIRE-001` | Introduce | None（尚未生效） | `ProcFile` lifecycle owner在static hook前exactly-once进入窄VFS flock cleanup；返回只等待grant cleanup与recheck submission | `FLOCK-CUTOVER` |
-| `FLOCK-DOMAIN-001` | Introduce | None（尚未生效） | inode-associated VFS flock domain唯一拥有holder × file identity grant relation、mode与conflict predicate | `FLOCK-CUTOVER` |
-| `FLOCK-WAIT-001` | Introduce | None（尚未生效） | wait publication/recheck闭合lost-wake；retirement notification只是协作式progress hint | `FLOCK-CUTOVER` |
-| `FLOCK-LIFECYCLE-001` | Introduce | None（尚未生效） | final retirement删除既有grant且retired holder不能遗留持久grant；不定义精确syscall-outcome全序 | `FLOCK-CUTOVER` |
+| [`OPENED-DESC-RETIRE-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-retire-001--terminal-retirement-固定进入窄-vfs-flock-handoff) | Introduce | Effective current rule见链接 | `ProcFile` lifecycle owner在static hook前exactly-once进入窄VFS flock cleanup；返回只等待grant cleanup与recheck submission | `FLOCK-CUTOVER` / 2026-07-29 |
+| [`FLOCK-DOMAIN-001`](../../contracts/vfs/flock.md#flock-domain-001--inode-associated-domain-是唯一-grant-truth) | Introduce | Effective current rule见链接 | inode-associated VFS flock domain唯一拥有holder × file identity grant relation、mode与conflict predicate | `FLOCK-CUTOVER` / 2026-07-29 |
+| [`FLOCK-WAIT-001`](../../contracts/vfs/flock.md#flock-wait-001--wait-publication-与-predicate-recheck-闭合进度) | Introduce | Effective current rule见链接 | wait publication/recheck闭合lost-wake；retirement notification只是协作式progress hint | `FLOCK-CUTOVER` / 2026-07-29 |
+| [`FLOCK-LIFECYCLE-001`](../../contracts/vfs/flock.md#flock-lifecycle-001--retired-holder-不遗留或重获持久-grant) | Introduce | Effective current rule见链接 | final retirement删除既有grant且retired holder不能遗留持久grant；不定义精确syscall-outcome全序 | `FLOCK-CUTOVER` / 2026-07-29 |
 
 `OPENED-DESC-003` 的 static hook 与 `OPENED-DESC-RETIRE-001` 的 mandatory flock handoff 是两个不同义务。
 后者只闭合当前 VFS-owned flock relation，不形成 dynamic registry、backend hook、future-participant framework
@@ -69,7 +69,7 @@ recheck source；waiter owner拥有operation-local wait cleanup。
 **违反表现：** final close遗漏grant cleanup；无grant时遗漏recheck使已发布waiter永久睡眠；handoff等待task
 实际运行；动态注册或覆盖existing hook；VFS读取`description_refs`或回取fd-table lock。
 
-**Cutover：** `FLOCK-CUTOVER` 后写入opened-description lifecycle current contract。
+**Cutover：** Effective；已由`FLOCK-CUTOVER`写入opened-description lifecycle current contract。
 
 ### FLOCK-DOMAIN-001 - Grant relation 只有一个 VFS owner
 
@@ -87,7 +87,7 @@ semantic holder是opened description；inode identity只提供聚合裁决点。
 **违反表现：** independent open不冲突；hard-link path形成多个domain；holder mode与conflict set漂移；fd reuse
 命中旧owner。
 
-**Cutover：** `FLOCK-CUTOVER` 后写入VFS flock current contract。
+**Cutover：** Effective；已由`FLOCK-CUTOVER`写入VFS flock current contract。
 
 ### FLOCK-TARGET-001 - 首版本地 whole-file advisory capability
 
@@ -182,7 +182,7 @@ wait identity、logical completion与physical wake delivery；operation owner拥
 **违反表现：** check-then-sleep lost wake；wake转移grant；无grant retirement遗漏notification；close等待
 physical placement；waiter或retirement各自维护重复completion truth。
 
-**Cutover：** `FLOCK-CUTOVER` 后写入VFS flock current contract。
+**Cutover：** Effective；已由`FLOCK-CUTOVER`写入VFS flock current contract。
 
 ### FLOCK-LIFECYCLE-001 - Terminal retirement 后无持久 grant
 
@@ -206,7 +206,7 @@ owner；wait outcome与operation-local cleanup属于waiter/scheduler owner。
 **违反表现：** final close后仍有retired-holder grant；cleanup完成后旧syscall插回grant；temporary strong hold
 推迟semantic final close；为了精确errno让close等待waiter；VFS读取或复制`description_refs`。
 
-**Cutover：** `FLOCK-CUTOVER` 后与`OPENED-DESC-RETIRE-001`、VFS flock contract在同一closure中生效。
+**Cutover：** Effective；已与`OPENED-DESC-RETIRE-001`、VFS flock contract在同一closure中生效。
 
 ### FLOCK-TARGET-005 - Alias、exec 与 independent-open semantics
 
@@ -244,9 +244,9 @@ record lock共享grant、waiter或conflict state。
 
 ### FLOCK-RFC-001 - R0 acceptance 与 cutover 分离
 
-R0 semantic revision只接受target与contract delta；首个Ready stage是
-acceptance前置证据，不会因此升级成target guarantee。`FLOCK-CUTOVER`只能由future transaction在代码、验证、
-review与contract write-back同一closure中执行。任何部分能力不能先冒充effective flock。
+R0 semantic revision只接受target与contract delta；首个Ready stage是acceptance前置证据，不会因此升级成target
+guarantee。`FLOCK-CUTOVER`后来由transaction在代码、验证、review与contract write-back同一closure中执行；
+此前任何部分能力都没有先冒充effective flock。
 
 ### FLOCK-RFC-002 - Ready resolution 与 Active authorization 分离
 
@@ -377,9 +377,9 @@ Stage 0当前选择的锁、allocation/destruction位置、`Event`与module plac
 6. R0 acceptance、transaction bootstrap 与 Stage 0 Active authorization 分别记录在
    [transaction](../../devlog/transactions/2026-07-29-flock.md)，Checkpoint 0S、0A、0B、0C 的独立授权与closure没有自动
    授权后续checkpoint；
-7. `OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs保持Not Effective，0A的private substrate不提供partial flock
-   capability；0B增加的ABI adapter与focused consumer即使通过0C runtime也仍不是effective capability。
+7. 在Stage 0结束时，`OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs仍保持Not Effective，0A/0B纵切不作为
+   partial capability；只有后续Stage 1整体closure执行原子cutover。
 
-第一个可执行stage已按独立授权关闭全部0S-0C checkpoint并成为Closed。Stage 1现为`Ready / Not Active`；最终
-implementation closure仍需逐项记录每个ID的Effective / Not Cut Over结果，并区分agent-run build/review、
-developer-run双架构runtime与Not Run evidence。
+第一个可执行stage已按独立授权关闭全部0S-0C checkpoint。Stage 1随后关闭1A acceptance assets与1B双架构
+developer-run runtime、final review和docs交接；transaction分别记录agent-run build/review/docs、developer-run
+runtime以及LA64 machine termination的外部register边界。四个新ID已由`FLOCK-CUTOVER`一起Effective。

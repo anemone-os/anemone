@@ -105,16 +105,14 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260728-flock](./rfcs/flock/index.md)：R0 / Accepted for Implementation；由opened-description持有、inode-associated
-  VFS domain统一裁决的本地whole-file advisory flock，并保持generic local default与独立record-lock
-  namespace。final close同步终结holder、删除既有grant并提交recheck hint；waiter协作式重验并自行清理，
-  不承诺precise close/signal/restart winner、identity-preserving restart或close等待task运行。
-  `OPENED-DESC-RETIRE-001`已缩窄为flock-specific grant cleanup与notification submission；相关finding均已
-  neutralize。独立implementation resolution已把带真实syscall与focused consumer的Stage 0解析为Ready；
-  R0 review后Stage 0已关闭；private inode domain、cooperative retirement、Linux ABI与focused consumer已形成，
-  RV64 KUnit/oracle/runtime与LA64 build/rootfs composition通过。后续`0 -> 1`独立resolution已把Stage 1解析为
-  `Ready / Not Active`：补focused/LTP acceptance assets，由开发者顺序运行RV64/LA64 wrapper，再原子完成
-  task/VFS current-contract交接。当前没有contract cutover，全部新ID继续Not Effective；Stage 1执行仍需独立授权。
+- [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
+  domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。
+  final close删除holder grant并提交cooperative recheck hint，不承诺precise close/signal/restart winner。
+  RV64/LA64 developer-run acceptance均通过264项enabled KUnit、11项focused oracle与双libc五项flock LTP；
+  LA64末尾halt由已登记的power driver缺失解释。`FLOCK-CUTOVER`已把
+  [`OPENED-DESC-RETIRE-001`](./contracts/task/opened-description-lifecycle.md)与三个
+  [`FLOCK-*`](./contracts/vfs/flock.md) ID原子切换为Effective，执行证据见
+  [transaction](./devlog/transactions/2026-07-29-flock.md)。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续

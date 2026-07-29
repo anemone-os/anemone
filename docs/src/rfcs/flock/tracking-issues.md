@@ -1,19 +1,18 @@
 # Flock Tracking Issues
 
-**状态：** Closed / R0 review found no current findings
+**状态：** Closed / R0 Cut Over / no current findings
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
 **事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 
 本文保留已经影响 flock Draft target、ABI、owner/contract boundary、implementation readiness或acceptance
 判断的design finding及其neutralize依据。2026-07-29 cooperative direction correction在R0前直接更新Draft，
-不形成R1；后续独立R0 review、0A/0B change review与0C full-diff review没有发现新的Apollyon、Keter或
-Euclid，R0 acceptance、Stage 0 activation与0S-0C closure见transaction。
+不形成R1；后续独立R0 review、0A/0B/1A change review与0C/1B full-diff review没有发现新的Apollyon、Keter、
+Euclid或Safe，全部checkpoint与cutover见transaction。
 
 同日独立implementation-resolution任务已从live source形成新的Stage 0 Ready plan。下文历史状态中的
 “No Ready Stage”与“implementation shape未解析”描述的是cooperative correction刚完成时的事实；它们不恢复
-旧precise-cancellation plan。Stage 0现已Closed，后续独立resolution已把Stage 1解析为`Ready / Not Active`；
-当前authority见
+旧precise-cancellation plan。Stage 0与Stage 1现均已Closed，四个新ID已原子Effective；当前authority见
 [迁移实施计划](./implementation.md)。
 
 ## Apollyon
@@ -58,8 +57,8 @@ retired holder不遗留持久grant。
 [Implementation Resolution状态](./implementation.md)。
 
 **状态：** Neutralized / 2026-07-29 Draft review；canonical target已折回cooperative semantics，旧Stage 1-3、
-probe与manifest全部失效。后续独立resolution形成新Stage 0 Ready，当时尚无R0、transaction或implementation
-execution；当前R0/Stage 0/0A状态见transaction，contract仍未cut over。
+probe与manifest全部失效。后续独立resolution形成新Stage 0 Ready；该句描述当时尚无R0、transaction或
+implementation execution的历史事实。当前R0与cutover状态见transaction。
 
 ### APOLLYON-FLOCK-003：无 grant retirement 可能遗漏 blocked waiter progress
 
@@ -100,9 +99,9 @@ handoff，也不增加callback slot、registration mirror或backend dispatch。
 [OPENED-DESC-RETIRE-001](./invariants.md#opened-desc-retire-001---terminal-episode-固定进入窄-vfs-flock-cleanup)与
 [FLOCK-RFC-005](./invariants.md#flock-rfc-005---flock-retirement-handoff-不是扩展-registry)。
 
-**状态：** Neutralized / 2026-07-29 Draft review；current contracts保持unchanged，新的ID在
-`FLOCK-CUTOVER`前Not Effective。后续Stage 0已把fixed context/facade路线解析为Ready，但它仍是可由实现证据
-修正的pre-cutover preference，不改变本finding的contract结论。
+**状态：** Neutralized / 2026-07-29 Draft review；在`FLOCK-CUTOVER`前current contracts保持unchanged、新ID为
+Not Effective。后续Stage 0把fixed context/facade路线解析并实现，最终cutover没有改变本finding的contract
+结论：mandatory flock handoff仍是窄、固定、不可注册的协议。
 
 ### KETER-FLOCK-001：并发 final close 与在途 flock 的 ABI 结果未定义
 

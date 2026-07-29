@@ -1,39 +1,36 @@
 # RFC-20260728-flock
 
-**状态：** Accepted for Implementation / Stage 0 Closed / Stage 1 Ready
+**状态：** Closed / R0 Cut Over
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
 **领域：** fs / VFS / task files / scheduler wait / syscall ABI
 **事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 **影响契约：** Preserve `OPENED-DESC-001/002/003`、`OPENED-DESC-LIVENESS-001`、
-`SCHED-WAKE-001..004`；拟 Introduce `OPENED-DESC-RETIRE-001`、`FLOCK-DOMAIN-001`、
+`SCHED-WAKE-001..004`；已 Introduce `OPENED-DESC-RETIRE-001`、`FLOCK-DOMAIN-001`、
 `FLOCK-WAIT-001`、`FLOCK-LIFECYCLE-001`。完整 R0 delta 见
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** None；当前 design findings 均已 neutralize，历史与 2026-07-29 cooperative direction
 correction 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** Stage 1已解析为`Ready / Not Active`；等待开发者独立授权从Checkpoint 1A进入执行。最终RV64 /
-LA64 runtime由开发者本人运行；全部新contract ID继续Not Effective，不得执行`FLOCK-CUTOVER`。
+**下一步：** None；Stage 1与`FLOCK-CUTOVER`已关闭，后续扩展必须建立独立RFC revision或follow-up RFC。
 
 ## 文档状态
 
-本文是第一版本地 `flock(2)` 的公共 canonical R0 accepted target。它陈述 target、contract delta、
-correctness boundaries 与 acceptance boundary；Checkpoint 0S 完成 `task::files` 行为保持型结构拆分，
-Checkpoint 0A 建立private inode domain与cooperative-retirement，Checkpoint 0B 增加Linux syscall ABI、双层
-userspace wrapper与focused consumer。Checkpoint 0C已用RV64 wrapper关闭KUnit、focused oracle、当前`sys`
-profile与正常关机证据，并用LA64 build/rootfs composition关闭该架构的build floor；LA64 runtime仍Not Run。
-当前纵切不能作为partial flock capability宣称，current contract也尚无对应effective rule。
+本文是第一版本地 `flock(2)` 的公共 canonical R0 target与历史决策入口。Checkpoint 0S完成
+`task::files`行为保持型结构拆分，0A建立private inode domain与cooperative retirement，0B增加Linux syscall
+ABI、双层userspace wrapper与focused consumer，0C关闭首个RV64纵切。Stage 1A补齐acceptance matrix与独立
+flock LTP group；1B由开发者运行RV64/LA64 wrapper，随后完成full-diff review与task/VFS current-contract交接。
 
 2026-07-29 Draft review 已废弃此前 close-driven precise cancellation 方向。旧 implementation stages、
 probe 与 manifest 不再有效；后续独立 implementation resolution 从 live source 形成当前 Stage 0 Ready。
 本轮独立 R0 review 未发现 Apollyon、Keter 或 Euclid，开发者授权建立 transaction、激活 Stage 0 并依次完成
-Checkpoint 0S、0A、0B、0C并关闭Stage 0。后续独立`0 -> 1 Implementation Resolution Gate`已把Stage 1解析为
-`Ready / Not Active`：只补focused/LTP acceptance assets，由开发者运行两架构wrapper，再完成current-contract
-交接。本轮resolution不修改register/current contract，也不执行`FLOCK-CUTOVER`。
+Checkpoint 0S、0A、0B、0C并关闭Stage 0。后续独立`0 -> 1 Implementation Resolution Gate`把Stage 1解析为
+focused/LTP acceptance assets、双架构developer-run runtime与current-contract交接；Checkpoint 1A/1B现已
+依次关闭。`FLOCK-CUTOVER`把四个新ID原子写入current contract，register保持不变。
 
-R0 acceptance只接受target与contract delta，不把它们写成effective contract。Stage 0 activation、
-Checkpoint 0S/0A/0B/0C closure与后续Stage 1 resolution已分别记录在transaction；Stage 1达到Ready仍不自动
-进入Active。
+R0 acceptance、Stage 0 activation、各checkpoint授权/closure与最终cutover是分离的历史事件，均记录在
+transaction。cutover后共享current truth由task opened-description与VFS flock current contracts拥有；本文继续
+保存accepted target、理由与proof boundary。
 
 ## 摘要
 
@@ -54,8 +51,8 @@ POSIX/OFD record-lock 统一以及通用 file-lock engine 均不在本 RFC 范�
 
 ### Anemone 当前事实
 
-当前树没有 `flock` syscall implementation；0A 只有private VFS flock grant/wait/cleanup substrate，尚无userspace
-入口或effective cleanup contract。
+当前树已实现双架构`flock(2)` syscall、private VFS flock grant/wait/cleanup domain、userspace wrapper与focused
+consumer；对应cleanup/domain/wait/lifecycle规则已完成current-contract cutover。
 `task::files` 已经提供本 RFC 所需的 opened-description baseline：
 
 - `ProcFile` 是当前 opened file description；dup 与非 `CLONE_FILES` fork 发布新 fd slot，但共享同一
@@ -66,7 +63,7 @@ POSIX/OFD record-lock 统一以及通用 file-lock engine 均不在本 RFC 范�
   terminal liveness；它不允许 consumer 取得 lifecycle word 或延迟 retirement。
 - `FileDescOps::final_release` 是 opened description 创建时固定的单 hook，不是可动态追加、组合或取消的
   teardown registry。
-- current contract 尚无 terminal retirement 后进入 VFS 并删除 flock grant 的 mandatory handoff。
+- `OPENED-DESC-RETIRE-001`要求terminal retirement固定进入VFS并删除flock grant、提交recheck hint。
 
 上述 effective 规则由
 [Opened-description lifecycle current contract](../../contracts/task/opened-description-lifecycle.md) 拥有。
@@ -145,9 +142,10 @@ RFC target：
 - [Tracking Issues](./tracking-issues.md)
 - [Implementation Resolution 状态](./implementation.md)
 
-Current effective baseline：
+Current effective contracts：
 
 - [Opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)
+- [VFS local whole-file flock](../../contracts/vfs/flock.md)
 - [Asynchronous wake delivery](../../contracts/scheduler/wake-delivery.md)
 
 公共外部源码证据：
@@ -289,8 +287,8 @@ restart 的选择由它实际完成的 domain/liveness/signal observation 决定
 
 ## 接受边界
 
-本 RFC 的 `R0` semantic revision只接受target与contract delta，不执行docs-only cutover，也不把首个Ready
-stage的implementation choices提升为target；但R0 review必须同时确认该stage提供可达路线。当前Draft review要求：
+本 RFC 的 `R0` semantic revision只接受target与contract delta，不因acceptance本身执行docs-only cutover，也不把
+stage的implementation choices提升为target；R0 review同时确认首个stage提供可达路线。当时的review要求：
 
 1. cooperative retirement、grant-state correctness、ABI admissible outcomes 与 acceptance boundary 自洽；
 2. Contract Impact 覆盖所有 affected IDs，并保持 current effective / accepted target 分离；
@@ -299,9 +297,8 @@ stage的implementation choices提升为target；但R0 review必须同时确认�
    `Ready`，Stage 1保持`Outline`，后续独立resolution再依据Stage 0 live evidence将其展开；
 5. `Ready`、R0 acceptance、transaction bootstrap 与 `Active` authority 保持分离。
 
-2026-07-29 的独立 implementation-resolution 任务满足首个 `Ready` 要求；本轮后续独立 review 接受 R0，
-transaction 已建立且开发者已明确授权 Stage 0 Active。Checkpoint 0S、0A 分别按独立授权关闭；0A closure不授权
-后续checkpoint。
+2026-07-29 的独立 implementation-resolution 任务满足首个 `Ready` 要求；后续独立review接受R0并建立
+transaction。0S至1B均按独立授权/closure推进，前一checkpoint closure不自动授权后一checkpoint或cutover。
 
 最终 implementation closure 的证据范围至少包括：
 
@@ -352,6 +349,7 @@ flock、POSIX record lock 与 OFD record lock 的 holder、range、close cleanup
 
 ## 收口
 
-当前为R0 / Accepted for Implementation；Stage 0已Closed，Stage 1为`Ready / Not Active`。RV64 Stage 0
-runtime与LA64 build/composition evidence已经记录，但尚无contract cutover；`OPENED-DESC-RETIRE-001`与全部
-`FLOCK-*` IDs保持Not Effective。Stage 1执行、开发者双架构runtime handoff与`FLOCK-CUTOVER`仍需后续独立授权。
+R0、Stage 0与Stage 1均已Closed。RV64/LA64 developer-run acceptance证明264项enabled KUnit、11项focused
+oracle和双libc五项flock LTP全部通过；LA64仅在进入machine action后因已登记的power handler缺失停在末尾halt，
+不改变flock acceptance。`FLOCK-CUTOVER`已使`OPENED-DESC-RETIRE-001`与三个`FLOCK-*` ID原子Effective；
+current truth见task opened-description与VFS flock contracts，执行证据见transaction。

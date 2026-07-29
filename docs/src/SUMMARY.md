@@ -5,6 +5,7 @@
 	- [当前契约模板](./contract-template.md)
 	- [VFS 当前契约](./contracts/vfs/index.md)
 		- [Mount admission](./contracts/vfs/mount-admission.md)
+		- [Local whole-file flock](./contracts/vfs/flock.md)
 	- [Signal 当前契约](./contracts/signal/index.md)
 		- [Pending routing 与 ordinary action selection](./contracts/signal/pending-routing.md)
 		- [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
