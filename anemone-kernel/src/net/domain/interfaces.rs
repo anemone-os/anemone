@@ -1,24 +1,19 @@
-//! Initial network-domain identity and protocol-Stack owners.
-
-use anemone_net_api::{
-    EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, PumpOutcome,
-};
-use anemone_smoltcp_stack::{PumpBudget, PumpError, Stack};
+//! Initial-domain logical-interface membership and identity owner.
 
 use crate::{device::net::NetdevId, prelude::*, utils::identity::GeneralIdentity};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(transparent)]
-pub(super) struct LogicalInterfaceId(u32);
+pub(in crate::net) struct LogicalInterfaceId(u32);
 
 impl LogicalInterfaceId {
-    pub(super) const fn index(self) -> u32 {
+    pub(in crate::net) const fn index(self) -> u32 {
         self.0
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum LogicalInterfaceKind {
+pub(in crate::net) enum LogicalInterfaceKind {
     Loopback,
     External,
 }
@@ -28,7 +23,7 @@ pub(super) enum LogicalInterfaceKind {
 /// `netdev` is an opaque association for external-interface diagnosis; it is
 /// never used to derive the logical or protocol identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct LogicalInterfaceSnapshot {
+pub(in crate::net) struct LogicalInterfaceSnapshot {
     id: LogicalInterfaceId,
     ifindex: u32,
     name: GeneralIdentity,
@@ -37,34 +32,34 @@ pub(super) struct LogicalInterfaceSnapshot {
 }
 
 impl LogicalInterfaceSnapshot {
-    pub(super) const fn id(&self) -> LogicalInterfaceId {
+    pub(in crate::net) const fn id(&self) -> LogicalInterfaceId {
         self.id
     }
 
-    pub(super) const fn ifindex(&self) -> u32 {
+    pub(in crate::net) const fn ifindex(&self) -> u32 {
         self.ifindex
     }
 
-    pub(super) fn name(&self) -> &str {
+    pub(in crate::net) fn name(&self) -> &str {
         self.name.as_str()
     }
 
-    pub(super) const fn kind(&self) -> LogicalInterfaceKind {
+    pub(in crate::net) const fn kind(&self) -> LogicalInterfaceKind {
         self.kind
     }
 
-    pub(super) const fn netdev(&self) -> Option<NetdevId> {
+    pub(in crate::net) const fn netdev(&self) -> Option<NetdevId> {
         self.netdev
     }
 }
 
-pub(super) struct LogicalInterfaceReservation {
+pub(in crate::net) struct LogicalInterfaceReservation {
     snapshot: LogicalInterfaceSnapshot,
     finished: bool,
 }
 
 impl LogicalInterfaceReservation {
-    pub(super) fn snapshot(&self) -> &LogicalInterfaceSnapshot {
+    pub(in crate::net) fn snapshot(&self) -> &LogicalInterfaceSnapshot {
         &self.snapshot
     }
 }
@@ -82,7 +77,7 @@ impl Drop for LogicalInterfaceReservation {
 }
 
 /// Sole owner of initial-domain membership, identity, ifindex, name, and kind.
-pub(super) struct LogicalInterfaces {
+pub(in crate::net) struct LogicalInterfaces {
     members: Vec<LogicalInterfaceSnapshot>,
     next_id: u32,
     next_ifindex: u32,
@@ -90,7 +85,7 @@ pub(super) struct LogicalInterfaces {
 }
 
 impl LogicalInterfaces {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let loopback = LogicalInterfaceSnapshot {
             id: LogicalInterfaceId(0),
             ifindex: 1,
@@ -106,7 +101,10 @@ impl LogicalInterfaces {
         }
     }
 
-    pub(super) fn reserve_external(&mut self, netdev: NetdevId) -> LogicalInterfaceReservation {
+    pub(in crate::net) fn reserve_external(
+        &mut self,
+        netdev: NetdevId,
+    ) -> LogicalInterfaceReservation {
         let id = self.next_id;
         self.next_id = id
             .checked_add(1)
@@ -134,7 +132,7 @@ impl LogicalInterfaces {
         }
     }
 
-    pub(super) fn commit(
+    pub(in crate::net) fn commit(
         &mut self,
         mut reservation: LogicalInterfaceReservation,
     ) -> LogicalInterfaceSnapshot {
@@ -148,7 +146,7 @@ impl LogicalInterfaces {
         snapshot
     }
 
-    pub(super) fn abort(&mut self, mut reservation: LogicalInterfaceReservation) {
+    pub(in crate::net) fn abort(&mut self, mut reservation: LogicalInterfaceReservation) {
         assert!(
             self.members
                 .iter()
@@ -158,138 +156,10 @@ impl LogicalInterfaces {
         reservation.finished = true;
     }
 
-    fn loopback(&self) -> &LogicalInterfaceSnapshot {
+    pub(super) fn loopback(&self) -> &LogicalInterfaceSnapshot {
         let loopback = &self.members[0];
         assert_eq!(loopback.kind, LogicalInterfaceKind::Loopback);
         loopback
-    }
-}
-
-pub(super) struct DomainStack {
-    stack: SpinLock<Stack>,
-}
-
-impl DomainStack {
-    fn new() -> Self {
-        Self {
-            stack: SpinLock::new(Stack::new()),
-        }
-    }
-
-    pub(super) fn attach_external<P: FrameProvider>(
-        self: &Arc<Self>,
-        provider: &mut P,
-        ethernet_address: EthernetAddress,
-        now: NetworkInstant,
-    ) -> ExternalMapping {
-        let interface = self
-            .stack
-            .lock()
-            .add_interface(provider, ethernet_address, now);
-        ExternalMapping {
-            stack: self.clone(),
-            interface,
-            finished: false,
-        }
-    }
-}
-
-/// Transaction-local mapping owner used only before active publication.
-pub(super) struct ExternalMapping {
-    stack: Arc<DomainStack>,
-    interface: InterfaceId,
-    finished: bool,
-}
-
-impl ExternalMapping {
-    pub(super) fn pump_port(&self) -> ExternalPumpPort {
-        ExternalPumpPort {
-            stack: self.stack.clone(),
-            interface: self.interface,
-        }
-    }
-
-    pub(super) const fn interface(&self) -> InterfaceId {
-        self.interface
-    }
-
-    pub(super) fn commit(mut self) {
-        self.finished = true;
-    }
-
-    pub(super) fn rollback(mut self) {
-        let removed = self.stack.stack.lock().remove_interface(self.interface);
-        self.finished = true;
-        removed.expect("failed attach lost its global-Stack mapping");
-    }
-}
-
-impl Drop for ExternalMapping {
-    fn drop(&mut self) {
-        if self.finished {
-            return;
-        }
-
-        // Fail closed before reporting the protocol bug: this mapping has not
-        // been published active, so leaving it behind would let a panic turn
-        // an attach mistake into stale global-Stack state.
-        let removed = self.stack.stack.lock().remove_interface(self.interface);
-        self.finished = true;
-        removed.expect("unfinished external mapping was already absent");
-        panic!("external Stack mapping dropped without commit or rollback");
-    }
-}
-
-/// Worker-local capability for one interface on the domain Stack.
-pub(super) struct ExternalPumpPort {
-    stack: Arc<DomainStack>,
-    interface: InterfaceId,
-}
-
-impl ExternalPumpPort {
-    pub(super) fn pump<P: FrameProvider>(
-        &self,
-        provider: &mut P,
-        now: NetworkInstant,
-        budget: PumpBudget,
-    ) -> Result<PumpOutcome, PumpError> {
-        // A provider callback runs only inside this finite pump window. It must
-        // not sleep or re-enter the domain/attach owners.
-        self.stack
-            .stack
-            .lock()
-            .pump(self.interface, provider, now, budget)
-    }
-}
-
-/// Boot-persistent composition of the two distinct initial-domain owners.
-pub(super) struct InitialDomain {
-    logical: LogicalInterfaces,
-    stack: Arc<DomainStack>,
-}
-
-impl InitialDomain {
-    pub(super) fn new() -> Self {
-        let domain = Self {
-            logical: LogicalInterfaces::new(),
-            stack: Arc::new(DomainStack::new()),
-        };
-        let loopback = domain.logical.loopback();
-        kinfoln!(
-            "initial network domain: {} (ifindex {}, {:?}) committed; global protocol Stack initialized",
-            loopback.name(),
-            loopback.ifindex(),
-            loopback.kind(),
-        );
-        domain
-    }
-
-    pub(super) fn logical_mut(&mut self) -> &mut LogicalInterfaces {
-        &mut self.logical
-    }
-
-    pub(super) fn stack(&self) -> Arc<DomainStack> {
-        self.stack.clone()
     }
 }
 

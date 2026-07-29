@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2 Ready / Not Active / Stage 3-5 Outline
+**状态：** Accepted for Implementation / Stage 0-1与Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Stage 3-5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -16,13 +16,13 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** None；后续Outline的待解析实现决定不作为当前设计问题
-**下一步：** 仅可在独立授权下激活Stage 2 Checkpoint 2A；不得由Ready状态自动修改source、执行2B/cutover或解析Stage 3
+**下一步：** 仅可在独立授权下激活Stage 2 Checkpoint 2B；不得由2A closure自动执行2B/cutover或解析Stage 3
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
 `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；其它R0 candidate仍须在后续明确
 implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的Stage 0与Stage 1
-均已独立关闭；独立`1 -> 2`resolution已把Stage 2解析为Ready / Not Active，Stage 3-5保持Outline。Stage 2
-resolution没有修改current contract或R0 target。
+均已独立关闭；Checkpoint 2A又完成behavior-preserving same-owner split并独立关闭。Checkpoint 2B保持Ready /
+Not Active，Stage 3-5保持Outline。2A没有修改current contract、R0 target或任何Stage 2 candidate contract。
 
 ## 摘要
 
@@ -101,7 +101,8 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-1 Closed；Stage 2 Ready / Not Active；Stage 3-5 Outline
+- [迁移实施计划](./implementation.md)：Stage 0-1与Checkpoint 2A Closed；Checkpoint 2B Ready / Not Active；
+  Stage 3-5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -456,10 +457,12 @@ fallback或provenance系统不能证明实际网络正确，反而扩大owner和
 
 ## 收口
 
-R0已经接受并完成Stage 0-1，整体RFC尚未关闭。0A先刻画candidate engine egress-admission seam，0B建立Stack-private
+R0已经接受并完成Stage 0-1与Checkpoint 2A，整体RFC与Stage 2尚未关闭。0A先刻画candidate engine
+egress-admission seam，0B建立Stack-private
 positive candidate；post-closure review随后发现receive gate owner粒度、engine capacity admission和host seam
 module placement反馈，已由0B Feedback Correction修复并通过独立复审。0C保留最小ordinary candidate和长期
 deterministic topology matrix，确认无需修改vendored/shared API，并关闭Stage 0。Stage 1随后建立boot logical `lo`、
 domain-local logical identity和production唯一global Stack，原子cut over三项domain contract；functional loopback、
-control plane、socket/UDP、LA64、SMP>1、network LTP与final harness仍`Not Run`。独立`1 -> 2`resolution已经完成；
-当前下一步只能在明确授权下激活Checkpoint 2A，且2A closure不得自动进入2B。
+control plane、socket/UDP、SMP>1、network LTP与final harness仍`Not Run`。独立`1 -> 2`resolution已经完成；
+Checkpoint 2A随后只重排同owner physical layout，双架构compile通过但未运行任何QEMU/LTP，Contract Impact为
+None。当前下一步只能在明确授权下激活Checkpoint 2B；2A closure不得自动进入2B或Stage 3。

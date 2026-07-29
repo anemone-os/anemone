@@ -115,8 +115,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   validation facade；Stage 1已建立boot logical `lo`、domain-local logical identity、initial-domain唯一Stack与
   per-provider narrow pump port。`NET-UDP-DOMAIN-CUTOVER`已原子Refine `NETDEV-LIFE-001`/
   `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；functional loopback/control plane/socket仍未生效，Stage 2
-  已按2A same-owner split与2B atomic static-control/loopback cutover解析为Ready / Not Active；Stage 2 source/
-  contract和Stage 3均未授权。执行证据见
+  已按2A same-owner split与2B atomic static-control/loopback cutover解析。2A已在不改变behavior/public surface/
+  contract的前提下独立关闭；2B仍Ready / Not Active，Stage 2 candidate contract和Stage 3均未授权。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

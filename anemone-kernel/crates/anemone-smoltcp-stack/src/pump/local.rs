@@ -1,0 +1,140 @@
+//! Bounded progression for the provisional IP-medium local port.
+
+use anemone_net_api::{Instant, InterfaceId, PumpOutcome};
+use smoltcp::iface::{PollIngressSingleResult, PollResult};
+
+use crate::{
+    adapter::{from_smoltcp_instant, to_smoltcp_instant},
+    local_link::LocalDevice,
+    stack::{PumpError, PumpOrder, Stack},
+    udp::UdpEndpoints,
+};
+
+use super::common::{PumpBudget, pump_outcome};
+
+impl Stack {
+    /// Advances the provisional IP-medium local port with the same exclusive
+    /// `&mut Stack` capability as external interfaces. Egress is transferred
+    /// into bounded link storage only after the protocol round, so normal
+    /// ingress cannot consume it until a later bounded call.
+    #[allow(dead_code)]
+    pub(crate) fn pump_local(
+        &mut self,
+        id: InterfaceId,
+        now: Instant,
+        budget: PumpBudget,
+    ) -> Result<PumpOutcome, PumpError> {
+        let local = self
+            .local
+            .as_mut()
+            .filter(|local| local.id == id)
+            .ok_or(PumpError::UnknownInterface(id))?;
+        let smoltcp_now = to_smoltcp_instant(now);
+        local.interface.poll_maintenance(smoltcp_now);
+        let active_endpoint = self.udp.prepare_egress(id, &mut local.sockets);
+        local.link.set_tx_owner(active_endpoint);
+
+        let mut device = LocalDevice::new(&mut local.link);
+        let (ingress_may_remain, egress_may_remain) = match local.next_pump_order {
+            PumpOrder::IngressFirst => (
+                poll_local_ingress(
+                    id,
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut self.udp,
+                    &mut device,
+                    smoltcp_now,
+                    budget.ingress_frames(),
+                ),
+                poll_local_egress(
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut device,
+                    smoltcp_now,
+                    budget.egress_steps(),
+                ),
+            ),
+            PumpOrder::EgressFirst => {
+                let egress_may_remain = poll_local_egress(
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut device,
+                    smoltcp_now,
+                    budget.egress_steps(),
+                );
+                let ingress_may_remain = poll_local_ingress(
+                    id,
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut self.udp,
+                    &mut device,
+                    smoltcp_now,
+                    budget.ingress_frames(),
+                );
+                (ingress_may_remain, egress_may_remain)
+            },
+        };
+        let device_blocked = device.blocked_work();
+        drop(device);
+        local.link.set_tx_owner(None);
+        local.link.transfer(budget.ingress_frames());
+        let owner_blocked = device_blocked && local.link.occupied() >= local.local_link_capacity();
+        let udp_egress_may_remain = self
+            .udp
+            .complete_egress(active_endpoint, id, &local.sockets);
+        local.next_pump_order = local.next_pump_order.next();
+
+        let next_deadline = local
+            .interface
+            .poll_at(smoltcp_now, &local.sockets)
+            .map(from_smoltcp_instant);
+        Ok(pump_outcome(
+            owner_blocked,
+            ingress_may_remain,
+            egress_may_remain || udp_egress_may_remain,
+            now,
+            next_deadline,
+        ))
+    }
+}
+
+#[allow(dead_code)]
+fn poll_local_ingress(
+    id: InterfaceId,
+    interface: &mut smoltcp::iface::Interface,
+    sockets: &mut smoltcp::iface::SocketSet<'static>,
+    udp: &mut UdpEndpoints,
+    device: &mut LocalDevice<'_>,
+    now: smoltcp::time::Instant,
+    budget: usize,
+) -> bool {
+    udp.drain_ingress(id, sockets);
+    let mut processed = 0;
+    while processed < budget {
+        match interface.poll_ingress_single(now, device, sockets) {
+            PollIngressSingleResult::None => break,
+            PollIngressSingleResult::PacketProcessed
+            | PollIngressSingleResult::SocketStateChanged => processed += 1,
+        }
+        udp.drain_ingress(id, sockets);
+    }
+    processed == budget
+}
+
+#[allow(dead_code)]
+fn poll_local_egress(
+    interface: &mut smoltcp::iface::Interface,
+    sockets: &mut smoltcp::iface::SocketSet<'static>,
+    device: &mut LocalDevice<'_>,
+    now: smoltcp::time::Instant,
+    budget: usize,
+) -> bool {
+    let mut processed = 0;
+    while processed < budget {
+        match interface.poll_egress(now, device, sockets) {
+            PollResult::None => break,
+            PollResult::SocketStateChanged => processed += 1,
+        }
+    }
+    processed == budget
+}

@@ -1,61 +1,47 @@
-use anemone_net_api::{EthernetAddress, Instant as NetworkInstant, InterfaceId, Recheck};
-use anemone_smoltcp_stack::PumpBudget;
+//! External-provider pump preparation and worker progression.
+
+use anemone_net_api::{EthernetAddress, InterfaceId, Recheck};
 
 use crate::{
     device::net::{NetdevFrameProvider, NetdevSnapshot, PublishedNetdev, RecheckWake},
     net::domain::{DomainStack, ExternalMapping, ExternalPumpPort},
     prelude::*,
-    task::kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
-    time::timer::schedule_threaded_timer_event,
+    task::kthread::{KThreadBuilder, KThreadCtx},
     utils::any_opaque::AnyOpaque,
 };
 
-static_assert!(
-    NET_PUMP_INGRESS_BUDGET_FRAMES > 0,
-    "NET_PUMP_INGRESS_BUDGET_FRAMES must be non-zero"
-);
-static_assert!(
-    NET_PUMP_EGRESS_BUDGET_STEPS > 0,
-    "NET_PUMP_EGRESS_BUDGET_STEPS must be non-zero"
-);
-static_assert!(
-    NET_WORKER_REPOLL_ROUNDS > 0,
-    "NET_WORKER_REPOLL_ROUNDS must be non-zero"
-);
+use super::{PUMP_BUDGET, PumpControl, deadline_due, network_now, schedule_deadline};
 
-const PUMP_BUDGET: PumpBudget =
-    PumpBudget::new(NET_PUMP_INGRESS_BUDGET_FRAMES, NET_PUMP_EGRESS_BUDGET_STEPS);
-
-pub(super) enum AttachFailure<P> {
+pub(in crate::net) enum AttachFailure<P> {
     WorkerSpawn {
         error: SysError,
         published: PublishedNetdev<P>,
     },
 }
 
-pub(super) struct PreparedPath {
+pub(in crate::net) struct PreparedPath {
     snapshot: NetdevSnapshot,
     mapping: Option<ExternalMapping>,
     control: Arc<PumpControl>,
 }
 
 impl PreparedPath {
-    pub(super) fn snapshot(&self) -> &NetdevSnapshot {
+    pub(in crate::net) fn snapshot(&self) -> &NetdevSnapshot {
         &self.snapshot
     }
 
-    pub(super) fn interface(&self) -> InterfaceId {
+    pub(in crate::net) fn interface(&self) -> InterfaceId {
         self.mapping
             .as_ref()
             .expect("prepared network path lost its mapping")
             .interface()
     }
 
-    pub(super) fn control(&self) -> Arc<PumpControl> {
+    pub(in crate::net) fn control(&self) -> Arc<PumpControl> {
         self.control.clone()
     }
 
-    pub(super) fn activate(mut self) {
+    pub(in crate::net) fn activate(mut self) {
         self.mapping
             .take()
             .expect("network path mapping committed twice")
@@ -64,95 +50,19 @@ impl PreparedPath {
         self.control.request_work();
     }
 
-    pub(super) fn rollback_mapping(&mut self) {
+    pub(in crate::net) fn rollback_mapping(&mut self) {
         self.mapping
             .take()
             .expect("network path mapping rolled back twice")
             .rollback();
     }
 
-    pub(super) fn stop_and_retain(self) {
+    pub(in crate::net) fn stop_and_retain(self) {
         assert!(
             self.mapping.is_none(),
             "terminal retention must withdraw the unpublished Stack mapping first"
         );
         self.control.request_shutdown();
-    }
-}
-
-/// Worker lifecycle and pure wake/work predicates owned by the attach path.
-///
-/// The provider remains the durable completion/recheck truth and the domain
-/// Stack remains the protocol/deadline truth. These atomics only project
-/// activation, explicit work, and pump admission; the attach authority lock
-/// owns terminal shutdown admission.
-pub(super) struct PumpControl {
-    worker: spin::Once<KThreadHandle>,
-    active: AtomicBool,
-    explicit_work: AtomicBool,
-}
-
-impl PumpControl {
-    fn new() -> Self {
-        Self {
-            worker: spin::Once::new(),
-            active: AtomicBool::new(false),
-            explicit_work: AtomicBool::new(false),
-        }
-    }
-
-    fn install_worker(&self, worker: KThreadHandle) {
-        assert!(
-            self.worker.get().is_none(),
-            "network pump worker installed twice"
-        );
-        self.worker.call_once(|| worker);
-    }
-
-    fn wake_worker(&self) {
-        if let Some(worker) = self.worker.get() {
-            worker.wake();
-        }
-    }
-
-    fn request_work(&self) {
-        if !self.active.load(Ordering::Acquire) {
-            return;
-        }
-        self.explicit_work.store(true, Ordering::Release);
-        // Shutdown closes `active` before clearing explicit work. Rechecking
-        // prevents an in-flight requester from restoring work after that
-        // linearization point.
-        if !self.active.load(Ordering::Acquire) {
-            self.explicit_work.store(false, Ordering::Release);
-            return;
-        }
-        self.wake_worker();
-    }
-
-    fn work_requested(&self) -> bool {
-        self.explicit_work.load(Ordering::Acquire)
-    }
-
-    fn take_work_request(&self) -> bool {
-        self.explicit_work.swap(false, Ordering::AcqRel)
-    }
-
-    pub(super) fn request_shutdown(&self) {
-        // Revoke pump admission before touching the worker. A queued timer or
-        // recheck edge may still wake it, but cannot reactivate the predicate.
-        self.active.store(false, Ordering::Release);
-        self.explicit_work.store(false, Ordering::Release);
-        self.worker
-            .get()
-            .expect("prepared network path must have an installed worker")
-            .request_stop();
-    }
-}
-
-impl RecheckWake for PumpControl {
-    fn wake(&self) {
-        self.wake_worker();
     }
 }
 
@@ -186,7 +96,7 @@ struct WorkerArg<P: NetdevFrameProvider> {
     control: Arc<PumpControl>,
 }
 
-pub(super) fn prepare<P: NetdevFrameProvider>(
+pub(in crate::net) fn prepare<P: NetdevFrameProvider>(
     published: PublishedNetdev<P>,
     stack: Arc<DomainStack>,
     ethernet_address: EthernetAddress,
@@ -305,31 +215,4 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
     // only after preventing Weak upgrades and proving queue/device quiescence.
     core::mem::forget(core);
     0
-}
-
-fn network_now() -> NetworkInstant {
-    let micros = crate::time::Instant::now().to_duration().as_micros();
-    let micros = i64::try_from(micros).unwrap_or(i64::MAX);
-    NetworkInstant::from_micros(micros)
-}
-
-fn deadline_due(deadline: Option<NetworkInstant>) -> bool {
-    deadline.is_some_and(|deadline| deadline <= network_now())
-}
-
-fn schedule_deadline(control: Arc<PumpControl>, deadline: NetworkInstant) {
-    if !control.active.load(Ordering::Acquire) {
-        return;
-    }
-    let now = network_now();
-    if deadline <= now {
-        control.request_work();
-        return;
-    }
-    let delay = u64::try_from(deadline.total_micros() - now.total_micros())
-        .expect("future network deadline must have a non-negative duration");
-    schedule_threaded_timer_event(
-        Duration::from_micros(delay),
-        Box::new(move || control.wake_worker()),
-    );
 }

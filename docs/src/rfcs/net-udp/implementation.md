@@ -442,9 +442,10 @@ claim boundary见[transaction](../../devlog/transactions/2026-07-29-net-udp.md)�
 
 ### 6.2 Stage 2 Ready — Static control plane与production loopback
 
-**阶段成熟度与授权：** Ready / Not Active。2026-07-29的`1 -> 2`resolution已经冻结本节两个checkpoint、
-module/file切分、配置和runtime路线、contract cutover、验证、停止/退出条件与Resolved Write Set Manifest。本轮只
-授权文档解析，不授权Stage 2 source、SystemTarget/KConfig/current-contract修改或进入Stage 3。
+**阶段成熟度与授权：** Checkpoint 2A Closed；Checkpoint 2B Ready / Not Active。2026-07-29的`1 -> 2`resolution
+冻结了本节两个checkpoint、module/file切分、配置和runtime路线、contract cutover、验证、停止/退出条件与Resolved
+Write Set Manifest。2A已经按split-only route独立关闭；该closure不授权2B source、SystemTarget/KConfig/
+current-contract修改或进入Stage 3。
 
 **前置条件与live baseline：**
 
@@ -525,6 +526,11 @@ Stage 2只建立上述private kernel control-plane capability。Stage 3解析真
 import/re-export机械调整，且原consumer callsite与可见能力集合必须不变。git rename detection不是closure条件；
 行为、依赖方向和callsite surface不变才是。2A完成host/no-default/xtask/双架构compile和change review后独立
 Closed；不得自动进入2B。
+
+**Closure：** 2026-07-29，五组same-owner split与获批的stale xtask fixture修正通过6.2.8全部2A gate并以
+独立checkpoint关闭。consumer/public surface、owner、runtime behavior和generated text不变，Contract Impact为None；
+Checkpoint 2B仍Ready / Not Active。精确diff、review、validation与Not Run边界见
+[transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-2-checkpoint-2a-activation-and-same-owner-split)。
 
 #### 6.2.3 Checkpoint 2B — static IPv4与production loopback cutover
 
@@ -637,7 +643,9 @@ Apollyon、production local-traffic failure、RV64 runtime未运行/失败或con
 - `anemone-kernel/src/net/{worker.rs,worker/mod.rs,worker/control.rs,worker/external.rs}`；
 - `anemone-kernel/crates/anemone-smoltcp-stack/src/stack/{mod.rs,interfaces.rs,udp_ops.rs,host_validation.rs}`；
 - `anemone-kernel/crates/anemone-smoltcp-stack/src/{pump.rs,pump/mod.rs,pump/common.rs,pump/external.rs,pump/local.rs}`；
-- `scripts/xtask/src/tasks/build/{mod.rs,generated_defs.rs}`。
+- `scripts/xtask/src/tasks/build/{mod.rs,generated_defs.rs}`；
+- `scripts/xtask/src/config/resolve.rs`，仅允许把`resolved_selection_owns_all_snapshot_inputs`的
+  `max_logical_cpus` fixture/expected snapshot与canonical `conf/.defconfig`值`1`重新对齐。
 
 2A只允许move、module declaration、owner-internal visibility/import/re-export和为保持原测试位置所需的机械调整；
 这些调整不得扩大owner-external consumer surface。上述new/old path都列出是为了允许tracked rename。
@@ -649,8 +657,8 @@ Apollyon、production local-traffic failure、RV64 runtime未运行/失败或con
 - `docs/src/devlog/2026-07-20_to_2026-08-02.md`、`docs/src/rfcs.md`。
 
 这些文档只记录2A activation/closure、exact diff、review、验证与2B Not Active状态，不得改变R0 target、candidate
-contract或2B manifest。`local_link.rs`、`udp.rs`、kernel `net/mod.rs`、Cargo/config、`invariants.md`与current
-contracts均只读。
+contract或2B manifest。`local_link.rs`、`udp.rs`、kernel `net/mod.rs`、Cargo、除上述获批test-only
+`resolve.rs`修正外的config source、`invariants.md`与current contracts均只读。
 
 **Checkpoint 2B tracked source/config：**
 
@@ -1457,6 +1465,12 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   split-only与2B atomic static-control/loopback cutover，保持R0 target/owner/ABI/Contract Impact/acceptance不变；
   Stage 2达到Ready / Not Active。精确preflight见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-1---stage-2-implementation-resolution-gate)。
+- `2026-07-29`：Checkpoint 2A / Same-owner Split Closure。kernel domain/worker、stack root/pump与xtask generated-def
+  materializer已按resolved roles目录化，获批的`resolve.rs`扩展仅修正与canonical `.defconfig`不一致的test fixture。
+  final diff没有新增type/method/config field、扩大public surface、改变owner/behavior/generated text或触碰current
+  contract；全部2A validation gate与先前独立source review通过，开发者在closure时明确取消额外final exact-diff
+  review。Contract Impact为None，Checkpoint 2B保持Ready / Not Active。精确证据见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-2-checkpoint-2a-activation-and-same-owner-split)。
 
 ## 14. Target Renegotiation Gates
 
@@ -1465,8 +1479,14 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 
 ## 15. Write Set扩展记录
 
-当前没有Active-stage扩展。Stage 1按冻结manifest完成；`1 -> 2`resolution为future Outline首次解析，6.2.7现在
-冻结新的Stage 2 manifest但尚未授权写入。2A/2B Active后任何manifest外tracked write仍须先上报。
+- `2026-07-29`：2A mandatory `just xtask-test`发现HEAD的
+  `resolved_selection_owns_all_snapshot_inputs`仍期待`max_logical_cpus = 16`，而canonical `conf/.defconfig`已为`1`；
+  两文件均无2A diff。worker按停止合同上报后，开发者明确批准把`scripts/xtask/src/config/resolve.rs`加入2A
+  manifest，仅修正该test fixture/expected snapshot。Contract Impact为None，不改变owner、public API、ABI、
+  visible semantics或acceptance；扩展后必须重跑全部2A validation与final review。
+
+Stage 1按冻结manifest完成；`1 -> 2`resolution为future Outline首次解析并冻结Stage 2 manifest。除上述获批2A
+test-only修正外，2A/2B Active后任何manifest外tracked write仍须先上报。
 
 ## 16. 结构维护记录
 

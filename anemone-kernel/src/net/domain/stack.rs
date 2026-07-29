@@ -1,0 +1,105 @@
+//! Initial-domain protocol-Stack mapping and pump capabilities.
+
+use anemone_net_api::{
+    EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, PumpOutcome,
+};
+use anemone_smoltcp_stack::{PumpBudget, PumpError, Stack};
+
+use crate::prelude::*;
+
+pub(in crate::net) struct DomainStack {
+    stack: SpinLock<Stack>,
+}
+
+impl DomainStack {
+    pub(super) fn new() -> Self {
+        Self {
+            stack: SpinLock::new(Stack::new()),
+        }
+    }
+
+    pub(in crate::net) fn attach_external<P: FrameProvider>(
+        self: &Arc<Self>,
+        provider: &mut P,
+        ethernet_address: EthernetAddress,
+        now: NetworkInstant,
+    ) -> ExternalMapping {
+        let interface = self
+            .stack
+            .lock()
+            .add_interface(provider, ethernet_address, now);
+        ExternalMapping {
+            stack: self.clone(),
+            interface,
+            finished: false,
+        }
+    }
+}
+
+/// Transaction-local mapping owner used only before active publication.
+pub(in crate::net) struct ExternalMapping {
+    stack: Arc<DomainStack>,
+    interface: InterfaceId,
+    finished: bool,
+}
+
+impl ExternalMapping {
+    pub(in crate::net) fn pump_port(&self) -> ExternalPumpPort {
+        ExternalPumpPort {
+            stack: self.stack.clone(),
+            interface: self.interface,
+        }
+    }
+
+    pub(in crate::net) const fn interface(&self) -> InterfaceId {
+        self.interface
+    }
+
+    pub(in crate::net) fn commit(mut self) {
+        self.finished = true;
+    }
+
+    pub(in crate::net) fn rollback(mut self) {
+        let removed = self.stack.stack.lock().remove_interface(self.interface);
+        self.finished = true;
+        removed.expect("failed attach lost its global-Stack mapping");
+    }
+}
+
+impl Drop for ExternalMapping {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+
+        // Fail closed before reporting the protocol bug: this mapping has not
+        // been published active, so leaving it behind would let a panic turn
+        // an attach mistake into stale global-Stack state.
+        let removed = self.stack.stack.lock().remove_interface(self.interface);
+        self.finished = true;
+        removed.expect("unfinished external mapping was already absent");
+        panic!("external Stack mapping dropped without commit or rollback");
+    }
+}
+
+/// Worker-local capability for one interface on the domain Stack.
+pub(in crate::net) struct ExternalPumpPort {
+    stack: Arc<DomainStack>,
+    interface: InterfaceId,
+}
+
+impl ExternalPumpPort {
+    pub(in crate::net) fn pump<P: FrameProvider>(
+        &self,
+        provider: &mut P,
+        now: NetworkInstant,
+        budget: PumpBudget,
+    ) -> Result<PumpOutcome, PumpError> {
+        // A provider callback runs only inside this finite pump window. It must
+        // not sleep or re-enter the domain/attach owners.
+        self.stack
+            .stack
+            .lock()
+            .pump(self.interface, provider, now, budget)
+    }
+}

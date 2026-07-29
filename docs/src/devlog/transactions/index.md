@@ -9,7 +9,8 @@
 - [Network UDP](./2026-07-29-net-udp.md)：R0已接受；Stage 0 positive topology decision与Stage 1 initial-domain/
   global-Stack walking skeleton均已关闭。`NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/
   `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；独立`1 -> 2`resolution已把Stage 2解析为2A same-owner
-  split与2B static-control/loopback cutover，当前Ready / Not Active，全部Stage 2 candidate仍未cut over。
+  split与2B static-control/loopback cutover。2A已按Contract Impact=None独立关闭；2B仍Ready / Not Active，
+  全部Stage 2 candidate仍未cut over。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
