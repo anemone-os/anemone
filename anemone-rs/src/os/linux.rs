@@ -1,3 +1,5 @@
+pub mod net;
+
 pub mod fs {
     use alloc::ffi::CString;
     use anemone_abi::{

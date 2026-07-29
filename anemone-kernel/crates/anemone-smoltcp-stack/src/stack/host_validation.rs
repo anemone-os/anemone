@@ -2,6 +2,10 @@ use alloc::{vec, vec::Vec};
 
 use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
+    udp::{
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
+        UdpLocalBinding, UdpQueryError,
+    },
 };
 use smoltcp::{
     socket::raw,
@@ -11,11 +15,11 @@ use smoltcp::{
 use crate::{
     pump::PumpBudget,
     stack::{Ipv4ConfigError, PumpError, Stack},
-    udp::{EndpointCreateError, EndpointId, RetireError, SendError},
+    udp::SendError,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct HostEndpointId(u32);
+pub struct HostEndpointId(UdpEndpointId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostSelection {
@@ -26,12 +30,14 @@ pub struct HostSelection {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostEndpointCreateError {
     InvalidPort,
+    EndpointCapacity,
     PortInUse,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostSendError {
     UnknownEndpoint,
+    UnboundEndpoint,
     MissingSelection,
     UnknownInterface,
     UnsupportedSource,
@@ -146,9 +152,63 @@ impl Stack {
         receive_packet_capacity: usize,
         engine_payload_capacity: usize,
     ) -> Result<HostEndpointId, HostEndpointCreateError> {
-        self.create_udp_endpoint(port, receive_packet_capacity, engine_payload_capacity)
-            .map(|id| HostEndpointId(id.raw()))
-            .map_err(Into::into)
+        if port == 0 {
+            return Err(HostEndpointCreateError::InvalidPort);
+        }
+        let id = self
+            .create_udp_endpoint(UdpEndpointLimits::new(
+                usize::MAX,
+                1,
+                receive_packet_capacity,
+                engine_payload_capacity,
+            ))
+            .map(HostEndpointId)
+            .map_err(HostEndpointCreateError::from)?;
+        let result = self.bind_udp_endpoint(
+            id.0,
+            UdpBindRequest::new(ApiIpv4Address::UNSPECIFIED, port),
+            32768,
+            60999,
+        );
+        match result {
+            Ok(_) => Ok(id),
+            Err(error) => {
+                self.retire_udp_endpoint(id.0)
+                    .expect("failed host create-and-bind must retire its fresh endpoint");
+                Err(match error {
+                    UdpBindError::PortInUse => HostEndpointCreateError::PortInUse,
+                    UdpBindError::UnknownEndpoint
+                    | UdpBindError::AlreadyBound
+                    | UdpBindError::EphemeralPortsExhausted => {
+                        unreachable!("fresh fixed-port host endpoint must be bindable")
+                    },
+                })
+            },
+        }
+    }
+
+    pub fn create_unbound_udp_endpoint_for_host_validation(
+        &mut self,
+        limits: UdpEndpointLimits,
+    ) -> Result<HostEndpointId, UdpCreateError> {
+        self.create_udp_endpoint(limits).map(HostEndpointId)
+    }
+
+    pub fn bind_udp_endpoint_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+        request: UdpBindRequest,
+        ephemeral_first: u16,
+        ephemeral_last: u16,
+    ) -> Result<UdpLocalBinding, UdpBindError> {
+        self.bind_udp_endpoint(endpoint.0, request, ephemeral_first, ephemeral_last)
+    }
+
+    pub fn udp_binding_for_host_validation(
+        &self,
+        endpoint: HostEndpointId,
+    ) -> Result<Option<UdpLocalBinding>, UdpQueryError> {
+        self.udp_endpoint_binding(endpoint.0)
     }
 
     pub fn send_udp_for_host_validation(
@@ -167,7 +227,7 @@ impl Stack {
             None => (None, Ipv4Address::UNSPECIFIED),
         };
         self.send_udp(
-            EndpointId::from_raw(endpoint.0),
+            endpoint.0,
             selected_interface,
             source,
             smoltcp::wire::IpEndpoint::new(
@@ -183,7 +243,7 @@ impl Stack {
         &mut self,
         endpoint: HostEndpointId,
     ) -> Option<HostReceivedDatagram> {
-        let datagram = self.udp.receive(EndpointId::from_raw(endpoint.0))?;
+        let datagram = self.udp.receive(endpoint.0)?;
         let IpAddress::Ipv4(source_address) = datagram.source.addr;
         Some(HostReceivedDatagram {
             payload: datagram.payload,
@@ -196,15 +256,14 @@ impl Stack {
         &mut self,
         endpoint: HostEndpointId,
     ) -> Result<(), HostRetireError> {
-        self.retire_udp_endpoint(EndpointId::from_raw(endpoint.0))
-            .map_err(Into::into)
+        self.retire_udp_endpoint(endpoint.0).map_err(Into::into)
     }
 
     pub fn udp_endpoint_observation_for_host_validation(
         &self,
         endpoint: HostEndpointId,
     ) -> Option<HostEndpointObservation> {
-        let endpoint = self.udp.endpoint(EndpointId::from_raw(endpoint.0))?;
+        let endpoint = self.udp.endpoint(endpoint.0)?;
         Some(HostEndpointObservation {
             engine_resources: endpoint.engines().len(),
             pending_tx: endpoint.has_pending_tx(),
@@ -230,11 +289,10 @@ impl Stack {
     }
 }
 
-impl From<EndpointCreateError> for HostEndpointCreateError {
-    fn from(error: EndpointCreateError) -> Self {
+impl From<UdpCreateError> for HostEndpointCreateError {
+    fn from(error: UdpCreateError) -> Self {
         match error {
-            EndpointCreateError::InvalidPort => Self::InvalidPort,
-            EndpointCreateError::PortInUse => Self::PortInUse,
+            UdpCreateError::EndpointCapacity => Self::EndpointCapacity,
         }
     }
 }
@@ -243,6 +301,7 @@ impl From<SendError> for HostSendError {
     fn from(error: SendError) -> Self {
         match error {
             SendError::UnknownEndpoint => Self::UnknownEndpoint,
+            SendError::UnboundEndpoint => Self::UnboundEndpoint,
             SendError::MissingSelection => Self::MissingSelection,
             SendError::UnknownInterface => Self::UnknownInterface,
             SendError::UnsupportedSource => Self::UnsupportedSource,
@@ -253,10 +312,10 @@ impl From<SendError> for HostSendError {
     }
 }
 
-impl From<RetireError> for HostRetireError {
-    fn from(error: RetireError) -> Self {
+impl From<anemone_net_api::udp::UdpRetireError> for HostRetireError {
+    fn from(error: anemone_net_api::udp::UdpRetireError) -> Self {
         match error {
-            RetireError::UnknownEndpoint => Self::UnknownEndpoint,
+            anemone_net_api::udp::UdpRetireError::UnknownEndpoint => Self::UnknownEndpoint,
         }
     }
 }

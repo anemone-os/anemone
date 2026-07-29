@@ -2,6 +2,7 @@ mod support;
 
 use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
+    udp::{UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointLimits, UdpQueryError},
 };
 use anemone_smoltcp_stack::{
     HostEndpointCreateError, HostRetireError, HostSelection, HostSendError, PumpBudget, Stack,
@@ -20,6 +21,142 @@ const SECOND_IP: [u8; 4] = [10, 0, 2, 2];
 const SECOND_PEER_IP: [u8; 4] = [10, 0, 2, 1];
 const LOCAL_IP: [u8; 4] = [127, 0, 0, 1];
 const ENDPOINT_PAYLOAD_CAPACITY: usize = 128;
+
+fn lifecycle_limits(capacity: usize) -> UdpEndpointLimits {
+    UdpEndpointLimits::new(capacity, 1, 1, 32)
+}
+
+fn create_unbound(stack: &mut Stack, capacity: usize) -> anemone_smoltcp_stack::HostEndpointId {
+    stack
+        .create_unbound_udp_endpoint_for_host_validation(lifecycle_limits(capacity))
+        .unwrap()
+}
+
+fn bind_for_host(
+    stack: &mut Stack,
+    endpoint: anemone_smoltcp_stack::HostEndpointId,
+    address: [u8; 4],
+    port: u16,
+    first: u16,
+    last: u16,
+) -> Result<anemone_net_api::udp::UdpLocalBinding, UdpBindError> {
+    stack.bind_udp_endpoint_for_host_validation(
+        endpoint,
+        UdpBindRequest::new(ApiIpv4Address::new(address), port),
+        first,
+        last,
+    )
+}
+
+#[test]
+fn endpoint_capacity_binding_matrix_ephemeral_and_stale_identity() {
+    let mut capacity_stack = Stack::new();
+    let mut endpoints = Vec::new();
+    for _ in 0..64 {
+        endpoints.push(create_unbound(&mut capacity_stack, 64));
+    }
+    assert_eq!(
+        capacity_stack.create_unbound_udp_endpoint_for_host_validation(lifecycle_limits(64)),
+        Err(UdpCreateError::EndpointCapacity)
+    );
+    for endpoint in endpoints {
+        capacity_stack
+            .retire_udp_endpoint_for_host_validation(endpoint)
+            .unwrap();
+    }
+
+    let any = [0, 0, 0, 0];
+    let first_address = [10, 0, 0, 1];
+    let second_address = [10, 0, 0, 2];
+    let mut stack = Stack::new();
+    let first = create_unbound(&mut stack, 64);
+    let second = create_unbound(&mut stack, 64);
+    let duplicate = create_unbound(&mut stack, 64);
+    let wildcard = create_unbound(&mut stack, 64);
+    bind_for_host(&mut stack, first, first_address, 42000, 50000, 50001).unwrap();
+    bind_for_host(&mut stack, second, second_address, 42000, 50000, 50001).unwrap();
+    assert_eq!(
+        bind_for_host(&mut stack, duplicate, first_address, 42000, 50000, 50001),
+        Err(UdpBindError::PortInUse)
+    );
+    assert_eq!(
+        stack.udp_binding_for_host_validation(duplicate).unwrap(),
+        None
+    );
+    assert_eq!(
+        bind_for_host(&mut stack, wildcard, any, 42000, 50000, 50001),
+        Err(UdpBindError::PortInUse)
+    );
+    bind_for_host(&mut stack, duplicate, first_address, 42001, 50000, 50001).unwrap();
+    assert_eq!(
+        bind_for_host(&mut stack, duplicate, first_address, 42002, 50000, 50001),
+        Err(UdpBindError::AlreadyBound)
+    );
+
+    let ephemeral_one = create_unbound(&mut stack, 64);
+    let ephemeral_two = create_unbound(&mut stack, 64);
+    let exhausted = create_unbound(&mut stack, 64);
+    assert_eq!(
+        bind_for_host(&mut stack, ephemeral_one, any, 0, 50000, 50001)
+            .unwrap()
+            .port(),
+        50000
+    );
+    assert_eq!(
+        bind_for_host(&mut stack, ephemeral_two, any, 0, 50000, 50001)
+            .unwrap()
+            .port(),
+        50001
+    );
+    assert_eq!(
+        bind_for_host(&mut stack, exhausted, any, 0, 50000, 50001),
+        Err(UdpBindError::EphemeralPortsExhausted)
+    );
+    assert_eq!(
+        stack.udp_binding_for_host_validation(exhausted).unwrap(),
+        None
+    );
+
+    stack
+        .retire_udp_endpoint_for_host_validation(ephemeral_one)
+        .unwrap();
+    assert_eq!(
+        stack.udp_binding_for_host_validation(ephemeral_one),
+        Err(UdpQueryError::UnknownEndpoint)
+    );
+    let replacement = create_unbound(&mut stack, 64);
+    assert_eq!(
+        bind_for_host(&mut stack, replacement, any, 0, 50000, 50001)
+            .unwrap()
+            .port(),
+        50000
+    );
+    assert_eq!(
+        stack.retire_udp_endpoint_for_host_validation(ephemeral_one),
+        Err(anemone_smoltcp_stack::HostRetireError::UnknownEndpoint)
+    );
+
+    let mut reverse = Stack::new();
+    let wildcard_first = create_unbound(&mut reverse, 64);
+    let wildcard_after = create_unbound(&mut reverse, 64);
+    let specific_after = create_unbound(&mut reverse, 64);
+    bind_for_host(&mut reverse, wildcard_first, any, 43000, 50000, 50001).unwrap();
+    assert_eq!(
+        bind_for_host(&mut reverse, wildcard_after, any, 43000, 50000, 50001),
+        Err(UdpBindError::PortInUse)
+    );
+    assert_eq!(
+        bind_for_host(
+            &mut reverse,
+            specific_after,
+            first_address,
+            43000,
+            50000,
+            50001
+        ),
+        Err(UdpBindError::PortInUse)
+    );
+}
 
 fn selection(interface: InterfaceId, source: [u8; 4]) -> HostSelection {
     HostSelection { interface, source }
@@ -356,6 +493,10 @@ fn local_link_is_bounded_normal_ingress_and_retire_withdraws_all_resources() {
         stack.create_udp_endpoint_for_host_validation(41001, 2, ENDPOINT_PAYLOAD_CAPACITY),
         Err(HostEndpointCreateError::PortInUse)
     );
+    let rollback_probe = create_unbound(&mut stack, 4);
+    stack
+        .retire_udp_endpoint_for_host_validation(rollback_probe)
+        .unwrap();
 
     // A blocked external provider retains its own Endpoint datagram but does
     // not prevent another Endpoint from progressing through the local port.

@@ -8,7 +8,6 @@ use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack};
 
 use crate::prelude::*;
 
-#[cfg(feature = "kunit")]
 mod udp;
 
 pub(in crate::net) struct DomainStack {

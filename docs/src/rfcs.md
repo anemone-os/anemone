@@ -118,8 +118,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   完成same-owner split，2B随后以optional SystemTarget static IPv4、唯一control plane、Stack projection与bounded
   production local worker关闭Stage 2。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce
   `NET-CONTROL-PLANE-001`；独立`2 -> 3`resolution已把Stage 3解析为3A same-owner split、3B
-  Endpoint/File/address lifecycle与3C nonblocking datagram三个checkpoint。3A已按Contract Impact=None独立关闭，
-  3B-3C保持Ready / Not Active，Socket/Endpoint/UAPI及其candidate contracts仍未生效。执行证据见
+  Endpoint/File/address lifecycle与3C nonblocking datagram三个checkpoint。3A已按Contract Impact=None独立关闭；
+  3B的`socket/bind/getsockname` RV64实现与验证候选已形成，但final review因两个Apollyon、一个Keter和VFS
+  write-set expansion保持Review Hold。3C仍Ready / Not Active，Socket/Endpoint/UDP/wait candidate contracts仍未
+  生效。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

@@ -30,6 +30,7 @@ mod pipe;
 pub mod proc;
 
 mod ramfs;
+pub(crate) mod socket;
 
 pub mod api;
 

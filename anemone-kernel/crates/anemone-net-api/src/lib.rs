@@ -5,6 +5,7 @@ mod interface;
 mod ipv4;
 mod pump;
 mod time;
+pub mod udp;
 
 pub use frame::{
     FrameCapabilities, FrameProvider, FrameSizeError, ReceiveOutcome, RxToken, TransmitOutcome,

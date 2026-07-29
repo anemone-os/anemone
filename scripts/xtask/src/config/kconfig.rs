@@ -104,6 +104,12 @@ pub struct Parameters {
     pub net_worker_repoll_rounds: Option<usize>,
     pub net_local_link_packet_capacity: Option<usize>,
     pub net_local_link_mtu_bytes: Option<usize>,
+    pub net_udp_endpoint_capacity: Option<usize>,
+    pub net_udp_tx_datagram_capacity: Option<usize>,
+    pub net_udp_rx_datagram_capacity: Option<usize>,
+    pub net_udp_max_payload_bytes: Option<usize>,
+    pub net_udp_ephemeral_port_first: Option<u16>,
+    pub net_udp_ephemeral_port_last: Option<u16>,
 }
 
 impl Parameters {
@@ -184,6 +190,47 @@ impl Parameters {
         materialize!(net_worker_repoll_rounds);
         materialize!(net_local_link_packet_capacity);
         materialize!(net_local_link_mtu_bytes);
+        materialize!(net_udp_endpoint_capacity);
+        materialize!(net_udp_tx_datagram_capacity);
+        materialize!(net_udp_rx_datagram_capacity);
+        materialize!(net_udp_max_payload_bytes);
+        materialize!(net_udp_ephemeral_port_first);
+        materialize!(net_udp_ephemeral_port_last);
+
+        let nonzero = [
+            ("net_udp_endpoint_capacity", self.net_udp_endpoint_capacity.unwrap()),
+            (
+                "net_udp_tx_datagram_capacity",
+                self.net_udp_tx_datagram_capacity.unwrap(),
+            ),
+            (
+                "net_udp_rx_datagram_capacity",
+                self.net_udp_rx_datagram_capacity.unwrap(),
+            ),
+        ];
+        for (name, value) in nonzero {
+            anyhow::ensure!(value != 0, "{name} must be nonzero");
+        }
+        let max_payload = self.net_udp_max_payload_bytes.unwrap();
+        anyhow::ensure!(
+            (1..=65_507).contains(&max_payload),
+            "net_udp_max_payload_bytes must be in 1..=65507"
+        );
+        self.net_udp_tx_datagram_capacity
+            .unwrap()
+            .checked_mul(max_payload)
+            .ok_or_else(|| anyhow::anyhow!("UDP TX storage size overflows usize"))?;
+        self.net_udp_rx_datagram_capacity
+            .unwrap()
+            .checked_mul(max_payload)
+            .ok_or_else(|| anyhow::anyhow!("UDP RX storage size overflows usize"))?;
+        let ephemeral_first = self.net_udp_ephemeral_port_first.unwrap();
+        let ephemeral_last = self.net_udp_ephemeral_port_last.unwrap();
+        anyhow::ensure!(ephemeral_first != 0, "net_udp_ephemeral_port_first must be nonzero");
+        anyhow::ensure!(
+            ephemeral_first <= ephemeral_last,
+            "net_udp_ephemeral_port_first must not exceed net_udp_ephemeral_port_last"
+        );
         Ok(())
     }
 
@@ -355,6 +402,18 @@ pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
 pub const NET_LOCAL_LINK_PACKET_CAPACITY: usize = {};
 /// Maximum IP-medium packet size of the production local software link.
 pub const NET_LOCAL_LINK_MTU_BYTES: usize = {};
+/// Maximum number of live UDP endpoints in the initial domain.
+pub const NET_UDP_ENDPOINT_CAPACITY: usize = {};
+/// Per-endpoint UDP transmit datagram capacity.
+pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};
+/// Per-endpoint UDP receive datagram capacity.
+pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = {};
+/// Maximum UDP payload bytes reserved by one protocol engine datagram.
+pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
+/// First port in the deterministic UDP ephemeral allocation range.
+pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = {};
+/// Last port in the deterministic UDP ephemeral allocation range.
+pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -414,6 +473,12 @@ pub const NET_LOCAL_LINK_MTU_BYTES: usize = {};
             resolved!(net_worker_repoll_rounds),
             resolved!(net_local_link_packet_capacity),
             resolved!(net_local_link_mtu_bytes),
+            resolved!(net_udp_endpoint_capacity),
+            resolved!(net_udp_tx_datagram_capacity),
+            resolved!(net_udp_rx_datagram_capacity),
+            resolved!(net_udp_max_payload_bytes),
+            resolved!(net_udp_ephemeral_port_first),
+            resolved!(net_udp_ephemeral_port_last),
         )
     }
 }
@@ -442,4 +507,52 @@ impl Config {
 pub struct KernelConfig {
     pub features: HashMap<String, bool>,
     pub parameters: Parameters,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn defaults() -> Parameters {
+        Config::from_str(include_str!("../../../../conf/.defconfig"))
+            .unwrap()
+            .parameters
+    }
+
+    #[test]
+    fn udp_defaults_materialize_and_generate_exact_constants() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        let generated = parameters.gen_kconfig_defs();
+        for expected in [
+            "pub const NET_UDP_ENDPOINT_CAPACITY: usize = 64;",
+            "pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = 8;",
+            "pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = 64;",
+            "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1472;",
+            "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 32768;",
+            "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 60999;",
+        ] {
+            assert!(generated.contains(expected), "missing generated constant {expected}");
+        }
+    }
+
+    #[test]
+    fn udp_parameter_bounds_are_rejected_by_config_owner() {
+        let mut zero_capacity = defaults();
+        zero_capacity.net_udp_endpoint_capacity = Some(0);
+        assert!(zero_capacity.materialize_defaults(None).is_err());
+
+        let mut oversized_payload = defaults();
+        oversized_payload.net_udp_max_payload_bytes = Some(65_508);
+        assert!(oversized_payload.materialize_defaults(None).is_err());
+
+        let mut inverted_ports = defaults();
+        inverted_ports.net_udp_ephemeral_port_first = Some(60_000);
+        inverted_ports.net_udp_ephemeral_port_last = Some(50_000);
+        assert!(inverted_ports.materialize_defaults(None).is_err());
+
+        let mut storage_overflow = defaults();
+        storage_overflow.net_udp_tx_datagram_capacity = Some(usize::MAX);
+        assert!(storage_overflow.materialize_defaults(None).is_err());
+    }
 }

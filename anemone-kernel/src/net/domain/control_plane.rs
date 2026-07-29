@@ -141,6 +141,14 @@ impl Ipv4ControlPlane {
         self.external.as_ref().map(|external| &external.logical)
     }
 
+    pub(in crate::net) fn owns_local_address(&self, address: Ipv4Address) -> bool {
+        address.is_loopback()
+            || self
+                .external
+                .as_ref()
+                .is_some_and(|external| external.cidr.address() == address)
+    }
+
     pub(in crate::net) fn select(
         &self,
         destination: Ipv4Address,

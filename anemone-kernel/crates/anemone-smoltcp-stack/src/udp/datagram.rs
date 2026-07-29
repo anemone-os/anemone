@@ -50,6 +50,9 @@ impl UdpEndpoints {
             .iter_mut()
             .find(|endpoint| endpoint.id == endpoint_id)
             .ok_or(SendError::UnknownEndpoint)?;
+        if endpoint.binding.is_none() {
+            return Err(SendError::UnboundEndpoint);
+        }
         // Admission owns both limits that the private engine must satisfy.
         // Accepting against MTU alone would defer an engine-buffer failure to
         // pump time, after the operation has already reported success.
@@ -61,7 +64,7 @@ impl UdpEndpoints {
             // the device after the operation had already committed success.
             return Err(SendError::Oversize { maximum: 0 });
         };
-        let maximum = interface_payload_capacity.min(endpoint.engine_payload_capacity);
+        let maximum = interface_payload_capacity.min(endpoint.limits.max_payload_bytes());
         if payload.len() > maximum {
             return Err(SendError::Oversize { maximum });
         }
@@ -176,7 +179,9 @@ impl UdpEndpoints {
                 continue;
             };
             let socket = sockets.get_mut::<udp::Socket>(engine.handle);
-            while endpoint.received.len() < endpoint.receive_packet_capacity && socket.can_recv() {
+            while endpoint.received.len() < endpoint.limits.rx_datagram_capacity()
+                && socket.can_recv()
+            {
                 let (payload, metadata) = socket
                     .recv()
                     .expect("can_recv must imply one engine-owned datagram");

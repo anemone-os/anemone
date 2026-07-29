@@ -1,16 +1,19 @@
-//! Dormant aggregate UDP operations owned by the protocol Stack.
+//! Aggregate UDP operations owned by the protocol Stack.
 
-use anemone_net_api::InterfaceId;
+use anemone_net_api::{
+    InterfaceId,
+    udp::{
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
+        UdpLocalBinding, UdpQueryError, UdpRetireError,
+    },
+};
 use smoltcp::wire::{EthernetFrame, IpEndpoint, Ipv4Address};
 
-use crate::udp::{EndpointCreateError, EndpointId, RetireError, SendError};
+use crate::udp::SendError;
 
 use super::Stack;
 
 impl Stack {
-    // These private operations now live under the production global Stack
-    // owner, but remain dormant until Stage 3 introduces a real Endpoint
-    // consumer. The host-only facade continues to exercise them meanwhile.
     #[allow(dead_code)]
     pub(super) fn interface_ipv4_and_mtu(
         &self,
@@ -29,16 +32,11 @@ impl Stack {
             .map(|local| (local.interface.has_ip_addr(source), local.ip_mtu()))
     }
 
-    #[allow(dead_code)]
-    pub(super) fn create_udp_endpoint(
+    pub fn create_udp_endpoint(
         &mut self,
-        port: u16,
-        receive_packet_capacity: usize,
-        engine_payload_capacity: usize,
-    ) -> Result<EndpointId, EndpointCreateError> {
-        let mut endpoint =
-            self.udp
-                .prepare_endpoint(port, receive_packet_capacity, engine_payload_capacity)?;
+        limits: UdpEndpointLimits,
+    ) -> Result<UdpEndpointId, UdpCreateError> {
+        let mut endpoint = self.udp.prepare_endpoint(limits)?;
         for entry in &mut self.interfaces {
             endpoint.add_engine(entry.id, &mut entry.sockets);
         }
@@ -48,10 +46,45 @@ impl Stack {
         Ok(self.udp.publish_endpoint(endpoint))
     }
 
+    /// Atomically selects/reserves a port, projects the binding into every
+    /// private engine, and commits the endpoint's sole binding truth.
+    pub fn bind_udp_endpoint(
+        &mut self,
+        id: UdpEndpointId,
+        request: UdpBindRequest,
+        ephemeral_first: u16,
+        ephemeral_last: u16,
+    ) -> Result<UdpLocalBinding, UdpBindError> {
+        let binding = self
+            .udp
+            .prepare_binding(id, request, ephemeral_first, ephemeral_last)?;
+        {
+            let endpoint = self
+                .udp
+                .endpoint(id)
+                .expect("prepared UDP endpoint disappeared before projection");
+            for entry in &mut self.interfaces {
+                endpoint.bind_engine_projection(entry.id, &mut entry.sockets, binding);
+            }
+            if let Some(local) = &mut self.local {
+                endpoint.bind_engine_projection(local.id, &mut local.sockets, binding);
+            }
+        }
+        self.udp.commit_binding(id, binding);
+        Ok(binding)
+    }
+
+    pub fn udp_endpoint_binding(
+        &self,
+        id: UdpEndpointId,
+    ) -> Result<Option<UdpLocalBinding>, UdpQueryError> {
+        self.udp.binding(id)
+    }
+
     #[allow(dead_code)]
     pub(super) fn send_udp(
         &mut self,
-        endpoint: EndpointId,
+        endpoint: UdpEndpointId,
         selected_interface: Option<InterfaceId>,
         source: Ipv4Address,
         destination: IpEndpoint,
@@ -74,8 +107,7 @@ impl Stack {
         )
     }
 
-    #[allow(dead_code)]
-    pub(super) fn retire_udp_endpoint(&mut self, id: EndpointId) -> Result<(), RetireError> {
+    pub fn retire_udp_endpoint(&mut self, id: UdpEndpointId) -> Result<(), UdpRetireError> {
         // Withdraw the aggregate owner before touching private engine objects.
         let endpoint = self.udp.withdraw(id)?;
         for engine in endpoint.engines() {

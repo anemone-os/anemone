@@ -7,7 +7,6 @@ edition = "2024"
 default = ["host-test"]
 host-test = ["std", "smoltcp/auto-icmp-echo-reply"]
 std = ["smoltcp/std"]
-udp-validation-probe = []
 
 [dependencies]
 anemone-net-api = { path = "../anemone-net-api" }

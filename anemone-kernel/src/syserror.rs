@@ -85,6 +85,20 @@ pub enum SysError {
     NoSpace,
     /// Operation would block and nonblocking mode was requested.
     Again,
+    /// The requested socket address family is unsupported.
+    AddressFamilyNotSupported,
+    /// The requested socket base type is unsupported.
+    SocketTypeNotSupported,
+    /// The requested socket protocol is unsupported.
+    ProtocolNotSupported,
+    /// The file descriptor does not refer to a socket.
+    NotSocket,
+    /// The requested local address/port conflicts with an active binding.
+    AddressInUse,
+    /// The requested local address is not owned by this network domain.
+    AddressNotAvailable,
+    /// A bounded network buffer or endpoint resource is exhausted.
+    NoBufferSpace,
     /// Pipe write attempted after all readers were gone.
     BrokenPipe,
     /// The file does not support seeking.
@@ -213,6 +227,13 @@ impl SysError {
             SysError::ReadOnlyFs => EROFS,
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
             SysError::Again => EAGAIN,
+            SysError::AddressFamilyNotSupported => EAFNOSUPPORT,
+            SysError::SocketTypeNotSupported => ESOCKTNOSUPPORT,
+            SysError::ProtocolNotSupported => EPROTONOSUPPORT,
+            SysError::NotSocket => ENOTSOCK,
+            SysError::AddressInUse => EADDRINUSE,
+            SysError::AddressNotAvailable => EADDRNOTAVAIL,
+            SysError::NoBufferSpace => ENOBUFS,
             SysError::BrokenPipe => EPIPE,
             SysError::IllegalSeek => ESPIPE,
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't

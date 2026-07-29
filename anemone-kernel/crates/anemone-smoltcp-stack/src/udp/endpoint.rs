@@ -1,48 +1,27 @@
 use alloc::{collections::VecDeque, vec, vec::Vec};
 
-use anemone_net_api::InterfaceId;
+use anemone_net_api::{
+    InterfaceId,
+    udp::{UdpEndpointId, UdpEndpointLimits, UdpLocalBinding},
+};
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
     socket::udp,
+    wire::{IpAddress, IpListenEndpoint, Ipv4Address},
 };
 
 use super::datagram::{PendingDatagram, ReceivedDatagram, TxPhase};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct EndpointId(pub(super) u32);
-
-impl EndpointId {
-    #[cfg(feature = "host-test")]
-    pub(crate) const fn from_raw(raw: u32) -> Self {
-        Self(raw)
-    }
-
-    #[cfg(feature = "host-test")]
-    pub(crate) const fn raw(self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EndpointCreateError {
-    InvalidPort,
-    PortInUse,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SendError {
     UnknownEndpoint,
+    UnboundEndpoint,
     MissingSelection,
     UnknownInterface,
     UnsupportedSource,
     InvalidDestination,
     Oversize { maximum: usize },
     TxFull,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RetireError {
-    UnknownEndpoint,
 }
 
 #[derive(Clone, Copy)]
@@ -52,34 +31,29 @@ pub(crate) struct EngineResource {
 }
 
 pub(crate) struct Endpoint {
-    pub(super) id: EndpointId,
-    // This is the sole provisional binding truth. Per-interface smoltcp
-    // bindings below are private engine projections and never decide conflict.
-    pub(super) port: u16,
+    pub(super) id: UdpEndpointId,
+    /// Sole committed binding truth. Per-interface smoltcp bindings are
+    /// private engine projections and never decide conflicts or allocation.
+    pub(super) binding: Option<UdpLocalBinding>,
     engines: Vec<EngineResource>,
     pub(super) tx: TxPhase,
     pub(super) received: VecDeque<ReceivedDatagram>,
-    pub(super) receive_packet_capacity: usize,
-    pub(super) engine_payload_capacity: usize,
+    pub(super) limits: UdpEndpointLimits,
 }
 
 impl Endpoint {
-    pub(super) fn new(
-        id: EndpointId,
-        port: u16,
-        receive_packet_capacity: usize,
-        engine_payload_capacity: usize,
-    ) -> Self {
-        assert!(receive_packet_capacity > 0);
-        assert!(engine_payload_capacity > 0);
+    pub(super) fn new(id: UdpEndpointId, limits: UdpEndpointLimits) -> Self {
+        assert!(limits.endpoint_capacity() > 0);
+        assert!(limits.tx_datagram_capacity() > 0);
+        assert!(limits.rx_datagram_capacity() > 0);
+        assert!(limits.max_payload_bytes() > 0);
         Self {
             id,
-            port,
+            binding: None,
             engines: Vec::new(),
             tx: TxPhase::Idle,
-            received: VecDeque::with_capacity(receive_packet_capacity),
-            receive_packet_capacity,
-            engine_payload_capacity,
+            received: VecDeque::with_capacity(limits.rx_datagram_capacity()),
+            limits,
         }
     }
 
@@ -90,21 +64,51 @@ impl Endpoint {
                 .all(|engine| engine.interface != interface),
             "an Endpoint cannot have two engine resources for one interface"
         );
+        let tx_bytes = self
+            .limits
+            .tx_datagram_capacity()
+            .checked_mul(self.limits.max_payload_bytes())
+            .expect("validated UDP TX storage size overflowed");
+        let rx_bytes = self
+            .limits
+            .rx_datagram_capacity()
+            .checked_mul(self.limits.max_payload_bytes())
+            .expect("validated UDP RX storage size overflowed");
         let mut socket = udp::Socket::new(
             udp::PacketBuffer::new(
-                vec![udp::PacketMetadata::EMPTY],
-                vec![0; self.engine_payload_capacity],
+                vec![udp::PacketMetadata::EMPTY; self.limits.rx_datagram_capacity()],
+                vec![0; rx_bytes],
             ),
             udp::PacketBuffer::new(
-                vec![udp::PacketMetadata::EMPTY],
-                vec![0; self.engine_payload_capacity],
+                vec![udp::PacketMetadata::EMPTY; self.limits.tx_datagram_capacity()],
+                vec![0; tx_bytes],
             ),
         );
-        socket
-            .bind(self.port)
-            .expect("a non-zero provisional binding must be accepted");
+        if let Some(binding) = self.binding {
+            bind_engine(&mut socket, binding);
+        }
         let handle = sockets.add(socket);
         self.engines.push(EngineResource { interface, handle });
+    }
+
+    pub(crate) fn bind_engine_projection(
+        &self,
+        interface: InterfaceId,
+        sockets: &mut SocketSet<'static>,
+        binding: UdpLocalBinding,
+    ) {
+        let engine = self
+            .engine(interface)
+            .expect("published interface must have one UDP engine projection");
+        bind_engine(sockets.get_mut::<udp::Socket>(engine.handle), binding);
+    }
+
+    pub(super) fn commit_binding(&mut self, binding: UdpLocalBinding) {
+        assert!(
+            self.binding.is_none(),
+            "UDP endpoint binding committed twice"
+        );
+        self.binding = Some(binding);
     }
 
     pub(super) fn remove_engine(
@@ -141,7 +145,7 @@ impl Endpoint {
             .find(|engine| engine.interface == interface)
     }
 
-    pub(crate) fn id(&self) -> EndpointId {
+    pub(crate) fn id(&self) -> UdpEndpointId {
         self.id
     }
 
@@ -156,6 +160,18 @@ impl Endpoint {
     pub(crate) fn received_len(&self) -> usize {
         self.received.len()
     }
+}
+
+fn bind_engine(socket: &mut udp::Socket<'static>, binding: UdpLocalBinding) {
+    let address = binding.address();
+    let endpoint = IpListenEndpoint {
+        addr: (!address.is_unspecified())
+            .then(|| IpAddress::Ipv4(Ipv4Address::from_octets(address.octets()))),
+        port: binding.port(),
+    };
+    socket
+        .bind(endpoint)
+        .expect("validated unbound UDP engine must accept committed binding");
 }
 
 impl EngineResource {

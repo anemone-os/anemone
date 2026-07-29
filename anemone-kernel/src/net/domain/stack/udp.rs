@@ -1,46 +1,41 @@
-use anemone_smoltcp_stack::udp_probe;
+use anemone_net_api::udp::{
+    UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
+    UdpLocalBinding, UdpQueryError, UdpRetireError,
+};
 
 use super::*;
 
 impl DomainStack {
-    pub(in crate::net) fn create_udp_probe(
+    pub(in crate::net) fn create_udp_endpoint(
         &self,
-        port: u16,
-    ) -> Result<udp_probe::EndpointId, udp_probe::CreateError> {
-        udp_probe::create(&mut self.stack.lock(), port, 4, NET_LOCAL_LINK_MTU_BYTES)
+        limits: UdpEndpointLimits,
+    ) -> Result<UdpEndpointId, UdpCreateError> {
+        self.stack.lock().create_udp_endpoint(limits)
     }
 
-    pub(in crate::net) fn send_udp_probe(
+    pub(in crate::net) fn bind_udp_endpoint(
         &self,
-        endpoint: udp_probe::EndpointId,
-        interface: InterfaceId,
-        source: Ipv4Address,
-        destination: Ipv4Address,
-        destination_port: u16,
-        payload: &[u8],
-    ) -> Result<(), udp_probe::SendError> {
-        udp_probe::send(
-            &mut self.stack.lock(),
-            endpoint,
-            interface,
-            source,
-            destination,
-            destination_port,
-            payload,
-        )
+        endpoint: UdpEndpointId,
+        request: UdpBindRequest,
+        ephemeral_first: u16,
+        ephemeral_last: u16,
+    ) -> Result<UdpLocalBinding, UdpBindError> {
+        self.stack
+            .lock()
+            .bind_udp_endpoint(endpoint, request, ephemeral_first, ephemeral_last)
     }
 
-    pub(in crate::net) fn receive_udp_probe(
+    pub(in crate::net) fn udp_endpoint_binding(
         &self,
-        endpoint: udp_probe::EndpointId,
-    ) -> Option<udp_probe::ReceivedDatagram> {
-        udp_probe::receive(&mut self.stack.lock(), endpoint)
+        endpoint: UdpEndpointId,
+    ) -> Result<Option<UdpLocalBinding>, UdpQueryError> {
+        self.stack.lock().udp_endpoint_binding(endpoint)
     }
 
-    pub(in crate::net) fn retire_udp_probe(
+    pub(in crate::net) fn retire_udp_endpoint(
         &self,
-        endpoint: udp_probe::EndpointId,
-    ) -> Result<(), udp_probe::RetireError> {
-        udp_probe::retire(&mut self.stack.lock(), endpoint)
+        endpoint: UdpEndpointId,
+    ) -> Result<(), UdpRetireError> {
+        self.stack.lock().retire_udp_endpoint(endpoint)
     }
 }

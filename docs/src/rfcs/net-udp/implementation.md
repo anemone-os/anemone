@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-2与Checkpoint 3A Closed / Checkpoint 3B-3C Ready / Not Active / Stage 4-5 Outline
+**状态：** R0 / Stage 0-2与Checkpoint 3A Closed / Checkpoint 3B Review Hold / Checkpoint 3C Ready / Not Active / Stage 4-5 Outline
 **最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -17,8 +17,10 @@
 > 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；独立的`0 -> 1`resolution与后续
 > Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效；独立的`1 -> 2`
 > resolution、Checkpoint 2A split与Checkpoint 2B control/local cutover也已完成，Stage 2 Closed。独立的
-> `2 -> 3`resolution已把Stage 3完整解析为Ready；Checkpoint 3A随后完成same-owner module split并独立关闭，
-> Checkpoint 3B-3C保持Ready / Not Active，Stage 4-5仍是Outline。
+> `2 -> 3`resolution已把Stage 3完整解析为Ready；Checkpoint 3A随后完成same-owner module split并独立关闭。
+> Checkpoint 3B已形成Endpoint/File/address lifecycle实现与RV64验证候选，但final exact-diff review发现两个
+> Apollyon和一个Keter，并因`S_IFSOCK`修正需要触及frozen manifest外VFS owner而进入Review Hold，尚未关闭。
+> Checkpoint 3C保持Ready / Not Active，Stage 4-5仍是Outline。
 
 ## 1. 计划角色与 authority
 
@@ -135,7 +137,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
-| Stage 3 — Endpoint/socket nonblocking vertical slice | 3A Closed；3B-3C Ready / Not Active | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | 本stage不cut over current contract；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
+| Stage 3 — Endpoint/socket nonblocking vertical slice | 3A Closed；3B Review Hold；3C Ready / Not Active | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | 本stage不cut over current contract；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
 
@@ -850,11 +852,12 @@ contract状态不变；本checkpoint已Closed，并继续停在Stage 3 Outline�
 
 ### 6.3 Stage 3 Ready — Endpoint/socket nonblocking vertical slice
 
-**阶段成熟度与授权：** Checkpoint 3A Closed / Checkpoint 3B-3C Ready / Not Active。2026-07-30独立
+**阶段成熟度与授权：** Checkpoint 3A Closed / Checkpoint 3B Review Hold / Checkpoint 3C Ready / Not Active。2026-07-30独立
 `2 -> 3 Implementation Resolution Gate`已完成；
 本节冻结Stage 3完整路线、三个checkpoint、ABI/lifecycle边界、验证、停止/退出条件与Resolved Write Set Manifest。
-Checkpoint 3A随后由独立授权完成；其closure不激活3B/3C，不授权QEMU、current-contract cutover或
-`3 -> 4`resolution。
+Checkpoint 3A随后由独立授权完成；3B implementation/validation candidate已提交final review，但两个Apollyon、
+一个Keter和VFS write-set expansion使其保持Review Hold。3C不激活，Stage 4 resolution与current-contract cutover
+均未授权。
 
 #### 6.3.1 Resolution baseline 与阶段结果
 
@@ -1078,7 +1081,7 @@ build、whitespace、mdBook与独立review通过。Contract Impact为None，Chec
 保持Ready / Not Active。精确source、validation、review与Not Run边界见
 [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3-checkpoint-3a-final-review-and-closure)。
 
-#### 6.3.7 Checkpoint 3B — Endpoint/File/address lifecycle vertical slice
+#### 6.3.7 Checkpoint 3B — Review Hold / Endpoint/File/address lifecycle vertical slice
 
 **目的：** 一次建立真实Endpoint capability、Socket/File association与`socket/bind/getsockname`用户纵切，不把
 datagram或blocking假装已经完成。
@@ -1100,6 +1103,26 @@ failed bind rollback、retire/port reuse与stale ID；kernel KUnit覆盖File ass
 unaligned/truncated sockaddr、dup/fork/one-alias/final close和CLOEXEC/NONBLOCK projection，并输出稳定
 `UDPTEST:SUMMARY`。LA64 app/kernel只做同源build，
 runtime仍Not Run。3B不注册send/receive、不执行contract cutover；关闭后停止，3C仍Not Active。
+
+**Implementation / validation candidate：** 2026-07-30，3B建立Stack-owned unbound Endpoint、bounded
+64-endpoint namespace、完整
+specific/wildcard conflict、deterministic port0、query/retire与non-reused identity；kernel-private
+`UdpEndpointPort`只投影到anonymous `UdpSocketFile`，creation guard在fd publication前rollback，semantic final
+release先撤销association再non-blocking retire。`socket/bind/getsockname`按16-byte IPv4 sockaddr、unaligned input、
+Linux prefix-copy/actual-length顺序与精确errno运行；CLOEXEC保持fd-local，NONBLOCK保持opened-description-local。
+
+temporary `udp-validation-probe` feature/module/forwarding与DomainStack support已删除；host matrix、两项File KUnit、
+62项xtask、双架构app/kernel build和fresh-disk RV64 `UDPTEST:SUMMARY:PASS:6`全部通过。RV64实际执行269/269 KUnit、
+LTP whitelist 4/4并严格按`filesystem -> network -> device -> PowerOff`关机。LA64 runtime及6.3.9其余Not Run范围
+没有外推。
+
+**Review hold：** final exact-diff review分类为Apollyon 2、Keter 1、Euclid 0、Safe 0：Kconfig没有覆盖actual
+allocation layout与count上界；anonymous UDP socket向`fstat`/`statx`投影`S_IFREG`而非`S_IFSOCK`；namespace-wide
+Endpoint capacity与ephemeral range仍由每次operation传入，没有单一policy owner。`S_IFSOCK`修正至少需要扩张到
+manifest外的VFS `InodeType` owner及其exhaustive consumers，命中6.3.10停止条件。现有runtime证据有效但不覆盖
+这三项defect。Contract Impact仍为None，全部candidate继续Pending；Checkpoint 3B保持Review Hold，3C仍Ready /
+Not Active。精确finding、证据与停止边界见
+[transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3-checkpoint-3b-final-review-and-stop)。
 
 #### 6.3.8 Checkpoint 3C — nonblocking datagram vertical slice
 
@@ -1900,4 +1923,5 @@ root/pump按interface/UDP/local progression拆分，xtask build把generated-def 
 `2 -> 3`resolution同样把3A冻结为split-only checkpoint。3A现已把protocol UDP按Endpoint resource、bounded
 namespace与datagram ownership phase目录化，把Stack UDP operation与DomainStack KUnit-only probe window移入各自
 同owner child module；为恢复原flat-module访问域只使用parent-scoped `pub(super)`与crate-private re-export，没有
-新增public surface、semantic owner、consumer或behavior。3B仍须在独立授权下引入真实Endpoint/File/address纵切。
+新增public surface、semantic owner、consumer或behavior。3B随后已按冻结边界引入真实Endpoint/File/address纵切，
+并删除temporary probe；3C仍须在独立授权下增加nonblocking datagram transaction。
