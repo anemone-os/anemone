@@ -507,6 +507,32 @@ fn engine_payload_capacity_is_part_of_precommit_admission() {
 }
 
 #[test]
+fn mtu_must_fit_headers_before_zero_length_payload_is_admitted() {
+    let mut stack = Stack::new();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 1, 27, Instant::ZERO);
+    let client = stack
+        .create_udp_endpoint_for_host_validation(43500, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            43501,
+            b"",
+        ),
+        Err(HostSendError::Oversize { maximum: 0 })
+    );
+    assert!(
+        !stack
+            .udp_endpoint_observation_for_host_validation(client)
+            .unwrap()
+            .pending_tx
+    );
+}
+
+#[test]
 fn full_receive_queue_does_not_gate_another_endpoint() {
     let mut stack = Stack::new();
     let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 4, 128, Instant::ZERO);

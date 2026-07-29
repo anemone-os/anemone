@@ -68,6 +68,11 @@ pub struct HostLocalLinkObservation {
 }
 
 impl Stack {
+    // These conditional methods remain public only because the long-term host
+    // matrices are integration tests. `host-test` is absent from the kernel
+    // dependency, and Stage 1 must delete any facade method replaced by an
+    // accepted production owner or a crate-private fixture.
+
     /// Installs an IPv4 address solely for the deterministic host fixture.
     ///
     /// `host-test` is absent from the kernel dependency, so this control cannot

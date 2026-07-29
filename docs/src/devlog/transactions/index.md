@@ -6,8 +6,8 @@
 
 ## Active
 
-- [Network UDP](./2026-07-29-net-udp.md)：R0已接受；0A-0B已关闭，0B post-closure engineering feedback已完成
-  correction与独立复审；Stage 0尚未关闭且0C未授权，contract cutover为None。
+- [Network UDP](./2026-07-29-net-udp.md)：R0已接受；0A-0C与Stage 0已按positive topology decision关闭；
+  `0 -> 1`resolution及Stage 1均未授权，contract cutover为None。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

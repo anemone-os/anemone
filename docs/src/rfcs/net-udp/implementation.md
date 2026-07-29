@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0 Active / Checkpoints 0A-0B Closed / 0C Not Authorized / Stage 1-5 Outline
+**状态：** R0 / Stage 0 Closed / Stage 1-5 Outline / `0 -> 1` Resolution Not Authorized
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -14,7 +14,8 @@
 
 > 本文是R0的canonical实施顺序、stage maturity、probe、验证和resolved write set。R0已由public review接受，
 > transaction已经建立；Checkpoint 0B关闭后的工程审查确认两个Keter和一个Euclid，0B Feedback Correction已
-> 修复并通过独立复审。Stage 0本身尚未关闭，0C仍未授权；Stage 0不修改current contract。
+> 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；Stage 1-5仍是Outline，独立的
+> `0 -> 1`resolution尚未授权。Stage 0不修改current contract。
 
 ## 1. 计划角色与 authority
 
@@ -128,7 +129,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 
 | Stage | 成熟度 | 概括目的 | 前置依赖 | Contract 状态 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Multi-interface UDP topology probe | Active；Checkpoints 0A-0B Closed；0C未授权 | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
+| Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Outline | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed | 候选`NETDEV-LIFE-001`/`NET-ATTACH-001` Refine与`NET-IFACE-DOMAIN-001` Introduce；解析前均Pending |
 | Stage 2 — Static control plane与production loopback | Outline | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed | 候选`STM-TARGET-001` Refine与`NET-CONTROL-PLANE-001` Introduce；是否本stage cutover由1->2 gate决定 |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
@@ -323,7 +324,7 @@ capacity数值或精确命令；这些只在对应stage变为Ready时冻结。
 
 ### 7.1 阶段状态与 activation preflight
 
-**成熟度：** Active；Checkpoints 0A-0B Closed。0C仍未授权，当前不得进入0C。
+**成熟度：** Closed；Checkpoints 0A-0C Closed。Stage 1及`0 -> 1`resolution均未授权。
 
 进入Active前必须同时满足：
 
@@ -501,6 +502,23 @@ Apollyon 0、Keter 0、Euclid 0。完整source/review/validation证据见
   “Stack-owned aggregate engine resources”等候选；Stage 0不得自行扩大manifest尝试第二方案；
 - 若证据要求移动control-plane/binding owner、允许success后silent drop、Socket fast path或削弱normal-ingress
   acceptance，停止cutover并进入Target Renegotiation Gate。agent只能提出，不能批准。
+
+**关闭记录：** 2026-07-29，0C选择positive route。保留`anemone-smoltcp-stack`内最小ordinary aggregate
+Endpoint、显式selection admission、bounded local-link与finite pump candidate，以及5项长期deterministic topology
+tests；这些代码继续保持private、`no_std + alloc`可编译且没有kernel consumer。integration test仍需conditional
+facade，故本stage保留的UDP-specific surface只传protocol-domain value/outcome与窄owner observation；kernel的
+`default-features = false`dependency不编译该surface。没有保留packet dump、raw smoltcp handle/buffer/queue
+inspection或0A expected-wrong test。既有frame-path host fixture继续拥有其长期test-only packet injection，未被
+本stage扩大。临时dead-code/test-facade注释的退出条件改为Stage 1由accepted production
+owner接管，或Stage 1选择替代路线并删除candidate。
+
+concrete topology decision是：一个Stack-private aggregate Endpoint owner可以为多个interface维护private engine
+resource，同时保持binding、admission、receive ordering与retire单一真相；operation-local selected
+`InterfaceId + source`在engine enqueue前完成验证，只有selected engine取得datagram；IP-medium local port可在同一
+`&mut Stack`边界内经bounded software handoff与下一finite round的normal ingress推进。该结果无需修改vendored
+smoltcp、`anemone-net-api`、kernel或current contracts。Stage 1 route input因此是优先评估该aggregate engine
+candidate如何接入唯一global Stack access window与异构provider；local port只作为Stage 2 production loopback
+resolution的证据输入。0C不解析Stack access/worker/attach路线，不冻结Stage 1 manifest，也不授权`0 -> 1`gate。
 
 ### 7.6 审计
 
@@ -807,6 +825,11 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   shared/vendored/kernel/current contract。0C仍须独立决定candidate/facade/test的长期保留与cleanup，并在final
   source上重跑Stage 0 branch/common gates；精确证据见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0b-implementation-review-validation-and-closure)。
+- `2026-07-29`：Checkpoint 0C / Positive Decision Closure。保留最小private ordinary candidate、5项长期topology
+  matrix与必要conditional validation facade；没有vendored/shared/kernel/current-contract变化。positive/common
+  gates在final source通过，Stage 0独立Closed。Stage 1只获得aggregate-engine/global-Stack与local-link证据输入，
+  `0 -> 1`resolution与Stage 1 activation均未授权；精确证据见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0c-positive-decision-closure-review-and-validation)。
 
 ## 13. Target Renegotiation Gates
 
@@ -819,5 +842,6 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 
 ## 15. 结构维护记录
 
-当前没有已执行的结构维护。Stage 0允许的same-owner private module boundary已在7.9与7.11预先解析；实际拆分、
-验证与保留/删除结论由transaction记录。
+Stage 0在0B Feedback Correction中执行same-owner private module split：ordinary Stack owner位于
+`src/stack/mod.rs`，conditional facade/DTO/conversion位于`src/stack/host_validation.rs`；0C确认该拆分长期保留到
+Stage 1由production owner替代conditional seam。拆分没有改变public production API、owner或shared contract。

@@ -3,10 +3,10 @@
 extern crate alloc;
 
 mod adapter;
-// Checkpoint 0B intentionally leaves this no_std candidate without a kernel
-// consumer. Checkpoint 0C must either retain it for the resolved Stage 1 route
-// or remove it; until then, kernel builds should not turn that boundary into
-// misleading per-item dead-code noise.
+// Stage 0's positive decision retains this private no_std candidate as route
+// input for the Stage 0 -> 1 resolution gate. The kernel still has no consumer,
+// so keep the temporary module-wide allowance until Stage 1 either wires the
+// production owner or replaces and removes the candidate.
 #[allow(dead_code)]
 mod local_link;
 mod pump;

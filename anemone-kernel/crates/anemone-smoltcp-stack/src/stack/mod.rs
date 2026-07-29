@@ -62,6 +62,9 @@ pub(crate) struct InterfaceEntry {
 #[derive(Default)]
 pub struct Stack {
     pub(crate) interfaces: Vec<InterfaceEntry>,
+    // Stage 0 retains the local-port candidate for the Stage 0 -> 1 route
+    // decision. Remove this temporary allowance when Stage 1 wires or replaces
+    // that private path.
     #[allow(dead_code)]
     pub(crate) local: Option<LocalPort>,
     pub(crate) udp: UdpEndpoints,
@@ -126,6 +129,9 @@ impl Stack {
         Ok(())
     }
 
+    // These private operations are the retained Stage 0 route input. They are
+    // exercised through the host-only facade today; Stage 1 must either give
+    // them a production owner or replace them and remove the allowances.
     #[allow(dead_code)]
     fn interface_ipv4_and_mtu(
         &self,

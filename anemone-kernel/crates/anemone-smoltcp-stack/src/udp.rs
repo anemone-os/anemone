@@ -248,10 +248,15 @@ impl UdpEndpoints {
         // Admission owns both limits that the private engine must satisfy.
         // Accepting against MTU alone would defer an engine-buffer failure to
         // pump time, after the operation has already reported success.
-        let maximum = interface_ip_mtu
-            .checked_sub(IPV4_HEADER_LEN + UDP_HEADER_LEN)
-            .unwrap_or(0)
-            .min(endpoint.engine_payload_capacity);
+        let Some(interface_payload_capacity) =
+            interface_ip_mtu.checked_sub(IPV4_HEADER_LEN + UDP_HEADER_LEN)
+        else {
+            // A zero-length UDP payload still needs both headers. Reporting a
+            // zero payload maximum as admissible here would defer failure to
+            // the device after the operation had already committed success.
+            return Err(SendError::Oversize { maximum: 0 });
+        };
+        let maximum = interface_payload_capacity.min(endpoint.engine_payload_capacity);
         if payload.len() > maximum {
             return Err(SendError::Oversize { maximum });
         }
