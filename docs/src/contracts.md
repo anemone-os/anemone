@@ -124,6 +124,8 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
   - [Attach lifecycle](./contracts/net/attach-lifecycle.md)
 - [System Power 当前契约](./contracts/power/index.md)
   - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
+- [Membarrier 当前契约](./contracts/membarrier/index.md)
+  - [Global rendezvous](./contracts/membarrier/global-rendezvous.md)
 - [Scheduler 当前契约](./contracts/scheduler/index.md)
   - [Asynchronous wake delivery](./contracts/scheduler/wake-delivery.md)
   - [Latch wait round](./contracts/scheduler/latch-wait-round.md)

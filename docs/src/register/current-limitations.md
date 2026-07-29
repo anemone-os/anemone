@@ -679,10 +679,25 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Low
 **Area:** signal / procfs / resource limits / kconfig / user-test
 
-**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声；原 `unknown syscall number 283` 已由只公布 `MEMBARRIER_CMD_GLOBAL` 的最小实现完成源码和 SMP KUnit closure，但 signal profile 尚未复跑。它们都不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
 
-**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` / `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
+**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和 `sched_getaffinity` 启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` 与已注册的最小 `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-14
-**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-07-29
+**Related:** [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md), [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260729-MEMBARRIER-GLOBAL-ONLY
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** syscall ABI / IPI / scheduler / userspace runtime
+
+**Summary:** Anemone 当前只公布并实现无需注册的 `MEMBARRIER_CMD_GLOBAL`。实现通过调用方前后 full data fence、全在线 CPU 同步 fence IPI 和统一 task-switch fence 建立功能正确但高成本的 global rendezvous。global/private expedited registration、private scope、sync-core、rseq、CPU-target flag、registrations query、CPU hotplug 等价语义和性能保证均未实现；对应命令明确返回 `EINVAL`，不能被记录为 silent compatibility。
+
+**Exit Condition:** 后续 accepted target 为需要的 command family 明确 state owner、注册/exec 生命周期、target selection、IPI/scheduler handoff、架构 sync-core/rseq 义务和验证矩阵；完成对应 cutover 后只移除实际闭合的子项，不能以 no-op success 关闭本限制。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-29
+**Related:** [Global membarrier 当前契约](../contracts/membarrier/global-rendezvous.md), [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md)
