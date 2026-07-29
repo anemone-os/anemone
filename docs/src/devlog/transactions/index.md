@@ -6,7 +6,7 @@
 
 ## Active
 
-- [Flock](./2026-07-29-flock.md)：R0已接受且Stage 0已关闭；RV64 KUnit/focused oracle/runtime与LA64 build/rootfs composition通过，LA64 runtime Not Run，全部新contract ID保持Not Effective，下一resolution gate未授权。
+- [Flock](./2026-07-29-flock.md)：R0已接受且Stage 0已关闭；Stage 1已解析为Ready / Not Active，将补focused/LTP assets并由开发者运行RV64/LA64 wrapper后执行原子contract交接。全部新ID保持Not Effective，Stage 1执行未授权。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

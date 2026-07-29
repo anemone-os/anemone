@@ -250,9 +250,10 @@ review与contract write-back同一closure中执行。任何部分能力不能先
 
 ### FLOCK-RFC-002 - Ready resolution 与 Active authorization 分离
 
-2026-07-29的独立implementation-resolution任务已从live source把Stage 0完整解析为`Ready / Not Active`，
-Stage 1保持`Outline`。后续独立review接受R0，开发者再明确授权transaction bootstrap与Stage 0 Active；这些
-事实分别记录，不由`Ready`自动推出。Stage 0或任一checkpoint closure也不自动解析或激活Stage 1。
+2026-07-29的首个独立implementation-resolution任务已从live source把Stage 0完整解析为`Ready / Not Active`，
+当时Stage 1保持`Outline`。后续独立review接受R0，开发者再明确授权transaction bootstrap与Stage 0 Active；
+Stage 0关闭后，另一次独立`0 -> 1` resolution才把Stage 1展开为`Ready / Not Active`。这些事实分别记录，
+`Ready`、checkpoint closure与developer-run runtime都不自动推出下一项授权或`FLOCK-CUTOVER`。
 
 ### FLOCK-RFC-003 - Generic facade 不预置 remote protocol
 
@@ -341,8 +342,8 @@ waiter publication与predicate recheck闭合lost-wake；retirement notification�
 - `Drop`与assertion不是semantic grant cleanup owner。
 
 Stage 0当前选择的锁、allocation/destruction位置、`Event`与module placement见`implementation.md`；它们是
-可由live evidence修正的implementation preference，不属于当前target。Stage 1的具体选择仍留给后续
-resolution gate。
+可由live evidence修正的implementation preference，不属于当前target。Stage 1已经依据live Stage 0 evidence
+解析为test/current-contract closure路线；其checkpoint与manifest仍不是target guarantee。
 
 ## 禁止退化项
 
@@ -370,13 +371,15 @@ resolution gate。
 2. KETER-FLOCK-004已将旧precise-cancellation target的修复折回canonical target；
 3. APOLLYON-FLOCK-003继续由recheck notification闭合，但其依据不再要求精确`EBADF`或同步waiter teardown；
 4. KETER-FLOCK-001/002的历史决定有明确supersession，且owner、handoff、ABI admissible outcomes无歧义；
-5. implementation preferences未被提升为target，`implementation.md`的Stage 0达到完整`Ready`，Stage 1保持
-   依赖、受保护边界与resolution trigger完整的`Outline`；
+5. implementation preferences未被提升为target；R0 acceptance时`implementation.md`的Stage 0达到完整
+   `Ready`，Stage 1保持依赖、受保护边界与resolution trigger完整的`Outline`；后续`0 -> 1`独立resolution
+   只展开test、validation、write set与cutover安排，不改变R0语义；
 6. R0 acceptance、transaction bootstrap 与 Stage 0 Active authorization 分别记录在
    [transaction](../../devlog/transactions/2026-07-29-flock.md)，Checkpoint 0S、0A、0B、0C 的独立授权与closure没有自动
    授权后续checkpoint；
 7. `OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs保持Not Effective，0A的private substrate不提供partial flock
    capability；0B增加的ABI adapter与focused consumer即使通过0C runtime也仍不是effective capability。
 
-第一个可执行stage已按独立授权关闭全部0S-0C checkpoint并成为Closed。最终implementation
-closure仍需逐项记录每个ID的Effective / Not Cut Over结果，并区分agent-run、developer-run与Not Run evidence。
+第一个可执行stage已按独立授权关闭全部0S-0C checkpoint并成为Closed。Stage 1现为`Ready / Not Active`；最终
+implementation closure仍需逐项记录每个ID的Effective / Not Cut Over结果，并区分agent-run build/review、
+developer-run双架构runtime与Not Run evidence。

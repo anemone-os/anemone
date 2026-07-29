@@ -1,6 +1,6 @@
 # RFC-20260728-flock
 
-**状态：** Accepted for Implementation / Stage 0 Closed
+**状态：** Accepted for Implementation / Stage 0 Closed / Stage 1 Ready
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -12,8 +12,8 @@
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** None；当前 design findings 均已 neutralize，历史与 2026-07-29 cooperative direction
 correction 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** Stage 0已关闭；等待开发者独立授权`0 -> 1 Implementation Resolution Gate`。全部新contract ID
-继续Not Effective，不得执行`FLOCK-CUTOVER`。
+**下一步：** Stage 1已解析为`Ready / Not Active`；等待开发者独立授权从Checkpoint 1A进入执行。最终RV64 /
+LA64 runtime由开发者本人运行；全部新contract ID继续Not Effective，不得执行`FLOCK-CUTOVER`。
 
 ## 文档状态
 
@@ -27,11 +27,13 @@ profile与正常关机证据，并用LA64 build/rootfs composition关闭该架�
 2026-07-29 Draft review 已废弃此前 close-driven precise cancellation 方向。旧 implementation stages、
 probe 与 manifest 不再有效；后续独立 implementation resolution 从 live source 形成当前 Stage 0 Ready。
 本轮独立 R0 review 未发现 Apollyon、Keter 或 Euclid，开发者授权建立 transaction、激活 Stage 0 并依次完成
-Checkpoint 0S、0A、0B、0C并关闭Stage 0。Stage 1 保持 `Outline`，本轮不修改 register/current contract，也不执行
-`FLOCK-CUTOVER`。
+Checkpoint 0S、0A、0B、0C并关闭Stage 0。后续独立`0 -> 1 Implementation Resolution Gate`已把Stage 1解析为
+`Ready / Not Active`：只补focused/LTP acceptance assets，由开发者运行两架构wrapper，再完成current-contract
+交接。本轮resolution不修改register/current contract，也不执行`FLOCK-CUTOVER`。
 
-R0 acceptance 只接受 target 与 contract delta，不把它们写成 effective contract。Stage 0 activation 与
-Checkpoint 0S/0A/0B/0C closure 已分别记录在 transaction；Stage 0关闭不自动解析或进入Stage 1。
+R0 acceptance只接受target与contract delta，不把它们写成effective contract。Stage 0 activation、
+Checkpoint 0S/0A/0B/0C closure与后续Stage 1 resolution已分别记录在transaction；Stage 1达到Ready仍不自动
+进入Active。
 
 ## 摘要
 
@@ -293,8 +295,8 @@ stage的implementation choices提升为target；但R0 review必须同时确认�
 1. cooperative retirement、grant-state correctness、ABI admissible outcomes 与 acceptance boundary 自洽；
 2. Contract Impact 覆盖所有 affected IDs，并保持 current effective / accepted target 分离；
 3. tracking 中不再存在会改变 target、owner、ABI、contract 或 acceptance 的 Apollyon / Keter；
-4. implementation preferences 未被提升为 target，`implementation.md` 的 Stage 0 已完整解析为 `Ready`，
-   后续 Stage 1 只保持目的、依赖、受保护边界与 resolution trigger 完整的 `Outline`；
+4. implementation preferences 未被提升为 target；R0 acceptance时`implementation.md`的Stage 0已完整解析为
+   `Ready`，Stage 1保持`Outline`，后续独立resolution再依据Stage 0 live evidence将其展开；
 5. `Ready`、R0 acceptance、transaction bootstrap 与 `Active` authority 保持分离。
 
 2026-07-29 的独立 implementation-resolution 任务满足首个 `Ready` 要求；本轮后续独立 review 接受 R0，
@@ -350,6 +352,6 @@ flock、POSIX record lock 与 OFD record lock 的 holder、range、close cleanup
 
 ## 收口
 
-当前为 R0 / Accepted for Implementation；Stage 0已Closed，Stage 1仍是`Outline`。RV64 Stage 0 runtime与
-LA64 build/composition evidence已经记录，但尚无contract cutover；`OPENED-DESC-RETIRE-001`与全部`FLOCK-*`
-IDs保持Not Effective。`0 -> 1 Implementation Resolution Gate`仍需独立授权。
+当前为R0 / Accepted for Implementation；Stage 0已Closed，Stage 1为`Ready / Not Active`。RV64 Stage 0
+runtime与LA64 build/composition evidence已经记录，但尚无contract cutover；`OPENED-DESC-RETIRE-001`与全部
+`FLOCK-*` IDs保持Not Effective。Stage 1执行、开发者双架构runtime handoff与`FLOCK-CUTOVER`仍需后续独立授权。

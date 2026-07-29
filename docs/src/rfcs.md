@@ -112,8 +112,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   `OPENED-DESC-RETIRE-001`已缩窄为flock-specific grant cleanup与notification submission；相关finding均已
   neutralize。独立implementation resolution已把带真实syscall与focused consumer的Stage 0解析为Ready；
   R0 review后Stage 0已关闭；private inode domain、cooperative retirement、Linux ABI与focused consumer已形成，
-  RV64 KUnit/oracle/runtime与LA64 build/rootfs composition通过，LA64 runtime Not Run，Stage 1保持`Outline`。
-  当前没有contract cutover，全部新ID继续Not Effective；下一resolution gate仍需独立授权。
+  RV64 KUnit/oracle/runtime与LA64 build/rootfs composition通过。后续`0 -> 1`独立resolution已把Stage 1解析为
+  `Ready / Not Active`：补focused/LTP acceptance assets，由开发者顺序运行RV64/LA64 wrapper，再原子完成
+  task/VFS current-contract交接。当前没有contract cutover，全部新ID继续Not Effective；Stage 1执行仍需独立授权。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续

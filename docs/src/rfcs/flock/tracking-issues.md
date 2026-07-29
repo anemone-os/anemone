@@ -12,7 +12,8 @@ Euclid，R0 acceptance、Stage 0 activation与0S-0C closure见transaction。
 
 同日独立implementation-resolution任务已从live source形成新的Stage 0 Ready plan。下文历史状态中的
 “No Ready Stage”与“implementation shape未解析”描述的是cooperative correction刚完成时的事实；它们不恢复
-旧precise-cancellation plan。Stage 0现已Closed；当前authority见
+旧precise-cancellation plan。Stage 0现已Closed，后续独立resolution已把Stage 1解析为`Ready / Not Active`；
+当前authority见
 [迁移实施计划](./implementation.md)。
 
 ## Apollyon
