@@ -117,7 +117,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；2A已在不改变behavior/public surface/contract的前提下
   完成same-owner split，2B随后以optional SystemTarget static IPv4、唯一control plane、Stack projection与bounded
   production local worker关闭Stage 2。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce
-  `NET-CONTROL-PLANE-001`；Socket/Endpoint/UAPI仍未生效，Stage 3保持Outline且未授权。执行证据见
+  `NET-CONTROL-PLANE-001`；独立`2 -> 3`resolution已把Stage 3解析为3A same-owner split、3B
+  Endpoint/File/address lifecycle与3C nonblocking datagram三个checkpoint。Stage 3为Ready / Not Active，
+  Socket/Endpoint/UAPI及其candidate contracts仍未生效。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

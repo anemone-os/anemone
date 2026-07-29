@@ -66,9 +66,10 @@ Stage 1已按上述分类执行`NET-UDP-DOMAIN-CUTOVER`；三项current truth分
 authority；functional loopback/control plane/socket相关candidate不因这一局部cutover提前生效。
 
 SystemTarget三项已经提取到`docs/src/contracts/configuration/system-target.md`。`STM-OWNER-001`与
-`STM-RESOLVE-001`保持current baseline；`STM-TARGET-001`当前仍不包含network deployment schema，R0只在
-未来SystemTarget network-schema cutover对其Refine。Platform/KernelConfig/Preset的必要直接边界由同页owner
-table覆盖，不额外批量迁移System Target Model的其它RFC-local invariant。
+`STM-RESOLVE-001`保持current baseline；`STM-TARGET-001`已由Stage 2 `NET-UDP-CONTROL-CUTOVER` Refine，
+current contract现已包含SystemTarget-owned optional first-version static IPv4 deployment。Stage 3新增的UDP
+capacity/port参数属于KernelConfig，不再次改变SystemTarget schema。Platform/KernelConfig/Preset的必要直接边界由
+同页owner table覆盖，不额外批量迁移System Target Model的其它RFC-local invariant。
 
 下文`NET-IFACE-DOMAIN-001`、`NET-CONTROL-PLANE-001`、`NET-PROTOCOL-BOUNDARY-001`、
 `NET-SOCKET-ENDPOINT-001`和`NET-SOCKET-WAIT-001`直接对应候选current-contract条目。其它`NET-UDP-*`标题是R0 target/proof ID；其中
@@ -435,8 +436,8 @@ control plane消费projection但不解析TOML；target/Platform maintainer拥有
 找不到`eth0`后静默改用其它interface；为了防误用引入第二selector/probe/fallback truth；connected route由配置和
 派生逻辑各保存一份。
 
-**Cutover：** SystemTarget schema/materialization与control-plane cutover原子更新；当前effective baseline在
-cutover前保持不变。验证证明合法/基本非法输入边界与targeted QEMU deployment，不宣称穷举或完全校验。
+**Cutover：** Stage 2 `NET-UDP-CONTROL-CUTOVER`已原子更新SystemTarget schema/materialization与control-plane
+current contract。对应验证只证明合法/基本非法输入边界与targeted QEMU deployment，不宣称穷举或完全校验。
 
 ### NET-UDP-CAPABILITY-001 — 第一版IPv4 unconnected UDP能力包络
 
@@ -472,8 +473,9 @@ RV64结果外推LA64；unsupported flag静默改变用户可见行为。
 
 - RFC前私有定位只作为历史讨论输入；公共R0形成后，target修正折回`index.md`/本文件，私有材料不成为
   公共链接或并列target authority。
-- accepted-before-cutover不得把global Stack、logical interface、UDP syscall或SystemTarget network schema
-  写成current fact；current per-netdev wiring和existing contracts继续有效。
+- 每个stage在自己的cutover前不得把尚未生效的target写成current fact。Stage 1/2已经生效的global Stack、logical
+  interface与SystemTarget network schema以current contracts和source为准；UDP syscall、Endpoint与wait candidates
+  继续Pending，不能因Stage 3 Ready或partial implementation提前宣称生效。
 - implementation probe只能验证route、Stack integration、loopback handoff、readiness/copy等假设；probe code不得
   在target/contract未接受时自然沉淀为长期public API、第二owner或compatibility bridge。
 - 临时双wiring、legacy ifindex projection或host control若在Ready stage确有必要，必须说明唯一behavior authority、

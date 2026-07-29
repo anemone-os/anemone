@@ -1,7 +1,7 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-2 Closed / Stage 3-5 Outline
-**最后更新：** 2026-07-29
+**状态：** R0 / Stage 0-2 Closed / Stage 3 Ready / Stage 4-5 Outline
+**最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
 **当前契约：** [Network current contracts](../../contracts/net/index.md)、
@@ -16,7 +16,8 @@
 > transaction已经建立；Checkpoint 0B关闭后的工程审查确认两个Keter和一个Euclid，0B Feedback Correction已
 > 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；独立的`0 -> 1`resolution与后续
 > Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效；独立的`1 -> 2`
-> resolution、Checkpoint 2A split与Checkpoint 2B control/local cutover也已完成，Stage 2 Closed；Stage 3-5仍是Outline。
+> resolution、Checkpoint 2A split与Checkpoint 2B control/local cutover也已完成，Stage 2 Closed。独立的
+> `2 -> 3`resolution现已把Stage 3完整解析为Ready；Stage 4-5仍是Outline，Checkpoint 3A尚未激活。
 
 ## 1. 计划角色与 authority
 
@@ -25,17 +26,17 @@
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
-Stage 0和Stage 1已经独立关闭；本计划现在冻结下一个可执行的Stage 2。Stage 3-5仍是future Outline，其中列出的
-目录、模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须
-先按自己的验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析
-完成只让下一阶段达到Ready，不自动进入Active。
+Stage 0-2已经独立关闭；本计划现在冻结下一个可执行的Stage 3。Stage 4-5仍是future Outline，其中列出的目录、
+模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须先按
+自己的验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让
+下一阶段达到Ready，不自动进入Active。
 
 进入实现前必须：
 
 1. R0由独立public review接受；Draft promotion本身不构成acceptance；
 2. 建立独立transaction，并重新读取当时的live source、current contracts、register、branch/HEAD与dirty state；
-3. 确认Stage 2的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
-4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 2仍须
+3. 确认Stage 3的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
+4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 3仍须
    获得独立启动授权。
 
 ## 2. Live baseline 与首阶段选择
@@ -133,12 +134,12 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
-| Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
+| Stage 3 — Endpoint/socket nonblocking vertical slice | Ready；3A-3C Not Active | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | 本stage不cut over current contract；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
 
-Stage名称与数量在future resolution中可以保持target地调整。上表不预定具体Rust类型、逐文件write set、
-capacity数值或精确命令；这些只在对应stage变为Ready时冻结。
+Stage名称与数量在future resolution中可以保持target地调整。Stage 3的具体Rust边界、逐文件write set、capacity
+数值与精确命令已在6.3冻结；Stage 4-5仍不预定这些实现细节。
 
 ## 6. Current Stage and Future Outlines
 
@@ -846,50 +847,356 @@ fresh-disk RV64 wrapper均通过；RV64实际执行270/270 KUnit、三项local-p
 hardware与final harness继续Not Run。`NET-BOUNDARY-001`为Preserve，R0 revision、Stage 2 runtime closure与其它
 contract状态不变；本checkpoint已Closed，并继续停在Stage 3 Outline。
 
-### 6.3 Stage 3 Outline — Endpoint/socket nonblocking vertical slice
+### 6.3 Stage 3 Ready — Endpoint/socket nonblocking vertical slice
 
-概括目的：
+**阶段成熟度与授权：** Ready / Not Active。2026-07-30独立`2 -> 3 Implementation Resolution Gate`已完成；
+本节冻结Stage 3完整路线、三个checkpoint、ABI/lifecycle边界、验证、停止/退出条件与Resolved Write Set Manifest。
+解析授权不激活Checkpoint 3A，不授权任何source change、QEMU、current-contract cutover或`3 -> 4`resolution。
 
-- 建立Stack-owned opaque Endpoint lifecycle、domain-wide binding namespace、port0/implicit bind与完整R0 conflict
-  matrix；
-- 在`File::prv`建立kernel Socket private state与opaque Endpoint association，接入创建rollback和semantic final
-  release trigger但不阻塞cleanup；
-- 注册`socket`、`bind`、`sendto`、`recvfrom`、`getsockname`，先形成`SOCK_NONBLOCK`/`MSG_DONTWAIT`下真实
-  loopback与external operation的纵切；
-- 建立operation-local receive transaction和copyout前detach consume point。
+#### 6.3.1 Resolution baseline 与阶段结果
 
-前置依赖：
+进入resolution时为`dev/drc/alpha@2e083891771c`，tracked/untracked worktree clean。Stage 0-2及2026-07-30
+post-close validation-boundary correction均Closed；R0 target、current Network/Opened-description/IOMUX/Epoll/
+SystemTarget contracts与register没有漂移，也没有替代本stage或允许绕过final-release/copy/owner边界的active issue。
 
-- Stage 2 Closed，control-plane selection和production loopback均可由narrow capability使用；
-- live syscall/UAPI、FileOps、`ProcFile` final-release和user-copy owner重新审计。
+live source审计得到以下直接输入：
 
-受保护边界：
+- `anemone-smoltcp-stack/src/udp.rs`同时承载Endpoint、provisional bind truth、per-interface engine projection、TX
+  phase、RX queue与namespace；`stack/udp_ops.rs`组合Stack/interface operation。继续把真实bind/port0与datagram
+  transaction塞入这两个文件会混合single-resource、namespace和handoff职责；
+- kernel `net/mod.rs`与`net/domain/stack.rs`已经拥有initial-domain composition、唯一raw `Stack` access window和
+  pump capability，但没有真实Endpoint consumer；`udp-validation-probe`仍是Stage 2缺少该consumer时的临时桥，
+  kernel Cargo的`kunit` feature仍向该stack feature转发；
+- `ProcFile::description_refs`、创建时固定的`FileDescOps::final_release`、`File::prv`、anonymous File、fd
+  reservation/commit与opened-description status flags已经提供所需lifecycle/fd owner；Stage 3不另建VFS close
+  framework，也不修改semantic final-release truth；
+- kernel尚未注册五项network syscall；`anemone-abi`已具有所需Linux errno常量，但没有network layout/constants或
+  asm-generic syscall number，`anemone-rs`也没有network raw/typed wrapper；
+- current control plane只需增加operation-local UDP selection入口；route/address/interface truth仍由
+  `Ipv4ControlPlane`拥有，`DomainStack`只执行projection revalidation与protocol admission。
 
-- fd number不成为Socket/Endpoint identity，dup/fork共享同一opened description；
-- Stack不接收task/fd/user pointer/Linux errno，kernel不接收smoltcp handle/private queue；
-- raw concrete `Stack`只由protocol composition/pump owner持有；kernel socket/syscall consumer只能取得Endpoint/UDP
-  operation所需的窄capability surface，不能因concrete backend还有其它`pub` method而依赖它们；
-- bind conflict、reservation和commit只在Stack；source selection不写回binding；
-- send success前完成selection/admission；receive detach后copy fault不requeue；
-- Stage 3从第一条Endpoint/File association起就完成creation rollback与opened-description semantic final release到
-  Endpoint retire的基本handoff；不得把首次final-release接入后延到Stage 4，Stage 4只harden并发交错；
-- unsupported family/type/protocol/flag稳定拒绝，不用日志或silent success替代功能。
+Stage 3按三个独立checkpoint执行：3A先做same-owner split；3B建立Endpoint/File association与
+`socket/bind/getsockname`真实地址/lifecycle纵切；3C增加`sendto/recvfrom`、implicit bind与nonblocking datagram
+纵切。每个checkpoint独立review、验证、关闭并停止；不得把3A/3B closure当作下一checkpoint activation。
 
-解析触发点：
+#### 6.3.2 Capability 与 module boundary
 
-- Stage 2 Closed后的只读preflight。该gate解析exact sockaddr/errno/copy order、Endpoint identity/stale
-  isolation、buffer inventory、module split、syscall registration、File private-state shape、final-release handoff、
-  precise tests与candidate cutover；同时读取真实protocol composition、socket和syscall callsites，决定窄surface用
-  trait、facade/newtype、free functions还是其它直接编码。若选择trait，必须由这个真实consumer边界和可验证fake/
-  conformance用途证明，并只包含Endpoint/UDP operation；不得建立catch-all `ProtocolStack`或让consumer同时保留
-  concrete `Stack`逃逸路径。`anemone-net-api`只有在该capability确实需要由stack实现、由kernel消费，且不能由
-  kernel protocol-owner module内的private facade封闭时，才承载最小trait/value contract；不能只为预防误用而
-  先建立共享抽象。
+本stage不引入`ProtocolStack`、`EndpointOps`、TCP/UDP generic Socket或catch-all backend trait。trait不能阻止已经
+取得concrete `Stack`的caller调用其其它public method；真实object fence由现有private instance ownership建立：
 
-预计范围：
+```text
+DomainStack private raw Stack
+  -> kernel-private UdpEndpointPort
+    -> File::prv中的 UdpSocketFile
+      -> fs/api/socket Linux ABI projection
+```
 
-- `anemone-net-api`的最小真实cross-crate consumer surface、`anemone-smoltcp-stack` Endpoint operations、kernel
-  socket/VFS/syscall/user-copy与architecture-neutral user tests。具体路径不是当前授权。
+`DomainStack`之外没有raw `Stack`实例或private lock。`UdpEndpointPort`只携带`Arc<DomainStack>`与opaque、boot-local、
+不复用的`UdpEndpointId`，提供create后Endpoint所需的bind/query/send/detach/retire窄操作；它不暴露smoltcp handle、
+SocketSet、engine/queue identity、route table或Stack其它operation。capability clone只形成operation-local access，
+不延长Endpoint semantic lifecycle；retire后old clone通过ID lookup fail closed。
+
+`anemone-net-api::udp`承载真实stack/kernel consumer共同需要的最小protocol-domain value/outcome：opaque
+`UdpEndpointId`、local binding、peer endpoint、egress selection、owned received datagram与typed create/bind/send/
+receive/retire outcome。它可以为owned datagram引入`alloc`，但不包含Linux sockaddr/errno/fd/task、control-plane
+policy、smoltcp type或trait。若实现审查证明某个candidate value只在`DomainStack`内部流动，应留在stack crate而不
+扩大shared surface；不得反向把整个concrete Stack或kernel facade搬入`anemone-net-api`。
+
+最终module shape冻结为：
+
+```text
+anemone-kernel/crates/anemone-smoltcp-stack/src/
+  udp/{mod.rs,endpoint.rs,namespace.rs,datagram.rs}
+  stack/{mod.rs,udp.rs,host_validation.rs}
+
+anemone-kernel/src/net/
+  udp.rs
+  domain/stack/{mod.rs,udp.rs}
+
+anemone-kernel/src/fs/
+  socket/{mod.rs,udp.rs}
+  api/socket/{mod.rs,abi.rs,create.rs,address.rs,datagram.rs}
+
+anemone-abi/src/net.rs
+anemone-rs/src/{sys/linux/net.rs,os/linux/net.rs}
+anemone-apps/udp-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}
+```
+
+职责边界如下：
+
+- `udp/endpoint.rs`：单Endpoint resource、committed binding、per-interface private engine projection、bounded TX/RX；
+- `udp/namespace.rs`：`UdpEndpoints`、ID/capacity、完整bind conflict、ephemeral allocation、publish/withdraw/retire；
+- `udp/datagram.rs`：pending-send phase、send ownership commit、owned receive transaction；
+- `stack/udp.rs`：唯一把Endpoint owner与interfaces/SocketSet/local link组合起来的concrete Stack operation；
+- `net/domain/stack/udp.rs`：同一DomainStack owner下的raw Stack UDP access window；
+- kernel `net/udp.rs`：control-plane point-in-time selection与DomainStack operation composition，并向Socket只导出
+  `UdpEndpointPort`；
+- `fs/socket/udp.rs`：`UdpSocketFile`、anonymous FileOps、association与final-release hook；
+- `fs/api/socket/abi.rs`：byte-level sockaddr、flag、user-copy ordering与typed outcome到`SysError`映射，其它四个
+  syscall文件只组合ABI helper和Socket operation，不复制解析规则。
+
+`fs/socket/mod.rs`不得因只有UDP一个consumer就建立generic Socket manager、protocol registry、option framework或
+trait hierarchy；它只做module wiring与“是否为本stage UDP Socket”的窄分类。
+
+#### 6.3.3 Endpoint、binding 与 capacity
+
+Endpoint创建时未绑定，建立必要的private engine resources但不发布port。committed binding是Endpoint内唯一
+`Option<address constraint + nonzero port>`；per-interface engine bind只是private projection。namespace不建立第二份
+`BindingTable`，第一版在bounded Endpoint集合上扫描committed binding完成冲突判断：wildcard与任一同port binding
+冲突，相同specific address冲突，不同specific address允许共用port。以后只有性能证据出现时才能把index作为带
+一致性assert的derived structure加入，不得让它成为并列reservation truth。
+
+explicit bind在唯一Stack access window内一次完成conflict check、port0 selection/reservation、engine projection与
+binding commit；commit前不向kernel/userspace发布port。新增interface根据Endpoint current binding建立projection，
+未绑定Endpoint保持engine unbound。retire先withdraw Endpoint identity/binding reservation，再清理engine/local-link
+resource；ID不复用，因此本stage不引入generation table。普通Endpoint capacity、port range exhaustion、conflict和
+queue full返回typed outcome，不panic或依赖allocator OOM。
+
+implicit bind使用同一wildcard/ephemeral transaction。与Linux IPv4 UDP顺序一致，本stage选择“一旦implicit binding
+commit便保留”：后续同一次`sendto`若因route、MTU或capacity失败，`getsockname`仍可观察已提交的wildcard/port；
+只有binding commit前的allocation/conflict failure不发布port。一次send source selection始终是operation-local
+result，不写回wildcard binding。
+
+Stage 3新增并由现有KernelConfig owner生成以下参数：
+
+| Parameter | R0 Stage 3 default | 约束 |
+| --- | ---: | --- |
+| `net_udp_endpoint_capacity` | 64 | nonzero；达到上限返回normal resource outcome |
+| `net_udp_tx_datagram_capacity` | 8 | per Endpoint；nonzero |
+| `net_udp_rx_datagram_capacity` | 64 | per Endpoint；nonzero |
+| `net_udp_max_payload_bytes` | 1472 | `1..=65507`；实际send上限仍取本值与selected interface MTU ceiling最小值 |
+| `net_udp_ephemeral_port_first` | 32768 | `1..=65535` |
+| `net_udp_ephemeral_port_last` | 60999 | `first <= last <= 65535` |
+
+`conf/.defconfig`保存default，xtask config owner负责default materialization、nonzero/range/cross-field与buffer-size
+checked-arithmetic validation，并生成`kconfig_defs.rs`；generated file只能由repository build入口更新，不能手改。
+Stage 3不引入random allocator或可配置scan policy；从last回绕到first的单调scan是owner-local implementation
+preference，不能改变冲突矩阵或exhaustion outcome。
+
+#### 6.3.4 Socket/File lifecycle 与锁边界
+
+`File::prv`安装一个`UdpSocketFile`：
+
+```text
+association: SpinLock<Option<UdpEndpointPort>>
+operation: Mutex<()>
+```
+
+association只拥有opaque capability，不缓存binding、port、route、queue、capacity或Linux errno。operation mutex
+串行化同一opened description的bind/name/send/receive transaction；它不是Endpoint state owner。每次operation在
+association lock内取得短期capability clone后立即释放该lock，再进入control-plane/Stack operation。Stack mutation
+继续只在DomainStack private spin lock的有限non-sleeping window内发生。
+
+`socket`按`fd reservation -> Endpoint create -> anonymous File/UdpSocketFile -> ProcFile/FileDesc -> fd commit`
+准备。fd commit前由linear creation guard拥有Endpoint并在任一步失败时non-blocking retire；commit后guard disarm，
+只有`ProcFile::description_refs`首次`Live(1) -> Retired`调用创建时固定的final-release hook。`SOCK_CLOEXEC`只设置
+新fd的fd-local flag，`SOCK_NONBLOCK`设置opened-description共享status flag；dup/fork不复制Socket/Endpoint。
+
+final-release先在association lock内`take()`撤销Socket association，释放lock后调用non-sleeping Endpoint retire；
+它不取operation mutex、不等待worker/progression、不以`Drop`或`Arc` last drop替代semantic event。Stage 3证明
+creation rollback、ordinary dup/fork sharing、one-alias close、final close和stale ID fail-closed基本路径；delayed
+retire、close/operation interleaving、shutdown/cancellation与identity/port reuse race的完整hardening仍属于Stage 4。
+
+user copy不得持Stack/control-plane/source private lock。receive在Stack lock内把队首datagram原子detach到owned
+operation-local transaction并立即释放Stack lock；随后才执行可能fault的payload/peer/addrlen copy。Socket operation
+mutex可以保持到当前syscall结束以固定同一description上receive顺序，但不能参与Endpoint liveness或final-release
+decision。
+
+#### 6.3.5 Linux ABI、copy order 与 temporary blocking bridge
+
+`anemone-abi::net`新增`AF_INET`、`SOCK_DGRAM`、`SOCK_NONBLOCK`、`SOCK_CLOEXEC`、`IPPROTO_UDP`、
+`MSG_DONTWAIT`、`socklen_t`与16-byte `SockAddrIn`/`InAddr`，并以compile-time size/alignment/offset assertion固定布局；
+port/address使用network byte order。RISC-V与LoongArch syscall number都按asm-generic固定为`socket=198`、
+`bind=200`、`getsockname=204`、`sendto=206`、`recvfrom=207`。布局和入口参考
+`xref:linux-6.6.32:include/uapi/linux/in.h#sockaddr_in`与
+`xref:linux-6.6.32:include/uapi/asm-generic/unistd.h`；上游只证明Linux snapshot，不替代R0 target。
+
+input sockaddr采用byte copy，不要求user pointer自然对齐：`addrlen < 16`或`addrlen > 128`返回`EINVAL`，合法长度
+只读取前16 bytes；family不是`AF_INET`返回`EAFNOSUPPORT`。output遵循
+`xref:linux-6.6.32:net/socket.c#move_addr_to_user`：先读取user `socklen_t`，复制`min(user_len, 16)` bytes，再把
+actual length 16写回；读出的32-bit length若按kernel `int`解释为负则返回`EINVAL`。任一fault返回`EFAULT`并保留
+此前已经发生的user-memory effect。unbound UDP Socket的`getsockname`返回`0.0.0.0:0`；binding已经commit后再次
+`bind`返回`EINVAL`，不改变原binding。
+
+`recvfrom`遵循`xref:linux-6.6.32:net/socket.c#__sys_recvfrom`的可见顺序并受R0更强consume boundary约束：先detach
+whole datagram，再复制payload prefix，然后在non-null peer pointer时执行peer sockaddr与actual addrlen copy。
+payload、peer或addrlen任一fault都消费当前datagram；payload fault后不继续peer copy，peer/addrlen fault可能发生在
+payload已经可见之后。null peer pointer不读取addrlen pointer。zero-length datagram和zero receive length仍按同一
+detach boundary消费；short buffer返回copied prefix length而不是original datagram length。
+
+Linux-visible outcome在Stage 3固定为：
+
+| 情形 | errno/result |
+| --- | --- |
+| unsupported family/type/protocol | `EAFNOSUPPORT` / `ESOCKTNOSUPPORT` / `EPROTONOSUPPORT` |
+| unknown socket type bits | `EINVAL` |
+| unsupported `sendto/recvfrom` flags | `EOPNOTSUPP`并输出可诊断notice |
+| non-socket fd | `ENOTSOCK` |
+| invalid sockaddr length/family/address/zero destination port | `EINVAL`或上述family error |
+| explicit local address不属于domain | `EADDRNOTAVAIL` |
+| bind conflict | `EADDRINUSE` |
+| implicit ephemeral range exhaustion | `EAGAIN` |
+| no destination / no route | `EDESTADDRREQ` / `ENETUNREACH` |
+| supported payload上限外 | `EMSGSIZE` |
+| ordinary Endpoint resource exhaustion | `ENOBUFS`；若是当前nonblocking TX/RX not-ready则`EAGAIN` |
+| invalid user pointer | `EFAULT` |
+
+kernel `SysError`增加对应精确variant并映射既有`anemone-abi::errno`；不得把socket outcome压成宽泛
+`EINVAL`/`ENOSPC`，也不得让Stack接收Linux errno。
+
+Stage 3只实现立即尝试：effective nonblocking是opened-description `O_NONBLOCK`或per-call `MSG_DONTWAIT`的OR，
+后者不修改status flags。default-blocking operation若立即可完成仍成功；若必须sleep，temporary bridge返回
+`EOPNOTSUPP`并输出一次受控notice，注释明确以Stage 4 blocking/wait接入为删除gate。nonblocking would-block返回
+`EAGAIN`。不得busy-poll、睡眠或把default-blocking would-block静默伪装成`EAGAIN`。
+
+`anemone-rs::sys::linux::net`提供raw六参数syscall wrapper；`os::linux::net`提供typed IPv4 UDP wrapper，同时保留
+最窄unsafe raw pointer/length/flag入口给ABI conformance/fault测试。`udp-test`是两层API的真实consumer，测试不得
+手写另一套syscall number或sockaddr layout。`socket`只接受`AF_INET + SOCK_DGRAM`，protocol为0或
+`IPPROTO_UDP`；type可附加`SOCK_NONBLOCK|SOCK_CLOEXEC`，不支持的base type/protocol/type bit按上表拒绝。
+
+#### 6.3.6 Checkpoint 3A — same-owner module split only
+
+**目的：** 在增加真实consumer、shared API或ABI前，行为保持地拆开已经混合职责的protocol/domain files。
+
+**交付：** `udp.rs`目录化为`udp/{mod,endpoint,namespace,datagram}.rs`，`stack/udp_ops.rs`改为
+`stack/udp.rs`；kernel `net/domain/stack.rs`目录化为`stack/{mod,udp}.rs`，但3A的`stack/udp.rs`只承接既有
+probe operation access window。ordinary visibility、conditional probe/host facade、public symbol、capacity值与
+所有call path保持不变；不得趁拆分实现unbound/port0/syscall或删除probe。
+
+**验证/退出：** stack完整host tests、两种no-default gate、formatter，以及精确的
+`cargo check -p anemone-smoltcp-stack --no-default-features --features udp-validation-probe`必须保持baseline；kernel
+双架构release build使用6.3.9列出的两个`just build`命令。source audit证明只有same-owner movement且kernel仍没有
+real Endpoint consumer。Contract Impact为None。3A单独Closed后停止，3B仍Not Active。
+
+#### 6.3.7 Checkpoint 3B — Endpoint/File/address lifecycle vertical slice
+
+**目的：** 一次建立真实Endpoint capability、Socket/File association与`socket/bind/getsockname`用户纵切，不把
+datagram或blocking假装已经完成。
+
+**交付：** 引入6.3.2最小shared values；Endpoint从unbound创建，完成full conflict matrix、specific/wildcard、
+port0、query与retire；增加`net::udp::UdpEndpointPort`和`UdpSocketFile`；注册`socket/bind/getsockname`，接入
+fd/status flags、creation rollback、dup/fork sharing与semantic final release。新增Kconfig参数和双架构
+`anemone-abi`/`anemone-rs` network surface，建立`udp-test`并接入两份pretest rootfs和`user-test`。
+
+real `UdpEndpointPort`出现后，必须删除stack Cargo的`udp-validation-probe` feature、kernel Cargo中`kunit`向该
+feature的forwarding edge、`stack/udp_probe.rs`与DomainStack probe support；kernel `kunit` feature本身继续服务
+owner-local KUnit。现有三项local-path KUnit改走real network capability或由更强`udp-test` case替代，不能把probe
+重命名为production API。长期`host_validation.rs`只保留仍有真实host-test consumer的deterministic control/
+observation；其ordinary operation必须调用与production相同的Stack path。
+
+**验证/退出：** deterministic host matrix覆盖64-capacity boundary、完整bind conflict表、port0 scan/exhaustion、
+failed bind rollback、retire/port reuse与stale ID；kernel KUnit覆盖File association和creation guard；RV64 fresh-disk
+`udp-test`覆盖family/type/protocol/flags、unbound name、wildcard/specific/port0/rebind/getsockname、
+unaligned/truncated sockaddr、dup/fork/one-alias/final close和CLOEXEC/NONBLOCK projection，并输出稳定
+`UDPTEST:SUMMARY`。LA64 app/kernel只做同源build，
+runtime仍Not Run。3B不注册send/receive、不执行contract cutover；关闭后停止，3C仍Not Active。
+
+#### 6.3.8 Checkpoint 3C — nonblocking datagram vertical slice
+
+**目的：** 在3B真实lifecycle上增加send/receive ownership transaction，形成五项syscall的可运行nonblocking闭环。
+
+**交付：** 注册`sendto/recvfrom`；implicit wildcard bind、control-plane selection、Stack revalidation、MTU/TX
+admission与ownership commit使用6.3.3边界；receive返回owned transaction并按6.3.5顺序copyout。loopback与
+self-external local address均经过protocol egress、bounded local link和normal ingress；kernel不得直接查目标Socket
+或复制payload。host fixture增加selected external-interface egress/ingress、TX/RX capacity和failure-before-success
+证据，但remote external QEMU peer仍属于Stage 5。
+
+**验证/退出：** host matrix覆盖wrong-interface-first、no route/source/interface、oversize、TX/RX full/recovery、
+implicit port exhaustion、zero/short datagram、owned detach后abandon不重新入队与two-receiver deterministic order；
+RV64 fresh-disk `udp-test`必须完成server `bind(port0)->getsockname`、client implicit-bind send、server recv/reply、
+client recv，以及loopback/self-external、empty nonblock `EAGAIN`、blocking temporary `EOPNOTSUPP`、zero/short、
+payload/peer/addrlen fault consume和precise errno/flag case。Stage 3只建立这些ordinary paths；concurrent close/
+receive stress、wait/readiness与fragment gate仍由Stage 4解析。
+
+#### 6.3.9 Validation、review 与 claim boundary
+
+每个checkpoint在自己的final source上执行适用子集；Stage 3 closure必须在3C exact code上重新执行完整集合：
+
+```text
+just xtask-test
+cargo test -p anemone-net-api -p anemone-smoltcp-stack
+cargo test -p anemone-smoltcp-stack --no-default-features --no-run
+cargo check -p anemone-smoltcp-stack --no-default-features
+just fmt kernel --check
+just fmt udp-test --check
+just app build --arch riscv64 udp-test
+just app build --arch loongarch64 udp-test
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-udp-stage3-rv64.log
+mdbook build docs
+git diff --check
+```
+
+host crate tests是protocol deterministic proof，app build只证明architecture-specific compile/export，kernel build只
+证明integration；它们都不能替代fresh-disk RV64 syscall/fd/copy/lifecycle runtime。RV64 wrapper会重建pretest rootfs、
+覆盖worktree-local runtime disk并运行QEMU，必须由独立checkpoint授权后才执行。LA64 runtime、remote external peer、
+SMP>1、poll/select/epoll、blocking/signal、fragment injection、hardware、network LTP与final harness继续明确Not Run，
+不得由Stage 3结果外推。
+
+每个checkpoint closure需要source/write-set audit和Apollyon/Keter/Euclid review。Stage 3 final review特别检查：
+
+- raw Stack/private lock未逃逸，kernel没有smoltcp handle/queue truth，`anemone-net-api`没有Linux/trait pollution；
+- binding/port只在Endpoint namespace，Socket/control plane没有mirror，implicit bind失败/保留语义与getsockname一致；
+- fd-local/opened-description flags、creation guard、final-release trigger和probe删除满足lifecycle边界；
+- send success前完成selection/admission，local path没有Socket fast path，receive detach先于全部copyout且fault不requeue；
+- generated Kconfig definition来自repository command，rootfs/app architecture与wrapper一致；
+- unsupported input和temporary blocking bridge有typed errno、受控notice与Stage 4删除注释，diagnostic字段/log不驱动状态。
+
+#### 6.3.10 Contract Impact、停止条件与退出
+
+Stage 3的current-contract cutover为**None**。`OPENED-DESC-001..003`、`NET-BOUNDARY-001`、
+`NET-IFACE-DOMAIN-001`、`NET-CONTROL-PLANE-001`及existing frame/pump IDs保持Effective/Preserve；
+`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
+`NET-SOCKET-WAIT-001`继续Pending。原因是Stage 3只证明ordinary nonblocking/lifecycle纵切，尚未达到
+`NET-SOCKET-ENDPOINT-001`要求的delayed retire/shutdown/cancellation/race floor，也未达到
+`NET-UDP-TRANSACTION-001`的fragment、concurrent receive、双架构和remote-external evidence floor。partial code、
+syscall registration或RV64 PASS都不使这些ID生效。
+
+以下任一情况必须停止当前checkpoint并写入transaction；不得用临时wrapper或宽errno继续：
+
+- 需要修改`task/files.rs`、`fs/file.rs`、anonymous/VFS lifecycle、iomux/epoll source或opened-description current
+  contract才能完成3B/3C；先报告owner/write-set/contract expansion；
+- concrete route要求vendored smoltcp change、第二binding/route/queue truth、Socket-to-Socket delivery或让Socket取得
+  raw Stack；保持partial code disposition并进入Route Correction或Target Renegotiation Gate；
+- implicit bind、copy ordering、blocking bridge或errno无法满足本节已冻结可见语义；这属于ABI/target反馈，不得
+  静默调整；
+- ordinary capacity exhaustion panic/busy-spin、final release等待worker/锁sleep、user copy跨Stack/source lock、
+  retire后old capability恢复publication，或Apollyon/Keter未清零；
+- 需要编辑本节manifest外source。先上报理由、拟新增路径、owner/contract影响与验证，再批准并更新manifest。
+
+3A、3B、3C全部独立Closed，最终source通过6.3.9 review/validation且stop condition未触发后，Stage 3才Closed。
+closure只授权transaction/RFC/biweekly状态写回；Stage 4保持Outline，`3 -> 4`resolution与任何candidate contract
+cutover均须新的明确授权。
+
+#### 6.3.11 Resolved Write Set Manifest
+
+以下是整个Stage 3允许触及的union；每个checkpoint只能使用上文属于自己的最小子集。目录pattern只覆盖列出的
+planned files，不授权顺手修改相邻owner。
+
+- configuration owner：`conf/.defconfig`、`scripts/xtask/src/config/kconfig.rs`，以及只由repository build生成的
+  `anemone-kernel/src/kconfig_defs.rs`；
+- shared protocol values：`anemone-kernel/crates/anemone-net-api/src/{lib.rs,udp.rs}`；
+- protocol Stack：`anemone-kernel/crates/anemone-smoltcp-stack/Cargo.toml`、
+  `src/{lib.rs,udp.rs,udp/{mod.rs,endpoint.rs,namespace.rs,datagram.rs},stack/{mod.rs,udp_ops.rs,udp.rs,
+  udp_probe.rs,host_validation.rs}}`与`tests/udp_topology.rs`；其中`udp.rs`/`udp_ops.rs`允许删除，
+  `udp_probe.rs`必须在3B删除；
+- kernel feature/network composition：`anemone-kernel/Cargo.toml`、
+  `anemone-kernel/src/net/{mod.rs,udp.rs,domain/{mod.rs,control_plane.rs,stack.rs,
+  stack/{mod.rs,udp.rs}}}`；其中`domain/stack.rs`允许在3A目录化删除；
+- Socket/File/syscall projection：`anemone-kernel/src/fs/{mod.rs,socket/{mod.rs,udp.rs},api/{mod.rs,
+  socket/{mod.rs,abi.rs,create.rs,address.rs,datagram.rs}}}`与`anemone-kernel/src/syserror.rs`；
+- ABI/library：`anemone-abi/src/{lib.rs,net.rs,syscall/{riscv.rs,loongarch.rs}}`、
+  `anemone-rs/src/{sys/linux.rs,sys/linux/net.rs,os/linux.rs,os/linux/net.rs}`；
+- real user consumer/rootfs：`anemone-apps/udp-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}`、
+  `anemone-apps/user-test/src/main.rs`、`conf/rootfs/{pretest-rv64.toml,pretest-la64.toml}`；
+- execution write-back：本RFC`{index.md,implementation.md}`、本transaction、`docs/src/rfcs.md`、
+  `docs/src/devlog/transactions/index.md`与当前biweekly devlog。
+
+从Stage 3 activation baseline起，`invariants.md`、current contracts、register/current limitations、vendored smoltcp、
+`task/files.rs`、`fs/file.rs`、
+anonymous VFS、iomux/epoll、net worker/provider、SystemTarget/Platform/build preset、其它apps/rootfs、其它RFC与
+scripts保持只读。formatter若产生允许的相邻style diff按repo规则审计，不将其解释为owner/write-set授权扩大。
 
 ### 6.4 Stage 4 Outline — Blocking/iomux与datagram hardening
 
@@ -899,7 +1206,8 @@ contract状态不变；本checkpoint已Closed，并继续停在Stage 3 Outline�
 - 把socket接入现有poll/select/epoll snapshot-register-final-recheck协议和signal/cancel路径；
 - 关闭readable/writable、Endpoint saturation/recovery、provider backpressure、late edge、retire race与dup/fork/
   close交错；
-- 完成zero/short/oversize、三类copy fault、concurrent receive与IPv4 first/later fragment显式拒绝。
+- 扩展zero/short/oversize与三类copy fault的并发/partial-effect matrix，完成concurrent receive和IPv4
+  first/later fragment显式拒绝。
 
 前置依赖：
 
