@@ -32,9 +32,9 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 | `NET-FRAME-OWN-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-own-001--frame-backing只有一个访问owner) | external frame ownership与DMA/CPU handoff不变；loopback另受同等唯一packet-owner义务约束 | 全程保持 |
 | `NET-FRAME-PROGRESS-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-progress-001--有界资源normal-backpressure与durable-recheck) | provider capacity、normal backpressure、durable recheck与fair progression不变 | 全程保持 |
 | `NET-STACK-PUMP-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state) | current contract已允许一个Stack拥有多interface；target改为initial domain唯一Stack，不改变单instance唯一推进规则 | 全程保持 |
-| `NETDEV-LIFE-001` | Refine | [Active](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction) | `device/net`保留external NIC publication identity/facts/capability；domain-local ifindex/name/kind与logical-interface lifecycle移入新的domain contract | Logical-interface contract cutover |
-| `NET-ATTACH-001` | Refine | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | attach authority从“每netdev新建Stack path”改为external NIC admission到initial domain/global Stack；保留publication-last、rollback isolation与shutdown admission | Domain/global-Stack attach cutover |
-| `NET-IFACE-DOMAIN-001` | Introduce | None（尚未生效） | initial domain唯一拥有logical-interface membership/lifecycle/ifindex/name/kind；`lo`与external interface共享这一namespace | Logical-interface contract cutover |
+| `NETDEV-LIFE-001` | Refine | [Active](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction) | `device/net`保留external NIC publication identity/facts/capability；domain-local ifindex/name/kind与logical-interface lifecycle移入新的domain contract | Stage 1 `NET-UDP-DOMAIN-CUTOVER` |
+| `NET-ATTACH-001` | Refine | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | attach authority从“每netdev新建Stack path”改为external NIC admission到initial domain/global Stack；保留publication-last、rollback isolation与shutdown admission | Stage 1 `NET-UDP-DOMAIN-CUTOVER` |
+| `NET-IFACE-DOMAIN-001` | Introduce | None（尚未生效） | initial domain唯一拥有logical-interface membership/lifecycle/ifindex/name/kind；`lo`与external interface共享这一namespace | Stage 1 `NET-UDP-DOMAIN-CUTOVER` |
 | `NET-CONTROL-PLANE-001` | Introduce | None（尚未生效） | 唯一拥有local address、route、source/interface selection policy与Stack projection边界 | Static IPv4 control-plane cutover |
 | `NET-PROTOCOL-BOUNDARY-001` | Introduce | None（尚未生效） | 固定kernel Socket/control plane与concrete Stack之间的Endpoint/UDP capability、依赖方向和object fence | Protocol capability cutover |
 | `NET-SOCKET-ENDPOINT-001` | Introduce | None（尚未生效） | kernel Socket / File与Stack Endpoint的owner fence、opaque association、final-release retire与stale isolation | Socket/Endpoint lifecycle cutover |
@@ -90,8 +90,8 @@ global表示domain-wide单一语义owner，不要求global static、singleton ty
 **违反表现：** per-netdev/per-interface/per-socket Stack成为并列endpoint owner；loopback使用另一endpoint namespace；
 kernel缓存private SocketSet/Endpoint mapping；global被误写成固定大锁或唯一worker contract。
 
-**Cutover：** Domain/global-Stack cutover必须先撤销current per-netdev Stack语义路径，再发布唯一domain Stack；不能
-在两个wiring同时可用于protocol mutation时宣称生效。
+**Cutover：** Stage 1 `NET-UDP-DOMAIN-CUTOVER`必须先撤销current per-netdev Stack语义路径，再发布唯一domain
+Stack；不能在两个wiring同时可用于protocol mutation时宣称生效。
 
 ### NET-IFACE-DOMAIN-001 — Logical-interface namespace与device publication分离
 
@@ -129,8 +129,8 @@ protocol `InterfaceId`和private engine object identity互不等价、不可互�
 domain保存provider queue/link truth；失败留下可被control plane/Stack部分观察的interface；通过兼容字段让旧新
 registry同时驱动行为。
 
-**Cutover：** logical-interface owner、external admission与global-Stack attach必须在同一受控contract transition
-中切换；旧`device/net` ifindex/name行为在新owner生效后不得继续作为决策输入。
+**Cutover：** logical-interface owner、external admission与global-Stack attach必须在Stage 1
+`NET-UDP-DOMAIN-CUTOVER`中切换；旧`device/net` ifindex/name行为在新owner生效后不得继续作为决策输入。
 
 ### NET-UDP-LOOPBACK-001 — Loopback是domain-local first-class software interface
 

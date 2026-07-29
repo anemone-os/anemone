@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0 Closed / Stage 1-5 Outline
+**状态：** Accepted for Implementation / Stage 0 Closed / Stage 1 Ready / Not Active / Stage 2-5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -16,11 +16,12 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** 0B post-closure review的两个Keter与一个Euclid已由0B Feedback Correction关闭
-**下一步：** 等待独立的`Stage 0 -> Stage 1 Implementation Resolution Gate`授权；不得自动解析或进入Stage 1
+**下一步：** 等待独立的Stage 1 activation授权；不得因Ready自动进入实现或解析Stage 2
 
 本目录是`net-udp` R0 accepted target的canonical source。R0不覆盖current contract；候选contract仍须在后续
 implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的0B Feedback
-Correction与0C positive decision closure均已关闭；Stage 1-5仍是Outline且未授权。
+Correction与0C positive decision closure均已关闭；独立`0 -> 1`resolution已把Stage 1解析为Ready，但Stage 1
+仍未授权进入Active，Stage 2-5保持Outline。
 
 ## 摘要
 
@@ -99,7 +100,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0 Closed；Stage 1-5 Outline且未授权
+- [迁移实施计划](./implementation.md)：Stage 0 Closed；Stage 1 Ready / Not Active；Stage 2-5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -394,8 +395,9 @@ R0 public review确认target / contract proposal已经自洽收口：
 
 Implementation readiness已经完成：
 
-- [迁移实施计划](./implementation.md)已按positive route关闭Stage 0 multi-interface UDP topology probe；
-  Stage 1-5保持Outline，独立的`0 -> 1`resolution尚未授权。
+- [迁移实施计划](./implementation.md)已按positive route关闭Stage 0 multi-interface UDP topology probe；独立
+  `0 -> 1`resolution选择per-provider worker + domain-owned single Stack access window路线，并把Stage 1完整解析为
+  Ready。Ready不构成implementation、contract cutover或Stage 2 resolution授权。
 
 R0把 concrete types、内部 API、module placement、lock/worker/queue、capacity、port algorithm、loopback
 medium 和 stage-later probe 后延，只要对应 Outline 明确保护本 target、contract IDs、owner、ABI 与 acceptance
@@ -456,4 +458,4 @@ R0已经接受但尚未实现或cut over。0A先刻画candidate engine egress-ad
 positive candidate；post-closure review随后发现receive gate owner粒度、engine capacity admission和host seam
 module placement反馈，已由0B Feedback Correction修复并通过独立复审。0C保留最小ordinary candidate和长期
 deterministic topology matrix，确认无需修改vendored/shared API，并关闭Stage 0。rootfs、QEMU、LTP、双架构runtime
-与用户可见UDP能力均`Not Run`；Stage 1仍须独立resolution与授权。
+与用户可见UDP能力均`Not Run`；Stage 1已完成resolution但仍须独立activation授权。
