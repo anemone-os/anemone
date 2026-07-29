@@ -3,7 +3,9 @@ use smoltcp::iface::{PollIngressSingleResult, PollResult};
 
 use crate::{
     adapter::{FrameDevice, from_smoltcp_instant, to_smoltcp_instant},
+    local_link::LocalDevice,
     stack::{InterfaceEntry, PumpError, PumpOrder, Stack},
+    udp::UdpEndpoints,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,6 +23,16 @@ impl PumpBudget {
             egress_steps,
         }
     }
+
+    #[allow(dead_code)]
+    pub(crate) const fn ingress_frames(self) -> usize {
+        self.ingress_frames
+    }
+
+    #[allow(dead_code)]
+    pub(crate) const fn egress_steps(self) -> usize {
+        self.egress_steps
+    }
 }
 
 impl Stack {
@@ -31,7 +43,13 @@ impl Stack {
         now: Instant,
         budget: PumpBudget,
     ) -> Result<PumpOutcome, PumpError> {
-        let entry = self.interface_mut(id)?;
+        let Self {
+            interfaces, udp, ..
+        } = self;
+        let entry = interfaces
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .ok_or(PumpError::UnknownInterface(id))?;
 
         // smoltcp snapshots this capability when the interface is created. A
         // different value here means the caller supplied the wrong provider.
@@ -44,20 +62,22 @@ impl Stack {
         let smoltcp_now = to_smoltcp_instant(now);
         let mut device = FrameDevice::new(provider);
         entry.interface.poll_maintenance(smoltcp_now);
+        let active_endpoint = udp.prepare_egress(id, &mut entry.sockets);
 
         let (ingress_may_remain, egress_may_remain) = match entry.next_pump_order {
             PumpOrder::IngressFirst => (
-                poll_ingress(entry, &mut device, smoltcp_now, budget.ingress_frames),
+                poll_ingress(entry, udp, &mut device, smoltcp_now, budget.ingress_frames),
                 poll_egress(entry, &mut device, smoltcp_now, budget.egress_steps),
             ),
             PumpOrder::EgressFirst => {
                 let egress_may_remain =
                     poll_egress(entry, &mut device, smoltcp_now, budget.egress_steps);
                 let ingress_may_remain =
-                    poll_ingress(entry, &mut device, smoltcp_now, budget.ingress_frames);
+                    poll_ingress(entry, udp, &mut device, smoltcp_now, budget.ingress_frames);
                 (ingress_may_remain, egress_may_remain)
             },
         };
+        let udp_egress_may_remain = udp.complete_egress(active_endpoint, id, &entry.sockets);
         entry.next_pump_order = entry.next_pump_order.next();
 
         let next_deadline = entry
@@ -67,10 +87,106 @@ impl Stack {
         Ok(pump_outcome(
             device.blocked_work(),
             ingress_may_remain,
-            egress_may_remain,
+            egress_may_remain || udp_egress_may_remain,
             now,
             next_deadline,
         ))
+    }
+
+    /// Advances the provisional IP-medium local port with the same exclusive
+    /// `&mut Stack` capability as external interfaces. Egress is transferred
+    /// into bounded link storage only after the protocol round, so normal
+    /// ingress cannot consume it until a later bounded call.
+    #[allow(dead_code)]
+    pub(crate) fn pump_local(
+        &mut self,
+        id: InterfaceId,
+        now: Instant,
+        budget: PumpBudget,
+    ) -> Result<PumpOutcome, PumpError> {
+        let local = self
+            .local
+            .as_mut()
+            .filter(|local| local.id == id)
+            .ok_or(PumpError::UnknownInterface(id))?;
+        let smoltcp_now = to_smoltcp_instant(now);
+        local.interface.poll_maintenance(smoltcp_now);
+        let active_endpoint = self.udp.prepare_egress(id, &mut local.sockets);
+        local.link.set_tx_owner(active_endpoint);
+
+        let mut device = LocalDevice::new(&mut local.link);
+        let (ingress_may_remain, egress_may_remain) = match local.next_pump_order {
+            PumpOrder::IngressFirst => (
+                poll_local_ingress(
+                    id,
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut self.udp,
+                    &mut device,
+                    smoltcp_now,
+                    budget.ingress_frames(),
+                ),
+                poll_local_egress(
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut device,
+                    smoltcp_now,
+                    budget.egress_steps(),
+                ),
+            ),
+            PumpOrder::EgressFirst => {
+                let egress_may_remain = poll_local_egress(
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut device,
+                    smoltcp_now,
+                    budget.egress_steps(),
+                );
+                let ingress_may_remain = poll_local_ingress(
+                    id,
+                    &mut local.interface,
+                    &mut local.sockets,
+                    &mut self.udp,
+                    &mut device,
+                    smoltcp_now,
+                    budget.ingress_frames(),
+                );
+                (ingress_may_remain, egress_may_remain)
+            },
+        };
+        let device_blocked = device.blocked_work();
+        drop(device);
+        local.link.set_tx_owner(None);
+        local.link.transfer(budget.ingress_frames());
+        let owner_blocked = device_blocked && local.link.occupied() >= local.local_link_capacity();
+        let udp_egress_may_remain = self
+            .udp
+            .complete_egress(active_endpoint, id, &local.sockets);
+        local.next_pump_order = local.next_pump_order.next();
+
+        let next_deadline = local
+            .interface
+            .poll_at(smoltcp_now, &local.sockets)
+            .map(from_smoltcp_instant);
+        Ok(pump_outcome(
+            owner_blocked,
+            ingress_may_remain,
+            egress_may_remain || udp_egress_may_remain,
+            now,
+            next_deadline,
+        ))
+    }
+
+    /// Conditional facade for the deterministic host fixture. The local pump
+    /// itself remains ordinary `no_std + alloc` owner logic above.
+    #[cfg(feature = "host-test")]
+    pub fn pump_local_for_host_validation(
+        &mut self,
+        id: InterfaceId,
+        now: Instant,
+        budget: PumpBudget,
+    ) -> Result<PumpOutcome, PumpError> {
+        self.pump_local(id, now, budget)
     }
 }
 
@@ -105,10 +221,14 @@ fn pump_outcome(
 
 fn poll_ingress<P: FrameProvider>(
     entry: &mut InterfaceEntry,
+    udp: &mut UdpEndpoints,
     device: &mut FrameDevice<'_, P>,
     now: smoltcp::time::Instant,
     budget: usize,
 ) -> bool {
+    if !udp.ingress_allowed(entry.id) || !udp.drain_ingress(entry.id, &mut entry.sockets) {
+        return true;
+    }
     let mut processed = 0;
     while processed < budget {
         match entry
@@ -118,6 +238,36 @@ fn poll_ingress<P: FrameProvider>(
             PollIngressSingleResult::None => break,
             PollIngressSingleResult::PacketProcessed
             | PollIngressSingleResult::SocketStateChanged => processed += 1,
+        }
+        if !udp.drain_ingress(entry.id, &mut entry.sockets) {
+            return true;
+        }
+    }
+    processed == budget
+}
+
+#[allow(dead_code)]
+fn poll_local_ingress(
+    id: InterfaceId,
+    interface: &mut smoltcp::iface::Interface,
+    sockets: &mut smoltcp::iface::SocketSet<'static>,
+    udp: &mut UdpEndpoints,
+    device: &mut LocalDevice<'_>,
+    now: smoltcp::time::Instant,
+    budget: usize,
+) -> bool {
+    if !udp.ingress_allowed(id) || !udp.drain_ingress(id, sockets) {
+        return true;
+    }
+    let mut processed = 0;
+    while processed < budget {
+        match interface.poll_ingress_single(now, device, sockets) {
+            PollIngressSingleResult::None => break,
+            PollIngressSingleResult::PacketProcessed
+            | PollIngressSingleResult::SocketStateChanged => processed += 1,
+        }
+        if !udp.drain_ingress(id, sockets) {
+            return true;
         }
     }
     processed == budget
@@ -132,6 +282,24 @@ fn poll_egress<P: FrameProvider>(
     let mut processed = 0;
     while processed < budget {
         match entry.interface.poll_egress(now, device, &mut entry.sockets) {
+            PollResult::None => break,
+            PollResult::SocketStateChanged => processed += 1,
+        }
+    }
+    processed == budget
+}
+
+#[allow(dead_code)]
+fn poll_local_egress(
+    interface: &mut smoltcp::iface::Interface,
+    sockets: &mut smoltcp::iface::SocketSet<'static>,
+    device: &mut LocalDevice<'_>,
+    now: smoltcp::time::Instant,
+    budget: usize,
+) -> bool {
+    let mut processed = 0;
+    while processed < budget {
+        match interface.poll_egress(now, device, sockets) {
             PollResult::None => break,
             PollResult::SocketStateChanged => processed += 1,
         }

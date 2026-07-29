@@ -13,6 +13,7 @@ anemone-net-api = { path = "../anemone-net-api" }
 smoltcp = { path = "../anemos/smoltcp", default-features = false, features = [
     "alloc",
     "medium-ethernet",
+    "medium-ip",
     "proto-ipv4",
     # smoltcp 0.13 makes `medium-ethernet` enable its private socket enum and
     # rejects an empty variant set. Raw is only the compile anchor here: this

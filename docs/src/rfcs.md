@@ -111,8 +111,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
 - [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：R0已接受；目标为initial domain内唯一global protocol
   `Stack`、domain-local logical interface/control plane、production loopback，以及普通用户态IPv4 unconnected UDP
-  纵切。Stage 0的Checkpoint 0A已用真实UDP路径关闭candidate egress-admission seam characterization；Stage 0
-  尚未关闭，0B及后续stage未授权，全部candidate contract仍未cut over。执行证据见
+  纵切。Stage 0的Checkpoints 0A-0B已完成candidate seam characterization与Stack-private positive topology；
+  Stage 0尚未关闭，0C及后续stage未授权，全部candidate contract仍未cut over。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

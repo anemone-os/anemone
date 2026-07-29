@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0 Active / Checkpoint 0A Closed / 0B-0C Not Authorized / Stage 1-5 Outline
+**状态：** R0 / Stage 0 Active / Checkpoints 0A-0B Closed / 0C Not Authorized / Stage 1-5 Outline
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -13,8 +13,8 @@
 **事务日志：** [2026-07-29 net-udp](../../devlog/transactions/2026-07-29-net-udp.md)
 
 > 本文是R0的canonical实施顺序、stage maturity、probe、验证和resolved write set。R0已由public review接受，
-> transaction已经建立；本轮独立授权覆盖的Stage 0 Checkpoint 0A已经关闭。Stage 0本身尚未关闭，当前停止并
-> 等待0B独立授权；Stage 0不修改current contract。
+> transaction已经建立；本轮独立授权覆盖的Stage 0 Checkpoint 0B已经关闭。Stage 0本身尚未关闭，当前停止并
+> 等待0C独立授权；Stage 0不修改current contract。
 
 ## 1. 计划角色与 authority
 
@@ -128,7 +128,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 
 | Stage | 成熟度 | 概括目的 | 前置依赖 | Contract 状态 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Multi-interface UDP topology probe | Active；Checkpoint 0A Closed；0B/0C未授权 | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
+| Stage 0 — Multi-interface UDP topology probe | Active；Checkpoints 0A-0B Closed；0C未授权 | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Outline | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed | 候选`NETDEV-LIFE-001`/`NET-ATTACH-001` Refine与`NET-IFACE-DOMAIN-001` Introduce；解析前均Pending |
 | Stage 2 — Static control plane与production loopback | Outline | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed | 候选`STM-TARGET-001` Refine与`NET-CONTROL-PLANE-001` Introduce；是否本stage cutover由1->2 gate决定 |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
@@ -323,7 +323,7 @@ capacity数值或精确命令；这些只在对应stage变为Ready时冻结。
 
 ### 7.1 阶段状态与 activation preflight
 
-**成熟度：** Active；Checkpoint 0A Closed。0B与0C仍未授权，当前不得继续Stage 0执行。
+**成熟度：** Active；Checkpoints 0A-0B Closed。0C仍未授权，当前不得继续Stage 0执行。
 
 进入Active前必须同时满足：
 
@@ -411,6 +411,17 @@ packet。风险归类为candidate egress-admission seam，不是current per-netd
 本checkpoint不预先要求literal `EndpointId`、`SelectedEgress`、`LocalLink`或`DomainPump`名称。若一个private type
 同时混合Endpoint lifecycle、route policy、provider resource与test control，应在同一checkpoint内缩窄职责，
 不能用`Manager`/`State`总对象掩盖owner边界。
+
+**关闭记录：** 2026-07-29，0B以一个Stack-private Endpoint owner聚合每个external/local interface的private
+smoltcp UDP resource；binding conflict、TX phase、receive ordering gate与retire均由aggregate owner推进。
+operation-local selection在commit前验证interface mapping、source、destination、MTU与Endpoint capacity；只有
+selected engine获得datagram，wrong-interface-first保持owner queue不变。新增bounded IP-medium local port经
+protocol egress、下一bounded round的normal ingress完成delivery，provider blocked与local-link full均不阻塞其它
+ready interface/Endpoint永久推进。retire先撤销aggregate identity，再删除全部engine resource及带owner的pending
+local packet；host facade只暴露protocol-domain value/outcome与test-only observation。0A expected-wrong test已改写为
+positive matrix。source、review与validation证据见
+[transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0b-implementation-review-validation-and-closure)。
+本记录不选择0C的保留/cleanup路线，也不授权进入0C。
 
 ### 7.5 Checkpoint 0C — Decision closure与probe cleanup
 
@@ -734,6 +745,12 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   不是production baseline defect；0A characterization保留到0B正确路径形成时删除或改写。没有Route Correction、
   Target Renegotiation、Contract Impact、tracking issue或register写回；精确source/review/validation证据见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0a-implementation-source-audit-and-closure)。
+- `2026-07-29`：Checkpoint 0B / Positive Execution Fact。Stack-private aggregate Endpoint为每个interface维护
+  private engine projection，但binding、admission、TX phase、receive order gate与retire只有一个owner；显式
+  selection阻止wrong-interface dequeue，bounded IP-medium local port经normal ingress交付。结论保持R0且不修改
+  shared/vendored/kernel/current contract。0C仍须独立决定candidate/facade/test的长期保留与cleanup，并在final
+  source上重跑Stage 0 branch/common gates；精确证据见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0b-implementation-review-validation-and-closure)。
 
 ## 13. Target Renegotiation Gates
 

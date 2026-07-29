@@ -1,215 +1,449 @@
-use std::collections::VecDeque;
+mod support;
 
-use anemone_net_api::InterfaceId;
-use smoltcp::{
-    iface::{Config, Interface, SocketSet},
-    phy::{
-        ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken as SmoltcpRxToken,
-        TxToken as SmoltcpTxToken,
-    },
-    socket::udp,
-    time::Instant,
-    wire::{
-        ArpOperation, ArpPacket, ArpRepr, EthernetAddress, EthernetFrame, EthernetProtocol,
-        EthernetRepr, HardwareAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Packet,
-        UdpPacket,
-    },
+use anemone_net_api::{Instant, InterfaceId};
+use anemone_smoltcp_stack::{
+    HostEndpointCreateError, HostRetireError, HostSelection, HostSendError, PumpBudget, Stack,
 };
+use smoltcp::wire::{EthernetFrame, Ipv4Address, Ipv4Packet, UdpPacket};
 
-const FIRST_MAC: EthernetAddress = EthernetAddress([0x02, 0, 0, 0, 1, 2]);
-const FIRST_GATEWAY_MAC: EthernetAddress = EthernetAddress([0x02, 0, 0, 0, 1, 1]);
-const FIRST_IP: Ipv4Address = Ipv4Address::new(10, 0, 1, 2);
-const FIRST_GATEWAY_IP: Ipv4Address = Ipv4Address::new(10, 0, 1, 1);
-const SECOND_MAC: EthernetAddress = EthernetAddress([0x02, 0, 0, 0, 2, 2]);
-const SECOND_IP: Ipv4Address = Ipv4Address::new(10, 0, 2, 2);
-const REMOTE_IP: Ipv4Address = Ipv4Address::new(192, 0, 2, 1);
+use support::{BoundedProvider, prime_bounded_neighbor};
 
-struct CandidateSelection {
-    interface: InterfaceId,
-    source: Ipv4Address,
+const FIRST_MAC: [u8; 6] = [0x02, 0, 0, 0, 1, 2];
+const FIRST_PEER_MAC: [u8; 6] = [0x02, 0, 0, 0, 1, 1];
+const FIRST_IP: [u8; 4] = [10, 0, 1, 2];
+const FIRST_PEER_IP: [u8; 4] = [10, 0, 1, 1];
+const SECOND_MAC: [u8; 6] = [0x02, 0, 0, 0, 2, 2];
+const SECOND_PEER_MAC: [u8; 6] = [0x02, 0, 0, 0, 2, 1];
+const SECOND_IP: [u8; 4] = [10, 0, 2, 2];
+const SECOND_PEER_IP: [u8; 4] = [10, 0, 2, 1];
+const LOCAL_IP: [u8; 4] = [127, 0, 0, 1];
+const ENDPOINT_PAYLOAD_CAPACITY: usize = 128;
+
+fn selection(interface: InterfaceId, source: [u8; 4]) -> HostSelection {
+    HostSelection { interface, source }
 }
 
-struct ObservedEthernet {
-    rx: VecDeque<Vec<u8>>,
-    tx: Vec<Vec<u8>>,
+fn assert_udp_frame(
+    frame: &[u8],
+    source: [u8; 4],
+    destination: [u8; 4],
+    source_port: u16,
+    destination_port: u16,
+    payload: &[u8],
+) {
+    let ethernet = EthernetFrame::new_checked(frame).unwrap();
+    let ipv4 = Ipv4Packet::new_checked(ethernet.payload()).unwrap();
+    assert_eq!(ipv4.src_addr(), Ipv4Address::from_octets(source));
+    assert_eq!(ipv4.dst_addr(), Ipv4Address::from_octets(destination));
+    let udp = UdpPacket::new_checked(ipv4.payload()).unwrap();
+    assert_eq!(udp.src_port(), source_port);
+    assert_eq!(udp.dst_port(), destination_port);
+    assert_eq!(udp.payload(), payload);
 }
 
-impl ObservedEthernet {
-    fn new() -> Self {
-        Self {
-            rx: VecDeque::new(),
-            tx: Vec::new(),
-        }
-    }
-}
-
-struct ObservedRx(Vec<u8>);
-
-impl SmoltcpRxToken for ObservedRx {
-    fn consume<R, F>(self, f: F) -> R
-    where
-        F: FnOnce(&[u8]) -> R,
-    {
-        f(&self.0)
-    }
-}
-
-struct ObservedTx<'a>(&'a mut Vec<Vec<u8>>);
-
-impl SmoltcpTxToken for ObservedTx<'_> {
-    fn consume<R, F>(self, len: usize, f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        let mut frame = vec![0; len];
-        let result = f(&mut frame);
-        self.0.push(frame);
-        result
-    }
-}
-
-impl Device for ObservedEthernet {
-    type RxToken<'a> = ObservedRx;
-    type TxToken<'a> = ObservedTx<'a>;
-
-    fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        let frame = self.rx.pop_front()?;
-        Some((ObservedRx(frame), ObservedTx(&mut self.tx)))
-    }
-
-    fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
-        Some(ObservedTx(&mut self.tx))
-    }
-
-    fn capabilities(&self) -> DeviceCapabilities {
-        let mut capabilities = DeviceCapabilities::default();
-        capabilities.medium = Medium::Ethernet;
-        capabilities.max_transmission_unit = 1514;
-        capabilities.checksum = ChecksumCapabilities::ignored();
-        capabilities
-    }
-}
-
-fn ethernet_interface(
-    device: &mut ObservedEthernet,
-    mac: EthernetAddress,
-    address: Ipv4Address,
-) -> Interface {
-    let mut interface = Interface::new(
-        Config::new(HardwareAddress::Ethernet(mac)),
-        device,
+#[test]
+fn selected_external_interface_is_the_only_engine_that_can_consume() {
+    let mut stack = Stack::new();
+    let mut first = BoundedProvider::with_mac(FIRST_MAC, 1);
+    let mut second = BoundedProvider::with_mac(SECOND_MAC, 1);
+    let first_id = stack.add_interface(
+        &mut first,
+        anemone_net_api::EthernetAddress::new(FIRST_MAC),
         Instant::ZERO,
     );
-    interface.update_ip_addrs(|addresses| {
-        addresses
-            .push(IpCidr::new(IpAddress::Ipv4(address), 24))
-            .unwrap();
-    });
-    interface
-}
-
-fn arp_reply(
-    source_mac: EthernetAddress,
-    source_ip: Ipv4Address,
-    destination_mac: EthernetAddress,
-    destination_ip: Ipv4Address,
-) -> Vec<u8> {
-    let ethernet = EthernetRepr {
-        src_addr: source_mac,
-        dst_addr: destination_mac,
-        ethertype: EthernetProtocol::Arp,
-    };
-    let arp = ArpRepr::EthernetIpv4 {
-        operation: ArpOperation::Reply,
-        source_hardware_addr: source_mac,
-        source_protocol_addr: source_ip,
-        target_hardware_addr: destination_mac,
-        target_protocol_addr: destination_ip,
-    };
-    let mut frame = vec![0; ethernet.buffer_len() + arp.buffer_len()];
-    ethernet.emit(&mut EthernetFrame::new_unchecked(&mut frame));
-    arp.emit(&mut ArpPacket::new_unchecked(
-        &mut frame[ethernet.buffer_len()..],
-    ));
-    frame
-}
-
-/// Characterizes the naive shared-engine seam; it is not a production Stack
-/// regression. Checkpoint 0B must remove this expected-wrong-behavior test once
-/// selected-interface admission exists.
-#[test]
-fn naive_shared_udp_resource_allows_wrong_interface_egress() {
-    let mut first_device = ObservedEthernet::new();
-    let mut second_device = ObservedEthernet::new();
-    let mut first_interface = ethernet_interface(&mut first_device, FIRST_MAC, FIRST_IP);
-    let mut second_interface = ethernet_interface(&mut second_device, SECOND_MAC, SECOND_IP);
-    first_interface
-        .routes_mut()
-        .add_default_ipv4_route(FIRST_GATEWAY_IP)
-        .unwrap();
-
-    // This ARP reply only prepares an ordinary Ethernet neighbor. The risk is
-    // reproduced below by a real UDP socket enqueue and smoltcp socket egress;
-    // no UDP packet is injected or manually encoded.
-    first_device.rx.push_back(arp_reply(
-        FIRST_GATEWAY_MAC,
-        FIRST_GATEWAY_IP,
-        FIRST_MAC,
-        FIRST_IP,
-    ));
-    let mut empty_sockets = SocketSet::new(Vec::new());
-    first_interface.poll(Instant::ZERO, &mut first_device, &mut empty_sockets);
-    first_device.tx.clear();
-
-    let mut socket = udp::Socket::new(
-        udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY], vec![0; 32]),
-        udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY], vec![0; 32]),
+    let second_id = stack.add_interface(
+        &mut second,
+        anemone_net_api::EthernetAddress::new(SECOND_MAC),
+        Instant::ZERO,
     );
-    socket.bind(40000).unwrap();
-    let selection = CandidateSelection {
-        interface: InterfaceId::from_index(1),
-        source: SECOND_IP,
-    };
-    socket
-        .send_slice(
-            b"0A",
-            udp::UdpMetadata {
-                endpoint: IpEndpoint::new(IpAddress::Ipv4(REMOTE_IP), 40001),
-                local_address: Some(IpAddress::Ipv4(selection.source)),
-                meta: Default::default(),
-            },
+    stack
+        .configure_ipv4_for_host_validation(first_id, FIRST_IP, 24)
+        .unwrap();
+    stack
+        .configure_ipv4_for_host_validation(second_id, SECOND_IP, 24)
+        .unwrap();
+    prime_bounded_neighbor(
+        &mut stack,
+        first_id,
+        &mut first,
+        FIRST_PEER_MAC,
+        FIRST_PEER_IP,
+        FIRST_IP,
+    );
+    prime_bounded_neighbor(
+        &mut stack,
+        second_id,
+        &mut second,
+        SECOND_PEER_MAC,
+        SECOND_PEER_IP,
+        SECOND_IP,
+    );
+    first.reset_observation();
+    second.reset_observation();
+
+    let local_id = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 2, 128, Instant::ZERO);
+    let endpoint = stack
+        .create_udp_endpoint_for_host_validation(40000, 4, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let mut stale_provider = BoundedProvider::with_mac([0x02, 0, 0, 0, 3, 2], 1);
+    let stale_id = stack.add_interface(
+        &mut stale_provider,
+        anemone_net_api::EthernetAddress::new([0x02, 0, 0, 0, 3, 2]),
+        Instant::ZERO,
+    );
+    stack
+        .configure_ipv4_for_host_validation(stale_id, [10, 0, 3, 2], 24)
+        .unwrap();
+    assert_eq!(
+        stack
+            .udp_endpoint_observation_for_host_validation(endpoint)
+            .unwrap()
+            .engine_resources,
+        4
+    );
+    stack.remove_interface(stale_id).unwrap();
+    assert_eq!(
+        stack
+            .udp_endpoint_observation_for_host_validation(endpoint)
+            .unwrap()
+            .engine_resources,
+        3
+    );
+
+    assert_eq!(
+        stack.send_udp_for_host_validation(endpoint, None, SECOND_PEER_IP, 40001, b"missing"),
+        Err(HostSendError::MissingSelection)
+    );
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(stale_id, [10, 0, 3, 2])),
+            SECOND_PEER_IP,
+            40001,
+            b"stale",
+        ),
+        Err(HostSendError::UnknownInterface)
+    );
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(second_id, FIRST_IP)),
+            SECOND_PEER_IP,
+            40001,
+            b"source",
+        ),
+        Err(HostSendError::UnsupportedSource)
+    );
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(second_id, SECOND_IP)),
+            SECOND_PEER_IP,
+            40001,
+            &[0; 87],
+        ),
+        Err(HostSendError::Oversize { maximum: 86 })
+    );
+
+    stack
+        .send_udp_for_host_validation(
+            endpoint,
+            Some(selection(second_id, SECOND_IP)),
+            SECOND_PEER_IP,
+            40001,
+            b"second",
         )
         .unwrap();
-    assert_eq!(socket.send_queue(), 2);
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(second_id, SECOND_IP)),
+            SECOND_PEER_IP,
+            40001,
+            b"full",
+        ),
+        Err(HostSendError::TxFull)
+    );
 
-    let mut sockets = SocketSet::new(Vec::new());
-    let handle = sockets.add(socket);
-    assert_eq!(selection.interface, InterfaceId::from_index(1));
+    // Wrong-interface-first cannot see the selected engine resource.
+    stack
+        .pump(
+            first_id,
+            &mut first,
+            Instant::from_micros(1),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert_eq!(first.submissions(), 0);
+    assert_eq!(second.submissions(), 0);
+    assert!(
+        stack
+            .udp_endpoint_observation_for_host_validation(endpoint)
+            .unwrap()
+            .pending_tx
+    );
 
-    // The candidate makes one engine-owned UDP resource visible to both
-    // interfaces. Polling the non-selected interface first consumes it and
-    // emits through that provider because smoltcp receives the selected source
-    // address but no selected-interface admission capability.
-    first_interface.poll(Instant::from_millis(1), &mut first_device, &mut sockets);
+    stack
+        .pump(
+            second_id,
+            &mut second,
+            Instant::from_micros(2),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert_eq!(first.submissions(), 0);
+    assert_eq!(second.submissions(), 1);
+    assert_udp_frame(
+        &second.submitted_frames()[0],
+        SECOND_IP,
+        SECOND_PEER_IP,
+        40000,
+        40001,
+        b"second",
+    );
+    assert!(
+        !stack
+            .udp_endpoint_observation_for_host_validation(endpoint)
+            .unwrap()
+            .pending_tx
+    );
+    second.complete_all();
 
-    assert_eq!(sockets.get::<udp::Socket>(handle).send_queue(), 0);
-    assert_eq!(first_device.tx.len(), 1);
-    assert!(second_device.tx.is_empty());
+    // The same logical Endpoint selects another prefix without changing ID or
+    // creating another binding owner.
+    stack
+        .send_udp_for_host_validation(
+            endpoint,
+            Some(selection(first_id, FIRST_IP)),
+            FIRST_PEER_IP,
+            40002,
+            b"first",
+        )
+        .unwrap();
+    stack
+        .pump(
+            first_id,
+            &mut first,
+            Instant::from_micros(3),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert_eq!(first.submissions(), 1);
+    assert_udp_frame(
+        &first.submitted_frames()[0],
+        FIRST_IP,
+        FIRST_PEER_IP,
+        40000,
+        40002,
+        b"first",
+    );
+    assert_eq!(local_id, InterfaceId::from_index(2));
+}
 
-    let ethernet = EthernetFrame::new_checked(&first_device.tx[0]).unwrap();
-    assert_eq!(ethernet.src_addr(), FIRST_MAC);
-    assert_eq!(ethernet.dst_addr(), FIRST_GATEWAY_MAC);
-    let ipv4 = Ipv4Packet::new_checked(ethernet.payload()).unwrap();
-    assert_eq!(ipv4.src_addr(), SECOND_IP);
-    assert_eq!(ipv4.dst_addr(), REMOTE_IP);
-    let udp = UdpPacket::new_checked(ipv4.payload()).unwrap();
-    assert_eq!(udp.src_port(), 40000);
-    assert_eq!(udp.dst_port(), 40001);
-    assert_eq!(udp.payload(), b"0A");
+#[test]
+fn local_link_is_bounded_normal_ingress_and_retire_withdraws_all_resources() {
+    let mut stack = Stack::new();
+    let mut blocked_external = BoundedProvider::with_mac(FIRST_MAC, 1);
+    let external_id = stack.add_interface(
+        &mut blocked_external,
+        anemone_net_api::EthernetAddress::new(FIRST_MAC),
+        Instant::ZERO,
+    );
+    stack
+        .configure_ipv4_for_host_validation(external_id, FIRST_IP, 24)
+        .unwrap();
+    prime_bounded_neighbor(
+        &mut stack,
+        external_id,
+        &mut blocked_external,
+        FIRST_PEER_MAC,
+        FIRST_PEER_IP,
+        FIRST_IP,
+    );
+    blocked_external.reset_observation();
+    blocked_external.set_link_state(anemone_net_api::LinkState::Down);
 
-    // Pumping the selected interface afterwards cannot recover the datagram:
-    // queue ownership was already consumed by the wrong-interface poll.
-    second_interface.poll(Instant::from_millis(2), &mut second_device, &mut sockets);
-    assert_eq!(sockets.get::<udp::Socket>(handle).send_queue(), 0);
-    assert!(second_device.tx.is_empty());
+    let local_id = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 1, 128, Instant::ZERO);
+    let client = stack
+        .create_udp_endpoint_for_host_validation(41000, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let server = stack
+        .create_udp_endpoint_for_host_validation(41001, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let external = stack
+        .create_udp_endpoint_for_host_validation(41002, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    assert_eq!(
+        stack.create_udp_endpoint_for_host_validation(41001, 2, ENDPOINT_PAYLOAD_CAPACITY),
+        Err(HostEndpointCreateError::PortInUse)
+    );
+
+    // A blocked external provider retains its own Endpoint datagram but does
+    // not prevent another Endpoint from progressing through the local port.
+    stack
+        .send_udp_for_host_validation(
+            external,
+            Some(selection(external_id, FIRST_IP)),
+            FIRST_PEER_IP,
+            41003,
+            b"blocked",
+        )
+        .unwrap();
+    let external_outcome = stack
+        .pump(
+            external_id,
+            &mut blocked_external,
+            Instant::from_micros(1),
+            PumpBudget::new(1, 1),
+        )
+        .unwrap();
+    assert!(external_outcome.work_remaining);
+    assert!(
+        stack
+            .udp_endpoint_observation_for_host_validation(external)
+            .unwrap()
+            .pending_tx
+    );
+
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local_id, LOCAL_IP)),
+            LOCAL_IP,
+            41001,
+            b"one",
+        )
+        .unwrap();
+    stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(2), PumpBudget::new(1, 1))
+        .unwrap();
+    assert_eq!(
+        stack
+            .local_link_observation_for_host_validation()
+            .unwrap()
+            .occupied_packets,
+        1
+    );
+    assert_eq!(
+        stack
+            .udp_endpoint_observation_for_host_validation(server)
+            .unwrap()
+            .received_datagrams,
+        0
+    );
+    stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(3), PumpBudget::new(1, 1))
+        .unwrap();
+    let received = stack
+        .receive_udp_for_host_validation(server)
+        .expect("normal local IP/UDP ingress must reach the aggregate Endpoint owner");
+    assert_eq!(received.payload, b"one");
+    assert_eq!(received.source_address, LOCAL_IP);
+    assert_eq!(received.source_port, 41000);
+
+    // Fill the one-packet link, then prove a later datagram remains in the
+    // engine until ingress frees credit and a finite later round retries it.
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local_id, LOCAL_IP)),
+            LOCAL_IP,
+            41001,
+            b"two",
+        )
+        .unwrap();
+    stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(4), PumpBudget::new(1, 1))
+        .unwrap();
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local_id, LOCAL_IP)),
+            LOCAL_IP,
+            41001,
+            b"three",
+        )
+        .unwrap();
+    let recovery = stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(5), PumpBudget::new(1, 1))
+        .unwrap();
+    assert!(recovery.work_remaining);
+    assert!(
+        stack
+            .udp_endpoint_observation_for_host_validation(client)
+            .unwrap()
+            .pending_tx
+    );
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(server)
+            .unwrap()
+            .payload,
+        b"two"
+    );
+    stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(6), PumpBudget::new(1, 1))
+        .unwrap();
+    stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(7), PumpBudget::new(1, 1))
+        .unwrap();
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(server)
+            .unwrap()
+            .payload,
+        b"three"
+    );
+
+    // A packet accepted by local egress remains tagged with its aggregate
+    // owner until ingress. Retirement removes that packet, every engine
+    // resource, and the provisional identity before any stale lookup.
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local_id, LOCAL_IP)),
+            LOCAL_IP,
+            41001,
+            b"retire",
+        )
+        .unwrap();
+    stack
+        .pump_local_for_host_validation(local_id, Instant::from_micros(8), PumpBudget::new(1, 1))
+        .unwrap();
+    assert_eq!(
+        stack
+            .local_link_observation_for_host_validation()
+            .unwrap()
+            .occupied_packets,
+        1
+    );
+    stack
+        .retire_udp_endpoint_for_host_validation(client)
+        .unwrap();
+    assert!(
+        stack
+            .udp_endpoint_observation_for_host_validation(client)
+            .is_none()
+    );
+    assert_eq!(
+        stack
+            .local_link_observation_for_host_validation()
+            .unwrap()
+            .occupied_packets,
+        0
+    );
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            client,
+            Some(selection(local_id, LOCAL_IP)),
+            LOCAL_IP,
+            41001,
+            b"stale",
+        ),
+        Err(HostSendError::UnknownEndpoint)
+    );
+    assert_eq!(
+        stack.retire_udp_endpoint_for_host_validation(client),
+        Err(HostRetireError::UnknownEndpoint)
+    );
 }

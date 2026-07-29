@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0 Active / Checkpoint 0A Closed / 0B Not Authorized
+**状态：** Accepted for Implementation / Stage 0 Active / Checkpoints 0A-0B Closed / 0C Not Authorized
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -16,11 +16,11 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** None（当前没有已确认的文档层 blocker；实现技术路线按滚动stage后延）
-**下一步：** 等待独立Checkpoint 0B启动授权；不得由0A关闭自动进入0B
+**下一步：** 等待独立Checkpoint 0C启动授权；不得由0B关闭自动进入0C
 
 本目录是`net-udp` R0 accepted target的canonical source。R0不覆盖current contract；候选contract仍须在后续
 implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)已关闭Stage 0
-Checkpoint 0A；Stage 0本身尚未关闭，0B及后续checkpoint/stage仍未授权。
+Checkpoints 0A-0B；Stage 0本身尚未关闭，0C及后续stage仍未授权。
 
 ## 摘要
 
@@ -99,7 +99,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0的Checkpoint 0A已关闭；Stage 1-5 Outline；0B及后续未授权
+- [迁移实施计划](./implementation.md)：Stage 0的Checkpoints 0A-0B已关闭；Stage 1-5 Outline；0C及后续未授权
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -395,7 +395,7 @@ R0 public review确认target / contract proposal已经自洽收口：
 Implementation readiness已经完成：
 
 - [迁移实施计划](./implementation.md)只把Stage 0 multi-interface UDP topology probe完整解析为Ready；
-  Stage 1-5保持Outline；当前独立授权覆盖的Stage 0 Checkpoint 0A已经关闭，0B尚未授权。
+  Stage 1-5保持Outline；当前独立授权覆盖的Stage 0 Checkpoint 0B已经关闭，0C尚未授权。
 
 R0把 concrete types、内部 API、module placement、lock/worker/queue、capacity、port algorithm、loopback
 medium 和 stage-later probe 后延，只要对应 Outline 明确保护本 target、contract IDs、owner、ABI 与 acceptance
@@ -452,6 +452,7 @@ fallback或provenance系统不能证明实际网络正确，反而扩大owner和
 
 ## 收口
 
-R0已经接受但尚未实现或cut over。Checkpoint 0A已用真实smoltcp UDP路径刻画candidate engine
-egress-admission seam并写入transaction；RV64 compile integration通过，rootfs、QEMU、LTP、双架构runtime与
-用户可见UDP能力均`Not Run`。Stage 0尚未关闭，当前停在0B独立授权门前。
+R0已经接受但尚未实现或cut over。Checkpoints 0A-0B已先刻画candidate engine egress-admission seam，再用
+Stack-private aggregate Endpoint、显式selection admission与bounded IP-medium local link形成positive candidate；
+RV64 compile integration通过，rootfs、QEMU、LTP、双架构runtime与用户可见UDP能力均`Not Run`。Stage 0尚未
+关闭，当前停在0C独立授权门前。
