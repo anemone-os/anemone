@@ -69,6 +69,11 @@ impl<'a> ReadRequest<'a> {
     }
 
     fn execute_single(self, buf: VirtAddr, count: usize) -> Result<u64, SysError> {
+        // Linux rejects positioned stream reads before entering vfs_read(),
+        // then checks the file mode before access_ok() on the original count.
+        self.validate_file_access()?;
+        validate_user_write_buffer(self.uspace, buf, count)?;
+
         let count = clamp_rw_count(count);
         if count == 0 {
             return Ok(0);
@@ -90,6 +95,13 @@ impl<'a> ReadRequest<'a> {
     // visible-bytes-first partial rule without making segment helpers decide
     // fanotify notification policy.
     fn execute_vectored(self, iovecs: &[CheckedIoVec]) -> Result<u64, SysError> {
+        // Linux import_iovec() validates every destination range before the
+        // subsequent file-mode admission in do_iter_read().
+        for iovec in iovecs {
+            validate_user_write_buffer(self.uspace, iovec.base, iovec.len)?;
+        }
+        self.validate_file_access()?;
+
         if iovecs.is_empty() {
             return Ok(0);
         }
@@ -141,6 +153,18 @@ impl<'a> ReadRequest<'a> {
 
         finalize_read(self.file, total, ReadNotifyPolicy::Access)
     }
+
+    fn validate_file_access(&self) -> Result<(), SysError> {
+        if matches!(self.position, RequestPosition::Positioned(_))
+            && self.file.vfs_file().is_stream()
+        {
+            return Err(SysError::IllegalSeek);
+        }
+        if !self.file.can_read() {
+            return Err(SysError::BadFileDescriptor);
+        }
+        Ok(())
+    }
 }
 
 fn read_user_sink(
@@ -173,8 +197,6 @@ fn read_fallback_segment(
     count: usize,
     position: RequestPosition,
 ) -> Result<usize, SysError> {
-    validate_user_write_buffer(uspace, buf, count)?;
-
     let kbuf = do_read(file, count, position.offset())?;
     copy_user_write_buffer(uspace, buf, &kbuf)?;
 
@@ -217,7 +239,7 @@ fn copy_user_write_buffer(
 
     let mut guard = uspace.lock();
     let mut slice = UserWriteSlice::try_new(buf, src.len(), &mut guard)?;
-    slice.copy_from_slice(src);
+    slice.copy_from_slice(src)?;
 
     Ok(())
 }

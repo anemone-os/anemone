@@ -89,8 +89,7 @@ impl DirSink for LinuxDirent64Sink {
 
         let header = LinuxDirent64Header {
             d_ino: entry.ino.get(),
-            // actually this field can be any value. user space programs are not expected to
-            // interpret it.
+            // Linux userspace treats d_off as an opaque directory position.
             d_off: 39,
             d_reclen: u16::try_from(reclen).map_err(|_| SysError::InvalidArgument)?,
             d_type: dirent64_dtype(entry.ty),
@@ -133,20 +132,30 @@ fn sys_getdents64(
     };
 
     let buf_len = count as usize;
+    {
+        // Directory backends may call DirSink with hardware interrupts
+        // disabled. Resolve the complete user destination before entering
+        // that lock domain; no user-space lock may be acquired by push().
+        let mut guard = usp.lock();
+        let mut dst = UserWriteSlice::<u8>::try_new(dirp, buf_len, &mut guard)?;
+        dst.fault_in()?;
+    }
+
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(buf_len)
+        .map_err(|_| SysError::OutOfMemory)?;
+    buffer.resize(buf_len, 0);
+
+    let writer = unsafe { ByteWriter::new(NonNull::from(buffer.as_mut_slice())) };
+    let mut sink = LinuxDirent64Sink::new(writer, buf_len);
+    let written = match fd.read_dir(&mut sink) {
+        Ok(ReadDirResult::Progressed) | Ok(ReadDirResult::Eof) => sink.written(),
+        Err(err) => return Err(err),
+    };
 
     let mut guard = usp.lock();
-    let mut slice = UserWriteSlice::<u8>::try_new(dirp, buf_len, &mut guard)?;
-    let written = unsafe {
-        slice.with_readable_ptr(|ptr| {
-            let buffer = NonNull::new(ptr).expect("user slice pointer should not be null");
-            let writer = unsafe { ByteWriter::new(buffer) };
-            let mut sink = LinuxDirent64Sink::new(writer, buf_len);
-
-            match fd.read_dir(&mut sink) {
-                Ok(ReadDirResult::Progressed) | Ok(ReadDirResult::Eof) => Ok(sink.written()),
-                Err(err) => Err(err),
-            }
-        })?
-    }?;
+    let mut dst = UserWriteSlice::<u8>::try_new(dirp, written, &mut guard)?;
+    dst.copy_from_slice(&buffer[..written])?;
     Ok(written as u64)
 }

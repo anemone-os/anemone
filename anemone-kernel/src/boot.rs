@@ -238,7 +238,12 @@ fn prepare_initial_task(init_stdio: InitStdio) {
 pub(crate) fn exec_initial_program(init_stdio: InitStdio) {
     let program = resolve_initial_program();
     prepare_initial_task(init_stdio);
-    kinfoln!("boot protocol: ordinary exec handoff path={}", program.path);
+    kinfoln!(
+        "boot protocol: ordinary exec handoff path={}, argv={:?}, envp={:?}",
+        program.path,
+        program.argv,
+        program.envp
+    );
     kernel_execve(&program.path, &program.argv, &program.envp).unwrap_or_else(|error| {
         panic!(
             "boot protocol: failed operation=ordinary-exec path={}: {:?}",
