@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-1 Closed / Stage 2 Ready / Not Active / Stage 3-5 Outline
+**状态：** R0 / Stage 0-2 Closed / Stage 3-5 Outline
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -16,7 +16,7 @@
 > transaction已经建立；Checkpoint 0B关闭后的工程审查确认两个Keter和一个Euclid，0B Feedback Correction已
 > 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；独立的`0 -> 1`resolution与后续
 > Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效；独立的`1 -> 2`
-> resolution也已完成，Stage 2现为Ready但未获得实现授权，Stage 3-5仍是Outline。
+> resolution、Checkpoint 2A split与Checkpoint 2B control/local cutover也已完成，Stage 2 Closed；Stage 3-5仍是Outline。
 
 ## 1. 计划角色与 authority
 
@@ -132,7 +132,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | --- | --- | --- | --- | --- |
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
-| Stage 2 — Static control plane与production loopback | Ready / Not Active | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`计划Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001`；Stage 2关闭前均保持当前Effective/Pending边界 |
+| Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
@@ -440,12 +440,12 @@ IP traffic、virtio-pci、hardware、network LTP和final harness均Not Run。
 claim boundary见[transaction](../../devlog/transactions/2026-07-29-net-udp.md)。Stage 1在此Closed，未运行或解析
 `1 -> 2`gate。
 
-### 6.2 Stage 2 Ready — Static control plane与production loopback
+### 6.2 Stage 2 Closed — Static control plane与production loopback
 
-**阶段成熟度与授权：** Checkpoint 2A Closed；Checkpoint 2B Ready / Not Active。2026-07-29的`1 -> 2`resolution
+**阶段成熟度与授权：** Checkpoint 2A与Checkpoint 2B均Closed。2026-07-29的`1 -> 2`resolution
 冻结了本节两个checkpoint、module/file切分、配置和runtime路线、contract cutover、验证、停止/退出条件与Resolved
 Write Set Manifest。2A已经按split-only route独立关闭；该closure不授权2B source、SystemTarget/KConfig/
-current-contract修改或进入Stage 3。
+current-contract修改或进入Stage 3；2B随后由独立授权完成，本closure不授权`2 -> 3`resolution或Stage 3。
 
 **前置条件与live baseline：**
 
@@ -631,9 +631,10 @@ ingress/egress因此继续Not Run；它仍是R0 Evidence Matrix与Stage 5 final 
 `NET-UDP-TRANSACTION-001`/external-path closure由final exact code证明。该proof-stage分工不降低R0 target、
 `NET-CONTROL-PLANE-001`规则或最终验收边界。
 
-cutover前current SystemTarget contract仍不包含network schema，`NET-CONTROL-PLANE-001`仍为None。2B任一Keter/
-Apollyon、production local-traffic failure、RV64 runtime未运行/失败或config/code/contract不能原子切换时，撤销或
-保留partial code作未发布证据，但不得更新current contract、把logical `lo`称为functional或进入Stage 3。
+cutover前current SystemTarget contract不包含network schema，`NET-CONTROL-PLANE-001`为None；2B closure达到本节
+proof floor后才由同一checkpoint切换为current。若任一Keter/Apollyon、production local-traffic failure、RV64
+runtime未运行/失败或config/code/contract不能原子切换，则撤销或保留partial code作未发布证据，但不得更新current
+contract、把logical `lo`称为functional或进入Stage 3。
 
 #### 6.2.7 Resolved Write Set Manifest
 
@@ -662,6 +663,7 @@ contract或2B manifest。`local_link.rs`、`udp.rs`、kernel `net/mod.rs`、Carg
 
 **Checkpoint 2B tracked source/config：**
 
+- `anemone-kernel/.gitignore`，只允许增加`src/network_defs.rs`这一条generated-output ignore rule；
 - `scripts/xtask/src/config/{system_target.rs,kconfig.rs}`；
 - `scripts/xtask/src/tasks/{clean.rs,build/mod.rs,build/generated_defs.rs}`；
 - `conf/.defconfig`、`conf/system-targets/{schema.jsonc,example.toml,qemu-virt-rv64.toml,qemu-virt-la64.toml}`；
@@ -773,6 +775,20 @@ config、one-time control publication、Stack projection、production local work
 source audit、final review与`NET-UDP-CONTROL-CUTOVER`全部在final exact code满足；conditional bridge带Stage 3删除
 条件，current contract与status同步。Stage 2随后独立Closed，但Stage 3仍是Outline；`2 -> 3`resolution不得由2B
 closure自动执行。
+
+**Closure：** 2026-07-29，2B按上述atomic route完成optional SystemTarget static IPv4、generated typed input、
+唯一control-plane selection、Stack projection、bounded production local worker与conditional production-path KUnit。
+首次RV64运行暴露local pump在protocol egress后才把packet transfer为normal ingress、但production 32/32预算因本轮
+egress未耗尽而返回Idle，sleeping worker可能遗留已发布ingress。获批Route Correction在`LocalLink::transfer()`
+实际移动packet时强制后续有限round，并以production budget regression证明第二round转为Idle而非busy-poll；重新
+执行的RV64三类local KUnit全部通过。
+
+focused host/no-default/kunit、60项xtask、双架构release build、RV64 fresh-disk 270项KUnit、指定LTP 4/4、严格
+shutdown、source/write-set/final review与docs gate达到本节floor。`NET-UDP-CONTROL-CUTOVER`原子Refine
+`STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001`；Socket/Endpoint/UDP transaction/wait candidates继续
+Pending。LA64 runtime、SMP > 1、remote external UDP、UDP syscall/UAPI、VFS/iomux、virtio-pci、hardware、full
+network LTP与final harness均Not Run。Stage 2 Closed，并在进入`2 -> 3`resolution前停止；精确命令、review与
+claim boundary见[transaction](../../devlog/transactions/2026-07-29-net-udp.md)。
 
 ### 6.3 Stage 3 Outline — Endpoint/socket nonblocking vertical slice
 
@@ -1484,6 +1500,11 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   两文件均无2A diff。worker按停止合同上报后，开发者明确批准把`scripts/xtask/src/config/resolve.rs`加入2A
   manifest，仅修正该test fixture/expected snapshot。Contract Impact为None，不改变owner、public API、ABI、
   visible semantics或acceptance；扩展后必须重跑全部2A validation与final review。
+- `2026-07-29`：2B generated-output audit发现authoritative manifest要求ignored
+  `anemone-kernel/src/network_defs.rs`，但live `anemone-kernel/.gitignore`没有对应规则。worker按停止合同上报后，
+  开发者明确批准把`anemone-kernel/.gitignore`加入2B manifest，只增加`src/network_defs.rs`一行。Contract Impact
+  为None，不改变owner、public API、ABI、visible semantics或acceptance；扩展后必须用`git check-ignore -v`证明
+  四份generated kernel input均命中明确规则，并继续执行全部2B validation与final review。
 
 Stage 1按冻结manifest完成；`1 -> 2`resolution为future Outline首次解析并冻结Stage 2 manifest。除上述获批2A
 test-only修正外，2A/2B Active后任何manifest外tracked write仍须先上报。

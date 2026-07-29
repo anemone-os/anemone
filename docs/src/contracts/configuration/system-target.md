@@ -5,9 +5,9 @@
 **Owner：** canonical build configuration model；每份配置事实与 derived snapshot 的唯一 owner 见下表
 **参与领域：** architecture / Platform / SystemTarget / KernelConfig / BuildPreset / app-rootfs task /
 `scripts/xtask` resolver与system action
-**覆盖范围：** 配置事实分层、SystemTarget boot/deploy selection、不可手写的 resolved snapshot
+**覆盖范围：** 配置事实分层、SystemTarget boot/deploy与first-version static IPv4 selection、不可手写的 resolved snapshot
 **不覆盖：** Platform DT/QEMU delivery、kernel output、具体 action workflow、artifact freshness/provenance、
-runtime topology/reachability验证，或尚未生效的 interface/address/route deployment schema
+runtime topology/reachability验证、runtime network configuration或多个external interface
 **实现位置：** `scripts/xtask/src/config/`、`conf/{platforms,system-targets,kernel-configs,build-presets}/`
 **依赖：** [`BOOT-PROTOCOL-001`](../task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)
 **Pending Successor：** None
@@ -23,7 +23,7 @@ runtime topology/reachability验证，或尚未生效的 interface/address/route
 | --- | --- | --- | --- |
 | ISA / ABI / target triple / toolchain contract | architecture / compiler target | typed target reference | 编译目标选择 |
 | guest machine topology、boot ABI、DT/QEMU与kernel-output contract | Platform | `PlatformRef`与resolved projection | machine与boot environment |
-| root mount、typed initial-program source与boot/deploy requirements | SystemTarget | `SystemTargetRef`与resolved projection | 产品级boot/deploy selection |
+| root mount、typed initial-program source、optional static IPv4与boot/deploy requirements | SystemTarget | `SystemTargetRef`与resolved projection | 产品级boot/deploy selection |
 | kernel feature / policy / capacity | KernelConfig | `KernelConfigRef`与resolved projection | kernel capability与参数 |
 | app/rootfs recipe与artifact source | 对应app/rootfs task或manifest | canonical reference | artifact materialization |
 | target + KernelConfig + kernel-only Cargo profile具名组合 | BuildPreset | `BuildPresetRef` | selection，不覆写被引用对象 |
@@ -61,28 +61,30 @@ KernelConfig与BuildPreset schema validation及system build transaction共同证
 
 ## STM-TARGET-001 — SystemTarget 是 boot/deploy contract
 
-**规则：** SystemTarget引用一个Platform，并拥有root mount、typed Boot Protocol entry source与产品级
-boot/deploy requirements。它可以要求KernelConfig提供capability，但不选择或复制具体KernelConfig参数；
+**规则：** SystemTarget引用一个Platform，并拥有root mount、typed Boot Protocol entry source、optional
+first-version static IPv4 deployment与产品级boot/deploy requirements。它可以要求KernelConfig提供capability，但不选择或复制具体KernelConfig参数；
 可以引用app/root source identity，但不拥有其build recipe；不声明kernel image format、QEMU bind template
 或本次host path。
 
-当前effective schema只包含Platform reference、root selection与initial-program selection，不包含interface、
-IP address/prefix、gateway或route。后续RFC增加这些deployment value时必须对本ID显式声明Refine，并在批准的
-schema/materialization cutover前保持本段baseline有效。
+当前effective network schema只允许一个optional `[network.ipv4]`，包含一个external logical interface name、
+unicast non-loopback address、checked prefix与optional unicast non-loopback default gateway。section缺失表示
+loopback-only，不产生implicit external fallback。SystemTarget不证明Platform device topology、interface存在性、
+gateway reachability或backend匹配；这些runtime事实不能回写或替换canonical deployment input。
 
 **违反表现：** SystemTarget保存machine/DTS topology、整份KernelConfig、worktree-local image或QEMU bind；
 Platform、rootfs、Preset或kernel runtime另存一份应由SystemTarget拥有的boot/deploy selection；未cut over的
 RFC target被提前写入tracked schema或称为current behavior。
 
-**验证 / Enforcement：** SystemTarget serde/schema拒绝未知或跨层字段；tracked target覆盖Platform、root与
-两类initial-program source；resolver与build tests证明target reference进入同一个resolved selection，kernel
-只消费有限generated Boot Protocol input而不解析SystemTarget TOML。
+**验证 / Enforcement：** SystemTarget serde/schema拒绝未知或跨层字段及非法interface/address/prefix/gateway；
+tracked target覆盖Platform、root、两类initial-program source和optional static IPv4。preset与完整tuple通过同一
+resolver取得同一target snapshot；build从该snapshot生成private `network_defs.rs`，kernel只消费有限typed input而
+不解析SystemTarget TOML。generated projection被clean/ignore规则覆盖，不成为canonical truth。
 
 **最初来源：** [System Target Model RFC R6](../../rfcs/system-target-model/invariants.md#stm-target-001---system-target-是-bootdeploy-contract)。
 
-**当前来源：** [System Target Model R0-R2 transaction](../../devlog/transactions/2026-07-22-system-target-model.md)与
-[R6 named bind / initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
-本页于2026-07-29从已生效语义做docs-only baseline提取。
+**当前来源：** [System Target Model R0-R2 transaction](../../devlog/transactions/2026-07-22-system-target-model.md)、
+[R6 named bind / initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)与
+[Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的`NET-UDP-CONTROL-CUTOVER`。
 
 ## STM-RESOLVE-001 — Resolved build 是不可手写的派生 snapshot
 

@@ -102,6 +102,8 @@ pub struct Parameters {
     pub net_pump_ingress_budget_frames: Option<usize>,
     pub net_pump_egress_budget_steps: Option<usize>,
     pub net_worker_repoll_rounds: Option<usize>,
+    pub net_local_link_packet_capacity: Option<usize>,
+    pub net_local_link_mtu_bytes: Option<usize>,
 }
 
 impl Parameters {
@@ -180,6 +182,8 @@ impl Parameters {
         materialize!(net_pump_ingress_budget_frames);
         materialize!(net_pump_egress_budget_steps);
         materialize!(net_worker_repoll_rounds);
+        materialize!(net_local_link_packet_capacity);
+        materialize!(net_local_link_mtu_bytes);
         Ok(())
     }
 
@@ -347,6 +351,10 @@ pub const NET_PUMP_INGRESS_BUDGET_FRAMES: usize = {};
 pub const NET_PUMP_EGRESS_BUDGET_STEPS: usize = {};
 /// Maximum immediate repoll rounds before a network worker yields.
 pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
+/// Shared packet-slot capacity of the production local software link.
+pub const NET_LOCAL_LINK_PACKET_CAPACITY: usize = {};
+/// Maximum IP-medium packet size of the production local software link.
+pub const NET_LOCAL_LINK_MTU_BYTES: usize = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -404,6 +412,8 @@ pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
             resolved!(net_pump_ingress_budget_frames),
             resolved!(net_pump_egress_budget_steps),
             resolved!(net_worker_repoll_rounds),
+            resolved!(net_local_link_packet_capacity),
+            resolved!(net_local_link_mtu_bytes),
         )
     }
 }

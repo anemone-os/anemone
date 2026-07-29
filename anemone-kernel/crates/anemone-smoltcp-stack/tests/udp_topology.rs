@@ -1,6 +1,8 @@
 mod support;
 
-use anemone_net_api::{Instant, InterfaceId};
+use anemone_net_api::{
+    Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
+};
 use anemone_smoltcp_stack::{
     HostEndpointCreateError, HostRetireError, HostSelection, HostSendError, PumpBudget, Stack,
 };
@@ -49,6 +51,73 @@ fn pump_local(stack: &mut Stack, interface: InterfaceId, tick: i64) {
             PumpBudget::new(1, 1),
         )
         .unwrap();
+}
+
+#[test]
+fn production_ipv4_projection_covers_127_8_self_external_and_default_route() {
+    let mut stack = Stack::new();
+    let mut external = BoundedProvider::with_mac(FIRST_MAC, 1);
+    let external_id = stack.add_interface(
+        &mut external,
+        anemone_net_api::EthernetAddress::new(FIRST_MAC),
+        Instant::ZERO,
+    );
+    stack
+        .configure_external_ipv4(
+            external_id,
+            ApiIpv4Cidr::new(ApiIpv4Address::new(FIRST_IP), 24).unwrap(),
+            Some(ApiIpv4Address::new(FIRST_PEER_IP)),
+        )
+        .unwrap();
+    let local = stack
+        .add_local_ipv4(
+            ApiIpv4Cidr::new(ApiIpv4Address::new(LOCAL_IP), 8).unwrap(),
+            2,
+            128,
+            Instant::ZERO,
+        )
+        .unwrap();
+    stack
+        .add_local_delivery_ipv4(ApiIpv4Address::new(FIRST_IP))
+        .unwrap();
+
+    let client = stack
+        .create_udp_endpoint_for_host_validation(40500, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let server = stack
+        .create_udp_endpoint_for_host_validation(40501, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    for (tick, source, destination, payload) in [
+        (1, LOCAL_IP, [127, 9, 8, 7], b"127/8".as_slice()),
+        (3, FIRST_IP, FIRST_IP, b"self-external".as_slice()),
+    ] {
+        stack
+            .send_udp_for_host_validation(
+                client,
+                Some(selection(local, source)),
+                destination,
+                40501,
+                payload,
+            )
+            .unwrap();
+        let transferred = stack
+            .pump_local(local, Instant::from_micros(tick), PumpBudget::new(32, 32))
+            .unwrap();
+        assert!(transferred.work_remaining);
+        assert_eq!(transferred.recheck, anemone_net_api::Recheck::Immediate);
+        let ingressed = stack
+            .pump_local(
+                local,
+                Instant::from_micros(tick + 1),
+                PumpBudget::new(32, 32),
+            )
+            .unwrap();
+        assert!(!ingressed.work_remaining);
+        assert_eq!(ingressed.recheck, anemone_net_api::Recheck::Idle);
+        let received = stack.receive_udp_for_host_validation(server).unwrap();
+        assert_eq!(received.payload, payload);
+        assert_eq!(received.source_address, source);
+    }
 }
 
 #[test]

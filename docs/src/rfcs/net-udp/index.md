@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-1与Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Stage 3-5 Outline
+**状态：** Accepted for Implementation / Stage 0-2 Closed / Stage 3-5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -12,17 +12,18 @@
 [IOMUX](../../contracts/iomux/poll-wait.md)中的`IOMUX-POLL-001..003`；
 [Epoll](../../contracts/epoll/protocol.md)中的`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`；
 [System Target](../../contracts/configuration/system-target.md)中的`STM-OWNER-001`、`STM-TARGET-001`、
-`STM-RESOLVE-001`；Stage 1已新增`NET-IFACE-DOMAIN-001`，后续候选新增`NET-CONTROL-PLANE-001`、
+`STM-RESOLVE-001`；Stage 1已新增`NET-IFACE-DOMAIN-001`，Stage 2已新增`NET-CONTROL-PLANE-001`，后续候选新增
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** None；后续Outline的待解析实现决定不作为当前设计问题
-**下一步：** 仅可在独立授权下激活Stage 2 Checkpoint 2B；不得由2A closure自动执行2B/cutover或解析Stage 3
+**下一步：** Stage 2在本checkpoint停止；仅可在独立授权下运行`2 -> 3` Implementation Resolution Gate，不得由2B closure自动解析或激活Stage 3
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
 `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；其它R0 candidate仍须在后续明确
-implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的Stage 0与Stage 1
-均已独立关闭；Checkpoint 2A又完成behavior-preserving same-owner split并独立关闭。Checkpoint 2B保持Ready /
-Not Active，Stage 3-5保持Outline。2A没有修改current contract、R0 target或任何Stage 2 candidate contract。
+implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的Stage 0-2
+均已独立关闭；Checkpoint 2A完成behavior-preserving same-owner split，Checkpoint 2B随后原子切换static IPv4
+control plane与production local path。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce
+`NET-CONTROL-PLANE-001`；Stage 3-5保持Outline且未解析或激活。
 
 ## 摘要
 
@@ -101,8 +102,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-1与Checkpoint 2A Closed；Checkpoint 2B Ready / Not Active；
-  Stage 3-5 Outline
+- [迁移实施计划](./implementation.md)：Stage 0-2 Closed；Stage 3-5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 

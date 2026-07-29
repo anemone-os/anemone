@@ -2,15 +2,23 @@
 
 use alloc::vec::Vec;
 
-use anemone_net_api::{EthernetAddress, FrameProvider, Instant, InterfaceId};
+use anemone_net_api::{
+    EthernetAddress, FrameProvider, Instant, InterfaceId, Ipv4Address, Ipv4Cidr,
+};
 use smoltcp::{
     iface::{Config, Interface, SocketSet},
-    wire::{EthernetAddress as SmoltcpEthernetAddress, HardwareAddress},
+    wire::{
+        EthernetAddress as SmoltcpEthernetAddress, HardwareAddress, IpAddress, IpCidr,
+        Ipv4Address as SmoltcpIpv4Address,
+    },
 };
 
-use crate::adapter::FrameDevice;
+use crate::{
+    adapter::{FrameDevice, to_smoltcp_instant},
+    local_link::LocalPort,
+};
 
-use super::{PumpError, Stack};
+use super::{Ipv4ConfigError, PumpError, Stack};
 
 #[derive(Clone, Copy)]
 pub(crate) enum PumpOrder {
@@ -89,6 +97,88 @@ impl Stack {
         Ok(())
     }
 
+    /// Installs the one IP-medium local protocol port.
+    ///
+    /// Route/source policy remains in the kernel control-plane owner. AnyIP is
+    /// only a protocol projection for packets that owner has already selected
+    /// onto this bounded local path.
+    pub fn add_local_ipv4(
+        &mut self,
+        loopback: Ipv4Cidr,
+        packet_capacity: usize,
+        mtu: usize,
+        now: Instant,
+    ) -> Result<InterfaceId, Ipv4ConfigError> {
+        if self.local.is_some() {
+            return Err(Ipv4ConfigError::LocalInterfaceAlreadyExists);
+        }
+        let raw_id = self.next_interface_id;
+        self.next_interface_id = raw_id
+            .checked_add(1)
+            .expect("InterfaceId namespace exhausted");
+        let id = InterfaceId::from_index(raw_id);
+        let mut local = LocalPort::new(id, to_smoltcp_instant(now), packet_capacity, mtu);
+        let cidr = to_smoltcp_cidr(loopback);
+        local.interface.update_ip_addrs(|addresses| {
+            assert!(
+                addresses.push(cidr).is_ok(),
+                "local IPv4 projection is full"
+            );
+        });
+        local.interface.set_any_ip(true);
+        self.udp.add_interface(id, &mut local.sockets);
+        self.local = Some(local);
+        Ok(id)
+    }
+
+    /// Installs the external interface's protocol projection once at boot.
+    pub fn configure_external_ipv4(
+        &mut self,
+        id: InterfaceId,
+        cidr: Ipv4Cidr,
+        default_gateway: Option<Ipv4Address>,
+    ) -> Result<(), Ipv4ConfigError> {
+        let Some(entry) = self.interfaces.iter_mut().find(|entry| entry.id == id) else {
+            return Err(Ipv4ConfigError::UnknownInterface(id));
+        };
+        let cidr = to_smoltcp_cidr(cidr);
+        entry.interface.update_ip_addrs(|addresses| {
+            addresses.clear();
+            assert!(
+                addresses.push(cidr).is_ok(),
+                "external IPv4 projection is full"
+            );
+        });
+        if let Some(gateway) = default_gateway {
+            let previous = entry
+                .interface
+                .routes_mut()
+                .add_default_ipv4_route(to_smoltcp_address(gateway))
+                .expect("one default IPv4 route must fit");
+            assert!(previous.is_none(), "external default route installed twice");
+        }
+        Ok(())
+    }
+
+    /// Adds a /32 local-delivery projection for one configured local address.
+    pub fn add_local_delivery_ipv4(&mut self, address: Ipv4Address) -> Result<(), Ipv4ConfigError> {
+        let Some(local) = self.local.as_mut() else {
+            return Err(Ipv4ConfigError::MissingLocalInterface);
+        };
+        let cidr = to_smoltcp_cidr(Ipv4Cidr::new(address, 32).expect("/32 is valid"));
+        local.interface.update_ip_addrs(|addresses| {
+            assert!(
+                addresses.iter().all(|existing| *existing != cidr),
+                "local IPv4 projection installed twice"
+            );
+            assert!(
+                addresses.push(cidr).is_ok(),
+                "local IPv4 projection is full"
+            );
+        });
+        Ok(())
+    }
+
     #[cfg(any(test, feature = "host-test"))]
     pub(crate) fn interface_mut(
         &mut self,
@@ -99,4 +189,15 @@ impl Stack {
             .find(|entry| entry.id == id)
             .ok_or(PumpError::UnknownInterface(id))
     }
+}
+
+fn to_smoltcp_address(address: Ipv4Address) -> SmoltcpIpv4Address {
+    SmoltcpIpv4Address::from_octets(address.octets())
+}
+
+fn to_smoltcp_cidr(cidr: Ipv4Cidr) -> IpCidr {
+    IpCidr::new(
+        IpAddress::Ipv4(to_smoltcp_address(cidr.address())),
+        cidr.prefix_len(),
+    )
 }

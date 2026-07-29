@@ -1,16 +1,16 @@
 use alloc::{vec, vec::Vec};
 
-use anemone_net_api::{Instant, InterfaceId};
+use anemone_net_api::{
+    Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
+};
 use smoltcp::{
     socket::raw,
-    wire::{IpAddress, IpCidr, IpVersion, Ipv4Address},
+    wire::{IpAddress, IpVersion, Ipv4Address},
 };
 
 use crate::{
-    adapter::to_smoltcp_instant,
-    local_link::LocalPort,
     pump::PumpBudget,
-    stack::{PumpError, Stack},
+    stack::{Ipv4ConfigError, PumpError, Stack},
     udp::{EndpointCreateError, EndpointId, RetireError, SendError},
 };
 
@@ -69,31 +69,27 @@ pub struct HostLocalLinkObservation {
 
 impl Stack {
     // These conditional methods remain public only because the long-term host
-    // matrices are integration tests. `host-test` is absent from the kernel
-    // dependency, and Stage 1 must delete any facade method replaced by an
-    // accepted production owner or a crate-private fixture.
+    // matrices are integration tests. Keep this facade limited to host-owned
+    // orchestration and observation; `host-test` is absent from the kernel
+    // dependency and must not become a production capability surface.
 
-    /// Installs an IPv4 address solely for the deterministic host fixture.
-    ///
-    /// `host-test` is absent from the kernel dependency, so this control cannot
-    /// become a production address API. Remove it when the fixture can stay
-    /// crate-private or an accepted control-plane owner replaces it.
+    /// Compatibility wrapper for existing deterministic host fixtures.
     pub fn configure_ipv4_for_host_validation(
         &mut self,
         id: InterfaceId,
         address: [u8; 4],
         prefix_len: u8,
     ) -> Result<(), PumpError> {
-        let entry = self.interface_mut(id)?;
-        let cidr = IpCidr::new(
-            IpAddress::Ipv4(Ipv4Address::from_octets(address)),
-            prefix_len,
-        );
-        entry.interface.update_ip_addrs(|addresses| {
-            addresses.clear();
-            assert!(addresses.push(cidr).is_ok());
-        });
-        Ok(())
+        let cidr = ApiIpv4Cidr::new(ApiIpv4Address::new(address), prefix_len)
+            .expect("host fixture prefix must be valid");
+        self.configure_external_ipv4(id, cidr, None)
+            .map_err(|error| match error {
+                Ipv4ConfigError::UnknownInterface(id) => PumpError::UnknownInterface(id),
+                Ipv4ConfigError::LocalInterfaceAlreadyExists
+                | Ipv4ConfigError::MissingLocalInterface => {
+                    unreachable!("external projection cannot report a local-interface error")
+                },
+            })
     }
 
     /// Queues complete IPv4 packets solely for the deterministic host fixture.
@@ -129,9 +125,7 @@ impl Stack {
         Ok(())
     }
 
-    /// Installs the production-shaped IP-medium port only for deterministic
-    /// validation. The kernel dependency excludes `host-test`; remove this
-    /// facade when an accepted control-plane owner supplies the same input.
+    /// Compatibility wrapper for existing deterministic host fixtures.
     pub fn add_local_ipv4_for_host_validation(
         &mut self,
         address: [u8; 4],
@@ -140,26 +134,10 @@ impl Stack {
         mtu: usize,
         now: Instant,
     ) -> InterfaceId {
-        assert!(
-            self.local.is_none(),
-            "the provisional domain has one local port"
-        );
-        let raw_id = self.next_interface_id;
-        self.next_interface_id = raw_id
-            .checked_add(1)
-            .expect("InterfaceId namespace exhausted");
-        let id = InterfaceId::from_index(raw_id);
-        let mut local = LocalPort::new(id, to_smoltcp_instant(now), packet_capacity, mtu);
-        let cidr = IpCidr::new(
-            IpAddress::Ipv4(Ipv4Address::from_octets(address)),
-            prefix_len,
-        );
-        local.interface.update_ip_addrs(|addresses| {
-            assert!(addresses.push(cidr).is_ok());
-        });
-        self.udp.add_interface(id, &mut local.sockets);
-        self.local = Some(local);
-        id
+        let cidr = ApiIpv4Cidr::new(ApiIpv4Address::new(address), prefix_len)
+            .expect("host fixture prefix must be valid");
+        self.add_local_ipv4(cidr, packet_capacity, mtu, now)
+            .expect("host fixture must create exactly one local interface")
     }
 
     pub fn create_udp_endpoint_for_host_validation(

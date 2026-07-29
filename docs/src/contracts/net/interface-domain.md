@@ -3,12 +3,12 @@
 **Contract ID：** `NET-IFACE-DOMAIN-001`
 **状态：** Active
 **Owner：** initial-domain logical-interface owner与domain Stack各自拥有的membership/protocol state
-**参与领域：** `device/net` / kernel attach authority / domain Stack / future network control plane
+**参与领域：** `device/net` / kernel attach authority / domain Stack / IPv4 control plane
 **覆盖范围：** initial-domain boot identity、logical-interface membership/identity/ifindex/name/kind、external reservation与global-Stack composition
-**不覆盖：** IP address/route/source selection、functional loopback/software link、Endpoint/socket/UAPI、runtime detach/retry/reuse或多个network domain
-**实现位置：** `anemone-kernel/src/net/{domain.rs,mod.rs,worker.rs}`
+**不覆盖：** IP address/route/source selection与local packet progression（由`NET-CONTROL-PLANE-001`拥有）、Endpoint/socket/UAPI、runtime detach/retry/reuse或多个network domain
+**实现位置：** `anemone-kernel/src/net/{domain/mod.rs,domain/interfaces.rs,domain/stack.rs,mod.rs}`
 **依赖：** [NETDEV-LIFE-001](./netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction)、[NET-BOUNDARY-001](./frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence)、[NET-STACK-PUMP-001](./frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state)
-**Pending Successor：** `NET-CONTROL-PLANE-001`仍是[net-udp R0](../../rfcs/net-udp/invariants.md#contract-impact)的future candidate
+**Pending Successor：** [NET-CONTROL-PLANE-001](./control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)已接入logical snapshot与唯一local mapping；Socket/Endpoint successors仍Pending
 **最后核验：** 2026-07-29
 
 ## 状态与身份所有权
@@ -28,8 +28,9 @@ opaque `NetdevId`关联供诊断，但不得以它反推logical/protocol identit
 
 **规则：** production在boot attach drain前无条件建立一个persistent initial domain。该domain拥有一个
 `LogicalInterfaces`和一个global `DomainStack`，两者保持不同真相源。`LogicalInterfaces`首先提交logical ID 0、
-ifindex 1、name `lo`、kind `Loopback`；即使没有external pending capability，该membership也存在。Stage 1只使
-`lo`成为logical fact，不建立IP address、route、Stack local mapping、software link或functional packet path。
+ifindex 1、name `lo`、kind `Loopback`；即使没有external pending capability，该membership也存在。该logical fact
+不拥有IP address、route或packet progression；Stage 2由独立control-plane owner和DomainStack local mapping在不
+复制membership truth的前提下使它成为functional production path。
 
 external logical interface只能通过reservation -> commit/abort transaction进入membership。logical ID、ifindex和
 `eth<N>` ordinal在reservation时单调消费；abort或失败不发布membership，也不复用已经消费的identity。commit是
@@ -45,7 +46,7 @@ unfinished mapping进入cleanup时先fail-close撤销未发布mapping，再暴�
 resource可撤销，其identity按no-reuse规则保持已消费。一个失败不影响`lo`或其它committed external member。
 
 **违反表现：** `device/net`或Stack同时保存ifindex/name/membership；从`NetdevId`或`InterfaceId`推导logical identity；
-没有external device时不建立`lo`；abort后复用identity；functional `lo`在control plane/software link切换前被宣称；
+没有external device时不建立`lo`；abort后复用identity；logical registry保存address/route或驱动local packet；
 worker取得raw Stack或其它interface mutation capability；失败留下可观察的logical member或Stack mapping。
 
 **验证 / Enforcement：** owner-local KUnit覆盖boot `lo`、external reservation/commit/abort、monotonic no-reuse、
@@ -61,6 +62,9 @@ worker只持`ExternalPumpPort`、device/logical/protocol identity没有转换路
 
 ## 当前接受边界
 
-- `lo`当前只有logical membership，不是functional loopback；production software link与control plane属于后续stage。
-- external logical facts当前只服务attach record与诊断；没有用户可见interface query或runtime configuration ABI。
-- production runtime只验证RV64 QEMU的一张virtio-mmio NIC与`smp=1`；LA64、virtio-pci、hardware与`smp>1`均Not Run。
+- `lo`的membership仍只由logical owner定义；其functional IPv4 path现由独立
+  [control-plane contract](./control-plane.md)拥有，不把route或packet truth写回logical registry。
+- external logical facts服务attach record、boot-time control-plane interface match与immutable association；logical
+  owner仍不拥有address/route，且没有用户可见interface query或runtime configuration ABI。
+- production runtime只验证RV64 QEMU的一张virtio-mmio NIC、functional local path与`smp=1`；remote external
+  traffic、LA64 runtime、virtio-pci、hardware与`smp>1`均Not Run。

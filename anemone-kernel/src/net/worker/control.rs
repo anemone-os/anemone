@@ -21,8 +21,19 @@ pub(in crate::net) struct PumpControl {
     explicit_work: AtomicBool,
 }
 
+/// Narrow control-plane capability that may only request a bounded recheck.
+/// It carries no lifecycle, route, capacity, or work-completion truth.
+#[derive(Clone)]
+pub(in crate::net) struct PumpWake(Arc<PumpControl>);
+
+impl PumpWake {
+    pub(in crate::net) fn request_work(&self) {
+        self.0.request_work();
+    }
+}
+
 impl PumpControl {
-    pub(super) fn new() -> Self {
+    pub(in crate::net) fn new() -> Self {
         Self {
             worker: spin::Once::new(),
             active: AtomicBool::new(false),
@@ -36,6 +47,10 @@ impl PumpControl {
             "network pump worker installed twice"
         );
         self.worker.call_once(|| worker);
+    }
+
+    pub(in crate::net) fn pump_wake(self: &Arc<Self>) -> PumpWake {
+        PumpWake(self.clone())
     }
 
     pub(super) fn wake_worker(&self) {
@@ -104,4 +119,24 @@ pub(super) fn schedule_deadline(control: Arc<PumpControl>, deadline: NetworkInst
         Duration::from_micros(delay),
         Box::new(move || control.wake_worker()),
     );
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn inactive_and_late_pump_wake_cannot_restore_admission() {
+        let control = Arc::new(PumpControl::new());
+        let wake = control.pump_wake();
+        wake.request_work();
+        assert!(!control.work_requested());
+
+        control.active.store(true, Ordering::Release);
+        wake.request_work();
+        assert!(control.take_work_request());
+        control.active.store(false, Ordering::Release);
+        wake.request_work();
+        assert!(!control.work_requested());
+    }
 }

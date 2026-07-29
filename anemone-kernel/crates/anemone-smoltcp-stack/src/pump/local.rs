@@ -1,4 +1,4 @@
-//! Bounded progression for the provisional IP-medium local port.
+//! Bounded progression for the production IP-medium local port.
 
 use anemone_net_api::{Instant, InterfaceId, PumpOutcome};
 use smoltcp::iface::{PollIngressSingleResult, PollResult};
@@ -13,12 +13,11 @@ use crate::{
 use super::common::{PumpBudget, pump_outcome};
 
 impl Stack {
-    /// Advances the provisional IP-medium local port with the same exclusive
+    /// Advances the production IP-medium local port with the same exclusive
     /// `&mut Stack` capability as external interfaces. Egress is transferred
     /// into bounded link storage only after the protocol round, so normal
     /// ingress cannot consume it until a later bounded call.
-    #[allow(dead_code)]
-    pub(crate) fn pump_local(
+    pub fn pump_local(
         &mut self,
         id: InterfaceId,
         now: Instant,
@@ -77,7 +76,12 @@ impl Stack {
         let device_blocked = device.blocked_work();
         drop(device);
         local.link.set_tx_owner(None);
-        local.link.transfer(budget.ingress_frames());
+        // Transfer publishes new normal-ingress work only after this protocol
+        // round has finished. Even when the egress loop stopped below its
+        // budget, a non-empty transfer therefore requires one later bounded
+        // round; otherwise a sleeping production worker can strand the packet
+        // without another owner capable of issuing a wake.
+        let transferred = local.link.transfer(budget.ingress_frames());
         let owner_blocked = device_blocked && local.link.occupied() >= local.local_link_capacity();
         let udp_egress_may_remain = self
             .udp
@@ -91,14 +95,13 @@ impl Stack {
         Ok(pump_outcome(
             owner_blocked,
             ingress_may_remain,
-            egress_may_remain || udp_egress_may_remain,
+            egress_may_remain || udp_egress_may_remain || transferred != 0,
             now,
             next_deadline,
         ))
     }
 }
 
-#[allow(dead_code)]
 fn poll_local_ingress(
     id: InterfaceId,
     interface: &mut smoltcp::iface::Interface,
@@ -121,7 +124,6 @@ fn poll_local_ingress(
     processed == budget
 }
 
-#[allow(dead_code)]
 fn poll_local_egress(
     interface: &mut smoltcp::iface::Interface,
     sockets: &mut smoltcp::iface::SocketSet<'static>,

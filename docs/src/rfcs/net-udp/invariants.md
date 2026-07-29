@@ -1,15 +1,14 @@
 # net-udp 目标与不变量
 
-**状态：** R0 Accepted Target / Stage 1 Domain Contract Cut Over / Stage 2 Ready / Later Candidates Pending
+**状态：** R0 Accepted Target / Stage 1 Domain与Stage 2 Control Contract Cut Over / Later Candidates Pending
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **适用修订：** R0
 
 本文定义`net-udp` R0的accepted contract delta、target invariants与RFC-local proof obligations。它不是current
 contract；当前 effective 规则仍以 `docs/src/contracts/` 及已完成 cutover 的 source为准。Stage 1已使
-`NETDEV-LIFE-001`、`NET-ATTACH-001`与`NET-IFACE-DOMAIN-001`生效；Stage 2虽已解析为Ready / Not Active，
-`STM-TARGET-001`的network Refine与`NET-CONTROL-PLANE-001`仍未cut over，其余新增/Refine ID也仍是Pending
-candidate。
+`NETDEV-LIFE-001`、`NET-ATTACH-001`与`NET-IFACE-DOMAIN-001`生效；Stage 2又Refine
+`STM-TARGET-001`并使`NET-CONTROL-PLANE-001`生效。其余新增/Refine ID仍是Pending candidate。
 
 本文不承担 implementation plan。concrete Rust type、internal API、lock primitive、worker、queue、buffer、
 algorithm、module path、write set、probe 与验证命令均由[迁移实施计划](./implementation.md)按滚动阶段解析。
@@ -37,7 +36,7 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 | `NETDEV-LIFE-001` | Refine | [Active](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction) | `device/net`保留external NIC publication identity/facts/capability；domain-local ifindex/name/kind与logical-interface lifecycle移入新的domain contract | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
 | `NET-ATTACH-001` | Refine | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | attach authority从“每netdev新建Stack path”改为external NIC admission到initial domain/global Stack；保留publication-last、rollback isolation与shutdown admission | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
 | `NET-IFACE-DOMAIN-001` | Introduce | [Active](../../contracts/net/interface-domain.md#net-iface-domain-001--initial-domain拥有logical-interface-namespace) | initial domain唯一拥有logical-interface membership/lifecycle/ifindex/name/kind；`lo`与external interface共享这一namespace | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
-| `NET-CONTROL-PLANE-001` | Introduce | None（尚未生效） | 唯一拥有local address、route、source/interface selection policy与Stack projection边界 | Stage 2 `NET-UDP-CONTROL-CUTOVER` |
+| `NET-CONTROL-PLANE-001` | Introduce | [Active](../../contracts/net/control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface) | 唯一拥有local address、route、source/interface selection policy与Stack projection边界 | Stage 2 `NET-UDP-CONTROL-CUTOVER`（已完成） |
 | `NET-PROTOCOL-BOUNDARY-001` | Introduce | None（尚未生效） | 固定kernel Socket/control plane与concrete Stack之间的Endpoint/UDP capability、依赖方向和object fence | Protocol capability cutover |
 | `NET-SOCKET-ENDPOINT-001` | Introduce | None（尚未生效） | kernel Socket / File与Stack Endpoint的owner fence、opaque association、final-release retire与stale isolation | Socket/Endpoint lifecycle cutover |
 | `NET-UDP-TRANSACTION-001` | Introduce | None（尚未生效） | bind namespace/commit、local delivery、send admission、datagram ownership/consumption、fragment rejection与同步失败边界 | Functional UDP cutover |
@@ -46,7 +45,7 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 | `IOMUX-POLL-001..003` | Preserve | [Active](../../contracts/iomux/poll-wait.md) | socket source遵守snapshot/register/final-scan、source-lock publication与wake-is-hint协议 | 全程保持 |
 | `EPOLL-WATCH-001` / `EPOLL-READY-001` / `EPOLL-FILE-001` | Preserve | [Active](../../contracts/epoll/protocol.md) | socket只作为普通poll source加入，不改变watch owner、ready harvest与non-sleeping publication | 全程保持 |
 | `STM-OWNER-001` | Preserve | [Active](../../contracts/configuration/system-target.md#stm-owner-001--每个配置事实只有一个规范-owner) | Platform/KernelConfig/SystemTarget/Preset owner分层不变 | 全程保持 |
-| `STM-TARGET-001` | Refine | [Active](../../contracts/configuration/system-target.md#stm-target-001--systemtarget-是-bootdeploy-contract) | SystemTarget增加first-version static IPv4 deployment；不把network value移入Platform/rootfs/Preset | Stage 2 `NET-UDP-CONTROL-CUTOVER` |
+| `STM-TARGET-001` | Refine | [Active](../../contracts/configuration/system-target.md#stm-target-001--systemtarget-是-bootdeploy-contract) | SystemTarget增加first-version static IPv4 deployment；不把network value移入Platform/rootfs/Preset | Stage 2 `NET-UDP-CONTROL-CUTOVER`（已完成） |
 | `STM-RESOLVE-001` | Preserve | [Active](../../contracts/configuration/system-target.md#stm-resolve-001--resolved-build-是不可手写的派生-snapshot) | resolver只物化本次typed input，不建立runtime deployment truth或兼容fallback | 全程保持 |
 
 `NETDEV-LIFE-001` 当前把external netdev publication identity与ifindex/name共同交给`device/net`。R0 target采用

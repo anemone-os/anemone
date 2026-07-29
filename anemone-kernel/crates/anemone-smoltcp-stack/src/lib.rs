@@ -3,21 +3,22 @@
 extern crate alloc;
 
 mod adapter;
-// The production global Stack now owns this private no_std candidate, but a
-// functional software link remains Stage 2 work. Remove the module allowance
-// when Stage 2 wires or replaces that path.
-#[allow(dead_code)]
 mod local_link;
 mod pump;
 mod stack;
-// The production global Stack now owns the aggregate Endpoint candidate, but
-// Endpoint operations stay dormant until Stage 3 introduces their real
-// consumer. Reassess the allowance at that gate.
+// The aggregate Endpoint owner remains dormant outside conditional validation
+// until Stage 3 introduces its real kernel consumer.
 #[allow(dead_code)]
 mod udp;
 
 pub use pump::PumpBudget;
-pub use stack::{PumpError, Stack};
+pub use stack::{Ipv4ConfigError, PumpError, Stack};
+
+#[cfg(feature = "kunit")]
+pub use stack::{
+    KunitEndpointCreateError, KunitEndpointId, KunitReceivedDatagram, KunitRetireError,
+    KunitSendError,
+};
 
 #[cfg(feature = "host-test")]
 pub use stack::{

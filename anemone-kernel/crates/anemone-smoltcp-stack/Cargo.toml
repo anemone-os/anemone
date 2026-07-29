@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["host-test"]
 host-test = ["std", "smoltcp/auto-icmp-echo-reply"]
+kunit = []
 std = ["smoltcp/std"]
 
 [dependencies]

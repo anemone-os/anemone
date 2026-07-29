@@ -65,7 +65,7 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     log_progress!(
         "RESOLVE",
         &format!(
-            "selection source={} target={} platform={} kernel-config={} profile={} platform-output={}",
+            "selection source={} target={} platform={} kernel-config={} profile={} platform-output={} network={}",
             action.selection_source.as_str(),
             action.system.target_ref,
             action.system.platform_ref,
@@ -77,7 +77,24 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
                 .uboot
                 .as_ref()
                 .map(|uboot| uboot.filename())
-                .unwrap_or("elf-only")
+                .unwrap_or("elf-only"),
+            action
+                .system
+                .target
+                .network
+                .as_ref()
+                .map(|network| format!(
+                    "{}={}/{} gateway={}",
+                    network.ipv4.interface,
+                    network.ipv4.address,
+                    network.ipv4.prefix,
+                    network
+                        .ipv4
+                        .default_gateway
+                        .map(|gateway| gateway.to_string())
+                        .unwrap_or_else(|| "none".to_string())
+                ))
+                .unwrap_or_else(|| "loopback-only".to_string())
         )
     );
 
@@ -326,6 +343,10 @@ impl BuildContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{
+        reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef},
+        selection::SelectionRequest,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestDirectory(std::path::PathBuf);
@@ -387,5 +408,30 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn preset_and_tuple_resolve_the_same_network_target() {
+        let loader = ConfigLoader::new(Path::new("../.."));
+        let preset = loader
+            .resolve_selection(SelectionRequest::explicit_preset(
+                BuildPresetRef::new("qemu-virt-rv64-release").unwrap(),
+            ))
+            .unwrap();
+        let tuple = loader
+            .resolve_selection(SelectionRequest::explicit_tuple(
+                SystemTargetRef::new("qemu-virt-rv64").unwrap(),
+                KernelConfigRef::new("conf/.defconfig").unwrap(),
+                CargoProfile::Release,
+            ))
+            .unwrap();
+
+        let preset_ipv4 = &preset.system.target.network.as_ref().unwrap().ipv4;
+        let tuple_ipv4 = &tuple.system.target.network.as_ref().unwrap().ipv4;
+        assert_eq!(preset.system.target_ref, tuple.system.target_ref);
+        assert_eq!(preset_ipv4.interface, tuple_ipv4.interface);
+        assert_eq!(preset_ipv4.address, tuple_ipv4.address);
+        assert_eq!(preset_ipv4.prefix, tuple_ipv4.prefix);
+        assert_eq!(preset_ipv4.default_gateway, tuple_ipv4.default_gateway);
     }
 }

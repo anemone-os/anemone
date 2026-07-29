@@ -114,9 +114,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   纵切。Stage 0保留最小private ordinary candidate、长期deterministic topology matrix与隔离的conditional
   validation facade；Stage 1已建立boot logical `lo`、domain-local logical identity、initial-domain唯一Stack与
   per-provider narrow pump port。`NET-UDP-DOMAIN-CUTOVER`已原子Refine `NETDEV-LIFE-001`/
-  `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；functional loopback/control plane/socket仍未生效，Stage 2
-  已按2A same-owner split与2B atomic static-control/loopback cutover解析。2A已在不改变behavior/public surface/
-  contract的前提下独立关闭；2B仍Ready / Not Active，Stage 2 candidate contract和Stage 3均未授权。执行证据见
+  `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；2A已在不改变behavior/public surface/contract的前提下
+  完成same-owner split，2B随后以optional SystemTarget static IPv4、唯一control plane、Stack projection与bounded
+  production local worker关闭Stage 2。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce
+  `NET-CONTROL-PLANE-001`；Socket/Endpoint/UAPI仍未生效，Stage 3保持Outline且未授权。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

@@ -1,6 +1,8 @@
 //! Kernel-side network attach authority.
 
 mod domain;
+#[cfg(feature = "kunit")]
+mod kunit;
 mod worker;
 
 use crate::{
@@ -11,7 +13,10 @@ use crate::{
     prelude::*,
 };
 
-use domain::{InitialDomain, LogicalInterfaceReservation, LogicalInterfaceSnapshot};
+use domain::{
+    ControlPlaneActivationError, ExternalControlInput, InitialDomain, LogicalInterfaceReservation,
+    LogicalInterfaceSnapshot,
+};
 use worker::{AttachFailure, PumpControl};
 
 struct ActivePath {
@@ -21,6 +26,10 @@ struct ActivePath {
     /// Immutable domain-membership snapshot for diagnosis and shutdown logs
     /// only. It never drives provider or Stack admission.
     logical: LogicalInterfaceSnapshot,
+    /// Immutable boot-lifetime logical-to-protocol association handed to the
+    /// control-plane owner. DomainStack remains the mapping truth; R0 has no
+    /// detach or ID reuse, so this protocol state cannot become stale.
+    interface: anemone_net_api::InterfaceId,
     control: Arc<PumpControl>,
 }
 
@@ -128,6 +137,7 @@ fn publish_prepared(reservation: LogicalInterfaceReservation, mut prepared: work
     authority.active_paths.push(ActivePath {
         netdev: netdev.clone(),
         logical: logical.clone(),
+        interface,
         control: prepared.control(),
     });
     // Readers cannot observe the logical or active record until mapping,
@@ -158,19 +168,89 @@ pub(crate) fn attach_published_netdevs() {
             retain_pending(pending);
         }
     }
+    activate_initial_control_plane();
+}
+
+fn activate_initial_control_plane() {
+    let mut authority = ACTIVE_PATHS.lock();
+    assert!(
+        !authority.shutdown_started,
+        "boot control-plane activation raced terminal shutdown"
+    );
+    let external = authority
+        .active_paths
+        .iter()
+        .map(|path| {
+            ExternalControlInput::new(
+                path.logical.clone(),
+                path.interface,
+                path.control.pump_wake(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let deployment = crate::network_defs::STATIC_IPV4_DEPLOYMENT;
+    if let Err(error) = authority
+        .domain
+        .activate_control_plane(deployment, &external)
+    {
+        let actual = external
+            .iter()
+            .map(ExternalControlInput::name)
+            .collect::<Vec<_>>();
+        let expected = deployment.map(|deployment| deployment.interface);
+        kerrln!(
+            "static IPv4 control-plane activation failed: {:?}; expected interface {:?}, published external interfaces {:?}",
+            error,
+            expected,
+            actual,
+        );
+        match error {
+            ControlPlaneActivationError::AlreadyPublished
+            | ControlPlaneActivationError::MissingInterface
+            | ControlPlaneActivationError::DuplicateInterface => {
+                panic!("static IPv4 SystemTarget does not match published network interfaces")
+            },
+        }
+    }
+
+    if let Some(deployment) = deployment {
+        let logical = authority
+            .domain
+            .control_plane()
+            .and_then(|control| control.external_logical())
+            .expect("configured control plane must retain its external association");
+        kinfoln!(
+            "IPv4 control plane active: lo ready, {} (ifindex {}) = {}.{}.{}.{}/{}; default route {}",
+            logical.name(),
+            logical.ifindex(),
+            deployment.address[0],
+            deployment.address[1],
+            deployment.address[2],
+            deployment.address[3],
+            deployment.prefix,
+            if deployment.default_gateway.is_some() {
+                "configured"
+            } else {
+                "absent"
+            },
+        );
+    } else {
+        kinfoln!("IPv4 control plane active: loopback-only local path ready");
+    }
 }
 
 /// Close network attach admission and request one non-waiting stop attempt for
 /// every active path. System Power owns the surrounding global order.
 pub(crate) unsafe fn shutdown() {
-    let paths = {
+    let (local, paths) = {
         let mut authority = ACTIVE_PATHS.lock();
         assert!(
             !authority.shutdown_started,
             "network shutdown admission closed more than once"
         );
         authority.shutdown_started = true;
-        authority
+        let local = authority.domain.withdraw_control_plane();
+        let paths = authority
             .active_paths
             .iter()
             .map(|path| {
@@ -180,8 +260,14 @@ pub(crate) unsafe fn shutdown() {
                     path.control.clone(),
                 )
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        (local, paths)
     };
+
+    if let Some(local) = local {
+        local.request_shutdown();
+        kemergln!("initial-domain local network worker shutdown: admission closed, stop requested");
+    }
 
     for (netdev, logical, control) in paths {
         control.request_shutdown();

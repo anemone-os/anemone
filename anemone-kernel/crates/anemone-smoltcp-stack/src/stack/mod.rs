@@ -15,7 +15,20 @@ pub use host_validation::{
     HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
 };
 
+#[cfg(feature = "kunit")]
+pub use udp_ops::{
+    KunitEndpointCreateError, KunitEndpointId, KunitReceivedDatagram, KunitRetireError,
+    KunitSendError,
+};
+
 pub(crate) use interfaces::{InterfaceEntry, PumpOrder};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Ipv4ConfigError {
+    UnknownInterface(InterfaceId),
+    LocalInterfaceAlreadyExists,
+    MissingLocalInterface,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PumpError {
@@ -30,10 +43,8 @@ pub enum PumpError {
 #[derive(Default)]
 pub struct Stack {
     pub(crate) interfaces: Vec<InterfaceEntry>,
-    // The global production owner retains this local-port candidate only as
-    // Stage 2 resolution input. It is not a functional production interface.
-    // Remove the allowance when Stage 2 wires or replaces that private path.
-    #[allow(dead_code)]
+    // The local link and port remain private protocol projections. Route and
+    // wake policy belong to the kernel control-plane and worker owners.
     pub(crate) local: Option<LocalPort>,
     pub(crate) udp: UdpEndpoints,
     pub(crate) next_interface_id: u32,

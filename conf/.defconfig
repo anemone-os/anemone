@@ -70,3 +70,5 @@ virtio_net_frame_capacity_bytes = 2048 # Per-slot backing bytes including the Vi
 net_pump_ingress_budget_frames = 32 # Maximum ingress frames advanced by one stack pump.
 net_pump_egress_budget_steps = 32 # Maximum egress steps advanced by one stack pump.
 net_worker_repoll_rounds = 8 # Maximum immediate repoll rounds before the network worker yields.
+net_local_link_packet_capacity = 64 # Shared ingress+egress packet slots owned by the local software link.
+net_local_link_mtu_bytes = 1500 # Maximum IP-medium packet size owned by the local software link.
