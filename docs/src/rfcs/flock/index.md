@@ -1,6 +1,6 @@
 # RFC-20260728-flock
 
-**状态：** Accepted for Implementation / Stage 0 Active / Checkpoint 0B Closed
+**状态：** Accepted for Implementation / Stage 0 Closed
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -12,26 +12,26 @@
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** None；当前 design findings 均已 neutralize，历史与 2026-07-29 cooperative direction
 correction 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** Stage 0 保持 `Active`，Checkpoint 0B 已关闭；Checkpoint 0C 仍未激活且不在本轮授权内。
-全部新 contract ID 继续 Not Effective，不得执行 `FLOCK-CUTOVER`。
+**下一步：** Stage 0已关闭；等待开发者独立授权`0 -> 1 Implementation Resolution Gate`。全部新contract ID
+继续Not Effective，不得执行`FLOCK-CUTOVER`。
 
 ## 文档状态
 
 本文是第一版本地 `flock(2)` 的公共 canonical R0 accepted target。它陈述 target、contract delta、
 correctness boundaries 与 acceptance boundary；Checkpoint 0S 完成 `task::files` 行为保持型结构拆分，
 Checkpoint 0A 建立private inode domain与cooperative-retirement，Checkpoint 0B 增加Linux syscall ABI、双层
-userspace wrapper与focused consumer。guest runtime仍属于未授权0C，当前纵切不能作为partial flock capability
-宣称；current contract也尚无对应effective rule。
+userspace wrapper与focused consumer。Checkpoint 0C已用RV64 wrapper关闭KUnit、focused oracle、当前`sys`
+profile与正常关机证据，并用LA64 build/rootfs composition关闭该架构的build floor；LA64 runtime仍Not Run。
+当前纵切不能作为partial flock capability宣称，current contract也尚无对应effective rule。
 
 2026-07-29 Draft review 已废弃此前 close-driven precise cancellation 方向。旧 implementation stages、
 probe 与 manifest 不再有效；后续独立 implementation resolution 从 live source 形成当前 Stage 0 Ready。
 本轮独立 R0 review 未发现 Apollyon、Keter 或 Euclid，开发者授权建立 transaction、激活 Stage 0 并依次完成
-Checkpoint 0S、0A、0B。Stage 1 保持 `Outline`，本轮不修改 register/current contract，也不执行
+Checkpoint 0S、0A、0B、0C并关闭Stage 0。Stage 1 保持 `Outline`，本轮不修改 register/current contract，也不执行
 `FLOCK-CUTOVER`。
 
 R0 acceptance 只接受 target 与 contract delta，不把它们写成 effective contract。Stage 0 activation 与
-Checkpoint 0S/0A/0B closure 已分别记录在 transaction；Checkpoint 0B 关闭不自动激活 0C，也不解析或进入
-Stage 1。
+Checkpoint 0S/0A/0B/0C closure 已分别记录在 transaction；Stage 0关闭不自动解析或进入Stage 1。
 
 ## 摘要
 
@@ -350,6 +350,6 @@ flock、POSIX record lock 与 OFD record lock 的 holder、range、close cleanup
 
 ## 收口
 
-当前为 R0 / Accepted for Implementation；Stage 0 Active 且 Checkpoint 0B Closed，Checkpoint 0C 未激活，
-Stage 1 仍是 `Outline`。尚无 flock runtime evidence 或 contract cutover，`OPENED-DESC-RETIRE-001` 与全部
-`FLOCK-*` IDs 保持 Not Effective。
+当前为 R0 / Accepted for Implementation；Stage 0已Closed，Stage 1仍是`Outline`。RV64 Stage 0 runtime与
+LA64 build/composition evidence已经记录，但尚无contract cutover；`OPENED-DESC-RETIRE-001`与全部`FLOCK-*`
+IDs保持Not Effective。`0 -> 1 Implementation Resolution Gate`仍需独立授权。

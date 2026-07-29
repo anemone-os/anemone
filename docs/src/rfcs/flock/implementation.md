@@ -1,6 +1,6 @@
 # Flock 迁移实施计划
 
-**状态：** Stage 0 Active / Checkpoint 0B Closed；Stage 1 Outline
+**状态：** Stage 0 Closed；Stage 1 Outline
 **适用修订：** R0
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
@@ -11,8 +11,7 @@
 
 本文把 cooperative-retirement R0 解析成一条 proof-first 实施路线。2026-07-29 的独立 R0 review 已接受
 target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并依次完成 Checkpoint 0S、0A、
-0B。0B 已关闭，Checkpoint 0C 仍未激活。本阶段不修改 current contract/register，也不执行
-`FLOCK-CUTOVER`。
+0B、0C。Stage 0 已关闭。本阶段没有修改 current contract/register，也没有执行`FLOCK-CUTOVER`。
 
 旧版围绕 precise cancellation、retirement-first 唯一 `EBADF`、同步 waiter cleanup 与
 identity-preserving restart 形成的 Stage 1-3、probe 和 manifest 继续失效；下文是当前唯一 implementation
@@ -60,7 +59,7 @@ authority。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 | 下一解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Owner / lifecycle vertical slice | Active / Checkpoint 0B Closed | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 0C仍需开发者独立授权；Stage 0全部checkpoint、review与证据关闭后，另行运行`0 -> 1 Implementation Resolution Gate` |
+| Stage 0 — Owner / lifecycle vertical slice | Closed | inode domain、cooperative retirement、syscall ABI、focused userspace oracle与RV64 runtime形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 等待开发者独立授权`0 -> 1 Implementation Resolution Gate` |
 | Stage 1 — Acceptance closure | Outline | 根据 Stage 0 实际 diff 补齐 target matrix、LTP、双架构 runtime、contract write-back 与原子 `FLOCK-CUTOVER` | 只有 Stage 1 closure 可切换 | Stage 0 Closed 后由开发者单独授权解析；`Ready` 后仍需独立 `Active` 授权 |
 
 `Outline` 只固定目的、依赖、受保护边界与解析触发点；不冻结具体类型、文件、算法或命令。`Ready` 表示当前
@@ -71,8 +70,8 @@ stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 R
 
 ### 4.1 状态与 activation preflight
 
-**状态：** Active / Checkpoint 0B Closed。Stage 0 已依次关闭 Checkpoint 0S、0A、0B；0C 仍须独立授权和
-关闭，不得把0B编译证据当作runtime oracle。
+**状态：** Closed / 2026-07-29。Stage 0 已按独立授权依次关闭 Checkpoint 0S、0A、0B、0C；0C通过真实
+RV64 wrapper关闭runtime oracle，未把此前编译证据当作runtime PASS。
 
 进入 `Active` 前必须同时满足：
 
@@ -355,6 +354,12 @@ composition，不运行 LA64 QEMU；LA64 runtime 必须明确记录为 Not Run�
 - transaction记录probe采用的实际representation、allocation/lock审计、KUnit与userspace evidence，以及成功保留
   或失败删除代码的决定。
 
+**关闭结果：** 2026-07-29的0C在production write set为None的边界内关闭。RV64 wrapper正常PowerOff，264项
+enabled KUnit与focused flock oracle八项全部PASS；当前`sys` profile四个case均PASS。LA64 app、kernel与rootfs
+composition build PASS，LA64 runtime明确Not Run。closure audit与完整Stage 0 diff review没有finding或停止条件，
+没有临时trace/control plane遗留；真实纵切成功保留。whitespace与mdBook validation通过。current contracts、
+register与全部新ID状态未改变，完整命令、分类、representation、allocation/lock与review证据见transaction。
+
 ### 4.7 Contract cutover 与代码去留
 
 Stage 0 contract cutover 为 `None`。`OPENED-DESC-RETIRE-001`、`FLOCK-DOMAIN-001`、`FLOCK-WAIT-001` 与
@@ -476,5 +481,6 @@ contracts，再把Stage 1完整解析为`Ready`：精确交付、checkpoints、w
 
 ## 7. 当前结论
 
-当前 R0 已 Accepted for Implementation，Stage 0 Active 且 Checkpoint 0B Closed。Checkpoint 0C 仍未激活，
-本轮不得进入；current contract 与 register 未修改，`FLOCK-CUTOVER` 未执行，全部新 ID 保持 Not Effective。
+当前 R0 已 Accepted for Implementation，Stage 0已Closed，Stage 1仍为Outline。current contract与register未修改，
+`FLOCK-CUTOVER`未执行，全部新ID保持Not Effective。`0 -> 1 Implementation Resolution Gate`须由开发者独立
+授权，本轮未进入。
