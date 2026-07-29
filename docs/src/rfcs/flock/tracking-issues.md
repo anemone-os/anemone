@@ -1,17 +1,19 @@
 # Flock Tracking Issues
 
-**状态：** Closed / all current findings neutralized
+**状态：** Closed / R0 review found no current findings
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
-**事务日志：** None
+**事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 
 本文保留已经影响 flock Draft target、ABI、owner/contract boundary、implementation readiness或acceptance
-判断的design finding及其neutralize依据。当前仍是R0前Draft，没有transaction或implementation execution；
-2026-07-29 cooperative direction correction直接更新Draft，不形成R1。
+判断的design finding及其neutralize依据。2026-07-29 cooperative direction correction在R0前直接更新Draft，
+不形成R1；后续独立R0 review没有发现新的Apollyon、Keter或Euclid，R0 acceptance、Stage 0 activation与0S
+closure见transaction。
 
-同日后续独立implementation-resolution任务已从live source形成新的Stage 0 Ready plan。下文历史状态中的
+同日独立implementation-resolution任务已从live source形成新的Stage 0 Ready plan。下文历史状态中的
 “No Ready Stage”与“implementation shape未解析”描述的是cooperative correction刚完成时的事实；它们不恢复
-旧precise-cancellation plan，也不表示Stage 0已Active。当前authority见[迁移实施计划](./implementation.md)。
+旧precise-cancellation plan。Stage 0现已Active且只关闭0S；当前authority见
+[迁移实施计划](./implementation.md)。
 
 ## Apollyon
 
@@ -55,8 +57,8 @@ retired holder不遗留持久grant。
 [Implementation Resolution状态](./implementation.md)。
 
 **状态：** Neutralized / 2026-07-29 Draft review；canonical target已折回cooperative semantics，旧Stage 1-3、
-probe与manifest全部失效。后续独立resolution形成的新Stage 0现为Ready / Not Active；仍无R0、transaction、
-implementation execution或contract cutover。
+probe与manifest全部失效。后续独立resolution形成新Stage 0 Ready，当时尚无R0、transaction或implementation
+execution；当前R0/Stage 0/0S状态见transaction，contract仍未cut over。
 
 ### APOLLYON-FLOCK-003：无 grant retirement 可能遗漏 blocked waiter progress
 

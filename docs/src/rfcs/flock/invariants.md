@@ -1,11 +1,11 @@
 # Flock 目标与不变量
 
-**状态：** Draft
+**状态：** R0 Accepted / Not Cut Over
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
-本文定义第一版本地 flock 相对 current effective contract 的 Draft delta、尚未 cutover 的 target
+本文定义第一版本地 flock 相对 current effective contract 的 R0 delta、尚未 cutover 的 target
 invariants，以及只服务本 RFC 的 proof obligations。当前 effective 规则仍以 `docs/src/contracts/` 为唯一
 权威；本文拟 Introduce 的 `OPENED-DESC-RETIRE-001` 与 `FLOCK-*` IDs 在 `FLOCK-CUTOVER` 前都不是 current
 contract。
@@ -18,18 +18,18 @@ terminal liveness、final-close grant cleanup、no-late-persistent-grant 或 wai
 
 - **Correctness Invariant：** 状态唯一 owner、并发、生命周期、cleanup、内存安全与 ABI 诚实性；违反即实现
   错误，不能作为工程降级项接受。
-- **Target Guarantee / Capability：** R0 拟承诺的功能范围、兼容覆盖与 acceptance boundary；只能经后续
+- **Target Guarantee / Capability：** R0 承诺的功能范围、兼容覆盖与 acceptance boundary；只能经后续
   accepted revision 调整。
 - **Implementation Preference：** 类型、helper、container、allocation、锁、wait primitive、模块、stage、
-  write set与命令；Draft target不冻结这些内容，只有`implementation.md`可为当前Ready stage局部冻结，且不得
+  write set与命令；R0 target不冻结这些内容，只有`implementation.md`可为当前Ready stage局部冻结，且不得
   反向提升为target guarantee。
 
 ## Contract Impact
 
-`FLOCK-CUTOVER` 只是 Draft 中拟议的语义切换单元，不是 implementation stage，也不授权执行。只有 future
+`FLOCK-CUTOVER` 是 R0 接受的语义切换单元，不是 implementation stage，也不授权执行。只有 future
 transaction 完成代码、验证、review 与 contract write-back 后，新 IDs 才能成为 effective。
 
-| Contract ID | 变化 | 当前规则 | Draft Target 摘要 | 生效 Gate |
+| Contract ID | 变化 | 当前规则 | R0 Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
 | [`OPENED-DESC-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-001--published-slot-refcount-是-final-release-的唯一真相) | Preserve | published slot refcount 是 terminal retirement 唯一真相 | flock 不让 syscall borrow、waiter或VFS storage延迟/复活retirement | 全程 |
 | [`OPENED-DESC-002`](../../contracts/task/opened-description-lifecycle.md#opened-desc-002--dupfork-共享-descriptionfd-table-只拥有-publication) | Preserve | dup/fork共享description，fd table只拥有publication | alias共享同一holder；fd number、path、inode不替代description identity | 全程 |
@@ -242,17 +242,17 @@ record lock共享grant、waiter或conflict state。
 
 ## RFC-local Invariants
 
-### FLOCK-RFC-001 - Draft、R0 与 cutover 分离
+### FLOCK-RFC-001 - R0 acceptance 与 cutover 分离
 
-当前Draft只形成待review target。R0 semantic revision也只接受target与contract delta；首个Ready stage是
+R0 semantic revision只接受target与contract delta；首个Ready stage是
 acceptance前置证据，不会因此升级成target guarantee。`FLOCK-CUTOVER`只能由future transaction在代码、验证、
 review与contract write-back同一closure中执行。任何部分能力不能先冒充effective flock。
 
 ### FLOCK-RFC-002 - Ready resolution 与 Active authorization 分离
 
 2026-07-29的独立implementation-resolution任务已从live source把Stage 0完整解析为`Ready / Not Active`，
-Stage 1保持`Outline`。`Ready`只冻结当前stage的交付、路线、审计、验证、停止/退出条件、cutover与resolved
-write set；它不形成R0、transaction或执行授权，也不让Stage 0 closure自动解析或激活Stage 1。
+Stage 1保持`Outline`。后续独立review接受R0，开发者再明确授权transaction bootstrap与Stage 0 Active；这些
+事实分别记录，不由`Ready`自动推出。Stage 0或任一checkpoint closure也不自动解析或激活Stage 1。
 
 ### FLOCK-RFC-003 - Generic facade 不预置 remote protocol
 
@@ -362,9 +362,9 @@ resolution gate。
 - 把Stage 0 Ready中冻结的stage、API、锁、container、write set或测试命令当成target guarantee，或让Stage 0
   closure自动解析/激活Stage 1。
 
-## 完成标准
+## R0 acceptance 与 Stage 0 activation 记录
 
-当前 Draft + implementation-resolution closure 必须满足：
+2026-07-29 的 R0 review 与 activation preflight 已确认：
 
 1. `index.md`、本文、tracking与`docs/src/rfcs.md`对cooperative semantics保持一致；
 2. KETER-FLOCK-004已将旧precise-cancellation target的修复折回canonical target；
@@ -372,9 +372,9 @@ resolution gate。
 4. KETER-FLOCK-001/002的历史决定有明确supersession，且owner、handoff、ABI admissible outcomes无歧义；
 5. implementation preferences未被提升为target，`implementation.md`的Stage 0达到完整`Ready`，Stage 1保持
    依赖、受保护边界与resolution trigger完整的`Outline`；
-6. Stage 0保持Not Active，尚无transaction、代码或runtime evidence；
-7. `OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs保持Not Effective。
+6. R0 acceptance、transaction bootstrap 与 Stage 0 Active authorization 分别记录在
+   [transaction](../../devlog/transactions/2026-07-29-flock.md)，Checkpoint 0S closure 不授权 0A；
+7. `OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs保持Not Effective，0S不提供partial flock capability。
 
-第一个可执行stage的Ready要求已满足；下一步是独立R0 review，而不是自动进入实现。R0形成后仍需建立新
-transaction并取得Stage 0 Active授权。最终implementation closure仍需逐项记录每个ID的Effective /
-Not Cut Over结果，并区分agent-run、developer-run与Not Run evidence。
+第一个可执行stage已按独立授权进入Active且只关闭Checkpoint 0S；Checkpoint 0A仍未激活。最终implementation
+closure仍需逐项记录每个ID的Effective / Not Cut Over结果，并区分agent-run、developer-run与Not Run evidence。

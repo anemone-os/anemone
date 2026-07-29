@@ -142,6 +142,7 @@
 			- [目标与不变量](./rfcs/flock/invariants.md)
 			- [迁移实施计划](./rfcs/flock/implementation.md)
 			- [Tracking Issues](./rfcs/flock/tracking-issues.md)
+			- [事务日志](./devlog/transactions/2026-07-29-flock.md)
 		- [System Target Model](./rfcs/system-target-model/index.md)
 		- [目标与不变量](./rfcs/system-target-model/invariants.md)
 		- [迁移实施计划](./rfcs/system-target-model/implementation.md)

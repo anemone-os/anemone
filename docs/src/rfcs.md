@@ -105,14 +105,14 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260728-flock](./rfcs/flock/index.md)：Draft；提议由opened-description持有、inode-associated
+- [RFC-20260728-flock](./rfcs/flock/index.md)：R0 / Accepted for Implementation；由opened-description持有、inode-associated
   VFS domain统一裁决的本地whole-file advisory flock，并保持generic local default与独立record-lock
   namespace。final close同步终结holder、删除既有grant并提交recheck hint；waiter协作式重验并自行清理，
   不承诺precise close/signal/restart winner、identity-preserving restart或close等待task运行。
   `OPENED-DESC-RETIRE-001`已缩窄为flock-specific grant cleanup与notification submission；相关finding均已
-  neutralize。独立implementation resolution已把带真实syscall与focused consumer的Stage 0解析为
-  `Ready / Not Active`，Stage 1保持`Outline`；仍没有R0、transaction、代码、runtime evidence或contract
-  cutover。下一步是独立R0 review，不得自动激活Stage 0。
+  neutralize。独立implementation resolution已把带真实syscall与focused consumer的Stage 0解析为Ready；
+  R0 review后Stage 0已Active且只关闭行为保持型Checkpoint 0S，0A仍未激活，Stage 1保持`Outline`。
+  当前没有flock runtime evidence或contract cutover，全部新ID继续Not Effective。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续

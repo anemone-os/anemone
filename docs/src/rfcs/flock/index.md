@@ -1,35 +1,33 @@
 # RFC-20260728-flock
 
-**状态：** Draft
-**修订：** Draft
+**状态：** Accepted for Implementation / Stage 0 Active / Checkpoint 0S Closed
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
 **领域：** fs / VFS / task files / scheduler wait / syscall ABI
-**事务日志：** None
+**事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 **影响契约：** Preserve `OPENED-DESC-001/002/003`、`OPENED-DESC-LIVENESS-001`、
 `SCHED-WAKE-001..004`；拟 Introduce `OPENED-DESC-RETIRE-001`、`FLOCK-DOMAIN-001`、
-`FLOCK-WAIT-001`、`FLOCK-LIFECYCLE-001`。完整 Draft delta 见
+`FLOCK-WAIT-001`、`FLOCK-LIFECYCLE-001`。完整 R0 delta 见
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** None；当前 design findings 均已 neutralize，历史与 2026-07-29 cooperative direction
 correction 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** 对 cooperative target、contract delta 与
-[Stage 0 Ready implementation resolution](./implementation.md) 做独立 R0 review。当前仍不得形成 transaction、
-激活 Stage 0、修改代码或执行 contract cutover。
+**下一步：** Stage 0 保持 `Active`，Checkpoint 0S 已关闭；Checkpoint 0A 仍未激活且不在本轮授权内。
+全部新 contract ID 继续 Not Effective，不得执行 `FLOCK-CUTOVER`。
 
 ## 文档状态
 
-本文是第一版本地 `flock(2)` proposal 的公共 canonical Draft。它只陈述拟议 target、contract delta、
-correctness boundaries 与 acceptance boundary；当前代码尚无 flock 能力，current contract 也尚无对应
-effective rule。
+本文是第一版本地 `flock(2)` 的公共 canonical R0 accepted target。它陈述 target、contract delta、
+correctness boundaries 与 acceptance boundary；Checkpoint 0S 只完成 `task::files` 行为保持型结构拆分，
+当前代码仍无 flock 能力，current contract 也尚无对应 effective rule。
 
 2026-07-29 Draft review 已废弃此前 close-driven precise cancellation 方向。旧 implementation stages、
-probe 与 manifest 不再有效；开发者随后另行授权从 live source 重写 implementation resolution，当前新的
-Stage 0 已达到 `Ready / Not Active`，Stage 1 保持 `Outline`。本文没有 transaction，不修改 register，也不
-授权代码、current contract 或 `FLOCK-CUTOVER`。
+probe 与 manifest 不再有效；后续独立 implementation resolution 从 live source 形成当前 Stage 0 Ready。
+本轮独立 R0 review 未发现 Apollyon、Keter 或 Euclid，开发者授权建立 transaction、激活 Stage 0 并完成
+Checkpoint 0S。Stage 1 保持 `Outline`，本轮不修改 register/current contract，也不执行 `FLOCK-CUTOVER`。
 
-Draft 内容不因公开而成为 accepted target 或 effective contract。只有后续 target review、独立
-implementation resolution 与 R0 review 均完成后，RFC 才能进入 `Accepted for Implementation`；达到
-`Ready` 也不自动授权 `Active`。
+R0 acceptance 只接受 target 与 contract delta，不把它们写成 effective contract。Stage 0 activation 与
+Checkpoint 0S closure 已分别记录在 transaction；Checkpoint 0S 关闭不自动激活 0A，也不解析或进入 Stage 1。
 
 ## 摘要
 
@@ -65,7 +63,7 @@ POSIX/OFD record-lock 统一以及通用 file-lock engine 均不在本 RFC 范�
 
 上述 effective 规则由
 [Opened-description lifecycle current contract](../../contracts/task/opened-description-lifecycle.md) 拥有。
-flock Draft 不复制 published-ref truth，也不把现有单 hook 扩张成 feature registry。
+flock R0 不复制 published-ref truth，也不把现有单 hook 扩张成 feature registry。
 
 VFS `File` 持有 `PathRef` 并能取得稳定 `InodeRef`；硬链接、不同 path 和不同独立 `open()` 可以到达同一 inode
 identity。因而 fd number、path 或临时 `(dev, ino)` key 都不足以成为本地 flock 冲突域的行为真相。
@@ -156,8 +154,9 @@ Current effective baseline：
 
 ## 修订记录
 
-当前仍是 Draft，尚无已经接受的语义修订。2026-07-29 cooperative correction 属于 R0 前 Draft review，
-不产生 R1。第一次 accepted target 才建立 `R0` 记录与 transaction 链接。
+| 修订 | 日期 | 语义摘要 | Review / transaction |
+| --- | --- | --- | --- |
+| R0 | 2026-07-29 | 接受 cooperative retirement、本地 generic whole-file flock、opened-description holder、inode-associated single grant truth、ordinary restart 与原子 `FLOCK-CUTOVER` acceptance boundary | [2026-07-29 Flock transaction](../../devlog/transactions/2026-07-29-flock.md) |
 
 ## Target Capability
 
@@ -287,14 +286,14 @@ restart 的选择由它实际完成的 domain/liveness/signal observation 决定
 stage的implementation choices提升为target；但R0 review必须同时确认该stage提供可达路线。当前Draft review要求：
 
 1. cooperative retirement、grant-state correctness、ABI admissible outcomes 与 acceptance boundary 自洽；
-2. Contract Impact 覆盖所有 affected IDs，并保持 current effective / Draft target 分离；
+2. Contract Impact 覆盖所有 affected IDs，并保持 current effective / accepted target 分离；
 3. tracking 中不再存在会改变 target、owner、ABI、contract 或 acceptance 的 Apollyon / Keter；
 4. implementation preferences 未被提升为 target，`implementation.md` 的 Stage 0 已完整解析为 `Ready`，
    后续 Stage 1 只保持目的、依赖、受保护边界与 resolution trigger 完整的 `Outline`；
 5. `Ready`、R0 acceptance、transaction bootstrap 与 `Active` authority 保持分离。
 
-2026-07-29 的独立 implementation-resolution 任务已满足首个 `Ready` 要求，但不构成 R0 acceptance 或
-implementation activation。形成 R0 后仍需建立新 transaction，并由开发者另行授权 Stage 0 Active。
+2026-07-29 的独立 implementation-resolution 任务满足首个 `Ready` 要求；本轮后续独立 review 接受 R0，
+transaction 已建立且开发者已明确授权 Stage 0 Active。Checkpoint 0S closure 不授权后续 checkpoint。
 
 最终 implementation closure 的证据范围至少包括：
 
@@ -308,7 +307,7 @@ implementation activation。形成 R0 后仍需建立新 transaction，并由开
 - source/owner review 证明 waiter cleanup 没有成为 close completion 的同步依赖。
 
 并发 final close acceptance 不断言唯一 errno、fd-reuse 隔离、waiter 已运行或固定 close-to-wake latency。
-agent-run、developer-run 与 Not Run evidence 必须在 future transaction 中分别记录；Draft 不预先声称任何平台
+agent-run、developer-run 与 Not Run evidence 必须在 transaction 中分别记录；R0 不预先声称任何平台
 runtime 已验证。
 
 ## 备选方案
@@ -345,5 +344,6 @@ flock、POSIX record lock 与 OFD record lock 的 holder、range、close cleanup
 
 ## 收口
 
-当前为 Draft；Stage 0 已 `Ready / Not Active`，Stage 1 仍是 `Outline`。尚无R0、transaction、runtime evidence
-或contract cutover，`OPENED-DESC-RETIRE-001`与全部`FLOCK-*` IDs保持Not Effective。
+当前为 R0 / Accepted for Implementation；Stage 0 Active 且 Checkpoint 0S Closed，Checkpoint 0A 未激活，
+Stage 1 仍是 `Outline`。尚无 flock runtime evidence 或 contract cutover，`OPENED-DESC-RETIRE-001` 与全部
+`FLOCK-*` IDs 保持 Not Effective。

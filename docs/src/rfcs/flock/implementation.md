@@ -1,17 +1,17 @@
 # Flock 迁移实施计划
 
-**状态：** Stage 0 Ready / Not Active；Stage 1 Outline
-**适用修订：** Draft（R0 前）
+**状态：** Stage 0 Active / Checkpoint 0S Closed；Stage 1 Outline
+**适用修订：** R0
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
 **目标与不变量：** [Flock 目标与不变量](./invariants.md)
 **当前契约：** [Opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)、
 [Asynchronous wake delivery](../../contracts/scheduler/wake-delivery.md)
-**事务日志：** None
+**事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 
-本文把 cooperative-retirement Draft 解析成一条 proof-first 实施路线。2026-07-29 的开发者授权只覆盖本次
-docs-only implementation resolution：Stage 0 已达到 `Ready`，但 RFC 仍是 Draft，尚无 R0 acceptance、
-transaction 或 `Active` 授权。本文不修改代码、current contract 或 register，也不执行 `FLOCK-CUTOVER`。
+本文把 cooperative-retirement R0 解析成一条 proof-first 实施路线。2026-07-29 的独立 R0 review 已接受
+target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并完成 Checkpoint 0S。0S 已
+关闭，Checkpoint 0A 仍未激活。本阶段不修改 current contract/register，也不执行 `FLOCK-CUTOVER`。
 
 旧版围绕 precise cancellation、retirement-first 唯一 `EBADF`、同步 waiter cleanup 与
 identity-preserving restart 形成的 Stage 1-3、probe 和 manifest 继续失效；下文是当前唯一 implementation
@@ -59,7 +59,7 @@ authority。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 | 下一解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Owner / lifecycle vertical slice | Ready / Not Active | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | Stage 0 全部 checkpoint、review 与证据关闭后，另行运行 `0 -> 1 Implementation Resolution Gate` |
+| Stage 0 — Owner / lifecycle vertical slice | Active / Checkpoint 0S Closed | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 0A仍需开发者独立授权；Stage 0全部checkpoint、review与证据关闭后，另行运行`0 -> 1 Implementation Resolution Gate` |
 | Stage 1 — Acceptance closure | Outline | 根据 Stage 0 实际 diff 补齐 target matrix、LTP、双架构 runtime、contract write-back 与原子 `FLOCK-CUTOVER` | 只有 Stage 1 closure 可切换 | Stage 0 Closed 后由开发者单独授权解析；`Ready` 后仍需独立 `Active` 授权 |
 
 `Outline` 只固定目的、依赖、受保护边界与解析触发点；不冻结具体类型、文件、算法或命令。`Ready` 表示当前
@@ -70,12 +70,12 @@ stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 R
 
 ### 4.1 状态与 activation preflight
 
-**状态：** Ready / Not Active。Stage 0 activation 只允许从 Checkpoint 0S 开始；0S、0A、0B、0C 依次关闭，
-不得跳过 owner/lifecycle review 直接运行 ABI oracle。
+**状态：** Active / Checkpoint 0S Closed。Stage 0 已从 Checkpoint 0S 开始；0A、0B、0C 仍须依次独立授权和
+关闭，不得跳过 owner/lifecycle review 直接运行 ABI oracle。
 
 进入 `Active` 前必须同时满足：
 
-1. 当前 Draft target、Contract Impact 与本文 Stage 0 已完成独立 review，并被接受为 `R0 / Accepted for
+1. 待接受的 Draft target、Contract Impact 与本文 Stage 0 已完成独立 review，并被接受为 `R0 / Accepted for
    Implementation`；
 2. 建立引用 R0 与本文的 `docs/src/devlog/transactions/2026-07-29-flock.md`，记录当时 branch、HEAD、dirty
    state、activation authority 与 frozen manifest；若 activation 日期或文档布局已漂移，先更新本文路径；
@@ -85,6 +85,10 @@ stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 R
    user-test wrapper；入口漂移时先修订本文，不在实现中绕过 repository orchestration；
 5. 核对 manifest 与 activation 时已有 dirty changes。重叠文件必须先确认归属并做语义合并，不能覆盖用户修改；
 6. 开发者明确授权 Stage 0 从 `Ready` 进入 `Active`。R0 acceptance 或 transaction 创建本身不构成授权。
+
+**2026-07-29 activation result：** 六项 preflight 均已完成并写入 transaction。activation baseline 为
+`dev/drc/omega@c69e2143` 的 clean worktree；本轮用户给出的唯一 GOAL 明确授权 Stage 0 从 0S 开始，但不授权
+0A。live owner、build/app/fmt interface 与两条 wrapper 均保持可达，frozen manifest 无重叠 dirty change。
 
 ### 4.2 Probe 假设与成功边界
 
@@ -109,6 +113,9 @@ Stage 0 每个 checkpoint 的 `git diff --check` 只覆盖 tracked diff；若该
 文件存在 diff，任何 diagnostics 或 exit > 1 都必须处理后才能关闭 checkpoint。
 
 ### 4.3 Checkpoint 0S — `task::files` 行为保持型结构拆分
+
+**状态：** Closed / 2026-07-29。只完成下述同 owner 目录化与 transaction/docs write-back；Checkpoint 0A
+仍 Not Activated / Unauthorized。
 
 **目的：** 在引入 flock retirement handoff 前，把当前 `task::files` 已有职责按稳定角色目录化。该 checkpoint
 只降低后续 lifecycle proof surface，不改变 opened-description owner、fd-table owner、public API、可见性策略、
@@ -138,6 +145,13 @@ git diff --check
 
 0S review必须把搬迁前后的公开路径、可见性、lifecycle线性化点、fd-table publication/unpublication顺序与现有
 KUnit逐项对照；只以编译通过不能证明行为保持。该checkpoint关闭后再进入0A。
+
+**Closure evidence：** `task::files::*` 的既有 `pub` / `pub(crate)` re-export路径、类型身份与caller imports
+保持；仅 sibling 协作所需的 `ProcFile` 字段/方法、`FileDesc` publication helpers 与四个 lifecycle KUnit 所需
+table helper 收窄提升为`pub(super)`。source/declaration audit确认`Live(1) -> Retired`、static hook顺序、
+fd-table guard外 release、publication/unpublication与三个既有KUnit body均未改写。RV64 release build在沙箱外
+通过；沙箱内同命令被lwext4 `SIGSYS`阻断。formatter检查确认0S文件无diff，但命令仍被frozen manifest外三处
+vendored smoltcp既有baseline阻断；详细命令、review与write-back见transaction。
 
 ### 4.4 Checkpoint 0A — Inode Domain 与 Cooperative Retirement
 
@@ -439,6 +453,5 @@ contracts，再把Stage 1完整解析为`Ready`：精确交付、checkpoints、w
 
 ## 7. 当前结论
 
-当前可以提交 R0 review 的是：cooperative target、完整 Contract Impact，以及一个带真实 consumer 的 Stage 0
-Ready vertical slice。当前仍不得创建 transaction、修改代码、更新 current contract 或执行
-`FLOCK-CUTOVER`；下一合法动作是独立 review 并接受 R0，随后再决定是否授权 Stage 0 Active。
+当前 R0 已 Accepted for Implementation，Stage 0 Active 且 Checkpoint 0S Closed。Checkpoint 0A 仍未激活，
+本轮不得进入；current contract 与 register 未修改，`FLOCK-CUTOVER` 未执行，全部新 ID 保持 Not Effective。
