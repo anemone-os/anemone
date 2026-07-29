@@ -109,6 +109,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
   Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
+- [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：Public Draft；提议initial domain内唯一global protocol
+  `Stack`、domain-local logical interface/control plane、production loopback，以及普通用户态IPv4 unconnected UDP
+  纵切。Stage 0 topology probe已解析为Ready但未授权；R0、transaction和全部candidate contract cutover均未生效。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
