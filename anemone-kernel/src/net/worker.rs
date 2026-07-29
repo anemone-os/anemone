@@ -1,8 +1,9 @@
-use anemone_net_api::{Instant as NetworkInstant, InterfaceId, Recheck};
-use anemone_smoltcp_stack::{PumpBudget, Stack};
+use anemone_net_api::{EthernetAddress, Instant as NetworkInstant, InterfaceId, Recheck};
+use anemone_smoltcp_stack::PumpBudget;
 
 use crate::{
     device::net::{NetdevFrameProvider, NetdevSnapshot, PublishedNetdev, RecheckWake},
+    net::domain::{DomainStack, ExternalMapping, ExternalPumpPort},
     prelude::*,
     task::kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
     time::timer::schedule_threaded_timer_event,
@@ -26,7 +27,6 @@ const PUMP_BUDGET: PumpBudget =
     PumpBudget::new(NET_PUMP_INGRESS_BUDGET_FRAMES, NET_PUMP_EGRESS_BUDGET_STEPS);
 
 pub(super) enum AttachFailure<P> {
-    MissingEthernetAddress(PublishedNetdev<P>),
     WorkerSpawn {
         error: SysError,
         published: PublishedNetdev<P>,
@@ -35,7 +35,7 @@ pub(super) enum AttachFailure<P> {
 
 pub(super) struct PreparedPath {
     snapshot: NetdevSnapshot,
-    interface: InterfaceId,
+    mapping: Option<ExternalMapping>,
     control: Arc<PumpControl>,
 }
 
@@ -44,30 +44,48 @@ impl PreparedPath {
         &self.snapshot
     }
 
-    pub(super) const fn interface(&self) -> InterfaceId {
-        self.interface
+    pub(super) fn interface(&self) -> InterfaceId {
+        self.mapping
+            .as_ref()
+            .expect("prepared network path lost its mapping")
+            .interface()
     }
 
     pub(super) fn control(&self) -> Arc<PumpControl> {
         self.control.clone()
     }
 
-    pub(super) fn activate(self) {
+    pub(super) fn activate(mut self) {
+        self.mapping
+            .take()
+            .expect("network path mapping committed twice")
+            .commit();
         self.control.active.store(true, Ordering::Release);
         self.control.request_work();
     }
 
+    pub(super) fn rollback_mapping(&mut self) {
+        self.mapping
+            .take()
+            .expect("network path mapping rolled back twice")
+            .rollback();
+    }
+
     pub(super) fn stop_and_retain(self) {
+        assert!(
+            self.mapping.is_none(),
+            "terminal retention must withdraw the unpublished Stack mapping first"
+        );
         self.control.request_shutdown();
     }
 }
 
 /// Worker lifecycle and pure wake/work predicates owned by the attach path.
 ///
-/// The provider remains the durable completion/recheck truth and `Stack`
-/// remains the protocol/deadline truth. These atomics only project activation,
-/// explicit work, and pump admission; the attach authority lock owns terminal
-/// shutdown admission.
+/// The provider remains the durable completion/recheck truth and the domain
+/// Stack remains the protocol/deadline truth. These atomics only project
+/// activation, explicit work, and pump admission; the attach authority lock
+/// owns terminal shutdown admission.
 pub(super) struct PumpControl {
     worker: spin::Once<KThreadHandle>,
     active: AtomicBool,
@@ -139,9 +157,8 @@ impl RecheckWake for PumpControl {
 }
 
 struct PumpCore<P: NetdevFrameProvider> {
-    stack: Stack,
+    port: ExternalPumpPort,
     provider: P,
-    interface: InterfaceId,
 }
 
 struct WorkerLaunch<P: NetdevFrameProvider> {
@@ -171,27 +188,22 @@ struct WorkerArg<P: NetdevFrameProvider> {
 
 pub(super) fn prepare<P: NetdevFrameProvider>(
     published: PublishedNetdev<P>,
+    stack: Arc<DomainStack>,
+    ethernet_address: EthernetAddress,
+    worker_name: &str,
 ) -> Result<PreparedPath, AttachFailure<P>> {
     let (snapshot, mut provider) = published.into_parts();
-    let Some(ethernet_address) = snapshot.facts().ethernet_address else {
-        return Err(AttachFailure::MissingEthernetAddress(
-            PublishedNetdev::from_parts(snapshot, provider),
-        ));
-    };
-
-    let mut stack = Stack::new();
-    let interface = stack.add_interface(&mut provider, ethernet_address, network_now());
+    let mapping = stack.attach_external(&mut provider, ethernet_address, network_now());
     let control = Arc::new(PumpControl::new());
     let wake: Arc<dyn RecheckWake> = control.clone();
     provider.install_recheck_wake(Arc::downgrade(&wake));
     drop(wake);
 
     let launch = Arc::new(WorkerLaunch::new(PumpCore {
-        stack,
+        port: mapping.pump_port(),
         provider,
-        interface,
     }));
-    let worker = match KThreadBuilder::new(format!("net:{}", snapshot.name())).spawn(
+    let worker = match KThreadBuilder::new(format!("net:{worker_name}")).spawn(
         network_worker_entry::<P>,
         AnyOpaque::new(WorkerArg {
             launch: launch.clone(),
@@ -200,10 +212,8 @@ pub(super) fn prepare<P: NetdevFrameProvider>(
     ) {
         Ok(worker) => worker,
         Err(error) => {
-            let mut core = launch.take();
-            core.stack
-                .remove_interface(interface)
-                .expect("failed network attach lost its stack-local mapping");
+            let core = launch.take();
+            mapping.rollback();
             let published = PublishedNetdev::from_parts(snapshot, core.provider);
             return Err(AttachFailure::WorkerSpawn { error, published });
         },
@@ -212,7 +222,7 @@ pub(super) fn prepare<P: NetdevFrameProvider>(
 
     Ok(PreparedPath {
         snapshot,
-        interface,
+        mapping: Some(mapping),
         control,
     })
 }
@@ -254,8 +264,8 @@ fn network_worker_entry<P: NetdevFrameProvider>(ctx: KThreadCtx, arg: AnyOpaque)
         loop {
             let now = network_now();
             let outcome = core
-                .stack
-                .pump(core.interface, &mut core.provider, now, PUMP_BUDGET)
+                .port
+                .pump(&mut core.provider, now, PUMP_BUDGET)
                 .expect("active network path lost its interface mapping");
             rounds += 1;
             immediate_repoll = outcome.recheck == Recheck::Immediate;

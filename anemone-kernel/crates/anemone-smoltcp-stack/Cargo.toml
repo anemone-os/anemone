@@ -40,6 +40,11 @@ path = "tests/multi_instance.rs"
 required-features = ["host-test"]
 
 [[test]]
+name = "multi_interface"
+path = "tests/multi_interface.rs"
+required-features = ["host-test"]
+
+[[test]]
 name = "udp_topology"
 path = "tests/udp_topology.rs"
 required-features = ["host-test"]

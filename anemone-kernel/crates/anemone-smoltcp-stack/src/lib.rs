@@ -3,14 +3,16 @@
 extern crate alloc;
 
 mod adapter;
-// Stage 0's positive decision retains this private no_std candidate as route
-// input for the Stage 0 -> 1 resolution gate. The kernel still has no consumer,
-// so keep the temporary module-wide allowance until Stage 1 either wires the
-// production owner or replaces and removes the candidate.
+// The production global Stack now owns this private no_std candidate, but a
+// functional software link remains Stage 2 work. Remove the module allowance
+// when Stage 2 wires or replaces that path.
 #[allow(dead_code)]
 mod local_link;
 mod pump;
 mod stack;
+// The production global Stack now owns the aggregate Endpoint candidate, but
+// Endpoint operations stay dormant until Stage 3 introduces their real
+// consumer. Reassess the allowance at that gate.
 #[allow(dead_code)]
 mod udp;
 

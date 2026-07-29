@@ -1,13 +1,13 @@
 # net-udp 目标与不变量
 
-**状态：** R0 Accepted Target / Not Cut Over
+**状态：** R0 Accepted Target / Stage 1 Domain Contract Cut Over / Later Candidates Pending
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **适用修订：** R0
 
 本文定义`net-udp` R0的accepted contract delta、target invariants与RFC-local proof obligations。它不是current
-contract；当前 effective 规则仍以 `docs/src/contracts/` 及已完成 cutover 的 source为准。下文新增ID仍是
-Pending candidate，只有完成相应implementation cutover后才能进入current contract。
+contract；当前 effective 规则仍以 `docs/src/contracts/` 及已完成 cutover 的 source为准。Stage 1已使
+`NETDEV-LIFE-001`、`NET-ATTACH-001`与`NET-IFACE-DOMAIN-001`生效；其余新增/Refine ID仍是Pending candidate。
 
 本文不承担 implementation plan。concrete Rust type、internal API、lock primitive、worker、queue、buffer、
 algorithm、module path、write set、probe 与验证命令均由[迁移实施计划](./implementation.md)按滚动阶段解析。
@@ -32,9 +32,9 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 | `NET-FRAME-OWN-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-own-001--frame-backing只有一个访问owner) | external frame ownership与DMA/CPU handoff不变；loopback另受同等唯一packet-owner义务约束 | 全程保持 |
 | `NET-FRAME-PROGRESS-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-frame-progress-001--有界资源normal-backpressure与durable-recheck) | provider capacity、normal backpressure、durable recheck与fair progression不变 | 全程保持 |
 | `NET-STACK-PUMP-001` | Preserve | [Active](../../contracts/net/frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state) | current contract已允许一个Stack拥有多interface；target改为initial domain唯一Stack，不改变单instance唯一推进规则 | 全程保持 |
-| `NETDEV-LIFE-001` | Refine | [Active](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction) | `device/net`保留external NIC publication identity/facts/capability；domain-local ifindex/name/kind与logical-interface lifecycle移入新的domain contract | Stage 1 `NET-UDP-DOMAIN-CUTOVER` |
-| `NET-ATTACH-001` | Refine | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | attach authority从“每netdev新建Stack path”改为external NIC admission到initial domain/global Stack；保留publication-last、rollback isolation与shutdown admission | Stage 1 `NET-UDP-DOMAIN-CUTOVER` |
-| `NET-IFACE-DOMAIN-001` | Introduce | None（尚未生效） | initial domain唯一拥有logical-interface membership/lifecycle/ifindex/name/kind；`lo`与external interface共享这一namespace | Stage 1 `NET-UDP-DOMAIN-CUTOVER` |
+| `NETDEV-LIFE-001` | Refine | [Active](../../contracts/net/netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction) | `device/net`保留external NIC publication identity/facts/capability；domain-local ifindex/name/kind与logical-interface lifecycle移入新的domain contract | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
+| `NET-ATTACH-001` | Refine | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | attach authority从“每netdev新建Stack path”改为external NIC admission到initial domain/global Stack；保留publication-last、rollback isolation与shutdown admission | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
+| `NET-IFACE-DOMAIN-001` | Introduce | [Active](../../contracts/net/interface-domain.md#net-iface-domain-001--initial-domain拥有logical-interface-namespace) | initial domain唯一拥有logical-interface membership/lifecycle/ifindex/name/kind；`lo`与external interface共享这一namespace | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
 | `NET-CONTROL-PLANE-001` | Introduce | None（尚未生效） | 唯一拥有local address、route、source/interface selection policy与Stack projection边界 | Static IPv4 control-plane cutover |
 | `NET-PROTOCOL-BOUNDARY-001` | Introduce | None（尚未生效） | 固定kernel Socket/control plane与concrete Stack之间的Endpoint/UDP capability、依赖方向和object fence | Protocol capability cutover |
 | `NET-SOCKET-ENDPOINT-001` | Introduce | None（尚未生效） | kernel Socket / File与Stack Endpoint的owner fence、opaque association、final-release retire与stale isolation | Socket/Endpoint lifecycle cutover |
@@ -57,6 +57,12 @@ publication-last、failure isolation仍由原owner和原协议延续，R0固定�
 原有publication-last、mapping rollback、failure isolation、shutdown admission与provider retention继续有效，新增
 logical-interface admission并把mapping destination改为initial domain/global Stack。把这段handoff另建为并列
 协议会分裂同一次attach transaction，因此不采用Preserve加第二attach owner的表达。
+
+Stage 1已按上述分类执行`NET-UDP-DOMAIN-CUTOVER`；三项current truth分别见
+[Netdev lifecycle](../../contracts/net/netdev-lifecycle.md)、
+[Attach lifecycle](../../contracts/net/attach-lifecycle.md)和
+[Interface domain](../../contracts/net/interface-domain.md)。本页仍保存R0 target与cutover理由，不成为并列current
+authority；functional loopback/control plane/socket相关candidate不因这一局部cutover提前生效。
 
 SystemTarget三项已经提取到`docs/src/contracts/configuration/system-target.md`。`STM-OWNER-001`与
 `STM-RESOLVE-001`保持current baseline；`STM-TARGET-001`当前仍不包含network deployment schema，R0只在

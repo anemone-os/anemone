@@ -111,10 +111,11 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
 - [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：R0已接受；目标为initial domain内唯一global protocol
   `Stack`、domain-local logical interface/control plane、production loopback，以及普通用户态IPv4 unconnected UDP
-  纵切。0B post-closure feedback已完成correction；0C保留最小private ordinary candidate、长期deterministic
-  topology matrix与隔离的conditional validation facade，positive/common gates通过并关闭Stage 0。独立`0 -> 1`
-  resolution已选择per-provider worker + domain-owned single Stack access window并把Stage 1解析为Ready / Not
-  Active；`NET-UDP-DOMAIN-CUTOVER`与Stage 2未授权，全部candidate contract仍未cut over。执行证据见
+  纵切。Stage 0保留最小private ordinary candidate、长期deterministic topology matrix与隔离的conditional
+  validation facade；Stage 1已建立boot logical `lo`、domain-local logical identity、initial-domain唯一Stack与
+  per-provider narrow pump port。`NET-UDP-DOMAIN-CUTOVER`已原子Refine `NETDEV-LIFE-001`/
+  `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；functional loopback/control plane/socket仍未生效，Stage 2
+  保持Outline且`1 -> 2`resolution未执行。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

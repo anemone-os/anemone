@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/crates/{anemone-net-api,anemone-smoltcp-stack}`、`anemone-kernel/src/{device/net,driver/net,net}`
 **依赖：** 本页内部依赖按条目声明
 **Pending Successor：** None
-**最后核验：** 2026-07-27
+**最后核验：** 2026-07-29
 
 ## 状态与能力所有权
 
@@ -18,7 +18,7 @@
 | shared semantic types | `anemone-net-api` | values、move-only token traits | 跨provider/stack表达同一handoff，不拥有runtime state |
 | backing、queue token、DMA与completion | concrete frame provider | callback-scoped frame token、recheck edge | frame I/O与资源回收 |
 | link/resource durable truth | concrete provider；规范化publication snapshot由`device/net`拥有 | snapshot + edge-only wake | worker醒来后重读owner fact |
-| smoltcp object、`InterfaceId` mapping与deadline | concrete stack instance | opaque `InterfaceId`、wake/work capability | 串行bounded protocol progression |
+| smoltcp object、`InterfaceId` mapping与deadline | initial-domain唯一`DomainStack`内的concrete Stack instance | narrow per-interface pump port、wake/work capability | 串行bounded protocol progression |
 | worker admission与explicit work | kernel attach/worker owner | stateless wake capability | 安排pump，不复制provider或stack truth |
 
 notification、wake edge、统计与diagnostic label都不是行为真相源。当前production source不保留
@@ -112,14 +112,18 @@ attach authority只请求推进，不在owner外修改smoltcp object或发布Lin
 **违反表现：** 两个worker并发poll同一stack；IRQ进入smoltcp；kernel缓存smoltcp handle；ordinary worker
 调用无界poll；deadline读取wall clock或另一条隐藏时间线。
 
-**验证 / Enforcement：** host serialization、exact budget、deadline/owner-blocked与multi-instance tests；
-kernel source audit确认worker只持唯一`PumpCore`且每轮受静态budget/repoll上界约束；RV64 worker/timer wiring
-与normal shutdown evidence。
+**验证 / Enforcement：** host serialization、exact budget、deadline/owner-blocked、multi-instance与one-Stack/
+two-provider tests；kernel source audit确认worker只持narrow per-interface port且每轮受静态budget/repoll上界约束，
+domain Stack lock在round间释放；RV64 worker/timer wiring与normal shutdown evidence。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
 **当前来源：** [Network Frame Path transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)的
 `NFP-FINAL-CUTOVER`。
+
+**当前 enforcement 更新：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
+`NET-UDP-DOMAIN-CUTOVER`将production从per-netdev Stack迁移为initial-domain唯一Stack与per-provider narrow pump
+port；本ID的单instance唯一推进语义保持不变。
 
 ## 当前接受边界
 

@@ -2,10 +2,7 @@
 
 use anemone_net_api::{EthernetAddress, FrameCapabilities, InterfaceFacts, LinkState};
 
-use crate::{
-    prelude::*,
-    utils::identity::{AnyIdentity, GeneralIdentity},
-};
+use crate::{prelude::*, utils::identity::AnyIdentity};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(transparent)]
@@ -15,14 +12,17 @@ impl NetdevId {
     pub const fn index(self) -> u32 {
         self.0
     }
+
+    #[cfg(feature = "kunit")]
+    pub(crate) const fn for_kunit(index: u32) -> Self {
+        Self(index)
+    }
 }
 
 /// Immutable facts committed by the network-device registry at publication.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NetdevSnapshot {
     id: NetdevId,
-    ifindex: u32,
-    name: GeneralIdentity,
     origin: AnyIdentity,
     /// Stable facts captured at publication. Link state may become stale and
     /// is never consulted by the runtime pump, whose provider remains the
@@ -33,14 +33,6 @@ pub struct NetdevSnapshot {
 impl NetdevSnapshot {
     pub const fn id(&self) -> NetdevId {
         self.id
-    }
-
-    pub const fn ifindex(&self) -> u32 {
-        self.ifindex
-    }
-
-    pub fn name(&self) -> &str {
-        self.name.as_str()
     }
 
     pub fn origin(&self) -> &str {
@@ -169,7 +161,6 @@ impl PendingNetdev {
 pub(crate) enum PublishError {
     DuplicateOrigin,
     IdentityExhausted,
-    NameTooLong,
 }
 
 struct Registry {
@@ -200,19 +191,13 @@ impl Registry {
         }
 
         let raw_id = self.next_id;
-        let Some(ifindex) = raw_id.checked_add(1) else {
+        let Some(next_id) = raw_id.checked_add(1) else {
             return Err((PublishError::IdentityExhausted, ready));
         };
-        let name = match GeneralIdentity::try_from_fmt(format_args!("eth{raw_id}")) {
-            Ok(name) => name,
-            Err(_) => return Err((PublishError::NameTooLong, ready)),
-        };
-        self.next_id = ifindex;
+        self.next_id = next_id;
 
         let snapshot = NetdevSnapshot {
             id: NetdevId(raw_id),
-            ifindex,
-            name,
             origin: ready.origin,
             facts: InterfaceFacts {
                 ethernet_address: ready.ethernet_address,
@@ -325,8 +310,6 @@ mod kunits {
             Err(_) => panic!("first publication must succeed"),
         };
         assert_eq!(first.id().index(), 0);
-        assert_eq!(first.ifindex(), 1);
-        assert_eq!(first.name(), "eth0");
         assert_eq!(first.origin(), "virtio0");
         assert_eq!(first.facts(), first_facts);
 
@@ -355,8 +338,6 @@ mod kunits {
             Err(_) => panic!("second unique publication must succeed"),
         };
         assert_eq!(second.id().index(), 1);
-        assert_eq!(second.ifindex(), 2);
-        assert_eq!(second.name(), "eth1");
         assert_eq!(second.origin(), "virtio1");
         assert_eq!(
             second.facts(),

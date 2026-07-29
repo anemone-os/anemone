@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0 Closed / Stage 1 Ready / Not Active / Stage 2-5 Outline
+**状态：** Accepted for Implementation / Stage 0-1 Closed / Stage 2-5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -12,16 +12,16 @@
 [IOMUX](../../contracts/iomux/poll-wait.md)中的`IOMUX-POLL-001..003`；
 [Epoll](../../contracts/epoll/protocol.md)中的`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`；
 [System Target](../../contracts/configuration/system-target.md)中的`STM-OWNER-001`、`STM-TARGET-001`、
-`STM-RESOLVE-001`；候选新增`NET-IFACE-DOMAIN-001`、`NET-CONTROL-PLANE-001`、
+`STM-RESOLVE-001`；Stage 1已新增`NET-IFACE-DOMAIN-001`，后续候选新增`NET-CONTROL-PLANE-001`、
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
-**开放问题：** 0B post-closure review的两个Keter与一个Euclid已由0B Feedback Correction关闭
-**下一步：** 等待独立的Stage 1 activation授权；不得因Ready自动进入实现或解析Stage 2
+**开放问题：** None；后续Outline的待解析实现决定不作为当前设计问题
+**下一步：** 仅可在独立授权下进入`1 -> 2 Implementation Resolution Gate`；不得由Stage 1 closure自动解析或实现Stage 2
 
-本目录是`net-udp` R0 accepted target的canonical source。R0不覆盖current contract；候选contract仍须在后续
-implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的0B Feedback
-Correction与0C positive decision closure均已关闭；独立`0 -> 1`resolution已把Stage 1解析为Ready，但Stage 1
-仍未授权进入Active，Stage 2-5保持Outline。
+本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
+`NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；其它R0 candidate仍须在后续明确
+implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的Stage 0与Stage 1
+均已独立关闭，Stage 2-5保持Outline。
 
 ## 摘要
 
@@ -100,7 +100,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0 Closed；Stage 1 Ready / Not Active；Stage 2-5 Outline
+- [迁移实施计划](./implementation.md)：Stage 0-1 Closed；Stage 2-5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -124,7 +124,7 @@ RFC target：
 
 | 修订 | 日期 | 结论 | 证据 |
 | --- | --- | --- | --- |
-| R0 | 2026-07-29 | 接受initial domain/global Stack、logical interface/control plane、Socket/Endpoint owner fence、IPv4 unconnected UDP能力包络与五项用户可见决定；全部候选contract保持Pending | [R0 review与Stage 0 activation](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---r0-public-review-and-stage-0-activation-preflight) |
+| R0 | 2026-07-29 | 接受initial domain/global Stack、logical interface/control plane、Socket/Endpoint owner fence、IPv4 unconnected UDP能力包络与五项用户可见决定；Stage 1 domain contract delta已cut over，其余candidate保持Pending | [R0 review、Stage 0-1执行与cutover](../../devlog/transactions/2026-07-29-net-udp.md) |
 
 ## 方案
 
@@ -397,7 +397,8 @@ Implementation readiness已经完成：
 
 - [迁移实施计划](./implementation.md)已按positive route关闭Stage 0 multi-interface UDP topology probe；独立
   `0 -> 1`resolution选择per-provider worker + domain-owned single Stack access window路线，并把Stage 1完整解析为
-  Ready。Ready不构成implementation、contract cutover或Stage 2 resolution授权。
+  Ready；后续独立授权已完成Stage 1实现、review、validation和`NET-UDP-DOMAIN-CUTOVER`。Stage 1 closure不构成
+  Stage 2 resolution或implementation授权。
 
 R0把 concrete types、内部 API、module placement、lock/worker/queue、capacity、port algorithm、loopback
 medium 和 stage-later probe 后延，只要对应 Outline 明确保护本 target、contract IDs、owner、ABI 与 acceptance
@@ -454,8 +455,10 @@ fallback或provenance系统不能证明实际网络正确，反而扩大owner和
 
 ## 收口
 
-R0已经接受但尚未实现或cut over。0A先刻画candidate engine egress-admission seam，0B建立Stack-private
+R0已经接受并完成Stage 0-1，整体RFC尚未关闭。0A先刻画candidate engine egress-admission seam，0B建立Stack-private
 positive candidate；post-closure review随后发现receive gate owner粒度、engine capacity admission和host seam
 module placement反馈，已由0B Feedback Correction修复并通过独立复审。0C保留最小ordinary candidate和长期
-deterministic topology matrix，确认无需修改vendored/shared API，并关闭Stage 0。rootfs、QEMU、LTP、双架构runtime
-与用户可见UDP能力均`Not Run`；Stage 1已完成resolution但仍须独立activation授权。
+deterministic topology matrix，确认无需修改vendored/shared API，并关闭Stage 0。Stage 1随后建立boot logical `lo`、
+domain-local logical identity和production唯一global Stack，原子cut over三项domain contract；functional loopback、
+control plane、socket/UDP、LA64、SMP>1、network LTP与final harness仍`Not Run`。下一步只能是独立`1 -> 2`
+resolution gate。

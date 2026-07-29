@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0 Closed / Stage 1 Ready / Not Active / Stage 2-5 Outline
+**状态：** R0 / Stage 0-1 Closed / Stage 2-5 Outline
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -14,8 +14,8 @@
 
 > 本文是R0的canonical实施顺序、stage maturity、probe、验证和resolved write set。R0已由public review接受，
 > transaction已经建立；Checkpoint 0B关闭后的工程审查确认两个Keter和一个Euclid，0B Feedback Correction已
-> 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；独立的`0 -> 1`resolution已于
-> 2026-07-29完成，Stage 1现为Ready但未获得实现授权，Stage 2-5仍是Outline。Stage 0不修改current contract。
+> 修复并通过独立复审。0C按positive route完成decision closure并关闭Stage 0；独立的`0 -> 1`resolution与后续
+> Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效，Stage 2-5仍是Outline。
 
 ## 1. 计划角色与 authority
 
@@ -24,7 +24,7 @@
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
-Stage 0已经独立关闭；本计划现在冻结下一个可执行的Stage 1。Stage 2-5仍是future Outline，其中列出的目录、
+Stage 0和Stage 1已经独立关闭；本计划当前停在`1 -> 2 Implementation Resolution Gate`之前。Stage 2-5仍是future Outline，其中列出的目录、
 模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须
 先按自己的验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析
 完成只让下一阶段达到Ready，不自动进入Active。
@@ -130,7 +130,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage | 成熟度 | 概括目的 | 前置依赖 | Contract 状态 |
 | --- | --- | --- | --- | --- |
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
-| Stage 1 — Initial domain / global Stack walking skeleton | Ready / Not Active | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`计划Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；Stage 1关闭前均Pending |
+| Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Outline | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed | 候选`STM-TARGET-001` Refine与`NET-CONTROL-PLANE-001` Introduce；是否本stage cutover由1->2 gate决定 |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Outline | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed | 候选`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`；partial code不自动生效 |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
@@ -141,11 +141,11 @@ capacity数值或精确命令；这些只在对应stage变为Ready时冻结。
 
 ## 6. Current Stage and Future Outlines
 
-### 6.1 Stage 1 Ready — Initial domain / global Stack walking skeleton
+### 6.1 Stage 1 Closed — Initial domain / global Stack walking skeleton
 
-**阶段成熟度与授权：** Ready / Not Active。2026-07-29的`0 -> 1`resolution已经冻结本节完整交付、路线、
-contract cutover、验证、停止/退出条件与Resolved Write Set Manifest；本轮只授权文档解析，不授权修改Stage 1
-source、current contract或进入Stage 2。
+**阶段成熟度与授权：** Closed。本节保留2026-07-29 `0 -> 1`resolution冻结的完整Ready定义、路线、contract
+cutover、验证、停止/退出条件与Resolved Write Set Manifest；后续独立授权只执行单一Checkpoint 1A，不授权
+`1 -> 2`resolution或Stage 2。
 
 **前置条件：**
 
@@ -420,6 +420,24 @@ Renegotiation Gate。不得用parallel registry、compat mirror、第二Stack或
   navigation同步Stage 1 Closed；
 - Stage 1先独立Closed。Stage 2仍是Outline，只有后续独立`1 -> 2 Implementation Resolution Gate`可以解析为
   Ready；本stage closure不得自动解析或启动Stage 2。
+
+**Closure result — 2026-07-29：** Checkpoint 1A按本节路线删除device-owned ifindex/name与per-worker Stack，
+建立boot logical `lo`、external reservation/commit/abort、initial-domain唯一`DomainStack`与per-provider narrow pump
+port。普通spawn failure按mapping -> reservation顺序回滚并交回同一provider；publish前terminal race先撤销两份
+未发布状态，再stop inactive worker并retain provider。source audit确认raw Stack、identity truth、authority/Stack
+lock order、finite pump和terminal lifetime均保持唯一owner，未修改shared/vendored API或Stage 2 surface。
+
+host stack/net-api、one-Stack/two-provider matrix、no-default test/check、authored-file format、RV64 release build与
+fresh-disk RV64 closure达到本节floor；RV64运行实际执行263/263 KUnit、真实VirtIO active attach、strict
+`filesystem -> network -> device -> PowerOff`并正常退出。最终日志调用按开发者要求保持`kinfoln!`；runtime run
+曾临时提高这三项lifecycle记录的直接console可见性，因此该run不作为最终INFO console print-level的exact-code
+proof，行为/KUnit/shutdown证据仍有效。LA64、SMP > 1、functional loopback、UDP syscall/UAPI、configured external
+IP traffic、virtio-pci、hardware、network LTP和final harness均Not Run。
+
+`NET-UDP-DOMAIN-CUTOVER`在本checkpoint原子Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce
+`NET-IFACE-DOMAIN-001`；frame-path四项ID保持Preserve，其它R0 candidate继续Pending。exact执行、review、验证和
+claim boundary见[transaction](../../devlog/transactions/2026-07-29-net-udp.md)。Stage 1在此Closed，未运行或解析
+`1 -> 2`gate。
 
 ### 6.2 Stage 2 Outline — Static control plane与production loopback
 
@@ -1012,7 +1030,7 @@ Resolution结果：
 - Stage 0 positive route在live source中仍可由一个kernel domain-owned Stack access window和heterogeneous
   per-provider worker自然消费；不需要vendored smoltcp、`anemone-net-api`、route/control plane或第二Stack。
 - authoritative Stage 1 Ready定义、单一Checkpoint 1A、`NET-UDP-DOMAIN-CUTOVER`与exact manifest已经冻结在
-  [6.1](#61-stage-1-ready--initial-domain--global-stack-walking-skeleton)；具体preflight、Route Correction分类和
+  [6.1](#61-stage-1-closed--initial-domain--global-stack-walking-skeleton)；具体preflight、Route Correction分类和
   Not Active边界记录在[transaction](../../devlog/transactions/2026-07-29-net-udp.md)。
 - 本resolution保持R0 target、owner、ABI、Contract Impact与acceptance boundary，不增加RFC修订，不更新current
   contract或register。Stage 1为Ready / Not Active；Stage 2 resolution与任何implementation均未授权。
@@ -1087,6 +1105,11 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   vendored/shared seam。resolution只改变implementation route、physical manifest、validation与cutover安排，保持
   R0 target/owner/ABI/Contract Impact/acceptance不变；Stage 1达到Ready / Not Active，精确preflight见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-0---stage-1-implementation-resolution-gate)。
+- `2026-07-29`：Stage 1 / Execution and Contract Cutover。Checkpoint 1A按resolved route迁移到initial-domain唯一
+  global Stack与logical-interface owner；未要求shared/vendored surface、target、owner、ABI、visible semantics或
+  acceptance变化。`NET-UDP-DOMAIN-CUTOVER`原子生效，Stage 1 Closed；Stage 2仍Outline且`1 -> 2`gate未执行。
+  精确source、review、validation与Not Run边界见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-1-checkpoint-1a-implementation-validation-and-domain-cutover)。
 
 ## 13. Target Renegotiation Gates
 
@@ -1095,14 +1118,14 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 
 ## 14. Write Set扩展记录
 
-当前没有扩展。Stage 1 manifest由future Outline在本次resolution中首次冻结，不是Stage 0 write-set expansion；只有
-Stage 1进入Ready后的越界申请才记录在这里。
+当前没有扩展。Stage 1按冻结manifest完成；没有修改shared/vendored API、build configuration、Stage 2 surface或
+其它owner。future Outline只有达到Ready后才形成新的write set。
 
 ## 15. 结构维护记录
 
 Stage 0在0B Feedback Correction中执行same-owner private module split：ordinary Stack owner位于
 `src/stack/mod.rs`，conditional facade/DTO/conversion位于`src/stack/host_validation.rs`；0C确认该拆分长期保留到
-Stage 1由production owner接管ordinary aggregate candidate。`0 -> 1`resolution进一步确认Stage 1不替代
+Stage 1已经由production initial-domain唯一Stack接管ordinary aggregate candidate owner。`0 -> 1`resolution确认Stage 1不替代
 host-only control/observation，因此conditional facade继续只服务长期deterministic matrix，待Stage 2/3真实
 control-plane/Endpoint consumer出现时按方法逐项删除或保留；它仍不进入kernel dependency。拆分没有改变public
 production API、owner或shared contract。

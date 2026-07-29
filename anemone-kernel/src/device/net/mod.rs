@@ -4,7 +4,7 @@ mod provider;
 mod registry;
 
 pub(crate) use provider::{NetdevFrameProvider, RecheckWake};
-pub use registry::NetdevSnapshot;
+pub use registry::{NetdevId, NetdevSnapshot};
 pub(crate) use registry::{
     PendingAttachProvider, PublishError, PublishedNetdev, ReadyNetdev, publish, retain_pending,
     take_pending,

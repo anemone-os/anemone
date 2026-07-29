@@ -13,6 +13,7 @@
 	- [Network 当前契约](./contracts/net/index.md)
 		- [Frame path](./contracts/net/frame-path.md)
 		- [Netdev lifecycle](./contracts/net/netdev-lifecycle.md)
+		- [Interface domain](./contracts/net/interface-domain.md)
 		- [Attach lifecycle](./contracts/net/attach-lifecycle.md)
 	- [Build Configuration 当前契约](./contracts/configuration/index.md)
 		- [System target 与 resolved selection](./contracts/configuration/system-target.md)

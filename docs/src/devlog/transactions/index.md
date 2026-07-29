@@ -6,9 +6,9 @@
 
 ## Active
 
-- [Network UDP](./2026-07-29-net-udp.md)：R0已接受；0A-0C与Stage 0已按positive topology decision关闭；
-  `0 -> 1`resolution选择per-provider worker + domain-owned single Stack access window，Stage 1现为Ready / Not
-  Active。`NET-UDP-DOMAIN-CUTOVER`与Stage 2均未授权，current contracts未变。
+- [Network UDP](./2026-07-29-net-udp.md)：R0已接受；Stage 0 positive topology decision与Stage 1 initial-domain/
+  global-Stack walking skeleton均已关闭。`NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/
+  `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；Stage 2仍Outline，`1 -> 2`resolution未执行。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
