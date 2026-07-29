@@ -41,6 +41,16 @@ fn assert_udp_frame(
     assert_eq!(udp.payload(), payload);
 }
 
+fn pump_local(stack: &mut Stack, interface: InterfaceId, tick: i64) {
+    stack
+        .pump_local_for_host_validation(
+            interface,
+            Instant::from_micros(tick),
+            PumpBudget::new(1, 1),
+        )
+        .unwrap();
+}
+
 #[test]
 fn selected_external_interface_is_the_only_engine_that_can_consume() {
     let mut stack = Stack::new();
@@ -445,5 +455,145 @@ fn local_link_is_bounded_normal_ingress_and_retire_withdraws_all_resources() {
     assert_eq!(
         stack.retire_udp_endpoint_for_host_validation(client),
         Err(HostRetireError::UnknownEndpoint)
+    );
+}
+
+#[test]
+fn engine_payload_capacity_is_part_of_precommit_admission() {
+    let mut stack = Stack::new();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 2, 128, Instant::ZERO);
+    let client = stack
+        .create_udp_endpoint_for_host_validation(43000, 1, 32)
+        .unwrap();
+    let server = stack
+        .create_udp_endpoint_for_host_validation(43001, 1, 32)
+        .unwrap();
+
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            43001,
+            &[0; 33],
+        ),
+        Err(HostSendError::Oversize { maximum: 32 })
+    );
+    assert!(
+        !stack
+            .udp_endpoint_observation_for_host_validation(client)
+            .unwrap()
+            .pending_tx
+    );
+
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            43001,
+            &[0x5a; 32],
+        )
+        .unwrap();
+    pump_local(&mut stack, local, 1);
+    pump_local(&mut stack, local, 2);
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(server)
+            .unwrap()
+            .payload,
+        [0x5a; 32]
+    );
+}
+
+#[test]
+fn full_receive_queue_does_not_gate_another_endpoint() {
+    let mut stack = Stack::new();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 4, 128, Instant::ZERO);
+    let first_client = stack
+        .create_udp_endpoint_for_host_validation(44000, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let first_server = stack
+        .create_udp_endpoint_for_host_validation(44001, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let second_client = stack
+        .create_udp_endpoint_for_host_validation(45000, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let second_server = stack
+        .create_udp_endpoint_for_host_validation(45001, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+
+    stack
+        .send_udp_for_host_validation(
+            first_client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            44001,
+            b"first-1",
+        )
+        .unwrap();
+    pump_local(&mut stack, local, 1);
+    pump_local(&mut stack, local, 2);
+
+    // Keep one datagram in the aggregate queue and one in the same Endpoint's
+    // engine. This backpressure belongs to first_server only.
+    stack
+        .send_udp_for_host_validation(
+            first_client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            44001,
+            b"first-2",
+        )
+        .unwrap();
+    pump_local(&mut stack, local, 3);
+    pump_local(&mut stack, local, 4);
+    assert_eq!(
+        stack
+            .udp_endpoint_observation_for_host_validation(first_server)
+            .unwrap()
+            .received_datagrams,
+        1
+    );
+    let quiescent = stack
+        .pump_local_for_host_validation(local, Instant::from_micros(5), PumpBudget::new(1, 1))
+        .unwrap();
+    assert!(!quiescent.work_remaining);
+    assert_eq!(quiescent.recheck, anemone_net_api::Recheck::Idle);
+
+    stack
+        .send_udp_for_host_validation(
+            second_client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            45001,
+            b"second",
+        )
+        .unwrap();
+    for tick in 6..10 {
+        pump_local(&mut stack, local, tick);
+    }
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(second_server)
+            .unwrap()
+            .payload,
+        b"second"
+    );
+
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(first_server)
+            .unwrap()
+            .payload,
+        b"first-1"
+    );
+    pump_local(&mut stack, local, 10);
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(first_server)
+            .unwrap()
+            .payload,
+        b"first-2"
     );
 }

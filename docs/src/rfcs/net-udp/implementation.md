@@ -13,8 +13,8 @@
 **事务日志：** [2026-07-29 net-udp](../../devlog/transactions/2026-07-29-net-udp.md)
 
 > 本文是R0的canonical实施顺序、stage maturity、probe、验证和resolved write set。R0已由public review接受，
-> transaction已经建立；本轮独立授权覆盖的Stage 0 Checkpoint 0B已经关闭。Stage 0本身尚未关闭，当前停止并
-> 等待0C独立授权；Stage 0不修改current contract。
+> transaction已经建立；Checkpoint 0B关闭后的工程审查确认两个Keter和一个Euclid，0B Feedback Correction已
+> 修复并通过独立复审。Stage 0本身尚未关闭，0C仍未授权；Stage 0不修改current contract。
 
 ## 1. 计划角色与 authority
 
@@ -323,7 +323,7 @@ capacity数值或精确命令；这些只在对应stage变为Ready时冻结。
 
 ### 7.1 阶段状态与 activation preflight
 
-**成熟度：** Active；Checkpoints 0A-0B Closed。0C仍未授权，当前不得继续Stage 0执行。
+**成熟度：** Active；Checkpoints 0A-0B Closed。0C仍未授权，当前不得进入0C。
 
 进入Active前必须同时满足：
 
@@ -423,6 +423,62 @@ positive matrix。source、review与validation证据见
 [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0b-implementation-review-validation-and-closure)。
 本记录不选择0C的保留/cleanup路线，也不授权进入0C。
 
+#### 7.4.1 Checkpoint 0B Feedback Correction — Closed
+
+0B关闭后的独立软件工程审查确认以下反馈；它们不改变R0 target、owner、ABI、shared contract或acceptance
+boundary，因此按保持target的Route Correction在原Stage 0内修复，不递增RFC修订：
+
+- **Keter — receive backpressure owner粒度错误：** `blocked_receive: Option<InterfaceId>`把一个Endpoint的
+  aggregate receive queue饱和提升成domain/interface级gate，使无关ready Endpoint在连续finite pump中永久无法
+  推进；blocker没有Endpoint identity也使retire无法证明清除的是原阻塞事实。
+- **Keter — TX admission与engine storage不一致：** admission只按interface MTU接受payload，没有把Endpoint
+  private engine payload capacity纳入同一owner predicate；合法MTU内但超过engine storage的send先返回成功，随后
+  pump在`send_slice`处触发correctness assertion，而不是commit前typed failure。
+- **Euclid — host validation与production owner文件混合：** conditional DTO、error conversion、fixture control和
+  observation集中在`stack.rs`，使test seam反向塑造owner orchestration文件；module-wide dead-code bridge仍只允许
+  保留到0C决定。
+
+本correction的交付与边界：
+
+- receive queue容量与pending engine datagram保持Endpoint-local；一个Endpoint饱和不得阻止同一或其它interface上
+  无关Endpoint的normal ingress。不得以domain-wide排序gate、busy recheck或第二receive truth修复；同Endpoint已有
+  engine datagram在aggregate credit恢复后仍先于该engine后续可接受datagram进入aggregate queue。
+- TX commit前的单一admission predicate同时覆盖selected interface IP MTU与Endpoint engine payload capacity；
+  accepted payload进入private engine时只能成功，capacity failure返回既有typed stack-local outcome，不新增panic
+  fallback或第二credit truth。
+- 把`#[cfg(feature = "host-test")]`validation types/facade/conversion按同一Stack owner拆入独立
+  `src/stack/host_validation.rs` child module；ordinary owner operation保持module-private，conditional surface与kernel
+  `default-features = false`边界不变。拆分不得扩大production public API或shared API。
+- 增加focused host regression：小engine/大MTU的pre-commit拒绝；Endpoint A receive饱和时Endpoint B在同一local
+  interface继续推进；existing topology、local recovery和retire cases继续通过。
+
+**Resolved correction write set：**
+
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/{lib,pump,udp}.rs`与`src/stack/mod.rs`；
+- 新建`anemone-kernel/crates/anemone-smoltcp-stack/src/stack/host_validation.rs`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/tests/udp_topology.rs`；
+- 本RFC `index.md` / `implementation.md`、net-udp transaction、RFC/transaction索引与当前biweekly devlog。
+
+`local_link.rs`、Cargo feature、kernel、`anemone-net-api`、vendored smoltcp、current contracts、register、build/config
+与其它RFC保持只读。若修复需要改变receive overflow语义的accepted boundary、Endpoint/control-plane owner、
+public/shared API或上述write set，立即停止并回到RFC review；不得自动进入0C。
+
+验证至少重跑`udp_topology`、stack/net-api host suite、no-default compile/check、`just fmt kernel --check`、RV64
+release compile integration、`mdbook build docs`与whitespace检查；runtime/rootfs/QEMU/LTP/LA64仍不由本correction
+外推。独立subagent必须在最终source上按软件工程审查等级review；Apollyon/Keter未清零不得重新关闭0B。
+
+**Correction result：** domain/interface级`blocked_receive`与关联cleanup已经删除；饱和Endpoint只在自己的engine
+保留最早datagram，不阻塞其它Endpoint或制造Immediate busy recheck。TX pre-commit maximum现在同时取interface
+MTU payload ceiling与Endpoint engine capacity的下界。ordinary Stack owner收归`src/stack/mod.rs`，conditional
+DTO/facade/conversion位于同owner child module `src/stack/host_validation.rs`；ordinary create/send/retire保持
+module-private，`interface_mut`只在unit test或`host-test`下编译。
+
+两个focused regression与原有matrix通过；stack/net-api host suite、no-default compile/check、RV64 release compile、
+mdBook和whitespace gate完成，formatter只剩三处未触及的vendored smoltcp baseline。最终独立复审为
+Apollyon 0、Keter 0、Euclid 0。完整source/review/validation证据见
+[transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---checkpoint-0b-feedback-correction-implementation-review-validation-and-closure)。
+0B重新Closed；本结果不选择0C路线、不关闭Stage 0，也不授权进入0C。
+
 ### 7.5 Checkpoint 0C — Decision closure与probe cleanup
 
 成功路线：
@@ -499,7 +555,7 @@ Stage 0失败时current per-netdev Stack和所有现有contracts保持baseline�
 
 ### 7.9 模块边界预检
 
-当前`anemone-smoltcp-stack/src/stack.rs`已经混合interface mapping、SocketSet ownership与host validation control，
+进入Stage 0时`anemone-smoltcp-stack/src/stack.rs`混合interface mapping、SocketSet ownership与host validation control，
 `pump.rs`混合per-interface scheduling与socket egress。Stage 0若继续把Endpoint transaction、local software device
 和test control全部塞入这两个文件，会固化新的混合边界。
 
@@ -507,7 +563,7 @@ Stage 0失败时current per-netdev Stack和所有现有contracts保持baseline�
 
 - `udp.rs`只承载provisional UDP Endpoint/operation ownership与stack-private engine conversion；
 - `local_link.rs`只承载bounded IP-medium packet handoff与smoltcp device adaptation；
-- `stack.rs`保留interface/endpoint mapping和owner-level orchestration；
+- `stack/mod.rs`保留interface/endpoint mapping和owner-level orchestration；
 - `pump.rs`保留finite progression与outcome组合；
 - `adapter.rs`保留smoltcp device/token adaptation，不取得route/Endpoint policy。
 
@@ -540,7 +596,7 @@ queue identity或production authority。它是conditional test surface，不是p
 - `anemone-kernel/crates/anemone-smoltcp-stack/Cargo.toml`，只用于启用UDP/IP-medium所需smoltcp feature与声明
   `udp_topology` host test target；
 - `anemone-kernel/crates/anemone-smoltcp-stack/src/lib.rs`；
-- `anemone-kernel/crates/anemone-smoltcp-stack/src/{stack.rs,pump.rs,adapter.rs}`；
+- `anemone-kernel/crates/anemone-smoltcp-stack/src/{pump.rs,adapter.rs}`与`src/stack/mod.rs`；
 - 计划新建`anemone-kernel/crates/anemone-smoltcp-stack/src/{udp.rs,local_link.rs}`。
 
 允许test/validation写入：

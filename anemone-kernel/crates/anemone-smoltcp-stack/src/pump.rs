@@ -176,18 +176,6 @@ impl Stack {
             next_deadline,
         ))
     }
-
-    /// Conditional facade for the deterministic host fixture. The local pump
-    /// itself remains ordinary `no_std + alloc` owner logic above.
-    #[cfg(feature = "host-test")]
-    pub fn pump_local_for_host_validation(
-        &mut self,
-        id: InterfaceId,
-        now: Instant,
-        budget: PumpBudget,
-    ) -> Result<PumpOutcome, PumpError> {
-        self.pump_local(id, now, budget)
-    }
 }
 
 fn pump_outcome(
@@ -226,9 +214,7 @@ fn poll_ingress<P: FrameProvider>(
     now: smoltcp::time::Instant,
     budget: usize,
 ) -> bool {
-    if !udp.ingress_allowed(entry.id) || !udp.drain_ingress(entry.id, &mut entry.sockets) {
-        return true;
-    }
+    udp.drain_ingress(entry.id, &mut entry.sockets);
     let mut processed = 0;
     while processed < budget {
         match entry
@@ -239,9 +225,7 @@ fn poll_ingress<P: FrameProvider>(
             PollIngressSingleResult::PacketProcessed
             | PollIngressSingleResult::SocketStateChanged => processed += 1,
         }
-        if !udp.drain_ingress(entry.id, &mut entry.sockets) {
-            return true;
-        }
+        udp.drain_ingress(entry.id, &mut entry.sockets);
     }
     processed == budget
 }
@@ -256,9 +240,7 @@ fn poll_local_ingress(
     now: smoltcp::time::Instant,
     budget: usize,
 ) -> bool {
-    if !udp.ingress_allowed(id) || !udp.drain_ingress(id, sockets) {
-        return true;
-    }
+    udp.drain_ingress(id, sockets);
     let mut processed = 0;
     while processed < budget {
         match interface.poll_ingress_single(now, device, sockets) {
@@ -266,9 +248,7 @@ fn poll_local_ingress(
             PollIngressSingleResult::PacketProcessed
             | PollIngressSingleResult::SocketStateChanged => processed += 1,
         }
-        if !udp.drain_ingress(id, sockets) {
-            return true;
-        }
+        udp.drain_ingress(id, sockets);
     }
     processed == budget
 }

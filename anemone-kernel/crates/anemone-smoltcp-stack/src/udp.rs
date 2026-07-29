@@ -163,13 +163,9 @@ impl Endpoint {
 ///
 /// Engine sockets remain inside their `SocketSet`; the mapping here is the
 /// only authority that can bind, select, drain, or retire them as one Endpoint.
-/// `blocked_receive` is protocol state, not diagnostics: it prevents a full
-/// aggregate receive queue from allowing a later interface to overtake the
-/// earliest engine-owned datagram.
 pub(crate) struct UdpEndpoints {
     endpoints: Vec<Endpoint>,
     next_id: u32,
-    blocked_receive: Option<InterfaceId>,
     next_egress_endpoint: usize,
 }
 
@@ -178,7 +174,6 @@ impl UdpEndpoints {
         Self {
             endpoints: Vec::new(),
             next_id: 0,
-            blocked_receive: None,
             next_egress_endpoint: 0,
         }
     }
@@ -230,9 +225,6 @@ impl UdpEndpoints {
         for endpoint in &mut self.endpoints {
             endpoint.remove_engine(interface, sockets);
         }
-        if self.blocked_receive == Some(interface) {
-            self.blocked_receive = None;
-        }
     }
 
     pub(crate) fn queue_send(
@@ -248,17 +240,21 @@ impl UdpEndpoints {
         if destination.addr.is_unspecified() || destination.port == 0 {
             return Err(SendError::InvalidDestination);
         }
-        let maximum = interface_ip_mtu
-            .checked_sub(IPV4_HEADER_LEN + UDP_HEADER_LEN)
-            .unwrap_or(0);
-        if payload.len() > maximum {
-            return Err(SendError::Oversize { maximum });
-        }
         let endpoint = self
             .endpoints
             .iter_mut()
             .find(|endpoint| endpoint.id == endpoint_id)
             .ok_or(SendError::UnknownEndpoint)?;
+        // Admission owns both limits that the private engine must satisfy.
+        // Accepting against MTU alone would defer an engine-buffer failure to
+        // pump time, after the operation has already reported success.
+        let maximum = interface_ip_mtu
+            .checked_sub(IPV4_HEADER_LEN + UDP_HEADER_LEN)
+            .unwrap_or(0)
+            .min(endpoint.engine_payload_capacity);
+        if payload.len() > maximum {
+            return Err(SendError::Oversize { maximum });
+        }
         if endpoint.engine(selected_interface).is_none() {
             return Err(SendError::UnknownInterface);
         }
@@ -364,14 +360,7 @@ impl UdpEndpoints {
         &mut self,
         interface: InterfaceId,
         sockets: &mut SocketSet<'static>,
-    ) -> bool {
-        if self
-            .blocked_receive
-            .is_some_and(|blocked| blocked != interface)
-        {
-            return false;
-        }
-
+    ) {
         for endpoint in &mut self.endpoints {
             let Some(engine) = endpoint.engine(interface) else {
                 continue;
@@ -386,20 +375,12 @@ impl UdpEndpoints {
                     source: metadata.endpoint,
                 });
             }
-            if socket.can_recv() {
-                self.blocked_receive = Some(interface);
-                return false;
-            }
+            // A full aggregate queue leaves this Endpoint's oldest engine
+            // datagram in place. It must not gate other Endpoints or the whole
+            // interface: later packets for this full UDP Endpoint may be
+            // dropped by its bounded engine queue while unrelated sockets keep
+            // making normal ingress progress.
         }
-        if self.blocked_receive == Some(interface) {
-            self.blocked_receive = None;
-        }
-        true
-    }
-
-    pub(crate) fn ingress_allowed(&self, interface: InterfaceId) -> bool {
-        self.blocked_receive
-            .is_none_or(|blocked| blocked == interface)
     }
 
     pub(crate) fn receive(&mut self, id: EndpointId) -> Option<ReceivedDatagram> {
@@ -421,12 +402,6 @@ impl UdpEndpoints {
             self.next_egress_endpoint = 0;
         }
         Ok(endpoint)
-    }
-
-    pub(crate) fn clear_blocked_receive(&mut self, interface: InterfaceId) {
-        if self.blocked_receive == Some(interface) {
-            self.blocked_receive = None;
-        }
     }
 
     pub(crate) fn endpoint(&self, id: EndpointId) -> Option<&Endpoint> {
