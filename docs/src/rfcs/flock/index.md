@@ -1,6 +1,6 @@
 # RFC-20260728-flock
 
-**状态：** Accepted for Implementation / Stage 0 Active / Checkpoint 0S Closed
+**状态：** Accepted for Implementation / Stage 0 Active / Checkpoint 0A Closed
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-29
@@ -12,22 +12,23 @@
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** None；当前 design findings 均已 neutralize，历史与 2026-07-29 cooperative direction
 correction 见 [Tracking Issues](./tracking-issues.md)。
-**下一步：** Stage 0 保持 `Active`，Checkpoint 0S 已关闭；Checkpoint 0A 仍未激活且不在本轮授权内。
+**下一步：** Stage 0 保持 `Active`，Checkpoint 0A 已关闭；Checkpoint 0B 仍未激活且不在本轮授权内。
 全部新 contract ID 继续 Not Effective，不得执行 `FLOCK-CUTOVER`。
 
 ## 文档状态
 
 本文是第一版本地 `flock(2)` 的公共 canonical R0 accepted target。它陈述 target、contract delta、
 correctness boundaries 与 acceptance boundary；Checkpoint 0S 只完成 `task::files` 行为保持型结构拆分，
-当前代码仍无 flock 能力，current contract 也尚无对应 effective rule。
+Checkpoint 0A 已建立private inode domain与cooperative-retirement纵切，但没有syscall ABI或userspace consumer，
+不能作为partial flock capability宣称；current contract也尚无对应effective rule。
 
 2026-07-29 Draft review 已废弃此前 close-driven precise cancellation 方向。旧 implementation stages、
 probe 与 manifest 不再有效；后续独立 implementation resolution 从 live source 形成当前 Stage 0 Ready。
-本轮独立 R0 review 未发现 Apollyon、Keter 或 Euclid，开发者授权建立 transaction、激活 Stage 0 并完成
-Checkpoint 0S。Stage 1 保持 `Outline`，本轮不修改 register/current contract，也不执行 `FLOCK-CUTOVER`。
+本轮独立 R0 review 未发现 Apollyon、Keter 或 Euclid，开发者授权建立 transaction、激活 Stage 0 并依次完成
+Checkpoint 0S、0A。Stage 1 保持 `Outline`，本轮不修改 register/current contract，也不执行 `FLOCK-CUTOVER`。
 
 R0 acceptance 只接受 target 与 contract delta，不把它们写成 effective contract。Stage 0 activation 与
-Checkpoint 0S closure 已分别记录在 transaction；Checkpoint 0S 关闭不自动激活 0A，也不解析或进入 Stage 1。
+Checkpoint 0S/0A closure 已分别记录在 transaction；Checkpoint 0A 关闭不自动激活 0B，也不解析或进入 Stage 1。
 
 ## 摘要
 
@@ -48,7 +49,8 @@ POSIX/OFD record-lock 统一以及通用 file-lock engine 均不在本 RFC 范�
 
 ### Anemone 当前事实
 
-当前树没有 `flock` syscall implementation，也没有 VFS flock grant、wait 或 cleanup contract。
+当前树没有 `flock` syscall implementation；0A 只有private VFS flock grant/wait/cleanup substrate，尚无userspace
+入口或effective cleanup contract。
 `task::files` 已经提供本 RFC 所需的 opened-description baseline：
 
 - `ProcFile` 是当前 opened file description；dup 与非 `CLONE_FILES` fork 发布新 fd slot，但共享同一
@@ -293,7 +295,8 @@ stage的implementation choices提升为target；但R0 review必须同时确认�
 5. `Ready`、R0 acceptance、transaction bootstrap 与 `Active` authority 保持分离。
 
 2026-07-29 的独立 implementation-resolution 任务满足首个 `Ready` 要求；本轮后续独立 review 接受 R0，
-transaction 已建立且开发者已明确授权 Stage 0 Active。Checkpoint 0S closure 不授权后续 checkpoint。
+transaction 已建立且开发者已明确授权 Stage 0 Active。Checkpoint 0S、0A 分别按独立授权关闭；0A closure不授权
+后续checkpoint。
 
 最终 implementation closure 的证据范围至少包括：
 
@@ -344,6 +347,6 @@ flock、POSIX record lock 与 OFD record lock 的 holder、range、close cleanup
 
 ## 收口
 
-当前为 R0 / Accepted for Implementation；Stage 0 Active 且 Checkpoint 0S Closed，Checkpoint 0A 未激活，
+当前为 R0 / Accepted for Implementation；Stage 0 Active 且 Checkpoint 0A Closed，Checkpoint 0B 未激活，
 Stage 1 仍是 `Outline`。尚无 flock runtime evidence 或 contract cutover，`OPENED-DESC-RETIRE-001` 与全部
 `FLOCK-*` IDs 保持 Not Effective。

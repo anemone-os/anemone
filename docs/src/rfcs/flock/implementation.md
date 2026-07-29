@@ -1,6 +1,6 @@
 # Flock 迁移实施计划
 
-**状态：** Stage 0 Active / Checkpoint 0S Closed；Stage 1 Outline
+**状态：** Stage 0 Active / Checkpoint 0A Closed；Stage 1 Outline
 **适用修订：** R0
 **最后更新：** 2026-07-29
 **父 RFC：** [RFC-20260728-flock](./index.md)
@@ -10,8 +10,8 @@
 **事务日志：** [2026-07-29 Flock](../../devlog/transactions/2026-07-29-flock.md)
 
 本文把 cooperative-retirement R0 解析成一条 proof-first 实施路线。2026-07-29 的独立 R0 review 已接受
-target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并完成 Checkpoint 0S。0S 已
-关闭，Checkpoint 0A 仍未激活。本阶段不修改 current contract/register，也不执行 `FLOCK-CUTOVER`。
+target 与 contract delta；开发者随后明确授权建立 transaction、激活 Stage 0 并依次完成 Checkpoint 0S、0A。
+0A 已关闭，Checkpoint 0B 仍未激活。本阶段不修改 current contract/register，也不执行 `FLOCK-CUTOVER`。
 
 旧版围绕 precise cancellation、retirement-first 唯一 `EBADF`、同步 waiter cleanup 与
 identity-preserving restart 形成的 Stage 1-3、probe 和 manifest 继续失效；下文是当前唯一 implementation
@@ -59,7 +59,7 @@ authority。
 
 | Stage | 成熟度 | 跨层结果 | Contract 状态 | 下一解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 — Owner / lifecycle vertical slice | Active / Checkpoint 0S Closed | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 0A仍需开发者独立授权；Stage 0全部checkpoint、review与证据关闭后，另行运行`0 -> 1 Implementation Resolution Gate` |
+| Stage 0 — Owner / lifecycle vertical slice | Active / Checkpoint 0A Closed | inode domain、cooperative retirement、syscall ABI 与 focused userspace oracle 形成一条真实纵切 | 全部新 ID Not Effective；cutover None | 0B仍需开发者独立授权；Stage 0全部checkpoint、review与证据关闭后，另行运行`0 -> 1 Implementation Resolution Gate` |
 | Stage 1 — Acceptance closure | Outline | 根据 Stage 0 实际 diff 补齐 target matrix、LTP、双架构 runtime、contract write-back 与原子 `FLOCK-CUTOVER` | 只有 Stage 1 closure 可切换 | Stage 0 Closed 后由开发者单独授权解析；`Ready` 后仍需独立 `Active` 授权 |
 
 `Outline` 只固定目的、依赖、受保护边界与解析触发点；不冻结具体类型、文件、算法或命令。`Ready` 表示当前
@@ -70,7 +70,7 @@ stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 R
 
 ### 4.1 状态与 activation preflight
 
-**状态：** Active / Checkpoint 0S Closed。Stage 0 已从 Checkpoint 0S 开始；0A、0B、0C 仍须依次独立授权和
+**状态：** Active / Checkpoint 0A Closed。Stage 0 已依次关闭 Checkpoint 0S、0A；0B、0C 仍须依次独立授权和
 关闭，不得跳过 owner/lifecycle review 直接运行 ABI oracle。
 
 进入 `Active` 前必须同时满足：
@@ -87,8 +87,9 @@ stage 的交付、路线、审计、验证、停止/退出条件、cutover 与 R
 6. 开发者明确授权 Stage 0 从 `Ready` 进入 `Active`。R0 acceptance 或 transaction 创建本身不构成授权。
 
 **2026-07-29 activation result：** 六项 preflight 均已完成并写入 transaction。activation baseline 为
-`dev/drc/omega@c69e2143` 的 clean worktree；本轮用户给出的唯一 GOAL 明确授权 Stage 0 从 0S 开始，但不授权
+`dev/drc/omega@c69e2143` 的 clean worktree；当时用户给出的唯一 GOAL 明确授权 Stage 0 从 0S 开始，但不授权
 0A。live owner、build/app/fmt interface 与两条 wrapper 均保持可达，frozen manifest 无重叠 dirty change。
+后续 0A 独立授权与 closure 见 transaction；它不追溯改变 0S 的授权边界。
 
 ### 4.2 Probe 假设与成功边界
 
@@ -155,6 +156,9 @@ vendored smoltcp既有baseline阻断；详细命令、review与write-back见tran
 
 ### 4.4 Checkpoint 0A — Inode Domain 与 Cooperative Retirement
 
+**状态：** Closed / 2026-07-29。只完成 inode domain、cooperative retirement、owner-local KUnit body 与
+transaction/docs write-back；Checkpoint 0B 仍 Not Activated / Unauthorized。
+
 **交付：**
 
 - 新建 private `fs::flock` owner。内部只表达 normalized `Lock(Shared|Exclusive, blocking|nonblocking)` / `Unlock`
@@ -187,11 +191,10 @@ vendored smoltcp既有baseline阻断；详细命令、review与write-back见tran
 
 - `Event::listen` predicate 已处于 active wait，不能取得 sleepable `Mutex`；Stage 0 因此使用 domain
   `SpinLock`，且不得在 guard 内 park、publish、log、调用 filesystem backend 或 drop 最后引用。
-- 当前 `spin_lock_irqsave` 会让普通 `SpinLock` guard 处于 IRQ-disabled context。linear collection 的 growth
-  只有在 task-context grant insertion 中发生；0A 必须结合 allocator live source 与
-  `ANE-20260622-IRQ-OFF-HEAP-ALLOCATION` 审计它确实是不睡眠、不 reclaim、不触发复杂 destructor 的简单分配。
-  若该结论不成立，立即停止 0A 并重新解析 storage/serialization；不得静默加入固定容量、散落常量或专用
-  `ENOLCK` ABI。
+- 当前 `spin_lock_irqsave` 会让普通 `SpinLock` guard 处于 IRQ-disabled context。开发者在 0A 执行期明确把现有
+  OOM 行为作为内核分配器的已知局限留待后续修正，并要求本 checkpoint 直接假设该问题不存在；因此
+  `Vec<FlockGrant>` 在 domain guard 内按自然形状 growth，不增加固定容量、补偿路径、散落常量或专用
+  `ENOLCK` ABI，也不让该已知局限反向驱动 flock 状态形状。
 - cleanup 先撤销 domain publication，再在 guard 外 drop 与 publish。局部 correctness 使用常开 `assert!`；
   只服务日志的 identity 不得参与 conflict 或 lifecycle 决策。
 
@@ -217,10 +220,20 @@ just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
 build 只证明 production 与 KUnit body 编译，不声称 KUnit 已运行。0A review 必须逐项确认 domain single truth、
 CAS/lock convergence、guard-out publish/drop、retirement/static-hook 顺序，以及 `FilesState` 没有 flock policy。
 
+**Closure evidence：** private `fs::flock` 以 inode-local `SpinLock<Vec<FlockGrant>> + Event` 单独拥有 grant、mode
+与 conflict predicate；grant 只保存 opaque capability 与 mode。operation-local lease 在每次 commit 前重验
+liveness；same-mode、owner-local unlock与两步 conversion 均在 domain guard 下裁决，移出的 grant、broadcast
+与 retirement notification 均在 guard 外完成。`OpenedDescriptionRetirementCtx` 只借用 `File` 并提供即时
+same-identity comparison；首次 `Live(1) -> Retired` 后 fixed cleanup exactly once 运行且先于 existing static
+hook。真实 `FilesState` KUnit body 覆盖 alias/independent owner、SH/EX conflict、幂等、unlock、nonblocking
+conversion old-mode removal、single-alias/terminal close与 retired owner late-commit rejection；signal branch完成
+source review但没有运行时注入，已取得旧lease与terminal close并发的CAS/domain-lock收敛同样只由source review
+证明。RV64 build证明 production 与 KUnit body 编译；KUnit/QEMU runtime Not Run。
+
 ### 4.5 Checkpoint 0B — Linux ABI 与 Focused Consumer
 
 **前置：** 0S、0A 交付，KUnit 编译与 owner/lifecycle review 已关闭；Stage 0 仍为 Active，contract仍Not
-Effective。
+Effective。该前置现已满足，但 0B 仍须开发者独立授权，不因 0A closure 自动进入。
 
 **交付：**
 
@@ -356,7 +369,6 @@ Stage 0 contract cutover 为 `None`。`OPENED-DESC-RETIRE-001`、`FLOCK-DOMAIN-0
   syscall return、task运行或physical placement；
 - success必须由wake/candidate/queue entry决定，或retirement后仍可能插入持久grant；
 - domain serialization要求在active-wait predicate中取得sleepable lock，或要求跨park持有guard；
-- IRQ-disabled allocation审计失败，而manifest内没有保持无专用容量/无新errno target的直接修正；
 - ordinary replay无法保持已接受的conversion与fd-reuse语义，必须引入identity-preserving restart carrier；
 - focused test只能通过test-only lifecycle/control plane、固定race winner或production fake state才能观察；
 - write set需要扩到scheduler、signal owner、filesystem backend、record-lock、remote protocol、Kconfig capacity或
@@ -453,5 +465,5 @@ contracts，再把Stage 1完整解析为`Ready`：精确交付、checkpoints、w
 
 ## 7. 当前结论
 
-当前 R0 已 Accepted for Implementation，Stage 0 Active 且 Checkpoint 0S Closed。Checkpoint 0A 仍未激活，
+当前 R0 已 Accepted for Implementation，Stage 0 Active 且 Checkpoint 0A Closed。Checkpoint 0B 仍未激活，
 本轮不得进入；current contract 与 register 未修改，`FLOCK-CUTOVER` 未执行，全部新 ID 保持 Not Effective。

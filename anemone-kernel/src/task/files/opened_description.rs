@@ -148,6 +148,22 @@ pub struct OpenedFileFinalReleaseCtx<'a> {
     pub notification_suppressed: bool,
 }
 
+/// Borrowed authority for the flock-specific terminal-retirement handoff.
+///
+/// VFS receives only the target file and an immediate identity predicate. It
+/// cannot acquire a live lease, inspect the lifecycle word, retain `ProcFile`,
+/// or turn this fixed handoff into a callback registry.
+struct OpenedDescriptionRetirementCtx<'a> {
+    file: &'a File,
+    owner: OpenedDescriptionCapability,
+}
+
+impl OpenedDescriptionRetirementCtx<'_> {
+    fn retire_flock(&self) {
+        crate::fs::retire_flock(self.file, |candidate| self.owner.same_identity(candidate));
+    }
+}
+
 impl ProcFile {
     pub(super) fn new(
         file: File,
@@ -190,7 +206,7 @@ impl ProcFile {
         }
     }
 
-    pub(super) fn release_description_ref(&self) {
+    pub(super) fn release_description_ref(self: &Arc<Self>) {
         let mut observed = self.description_refs.load(Ordering::Acquire);
         loop {
             assert!(
@@ -211,6 +227,13 @@ impl ProcFile {
             ) {
                 Ok(_) => {
                     if observed == 1 {
+                        OpenedDescriptionRetirementCtx {
+                            file: self.file.as_ref(),
+                            owner: OpenedDescriptionCapability {
+                                target: Arc::downgrade(self),
+                            },
+                        }
+                        .retire_flock();
                         if let Some(final_release) = self.description_ops.final_release {
                             final_release(OpenedFileFinalReleaseCtx {
                                 file: self.file.as_ref(),
@@ -239,11 +262,13 @@ impl ProcFile {
 #[cfg(feature = "kunit")]
 mod opened_description_liveness_kunits {
     use super::*;
+    use crate::{
+        fs::{FlockMode, FlockOperation, FlockOutcome, request_flock},
+        task::files::Fd,
+    };
 
-    #[kunit]
-    fn aliases_keep_description_live_until_terminal_release() {
-        let mut files = FilesState::new();
-        let first = files
+    fn open_root(files: &mut FilesState) -> Fd {
+        files
             .open_fd(
                 vfs_open(Path::new("/")).unwrap(),
                 OpenAccessMode::Read,
@@ -251,7 +276,38 @@ mod opened_description_liveness_kunits {
                 LinuxOpenCompat::empty(),
                 FdFlags::empty(),
             )
-            .unwrap();
+            .unwrap()
+    }
+
+    fn target(files: &FilesState, fd: Fd) -> (Arc<File>, OpenedDescriptionCapability) {
+        let file_desc = files.get_fd(fd).unwrap();
+        (
+            file_desc.vfs_file().clone(),
+            file_desc.opened_description_capability().unwrap(),
+        )
+    }
+
+    fn close(files: &mut FilesState, fd: Fd) {
+        files.close_fd(fd).unwrap().release_description_ref();
+    }
+
+    fn lock(
+        file: &File,
+        owner: &OpenedDescriptionCapability,
+        mode: FlockMode,
+        nonblocking: bool,
+    ) -> FlockOutcome {
+        request_flock(file, owner, FlockOperation::Lock { mode, nonblocking })
+    }
+
+    fn unlock(file: &File, owner: &OpenedDescriptionCapability) -> FlockOutcome {
+        request_flock(file, owner, FlockOperation::Unlock)
+    }
+
+    #[kunit]
+    fn aliases_keep_description_live_until_terminal_release() {
+        let mut files = FilesState::new();
+        let first = open_root(&mut files);
         let second = files.dup(first).unwrap();
 
         let capability = files
@@ -274,5 +330,128 @@ mod opened_description_liveness_kunits {
         files.close_fd(second).unwrap().release_description_ref();
         assert!(capability.try_lease().is_none());
         assert!(!lease.is_live());
+    }
+
+    #[kunit]
+    fn flock_domain_keeps_one_owner_truth_across_aliases_and_conversion() {
+        let mut files = FilesState::new();
+        let first = open_root(&mut files);
+        let alias = files.dup(first).unwrap();
+        let independent = open_root(&mut files);
+        let (first_file, first_owner) = target(&files, first);
+        let (alias_file, alias_owner) = target(&files, alias);
+        let (independent_file, independent_owner) = target(&files, independent);
+
+        assert!(first_owner.same_identity(&alias_owner));
+        assert!(!first_owner.same_identity(&independent_owner));
+        assert_eq!(
+            lock(&first_file, &first_owner, FlockMode::Shared, false),
+            FlockOutcome::Complete,
+        );
+        assert_eq!(
+            lock(&alias_file, &alias_owner, FlockMode::Shared, false),
+            FlockOutcome::Complete,
+        );
+        assert_eq!(
+            lock(
+                &independent_file,
+                &independent_owner,
+                FlockMode::Shared,
+                false,
+            ),
+            FlockOutcome::Complete,
+        );
+
+        // Conversion removes the old shared grant before competing for EX.
+        assert_eq!(
+            lock(&first_file, &first_owner, FlockMode::Exclusive, true),
+            FlockOutcome::WouldBlock,
+        );
+        assert_eq!(
+            lock(
+                &independent_file,
+                &independent_owner,
+                FlockMode::Exclusive,
+                true,
+            ),
+            FlockOutcome::Complete,
+        );
+        assert_eq!(
+            lock(&alias_file, &alias_owner, FlockMode::Shared, true),
+            FlockOutcome::WouldBlock,
+        );
+
+        assert_eq!(unlock(&alias_file, &alias_owner), FlockOutcome::Complete,);
+        assert_eq!(
+            lock(&first_file, &first_owner, FlockMode::Shared, true),
+            FlockOutcome::WouldBlock,
+        );
+        assert_eq!(
+            unlock(&independent_file, &independent_owner),
+            FlockOutcome::Complete,
+        );
+        assert_eq!(
+            lock(&alias_file, &alias_owner, FlockMode::Exclusive, false),
+            FlockOutcome::Complete,
+        );
+        assert_eq!(
+            lock(
+                &independent_file,
+                &independent_owner,
+                FlockMode::Exclusive,
+                true,
+            ),
+            FlockOutcome::WouldBlock,
+        );
+        assert_eq!(unlock(&alias_file, &alias_owner), FlockOutcome::Complete,);
+
+        close(&mut files, first);
+        close(&mut files, alias);
+        close(&mut files, independent);
+    }
+
+    #[kunit]
+    fn terminal_release_cleans_grant_and_blocks_retired_owner_recommit() {
+        let mut files = FilesState::new();
+        let first = open_root(&mut files);
+        let alias = files.dup(first).unwrap();
+        let independent = open_root(&mut files);
+        let (first_file, first_owner) = target(&files, first);
+        let (independent_file, independent_owner) = target(&files, independent);
+        let old_lease = first_owner.try_lease().unwrap();
+
+        assert_eq!(
+            lock(&first_file, &first_owner, FlockMode::Exclusive, false),
+            FlockOutcome::Complete,
+        );
+        close(&mut files, first);
+        assert!(old_lease.is_live());
+        assert_eq!(
+            lock(
+                &independent_file,
+                &independent_owner,
+                FlockMode::Exclusive,
+                true,
+            ),
+            FlockOutcome::WouldBlock,
+        );
+
+        close(&mut files, alias);
+        assert!(!old_lease.is_live());
+        assert_eq!(
+            lock(
+                &independent_file,
+                &independent_owner,
+                FlockMode::Exclusive,
+                false,
+            ),
+            FlockOutcome::Complete,
+        );
+        assert_eq!(
+            lock(&first_file, &first_owner, FlockMode::Shared, false),
+            FlockOutcome::Retired,
+        );
+
+        close(&mut files, independent);
     }
 }

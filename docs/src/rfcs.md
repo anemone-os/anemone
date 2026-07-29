@@ -111,7 +111,8 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   不承诺precise close/signal/restart winner、identity-preserving restart或close等待task运行。
   `OPENED-DESC-RETIRE-001`已缩窄为flock-specific grant cleanup与notification submission；相关finding均已
   neutralize。独立implementation resolution已把带真实syscall与focused consumer的Stage 0解析为Ready；
-  R0 review后Stage 0已Active且只关闭行为保持型Checkpoint 0S，0A仍未激活，Stage 1保持`Outline`。
+  R0 review后Stage 0已Active并关闭至Checkpoint 0A，private inode domain与cooperative retirement已形成，0B仍未
+  激活，Stage 1保持`Outline`。
   当前没有flock runtime evidence或contract cutover，全部新ID继续Not Effective。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
