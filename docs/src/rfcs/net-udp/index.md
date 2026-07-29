@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-2 Closed / Stage 3 Ready / Stage 4-5 Outline
+**状态：** Accepted for Implementation / Stage 0-2与Checkpoint 3A Closed / Checkpoint 3B-3C Ready / Not Active / Stage 4-5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-30
@@ -16,7 +16,7 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** None；Stage 4-5 Outline的待解析实现决定不作为当前设计问题
-**下一步：** Stage 3已解析为Ready / Not Active；仅可在独立授权下激活Checkpoint 3A，不得自动进入3B/3C、
+**下一步：** Checkpoint 3A已独立关闭；仅可在新的独立授权下激活Checkpoint 3B，不得自动进入3B/3C、
 Stage 4 resolution或current-contract cutover
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
@@ -27,7 +27,8 @@ control plane与production local path。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-
 `NET-CONTROL-PLANE-001`；2026-07-30 post-close correction恢复`NET-BOUNDARY-001`既有artifact-neutral
 validation seam并收拢KUnit共置规则，不改变R0 target或Stage 2 runtime closure。独立`2 -> 3`resolution已把
 Stage 3解析为3A same-owner split、3B Endpoint/File/address lifecycle与3C nonblocking datagram三个checkpoint；
-Stage 3仍Not Active，Stage 4-5保持Outline，全部Socket/Endpoint/UDP/wait candidate contract继续Pending。
+3A已经按behavior-preserving same-owner split独立关闭，3B-3C保持Ready / Not Active，Stage 4-5保持Outline，全部
+Socket/Endpoint/UDP/wait candidate contract继续Pending。
 
 ## 摘要
 
@@ -106,7 +107,8 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-2 Closed；Stage 3 Ready；Stage 4-5 Outline
+- [迁移实施计划](./implementation.md)：Stage 0-2与Checkpoint 3A Closed；Checkpoint 3B-3C Ready / Not Active；
+  Stage 4-5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 

@@ -7,7 +7,7 @@ use crate::{local_link::LocalPort, udp::UdpEndpoints};
 #[cfg(feature = "host-test")]
 mod host_validation;
 mod interfaces;
-mod udp_ops;
+mod udp;
 #[cfg(feature = "udp-validation-probe")]
 pub mod udp_probe;
 
