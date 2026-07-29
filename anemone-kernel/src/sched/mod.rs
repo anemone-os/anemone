@@ -75,6 +75,10 @@ pub unsafe fn scheduler() -> ! {
         {
             let prev = get_current_task();
             let next = local_pick_next();
+            // MEMBARRIER-GLOBAL-001 requires every outgoing-to-incoming task
+            // boundary to cross a full barrier, including same-mapping switches.
+            // Remove this only with another proven migration rendezvous.
+            full_memory_barrier();
             unsafe {
                 // `local_pick_next()` has already called the class switch-in
                 // transaction. Mapping preparation must stay after that point
