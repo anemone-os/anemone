@@ -10,18 +10,19 @@ use anemone_rs::{
     abi::{
         fs::linux::{
             flock::{LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN},
-            open::{O_CREAT, O_PATH, O_RDWR},
+            open::{O_CLOEXEC, O_CREAT, O_DIRECTORY, O_PATH, O_RDONLY, O_RDWR},
         },
         process::linux::signal::{self as linux_signal, SigAction, SigSet},
     },
+    env,
     os::linux::{
         fs::{
-            AtFd, Fd, FlockOperation, PipeFlags, close, dup, flock, flock_raw, openat, pipe2, read,
-            unlinkat, write,
+            AtFd, Fd, FlockOperation, PipeFlags, close, dup, flock, flock_raw, linkat, openat,
+            pipe2, read, unlinkat, write,
         },
         process::{
             self, CloneFlags, MmapFlags, MmapProt, Tid, WStatus, WStatusRaw, WaitFor, WaitOptions,
-            fork, getpid, mmap, sched_yield,
+            execve, fork, getpid, mmap, sched_yield,
             signal::{self, SigNo},
             spawn_raw_thread, wait4,
         },
@@ -484,6 +485,146 @@ fn test_concurrent_final_close_outcomes() -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_hard_link_domain() -> Result<(), Errno> {
+    let original = Path::new("/flock-test-hard-link");
+    let alias = Path::new("/flock-test-hard-link-alias");
+    remove(alias);
+    remove(original);
+
+    let holder = open_file(original)?;
+    linkat(AtFd::Cwd, original, AtFd::Cwd, alias, 0)?;
+    let independent = open_file(alias)?;
+
+    flock(holder, FlockOperation::Exclusive)?;
+    expect_errno(
+        flock(independent, FlockOperation::ExclusiveNonblocking),
+        EAGAIN,
+    )?;
+    flock(holder, FlockOperation::Unlock)?;
+    flock(independent, FlockOperation::ExclusiveNonblocking)?;
+    flock(independent, FlockOperation::Unlock)?;
+
+    close(independent)?;
+    close(holder)?;
+    remove(alias);
+    remove(original);
+    Ok(())
+}
+
+fn exec_child(mode: &str, fd: Option<&str>) -> Result<(), Errno> {
+    // The argument only locates the inherited slot in this fresh image. Owner
+    // semantics are proved by unlock/conflict and final-cleanup outcomes, not
+    // by treating the fd number as opened-description identity.
+    let fd = fd.ok_or(EINVAL)?.parse::<Fd>().map_err(|_| EINVAL)?;
+    match mode {
+        "--exec-unlock-child" => flock(fd, FlockOperation::Unlock),
+        "--exec-cloexec-child" => expect_errno(flock(fd, FlockOperation::Shared), EBADF),
+        _ => Err(EINVAL),
+    }
+}
+
+fn test_exec_and_cloexec() -> Result<(), Errno> {
+    let path = Path::new("/flock-test-exec");
+    remove(path);
+
+    let inherited = open_file(path)?;
+    flock(inherited, FlockOperation::Exclusive)?;
+
+    let child = match fork()? {
+        Some(pid) => pid,
+        None => {
+            let fd = format!("{inherited}");
+            let result = execve(
+                "/bin/flock-test",
+                &["flock-test", "--exec-unlock-child", fd.as_str()],
+                &[],
+            );
+            process::exit(if result.is_err() { 1 } else { 0 })
+        },
+    };
+    wait_child(child)?;
+
+    let independent = open_file(path)?;
+    flock(independent, FlockOperation::ExclusiveNonblocking)?;
+    flock(independent, FlockOperation::Unlock)?;
+    close(independent)?;
+    close(inherited)?;
+
+    let cloexec = openat(AtFd::Cwd, path, O_CREAT | O_RDWR | O_CLOEXEC, MODE)?;
+    flock(cloexec, FlockOperation::Exclusive)?;
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+
+    let child = match fork()? {
+        Some(pid) => pid,
+        None => {
+            let result: Result<(), Errno> = (|| {
+                close(ready_write)?;
+                let mut ready = [0u8; 1];
+                ensure(read(ready_read, &mut ready)? == 1)?;
+                close(ready_read)?;
+                let fd = format!("{cloexec}");
+                execve(
+                    "/bin/flock-test",
+                    &["flock-test", "--exec-cloexec-child", fd.as_str()],
+                    &[],
+                )?;
+                Err(EIO)
+            })();
+            process::exit(if result.is_err() { 1 } else { 0 })
+        },
+    };
+    close(ready_read)?;
+    // The child now owns the last published alias. Its exec transition must
+    // retire that opened description before entering the fixture mode.
+    close(cloexec)?;
+    ensure(write(ready_write, b"x")? == 1)?;
+    close(ready_write)?;
+    wait_child(child)?;
+
+    let independent = open_file(path)?;
+    flock(independent, FlockOperation::ExclusiveNonblocking)?;
+    flock(independent, FlockOperation::Unlock)?;
+    close(independent)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_local_files_and_advisory_io() -> Result<(), Errno> {
+    let path = Path::new("/flock-test-advisory");
+    remove(path);
+
+    let holder = open_file(path)?;
+    let writer = open_file(path)?;
+    let reader = openat(AtFd::Cwd, path, O_RDONLY, 0)?;
+    flock(holder, FlockOperation::Exclusive)?;
+    ensure(write(writer, b"a")? == 1)?;
+    let mut byte = [0u8; 1];
+    ensure(read(reader, &mut byte)? == 1 && byte[0] == b'a')?;
+    flock(holder, FlockOperation::Unlock)?;
+    close(reader)?;
+    close(writer)?;
+    close(holder)?;
+    remove(path);
+
+    let directory = openat(AtFd::Cwd, Path::new("/"), O_RDONLY | O_DIRECTORY, 0)?;
+    flock(directory, FlockOperation::Shared)?;
+    flock(directory, FlockOperation::Unlock)?;
+    close(directory)?;
+
+    let (pipe_read, pipe_write) = pipe2(PipeFlags::empty())?;
+    flock(pipe_read, FlockOperation::Exclusive)?;
+    expect_errno(flock(pipe_write, FlockOperation::SharedNonblocking), EAGAIN)?;
+    ensure(write(pipe_write, b"p")? == 1)?;
+    let mut byte = [0u8; 1];
+    ensure(read(pipe_read, &mut byte)? == 1 && byte[0] == b'p')?;
+    flock(pipe_read, FlockOperation::Unlock)?;
+    flock(pipe_write, FlockOperation::Shared)?;
+    flock(pipe_write, FlockOperation::Unlock)?;
+    close(pipe_write)?;
+    close(pipe_read)?;
+    Ok(())
+}
+
 struct Results {
     passed: usize,
     failed: usize,
@@ -513,6 +654,12 @@ impl Results {
 
 #[anemone_rs::main]
 fn main() -> Result<(), Errno> {
+    let mut args = env::args();
+    let _ = args.next();
+    if let Some(mode) = args.next() {
+        return exec_child(mode, args.next());
+    }
+
     println!("FLOCKTEST:START");
     let mut results = Results::new();
     results.case("flags-admission", test_flags_and_admission);
@@ -529,6 +676,9 @@ fn main() -> Result<(), Errno> {
         "concurrent-final-close",
         test_concurrent_final_close_outcomes,
     );
+    results.case("hard-link-domain", test_hard_link_domain);
+    results.case("exec-cloexec", test_exec_and_cloexec);
+    results.case("local-files-advisory", test_local_files_and_advisory_io);
 
     if results.failed == 0 {
         println!("FLOCKTEST:SUMMARY:PASS:{}", results.passed);
