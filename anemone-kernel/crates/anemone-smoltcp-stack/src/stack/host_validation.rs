@@ -3,19 +3,15 @@ use alloc::{vec, vec::Vec};
 use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
-        UdpLocalBinding, UdpQueryError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointId,
+        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
     },
 };
-use smoltcp::{
-    socket::raw,
-    wire::{IpAddress, IpVersion, Ipv4Address},
-};
+use smoltcp::{socket::raw, wire::IpVersion};
 
 use crate::{
     pump::PumpBudget,
     stack::{Ipv4ConfigError, PumpError, Stack},
-    udp::SendError,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -212,21 +208,11 @@ impl Stack {
         destination_port: u16,
         payload: &[u8],
     ) -> Result<(), HostSendError> {
-        let (selected_interface, source) = match selection {
-            Some(selection) => (
-                Some(selection.interface),
-                Ipv4Address::from_octets(selection.source),
-            ),
-            None => (None, Ipv4Address::UNSPECIFIED),
-        };
-        self.send_udp(
+        let selection = selection.ok_or(HostSendError::MissingSelection)?;
+        self.send_udp_endpoint(
             endpoint.0,
-            selected_interface,
-            source,
-            smoltcp::wire::IpEndpoint::new(
-                IpAddress::Ipv4(Ipv4Address::from_octets(destination_address)),
-                destination_port,
-            ),
+            UdpEgressSelection::new(selection.interface, ApiIpv4Address::new(selection.source)),
+            UdpPeer::new(ApiIpv4Address::new(destination_address), destination_port),
             payload,
         )
         .map_err(Into::into)
@@ -236,12 +222,11 @@ impl Stack {
         &mut self,
         endpoint: HostEndpointId,
     ) -> Option<HostReceivedDatagram> {
-        let datagram = self.udp.receive(endpoint.0)?;
-        let IpAddress::Ipv4(source_address) = datagram.source.addr;
+        let datagram = self.receive_udp_endpoint(endpoint.0).ok()?;
         Some(HostReceivedDatagram {
-            payload: datagram.payload,
-            source_address: source_address.octets(),
-            source_port: datagram.source.port,
+            payload: datagram.payload().to_vec(),
+            source_address: datagram.peer().address().octets(),
+            source_port: datagram.peer().port(),
         })
     }
 
@@ -290,17 +275,16 @@ impl From<UdpCreateError> for HostEndpointCreateError {
     }
 }
 
-impl From<SendError> for HostSendError {
-    fn from(error: SendError) -> Self {
+impl From<UdpSendError> for HostSendError {
+    fn from(error: UdpSendError) -> Self {
         match error {
-            SendError::UnknownEndpoint => Self::UnknownEndpoint,
-            SendError::UnboundEndpoint => Self::UnboundEndpoint,
-            SendError::MissingSelection => Self::MissingSelection,
-            SendError::UnknownInterface => Self::UnknownInterface,
-            SendError::UnsupportedSource => Self::UnsupportedSource,
-            SendError::InvalidDestination => Self::InvalidDestination,
-            SendError::Oversize { maximum } => Self::Oversize { maximum },
-            SendError::TxFull => Self::TxFull,
+            UdpSendError::UnknownEndpoint => Self::UnknownEndpoint,
+            UdpSendError::UnboundEndpoint => Self::UnboundEndpoint,
+            UdpSendError::UnknownInterface => Self::UnknownInterface,
+            UdpSendError::UnsupportedSource => Self::UnsupportedSource,
+            UdpSendError::InvalidDestination => Self::InvalidDestination,
+            UdpSendError::MessageTooLong { maximum } => Self::Oversize { maximum },
+            UdpSendError::WouldBlock => Self::TxFull,
         }
     }
 }

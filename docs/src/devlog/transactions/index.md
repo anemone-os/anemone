@@ -13,8 +13,10 @@
   Introduce `NET-CONTROL-PLANE-001`，production local path通过RV64 exact-source证据，Stage 2 Closed。transaction
   因R0后续Stage仍未完成而保持Active；独立`2 -> 3`resolution已把Stage 3解析为3A split、3B lifecycle/address与
   3C nonblocking datagram。3A已按Contract Impact=None独立关闭；3B correction关闭namespace policy owner、
-  `S_IFSOCK`/backend admission与capacity-model findings，final review全0后独立Closed。3C仍Ready / Not Active，全部Socket/
-  Endpoint/UDP/wait candidate仍Pending。
+  `S_IFSOCK`/backend admission与capacity-model findings，final review全0后独立Closed。3C随后完成implicit bind、
+  `sendto/recvfrom`、owned receive与13项RV64 real-consumer matrix；初审三个Apollyon在原owner内修复，final review
+  全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；全部Socket/Endpoint/UDP/wait candidate仍
+  Pending，transaction保持Active，未进入`3 -> 4`resolution。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

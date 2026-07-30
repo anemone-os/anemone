@@ -1,5 +1,7 @@
 #![no_std]
 
+extern crate alloc;
+
 mod frame;
 mod interface;
 mod ipv4;

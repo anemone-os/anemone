@@ -1,9 +1,11 @@
 //! Anonymous UDP socket file and opened-description lifecycle association.
 
-use anemone_net_api::udp::{UdpLocalBinding, UdpQueryError};
+use anemone_net_api::udp::{
+    UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError, UdpReceivedDatagram,
+};
 
 use crate::{
-    net::udp::{BindError, UdpEndpointPort, create_endpoint},
+    net::udp::{BindError, SendError, UdpEndpointPort, create_endpoint},
     prelude::*,
     task::files::{FileDescOps, OpenedFileFinalReleaseCtx},
     utils::any_opaque::{AnyOpaque, NilOpaque},
@@ -114,6 +116,42 @@ pub(crate) fn query_udp_socket(
         .ok_or(UdpQueryError::UnknownEndpoint)?
         .binding()?;
     Ok((operation, binding))
+}
+
+pub(crate) struct UdpSendOperation<'a> {
+    endpoint: UdpEndpointPort,
+    _operation: MutexGuard<'a, ()>,
+}
+
+impl UdpSendOperation<'_> {
+    pub(crate) fn send(self, peer: UdpPeer, payload: &[u8]) -> Result<(), SendError> {
+        self.endpoint.send(peer, payload)
+    }
+}
+
+pub(crate) fn begin_udp_send(socket: &UdpSocketFile) -> Result<UdpSendOperation<'_>, SendError> {
+    let operation = socket.operation.lock();
+    let endpoint = socket.endpoint().ok_or(SendError::Stack(
+        anemone_net_api::udp::UdpSendError::UnknownEndpoint,
+    ))?;
+    // Implicit binding is a persistent commit. Keep the operation guard across
+    // the later user copy so MTU/capacity rejection cannot bypass that commit.
+    endpoint.ensure_bound()?;
+    Ok(UdpSendOperation {
+        endpoint,
+        _operation: operation,
+    })
+}
+
+pub(crate) fn receive_udp_socket(
+    socket: &UdpSocketFile,
+) -> Result<(MutexGuard<'_, ()>, UdpReceivedDatagram), UdpReceiveError> {
+    let operation = socket.operation.lock();
+    let datagram = socket
+        .endpoint()
+        .ok_or(UdpReceiveError::UnknownEndpoint)?
+        .receive()?;
+    Ok((operation, datagram))
 }
 
 fn final_release_udp_socket(ctx: OpenedFileFinalReleaseCtx<'_>) {

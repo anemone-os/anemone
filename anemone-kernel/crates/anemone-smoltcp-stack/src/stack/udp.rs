@@ -1,15 +1,14 @@
 //! Aggregate UDP operations owned by the protocol Stack.
 
 use anemone_net_api::{
-    InterfaceId,
+    InterfaceId, Ipv4Address as ApiIpv4Address,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
-        UdpLocalBinding, UdpQueryError, UdpRetireError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointId,
+        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError,
+        UdpReceivedDatagram, UdpRetireError, UdpSendError,
     },
 };
-use smoltcp::wire::{EthernetFrame, IpEndpoint, Ipv4Address};
-
-use crate::udp::SendError;
+use smoltcp::wire::{EthernetFrame, IpAddress, IpEndpoint, Ipv4Address};
 
 use super::Stack;
 
@@ -77,30 +76,53 @@ impl Stack {
         self.udp.binding(id)
     }
 
-    #[allow(dead_code)]
-    pub(super) fn send_udp(
+    pub fn send_udp_endpoint(
         &mut self,
         endpoint: UdpEndpointId,
-        selected_interface: Option<InterfaceId>,
-        source: Ipv4Address,
-        destination: IpEndpoint,
+        selection: UdpEgressSelection,
+        peer: UdpPeer,
         payload: &[u8],
-    ) -> Result<(), SendError> {
-        let selected = selected_interface.ok_or(SendError::MissingSelection)?;
+    ) -> Result<(), UdpSendError> {
+        let selected = selection.interface();
+        let source = Ipv4Address::from_octets(selection.source().octets());
         let (source_supported, ip_mtu) = self
             .interface_ipv4_and_mtu(selected, source)
-            .ok_or(SendError::UnknownInterface)?;
+            .ok_or(UdpSendError::UnknownInterface)?;
         if !source_supported {
-            return Err(SendError::UnsupportedSource);
+            return Err(UdpSendError::UnsupportedSource);
         }
         self.udp.queue_send(
             endpoint,
             Some(selected),
             source,
-            destination,
+            IpEndpoint::new(
+                IpAddress::Ipv4(Ipv4Address::from_octets(peer.address().octets())),
+                peer.port(),
+            ),
             payload,
             ip_mtu,
         )
+    }
+
+    pub fn receive_udp_endpoint(
+        &mut self,
+        endpoint: UdpEndpointId,
+    ) -> Result<UdpReceivedDatagram, UdpReceiveError> {
+        let datagram = self.udp.receive(endpoint)?;
+        // Detach restores one aggregate RX credit. Refill it while the Stack
+        // owner is still active: a full aggregate queue intentionally leaves
+        // the next datagram in the engine without a durable pump edge.
+        for entry in &mut self.interfaces {
+            self.udp.drain_ingress(entry.id, &mut entry.sockets);
+        }
+        if let Some(local) = &mut self.local {
+            self.udp.drain_ingress(local.id, &mut local.sockets);
+        }
+        let IpAddress::Ipv4(source) = datagram.source.addr;
+        Ok(UdpReceivedDatagram::from_owner_detach(
+            datagram.payload,
+            UdpPeer::new(ApiIpv4Address::new(source.octets()), datagram.source.port),
+        ))
     }
 
     pub fn retire_udp_endpoint(&mut self, id: UdpEndpointId) -> Result<(), UdpRetireError> {

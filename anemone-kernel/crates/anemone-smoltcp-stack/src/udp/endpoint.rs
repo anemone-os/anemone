@@ -12,18 +12,6 @@ use smoltcp::{
 
 use super::datagram::{PendingDatagram, ReceivedDatagram, TxPhase};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SendError {
-    UnknownEndpoint,
-    UnboundEndpoint,
-    MissingSelection,
-    UnknownInterface,
-    UnsupportedSource,
-    InvalidDestination,
-    Oversize { maximum: usize },
-    TxFull,
-}
-
 #[derive(Clone, Copy)]
 pub(crate) struct EngineResource {
     pub(super) interface: InterfaceId,

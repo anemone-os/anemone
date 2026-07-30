@@ -15,10 +15,12 @@ use anemone_rs::{
     os::linux::{
         fs::{AtFd, Fd, close, dup, fcntl_getfd, fcntl_getfl, fstat, statx},
         net::{
-            SocketFlags, bind_ipv4, bind_raw, getsockname_ipv4, getsockname_raw, socket_raw,
-            udp_socket,
+            MessageFlags, SocketFlags, bind_ipv4, bind_raw, getsockname_ipv4, getsockname_raw,
+            recvfrom_ipv4, recvfrom_raw, sendto_ipv4, sendto_raw, socket_raw, udp_socket,
         },
-        process::{WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, wait4},
+        process::{
+            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, wait4,
+        },
     },
     prelude::*,
 };
@@ -218,6 +220,273 @@ fn test_cloexec_exec_projection() -> Result<(), Errno> {
     close(fd)
 }
 
+const DELIVERY_RETRIES: usize = 4096;
+
+fn recv_retry(fd: Fd, payload: &mut [u8]) -> Result<(usize, SockAddrIn), Errno> {
+    for _ in 0..DELIVERY_RETRIES {
+        match recvfrom_ipv4(fd, payload, MessageFlags::DONTWAIT) {
+            Err(EAGAIN) => sched_yield()?,
+            result => return result,
+        }
+    }
+    Err(ETIMEDOUT)
+}
+
+fn expect_empty(fd: Fd) -> Result<(), Errno> {
+    let mut byte = [0u8; 1];
+    expect_errno(recvfrom_ipv4(fd, &mut byte, MessageFlags::DONTWAIT), EAGAIN)
+}
+
+fn test_roundtrip_local_paths() -> Result<(), Errno> {
+    for (address, message) in [
+        ([127, 0, 0, 1], b"loopback".as_slice()),
+        ([10, 0, 2, 15], b"self-external".as_slice()),
+    ] {
+        let server = udp_socket(SocketFlags::NONBLOCK)?;
+        bind_ipv4(server, SockAddrIn::new([0; 4], 0))?;
+        let server_name = getsockname_ipv4(server)?;
+        ensure(server_name.port() != 0)?;
+
+        let client = udp_socket(SocketFlags::NONBLOCK)?;
+        ensure(
+            sendto_ipv4(
+                client,
+                message,
+                MessageFlags::empty(),
+                SockAddrIn::new(address, server_name.port()),
+            )? == message.len(),
+        )?;
+        let client_name = getsockname_ipv4(client)?;
+        ensure(client_name.address() == [0; 4] && client_name.port() != 0)?;
+
+        let mut request = [0u8; 32];
+        let (request_len, client_peer) = recv_retry(server, &mut request)?;
+        ensure(&request[..request_len] == message)?;
+        ensure(client_peer.port() == client_name.port())?;
+
+        ensure(sendto_ipv4(server, b"reply", MessageFlags::empty(), client_peer)? == 5)?;
+        let mut reply = [0u8; 8];
+        let (reply_len, server_peer) = recv_retry(client, &mut reply)?;
+        ensure(&reply[..reply_len] == b"reply")?;
+        ensure(server_peer.port() == server_name.port())?;
+        close(client)?;
+        close(server)?;
+    }
+    Ok(())
+}
+
+fn test_specific_loopback_source() -> Result<(), Errno> {
+    let server = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let server_name = getsockname_ipv4(server)?;
+
+    let client = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(client, SockAddrIn::new([127, 0, 0, 2], 0))?;
+    let client_name = getsockname_ipv4(client)?;
+    send_to_bound(client, server_name, b"specific-loopback")?;
+
+    let mut payload = [0u8; 32];
+    let (received, peer) = recv_retry(server, &mut payload)?;
+    ensure(&payload[..received] == b"specific-loopback")?;
+    ensure(peer.address() == [127, 0, 0, 2] && peer.port() == client_name.port())?;
+    close(client)?;
+    close(server)
+}
+
+fn test_would_block_bridge() -> Result<(), Errno> {
+    let nonblocking = udp_socket(SocketFlags::NONBLOCK)?;
+    let mut byte = [0u8; 1];
+    expect_errno(
+        recvfrom_ipv4(nonblocking, &mut byte, MessageFlags::empty()),
+        EAGAIN,
+    )?;
+    close(nonblocking)?;
+
+    let blocking = udp_socket(SocketFlags::empty())?;
+    expect_errno(
+        recvfrom_ipv4(blocking, &mut byte, MessageFlags::DONTWAIT),
+        EAGAIN,
+    )?;
+    expect_errno(
+        recvfrom_ipv4(blocking, &mut byte, MessageFlags::empty()),
+        EOPNOTSUPP,
+    )?;
+    close(blocking)
+}
+
+fn send_to_bound(client: Fd, server: SockAddrIn, payload: &[u8]) -> Result<(), Errno> {
+    ensure(sendto_ipv4(client, payload, MessageFlags::empty(), server)? == payload.len())
+}
+
+fn test_zero_and_short_consume_whole() -> Result<(), Errno> {
+    let server = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let server_name = getsockname_ipv4(server)?;
+    let client = udp_socket(SocketFlags::NONBLOCK)?;
+
+    send_to_bound(client, server_name, b"")?;
+    let mut empty = [];
+    ensure(recv_retry(server, &mut empty)?.0 == 0)?;
+    expect_empty(server)?;
+
+    send_to_bound(client, server_name, b"consume-whole")?;
+    let mut short = [0u8; 3];
+    let (read, _) = recv_retry(server, &mut short)?;
+    ensure(read == 3 && &short == b"con")?;
+    expect_empty(server)?;
+    close(client)?;
+    close(server)
+}
+
+enum FaultTarget {
+    Payload,
+    Peer,
+    Addrlen,
+}
+
+fn recv_fault_when_ready(fd: Fd, target: FaultTarget, visible: &mut [u8]) -> Result<(), Errno> {
+    let mut peer = [0u8; 16];
+    let mut peer_len: socklen_t = 16;
+    for _ in 0..DELIVERY_RETRIES {
+        let result = unsafe {
+            match target {
+                FaultTarget::Payload => recvfrom_raw(
+                    fd as i32,
+                    1usize as *mut u8,
+                    1,
+                    anemone_rs::abi::net::linux::MSG_DONTWAIT,
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                ),
+                FaultTarget::Peer => recvfrom_raw(
+                    fd as i32,
+                    visible.as_mut_ptr(),
+                    visible.len(),
+                    anemone_rs::abi::net::linux::MSG_DONTWAIT,
+                    1usize as *mut u8,
+                    &mut peer_len,
+                ),
+                FaultTarget::Addrlen => recvfrom_raw(
+                    fd as i32,
+                    visible.as_mut_ptr(),
+                    visible.len(),
+                    anemone_rs::abi::net::linux::MSG_DONTWAIT,
+                    peer.as_mut_ptr(),
+                    1usize as *mut socklen_t,
+                ),
+            }
+        };
+        match result {
+            Err(EAGAIN) => sched_yield()?,
+            Err(EFAULT) => return Ok(()),
+            _ => return Err(EIO),
+        }
+    }
+    Err(ETIMEDOUT)
+}
+
+fn test_faults_consume_detached_datagram() -> Result<(), Errno> {
+    let server = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let server_name = getsockname_ipv4(server)?;
+    let client = udp_socket(SocketFlags::NONBLOCK)?;
+
+    send_to_bound(client, server_name, b"payload-fault")?;
+    let mut visible = [0u8; 16];
+    recv_fault_when_ready(server, FaultTarget::Payload, &mut visible)?;
+    expect_empty(server)?;
+
+    send_to_bound(client, server_name, b"peer-fault")?;
+    visible.fill(0);
+    recv_fault_when_ready(server, FaultTarget::Peer, &mut visible)?;
+    ensure(&visible[..10] == b"peer-fault")?;
+    expect_empty(server)?;
+
+    send_to_bound(client, server_name, b"addrlen-fault")?;
+    visible.fill(0);
+    recv_fault_when_ready(server, FaultTarget::Addrlen, &mut visible)?;
+    ensure(&visible[..13] == b"addrlen-fault")?;
+    expect_empty(server)?;
+    close(client)?;
+    close(server)
+}
+
+fn test_send_errno_and_flags() -> Result<(), Errno> {
+    let socket = udp_socket(SocketFlags::NONBLOCK)?;
+    let peer = SockAddrIn::new([127, 0, 0, 1], 47000);
+    let peer_bytes = sockaddr_bytes(peer);
+    let oversize = [0u8; 1473];
+
+    let fresh_oversize = udp_socket(SocketFlags::NONBLOCK)?;
+    expect_errno(
+        sendto_ipv4(fresh_oversize, &oversize, MessageFlags::empty(), peer),
+        EMSGSIZE,
+    )?;
+    let retained = getsockname_ipv4(fresh_oversize)?;
+    ensure(retained.address() == [0; 4] && retained.port() != 0)?;
+    close(fresh_oversize)?;
+
+    expect_errno(
+        unsafe {
+            sendto_raw(
+                socket as i32,
+                b"x".as_ptr(),
+                1,
+                0x1,
+                peer_bytes.as_ptr(),
+                16,
+            )
+        },
+        EOPNOTSUPP,
+    )?;
+    expect_errno(
+        unsafe { sendto_raw(socket as i32, b"x".as_ptr(), 1, 0, core::ptr::null(), 0) },
+        EDESTADDRREQ,
+    )?;
+    expect_errno(
+        sendto_ipv4(
+            socket,
+            b"x",
+            MessageFlags::empty(),
+            SockAddrIn::new([0; 4], 47000),
+        ),
+        EINVAL,
+    )?;
+    let retained = getsockname_ipv4(socket)?;
+    ensure(retained.address() == [0; 4] && retained.port() != 0)?;
+    expect_errno(
+        sendto_ipv4(
+            socket,
+            b"x",
+            MessageFlags::empty(),
+            SockAddrIn::new([127, 0, 0, 1], 0),
+        ),
+        EINVAL,
+    )?;
+    expect_errno(
+        sendto_ipv4(socket, &oversize, MessageFlags::empty(), peer),
+        EMSGSIZE,
+    )?;
+    expect_errno(
+        unsafe { sendto_raw(1, b"x".as_ptr(), 1, 0, peer_bytes.as_ptr(), 16) },
+        ENOTSOCK,
+    )?;
+
+    let constrained = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(constrained, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    expect_errno(
+        sendto_ipv4(
+            constrained,
+            b"x",
+            MessageFlags::empty(),
+            SockAddrIn::new([203, 0, 113, 7], 47000),
+        ),
+        EADDRNOTAVAIL,
+    )?;
+    close(constrained)?;
+    close(socket)
+}
+
 struct Results {
     passed: usize,
     failed: usize,
@@ -269,6 +538,12 @@ fn main() -> Result<(), Errno> {
     );
     results.case("dup-fork-final-release", test_dup_fork_and_final_release);
     results.case("cloexec-exec", test_cloexec_exec_projection);
+    results.case("roundtrip-local-paths", test_roundtrip_local_paths);
+    results.case("specific-loopback-source", test_specific_loopback_source);
+    results.case("would-block-bridge", test_would_block_bridge);
+    results.case("zero-short-consume", test_zero_and_short_consume_whole);
+    results.case("fault-consume", test_faults_consume_detached_datagram);
+    results.case("send-errno-flags", test_send_errno_and_flags);
 
     if results.failed == 0 {
         println!("UDPTEST:SUMMARY:PASS:{}", results.passed);

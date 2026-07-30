@@ -1,15 +1,17 @@
 //! Byte-level Linux sockaddr handling and UDP outcome projection.
 
+use alloc::{vec, vec::Vec};
 use core::mem::size_of;
 
-use anemone_abi::net::linux::{AF_INET, SockAddrIn, socklen_t};
+use anemone_abi::net::linux::{AF_INET, MSG_DONTWAIT, SockAddrIn, socklen_t};
 use anemone_net_api::{
     Ipv4Address,
-    udp::{UdpBindError, UdpLocalBinding, UdpQueryError},
+    udp::{UdpBindError, UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError, UdpSendError},
 };
 
 use crate::{
-    net::udp::BindError,
+    kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
+    net::udp::{BindError, SendError},
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
 };
@@ -40,10 +42,11 @@ pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<(Ipv4Address, u16)
     Ok((address, port))
 }
 
-pub(super) fn write_sockaddr_in(
+fn write_sockaddr_value(
     addr: u64,
     addrlen: u64,
-    binding: Option<UdpLocalBinding>,
+    address: Ipv4Address,
+    port: u16,
 ) -> Result<(), SysError> {
     let addrlen_addr = user_addr(addrlen)?;
     let task = get_current_task();
@@ -57,9 +60,6 @@ pub(super) fn write_sockaddr_in(
         return Err(SysError::InvalidArgument);
     }
 
-    let (address, port) = binding
-        .map(|binding| (binding.address(), binding.port()))
-        .unwrap_or((Ipv4Address::UNSPECIFIED, 0));
     let mut bytes = [0u8; SOCKADDR_IN_LEN];
     bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
     bytes[2..4].copy_from_slice(&port.to_be_bytes());
@@ -80,6 +80,69 @@ pub(super) fn write_sockaddr_in(
     Ok(())
 }
 
+pub(super) fn write_sockaddr_in(
+    addr: u64,
+    addrlen: u64,
+    binding: Option<UdpLocalBinding>,
+) -> Result<(), SysError> {
+    let (address, port) = binding
+        .map(|binding| (binding.address(), binding.port()))
+        .unwrap_or((Ipv4Address::UNSPECIFIED, 0));
+    write_sockaddr_value(addr, addrlen, address, port)
+}
+
+pub(super) fn write_peer(addr: u64, addrlen: u64, peer: UdpPeer) -> Result<(), SysError> {
+    write_sockaddr_value(addr, addrlen, peer.address(), peer.port())
+}
+
+pub(super) fn read_payload(addr: u64, len: usize) -> Result<Vec<u8>, SysError> {
+    // sendto commits any implicit binding before reaching this allocation
+    // guard. Stack admission still rechecks the same configured Endpoint limit
+    // together with the selected interface MTU before reporting success.
+    if len > NET_UDP_MAX_PAYLOAD_BYTES {
+        return Err(SysError::MessageTooLong);
+    }
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    let addr = user_addr(addr)?;
+    let task = get_current_task();
+    let uspace = task.clone_uspace_handle();
+    let mut payload = vec![0; len];
+    UserReadSlice::<u8>::try_new(addr, len, &mut uspace.lock())?.copy_to_slice(&mut payload);
+    Ok(payload)
+}
+
+pub(super) fn write_payload(addr: u64, payload: &[u8], len: usize) -> Result<usize, SysError> {
+    let copied = payload.len().min(len);
+    if copied == 0 {
+        return Ok(0);
+    }
+    let addr = user_addr(addr)?;
+    let task = get_current_task();
+    let uspace = task.clone_uspace_handle();
+    UserWriteSlice::<u8>::try_new(addr, copied, &mut uspace.lock())?
+        .copy_from_slice(&payload[..copied]);
+    Ok(copied)
+}
+
+pub(super) fn validate_message_flags(flags: i32) -> Result<bool, SysError> {
+    if flags & !MSG_DONTWAIT != 0 {
+        knoticeln!("udp: unsupported sendto/recvfrom flags {:#x}", flags);
+        return Err(SysError::NotSupported);
+    }
+    Ok(flags & MSG_DONTWAIT != 0)
+}
+
+fn map_would_block(nonblocking: bool) -> SysError {
+    if nonblocking {
+        return SysError::Again;
+    }
+    // Stage 4 replaces this bridge with the socket wait/readiness protocol.
+    knoticeln!("udp: blocking send/receive would sleep; Stage 4 wait support is not active");
+    SysError::NotSupported
+}
+
 pub(super) fn map_bind_error(error: BindError) -> SysError {
     match error {
         BindError::AddressUnavailable => SysError::AddressNotAvailable,
@@ -93,5 +156,30 @@ pub(super) fn map_bind_error(error: BindError) -> SysError {
 pub(super) fn map_query_error(error: UdpQueryError) -> SysError {
     match error {
         UdpQueryError::UnknownEndpoint => SysError::BadFileDescriptor,
+    }
+}
+
+pub(super) fn map_send_error(error: SendError, nonblocking: bool) -> SysError {
+    match error {
+        SendError::Bind(UdpBindError::UnknownEndpoint) => SysError::BadFileDescriptor,
+        SendError::Bind(UdpBindError::AlreadyBound) => SysError::InvalidArgument,
+        SendError::Bind(UdpBindError::PortInUse) => SysError::AddressInUse,
+        SendError::Bind(UdpBindError::EphemeralPortsExhausted) => SysError::Again,
+        SendError::NoRoute | SendError::InterfaceUnavailable => SysError::NetworkUnreachable,
+        SendError::SourceUnavailable => SysError::AddressNotAvailable,
+        SendError::Stack(UdpSendError::UnknownEndpoint) => SysError::BadFileDescriptor,
+        SendError::Stack(UdpSendError::UnboundEndpoint) => SysError::InvalidArgument,
+        SendError::Stack(UdpSendError::UnknownInterface) => SysError::NetworkUnreachable,
+        SendError::Stack(UdpSendError::UnsupportedSource) => SysError::AddressNotAvailable,
+        SendError::Stack(UdpSendError::InvalidDestination) => SysError::InvalidArgument,
+        SendError::Stack(UdpSendError::MessageTooLong { .. }) => SysError::MessageTooLong,
+        SendError::Stack(UdpSendError::WouldBlock) => map_would_block(nonblocking),
+    }
+}
+
+pub(super) fn map_receive_error(error: UdpReceiveError, nonblocking: bool) -> SysError {
+    match error {
+        UdpReceiveError::UnknownEndpoint => SysError::BadFileDescriptor,
+        UdpReceiveError::WouldBlock => map_would_block(nonblocking),
     }
 }

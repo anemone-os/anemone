@@ -99,6 +99,12 @@ pub enum SysError {
     AddressNotAvailable,
     /// A bounded network buffer or endpoint resource is exhausted.
     NoBufferSpace,
+    /// A datagram send did not provide a destination address.
+    DestinationAddressRequired,
+    /// A datagram exceeds the supported protocol or interface limit.
+    MessageTooLong,
+    /// The network control plane has no route to the destination.
+    NetworkUnreachable,
     /// Pipe write attempted after all readers were gone.
     BrokenPipe,
     /// The file does not support seeking.
@@ -234,6 +240,9 @@ impl SysError {
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,
             SysError::NoBufferSpace => ENOBUFS,
+            SysError::DestinationAddressRequired => EDESTADDRREQ,
+            SysError::MessageTooLong => EMSGSIZE,
+            SysError::NetworkUnreachable => ENETUNREACH,
             SysError::BrokenPipe => EPIPE,
             SysError::IllegalSeek => ESPIPE,
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't

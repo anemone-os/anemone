@@ -1,13 +1,16 @@
 use alloc::vec::Vec;
 
-use anemone_net_api::InterfaceId;
+use anemone_net_api::{
+    InterfaceId,
+    udp::{UdpReceiveError, UdpSendError},
+};
 use smoltcp::{
     iface::SocketSet,
     socket::udp,
     wire::{IpAddress, IpEndpoint, Ipv4Address},
 };
 
-use super::{EndpointId, SendError, UdpEndpoints};
+use super::{EndpointId, UdpEndpoints};
 
 const IPV4_HEADER_LEN: usize = 20;
 const UDP_HEADER_LEN: usize = 8;
@@ -40,18 +43,18 @@ impl UdpEndpoints {
         destination: IpEndpoint,
         payload: &[u8],
         interface_ip_mtu: usize,
-    ) -> Result<(), SendError> {
-        let selected_interface = selected_interface.ok_or(SendError::MissingSelection)?;
+    ) -> Result<(), UdpSendError> {
+        let selected_interface = selected_interface.ok_or(UdpSendError::UnknownInterface)?;
         if destination.addr.is_unspecified() || destination.port == 0 {
-            return Err(SendError::InvalidDestination);
+            return Err(UdpSendError::InvalidDestination);
         }
         let endpoint = self
             .endpoints
             .iter_mut()
             .find(|endpoint| endpoint.id == endpoint_id)
-            .ok_or(SendError::UnknownEndpoint)?;
+            .ok_or(UdpSendError::UnknownEndpoint)?;
         if endpoint.binding.is_none() {
-            return Err(SendError::UnboundEndpoint);
+            return Err(UdpSendError::UnboundEndpoint);
         }
         // Admission owns both limits that the private engine must satisfy.
         // Accepting against MTU alone would defer an engine-buffer failure to
@@ -62,17 +65,17 @@ impl UdpEndpoints {
             // A zero-length UDP payload still needs both headers. Reporting a
             // zero payload maximum as admissible here would defer failure to
             // the device after the operation had already committed success.
-            return Err(SendError::Oversize { maximum: 0 });
+            return Err(UdpSendError::MessageTooLong { maximum: 0 });
         };
         let maximum = interface_payload_capacity.min(endpoint.limits.max_payload_bytes());
         if payload.len() > maximum {
-            return Err(SendError::Oversize { maximum });
+            return Err(UdpSendError::MessageTooLong { maximum });
         }
         if endpoint.engine(selected_interface).is_none() {
-            return Err(SendError::UnknownInterface);
+            return Err(UdpSendError::UnknownInterface);
         }
         if !matches!(endpoint.tx, TxPhase::Idle) {
-            return Err(SendError::TxFull);
+            return Err(UdpSendError::WouldBlock);
         }
         endpoint.tx = TxPhase::Queued(PendingDatagram {
             selected_interface,
@@ -198,11 +201,13 @@ impl UdpEndpoints {
         }
     }
 
-    pub(crate) fn receive(&mut self, id: EndpointId) -> Option<ReceivedDatagram> {
+    pub(crate) fn receive(&mut self, id: EndpointId) -> Result<ReceivedDatagram, UdpReceiveError> {
         self.endpoints
             .iter_mut()
-            .find(|endpoint| endpoint.id == id)?
+            .find(|endpoint| endpoint.id == id)
+            .ok_or(UdpReceiveError::UnknownEndpoint)?
             .received
             .pop_front()
+            .ok_or(UdpReceiveError::WouldBlock)
     }
 }

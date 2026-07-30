@@ -7,7 +7,7 @@ mod namespace;
 pub(crate) use anemone_net_api::udp::UdpEndpointId as EndpointId;
 #[allow(unused_imports)]
 pub(crate) use datagram::ReceivedDatagram;
+pub(crate) use endpoint::Endpoint;
 #[allow(unused_imports)]
 pub(crate) use endpoint::EngineResource;
-pub(crate) use endpoint::{Endpoint, SendError};
 pub(crate) use namespace::UdpEndpoints;

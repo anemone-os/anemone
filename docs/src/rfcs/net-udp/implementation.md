@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-2与Checkpoint 3A-3B Closed / Checkpoint 3C Ready / Not Active / Stage 4-5 Outline
+**状态：** R0 / Stage 0-3 Closed / Stage 4-5 Outline
 **最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -20,7 +20,8 @@
 > `2 -> 3`resolution已把Stage 3完整解析为Ready；Checkpoint 3A随后完成same-owner module split并独立关闭。
 > Checkpoint 3B已形成Endpoint/File/address lifecycle实现；获批VFS/shared-surface correction与capacity Route
 > Correction完成后，RV64 correction-source证据经behavior-preserving lazy-Vec改动复用，独立final review关闭本checkpoint。
-> Checkpoint 3C保持Ready / Not Active，Stage 4-5仍是Outline。
+> Checkpoint 3C随后完成nonblocking datagram纵切、correctness repair、final validation与review，Stage 3已Closed；
+> Stage 4-5仍是Outline，`3 -> 4`resolution未执行。
 
 ## 1. 计划角色与 authority
 
@@ -29,7 +30,7 @@
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
-Stage 0-2已经独立关闭；本计划现在冻结下一个可执行的Stage 3。Stage 4-5仍是future Outline，其中列出的目录、
+Stage 0-3已经独立关闭。Stage 4-5仍是future Outline，其中列出的目录、
 模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须先按
 自己的验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让
 下一阶段达到Ready，不自动进入Active。
@@ -137,7 +138,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
-| Stage 3 — Endpoint/socket nonblocking vertical slice | 3A-3B Closed；3C Ready / Not Active | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | 本stage不cut over current contract；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
+| Stage 3 — Endpoint/socket nonblocking vertical slice | Closed | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | Contract Impact为None；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
 
@@ -850,13 +851,14 @@ fresh-disk RV64 wrapper均通过；RV64实际执行270/270 KUnit、三项local-p
 hardware与final harness继续Not Run。`NET-BOUNDARY-001`为Preserve，R0 revision、Stage 2 runtime closure与其它
 contract状态不变；本checkpoint已Closed，并继续停在Stage 3 Outline。
 
-### 6.3 Stage 3 Ready — Endpoint/socket nonblocking vertical slice
+### 6.3 Stage 3 Closed — Endpoint/socket nonblocking vertical slice
 
-**阶段成熟度与授权：** Checkpoint 3A-3B Closed / Checkpoint 3C Ready / Not Active。2026-07-30独立
+**阶段成熟度与授权：** Checkpoint 3A-3C Closed。2026-07-30独立
 `2 -> 3 Implementation Resolution Gate`已完成；
 本节冻结Stage 3完整路线、三个checkpoint、ABI/lifecycle边界、验证、停止/退出条件与Resolved Write Set Manifest。
 Checkpoint 3A随后由独立授权完成；3B implementation/validation、获批correction、capacity Route Correction与
-final exact-diff review也已独立关闭。3C不激活，Stage 4 resolution与current-contract cutover均未授权。
+final exact-diff review也已独立关闭。3C随后完成implementation、correctness repair、validation与review并关闭
+Stage 3；Stage 4 resolution与current-contract cutover均未授权。
 
 #### 6.3.1 Resolution baseline 与阶段结果
 
@@ -1193,7 +1195,7 @@ final change review为Apollyon/Keter/Euclid/Safe全0。QEMU、KUnit runtime、UD
 均Not Run且不属于本behavior-preserving checkpoint退出条件。Contract Impact为None，existing Effective IDs
 Preserve，全部Socket/Endpoint/UDP/wait candidate继续Pending；checkpoint独立Closed并停止，3C仍Ready / Not Active。
 
-#### 6.3.8 Checkpoint 3C — nonblocking datagram vertical slice
+#### 6.3.8 Checkpoint 3C — Closed / nonblocking datagram vertical slice
 
 **目的：** 在3B真实lifecycle上增加send/receive ownership transaction，形成五项syscall的可运行nonblocking闭环。
 
@@ -1210,9 +1212,21 @@ client recv，以及loopback/self-external、empty nonblock `EAGAIN`、blocking 
 payload/peer/addrlen fault consume和precise errno/flag case。Stage 3只建立这些ordinary paths；concurrent close/
 receive stress、wait/readiness与fragment gate仍由Stage 4解析。
 
+**Closure：** `sendto/recvfrom`、shared typed outcome、Stack send/receive operation与typed `anemone-rs` wrapper已在
+3B真实lifecycle上形成ordinary nonblocking纵切。File operation guard串行bind/name/send/receive；send在同一guard下
+先提交implicit wildcard binding再执行bounded copyin与Stack route/source/interface/MTU/TX revalidation，receive在
+Stack锁内detach whole datagram后释放protocol owner，再按payload/peer/addrlen顺序copyout。local loopback与
+self-external均经protocol egress、bounded local link与normal ingress，不存在Socket fast path。
+
+初次独立source review得到Apollyon 3：aggregate RX credit恢复后缺少durable progression、fresh oversize被ABI
+precheck在implicit bind前拒绝、specific noncanonical `127/8` bind与source selection predicate不一致。修复保持原
+owner/write set：Stack detach同步refill engine datagram；`UdpSendOperation`保持File guard并在copyin前完成persistent
+implicit bind；control plane统一使用`Ipv4Address::is_loopback()`。focused host recovery与新增fresh oversize retention/
+specific loopback runtime case覆盖三项repair；最终复审清零后本checkpoint独立Closed。
+
 #### 6.3.9 Validation、review 与 claim boundary
 
-每个checkpoint在自己的final source上执行适用子集；Stage 3 closure必须在3C exact code上重新执行完整集合：
+每个checkpoint在自己的final source上执行适用子集；Stage 3 closure必须在3C exact code上执行完整适用集合：
 
 ```text
 just xtask-test
@@ -1238,6 +1252,16 @@ payload-one仍是物理上不可满足的trusted configuration，private metadat
 failure不在R0保证内；不应为逼迫该case compile-fail而重新耦合private metadata layout。
 这些case不得在xtask semantic validation中失败；每次失败必须定位到kernel compilation，随后用canonical config
 恢复generated input并完成正常双架构build。
+
+3C没有修改KernelConfig schema、generated values、kernel static assertion或配置consumer；按开发者明确决定，
+invalid-KernelConfig matrix在本checkpoint记为**Not Re-run / unchanged owner**，只沿用3B final source已经记录的
+compile-fail evidence，不宣称3C重跑。其它final-source gate不因此降低。
+
+3C final source执行62/62 xtask、完整host matrix（`udp_topology` 9/9）、两项no-default gate、kernel/`udp-test`
+formatter、双架构`udp-test` app与release kernel build、RV64 fresh-disk wrapper、whitespace与mdBook。RV64执行
+271/271 KUnit、`UDPTEST:SUMMARY:PASS:13`、`EPOLLTEST:SUMMARY:PASS:11`、LTP whitelist 4/4与strict
+`filesystem -> network -> device -> PowerOff`。sandbox内unchanged `lwext4`的`Bad system call`由相同RV64 build在
+sandbox外PASS归类为环境限制。
 
 host crate tests是protocol deterministic proof，app build只证明architecture-specific compile/export，kernel build只
 证明integration；它们都不能替代fresh-disk RV64 syscall/fd/copy/lifecycle runtime。RV64 wrapper会重建pretest rootfs、
@@ -1276,9 +1300,9 @@ syscall registration或RV64 PASS都不使这些ID生效。
   retire后old capability恢复publication，或Apollyon/Keter未清零；
 - 需要编辑本节manifest外source。先上报理由、拟新增路径、owner/contract影响与验证，再批准并更新manifest。
 
-3A、3B、3C全部独立Closed，最终source通过6.3.9 review/validation且stop condition未触发后，Stage 3才Closed。
+3A、3B、3C现已全部独立Closed，最终source通过6.3.9 review/validation且stop condition未触发，Stage 3 Closed。
 closure只授权transaction/RFC/biweekly状态写回；Stage 4保持Outline，`3 -> 4`resolution与任何candidate contract
-cutover均须新的明确授权。
+cutover均须新的明确授权，本次没有执行。
 
 #### 6.3.11 Resolved Write Set Manifest
 
@@ -1973,6 +1997,12 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   contract；全部2A validation gate与先前独立source review通过，开发者在closure时明确取消额外final exact-diff
   review。Contract Impact为None，Checkpoint 2B保持Ready / Not Active。精确证据见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-29---stage-2-checkpoint-2a-activation-and-same-owner-split)。
+- `2026-07-30`：Checkpoint 3C / Correctness Feedback and Closure。初次独立source review发现RX aggregate credit
+  recovery、fresh oversize implicit-bind retention与specific `127/8` source三项Apollyon；全部在Stack/File operation/
+  control-plane既有owner内修复，并以无手工pump host recovery、fresh oversize `getsockname` retention与specific
+  loopback runtime补齐证据。修复后final validation与复审通过，Stage 3独立Closed；Contract Impact为None，candidate
+  contracts继续Pending，`3 -> 4`resolution未执行。精确证据见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3-checkpoint-3c-implementation-review-repair-and-closure)。
 
 ## 14. Target Renegotiation Gates
 

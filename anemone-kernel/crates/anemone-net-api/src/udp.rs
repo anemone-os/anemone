@@ -4,7 +4,9 @@
 //! smoltcp details. The concrete Stack remains the sole endpoint and binding
 //! authority.
 
-use crate::Ipv4Address;
+use alloc::vec::Vec;
+
+use crate::{InterfaceId, Ipv4Address};
 
 /// Opaque boot-local UDP endpoint identity.
 ///
@@ -138,6 +140,71 @@ impl UdpLocalBinding {
     }
 }
 
+/// Point-in-time route/source selection passed into the protocol owner for
+/// commit-time revalidation. It carries no route-table or wake capability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UdpEgressSelection {
+    interface: InterfaceId,
+    source: Ipv4Address,
+}
+
+impl UdpEgressSelection {
+    pub const fn new(interface: InterfaceId, source: Ipv4Address) -> Self {
+        Self { interface, source }
+    }
+
+    pub const fn interface(self) -> InterfaceId {
+        self.interface
+    }
+
+    pub const fn source(self) -> Ipv4Address {
+        self.source
+    }
+}
+
+/// Protocol-domain IPv4 peer endpoint, independent of Linux sockaddr layout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UdpPeer {
+    address: Ipv4Address,
+    port: u16,
+}
+
+impl UdpPeer {
+    pub const fn new(address: Ipv4Address, port: u16) -> Self {
+        Self { address, port }
+    }
+
+    pub const fn address(self) -> Ipv4Address {
+        self.address
+    }
+
+    pub const fn port(self) -> u16 {
+        self.port
+    }
+}
+
+/// Datagram detached from the protocol owner before any user-memory copyout.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UdpReceivedDatagram {
+    payload: Vec<u8>,
+    peer: UdpPeer,
+}
+
+impl UdpReceivedDatagram {
+    #[doc(hidden)]
+    pub fn from_owner_detach(payload: Vec<u8>, peer: UdpPeer) -> Self {
+        Self { payload, peer }
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    pub const fn peer(&self) -> UdpPeer {
+        self.peer
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UdpCreateError {
     EndpointCapacity,
@@ -154,6 +221,23 @@ pub enum UdpBindError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UdpQueryError {
     UnknownEndpoint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UdpSendError {
+    UnknownEndpoint,
+    UnboundEndpoint,
+    UnknownInterface,
+    UnsupportedSource,
+    InvalidDestination,
+    MessageTooLong { maximum: usize },
+    WouldBlock,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UdpReceiveError {
+    UnknownEndpoint,
+    WouldBlock,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,6 +1,7 @@
 use anemone_net_api::udp::{
-    UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
-    UdpLocalBinding, UdpQueryError, UdpRetireError,
+    UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointId,
+    UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError,
+    UdpReceivedDatagram, UdpRetireError, UdpSendError,
 };
 
 use super::*;
@@ -26,6 +27,25 @@ impl DomainStack {
         endpoint: UdpEndpointId,
     ) -> Result<Option<UdpLocalBinding>, UdpQueryError> {
         self.stack.lock().udp_endpoint_binding(endpoint)
+    }
+
+    pub(in crate::net) fn send_udp_endpoint(
+        &self,
+        endpoint: UdpEndpointId,
+        selection: UdpEgressSelection,
+        peer: UdpPeer,
+        payload: &[u8],
+    ) -> Result<(), UdpSendError> {
+        self.stack
+            .lock()
+            .send_udp_endpoint(endpoint, selection, peer, payload)
+    }
+
+    pub(in crate::net) fn receive_udp_endpoint(
+        &self,
+        endpoint: UdpEndpointId,
+    ) -> Result<UdpReceivedDatagram, UdpReceiveError> {
+        self.stack.lock().receive_udp_endpoint(endpoint)
     }
 
     pub(in crate::net) fn retire_udp_endpoint(

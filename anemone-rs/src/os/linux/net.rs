@@ -18,6 +18,13 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct MessageFlags: i32 {
+        const DONTWAIT = anemone_abi::net::linux::MSG_DONTWAIT;
+    }
+}
+
 pub fn udp_socket(flags: SocketFlags) -> Result<Fd, Errno> {
     net::socket(
         AF_INET as u64,
@@ -46,6 +53,42 @@ pub fn getsockname_ipv4(fd: Fd) -> Result<SockAddrIn, Errno> {
     )?;
     assert_eq!(len as usize, core::mem::size_of::<SockAddrIn>());
     Ok(address)
+}
+
+pub fn sendto_ipv4(
+    fd: Fd,
+    payload: &[u8],
+    flags: MessageFlags,
+    peer: SockAddrIn,
+) -> Result<usize, Errno> {
+    net::sendto(
+        fd as u64,
+        payload.as_ptr() as u64,
+        payload.len() as u64,
+        flags.bits() as u64,
+        &peer as *const SockAddrIn as u64,
+        core::mem::size_of::<SockAddrIn>() as u64,
+    )
+    .map(|written| written as usize)
+}
+
+pub fn recvfrom_ipv4(
+    fd: Fd,
+    payload: &mut [u8],
+    flags: MessageFlags,
+) -> Result<(usize, SockAddrIn), Errno> {
+    let mut peer = SockAddrIn::default();
+    let mut peer_len = core::mem::size_of::<SockAddrIn>() as socklen_t;
+    let received = net::recvfrom(
+        fd as u64,
+        payload.as_mut_ptr() as u64,
+        payload.len() as u64,
+        flags.bits() as u64,
+        &mut peer as *mut SockAddrIn as u64,
+        &mut peer_len as *mut socklen_t as u64,
+    )?;
+    assert_eq!(peer_len as usize, core::mem::size_of::<SockAddrIn>());
+    Ok((received as usize, peer))
 }
 
 /// Raw socket creation for ABI rejection and flag-conformance tests.

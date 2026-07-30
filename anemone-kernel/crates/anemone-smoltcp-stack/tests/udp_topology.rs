@@ -158,6 +158,56 @@ fn endpoint_capacity_binding_matrix_ephemeral_and_stale_identity() {
     );
 }
 
+#[test]
+fn implicit_bind_exhaustion_and_post_bind_send_failure_preserve_binding() {
+    let any = [0, 0, 0, 0];
+    let mut exhausted = host_stack(4, 50000, 50000);
+    let occupied = create_unbound(&mut exhausted);
+    let implicit = create_unbound(&mut exhausted);
+    bind_for_host(&mut exhausted, occupied, any, 0).unwrap();
+    assert_eq!(
+        bind_for_host(&mut exhausted, implicit, any, 0),
+        Err(UdpBindError::EphemeralPortsExhausted)
+    );
+    assert_eq!(
+        exhausted.udp_binding_for_host_validation(implicit).unwrap(),
+        None
+    );
+
+    let mut stack = standard_stack();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 2, 128, Instant::ZERO);
+    let endpoint = create_unbound(&mut stack);
+    let binding = bind_for_host(&mut stack, endpoint, any, 0).unwrap();
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            0,
+            b"invalid destination",
+        ),
+        Err(HostSendError::InvalidDestination)
+    );
+    assert_eq!(
+        stack.udp_binding_for_host_validation(endpoint).unwrap(),
+        Some(binding)
+    );
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            49000,
+            &[0; 33],
+        ),
+        Err(HostSendError::Oversize { maximum: 32 })
+    );
+    assert_eq!(
+        stack.udp_binding_for_host_validation(endpoint).unwrap(),
+        Some(binding)
+    );
+}
+
 fn selection(interface: InterfaceId, source: [u8; 4]) -> HostSelection {
     HostSelection { interface, source }
 }
@@ -824,7 +874,8 @@ fn full_receive_queue_does_not_gate_another_endpoint() {
             .payload,
         b"first-1"
     );
-    pump_local(&mut stack, local, 10);
+    // Detaching first-1 restores one aggregate credit and synchronously refills
+    // it from the engine; no unrelated pump edge is required for first-2.
     assert_eq!(
         stack
             .receive_udp_for_host_validation(first_server)
@@ -832,4 +883,61 @@ fn full_receive_queue_does_not_gate_another_endpoint() {
             .payload,
         b"first-2"
     );
+}
+
+#[test]
+fn zero_length_detach_abandon_and_receive_order_are_deterministic() {
+    let mut stack = standard_stack();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 4, 128, Instant::ZERO);
+    let client = stack
+        .create_udp_endpoint_for_host_validation(46000, 4, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let server = stack
+        .create_udp_endpoint_for_host_validation(46001, 4, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            46001,
+            b"",
+        )
+        .unwrap();
+    pump_local(&mut stack, local, 1);
+    pump_local(&mut stack, local, 2);
+    let detached = stack.receive_udp_for_host_validation(server).unwrap();
+    assert!(detached.payload.is_empty());
+    drop(detached);
+    assert!(stack.receive_udp_for_host_validation(server).is_none());
+
+    for (tick, payload) in [(3, b"first".as_slice()), (5, b"second".as_slice())] {
+        stack
+            .send_udp_for_host_validation(
+                client,
+                Some(selection(local, LOCAL_IP)),
+                LOCAL_IP,
+                46001,
+                payload,
+            )
+            .unwrap();
+        pump_local(&mut stack, local, tick);
+        pump_local(&mut stack, local, tick + 1);
+    }
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(server)
+            .unwrap()
+            .payload,
+        b"first"
+    );
+    assert_eq!(
+        stack
+            .receive_udp_for_host_validation(server)
+            .unwrap()
+            .payload,
+        b"second"
+    );
+    assert!(stack.receive_udp_for_host_validation(server).is_none());
 }

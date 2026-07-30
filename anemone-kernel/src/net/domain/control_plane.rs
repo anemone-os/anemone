@@ -159,7 +159,7 @@ impl Ipv4ControlPlane {
             .as_ref()
             .map(|external| external.cidr.address());
         let source_is_local =
-            |source| source == Ipv4Address::LOOPBACK || external_address == Some(source);
+            |source: Ipv4Address| source.is_loopback() || external_address == Some(source);
 
         if external_address == Some(destination) || destination.is_loopback() {
             let default_source = if external_address == Some(destination) {
