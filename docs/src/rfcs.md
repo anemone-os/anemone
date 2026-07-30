@@ -122,8 +122,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   3B的`socket/bind/getsockname`、namespace single-owner、`S_IFSOCK`/backend admission与自然capacity model已完成，
   RV64 correction-source证据经behavior-preserving lazy-Vec改动复用，独立review关闭本checkpoint。3C随后完成
   implicit bind、`sendto/recvfrom`、owned receive与13项RV64 real-consumer matrix；初审三个correctness finding在
-  原owner内修复，final review全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；Socket/Endpoint/
-  UDP/wait candidate contracts仍未生效，未进入`3 -> 4`resolution。执行证据见
+  原owner内修复，final review全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；独立`3 -> 4`
+  resolution已把Stage 4解析为4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence
+  closure，当前Ready / Not Active。Socket/Endpoint/UDP/wait candidate contracts仍未生效。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

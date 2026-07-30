@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-3 Closed / Stage 4-5 Outline
+**状态：** R0 / Stage 0-3 Closed / Stage 4 Ready / Not Active / Stage 5 Outline
 **最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -21,7 +21,9 @@
 > Checkpoint 3B已形成Endpoint/File/address lifecycle实现；获批VFS/shared-surface correction与capacity Route
 > Correction完成后，RV64 correction-source证据经behavior-preserving lazy-Vec改动复用，独立final review关闭本checkpoint。
 > Checkpoint 3C随后完成nonblocking datagram纵切、correctness repair、final validation与review，Stage 3已Closed；
-> Stage 4-5仍是Outline，`3 -> 4`resolution未执行。
+> 独立`3 -> 4`resolution现已把Stage 4解析为4A socket source、4B blocking syscall与4C race/evidence
+> closure三个checkpoint。Stage 4为Ready / Not Active，Stage 5保持Outline；本次没有激活4A或执行current-contract
+> cutover。
 
 ## 1. 计划角色与 authority
 
@@ -30,17 +32,18 @@
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
-Stage 0-3已经独立关闭。Stage 4-5仍是future Outline，其中列出的目录、
-模块和contract gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须先按
-自己的验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让
-下一阶段达到Ready，不自动进入Active。
+Stage 0-3已经独立关闭。Stage 4已经由独立`3 -> 4`resolution完整解析为Ready / Not Active；本阶段的checkpoint、
+验证和Resolved Write Set Manifest以6.4为唯一权威。Stage 5仍是future Outline，其中列出的目录、模块和contract
+gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须先按自己的验证和退出
+条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让下一阶段达到Ready，
+不自动进入Active。
 
 进入实现前必须：
 
 1. R0由独立public review接受；Draft promotion本身不构成acceptance；
 2. 建立独立transaction，并重新读取当时的live source、current contracts、register、branch/HEAD与dirty state；
-3. 确认Stage 3的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
-4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 3仍须
+3. 确认Stage 4的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
+4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 4仍须
    获得独立启动授权。
 
 ## 2. Live baseline 与首阶段选择
@@ -139,11 +142,12 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Closed | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | Contract Impact为None；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
-| Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
+| Stage 4 — Blocking/iomux与datagram hardening | Ready / Not Active | 以完整复数route socket source接入poll/select/epoll，复用同一predicate完成blocking/signal，并关闭race、copy-fault、capacity/writable与fragment evidence | Stage 3 Closed；`3 -> 4`resolution完成 | Contract Impact为None；保持既有OPENED-DESC/IOMUX/EPOLL IDs，全部Socket/Endpoint/UDP/wait candidate继续Pending |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
 
-Stage名称与数量在future resolution中可以保持target地调整。Stage 3的具体Rust边界、逐文件write set、capacity
-数值与精确命令已在6.3冻结；Stage 4-5仍不预定这些实现细节。
+Stage名称与数量可以在保持target的Route Correction中调整，但Ready / Active阶段必须先更新本文与transaction后
+再改变冻结边界。Stage 3的具体Rust边界、逐文件write set、capacity数值与精确命令已在6.3保留；Stage 4的完整
+Ready定义位于6.4，Stage 5仍不预定具体实现细节。
 
 ## 6. Current Stage and Future Outlines
 
@@ -1301,8 +1305,8 @@ syscall registration或RV64 PASS都不使这些ID生效。
 - 需要编辑本节manifest外source。先上报理由、拟新增路径、owner/contract影响与验证，再批准并更新manifest。
 
 3A、3B、3C现已全部独立Closed，最终source通过6.3.9 review/validation且stop condition未触发，Stage 3 Closed。
-closure只授权transaction/RFC/biweekly状态写回；Stage 4保持Outline，`3 -> 4`resolution与任何candidate contract
-cutover均须新的明确授权，本次没有执行。
+closure当时只授权transaction/RFC/biweekly状态写回；Stage 4当时保持Outline，`3 -> 4`resolution与任何candidate
+contract cutover均须新的明确授权，Stage 3 closure本身没有执行。
 
 #### 6.3.11 Resolved Write Set Manifest
 
@@ -1344,39 +1348,255 @@ planned files，不授权顺手修改相邻owner。
 net worker/provider、SystemTarget/Platform/build preset、其它apps/rootfs、其它RFC与
 scripts保持只读。formatter若产生允许的相邻style diff按repo规则审计，不将其解释为owner/write-set授权扩大。
 
-### 6.4 Stage 4 Outline — Blocking/iomux与datagram hardening
+### 6.4 Stage 4 Ready / Not Active — Blocking/iomux与datagram hardening
 
-概括目的：
+本节由Stage 3 Closed后的独立`3 -> 4 Implementation Resolution Gate`解析。**成熟度：Ready / Not Active**；
+Checkpoint 4A、4B、4C均未激活。本次只冻结完整Stage 4交付、owner/handoff、review/validation、停止/退出条件和
+Resolved Write Set Manifest，不修改source、current contract、R0 revision或acceptance boundary。
 
-- 让default blocking、`O_NONBLOCK`、`SOCK_NONBLOCK`和`MSG_DONTWAIT`共享同一owner predicate；
-- 把socket接入现有poll/select/epoll snapshot-register-final-recheck协议和signal/cancel路径；
-- 关闭readable/writable、Endpoint saturation/recovery、provider backpressure、late edge、retire race与dup/fork/
-  close交错；
-- 扩展zero/short/oversize与三类copy fault的并发/partial-effect matrix，完成concurrent receive和IPv4
-  first/later fragment显式拒绝。
+#### 6.4.1 前置条件与live baseline
 
-前置依赖：
+- Stage 3已经在`0204ac74`关闭：anonymous `UdpSocketFile`、opaque `UdpEndpointPort`、semantic final release、
+  nonblocking `sendto/recvfrom`与owned receive transaction均已形成；default-blocking would-block仍通过带删除条件的
+  `EOPNOTSUPP` bridge停止，`FileOps::poll`仍是snapshot-only empty stub；
+- Endpoint当前readable fact来自aggregate receive queue，writable fact来自live Endpoint是否能接受一个普通非空
+  datagram进入Endpoint-owned bounded TX admission；provider backpressure只有通过占满该admission间接改变writable，
+  kernel没有也不得新增provider/private-engine queue mirror；
+- effective `OPENED-DESC-001..003`、`IOMUX-POLL-001..003`与`EPOLL-*`已经提供semantic final release、复数
+  source-neutral `PollRoute`、snapshot/register/final-scan和epoll ordinary-source consumer；Stage 4 Preserve这些规则，
+  不修改epoll watch/ready owner；
+- shared `wait_for_iomux_ready()`当前私有位于`fs/api/iomux/wait.rs`并只服务`ppoll/pselect6`。Stage 4需要复用或
+  下移其中source-neutral wait loop，不能在socket syscall复制第二套Latch/signal/final-recheck协议；
+- vendored smoltcp已经在IPv4 representation parse、UDP header/Endpoint lookup之前显式拒绝`MF != 0`或
+  `fragment offset != 0`；Stage 4首先用真实frame injection证明该production gate，不预先取得vendored write权限；
+- activation前必须重新核对branch/HEAD、dirty state、live source、current contracts、register、4A manifest与本文
+  anchor。drift若只影响实现偏好，先按6.4.3记录Route Correction；影响owner、ABI、contract或acceptance时停止。
 
-- Stage 3 Closed且nonblocking syscall/Endpoint lifecycle纵切已经稳定；
-- live iomux/epoll/opened-description contracts与实现重新审计。
+#### 6.4.2 Resolved owner、predicate与handoff
 
-受保护边界：
+Stage 4固定以下语义形状，不固定无真实摩擦证据的Rust拼写：
 
-- Endpoint fact、notification与Linux readiness/error保持分离；event/wake只请求重查；
-- source registration和predicate publication遵守`IOMUX-POLL-001..003`，不另建socket wait core；
-- writable只表示destination-independent general Endpoint admission，不镜像route/provider queue truth；
-- user copy不持Stack/source private lock，copy fault不回滚已detach datagram；
-- fragment必须在UDP header parsing/Endpoint lookup前拒绝，未启用reassembly不是充分证据。
+1. **Endpoint fact owner：** concrete Stack/Endpoint继续唯一拥有liveness、RX aggregate、TX admission phase、
+   capacity与private engine fact。跨crate只增加一次性readiness facts snapshot和可合并的“Endpoint facts may have
+   changed” invalidation；二者不携带Linux poll mask、errno、task、waiter或consumer callback truth。
+2. **Kernel Socket/source owner：** Socket-owned source state一次拥有opaque association publication与复数
+   `PollRoute` registry，File operation mutex只串行syscall operation。source依据当前Endpoint snapshot解释
+   `READABLE/WRITABLE`，不得缓存第二份queue/capacity/error truth。reverse event route只把opaque Endpoint identity
+   定位到non-owning Socket source capability；它不决定association、liveness或readiness。
+3. **Event handoff：** Stack state transition只在Stack锁内更新事实并留下可合并recheck indication；DomainStack在
+   释放Stack锁后取出/路由edge。kernel reverse registry取得non-owning source后，在source锁内选择route snapshot，
+   释放锁后再notify/drop。Stack不保存`PollRoute`、task或waiter，source callback不进入Stack。
+4. **Poll publication：** register request先fallibly准备复数route replacement，再在同一source-state临界区发布
+   route并读取当前association；保持`source -> Stack`的短时只读snapshot顺序。Stack transition永不持Stack锁获取
+   source锁，所以不存在反向嵌套。ready-at-register也保留route；stale route pruning、旧snapshot drop与所有notify
+   都在source/Stack锁外。普通allocation failure形成typed registration failure，不能退化成单slot或睡在未armed source。
+5. **Readiness projection：** readable当且仅当live Endpoint已有可detach datagram。ordinary writable当且仅当
+   Endpoint live、未retire且能立即接纳至少一个非空、第一版支持范围内datagram进入自身bounded TX admission。
+   unbound本身仍writable；route/source/interface、具体长度/oversize和provider queue不进入poll truth。Stage 4不新增
+   ICMP/`SO_ERROR`/完整`POLLERR`语义，也不把socket-specific ET/ONESHOT扩展写成新target。
+6. **Retire/cleanup：** semantic final release在source owner内先撤销association publication、反向event route和
+   route registry，释放source锁后唤醒/丢弃detached routes，再发起non-blocking Endpoint retire。它不取得operation
+   mutex、不等待waiter/worker/Stack progression；晚到event只能找不到retired source或命中已撤销publication后
+   fail closed，不能把旧Endpoint fact发布给复用identity/port的新Socket。
 
-解析触发点：
+这里的复数route不是4C压力测试才增加的扩展：4A交付的source和4B交付的blocking path从第一版就不得假设只有一个
+waiter。一次edge可以提示全部当前interested routes；真正返回什么仍分别由每个consumer的final predicate scan决定。
 
-- Stage 3 Closed后的只读preflight。该gate解析source registry/lock、snapshot/outcome、capacity数值、fragment
-  gate落点、signal restart policy、focused stress与contract cutover。
+#### 6.4.3 实现弹性与Route Correction
 
-预计范围：
+Ready冻结的是上述能力、owner、handoff、锁/cleanup和evidence floor，不把当前候选类型/文件内形状升级为target。
+真实实现出现摩擦时，以下内容允许在保持R0的Route Correction中调整：一次性facts/event的具体类型名、pending edge
+是bit/set/batch还是等价可合并表示、reverse registry与route snapshot的容器、helper的具体函数签名/落点、
+`udp/{mod.rs,source.rs}`内部拆分，以及同一checkpoint内不改变交付/停止点的施工顺序。若调整仍在6.4.10 manifest内，
+先更新本文并在transaction记录理由与验证变化；若需要新增文件/owner，先走write-set expansion。
 
-- kernel socket source、fs/iomux与epoll consumer、stack Endpoint snapshot/event、host race tests与普通用户态
-  syscall tests。具体路径由3->4 gate冻结。
+以下不是可接受的“实现弹性”：
+
+- 4A/4B只支持单waiter，等4C再扩成复数route或多blocking waiter；
+- 为socket复制`wait_for_iomux_ready()`、直接使用裸Latch形成第二套wait loop，或用busy-poll/yield bridge；
+- Socket缓存RX/TX/provider count、event payload直接决定poll mask/errno，或Stack保存task/waiter/`PollRoute`；
+- 为绕开锁/通知摩擦改变source/Stack owner、建立第二association/readiness truth，或让final release等待operation mutex；
+- 降低blocking/signal/copy/fragment可见语义、Stage 4 evidence floor或Stage 5 dual-architecture/external closure。
+
+前述允许项的Route Correction不递增RFC修订；上述五项退化均不能以实现摩擦批准。任何owner、ABI/visible
+semantics、contract或acceptance变化必须停止并进入RFC review / Target Renegotiation Gate。
+
+#### 6.4.4 Checkpoint 4A — Complete plural-route Socket poll source
+
+**目的：** 先形成可被poll/select/epoll与后续blocking syscall共同消费的完整ordinary socket source，而不是先写
+一个single-waiter blocking adapter。
+
+**交付：**
+
+- 为shared UDP surface增加最小facts snapshot与opaque invalidation value；Stack在create/bind/send/receive/pump/
+  capacity recovery/retire等所有可能改变predicate的transition上形成可合并edge，并由DomainStack在Stack锁外路由；
+- 将当前聚合`fs/socket/udp.rs`按同一Socket owner目录化为`udp/{mod.rs,source.rs}`；source state拥有association
+  publication、复数interest-bearing route registry和reverse-event registration，operation mutex仍只串行File operation；
+- `FileOps::poll`完整实现snapshot/register。route publication/current facts遵守6.4.2；`READABLE/WRITABLE`只由
+  current snapshot解释，unsupported interests不伪造ready；
+- final release、creation rollback与event-route rollback覆盖publication-before/after failure；不留下强引用环、
+  stale reverse entry或能够命中新Endpoint的old route；
+- source/KUnit/host与普通用户态基础matrix至少覆盖empty/readable/writable snapshot、ready-at-register、
+  register-then-transition、两个并存route均收到hint、一个route retire不影响另一个、late/duplicate edge、stale pruning，
+  以及`ppoll`/`pselect6`/epoll对同一UDP source的ordinary LT重查。basic matrix不是socket-specific ET扩展承诺。
+
+**停止/退出：** 若需要修改iomux/epoll contract或implementation才能让普通source工作、Stack必须持consumer callback、
+只能保存一条route、route publication无法在predicate transition窗口内闭合，或final release需要等待operation/worker，
+停止4A。完整source、复数route和基础poll/select/epoll evidence通过review/validation后，4A独立Closed并停止；4B仍须
+新的明确授权。
+
+#### 6.4.5 Checkpoint 4B — Blocking `sendto/recvfrom` on the same source
+
+**目的：** 删除Stage 3 temporary blocking bridge，让blocking与nonblocking只在“是否等待”上分叉，不复制
+predicate或wait protocol。
+
+**交付：**
+
+- 把现有source-neutral iomux wait loop移动到最低共同owner或窄化暴露给socket API；`ppoll/pselect6`继续走同一
+  implementation。socket adapter只提供单source snapshot/register/final scan与operation retry，不复制Latch、signal、
+  timeout或register-abort cleanup；
+- 每轮`sendto/recvfrom`在File operation guard内尝试一次。`WouldBlock`时释放operation guard，再通过4A source
+  等待；schedule期间不持operation/source/Stack锁。wake/late edge只触发final snapshot和重新取得operation guard后的
+  operation retry；
+- effective `O_NONBLOCK`（包括creation-time `SOCK_NONBLOCK`）与per-call `MSG_DONTWAIT`对同一operation/predicate
+  立即返回`EAGAIN`，且per-call flag不修改opened-description status。default blocking才进入共享wait loop；
+- blocking send保持implicit bind先提交、payload只copyin一次并由kernel transaction跨wait保存、每次重试重新执行
+  current selection/admission。no route/source/interface、oversize和其它非`WouldBlock`失败立即返回，不因poll
+  writable而等待或伪装成功；
+- blocking receive在empty时释放operation guard等待；只有成功detach后才保持现有operation-local transaction跨
+  payload/peer/addrlen copyout。fault仍消费datagram，等待重试不能detach两次或requeue；
+- final predicate仍不满足时，signal/force按现有wait规则返回`EINTR`；第一版不使用仅适合无副作用operation的
+  `RestartSyscall::Idempotent`。删除Stage 3 `EOPNOTSUPP` notice/temporary bridge及其注释；
+- 最小deterministic multi-waiter coverage在本checkpoint完成：同一opened description上至少两个blocking receive
+  waiter先同时park，一个datagram只允许一个detach，另一个继续等待并由后续datagram完成；同时覆盖一个waiter
+  signal/cancel不撤销其它waiter的route。该能力不得推迟到4C。
+
+**停止/退出：** operation/source/Stack任一锁必须跨schedule、wait helper无法由socket与现有iomux共享、同一source
+只能保留一个blocking route、nonblocking与blocking需要不同fact，或signal结果要求改变既有wait/signal contract时，
+停止4B。temporary bridge为0、focused blocking/nonblocking/signal与multi-waiter matrix通过后，4B独立Closed并停止；
+4C仍须新的明确授权。
+
+#### 6.4.6 Checkpoint 4C — Race、fragment与evidence closure
+
+**目的：** 在4A/4B已经具备完整多waiter能力的实现上做竞态、资源与proof closure；本checkpoint不再承担
+single-waiter到multi-waiter的能力扩展。
+
+**交付：**
+
+- 扩展initial-unbound writable、route failure while writable、oversize while writable、request-size-specific
+  rejection、TX saturation/recovery与provider backpressure传播；证明capacity恢复由Endpoint fact transition触发
+  recheck，而不是Socket/provider mirror；
+- 覆盖多个blocking receive/send waiter、poll/select/epoll与blocking syscall并存、ready/timeout/signal/cancel、
+  late/duplicate edge、dup/fork/one-alias close/final close、Endpoint retire/identity/port reuse和concurrent receive；
+  一次edge可唤醒多人，但每次datagram只有一个detach owner，未胜出者按final predicate继续等待；
+- 扩展zero/short/oversize、payload/peer/addrlen三类copy fault在并发下的consume/partial-effect matrix，确认任何
+  Stack/source lock不跨user copy、fault后不回滚或重排；
+- 通过真实frame/provider injection分别输入first fragment、later fragment和完整fragment pair，证明它们在UDP header/
+  Endpoint lookup前被拒绝，不形成delivery/readiness；随后完整datagram仍可收取。当前vendored IPv4 explicit gate若
+  已满足，只记录source/evidence，不修改vendor；若失败需要`adapter.rs`或vendored smoltcp change，先停止并报告
+  owner/write-set/contract影响；
+- 对4A/4B真实压力发现的correctness defect在既有owner/manifest内修复并重跑受影响matrix；不得把修复写成4C新增
+  “更多waiter能力”或降低4A/4B closure事实。
+
+**停止/退出：** 任一lost wake、single-waiter restriction、duplicate readiness truth、old Endpoint edge命中新source、
+copy fault requeue、fragment进入UDP demux、normal capacity panic/busy-spin或Apollyon/Keter未清零都阻塞Stage 4。
+4C final exact source通过6.4.8全部适用gate、review与write-set audit后Stage 4 Closed；只允许随后独立运行
+`4 -> 5 Implementation Resolution Gate`，不自动激活Stage 5或cut over candidate contracts。
+
+#### 6.4.7 审计与可观测性
+
+每个checkpoint按实际diff审计，Stage 4 final至少确认：
+
+- 全部Endpoint predicate-changing transition都形成durable/coalescible recheck；edge batching/diagnostic count不反向
+  驱动readiness，event loss不能依赖未来无关traffic修复；
+- source route registry确实支持复数live routes；fallible replacement先构造后publication，stale pruning、notify与
+  final drop均在锁外，没有强引用环或unbounded stale retention；
+- 允许的锁偏序最多为`operation -> source -> Stack`，其中poll publication只有短时`source -> Stack snapshot`；
+  Stack transition/event drain不反向持锁，operation/source/Stack锁不跨schedule，Stack/source锁不跨user copy，
+  final release不取得operation mutex；
+- `FileOps::poll`、blocking retry与Endpoint operations读取同一facts；raw Stack/private engine/capacity/provider truth
+  不逃逸到Socket或syscall，reverse registry不成为association/liveness owner；
+- Stage 3 `EOPNOTSUPP` bridge、busy-poll、single-route slot、socket-local wait loop和直接Latch use均为0；
+- fragment source gate、real injection path和完整datagram control case可追溯；禁用reassembly或“测试未收到”不能单独
+  作为proof；
+- log只区分registration failure、would-block、signal/cancel、retire与unexpected outcome；opaque Endpoint/wait ID
+  只服务诊断，不参与lookup之外的状态决策。ordinary packet/edge不产生默认高频日志。
+
+#### 6.4.8 Validation、review与claim boundary
+
+每个checkpoint在自己的final source执行适用子集；4C/Stage 4 closure在exact code上执行完整集合：
+
+```text
+just xtask-test
+cargo test -p anemone-net-api -p anemone-smoltcp-stack
+cargo test -p anemone-smoltcp-stack --no-default-features --no-run
+cargo check -p anemone-smoltcp-stack --no-default-features
+just fmt kernel --check
+just fmt udp-test --check
+just app build --arch riscv64 udp-test
+just app build --arch loongarch64 udp-test
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-udp-stage4-rv64.log
+mdbook build docs
+git diff --check
+```
+
+host matrix必须覆盖facts/event/source publication、复数route、capacity/progression、concurrent receive与真实fragment
+injection；KUnit/source-local tests覆盖rollback、late route、retire和锁外handoff；RV64 fresh-disk `udp-test`覆盖真实
+fd/status/per-call flags、blocking/nonblocking、poll/select/epoll、signal、dup/fork/close、multi-waiter、copy fault与
+loopback/self-external。每个checkpoint closure都需要source/write-set audit和Apollyon/Keter/Euclid review；4C final
+review绑定完整exact diff，Apollyon/Keter必须为0。
+
+`cargo test`是protocol/source deterministic proof，app build只是architecture-specific compile/export，kernel build只是
+integration；它们都不能替代RV64 syscall/fd/wait runtime。Stage 4不运行或宣称LA64 runtime、remote external peer、
+hardware、`smp>1`、full network LTP或final harness；这些继续Not Run并由Stage 5 closure拥有。RV64 local/self-external
+也不替代remote external ingress/egress。
+
+#### 6.4.9 Contract Impact、停止条件与退出
+
+Stage 4 **Contract Impact为None**。`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、
+`EPOLL-READY-001`、`EPOLL-FILE-001`与现有Network/control-plane IDs保持Effective/Preserve；
+`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
+`NET-SOCKET-WAIT-001`继续Pending。Stage 4提供blocking/iomux/race/fragment evidence，但LA64同源runtime与remote
+external双向proof仍由Stage 5拥有；因此不提前执行Protocol/Socket/UDP/wait candidate cutover。
+
+除各checkpoint局部停止条件外，以下任一情况停止整个Stage 4并写入transaction：
+
+- 需要改变R0 readable/writable、blocking/nonblocking、copy consume、fragment或errno/flag可见语义；
+- 需要改变Stack/Endpoint、Socket/source、iomux/epoll或opened-description owner/current contract；
+- 需要修改`task/files.rs`、`fs/file.rs`、epoll implementation、anemone ABI/library、rootfs/config、vendored smoltcp或
+  6.4.10之外source；先报告真实consumer、拟新增路径、owner/contract影响与验证计划；
+- exact route只能依赖single waiter、second wait core、busy-poll、unbounded queue、strong consumer reference、
+  source/Stack lock inversion或无法退出的compat bridge；
+- 需要把Stage 5 mandatory LA64/remote-external evidence降级为optional，或把Stage 4 local/host proof外推为final PASS。
+
+4A、4B、4C必须分别获得activation并独立停止。三者全部Closed、final review/validation通过且没有未处置stop condition
+时，Stage 4才Closed；closure只授权状态/evidence write-back，不授权`4 -> 5`resolution、Stage 5或contract cutover。
+
+#### 6.4.10 Resolved Write Set Manifest
+
+以下是Stage 4三个checkpoint允许触及的union；每个checkpoint只使用上文属于自己的最小子集。新文件只允许
+`fs/socket/udp/{mod.rs,source.rs}`，并在目录化后删除旧`fs/socket/udp.rs`；其它目录pattern不授权新增相邻文件。
+
+- shared UDP values：`anemone-kernel/crates/anemone-net-api/src/udp.rs`；
+- protocol fact/event owner与host proof：`anemone-kernel/crates/anemone-smoltcp-stack/src/udp/{mod.rs,endpoint.rs,
+  namespace.rs,datagram.rs}`、`src/stack/{mod.rs,udp.rs,host_validation.rs}`与`tests/udp_topology.rs`；
+- kernel Endpoint event routing/access window：`anemone-kernel/src/net/{udp.rs,domain/stack/{mod.rs,udp.rs}}`；
+- Socket source/lifecycle：`anemone-kernel/src/fs/socket/{mod.rs,udp.rs,udp/{mod.rs,source.rs}}`；
+- blocking syscall与ABI-local mapping：`anemone-kernel/src/fs/api/socket/{mod.rs,abi.rs,sendto.rs,recvfrom.rs}`；
+- shared wait owner与既有consumer correction：`anemone-kernel/src/fs/iomux/{mod.rs,wait.rs}`、
+  `anemone-kernel/src/fs/api/iomux/{mod.rs,wait.rs,ppoll.rs,pselect6.rs}`；这里只允许移动/窄化source-neutral wait loop并
+  保持两个既有consumer，不改变PollRoute/IomuxWaitRound contract；
+- real user consumer：`anemone-apps/udp-test/src/main.rs`；
+- execution write-back：本RFC`{index.md,implementation.md}`、本transaction、`docs/src/rfcs.md`、
+  `docs/src/devlog/transactions/index.md`与当前biweekly devlog。
+
+从4A activation baseline起，`anemone-abi`、`anemone-rs`、`task/files.rs`、`fs/file.rs`、epoll implementation、
+其它iomux source、net worker/provider/control-plane、KernelConfig/SystemTarget/build/rootfs、vendored smoltcp、其它apps、
+current contracts、`invariants.md`、register/current limitations、其它RFC与scripts保持只读。现有ABI/library wrapper、
+opened-description hook、epoll consumer与fragment parse gate已经足够；若live implementation证明不够，按6.4.9停止，
+不在当前manifest内做兼容绕行。
 
 ### 6.5 Stage 5 Outline — External/dual-architecture closure
 
@@ -2001,8 +2221,16 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   recovery、fresh oversize implicit-bind retention与specific `127/8` source三项Apollyon；全部在Stack/File operation/
   control-plane既有owner内修复，并以无手工pump host recovery、fresh oversize `getsockname` retention与specific
   loopback runtime补齐证据。修复后final validation与复审通过，Stage 3独立Closed；Contract Impact为None，candidate
-  contracts继续Pending，`3 -> 4`resolution未执行。精确证据见
+  contracts继续Pending。精确证据见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3-checkpoint-3c-implementation-review-repair-and-closure)。
+- `2026-07-30`：`3 -> 4` Implementation Resolution / Source and Wait Route Selection。live source确认Stage 4可在
+  现有Endpoint/Socket/iomux owner上形成完整复数route source，并让blocking syscall复用同一predicate与shared wait
+  loop；不需要修改ABI/library、opened-description、epoll或vendored smoltcp。resolution把Stage 4解析为4A complete
+  plural-route source、4B blocking syscall与4C race/fragment/evidence closure；multi-waiter是4A/4B固有能力，不是4C
+  capability expansion。类型名、event batching、helper落点、容器与checkpoint内部顺序保留有边界的Route Correction，
+  但single-waiter、second wait loop、duplicate readiness truth或降低evidence floor不在弹性范围。Contract Impact为
+  None，candidate contracts继续Pending；Stage 4达到Ready / Not Active，精确preflight见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3---stage-4-implementation-resolution-gate)。
 
 ## 14. Target Renegotiation Gates
 
