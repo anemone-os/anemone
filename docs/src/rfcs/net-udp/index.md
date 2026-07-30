@@ -1,9 +1,9 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-4 Closed / Stage 5 Outline
+**状态：** Accepted for Implementation / Stage 0-4 Closed / Stage 5 Ready / Not Active
 **修订：** R0
 **负责人：** doruche
-**最后更新：** 2026-07-30
+**最后更新：** 2026-07-31
 **领域：** network / socket / VFS / iomux / build configuration
 **事务日志：** [2026-07-29 net-udp](../../devlog/transactions/2026-07-29-net-udp.md)
 **影响契约：** [Network](../../contracts/net/index.md)中的`NETDEV-LIFE-001`、`NET-ATTACH-001`、
@@ -16,8 +16,8 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** R0 target无新增开放问题；Checkpoint 3B/3C的历史findings及neutralization见transaction
-**下一步：** 只能由新的明确授权运行`4 -> 5 Implementation Resolution Gate`；不得自动激活Stage 5或执行
-current-contract cutover
+**下一步：** 只能由新的明确授权激活Stage 5 Checkpoint 5A；不得自动修改source、运行QEMU或执行
+`NET-UDP-FINAL-CUTOVER`
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
 `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；其它R0 candidate仍须在后续明确
@@ -35,8 +35,10 @@ RX credit refill、fresh oversize bind retention和specific `127/8` source三个
 4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence closure；三个checkpoint均已分别独立
 Closed，Stage 4现已Closed。4B复用唯一shared iomux wait loop，blocking/nonblocking读取同一Endpoint predicate；
 4C完成capacity/provider、lifecycle、concurrent copy-fault与fragment真实注入收口，并修复final review发现的
-empty-interest retire lost wake。multi-waiter始终是4A/4B固有能力；全部Socket/Endpoint/UDP/wait candidate contract
-继续Pending。
+empty-interest retire lost wake。multi-waiter始终是4A/4B固有能力；独立`4 -> 5`resolution已把Stage 5收窄为一个
+Checkpoint 5A，以同源`udp-test`、host-loopback UDP peer、RV64 agent-run和LA64 user-run补齐remote external双向
+evidence，再原子执行final contract cutover。Stage 5现为Ready / Not Active；全部Socket/Endpoint/UDP/wait
+candidate contract继续Pending。
 
 2026-07-30开发者以`approved`批准3B correction最小扩展：只为anonymous UDP socket增加正确`S_IFSOCK`投影并
 处置`InodeType`的五个exhaustive VFS consumer；允许Stack/shared value surface把namespace policy改为构造时一次
@@ -130,7 +132,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-4 Closed；Stage 5 Outline
+- [迁移实施计划](./implementation.md)：Stage 0-4 Closed；Stage 5 Ready / Not Active
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -523,5 +525,5 @@ interest过滤，复审Apollyon/Keter/Euclid/Safe全0。final exact-source RV64�
 
 Contract Impact为None；effective OPENED-DESC/IOMUX/EPOLL与Network/control-plane contracts保持Preserve，全部Socket/
 Endpoint/UDP/wait candidate继续Pending。Stage 4 Closed；LA64 runtime、remote external、SMP>1、hardware、full
-network LTP与final harness仍Not Run。Stage 4关闭后立即停止，只能由新的明确授权运行`4 -> 5`resolution，不得
-自动激活Stage 5或执行current-contract cutover。
+network LTP与final harness仍Not Run。独立`4 -> 5`resolution已完成且没有执行source/QEMU/cutover；Stage 5为Ready /
+Not Active，只能由新的明确授权激活Checkpoint 5A。

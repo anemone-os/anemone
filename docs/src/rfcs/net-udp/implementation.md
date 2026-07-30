@@ -1,7 +1,7 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-4 Closed / Stage 5 Outline
-**最后更新：** 2026-07-30
+**状态：** R0 / Stage 0-4 Closed / Stage 5 Ready / Not Active
+**最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
 **当前契约：** [Network current contracts](../../contracts/net/index.md)、
@@ -23,7 +23,8 @@
 > Checkpoint 3C随后完成nonblocking datagram纵切、correctness repair、final validation与review，Stage 3已Closed；
 > 独立`3 -> 4`resolution把Stage 4解析为4A socket source、4B blocking syscall与4C race/evidence closure三个
 > checkpoint。Checkpoint 4A/4B/4C均已分别完成source/evidence、review、validation与write-back并独立Closed；
-> Stage 4现已Closed。Stage 5保持Outline，current contracts未cut over。
+> Stage 4现已Closed。独立`4 -> 5`resolution已把Stage 5解析为一个external/dual-architecture evidence与final
+> cutover checkpoint；Stage 5现为Ready / Not Active，current contracts未cut over。
 
 ## 1. 计划角色与 authority
 
@@ -33,17 +34,17 @@ interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
 Stage 0-4已经独立关闭。Stage 4由独立`3 -> 4`resolution完整解析，并由三个独立授权的checkpoint完成；本阶段的
-checkpoint、验证和Resolved Write Set Manifest以6.4为唯一权威。Stage 5仍是future Outline，其中列出的目录、模块和contract
-gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须先按自己的验证和退出
-条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让下一阶段达到Ready，
-不自动进入Active。
+checkpoint、验证和Resolved Write Set Manifest以6.4为唯一权威。独立`4 -> 5`resolution已经把Stage 5解析为完整
+Ready定义，其单一checkpoint、验证、cutover与Resolved Write Set Manifest以6.5为唯一权威。Stage N必须先按自己的
+验证和退出条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让下一阶段
+达到Ready，不自动进入Active。
 
 进入实现前必须：
 
 1. R0由独立public review接受；Draft promotion本身不构成acceptance；
 2. 建立独立transaction，并重新读取当时的live source、current contracts、register、branch/HEAD与dirty state；
-3. 确认Stage 4的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
-4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 4仍须
+3. 确认Stage 5的路线、命令和Resolved Write Set Manifest未漂移；如有漂移，先在本文重新解析并review；
+4. transaction只记录activation preflight、批准事实和本文链接，不复制Ready定义或manifest；Stage 5仍须
    获得独立启动授权。
 
 ## 2. Live baseline 与首阶段选择
@@ -143,11 +144,11 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Closed | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | Contract Impact为None；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
 | Stage 4 — Blocking/iomux与datagram hardening | Closed | 以完整复数route socket source接入poll/select/epoll，复用同一predicate完成blocking/signal，并关闭race、copy-fault、capacity/writable与fragment evidence | Stage 3 Closed；`3 -> 4`resolution完成 | Contract Impact为None；保持既有OPENED-DESC/IOMUX/EPOLL IDs，全部Socket/Endpoint/UDP/wait candidate继续Pending |
-| Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
+| Stage 5 — External/dual-architecture closure | Ready / Not Active | 以同源user case和host UDP peer完成remote external双向proof、RV64 agent-run、LA64 user-run、旁路审计与原子final cutover | Stage 4 Closed；`4 -> 5`resolution完成 | 所有仍Pending ID只在共同evidence floor达到后原子Effective，否则全部保持Pending / Not Cut Over |
 
 Stage名称与数量可以在保持target的Route Correction中调整，但Ready / Active阶段必须先更新本文与transaction后
 再改变冻结边界。Stage 3的具体Rust边界、逐文件write set、capacity数值与精确命令已在6.3保留；Stage 4的完整
-Ready定义位于6.4，Stage 5仍不预定具体实现细节。
+关闭定义位于6.4，Stage 5的完整Ready定义位于6.5。
 
 ## 6. Current Stage and Future Outlines
 
@@ -1668,36 +1669,184 @@ current contracts、`invariants.md`、register/current limitations、其它RFC�
 opened-description hook、epoll consumer与fragment parse gate已经足够；若live implementation证明不够，按6.4.9停止，
 不在当前manifest内做兼容绕行。
 
-### 6.5 Stage 5 Outline — External/dual-architecture closure
+### 6.5 Stage 5 Ready / Not Active — External/dual-architecture closure
 
-概括目的：
+本节由Stage 4 Closed后的独立`4 -> 5 Implementation Resolution Gate`解析。**成熟度：Ready / Not Active**。
+Stage 5只有一个Checkpoint 5A；本resolution只冻结路线、验证、cutover与write set，不授权修改source、运行QEMU或
+更新current contracts。进入Active仍须新的明确授权。
 
-- 在最终exact code上证明loopback、self-external local delivery和remote external ingress/egress是三条不同证据；
-- 完成host deterministic matrix、RV64 QEMU `smp=1` agent-run与LA64 QEMU `smp=1` user-run；
-- 删除probe-only control、temporary dual wiring、legacy ifindex projection与validation-only production seam；
-- 原子更新所有达到gate的current contracts、RFC状态、transaction、register/limitations与最终claim。
+#### 6.5.1 Resolution preflight与live baseline
 
-前置依赖：
+- Stage 4已在`5e3045f2`关闭；当前clean baseline为`dev/drc/alpha@d12364d7`。后者只把`udp-test`本地异步
+  readiness evidence改为bounded wait，并为LA64 pretest rootfs补齐既有procfs mount point；它没有修改production
+  kernel/protocol owner、ABI、visible semantics或current contract。Stage 5以该post-Stage-4 correction后的live tree
+  为执行基线，不把5e3045f2旧测试形状冒充最终source。
+- live production只有initial-domain唯一`DomainStack`；logical ifindex/name仍唯一属于domain owner。source audit未发现
+  per-netdev Stack、legacy ifindex projection、`udp-validation-probe`、temporary dual wiring或Stage 3 blocking
+  `EOPNOTSUPP` bridge。
+- `anemone-smoltcp-stack`的conditional host-validation facade仍只服务长期deterministic integration tests；kernel依赖
+  使用`default-features = false`，该facade不进入production capability surface。Stage 5保留它，不为“cleanup”删除
+  真实consumer或降低host Evidence Matrix。
+- RV64/LA64 QEMU SystemTarget都配置`eth0 = 10.0.2.15/24`与gateway `10.0.2.2`；两套pretest rootfs都已经安装同一
+  `udp-test` source。当前wrapper分别使用tracked QEMU user backend和显式`smp=1`、`memory=1G`。
+- Stage 4 final host matrix、source review、双架构build与RV64 local/wait/race/fragment evidence保持有效；Stage 5只补
+  remote external与LA64 runtime这一缺口。register/current limitations没有允许绕过R0 target的active network条目。
 
-- Stage 4 Closed；所有in-target Keter/Apollyon已经neutralized或转成明确cutover stop condition；
-- 开发者准备LA64 runtime输入并负责user-run evidence。
+#### 6.5.2 Checkpoint 5A — Remote external evidence与final cutover
 
-受保护边界：
+**交付与受保护边界：**
 
-- 同一份architecture-neutral test源码与case用于RV64/LA64；launcher、镜像和remote endpoint参数可以不同；
-- LA64失败阻塞closure，未运行只记`Not Run`；RV64/host结果不得外推；
-- local path不冒充external provider proof，QEMU不外推physical hardware/virtio-pci/`smp>1`；
-- partial success不更新functional contract或把target内失败登记为accepted limitation。
+- 在`anemone-apps/udp-test/src/main.rs`增加唯一`remote-external-roundtrip` case。RV64与LA64编译并运行同一函数、
+  request/ack token、peer address和判断逻辑；不得用`cfg(target_arch)`形成两套测试语义。
+- case显式bind production external address `10.0.2.15`与ephemeral port，向QEMU user backend的host alias
+  `10.0.2.2:49153`发送固定request token。send success后以现有`ppoll` source等待有界时间，再`recvfrom`并同时校验
+  ack payload、peer address与peer port。timeout、unexpected peer/payload或任何syscall failure都是case FAIL；不得
+  fallback到loopback/self-external、改用packet injection或无限retry。
+- 新增一个窄的`scripts/net-udp-echo-peer.py`，只在host loopback `127.0.0.1:49153`等待上述request token、向
+  QEMU slirp/NAT交付的source回复固定ack，并在一次成功exchange后退出。peer receive使用单一bounded deadline；超时
+  明确失败，不等待永久guest。固定端口是guest/host validation wire agreement；被占用时preflight明确失败，不随机
+  换端口或把环境差异写入production config。
+- 两个canonical pretest wrapper只在kernel/rootfs构建完成后、QEMU启动前启动peer；先安装cleanup trap并记录child
+  PID，再以bounded wait等待已经flush的`READY` marker。wrapper唯一拥有child PID、peer log与cleanup trap。READY
+  超时、QEMU失败、信号退出、guest未完成exchange或peer非零退出时，wrapper必须回收child并返回失败，不留下host
+  process。该helper不是daemon、production service或通用network framework。
+- QEMU guest到`10.0.2.2`的request必须经过configured external route、production Stack pump和VirtIO provider
+  egress；reply必须经同一provider ingress和normal UDP demux。host peer marker只证明host收到request，guest PASS只在
+  收到正确reply后形成；两者缺一都不能宣称remote external双向proof。
+- loopback、self-external local delivery与remote external保持三条独立case/marker。local result不得替代provider
+  proof；QEMU evidence不得外推physical hardware、任意NIC、virtio-pci以外实现或`smp>1`。
 
-解析触发点：
+#### 6.5.3 Owner、handoff、failure与cleanup
 
-- Stage 4 Closed后的只读preflight。该gate冻结final case/marker/log/command、external harness、LA64 handoff、
-  exact contract write-back、probe deletion与final resolved manifest。
+| 事实 / 资源 | 唯一 owner | handoff / commit | failure / cleanup |
+| --- | --- | --- | --- |
+| guest Socket、request与ack判断 | `udp-test` case | request由`sendto`提交，ack由`recvfrom`消费后形成guest PASS | 每条失败路径关闭fd并返回case errno；bounded poll超时失败 |
+| protocol/provider path | 既有control plane、DomainStack与VirtIO provider各自owner | non-local selection进入external provider；RX completion后normal UDP ingress | Stage 5不增加第二route、queue、wake或packet owner |
+| host UDP socket与token oracle | `net-udp-echo-peer.py` process | exact request match后一次send ack并发布peer PASS | bind/receive deadline/mismatch/send失败返回非零；成功或wrapper退出都关闭socket |
+| peer process、日志与最终回收 | 对应architecture wrapper | `READY`后才launch QEMU；QEMU与peer都成功才返回0 | trap按PID回收；不使用process-name kill或遗留共享状态 |
+| candidate contract publication | `NET-UDP-FINAL-CUTOVER` docs checkpoint | 全部host/RV64/LA64证据与review同时满足后原子写入current contract | 任一失败保持四项candidate Pending / Not Effective |
 
-预计范围：
+Stage 5不得修改protocol/Socket/iomux/opened-description owner来制造证据。host process、marker、固定port和log都是
+validation state，不参与kernel route、Endpoint identity、readiness或capacity决策。
 
-- host/network tests、architecture-neutral user-test资产、两个SystemTarget/Platform wrapper输入、current contracts、
-  RFC/transaction/register与validation outputs。具体文件不是当前授权。
+#### 6.5.4 旁路、模块与consumer audit
+
+在Checkpoint 5A final diff上确认：
+
+- production kernel、`anemone-net-api`、`anemone-smoltcp-stack`、vendored smoltcp、ABI/library、SystemTarget/Platform、
+  rootfs manifest和QEMU provider args均无改动；remote proof不需要新的production seam或hostfwd rule；
+- `udp-test`仍是唯一guest case owner，两个wrapper只负责architecture-specific launcher/image/log与host-peer lifecycle；
+  不把echo protocol复制到user-test、kernel config或两份architecture-specific source；
+- host-test facade的每个入口仍有真实test consumer，且kernel dependency继续禁用该feature；不存在应删除的probe-only
+  production control、legacy owner projection或compat bridge；
+- 新helper只有一个consumer族，不抽象成通用server framework；固定port/token旁注释说明validation wire agreement和
+  修改时必须同步两端的条件。
+
+若audit发现必须修改production owner、public API、ABI、current effective contract、SystemTarget/Platform schema、
+rootfs layout或QEMU generic provider，停止Checkpoint 5A并上报真实consumer、拟扩文件、contract影响与验证计划；不得
+把manifest外变化包装为test wiring。
+
+#### 6.5.5 可观测性与evidence identity
+
+- guest保留`UDPTEST:START`和每case marker，新增`UDPTEST:PASS:remote-external-roundtrip`；全部17项通过才输出
+  `UDPTEST:SUMMARY:PASS:17`。
+- peer以显式flush分别输出一次`UDPPEER:READY:49153`与`UDPPEER:PASS:remote-external-roundtrip`；timeout、unexpected
+  token、bind、recv或send failure输出单一failure marker并以非零退出，不记录高频packet dump。
+- wrapper保留QEMU主日志，并将peer输出写入同basename的独立`-peer.log`；transaction同时记录main/peer log、architecture、
+  branch/HEAD、Stage 5 source diff与user/agent运行归属。
+- network activation、logical interface、configured address/gateway与normal PowerOff日志只作路径诊断；它们不能替代
+  guest/peer双marker或最终predicate。
+
+#### 6.5.6 Validation、evidence reuse与LA64 handoff
+
+Checkpoint 5A source完成后按顺序执行：
+
+```text
+bash -n scripts/run-user-test-rv64.sh scripts/run-user-test-la64.sh
+python3 -c 'import ast, pathlib; ast.parse(pathlib.Path("scripts/net-udp-echo-peer.py").read_text())'
+just fmt udp-test --check
+./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-udp-stage5-rv64.log
+./scripts/run-user-test-la64.sh etc/preliminary/images/sdcard-la.img build/net-udp-stage5-la64.log
+mdbook build docs
+git diff --check
+```
+
+- RV64 wrapper由agent运行；LA64 wrapper由开发者在同一exact source上user-run并提供main/peer logs。LA64命令运行前后
+  必须确认Stage 5 source diff未变化；user evidence、日志路径和结果由transaction明确标注，不写成agent-run。
+- 两个wrapper已经分别重建对应rootfs、`udp-test`、release kernel并启动`smp=1` QEMU，因此不在wrapper前后重复运行
+  独立app/kernel build。Stage 4已通过且Stage 5 manifest保持只读的`xtask-test`、net-api/stack host matrix、no-default
+  build/check、KUnit、fragment/copy/wait source不重复执行；final review若发现production source漂移，则旧证据失效，
+  必须按受影响owner扩展验证后再继续。
+- 每个architecture都必须同时具备guest remote-external PASS、`UDPTEST:SUMMARY:PASS:17`、peer PASS与正常
+  `filesystem -> network -> device -> PowerOff`。wrapper附带的KUnit/epoll/LTP结果记录为回归证据，但不能替代
+  remote-external或LA64 proof。
+- physical hardware、`smp>1`、full network LTP、final harness与任意非QEMU deployment保持Not Run；这些是R0非目标，
+  不阻塞Stage 5，也不得写成PASS或新增accepted limitation。
+
+#### 6.5.7 Review、停止条件与退出
+
+Checkpoint 5A必须在final exact diff上完成source/write-set audit与工程review，至少检查：host child lifecycle与异常清理、
+fixed-port conflict、peer receive/READY deadline与marker flush、guest bounded wait、peer/payload fidelity、remote-vs-local
+路径区别、同源双架构case、日志claim和contract最小闭包。Apollyon/Keter必须为0；会影响acceptance的Euclid必须修复或
+由开发者明确处置。
+
+以下任一情况立即停止且不得cut over：
+
+- remote case只能通过loopback/self-external、packet injection、hostfwd ingress-only、外部互联网服务或无界retry通过；
+- RV64或LA64缺少guest/peer任一marker、summary失败、QEMU未正常关机，或LA64没有user-run；
+- 需要改变R0 owner、ABI/visible semantics、Evidence Matrix或把mandatory LA64/external proof降级；
+- 需要修改6.5.9 manifest外tracked source，或出现未neutralize的Apollyon/Keter；
+- 任一candidate contract无法按同一final source满足其evidence floor。partial success不能先切换部分functional contract，
+  也不能把target内失败登记为accepted limitation。
+
+全部source、review、双架构evidence和docs validation通过后，Checkpoint 5A在同一原子checkpoint执行
+`NET-UDP-FINAL-CUTOVER`并关闭Stage 5；不得先用runtime PASS宣称candidate Effective，再补current contract。
+
+#### 6.5.8 `NET-UDP-FINAL-CUTOVER`
+
+cutover在`docs/src/contracts/net/udp-socket.md`建立共同变化、共同证明的UDP/Socket contract surface，原子Introduce：
+
+- `NET-PROTOCOL-BOUNDARY-001`：kernel Socket/control plane与concrete Stack之间的窄Endpoint/UDP capability和object fence；
+- `NET-SOCKET-ENDPOINT-001`：Socket/File与Stack Endpoint的opaque association、final-release retire与stale isolation；
+- `NET-UDP-TRANSACTION-001`：binding、selection/admission、local/external delivery、datagram consume、capacity与fragment边界；
+- `NET-SOCKET-WAIT-001`：Stack facts到Socket readiness/error、route publication、wake/recheck与blocking/nonblocking投影。
+
+该页明确每份state owner、cross-owner handoff、linearization、failure、cancellation与cleanup，并引用而不复制
+`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、EPOLL与现有Network/control-plane current rules。四项ID共同依赖
+Stage 3-4 host/RV64 evidence以及Stage 5 RV64/LA64 external proof，因此本RFC不拆成四次partial cutover。
+
+同一checkpoint更新Network contract index、control-plane pending-successor导航、总contract导航、本RFC
+`index/invariants/implementation`、transaction、RFC/transaction索引与当前biweekly devlog；RFC状态改为Closed，
+transaction改为Completed。register/current limitations经审计无net-udp条目时保持只读；非目标Not Run只记录在
+transaction/final claim，不制造limitation。R0 target、revision、owner、ABI与acceptance boundary不变。
+
+#### 6.5.9 Resolved Write Set Manifest
+
+**Stage 5 source与harness：**
+
+- `anemone-apps/udp-test/src/main.rs`；
+- `scripts/run-user-test-rv64.sh`、`scripts/run-user-test-la64.sh`；
+- planned new file：`scripts/net-udp-echo-peer.py`。
+
+**Final contract与execution write-back：**
+
+- planned new file：`docs/src/contracts/net/udp-socket.md`；
+- `docs/src/contracts/net/{index.md,control-plane.md}`、`docs/src/contracts.md`、`docs/src/SUMMARY.md`；
+- 本RFC`{index.md,invariants.md,implementation.md}`；
+- 本transaction、`docs/src/rfcs.md`、`docs/src/devlog/transactions/index.md`与当前biweekly devlog。
+
+**Validation-only inputs（只读）：**
+
+- `anemone-kernel/`全部source与Cargo feature graph、`anemone-abi/`、`anemone-rs/`；
+- `conf/system-targets/qemu-virt-{rv64,la64}.toml`、`conf/platforms/qemu-virt-{rv64,la64}.toml`、
+  `conf/rootfs/pretest-{rv64,la64}.toml`；
+- current Network、Opened-description、IOMUX、EPOLL与System Target contracts；
+- register/current limitations、Stage 4 transaction evidence与`build/net-udp-stage4-rv64.log`；
+- `etc/preliminary/images/sdcard-{rv,la}.img`只作为LOCAL定义的只读master input，公共文档只引用canonical wrapper命令，
+  不把私人绝对路径写成接口。
+
+除上述planned new files外不授权相邻新文件。Kernel/protocol/ABI/library、user-test owner、SystemTarget/Platform、rootfs、
+QEMU generic provider、vendored source、其它apps/RFC/contracts与register保持只读；任何真实需要先按6.5.7停止并上报。
 
 ## 7. Stage 0 Ready — Multi-interface UDP topology probe
 
@@ -2301,6 +2450,14 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   但single-waiter、second wait loop、duplicate readiness truth或降低evidence floor不在弹性范围。Contract Impact为
   None，candidate contracts继续Pending；Stage 4达到Ready / Not Active，精确preflight见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3---stage-4-implementation-resolution-gate)。
+- `2026-07-31`：`4 -> 5` Implementation Resolution / External Evidence and Final Cutover。live source确认Stage 4
+  production owners已闭合，current baseline只在real-consumer wait evidence与LA64 rootfs mount point上有post-close
+  correction；没有待删除的production probe、legacy ifindex或blocking bridge。resolution把Stage 5收窄为一个
+  Checkpoint 5A：同源`udp-test`通过QEMU user backend访问host-loopback UDP peer，RV64 agent-run与LA64 user-run共同
+  证明remote external双向路径，随后原子Introduce四项UDP/Socket candidate contract并关闭RFC/transaction。
+  resolution保持R0 target、owner、ABI/visible semantics、Contract Impact分类与acceptance不变；Stage 5达到Ready /
+  Not Active，精确preflight见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-31---stage-4---stage-5-implementation-resolution-gate)。
 
 ## 14. Target Renegotiation Gates
 

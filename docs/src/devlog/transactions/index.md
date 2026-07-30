@@ -23,7 +23,9 @@
   UDP 15/15、epoll 11/11与LTP whitelist 4/4，follow-up review全0后独立Closed。4C完成capacity/provider、
   lifecycle、concurrent copy-fault与fragment evidence；final review的empty-interest retire lost wake在source owner内
   neutralize，复审全0，final RV64为274/274 KUnit、UDP 16/16、epoll 11/11与LTP 4/4。Stage 4 Closed；Stage 5
-  保持Outline，全部Socket/Endpoint/UDP/wait candidate仍Pending，transaction保持Active。
+  已由独立docs-only `4 -> 5`resolution解析为单一Checkpoint 5A，覆盖同源remote-external case、host UDP peer、
+  RV64 agent-run、LA64 user-run与四项candidate原子final cutover。Stage 5为Ready / Not Active，全部Socket/Endpoint/
+  UDP/wait candidate仍Pending / Not Effective；本resolution未修改source、运行QEMU或执行cutover，transaction保持Active。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
