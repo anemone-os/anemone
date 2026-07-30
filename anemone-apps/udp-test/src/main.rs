@@ -687,12 +687,15 @@ fn run_blocking_multi_waiter_and_signal() -> Result<(), Errno> {
     send_to_bound(client, peer, b"d")?;
     send_to_bound(client, peer, b"e")?;
 
+    // Successful send admission does not imply that the asynchronous local
+    // stack has already published RX readiness. Establish that fact with a
+    // bounded wait before zero-time pselect/epoll recheck the same predicate.
     let mut pollfd = [PollFd {
         fd: server as i32,
         events: POLLIN,
         revents: 0,
     }];
-    ensure(ppoll(&mut pollfd, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(ppoll(&mut pollfd, Some(&SOURCE_TIMEOUT))? == 1)?;
     ensure(pollfd[0].revents & POLLIN != 0)?;
     let mut readfds = fdset_with(server);
     ensure(

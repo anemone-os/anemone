@@ -16,6 +16,9 @@ path = "/dev"
 [[dirs]]
 path = "/mnt"
 
+[[dirs]]
+path = "/proc"
+
 [[apps]]
 name = "init"
 installed_dir = "/sbin"
