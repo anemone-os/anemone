@@ -15,9 +15,11 @@
   3C nonblocking datagram。3A已按Contract Impact=None独立关闭；3B correction关闭namespace policy owner、
   `S_IFSOCK`/backend admission与capacity-model findings，final review全0后独立Closed。3C随后完成implicit bind、
   `sendto/recvfrom`、owned receive与13项RV64 real-consumer matrix；初审三个Apollyon在原owner内修复，final review
-  全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；独立`3 -> 4`resolution已把Stage 4解析为
-  4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence closure，当前Ready / Not
-  Active。全部Socket/Endpoint/UDP/wait candidate仍Pending，transaction保持Active，4A未激活。
+  全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；独立`3 -> 4`resolution把Stage 4解析为
+  4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence closure。4A已交付Stack facts/
+  invalidation、lock-external reverse routing与Socket-owned plural-route source；exact-source RV64执行273/273 KUnit、
+  UDP 14/14、epoll 11/11与LTP whitelist 4/4，final review blocker为0后独立Closed。4B/4C保持Ready / Not Active，
+  全部Socket/Endpoint/UDP/wait candidate仍Pending，transaction保持Active。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

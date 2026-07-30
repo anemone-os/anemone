@@ -83,6 +83,7 @@ impl UdpEndpoints {
             destination,
             payload: payload.to_vec(),
         });
+        self.invalidate(endpoint_id);
         Ok(())
     }
 
@@ -166,6 +167,7 @@ impl UdpEndpoints {
             .expect("active engine mapping must remain published during pump");
         if sockets.get::<udp::Socket>(engine.handle).send_queue() == 0 {
             endpoint.tx = TxPhase::Idle;
+            self.invalidate(endpoint_id);
             false
         } else {
             true
@@ -177,7 +179,9 @@ impl UdpEndpoints {
         interface: InterfaceId,
         sockets: &mut SocketSet<'static>,
     ) {
+        let mut invalidated = Vec::new();
         for endpoint in &mut self.endpoints {
+            let was_empty = endpoint.received.is_empty();
             let Some(engine) = endpoint.engine(interface) else {
                 continue;
             };
@@ -193,21 +197,30 @@ impl UdpEndpoints {
                     source: metadata.endpoint,
                 });
             }
+            if was_empty && !endpoint.received.is_empty() {
+                invalidated.push(endpoint.id());
+            }
             // A full aggregate queue leaves this Endpoint's oldest engine
             // datagram in place. It must not gate other Endpoints or the whole
             // interface: later packets for this full UDP Endpoint may be
             // dropped by its bounded engine queue while unrelated sockets keep
             // making normal ingress progress.
         }
+        for endpoint in invalidated {
+            self.invalidate(endpoint);
+        }
     }
 
     pub(crate) fn receive(&mut self, id: EndpointId) -> Result<ReceivedDatagram, UdpReceiveError> {
-        self.endpoints
+        let datagram = self
+            .endpoints
             .iter_mut()
             .find(|endpoint| endpoint.id == id)
             .ok_or(UdpReceiveError::UnknownEndpoint)?
             .received
             .pop_front()
-            .ok_or(UdpReceiveError::WouldBlock)
+            .ok_or(UdpReceiveError::WouldBlock)?;
+        self.invalidate(id);
+        Ok(datagram)
     }
 }

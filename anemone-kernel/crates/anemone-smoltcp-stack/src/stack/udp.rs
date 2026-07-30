@@ -1,11 +1,13 @@
 //! Aggregate UDP operations owned by the protocol Stack.
 
+use alloc::vec::Vec;
+
 use anemone_net_api::{
     InterfaceId, Ipv4Address as ApiIpv4Address,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointId,
-        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError,
-        UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointFacts,
+        UdpEndpointId, UdpEndpointInvalidation, UdpEndpointLimits, UdpLocalBinding, UdpPeer,
+        UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
     },
 };
 use smoltcp::wire::{EthernetFrame, IpAddress, IpEndpoint, Ipv4Address};
@@ -74,6 +76,19 @@ impl Stack {
         id: UdpEndpointId,
     ) -> Result<Option<UdpLocalBinding>, UdpQueryError> {
         self.udp.binding(id)
+    }
+
+    pub fn udp_endpoint_facts(&self, id: UdpEndpointId) -> Result<UdpEndpointFacts, UdpQueryError> {
+        self.udp
+            .endpoint(id)
+            .map(|endpoint| endpoint.facts())
+            .ok_or(UdpQueryError::UnknownEndpoint)
+    }
+
+    /// Drain coalesced Endpoint recheck hints after the caller's exclusive
+    /// Stack window ends. The returned tokens contain no readiness payload.
+    pub fn take_udp_endpoint_invalidations(&mut self) -> Vec<UdpEndpointInvalidation> {
+        self.udp.take_invalidations()
     }
 
     pub fn send_udp_endpoint(

@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
-        UdpLocalBinding, UdpNamespacePolicy, UdpQueryError, UdpRetireError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointInvalidation,
+        UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpQueryError, UdpRetireError,
     },
 };
 use smoltcp::iface::SocketSet;
@@ -22,6 +22,9 @@ pub(crate) struct UdpEndpoints {
     next_id: u64,
     next_ephemeral: Option<u16>,
     pub(super) next_egress_endpoint: usize,
+    /// Bounded, coalesced recheck hints. Endpoint facts remain authoritative
+    /// in `endpoints`; this queue carries no readiness payload.
+    pending_invalidations: Vec<UdpEndpointInvalidation>,
 }
 
 impl UdpEndpoints {
@@ -37,6 +40,7 @@ impl UdpEndpoints {
             next_id: 0,
             next_ephemeral: None,
             next_egress_endpoint: 0,
+            pending_invalidations: Vec::new(),
         }
     }
 
@@ -57,6 +61,7 @@ impl UdpEndpoints {
     pub(crate) fn publish_endpoint(&mut self, endpoint: Endpoint) -> UdpEndpointId {
         let id = endpoint.id;
         self.endpoints.push(endpoint);
+        self.invalidate(id);
         id
     }
 
@@ -86,6 +91,7 @@ impl UdpEndpoints {
         self.endpoint_mut(id)
             .expect("prepared UDP endpoint disappeared before binding commit")
             .commit_binding(binding);
+        self.invalidate(id);
     }
 
     pub(crate) fn binding(
@@ -149,8 +155,14 @@ impl UdpEndpoints {
         sockets: &mut SocketSet<'static>,
     ) {
         // Withdraw the owner mapping before removing the private engine object.
+        let mut invalidated = Vec::new();
         for endpoint in &mut self.endpoints {
-            endpoint.remove_engine(interface, sockets);
+            if endpoint.remove_engine(interface, sockets) {
+                invalidated.push(endpoint.id());
+            }
+        }
+        for endpoint in invalidated {
+            self.invalidate(endpoint);
         }
     }
 
@@ -161,6 +173,7 @@ impl UdpEndpoints {
             .position(|endpoint| endpoint.id == id)
             .ok_or(UdpRetireError::UnknownEndpoint)?;
         let endpoint = self.endpoints.remove(index);
+        self.invalidate(id);
         if self.next_egress_endpoint > self.endpoints.len() {
             self.next_egress_endpoint = 0;
         }
@@ -173,5 +186,32 @@ impl UdpEndpoints {
 
     pub(crate) fn endpoint_mut(&mut self, id: UdpEndpointId) -> Option<&mut Endpoint> {
         self.endpoints.iter_mut().find(|endpoint| endpoint.id == id)
+    }
+
+    pub(crate) fn invalidate(&mut self, id: UdpEndpointId) {
+        // A correctly wired consumer drains after every exclusive Stack
+        // window. Still keep the owner queue intrinsically bounded if a host
+        // fixture batches operations: retired identities have no live source
+        // and may be discarded when a later identity needs a hint.
+        let endpoints = &self.endpoints;
+        self.pending_invalidations.retain(|pending| {
+            pending.endpoint() == id
+                || endpoints
+                    .iter()
+                    .any(|endpoint| endpoint.id == pending.endpoint())
+        });
+        if self
+            .pending_invalidations
+            .iter()
+            .any(|pending| pending.endpoint() == id)
+        {
+            return;
+        }
+        self.pending_invalidations
+            .push(UdpEndpointInvalidation::from_owner_transition(id));
+    }
+
+    pub(crate) fn take_invalidations(&mut self) -> Vec<UdpEndpointInvalidation> {
+        core::mem::take(&mut self.pending_invalidations)
     }
 }

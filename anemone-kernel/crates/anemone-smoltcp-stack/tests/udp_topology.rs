@@ -941,3 +941,103 @@ fn zero_length_detach_abandon_and_receive_order_are_deterministic() {
     );
     assert!(stack.receive_udp_for_host_validation(server).is_none());
 }
+
+#[test]
+fn endpoint_facts_and_invalidations_cover_capacity_receive_and_retire() {
+    let mut stack = standard_stack();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 2, 128, Instant::ZERO);
+    let client = stack
+        .create_udp_endpoint_for_host_validation(49010, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    let server = stack
+        .create_udp_endpoint_for_host_validation(49011, 1, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+
+    // Create and bind both touch the owner, but the handoff is one coalesced
+    // identity per Endpoint and carries no readiness payload.
+    let mut initial = stack.take_udp_invalidations_for_host_validation();
+    initial.sort_by_key(|endpoint| *endpoint == server);
+    assert_eq!(initial, vec![client, server]);
+    let facts = stack
+        .udp_endpoint_facts_for_host_validation(client)
+        .unwrap();
+    assert!(facts.is_live());
+    assert!(!facts.is_readable());
+    assert!(facts.is_writable());
+
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            49011,
+            b"facts",
+        )
+        .unwrap();
+    assert!(
+        !stack
+            .udp_endpoint_facts_for_host_validation(client)
+            .unwrap()
+            .is_writable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![client]
+    );
+
+    pump_local(&mut stack, local, 1);
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(client)
+            .unwrap()
+            .is_writable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![client]
+    );
+
+    pump_local(&mut stack, local, 2);
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(server)
+            .unwrap()
+            .is_readable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![server]
+    );
+
+    let received = stack.receive_udp_for_host_validation(server).unwrap();
+    assert_eq!(received.payload, b"facts");
+    assert!(
+        !stack
+            .udp_endpoint_facts_for_host_validation(server)
+            .unwrap()
+            .is_readable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![server]
+    );
+
+    stack
+        .retire_udp_endpoint_for_host_validation(client)
+        .unwrap();
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![client]
+    );
+    stack
+        .retire_udp_endpoint_for_host_validation(server)
+        .unwrap();
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![server]
+    );
+    assert_eq!(
+        stack.udp_endpoint_facts_for_host_validation(client),
+        Err(UdpQueryError::UnknownEndpoint)
+    );
+}

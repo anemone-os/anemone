@@ -1,5 +1,7 @@
 //! Anonymous UDP socket file and opened-description lifecycle association.
 
+mod source;
+
 use anemone_net_api::udp::{
     UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError, UdpReceivedDatagram,
 };
@@ -11,12 +13,11 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
+use source::UdpSocketSource;
+
 #[derive(Opaque)]
 pub(crate) struct UdpSocketFile {
-    /// Sole Socket-to-Endpoint association. Binding and liveness remain in the
-    /// Stack; the `Option` exists only so semantic final release can withdraw
-    /// this capability before retiring the endpoint.
-    association: SpinLock<Option<UdpEndpointPort>>,
+    source: Arc<UdpSocketSource>,
     /// Serializes operations on one opened description. It owns no endpoint
     /// state and is deliberately absent from final release.
     operation: Mutex<()>,
@@ -29,36 +30,36 @@ impl core::fmt::Debug for UdpSocketFile {
 }
 
 impl UdpSocketFile {
-    fn new(endpoint: UdpEndpointPort) -> Self {
+    fn new(source: Arc<UdpSocketSource>) -> Self {
         Self {
-            association: SpinLock::new(Some(endpoint)),
+            source,
             operation: Mutex::new(()),
         }
     }
 
     fn endpoint(&self) -> Option<UdpEndpointPort> {
-        self.association.lock().clone()
+        self.source.endpoint()
     }
 }
 
 /// Owns rollback authority until the fully prepared file description becomes
 /// visible in an fd table. Capability clones never own semantic lifetime.
 pub(crate) struct UdpSocketCreation {
-    endpoint: Option<UdpEndpointPort>,
+    source: Option<Arc<UdpSocketSource>>,
 }
 
 impl UdpSocketCreation {
     pub(crate) fn commit(mut self) {
-        self.endpoint.take();
+        self.source.take();
     }
 }
 
 impl Drop for UdpSocketCreation {
     fn drop(&mut self) {
-        let Some(endpoint) = self.endpoint.take() else {
+        let Some(source) = self.source.take() else {
             return;
         };
-        let result = endpoint.retire();
+        let result = source.retire();
         assert!(
             result.is_ok(),
             "UDP socket creation rollback lost its endpoint identity"
@@ -70,8 +71,19 @@ pub(crate) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError
     let endpoint = create_endpoint().map_err(|error| match error {
         anemone_net_api::udp::UdpCreateError::EndpointCapacity => SysError::NoBufferSpace,
     })?;
+    let source = match UdpSocketSource::try_new(endpoint.clone()) {
+        Ok(source) => source,
+        Err(error) => {
+            let retired = endpoint.retire();
+            assert!(
+                retired.is_ok(),
+                "UDP source allocation rollback lost its Endpoint"
+            );
+            return Err(error);
+        },
+    };
     let creation = UdpSocketCreation {
-        endpoint: Some(endpoint.clone()),
+        source: Some(source.clone()),
     };
     let path = anony_new_inode(InodeType::Socket, &UDP_SOCKET_INODE_OPS, NilOpaque::new())?;
     let file = anony_open_with(
@@ -79,7 +91,7 @@ pub(crate) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError
         OpenedFile::with_mode(
             &UDP_SOCKET_FILE_OPS,
             FileMode::STREAM,
-            AnyOpaque::new(UdpSocketFile::new(endpoint)),
+            AnyOpaque::new(UdpSocketFile::new(source)),
         ),
     )?;
     Ok((file, creation))
@@ -161,14 +173,9 @@ fn final_release_udp_socket(ctx: OpenedFileFinalReleaseCtx<'_>) {
     );
     let socket =
         udp_socket_from_file(ctx.file).expect("UDP final-release hook installed on a non-UDP file");
-    // Withdraw association before calling into the Stack. No sleeping mutex or
-    // fd-table lock participates in semantic final release.
-    let endpoint = socket
-        .association
-        .lock()
-        .take()
-        .expect("UDP opened description reached final release more than once");
-    let result = endpoint.retire();
+    // Source retirement first withdraws association, reverse publication and
+    // routes. No sleeping operation mutex or fd-table lock participates.
+    let result = socket.source.retire();
     assert!(
         result.is_ok(),
         "UDP final release lost its endpoint identity"
@@ -200,7 +207,12 @@ static UDP_SOCKET_FILE_OPS: FileOps = FileOps {
     check_status_flags: udp_check_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, request| Ok(request.ready_or_unsupported(PollEvent::empty())),
+    poll: |file, request| {
+        udp_socket_from_file(file)
+            .expect("UDP FileOps poll used without UDP source")
+            .source
+            .poll(request)
+    },
     fcntl: None,
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };

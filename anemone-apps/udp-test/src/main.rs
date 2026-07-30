@@ -5,15 +5,23 @@ use anemone_rs::{
     abi::{
         fs::linux::{
             at::AT_EMPTY_PATH,
+            epoll::{EPOLLIN, EpollEvent},
             mode::{S_IFMT, S_IFSOCK},
             open::O_NONBLOCK,
+            poll::{POLLIN, POLLOUT, PollFd},
+            select::FdSet,
             statx as linux_statx,
         },
         net::linux::{AF_INET, SOCK_DGRAM, SockAddrIn, socklen_t},
+        time::linux::TimeSpec,
     },
     env::args,
     os::linux::{
-        fs::{AtFd, Fd, close, dup, fcntl_getfd, fcntl_getfl, fstat, statx},
+        fs::{
+            AtFd, EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, dup, epoll_create1,
+            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fstat, pipe2, ppoll, pselect, read,
+            statx, write,
+        },
         net::{
             MessageFlags, SocketFlags, bind_ipv4, bind_raw, getsockname_ipv4, getsockname_raw,
             recvfrom_ipv4, recvfrom_raw, sendto_ipv4, sendto_raw, socket_raw, udp_socket,
@@ -221,6 +229,14 @@ fn test_cloexec_exec_projection() -> Result<(), Errno> {
 }
 
 const DELIVERY_RETRIES: usize = 4096;
+const ZERO_TIMEOUT: TimeSpec = TimeSpec {
+    tv_sec: 0,
+    tv_nsec: 0,
+};
+const SOURCE_TIMEOUT: TimeSpec = TimeSpec {
+    tv_sec: 1,
+    tv_nsec: 0,
+};
 
 fn recv_retry(fd: Fd, payload: &mut [u8]) -> Result<(usize, SockAddrIn), Errno> {
     for _ in 0..DELIVERY_RETRIES {
@@ -291,6 +307,144 @@ fn test_specific_loopback_source() -> Result<(), Errno> {
     ensure(peer.address() == [127, 0, 0, 2] && peer.port() == client_name.port())?;
     close(client)?;
     close(server)
+}
+
+fn fdset_with(fd: Fd) -> FdSet {
+    let mut set = FdSet::default();
+    set.fds_bits[fd as usize / 64] |= 1u64 << (fd as usize % 64);
+    set
+}
+
+fn fdset_contains(set: &FdSet, fd: Fd) -> bool {
+    set.fds_bits[fd as usize / 64] & (1u64 << (fd as usize % 64)) != 0
+}
+
+struct DelayedSender {
+    pid: u32,
+    ack: Fd,
+}
+
+fn spawn_delayed_sender(peer: SockAddrIn, payload: &'static [u8]) -> Result<DelayedSender, Errno> {
+    let (ack_rx, ack_tx) = pipe2(PipeFlags::empty())?;
+    match fork()? {
+        None => {
+            if close(ack_tx).is_err() {
+                exit(1);
+            }
+            for _ in 0..64 {
+                if sched_yield().is_err() {
+                    exit(1);
+                }
+            }
+            let result = (|| {
+                let sender = udp_socket(SocketFlags::NONBLOCK)?;
+                let sent = sendto_ipv4(sender, payload, MessageFlags::empty(), peer)?;
+                let mut ack = [0u8; 1];
+                ensure(read(ack_rx, &mut ack)? == 1)?;
+                close(sender)?;
+                close(ack_rx)?;
+                ensure(sent == payload.len())
+            })();
+            exit(if result.is_ok() { 0 } else { 1 })
+        },
+        Some(pid) => {
+            close(ack_rx)?;
+            Ok(DelayedSender { pid, ack: ack_tx })
+        },
+    }
+}
+
+fn finish_delayed_sender(sender: DelayedSender) -> Result<(), Errno> {
+    ensure(write(sender.ack, b"a")? == 1)?;
+    close(sender.ack)?;
+    wait_child(sender.pid)
+}
+
+fn test_poll_select_epoll_source() -> Result<(), Errno> {
+    let unbound = udp_socket(SocketFlags::NONBLOCK)?;
+    let mut pollfd = [PollFd {
+        fd: unbound as i32,
+        events: POLLIN | POLLOUT,
+        revents: 0,
+    }];
+    ensure(ppoll(&mut pollfd, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(pollfd[0].revents & POLLOUT != 0 && pollfd[0].revents & POLLIN == 0)?;
+    let mut writefds = fdset_with(unbound);
+    ensure(
+        pselect(
+            unbound as usize + 1,
+            None,
+            Some(&mut writefds),
+            None,
+            Some(&ZERO_TIMEOUT),
+        )? == 1,
+    )?;
+    ensure(fdset_contains(&writefds, unbound))?;
+    close(unbound)?;
+
+    let poll_server = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(poll_server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let poll_peer = getsockname_ipv4(poll_server)?;
+    let poll_sender = spawn_delayed_sender(poll_peer, b"poll-source")?;
+    let mut pollfd = [PollFd {
+        fd: poll_server as i32,
+        events: POLLIN,
+        revents: 0,
+    }];
+    let poll_ready = ppoll(&mut pollfd, Some(&SOURCE_TIMEOUT));
+    let poll_sender_finished = finish_delayed_sender(poll_sender);
+    let poll_ready = poll_ready?;
+    poll_sender_finished?;
+    ensure(poll_ready == 1)?;
+    ensure(pollfd[0].revents & POLLIN != 0)?;
+    let mut payload = [0u8; 16];
+    ensure(recv_retry(poll_server, &mut payload)?.0 == b"poll-source".len())?;
+    close(poll_server)?;
+
+    let select_server = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(select_server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let select_peer = getsockname_ipv4(select_server)?;
+    let select_sender = spawn_delayed_sender(select_peer, b"select-source")?;
+    let mut readfds = fdset_with(select_server);
+    let select_ready = pselect(
+        select_server as usize + 1,
+        Some(&mut readfds),
+        None,
+        None,
+        Some(&SOURCE_TIMEOUT),
+    );
+    let select_sender_finished = finish_delayed_sender(select_sender);
+    let select_ready = select_ready?;
+    select_sender_finished?;
+    ensure(select_ready == 1)?;
+    ensure(fdset_contains(&readfds, select_server))?;
+    ensure(recv_retry(select_server, &mut payload)?.0 == b"select-source".len())?;
+    close(select_server)?;
+
+    let epoll_server = udp_socket(SocketFlags::NONBLOCK)?;
+    bind_ipv4(epoll_server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let epoll_peer = getsockname_ipv4(epoll_server)?;
+    let epfd = epoll_create1(EpollCreateFlags::empty())?;
+    let interest = EpollEvent::new(EPOLLIN, 0x5544);
+    epoll_ctl(epfd, EpollCtlOp::Add, epoll_server, Some(&interest))?;
+    let mut events = [EpollEvent::default(); 1];
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+
+    let epoll_sender = spawn_delayed_sender(epoll_peer, b"epoll-source")?;
+    let epoll_ready = epoll_wait(epfd, &mut events, 1000);
+    let epoll_sender_finished = finish_delayed_sender(epoll_sender);
+    let epoll_ready = epoll_ready?;
+    epoll_sender_finished?;
+    ensure(epoll_ready == 1)?;
+    ensure(events[0].data == 0x5544 && events[0].events & EPOLLIN != 0)?;
+    // Ordinary LT must observe the same current predicate without another
+    // transition or a socket-specific epoll path.
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events & EPOLLIN != 0)?;
+    ensure(recv_retry(epoll_server, &mut payload)?.0 == b"epoll-source".len())?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    close(epfd)?;
+    close(epoll_server)
 }
 
 fn test_would_block_bridge() -> Result<(), Errno> {
@@ -540,6 +694,7 @@ fn main() -> Result<(), Errno> {
     results.case("cloexec-exec", test_cloexec_exec_projection);
     results.case("roundtrip-local-paths", test_roundtrip_local_paths);
     results.case("specific-loopback-source", test_specific_loopback_source);
+    results.case("poll-select-epoll-source", test_poll_select_epoll_source);
     results.case("would-block-bridge", test_would_block_bridge);
     results.case("zero-short-consume", test_zero_and_short_consume_whole);
     results.case("fault-consume", test_faults_consume_detached_datagram);

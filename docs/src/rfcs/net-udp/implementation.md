@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-3 Closed / Stage 4 Ready / Not Active / Stage 5 Outline
+**状态：** R0 / Stage 0-3 Closed / Stage 4: 4A Closed, 4B-4C Ready / Not Active / Stage 5 Outline
 **最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -21,9 +21,9 @@
 > Checkpoint 3B已形成Endpoint/File/address lifecycle实现；获批VFS/shared-surface correction与capacity Route
 > Correction完成后，RV64 correction-source证据经behavior-preserving lazy-Vec改动复用，独立final review关闭本checkpoint。
 > Checkpoint 3C随后完成nonblocking datagram纵切、correctness repair、final validation与review，Stage 3已Closed；
-> 独立`3 -> 4`resolution现已把Stage 4解析为4A socket source、4B blocking syscall与4C race/evidence
-> closure三个checkpoint。Stage 4为Ready / Not Active，Stage 5保持Outline；本次没有激活4A或执行current-contract
-> cutover。
+> 独立`3 -> 4`resolution把Stage 4解析为4A socket source、4B blocking syscall与4C race/evidence closure三个
+> checkpoint。Checkpoint 4A现已完成source、review、validation与write-back并独立Closed；4B/4C保持Ready / Not
+> Active，Stage 5保持Outline，current contracts未cut over。
 
 ## 1. 计划角色与 authority
 
@@ -32,8 +32,8 @@
 interface owner、Stack-owned Endpoint/binding truth、control-plane-owned route/source/interface policy、kernel
 Socket-owned Linux ABI/readiness/error，以及五项 R0 用户可见决定。
 
-Stage 0-3已经独立关闭。Stage 4已经由独立`3 -> 4`resolution完整解析为Ready / Not Active；本阶段的checkpoint、
-验证和Resolved Write Set Manifest以6.4为唯一权威。Stage 5仍是future Outline，其中列出的目录、模块和contract
+Stage 0-3及Stage 4 Checkpoint 4A已经独立关闭。Stage 4由独立`3 -> 4`resolution完整解析；4B/4C保持Ready / Not
+Active，本阶段的checkpoint、验证和Resolved Write Set Manifest以6.4为唯一权威。Stage 5仍是future Outline，其中列出的目录、模块和contract
 gate只是后续resolution输入，不是write permission，也不是concrete object graph。Stage N必须先按自己的验证和退出
 条件独立Closed，之后才能运行只读的`N -> N+1 Implementation Resolution Gate`。解析完成只让下一阶段达到Ready，
 不自动进入Active。
@@ -142,7 +142,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Closed | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | Contract Impact为None；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
-| Stage 4 — Blocking/iomux与datagram hardening | Ready / Not Active | 以完整复数route socket source接入poll/select/epoll，复用同一predicate完成blocking/signal，并关闭race、copy-fault、capacity/writable与fragment evidence | Stage 3 Closed；`3 -> 4`resolution完成 | Contract Impact为None；保持既有OPENED-DESC/IOMUX/EPOLL IDs，全部Socket/Endpoint/UDP/wait candidate继续Pending |
+| Stage 4 — Blocking/iomux与datagram hardening | 4A Closed；4B-4C Ready / Not Active | 以完整复数route socket source接入poll/select/epoll，复用同一predicate完成blocking/signal，并关闭race、copy-fault、capacity/writable与fragment evidence | Stage 3 Closed；`3 -> 4`resolution完成 | Contract Impact为None；保持既有OPENED-DESC/IOMUX/EPOLL IDs，全部Socket/Endpoint/UDP/wait candidate继续Pending |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
 
 Stage名称与数量可以在保持target的Route Correction中调整，但Ready / Active阶段必须先更新本文与transaction后
@@ -1348,11 +1348,12 @@ planned files，不授权顺手修改相邻owner。
 net worker/provider、SystemTarget/Platform/build preset、其它apps/rootfs、其它RFC与
 scripts保持只读。formatter若产生允许的相邻style diff按repo规则审计，不将其解释为owner/write-set授权扩大。
 
-### 6.4 Stage 4 Ready / Not Active — Blocking/iomux与datagram hardening
+### 6.4 Stage 4 — 4A Closed / 4B-4C Ready / Not Active — Blocking/iomux与datagram hardening
 
-本节由Stage 3 Closed后的独立`3 -> 4 Implementation Resolution Gate`解析。**成熟度：Ready / Not Active**；
-Checkpoint 4A、4B、4C均未激活。本次只冻结完整Stage 4交付、owner/handoff、review/validation、停止/退出条件和
-Resolved Write Set Manifest，不修改source、current contract、R0 revision或acceptance boundary。
+本节由Stage 3 Closed后的独立`3 -> 4 Implementation Resolution Gate`解析。**成熟度：Checkpoint 4A Closed；
+Checkpoint 4B/4C Ready / Not Active**。4A已按本节冻结的owner/handoff、review/validation、停止/退出条件与
+Resolved Write Set Manifest独立关闭；它不授权4B/4C、current-contract cutover、R0 revision或acceptance boundary
+变化。
 
 #### 6.4.1 前置条件与live baseline
 
@@ -1444,6 +1445,27 @@ semantics、contract或acceptance变化必须停止并进入RFC review / Target 
 只能保存一条route、route publication无法在predicate transition窗口内闭合，或final release需要等待operation/worker，
 停止4A。完整source、复数route和基础poll/select/epoll evidence通过review/validation后，4A独立Closed并停止；4B仍须
 新的明确授权。
+
+**2026-07-30 closure：** 4A在`dev/drc/alpha@c2b1fd4b`上激活。Stack/Endpoint新增owner facts与bounded coalesced
+invalidation，DomainStack在释放Stack锁后通过weak observer反向路由；Socket同一owner拆为`udp/{mod.rs,source.rs}`，
+source一次拥有association、reverse registration与复数interest-bearing routes。route replacement先fallibly准备再
+发布，facts snapshot只形成短时`source -> Stack`嵌套；旧snapshot drop、notify与final cleanup均在source/Stack锁外。
+creation rollback与semantic final release先撤publication/reverse route/routes，且不取得operation mutex。
+
+初次runtime发现test sender在异步`sendto`后立即close，使Endpoint-owned queued datagram在local pump transfer前按既有
+final-release语义被retire；test改用ack pipe只延长sender socket测试生命周期，不改变production send-close语义。独立
+final review的manifest越界re-export、ready-at-register coverage和wait-error child cleanup findings均在冻结manifest内
+neutralize；最终Apollyon 0、Keter 0、acceptance-affecting Euclid 0，剩余一个combined ppoll/pselect/epoll case的可选
+诊断Euclid不影响4A acceptance。
+
+exact-source验证通过`just xtask-test` 62/62、net-api/stack host tests（`udp_topology` 10/10）、no-default test/check、
+双formatter、RV64/LA64 `udp-test` app build与release kernel build。sandbox内RV64 build在unchanged `lwext4`命中
+`Bad system call`/SIGSYS；相同repository build在sandbox外通过，归类为环境限制。canonical fresh-disk RV64 wrapper
+运行273/273 KUnit、`EPOLLTEST:SUMMARY:PASS:11`、`UDPTEST:SUMMARY:PASS:14`、LTP whitelist 4/4与正常
+`filesystem -> network -> device -> PowerOff`；日志为`build/net-udp-stage4a-rv64.log`。Contract Impact为None，
+effective OPENED-DESC/IOMUX/EPOLL与Network/control-plane IDs保持Preserve，全部Socket/Endpoint/UDP/wait candidates
+继续Pending。LA64 runtime、remote external、hardware、`smp>1`、full network LTP和final harness均Not Run。4A独立
+Closed并停止；4B/4C保持Ready / Not Active。
 
 #### 6.4.5 Checkpoint 4B — Blocking `sendto/recvfrom` on the same source
 

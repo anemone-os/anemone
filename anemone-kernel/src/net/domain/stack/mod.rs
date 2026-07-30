@@ -10,14 +10,18 @@ use crate::prelude::*;
 
 mod udp;
 
+use udp::UdpEndpointEventRoutes;
+
 pub(in crate::net) struct DomainStack {
     stack: SpinLock<Stack>,
+    event_routes: SpinLock<UdpEndpointEventRoutes>,
 }
 
 impl DomainStack {
     pub(super) fn new(udp_policy: UdpNamespacePolicy) -> Self {
         Self {
             stack: SpinLock::new(Stack::new_with_udp_namespace_policy(udp_policy)),
+            event_routes: SpinLock::new(UdpEndpointEventRoutes::new()),
         }
     }
 
@@ -92,7 +96,7 @@ impl ExternalMapping {
     }
 
     pub(in crate::net) fn rollback(mut self) {
-        let removed = self.stack.stack.lock().remove_interface(self.interface);
+        let removed = self.stack.rollback_external_mapping(self.interface);
         self.finished = true;
         removed.expect("failed attach lost its global-Stack mapping");
     }
@@ -107,7 +111,7 @@ impl Drop for ExternalMapping {
         // Fail closed before reporting the protocol bug: this mapping has not
         // been published active, so leaving it behind would let a panic turn
         // an attach mistake into stale global-Stack state.
-        let removed = self.stack.stack.lock().remove_interface(self.interface);
+        let removed = self.stack.rollback_external_mapping(self.interface);
         self.finished = true;
         removed.expect("unfinished external mapping was already absent");
         panic!("external Stack mapping dropped without commit or rollback");
@@ -136,10 +140,7 @@ impl LocalPumpPort {
         now: NetworkInstant,
         budget: PumpBudget,
     ) -> Result<PumpOutcome, PumpError> {
-        self.stack
-            .stack
-            .lock()
-            .pump_local(self.interface, now, budget)
+        self.stack.pump_local(self.interface, now, budget)
     }
 }
 
@@ -153,8 +154,6 @@ impl ExternalPumpPort {
         // A provider callback runs only inside this finite pump window. It must
         // not sleep or re-enter the domain/attach owners.
         self.stack
-            .stack
-            .lock()
-            .pump(self.interface, provider, now, budget)
+            .pump_external(self.interface, provider, now, budget)
     }
 }

@@ -2,7 +2,7 @@ use alloc::{collections::VecDeque, vec, vec::Vec};
 
 use anemone_net_api::{
     InterfaceId,
-    udp::{UdpEndpointId, UdpEndpointLimits, UdpLocalBinding},
+    udp::{UdpEndpointFacts, UdpEndpointId, UdpEndpointLimits, UdpLocalBinding},
 };
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
@@ -102,17 +102,17 @@ impl Endpoint {
         &mut self,
         interface: InterfaceId,
         sockets: &mut SocketSet<'static>,
-    ) {
+    ) -> bool {
         let Some(index) = self
             .engines
             .iter()
             .position(|engine| engine.interface == interface)
         else {
-            return;
+            return false;
         };
         let engine = self.engines.remove(index);
         sockets.remove(engine.handle);
-        if matches!(
+        let released_tx = matches!(
             self.tx,
             TxPhase::Queued(PendingDatagram {
                 selected_interface,
@@ -120,9 +120,11 @@ impl Endpoint {
             }) | TxPhase::EngineOwned {
                 interface: selected_interface,
             } if selected_interface == interface
-        ) {
+        );
+        if released_tx {
             self.tx = TxPhase::Idle;
         }
+        released_tx
     }
 
     pub(super) fn engine(&self, interface: InterfaceId) -> Option<EngineResource> {
@@ -146,6 +148,13 @@ impl Endpoint {
 
     pub(crate) fn received_len(&self) -> usize {
         self.received.len()
+    }
+
+    pub(crate) fn facts(&self) -> UdpEndpointFacts {
+        UdpEndpointFacts::from_owner_snapshot(
+            !self.received.is_empty(),
+            matches!(self.tx, TxPhase::Idle),
+        )
     }
 }
 

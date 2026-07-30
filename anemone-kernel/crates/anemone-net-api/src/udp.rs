@@ -26,6 +26,62 @@ impl UdpEndpointId {
     }
 }
 
+/// Point-in-time readiness facts owned by the concrete Stack endpoint.
+///
+/// This value carries no waiter, route, Linux poll mask, or stable liveness
+/// guarantee. A consumer must take a fresh snapshot after every invalidation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UdpEndpointFacts {
+    live: bool,
+    readable: bool,
+    writable: bool,
+}
+
+impl UdpEndpointFacts {
+    /// Construct a snapshot at the concrete Endpoint owner boundary.
+    #[doc(hidden)]
+    pub const fn from_owner_snapshot(readable: bool, writable: bool) -> Self {
+        Self {
+            live: true,
+            readable,
+            writable,
+        }
+    }
+
+    pub const fn is_live(self) -> bool {
+        self.live
+    }
+
+    pub const fn is_readable(self) -> bool {
+        self.readable
+    }
+
+    pub const fn is_writable(self) -> bool {
+        self.writable
+    }
+}
+
+/// Opaque hint that one endpoint's facts may have changed.
+///
+/// The token identifies the owner lookup only. It deliberately carries no
+/// readiness or error payload, so every consumer must re-read current facts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UdpEndpointInvalidation {
+    endpoint: UdpEndpointId,
+}
+
+impl UdpEndpointInvalidation {
+    #[doc(hidden)]
+    pub const fn from_owner_transition(endpoint: UdpEndpointId) -> Self {
+        Self { endpoint }
+    }
+
+    #[doc(hidden)]
+    pub const fn endpoint(self) -> UdpEndpointId {
+        self.endpoint
+    }
+}
+
 /// Domain-wide UDP endpoint and ephemeral-port policy, fixed when the owning
 /// Stack is constructed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

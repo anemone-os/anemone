@@ -3,9 +3,9 @@
 use anemone_net_api::{
     Ipv4Address,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointId,
-        UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeer, UdpQueryError,
-        UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointFacts,
+        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeer,
+        UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
     },
 };
 
@@ -90,6 +90,50 @@ pub(crate) enum SendError {
     Stack(UdpSendError),
 }
 
+pub(crate) trait UdpEndpointInvalidationObserver: Send + Sync {
+    fn invalidate(&self);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EventRegistrationError {
+    OutOfMemory,
+}
+
+/// Source-owned proof that the reverse event route is published.
+///
+/// The endpoint identity is protocol state, not a diagnostic token: it is the
+/// key used to withdraw exactly the route installed for this boot-unique
+/// Endpoint. It never carries readiness or liveness truth.
+pub(crate) struct UdpEndpointEventRegistration {
+    stack: Arc<DomainStack>,
+    endpoint: UdpEndpointId,
+    active: bool,
+}
+
+impl UdpEndpointEventRegistration {
+    pub(crate) fn unregister(mut self) {
+        self.stack.unregister_udp_endpoint_observer(self.endpoint);
+        self.active = false;
+    }
+}
+
+impl Drop for UdpEndpointEventRegistration {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        // Withdraw the weak publication before exposing the owner bug. This
+        // cannot retain the Socket source, but leaving it registered would
+        // accumulate stale reverse entries until another transition.
+        self.stack.unregister_udp_endpoint_observer(self.endpoint);
+        self.active = false;
+        assert!(
+            false,
+            "UDP endpoint event registration dropped while active"
+        );
+    }
+}
+
 pub(crate) fn create_endpoint() -> Result<UdpEndpointPort, UdpCreateError> {
     let stack = {
         let authority = ACTIVE_PATHS.lock();
@@ -108,6 +152,23 @@ pub(crate) fn create_endpoint() -> Result<UdpEndpointPort, UdpCreateError> {
 }
 
 impl UdpEndpointPort {
+    pub(crate) fn register_invalidation_observer(
+        &self,
+        observer: &Arc<dyn UdpEndpointInvalidationObserver>,
+    ) -> Result<UdpEndpointEventRegistration, EventRegistrationError> {
+        self.stack
+            .register_udp_endpoint_observer(self.endpoint, observer)?;
+        Ok(UdpEndpointEventRegistration {
+            stack: self.stack.clone(),
+            endpoint: self.endpoint,
+            active: true,
+        })
+    }
+
+    pub(crate) fn facts(&self) -> Result<UdpEndpointFacts, UdpQueryError> {
+        self.stack.udp_endpoint_facts(self.endpoint)
+    }
+
     pub(crate) fn bind(
         &self,
         address: Ipv4Address,

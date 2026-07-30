@@ -3,8 +3,8 @@ use alloc::{vec, vec::Vec};
 use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointId,
-        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointFacts,
+        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
     },
 };
 use smoltcp::{socket::raw, wire::IpVersion};
@@ -247,6 +247,20 @@ impl Stack {
             pending_tx: endpoint.has_pending_tx(),
             received_datagrams: endpoint.received_len(),
         })
+    }
+
+    pub fn udp_endpoint_facts_for_host_validation(
+        &self,
+        endpoint: HostEndpointId,
+    ) -> Result<UdpEndpointFacts, UdpQueryError> {
+        self.udp_endpoint_facts(endpoint.0)
+    }
+
+    pub fn take_udp_invalidations_for_host_validation(&mut self) -> Vec<HostEndpointId> {
+        self.take_udp_endpoint_invalidations()
+            .into_iter()
+            .map(|invalidation| HostEndpointId(invalidation.endpoint()))
+            .collect()
     }
 
     pub fn local_link_observation_for_host_validation(&self) -> Option<HostLocalLinkObservation> {
