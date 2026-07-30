@@ -920,10 +920,14 @@ anemone-kernel/src/net/
 
 anemone-kernel/src/fs/
   socket/{mod.rs,udp.rs}
-  api/socket/{mod.rs,abi.rs,create.rs,address.rs,datagram.rs}
+  api/socket/{mod.rs,abi.rs,socket.rs,bind.rs,getsockname.rs,sendto.rs,recvfrom.rs}
 
-anemone-abi/src/net.rs
-anemone-rs/src/{sys/linux/net.rs,os/linux/net.rs}
+anemone-abi/src/net.rs  # inline native/linux modules; native remains empty
+anemone-rs/src/
+  sys/{linux/{mod.rs,fs.rs,time.rs,process/{mod.rs,signal.rs},net.rs},
+       anemone/{mod.rs,debug.rs,power.rs}}
+  os/{linux/{mod.rs,fs.rs,tty.rs,time.rs,process/{mod.rs,signal.rs},net.rs},
+      anemone/{mod.rs,debug.rs,power.rs}}
 anemone-apps/udp-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}
 ```
 
@@ -937,8 +941,12 @@ anemone-apps/udp-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}
 - kernel `net/udp.rs`：control-plane point-in-time selection与DomainStack operation composition，并向Socket只导出
   `UdpEndpointPort`；
 - `fs/socket/udp.rs`：`UdpSocketFile`、anonymous FileOps、association与final-release hook；
-- `fs/api/socket/abi.rs`：byte-level sockaddr、flag、user-copy ordering与typed outcome到`SysError`映射，其它四个
-  syscall文件只组合ABI helper和Socket operation，不复制解析规则。
+- `fs/api/socket/abi.rs`：byte-level sockaddr、flag、user-copy ordering与typed outcome到`SysError`映射；五个
+  syscall各自使用同名文件，只组合ABI helper和Socket operation，不复制解析规则；
+- `anemone-abi::net::linux`：在单一`net.rs`中唯一承载Linux network UAPI layout/constant；同文件保留空
+  `native` module以显式表达两类ABI identity，不在`net`根部提供flat compatibility re-export；`anemone-rs`保留
+  raw `sys::linux::net`与typed `os::linux::net`两个不同层次，现有其它公开inline domain module全部物理拆分但
+  保持Rust public path不变。
 
 `fs/socket/mod.rs`不得因只有UDP一个consumer就建立generic Socket manager、protocol registry、option framework或
 trait hierarchy；它只做module wiring与“是否为本stage UDP Socket”的窄分类。
@@ -1015,7 +1023,7 @@ decision。
 
 #### 6.3.5 Linux ABI、copy order 与 temporary blocking bridge
 
-`anemone-abi::net`新增`AF_INET`、`SOCK_DGRAM`、`SOCK_NONBLOCK`、`SOCK_CLOEXEC`、`IPPROTO_UDP`、
+`anemone-abi::net::linux`新增`AF_INET`、`SOCK_DGRAM`、`SOCK_NONBLOCK`、`SOCK_CLOEXEC`、`IPPROTO_UDP`、
 `MSG_DONTWAIT`、`socklen_t`与16-byte `SockAddrIn`/`InAddr`，并以compile-time size/alignment/offset assertion固定布局；
 port/address使用network byte order。RISC-V与LoongArch syscall number都按asm-generic固定为`socket=198`、
 `bind=200`、`getsockname=204`、`sendto=206`、`recvfrom=207`。布局和入口参考
@@ -1157,6 +1165,34 @@ lazy growth，明显不改变已验证的publication/capacity/ABI path，因此�
 Apollyon/Keter/Euclid/Safe全0。musl LTP未形成完整aggregate，不宣称本轮4/4；它也不是3B自身的UDPTEST退出条件。
 Contract Impact为None，全部candidate继续Pending。Checkpoint 3B独立Closed并停止，3C仍Ready / Not Active。
 
+##### Post-3B module-boundary correction — Closed
+
+2026-07-30完成3B后的周期工程审计确认两个Keter：kernel `fs/api/socket/address.rs`同时承载`bind`与
+`getsockname`，且3C原计划继续把`sendto/recvfrom`合入`datagram.rs`，违反kernel一syscall一文件的既有形状；
+`anemone-abi::net`根部全部是Linux UAPI，却没有以`linux` module标明compatibility boundary。审计同时确认
+`anemone-rs::sys::linux::net`与`os::linux::net`分别是raw syscall和typed OS wrapper，不应合并，但父级与其它
+公开inline module应目录化以清楚表达层次。
+
+开发者明确批准在3B Closed、3C Ready / Not Active之间执行一个独立behavior-preserving纠偏checkpoint，并要求
+一并物理拆分`anemone-rs::{sys,os}::{linux,anemone}`下全部现有公开inline module。该checkpoint不重开3B、不实现
+3C、不改变syscall number/layout/errno、Socket/Endpoint owner、opened-description lifecycle、current contract或
+acceptance；唯一public Rust source-path cutover是`anemone_abi::net::* -> anemone_abi::net::linux::*`，workspace内
+direct consumers原子更新且不保留flat compatibility re-export。`anemone-abi/src/net.rs`保持单文件，在其中inline
+空`native`与承载现有UAPI的`linux`，不目录化；获批public Rust API delta仅为该空module identity与strict
+source-path cutover。验证至少覆盖repository formatter、workspace source/API audit、
+`udp-test`双架构app build、RV64/LA64 kernel build、whitespace与mdBook；最终change review与write-set audit清零
+后独立关闭并停止，3C继续Not Active。
+
+**Closure：** 2026-07-30，kernel Socket API已按`socket`/`bind`/`getsockname`一syscall一文件重排，未创建
+`sendto.rs`/`recvfrom.rs`；单文件`anemone-abi/src/net.rs`现inline空`native`与Linux UAPI `linux`，workspace
+direct consumers完成strict cutover且flat路径清零；`anemone-rs`四个parent目录化，`fs`/`tty`/`time`/`process`/
+`signal`/`debug`/`power`全部成为同owner child file。13项拆分前后module-body逐字对照、结构/API/write-set audit、
+kernel与`udp-test` formatter check、双架构`udp-test` app build、RV64/LA64 release kernel build、whitespace与mdBook
+均PASS；RV64首次sandbox build的`lwext4` `Bad system call`由完全相同命令在sandbox外PASS证明为环境SIGSYS。
+final change review为Apollyon/Keter/Euclid/Safe全0。QEMU、KUnit runtime、UDPTEST/LTP、hardware与final harness
+均Not Run且不属于本behavior-preserving checkpoint退出条件。Contract Impact为None，existing Effective IDs
+Preserve，全部Socket/Endpoint/UDP/wait candidate继续Pending；checkpoint独立Closed并停止，3C仍Ready / Not Active。
+
 #### 6.3.8 Checkpoint 3C — nonblocking datagram vertical slice
 
 **目的：** 在3B真实lifecycle上增加send/receive ownership transaction，形成五项syscall的可运行nonblocking闭环。
@@ -1260,13 +1296,20 @@ planned files，不授权顺手修改相邻owner。
   `anemone-kernel/src/net/{mod.rs,udp.rs,domain/{mod.rs,control_plane.rs,stack.rs,
   stack/{mod.rs,udp.rs}}}`；其中`domain/stack.rs`允许在3A目录化删除；
 - Socket/File/syscall projection：`anemone-kernel/src/fs/{mod.rs,socket/{mod.rs,udp.rs},api/{mod.rs,
-  socket/{mod.rs,abi.rs,create.rs,address.rs,datagram.rs}}}`与`anemone-kernel/src/syserror.rs`；
+  socket/{mod.rs,abi.rs,socket.rs,bind.rs,getsockname.rs,sendto.rs,recvfrom.rs}}}`与
+  `anemone-kernel/src/syserror.rs`；其中旧`create.rs`/`address.rs`允许删除，3C只能在独立授权后新增
+  `sendto.rs`/`recvfrom.rs`；
 - 3B correction获批VFS expansion：`anemone-kernel/src/fs/inode.rs`、
   `anemone-kernel/src/fs/api/getdents64.rs`、`anemone-kernel/src/fs/ext4/{mod.rs,inode.rs,superblock.rs}`与
   `anemone-kernel/src/fs/devfs/mod.rs`；只允许新增`InodeType::Socket`的Linux mode/dirent投影、ext4显式拒绝及
   devfs publish admission拒绝，不改变anonymous/VFS lifecycle；
-- ABI/library：`anemone-abi/src/{lib.rs,net.rs,syscall/{riscv.rs,loongarch.rs}}`、
-  `anemone-rs/src/{sys/linux.rs,sys/linux/net.rs,os/linux.rs,os/linux/net.rs}`；
+- ABI/library：`anemone-abi/src/{lib.rs,net.rs,syscall/{riscv.rs,loongarch.rs}}`；`net.rs`保持单文件，只允许inline
+  空`native`与承载现有Linux UAPI的`linux`并执行strict source-path cutover；这两项是本checkpoint仅有的
+  public Rust API delta；`anemone-rs/src/{sys/{linux.rs,
+  linux/{mod.rs,fs.rs,time.rs,
+  process/{mod.rs,signal.rs},net.rs},anemone.rs,anemone/{mod.rs,debug.rs,power.rs}},
+  os/{linux.rs,linux/{mod.rs,fs.rs,tty.rs,time.rs,process/{mod.rs,signal.rs},net.rs},anemone.rs,
+  anemone/{mod.rs,debug.rs,power.rs}}}`，其中四个旧parent `.rs`允许目录化删除；
 - real user consumer/rootfs：`anemone-apps/udp-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}`、
   `anemone-apps/user-test/src/main.rs`、`conf/rootfs/{pretest-rv64.toml,pretest-la64.toml}`；
 - execution write-back：本RFC`{index.md,implementation.md}`、本transaction、`docs/src/rfcs.md`、

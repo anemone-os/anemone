@@ -2,7 +2,7 @@
 
 use core::mem::size_of;
 
-use anemone_abi::net::{AF_INET, SockAddrIn, socklen_t};
+use anemone_abi::net::linux::{AF_INET, SockAddrIn, socklen_t};
 use anemone_net_api::{
     Ipv4Address,
     udp::{UdpBindError, UdpLocalBinding, UdpQueryError},

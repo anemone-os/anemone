@@ -2,7 +2,9 @@
 
 use anemone_abi::{
     errno::Errno,
-    net::{AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SockAddrIn, socklen_t},
+    net::linux::{
+        AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SockAddrIn, socklen_t,
+    },
 };
 use bitflags::bitflags;
 
@@ -110,4 +112,4 @@ pub unsafe fn recvfrom_raw(
     .map(|read| read as usize)
 }
 
-pub use anemone_abi::net::{InAddr, SockAddrIn as Ipv4SocketAddress};
+pub use anemone_abi::net::linux::{InAddr, SockAddrIn as Ipv4SocketAddress};

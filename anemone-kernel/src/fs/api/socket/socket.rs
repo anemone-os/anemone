@@ -1,5 +1,5 @@
 use anemone_abi::{
-    net::{AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK},
+    net::linux::{AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK},
     syscall::SYS_SOCKET,
 };
 

@@ -9,7 +9,7 @@ use anemone_rs::{
             open::O_NONBLOCK,
             statx as linux_statx,
         },
-        net::{AF_INET, SOCK_DGRAM, SockAddrIn, socklen_t},
+        net::linux::{AF_INET, SOCK_DGRAM, SockAddrIn, socklen_t},
     },
     env::args,
     os::linux::{
