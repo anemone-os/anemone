@@ -156,9 +156,11 @@ impl UdpSocketSource {
         };
 
         // Publication is already withdrawn. Remove the reverse lookup before
-        // waking consumers, then retire the Endpoint without an operation lock.
+        // waking every detached route: retirement is observable on a final
+        // scan even when that consumer registered no ordinary readiness bit.
+        // Then retire the Endpoint without an operation lock.
         association.event_registration.unregister();
-        notify_routes(&routes);
+        notify_all_routes(&routes);
         drop(routes);
         association.endpoint.retire()
     }
@@ -172,7 +174,7 @@ impl UdpEndpointInvalidationObserver for UdpSocketSource {
         };
         let routes = routes.clone();
         drop(publication);
-        notify_routes(&routes);
+        notify_interested_routes(&routes);
     }
 }
 
@@ -223,7 +225,7 @@ fn prepare_route_replacement(
     Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)
 }
 
-fn notify_routes(routes: &Arc<Vec<UdpPollRoute>>) {
+fn notify_interested_routes(routes: &Arc<Vec<UdpPollRoute>>) {
     for entry in routes.iter() {
         if entry
             .interests
@@ -231,6 +233,12 @@ fn notify_routes(routes: &Arc<Vec<UdpPollRoute>>) {
         {
             entry.route.notify();
         }
+    }
+}
+
+fn notify_all_routes(routes: &Arc<Vec<UdpPollRoute>>) {
+    for entry in routes.iter() {
+        entry.route.notify();
     }
 }
 
@@ -281,8 +289,8 @@ mod kunits {
         let routes = prepare_route_replacement(&routes, &second_route, PollEvent::WRITABLE)
             .expect("second route must fit");
 
-        notify_routes(&routes);
-        notify_routes(&routes);
+        notify_interested_routes(&routes);
+        notify_interested_routes(&routes);
         assert_eq!(first.notifications(), 2);
         assert_eq!(second.notifications(), 2);
 
@@ -292,7 +300,7 @@ mod kunits {
         let replacement = prepare_route_replacement(&routes, &third_route, PollEvent::READABLE)
             .expect("replacement route must fit");
         assert_eq!(replacement.len(), 2);
-        notify_routes(&replacement);
+        notify_interested_routes(&replacement);
         assert_eq!(second.notifications(), 3);
         assert_eq!(third.notifications(), 1);
     }
@@ -315,5 +323,61 @@ mod kunits {
         source
             .retire()
             .expect("KUnit UDP source must retain its Endpoint");
+    }
+
+    #[kunit]
+    fn retire_withdraws_publication_before_late_duplicate_hints() {
+        let endpoint = create_endpoint().expect("KUnit UDP endpoint must fit");
+        let source = UdpSocketSource::try_new(endpoint).expect("KUnit UDP source must fit");
+        let readable_observer = Arc::new(CountingObserver::new());
+        let empty_observer = Arc::new(CountingObserver::new());
+        let hang_up_observer = Arc::new(CountingObserver::new());
+        let readable_route = route(&readable_observer);
+        let empty_route = route(&empty_observer);
+        let hang_up_route = route(&hang_up_observer);
+
+        assert_eq!(
+            source
+                .poll(&PollRequest::register_with_route(
+                    PollEvent::READABLE,
+                    &readable_route,
+                ))
+                .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+        assert_eq!(
+            source
+                .poll(&PollRequest::register_with_route(
+                    PollEvent::empty(),
+                    &empty_route,
+                ))
+                .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+        assert_eq!(
+            source
+                .poll(&PollRequest::register_with_route(
+                    PollEvent::HANG_UP,
+                    &hang_up_route,
+                ))
+                .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+        source
+            .retire()
+            .expect("KUnit UDP source must retain its Endpoint");
+        assert_eq!(readable_observer.notifications(), 1);
+        assert_eq!(empty_observer.notifications(), 1);
+        assert_eq!(hang_up_observer.notifications(), 1);
+
+        UdpEndpointInvalidationObserver::invalidate(source.as_ref());
+        UdpEndpointInvalidationObserver::invalidate(source.as_ref());
+        assert_eq!(readable_observer.notifications(), 1);
+        assert_eq!(empty_observer.notifications(), 1);
+        assert_eq!(hang_up_observer.notifications(), 1);
+        assert_eq!(
+            source.poll(&PollRequest::snapshot(PollEvent::READABLE)),
+            Err(SysError::IdentifierRemoved)
+        );
     }
 }

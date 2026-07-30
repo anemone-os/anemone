@@ -20,8 +20,10 @@
   invalidation、lock-external reverse routing与Socket-owned plural-route source；exact-source RV64执行273/273 KUnit、
   UDP 14/14、epoll 11/11与LTP whitelist 4/4，final review blocker为0后独立Closed。4B复用唯一shared iomux wait
   loop完成blocking UDP、NONBLOCK/DONTWAIT与deterministic multi-waiter/signal纵切；final RV64为273/273 KUnit、
-  UDP 15/15、epoll 11/11与LTP whitelist 4/4，follow-up review全0后独立Closed。4C保持Ready / Not Active，全部
-  Socket/Endpoint/UDP/wait candidate仍Pending，transaction保持Active。
+  UDP 15/15、epoll 11/11与LTP whitelist 4/4，follow-up review全0后独立Closed。4C完成capacity/provider、
+  lifecycle、concurrent copy-fault与fragment evidence；final review的empty-interest retire lost wake在source owner内
+  neutralize，复审全0，final RV64为274/274 KUnit、UDP 16/16、epoll 11/11与LTP 4/4。Stage 4 Closed；Stage 5
+  保持Outline，全部Socket/Endpoint/UDP/wait candidate仍Pending，transaction保持Active。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

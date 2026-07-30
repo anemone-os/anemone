@@ -126,8 +126,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   resolution把Stage 4解析为4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence
   closure。4A已形成Stack-owned facts/invalidation、锁外weak reverse routing与Socket-owned plural-route source，
   final exact-source RV64与独立review通过后Closed；4B随后下移唯一shared iomux wait loop，让blocking UDP复用同一
-  predicate，并以deterministic multi-waiter/signal case证明复数route独立保留，final review全0后Closed。4C保持
-  Ready / Not Active；Socket/Endpoint/UDP/wait candidate contracts仍未生效。执行证据见
+  predicate，并以deterministic multi-waiter/signal case证明复数route独立保留，final review全0后Closed。4C完成
+  writable/provider、lifecycle、concurrent copy-fault与fragment injection收口；final review发现并修复empty-interest
+  retire lost wake，复审全0、RV64 274/274 KUnit与UDP 16/16后关闭Stage 4。Stage 5保持Outline，Socket/Endpoint/
+  UDP/wait candidate contracts仍未生效。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

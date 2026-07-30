@@ -10,7 +10,13 @@ use anemone_net_api::{
 use anemone_smoltcp_stack::{
     HostEndpointCreateError, HostRetireError, HostSelection, HostSendError, PumpBudget, Stack,
 };
-use smoltcp::wire::{EthernetFrame, Ipv4Address, Ipv4Packet, UdpPacket};
+use smoltcp::{
+    phy::ChecksumCapabilities,
+    wire::{
+        EthernetAddress as SmoltcpEthernetAddress, EthernetFrame, EthernetProtocol, EthernetRepr,
+        IpAddress, IpProtocol, Ipv4Address, Ipv4Packet, Ipv4Repr, UdpPacket, UdpRepr,
+    },
+};
 
 use support::{BoundedProvider, prime_bounded_neighbor};
 
@@ -228,6 +234,71 @@ fn assert_udp_frame(
     assert_eq!(udp.src_port(), source_port);
     assert_eq!(udp.dst_port(), destination_port);
     assert_eq!(udp.payload(), payload);
+}
+
+fn udp_datagram(
+    source: [u8; 4],
+    destination: [u8; 4],
+    source_port: u16,
+    destination_port: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    let source = IpAddress::Ipv4(Ipv4Address::from_octets(source));
+    let destination = IpAddress::Ipv4(Ipv4Address::from_octets(destination));
+    let repr = UdpRepr {
+        src_port: source_port,
+        dst_port: destination_port,
+    };
+    let mut bytes = vec![0; repr.header_len() + payload.len()];
+    repr.emit(
+        &mut UdpPacket::new_unchecked(&mut bytes[..]),
+        &source,
+        &destination,
+        payload.len(),
+        |target| target.copy_from_slice(payload),
+        &ChecksumCapabilities::default(),
+    );
+    bytes
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ethernet_ipv4_fragment(
+    source_mac: [u8; 6],
+    destination_mac: [u8; 6],
+    source_ip: [u8; 4],
+    destination_ip: [u8; 4],
+    ident: u16,
+    fragment_offset: u16,
+    more_fragments: bool,
+    payload: &[u8],
+) -> Vec<u8> {
+    let ethernet = EthernetRepr {
+        src_addr: SmoltcpEthernetAddress::from_bytes(&source_mac),
+        dst_addr: SmoltcpEthernetAddress::from_bytes(&destination_mac),
+        ethertype: EthernetProtocol::Ipv4,
+    };
+    let ipv4 = Ipv4Repr {
+        src_addr: Ipv4Address::from_octets(source_ip),
+        dst_addr: Ipv4Address::from_octets(destination_ip),
+        next_header: IpProtocol::Udp,
+        payload_len: payload.len(),
+        hop_limit: 64,
+    };
+    let ip_offset = ethernet.buffer_len();
+    let payload_offset = ip_offset + ipv4.buffer_len();
+    let mut bytes = vec![0; payload_offset + payload.len()];
+    ethernet.emit(&mut EthernetFrame::new_unchecked(&mut bytes[..]));
+    {
+        let mut packet = Ipv4Packet::new_unchecked(&mut bytes[ip_offset..]);
+        ipv4.emit(&mut packet, &ChecksumCapabilities::default());
+        packet.set_ident(ident);
+        packet.set_dont_frag(false);
+        packet.set_more_frags(more_fragments);
+        packet.set_frag_offset(fragment_offset);
+        packet.fill_checksum();
+    }
+    bytes[payload_offset..].copy_from_slice(payload);
+    bytes
 }
 
 fn pump_local(stack: &mut Stack, interface: InterfaceId, tick: i64) {
@@ -940,6 +1011,264 @@ fn zero_length_detach_abandon_and_receive_order_are_deterministic() {
         b"second"
     );
     assert!(stack.receive_udp_for_host_validation(server).is_none());
+}
+
+#[test]
+fn writable_tracks_endpoint_admission_across_selection_and_provider_backpressure() {
+    let mut stack = standard_stack();
+    let mut provider = BoundedProvider::with_mac(FIRST_MAC, 1);
+    let interface = stack.add_interface(
+        &mut provider,
+        anemone_net_api::EthernetAddress::new(FIRST_MAC),
+        Instant::ZERO,
+    );
+    stack
+        .configure_ipv4_for_host_validation(interface, FIRST_IP, 24)
+        .unwrap();
+    prime_bounded_neighbor(
+        &mut stack,
+        interface,
+        &mut provider,
+        FIRST_PEER_MAC,
+        FIRST_PEER_IP,
+        FIRST_IP,
+    );
+    provider.reset_observation();
+
+    let endpoint = create_unbound(&mut stack);
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(endpoint)
+            .unwrap()
+            .is_writable()
+    );
+    stack.take_udp_invalidations_for_host_validation();
+    bind_for_host(&mut stack, endpoint, [0; 4], 49100).unwrap();
+    stack.take_udp_invalidations_for_host_validation();
+
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            None,
+            FIRST_PEER_IP,
+            49101,
+            b"selection failure",
+        ),
+        Err(HostSendError::MissingSelection)
+    );
+    assert_eq!(
+        stack.send_udp_for_host_validation(
+            endpoint,
+            Some(selection(interface, FIRST_IP)),
+            FIRST_PEER_IP,
+            49101,
+            &[0; 33],
+        ),
+        Err(HostSendError::Oversize { maximum: 32 })
+    );
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(endpoint)
+            .unwrap()
+            .is_writable()
+    );
+    assert!(
+        stack
+            .take_udp_invalidations_for_host_validation()
+            .is_empty()
+    );
+
+    stack
+        .send_udp_for_host_validation(
+            endpoint,
+            Some(selection(interface, FIRST_IP)),
+            FIRST_PEER_IP,
+            49101,
+            b"first",
+        )
+        .unwrap();
+    assert!(
+        !stack
+            .udp_endpoint_facts_for_host_validation(endpoint)
+            .unwrap()
+            .is_writable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![endpoint]
+    );
+
+    stack
+        .pump(
+            interface,
+            &mut provider,
+            Instant::from_micros(1),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert_eq!(provider.live_tx(), 1);
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(endpoint)
+            .unwrap()
+            .is_writable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![endpoint]
+    );
+
+    stack
+        .send_udp_for_host_validation(
+            endpoint,
+            Some(selection(interface, FIRST_IP)),
+            FIRST_PEER_IP,
+            49101,
+            b"second",
+        )
+        .unwrap();
+    stack.take_udp_invalidations_for_host_validation();
+    let blocked = stack
+        .pump(
+            interface,
+            &mut provider,
+            Instant::from_micros(2),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert!(blocked.work_remaining);
+    assert!(provider.normal_exhaustions() > 0);
+    assert!(
+        !stack
+            .udp_endpoint_facts_for_host_validation(endpoint)
+            .unwrap()
+            .is_writable()
+    );
+    assert!(
+        stack
+            .take_udp_invalidations_for_host_validation()
+            .is_empty()
+    );
+
+    provider.complete_all();
+    stack
+        .pump(
+            interface,
+            &mut provider,
+            Instant::from_micros(3),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(endpoint)
+            .unwrap()
+            .is_writable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![endpoint]
+    );
+}
+
+#[test]
+fn provider_ingress_rejects_first_later_and_complete_fragment_pair() {
+    let mut stack = standard_stack();
+    let mut provider = BoundedProvider::with_mac(FIRST_MAC, 1);
+    let interface = stack.add_interface(
+        &mut provider,
+        anemone_net_api::EthernetAddress::new(FIRST_MAC),
+        Instant::ZERO,
+    );
+    stack
+        .configure_ipv4_for_host_validation(interface, FIRST_IP, 24)
+        .unwrap();
+    let server = stack
+        .create_udp_endpoint_for_host_validation(49200, 4, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    stack.take_udp_invalidations_for_host_validation();
+
+    let payload = b"fragment-proof";
+    let datagram = udp_datagram(FIRST_PEER_IP, FIRST_IP, 49201, 49200, payload);
+    let first = ethernet_ipv4_fragment(
+        FIRST_PEER_MAC,
+        FIRST_MAC,
+        FIRST_PEER_IP,
+        FIRST_IP,
+        0x4c01,
+        0,
+        true,
+        &datagram[..16],
+    );
+    let later = ethernet_ipv4_fragment(
+        FIRST_PEER_MAC,
+        FIRST_MAC,
+        FIRST_PEER_IP,
+        FIRST_IP,
+        0x4c01,
+        16,
+        false,
+        &datagram[16..],
+    );
+
+    for frame in [&first, &later, &first, &later] {
+        provider.inject(frame);
+        let tick = i64::try_from(provider.rx_recycles() + 1).unwrap();
+        stack
+            .pump(
+                interface,
+                &mut provider,
+                Instant::from_micros(tick),
+                PumpBudget::new(2, 2),
+            )
+            .unwrap();
+        assert!(
+            !stack
+                .udp_endpoint_facts_for_host_validation(server)
+                .unwrap()
+                .is_readable()
+        );
+        assert!(stack.receive_udp_for_host_validation(server).is_none());
+        assert!(
+            stack
+                .take_udp_invalidations_for_host_validation()
+                .is_empty()
+        );
+    }
+
+    let complete = ethernet_ipv4_fragment(
+        FIRST_PEER_MAC,
+        FIRST_MAC,
+        FIRST_PEER_IP,
+        FIRST_IP,
+        0x4c02,
+        0,
+        false,
+        &datagram,
+    );
+    provider.inject(&complete);
+    stack
+        .pump(
+            interface,
+            &mut provider,
+            Instant::from_micros(5),
+            PumpBudget::new(2, 2),
+        )
+        .unwrap();
+    assert!(
+        stack
+            .udp_endpoint_facts_for_host_validation(server)
+            .unwrap()
+            .is_readable()
+    );
+    assert_eq!(
+        stack.take_udp_invalidations_for_host_validation(),
+        vec![server]
+    );
+    let received = stack.receive_udp_for_host_validation(server).unwrap();
+    assert_eq!(received.payload, payload);
+    assert_eq!(received.source_address, FIRST_PEER_IP);
+    assert_eq!(received.source_port, 49201);
 }
 
 #[test]
