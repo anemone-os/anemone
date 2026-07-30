@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-2与Checkpoint 3A Closed / Checkpoint 3B Review Hold / Checkpoint 3C Ready / Not Active / Stage 4-5 Outline
+**状态：** Accepted for Implementation / Stage 0-2与Checkpoint 3A-3B Closed / Checkpoint 3C Ready / Not Active / Stage 4-5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-30
@@ -15,9 +15,9 @@
 `STM-RESOLVE-001`；Stage 1已新增`NET-IFACE-DOMAIN-001`，Stage 2已新增`NET-CONTROL-PLANE-001`，后续候选新增
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
-**开放问题：** R0 target无新增开放问题；Checkpoint 3B implementation review的两个Apollyon和一个Keter见transaction
-**下一步：** Checkpoint 3B保持Review Hold；先批准并冻结VFS write-set expansion、处置review findings并复审，
-不得自动进入3C、Stage 4 resolution或current-contract cutover
+**开放问题：** R0 target无新增开放问题；Checkpoint 3B的历史findings及neutralization见transaction
+**下一步：** Checkpoint 3B已独立关闭并停止；Checkpoint 3C保持Ready / Not Active，不得自动进入3C、Stage 4
+resolution或current-contract cutover
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
 `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；其它R0 candidate仍须在后续明确
@@ -27,10 +27,25 @@ control plane与production local path。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-
 `NET-CONTROL-PLANE-001`；2026-07-30 post-close correction恢复`NET-BOUNDARY-001`既有artifact-neutral
 validation seam并收拢KUnit共置规则，不改变R0 target或Stage 2 runtime closure。独立`2 -> 3`resolution已把
 Stage 3解析为3A same-owner split、3B Endpoint/File/address lifecycle与3C nonblocking datagram三个checkpoint；
-3A已经按behavior-preserving same-owner split独立关闭；3B已建立真实Endpoint/File/address lifecycle实现与RV64
-验证候选，但final review因两个Apollyon、一个Keter和VFS write-set expansion进入Review Hold，尚未关闭。3C保持
+3A已经按behavior-preserving same-owner split独立关闭；3B已建立真实Endpoint/File/address lifecycle实现，完成
+获批VFS/shared-surface correction、capacity Route Correction、RV64 correction-source证据复用与独立复审后关闭。3C保持
 Ready / Not Active，Stage 4-5保持Outline，全部
 Socket/Endpoint/UDP/wait candidate contract继续Pending。
+
+2026-07-30开发者以`approved`批准3B correction最小扩展：只为anonymous UDP socket增加正确`S_IFSOCK`投影并
+处置`InodeType`的五个exhaustive VFS consumer；允许Stack/shared value surface把namespace policy改为构造时一次
+拥有，并把参数semantic与direct storage arithmetic唯一验收收归kernel compile-time assertion。后续capacity
+model复核否决了穷尽private container layout和为`SocketSet`eager reserve的路线：它不能证明OOM success，且会把
+namespace policy传播到interface/local-link owner。cross-crate layout predicate已删除，不扩张这两个owner文件。
+Endpoint collection与per-interface `SocketSet`都保持按实际publication lazy growth；namespace capacity只是
+normal exhaustion的逻辑上限，不是启动期内存承诺。该Route Correction保持R0 target、owner、ABI visible
+semantics与acceptance不变，Contract Impact为None；精确
+manifest、validation与停止边界见[implementation](./implementation.md#15-write-set扩展记录)和transaction。
+
+同日后续backend admission复核确认：ramfs/proc创建入口只传固定类型，不需要为新枚举机械扩张；devfs公开
+`DevfsNodeAttr.ty`却以“leaf只要不是Dir”作负向准入，若保持不变会意外允许发布Socket inode。开发者允许按实际
+需求判断后，3B correction再最小加入`fs/devfs/mod.rs`，只在publish owner入口明确拒绝Socket并增加owner-local
+KUnit；这不授权ramfs/proc改动，也不改变上述target、owner、Contract Impact或3C状态。
 
 ## 摘要
 
@@ -109,7 +124,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-2与Checkpoint 3A Closed；Checkpoint 3B Review Hold；Checkpoint 3C Ready / Not Active；
+- [迁移实施计划](./implementation.md)：Stage 0-2与Checkpoint 3A-3B Closed；Checkpoint 3C Ready / Not Active；
   Stage 4-5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
@@ -467,12 +482,13 @@ fallback或provenance系统不能证明实际网络正确，反而扩大owner和
 
 R0已经接受。Stage 0的positive topology decision、Stage 1 initial-domain/global-Stack walking skeleton与Stage 2
 static control-plane/production-loopback均已独立关闭；两项domain/control contract cutover已经生效。Stage 3的3A
-same-owner split也已独立关闭。3B已形成unbound Endpoint、bind/port0 namespace、anonymous `UdpSocketFile`、
-creation rollback/semantic final release以及`socket/bind/getsockname` RV64用户纵切，并删除Stage 2 temporary probe，
-但final review确认Kconfig allocation layout、socket `S_IFSOCK`投影与namespace policy owner尚未闭合；其中VFS
-修正需要扩大frozen write set。3B因此保持Review Hold，不宣称Closed。Contract Impact为None，candidate contracts
-继续Pending。
+same-owner split与3B Endpoint/File/address lifecycle也已分别独立关闭。3B形成unbound Endpoint、bind/port0
+namespace、anonymous `UdpSocketFile`、creation rollback/semantic final release以及`socket/bind/getsockname` RV64
+用户纵切，并删除Stage 2 temporary probe；获批correction把namespace policy收归Stack构造、正确投影`S_IFSOCK`并
+由ext4/devfs明确拒绝named Socket admission。capacity Route Correction删除private-layout predicate和eager reserve，
+只保留kernel-owned semantic/direct-byte assertions。最终独立review为Apollyon/Keter/Euclid/Safe全0。Contract
+Impact为None，candidate contracts继续Pending。
 
 Stage 3尚未Closed：3C nonblocking datagram仍为Ready / Not Active。LA64 runtime、remote external、SMP>1、blocking/
-iomux、fragment、hardware、network LTP与final harness均未由3B证明。当前下一步是先批准3B correction write set、
-处置review findings并复审；不得进入3C、Stage 4 resolution或current-contract cutover。
+iomux、fragment、hardware、network LTP与final harness均未由3B证明。3B closure不激活下一checkpoint；当前停止，
+必须获得新的明确授权才能进入3C。Stage 4 resolution或current-contract cutover同样未授权。

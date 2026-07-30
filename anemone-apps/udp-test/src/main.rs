@@ -3,12 +3,17 @@
 
 use anemone_rs::{
     abi::{
-        fs::linux::open::O_NONBLOCK,
+        fs::linux::{
+            at::AT_EMPTY_PATH,
+            mode::{S_IFMT, S_IFSOCK},
+            open::O_NONBLOCK,
+            statx as linux_statx,
+        },
         net::{AF_INET, SOCK_DGRAM, SockAddrIn, socklen_t},
     },
     env::args,
     os::linux::{
-        fs::{Fd, close, dup, fcntl_getfd, fcntl_getfl},
+        fs::{AtFd, Fd, close, dup, fcntl_getfd, fcntl_getfl, fstat, statx},
         net::{
             SocketFlags, bind_ipv4, bind_raw, getsockname_ipv4, getsockname_raw, socket_raw,
             udp_socket,
@@ -59,6 +64,20 @@ fn test_create_errno_and_flags() -> Result<(), Errno> {
     ensure(fcntl_getfd(flagged)? == 1)?;
     ensure(fcntl_getfl(flagged)? & O_NONBLOCK != 0)?;
     close(flagged)
+}
+
+fn test_socket_inode_type() -> Result<(), Errno> {
+    let fd = udp_socket(SocketFlags::empty())?;
+    let stat = fstat(fd)?;
+    ensure(stat.st_mode & S_IFMT == S_IFSOCK)?;
+    let statx = statx(
+        AtFd::Fd(fd),
+        Path::new(""),
+        AT_EMPTY_PATH,
+        linux_statx::BASIC_STATS,
+    )?;
+    ensure(u32::from(statx.stx_mode) & S_IFMT == S_IFSOCK)?;
+    close(fd)
 }
 
 fn test_unbound_and_port_zero_name() -> Result<(), Errno> {
@@ -238,6 +257,7 @@ fn main() -> Result<(), Errno> {
         failed: 0,
     };
     results.case("create-errno-flags", test_create_errno_and_flags);
+    results.case("socket-inode-type", test_socket_inode_type);
     results.case("unbound-port0-name", test_unbound_and_port_zero_name);
     results.case(
         "binding-matrix-address",

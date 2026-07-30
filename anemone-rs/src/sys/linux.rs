@@ -76,6 +76,16 @@ pub mod fs {
         unsafe { syscall(SYS_FSTAT, fd, statbuf_ptr, 0, 0, 0, 0) }
     }
 
+    pub fn statx(
+        dirfd: u64,
+        path_ptr: u64,
+        flags: u64,
+        mask: u64,
+        statxbuf_ptr: u64,
+    ) -> Result<u64, Errno> {
+        unsafe { syscall(SYS_STATX, dirfd, path_ptr, flags, mask, statxbuf_ptr, 0) }
+    }
+
     pub fn pselect6(
         nfds: u64,
         readfds_ptr: u64,

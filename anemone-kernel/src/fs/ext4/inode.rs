@@ -75,6 +75,7 @@ fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
         InodeType::Symlink => &EXT4_SYMLINK_FILE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo file"),
         InodeType::Char | InodeType::Block => unimplemented!("ext4 dev file"),
+        InodeType::Socket => return Err(SysError::NotSupported),
     };
 
     Ok(OpenedFile::new(file_ops, NilOpaque::new()))

@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-2与Checkpoint 3A Closed / Checkpoint 3B Review Hold / Checkpoint 3C Ready / Not Active / Stage 4-5 Outline
+**状态：** R0 / Stage 0-2与Checkpoint 3A-3B Closed / Checkpoint 3C Ready / Not Active / Stage 4-5 Outline
 **最后更新：** 2026-07-30
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -18,8 +18,8 @@
 > Stage 1 Checkpoint 1A均已于2026-07-29完成。`NET-UDP-DOMAIN-CUTOVER`已生效；独立的`1 -> 2`
 > resolution、Checkpoint 2A split与Checkpoint 2B control/local cutover也已完成，Stage 2 Closed。独立的
 > `2 -> 3`resolution已把Stage 3完整解析为Ready；Checkpoint 3A随后完成same-owner module split并独立关闭。
-> Checkpoint 3B已形成Endpoint/File/address lifecycle实现与RV64验证候选，但final exact-diff review发现两个
-> Apollyon和一个Keter，并因`S_IFSOCK`修正需要触及frozen manifest外VFS owner而进入Review Hold，尚未关闭。
+> Checkpoint 3B已形成Endpoint/File/address lifecycle实现；获批VFS/shared-surface correction与capacity Route
+> Correction完成后，RV64 correction-source证据经behavior-preserving lazy-Vec改动复用，独立final review关闭本checkpoint。
 > Checkpoint 3C保持Ready / Not Active，Stage 4-5仍是Outline。
 
 ## 1. 计划角色与 authority
@@ -137,7 +137,7 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 0 — Multi-interface UDP topology probe | Closed；positive decision | 验证单一Stack-level Endpoint owner、显式egress selection、双Ethernet interface与bounded IP-medium local link能否在现有shared/vendored边界内闭合 | 公共R0接受与transaction activation | None；全部保持现状 |
 | Stage 1 — Initial domain / global Stack walking skeleton | Closed | 把current per-netdev Stack wiring迁移为initial-domain唯一Stack与logical-interface/attach authority，保留现有frame traffic | Stage 0 Closed；`0 -> 1`resolution完成 | `NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001` |
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
-| Stage 3 — Endpoint/socket nonblocking vertical slice | 3A Closed；3B Review Hold；3C Ready / Not Active | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | 本stage不cut over current contract；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
+| Stage 3 — Endpoint/socket nonblocking vertical slice | 3A-3B Closed；3C Ready / Not Active | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | 本stage不cut over current contract；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
 | Stage 4 — Blocking/iomux与datagram hardening | Outline | harden opened-description retire/close/dup/fork race，并接入blocking/signal、poll/select/epoll、copy-fault consume、capacity/writable与fragment gate | Stage 3 Closed | 候选`NET-SOCKET-WAIT-001`及相关functional gate；保持既有OPENED-DESC/IOMUX/EPOLL IDs |
 | Stage 5 — External/dual-architecture closure | Outline | 完成remote external双向路径、双架构同源测试、RV64 agent-run、LA64 user-run、旁路删除与原子final cutover | Stage 4 Closed | 所有仍Pending ID在达到各自evidence floor后Effective或明确Not Cut Over |
 
@@ -852,12 +852,11 @@ contract状态不变；本checkpoint已Closed，并继续停在Stage 3 Outline�
 
 ### 6.3 Stage 3 Ready — Endpoint/socket nonblocking vertical slice
 
-**阶段成熟度与授权：** Checkpoint 3A Closed / Checkpoint 3B Review Hold / Checkpoint 3C Ready / Not Active。2026-07-30独立
+**阶段成熟度与授权：** Checkpoint 3A-3B Closed / Checkpoint 3C Ready / Not Active。2026-07-30独立
 `2 -> 3 Implementation Resolution Gate`已完成；
 本节冻结Stage 3完整路线、三个checkpoint、ABI/lifecycle边界、验证、停止/退出条件与Resolved Write Set Manifest。
-Checkpoint 3A随后由独立授权完成；3B implementation/validation candidate已提交final review，但两个Apollyon、
-一个Keter和VFS write-set expansion使其保持Review Hold。3C不激活，Stage 4 resolution与current-contract cutover
-均未授权。
+Checkpoint 3A随后由独立授权完成；3B implementation/validation、获批correction、capacity Route Correction与
+final exact-diff review也已独立关闭。3C不激活，Stage 4 resolution与current-contract cutover均未授权。
 
 #### 6.3.1 Resolution baseline 与阶段结果
 
@@ -974,8 +973,14 @@ Stage 3新增并由现有KernelConfig owner生成以下参数：
 | `net_udp_ephemeral_port_first` | 32768 | `1..=65535` |
 | `net_udp_ephemeral_port_last` | 60999 | `first <= last <= 65535` |
 
-`conf/.defconfig`保存default，xtask config owner负责default materialization、nonzero/range/cross-field与buffer-size
-checked-arithmetic validation，并生成`kconfig_defs.rs`；generated file只能由repository build入口更新，不能手改。
+`conf/.defconfig`保存default；xtask config owner只负责typed TOML parsing、default materialization与
+`kconfig_defs.rs`常量生成，不验收UDP参数的nonzero、protocol range、cross-field或storage arithmetic。kernel
+compile在消费generated constants处以常开static assertions唯一验收这些语义；TX/RX count与payload的直接乘积
+还必须进入contiguous byte-storage domain。private
+`Endpoint`、`VecDeque`、smoltcp metadata与`SocketSet`的元素尺寸和allocator growth不是KernelConfig contract；它们
+继续服从R0明确的ordinary infallible-allocation/OOM边界，不通过cross-crate layout predicate反向塑造配置或owner
+surface。物理上不可满足的trusted build configuration不获得allocation成功保证，也不等同于用户运行时的normal
+capacity exhaustion；generated file只能由repository build入口更新，不能手改。
 Stage 3不引入random allocator或可配置scan policy；从last回绕到first的单调scan是owner-local implementation
 preference，不能改变冲突矩阵或exhaustion outcome。
 
@@ -1081,7 +1086,7 @@ build、whitespace、mdBook与独立review通过。Contract Impact为None，Chec
 保持Ready / Not Active。精确source、validation、review与Not Run边界见
 [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3-checkpoint-3a-final-review-and-closure)。
 
-#### 6.3.7 Checkpoint 3B — Review Hold / Endpoint/File/address lifecycle vertical slice
+#### 6.3.7 Checkpoint 3B — Closed / Endpoint/File/address lifecycle vertical slice
 
 **目的：** 一次建立真实Endpoint capability、Socket/File association与`socket/bind/getsockname`用户纵切，不把
 datagram或blocking假装已经完成。
@@ -1124,6 +1129,34 @@ manifest外的VFS `InodeType` owner及其exhaustive consumers，命中6.3.10停�
 Not Active。精确finding、证据与停止边界见
 [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-30---stage-3-checkpoint-3b-final-review-and-stop)。
 
+**Correction authorization：** 2026-07-30开发者明确回复`approved`。3B correction因此只按第15节冻结的扩展继续：
+kernel compilation唯一验收全部UDP参数语义与direct storage arithmetic；`UdpEndpoints`在Stack构造时一次拥有
+Endpoint capacity和ephemeral range，create/bind caller不再传入namespace policy；anonymous UDP inode投影
+`S_IFSOCK`，五个exhaustive VFS consumer显式映射或拒绝Socket。该授权不改变anonymous/opened-description
+lifecycle owner，不修改current contract，不进入3C；全部finding清零、受影响validation和独立exact-diff复审完成前
+3B继续保持Review Hold。
+
+后续backend admission复核中，开发者指出ramfs等backend是否进入写集应由实际需求决定。live source确认ramfs/
+proc创建入口只传固定类型；devfs的public `DevfsNodeAttr.ty`与“leaf只要不是Dir”负向检查则会因新增枚举而自动接纳
+Socket。第15节因此只再加入`fs/devfs/mod.rs`，在publish owner入口显式返回`NotSupported`并以owner-local KUnit
+锁定；ramfs/proc继续只读。该修正仍只落实anonymous-only Socket边界，不扩大owner、ABI、contract或acceptance。
+
+后续capacity model复核确认，穷尽private container element layout和模拟`Vec` amortized growth不是R0的supported
+bound，也不能证明物理allocation成功。该类failure要求开发者先构建物理上不可满足的KernelConfig，普通用户程序
+不能修改这些参数；它不属于normal bounded-resource exhaustion。原cross-crate layout predicate因此删除，kernel
+只保留上述semantic/direct-byte assertions；Endpoint collection与external/local `SocketSet`都保持按实际publication
+lazy growth，不传播namespace capacity或增加eager allocation。该Route Correction不改变normal capacity outcome、
+target、owner、ABI、Contract Impact或3C状态。
+
+**Closure：** closure source完成namespace policy single-owner、anonymous Socket inode与backend admission correction，
+并删除为穷尽private layout而引入的predicate/eager reserve。62/62 xtask、完整host/no-default、双架构app/kernel build、
+invalid-config kernel compile-fail matrix、formatter、whitespace与mdBook均PASS；correction-source fresh-disk RV64执行271/271 KUnit、
+`UDPTEST:SUMMARY:PASS:7`与`EPOLLTEST:SUMMARY:PASS:11`，关机保持
+`filesystem -> network -> device -> PowerOff`。最后的`Vec::with_capacity -> Vec::new`只恢复Endpoint collection
+lazy growth，明显不改变已验证的publication/capacity/ABI path，因此按开发者指示不重复QEMU。独立final review为
+Apollyon/Keter/Euclid/Safe全0。musl LTP未形成完整aggregate，不宣称本轮4/4；它也不是3B自身的UDPTEST退出条件。
+Contract Impact为None，全部candidate继续Pending。Checkpoint 3B独立Closed并停止，3C仍Ready / Not Active。
+
 #### 6.3.8 Checkpoint 3C — nonblocking datagram vertical slice
 
 **目的：** 在3B真实lifecycle上增加send/receive ownership transaction，形成五项syscall的可运行nonblocking闭环。
@@ -1147,6 +1180,8 @@ receive stress、wait/readiness与fragment gate仍由Stage 4解析。
 
 ```text
 just xtask-test
+# For each workspace-relative temporary invalid KernelConfig, the repository
+# build must pass xtask parsing/generation and fail in kernel static assertions.
 cargo test -p anemone-net-api -p anemone-smoltcp-stack
 cargo test -p anemone-smoltcp-stack --no-default-features --no-run
 cargo check -p anemone-smoltcp-stack --no-default-features
@@ -1160,6 +1195,13 @@ just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
 mdbook build docs
 git diff --check
 ```
+
+3B correction的invalid-config compile-fail matrix覆盖zero、payload protocol range、ephemeral cross-field以及
+direct payload-storage arithmetic；至少包含TX/RX maximum TOML count与payload-two case。maximum count配
+payload-one仍是物理上不可满足的trusted configuration，private metadata allocation是否先触发layout/allocator
+failure不在R0保证内；不应为逼迫该case compile-fail而重新耦合private metadata layout。
+这些case不得在xtask semantic validation中失败；每次失败必须定位到kernel compilation，随后用canonical config
+恢复generated input并完成正常双架构build。
 
 host crate tests是protocol deterministic proof，app build只证明architecture-specific compile/export，kernel build只
 证明integration；它们都不能替代fresh-disk RV64 syscall/fd/copy/lifecycle runtime。RV64 wrapper会重建pretest rootfs、
@@ -1219,6 +1261,10 @@ planned files，不授权顺手修改相邻owner。
   stack/{mod.rs,udp.rs}}}`；其中`domain/stack.rs`允许在3A目录化删除；
 - Socket/File/syscall projection：`anemone-kernel/src/fs/{mod.rs,socket/{mod.rs,udp.rs},api/{mod.rs,
   socket/{mod.rs,abi.rs,create.rs,address.rs,datagram.rs}}}`与`anemone-kernel/src/syserror.rs`；
+- 3B correction获批VFS expansion：`anemone-kernel/src/fs/inode.rs`、
+  `anemone-kernel/src/fs/api/getdents64.rs`、`anemone-kernel/src/fs/ext4/{mod.rs,inode.rs,superblock.rs}`与
+  `anemone-kernel/src/fs/devfs/mod.rs`；只允许新增`InodeType::Socket`的Linux mode/dirent投影、ext4显式拒绝及
+  devfs publish admission拒绝，不改变anonymous/VFS lifecycle；
 - ABI/library：`anemone-abi/src/{lib.rs,net.rs,syscall/{riscv.rs,loongarch.rs}}`、
   `anemone-rs/src/{sys/linux.rs,sys/linux/net.rs,os/linux.rs,os/linux/net.rs}`；
 - real user consumer/rootfs：`anemone-apps/udp-test/{Cargo.toml,Cargo.lock,app.toml,src/main.rs}`、
@@ -1227,8 +1273,8 @@ planned files，不授权顺手修改相邻owner。
   `docs/src/devlog/transactions/index.md`与当前biweekly devlog。
 
 从Stage 3 activation baseline起，`invariants.md`、current contracts、register/current limitations、vendored smoltcp、
-`task/files.rs`、`fs/file.rs`、
-anonymous VFS、iomux/epoll、net worker/provider、SystemTarget/Platform/build preset、其它apps/rootfs、其它RFC与
+`task/files.rs`、`fs/file.rs`、上述六个文件以外的anonymous/VFS lifecycle与filesystem backend、iomux/epoll、
+net worker/provider、SystemTarget/Platform/build preset、其它apps/rootfs、其它RFC与
 scripts保持只读。formatter若产生允许的相邻style diff按repo规则审计，不将其解释为owner/write-set授权扩大。
 
 ### 6.4 Stage 4 Outline — Blocking/iomux与datagram hardening
@@ -1891,6 +1937,34 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 提案不等于批准；决定前当前stage保持停止且不得cut over。correctness invariant不能作为reduced target妥协项。
 
 ## 15. Write Set扩展记录
+
+- `2026-07-30`：final review继续要求把每个interface的private `SocketStorage` layout纳入KernelConfig predicate，
+  并为external/local `SocketSet`按Endpoint capacity eager reserve。复核证明该条件只在约`4.6e16`个Endpoint起与
+  Endpoint layout分离；没有物理系统能够成功publication该数量的Endpoint，要求通过eager allocation证明某个private
+  container一定先失败也不能增加可用保证。预分配还会把UDP namespace policy传播到interface/local-link owner，
+  或把逻辑上限变成Stack启动期内存承诺，并把lazy storage改成更早OOM的eager allocation。开发者据此要求恢复自然实现形状：
+  不批准`stack/interfaces.rs`或`local_link.rs`扩集，删除cross-crate private-layout predicate，kernel只验收semantic与
+  direct payload-byte arithmetic；Endpoint collection与SocketSet都按实际publication lazy growth。原finding按
+  Neutralized处理；Contract Impact为None，R0 target、
+  normal capacity semantics、owner、ABI与3C Not Active边界不变。
+
+- `2026-07-30`：3B final review发现anonymous UDP inode仍以`InodeType::Regular`创建，`fstat/statx`错误投影
+  `S_IFREG`；修复还要求把namespace-wide capacity/range收归Stack构造，并让kernel compilation通过stack-private
+  actual allocation layout验收全部UDP参数语义。worker按6.3.10停止并报告后，开发者明确回复`approved`，批准：
+  `anemone-kernel/src/fs/inode.rs`、`fs/api/getdents64.rs`、`fs/ext4/{mod.rs,inode.rs,superblock.rs}`进入3B manifest；
+  原manifest内的`anemone-net-api`/stack public shared surface可以最小调整为构造时namespace policy与无私有类型
+  泄漏的const layout predicate。`fs/socket/udp.rs`改用Socket inode，`anemone-rs`既有manifest surface增加窄
+  `statx` wrapper供`udp-test`同时验证`fstat/statx`。Contract Impact为None：不改变anonymous/VFS lifecycle、
+  opened-description owner、current contract、R0 ABI visible semantics或acceptance。validation必须覆盖temporary
+  invalid-KernelConfig kernel compile failures、host ownership/layout regressions、KUnit与`udp-test` S_IFSOCK、
+  双架构build、RV64 fresh-disk runtime、write-set/source audit和独立exact-diff review；3C保持Not Active。
+
+- `2026-07-30`：后续backend admission复核中，开发者指出ramfs等backend是否纳入取决于实际需求。live source
+  证明ramfs/proc创建入口只接收各自hard-coded类型，无Socket输入能力；devfs public `DevfsNodeAttr.ty`配合
+  “leaf只要不是Dir”负向检查会在新增枚举后意外接纳Socket。为保持本stage Socket仅由anonymous VFS承载，
+  `anemone-kernel/src/fs/devfs/mod.rs`加入3B manifest，只允许publish入口显式拒绝Socket及对应owner-local KUnit；
+  ramfs/proc保持只读。Contract Impact仍为None，不改变public owner、ABI visible semantics、lifecycle或acceptance，
+  并继续要求全部3B validation和final exact-diff review。
 
 - `2026-07-29`：2A mandatory `just xtask-test`发现HEAD的
   `resolved_selection_owns_all_snapshot_inputs`仍期待`max_logical_cpus = 16`，而canonical `conf/.defconfig`已为`1`；

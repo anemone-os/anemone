@@ -4,7 +4,7 @@ use anemone_net_api::{
     Ipv4Address,
     udp::{
         UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
-        UdpLocalBinding, UdpQueryError, UdpRetireError,
+        UdpLocalBinding, UdpNamespacePolicy, UdpQueryError, UdpRetireError,
     },
 };
 
@@ -12,6 +12,56 @@ use crate::{kconfig_defs::*, prelude::*};
 
 use super::{ACTIVE_PATHS, domain::DomainStack};
 
+pub(in crate::net) const UDP_NAMESPACE_POLICY: UdpNamespacePolicy = UdpNamespacePolicy::new(
+    NET_UDP_ENDPOINT_CAPACITY,
+    NET_UDP_EPHEMERAL_PORT_FIRST,
+    NET_UDP_EPHEMERAL_PORT_LAST,
+);
+const UDP_ENDPOINT_LIMITS: UdpEndpointLimits = UdpEndpointLimits::new(
+    NET_UDP_TX_DATAGRAM_CAPACITY,
+    NET_UDP_RX_DATAGRAM_CAPACITY,
+    NET_UDP_MAX_PAYLOAD_BYTES,
+);
+
+const fn payload_storage_fits(datagram_capacity: usize, max_payload_bytes: usize) -> bool {
+    match datagram_capacity.checked_mul(max_payload_bytes) {
+        Some(bytes) => bytes <= isize::MAX as usize,
+        None => false,
+    }
+}
+
+static_assert!(
+    NET_UDP_ENDPOINT_CAPACITY > 0,
+    "net_udp_endpoint_capacity must be nonzero"
+);
+static_assert!(
+    NET_UDP_TX_DATAGRAM_CAPACITY > 0,
+    "net_udp_tx_datagram_capacity must be nonzero"
+);
+static_assert!(
+    NET_UDP_RX_DATAGRAM_CAPACITY > 0,
+    "net_udp_rx_datagram_capacity must be nonzero"
+);
+static_assert!(
+    NET_UDP_MAX_PAYLOAD_BYTES > 0 && NET_UDP_MAX_PAYLOAD_BYTES <= 65_507,
+    "net_udp_max_payload_bytes must be in 1..=65507"
+);
+static_assert!(
+    payload_storage_fits(NET_UDP_TX_DATAGRAM_CAPACITY, NET_UDP_MAX_PAYLOAD_BYTES,),
+    "configured UDP TX payload storage exceeds the contiguous byte-storage bound"
+);
+static_assert!(
+    payload_storage_fits(NET_UDP_RX_DATAGRAM_CAPACITY, NET_UDP_MAX_PAYLOAD_BYTES,),
+    "configured UDP RX payload storage exceeds the contiguous byte-storage bound"
+);
+static_assert!(
+    NET_UDP_EPHEMERAL_PORT_FIRST > 0,
+    "net_udp_ephemeral_port_first must be nonzero"
+);
+static_assert!(
+    NET_UDP_EPHEMERAL_PORT_FIRST <= NET_UDP_EPHEMERAL_PORT_LAST,
+    "net_udp_ephemeral_port_first must not exceed net_udp_ephemeral_port_last"
+);
 #[derive(Clone)]
 pub(crate) struct UdpEndpointPort {
     stack: Arc<DomainStack>,
@@ -43,12 +93,7 @@ pub(crate) fn create_endpoint() -> Result<UdpEndpointPort, UdpCreateError> {
         );
         authority.domain.stack()
     };
-    let endpoint = stack.create_udp_endpoint(UdpEndpointLimits::new(
-        NET_UDP_ENDPOINT_CAPACITY,
-        NET_UDP_TX_DATAGRAM_CAPACITY,
-        NET_UDP_RX_DATAGRAM_CAPACITY,
-        NET_UDP_MAX_PAYLOAD_BYTES,
-    ))?;
+    let endpoint = stack.create_udp_endpoint(UDP_ENDPOINT_LIMITS)?;
     Ok(UdpEndpointPort { stack, endpoint })
 }
 
@@ -72,12 +117,7 @@ impl UdpEndpointPort {
             }
         }
         self.stack
-            .bind_udp_endpoint(
-                self.endpoint,
-                UdpBindRequest::new(address, port),
-                NET_UDP_EPHEMERAL_PORT_FIRST,
-                NET_UDP_EPHEMERAL_PORT_LAST,
-            )
+            .bind_udp_endpoint(self.endpoint, UdpBindRequest::new(address, port))
             .map_err(BindError::Stack)
     }
 

@@ -71,7 +71,7 @@ pub(crate) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError
     let creation = UdpSocketCreation {
         endpoint: Some(endpoint.clone()),
     };
-    let path = anony_new_inode(InodeType::Regular, &UDP_SOCKET_INODE_OPS, NilOpaque::new())?;
+    let path = anony_new_inode(InodeType::Socket, &UDP_SOCKET_INODE_OPS, NilOpaque::new())?;
     let file = anony_open_with(
         &path,
         OpenedFile::with_mode(
@@ -203,6 +203,8 @@ static UDP_SOCKET_INODE_OPS: InodeOps = InodeOps {
 mod kunits {
     use super::*;
 
+    use anemone_abi::fs::linux::{mode, statx};
+
     #[kunit]
     fn udp_file_association_projects_only_the_udp_socket() {
         let (file, creation) = prepare_udp_socket().expect("KUnit UDP endpoint must fit");
@@ -225,5 +227,20 @@ mod kunits {
             query_udp_socket(socket),
             Err(anemone_net_api::udp::UdpQueryError::UnknownEndpoint)
         ));
+    }
+
+    #[kunit]
+    fn udp_inode_projects_linux_socket_type() {
+        let (file, creation) = prepare_udp_socket().expect("KUnit UDP endpoint must fit");
+        let attr = file
+            .inode()
+            .get_attr()
+            .expect("UDP inode must report attrs");
+        assert_eq!(attr.to_linux_stat().st_mode & mode::S_IFMT, mode::S_IFSOCK);
+        assert_eq!(
+            u32::from(attr.to_linux_statx(statx::BASIC_STATS).stx_mode) & mode::S_IFMT,
+            mode::S_IFSOCK
+        );
+        drop(creation);
     }
 }

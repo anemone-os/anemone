@@ -43,7 +43,6 @@ pub(crate) struct Endpoint {
 
 impl Endpoint {
     pub(super) fn new(id: UdpEndpointId, limits: UdpEndpointLimits) -> Self {
-        assert!(limits.endpoint_capacity() > 0);
         assert!(limits.tx_datagram_capacity() > 0);
         assert!(limits.rx_datagram_capacity() > 0);
         assert!(limits.max_payload_bytes() > 0);

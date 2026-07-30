@@ -2,7 +2,7 @@
 
 use anemone_net_api::{
     EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, Ipv4Address, Ipv4Cidr,
-    PumpOutcome,
+    PumpOutcome, udp::UdpNamespacePolicy,
 };
 use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack};
 
@@ -15,9 +15,9 @@ pub(in crate::net) struct DomainStack {
 }
 
 impl DomainStack {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(udp_policy: UdpNamespacePolicy) -> Self {
         Self {
-            stack: SpinLock::new(Stack::new()),
+            stack: SpinLock::new(Stack::new_with_udp_namespace_policy(udp_policy)),
         }
     }
 

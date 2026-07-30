@@ -4,7 +4,7 @@ use anemone_net_api::{
     InterfaceId,
     udp::{
         UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointLimits,
-        UdpLocalBinding, UdpQueryError, UdpRetireError,
+        UdpLocalBinding, UdpNamespacePolicy, UdpQueryError, UdpRetireError,
     },
 };
 use smoltcp::iface::SocketSet;
@@ -18,15 +18,22 @@ use super::Endpoint;
 /// a binding. No derived binding index exists in this first bounded version.
 pub(crate) struct UdpEndpoints {
     pub(super) endpoints: Vec<Endpoint>,
+    policy: UdpNamespacePolicy,
     next_id: u64,
     next_ephemeral: Option<u16>,
     pub(super) next_egress_endpoint: usize,
 }
 
 impl UdpEndpoints {
-    pub(crate) const fn new() -> Self {
+    pub(crate) fn new(policy: UdpNamespacePolicy) -> Self {
+        assert!(policy.endpoint_capacity() > 0);
+        assert!(
+            policy.ephemeral_port_first() != 0
+                && policy.ephemeral_port_first() <= policy.ephemeral_port_last()
+        );
         Self {
             endpoints: Vec::new(),
+            policy,
             next_id: 0,
             next_ephemeral: None,
             next_egress_endpoint: 0,
@@ -37,8 +44,7 @@ impl UdpEndpoints {
         &mut self,
         limits: UdpEndpointLimits,
     ) -> Result<Endpoint, UdpCreateError> {
-        assert!(limits.endpoint_capacity() > 0);
-        if self.endpoints.len() >= limits.endpoint_capacity() {
+        if self.endpoints.len() >= self.policy.endpoint_capacity() {
             return Err(UdpCreateError::EndpointCapacity);
         }
         let raw = self.next_id;
@@ -58,8 +64,6 @@ impl UdpEndpoints {
         &mut self,
         id: UdpEndpointId,
         request: UdpBindRequest,
-        ephemeral_first: u16,
-        ephemeral_last: u16,
     ) -> Result<UdpLocalBinding, UdpBindError> {
         let endpoint = self.endpoint(id).ok_or(UdpBindError::UnknownEndpoint)?;
         if endpoint.binding.is_some() {
@@ -72,8 +76,7 @@ impl UdpEndpoints {
             }
             request.port()
         } else {
-            assert!(ephemeral_first != 0 && ephemeral_first <= ephemeral_last);
-            self.allocate_ephemeral(request.address(), ephemeral_first, ephemeral_last)?
+            self.allocate_ephemeral(request.address())?
         };
 
         Ok(UdpLocalBinding::from_owner_commit(request.address(), port))
@@ -97,9 +100,9 @@ impl UdpEndpoints {
     fn allocate_ephemeral(
         &mut self,
         address: anemone_net_api::Ipv4Address,
-        first: u16,
-        last: u16,
     ) -> Result<u16, UdpBindError> {
+        let first = self.policy.ephemeral_port_first();
+        let last = self.policy.ephemeral_port_last();
         let start = self
             .next_ephemeral
             .filter(|port| (first..=last).contains(port))
@@ -170,11 +173,5 @@ impl UdpEndpoints {
 
     pub(crate) fn endpoint_mut(&mut self, id: UdpEndpointId) -> Option<&mut Endpoint> {
         self.endpoints.iter_mut().find(|endpoint| endpoint.id == id)
-    }
-}
-
-impl Default for UdpEndpoints {
-    fn default() -> Self {
-        Self::new()
     }
 }

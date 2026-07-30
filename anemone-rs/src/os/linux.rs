@@ -9,6 +9,7 @@ pub mod fs {
             poll::PollFd,
             select::FdSet,
             stat::Stat,
+            statx::StatX,
         },
         process::linux::signal::SigSet as LinuxSigSet,
         time::linux::TimeSpec,
@@ -253,6 +254,19 @@ pub mod fs {
     pub fn fstat(fd: Fd) -> Result<Stat, Errno> {
         let mut statbuf = Stat::default();
         fs::fstat(fd as u64, &mut statbuf as *mut Stat as u64).map(|_| statbuf)
+    }
+
+    pub fn statx(dirfd: AtFd, path: &Path, flags: u32, mask: u32) -> Result<StatX, Errno> {
+        let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+        let mut statxbuf = StatX::default();
+        fs::statx(
+            dirfd.to_raw() as u64,
+            path.as_ptr() as u64,
+            flags as u64,
+            mask as u64,
+            &mut statxbuf as *mut StatX as u64,
+        )
+        .map(|_| statxbuf)
     }
 
     pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {

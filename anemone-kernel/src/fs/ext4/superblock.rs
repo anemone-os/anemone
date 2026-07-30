@@ -24,6 +24,9 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
         InodeType::Block | InodeType::Char => &EXT4_DEV_INODE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_INODE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo inode ops"),
+        InodeType::Socket => {
+            unreachable!("anonymous socket inode must not use an ext4 superblock")
+        },
     }
 }
 

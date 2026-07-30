@@ -23,7 +23,7 @@ pub(super) struct InitialDomain {
 
 impl InitialDomain {
     pub(super) fn new() -> Self {
-        let stack = Arc::new(DomainStack::new());
+        let stack = Arc::new(DomainStack::new(crate::net::udp::UDP_NAMESPACE_POLICY));
         let local_port = stack
             .attach_local(crate::net::worker::network_now())
             .expect("the initial domain must create exactly one local mapping");

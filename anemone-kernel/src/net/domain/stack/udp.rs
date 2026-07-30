@@ -17,12 +17,8 @@ impl DomainStack {
         &self,
         endpoint: UdpEndpointId,
         request: UdpBindRequest,
-        ephemeral_first: u16,
-        ephemeral_last: u16,
     ) -> Result<UdpLocalBinding, UdpBindError> {
-        self.stack
-            .lock()
-            .bind_udp_endpoint(endpoint, request, ephemeral_first, ephemeral_last)
+        self.stack.lock().bind_udp_endpoint(endpoint, request)
     }
 
     pub(in crate::net) fn udp_endpoint_binding(

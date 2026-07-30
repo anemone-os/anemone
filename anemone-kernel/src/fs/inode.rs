@@ -169,6 +169,7 @@ pub enum InodeType {
     Block,
     Symlink,
     Fifo,
+    Socket,
 }
 
 impl InodeType {
@@ -181,6 +182,7 @@ impl InodeType {
             Self::Block => linux_mode::S_IFBLK,
             Self::Symlink => linux_mode::S_IFLNK,
             Self::Fifo => linux_mode::S_IFIFO,
+            Self::Socket => linux_mode::S_IFSOCK,
         }
     }
 }

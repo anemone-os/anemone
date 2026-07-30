@@ -196,41 +196,6 @@ impl Parameters {
         materialize!(net_udp_max_payload_bytes);
         materialize!(net_udp_ephemeral_port_first);
         materialize!(net_udp_ephemeral_port_last);
-
-        let nonzero = [
-            ("net_udp_endpoint_capacity", self.net_udp_endpoint_capacity.unwrap()),
-            (
-                "net_udp_tx_datagram_capacity",
-                self.net_udp_tx_datagram_capacity.unwrap(),
-            ),
-            (
-                "net_udp_rx_datagram_capacity",
-                self.net_udp_rx_datagram_capacity.unwrap(),
-            ),
-        ];
-        for (name, value) in nonzero {
-            anyhow::ensure!(value != 0, "{name} must be nonzero");
-        }
-        let max_payload = self.net_udp_max_payload_bytes.unwrap();
-        anyhow::ensure!(
-            (1..=65_507).contains(&max_payload),
-            "net_udp_max_payload_bytes must be in 1..=65507"
-        );
-        self.net_udp_tx_datagram_capacity
-            .unwrap()
-            .checked_mul(max_payload)
-            .ok_or_else(|| anyhow::anyhow!("UDP TX storage size overflows usize"))?;
-        self.net_udp_rx_datagram_capacity
-            .unwrap()
-            .checked_mul(max_payload)
-            .ok_or_else(|| anyhow::anyhow!("UDP RX storage size overflows usize"))?;
-        let ephemeral_first = self.net_udp_ephemeral_port_first.unwrap();
-        let ephemeral_last = self.net_udp_ephemeral_port_last.unwrap();
-        anyhow::ensure!(ephemeral_first != 0, "net_udp_ephemeral_port_first must be nonzero");
-        anyhow::ensure!(
-            ephemeral_first <= ephemeral_last,
-            "net_udp_ephemeral_port_first must not exceed net_udp_ephemeral_port_last"
-        );
         Ok(())
     }
 
@@ -537,22 +502,30 @@ mod tests {
     }
 
     #[test]
-    fn udp_parameter_bounds_are_rejected_by_config_owner() {
-        let mut zero_capacity = defaults();
-        zero_capacity.net_udp_endpoint_capacity = Some(0);
-        assert!(zero_capacity.materialize_defaults(None).is_err());
+    fn udp_parameter_semantics_are_deferred_to_kernel_compilation() {
+        let mut parameters = defaults();
+        parameters.net_udp_endpoint_capacity = Some(0);
+        parameters.net_udp_tx_datagram_capacity = Some(usize::MAX);
+        parameters.net_udp_max_payload_bytes = Some(1);
+        parameters.net_udp_ephemeral_port_first = Some(60_000);
+        parameters.net_udp_ephemeral_port_last = Some(50_000);
+        parameters.materialize_defaults(None).unwrap();
 
-        let mut oversized_payload = defaults();
-        oversized_payload.net_udp_max_payload_bytes = Some(65_508);
-        assert!(oversized_payload.materialize_defaults(None).is_err());
-
-        let mut inverted_ports = defaults();
-        inverted_ports.net_udp_ephemeral_port_first = Some(60_000);
-        inverted_ports.net_udp_ephemeral_port_last = Some(50_000);
-        assert!(inverted_ports.materialize_defaults(None).is_err());
-
-        let mut storage_overflow = defaults();
-        storage_overflow.net_udp_tx_datagram_capacity = Some(usize::MAX);
-        assert!(storage_overflow.materialize_defaults(None).is_err());
+        let generated = parameters.gen_kconfig_defs();
+        for expected in [
+            "pub const NET_UDP_ENDPOINT_CAPACITY: usize = 0;".to_string(),
+            format!(
+                "pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};",
+                usize::MAX
+            ),
+            "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1;".to_string(),
+            "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 60000;".to_string(),
+            "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 50000;".to_string(),
+        ] {
+            assert!(
+                generated.contains(&expected),
+                "missing generated constant {expected}"
+            );
+        }
     }
 }

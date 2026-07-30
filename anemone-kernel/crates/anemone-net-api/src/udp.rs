@@ -24,10 +24,44 @@ impl UdpEndpointId {
     }
 }
 
-/// Bounded resources reserved for one endpoint and the owning namespace.
+/// Domain-wide UDP endpoint and ephemeral-port policy, fixed when the owning
+/// Stack is constructed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UdpNamespacePolicy {
+    endpoint_capacity: usize,
+    ephemeral_port_first: u16,
+    ephemeral_port_last: u16,
+}
+
+impl UdpNamespacePolicy {
+    pub const fn new(
+        endpoint_capacity: usize,
+        ephemeral_port_first: u16,
+        ephemeral_port_last: u16,
+    ) -> Self {
+        Self {
+            endpoint_capacity,
+            ephemeral_port_first,
+            ephemeral_port_last,
+        }
+    }
+
+    pub const fn endpoint_capacity(self) -> usize {
+        self.endpoint_capacity
+    }
+
+    pub const fn ephemeral_port_first(self) -> u16 {
+        self.ephemeral_port_first
+    }
+
+    pub const fn ephemeral_port_last(self) -> u16 {
+        self.ephemeral_port_last
+    }
+}
+
+/// Bounded resources reserved for one endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UdpEndpointLimits {
-    endpoint_capacity: usize,
     tx_datagram_capacity: usize,
     rx_datagram_capacity: usize,
     max_payload_bytes: usize,
@@ -35,21 +69,15 @@ pub struct UdpEndpointLimits {
 
 impl UdpEndpointLimits {
     pub const fn new(
-        endpoint_capacity: usize,
         tx_datagram_capacity: usize,
         rx_datagram_capacity: usize,
         max_payload_bytes: usize,
     ) -> Self {
         Self {
-            endpoint_capacity,
             tx_datagram_capacity,
             rx_datagram_capacity,
             max_payload_bytes,
         }
-    }
-
-    pub const fn endpoint_capacity(self) -> usize {
-        self.endpoint_capacity
     }
 
     pub const fn tx_datagram_capacity(self) -> usize {

@@ -52,12 +52,8 @@ impl Stack {
         &mut self,
         id: UdpEndpointId,
         request: UdpBindRequest,
-        ephemeral_first: u16,
-        ephemeral_last: u16,
     ) -> Result<UdpLocalBinding, UdpBindError> {
-        let binding = self
-            .udp
-            .prepare_binding(id, request, ephemeral_first, ephemeral_last)?;
+        let binding = self.udp.prepare_binding(id, request)?;
         {
             let endpoint = self
                 .udp

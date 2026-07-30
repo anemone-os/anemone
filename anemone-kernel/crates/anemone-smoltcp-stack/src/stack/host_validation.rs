@@ -157,19 +157,14 @@ impl Stack {
         }
         let id = self
             .create_udp_endpoint(UdpEndpointLimits::new(
-                usize::MAX,
                 1,
                 receive_packet_capacity,
                 engine_payload_capacity,
             ))
             .map(HostEndpointId)
             .map_err(HostEndpointCreateError::from)?;
-        let result = self.bind_udp_endpoint(
-            id.0,
-            UdpBindRequest::new(ApiIpv4Address::UNSPECIFIED, port),
-            32768,
-            60999,
-        );
+        let result =
+            self.bind_udp_endpoint(id.0, UdpBindRequest::new(ApiIpv4Address::UNSPECIFIED, port));
         match result {
             Ok(_) => Ok(id),
             Err(error) => {
@@ -198,10 +193,8 @@ impl Stack {
         &mut self,
         endpoint: HostEndpointId,
         request: UdpBindRequest,
-        ephemeral_first: u16,
-        ephemeral_last: u16,
     ) -> Result<UdpLocalBinding, UdpBindError> {
-        self.bind_udp_endpoint(endpoint.0, request, ephemeral_first, ephemeral_last)
+        self.bind_udp_endpoint(endpoint.0, request)
     }
 
     pub fn udp_binding_for_host_validation(
