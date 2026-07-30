@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/crates/{anemone-net-api,anemone-smoltcp-stack}`、`anemone-kernel/src/{device/net,driver/net,net}`
 **依赖：** 本页内部依赖按条目声明
 **Pending Successor：** None
-**最后核验：** 2026-07-30
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 
@@ -121,7 +121,8 @@ attach authority只请求推进，不在owner外修改smoltcp object或发布Lin
 
 **验证 / Enforcement：** host serialization、exact budget、deadline/owner-blocked、multi-instance与one-Stack/
 two-provider tests；kernel source audit确认worker只持narrow per-interface port且每轮受静态budget/repoll上界约束，
-domain Stack lock在round间释放；RV64 worker/timer wiring与normal shutdown evidence。
+domain Stack lock在round间释放；Stage 5 final RV64/LA64 remote-external guest/peer双marker分别证明virtio-mmio与
+virtio-pci provider ingress/egress、worker/timer wiring和normal shutdown markers。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
@@ -134,7 +135,7 @@ port；本ID的单instance唯一推进语义保持不变。
 
 ## 当前接受边界
 
-- production runtime proof只覆盖RV64 QEMU virtio-mmio单NIC；多实例隔离由两个真实host stack/provider
-  domain证明。LA64、virtio-pci、hardware与`smp>1`均Not Run。
+- production runtime proof覆盖RV64 QEMU virtio-mmio单NIC与LA64 QEMU virtio-pci单NIC；多实例隔离由两个真实
+  host stack/provider domain证明。hardware、其它provider/deployment与`smp>1`均Not Run。
 - 本页不提供socket/control-plane或完整teardown；host-test control不进入kernel dependency。
 - runtime hotplug/detach/restart未实现；无法证明device/CPU不再访问的provider/backing保留到reset/power-off。

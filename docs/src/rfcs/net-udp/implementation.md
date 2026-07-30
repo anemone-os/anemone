@@ -1,6 +1,6 @@
 # net-udp 迁移实施计划
 
-**状态：** R0 / Stage 0-4 Closed / Stage 5 Ready / Not Active
+**状态：** R0 / Stage 0-5 Closed
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **目标与不变量：** [net-udp 目标与不变量](./invariants.md)
@@ -8,6 +8,7 @@
 [Opened-description lifecycle](../../contracts/task/opened-description-lifecycle.md)、
 [Poll wait / source registration](../../contracts/iomux/poll-wait.md)、
 [Epoll protocol](../../contracts/epoll/protocol.md)、
+[UDP Socket](../../contracts/net/udp-socket.md)、
 [System Target](../../contracts/configuration/system-target.md)
 **当前修订：** R0
 **事务日志：** [2026-07-29 net-udp](../../devlog/transactions/2026-07-29-net-udp.md)
@@ -24,7 +25,8 @@
 > 独立`3 -> 4`resolution把Stage 4解析为4A socket source、4B blocking syscall与4C race/evidence closure三个
 > checkpoint。Checkpoint 4A/4B/4C均已分别完成source/evidence、review、validation与write-back并独立Closed；
 > Stage 4现已Closed。独立`4 -> 5`resolution已把Stage 5解析为一个external/dual-architecture evidence与final
-> cutover checkpoint；Stage 5现为Ready / Not Active，current contracts未cut over。
+> cutover checkpoint；Checkpoint 5A、两项获批LA64 Route Correction、双架构evidence与
+> `NET-UDP-FINAL-CUTOVER`现已完成，Stage 5与R0 Closed。
 
 ## 1. 计划角色与 authority
 
@@ -144,11 +146,11 @@ Stack、single Endpoint owner或send-success target失败。保持target的内�
 | Stage 2 — Static control plane与production loopback | Closed | materialize SystemTarget network input，建立唯一IPv4 control plane、local route与bounded production `lo` | Stage 1 Closed；`1 -> 2`resolution完成 | `NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce `NET-CONTROL-PLANE-001` |
 | Stage 3 — Endpoint/socket nonblocking vertical slice | Closed | 建立opaque Endpoint association、bind/port/send/receive transaction与五项syscall的nonblocking纵切 | Stage 2 Closed；`2 -> 3`resolution完成 | Contract Impact为None；`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`继续Pending |
 | Stage 4 — Blocking/iomux与datagram hardening | Closed | 以完整复数route socket source接入poll/select/epoll，复用同一predicate完成blocking/signal，并关闭race、copy-fault、capacity/writable与fragment evidence | Stage 3 Closed；`3 -> 4`resolution完成 | Contract Impact为None；保持既有OPENED-DESC/IOMUX/EPOLL IDs，全部Socket/Endpoint/UDP/wait candidate继续Pending |
-| Stage 5 — External/dual-architecture closure | Ready / Not Active | 以同源user case和host UDP peer完成remote external双向proof、RV64 agent-run、LA64 user-run、旁路审计与原子final cutover | Stage 4 Closed；`4 -> 5`resolution完成 | 所有仍Pending ID只在共同evidence floor达到后原子Effective，否则全部保持Pending / Not Cut Over |
+| Stage 5 — External/dual-architecture closure | Closed | 以同源user case和host UDP peer完成remote external双向proof、RV64/LA64 agent-run、旁路审计与原子final cutover | Stage 4 Closed；`4 -> 5`resolution完成 | `NET-UDP-FINAL-CUTOVER`已原子Introduce四项Active UDP/Socket contract |
 
 Stage名称与数量可以在保持target的Route Correction中调整，但Ready / Active阶段必须先更新本文与transaction后
 再改变冻结边界。Stage 3的具体Rust边界、逐文件write set、capacity数值与精确命令已在6.3保留；Stage 4的完整
-关闭定义位于6.4，Stage 5的完整Ready定义位于6.5。
+关闭定义位于6.4，Stage 5的完整Ready定义与closure位于6.5。
 
 ## 6. Current Stage and Future Outlines
 
@@ -1669,11 +1671,11 @@ current contracts、`invariants.md`、register/current limitations、其它RFC�
 opened-description hook、epoll consumer与fragment parse gate已经足够；若live implementation证明不够，按6.4.9停止，
 不在当前manifest内做兼容绕行。
 
-### 6.5 Stage 5 Ready / Not Active — External/dual-architecture closure
+### 6.5 Stage 5 Closed — External/dual-architecture closure
 
-本节由Stage 4 Closed后的独立`4 -> 5 Implementation Resolution Gate`解析。**成熟度：Ready / Not Active**。
-Stage 5只有一个Checkpoint 5A；本resolution只冻结路线、验证、cutover与write set，不授权修改source、运行QEMU或
-更新current contracts。进入Active仍须新的明确授权。
+本节由Stage 4 Closed后的独立`4 -> 5 Implementation Resolution Gate`解析，并由后续明确授权执行。
+**成熟度：Closed**。Stage 5只有一个Checkpoint 5A；以下保留当时冻结的路线、验证、cutover与write set，并在
+6.5.12记录最终closure。
 
 #### 6.5.1 Resolution preflight与live baseline
 
@@ -1771,8 +1773,9 @@ mdbook build docs
 git diff --check
 ```
 
-- RV64 wrapper由agent运行；LA64 wrapper由开发者在同一exact source上user-run并提供main/peer logs。LA64命令运行前后
-  必须确认Stage 5 source diff未变化；user evidence、日志路径和结果由transaction明确标注，不写成agent-run。
+- RV64 wrapper由agent运行；activation时开发者明确说明LA64已无需人工Docker，因此LA64也由agent在同一exact
+  source上运行。LA64命令运行前后必须确认Stage 5 source diff未变化，日志路径和agent-run provenance由transaction
+  明确记录。
 - 两个wrapper已经分别重建对应rootfs、`udp-test`、release kernel并启动`smp=1` QEMU，因此不在wrapper前后重复运行
   独立app/kernel build。Stage 4已通过且Stage 5 manifest保持只读的`xtask-test`、net-api/stack host matrix、no-default
   build/check、KUnit、fragment/copy/wait source不重复执行；final review若发现production source漂移，则旧证据失效，
@@ -1793,7 +1796,8 @@ fixed-port conflict、peer receive/READY deadline与marker flush、guest bounded
 以下任一情况立即停止且不得cut over：
 
 - remote case只能通过loopback/self-external、packet injection、hostfwd ingress-only、外部互联网服务或无界retry通过；
-- RV64或LA64缺少guest/peer任一marker、summary失败、QEMU未正常关机，或LA64没有user-run；
+- RV64或LA64缺少guest/peer任一marker或summary失败；RV64未自然退出，或LA64在完整orderly shutdown markers后进入
+  halt却未由launcher显式monitor `quit`并成功收尾；或LA64 mandatory runtime未执行；
 - 需要改变R0 owner、ABI/visible semantics、Evidence Matrix或把mandatory LA64/external proof降级；
 - 需要修改6.5.9 manifest外tracked source，或出现未neutralize的Apollyon/Keter；
 - 任一candidate contract无法按同一final source满足其evidence floor。partial success不能先切换部分functional contract，
@@ -1827,11 +1831,18 @@ transaction/final claim，不制造limitation。R0 target、revision、owner、A
 - `anemone-apps/udp-test/src/main.rs`；
 - `scripts/run-user-test-rv64.sh`、`scripts/run-user-test-la64.sh`；
 - planned new file：`scripts/net-udp-echo-peer.py`。
+- approved LA64 Route Correction：`anemone-kernel/src/driver/intc/loongson_platic.rs`。该扩展只允许在既有
+  QEMU LA64 PCH-PIC/EIOINTC root owner内恢复DT声明的level-high PCI INTx delivery；generic IRQ flow、machine
+  descriptor、VirtIO/provider、protocol/Socket owner与其它architecture source保持只读。
+- approved synchronous VirtIO block IRQ correction：`anemone-kernel/src/driver/block/virtio_blk.rs`。该扩展只允许
+  删除同步轮询block driver对空handler的IRQ注册，并保留未来异步I/O必须先安装会acknowledge device ISR的真实handler
+  才能重新request IRQ的退出条件；generic IRQ、block/VFS API、VirtIO transport与其它driver source保持只读。
 
 **Final contract与execution write-back：**
 
 - planned new file：`docs/src/contracts/net/udp-socket.md`；
-- `docs/src/contracts/net/{index.md,control-plane.md}`、`docs/src/contracts.md`、`docs/src/SUMMARY.md`；
+- `docs/src/contracts/net/{index.md,control-plane.md,interface-domain.md,frame-path.md,netdev-lifecycle.md,attach-lifecycle.md}`、
+  `docs/src/contracts.md`、`docs/src/SUMMARY.md`；
 - 本RFC`{index.md,invariants.md,implementation.md}`；
 - 本transaction、`docs/src/rfcs.md`、`docs/src/devlog/transactions/index.md`与当前biweekly devlog。
 
@@ -1840,13 +1851,81 @@ transaction/final claim，不制造limitation。R0 target、revision、owner、A
 - `anemone-kernel/`全部source与Cargo feature graph、`anemone-abi/`、`anemone-rs/`；
 - `conf/system-targets/qemu-virt-{rv64,la64}.toml`、`conf/platforms/qemu-virt-{rv64,la64}.toml`、
   `conf/rootfs/pretest-{rv64,la64}.toml`；
-- current Network、Opened-description、IOMUX、EPOLL与System Target contracts；
+- 其它current Network、Opened-description、IOMUX、EPOLL与System Target contracts；
 - register/current limitations、Stage 4 transaction evidence与`build/net-udp-stage4-rv64.log`；
 - `etc/preliminary/images/sdcard-{rv,la}.img`只作为LOCAL定义的只读master input，公共文档只引用canonical wrapper命令，
   不把私人绝对路径写成接口。
 
 除上述planned new files外不授权相邻新文件。Kernel/protocol/ABI/library、user-test owner、SystemTarget/Platform、rootfs、
 QEMU generic provider、vendored source、其它apps/RFC/contracts与register保持只读；任何真实需要先按6.5.7停止并上报。
+
+#### 6.5.10 LA64 mandatory-evidence Route Correction
+
+首次LA64 canonical runtime中，host peer已经收到request并发送ack，但guest bounded `ppoll`没有观察到reply，随后
+summary失败且没有normal PowerOff。对同一exact source的路径审计确认：generated QEMU DT把PCI INTx 16-19以
+level-high交给PCH-PIC，PCH-PIC再以`loongson,pic-base-vec`映射到EIOINTC；既有
+`loongson_platic.rs`却反转mask位语义，没有初始化PCH route/HT vector与EIOINTC route/enable，并把
+`claim/ack/eoi`保留为`todo!()`。request只因protocol deadline重新pump而偶然完成ARP/egress；ack到达VirtIO后没有
+external IRQ驱动normal ingress，这与peer PASS、guest timeout和缺少shutdown的组合一致。延长timeout或增加periodic
+poll会掩盖provider progression缺口，不是允许的修复。
+
+开发者批准把本节所列单一中断控制器文件加入Stage 5 manifest。修正保持既有type/file与root-domain owner，不新增
+interrupt controller、public API、ABI或network owner：init从immutable DT读取base vector，从全masked/cleared状态
+初始化PCH-PIC/EIOINTC并把QEMU支持的level-high source路由到CPU0；mask/unmask共同控制PCH source与对应EIO vector，
+claim只返回enabled pending PCH source，LevelFlow在device handler清除VirtIO ISR后由eoi清除EIO pending，再由
+unmask清除stale PCH cause并重新开放。当前DT type model不能保留polarity，因此xlate只接受本QEMU target实际提供的
+level-high形状，不虚构对任意edge/low-polarity的支持。
+
+该Route Correction保持R0 target、owner、Socket/UDP ABI、visible semantics、Contract Impact与Stage 5 evidence floor
+不变，不递增RFC修订。production source变化后，旧LA64失败仍是诊断证据而不是acceptance proof；必须先在同一final
+source上重跑LA64 canonical wrapper，再重跑RV64 canonical wrapper，并重新满足guest remote PASS、17项summary、peer
+PASS、附带回归与normal PowerOff。若修复需要generic IRQ、machine descriptor、VirtIO/provider或其它manifest外source，
+再次停止并上报。
+
+#### 6.5.11 Synchronous VirtIO block IRQ Route Correction
+
+中断控制器Route Correction恢复LA64 PCI INTx后，canonical wrapper在guest串口测试开始前持续进入hwirq 19。
+QEMU PCI topology与两次monitor PC采样把该source定位为首个VirtIO block device；live `virtio_blk.rs`以同步
+`VirtIOBlk::read_blocks/write_blocks`轮询used ring，却仍为设备request IRQ，注册的handler为空且不调用
+`VirtIOBlk::ack_interrupt()`。LevelFlow每次eoi/unmask后因此立即重收尚未清除的device ISR。该缺口此前只因LA64
+root interrupt delivery未工作而被掩盖，不属于UDP/Socket、timeout或中断控制器route语义。
+
+开发者批准把`anemone-kernel/src/driver/block/virtio_blk.rs`加入Stage 5 manifest。最小修正删除同步block driver的
+`request_irq`与空handler；同步I/O继续由既有used-ring polling完成，不新增waiter、callback或第二completion truth。
+代码关键注释必须保留退出条件：只有未来异步实现安装能够acknowledge device ISR并拥有completion/wake lifecycle的
+真实handler后，才能重新request IRQ。该Route Correction保持block/VFS public API、generic IRQ、VirtIO transport、
+R0 target、Socket/UDP ABI、visible semantics、Contract Impact与Stage 5 evidence floor不变，不递增RFC修订。
+
+production source再次变化后，必须重新执行kernel formatter/static check，先跑LA64 canonical wrapper，再在同一
+exact source上跑RV64 canonical wrapper，并重新满足guest remote PASS、17项summary、peer PASS、附带回归与normal
+PowerOff。若仍需generic IRQ、VirtIO transport、其它block/VFS owner或manifest外source，再次停止并上报。
+
+#### 6.5.12 Checkpoint 5A closure与`NET-UDP-FINAL-CUTOVER`
+
+最终source/harness只修改6.5.9两项原始文件、planned peer、两套wrapper和两项获批Route Correction文件。
+`remote-external-roundtrip`在RV64/LA64编译并运行同一函数、token、peer address/port与bounded `ppoll`判断；host peer
+仍是单次bounded token/ack oracle，wrapper唯一拥有child PID、READY gate、peer log与cleanup trap。source/owner/
+consumer audit确认production protocol、Socket、iomux、opened-description、SystemTarget/Platform、rootfs和QEMU
+provider均未为测试新增旁路，conditional host-validation facade继续只由长期host tests消费。
+
+final source/harness diff SHA-256为
+`6a1853fa4b6d62297377498442722e3327fcea826cc2cf160f23293dc3ebd393`；planned peer文件SHA-256为
+`f23778b31dcbd89ec37cce16e1833510bc3b6ff6706bd1b0d927a59992185e9f`。syntax/AST、kernel/udp-test formatter与
+`git diff --check`均通过。LA64 canonical wrapper先在该source执行，随后RV64 wrapper在未改变的同一source执行；
+两者都取得274/274 KUnit、`UDPTEST:PASS:remote-external-roundtrip`、`UDPTEST:SUMMARY:PASS:17`、
+`EPOLLTEST:SUMMARY:PASS:11`、LTP whitelist `attempted=4 passed=4 failed=0 infra_failed=0 skipped=0`、peer
+READY/PASS及完整`filesystem -> network -> device -> PowerOff`标记。RV64自然退出0；LA64因当前无电源驱动，在guest
+进入orderly halt后由launcher通过QEMU monitor `quit`收尾并退出0，该host收尾不降低或替代guest shutdown markers。
+
+final exact-diff工程review由本checkpoint唯一subagent执行。初审唯一reported finding是四份既有Network current
+contract仍保留Stage 1-4的LA64/virtio-pci/remote-external Not Run边界，形成阻塞cutover诚实性的Euclid；开发者批准
+最小docs-only write-set扩展后已同步final evidence，不改变任何contract rule、owner、code、ABI或acceptance。
+开发者随后明确取消修复后的再次subagent review；本地exact-diff/status/anchor审计与docs gate承担最终确认。全部
+检查均通过且source/harness hash未漂移；没有重复build或QEMU。全部gate满足后，本checkpoint原子建立
+[UDP Socket current contract](../../contracts/net/udp-socket.md)，Introduce Active
+`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
+`NET-SOCKET-WAIT-001`，并使Stage 5、R0和transaction关闭。hardware、`smp>1`、full network LTP、final harness与
+非QEMU deployment保持Not Run / R0非目标。
 
 ## 7. Stage 0 Ready — Multi-interface UDP topology probe
 
@@ -2375,7 +2454,8 @@ Resolution结果：
 - admission failure：unsupported ABI、bind conflict、no route/source/interface、oversize、normal capacity与
   would-block应能区分；静默兼容或未支持flag必须按syscall准则注释并记录；
 - wait：只记录predicate transition/recheck/cancel类别，不把wake count或event payload当ready proof；
-- validation marker必须标注host、RV64 agent-run、LA64 user-run与Not Run，不从一个轨道生成另一轨道结论；
+- validation marker必须标注host、每条RV64/LA64 runtime的实际agent/user执行归属与Not Run，不从一个轨道生成
+  另一轨道结论；
 - production per-packet dump、长期queue mirror和unbounded日志不作为默认方案。
 
 ## 12. 停止边界
@@ -2458,6 +2538,13 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
   resolution保持R0 target、owner、ABI/visible semantics、Contract Impact分类与acceptance不变；Stage 5达到Ready /
   Not Active，精确preflight见
   [transaction](../../devlog/transactions/2026-07-29-net-udp.md#2026-07-31---stage-4---stage-5-implementation-resolution-gate)。
+- `2026-07-31`：Stage 5 / External Evidence, Route Corrections and Final Cutover。同源guest case、bounded host peer与
+  canonical wrappers形成remote-external双向proof；LA64执行先后暴露PCH-PIC/EIOINTC delivery缺口和同步VirtIO block
+  空handler引发的level IRQ storm，开发者逐项批准后均在既有owner内最小修正。最终LA64、RV64同一source各通过
+  274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown markers；LA64无电源驱动时在halt
+  后由monitor `quit`正常收尾。final exact-diff review与docs gate满足后，`NET-UDP-FINAL-CUTOVER`原子Introduce四项
+  UDP/Socket current contract，Stage 5和R0 Closed；精确证据见
+  [transaction](../../devlog/transactions/2026-07-29-net-udp.md)。
 
 ## 14. Target Renegotiation Gates
 
@@ -2465,6 +2552,22 @@ queue或allocator形状、port选择算法、capacity数值、test case拆分、
 提案不等于批准；决定前当前stage保持停止且不得cut over。correctness invariant不能作为reduced target妥协项。
 
 ## 15. Write Set扩展记录
+
+- `2026-07-31`：Stage 5唯一subagent final review发现`interface-domain.md`、`frame-path.md`、
+  `netdev-lifecycle.md`与`attach-lifecycle.md`仍把LA64、virtio-pci或remote-external写成Not Run，与final
+  RV64/LA64 evidence冲突，形成一个阻塞cutover诚实性的Euclid。worker按6.5.7停止并上报后，开发者明确批准将这
+  四份current contract加入Stage 5 docs write set，只更新最后核验、validation/enforcement与当前接受边界，并同步
+  RFC Evidence Matrix、本文和transaction。该扩展不改变contract rule、state owner、handoff、source、public API、
+  ABI/visible semantics、R0 target或acceptance；只运行docs/whitespace/status/anchor审计，不重跑build/QEMU。
+  开发者随后明确取消修复后的再次subagent review，由本地final exact-diff审计关闭该finding。
+
+- `2026-07-31`：LA64 PCH-PIC/EIOINTC Route Correction恢复PCI INTx后，canonical wrapper在guest test前进入
+  hwirq 19风暴。QEMU topology、monitor PC与live source确认首个VirtIO block device使用同步used-ring polling，
+  却注册不acknowledge device ISR的空handler；这会让LevelFlow在每次eoi/unmask后立即重触发。worker按6.5.7停止并
+  上报后，开发者明确批准把`anemone-kernel/src/driver/block/virtio_blk.rs`加入Stage 5 manifest，只删除该同步driver
+  的IRQ注册和空handler，并用关键注释固定未来异步实现的真实acknowledge/lifecycle退出条件。Contract Impact为None，
+  不改变generic IRQ、block/VFS API、VirtIO transport、R0 target、Socket/UDP ABI、visible semantics或acceptance；
+  修改后必须先LA64、再同一exact source RV64重跑完整canonical wrapper。
 
 - `2026-07-30`：final review继续要求把每个interface的private `SocketStorage` layout纳入KernelConfig predicate，
   并为external/local `SocketSet`按Endpoint capacity eager reserve。复核证明该条件只在约`4.6e16`个Endpoint起与

@@ -109,30 +109,14 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
   Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
-- [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：R0已接受；目标为initial domain内唯一global protocol
-  `Stack`、domain-local logical interface/control plane、production loopback，以及普通用户态IPv4 unconnected UDP
-  纵切。Stage 0保留最小private ordinary candidate、长期deterministic topology matrix与隔离的conditional
-  validation facade；Stage 1已建立boot logical `lo`、domain-local logical identity、initial-domain唯一Stack与
-  per-provider narrow pump port。`NET-UDP-DOMAIN-CUTOVER`已原子Refine `NETDEV-LIFE-001`/
-  `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；2A已在不改变behavior/public surface/contract的前提下
-  完成same-owner split，2B随后以optional SystemTarget static IPv4、唯一control plane、Stack projection与bounded
-  production local worker关闭Stage 2。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce
-  `NET-CONTROL-PLANE-001`；独立`2 -> 3`resolution已把Stage 3解析为3A same-owner split、3B
-  Endpoint/File/address lifecycle与3C nonblocking datagram三个checkpoint。3A已按Contract Impact=None独立关闭；
-  3B的`socket/bind/getsockname`、namespace single-owner、`S_IFSOCK`/backend admission与自然capacity model已完成，
-  RV64 correction-source证据经behavior-preserving lazy-Vec改动复用，独立review关闭本checkpoint。3C随后完成
-  implicit bind、`sendto/recvfrom`、owned receive与13项RV64 real-consumer matrix；初审三个correctness finding在
-  原owner内修复，final review全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；独立`3 -> 4`
-  resolution把Stage 4解析为4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence
-  closure。4A已形成Stack-owned facts/invalidation、锁外weak reverse routing与Socket-owned plural-route source，
-  final exact-source RV64与独立review通过后Closed；4B随后下移唯一shared iomux wait loop，让blocking UDP复用同一
-  predicate，并以deterministic multi-waiter/signal case证明复数route独立保留，final review全0后Closed。4C完成
-  writable/provider、lifecycle、concurrent copy-fault与fragment injection收口；final review发现并修复empty-interest
-  retire lost wake，复审全0、RV64 274/274 KUnit与UDP 16/16后关闭Stage 4。独立`4 -> 5`resolution现已把Stage 5
-  解析为单一Checkpoint 5A：同源`udp-test` remote-external case、host UDP peer、RV64 agent-run与LA64 user-run共同
-  关闭external/dual-architecture evidence，并只在全部证据通过后执行四项candidate的原子final cutover。Stage 5为
-  Ready / Not Active，Socket/Endpoint/UDP/wait candidate contracts仍Pending / Not Effective；本resolution未修改
-  source、运行QEMU或执行contract cutover。执行证据见
+- [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：R0已实现并关闭；Stage 1/2分别建立initial-domain唯一Stack、
+  logical interface/static IPv4 control plane与production local path，Stage 3/4完成Endpoint/File lifecycle、
+  unconnected UDP transaction、blocking与poll/select/epoll、capacity/copy-fault/fragment证据。Stage 5以同源guest
+  case和bounded host peer完成RV64/LA64 remote-external双向proof；两项获批LA64 Route Correction修复PCH-PIC/
+  EIOINTC delivery与同步VirtIO block空IRQ handler，保持原owner与R0 target。最终双架构均为274/274 KUnit、UDP
+  17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown；LA64无电源驱动时在halt后由monitor `quit`收尾。
+  `NET-UDP-FINAL-CUTOVER`已原子使四项[UDP Socket contract](./contracts/net/udp-socket.md) Active；hardware、
+  `smp>1`、full network LTP与final harness保持Not Run。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

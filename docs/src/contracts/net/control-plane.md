@@ -5,11 +5,11 @@
 **Owner：** initial-domain `Ipv4ControlPlane`
 **参与领域：** SystemTarget / kernel attach authority / logical-interface owner / domain Stack / external与local pump worker
 **覆盖范围：** boot-time static IPv4 publication、local/connected/default route precedence、source/interface selection、Stack projection与bounded production local handoff
-**不覆盖：** Socket/Endpoint/UAPI、runtime address/route change、remote external UDP functional proof、runtime detach/reuse、多个network domain或完整teardown
+**不覆盖：** Socket/Endpoint/UAPI、runtime address/route change、runtime detach/reuse、多个network domain或完整teardown
 **实现位置：** `anemone-kernel/src/net/{mod.rs,domain/control_plane.rs,domain/stack.rs,worker/local.rs}`、`anemone-kernel/crates/anemone-smoltcp-stack/src/{stack/interfaces.rs,pump/local.rs}`
 **依赖：** [STM-TARGET-001](../configuration/system-target.md#stm-target-001--systemtarget-是-bootdeploy-contract)、[NET-IFACE-DOMAIN-001](./interface-domain.md#net-iface-domain-001--initial-domain拥有logical-interface-namespace)、[NET-STACK-PUMP-001](./frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state)
-**Pending Successor：** `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与`NET-SOCKET-WAIT-001`仍是[net-udp R0](../../rfcs/net-udp/invariants.md#contract-impact)的future candidates
-**最后核验：** 2026-07-29
+**Pending Successor：** None；UDP consumer协议见Active [Network UDP Socket](./udp-socket.md)
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 
@@ -63,11 +63,16 @@ pump admission。
 **验证 / Enforcement：** xtask tests覆盖closed schema、preset/tuple同一resolved target、generated projection和
 clean provenance；host topology覆盖`127/8`、self-external、connected/default projection、bounded recovery与
 production budget transfer后的later-round requirement；kernel KUnit覆盖route/source matrix、one-time publication、
-missing/duplicate interface、late wake和真实DomainStack/local worker三类local delivery。RV64 fresh-disk运行实际经过
-protocol egress、bounded local link与normal ingress，并保持strict `filesystem -> network -> device -> PowerOff`；
-LA64只完成同源release build，runtime与remote external traffic均Not Run。
+missing/duplicate interface、late wake和真实DomainStack/local worker三类local delivery。RV64/LA64 final fresh-disk
+运行均实际经过loopback/self-external local path，并以remote-external guest/peer双marker证明external selection、
+provider ingress/egress与normal UDP demux；两边均保持完整`filesystem -> network -> device -> PowerOff`标记。hardware、
+`smp>1`、其它deployment与runtime reconfiguration仍Not Run。
 
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/index.md)。
 
 **当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
 `NET-UDP-CONTROL-CUTOVER`。
+
+**当前 consumer closure：** 同一transaction的`NET-UDP-FINAL-CUTOVER`使
+[`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
+`NET-SOCKET-WAIT-001`](./udp-socket.md)生效；route/source/interface policy仍由本页owner唯一拥有。

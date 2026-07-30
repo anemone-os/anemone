@@ -1,14 +1,15 @@
 # net-udp 目标与不变量
 
-**状态：** R0 Accepted Target / Stage 1 Domain与Stage 2 Control Contract Cut Over / Later Candidates Pending
-**最后更新：** 2026-07-30
+**状态：** R0 Closed / All Contract Deltas Cut Over
+**最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260729-net-udp](./index.md)
 **适用修订：** R0
 
 本文定义`net-udp` R0的accepted contract delta、target invariants与RFC-local proof obligations。它不是current
 contract；当前 effective 规则仍以 `docs/src/contracts/` 及已完成 cutover 的 source为准。Stage 1已使
 `NETDEV-LIFE-001`、`NET-ATTACH-001`与`NET-IFACE-DOMAIN-001`生效；Stage 2又Refine
-`STM-TARGET-001`并使`NET-CONTROL-PLANE-001`生效。其余新增/Refine ID仍是Pending candidate。
+`STM-TARGET-001`并使`NET-CONTROL-PLANE-001`生效；Stage 5 `NET-UDP-FINAL-CUTOVER`已使其余四项
+UDP/Socket ID共同生效。
 
 本文不承担 implementation plan。concrete Rust type、internal API、lock primitive、worker、queue、buffer、
 algorithm、module path、write set、probe 与验证命令均由[迁移实施计划](./implementation.md)按滚动阶段解析。
@@ -37,10 +38,10 @@ algorithm、module path、write set、probe 与验证命令均由[迁移实施�
 | `NET-ATTACH-001` | Refine | [Active](../../contracts/net/attach-lifecycle.md#net-attach-001--attach-publicationrollback与best-effort-shutdown) | attach authority从“每netdev新建Stack path”改为external NIC admission到initial domain/global Stack；保留publication-last、rollback isolation与shutdown admission | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
 | `NET-IFACE-DOMAIN-001` | Introduce | [Active](../../contracts/net/interface-domain.md#net-iface-domain-001--initial-domain拥有logical-interface-namespace) | initial domain唯一拥有logical-interface membership/lifecycle/ifindex/name/kind；`lo`与external interface共享这一namespace | Stage 1 `NET-UDP-DOMAIN-CUTOVER`（已完成） |
 | `NET-CONTROL-PLANE-001` | Introduce | [Active](../../contracts/net/control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface) | 唯一拥有local address、route、source/interface selection policy与Stack projection边界 | Stage 2 `NET-UDP-CONTROL-CUTOVER`（已完成） |
-| `NET-PROTOCOL-BOUNDARY-001` | Introduce | None（尚未生效） | 固定kernel Socket/control plane与concrete Stack之间的Endpoint/UDP capability、依赖方向和object fence | Protocol capability cutover |
-| `NET-SOCKET-ENDPOINT-001` | Introduce | None（尚未生效） | kernel Socket / File与Stack Endpoint的owner fence、opaque association、final-release retire与stale isolation | Socket/Endpoint lifecycle cutover |
-| `NET-UDP-TRANSACTION-001` | Introduce | None（尚未生效） | bind namespace/commit、local delivery、send admission、datagram ownership/consumption、fragment rejection与同步失败边界 | Functional UDP cutover |
-| `NET-SOCKET-WAIT-001` | Introduce | None（尚未生效） | protocol facts到Linux readiness/error的唯一投影、socket source publication与recheck义务 | Socket iomux cutover |
+| `NET-PROTOCOL-BOUNDARY-001` | Introduce | [Active](../../contracts/net/udp-socket.md#net-protocol-boundary-001--cross-owner-udp-capability保持窄且非阻塞) | 固定kernel Socket/control plane与concrete Stack之间的Endpoint/UDP capability、依赖方向和object fence | Stage 5 `NET-UDP-FINAL-CUTOVER`（已完成） |
+| `NET-SOCKET-ENDPOINT-001` | Introduce | [Active](../../contracts/net/udp-socket.md#net-socket-endpoint-001--socket与endpoint保持owner-fence和单向association) | kernel Socket / File与Stack Endpoint的owner fence、opaque association、final-release retire与stale isolation | Stage 5 `NET-UDP-FINAL-CUTOVER`（已完成） |
+| `NET-UDP-TRANSACTION-001` | Introduce | [Active](../../contracts/net/udp-socket.md#net-udp-transaction-001--bindsend与receive各自只有一个commit-boundary) | bind namespace/commit、local delivery、send admission、datagram ownership/consumption、fragment rejection与同步失败边界 | Stage 5 `NET-UDP-FINAL-CUTOVER`（已完成） |
+| `NET-SOCKET-WAIT-001` | Introduce | [Active](../../contracts/net/udp-socket.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离) | protocol facts到Linux readiness/error的唯一投影、socket source publication与recheck义务 | Stage 5 `NET-UDP-FINAL-CUTOVER`（已完成） |
 | `OPENED-DESC-001..003` | Preserve | [Active](../../contracts/task/opened-description-lifecycle.md) | published refs继续唯一决定final release；dup/fork共享description；socket只使用创建时固定的单final-release hook | 全程保持 |
 | `IOMUX-POLL-001..003` | Preserve | [Active](../../contracts/iomux/poll-wait.md) | socket source遵守snapshot/register/final-scan、source-lock publication与wake-is-hint协议 | 全程保持 |
 | `EPOLL-WATCH-001` / `EPOLL-READY-001` / `EPOLL-FILE-001` | Preserve | [Active](../../contracts/epoll/protocol.md) | socket只作为普通poll source加入，不改变watch owner、ready harvest与non-sleeping publication | 全程保持 |
@@ -72,8 +73,8 @@ capacity/port参数属于KernelConfig，不再次改变SystemTarget schema。Pla
 同页owner table覆盖，不额外批量迁移System Target Model的其它RFC-local invariant。
 
 下文`NET-IFACE-DOMAIN-001`、`NET-CONTROL-PLANE-001`、`NET-PROTOCOL-BOUNDARY-001`、
-`NET-SOCKET-ENDPOINT-001`和`NET-SOCKET-WAIT-001`直接对应候选current-contract条目。其它`NET-UDP-*`标题是R0 target/proof ID；其中
-bind、datagram和capability规则在cutover时按共同owner/proof surface聚合进`NET-UDP-TRANSACTION-001`，不为每条
+`NET-SOCKET-ENDPOINT-001`和`NET-SOCKET-WAIT-001`直接对应已生效current-contract条目。其它`NET-UDP-*`标题是R0 target/proof ID；其中
+bind、datagram和capability规则已在cutover时按共同owner/proof surface聚合进`NET-UDP-TRANSACTION-001`，不为每条
 局部规则新建一份contract文档。
 
 ## Target Invariants
@@ -474,8 +475,8 @@ RV64结果外推LA64；unsupported flag静默改变用户可见行为。
 - RFC前私有定位只作为历史讨论输入；公共R0形成后，target修正折回`index.md`/本文件，私有材料不成为
   公共链接或并列target authority。
 - 每个stage在自己的cutover前不得把尚未生效的target写成current fact。Stage 1/2已经生效的global Stack、logical
-  interface与SystemTarget network schema以current contracts和source为准；UDP syscall、Endpoint与wait candidates
-  继续Pending，不能因Stage 3 Ready或partial implementation提前宣称生效。
+  interface、SystemTarget network schema及最终UDP/Socket surface以current contracts和source为准；历史partial
+  stage在`NET-UDP-FINAL-CUTOVER`前均不得提前宣称candidate生效。
 - implementation probe只能验证route、Stack integration、loopback handoff、readiness/copy等假设；probe code不得
   在target/contract未接受时自然沉淀为长期public API、第二owner或compatibility bridge。
 - 临时双wiring、legacy ifindex projection或host control若在Ready stage确有必要，必须说明唯一behavior authority、
@@ -616,14 +617,14 @@ port allocator、capacity representation、owned receive token、copy顺序与fr
 
 ## Evidence Matrix
 
-| Claim | Host deterministic | RV64 QEMU agent-run | LA64 QEMU user-run | 不能外推 |
+| Claim | Host deterministic | RV64 QEMU runtime | LA64 QEMU runtime | 不能外推 |
 | --- | --- | --- | --- | --- |
 | global Stack/multi-interface selection | 至少2 interface，route/source/egress、self-external local route与single-owner | loopback + self-external + 1 remote external | 同case/同源码 | host不证明kernel wiring；self-local不证明provider path；single NIC不证明selection |
 | bind/port/Endpoint lifecycle | 完整wildcard/specific matrix、port0、implicit wildcard、destination demux、rollback、retire/reuse | real syscall/getsockname/close/dup/fork | 同case/同源码 | fixed port或单地址smoke不证明namespace |
 | datagram/capacity | zero/short/oversize/exhaustion/recheck、3类copy fault consume、concurrent receive、first/later fragment rejection | real copyin/out + loopback/self-external/remote-external | 同case/同源码 | allocator OOM不在proof；未测fragment不证明安全拒绝；local不证明frame path |
 | wait/readiness | unbound/general predicate、route/size failure、Endpoint saturation、provider propagation、register/recheck/cancel races | blocking/nonblocking/signal/poll/select/epoll | 同case/同源码 | wake marker不证明predicate；writable不承诺任意send；ordinary LT不外推完整ET matrix |
 | loopback | bounded handoff/normal ingress/resource recovery | production `lo` syscall flow | 同case/同源码 | host smoltcp loopback不证明production path |
-| external path | deterministic provider ingress/egress/failure isolation | production VirtIO ingress + egress | production LA64 selected NIC | QEMU不外推hardware/virtio-pci |
+| external path | deterministic provider ingress/egress/failure isolation | production virtio-mmio ingress + egress | production virtio-pci ingress + egress | QEMU不外推hardware、其它NIC/provider或deployment |
 | build/static config | basic valid/invalid schema/materialization | selected target deployment | selected target deployment | 不证明arbitrary runtime topology、reachability或missing `eth0` behavior |
 | SMP safety | source/concurrency audit与host races | `smp=1` mandatory | `smp=1` mandatory | 不外推`smp>1` runtime；未运行写`Not Run` |
 
@@ -643,7 +644,7 @@ R0 acceptance review已经确认：
 最终RFC closure还必须：
 
 - 每个Preserve contract保持source/tests一致；每个Refine/Introduce ID在明确gate原子cut over并写入current contract；
-- host、双架构build、RV64 agent-run与LA64 user-run达到Evidence Matrix，未执行项如实记`Not Run`；
+- host、双架构build及RV64/LA64 agent-run达到Evidence Matrix，未执行项如实记`Not Run`；
 - current per-netdev Stack/old ifindex owner/临时bridge不再驱动production behavior；
 - accepted limitation位于target外，target内失败进入open issue而不是改名为限制；
-- transaction记录每个contract ID的Effective/Pending/Not Cut Over结果与最终validation claim。
+- transaction记录每个contract ID的Effective结果与最终validation claim。

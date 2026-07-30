@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-4 Closed / Stage 5 Ready / Not Active
+**状态：** Closed / Stage 0-5 Closed
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-31
@@ -12,16 +12,15 @@
 [IOMUX](../../contracts/iomux/poll-wait.md)中的`IOMUX-POLL-001..003`；
 [Epoll](../../contracts/epoll/protocol.md)中的`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`；
 [System Target](../../contracts/configuration/system-target.md)中的`STM-OWNER-001`、`STM-TARGET-001`、
-`STM-RESOLVE-001`；Stage 1已新增`NET-IFACE-DOMAIN-001`，Stage 2已新增`NET-CONTROL-PLANE-001`，后续候选新增
+`STM-RESOLVE-001`；Stage 1已新增`NET-IFACE-DOMAIN-001`，Stage 2已新增`NET-CONTROL-PLANE-001`，Stage 5已新增
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** R0 target无新增开放问题；Checkpoint 3B/3C的历史findings及neutralization见transaction
-**下一步：** 只能由新的明确授权激活Stage 5 Checkpoint 5A；不得自动修改source、运行QEMU或执行
-`NET-UDP-FINAL-CUTOVER`
+**下一步：** R0已经关闭；任何新语义目标必须使用新的明确授权和follow-up RFC或R1 transaction，不延长本事务
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
-`NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；其它R0 candidate仍须在后续明确
-implementation cutover达到各自evidence floor后才能生效。[迁移实施计划](./implementation.md)的Stage 0-2
+`NETDEV-LIFE-001`/`NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；Stage 5
+`NET-UDP-FINAL-CUTOVER`又原子Introduce四项UDP/Socket current contract。[迁移实施计划](./implementation.md)的Stage 0-2
 均已独立关闭；Checkpoint 2A完成behavior-preserving same-owner split，Checkpoint 2B随后原子切换static IPv4
 control plane与production local path。`NET-UDP-CONTROL-CUTOVER`已Refine `STM-TARGET-001`并Introduce
 `NET-CONTROL-PLANE-001`；2026-07-30 post-close correction恢复`NET-BOUNDARY-001`既有artifact-neutral
@@ -36,9 +35,10 @@ RX credit refill、fresh oversize bind retention和specific `127/8` source三个
 Closed，Stage 4现已Closed。4B复用唯一shared iomux wait loop，blocking/nonblocking读取同一Endpoint predicate；
 4C完成capacity/provider、lifecycle、concurrent copy-fault与fragment真实注入收口，并修复final review发现的
 empty-interest retire lost wake。multi-waiter始终是4A/4B固有能力；独立`4 -> 5`resolution已把Stage 5收窄为一个
-Checkpoint 5A，以同源`udp-test`、host-loopback UDP peer、RV64 agent-run和LA64 user-run补齐remote external双向
-evidence，再原子执行final contract cutover。Stage 5现为Ready / Not Active；全部Socket/Endpoint/UDP/wait
-candidate contract继续Pending。
+Checkpoint 5A，以同源`udp-test`、host-loopback UDP peer和RV64/LA64 agent-run补齐remote external双向
+evidence；获批的LA64 interrupt delivery与同步VirtIO block IRQ Route Correction保持原owner和R0 target。双架构
+final source均达到274/274 KUnit、UDP 17/17、epoll 11/11、LTP whitelist 4/4与orderly shutdown floor；
+`NET-UDP-FINAL-CUTOVER`已使四项UDP/Socket contract共同Active，Stage 5与R0 Closed。
 
 2026-07-30开发者以`approved`批准3B correction最小扩展：只为anonymous UDP socket增加正确`S_IFSOCK`投影并
 处置`InodeType`的五个exhaustive VFS consumer；允许Stack/shared value surface把namespace policy改为构造时一次
@@ -106,8 +106,8 @@ global shutdown episode 移交给新 owner。
   ingress 与 egress，不能由 host fixture、kernel packet injection 或 loopback 结果代替。
 - 维持有界 datagram storage、capacity/backpressure、无 busy-poll wait、唯一 packet/datagram owner、失败回滚、
   stale identity isolation 与 non-blocking final release。
-- 建立分层 proof boundary：deterministic host proof、双架构同源用户测试、RV64 QEMU agent-run runtime 和
-  LA64 QEMU user-run runtime，不从未执行平台外推结论。
+- 建立分层 proof boundary：deterministic host proof、双架构同源用户测试和RV64/LA64 QEMU mandatory runtime，
+  transaction记录每条runtime的实际执行归属，不从未执行平台外推结论。
 
 ## 非目标
 
@@ -132,7 +132,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-4 Closed；Stage 5 Ready / Not Active
+- [迁移实施计划](./implementation.md)：Stage 0-5 Closed
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -156,7 +156,7 @@ RFC target：
 
 | 修订 | 日期 | 结论 | 证据 |
 | --- | --- | --- | --- |
-| R0 | 2026-07-29 | 接受initial domain/global Stack、logical interface/control plane、Socket/Endpoint owner fence、IPv4 unconnected UDP能力包络与五项用户可见决定；Stage 1 domain contract delta已cut over，其余candidate保持Pending | [R0 review、Stage 0-1执行与cutover](../../devlog/transactions/2026-07-29-net-udp.md) |
+| R0 | 2026-07-29 | 接受initial domain/global Stack、logical interface/control plane、Socket/Endpoint owner fence、IPv4 unconnected UDP能力包络与五项用户可见决定；Stage 1/2 domain/control delta及Stage 5四项UDP/Socket contract均已cut over，R0于2026-07-31关闭 | [R0 review、分阶段执行与全部cutover](../../devlog/transactions/2026-07-29-net-udp.md) |
 
 ## 方案
 
@@ -381,8 +381,8 @@ kernel Socket owner直接发布 Linux error。
   rejection、retire/stale identity 与 loopback bounded handoff。
 - RV64 QEMU agent-run mandatory runtime：`smp=1`，普通用户态测试覆盖真实 syscall/fd/copy/wait、loopback 和
   production external ingress/egress。
-- LA64 QEMU user-run mandatory closure：与 RV64 构建同一测试源码和同一 case；允许 launcher、镜像和外部
-  endpoint 参数不同。失败阻塞 closure，未提供时只记录 `Not Run`。
+- LA64 QEMU mandatory closure：与 RV64 构建同一测试源码和同一 case；允许 launcher、镜像和外部endpoint参数
+  不同。失败阻塞closure，未执行时只记录`Not Run`；agent/user执行归属按实际transaction证据记录。
 - 双架构 build：共享代码不得通过 arch-specific cfg、私有 syscall number、inline assembly 或不同 expected
   output 隐藏功能差异。
 - `smp>1` runtime不是 mandatory gate，但 owner/lock/wake/lifecycle/cleanup 必须按 SMP-safe correctness 设计；
@@ -523,7 +523,14 @@ final-close wake；修复改为撤publication/reverse route后锁外通知全部
 interest过滤，复审Apollyon/Keter/Euclid/Safe全0。final exact-source RV64执行274/274 KUnit、UDP 16/16、epoll
 11/11、LTP whitelist 4/4与正常PowerOff。
 
-Contract Impact为None；effective OPENED-DESC/IOMUX/EPOLL与Network/control-plane contracts保持Preserve，全部Socket/
-Endpoint/UDP/wait candidate继续Pending。Stage 4 Closed；LA64 runtime、remote external、SMP>1、hardware、full
-network LTP与final harness仍Not Run。独立`4 -> 5`resolution已完成且没有执行source/QEMU/cutover；Stage 5为Ready /
-Not Active，只能由新的明确授权激活Checkpoint 5A。
+Checkpoint 5A在同源guest case与host peer上完成RV64/LA64 remote-external双向proof。LA64路径先暴露并按两次明确
+批准修正PCH-PIC/EIOINTC delivery和同步VirtIO block空IRQ handler；两项修正均保持既有owner、public API、UDP ABI、
+R0 target和Contract Impact。最终双架构均执行274/274 KUnit、UDP 17/17、epoll 11/11、LTP whitelist 4/4、peer
+READY/PASS与完整`filesystem -> network -> device -> PowerOff`标记。LA64当前无电源驱动，进入orderly halt后由
+launcher通过QEMU monitor `quit`收尾，不改变guest shutdown判定。
+
+`NET-UDP-FINAL-CUTOVER`原子使[UDP Socket current contract](../../contracts/net/udp-socket.md)的
+`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
+`NET-SOCKET-WAIT-001` Active；OPENED-DESC/IOMUX/EPOLL与既有Network/control-plane contracts保持Preserve。
+Stage 5和R0 Closed，transaction Completed。hardware、`smp>1`、full network LTP、final harness及非QEMU deployment
+保持Not Run / R0非目标，不从双架构QEMU证据外推。

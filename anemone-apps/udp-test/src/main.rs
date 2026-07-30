@@ -272,6 +272,16 @@ const SOURCE_TIMEOUT: TimeSpec = TimeSpec {
     tv_sec: 1,
     tv_nsec: 0,
 };
+const REMOTE_EXTERNAL_TIMEOUT: TimeSpec = TimeSpec {
+    tv_sec: 5,
+    tv_nsec: 0,
+};
+
+// These tokens and the fixed peer port are the Stage 5 validation wire
+// agreement with scripts/net-udp-echo-peer.py. Keep both endpoints in sync.
+const REMOTE_EXTERNAL_REQUEST: &[u8] = b"anemone-udp-stage5-request";
+const REMOTE_EXTERNAL_ACK: &[u8] = b"anemone-udp-stage5-ack";
+const REMOTE_EXTERNAL_PEER_PORT: u16 = 49153;
 
 fn recv_retry(fd: Fd, payload: &mut [u8]) -> Result<(usize, SockAddrIn), Errno> {
     for _ in 0..DELIVERY_RETRIES {
@@ -324,6 +334,41 @@ fn test_roundtrip_local_paths() -> Result<(), Errno> {
         close(server)?;
     }
     Ok(())
+}
+
+fn test_remote_external_roundtrip() -> Result<(), Errno> {
+    let socket = udp_socket(SocketFlags::NONBLOCK)?;
+    let result = (|| {
+        bind_ipv4(socket, SockAddrIn::new([10, 0, 2, 15], 0))?;
+        let local = getsockname_ipv4(socket)?;
+        ensure(local.address() == [10, 0, 2, 15] && local.port() != 0)?;
+
+        let remote = SockAddrIn::new([10, 0, 2, 2], REMOTE_EXTERNAL_PEER_PORT);
+        ensure(
+            sendto_ipv4(
+                socket,
+                REMOTE_EXTERNAL_REQUEST,
+                MessageFlags::empty(),
+                remote,
+            )? == REMOTE_EXTERNAL_REQUEST.len(),
+        )?;
+
+        let mut pollfd = [PollFd {
+            fd: socket as i32,
+            events: POLLIN,
+            revents: 0,
+        }];
+        ensure(ppoll(&mut pollfd, Some(&REMOTE_EXTERNAL_TIMEOUT))? == 1)?;
+        ensure(pollfd[0].revents & POLLIN != 0)?;
+
+        let mut payload = [0u8; 64];
+        let (received, peer) = recvfrom_ipv4(socket, &mut payload, MessageFlags::empty())?;
+        ensure(&payload[..received] == REMOTE_EXTERNAL_ACK)?;
+        ensure(peer.address() == [10, 0, 2, 2] && peer.port() == REMOTE_EXTERNAL_PEER_PORT)
+    })();
+    let close_result = close(socket);
+    result?;
+    close_result
 }
 
 fn test_specific_loopback_source() -> Result<(), Errno> {
@@ -1063,6 +1108,7 @@ fn main() -> Result<(), Errno> {
     results.case("dup-fork-final-release", test_dup_fork_and_final_release);
     results.case("cloexec-exec", test_cloexec_exec_projection);
     results.case("roundtrip-local-paths", test_roundtrip_local_paths);
+    results.case("remote-external-roundtrip", test_remote_external_roundtrip);
     results.case("specific-loopback-source", test_specific_loopback_source);
     results.case("poll-select-epoll-source", test_poll_select_epoll_source);
     results.case("nonblocking-modes", test_nonblocking_modes);

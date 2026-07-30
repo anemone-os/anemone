@@ -8,8 +8,8 @@
 **不覆盖：** IP address/route/source selection与local packet progression（由`NET-CONTROL-PLANE-001`拥有）、Endpoint/socket/UAPI、runtime detach/retry/reuse或多个network domain
 **实现位置：** `anemone-kernel/src/net/{domain/mod.rs,domain/interfaces.rs,domain/stack.rs,mod.rs}`
 **依赖：** [NETDEV-LIFE-001](./netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction)、[NET-BOUNDARY-001](./frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence)、[NET-STACK-PUMP-001](./frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state)
-**Pending Successor：** [NET-CONTROL-PLANE-001](./control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)已接入logical snapshot与唯一local mapping；Socket/Endpoint successors仍Pending
-**最后核验：** 2026-07-29
+**Pending Successor：** None；[NET-CONTROL-PLANE-001](./control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)与[UDP Socket contract](./udp-socket.md)均已接入本页logical/domain边界
+**最后核验：** 2026-07-31
 
 ## 状态与身份所有权
 
@@ -52,8 +52,9 @@ worker取得raw Stack或其它interface mutation capability；失败留下可观
 **验证 / Enforcement：** owner-local KUnit覆盖boot `lo`、external reservation/commit/abort、monotonic no-reuse、
 opaque netdev association与failure isolation；registry KUnit独立覆盖netdev identity/facts。one-Stack/two-provider host
 matrix覆盖mapping isolation与removed ID fail-closed。source audit确认production `Stack::new()`只在`DomainStack`构造、
-worker只持`ExternalPumpPort`、device/logical/protocol identity没有转换路径，RV64 fresh-disk运行实际执行上述KUnit并
-通过真实VirtIO attach和orderly shutdown回归。
+worker只持`ExternalPumpPort`、device/logical/protocol identity没有转换路径；RV64/LA64 final fresh-disk运行均实际
+执行274/274 KUnit，通过一张真实VirtIO NIC的publication、active attach、functional local/remote path与orderly
+shutdown markers。
 
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/index.md)。
 
@@ -66,5 +67,5 @@ worker只持`ExternalPumpPort`、device/logical/protocol identity没有转换路
   [control-plane contract](./control-plane.md)拥有，不把route或packet truth写回logical registry。
 - external logical facts服务attach record、boot-time control-plane interface match与immutable association；logical
   owner仍不拥有address/route，且没有用户可见interface query或runtime configuration ABI。
-- production runtime只验证RV64 QEMU的一张virtio-mmio NIC、functional local path与`smp=1`；remote external
-  traffic、LA64 runtime、virtio-pci、hardware与`smp>1`均Not Run。
+- production runtime分别验证RV64 QEMU的一张virtio-mmio NIC与LA64 QEMU的一张virtio-pci NIC、functional
+  local/remote path和`smp=1`。hardware、其它NIC/deployment与`smp>1`均Not Run。

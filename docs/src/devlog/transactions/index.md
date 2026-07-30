@@ -6,26 +6,6 @@
 
 ## Active
 
-- [Network UDP](./2026-07-29-net-udp.md)：R0已接受；Stage 0 positive topology decision与Stage 1 initial-domain/
-  global-Stack walking skeleton均已关闭。`NET-UDP-DOMAIN-CUTOVER`已Refine `NETDEV-LIFE-001`/
-  `NET-ATTACH-001`并Introduce `NET-IFACE-DOMAIN-001`；独立`1 -> 2`resolution已把Stage 2解析为2A same-owner
-  split与2B static-control/loopback cutover。2A按Contract Impact=None独立关闭；2B已Refine `STM-TARGET-001`并
-  Introduce `NET-CONTROL-PLANE-001`，production local path通过RV64 exact-source证据，Stage 2 Closed。transaction
-  因R0后续Stage仍未完成而保持Active；独立`2 -> 3`resolution已把Stage 3解析为3A split、3B lifecycle/address与
-  3C nonblocking datagram。3A已按Contract Impact=None独立关闭；3B correction关闭namespace policy owner、
-  `S_IFSOCK`/backend admission与capacity-model findings，final review全0后独立Closed。3C随后完成implicit bind、
-  `sendto/recvfrom`、owned receive与13项RV64 real-consumer matrix；初审三个Apollyon在原owner内修复，final review
-  全0后关闭Stage 3。invalid-config因owner/assertion未改而Not Re-run；独立`3 -> 4`resolution把Stage 4解析为
-  4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence closure。4A已交付Stack facts/
-  invalidation、lock-external reverse routing与Socket-owned plural-route source；exact-source RV64执行273/273 KUnit、
-  UDP 14/14、epoll 11/11与LTP whitelist 4/4，final review blocker为0后独立Closed。4B复用唯一shared iomux wait
-  loop完成blocking UDP、NONBLOCK/DONTWAIT与deterministic multi-waiter/signal纵切；final RV64为273/273 KUnit、
-  UDP 15/15、epoll 11/11与LTP whitelist 4/4，follow-up review全0后独立Closed。4C完成capacity/provider、
-  lifecycle、concurrent copy-fault与fragment evidence；final review的empty-interest retire lost wake在source owner内
-  neutralize，复审全0，final RV64为274/274 KUnit、UDP 16/16、epoll 11/11与LTP 4/4。Stage 4 Closed；Stage 5
-  已由独立docs-only `4 -> 5`resolution解析为单一Checkpoint 5A，覆盖同源remote-external case、host UDP peer、
-  RV64 agent-run、LA64 user-run与四项candidate原子final cutover。Stage 5为Ready / Not Active，全部Socket/Endpoint/
-  UDP/wait candidate仍Pending / Not Effective；本resolution未修改source、运行QEMU或执行cutover，transaction保持Active。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
@@ -44,6 +24,10 @@
 
 ## Completed
 
+- [Network UDP](./2026-07-29-net-udp.md)：R0 Stage 0-5已关闭。domain/control两次cutover和final
+  `NET-UDP-FINAL-CUTOVER`现已使initial-domain/global Stack、static IPv4 control plane及四项UDP/Socket contract
+  Active；最终RV64/LA64均为274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown。
+  LA64无电源驱动时在halt后由monitor `quit`收尾；hardware、`smp>1`、full network LTP与final harness Not Run。
 - [Network Frame Path Stage 4](./2026-07-27-net-frame-path-stage4.md)：单一post-close conformance checkpoint已完成
   registry-owned pending handoff、post-`Late` activation与host-test metadata修正；NFP-008/009/010关闭，既有
   contracts保持Effective且无第二次cutover。

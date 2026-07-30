@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/{net,power.rs,device/mod.rs,driver/net}`
 **依赖：** [NETDEV-LIFE-001](./netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction)、[NET-IFACE-DOMAIN-001](./interface-domain.md#net-iface-domain-001--initial-domain拥有logical-interface-namespace)、[NET-FRAME-OWN-001](./frame-path.md#net-frame-own-001--frame-backing只有一个访问owner)、[NET-FRAME-PROGRESS-001](./frame-path.md#net-frame-progress-001--有界资源normal-backpressure与durable-recheck)、[NET-STACK-PUMP-001](./frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state)、[SYSTEM-POWER-ORDERLY-001](../power/shutdown-lifecycle.md#system-power-orderly-001)、[SYSTEM-POWER-EMERGENCY-001](../power/shutdown-lifecycle.md#system-power-emergency-001)
 **Pending Successor：** None
-**最后核验：** 2026-07-29
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 
@@ -61,9 +61,10 @@ timer；normal worker exit Drop未quiesce backing；driver反向访问stack；ne
 
 **验证 / Enforcement：** one-Stack/two-provider host matrix覆盖双interface progression、blocked-provider isolation、
 wrong-provider isolation与mapping rollback；domain/registry KUnit覆盖reservation/commit/abort、identity no-reuse及
-failure isolation。RV64 fresh-disk运行在真实VirtIO active attach后通过263/263 KUnit，并保持严格
-`filesystem -> network -> device -> PowerOff`与正常QEMU退出。source review覆盖identity separation、
-raw-Stack containment、authority/Stack lock order、rollback、finite round、stop/timer/Weak/retention与emergency bypass。
+failure isolation。Stage 5 final RV64/LA64 fresh-disk运行均在真实VirtIO active attach后通过274/274 KUnit，并保持
+严格`filesystem -> network -> device -> PowerOff` markers；RV64自然退出，LA64因当前无电源驱动在orderly halt后
+由launcher通过QEMU monitor `quit`收尾。source review覆盖identity separation、raw-Stack containment、authority/
+Stack lock order、rollback、finite round、stop/timer/Weak/retention与emergency bypass。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
@@ -83,4 +84,5 @@ raw-Stack containment、authority/Stack lock order、rollback、finite round、s
 
 - 不支持runtime hotplug/detach/retry/restart、完整teardown或shutdown reclamation/progress guarantee。
 - shutdown summary证明admission/stop request与retention，不证明worker join、queue reset或resource释放。
-- RV64 QEMU/smp=1是唯一production runtime acceptance；LA64、virtio-pci、hardware与`smp>1`均Not Run。
+- production runtime acceptance覆盖RV64 QEMU/virtio-mmio与LA64 QEMU/virtio-pci的`smp=1`单NIC路径。hardware、
+  其它NIC/deployment与`smp>1`均Not Run。

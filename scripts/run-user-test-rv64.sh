@@ -25,7 +25,8 @@ Runs the rv64 test chain:
   1. build the rootfs with sudo
   2. stage the provided sdcard image as a build-local temporary copy
   3. build the generic QEMU target with the preliminary topology
-  4. launch QEMU with the complete tracked bind map and tee the output to a log file
+  4. start the bounded Stage 5 host UDP peer
+  5. launch QEMU with the complete tracked bind map and tee the output to a log file
 
 Uses conf/rootfs/pretest-rv64.toml as the public pretest rootfs manifest.
 EOF
@@ -46,10 +47,32 @@ runtime_dir=build/runtime/pretest-rv64
 sdcard_target=$runtime_dir/disk-x0.img
 rootfs_target=build/rootfs/pretest-rv64/rootfs.img
 provider_bindings=(--bind smp=1 --bind memory=1G)
+peer_script=scripts/net-udp-echo-peer.py
+if [[ "$log_file" == *.log ]]; then
+    peer_log_file=${log_file%.log}-peer.log
+else
+    peer_log_file=$log_file-peer.log
+fi
+peer_pid=
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
+
+cleanup_peer() {
+    local exit_status=$?
+    if [[ -n "$peer_pid" ]]; then
+        if kill -0 "$peer_pid" 2>/dev/null; then
+            kill "$peer_pid" 2>/dev/null || true
+        fi
+        wait "$peer_pid" 2>/dev/null || true
+    fi
+    return "$exit_status"
+}
+
+trap cleanup_peer EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ ! -f "$rootfs_config" ]]; then
     error "rootfs config not found: $rootfs_config"
@@ -58,6 +81,11 @@ fi
 
 if [[ ! -f "$sdcard_image" ]]; then
     error "sdcard image not found: $sdcard_image"
+    exit 1
+fi
+
+if [[ ! -f "$peer_script" ]]; then
+    error "UDP peer not found: $peer_script"
     exit 1
 fi
 
@@ -79,6 +107,7 @@ log_progress "PRETEST" "topology smp=1 memory=1G"
 log_progress "PRETEST" "rootfs config $rootfs_config"
 log_progress "PRETEST" "sdcard image $sdcard_image"
 log_progress "PRETEST" "log file $log_file"
+log_progress "PRETEST" "peer log $peer_log_file"
 
 log_progress "PRETEST" "rebuilding rootfs"
 just rootfs mkfs -c "$rootfs_config" --sudo
@@ -101,8 +130,56 @@ cp --remove-destination -- "$sdcard_image" "$sdcard_target"
 log_progress "PRETEST" "building kernel"
 just build --preset "$preset" "${provider_bindings[@]}"
 
+log_progress "PRETEST" "starting host UDP peer"
+python3 -u "$peer_script" >"$peer_log_file" 2>&1 &
+peer_pid=$!
+for ((attempt = 0; attempt < 100; attempt++)); do
+    if grep -Fqx "UDPPEER:READY:49153" "$peer_log_file"; then
+        break
+    fi
+    if ! kill -0 "$peer_pid" 2>/dev/null; then
+        break
+    fi
+    sleep 0.05
+done
+if ! grep -Fqx "UDPPEER:READY:49153" "$peer_log_file"; then
+    error "host UDP peer did not become ready; see $peer_log_file"
+    exit 1
+fi
+
 log_progress "PRETEST" "running qemu"
 just qemu --preset "$preset" "${provider_bindings[@]}" \
     --bind kernel-image=build/anemone.elf \
     --bind disk-x0="$sdcard_target" \
     --bind disk-x1="$rootfs_target" 2>&1 | tee "$log_file"
+
+if wait "$peer_pid"; then
+    peer_pid=
+else
+    peer_status=$?
+    peer_pid=
+    error "host UDP peer failed with status $peer_status; see $peer_log_file"
+    exit 1
+fi
+if ! grep -Fqx "UDPPEER:PASS:remote-external-roundtrip" "$peer_log_file"; then
+    error "host UDP peer PASS marker missing; see $peer_log_file"
+    exit 1
+fi
+
+required_guest_markers=(
+    "All tests passed!"
+    "EPOLLTEST:SUMMARY:PASS:11"
+    "UDPTEST:PASS:remote-external-roundtrip"
+    "UDPTEST:SUMMARY:PASS:17"
+    "user-test: LTP whitelist finished: attempted=4 passed=4 failed=0 infra_failed=0 skipped=0"
+    "system-power: completed filesystem shutdown step"
+    "system-power: completed network shutdown step"
+    "system-power: completed device shutdown step"
+    "system-power: executor core #0 entering PowerOff machine action"
+)
+for marker in "${required_guest_markers[@]}"; do
+    if ! grep -Fq "$marker" "$log_file"; then
+        error "required guest marker missing: $marker; see $log_file"
+        exit 1
+    fi
+done

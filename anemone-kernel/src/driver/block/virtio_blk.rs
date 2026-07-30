@@ -158,7 +158,11 @@ impl DriverOps for VirtIOBlkDriver {
 
         let devnum = devnum_for(minor.get());
 
-        vdev.request_irq(&IRQ_HANDLER, Some(AnyOpaque::new(state.clone())))?;
+        // VirtIOBlk's current read/write path synchronously polls the used ring.
+        // Do not request an IRQ with an empty handler: a level-triggered source
+        // stays asserted until the device ISR is acknowledged and would storm.
+        // A future asynchronous path may request it only after installing a real
+        // handler that acknowledges the ISR and owns completion/wake lifecycle.
 
         register_block_device(BlockDevRegistration {
             name: name_for(minor.get()),
@@ -206,10 +210,6 @@ impl VirtIODriver for VirtIOBlkDriver {
         &[virtio_drivers::transport::DeviceType::Block as usize]
     }
 }
-
-static IRQ_HANDLER: IrqHandler = IrqHandler::new(irq_handler);
-
-fn irq_handler(_prv_data: &AnyOpaque) {}
 
 static BOOKKEEPER: Lazy<SpinLock<(GeneralMinorAllocator, HashMap<MinorNum, VirtIOBlkState>)>> =
     Lazy::new(|| SpinLock::new((GeneralMinorAllocator::new(), HashMap::new())));

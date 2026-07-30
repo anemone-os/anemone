@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/device/net/`、`anemone-kernel/src/driver/net/`
 **依赖：** [NET-BOUNDARY-001](./frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence)、[NET-FRAME-OWN-001](./frame-path.md#net-frame-own-001--frame-backing只有一个访问owner)
 **Pending Successor：** None
-**最后核验：** 2026-07-29
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 
@@ -43,8 +43,8 @@ registry缓存并列lifecycle truth。
 
 **验证 / Enforcement：** registry KUnit覆盖不同origin/facts、单调netdev identity、duplicate failure isolation与
 snapshot；source audit确认registry不再保存ifindex/name，VirtIO probe在queue/RX/IRQ/notification准备后publish且
-失败不留entry；RV64 fresh-disk运行证明真实VirtIO publication进入后续active attach，logical identity由独立domain
-KUnit与source audit验证。
+失败不留entry；RV64/LA64 final fresh-disk运行分别证明virtio-mmio/virtio-pci publication进入后续active attach，
+logical identity由独立domain KUnit与source audit验证。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
@@ -54,5 +54,6 @@ KUnit与source audit验证。
 ## 当前接受边界
 
 - 第一版只支持boot-time persistent netdev；没有runtime unpublish、generation、stale-handle recovery或reuse。
-- RV64 QEMU只证明一张virtio-mmio NIC；多实例identity/failure isolation由host与registry KUnit证明。
+- RV64 QEMU证明一张virtio-mmio NIC，LA64 QEMU证明一张virtio-pci NIC；多实例identity/failure isolation由host与
+  registry KUnit证明。hardware、其它NIC/deployment与`smp>1`均Not Run。
 - link facts没有control-plane subscription或用户ABI；snapshot只表示publication point。
