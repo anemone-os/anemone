@@ -5,7 +5,7 @@
 
 use core::{mem::size_of, ptr::NonNull};
 
-use anemone_abi::fs::linux::dirent::{DT_BLK, DT_CHR, DT_DIR, DT_FIFO, DT_LNK, DT_REG};
+use anemone_abi::fs::linux::dirent::{DT_BLK, DT_CHR, DT_DIR, DT_FIFO, DT_LNK, DT_REG, DT_UNKNOWN};
 
 use crate::{
     prelude::{
@@ -30,6 +30,7 @@ const DIRENT64_HEADER_SIZE: usize = size_of::<LinuxDirent64Header>();
 
 fn dirent64_dtype(ty: InodeType) -> u8 {
     match ty {
+        InodeType::Anon => DT_UNKNOWN,
         InodeType::Regular => DT_REG,
         InodeType::Dir => DT_DIR,
         InodeType::Char => DT_CHR,

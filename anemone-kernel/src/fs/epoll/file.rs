@@ -214,7 +214,7 @@ static EPOLL_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(in crate::fs) fn create_epoll_file(epoll: Arc<Epoll>) -> Result<File, SysError> {
-    let path = anony_new_inode(InodeType::Regular, &EPOLL_INODE_OPS, NilOpaque::new())?;
+    let path = anony_new_inode(InodeType::Anon, &EPOLL_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
         OpenedFile::with_mode(

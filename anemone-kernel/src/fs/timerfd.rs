@@ -698,7 +698,7 @@ pub fn create_timerfd(clockid: i32) -> Result<File, SysError> {
         return Err(SysError::InvalidArgument);
     }
 
-    let path = anony_new_inode(InodeType::Regular, &TIMERFD_INODE_OPS, NilOpaque::new())?;
+    let path = anony_new_inode(InodeType::Anon, &TIMERFD_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
         OpenedFile::with_mode(

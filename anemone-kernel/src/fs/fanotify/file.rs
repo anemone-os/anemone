@@ -47,7 +47,7 @@ pub(super) fn group_from_file(file: &File) -> Result<Arc<FanGroup>, SysError> {
 }
 
 pub(super) fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
-    let path = anony_new_inode(InodeType::Regular, &FANOTIFY_INODE_OPS, NilOpaque::new())?;
+    let path = anony_new_inode(InodeType::Anon, &FANOTIFY_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
         OpenedFile::with_mode(
