@@ -44,7 +44,11 @@ pub struct StaticIpv4 {
     #[serde(deserialize_with = "deserialize_ipv4")]
     pub address: Ipv4Addr,
     pub prefix: u8,
-    #[serde(rename = "default-gateway", deserialize_with = "deserialize_optional_ipv4", default)]
+    #[serde(
+        rename = "default-gateway",
+        deserialize_with = "deserialize_optional_ipv4",
+        default
+    )]
     pub default_gateway: Option<Ipv4Addr>,
 }
 
@@ -100,7 +104,9 @@ fn validate_external_address(address: Ipv4Addr, prefix: u8) -> anyhow::Result<()
         let network = bits & mask;
         let broadcast = network | !mask;
         if bits == network || bits == broadcast {
-            anyhow::bail!("system target external IPv4 address must not be a subnet network or broadcast address");
+            anyhow::bail!(
+                "system target external IPv4 address must not be a subnet network or broadcast address"
+            );
         }
     }
     Ok(())
@@ -226,17 +232,11 @@ mod tests {
         );
         for (needle, replacement) in [
             ("\ninterface = \"eth0\"", "\ninterface = \"\""),
-            (
-                "\naddress = \"10.0.2.15\"",
-                "\naddress = \"not-an-ip\"",
-            ),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"not-an-ip\""),
             ("\naddress = \"10.0.2.15\"", "\naddress = \"0.0.0.0\""),
             ("\naddress = \"10.0.2.15\"", "\naddress = \"127.0.0.1\""),
             ("\naddress = \"10.0.2.15\"", "\naddress = \"224.0.0.1\""),
-            (
-                "\naddress = \"10.0.2.15\"",
-                "\naddress = \"10.0.2.255\"",
-            ),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"10.0.2.255\""),
             ("\nprefix = 24", "\nprefix = 33"),
         ] {
             assert!(

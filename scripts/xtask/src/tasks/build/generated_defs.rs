@@ -5,8 +5,7 @@ use std::path::Path;
 use anyhow::Context;
 use xshell::Shell;
 
-use crate::log_progress;
-use crate::config::system_target::StaticIpv4;
+use crate::{config::system_target::StaticIpv4, log_progress};
 
 use super::BuildContext;
 
@@ -18,7 +17,13 @@ impl BuildContext {
             .platform
             .gen_platform_defs(&self.resolved.target.root);
         let boot_defs = self.gen_boot_defs()?;
-        let network_defs = render_network_defs(self.resolved.target.network.as_ref().map(|value| &value.ipv4));
+        let network_defs = render_network_defs(
+            self.resolved
+                .target
+                .network
+                .as_ref()
+                .map(|value| &value.ipv4),
+        );
         // write to both loader and kernel src directories
         let kconfig_defs_path = format!("anemone-kernel/src/kconfig_defs.rs",);
         let platform_defs_path = format!("anemone-kernel/src/platform_defs.rs",);

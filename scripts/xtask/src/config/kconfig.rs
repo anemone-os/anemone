@@ -497,7 +497,10 @@ mod tests {
             "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 32768;",
             "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 60999;",
         ] {
-            assert!(generated.contains(expected), "missing generated constant {expected}");
+            assert!(
+                generated.contains(expected),
+                "missing generated constant {expected}"
+            );
         }
     }
 
