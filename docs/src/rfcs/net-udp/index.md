@@ -1,6 +1,6 @@
 # RFC-20260729-net-udp
 
-**状态：** Accepted for Implementation / Stage 0-3 Closed / Stage 4: 4A Closed, 4B-4C Ready / Not Active / Stage 5 Outline
+**状态：** Accepted for Implementation / Stage 0-3 Closed / Stage 4: 4A-4B Closed, 4C Ready / Not Active / Stage 5 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-30
@@ -16,7 +16,7 @@
 `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、
 `NET-SOCKET-WAIT-001`
 **开放问题：** R0 target无新增开放问题；Checkpoint 3B/3C的历史findings及neutralization见transaction
-**下一步：** Checkpoint 4A已独立关闭；只能由新的明确授权激活Checkpoint 4B，不得自动进入4C、Stage 5
+**下一步：** Checkpoint 4A/4B已分别独立关闭；只能由新的明确授权激活Checkpoint 4C，不得自动进入Stage 5
 resolution或执行current-contract cutover
 
 本目录是`net-udp` R0 accepted target的canonical source。Stage 1 `NET-UDP-DOMAIN-CUTOVER`已原子Refine
@@ -32,8 +32,9 @@ Stage 3解析为3A same-owner split、3B Endpoint/File/address lifecycle与3C no
 3C随后形成`sendto/recvfrom`、implicit bind、control-plane/Stack send admission与owned receive transaction；初审的
 RX credit refill、fresh oversize bind retention和specific `127/8` source三个correctness finding均在原owner内修复，
 修复后host、双架构build与RV64 fresh-disk证据通过。Stage 3已Closed；独立`3 -> 4`resolution已把Stage 4解析为
-4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence closure；4A已独立Closed，4B/4C
-保持Ready / Not Active。
+4A complete plural-route source、4B blocking syscall与4C race/fragment/evidence closure；4A/4B已分别独立Closed，
+4C保持Ready / Not Active。4B复用唯一shared iomux wait loop，blocking/nonblocking读取同一Endpoint predicate，
+deterministic multi-waiter/signal real-consumer evidence已关闭fixed-yield假阳性风险。
 multi-waiter是4A/4B固有能力，4C只做压力与证据收口；全部Socket/Endpoint/UDP/wait candidate contract继续Pending。
 
 2026-07-30开发者以`approved`批准3B correction最小扩展：只为anonymous UDP socket增加正确`S_IFSOCK`投影并
@@ -128,7 +129,7 @@ global shutdown episode 移交给新 owner。
 RFC target：
 
 - [目标与不变量](./invariants.md)
-- [迁移实施计划](./implementation.md)：Stage 0-3 Closed；Stage 4 4A Closed、4B-4C Ready / Not Active；Stage 5 Outline
+- [迁移实施计划](./implementation.md)：Stage 0-3 Closed；Stage 4 4A-4B Closed、4C Ready / Not Active；Stage 5 Outline
 
 背景材料：RFC前的私有定位已经折入本页和目标不变量，不作为公共引用目标。
 
@@ -506,7 +507,14 @@ capacity recovery与ppoll/pselect/epoll ordinary LT均有host/KUnit/runtime证�
 acceptance-affecting Euclid 0；可选的combined-case诊断改进不阻塞4A。final exact-source RV64执行273/273 KUnit、
 `UDPTEST:SUMMARY:PASS:14`、`EPOLLTEST:SUMMARY:PASS:11`与LTP whitelist 4/4，并正常PowerOff。
 
+Checkpoint 4B将唯一source-neutral wait loop下移到iomux owner，`ppoll/pselect6`与UDP blocking syscall共用
+snapshot/register/schedule/final-scan协议。`sendto/recvfrom`在`WouldBlock`后释放operation guard再等待；send payload
+只copyin一次并在每轮重做selection/admission，receive只在成功detach后保持transaction。NONBLOCK/DONTWAIT继续
+映射`EAGAIN`且不修改status，signal final miss映射`EINTR`，Stage 3 temporary bridge已删除。RV64 deterministic
+multi-waiter/signal case以局部procfs mount确认两个receiver同时park，并以bounded result poll证明无lost wake；最终
+运行273/273 KUnit、UDP 15/15、epoll 11/11、LTP whitelist 4/4与正常PowerOff。
+
 Contract Impact为None；effective OPENED-DESC/IOMUX/EPOLL与Network/control-plane contracts保持Preserve，全部Socket/
-Endpoint/UDP/wait candidate继续Pending。Checkpoint 4B/4C保持Ready / Not Active；blocking syscall、race/fragment
-closure以及LA64 runtime、remote external、SMP>1、hardware、full network LTP与final harness仍Not Run。4A关闭后立即
-停止，只能由新的明确授权激活4B，不得自动进入4C、Stage 5 resolution或current-contract cutover。
+Endpoint/UDP/wait candidate继续Pending。Checkpoint 4C保持Ready / Not Active；race/fragment closure以及LA64
+runtime、remote external、SMP>1、hardware、full network LTP与final harness仍Not Run。4B关闭后立即停止，只能由
+新的明确授权激活4C，不得自动进入Stage 5 resolution或current-contract cutover。

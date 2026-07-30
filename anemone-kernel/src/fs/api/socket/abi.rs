@@ -134,15 +134,6 @@ pub(super) fn validate_message_flags(flags: i32) -> Result<bool, SysError> {
     Ok(flags & MSG_DONTWAIT != 0)
 }
 
-fn map_would_block(nonblocking: bool) -> SysError {
-    if nonblocking {
-        return SysError::Again;
-    }
-    // Stage 4 replaces this bridge with the socket wait/readiness protocol.
-    knoticeln!("udp: blocking send/receive would sleep; Stage 4 wait support is not active");
-    SysError::NotSupported
-}
-
 pub(super) fn map_bind_error(error: BindError) -> SysError {
     match error {
         BindError::AddressUnavailable => SysError::AddressNotAvailable,
@@ -159,7 +150,7 @@ pub(super) fn map_query_error(error: UdpQueryError) -> SysError {
     }
 }
 
-pub(super) fn map_send_error(error: SendError, nonblocking: bool) -> SysError {
+pub(super) fn map_send_error(error: SendError) -> SysError {
     match error {
         SendError::Bind(UdpBindError::UnknownEndpoint) => SysError::BadFileDescriptor,
         SendError::Bind(UdpBindError::AlreadyBound) => SysError::InvalidArgument,
@@ -173,13 +164,13 @@ pub(super) fn map_send_error(error: SendError, nonblocking: bool) -> SysError {
         SendError::Stack(UdpSendError::UnsupportedSource) => SysError::AddressNotAvailable,
         SendError::Stack(UdpSendError::InvalidDestination) => SysError::InvalidArgument,
         SendError::Stack(UdpSendError::MessageTooLong { .. }) => SysError::MessageTooLong,
-        SendError::Stack(UdpSendError::WouldBlock) => map_would_block(nonblocking),
+        SendError::Stack(UdpSendError::WouldBlock) => SysError::Again,
     }
 }
 
-pub(super) fn map_receive_error(error: UdpReceiveError, nonblocking: bool) -> SysError {
+pub(super) fn map_receive_error(error: UdpReceiveError) -> SysError {
     match error {
         UdpReceiveError::UnknownEndpoint => SysError::BadFileDescriptor,
-        UdpReceiveError::WouldBlock => map_would_block(nonblocking),
+        UdpReceiveError::WouldBlock => SysError::Again,
     }
 }

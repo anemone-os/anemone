@@ -1,6 +1,11 @@
 #![no_std]
 #![no_main]
 
+use core::{
+    str,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
 use anemone_rs::{
     abi::{
         fs::linux::{
@@ -16,22 +21,32 @@ use anemone_rs::{
         time::linux::TimeSpec,
     },
     env::args,
+    fs::OpenOptions,
+    io::Read,
     os::linux::{
         fs::{
             AtFd, EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, dup, epoll_create1,
-            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fstat, pipe2, ppoll, pselect, read,
-            statx, write,
+            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fstat, mount, pipe2, ppoll, pselect,
+            read, statx, umount, write,
         },
         net::{
             MessageFlags, SocketFlags, bind_ipv4, bind_raw, getsockname_ipv4, getsockname_raw,
             recvfrom_ipv4, recvfrom_raw, sendto_ipv4, sendto_raw, socket_raw, udp_socket,
         },
         process::{
-            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield, wait4,
+            WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, sched_yield,
+            signal::{SigNo, kill, sigaction},
+            wait4,
         },
     },
     prelude::*,
 };
+
+static USR1_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+extern "C" fn usr1_handler(_signo: i32) {
+    USR1_COUNT.fetch_add(1, Ordering::SeqCst);
+}
 
 fn ensure(condition: bool) -> Result<(), Errno> {
     if condition { Ok(()) } else { Err(EIO) }
@@ -447,7 +462,7 @@ fn test_poll_select_epoll_source() -> Result<(), Errno> {
     close(epoll_server)
 }
 
-fn test_would_block_bridge() -> Result<(), Errno> {
+fn test_nonblocking_modes() -> Result<(), Errno> {
     let nonblocking = udp_socket(SocketFlags::NONBLOCK)?;
     let mut byte = [0u8; 1];
     expect_errno(
@@ -461,11 +476,165 @@ fn test_would_block_bridge() -> Result<(), Errno> {
         recvfrom_ipv4(blocking, &mut byte, MessageFlags::DONTWAIT),
         EAGAIN,
     )?;
-    expect_errno(
-        recvfrom_ipv4(blocking, &mut byte, MessageFlags::empty()),
-        EOPNOTSUPP,
-    )?;
+    ensure(fcntl_getfl(blocking)? & O_NONBLOCK == 0)?;
     close(blocking)
+}
+
+fn read_exact(fd: Fd, mut bytes: &mut [u8]) -> Result<(), Errno> {
+    while !bytes.is_empty() {
+        let read_len = read(fd, bytes)?;
+        ensure(read_len != 0)?;
+        bytes = &mut bytes[read_len..];
+    }
+    Ok(())
+}
+
+fn read_text(path: &str) -> Result<String, Errno> {
+    let mut file = OpenOptions::new().read(true).open(Path::new(path))?;
+    let mut text = String::new();
+    let mut buf = [0u8; 512];
+
+    loop {
+        let count = file.read(&mut buf)?;
+        if count == 0 {
+            return Ok(text);
+        }
+        text.push_str(str::from_utf8(&buf[..count]).map_err(|_| EIO)?);
+    }
+}
+
+fn proc_state(pid: u32) -> Result<u8, Errno> {
+    let status = read_text(&format!("/proc/{pid}/status"))?;
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("State:"))
+        .map(str::trim)
+        .and_then(|state| state.as_bytes().first().copied())
+        .ok_or(EIO)
+}
+
+fn read_result_bounded(fd: Fd, result: &mut [u8; 2]) -> Result<(), Errno> {
+    let mut pollfd = [PollFd {
+        fd: fd as i32,
+        events: POLLIN,
+        revents: 0,
+    }];
+    ensure(ppoll(&mut pollfd, Some(&SOURCE_TIMEOUT))? == 1)?;
+    ensure(pollfd[0].revents & POLLIN != 0)?;
+    read_exact(fd, result)
+}
+
+fn spawn_blocking_receiver(server: Fd, ready_tx: Fd, result_tx: Fd, id: u8) -> Result<u32, Errno> {
+    match fork()? {
+        None => {
+            let result = (|| {
+                ensure(write(ready_tx, &[id])? == 1)?;
+                let mut payload = [0u8; 1];
+                let outcome = match recvfrom_ipv4(server, &mut payload, MessageFlags::empty()) {
+                    Ok((1, _)) => payload[0],
+                    Err(EINTR) => 0xff,
+                    _ => return Err(EIO),
+                };
+                ensure(write(result_tx, &[id, outcome])? == 2)
+            })();
+            exit(if result.is_ok() { 0 } else { 1 })
+        },
+        Some(pid) => Ok(pid),
+    }
+}
+
+fn wait_until_receivers_park(
+    server: Fd,
+    ready_rx: Fd,
+    first: u32,
+    second: u32,
+) -> Result<(), Errno> {
+    let mut ready = [0u8; 2];
+    read_exact(ready_rx, &mut ready)?;
+    ensure(ready[0] != ready[1])?;
+
+    // Each child has no blocking operation after its ready write except the
+    // target recvfrom. Seeing both leaders in interruptible sleep therefore
+    // observes that both source registrations reached schedule; this avoids
+    // treating a fixed delay as evidence that two routes were armed.
+    for _ in 0..DELIVERY_RETRIES {
+        if proc_state(first)? == b'S' && proc_state(second)? == b'S' {
+            return expect_empty(server);
+        }
+        sched_yield()?;
+    }
+    Err(ETIMEDOUT)
+}
+
+fn run_blocking_multi_waiter_and_signal() -> Result<(), Errno> {
+    let server = udp_socket(SocketFlags::empty())?;
+    bind_ipv4(server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let peer = getsockname_ipv4(server)?;
+    let client = udp_socket(SocketFlags::empty())?;
+
+    let (ready_rx, ready_tx) = pipe2(PipeFlags::empty())?;
+    let (result_rx, result_tx) = pipe2(PipeFlags::empty())?;
+    let first = spawn_blocking_receiver(server, ready_tx, result_tx, 1)?;
+    let second = spawn_blocking_receiver(server, ready_tx, result_tx, 2)?;
+    wait_until_receivers_park(server, ready_rx, first, second)?;
+
+    send_to_bound(client, peer, b"a")?;
+    let mut first_result = [0u8; 2];
+    read_result_bounded(result_rx, &mut first_result)?;
+    ensure(first_result[1] == b'a')?;
+    // The waiter that lost the first detach must retain its independent route
+    // and complete only after a later datagram changes the shared predicate.
+    send_to_bound(client, peer, b"b")?;
+    let mut second_result = [0u8; 2];
+    read_result_bounded(result_rx, &mut second_result)?;
+    ensure(second_result[1] == b'b' && first_result[0] != second_result[0])?;
+    wait_child(first)?;
+    wait_child(second)?;
+
+    let action = anemone_rs::abi::process::linux::signal::SigAction {
+        sighandler: usr1_handler as *const (),
+        sa_flags: 0,
+        sa_restorer: core::ptr::null(),
+        sa_mask: anemone_rs::abi::process::linux::signal::SigSet { bits: 0 },
+    };
+    sigaction(SigNo::SIGUSR1, Some(&action), None)?;
+    let cancelled = spawn_blocking_receiver(server, ready_tx, result_tx, 3)?;
+    let survivor = spawn_blocking_receiver(server, ready_tx, result_tx, 4)?;
+    wait_until_receivers_park(server, ready_rx, cancelled, survivor)?;
+    kill(cancelled as i32, SigNo::SIGUSR1)?;
+    let mut cancelled_result = [0u8; 2];
+    read_result_bounded(result_rx, &mut cancelled_result)?;
+    ensure(cancelled_result == [3, 0xff])?;
+    ensure(proc_state(survivor)? == b'S')?;
+    send_to_bound(client, peer, b"c")?;
+    let mut survivor_result = [0u8; 2];
+    read_result_bounded(result_rx, &mut survivor_result)?;
+    ensure(survivor_result == [4, b'c'])?;
+    wait_child(cancelled)?;
+    wait_child(survivor)?;
+
+    close(ready_tx)?;
+    close(ready_rx)?;
+    close(result_tx)?;
+    close(result_rx)?;
+    close(client)?;
+    close(server)
+}
+
+fn test_blocking_multi_waiter_and_signal() -> Result<(), Errno> {
+    // udp-test runs before user-test enters and initializes the competition
+    // root, so it owns this focused procfs mount used only to observe that both
+    // child recvfrom calls have actually reached interruptible sleep.
+    mount(Path::new("proc"), Path::new("/proc"), "proc")?;
+    let result = run_blocking_multi_waiter_and_signal();
+    let unmount = umount(Path::new("/proc"));
+    match result {
+        Ok(()) => unmount,
+        Err(error) => {
+            let _ = unmount;
+            Err(error)
+        },
+    }
 }
 
 fn send_to_bound(client: Fd, server: SockAddrIn, payload: &[u8]) -> Result<(), Errno> {
@@ -695,7 +864,11 @@ fn main() -> Result<(), Errno> {
     results.case("roundtrip-local-paths", test_roundtrip_local_paths);
     results.case("specific-loopback-source", test_specific_loopback_source);
     results.case("poll-select-epoll-source", test_poll_select_epoll_source);
-    results.case("would-block-bridge", test_would_block_bridge);
+    results.case("nonblocking-modes", test_nonblocking_modes);
+    results.case(
+        "blocking-multi-waiter-signal",
+        test_blocking_multi_waiter_and_signal,
+    );
     results.case("zero-short-consume", test_zero_and_short_consume_whole);
     results.case("fault-consume", test_faults_consume_detached_datagram);
     results.case("send-errno-flags", test_send_errno_and_flags);

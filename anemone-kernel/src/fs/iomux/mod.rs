@@ -8,6 +8,9 @@ mod wait;
 pub(in crate::fs) use subscription::PollObserver;
 pub(crate) use subscription::PollRoute;
 pub(crate) use wait::IomuxWaitRound;
+pub(in crate::fs) use wait::{
+    IomuxScanMode, IomuxScanOutcome, IomuxWaitOutcome, wait_for_iomux_ready,
+};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
