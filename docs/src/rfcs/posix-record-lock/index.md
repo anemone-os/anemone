@@ -1,6 +1,6 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** R0 / Accepted for Implementation / Stage 0-1 Closed / Stage 2 Ready / Not Active / Not Cut Over
+**状态：** R0 / Accepted for Implementation / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Not Cut Over
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-31
@@ -15,9 +15,9 @@
 **开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
 后续 Outline 中尚未解析的类型、锁、容器、模块路径、stage、write set 与精确验证命令属于滚动
 implementation resolution，不因缺失本身构成 finding。
-**下一步：** Stage 1已按1A/1B两个checkpoint独立关闭，Stage 2也已由独立只读gate完整解析为2A/2B并停在
-Ready / Not Active。只有开发者另行授权才能激活Checkpoint 2A；本次resolution不授权实现、2B或任何semantic
-contract cutover。
+**下一步：** Stage 1已按1A/1B两个checkpoint独立关闭，Stage 2也已解析为2A/2B；Checkpoint 2A现已独立关闭。
+Checkpoint 2B仍为Ready / Not Active，只有开发者另行授权才能激活。Stage 2尚未关闭，本轮不授权2B、Stage 3或
+任何semantic contract cutover。
 
 ## 文档状态
 
@@ -27,8 +27,9 @@ stage；随后建立 transaction，开发者明确授权 Stage 0 Active。R0 tar
 Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record-lock capability。其后的独立只读
 resolution gate已基于live source把Stage 1解析为两个独立checkpoint：1A行为保持地完成lock namespace
 alignment，1B建立inode-associated POSIX range domain与focused proof。两者现均已关闭，Stage 1 Closed。
-其后的独立只读gate已经把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal replay；
-Stage 2当前Ready / Not Active，current contract语义仍未更新，也未获得实现授权。
+其后的独立只读gate把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal replay；
+2A现已独立关闭，2B继续Ready / Not Active。Stage 2尚未关闭，current contract语义仍未更新，2A candidate不是
+可独立合入或对外声称的POSIX record-lock capability。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
 此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
@@ -59,10 +60,11 @@ waiter graph 或 lifecycle registry。
 
 ### Anemone 当前事实
 
-当前 `fcntl()` syscall adapter 已识别 `F_GETLK`、`F_SETLK` 与 `F_SETLKW` 的命令号，但三者都在命令解析阶段
-返回 `ENOSYS`；kernel 尚无 POSIX record-lock grant domain、UAPI `struct flock` copy boundary 或对应 userspace
-wrapper。现有 `anemone-apps/user-test/ltp/groups/fcntl.txt` 暂时注释掉 `fcntl14` / `fcntl14_64`，不能把其它
-`fcntl` case 的结果当成 record-lock 支持证据。
+Checkpoint 2A candidate现已接入`F_GETLK`、nonblocking `F_SETLK`、native `struct flock` copy boundary与
+userspace wrapper；`F_SETLKW`仍在command decode返回`ENOSYS`，blocking/signal/restart尚未实现。由于Stage 2未关闭
+且`POSIX-LOCK-CUTOVER`仍为`None`，这些代码不能写成current POSIX record-lock支持。现有
+`anemone-apps/user-test/ltp/groups/fcntl.txt`仍注释掉`fcntl14` / `fcntl14_64`，不能把其它`fcntl` case或2A focused
+suite当成focused LTP与最终双架构产品证据。
 
 当前 task file state 已具备与本 target 相邻、但不能直接冒充 holder contract 的事实：
 
@@ -402,7 +404,8 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 `None`；后续只读resolution把Stage 1拆为1A/1B。1A已完成行为保持的`fs::lock::flock` namespace alignment，
 只对current contracts做locator-only更新；1B已完成inode-owned range domain、opaque holder接线与focused KUnit。
 Stage 1 semantic cutover仍为`None`，全部prospective ID继续Not Effective；Stage 2已经独立解析为2A native
-ABI/binding/nonblocking-query与2B blocking wait/signal replay，当前Ready / Not Active，尚未获得实现授权。
+ABI/binding/nonblocking-query与2B blocking wait/signal replay。2A现已独立关闭，2B仍Ready / Not Active，Stage 2
+尚未关闭；截至2A closure contract cutover继续为`None`，2A candidate不是standalone/current支持。
 最终 R0 implementation closure 至少需要：
 
 - 新增 contract IDs 在 `POSIX-LOCK-CUTOVER` 原子写入 current contracts，Preserve IDs 经 source/review 证明

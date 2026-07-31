@@ -66,7 +66,11 @@ pub use self::{
 pub(crate) use self::{
     inode::RenameFlags,
     iomux::PollRoute,
-    lock::{FlockMode, FlockOperation, FlockOutcome, request_flock, retire_flock},
+    lock::{
+        FlockMode, FlockOperation, FlockOutcome, PosixLockMode, PosixLockQueryOutcome,
+        PosixLockRange, PosixLockSetOutcome, query_posix_lock, request_flock, retire_flock,
+        retire_posix_locks, set_posix_lock, unlock_posix_lock,
+    },
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };
 pub use cache_stats::resident_file_inode_cache_pages;

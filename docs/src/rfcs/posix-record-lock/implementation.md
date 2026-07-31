@@ -1,13 +1,13 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Stage 2 Ready / Not Active
+**状态：** R0 implementation plan / Stage 0-1 Closed / Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active
 **适用修订：** R0
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **目标与不变量：** [POSIX Record Lock 目标和不变量](./invariants.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 active Apollyon / Keter
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
-**Contract Cutover：** Stage 2 resolution semantic cutover `None`；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
+**Contract Cutover：** semantic `None` through Checkpoint 2A closure；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
 
 本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
 canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
@@ -15,7 +15,8 @@ authorization 已作为三个独立事件完成；Stage 0现已关闭。开发�
 `Stage 0 -> Stage 1 Implementation Resolution Gate`，并把物理namespace迁移与POSIX range-domain实现拆为
 1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed。开发者随后独立授权只读
 `Stage 1 -> Stage 2 Implementation Resolution Gate`；本次已从clean live source把Stage 2完整解析为两个有序
-checkpoint。Stage 2当前为Ready / Not Active，不因本次解析自动获得实现授权。
+checkpoint。开发者随后明确授权并独立关闭Checkpoint 2A；2B仍为Ready / Not Active，不得由2A closure自动激活。
+Stage 2尚未关闭，2A candidate也不是current POSIX record-lock支持。
 
 ## 实施原则
 
@@ -89,7 +90,7 @@ checkpoint。Stage 2当前为Ready / Not Active，不因本次解析自动获得
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
 | Stage 1 | Closed；1A/1B Closed | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 已独立关闭；下一步只能另行授权`1 -> 2`resolution |
-| Stage 2 | Ready / Not Active；2A/2B已解析 | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-07-31已完成独立`1 -> 2`resolution；等待开发者另行授权2A |
+| Stage 2 | 2A Closed；2B Ready / Not Active；Stage 2未关闭 | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-07-31已独立关闭2A并停止；等待开发者另行授权2B |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
 
 ## Stage 0 Ready：File-table Episode 与 Holder Foundation
@@ -714,7 +715,9 @@ focused test assets和固定Linux/LTP source。输出必须完整解析：
 解析只能把Stage 2变成Ready/Not Active。若需要nested active wait、producer等待waiter、同步close cancellation、
 shared fd-table private lock下回调VFS，或只能改变target race outcomes，停止并进入RFC review。
 
-## Stage 2 Ready / Not Active：Native ABI、Close/Commit 与 Blocking Wait
+<a id="posix-record-lock-stage-2"></a>
+
+## Stage 2：Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active
 
 ### Resolution baseline 与前置核验
 
@@ -748,10 +751,13 @@ fd-table、`fcntl`、POSIX domain、Event/wait、signal restart、ABI/app/rootfs
   Event listener携带exact `WakeToken`，wait completion校验current identity；owner CPU的`local_wake_enqueue()`重新
   分类stale/current/queued状态。2026-07-25 `SCHED-WAKE` cutover与后续canonical wrapper均正常收敛。因此本gate
   按register的active-defect边界移除该过期Open项，在transaction保留关闭证据；不修改scheduler current contract。
-- `anemone-rs::sys::linux::fs::fcntl()`已有raw syscall entry。真实`fcntl-test` consumer只需要在
+- `anemone-rs::sys::linux::fs::fcntl()`已有raw syscall entry。真实`fcntl-test` consumer在
   `os/linux/fs.rs`按checkpoint增加窄typed record-lock wrapper；2A增加query/nonblocking consumer使用的入口，2B再随
-  blocking consumer增加`fcntl_setlkw`，不修改raw layer。现有`user-test::local_run_cmd()`、两份tracked pretest
-  rootfs的`[[apps]]`与xtask app driver可以直接安装、执行并检查child exit，不建立新runner或wrapper。
+  blocking consumer增加`fcntl_setlkw`。2A activation preflight另确认focused app需要覆盖代表性`close_range`
+  cleanup，但live raw/typed layer均没有该入口；开发者已批准只在raw owner增加private `close_range` syscall wrapper，
+  再由`os/linux/fs.rs`提供首个真实consumer所需的typed public wrapper。该扩展不增加app-local syscall backend、
+  兼容语法或其它wrapper。现有`user-test::local_run_cmd()`、两份tracked pretest rootfs的`[[apps]]`与xtask app
+  driver可以直接安装、执行并检查child exit，不建立新runner或wrapper。
 
 初始gate未发现Apollyon/Keter；后续owner review识别并同轮neutralize了
 [`KETER-POSIX-LOCK-009`](./tracking-issues.md#keter-posix-lock-009fcntl-command-family-abi-被错误下沉到-vfs-lock-core)：
@@ -764,7 +770,7 @@ scheduler旁路仍有live consumer，必须恢复register项并把它列为Stage
 
 | Checkpoint | 当前成熟度 | 交付 | 独立边界 |
 | --- | --- | --- | --- |
-| 2A — Native ABI、binding 与nonblocking/query | Ready / Not Active | 原生`struct flock`、`F_GETLK/F_SETLK`、operation-local binding、全部fd-removal cleanup、focused userspace纵切 | 形成无blocking waiter的完整close/commit协议；不得独立作为产品capability合入或cut over |
+| 2A — Native ABI、binding 与nonblocking/query | Closed | 原生`struct flock`、`F_GETLK/F_SETLK`、operation-local binding、全部fd-removal cleanup、focused userspace纵切 | 已形成无blocking waiter的完整close/commit协议；不得独立作为产品capability合入或cut over |
 | 2B — Blocking wait、signal replay 与Stage 2 closure | Ready / Not Active；受2A Closed约束 | `F_SETLKW`、Event predicate recheck、ordinary restart、focused signal/close race纵切与stage-wide review | 2A独立Closed后才可激活；closure必须停在`Stage 2 -> 3`resolution gate前 |
 
 两个checkpoint共同构成一个stacked Stage 2 candidate。2A虽然具备可执行syscall slice，但R0 target还缺
@@ -786,8 +792,10 @@ LTP和原子`POSIX-LOCK-CUTOVER`。解析Ready不授权2A，2A关闭也不自动
   `EOVERFLOW`，non-regular为`EINVAL`；read/write set分别要求readable/writable，unlock不要求access。
 - normalization只在一次invocation开始时取得opened-description position与inode size snapshot。`SEEK_SET/CUR/END`、
   signed start/length在足够宽的临时整数中计算，再验证结果可由native signed offset表达；positive length生成有限
-  half-open range，negative length反向生成有限range，zero length保持open-ended。blocking同一invocation只复用
-  normalized range；ordinary replay从raw syscall参数重新lookup/copy/snapshot/normalize。
+  half-open range，negative length反向生成有限range，zero length保持open-ended。Linux允许inclusive end恰好为
+  `OFFSET_MAX`；对应half-open endpoint为`i64::MAX + 1`时规范化为同范围的open-ended表示，只有继续越界才返回
+  `EOVERFLOW`。blocking同一invocation只复用normalized range；ordinary replay从raw syscall参数重新lookup/copy/
+  snapshot/normalize。
 - `anemone-rs::os::linux::fs`在2A提供`fcntl_getlk`、`fcntl_setlk`与仅供ABI/conformance consumer使用的raw-pointer
   entry；2B随真实blocking consumer增加`fcntl_setlkw`。typed wrapper不缓存fd target、holder、range或restart state。
 
@@ -869,6 +877,7 @@ decode处继续明确NYI，直到2B原子接入wait/restart；2A不得用busy lo
 Production source：
 
 - `anemone-abi/src/fs.rs`；
+- `anemone-rs/src/sys/linux/fs.rs`（只增加private raw `close_range(first, last, flags)` wrapper）；
 - `anemone-rs/src/os/linux/fs.rs`；
 - `anemone-kernel/src/syserror.rs`；
 - `anemone-kernel/src/fs/api/fcntl.rs`（迁移来源；2A完成后删除该旧路径）；
@@ -889,7 +898,8 @@ Existing KUnit consumer adaptation：
 
 Userspace/runtime source：
 
-- `anemone-apps/fcntl-test/Cargo.toml`、`Cargo.lock`、`app.toml`与`src/main.rs`（均新建）；
+- `anemone-apps/fcntl-test/Cargo.toml`、`Cargo.lock`、`app.toml`、`src/main.rs`与
+  `src/posix_record_lock.rs`（均新建；`main.rs`只负责suite dispatch，2A suite实现不平铺在入口）；
 - `anemone-apps/user-test/src/main.rs`；
 - `conf/rootfs/pretest-rv64.toml`；
 - `conf/rootfs/pretest-la64.toml`。
@@ -905,7 +915,7 @@ Userspace/runtime source：
 
 Validation-only、明确不在2A写集：
 
-- `anemone-rs/src/sys/linux/fs.rs`（raw `fcntl`已存在）与其它app；
+- 其它app与`anemone-rs` raw/typed filesystem wrapper source；
 - `anemone-kernel/src/fs/{file.rs,inode.rs}`、`fs/lock/flock/**`、filesystem backend；
 - clone/exec/exit/close syscall adapter；
 - `anemone-kernel/src/sched/**`、`task/sig/**`与所有current contracts；
@@ -919,7 +929,9 @@ POSIX cleanup -> opened-description release排序；holder与slot来自同一epi
 `published`决定binding liveness；fd reuse不共享slot object；flock/final-release/backend/scheduler零修改；原
 `fs/api/fcntl.rs`路径归零且全部既有non-record-lock branch在`fcntl/mod.rs`行为保持；raw UAPI、relative whence与
 Linux errno不进入VFS core；`fcntl`subtree不拥有grant/wait truth；`fs/mod.rs`只出现明确列举的crate-private
-operation/cleanup re-export且`fs::lock`保持private；`F_SETLKW`仍没有半套wait consumer。
+operation/cleanup re-export且`fs::lock`保持private；`F_SETLKW`仍没有半套wait consumer；`fcntl-test`只经
+`anemone-rs::os::linux::fs::close_range()`进入该syscall，app内没有architecture syscall assembly，raw owner除
+private `close_range` wrapper外没有其它API扩张。
 
 按顺序执行：
 
@@ -956,6 +968,20 @@ shutdown；随行LTP不证明record-lock。随后执行full caller/owner scan、
 没有temporary hook或manifest越界。contract cutover仍为`None`；2A candidate不得单独合入。transaction记录2A Closed
 后必须停止，等待开发者另行授权2B。
 
+#### Checkpoint 2A 关闭结果
+
+Checkpoint 2A已独立Closed。最终实现交付native 32-byte `Flock`、`F_GETLK/F_SETLK` adapter、operation-local
+holder/slot binding、ordinary close/dup3 replacement/close-range/CLOEXEC/final drain的exact-slot cleanup，以及
+拆分在`src/posix_record_lock.rs`中的8-case focused suite。最终review修正了terminal signed-offset边界、
+command-decode优先于fd admission的errno顺序，以及2B suite owner manifest；独立只读复核结论为Apollyon 0、
+Keter 0、Euclid 0、Safe 0。
+
+formatter、双架构app/kernel build、RV64 canonical wrapper、source/whitespace与mdBook证据通过；最终RV64日志为
+288/288 KUnit、`POSIXLOCK2A:SUMMARY:PASS:8`、tracked `sys` profile双libc 4/4 case及正常`PowerOff`。LA64 runtime、
+focused fcntl LTP、blocking/signal/restart语义、Stage 3与`POSIX-LOCK-CUTOVER`均Not Run。contract cutover继续为
+`None`，全部prospective IDs保持Not Effective；Stage 2未关闭，2A candidate不能写成standalone/current POSIX
+record-lock支持。Checkpoint 2B继续Ready / Not Active，等待开发者另行授权。
+
 ### Checkpoint 2B — Blocking Wait、Signal Replay 与 Stage 2 Closure
 
 #### 2B交付与Resolved Write Set Manifest
@@ -972,7 +998,7 @@ Production source：
 Userspace source：
 
 - `anemone-rs/src/os/linux/fs.rs`；
-- `anemone-apps/fcntl-test/src/main.rs`。
+- `anemone-apps/fcntl-test/src/posix_record_lock.rs`。
 
 文档write-back与2A相同；`docs/src/register/open-issues.md`不属于2B写集。`anemone-abi`、task/files、rootfs和
 `user-test`在2B均为validation-only；若2A接口不足，必须先停止并提交精确Route Correction / manifest expansion，

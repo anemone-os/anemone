@@ -448,6 +448,8 @@ pub mod linux {
     }
 
     pub mod fcntl {
+        use core::mem::{align_of, offset_of, size_of};
+
         pub const F_DUPFD: u32 = 0;
         pub const F_GETFD: u32 = 1;
         pub const F_SETFD: u32 = 2;
@@ -465,6 +467,33 @@ pub mod linux {
         pub const F_DUPFD_CLOEXEC: u32 = F_LINUX_SPECIFIC_BASE + 6;
         pub const F_SETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 7;
         pub const F_GETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 8;
+
+        pub const F_RDLCK: i16 = 0;
+        pub const F_WRLCK: i16 = 1;
+        pub const F_UNLCK: i16 = 2;
+
+        /// Native asm-generic Linux `struct flock` layout on RV64 and LA64.
+        ///
+        /// Kernel adapters copy this record as bytes because Linux permits an
+        /// unaligned userspace pointer and requires untouched padding/fields
+        /// to survive an `F_GETLK` round trip.
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct Flock {
+            pub l_type: i16,
+            pub l_whence: i16,
+            pub l_start: i64,
+            pub l_len: i64,
+            pub l_pid: i32,
+        }
+
+        const _: [(); 32] = [(); size_of::<Flock>()];
+        const _: [(); 8] = [(); align_of::<Flock>()];
+        const _: [(); 0] = [(); offset_of!(Flock, l_type)];
+        const _: [(); 2] = [(); offset_of!(Flock, l_whence)];
+        const _: [(); 8] = [(); offset_of!(Flock, l_start)];
+        const _: [(); 16] = [(); offset_of!(Flock, l_len)];
+        const _: [(); 24] = [(); offset_of!(Flock, l_pid)];
     }
 
     pub mod ioctl {

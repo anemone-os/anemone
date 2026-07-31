@@ -1,15 +1,18 @@
 use core::cmp::Ordering;
 
-use crate::{prelude::*, task::files::PosixLockHolder};
+use crate::{
+    prelude::*,
+    task::files::{PosixLockBinding, PosixLockHolder},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PosixLockRange {
+pub(crate) struct PosixLockRange {
     start: u64,
     end_exclusive: Option<u64>,
 }
 
 impl PosixLockRange {
-    fn finite(start: u64, end_exclusive: u64) -> Self {
+    pub(crate) fn finite(start: u64, end_exclusive: u64) -> Self {
         assert!(start < end_exclusive, "POSIX lock range must be nonempty");
         Self {
             start,
@@ -17,7 +20,7 @@ impl PosixLockRange {
         }
     }
 
-    const fn open_ended(start: u64) -> Self {
+    pub(crate) const fn open_ended(start: u64) -> Self {
         Self {
             start,
             end_exclusive: None,
@@ -77,10 +80,18 @@ impl PosixLockRange {
                 (None, None) => Ordering::Equal,
             })
     }
+
+    pub(crate) const fn start(self) -> u64 {
+        self.start
+    }
+
+    pub(crate) const fn end_exclusive(self) -> Option<u64> {
+        self.end_exclusive
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PosixLockMode {
+pub(crate) enum PosixLockMode {
     Read,
     Write,
 }
@@ -102,7 +113,7 @@ struct PosixLockSegment {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PosixLockConflict {
+pub(crate) struct PosixLockConflict {
     range: PosixLockRange,
     mode: PosixLockMode,
     report_tgid: u32,
@@ -116,6 +127,34 @@ impl From<&PosixLockSegment> for PosixLockConflict {
             report_tgid: segment.report_tgid,
         }
     }
+}
+
+impl PosixLockConflict {
+    pub(crate) const fn range(self) -> PosixLockRange {
+        self.range
+    }
+
+    pub(crate) const fn mode(self) -> PosixLockMode {
+        self.mode
+    }
+
+    pub(crate) const fn report_tgid(self) -> u32 {
+        self.report_tgid
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PosixLockQueryOutcome {
+    Available,
+    Conflict(PosixLockConflict),
+    BindingRetired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PosixLockSetOutcome {
+    Applied,
+    Conflict(PosixLockConflict),
+    BindingRetired,
 }
 
 #[derive(Debug)]
@@ -268,6 +307,135 @@ impl PosixLockDomain {
 
         drop(replaced);
     }
+
+    fn query_binding(
+        &self,
+        binding: &PosixLockBinding,
+        range: PosixLockRange,
+        mode: PosixLockMode,
+    ) -> PosixLockQueryOutcome {
+        let segments = self.segments.lock();
+        if !binding.is_live() {
+            return PosixLockQueryOutcome::BindingRetired;
+        }
+        match Self::find_conflict(&segments, binding.holder(), range, mode) {
+            Some(conflict) => PosixLockQueryOutcome::Conflict(conflict),
+            None => PosixLockQueryOutcome::Available,
+        }
+    }
+
+    fn set_binding(
+        &self,
+        binding: &PosixLockBinding,
+        range: PosixLockRange,
+        mode: PosixLockMode,
+        report_tgid: u32,
+    ) -> PosixLockSetOutcome {
+        let replaced = {
+            let mut segments = self.segments.lock();
+            if !binding.is_live() {
+                return PosixLockSetOutcome::BindingRetired;
+            }
+            if let Some(conflict) = Self::find_conflict(&segments, binding.holder(), range, mode) {
+                return PosixLockSetOutcome::Conflict(conflict);
+            }
+            let replacement = Self::rebuild_assignment(
+                &segments,
+                binding.holder(),
+                range,
+                Some((mode, report_tgid)),
+            );
+            core::mem::replace(&mut *segments, replacement)
+        };
+        drop(replaced);
+        PosixLockSetOutcome::Applied
+    }
+
+    fn unlock_binding(
+        &self,
+        binding: &PosixLockBinding,
+        range: PosixLockRange,
+    ) -> PosixLockSetOutcome {
+        let replaced = {
+            let mut segments = self.segments.lock();
+            if !binding.is_live() {
+                return PosixLockSetOutcome::BindingRetired;
+            }
+            if !segments.iter().any(|segment| {
+                segment.owner.same_identity(binding.holder()) && segment.range.overlaps(range)
+            }) {
+                return PosixLockSetOutcome::Applied;
+            }
+            let replacement = Self::rebuild_assignment(&segments, binding.holder(), range, None);
+            core::mem::replace(&mut *segments, replacement)
+        };
+        drop(replaced);
+        PosixLockSetOutcome::Applied
+    }
+
+    fn retire_binding(&self, binding: &PosixLockBinding) {
+        let removed = {
+            let mut segments = self.segments.lock();
+            let old = core::mem::take(&mut *segments);
+            let (removed, retained) = old
+                .into_iter()
+                .partition(|segment| segment.owner.same_identity(binding.holder()));
+            *segments = retained;
+            removed
+        };
+
+        // Holder references can be terminal. Keep their destruction outside
+        // the inode-domain guard so cleanup cannot re-enter the lock owner.
+        drop(removed);
+    }
+}
+
+pub(crate) fn query_posix_lock(
+    binding: &PosixLockBinding,
+    range: PosixLockRange,
+    mode: PosixLockMode,
+) -> PosixLockQueryOutcome {
+    binding
+        .file()
+        .inode()
+        .posix_lock_domain()
+        .query_binding(binding, range, mode)
+}
+
+pub(crate) fn set_posix_lock(
+    binding: &PosixLockBinding,
+    range: PosixLockRange,
+    mode: PosixLockMode,
+    report_tgid: u32,
+) -> PosixLockSetOutcome {
+    binding
+        .file()
+        .inode()
+        .posix_lock_domain()
+        .set_binding(binding, range, mode, report_tgid)
+}
+
+pub(crate) fn unlock_posix_lock(
+    binding: &PosixLockBinding,
+    range: PosixLockRange,
+) -> PosixLockSetOutcome {
+    binding
+        .file()
+        .inode()
+        .posix_lock_domain()
+        .unlock_binding(binding, range)
+}
+
+pub(crate) fn retire_posix_locks(binding: &PosixLockBinding) {
+    assert!(
+        !binding.is_live(),
+        "POSIX lock cleanup requires an unpublished fd-slot binding"
+    );
+    binding
+        .file()
+        .inode()
+        .posix_lock_domain()
+        .retire_binding(binding);
 }
 
 #[cfg(feature = "kunit")]

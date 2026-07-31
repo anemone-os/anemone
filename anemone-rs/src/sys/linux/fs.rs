@@ -154,6 +154,10 @@ pub fn close(fd: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_CLOSE, fd, 0, 0, 0, 0, 0) }
 }
 
+pub fn close_range(first: u64, last: u64, flags: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_CLOSE_RANGE, first, last, flags, 0, 0, 0) }
+}
+
 pub fn dup(fd: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_DUP, fd, 0, 0, 0, 0, 0) }
 }

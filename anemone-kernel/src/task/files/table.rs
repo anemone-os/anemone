@@ -5,7 +5,7 @@ use crate::{
 
 use super::{
     descriptor::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
-    opened_description::{FileDescOps, ProcFile},
+    opened_description::FileDescOps,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -100,12 +100,13 @@ impl FileTable {
         self.fds[idx] = Some(file_desc);
     }
 
-    fn recycle(&mut self, fd: Fd) -> Arc<ProcFile> {
+    fn recycle(&mut self, fd: Fd) -> Arc<FileDesc> {
         debug_assert!(fd < Fd(MAX_FD_PER_PROCESS as u32));
         debug_assert!(self.fds[fd.raw() as usize].is_some());
         let file_desc = self.fds[fd.raw() as usize].take().unwrap();
         self.bitmap.clear(fd.raw() as usize);
-        file_desc.unpublish_from_fd_table()
+        file_desc.unpublish_from_fd_table();
+        file_desc
     }
 
     pub(super) fn reserve_fd(&mut self) -> Result<Fd, SysError> {
@@ -195,7 +196,7 @@ impl FileTable {
         Ok(fd)
     }
 
-    pub(super) fn close_fd(&mut self, fd: Fd) -> Result<Arc<ProcFile>, SysError> {
+    pub(super) fn close_fd(&mut self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
         if fd.raw() as usize >= self.fds.len() {
             return Err(SysError::BadFileDescriptor);
         }
@@ -207,7 +208,7 @@ impl FileTable {
         }
     }
 
-    pub(super) fn close_range(&mut self, first: u32, last: u32) -> Vec<Arc<ProcFile>> {
+    pub(super) fn close_range(&mut self, first: u32, last: u32) -> Vec<Arc<FileDesc>> {
         let first = first as usize;
         if first >= self.fds.len() {
             return Vec::new();
@@ -336,7 +337,7 @@ impl FileTable {
         old_fd: Fd,
         new_fd: Fd,
         flags: FdFlags,
-    ) -> Result<Vec<Arc<ProcFile>>, SysError> {
+    ) -> Result<Vec<Arc<FileDesc>>, SysError> {
         if new_fd.raw() as usize >= self.fds.len() {
             return Err(SysError::BadFileDescriptor);
         }
@@ -361,22 +362,22 @@ impl FileTable {
         Ok(closed)
     }
 
-    pub(super) fn close_on_exec(&mut self) -> Vec<Arc<ProcFile>> {
+    pub(super) fn close_on_exec(&mut self) -> Vec<Arc<FileDesc>> {
         let mut closed = Vec::new();
         for fd in 0..self.fds.len() {
             if let Some(file_desc) = &self.fds[fd] {
                 if file_desc.fd_flags().contains(FdFlags::CLOSE_ON_EXEC) {
-                    let pfile = self.close_fd(Fd::new(fd as u32).unwrap()).expect(
+                    let file_desc = self.close_fd(Fd::new(fd as u32).unwrap()).expect(
                         "we've validated those created fds before, so they must be valid to close",
                     );
-                    closed.push(pfile);
+                    closed.push(file_desc);
                 }
             }
         }
         closed
     }
 
-    pub(super) fn drain_all_published_fds(&mut self) -> Vec<Arc<ProcFile>> {
+    pub(super) fn drain_all_published_fds(&mut self) -> Vec<Arc<FileDesc>> {
         let mut closed = Vec::new();
         for (fd, file_desc) in self.fds.iter_mut().enumerate() {
             if let Some(file_desc) = file_desc.take() {
@@ -388,7 +389,8 @@ impl FileTable {
                     !self.reserved_bitmap.test(fd),
                     "published fd slot marked reserved during explicit fd-table cleanup"
                 );
-                closed.push(file_desc.unpublish_from_fd_table());
+                file_desc.unpublish_from_fd_table();
+                closed.push(file_desc);
             }
         }
 

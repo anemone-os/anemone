@@ -1,8 +1,7 @@
 use crate::prelude::*;
 
 use super::{
-    Fd, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FileTable, LinuxOpenCompat,
-    OpenAccessMode, opened_description::ProcFile,
+    Fd, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FileTable, LinuxOpenCompat, OpenAccessMode,
 };
 
 /// Opaque POSIX record-lock owner identity for one file-table sharing episode.
@@ -29,6 +28,60 @@ impl PosixLockHolder {
 
     pub(crate) fn same_identity(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// One operation's exact POSIX-lock owner and fd-slot capability.
+///
+/// The holder and slot are captured under the same episode guard. The binding
+/// is deliberately not cloneable: it carries no fd number, range, table
+/// access, or participation truth, and `FileDesc::published` remains the sole
+/// commit-time liveness source.
+#[derive(Debug)]
+pub(crate) struct PosixLockBinding {
+    holder: PosixLockHolder,
+    file_desc: Arc<FileDesc>,
+}
+
+impl PosixLockBinding {
+    fn new(holder: PosixLockHolder, file_desc: Arc<FileDesc>) -> Self {
+        Self { holder, file_desc }
+    }
+
+    pub(crate) fn holder(&self) -> &PosixLockHolder {
+        &self.holder
+    }
+
+    pub(crate) fn file(&self) -> &Arc<File> {
+        self.file_desc.vfs_file()
+    }
+
+    pub(crate) fn access_mode(&self) -> OpenAccessMode {
+        self.file_desc.access_mode()
+    }
+
+    pub(crate) fn is_path_only(&self) -> bool {
+        self.file_desc.is_path_only()
+    }
+
+    pub(crate) fn is_live(&self) -> bool {
+        self.file_desc.is_published()
+    }
+
+    pub(crate) fn position(&self) -> usize {
+        self.file().pos()
+    }
+
+    pub(crate) fn inode_size(&self) -> u64 {
+        self.file().inode().size()
+    }
+
+    pub(crate) fn is_regular(&self) -> bool {
+        self.file().inode().ty() == InodeType::Regular
+    }
+
+    fn release_description_ref(&self) {
+        self.file_desc.release_description_ref();
     }
 }
 
@@ -136,7 +189,7 @@ impl FilesState {
     /// Withdraw one semantic participant and drain the table exactly when it
     /// is the final participant. Opened-description release remains outside
     /// the episode guard because it may enter VFS cleanup and wake waiters.
-    fn detach(mut self) -> Vec<Arc<ProcFile>> {
+    fn detach(mut self) -> Vec<PosixLockBinding> {
         let closed = {
             let mut inner = self.episode.inner.write();
             assert!(
@@ -145,7 +198,12 @@ impl FilesState {
             );
             inner.participants -= 1;
             if inner.participants == 0 {
-                inner.table.drain_all_published_fds()
+                inner
+                    .table
+                    .drain_all_published_fds()
+                    .into_iter()
+                    .map(|file_desc| PosixLockBinding::new(self.episode.holder.clone(), file_desc))
+                    .collect()
             } else {
                 Vec::new()
             }
@@ -180,6 +238,33 @@ impl FilesState {
 
     fn holder(&self) -> PosixLockHolder {
         self.episode.holder.clone()
+    }
+
+    fn binding(&self, fd: Fd) -> Result<PosixLockBinding, SysError> {
+        let inner = self.episode.inner.read();
+        assert!(
+            inner.participants > 0,
+            "terminal file-table episode used for POSIX lock binding"
+        );
+        let file_desc = inner.table.get_fd(fd)?;
+        Ok(PosixLockBinding::new(
+            self.episode.holder.clone(),
+            file_desc,
+        ))
+    }
+
+    fn with_removed<R>(
+        &self,
+        remove: impl FnOnce(&mut FileTable) -> Result<R, SysError>,
+        bind: impl FnOnce(R, &PosixLockHolder) -> Vec<PosixLockBinding>,
+    ) -> Result<Vec<PosixLockBinding>, SysError> {
+        let mut inner = self.episode.inner.write();
+        assert!(
+            inner.participants > 0,
+            "terminal file-table episode used for fd removal"
+        );
+        let removed = remove(&mut inner.table)?;
+        Ok(bind(removed, &self.episode.holder))
     }
 }
 
@@ -283,13 +368,17 @@ impl Task {
             .with_table_mut(f)
     }
 
-    fn release_description_ref(pfile: Arc<ProcFile>) {
-        pfile.release_description_ref();
+    fn finish_removed_binding(binding: PosixLockBinding) {
+        // The fd-table publication is already withdrawn and all table/episode
+        // guards are gone before VFS cleanup. Opened-description retirement is
+        // last because it may enter backend final-release code.
+        crate::fs::retire_posix_locks(&binding);
+        binding.release_description_ref();
     }
 
-    fn release_description_refs(closed: Vec<Arc<ProcFile>>) {
-        for pfile in closed {
-            Self::release_description_ref(pfile);
+    fn finish_removed_bindings(closed: Vec<PosixLockBinding>) {
+        for binding in closed {
+            Self::finish_removed_binding(binding);
         }
     }
 
@@ -299,7 +388,7 @@ impl Task {
             .write()
             .replace(files_state)
             .expect("new task must own its initial files state");
-        Self::release_description_refs(old.detach());
+        Self::finish_removed_bindings(old.detach());
     }
 
     pub(crate) fn share_files_from(&mut self, parent: &Task) {
@@ -345,7 +434,7 @@ impl Task {
             .write()
             .take()
             .expect("task file-table participation detached more than once");
-        Self::release_description_refs(files_state.detach());
+        Self::finish_removed_bindings(files_state.detach());
     }
 
     pub fn open_fd(
@@ -398,13 +487,30 @@ impl Task {
         self.with_table(|table| table.get_fd(fd))
     }
 
+    pub(crate) fn posix_lock_binding(&self, fd: Fd) -> Result<PosixLockBinding, SysError> {
+        let files_state = self.files_state.read();
+        files_state
+            .as_ref()
+            .expect("detached task cannot capture a POSIX lock binding")
+            .binding(fd)
+    }
+
     pub fn opened_fd_numbers_snapshot(&self) -> Vec<Fd> {
         self.with_table(FileTable::opened_fd_numbers_snapshot)
     }
 
     pub fn close_fd(&self, fd: Fd) -> Result<(), SysError> {
-        let pfile = self.with_table_mut(|table| table.close_fd(fd))?;
-        Self::release_description_ref(pfile);
+        let closed = {
+            let files_state = self.files_state.read();
+            files_state
+                .as_ref()
+                .expect("detached task cannot close an fd")
+                .with_removed(
+                    |table| table.close_fd(fd),
+                    |file_desc, holder| vec![PosixLockBinding::new(holder.clone(), file_desc)],
+                )?
+        };
+        Self::finish_removed_bindings(closed);
         Ok(())
     }
 
@@ -422,14 +528,43 @@ impl Task {
     }
 
     pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {
-        let closed = self.with_table_mut(|table| table.dup3(old_fd, new_fd, flags))?;
-        Self::release_description_refs(closed);
+        let closed = {
+            let files_state = self.files_state.read();
+            files_state
+                .as_ref()
+                .expect("detached task cannot duplicate an fd")
+                .with_removed(
+                    |table| table.dup3(old_fd, new_fd, flags),
+                    |file_descs, holder| {
+                        file_descs
+                            .into_iter()
+                            .map(|file_desc| PosixLockBinding::new(holder.clone(), file_desc))
+                            .collect()
+                    },
+                )?
+        };
+        Self::finish_removed_bindings(closed);
         Ok(new_fd)
     }
 
     pub fn close_cloexec_fds(&self) {
-        let closed = self.with_table_mut(FileTable::close_on_exec);
-        Self::release_description_refs(closed);
+        let closed = {
+            let files_state = self.files_state.read();
+            files_state
+                .as_ref()
+                .expect("detached task cannot close CLOEXEC fds")
+                .with_removed(
+                    |table| Ok(table.close_on_exec()),
+                    |file_descs, holder| {
+                        file_descs
+                            .into_iter()
+                            .map(|file_desc| PosixLockBinding::new(holder.clone(), file_desc))
+                            .collect()
+                    },
+                )
+                .expect("CLOEXEC removal cannot fail")
+        };
+        Self::finish_removed_bindings(closed);
     }
 
     pub fn close_range(
@@ -445,8 +580,23 @@ impl Task {
         if flags.contains(crate::fs::api::close::CloseRangeFlags::CLOEXEC) {
             self.with_table(|table| table.set_close_on_exec_range(first, last));
         } else {
-            let closed = self.with_table_mut(|table| table.close_range(first, last));
-            Self::release_description_refs(closed);
+            let closed = {
+                let files_state = self.files_state.read();
+                files_state
+                    .as_ref()
+                    .expect("detached task cannot close an fd range")
+                    .with_removed(
+                        |table| Ok(table.close_range(first, last)),
+                        |file_descs, holder| {
+                            file_descs
+                                .into_iter()
+                                .map(|file_desc| PosixLockBinding::new(holder.clone(), file_desc))
+                                .collect()
+                        },
+                    )
+                    .expect("close_range removal cannot fail")
+            };
+            Self::finish_removed_bindings(closed);
         }
     }
 }
@@ -454,6 +604,10 @@ impl Task {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::fs::{
+        InodePerm, PosixLockMode, PosixLockRange, PosixLockSetOutcome, set_posix_lock, vfs_touch,
+        vfs_unlink,
+    };
 
     fn open_root(files_state: &FilesState) -> Fd {
         files_state
@@ -469,10 +623,68 @@ mod kunits {
             .unwrap()
     }
 
-    fn release_all(closed: Vec<Arc<ProcFile>>) {
-        for pfile in closed {
-            pfile.release_description_ref();
+    fn release_all(closed: Vec<PosixLockBinding>) {
+        for binding in closed {
+            crate::fs::retire_posix_locks(&binding);
+            binding.release_description_ref();
         }
+    }
+
+    #[kunit]
+    fn posix_binding_rejects_late_commit_and_fd_reuse_gets_a_fresh_slot() {
+        let path = Path::new("/kunit-posix-binding-liveness");
+        let _created = vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        let files = FilesState::new_empty();
+        let fd = files
+            .with_table_mut(|table| {
+                table.open_fd(
+                    vfs_open(path).unwrap(),
+                    OpenAccessMode::ReadWrite,
+                    FileStatusFlags::empty(),
+                    LinuxOpenCompat::empty(),
+                    FdFlags::empty(),
+                )
+            })
+            .unwrap();
+        let old = files.binding(fd).unwrap();
+        let range = PosixLockRange::finite(0, 1);
+        assert_eq!(
+            set_posix_lock(&old, range, PosixLockMode::Write, 1),
+            PosixLockSetOutcome::Applied
+        );
+
+        let closed = files
+            .with_removed(
+                |table| table.close_fd(fd),
+                |file_desc, holder| vec![PosixLockBinding::new(holder.clone(), file_desc)],
+            )
+            .unwrap();
+        assert_eq!(
+            set_posix_lock(&old, range, PosixLockMode::Write, 1),
+            PosixLockSetOutcome::BindingRetired
+        );
+        release_all(closed);
+
+        let reused = files
+            .with_table_mut(|table| {
+                table.open_fd(
+                    vfs_open(path).unwrap(),
+                    OpenAccessMode::ReadWrite,
+                    FileStatusFlags::empty(),
+                    LinuxOpenCompat::empty(),
+                    FdFlags::empty(),
+                )
+            })
+            .unwrap();
+        assert_eq!(reused, fd);
+        let fresh = files.binding(reused).unwrap();
+        assert_eq!(
+            set_posix_lock(&fresh, range, PosixLockMode::Write, 2),
+            PosixLockSetOutcome::Applied
+        );
+
+        release_all(files.detach());
+        vfs_unlink(path).unwrap();
     }
 
     #[kunit]

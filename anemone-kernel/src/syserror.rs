@@ -71,6 +71,8 @@ pub enum SysError {
     Busy,
     /// File is too large.
     FileTooLarge,
+    /// A signed ABI range or offset cannot represent the requested result.
+    Overflow,
     /// The directory is not empty.
     DirNotEmpty,
     /// Trying to link across different filesystems.
@@ -228,6 +230,7 @@ impl SysError {
             SysError::IsDir => EISDIR,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,
             SysError::FileTooLarge => EFBIG,
+            SysError::Overflow => EOVERFLOW,
             SysError::DirNotEmpty => ENOTEMPTY,
             SysError::CrossDeviceLink => EXDEV,
             SysError::ReadOnlyFs => EROFS,

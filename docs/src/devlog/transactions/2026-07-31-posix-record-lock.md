@@ -1,12 +1,12 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0-1 Closed / Stage 2 Ready / Not Active / Not Cut Over
+**状态：** Active transaction / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Stage 2 not Closed / Not Cut Over
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
-**实施计划：** [Stage 2 — Checkpoint 2A/2B](../../rfcs/posix-record-lock/implementation.md#stage-2-ready--not-activenative-abiclosecommit-与-blocking-wait)
+**实施计划：** [Stage 2 — Checkpoint 2A/2B](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-2)
 **适用修订：** R0
-**Contract Cutover：** semantic `None` through Stage 2 resolution；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
+**Contract Cutover：** semantic `None` through Checkpoint 2A closure；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
 `POSIX-LOCK-*`继续 Not Effective
 
 ## 边界
@@ -17,8 +17,9 @@ file-table sharing episode、显式participation与opaque holder foundation，�
 
 Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
 把Stage 1解析并拆为1A/1B；两者现均已独立关闭，Stage 1 Closed。开发者随后另行授权只读`Stage 1 -> 2`
-resolution gate；Stage 2现已解析为2A/2B并停在Ready / Not Active。Stage 2实现及任何semantic contract cutover均
-未授权。Stage 0/1代码仍不是可独立合入的POSIX record-lock capability。
+resolution gate；Stage 2已解析为2A/2B，开发者随后只授权并已关闭Checkpoint 2A。Checkpoint 2B仍为Ready /
+Not Active，Stage 2尚未关闭，任何2B/Stage 3实现或semantic contract cutover均未授权。Stage 0/1/2A stacked
+candidate仍不是可独立合入或写成current支持的POSIX record-lock capability。
 
 ## R0 acceptance 与 activation
 
@@ -411,7 +412,7 @@ Gate`前；该gate、Stage 2及任何后续实现均未授权。
 组合。本gate从clean `dev/drc/omega@9d1204e0`读取Stage 0/1实际diff与证据、live fd-table/close/dup/exec/exit、
 `fcntl`/user-copy、POSIX domain、Event/wait、signal replay、current contracts/register、fixed Linux/LTP source和
 repository app/rootfs/runner。authoritative Ready definition与两个checkpoint manifest已写入
-[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-2-ready--not-activenative-abiclosecommit-与-blocking-wait)，
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-2)，
 本节只记录解析证据，不复制第二份计划。
 
 resolution确认：
@@ -486,3 +487,156 @@ profile、rootfs、apps或wrapper，也没有执行build、QEMU、KUnit或LTP。
 docs-only correction的`git diff --check`与新增行tab/尾随空白扫描无诊断，`mdbook build docs`通过；生成HTML确认
 `KETER-POSIX-LOCK-009`与本correction锚点及交叉链接均存在。全树路径扫描只保留上节首次resolution历史记录与本轮
 显式supersession说明，不再存在把`fs/lock/posix/api.rs`写成当前manifest或有效路线的表述。
+
+## Checkpoint 2A activation preflight and manifest stop — 2026-07-31
+
+开发者把“完成Stage 2 Checkpoint 2A”设为本轮唯一GOAL，明确不得进入2B，并要求checkpoint完成后由一位
+subagent做独立review。preflight从clean `dev/drc/omega@6f041f02`读取`AGENTS.md`、`LOCAL.md`、canonical RFC
+四页、register、current contracts、本transaction、live Stage 0/1 source与2A validation/runtime owner。Stage 1
+仍Closed；2A authoritative delivery、review、validation、停止/退出条件与resolved manifest均以当前
+`implementation.md`为准。除`6f041f02`的docs-only owner correction外，production source相对Stage 1 closure
+baseline没有漂移；旧scheduler register项与旧wake tail在live register/source中仍为零。
+
+preflight确认`anemone-rs::sys::linux::fs::fcntl()`已经存在，因而2A的record-lock typed wrapper可在已冻结的
+`anemone-rs/src/os/linux/fs.rs`内直接消费它。但2A同时明确要求新的`fcntl-test`覆盖代表性
+`close_range` cleanup，而live `anemone-rs`既没有raw `close_range` syscall wrapper，也没有可供app调用的typed
+wrapper。raw backend所在的`anemone-rs/src/sys/linux/fs.rs`被2A manifest明确列为validation-only；app也不能访问
+crate-private `sys` module。若只守现有manifest，唯一剩余路线是在`fcntl-test`内分别手写RV64/LA64 syscall汇编，
+这会复制`anemone-rs`的architecture backend、形成app-local ad-hoc旁路，并使双架构wrapper语义不可由唯一owner
+维护，因而被拒绝。
+
+该事实在任何production source修改前触发2A的manifest/public-API停止合同。候选最小扩展为：
+
+- 把`anemone-rs/src/sys/linux/fs.rs`从validation-only提升为2A production write set，只增加一个private raw
+  `close_range(first, last, flags)` syscall wrapper；
+- 在已经属于2A manifest的`anemone-rs/src/os/linux/fs.rs`增加对应typed `close_range` wrapper，让
+  `fcntl-test`成为首个真实consumer；不增加兼容语法、app-local syscall或其它raw wrapper；
+- 保持kernel owner、R0 ABI/visible semantics、current contracts、acceptance与contract cutover `None`不变；
+  public surface只增加现有kernel syscall的窄userspace调用能力，不改变syscall本身；
+- validation仍执行2A现有双架构app build、双架构kernel build与RV64 canonical wrapper，并额外source-audit
+  `fcntl-test`只经该唯一wrapper进入`close_range`，app内无architecture syscall backend。
+
+批准前Stage 2继续Ready / Not Active，未修改production source、app、rootfs、current contract、register或RFC
+target，也未运行build/QEMU/KUnit/LTP。批准后必须先把上述单文件manifest扩展及public-wrapper边界写回
+authoritative `implementation.md`，再由本transaction记录批准事实和生效点；若不批准，则2A无法按当前
+focused-app exit condition关闭，不能用省略`close_range`覆盖或app-local汇编冒充完成。
+
+## Checkpoint 2A manifest expansion approval and activation — 2026-07-31
+
+开发者明确同意上一节提出的精确扩展。authoritative `implementation.md`已先完成修正：
+`anemone-rs/src/sys/linux/fs.rs`从validation-only提升为2A production source，只允许增加private raw
+`close_range(first, last, flags)` wrapper；已在manifest内的`anemone-rs/src/os/linux/fs.rs`提供对应typed public
+wrapper，且`fcntl-test`必须成为首个真实consumer。app-local architecture syscall assembly、其它raw/typed wrapper、
+兼容入口与无真实consumer的API仍不在写集。
+
+本次批准与manifest修正不改变R0 target或revision、kernel syscall ABI、holder/domain/lifecycle owner、visible
+semantics、acceptance boundary、current contracts或validation floor；contract cutover仍为`None`，全部prospective
+POSIX contract IDs继续Not Effective。activation baseline固定为clean production source
+`dev/drc/omega@6f041f02`；此前唯一dirty内容是上一节preflight/stop transaction记录，`git diff --check`无诊断。
+Checkpoint 2A现由Ready进入Active。2B仍为Ready / Not Active，2A closure后必须停止，不能自动进入2B或Stage 3。
+
+## Checkpoint 2A focused-app suite split — 2026-07-31
+
+开发者在首轮focused app实现后明确要求suite不能平铺在`main.rs`。authoritative 2A manifest因此增加同一app owner内的
+新文件`anemone-apps/fcntl-test/src/posix_record_lock.rs`：`main.rs`只保留suite参数解析与dispatch，全部
+`posix-record-lock` case及其owner-local helper移动到该suite module。该结构修正不增加suite、production API、
+kernel owner、ABI、contract或acceptance，也不授权2B。
+
+修正前按顺序执行的`just fmt kernel --check`已通过；`just fmt fcntl-test --check`与
+`just fmt user-test --check`各自先报告纯formatter diff，随后经repository formatter修正。首次
+`just xtask app build fcntl-test --arch riscv64`在下载依赖索引前因sandbox DNS失败，未进入app编译、artifact export
+或runtime；suite拆分后必须从formatter开始重跑canonical验证，不能把该环境失败记录为compile evidence。
+
+## Checkpoint 2A implementation, validation and primary review candidate — 2026-07-31
+
+2A candidate按authoritative manifest完成：native 32-byte `Flock` ABI与typed/raw userspace wrapper、`fcntl`
+目录化adapter、operation-local holder/slot binding、`F_GETLK/F_SETLK`、全部published-slot removal handoff与
+holder x inode cleanup、owner-local KUnit，以及拆分到`src/posix_record_lock.rs`的8-case focused suite均已接线。
+`F_SETLKW`仍在general command decode处返回NYI；没有wait/signal/scheduler路径或current-contract cutover。
+
+主执行者沿ABI、owner、lifecycle、concurrency与resource边界审查时发现并修复一项Apollyon：初始normalization把
+half-open endpoint也限制为signed `off_t`，因而错误拒绝Linux允许的`l_start = i64::MAX, l_len = 1`。固定
+Linux 6.6.32 `flock64_to_posix_lock()`以inclusive end验证该请求合法，只有`start + len - 1`越过`OFFSET_MAX`
+才返回`EOVERFLOW`。最终实现允许half-open `i64::MAX + 1`并规范化为等价open-ended range；focused case同时证明
+该terminal byte可set/query/unlock且冲突报告`l_len = 0`，而`l_start = i64::MAX, l_len = 2`精确返回
+`EOVERFLOW`。修复保持R0 target、ABI owner、domain owner与manifest不变，不是架构摩擦或target renegotiation。
+
+最终source/caller scan确认：
+
+- ordinary close、dup3 replacement、close_range、CLOEXEC与final drain都返回被unpublish的原`Arc<FileDesc>`；
+  episode/table guard释放后统一执行POSIX cleanup，再释放opened-description publication ref；
+- binding holder与slot在同一episode guard下取得；`FileDesc.published`仍是唯一commit-time liveness truth，fd reuse
+  创建新slot object；domain guard内的recheck与guard外cleanup覆盖commit-before-close/close-before-commit集合；
+- `task::files`只持holder与slot capability，VFS inode domain仍是唯一grant truth；raw UAPI/relative whence/Linux
+  errno只存在于`fs/api/fcntl/posix_lock.rs`，`fs::lock`保持private且不拥有dispatch；
+- 旧`fs/api/fcntl.rs`物理路径已删除，existing non-record-lock branches由`fcntl/mod.rs`保持；`F_SETLKW`没有partial
+  wait consumer；flock、backend、opened-description final-release、scheduler、signal、current contracts、tracked
+  LTP profile/group与wrapper均无diff；
+- `fcntl-test/src/main.rs`只做suite dispatch；suite只通过`anemone-rs::os::linux::fs`进入fcntl/close_range，app内
+  没有architecture syscall assembly。raw userspace owner除获批的private `close_range` wrapper外没有API扩张。
+
+最终source依次通过：
+
+```text
+just fmt kernel --check
+just fmt fcntl-test --check
+just fmt user-test --check
+just xtask app build fcntl-test --arch riscv64
+just xtask app build fcntl-test --arch loongarch64
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+```
+
+两个kernel build沿用相同repository command在sandbox外执行；该路线只规避已复现的`lwext4` sandbox SIGSYS，不
+改变构建owner。第一次wrapper重跑因非TTY sudo无法读取rootfs materialization凭据，在kernel/QEMU前退出，不计为
+runtime证据；随后以TTY重跑同一canonical命令并exit 0：
+
+```text
+./scripts/run-user-test-rv64.sh \
+  etc/preliminary/images/sdcard-rv.img \
+  build/posix-record-lock-stage2a-rv64.log
+```
+
+最终日志包含288项KUnit与`All tests passed!`、`POSIXLOCK2A:SUMMARY:PASS:8`、tracked `sys` profile的glibc
+2/2与musl 2/2、以及orderly `PowerOff`。随行LTP不证明record-lock；LA64 runtime、focused fcntl LTP、blocking/
+signal语义、Stage 3与`POSIX-LOCK-CUTOVER`均Not Run。当前候选没有remaining Apollyon/Keter，仍保持Checkpoint 2A
+Active，等待唯一只读subagent终审后才能写回Closed；2B继续Ready / Not Active。
+
+## Checkpoint 2A independent review findings and repair candidate — 2026-07-31
+
+唯一独立只读subagent终审给出Apollyon 1、Keter 1、Euclid 0、Safe 0，因而拒绝关闭2A：
+
+- Apollyon：`sys_fcntl(fd: Fd, cmd: FcntlCmd, ...)`使syscall macro按形参顺序先做fallible fd parse，导致invalid
+  fd与invalid/NYI command并存时`EBADF`早于command decode，违反冻结的validation order。修复把arg0改为
+  infallible raw `u64` transport；macro先完成`FcntlCmd` decode，函数体再显式执行`Fd::try_from_syscall_arg()`。
+  dispatch、Fd类型、public API与其它command branch均不改变；各分支errno映射不变，唯一可见变化是多重非法输入
+  按冻结顺序优先返回command-decode errno。
+- Keter：suite拆分后，Ready / Not Active的2B manifest仍把focused suite写集指向只负责dispatch的`main.rs`。
+  修复只把该路径改为真实suite owner `src/posix_record_lock.rs`，保持2B未激活且不修改任何2B source。
+
+两项修复都位于既有owner与authoritative manifest边界内，不扩大API/shared contract/ABI/acceptance，不接入
+blocking/signal路径，也不是架构摩擦或target renegotiation。修复后`just fmt kernel --check`与
+`git diff --check`通过；RV64 kernel build在sandbox内按预期停于`lwext4`编译器`Bad system call`，同一repository
+command在sandbox外exit 0。2A保持Active，必须由同一独立reviewer复核为无active finding后才可写回Closed；2B仍为
+Ready / Not Active。
+
+## Checkpoint 2A independent review and closure — 2026-07-31
+
+同一独立只读reviewer在两项source/manifest修复后复核确认其成立，并指出transaction最初用“errno均不改变”描述
+command-first修复不够精确。文档随后改为：各分支errno映射不变，唯一可见变化是多重非法输入按冻结顺序优先返回
+command-decode errno。最终复核检查前后worktree status hash一致，明确确认未修改任何文件；disposition为
+Apollyon 0、Keter 0、Euclid 0、Safe 0，允许进入2A closure write-back。
+
+Checkpoint 2A退出条件全部满足：native ABI、nonblocking/query、operation-local binding与全部published-slot
+removal cleanup闭合；没有temporary hook、manifest外production文件、owner/API/shared-contract/ABI/acceptance扩张，
+也没有blocking wait、scheduler/signal或current-contract接线。primary review发现的terminal signed-offset错误与
+final review发现的command/fd validation precedence、2B suite-owner manifest问题均已neutralize；没有意料之外的
+架构摩擦或target renegotiation。
+
+最终evidence保持分层：formatter、双架构app/kernel build、RV64 canonical wrapper、source/whitespace与mdBook通过；
+RV64日志包含288/288 KUnit、`POSIXLOCK2A:SUMMARY:PASS:8`、tracked `sys` profile的glibc 2/2、musl 2/2与正常
+`PowerOff`。LA64 runtime、focused fcntl LTP、blocking/signal/restart语义、Stage 3与`POSIX-LOCK-CUTOVER`均Not Run。
+Contract cutover继续为`None`，全部prospective IDs保持Not Effective。
+
+Checkpoint 2A现为Closed并在此停止。Checkpoint 2B继续Ready / Not Active，Stage 2尚未关闭；2A candidate不得
+standalone合入、发布或写成current POSIX record-lock支持。后续只能由开发者另行授权2B，不得自动进入2B或Stage 3。

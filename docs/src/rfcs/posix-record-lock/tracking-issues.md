@@ -1,6 +1,6 @@
 # POSIX Record Lock Tracking Issues
 
-**状态：** R0 / Stage 0-1 Closed / Stage 2 Ready / Not Active / no current findings / Not Cut Over
+**状态：** R0 / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / no current findings / Not Cut Over
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
@@ -15,12 +15,14 @@ Ready / Not Active。开发者随后批准把结构迁移与新domain拆为Check
 Correction关闭，未形成target或design finding；1A/1B与Stage 1现均已Closed。1B实现期间唯一路线修正是删除
 KUnit对coalesce后具体diagnostic report值的过强断言；R0明确允许任一合法report snapshot，因此不形成finding。
 独立`Stage 1 -> 2`resolution gate随后核验live binding/removal、ABI、wait/restart与test wiring，把Stage 2完整拆为
-2A/2B并保持Ready / Not Active；随后owner review发现原计划把`fcntl(2)` command-family ABI错误下沉到
+2A/2B；随后owner review发现原计划把`fcntl(2)` command-family ABI错误下沉到
 `fs::lock`core，形成`KETER-POSIX-LOCK-009`。开发者接受把现有`fcntl.rs`目录化为
 `fcntl/{mod.rs,posix_lock.rs}`并保持VFS core为normalized internal owner；该finding已在同一docs-only Route
-Correction中neutralize，没有授权实现。
-Stage 0实现审查发现的显式detach consumer遗漏与runtime发现的kthread exit遗漏均已neutralize；最终独立review为
-Apollyon/Keter/Euclid/Safe全0。
+Correction中neutralize。Checkpoint 2A随后获得独立授权并已Closed；其primary/final review发现的terminal offset、
+command/fd validation precedence与suite-owner manifest问题均已修复并记录在Neutralized。最终独立只读复核为
+Apollyon/Keter/Euclid/Safe全0。Checkpoint 2B仍Ready / Not Active，Stage 2尚未关闭。
+此前Stage 0实现审查发现的显式detach consumer遗漏与runtime发现的kthread exit遗漏也均已neutralize；Stage 0当时的
+独立review同样为Apollyon/Keter/Euclid/Safe全0。
 后续 finding 仍按影响
 写回 `index.md`、`invariants.md` 或 `implementation.md`，本文只记录 finding 状态与依据。
 
@@ -207,7 +209,7 @@ Rust类型/函数、修改production source、改变target/contract或授权Stag
 POSIX record lock没有独立syscall；`F_GETLK/F_SETLK/F_SETLKW`属于`fcntl(2)` command family。该落点会让VFS
 lock core理解用户指针、raw command和Linux错误语义，并制造一个名为`api`、实际却不是syscall owner的旁路入口。
 
-**修复：** [Stage 2 Ready plan](./implementation.md#stage-2-ready--not-activenative-abiclosecommit-与-blocking-wait)
+**修复：** [Stage 2 plan](./implementation.md#posix-record-lock-stage-2)
 现在要求Checkpoint 2A把现有`fs/api/fcntl.rs`行为保持地迁入`fs/api/fcntl/mod.rs`，由root继续拥有
 `sys_fcntl`、command decode与总dispatch；新建`fs/api/fcntl/posix_lock.rs`承担record-lock command-family的
 raw copy、validation/normalization、copyout和errno/restart映射。`fs/lock/posix.rs`只接收normalized internal
@@ -220,3 +222,36 @@ compatibility入口。
 Ready implementation route与resolved manifest，不改变R0 target、state/protocol owner、ABI、visible semantics、
 Contract Impact、acceptance或cutover。Stage 2保持Ready / Not Active，未修改production source或运行测试；证据见
 [transaction correction](../../devlog/transactions/2026-07-31-posix-record-lock.md#stage-2-fcntlposix-api-owner-correction--2026-07-31)。
+
+### APOLLYON-POSIX-LOCK-010：terminal signed offset 被 half-open endpoint 错误拒绝
+
+**原问题：** 2A初始normalization要求finite half-open endpoint本身可由signed `off_t`表示，因此把
+`l_start = i64::MAX, l_len = 1`错误判为`EOVERFLOW`。Linux以inclusive end检查，这个请求仍只覆盖最后一个合法
+byte；只有`l_len = 2`才越过`OFFSET_MAX`。
+
+**修复：** ABI adapter允许内部half-open endpoint达到`i64::MAX + 1`，并把该terminal-byte range规范化为等价的
+open-ended表示；focused suite证明set/query/unlock成功、冲突报告`l_len = 0`，而再多一个byte精确返回
+`EOVERFLOW`。domain range owner、native ABI与R0 target均未改变。
+
+**状态：** Neutralized / 2026-07-31 Checkpoint 2A primary review；修复后完整2A validation重新通过。
+
+### APOLLYON-POSIX-LOCK-011：fallible fd parse 抢在 command decode 之前
+
+**原问题：** `sys_fcntl(fd: Fd, cmd: FcntlCmd, ...)`让syscall macro按形参顺序先做fallible fd conversion；invalid
+fd与invalid/NYI command并存时因此先返回`EBADF`，违反已冻结的`command decode -> fd/O_PATH`可见验证顺序。
+
+**修复：** arg0改为infallible raw `u64` transport，macro先完成`FcntlCmd` decode，函数体再执行
+`Fd::try_from_syscall_arg()`。各分支errno映射与dispatch保持不变；唯一可见变化是多重非法输入按冻结顺序优先返回
+command-decode errno。RV64 kernel build与独立source review确认修复成立。
+
+**状态：** Neutralized / 2026-07-31 Checkpoint 2A independent final review；不扩大API、ABI owner或write set。
+
+### KETER-POSIX-LOCK-012：2B manifest 指向 focused suite 的错误文件 owner
+
+**原问题：** 开发者要求`fcntl-test` suite从`main.rs`拆到`src/posix_record_lock.rs`后，2B Ready manifest仍把
+后续blocking/signal case写集指向只负责parse/dispatch的`main.rs`，会让下一checkpoint违反已批准的suite owner边界。
+
+**修复：** 只把2B userspace manifest路径改为`src/posix_record_lock.rs`。Checkpoint 2B保持Ready / Not Active，
+没有修改任何2B source或提前接入`F_SETLKW`。
+
+**状态：** Neutralized / 2026-07-31 Checkpoint 2A independent final review；最终复核确认无remaining finding。
