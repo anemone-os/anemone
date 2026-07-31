@@ -31,17 +31,17 @@ installed_dir = "/bin"
 # name = "ioctl-test"
 # installed_dir = "/bin"
 
-[[apps]]
-name = "epoll-test"
-installed_dir = "/bin"
-
-[[apps]]
-name = "flock-test"
-installed_dir = "/bin"
-
-[[apps]]
-name = "udp-test"
-installed_dir = "/bin"
+# [[apps]]
+# name = "epoll-test"
+# installed_dir = "/bin"
+# 
+# [[apps]]
+# name = "flock-test"
+# installed_dir = "/bin"
+# 
+# [[apps]]
+# name = "udp-test"
+# installed_dir = "/bin"
 
 # [[apps]]
 # name = "fair-test"
