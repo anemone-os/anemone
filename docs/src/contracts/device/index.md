@@ -1,8 +1,8 @@
 # Device 当前契约
 
 **Owner：** device-number numeric namespace、character/block endpoint identity 与各自 registry admission
-**覆盖范围：** 当前 effective 16/16 typed device-number namespace、endpoint-owned number、producer-owned
-number/name policy 与 registry-derived key
+**覆盖范围：** 当前 effective 12/20 category-neutral device-number domain、char/block typed registry namespace、
+endpoint-owned number、producer-owned number/name policy 与 registry-derived key
 **不覆盖：** device discovery、devfs/TTY publication lifecycle、provider open/lifetime、block I/O、hotplug/unpublish、
 ordinary-filesystem special-node creation
 **最后核验：** 2026-08-01
@@ -12,9 +12,9 @@ ordinary-filesystem special-node creation
 
 ## Contract Surfaces
 
-- [Device number namespace](./device-number.md)：16/16 typed numeric domain、char/block namespace separation、
-  endpoint-owned number 与 producer/registry ownership；VFS Make Node R0 的 12/20 Refine 是尚未生效的
-  pending successor。
+- [Device number namespace](./device-number.md)：12/20 category-neutral numeric domain、canonical Linux
+  `dev_t` codec、char/block namespace separation、endpoint-owned number 与 producer/registry ownership；VFS
+  Make Node R0 `DEVICE-NUMBER-CUTOVER` 已生效，Stage 2 不重新打开该 namespace。
 
 ## 邻接契约
 

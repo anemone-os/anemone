@@ -6,16 +6,15 @@
 **最后更新：** 2026-08-01
 **领域：** fs / VFS / syscall ABI / ext4 / ramfs
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
-**影响契约：** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Refine 已提取 current baseline 的
-`DEVICE-NUMBER-001` 与 `VFS-MOUNT-ADMISSION-002`；Introduce `VFS-MAKE-NODE-001`、
-`VFS-SPECIAL-NODE-RDEV-001`
+**影响契约：** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；`DEVICE-NUMBER-001` Refine已Effective；
+`VFS-MOUNT-ADMISSION-002` Refine与`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001` Introduce仍Not Cut Over
 **开放问题：** None active；[Tracking Issues](./tracking-issues.md) 保留本轮四个 Keter、两个 Euclid 的
 Neutralized 历史
-**下一步：** 完成已激活的 [Stage 1](./implementation.md#5-stage-1-ready--device-number-prerequisite)；
-`DEVICE-NUMBER-CUTOVER` 前仍保持 16/16 current baseline，Stage 1 关闭后停止，不自动进入 `1 -> 2` gate
+**下一步：** [Stage 1](./implementation.md#5-stage-1-closed--device-number-prerequisite)与
+`DEVICE-NUMBER-CUTOVER`已关闭；当前停止，Stage 2保持Outline / Not Active，不自动进入`1 -> 2` gate
 
 > 本目录自 2026-07-31 起是 `vfs-make-node` 提案与 target 的公共 canonical source。2026-08-01 的独立复审
-> 接受 R0；Stage 1 已由本轮唯一 GOAL 激活，但 target contract 仍须在各自 cutover gate 后才生效。
+> 接受 R0；Stage 1 已关闭并使`DEVICE-NUMBER-001`生效，其余target contract仍须在各自cutover gate后才生效。
 
 ## 摘要
 
@@ -145,7 +144,7 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Implementation plan](./implementation.md)：一个 device-number prerequisite + 一个 make-node 主实现阶段；
-  Stage 1 Active，Stage 2 Outline
+  Stage 1 Closed，Stage 2 Outline / Not Active
 - [Tracking Issues](./tracking-issues.md)：保存当前影响 target / implementation readiness 的 finding
 - [No-umask accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)：
   本 revision 的 requested permission bits 不经 process umask 屏蔽
@@ -155,9 +154,9 @@ Current contracts：
 
 - [`VFS-FILE-KIND-001`](../../contracts/vfs/file-kind.md#vfs-file-kind-001--inode-kind-是唯一-file-type-truth)：
   Preserve；immutable inode kind 继续是唯一 file-type truth。
-- [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1616-typed-device-number-namespace)：
-  Proposed Refine；当前 contract 只记录 live 16/16 typed namespace、endpoint-owned number 与
-  producer-owned allocation/name baseline；独立 prerequisite cutover 才扩展为 12/20 并迁移既有 consumer。
+- [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1220-category-neutral-device-number-domain)：
+  Refine已由`DEVICE-NUMBER-CUTOVER`生效；当前contract记录12/20 common domain、category-neutral generic inode
+  number、typed registry boundary与canonical Linux codec，Stage 2只读复用该baseline。
 - [`TTY-ENDPOINT-001`](../../contracts/tty/data-plane.md#tty-endpoint-001--endpoint-publication是稳定的单向transaction)：
   Preserve；`ttyS<N>` major 4/minor `64+N` 与 console 5:1 均不改变。
 - [`VFS-MOUNT-ADMISSION-002`](../../contracts/vfs/mount-admission.md#vfs-mount-admission-002--source-kind-owned-admission)：
@@ -288,10 +287,9 @@ KUnit 与 source audit 应覆盖 mode/`dev_t` codec、capability gate、backend 
 
 ## Contract Impact
 
-规范性 contract delta、owner 与 cutover 条件见 [目标和不变量](./invariants.md#contract-impact)。R0 accepted-but-
-not-effective 阶段不修改 target contract delta。公开提升 gate 已从 live source docs-only 提取
-16/16 `DEVICE-NUMBER-001` baseline；实现期先由独立 `DEVICE-NUMBER-CUTOVER` 完成 12/20 normalization、通用 inode
-category-neutral number 与既有 consumer 迁移，关闭后才能进入 make-node stage。最终
+规范性contract delta、owner与cutover条件见[目标和不变量](./invariants.md#contract-impact)。公开提升gate最初从
+live source docs-only提取16/16 `DEVICE-NUMBER-001` baseline；2026-08-01独立`DEVICE-NUMBER-CUTOVER`已完成12/20
+normalization、通用inode category-neutral number与既有consumer迁移。最终
 `VFS-MAKE-NODE-CUTOVER` 再原子 Introduce filesystem-backed make-node/`rdev` 并 Refine mount `ENOTBLK`。
 任一 gate 失败时不得提前把 target 写入 current contract。
 
@@ -387,9 +385,9 @@ kind truth。filesystem 只接收 VFS semantic description。
 
 ## 收口
 
-R0 已接受，transaction 与 Stage 1 已激活；`DEVICE-NUMBER-001` 仍保持 16/16 effective baseline，所有 target
-contract 均尚未 cut over。Stage 1 关闭只完成 device-number prerequisite，必须在此停止，不自动解析或启动
-Stage 2。
+R0已接受；Stage 1与`DEVICE-NUMBER-CUTOVER`已关闭，`DEVICE-NUMBER-001`现为effective 12/20 baseline。
+`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`、`VFS-MOUNT-ADMISSION-002` Refine与
+`VFS-MAKE-NODE-CUTOVER`仍Not Cut Over。当前必须在此停止，不自动解析或启动Stage 2。
 
 最终 RFC closure 至少需要：
 

@@ -1,14 +1,14 @@
 # 2026-07-31 - VFS Make Node
 
-**Status:** Active / R0 Accepted / Stage 1 Active / `DEVICE-NUMBER-CUTOVER` Not Cut Over
+**Status:** Active / R0 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Outline
 **Opened:** 2026-08-01；canonical path 于 2026-07-31 public promotion 时预留
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260731-vfs-make-node R0](../../rfcs/vfs-make-node/index.md),
 [目标与不变量](../../rfcs/vfs-make-node/invariants.md),
-[Stage 1 definition](../../rfcs/vfs-make-node/implementation.md#5-stage-1-ready--device-number-prerequisite)
+[Stage 1 definition](../../rfcs/vfs-make-node/implementation.md#5-stage-1-closed--device-number-prerequisite)
 **Canonical Revision:** R0
-**Contract Impact:** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Stage 1 只在
-`DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`；`VFS-MAKE-NODE-001`、
+**Contract Impact:** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Stage 1已在
+`DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`为Effective；`VFS-MAKE-NODE-001`、
 `VFS-SPECIAL-NODE-RDEV-001` 与 `VFS-MOUNT-ADMISSION-002` 保持 Not Cut Over
 
 ## Scope and authorization
@@ -79,3 +79,37 @@ lifecycle/lookup、block I/O 与 mount provider-miss semantics 保持；不新�
 **Validation floor:** `just fmt kernel --check`、`git diff --check`、RV64/LA64 release preset build、绑定上述 master
 的 RV64 end-to-end wrapper、source audit、独立 final review 与 `mdbook build docs`。LA64 runtime 与 make-node
 syscall proof明确属于 Stage 2，保持 Not Run。
+
+### 2026-08-01 - Stage 1 closure and `DEVICE-NUMBER-CUTOVER`
+
+**Implementation:** `anemone_abi::fs::linux::dev_t`成为唯一Linux 12/20 packed codec owner，精确API为
+`encode(u32, u32) -> u32`与`decode(u32)`，codec位宽常量保持private。`device::devnum`独立拥有common numeric
+domain的public bounds；`DeviceNumber`拥有category-neutral
+major/minor，`CharDevNum` / `BlockDevNum`只在typed registry boundary包装；`DeviceId`收窄为`None | Number`，
+删除Char/Block tag、Raw与行为性raw escape。stat和loop调用canonical codec，statx直接投影结构化parts。
+
+char/block FileOps与mount均先检查immutable inode kind，再从numeric `rdev`构造typed key；mount继续对non-block
+返回`EINVAL`，provider miss保持`ENOENT`，没有提前实施Stage 2 `ENOTBLK` Refine。devfs、console、TTY与ext4只把
+既有typed endpoint number投影为common number；static major/minor、name、registry、publication/provider
+lifecycle与block I/O均未改变。最终source diff恰好覆盖第5.5节十二个冻结路径，没有source expansion。
+
+**Validation:** `just fmt kernel --check`与`git diff --check`通过。RV64/LA64 canonical release preset build在最终
+tree通过；sandbox内相同build曾因lwext4 C编译触发`Bad system call`/SIGSYS，完全相同命令在sandbox外成功，因此
+分类为environmental。RV64 wrapper绑定preliminary 4 GiB只读master并使用worktree-local运行副本，near-final
+tree完成282/282 KUnit、glibc/musl focused LTP共4/4 case与orderly PowerOff。新增device-number domain、typed
+conversion、codec boundary、stat/statx与loop codec KUnit均`ok`，既有devfs char/block与TTY mapping KUnit通过。
+
+runtime之后只发生三项局部可预测收紧：codec签名从u64改为冻结的u32 API、mount kind检查移到`get_attr()`前，
+以及删除多余的console单值KUnit；production console projection与device domain bounds没有再改。开发者明确判断
+无需因此重跑QEMU；最终双架构build、format、whitespace与source audit覆盖这些变化。LA64 runtime、真实
+`mknodat`、filesystem node matrix与Stage 2用户态proof均Not Run。
+
+**Review:** 最终独立只读review以最新tree核对canonical RFC/current contract target、全部十二个source diff和
+validation provenance，结论Apollyon 0、Keter 0、Euclid 0、Safe 0。review确认codec唯一owner、category single
+truth、typed namespace、mount order/errno、loop/stat projection、allocator bounds及existing number/name/
+publication/provider行为均满足Stage 1，且无write-set或Stage 2越界。
+
+**Cutover / stop:** `DEVICE-NUMBER-CUTOVER`原子把`DEVICE-NUMBER-001`从历史16/16 baseline Refine为effective
+12/20 category-neutral current contract；Stage 1 Closed。RFC仍是R0 Accepted for Implementation，transaction
+保持Active只因完整RFC尚有后续stage。Stage 2继续Outline / Not Active，`VFS-MAKE-NODE-CUTOVER`与其三个contract
+delta保持Not Cut Over；本轮未运行、未解析、未授权`1 -> 2 Implementation Resolution Gate`，并在此停止。

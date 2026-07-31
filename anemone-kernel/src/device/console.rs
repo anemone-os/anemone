@@ -400,7 +400,7 @@ pub(crate) fn prepare_devfs() -> Result<ConsoleDevfsPublication, SysError> {
         attr: DevfsNodeAttr {
             ty: InodeType::Char,
             perm: InodePerm::all_rw(),
-            rdev: DeviceId::Char(console_devnum()),
+            rdev: DeviceId::Number(console_devnum().number()),
         },
         ops,
     }))

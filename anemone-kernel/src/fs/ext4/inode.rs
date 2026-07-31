@@ -138,7 +138,7 @@ fn ext4_mode_from_attr(node_type: LwExt4InodeType, raw_mode: u32) -> Result<Inod
 #[inline]
 fn ext4_fs_dev(sb: &SuperBlock) -> DeviceId {
     match sb.backing() {
-        MountSource::Block(dev) => DeviceId::Block(dev.devnum()),
+        MountSource::Block(dev) => DeviceId::Number(dev.devnum().number()),
         _ => unreachable!(),
     }
 }

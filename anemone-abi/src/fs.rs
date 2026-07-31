@@ -133,6 +133,31 @@ pub mod linux {
         pub const S_IXOTH: u32 = 0o000001;
     }
 
+    /// Linux userspace `dev_t` packing (`new_encode_dev` / `new_decode_dev`).
+    ///
+    /// The packed form is an ABI boundary representation. Kernel-internal
+    /// device identity should retain separate major and minor components.
+    pub mod dev_t {
+        const MAJOR_BITS: u32 = 12;
+        const MINOR_BITS: u32 = 20;
+
+        const MAJOR_MASK: u32 = (1 << MAJOR_BITS) - 1;
+        const MINOR_MASK: u32 = (1 << MINOR_BITS) - 1;
+
+        pub const fn encode(major: u32, minor: u32) -> u32 {
+            assert!(major <= MAJOR_MASK);
+            assert!(minor <= MINOR_MASK);
+
+            (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
+        }
+
+        pub const fn decode(encoded: u32) -> (u32, u32) {
+            let major = (encoded >> 8) & MAJOR_MASK;
+            let minor = (encoded & 0xff) | ((encoded >> 12) & (MINOR_MASK & !0xff));
+            (major, minor)
+        }
+    }
+
     pub mod at {
         pub const AT_FDCWD: i32 = -100;
 

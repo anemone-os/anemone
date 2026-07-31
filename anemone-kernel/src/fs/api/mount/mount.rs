@@ -112,6 +112,15 @@ fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<Mount
         },
     };
 
+    if dev.inode().ty() != InodeType::Block {
+        knoticeln!(
+            "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=not-block-device errno={:?}",
+            fstype,
+            SysError::InvalidArgument
+        );
+        return Err(SysError::InvalidArgument);
+    }
+
     let attr = match dev.inode().get_attr() {
         Ok(attr) => attr,
         Err(err) => {
@@ -124,14 +133,15 @@ fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<Mount
         },
     };
 
-    let DeviceId::Block(devnum) = attr.rdev else {
+    let Some(number) = attr.rdev.number() else {
         knoticeln!(
-            "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=not-block-device errno={:?}",
+            "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=missing-device-number errno={:?}",
             fstype,
             SysError::InvalidArgument
         );
         return Err(SysError::InvalidArgument);
     };
+    let devnum = BlockDevNum::from(number);
 
     let Some(dev) = get_block_dev(devnum) else {
         knoticeln!(

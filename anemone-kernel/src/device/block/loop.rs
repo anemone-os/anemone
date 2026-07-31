@@ -7,16 +7,27 @@ use crate::{
     prelude::*,
     syscall::user_access::{UserReadPtr, UserWritePtr},
 };
-use anemone_abi::fs::linux::ioctl::{
-    LO_FLAGS_AUTOCLEAR, LO_FLAGS_READ_ONLY, LO_NAME_SIZE, LOOP_CLR_FD, LOOP_CONFIGURE,
-    LOOP_GET_STATUS, LOOP_GET_STATUS64, LOOP_SET_DIRECT_IO, LOOP_SET_FD, LOOP_SET_STATUS,
-    LOOP_SET_STATUS64, LoopFlags as LinuxLoopFlags, loop_info, loop_info64,
+use anemone_abi::fs::linux::{
+    dev_t as linux_dev_t,
+    ioctl::{
+        LO_FLAGS_AUTOCLEAR, LO_FLAGS_READ_ONLY, LO_NAME_SIZE, LOOP_CLR_FD, LOOP_CONFIGURE,
+        LOOP_GET_STATUS, LOOP_GET_STATUS64, LOOP_SET_DIRECT_IO, LOOP_SET_FD, LOOP_SET_STATUS,
+        LOOP_SET_STATUS64, LoopFlags as LinuxLoopFlags, loop_info, loop_info64,
+    },
 };
 
 const LOOP_BLOCK_SIZE: BlockSize = BlockSize::new(1);
 
 const fn devnum_for(id: usize) -> BlockDevNum {
     BlockDevNum::new(MajorNum::new(devnum::block::major::LOOP), MinorNum::new(id))
+}
+
+fn encode_device_id(dev: DeviceId) -> u32 {
+    let Some(number) = dev.number() else {
+        return 0;
+    };
+    let (major, minor) = number.decompose();
+    linux_dev_t::encode(major.get() as u32, minor.get() as u32)
 }
 
 fn name_for(id: usize) -> String {
@@ -292,9 +303,9 @@ impl LoopBoundSnapshot {
         let attr = self.backing.get_attr()?;
         let mut info = loop_info::default();
         info.lo_number = i32::try_from(id).map_err(|_| SysError::InvalidArgument)?;
-        info.lo_device = u32::try_from(attr.fs_dev.raw()).map_err(|_| SysError::FileTooLarge)?;
+        info.lo_device = encode_device_id(attr.fs_dev);
         info.lo_inode = usize::try_from(attr.ino.get()).map_err(|_| SysError::FileTooLarge)?;
-        info.lo_rdevice = u32::try_from(attr.rdev.raw()).map_err(|_| SysError::FileTooLarge)?;
+        info.lo_rdevice = encode_device_id(attr.rdev);
         info.lo_offset = i32::try_from(self.offset).map_err(|_| SysError::InvalidArgument)?;
         info.lo_flags = i32::try_from(self.flags.bits()).map_err(|_| SysError::InvalidArgument)?;
         copy_name(&mut info.lo_name, &self.display_name);
@@ -304,9 +315,9 @@ impl LoopBoundSnapshot {
     fn to_loop_info64(&self, id: usize) -> Result<loop_info64, SysError> {
         let attr = self.backing.get_attr()?;
         let mut info = loop_info64::default();
-        info.lo_device = attr.fs_dev.raw();
+        info.lo_device = encode_device_id(attr.fs_dev) as u64;
         info.lo_inode = attr.ino.get();
-        info.lo_rdevice = attr.rdev.raw();
+        info.lo_rdevice = encode_device_id(attr.rdev) as u64;
         info.lo_offset = self.offset as u64;
         info.lo_sizelimit = self.size_limit.unwrap_or(0) as u64;
         info.lo_number = u32::try_from(id).map_err(|_| SysError::InvalidArgument)?;
@@ -484,4 +495,13 @@ fn init() {
 fn endpoint_identity_uses_one_local_id() {
     assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
     assert_eq!(name_for(0), "loop0");
+}
+
+#[kunit]
+fn loop_status_uses_the_canonical_linux_device_codec() {
+    let number = DeviceNumber::new(MajorNum::new(2048), MinorNum::new(0x12345));
+    let encoded = encode_device_id(DeviceId::Number(number));
+
+    assert_eq!(encoded, linux_dev_t::encode(2048, 0x12345));
+    assert_eq!(linux_dev_t::decode(encoded), (2048, 0x12345));
 }

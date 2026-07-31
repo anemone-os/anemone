@@ -1,13 +1,13 @@
 # VFS Make Node 实施计划
 
-**状态：** R0 Accepted / Stage 1 Active；Stage 2 Outline
+**状态：** R0 Accepted / Stage 1 Closed；Stage 2 Outline / Not Active
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **目标与不变量：** [VFS Make Node 目标与不变量](./invariants.md)
-**当前契约：** [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1616-typed-device-number-namespace)
-为 live 16/16 baseline；其余受影响 ID 见 [Contract Impact](./invariants.md#contract-impact)
+**当前契约：** [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1220-category-neutral-device-number-domain)
+已由 Stage 1 cut over为live 12/20 baseline；其余受影响ID见[Contract Impact](./invariants.md#contract-impact)
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
-**Contract Cutover：** `DEVICE-NUMBER-CUTOVER`、`VFS-MAKE-NODE-CUTOVER` 均 Not Cut Over
+**Contract Cutover：** `DEVICE-NUMBER-CUTOVER` Effective；`VFS-MAKE-NODE-CUTOVER` Not Cut Over
 
 本文只把 R0 accepted target 转换为可执行顺序、首阶段 write set、验证与停止条件，不重新定义
 [`index.md`](./index.md) 和 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI 或 proof
@@ -99,19 +99,19 @@ kernel build、QEMU、KUnit 与 LTP 均 Not Run，也不属于本 docs-only gate
 
 | Stage                                | 成熟度             | 单一交付                                                                                     | Contract Cutover        | 解析触发点                                        |
 | ------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
-| Stage 1 — Device-number prerequisite | Active             | 12/20 category-neutral numeric domain 与全部既有 consumer 迁移                               | `DEVICE-NUMBER-CUTOVER` | entry gate、R0 acceptance、transaction 与独立授权 |
+| Stage 1 — Device-number prerequisite | Closed             | 12/20 category-neutral numeric domain 与全部既有 consumer 迁移                               | `DEVICE-NUMBER-CUTOVER` Effective | entry gate、R0 acceptance、transaction 与独立授权 |
 | Stage 2 — Make-node vertical slice   | Outline            | RV64/LA64 `mknodat` 到 ext4/ramfs persistence、metadata/open/mount 与用户态 proof 的完整闭环 | `VFS-MAKE-NODE-CUTOVER` | Stage 1 Closed 后的独立 `1 -> 2` resolution       |
 
 Stage 1 不交付 make-node syscall；Stage 2 不重新打开 device-number namespace。两次 cutover 各自保持旧 contract
 直到相应 stage 完整通过，不能把 Stage 1 的 build/KUnit 证据写成 make-node implementation proof。
 
-## 5. Stage 1 Ready — Device-number prerequisite
+## 5. Stage 1 Closed — Device-number prerequisite
 
 ### 5.1 成熟度、前置条件与受保护边界
 
-本阶段于 2026-08-01 经独立 R0 复审、transaction preflight 与用户的 Stage 1 唯一 GOAL 激活为 `Active`。
-本次 activation 只授权第 5.5 节 frozen manifest 和 `DEVICE-NUMBER-CUTOVER`；不授权 Stage 2 或
-`1 -> 2 Implementation Resolution Gate`。
+本阶段于 2026-08-01 经独立 R0 复审、transaction preflight 与用户的 Stage 1 唯一 GOAL 激活，并在同日完成
+实现、验证、独立终审与`DEVICE-NUMBER-CUTOVER`后关闭。该closure只覆盖第5.5节frozen manifest；不授权
+Stage 2或`1 -> 2 Implementation Resolution Gate`。
 
 激活前必须满足：
 
@@ -188,6 +188,16 @@ filesystem node matrix 与真实 syscall proof 留在 Stage 2；未运行项必�
 任一项失败时保持 16/16 current contract，Stage 1 不关闭，也不进入 `1 -> 2` resolution。出现以下情况必须
 立即停止并上报：需要 raw escape 才能维持 consumer、拒绝/截断合法 Linux encoding、修改 endpoint 号码或
 publication/provider lifecycle、合并 char/block registry、引入 device-open resolver，或需要移动 existing owner。
+
+2026-08-01 closure满足全部条件：dirty source set恰好为第5.5节十二个路径；12/20 domain、category-neutral
+`DeviceNumber`、typed registry boundary、canonical u32 Linux codec、stat/statx/loop与mount consumer迁移完成；
+source audit没有旧`DeviceId::{Char, Block, Raw}`、device-number `raw()`、16/16 packing或重复codec。最终RV64/
+LA64 release build、format与whitespace通过；RV64 wrapper在near-final tree完成282/282 KUnit、focused LTP 4/4与
+正常关机，随后只有u32 codec签名收窄、mount kind检查前移和多余console单值KUnit删除，开发者明确接受无需重跑
+QEMU；最终owner audit保持codec位宽常量private，由`device::devnum`拥有public domain bounds。独立终审为
+Apollyon/Keter/Euclid/Safe全0。因此`DEVICE-NUMBER-001`原子Refine为
+effective 12/20 current contract，Stage 1 Closed。LA64 runtime、`mknodat`与filesystem node matrix保持Not Run；
+Stage 2仍为Outline / Not Active，`1 -> 2` resolution Not Run。
 
 ### 5.5 Resolved Write Set Manifest
 

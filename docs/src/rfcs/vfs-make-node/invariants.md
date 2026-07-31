@@ -1,13 +1,13 @@
 # VFS Make Node 目标和不变量
 
-**状态：** R0 Accepted Target / Not Effective
+**状态：** R0 Accepted Target / `DEVICE-NUMBER-001` Effective / Remaining Not Effective
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **适用修订：** R0
 
-本文定义本 RFC 的 contract delta、target invariants 与 RFC-local proof obligations。当前已经生效的共享规则
-仍以 `docs/src/contracts/` 中的稳定 ID 为准；本文中的 target Refine / Introduce 项分别在
-`DEVICE-NUMBER-CUTOVER` / `VFS-MAKE-NODE-CUTOVER` 前都不是 current fact。
+本文定义本RFC的contract delta、target invariants与RFC-local proof obligations。当前已经生效的共享规则仍以
+`docs/src/contracts/`中的稳定ID为准；`DEVICE-NUMBER-001` Refine已在`DEVICE-NUMBER-CUTOVER`生效，其余
+Refine / Introduce项在`VFS-MAKE-NODE-CUTOVER`前仍不是current fact。
 
 ## 规则分类
 
@@ -24,15 +24,15 @@
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
 | `VFS-FILE-KIND-001` | Preserve | [当前规则](../../contracts/vfs/file-kind.md#vfs-file-kind-001--inode-kind-是唯一-file-type-truth) | make-node 只构造既有 immutable kind，不新增第二份 file-type truth | 全程；无需改写 current rule |
-| `DEVICE-NUMBER-001` | Refine | [当前 16/16 baseline](../../contracts/device/device-number.md#device-number-001--1616-typed-device-number-namespace)；2026-07-31 的 docs-only extraction 不改变代码 | common numeric domain 改为 12-bit major + 20-bit minor；通用 inode metadata 不保存 Char/Block category 或 raw packing；typed registry key 只在 consumer boundary 构造 | `DEVICE-NUMBER-CUTOVER` |
+| `DEVICE-NUMBER-001` | Refine | [当前12/20规则](../../contracts/device/device-number.md#device-number-001--1220-category-neutral-device-number-domain)；2026-07-31 docs-only extraction曾建立16/16 baseline | common numeric domain改为12-bit major + 20-bit minor；通用inode metadata不保存Char/Block category或raw packing；typed registry key只在consumer boundary构造 | `DEVICE-NUMBER-CUTOVER` Effective / 2026-08-01 |
 | `TTY-ENDPOINT-001` | Preserve | [当前规则](../../contracts/tty/data-plane.md#tty-endpoint-001--endpoint-publication是稳定的单向transaction) | 保持 `ttyS<N>` 4:`64+N`、console 5:1、deterministic identity 与 publication lifecycle | 全程；device-number cutover 需证明数值未变 |
 | `VFS-MAKE-NODE-001` | Introduce | None（尚未生效） | VFS admission 经 `InodeOps::make_node` 向 backend 交付窄 semantic description，backend 原子提交 inode metadata + dirent | `VFS-MAKE-NODE-CUTOVER` |
 | `VFS-SPECIAL-NODE-RDEV-001` | Introduce | None（尚未生效） | ext4/ramfs filesystem-backed character/block node 持久/驻留保存 category-neutral numeric `rdev`；kind 只来自 `Inode::ty()` | `VFS-MAKE-NODE-CUTOVER` |
 | `VFS-MOUNT-ADMISSION-002` | Refine | [当前规则](../../contracts/vfs/mount-admission.md#vfs-mount-admission-002--source-kind-owned-admission) | 保持 source-kind owner；non-block inode source 在 registry lookup 前稳定返回 `ENOTBLK` | `VFS-MAKE-NODE-CUTOVER` |
 
-R0 acceptance 已为 `DEVICE-NUMBER-001` 建立 pending-successor link，但不修改 current contract。
-`DEVICE-NUMBER-BASELINE-EXTRACTION` 已建立只描述 live 16/16 行为的 device-owned current contract，未提前写入
-12/20 target。实现期先独立关闭 `DEVICE-NUMBER-CUTOVER`，再解析/执行 make-node stage。最终 VFS cutover 应在
+R0 acceptance曾为`DEVICE-NUMBER-001`建立pending-successor link；2026-08-01 `DEVICE-NUMBER-CUTOVER`已把该
+target原子写入current contract。`DEVICE-NUMBER-BASELINE-EXTRACTION`建立的16/16规则只保留为历史baseline。
+后续make-node stage只能复用已关闭的device-number owner边界。最终VFS cutover应在
 VFS contract 下建立稳定的 make-node/filesystem-backed-rdev surface，容纳两个 Introduce ID；不得为每个 ID
 单独建页，也不得把 RFC-local validation 规则写入 current contract。
 
@@ -362,8 +362,8 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
 
 - `VFS-FILE-KIND-001` 经 source audit 证明保持 Preserve，无第二份 kind truth。
 - `DEVICE-NUMBER-BASELINE-EXTRACTION` 已只提取 live 16/16 current rule；未提前发布 12/20 target。
-- `DEVICE-NUMBER-001` 在独立 `DEVICE-NUMBER-CUTOVER` 完成 12/20 Refine，保持 char/block namespace、
-  TTY/device endpoint 号码与 publication lifecycle，并在关闭后才允许 make-node stage 进入 Ready/Active。
+- `DEVICE-NUMBER-001` 已在独立`DEVICE-NUMBER-CUTOVER`完成12/20 Refine，保持char/block namespace、
+  TTY/device endpoint号码与publication lifecycle；本次closure未解析或激活make-node stage。
 - `VFS-MAKE-NODE-001` 与 `VFS-SPECIAL-NODE-RDEV-001` 在同一 `VFS-MAKE-NODE-CUTOVER` 进入 current contract。
 - `VFS-MOUNT-ADMISSION-002` 同一 cutover 完成 `ENOTBLK` Refine，失败时保持旧 current rule。
 - RV64/LA64 `mknodat(33)`、libc `mknod()` / `mknodat()`、node-kind/capability/dirfd/error matrix 有明确证据；

@@ -163,10 +163,13 @@ pub(crate) fn prepare_system_boot(
         attr: DevfsNodeAttr {
             ty: InodeType::Char,
             perm: InodePerm::all_rw(),
-            rdev: DeviceId::Char(CharDevNum::new(
-                MajorNum::new(devnum::char::major::TTY_AUX),
-                MinorNum::new(TTY_CONTROLLING_MINOR),
-            )),
+            rdev: DeviceId::Number(
+                CharDevNum::new(
+                    MajorNum::new(devnum::char::major::TTY_AUX),
+                    MinorNum::new(TTY_CONTROLLING_MINOR),
+                )
+                .number(),
+            ),
         },
         ops: controlling_ops,
     };
@@ -197,7 +200,7 @@ pub(crate) fn prepare_system_boot(
                 attr: DevfsNodeAttr {
                     ty: InodeType::Char,
                     perm: InodePerm::all_rw(),
-                    rdev: DeviceId::Char(devnum),
+                    rdev: DeviceId::Number(devnum.number()),
                 },
                 ops,
             },
@@ -254,7 +257,7 @@ impl TtyBootPublication {
         for prepared in endpoints {
             assert_eq!(
                 prepared.publish.attr.rdev,
-                DeviceId::Char(prepared.devnum),
+                DeviceId::Number(prepared.devnum.number()),
                 "TTY name/devnum publication snapshot diverged"
             );
             kinfoln!(
@@ -321,7 +324,7 @@ fn endpoint_stat(inode: &InodeRef, rdev: DeviceId) -> InodeStat {
 fn boot_tty_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     Ok(endpoint_stat(
         inode,
-        DeviceId::Char(selected_endpoint()?.devnum),
+        DeviceId::Number(selected_endpoint()?.devnum.number()),
     ))
 }
 

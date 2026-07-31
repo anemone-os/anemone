@@ -12,7 +12,8 @@ design finding。implementation 进度与执行证据不放在这里；Draft tar
 本轮 review 没有 Apollyon，四个 Keter 与两个 Euclid 均已在 Draft target / implementation manifest 中
 Neutralized。这里的
 Neutralized 表示文档层问题已有自然落点。2026-08-01 独立复审确认 Apollyon/Keter/Euclid/Safe 全 0，R0
-随后接受并建立 transaction；Stage 1 仅按本轮唯一 GOAL 激活，所有 target contract 仍待对应 cutover。
+随后接受并建立transaction；Stage 1独立终审再次确认Apollyon/Keter/Euclid/Safe全0，
+`DEVICE-NUMBER-CUTOVER`已生效并关闭Stage 1。Stage 2仍为Outline / Not Active，其余target contract保持Not Cut Over。
 
 ## Apollyon
 
@@ -83,7 +84,7 @@ minor，全部 32-bit Linux encoding 可 round-trip。generic inode 只保存 ca
 
 当前 16/16 行为先从
 [`ANE-CHG-20260722-device-devnum-ownership`](../../devlog/changes/2026-07-22-device-devnum-ownership.md)
-已提取为 device-owned [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1616-typed-device-number-namespace)
+已提取为 device-owned [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1220-category-neutral-device-number-domain)
 current baseline；12/20 normalization 与既有 devfs/TTY/char/block/
 loop/stat consumer migration 使用独立 `DEVICE-NUMBER-CUTOVER`，关闭后才进入 make-node stage。既有 static
 major/minor、char/block namespace、endpoint name 与 publication lifecycle 保持不变。

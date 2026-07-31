@@ -363,10 +363,13 @@ mod kunits {
         assert_eq!(null_attr.mode.ty(), InodeType::Char);
         assert_eq!(
             null_attr.rdev,
-            DeviceId::Char(CharDevNum::new(
-                MajorNum::new(devnum::char::major::MEMORY),
-                MinorNum::new(devnum::char::minor::NULL)
-            ))
+            DeviceId::Number(
+                CharDevNum::new(
+                    MajorNum::new(devnum::char::major::MEMORY),
+                    MinorNum::new(devnum::char::minor::NULL)
+                )
+                .number()
+            )
         );
 
         assert_eq!(null.write(b"abc").unwrap(), 3);
@@ -394,10 +397,13 @@ mod kunits {
         assert_eq!(attr.mode.ty(), InodeType::Block);
         assert_eq!(
             attr.rdev,
-            DeviceId::Block(BlockDevNum::new(
-                MajorNum::new(devnum::block::major::RAMDISK),
-                MinorNum::new(0)
-            ))
+            DeviceId::Number(
+                BlockDevNum::new(
+                    MajorNum::new(devnum::block::major::RAMDISK),
+                    MinorNum::new(0)
+                )
+                .number()
+            )
         );
         assert!(attr.size > 0);
 

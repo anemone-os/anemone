@@ -109,9 +109,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs atomic creation与filesystem-backed `rdev`形成完整
   node-creation target；R0 明确接受 requested permission bits 不应用 process umask，并把 task/fs-state 与全部
   create call sites 留给[独立 limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)。
-  docs-only promotion已提取 live 16/16
-  [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) current baseline；12/20 Refine、make-node target、
-  mount `ENOTBLK`与两个新VFS contract ID均尚未cut over。Stage 1 Active，Stage 2 Outline；执行证据见
+  Stage 1与`DEVICE-NUMBER-CUTOVER`已把
+  [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) Refine为effective 12/20 category-neutral baseline；
+  make-node target、mount `ENOTBLK`与两个新VFS contract ID仍未cut over。Stage 1 Closed，Stage 2保持
+  Outline / Not Active，`1 -> 2` resolution未运行；执行证据见
   [transaction](./devlog/transactions/2026-07-31-vfs-make-node.md)。
 - [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
   domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。
