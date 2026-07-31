@@ -3,6 +3,8 @@
 //! Eventfd readiness and blocking are owned entirely by the counter state here.
 //! The anonymous inode only gives the opened file a stable fd identity.
 
+mod api;
+
 use core::mem::size_of;
 
 use crate::{
@@ -530,7 +532,7 @@ static EVENTFD_INODE_OPS: InodeOps = InodeOps {
     get_attr: eventfd_get_attr,
 };
 
-pub fn create_eventfd(counter: u32, semaphore: bool) -> Result<File, SysError> {
+fn create_eventfd(counter: u32, semaphore: bool) -> Result<File, SysError> {
     let path = anony_new_inode(InodeType::Regular, &EVENTFD_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,

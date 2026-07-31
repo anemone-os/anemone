@@ -1,8 +1,9 @@
-pub mod epoll;
-pub mod ppoll;
-pub mod pselect6;
+mod ppoll;
+mod pselect6;
 
 mod wait;
+
+pub(in crate::fs) use wait::finish_temporary_iomux_wait;
 
 mod args {
     use crate::prelude::*;

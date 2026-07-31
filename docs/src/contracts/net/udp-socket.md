@@ -13,7 +13,7 @@ reassembly、runtime network reconfiguration/detach、TCP或raw socket
 **实现位置：** `anemone-kernel/crates/anemone-net-api/src/udp.rs`、
 `anemone-kernel/crates/anemone-smoltcp-stack/src/{stack/udp.rs,udp/}`、
 `anemone-kernel/src/net/{udp.rs,domain/stack/udp.rs}`、`anemone-kernel/src/fs/socket/udp/`、
-`anemone-kernel/src/fs/api/socket/`
+`anemone-kernel/src/fs/socket/api/`
 **依赖：** `NET-BOUNDARY-001`、`NET-FRAME-OWN-001`、`NET-FRAME-PROGRESS-001`、
 `NET-STACK-PUMP-001`、`NET-CONTROL-PLANE-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、
 `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`

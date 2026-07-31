@@ -6,10 +6,10 @@
 **参与领域：** signal mask / private and shared pending / wait-core outcome classification / ordinary trap return
 **覆盖范围：** delayed temporary-mask restore、stable delivery reservation，以及 handler-frame / no-frame cleanup
 **不覆盖：** `rt_sigtimedwait` 的syscall-body-only mask、job-control phase / report、fresh / clone / exec user entry
-**实现位置：** `anemone-kernel/src/task/sig/`、`anemone-kernel/src/task/sig/api/{rt_sigsuspend,rt_sigreturn}.rs`、`anemone-kernel/src/fs/api/iomux/`
+**实现位置：** `anemone-kernel/src/task/sig/`、`anemone-kernel/src/task/sig/api/{rt_sigsuspend,rt_sigreturn}.rs`、`anemone-kernel/src/fs/iomux/api/`
 **依赖：** `SIGNAL-PENDING-001`、`SIGNAL-ACTION-002`
 **Pending Successor：** None
-**最后核验：** 2026-07-21
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 

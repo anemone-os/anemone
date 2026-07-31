@@ -213,7 +213,7 @@ static EPOLL_INODE_OPS: InodeOps = InodeOps {
     get_attr: epoll_get_attr,
 };
 
-pub(in crate::fs) fn create_epoll_file(epoll: Arc<Epoll>) -> Result<File, SysError> {
+pub(super) fn create_epoll_file(epoll: Arc<Epoll>) -> Result<File, SysError> {
     let path = anony_new_inode(InodeType::Regular, &EPOLL_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
@@ -225,15 +225,15 @@ pub(in crate::fs) fn create_epoll_file(epoll: Arc<Epoll>) -> Result<File, SysErr
     )
 }
 
-pub(in crate::fs) fn epoll_from_file(file: &File) -> Option<Arc<Epoll>> {
+pub(super) fn epoll_from_file(file: &File) -> Option<Arc<Epoll>> {
     file.uses_file_ops(&EPOLL_FILE_OPS)
         .then(|| EpollFile::from_file(file).epoll.clone())
 }
 
-pub(in crate::fs) fn lease_targets_epoll(lease: &OpenedDescriptionLease) -> bool {
+pub(super) fn lease_targets_epoll(lease: &OpenedDescriptionLease) -> bool {
     lease.uses_file_ops(&EPOLL_FILE_OPS)
 }
 
-pub(in crate::fs) fn teardown_epoll_file(file: &File) {
+pub(super) fn teardown_epoll_file(file: &File) {
     EpollFile::from_file(file).epoll.teardown();
 }

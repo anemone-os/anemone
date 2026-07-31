@@ -19,10 +19,9 @@ use crate::{
     },
 };
 
-use super::{
-    super::wait::{IomuxWaitOutcome, finish_temporary_iomux_wait},
-    resolve_epoll_fd,
-};
+use crate::fs::iomux::{IomuxWaitOutcome, api::finish_temporary_iomux_wait};
+
+use super::resolve_epoll_fd;
 
 enum EpollWaitResult<'a> {
     Ready(EpollHarvest<'a>),

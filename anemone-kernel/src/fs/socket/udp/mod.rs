@@ -16,7 +16,7 @@ use crate::{
 use source::UdpSocketSource;
 
 #[derive(Opaque)]
-pub(crate) struct UdpSocketFile {
+pub(super) struct UdpSocketFile {
     source: Arc<UdpSocketSource>,
     /// Serializes operations on one opened description. It owns no endpoint
     /// state and is deliberately absent from final release.
@@ -44,12 +44,12 @@ impl UdpSocketFile {
 
 /// Owns rollback authority until the fully prepared file description becomes
 /// visible in an fd table. Capability clones never own semantic lifetime.
-pub(crate) struct UdpSocketCreation {
+pub(super) struct UdpSocketCreation {
     source: Option<Arc<UdpSocketSource>>,
 }
 
 impl UdpSocketCreation {
-    pub(crate) fn commit(mut self) {
+    pub(super) fn commit(mut self) {
         self.source.take();
     }
 }
@@ -67,7 +67,7 @@ impl Drop for UdpSocketCreation {
     }
 }
 
-pub(crate) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError> {
+pub(super) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError> {
     let endpoint = create_endpoint().map_err(|error| match error {
         anemone_net_api::udp::UdpCreateError::EndpointCapacity => SysError::NoBufferSpace,
     })?;
@@ -97,14 +97,14 @@ pub(crate) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError
     Ok((file, creation))
 }
 
-pub(crate) fn udp_socket_from_file(file: &File) -> Option<&UdpSocketFile> {
+pub(super) fn udp_socket_from_file(file: &File) -> Option<&UdpSocketFile> {
     file.uses_file_ops(&UDP_SOCKET_FILE_OPS).then(|| {
         file.private::<UdpSocketFile>()
             .expect("UDP Socket FileOps used without UdpSocketFile private state")
     })
 }
 
-pub(crate) fn bind_udp_socket(
+pub(super) fn bind_udp_socket(
     socket: &UdpSocketFile,
     address: anemone_net_api::Ipv4Address,
     port: u16,
@@ -119,7 +119,7 @@ pub(crate) fn bind_udp_socket(
         .map(|_| ())
 }
 
-pub(crate) fn query_udp_socket(
+pub(super) fn query_udp_socket(
     socket: &UdpSocketFile,
 ) -> Result<(MutexGuard<'_, ()>, Option<UdpLocalBinding>), UdpQueryError> {
     let operation = socket.operation.lock();
@@ -130,18 +130,18 @@ pub(crate) fn query_udp_socket(
     Ok((operation, binding))
 }
 
-pub(crate) struct UdpSendOperation<'a> {
+pub(super) struct UdpSendOperation<'a> {
     endpoint: UdpEndpointPort,
     _operation: MutexGuard<'a, ()>,
 }
 
 impl UdpSendOperation<'_> {
-    pub(crate) fn send(self, peer: UdpPeer, payload: &[u8]) -> Result<(), SendError> {
+    pub(super) fn send(self, peer: UdpPeer, payload: &[u8]) -> Result<(), SendError> {
         self.endpoint.send(peer, payload)
     }
 }
 
-pub(crate) fn begin_udp_send(socket: &UdpSocketFile) -> Result<UdpSendOperation<'_>, SendError> {
+pub(super) fn begin_udp_send(socket: &UdpSocketFile) -> Result<UdpSendOperation<'_>, SendError> {
     let operation = socket.operation.lock();
     let endpoint = socket.endpoint().ok_or(SendError::Stack(
         anemone_net_api::udp::UdpSendError::UnknownEndpoint,
@@ -155,7 +155,7 @@ pub(crate) fn begin_udp_send(socket: &UdpSocketFile) -> Result<UdpSendOperation<
     })
 }
 
-pub(crate) fn receive_udp_socket(
+pub(super) fn receive_udp_socket(
     socket: &UdpSocketFile,
 ) -> Result<(MutexGuard<'_, ()>, UdpReceivedDatagram), UdpReceiveError> {
     let operation = socket.operation.lock();
@@ -182,7 +182,7 @@ fn final_release_udp_socket(ctx: OpenedFileFinalReleaseCtx<'_>) {
     );
 }
 
-pub(crate) fn udp_file_desc_ops() -> FileDescOps {
+pub(super) fn udp_file_desc_ops() -> FileDescOps {
     FileDescOps {
         final_release: Some(final_release_udp_socket),
         notification_suppressed: true,

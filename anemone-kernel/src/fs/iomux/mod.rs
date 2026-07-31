@@ -2,6 +2,7 @@
 
 use crate::prelude::*;
 
+pub(in crate::fs) mod api;
 mod subscription;
 mod wait;
 

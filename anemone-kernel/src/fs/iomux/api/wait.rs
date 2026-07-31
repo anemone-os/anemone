@@ -16,7 +16,7 @@ pub(super) use crate::fs::iomux::{
     IomuxScanMode, IomuxScanOutcome, IomuxWaitOutcome, wait_for_iomux_ready,
 };
 
-pub(super) fn finish_temporary_iomux_wait(
+pub(in crate::fs) fn finish_temporary_iomux_wait(
     context: &'static str,
     task: &Arc<Task>,
     token: TemporarySigMaskToken,

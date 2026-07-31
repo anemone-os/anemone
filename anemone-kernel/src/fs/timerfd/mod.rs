@@ -4,6 +4,8 @@
 //! only provides a stable fd identity; timer expiration, blocking reads, poll
 //! readiness, and logical cancellation all live in `TimerFdCore`.
 
+mod api;
+
 use core::mem::size_of;
 
 use anemone_abi::time::linux::{ITimerSpec, TimeSpec};
@@ -21,9 +23,9 @@ const NSEC_PER_SEC: u64 = 1_000_000_000;
 const TIMERFD_TRIGGER_QUEUE_CAPACITY: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TimerFdSettimeFlags {
-    pub abstime: bool,
-    pub cancel_on_set: bool,
+struct TimerFdSettimeFlags {
+    abstime: bool,
+    cancel_on_set: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -308,7 +310,7 @@ fn validate_itimerspec(spec: ITimerSpec) -> Result<(u64, Option<u64>), SysError>
     Ok((value_ns, interval))
 }
 
-pub fn validate_settime_value(spec: ITimerSpec) -> Result<(), SysError> {
+fn validate_settime_value(spec: ITimerSpec) -> Result<(), SysError> {
     validate_itimerspec(spec).map(|_| ())
 }
 
@@ -686,14 +688,14 @@ static TIMERFD_INODE_OPS: InodeOps = InodeOps {
     get_attr: timerfd_get_attr,
 };
 
-pub fn valid_timerfd_clockid(clockid: i32) -> bool {
+fn valid_timerfd_clockid(clockid: i32) -> bool {
     use anemone_abi::time::linux::clock::{CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_REALTIME};
 
     matches!(clockid, CLOCK_REALTIME | CLOCK_MONOTONIC | CLOCK_BOOTTIME)
         && get_clock(clockid as usize).is_some()
 }
 
-pub fn create_timerfd(clockid: i32) -> Result<File, SysError> {
+fn create_timerfd(clockid: i32) -> Result<File, SysError> {
     if !valid_timerfd_clockid(clockid) {
         return Err(SysError::InvalidArgument);
     }
@@ -709,13 +711,13 @@ pub fn create_timerfd(clockid: i32) -> Result<File, SysError> {
     )
 }
 
-pub fn gettime(file: &File) -> Result<ITimerSpec, SysError> {
+fn gettime(file: &File) -> Result<ITimerSpec, SysError> {
     let core = TimerFdFile::core_from_file(file)?;
     let state = core.state.lock();
     Ok(snapshot_itimerspec(core.clockid, &state))
 }
 
-pub fn settime(
+fn settime(
     file: &File,
     flags: TimerFdSettimeFlags,
     new_value: ITimerSpec,

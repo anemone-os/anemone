@@ -18,7 +18,7 @@ mod namei;
 mod path;
 mod permission;
 mod superblock;
-pub mod timerfd;
+mod timerfd;
 mod uio;
 
 // filesystem drivers
@@ -30,7 +30,7 @@ mod pipe;
 pub mod proc;
 
 mod ramfs;
-pub(crate) mod socket;
+mod socket;
 
 pub mod api;
 

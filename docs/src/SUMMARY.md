@@ -50,6 +50,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-07-31 - FS owner-local syscall API](./devlog/changes/2026-07-31-fs-owner-local-syscall-api.md)
 		- [2026-07-31 - IRQ flow protocol](./devlog/changes/2026-07-31-irq-flow-protocol.md)
 		- [2026-07-25 - Asynchronous wake delivery](./devlog/changes/2026-07-25-asynchronous-wake-delivery.md)
 		- [2026-07-24 - QEMU SMP Platform用途别名](./devlog/changes/2026-07-24-qemu-smp-platform-aliases.md)
