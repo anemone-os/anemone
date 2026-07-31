@@ -109,8 +109,9 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   `S_IFREG` 文件增加 native RV64/LA64 POSIX process-associated byte-range record lock，保持现有 `flock`
   conflict namespace 与 opened-description retirement 独立。Stage 0已关闭，只建立file-table episode与holder
   topology；最终review全零，contract cutover为None。后续独立只读gate已把inode range domain的Stage 1解析为
-  Ready / Not Active，并拆为1A结构迁移与1B range domain；1A已行为保持地关闭`fs::lock::flock` namespace
-  alignment，1B Ready / Not Active且等待独立授权。不接入ABI、close或wait。完整target delta、
+  1A结构迁移与1B range domain；两者现均已关闭，完成`fs::lock::flock` namespace alignment、inode-owned
+  range domain与focused proof。不接入ABI、close或wait，Stage 1 semantic cutover为None；`Stage 1 -> 2`
+  resolution gate未授权。完整target delta、
   proof obligations 与滚动阶段见 [目标和不变量](./rfcs/posix-record-lock/invariants.md)及
   [实施计划](./rfcs/posix-record-lock/implementation.md)，执行证据见
   [事务日志](./devlog/transactions/2026-07-31-posix-record-lock.md)。

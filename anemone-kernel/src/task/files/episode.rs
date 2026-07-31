@@ -22,6 +22,11 @@ impl PosixLockHolder {
         Self(Arc::new(PosixLockHolderIdentity))
     }
 
+    #[cfg(feature = "kunit")]
+    pub(crate) fn new_for_kunit() -> Self {
+        Self::new()
+    }
+
     pub(crate) fn same_identity(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }

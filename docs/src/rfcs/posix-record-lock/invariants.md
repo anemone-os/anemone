@@ -1,6 +1,6 @@
 # POSIX Record Lock 目标和不变量
 
-**状态：** R0 Accepted / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Closed / 1B Ready / Not Active / Not Cut Over
+**状态：** R0 Accepted / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Not Cut Over
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **适用修订：** R0
@@ -436,8 +436,8 @@ R0 target最终关闭必须同时满足：
    或新open defect按归属进入register，不留在tracker伪装成实现进度。
 
 当前 R0 已共同接受 target 与[实施计划](./implementation.md)的首个 Stage 0 Ready definition，transaction 已
-建立且 Stage 0已独立关闭。后续独立只读resolution gate保持本页target不变，并把Stage 1解析为Ready / Not
-Active；checkpoint修正让1A只做行为保持的module alignment，1B才证明inode range domain。1A现已独立关闭，
-只更新两个current-contract locator且不接入ABI、close或wait；1B保持Ready / Not Active。current-contract语义
-write-back仍只属于最终`POSIX-LOCK-CUTOVER`，Stage 0/1 semantic cutover均为`None`，全部Introduce项继续Not
-Effective。
+建立且 Stage 0已独立关闭。后续独立只读resolution gate保持本页target不变，并把Stage 1解析为两个checkpoint：
+1A行为保持地完成module alignment，1B建立inode-associated range domain与assignment/conflict/query proof。
+两者现均已独立关闭，未接入ABI、close或wait。current-contract语义write-back仍只属于最终
+`POSIX-LOCK-CUTOVER`，Stage 0/1 semantic cutover均为`None`，全部Introduce项继续Not Effective；Stage 2及
+`Stage 1 -> 2`resolution gate未授权。

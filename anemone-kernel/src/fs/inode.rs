@@ -9,7 +9,11 @@ use core::{
 };
 
 use crate::{
-    fs::{file::FileMode, lock::FlockDomain, permission::FsPermChecker},
+    fs::{
+        file::FileMode,
+        lock::{FlockDomain, PosixLockDomain},
+        permission::FsPermChecker,
+    },
     prelude::{vmo::VmObject, *},
     task::credentials::cap::{Capability, FileCapabilities},
     utils::any_opaque::AnyOpaque,
@@ -609,6 +613,8 @@ pub(super) struct Inode {
     mapping: Option<Arc<dyn VmObject>>,
     /// Sole local whole-file flock grant and wait-notification domain.
     flock: FlockDomain,
+    /// Sole local POSIX byte-range grant and conflict domain.
+    posix_locks: PosixLockDomain,
     /// Cached metadata that can be updated by the inode's file operations
     /// without accesing underlying filesystem, thus speeding up common
     /// operations like `stat` and `write`.
@@ -675,6 +681,7 @@ impl Inode {
             indexed: AtomicBool::new(false),
             mapping: None,
             flock: FlockDomain::new(),
+            posix_locks: PosixLockDomain::new(),
             meta: RwLock::new(meta),
         }
     }
@@ -930,6 +937,10 @@ impl InodeRef {
 
     pub(super) fn flock_domain(&self) -> &FlockDomain {
         &self.inode().flock
+    }
+
+    pub(super) fn posix_lock_domain(&self) -> &PosixLockDomain {
+        &self.inode().posix_locks
     }
 
     /// Get the inode number.

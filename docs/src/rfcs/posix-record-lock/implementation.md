@@ -1,6 +1,6 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Closed / 1B Ready / Not Active
+**状态：** R0 implementation plan / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Stage 2 Outline
 **适用修订：** R0
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
@@ -12,9 +12,9 @@
 本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
 canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
 authorization 已作为三个独立事件完成；Stage 0现已关闭。开发者随后独立授权并完成只读
-`Stage 0 -> Stage 1 Implementation Resolution Gate`，Stage 1现为Ready / Not Active。后续checkpoint粒度修正把
-物理namespace迁移与POSIX range-domain实现拆为1A/1B；Checkpoint 1A现已独立关闭，1B虽已满足结构前置并保持
-Ready，但仍须开发者另行授权才可激活。
+`Stage 0 -> Stage 1 Implementation Resolution Gate`，并把物理namespace迁移与POSIX range-domain实现拆为
+1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed；本次未进入`Stage 1 -> 2`resolution gate，Stage 2
+继续为Outline且未获授权。
 
 ## 实施原则
 
@@ -87,7 +87,7 @@ Ready，但仍须开发者另行授权才可激活。
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
-| Stage 1 | Ready / Not Active；1A Closed，1B Ready / Not Active | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 1A已独立关闭；下一步只允许开发者另行授权1B Active |
+| Stage 1 | Closed；1A/1B Closed | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 已独立关闭；下一步只能另行授权`1 -> 2`resolution |
 | Stage 2 | Outline | 实现 native ABI、binding-scoped close/commit、blocking wait 与 signal restart vertical slice | None | Stage 1 独立关闭后 |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
 
@@ -424,12 +424,12 @@ Correction：两个API文件继续100% rename，主模块只允许把`FlockDomai
 `pub(in crate::fs)`；除此之外仍须逐字不变。该修正不改变owner、behavior、ABI、public API、shared contract、
 acceptance或Stage 1总write set。
 
-## Stage 1 Ready：Inode Range Domain 与 Assignment Proof
+## Stage 1 Closed：Inode Range Domain 与 Assignment Proof
 
 ### 阶段成熟度与前置条件
 
-Stage 1当前是`Ready / Not Active`。Checkpoint 1A已按本节边界独立关闭；Checkpoint 1B成为唯一可能的下一
-activation point，但本次1A closure不构成1B授权。
+Stage 1当前是`Closed`。Checkpoint 1A/1B均已按各自边界独立关闭；本次1B closure不构成Stage 2或
+`Stage 1 -> 2`resolution授权。
 
 Checkpoint 1B的完整定义已经解析，但它在1A独立Closed、transaction记录closure且开发者另行授权前不可激活。
 如果`PosixLockHolder`、`Inode` construction、`FlockDomain`或KUnit runner相对resolution baseline漂移，必须在
@@ -440,7 +440,7 @@ Checkpoint 1B的完整定义已经解析，但它在1A独立Closed、transaction
 | Checkpoint | 状态 | 目的 | 独立关闭边界 |
 | --- | --- | --- | --- |
 | 1A — Lock namespace alignment | Closed | 行为保持地把现有`fs::flock`迁入纯wiring的`fs::lock::flock`，建立后续POSIX child的物理归类位置 | 两个API文件100% rename，主模块仅有两处已批准visibility恢复；单架构代表性build、locator-only contract更新与source/docs review通过；POSIX state为零；已关闭并停止 |
-| 1B — POSIX inode range domain | Ready / Not Active | 在已关闭的module基线上增加独立POSIX range domain、holder接线与focused proof | 双架构build、RV64 runtime、range/domain source audit与full-diff review通过；Stage 1 Closed并停止在`1 -> 2` gate前 |
+| 1B — POSIX inode range domain | Closed | 在已关闭的module基线上增加独立POSIX range domain、holder接线与focused proof | 双架构build、RV64 runtime、range/domain source audit与full-diff review通过；Stage 1 Closed并停止在`1 -> 2` gate前 |
 
 ### Checkpoint 1A — Lock Namespace Alignment
 
@@ -670,6 +670,26 @@ Target Renegotiation；manifest扩展必须先更新本文并在transaction记�
   1A的两个implementation locator已经同步，并明确Stage 2及`Stage 1 -> 2` resolution gate仍未自动授权。
 
 Stage 2是否已经解析为Ready不属于Stage 1 closure；Stage 1关闭后必须停在下一独立resolution gate。
+
+#### Checkpoint 1B / Stage 1 关闭结果
+
+Checkpoint 1B已按frozen manifest关闭。最终source以每个`Inode`直接拥有的`PosixLockDomain`作为唯一grant
+truth，domain内单一guarded vector保存holder/range/mode；opaque holder仍只由file-table episode构造，report
+TGID明确为可stale且不参与behavior。query、conflict-free set与idempotent unlock覆盖same-owner
+replacement/split/merge、open-ended range、read/read兼容、任一write overlap冲突与conflict-before-mutation；
+replaced holder refs在domain guard外drop。五项owner-local KUnit均通过真实production transition，其中hard-link
+case经过VFS create/link/lookup/unlink route证明inode identity association。
+
+实现没有接入raw UAPI、syscall、close cleanup、Event/wait、signal、OFD/deadlock/backend hook、capacity policy或
+第二persistent index。`fcntl`三个record-lock命令仍为NYI，flock/opened-description/backend/current-contract
+语义与register均无修改，production range-mutation caller保持为零。首次RV64 runtime只暴露KUnit把coalesce后
+具体`report_tgid`误冻结为单一值；R0允许任一合法diagnostic snapshot，因此删除该过强断言并从formatter、
+双架构build与canonical wrapper完整重跑，不改变production code、target或validation floor。
+
+最终formatter、RV64/LA64 release build、RV64 canonical wrapper、source/whitespace、mdBook与完整diff review通过；
+wrapper为287/287 KUnit，五项新增case均`ok`，随后tracked `sys` profile双libc 4/4 case PASS并正常关机。LA64
+QEMU、record-lock userspace oracle与LTP仍Not Run，不能由build或RV64结果替代。contract cutover为`None`，全部
+prospective ID继续Not Effective；Stage 1 Closed，并明确停在未经授权的`Stage 1 -> 2`resolution gate前。
 
 ## Stage 1 -> Stage 2 Implementation Resolution Gate
 

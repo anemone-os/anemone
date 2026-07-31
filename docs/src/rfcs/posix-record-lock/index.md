@@ -1,6 +1,6 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** R0 / Accepted for Implementation / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Closed / 1B Ready / Not Active
+**状态：** R0 / Accepted for Implementation / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Not Cut Over
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-31
@@ -15,9 +15,9 @@
 **开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
 后续 Outline 中尚未解析的类型、锁、容器、模块路径、stage、write set 与精确验证命令属于滚动
 implementation resolution，不因缺失本身构成 finding。
-**下一步：** 等待开发者独立授权Checkpoint 1B Active。Stage 0 -> Stage 1只读resolution gate已完成并把
-Stage 1解析为Ready；Checkpoint 1A已独立关闭纯结构迁移。Checkpoint 1B、Stage 2 gate与任何semantic contract
-cutover仍未授权，1A closure不自动启动后续工作。
+**下一步：** Stage 1已按1A/1B两个checkpoint独立关闭。只有开发者另行授权的
+`Stage 1 -> Stage 2 Implementation Resolution Gate`可以读取live source并解析Stage 2；该gate、Stage 2实现与
+任何semantic contract cutover均未授权，本次closure不自动启动后续工作。
 
 ## 文档状态
 
@@ -25,9 +25,9 @@ cutover仍未授权，1A closure不自动启动后续工作。
 R0 target。2026-07-31 独立 review 已共同接受 target、Contract Impact、proof obligations 与首个完整 Ready
 stage；随后建立 transaction，开发者明确授权 Stage 0 Active。R0 target 尚未 cut over，不是 current contract，
 Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record-lock capability。其后的独立只读
-resolution gate已基于live source把Stage 1解析为Ready / Not Active；后续checkpoint粒度修正保持R0 target，
-把行为保持的lock namespace alignment独立为1A、POSIX range domain独立为1B。1A现已独立关闭且只更新两个
-current-contract locator；1B保持Ready / Not Active，current contract语义仍未更新。
+resolution gate已基于live source把Stage 1解析为两个独立checkpoint：1A行为保持地完成lock namespace
+alignment，1B建立inode-associated POSIX range domain与focused proof。两者现均已关闭，Stage 1 Closed；
+current contract语义仍未更新，Stage 2及其resolution gate均未进入。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
 此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
@@ -149,10 +149,9 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Tracking Issues](./tracking-issues.md)：当前无 active Apollyon / Keter
-- [实施计划](./implementation.md)：Stage 0 Closed；Stage 1 Ready，Checkpoint 1A Closed，1B Ready / Not Active；
-  后续阶段保持 Outline
+- [实施计划](./implementation.md)：Stage 0-1 Closed；Checkpoint 1A-1B Closed；后续阶段保持 Outline
 - [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0执行证据、Stage 1 resolution与
-  Checkpoint 1A closure
+  Checkpoint 1A/1B closure
 
 Current contracts：
 
@@ -399,9 +398,9 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 
 当前 R0 target 已接受，transaction 已建立，Stage 0已按实现、验证与全零独立review关闭；执行事实只由
 [transaction](../../devlog/transactions/2026-07-31-posix-record-lock.md)记录。Stage 0 contract cutover为
-`None`；后续只读resolution已把Stage 1解析为Ready / Not Active，并进一步拆为1A/1B。1A已完成行为保持的
-`fs::lock::flock` namespace alignment，只对current contracts做locator-only更新，semantic cutover仍为`None`。
-1B尚未激活，全部prospective ID继续Not Effective。
+`None`；后续只读resolution把Stage 1拆为1A/1B。1A已完成行为保持的`fs::lock::flock` namespace alignment，
+只对current contracts做locator-only更新；1B已完成inode-owned range domain、opaque holder接线与focused KUnit。
+Stage 1 semantic cutover仍为`None`，全部prospective ID继续Not Effective；Stage 2及`Stage 1 -> 2`gate未授权。
 最终 R0 implementation closure 至少需要：
 
 - 新增 contract IDs 在 `POSIX-LOCK-CUTOVER` 原子写入 current contracts，Preserve IDs 经 source/review 证明

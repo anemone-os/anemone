@@ -1,10 +1,10 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Closed / 1B Ready / Not Active
+**状态：** Active transaction / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Stage 2 Outline / Not Cut Over
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
-**实施计划：** [Stage 1 — Checkpoint 1A/1B](../../rfcs/posix-record-lock/implementation.md#stage-1-readyinode-range-domain-与-assignment-proof)
+**实施计划：** [Stage 1 — Checkpoint 1A/1B](../../rfcs/posix-record-lock/implementation.md#stage-1-closedinode-range-domain-与-assignment-proof)
 **适用修订：** R0
 **Contract Cutover：** semantic `None` through Stage 1；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
 `POSIX-LOCK-*`继续 Not Effective
@@ -16,9 +16,9 @@ file-table sharing episode、显式participation与opaque holder foundation，�
 成功exec和exit topology；不实现range domain、`fcntl` ABI、close-to-VFS cleanup或blocking wait。
 
 Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
-现已完成，Stage 1为Ready / Not Active；后续checkpoint修正把1A/1B拆开，Checkpoint 1A现已独立关闭。
-Checkpoint 1B虽已满足1A前置但仍为Ready / Not Active；Stage 1 -> 2 gate及任何semantic contract cutover均未授权。
-Stage 0代码不是可独立合入的POSIX record-lock capability；current contracts与register保持不变。
+把Stage 1解析并拆为1A/1B；两者现均已独立关闭，Stage 1 Closed。`Stage 1 -> 2`resolution gate、Stage 2实现及
+任何semantic contract cutover均未授权。Stage 0/1代码仍不是可独立合入的POSIX record-lock capability；current
+contracts与register保持不变。
 
 ## R0 acceptance 与 activation
 
@@ -203,7 +203,7 @@ prospective POSIX-lock contract ID继续Not Effective。
 `dev/drc/omega@2268ca1f`读取Stage 0实际diff、本transaction的review/validation、live`PosixLockHolder`与
 `FilesState`、VFS`Inode`/`FlockDomain`、R0 target/current contracts、register、fixed Linux/LTP source及
 repository runner。authoritative Ready definition与resolved manifest已写入
-[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-1-readyinode-range-domain-与-assignment-proof)，
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-1-closedinode-range-domain-与-assignment-proof)，
 本节不复制第二份计划。
 
 resolution确认：
@@ -236,7 +236,7 @@ rootfs或test assets。唯一合法后续动作是等待开发者独立授权Sta
 开发者在resolution review中指出：原Stage 1把行为保持的flock目录迁移与POSIX range-domain新语义放在同一closure
 边界，无法独立证明结构迁移，也使失败归属和后续activation过宽。开发者批准保持R0 target的路线修正，把Stage 1
 拆为两个独立checkpoint；authoritative定义与逐checkpoint manifest已回写
-[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-1-readyinode-range-domain-与-assignment-proof)。
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-1-closedinode-range-domain-与-assignment-proof)。
 本节supersede上一条resolution记录中的单一Stage 1 manifest和“下一步激活Stage 1”措辞，不重写当时的解析事实。
 
 - Checkpoint 1A只把现有`fs::flock`100% rename为`fs::lock::flock`，建立纯wiring parent、更新`Inode` import和
@@ -308,3 +308,98 @@ LA64 build与userspace oracle均Not Run且不属于1A closure。Checkpoint 1B现
 完整diff与docs validation完成后曾启动一位新的只读subagent终审；开发者随即明确指示“不需要再review，直接
 提交”，该review在形成结论前被中止，因此本transaction不声称存在1A subagent review结果。主执行者对完整source、
 contract、write set与状态diff的审查未发现active Apollyon/Keter；本次按开发者最新指令直接进入checkpoint提交。
+
+## Checkpoint 1B activation preflight — 2026-07-31
+
+开发者把“完成Stage 1 Checkpoint 1B”设为本轮唯一GOAL，明确不得自动进入
+`Stage 1 -> Stage 2 Implementation Resolution Gate`，并要求最终由一位subagent做只读review。preflight从clean
+`dev/drc/omega@a1c29bfa`读取`AGENTS.md`、`LOCAL.md`、canonical RFC四页、register、current contracts、当前
+transaction与live source。Checkpoint 1A已经独立Closed；`PosixLockHolder`、`Inode` construction、
+`FlockDomain`与KUnit runner相对resolution baseline没有使1B manifest失效，tracked profile仍为`sys`。
+
+本次production write set冻结为`task/files/{episode.rs,mod.rs}`、`fs/{inode.rs,lock/mod.rs}`与新建
+`fs/lock/posix.rs`。文档write-back只覆盖RFC四页、本transaction、transaction index、当前双周devlog与
+`rfcs.md`；`SUMMARY.md`导航不变。current contracts、register、ABI、apps、profile、rootfs、filesystem backend、
+flock与opened-description source均为validation-only或明确不应触碰边界。preflight未发现Apollyon/Keter，1B进入
+Active。
+
+## Checkpoint 1B implementation, validation and Stage 1 closure — 2026-07-31
+
+### Implementation shape
+
+`fs::lock::posix`使用`u64 start + Option<u64> end_exclusive`表达absolute half-open/open-ended range，并由
+每个`Inode`直接拥有一个`PosixLockDomain`。domain的单一`SpinLock<Vec<PosixLockSegment>>`是
+holder/range/mode的唯一持久真相源；不同holder的read segments可重叠，任一write overlap冲突，同一holder
+assignment在operation-local vectors中完成replacement、split与same-mode adjacency merge。set先在同一guard内
+检查冲突再替换collection，unlock只减去调用holder的范围且无覆盖时幂等；被替换segments在guard释放后drop。
+
+domain只消费Stage 0 opaque `PosixLockHolder`；production constructor仍只在`FileTableEpisode`，本checkpoint仅增加
+KUnit-only独立holder factory与crate-private type re-export。`report_tgid`字段明确为可能stale的纯诊断snapshot，
+不参与owner、conflict、canonicalization或lifecycle。`InodeRef`只向`fs`内部提供窄domain accessor，hard-link与
+repeated lookup自然按inode identity共享domain，不建立path/backend/numeric-inode registry。
+
+五项inline owner-local KUnit精确覆盖resolved proof names：same-owner mixed-mode replacement/split/merge/unlock，
+read/read兼容与write conflict/no-partial-mutation，finite/open-ended query边界与真实conflict snapshot，report
+TGID不定义owner/coalescing，以及真实VFS hard-link route的domain association。production range mutation caller为
+零；Stage 2必须在binding/close/wait协议解析后才能建立真实entry。
+
+### Route correction
+
+首次RV64 canonical runtime中前四项新增KUnit通过，第五项把same-owner adjacent coalesce后的具体
+`report_tgid`固定为单一输入值而失败。source与R0都明确该字段不参与behavior，coalesce可保留任一合法diagnostic
+snapshot；因此只删除该过强测试断言，改为验证range/mode canonical result与report属于两个合法输入之一。
+该保持target的test-composition修正没有修改production code、owner、ABI、visible semantics、acceptance、manifest或
+validation floor。失败run不记为PASS；从formatter、双架构build与canonical wrapper完整重跑owning evidence。
+
+### Validation ledger
+
+- `just fmt kernel --check`在最终source通过。
+- RV64 release build首次在sandbox内由既有`lwext4` `Bad system call` / SIGSYS停止；sandbox外完全相同的
+  canonical命令通过。LA64 release build随后按顺序在sandbox外通过；两者分别只证明对应architecture compile。
+- 修正后的`./scripts/run-user-test-rv64.sh <sdcard-image> build/posix-record-lock-stage1-rv64.log`正常exit 0：
+  287/287 enabled KUnit全部通过，五项新增POSIX range/domain case均`ok`，并出现`All tests passed!`；init与
+  user-test正常进入，tracked `sys` profile的glibc/musl共4/4 case PASS，最后完成System Power正常shutdown。
+  随行`sys`只作环境回归，不证明record-lock ABI。
+- LA64 QEMU、record-lock userspace oracle与LTP均Not Run；本checkpoint没有ABI产品capability，以上证据不属于
+  Stage 1 closure，也不能由build或RV64 runtime替代。
+
+### Source and boundary audit
+
+全树caller scan与逐文件review确认：
+
+- holder production construction仍只有`FileTableEpisode`，KUnit factory保持conditional；raw pointer、refcount、
+  TGID、Task、FilesState或opened description均未替代identity；
+- 每个`Inode`只有一个POSIX domain，grant/range/mode只存在于其single guarded vector；operation-local rebuild
+  vector不形成第二persistent truth；
+- `report_tgid`只进入snapshot、split preservation与新assignment输入，不出现在owner/conflict/merge/cleanup
+  predicate；segment order不构成外部保证；
+- `FlockDomain`函数体、opened-description lifecycle、filesystem backend、`fcntl` NYI与current contracts/register
+  相对1A基线diff为零；旧production `fs::flock` path/reference仍为零；
+- 没有Event/wait/candidate/cleanup registry、OFD/deadlock/backend hook、capacity constant、Kconfig、第二索引、
+  syscall/VFS facade或production range-mutation caller；
+- conflict scan与collection replace在同一domain guard内；guard内只做holder identity/range/vector操作，不回调
+  外部owner，被替换segments与潜在last holder reference在guard外drop。
+
+`git diff --check`、新`posix.rs`的no-index whitespace、`mdbook build docs`与最终独立review均在下述closure记录
+中通过。contract cutover保持`None`；全部prospective `FILES-POSIX-OWNER-001` / `POSIX-LOCK-*`继续Not Effective，
+current contract语义与register不变。
+
+### Final independent review and closure
+
+恰好一位新的subagent对完整production/KUnit/docs dirty diff做只读独立终审。初次状态采样指出transaction当时仍
+保留1B Ready页首与final-review pending latch，而其它current-status surface已候选写成Closed；这是提交前必须消除的
+执行证据一致性Keter。主执行者在同一轮全状态扫描中已把transaction页首/边界同步为1A/1B与Stage 1 Closed，并在
+收到真实review结论后用本节替换pending latch。该修正只完成closure evidence write-back，不改变source、target、
+contract、ABI、acceptance或验证边界。
+
+review继续独立核对production source、五项KUnit、frozen write set、current-contract/register/ABI/fcntl/flock/
+opened-description/backend排除面与runtime claim分层，最终结论为Apollyon 0、Keter 0、Euclid 0、Safe 0，closure
+blocker 0。review确认single inode domain/single guarded Vec、holder与diagnostic边界、conflict-before-mutation、
+canonicalization/open-ended transform、guard-out last-ref drop及production mutation caller为零均成立；Stage 2能力
+没有被提前接线。
+
+最终`git diff --check`通过；新`fs/lock/posix.rs`的`git diff --no-index --check /dev/null ...`无诊断，exit 1只表示
+new file与`/dev/null`不同；`mdbook build docs`通过。formatter、顺序双架构release build与修正后的RV64 wrapper
+仍对应最终source diff。Checkpoint 1B与Stage 1因此Closed，semantic contract cutover为`None`，current contracts与
+register不变，全部prospective ID继续Not Effective。本轮明确停在`Stage 1 -> Stage 2 Implementation Resolution
+Gate`前；该gate、Stage 2及任何后续实现均未授权。
