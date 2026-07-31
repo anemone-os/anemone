@@ -105,14 +105,16 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R0 Accepted for Implementation；以 canonical
-  `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs atomic creation与filesystem-backed `rdev`形成完整
-  node-creation target；R0 明确接受 requested permission bits 不应用 process umask，并把 task/fs-state 与全部
+- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R1 Accepted for Implementation；以 canonical
+  `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs backend-local atomic creation与filesystem-backed `rdev`
+  形成完整node-creation target；R1继承requested permission bits不应用process umask的限制，并把task/fs-state与全部
   create call sites 留给[独立 limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)。
   Stage 1与`DEVICE-NUMBER-CUTOVER`已把
   [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) Refine为effective 12/20 category-neutral baseline；
-  make-node target、mount `ENOTBLK`与两个新VFS contract ID仍未cut over。Stage 1 Closed，Stage 2保持
-  Outline / Not Active，`1 -> 2` resolution未运行；执行证据见
+  make-node target、mount `ENOTBLK`与两个新VFS contract ID仍未cut over。R1要求backend-local final metadata
+  先于dirent commit并回滚commit前失败；若既有common-create backend/cache/dentry窗口需要新跨ownertransaction，
+  则由[独立open issue](./register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)承接，不阻塞本RFC。
+  Stage 1 Closed，Stage 2已解析为Ready / Not Active，C1仍需独立授权；执行证据见
   [transaction](./devlog/transactions/2026-07-31-vfs-make-node.md)。
 - [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
   domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。

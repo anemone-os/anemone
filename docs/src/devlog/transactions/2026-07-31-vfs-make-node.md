@@ -1,12 +1,12 @@
 # 2026-07-31 - VFS Make Node
 
-**Status:** Active / R0 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Outline
+**Status:** Active / R1 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Ready / Not Active
 **Opened:** 2026-08-01；canonical path 于 2026-07-31 public promotion 时预留
 **Owner:** doruche, Codex
-**Canonical Plan:** [RFC-20260731-vfs-make-node R0](../../rfcs/vfs-make-node/index.md),
+**Canonical Plan:** [RFC-20260731-vfs-make-node R1](../../rfcs/vfs-make-node/index.md),
 [目标与不变量](../../rfcs/vfs-make-node/invariants.md),
-[Stage 1 definition](../../rfcs/vfs-make-node/implementation.md#5-stage-1-closed--device-number-prerequisite)
-**Canonical Revision:** R0
+[Stage 2 Ready](../../rfcs/vfs-make-node/implementation.md#7-stage-2-ready--make-node-vertical-slice)
+**Canonical Revision:** R1
 **Contract Impact:** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Stage 1已在
 `DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`为Effective；`VFS-MAKE-NODE-001`、
 `VFS-SPECIAL-NODE-RDEV-001` 与 `VFS-MOUNT-ADMISSION-002` 保持 Not Cut Over
@@ -113,3 +113,37 @@ publication/provider行为均满足Stage 1，且无write-set或Stage 2越界。
 12/20 category-neutral current contract；Stage 1 Closed。RFC仍是R0 Accepted for Implementation，transaction
 保持Active只因完整RFC尚有后续stage。Stage 2继续Outline / Not Active，`VFS-MAKE-NODE-CUTOVER`与其三个contract
 delta保持Not Cut Over；本轮未运行、未解析、未授权`1 -> 2 Implementation Resolution Gate`，并在此停止。
+
+## Stage 1 -> Stage 2 Implementation Resolution Gate - 2026-08-01
+
+**Authorization / baseline:** Stage 1独立关闭后，开发者另行授权只解析Stage 2并落文档；进入时baseline为clean
+`dev/drc/alpha@c72721dd`。开发者要求把原计划中分开的syscall/VFS与ext4/ramfs/mount feature checkpoint合并，
+最终只保留C1 behavior-preserving module split、C2 merged feature implementation、C3 validation/probe removal/
+review/cutover。Ready不构成activation，任一checkpoint关闭不自动进入下一checkpoint。
+
+**R1 decision:** live common-create在backend commit之后仍有inode-cache/dentry materialization窗口。开发者明确：
+若完整原子化做不到，或需要不小的架构变动，则作为既有问题记录，本RFC不负责解决。该决定改变acceptance boundary，
+因此RFC升为R1：ext4/ramfs仍必须backend-local先写final mode/uid/gid/适用`rdev`、再commit dirent并回滚commit前
+allocation/resource；existing common-create handoff不得因make-node退化。需要新跨owner transaction protocol的
+既有窗口登记为`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`，不阻塞R1。
+
+**Live resolution evidence:** `fs/mod.rs`为1271行、`fs/inode.rs`为1061行，C1固定同owner目录化拆分并保持全部
+re-export/visibility/signature/behavior。RV64/LA64 syscall table均缺`mknodat(33)`；`Capability::MKNOD`与
+`RawAtFd`/`AtFd`规则可只读复用。32个`InodeOps` static分布于26个文件，已在authoritative Ready manifest冻结。
+common create当前在backend return后补owner，故C2固定VFS callback前形成`MakeNodeDescription`，regular mknodat
+也走backend `make_node`。
+
+lwext4 live create在`add_entry`后才set mode，owner high bits与rdev reload尚未完整接线；C2要求backend-local
+pre-dirent final metadata、free-unlinked-inode rollback、u32 uid/gid、rdev persistence/reload与explicit special
+open error。ramfs在现有write transaction内扩展五类node并以private category-neutral rdev保持identity。mount在
+registry lookup前区分`ENOTBLK`，合法Block provider miss保持`ENOENT`。durable `anemone-rs` mknodat wrapper作为
+真实ABI consumer保留；focused LTP group与existing user-test临时probe在C3验证后删除/恢复。
+
+**Validation plan / disposition:** authoritative命令、LTP case分类、temporary probe coverage、双架构runtime、
+source audit、probe exit与single cutover见
+[Stage 2 Ready](../../rfcs/vfs-make-node/implementation.md#7-stage-2-ready--make-node-vertical-slice)。本resolution
+只运行`git diff --check`、`mdbook build docs`与状态一致性扫描；kernel format/build、KUnit、QEMU、LTP、RV64/
+LA64 runtime、ext4/ramfs behavior与hardware均Not Run。current contracts未修改，`VFS-MAKE-NODE-CUTOVER`及三个
+remaining delta保持Not Cut Over。
+
+**Result / stop:** R1 Accepted for Implementation；Stage 2 Ready / Not Active。C1、C2、C3均未激活，当前停止。

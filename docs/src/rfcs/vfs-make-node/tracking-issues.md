@@ -1,6 +1,6 @@
 # VFS Make Node Tracking Issues
 
-**状态：** R0 Accepted / No Active Findings
+**状态：** R1 Accepted / No Active Findings
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
@@ -9,11 +9,12 @@
 design finding。implementation 进度与执行证据不放在这里；Draft target 修复已经折回 `index.md` /
 `invariants.md`，本文只保留 finding 的问题、决定、修复位置与状态历史。
 
-本轮 review 没有 Apollyon，四个 Keter 与两个 Euclid 均已在 Draft target / implementation manifest 中
+本轮 review 没有 Apollyon，五个 Keter 与两个 Euclid 均已在 accepted target / implementation manifest 中
 Neutralized。这里的
 Neutralized 表示文档层问题已有自然落点。2026-08-01 独立复审确认 Apollyon/Keter/Euclid/Safe 全 0，R0
 随后接受并建立transaction；Stage 1独立终审再次确认Apollyon/Keter/Euclid/Safe全0，
-`DEVICE-NUMBER-CUTOVER`已生效并关闭Stage 1。Stage 2仍为Outline / Not Active，其余target contract保持Not Cut Over。
+`DEVICE-NUMBER-CUTOVER`已生效并关闭Stage 1。后续resolution接受R1原子性边界并把Stage 2解析为Ready / Not Active；
+其余target contract保持Not Cut Over。
 
 ## Apollyon
 
@@ -32,6 +33,26 @@ None active。
 None。
 
 ## Neutralized
+
+### KETER-VFS-MAKE-NODE-005：R0 混合了 backend-local 与 common-create 跨 owner 原子性
+
+**原问题：** R0要求任何backend commit后的fallible step都移到commit前或具备rollback，同时live VFS的touch/mkdir
+已经采用“backend提交inode/dirent，再初始化owner并materialize inode cache/dentry”的common-create handoff。
+如果把该既有窗口也作为make-node closure，Stage 2可能被迫同时改造backend、inode cache、dentry cache和全部create
+caller，形成远大于本RFC的架构transaction；反之若静默忽略，又会把backend-local半初始化dirent错误地接受。
+
+**决定：** 开发者接受R1：ext4/ramfs仍必须在backend-local边界先写final mode/uid/gid/适用`rdev`，再提交dirent，
+并回滚commit前全部make-node allocation/resource。callback后的common-create handoff复用既有协议且不得比
+touch/mkdir更弱；若完整关闭既有backend/cache/dentry窗口需要不小的跨owner架构变动，则只登记独立open issue，
+不由本RFC解决或阻塞cutover。panic、success stub、cache-only `rdev`与post-dirent metadata patch仍不可接受。
+
+**修复位置：** [R1 VFS handoff与接受边界](./index.md#vfs-与-filesystem-handoff)、
+[MAKE-NODE-ATOMIC-001](./invariants.md#make-node-atomic-001--backend-local-commit-不得发布半初始化-node)、
+[Stage 2 Ready](./implementation.md#7-stage-2-ready--make-node-vertical-slice)、
+[ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)与
+[transaction resolution](../../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01)。
+
+**状态：** Neutralized / 2026-08-01；R1 acceptance-boundary修订已接受，Stage 2保持Ready / Not Active。
 
 ### KETER-VFS-MAKE-NODE-004：Stage 1 manifest 无法覆盖 R0、transaction 与 closure write-back
 

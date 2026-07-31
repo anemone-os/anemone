@@ -154,6 +154,35 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 **Severity:** Medium
 **Workaround:** 无需针对该问题绕过；完整 `O_PATH` 能力仍见 `ANE-20260528-OPATH-STAGE1-CAPABILITIES`。
 
+## ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY
+
+**Type:** Issue
+**Status:** Open
+**Area:** fs / VFS create / inode cache / dentry lifecycle
+
+**Symptom / Trigger:** live common-create先由filesystem backend提交inode/dirent，随后VFS初始化部分owner metadata并
+materialize inode cache/dentry。backend commit到cache/dentry完成之间存在跨owner failure window；当前touch/mkdir
+已经使用该路线，它不是VFS Make Node R1新引入的问题。
+
+**Impact:** 若post-backend步骤失败，完整端到端原子性可能需要在backend、inode cache、dentry cache与全部create
+caller之间建立统一transaction/rollback。只在mknodat局部补偿会制造并列create protocol或让不同创建路径语义分裂。
+
+**Owner:** VFS common-create protocol（待独立设计）；各filesystem只拥有backend-local commit/rollback
+
+**Last Verified:** 2026-08-01
+
+**Exit Condition:** 由独立RFC/迭代解析所有create call site、唯一transaction owner、backend commit与cache/dentry
+publication线性化点、post-commit failure/rollback和并发lookup语义，并以touch/mkdir/mknodat等真实consumer共同验证。
+若工程证据表明现有handoff已经不可失败，也可用source invariant与fault-path proof关闭，无需强行引入framework。
+
+**Related:** [VFS Make Node R1](../rfcs/vfs-make-node/index.md)、
+[MAKE-NODE-ATOMIC-001](../rfcs/vfs-make-node/invariants.md#make-node-atomic-001--backend-local-commit-不得发布半初始化-node)、
+[Stage 2 resolution](../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01)
+
+**Severity:** Medium
+**Workaround:** VFS Make Node R1只保证backend-local final metadata先于dirent commit及commit前rollback，并要求
+复用既有common-create handoff且不新增比touch/mkdir更弱的失败路径；本问题不阻塞该RFC cutover。
+
 ## ANE-20260527-LTP-MKNOD-LEGACY-READDIR
 
 **Type:** Issue
@@ -166,13 +195,13 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 
 **Owner:** doruche
 **Last Verified:** 2026-08-01
-**Exit Condition:** VFS Make Node R0 只交付 node creation；其 `VFS-MAKE-NODE-CUTOVER` 完成后仍需分别补齐
+**Exit Condition:** VFS Make Node R1 只交付 node creation；其 `VFS-MAKE-NODE-CUTOVER` 完成后仍需分别补齐
 named FIFO I/O 与 legacy `readdir` 决策，再重新跑 `read03` 和 `readdir21`，才能关闭本合并旧条目。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md),
-[VFS Make Node R0](../rfcs/vfs-make-node/index.md)及其
+[VFS Make Node R1](../rfcs/vfs-make-node/index.md)及其
 [transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)（只覆盖 node creation；named FIFO I/O 与 legacy
-`readdir` 不随 R0 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
+`readdir` 不随 R1 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
 
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。

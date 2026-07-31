@@ -9,9 +9,9 @@
 **Severity:** Medium
 **Area:** VFS / task fs-state / syscall ABI / file creation
 
-**Summary:** VFS Make Node R0 明确接受 `mknodat` 不应用 process umask：最终 permission 直接使用调用者
+**Summary:** VFS Make Node R1 继承 R0 接受的 no-umask 边界：`mknodat` 最终 permission 直接使用调用者
 requested bits。当前 `sys_umask` 仍是无状态 stub，本 RFC 不读取它、不建立 mknod-local/task-local mask，也不
-扩展其它创建类调用点。因而 R0 的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与
+扩展其它创建类调用点。因而 R1 的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与
 errno matrix，不覆盖 umask-adjusted permission；`mknodat` 本身在 `VFS-MAKE-NODE-CUTOVER` 前仍未生效。
 
 **Exit Condition:** 后续独立 umask 工作为 task/fs-state mask 建立唯一 owner，统一实现 `umask(2)` 与所有创建类
@@ -21,8 +21,8 @@ errno matrix，不覆盖 umask-adjusted permission；`mknodat` 本身在 `VFS-MA
 
 **Owner:** doruche
 **Last Verified:** 2026-08-01
-**Related:** [VFS Make Node R0](../rfcs/vfs-make-node/index.md),
-[R0 invariants](../rfcs/vfs-make-node/invariants.md#make-node-abi-001--rv64la64-使用-canonical-mknodat-与-linux-node-matrix),
+**Related:** [VFS Make Node R1](../rfcs/vfs-make-node/index.md),
+[R1 invariants](../rfcs/vfs-make-node/invariants.md#make-node-abi-001--rv64la64-使用-canonical-mknodat-与-linux-node-matrix),
 [transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)
 
 ## ANE-20260726-SYSTEM-POWER-BEST-EFFORT-BOUNDARIES
