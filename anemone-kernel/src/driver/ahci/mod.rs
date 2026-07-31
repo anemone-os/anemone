@@ -11,7 +11,7 @@ use port::AhciController;
 
 use crate::{
     device::{
-        block::{BlockDevRegistration, devfs::publish_block_device, register_block_device},
+        block::{BlockDevRegistration, devfs::publish_block_device, register_block_disk},
         bus::platform::{self as platform_bus, PlatformDriver},
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObjectBase, KObjectOps},
@@ -21,6 +21,9 @@ use crate::{
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
+
+/// Linux SCSI disk minors reserve four bits for partition numbers.
+const DISK_MINOR_STRIDE: usize = 16;
 
 static_assert!(
     AHCI_HBA_RESET_TIMEOUT_MS > 0,
@@ -48,8 +51,15 @@ static_assert!(
     "AHCI_READ_WARN_MS must be less than AHCI_READ_TIMEOUT_MS"
 );
 
-const fn devnum_for(id: usize) -> BlockDevNum {
-    BlockDevNum::new(MajorNum::new(devnum::block::major::SCSI), MinorNum::new(id))
+fn devnum_for(id: usize) -> Result<BlockDevNum, SysError> {
+    let minor = id
+        .checked_mul(DISK_MINOR_STRIDE)
+        .filter(|minor| *minor < (1usize << devnum::MINOR_BITS))
+        .ok_or(SysError::NoMinorAvailable)?;
+    Ok(BlockDevNum::new(
+        MajorNum::new(devnum::block::major::SCSI),
+        MinorNum::new(minor),
+    ))
 }
 
 /// Generate Linux-style SCSI disk names: `sda`, `sdz`, `sdaa`, ...
@@ -105,25 +115,27 @@ impl DriverOps for AhciDriver {
 
         let remap = unsafe { ioremap(base, len) }?;
         let (controller, identity, info) = AhciController::probe(remap, platform_config)?;
-        let minor = MINORS
+        let disk_id = MINORS
             .lock_irqsave()
             .alloc()
             .ok_or(SysError::NoMinorAvailable)?;
-        let devnum = devnum_for(minor.get());
+        let devnum = devnum_for(disk_id.get())?;
         let disk = Arc::new(AtaDisk::new(devnum, controller, identity));
-        let name = name_for(minor.get());
-        register_block_device(BlockDevRegistration {
+        let name = name_for(disk_id.get());
+        let devnums = register_block_disk(BlockDevRegistration {
             name: name.clone(),
             device: disk.clone(),
-        })?;
+        }, DISK_MINOR_STRIDE)?;
 
-        if let Err(error) = publish_block_device(devnum) {
-            knoticeln!(
-                "ahci {}: {} registered, but devfs publish failed: {:?}",
-                device.name(),
-                name,
-                error
-            );
+        for endpoint_devnum in devnums {
+            if let Err(error) = publish_block_device(endpoint_devnum) {
+                knoticeln!(
+                    "ahci {}: block endpoint {} registered, but devfs publish failed: {:?}",
+                    device.name(),
+                    endpoint_devnum,
+                    error
+                );
+            }
         }
         kinfoln!(
             "ahci {}: {} resource={}+{:#x} cap={:#x} vs={:#x} pi={:#x} port={} slots={} speed={} dma_mask={:#x} available_top={:#x} model={:?} serial={:?} firmware={:?} blocks={}",
@@ -192,10 +204,11 @@ fn init() {
 #[kunit]
 fn endpoint_identity_uses_one_local_id() {
     assert_eq!(
-        devnum_for(0).major(),
+        devnum_for(0).unwrap().major(),
         MajorNum::new(devnum::block::major::SCSI)
     );
-    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(devnum_for(0).unwrap().minor(), MinorNum::new(0));
+    assert_eq!(devnum_for(1).unwrap().minor(), MinorNum::new(16));
     assert_eq!(name_for(0), "sda");
     assert_eq!(name_for(25), "sdz");
     assert_eq!(name_for(26), "sdaa");

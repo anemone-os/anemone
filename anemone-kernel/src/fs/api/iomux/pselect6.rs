@@ -308,9 +308,7 @@ pub fn sys_pselect6(
     let mut exp_ready = exp_interests.as_ref().map(|_| FdBitmap::new());
 
     if exp_interests.as_ref().is_some_and(|fds| !fds.is_empty()) {
-        knoticeln!(
-            "sys_pselect6: exceptfds requested; exception readiness is a compatibility stub"
-        );
+        kdebugln!("sys_pselect6: exceptfds requested; exception readiness is a compatibility stub");
     }
 
     let token = sigmask.map(|mask| task.begin_temporary_sig_mask(mask));

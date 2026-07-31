@@ -269,29 +269,45 @@ impl BlockDevRegistry {
     }
 
     fn register(&mut self, registration: BlockDevRegistration) -> Result<(), SysError> {
-        let devnum = registration.device.devnum();
-        if self.devices.contains_key(&devnum) || self.names.contains_key(registration.name.as_str())
-        {
-            return Err(SysError::DevAlreadyRegistered);
+        self.register_batch(vec![registration])
+    }
+
+    fn register_batch(
+        &mut self,
+        registrations: Vec<BlockDevRegistration>,
+    ) -> Result<(), SysError> {
+        for (index, registration) in registrations.iter().enumerate() {
+            let devnum = registration.device.devnum();
+            if self.devices.contains_key(&devnum)
+                || self.names.contains_key(registration.name.as_str())
+                || registrations[..index].iter().any(|previous| {
+                    previous.device.devnum() == devnum || previous.name == registration.name
+                })
+            {
+                return Err(SysError::DevAlreadyRegistered);
+            }
         }
 
-        let desc = BlockDevDesc {
-            name: registration.name,
-            ops: registration.device,
-            io_lock: Arc::new(Mutex::new(())),
-            transient_refs: Arc::new(AtomicUsize::new(0)),
-            readahead: AtomicUsize::new(0),
-        };
+        for registration in registrations {
+            let devnum = registration.device.devnum();
+            let desc = BlockDevDesc {
+                name: registration.name,
+                ops: registration.device,
+                io_lock: Arc::new(Mutex::new(())),
+                transient_refs: Arc::new(AtomicUsize::new(0)),
+                readahead: AtomicUsize::new(0),
+            };
 
-        kinfoln!(
-            "block device registered: devnum={}, name={}",
-            devnum,
-            desc.name
-        );
+            kinfoln!(
+                "block device registered: devnum={}, name={}",
+                devnum,
+                desc.name
+            );
 
-        self.names.insert(desc.name.clone(), devnum);
-        self.devices.insert(devnum, desc);
-        self.ordered.push(devnum);
+            self.names.insert(desc.name.clone(), devnum);
+            self.devices.insert(devnum, desc);
+            self.ordered.push(devnum);
+        }
 
         Ok(())
     }
@@ -315,6 +331,25 @@ static SUBSYS: Lazy<BlockDevSubSys> = Lazy::new(|| BlockDevSubSys::new());
 /// Register a named block endpoint. The capability owns its device number.
 pub fn register_block_device(registration: BlockDevRegistration) -> Result<(), SysError> {
     SUBSYS.registry.write_irqsave().register(registration)
+}
+
+/// Register a whole-disk endpoint and the valid primary MBR partitions found
+/// by its one-time sector-zero scan. The returned device numbers are ordered as
+/// whole disk first, followed by partitions in table-slot order.
+pub fn register_block_disk(
+    registration: BlockDevRegistration,
+    minor_stride: usize,
+) -> Result<Vec<BlockDevNum>, SysError> {
+    let registrations = partition::registrations_for_disk(registration, minor_stride)?;
+    let devnums = registrations
+        .iter()
+        .map(|registration| registration.device.devnum())
+        .collect();
+    SUBSYS
+        .registry
+        .write_irqsave()
+        .register_batch(registrations)?;
+    Ok(devnums)
 }
 
 /// Get the block device corresponding to the given device number, if it exists.
@@ -395,6 +430,7 @@ pub fn next_block_dev(ctx: &mut IterCtx) -> Option<BlockDevEntry> {
 
 pub mod devfs;
 mod r#loop;
+mod partition;
 mod ramdisk;
 
 #[cfg(feature = "kunit")]
