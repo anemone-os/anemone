@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-07-31 - Network host test organization](./2026-07-31-net-host-test-organization.md)
 - [2026-07-31 - Alpha/Omega Flock/UDP integration](./2026-07-31-alpha-omega-flock-udp-integration.md)
 - [2026-07-31 - Anonymous inode UAPI kind](./2026-07-31-anon-inode-uapi-kind.md)
 - [2026-07-31 - FS owner-local syscall API](./2026-07-31-fs-owner-local-syscall-api.md)

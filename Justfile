@@ -6,9 +6,23 @@ default:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
+[doc("run a repository-owned test suite: `xtask` or `net-host`")]
+test suite:
+    @case {{ quote(suite) }} in \
+        xtask) just test-xtask ;; \
+        net-host) just test-net-host ;; \
+        *) echo "unknown test suite:" {{ quote(suite) }} >&2; exit 2 ;; \
+    esac
+
 [private]
-xtask-test:
+test-xtask:
     @cd scripts/xtask && cargo test
+
+[private]
+test-net-host:
+    @cargo test -p anemone-net-api -p anemone-smoltcp-stack
+    @cargo test -p anemone-smoltcp-stack --no-default-features --no-run
+    @cargo check -p anemone-smoltcp-stack --no-default-features
 
 [doc("clean the build artifacts of Anemone kernel")]
 clean:

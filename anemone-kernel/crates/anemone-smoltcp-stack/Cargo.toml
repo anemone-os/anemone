@@ -46,5 +46,5 @@ required-features = ["host-test"]
 
 [[test]]
 name = "udp_topology"
-path = "tests/udp_topology.rs"
+path = "tests/udp_topology/mod.rs"
 required-features = ["host-test"]
