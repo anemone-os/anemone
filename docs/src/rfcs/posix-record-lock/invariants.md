@@ -1,6 +1,6 @@
 # POSIX Record Lock 目标和不变量
 
-**状态：** R0 Accepted / Stage 0 Closed / Not Cut Over
+**状态：** R0 Accepted / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active / Not Cut Over
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **适用修订：** R0
@@ -277,7 +277,7 @@ state；query返回与冲突segment无关的PID；诊断字段反向阻止coales
 
 **Cutover：** N/A；产品能力随`POSIX-LOCK-CUTOVER`生效。
 
-### POSIX-LOCK-TARGET-007 — Advisory、namespace 与首版 capability exclusion
+### POSIX-LOCK-TARGET-007 — Advisory、conflict namespace 与首版 capability exclusion
 
 **分类：** Target Guarantee / Capability。
 
@@ -289,7 +289,8 @@ compat、non-regular files、公平性或performance guarantee。形成record-lo
 未来OFD lock必须与POSIX ranges互相冲突，因此届时必须经follow-up RFC读取live domain并形成单一
 POSIX/OFD conflict truth；当前不得为该未来需求预置owner enum、generic record、wait graph或backend hook。
 
-**Owner：** POSIX domain只拥有本RFC namespace；flock继续由`FLOCK-DOMAIN-001`拥有。
+**Owner：** POSIX domain只拥有本RFC conflict namespace；flock继续由`FLOCK-DOMAIN-001`拥有。该语义边界不阻止
+两个domain归入同一纯wiring Rust module namespace。
 
 **依赖：** `POSIX-LOCK-DOMAIN-001`、`FLOCK-DOMAIN-001`。
 
@@ -435,5 +436,7 @@ R0 target最终关闭必须同时满足：
    或新open defect按归属进入register，不留在tracker伪装成实现进度。
 
 当前 R0 已共同接受 target 与[实施计划](./implementation.md)的首个 Stage 0 Ready definition，transaction 已
-建立且 Stage 0已独立关闭。Stage 0只证明episode/holder foundation；current-contract write-back仍只属于最终
-`POSIX-LOCK-CUTOVER`，本阶段contract cutover为`None`，全部Introduce项继续Not Effective。
+建立且 Stage 0已独立关闭。后续独立只读resolution gate保持本页target不变，并把Stage 1解析为Ready / Not
+Active；checkpoint修正让1A只做行为保持的module alignment，1B才证明inode range domain，均不接入ABI、close或
+wait。current-contract语义write-back仍只属于最终`POSIX-LOCK-CUTOVER`，Stage 0/1 semantic cutover均为`None`，
+全部Introduce项继续Not Effective。

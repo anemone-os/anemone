@@ -1,24 +1,27 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0 Closed / Stage 1 Outline
+**状态：** R0 implementation plan / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active / 1B Gated
 **适用修订：** R0
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **目标与不变量：** [POSIX Record Lock 目标和不变量](./invariants.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 active Apollyon / Keter
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
-**Contract Cutover：** prospective `POSIX-LOCK-CUTOVER`；当前 Not Cut Over
+**Contract Cutover：** Stage 1 semantic cutover `None`；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
 
 本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
-canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Active authorization 已
-作为三个独立事件完成；Stage 0现已关闭，其后的resolution gate仍未授权。
+canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
+authorization 已作为三个独立事件完成；Stage 0现已关闭。开发者随后独立授权并完成只读
+`Stage 0 -> Stage 1 Implementation Resolution Gate`，Stage 1现为Ready / Not Active。后续checkpoint粒度修正把
+物理namespace迁移与POSIX range-domain实现拆为1A/1B；下一次独立授权只能激活Checkpoint 1A。
 
 ## 实施原则
 
 - Stage 0 先建立 file-table sharing episode 的显式 participation truth 与 opaque holder capability；不实现
   range、close-to-VFS cleanup、`fcntl` ABI 或 blocking wait，也不执行 contract cutover。
-- Stage 1 才建立 inode-associated range domain；Stage 2 才组合 native ABI、binding-scoped close/commit
-  serialization、wait 与 ordinary signal restart；Stage 3 负责双架构产品证据与原子 cutover。
+- Stage 1先由Checkpoint 1A行为保持地建立`fs::lock`物理namespace，再由Checkpoint 1B建立inode-associated
+  range domain；Stage 2才组合native ABI、binding-scoped close/commit serialization、wait与ordinary signal
+  restart；Stage 3负责双架构产品证据与原子cutover。
 - 每个阶段按自身条件独立关闭。只有前一阶段 Closed 后，独立的 `N -> N+1 Implementation Resolution Gate`
   才能从 live source 展开下一阶段；future Outline 缺少具体类型、锁、文件和命令不是 finding。
 - KUnit 只证明用户态难以稳定命中的 owner/lifecycle topology，并直接经过 production transition；不复制
@@ -83,7 +86,7 @@ canonical implementation plan。R0 acceptance、transaction bootstrap 与开发�
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
-| Stage 1 | Outline | 建立 inode-associated normalized range domain与 assignment/conflict/query proof | None | Stage 0 独立关闭后 |
+| Stage 1 | Ready / Not Active；1A Ready，1B Gated | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 resolution gate与checkpoint split已完成；下一步只允许独立激活1A |
 | Stage 2 | Outline | 实现 native ABI、binding-scoped close/commit、blocking wait 与 signal restart vertical slice | None | Stage 1 独立关闭后 |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
 
@@ -343,7 +346,8 @@ owner、target、ABI、contract或acceptance变化进入RFC review/Target Renego
 wrapper、whitespace、mdBook与full-diff review全部满足。首次runtime发现published kthread缺少detach，已在原
 manifest内修复并从formatter起完整重跑。最终独立review为Apollyon/Keter/Euclid/Safe全0，无temporary
 instrumentation或remaining Stage 0 blocker。contract cutover为`None`，current contracts/register未修改；
-Stage 0代码不构成standalone POSIX-lock capability。Stage 1保持Outline/Unauthorized，本轮未运行下述gate。
+Stage 0代码不构成standalone POSIX-lock capability。在该Stage 0 closure checkpoint，Stage 1仍为
+Outline/Unauthorized，本轮未运行下述gate。
 
 ### Post-Stage 0 naming alignment
 
@@ -356,13 +360,15 @@ Stage 0代码不构成standalone POSIX-lock capability。Stage 1保持Outline/Un
 
 本节只supersede上文completed Stage 0段落中的private Rust名称，不重写历史manifest或执行事实；该调整不改变
 R0 target、owner、public API、shared-contract语义、ABI、visible semantics、acceptance、contract cutover或Stage 1
-成熟度。对应Euclid处置与验证证据记录在tracking issue和transaction；Stage 1及其resolution gate仍未授权。
+成熟度。对应Euclid处置与验证证据记录在tracking issue和transaction；在该命名checkpoint，Stage 1及其
+resolution gate仍未授权。
 
 ## Stage 0 -> Stage 1 Implementation Resolution Gate
 
-前置条件是Stage 0已按上述review、验证和退出条件独立Closed，并由开发者单独授权本只读gate。gate读取Stage 0
-实际diff、transaction evidence、holder/episode实际表示、review findings、live VFS inode/file owners、current
-contracts、register与Draft/R0 target，核对以下事项：
+前置条件是Stage 0已按上述review、验证和退出条件独立Closed，并由开发者单独授权本只读gate。该授权已于
+2026-07-31给出；gate在clean `dev/drc/omega@2268ca1f`上读取Stage 0实际diff、transaction evidence、
+holder/episode实际表示、review findings、live VFS inode/file owners、current contracts、register与R0 target，
+核对以下事项：
 
 - opaque holder如何在不暴露Task/FilesState/table guard的前提下进入VFS；
 - local inode-associated identity与现有flock domain/module shape，确认POSIX domain独立且不进入filesystem
@@ -375,22 +381,281 @@ contracts、register与Draft/R0 target，核对以下事项：
 gate只把Stage 1解析为Ready/Not Active，不自动实现。若live evidence要求改变holder/domain owner、range target、
 flock separation或public contract，停止并进入RFC review，而不是用module preference掩盖target变化。
 
-## Stage 1 Outline：Inode Range Domain 与 Assignment Proof
+### Resolution result
 
-概括目的：
+- Stage 0最终代码中的`PosixLockHolder`是只封装独立`Arc` identity的crate-private capability；它不持有
+  `FilesState`、`FileTable`、participant count、inode或grant state，clone只延长identity storage。VFS只需接收
+  该窄类型并调用same-identity比较，不需要完整Task、files facade或table guard。
+- `Inode`已经直接拥有独立`FlockDomain`；当前`fs::flock`以private module、inode field与窄accessor表达
+  inode-associated owner，filesystem backend不参与。新增第二个advisory-lock family时继续把`flock`与POSIX
+  平铺在`fs`根部会弱化责任导航，因此Stage 1先做同一VFS owner内的行为保持型结构校正：建立纯namespace
+  `fs::lock`，把现有flock原样移入`lock::flock`，新domain落在`lock::posix`。parent module不持有state、
+  不定义共同trait/facade，也不抽取或合并两个domain。
+- absolute range使用`start: u64`与`end_exclusive: Option<u64>`：`Some(end)`只表示`start < end`的有限半开区间，
+  `None`表示持续开放的EOF上界。comparison helper直接把`None`当作正无穷，不使用`u64::MAX` sentinel、
+  inclusive-end或`end + 1`算术。signed UAPI、overflow与relative-whence normalization仍只属于Stage 2。
+- domain采用一个`SpinLock<Vec<PosixLockSegment>>`作为唯一grant truth。每个segment只保存holder、absolute range、
+  read/write mode与显式标注为diagnostic-only的report TGID；没有holder-local list、inode index、candidate、waiter、
+  cached conflict或第二container。
+- conflict/query使用O(n) scan。set在同一domain guard内先检查其它holder的overlap/mode conflict；有冲突时返回
+  一份不含holder capability的真实segment snapshot且不修改state。无冲突时仅重建调用holder的segments：保留
+  assignment range外的prefix/suffix，在lock请求下插入新segment，在unlock下不插入，再按range排序并合并
+  same-holder/same-mode的overlap或相邻segment。其它holder的segments保持原样，最终一次replace提交。
+- report TGID在split时随保留片段保留，新assignment使用调用者提供的snapshot；coalesce可以从参与合并的合法
+  report中保留一个确定值，但report不得进入owner equality、conflict、range transform或merge predicate，测试也
+  不冻结跨coalesce的精确报告选择。
+- 普通heap allocation继续沿用kernel-fatal OOM边界；空domain不分配segment backing，增长只对应canonical
+  granted segments。Stage 1不引入capacity、batch、threshold或其它策略常量，因而不增加Kconfig。被替换或删除的
+  holder-bearing segments在domain guard外drop；domain guard内不调用VFS、task、scheduler或其它可重入owner。
+- Stage 1不需要独立probe：最高风险正是range transform与identity/conflict truth，能够由同一production core的
+  owner-local inline KUnit直接证明。另建probe会复制即将保留的算法或制造test-only facade，不能降低风险。
 
-- 在inode-associated VFS owner下建立独立POSIX record-lock domain，使用Stage 0 opaque holder表达
-  `Holder x AbsoluteRange -> Mode`唯一grant truth。
-- 证明normalized absolute range上的read/write conflict、same-owner replacement/split/merge、idempotent unlock、
-  no-partial-mutation与`F_GETLK`真实conflict snapshot；report TGID仅为允许stale的diagnostic。
+上述结论保持R0 holder/domain owner、range target、flock separation、ABI与acceptance boundary，无
+Apollyon/Keter或Target Renegotiation。Stage 1完整解析为Ready / Not Active；`anemone-abi`与`anemone-rs`虽经
+开发者允许在确有consumer时纳入write set，但本阶段没有UAPI或userspace consumer，加入它们只会提前泄漏Stage 2
+责任，因此不进入resolved manifest。开发者在resolution review中提出共同`lock` module后，上述物理namespace
+调整作为保持target的Route Correction写回本节；它不形成shared lock owner或新RFC revision。随后开发者指出
+结构迁移与新domain不应共用一个closure边界，批准把Stage 1拆为Checkpoint 1A/1B：1A只关闭行为保持的namespace
+alignment，1B才引入POSIX state与proof。该checkpoint修正不改变Stage 1总write set或最终validation floor。
 
-前置依赖：Stage 0 Closed；holder capability和participant topology已由真实实现/review证明。
+## Stage 1 Ready：Inode Range Domain 与 Assignment Proof
 
-受保护边界：不接入raw UAPI、fd close cleanup、wait/signal或userspace syscall；不与flock共享grant、holder、
-waiter或cleanup；不为OFD/deadlock/remote预置owner enum、wait graph或backend hook；contract cutover为`None`。
+### 阶段成熟度与前置条件
 
-解析触发点：仅由Stage 0 -> 1 gate从live inode/flock/source/test shape冻结具体module、container、锁、KUnit/probe、
-审计、停止/退出条件和逐文件manifest。当前不预先选择`Vec`/tree、O(n) scan、wake source或capacity policy。
+Stage 1当前是`Ready / Not Active`，但只允许Checkpoint 1A成为下一activation point。开始1A前必须重新读取live
+HEAD、dirty state、本节manifest、current `VFS-FILE-KIND` / `FLOCK` / `OPENED-DESC` contracts、register与
+transaction，并由开发者明确授权Checkpoint 1A Active。Ready、transaction仍Active或用户允许候选文件进入
+write set都不构成启动授权。
+
+Checkpoint 1B的完整定义已经解析，但它在1A独立Closed、transaction记录closure且开发者另行授权前不可激活。
+如果`PosixLockHolder`、`Inode` construction、`FlockDomain`或KUnit runner相对resolution baseline漂移，必须在
+1B activation前更新对应manifest并重新review；1A closure本身不授权1B。
+
+### Checkpoint 路线
+
+| Checkpoint | 状态 | 目的 | 独立关闭边界 |
+| --- | --- | --- | --- |
+| 1A — Lock namespace alignment | Ready / Not Active | 行为保持地把现有`fs::flock`迁入纯wiring的`fs::lock::flock`，建立后续POSIX child的物理归类位置 | 100% rename、单架构代表性build、locator-only contract更新与source/docs review通过；POSIX state为零；关闭后停止 |
+| 1B — POSIX inode range domain | Gated by 1A Closed / Not Active | 在已关闭的module基线上增加独立POSIX range domain、holder接线与focused proof | 双架构build、RV64 runtime、range/domain source audit与full-diff review通过；Stage 1 Closed并停止在`1 -> 2` gate前 |
+
+### Checkpoint 1A — Lock Namespace Alignment
+
+#### 交付与 Resolved Write Set Manifest
+
+- 把`anemone-kernel/src/fs/flock/{mod.rs,api/{mod.rs,flock.rs}}`100% rename到
+  `anemone-kernel/src/fs/lock/flock/{mod.rs,api/{mod.rs,flock.rs}}`；文件内容、syscall registration、
+  `FlockDomain` grant/wait/retirement与opened-description cleanup行为不变。
+- 新建`anemone-kernel/src/fs/lock/mod.rs`，本checkpoint只声明`flock` child并做维持现有visibility所需的窄
+  re-export；不得提前声明`posix` child、保存state或定义共同trait/facade。
+- `anemone-kernel/src/fs/mod.rs`只把root `flock` wiring替换为private `lock` module，并维持现有crate-private
+  flock surface；不保留`fs::flock` compatibility module或alias。
+- `anemone-kernel/src/fs/inode.rs`只更新`FlockDomain` import path；不得增加POSIX field、constructor或accessor。
+- `docs/src/contracts/vfs/flock.md`与`docs/src/contracts/task/opened-description-lifecycle.md`只刷新implementation
+  path / source-audit locator；stable ID、owner、规则正文、来源与effective状态不变。
+- 执行证据与状态只写回本RFC四页、transaction、transaction index、当前双周devlog与`rfcs.md`；`SUMMARY.md`
+  导航不变时不修改。
+
+#### 验证、review与停止条件
+
+1A按以下顺序执行：
+
+```sh
+just fmt kernel --check
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+git diff --check
+mdbook build docs
+```
+
+随后检查`git diff --find-renames=100% --summary`、production source中旧`fs/flock/**`文件与`fs::flock`引用为零，
+以及`FlockDomain`、syscall adapter、opened-description retirement与全部flock function body的逐字/结构审计；
+确认current contract diff只触及两个locator。历史RFC/transaction路径不回写。`lock/mod.rs`新文件另做no-index
+whitespace检查。RV64 build只证明
+公共module wiring、syscall registration与既有KUnit在代表性production配置下编译，不冒充runtime或行为proof。
+
+1A不运行QEMU、KUnit runtime、LTP、LA64 build或userspace oracle，也不修改profile/rootfs/register。以下任一情况
+立即停止：flock文件无法保持100% rename；需要改变函数体、wait/cleanup顺序、public API或current contract规则；
+需要compatibility alias、共同state/trait/facade、POSIX child/state或manifest外代码才能编译；review出现active
+Apollyon/Keter。成功时transaction记录1A Closed、contract semantic cutover None及locator-only更新，然后停止；
+Checkpoint 1B继续Not Active，不能由1A closure自动进入。
+
+### Checkpoint 1B — POSIX Inode Range Domain
+
+#### 交付
+
+1. 在`fs::lock::posix`建立absolute half-open/open-ended range、read/write mode、conflict snapshot、canonical
+   segment与inode-associated domain；range构造只接受已normalized的非空状态，不读取raw UAPI。
+2. 让每个VFS`Inode`直接拥有一个独立POSIX domain，并只向`fs`内部提供窄accessor；同一inode的hard-link/
+   repeated-open路径自然到达同一domain，不按path、provider、`FileOps`或数值inode key建立registry。
+3. 让domain消费Stage 0的opaque holder capability；production surface只扩大到crate-private type re-export，
+   不提供holder constructor、participant/table state、完整Task或files facade。
+4. 实现query、conflict-free set与idempotent unlock的单锁transaction，证明read/read兼容、任一write overlap冲突、
+   same-owner assignment replacement、split/merge、open-ended range、no-partial-mutation及真实conflict snapshot。
+5. 在`lock/posix.rs`末尾放置owner-local inline KUnit；只为构造多个独立holder identity增加一个
+   `#[cfg(feature = "kunit")]`窄factory。该factory不进入production dependency、不暴露episode/table，也不
+   证明Stage 0 topology；Stage 0既有production-route KUnit继续单独拥有那一层证据。
+
+#### 实现路线与局部不变量
+
+- `PosixLockRange`保持fields private；finite constructor常开断言`start < end`，open-ended constructor只保存
+  start。overlap、adjacency、subtraction与ordering集中在range自身，避免在query/set/unlock分别复制EOF判断。
+- domain guard内的唯一持久集合允许不同holder的兼容read segments overlap，但同一holder的segments不得overlap，
+  且相邻same-mode segments必须canonical coalesce。不同mode相邻segments可以保留；segment顺序不构成外部保证。
+- query忽略same-holder segments，只返回一个实际overlap且mode冲突的snapshot；多个合法冲突的选择顺序不冻结。
+  snapshot只含range/mode/report TGID，不让调用方取得stored holder或domain guard。
+- set的conflict scan与state replace在同一guard内，冲突路径在任何split/merge前退出。same-owner transform使用
+  operation-local temporary vectors，不形成第二持久真相源；ordinary heap OOM仍是fatal boundary，不转换
+  `ENOLCK`，也不为此引入pool/intrusive collection。
+- unlock不检查其它holder冲突，只对调用holder执行range subtraction；没有覆盖部分时为idempotent no-op。
+- report TGID字段旁必须注明pure diagnostic / may stale / never behavior。split保留原snapshot，new assignment
+  使用本次report；coalesce的report选择不改变canonical ranges或任何conflict结果。
+- 轻量局部invariant使用`assert!`；只在KUnit或昂贵全collection审计中检查全局canonical form。cleanup/replaced
+  segment先从published collection移除并释放guard，再执行可能成为last-ref的drop。
+
+#### Module boundary preflight
+
+- `anemone-kernel/src/fs/inode.rs`已经共同承载inode identity、immutable kind、metadata与独立flock domain；新增
+  POSIX domain field/accessor仍是同一VFS inode owner内的association，不要求拆分inode或移动owner surface。
+- `fs::lock`是物理分类namespace，不是semantic owner。1A关闭后，1B只在`lock/mod.rs`增加private `posix` child
+  与窄re-export；parent不得出现state、operation、policy、generic holder/segment、cross-family conflict或cleanup。
+- 1A必须已经把现有`fs/flock/**`完整rename到`fs/lock/flock/**`并同步current locator。1B不得继续修改
+  `lock/flock/**`函数体、syscall registration、`FlockDomain`字段、wait/retirement顺序或两个current contract；
+  历史RFC/transaction路径不回写。
+- Stage 1只用单文件`fs/lock/posix.rs`承载range/domain operation与inline KUnit。当前没有ABI、wait、lifecycle或
+  compat职责，不提前建立`posix/{mod.rs,api.rs,state.rs}`目录；Stage 2若同时接入ABI/wait导致角色分化，应在
+  `Stage 1 -> 2` gate重新判断同owner拆分。
+- `lock::flock`与`lock::posix`不互相import；两个domain只在同一`Inode`中并列，filesystem backend零修改。
+- `task::files`只re-export既有opaque holder给crate内VFS。除KUnit-only factory外不新增constructor或getter；真实
+  syscall如何从当前task取得holder属于Stage 2，不在本阶段预置public/cross-owner facade。
+- Stage 1的query/set/unlock与inode-domain accessor只服务同module KUnit proof，`fs/mod.rs`不向其它subsystem
+  re-export可提交grant的facade。Stage 2必须在live binding/close/wait协议解析后建立真实production entry，不能
+  直接把本阶段无binding validation的private mutation helper暴露给syscall。
+
+#### Checkpoint 1B Resolved Write Set Manifest
+
+Checkpoint 1B Active时允许修改的production source：
+
+- `anemone-kernel/src/task/files/episode.rs`：仅增加KUnit-only独立holder factory；holder production identity与
+  episode lifecycle不变；
+- `anemone-kernel/src/task/files/mod.rs`：crate-private re-export既有`PosixLockHolder`；
+- `anemone-kernel/src/fs/inode.rs`：增加inode-owned domain field、construction与`fs`内部窄accessor；
+- `anemone-kernel/src/fs/lock/mod.rs`：只增加private `posix` child与inode所需的窄re-export，保持1A flock wiring；
+- `anemone-kernel/src/fs/lock/posix.rs`（新建）：range/mode/segment/conflict/domain与owner-local inline KUnit。
+
+文档与执行证据write-back：
+
+- `docs/src/rfcs/posix-record-lock/{index.md,invariants.md,implementation.md,tracking-issues.md}`；
+- `docs/src/devlog/transactions/2026-07-31-posix-record-lock.md`；
+- `docs/src/devlog/transactions/index.md`、当前双周devlog与`docs/src/rfcs.md`：只同步Stage 1 activation/closure入口；
+  `SUMMARY.md`导航不变时不修改。
+
+Validation-only输入，不在写集：
+
+- `anemone-kernel/src/task/files/{table.rs,opened_description.rs,descriptor.rs}`与Stage 0 clone/exec/exit callers；
+- `anemone-kernel/src/fs/{file.rs,api/fcntl.rs}`及各filesystem backend；
+- `anemone-kernel/src/task/tid.rs`；
+- `anemone-abi/**`、`anemone-rs/**`与`anemone-apps/**`；
+- 1A已更新的两个current contract文件整体，以及其它`docs/src/contracts/**`与`docs/src/register/**`；
+- `xref/linux-6.6.32/{fs/locks.c,include/uapi/asm-generic/fcntl.h}`及固定LTP `fcntl14` source；
+- `anemone-apps/user-test/ltp/profile.txt`、`anemone-apps/user-test/ltp/groups/fcntl.txt`、
+  `scripts/run-user-test-rv64.sh`、`conf/rootfs/pretest-rv64.toml`与调用者显式选择的sdcard master。
+
+`anemone-abi` / `anemone-rs`的standing permission不把它们自动纳入本manifest；Stage 1若真实需要raw command、
+`struct flock`、userspace wrapper或syscall smoke，说明ABI责任被提前拉入，应停止并回到stage-order/manifest review，
+而不是静默扩展。本manifest外的生产、contract、register、profile或test asset修改都需先停止并记录扩展理由、
+owner/contract影响与验证变化。
+
+#### Focused KUnit、审计与可观测性
+
+owner-local KUnit直接调用production range/domain transition，至少形成以下具名proof；若实现中case拆合能保持每项
+failure定位，可在closure时记录实际名称，但不得减少coverage：
+
+- `posix_range_assignment_replaces_splits_merges_and_unlocks`：same-owner mixed-mode replacement、双侧split、
+  adjacent merge与idempotent unlock；
+- `posix_conflict_rejects_without_partial_mutation`：read/read兼容、write conflict及冲突前后caller既有segments不变；
+- `posix_open_ended_query_reports_real_segment`：finite/open-ended overlap boundary、真实conflict range/mode/report；
+- `posix_report_tgid_does_not_define_owner_or_coalescing`：same holder不同report仍是same owner并可coalesce，fresh
+  holder即使report相同仍发生冲突；
+- `posix_domain_follows_inode_identity_across_hard_links`：两个path到同一inode观察同一domain，不同inode不共享。
+
+KUnit可以在owner-local module内检查canonical segment count/order，但不新增production snapshot/debug API；
+hard-link case通过真实VFS create/link/unlink route并完整cleanup。KUnit-only holder factory必须保持conditional，
+全树production caller为零。
+
+Stage 1不新增用户可见日志、trace、procfs/debugfs、Event、wait identity或Kconfig。常开assert覆盖invalid internal
+range、same-holder overlap/duplicate canonical state与impossible transform结果；report field注释和source audit是其
+diagnostic-only证据。
+
+source audit必须确认：
+
+- production holder construction仍只在`FileTableEpisode`，没有raw pointer/refcount/TGID替代identity；
+- 每个`Inode`只有一个POSIX domain，所有persistent range/mode只在其single guarded vector；
+- report TGID不出现在owner/conflict/merge/cleanup predicate；
+- 1A关闭后的`FlockDomain`函数体、opened-description lifecycle、filesystem backend、`fcntl` NYI与current
+  contracts规则正文零变化；production source/module中的旧`fs::flock`引用与current旧locator保持为零；
+- 无Event/wait/candidate/cleanup registry、OFD/deadlock/backend hook、capacity constant或第二索引；
+- Stage 1 range mutation的production caller为零，只有owner-local KUnit使用；不存在绕过未来binding validation的
+  syscall/VFS facade；
+- lock guard内无外部owner调用，replaced segment与last holder reference在guard外drop。
+
+#### 验证与 review
+
+按顺序执行，两个architecture build不能并行使用共享generated artifacts：
+
+```sh
+just fmt kernel --check
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+./scripts/run-user-test-rv64.sh <sdcard-image> build/posix-record-lock-stage1-rv64.log
+```
+
+`<sdcard-image>`由调用者通过repository wrapper接口显式选择。1B activation preflight必须重新读取tracked profile；
+resolution时它仍为`sys`，不得为Stage 1修改。wrapper必须正常exit 0，日志点名全部新增KUnit、出现
+`All tests passed!`、进入init/user-test并完成正常shutdown；随行`sys`只作环境回归，不证明record-lock ABI。
+RV64 runtime证明production core在真实kernel执行，LA64 build只证明compile；Stage 1不运行LA64 QEMU、
+record-lock userspace oracle或LTP，因为ABI/产品能力尚未接入。
+
+随后运行`rg` owner/bypass audit、`git diff --check`、新文件独立no-index whitespace check、`mdbook build docs`，
+并对1A基线至完整Stage 1 diff做一次owner/domain/concurrency/resource/diagnostic-boundary review。review必须逐项
+映射1B manifest，确认Vec增长与segment lifetime、conflict-before-mutation、canonicalization、inode association、
+1A flock wiring未回归和两个lock child的语义分离；
+不得用build或KUnit冒充Stage 2/3 ABI、wait、cleanup或双架构runtime evidence。
+
+#### Contract cutover、反馈与停止条件
+
+**Contract cutover：** `None`。`FILES-POSIX-OWNER-001`与全部`POSIX-LOCK-*`继续Not Effective；Stage 1 domain没有
+syscall/close/wait consumer，不能作为partial capability单独合入或把`fcntl` NYI改写成已支持。1A已经完成的
+`FLOCK-*`/`OPENED-DESC-*` locator-only更新不构成semantic cutover；1B不得再修改这些current contract。
+
+以下任一情况立即停止Stage 1：
+
+- VFS需要完整Task、FilesState、FileTable guard或backend-private hook才能比较holder或关联domain；
+- grant/range/mode同时出现在holder、inode外registry、filesystem backend、waiter或第二persistent container；
+- 正确transform需要与flock共享domain/segment，或为OFD/deadlock/remote预置generic owner/framework；
+- `fs::lock` parent开始保存state、定义共同operation/trait、拥有cross-family cleanup，或1B需要重新打开1A并改变
+  flock wiring、syscall/wait/retirement行为；
+- report TGID、segment order、notification或diagnostic label开始驱动owner/conflict/merge行为；
+- conflict检查与assignment commit不能在单一domain serialization下保证no-partial-mutation；
+- 需要Event、blocking wait、fd-close cleanup、signal、raw UAPI、syscall或userspace改动才能证明本阶段；
+- 需要提前把无binding validation的range mutation导出为production facade，或已有consumer要求依赖该旁路；
+- 需要固定capacity/batch/threshold等策略却未先解析Kconfig owner与compile-time assertion；
+- review发现active Apollyon/Keter，或实现只能弱于R0 range/domain/conflict-namespace target。
+
+保持target的range helper、temporary vector、segment order或test composition调整作为Route Correction记录在
+transaction并重跑owning evidence。owner、contract、ABI、visible semantics或acceptance变化进入RFC review /
+Target Renegotiation；manifest扩展必须先更新本文并在transaction记录批准事实。
+
+#### Checkpoint 1B / Stage 1 退出条件
+
+- inode-associated domain是唯一grant truth；holder只表达identity，report只服务diagnostic，flock与backend零
+  POSIX state；
+- 五类focused proof通过production transition，source audit确认range canonicalization、no-partial-mutation、
+  open-ended边界与resource/drop纪律；
+- format、双架构build、RV64 canonical wrapper、whitespace、mdBook与full-diff review通过，证据按claim分层；
+- 无active Apollyon/Keter、temporary instrumentation、manifest越界或Stage 2提前接线；Euclid有明确disposition；
+- transaction记录1A与1B分别Closed、Stage 1 Closed、contract cutover None、current contract语义/register不变，
+  1A的两个implementation locator已经同步，并明确Stage 2及`Stage 1 -> 2` resolution gate仍未自动授权。
+
+Stage 2是否已经解析为Ready不属于Stage 1 closure；Stage 1关闭后必须停在下一独立resolution gate。
 
 ## Stage 1 -> Stage 2 Implementation Resolution Gate
 

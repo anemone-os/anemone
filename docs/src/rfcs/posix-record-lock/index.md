@@ -1,6 +1,6 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** R0 / Accepted for Implementation / Stage 0 Closed
+**状态：** R0 / Accepted for Implementation / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-31
@@ -15,15 +15,19 @@
 **开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
 后续 Outline 中尚未解析的类型、锁、容器、模块路径、stage、write set 与精确验证命令属于滚动
 implementation resolution，不因缺失本身构成 finding。
-**下一步：** 停在 Stage 0 closure；等待开发者独立授权
-Stage 0 -> Stage 1 Implementation Resolution Gate。该 gate、Stage 1与任何contract cutover均未授权。
+**下一步：** 等待开发者独立授权Checkpoint 1A Active。Stage 0 -> Stage 1只读resolution gate已完成并把
+Stage 1解析为Ready；后续路线修正拆出1A结构迁移与1B range domain，下一次授权只允许进入1A。Checkpoint 1B、
+Stage 2 gate与任何semantic contract cutover仍未授权。
 
 ## 文档状态
 
 本文与 [目标和不变量](./invariants.md) 是 POSIX process-associated byte-range record lock 的公共 canonical
 R0 target。2026-07-31 独立 review 已共同接受 target、Contract Impact、proof obligations 与首个完整 Ready
 stage；随后建立 transaction，开发者明确授权 Stage 0 Active。R0 target 尚未 cut over，不是 current contract，
-Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record-lock capability。
+Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record-lock capability。其后的独立只读
+resolution gate已基于live source把Stage 1解析为Ready / Not Active；后续checkpoint粒度修正保持R0 target，
+把行为保持的lock namespace alignment独立为1A、POSIX range domain独立为1B。两者均未激活，且不更新current
+contract语义。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
 此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
@@ -46,7 +50,7 @@ cleanup attribution。全部已授予区间、mode、conflict predicate 与 wait
 inode-associated VFS POSIX record-lock domain。fd slot、opened description、数值 PID、path 与 inode number
 都不能替代 holder；notification 也不能替代 grant truth。
 
-现有 whole-file `flock` 保持独立 namespace。首版不实现 OFD lock、deadlock detection、mandatory locking、
+现有 whole-file `flock` 保持独立 conflict namespace。首版不实现 OFD lock、deadlock detection、mandatory locking、
 remote propagation 或通用 file-lock framework，也不为这些未来能力预置 owner variant、backend hook、
 waiter graph 或 lifecycle registry。
 
@@ -120,7 +124,7 @@ Linux generic POSIX path 以 `current->files` 作为 behavior owner，以 `curre
   signal interruption / `SA_RESTART` replay。
 - 关闭 holder 的任意相关 fd 时，同步提交该 holder 在目标 inode 上的全部 grant cleanup 与 recheck hint；
   不要求 producer 等待 waiter 运行或 local cleanup 完成。
-- 保持 ordinary read/write advisory、local flock namespace 独立以及 non-target file kind fail-closed。
+- 保持 ordinary read/write advisory、local flock conflict namespace 独立以及 non-target file kind fail-closed。
 - 以 focused kernel proof、`fcntl-test` 的 `posix-record-lock` suite、focused LTP group 与 RV64/LA64
   end-to-end runtime 形成彼此独立的最终证据。
 
@@ -145,8 +149,9 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Tracking Issues](./tracking-issues.md)：当前无 active Apollyon / Keter
-- [实施计划](./implementation.md)：Stage 0 Closed；Stage 1与后续阶段保持 Outline
-- [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0 执行、finding 与验证证据
+- [实施计划](./implementation.md)：Stage 0 Closed；Stage 1 Ready，Checkpoint 1A Ready / Not Active，1B Gated；
+  后续阶段保持 Outline
+- [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0 执行证据与Stage 1 resolution preflight
 
 Current contracts：
 
@@ -290,10 +295,11 @@ ABI owner 使用以下 validation order：command decode；fd lookup / `O_PATH`�
 lock-record/operation 配额，其容量必须由 Kconfig 拥有、由 kernel compile-time assertion 验证合法性，资源
 拒绝必须在 mutation 前返回 `ENOLCK`；不得以此为理由引入双重索引或预付通用 framework。
 
-### Advisory 与 namespace
+### Advisory 与 conflict namespace
 
 POSIX record locks 不强制 ordinary read/write。现有 flock 与 POSIX record lock 使用两个独立 conflict
-namespace，不共享 grants、waiters、cleanup 或 mode；未来 OFD lock 必须与 POSIX record lock 互相冲突，但该
+namespace，不共享 grants、waiters、cleanup 或 mode；这里的 namespace 是锁冲突域，不约束 Rust module 的物理
+归类。未来 OFD lock 必须与 POSIX record lock 互相冲突，但该
 能力到来前不预置 OFD owner variant。未来 RFC 必须读取当时的 live POSIX implementation，再决定如何形成
 POSIX/OFD 的单一 record-lock conflict truth。
 
@@ -338,7 +344,7 @@ module pressure，解析首个完整 Ready stage、精确 write set、probe、�
 以下变化必须回到本文 review 或 `Target Renegotiation Gate`，不能由 implementation preference 静默决定：
 
 - holder 从 file-table sharing episode 改为 task/TGID/opened-description/fd 等其它 identity；
-- grant、wait publication 或 cleanup 出现第二 owner，或 POSIX 与 flock 提前共用 namespace；
+- grant、wait publication 或 cleanup 出现第二 owner，或 POSIX 与 flock 提前共用 conflict namespace；
 - 改变 native ABI、file-kind admission、range/conflict、close/fork/exec/restart 或 `l_pid` visible boundary；
 - 把 deadlock detection、OFD、remote backend、non-regular files 或 32-bit compat 纳入首版；
 - 降低双架构 runtime、focused oracle、LTP 或 lifecycle/concurrency proof 的最终验收边界。
@@ -392,7 +398,8 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 
 当前 R0 target 已接受，transaction 已建立，Stage 0已按实现、验证与全零独立review关闭；执行事实只由
 [transaction](../../devlog/transactions/2026-07-31-posix-record-lock.md)记录。Stage 0 contract cutover为
-`None`，current contracts未修改，全部prospective ID继续Not Effective。
+`None`；后续只读resolution已把Stage 1解析为Ready / Not Active，并进一步拆为1A/1B，但没有代码执行或
+semantic contract cutover。current contracts未修改，全部prospective ID继续Not Effective。
 最终 R0 implementation closure 至少需要：
 
 - 新增 contract IDs 在 `POSIX-LOCK-CUTOVER` 原子写入 current contracts，Preserve IDs 经 source/review 证明

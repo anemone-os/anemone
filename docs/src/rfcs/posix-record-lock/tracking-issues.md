@@ -1,6 +1,6 @@
 # POSIX Record Lock Tracking Issues
 
-**状态：** R0 / Stage 0 Closed / no current findings
+**状态：** R0 / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active / no current findings
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
@@ -9,7 +9,9 @@
 停止条件或验收判断的 design finding。当前没有 active Apollyon 或 Keter；既有结论保留在 Neutralized 作为
 后续 implementation resolution 与 review 的边界依据。
 
-[实施计划](./implementation.md) 已把 Stage 0关闭，后续阶段仍保持 Outline。实现审查发现的显式 detach
+[实施计划](./implementation.md) 已把 Stage 0关闭；后续独立只读resolution gate未发现新的design finding，
+并把Stage 1解析为Ready / Not Active。开发者随后批准把结构迁移与新domain拆为Checkpoint 1A/1B；该路线修正
+不改变target/owner/contract语义，因此不新增tracking finding。Stage 2以后仍保持Outline。Stage 0实现审查发现的显式 detach
 consumer遗漏与runtime发现的kthread exit遗漏均已neutralize；最终独立review为Apollyon/Keter/Euclid/Safe全0。
 后续 finding 仍按影响
 写回 `index.md`、`invariants.md` 或 `implementation.md`，本文只记录 finding 状态与依据。
@@ -170,7 +172,8 @@ observer、participant count、attached诊断字段、detach与opened-descriptio
 `OPENED-DESC` contract只同步实现owner名称，不改变effective语义。
 
 **状态：** Neutralized / 2026-07-31 post-Stage 0 engineering audit。开发者明确批准该同owner命名checkpoint与
-聚焦commit；R0、Stage 0 closure、contract cutover与Stage 1 Outline/Unauthorized状态不变。验证证据见transaction。
+聚焦commit；在该checkpoint，R0、Stage 0 closure、contract cutover与Stage 1 Outline/Unauthorized状态不变。
+验证证据见transaction。
 
 ### KETER-POSIX-LOCK-006：Episode 拆分未约束现有 lifecycle orchestration 的归属
 

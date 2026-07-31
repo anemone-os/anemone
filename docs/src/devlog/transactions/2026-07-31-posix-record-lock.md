@@ -1,21 +1,24 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0 Closed / stopped before Stage 1
+**状态：** Active transaction / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active / 1B Gated
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
-**实施计划：** [Stage 0 — File-table Episode 与 Holder Foundation](../../rfcs/posix-record-lock/implementation.md#stage-0-readyfile-table-episode-与-holder-foundation)
+**实施计划：** [Stage 1 — Checkpoint 1A/1B](../../rfcs/posix-record-lock/implementation.md#stage-1-readyinode-range-domain-与-assignment-proof)
 **适用修订：** R0
-**Contract Cutover：** `None` for Stage 0；`FILES-POSIX-OWNER-001`与全部`POSIX-LOCK-*`继续 Not Effective
+**Contract Cutover：** semantic `None` through Stage 1；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
+`POSIX-LOCK-*`继续 Not Effective
 
 ## 边界
 
-本事务执行 POSIX process-associated byte-range record lock R0，但本轮唯一授权仅为 Stage 0。Stage 0建立
-file-table sharing episode、显式participation与opaque holder foundation，证明fork、`CLONE_FILES`、
-unshare、成功exec和exit topology；不实现range domain、`fcntl` ABI、close-to-VFS cleanup或blocking wait。
+本事务执行 POSIX process-associated byte-range record lock R0。初始activation唯一授权是Stage 0：建立
+file-table sharing episode、显式participation与opaque holder foundation，证明fork、`CLONE_FILES`、unshare、
+成功exec和exit topology；不实现range domain、`fcntl` ABI、close-to-VFS cleanup或blocking wait。
 
-Stage 0关闭后必须停止。`Stage 0 -> Stage 1 Implementation Resolution Gate`、Stage 1及任何contract cutover
-均未授权。Stage 0代码不是可独立合入的POSIX record-lock capability；current contracts与register保持不变。
+Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
+现已完成，Stage 1为Ready / Not Active；后续checkpoint修正把1A/1B拆开，下一次授权只允许进入1A。Stage 1代码、
+Checkpoint 1B、Stage 1 -> 2 gate及任何semantic contract cutover仍未授权。
+Stage 0代码不是可独立合入的POSIX record-lock capability；current contracts与register保持不变。
 
 ## R0 acceptance 与 activation
 
@@ -193,3 +196,57 @@ acceptance与contract cutover均未改变。
 本checkpoint不重写Stage 0历史manifest或当时的执行事实；implementation中的post-Stage 0 supersession和
 `EUCLID-POSIX-LOCK-003`记录当前术语。未运行QEMU、LTP或Stage 1 gate；Stage 1继续Outline/Unauthorized，全部
 prospective POSIX-lock contract ID继续Not Effective。
+
+## Stage 0 -> Stage 1 Implementation Resolution Gate — 2026-07-31
+
+开发者在Stage 0及其命名校正均独立关闭后，明确授权本轮只解析Stage 1，不授权实现。preflight从clean
+`dev/drc/omega@2268ca1f`读取Stage 0实际diff、本transaction的review/validation、live`PosixLockHolder`与
+`FilesState`、VFS`Inode`/`FlockDomain`、R0 target/current contracts、register、fixed Linux/LTP source及
+repository runner。authoritative Ready definition与resolved manifest已写入
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-1-readyinode-range-domain-与-assignment-proof)，
+本节不复制第二份计划。
+
+resolution确认：
+
+- Stage 0 holder只封装独立opaque identity，不持有task/table/inode/grant truth；VFS可通过crate-private窄类型
+  消费same-owner comparison，不需要完整Task、`FilesState`或table guard；
+- `Inode`已以direct field拥有独立`FlockDomain`。开发者在resolution review中要求把两个advisory-lock family
+  收归共同物理namespace；最终路线先把现有`fs::flock`行为保持地迁入纯wiring的`fs::lock::flock`，再把POSIX
+  domain落入`fs::lock::posix`。parent不持有state或共同trait/facade，无需backend hook、path registry或generic
+  file-lock framework；
+- internal range固定为`u64 start + Option<u64> exclusive end`，`None`表达开放EOF；domain以单一
+  `SpinLock<Vec<segment>>`做O(n) conflict/query和same-owner range rebuild，report TGID只作diagnostic；
+- Stage 1只证明range/domain，不接入raw UAPI、fd-close cleanup、Event/wait、signal或userspace。开发者允许
+  `anemone-abi`/`anemone-rs`在必要时进入write set，但本阶段没有真实consumer，二者明确不在resolved manifest；
+- ordinary heap OOM维持kernel-fatal边界；不新增capacity policy、Kconfig、second index、wait candidate或
+  persistent diagnostic mirror。focused proof由同一production core末尾的inline KUnit承担，不建立独立probe。
+
+code manifest冻结为`task/files/{episode.rs,mod.rs}`、`fs/{mod.rs,inode.rs}`、现有`fs/flock/**` rename source与
+新建`fs/lock/{mod.rs,flock/**,posix.rs}`；current`FLOCK`/`OPENED-DESC` contract只同步implementation locator。
+完整文档回写面与validation-only输入见authoritative plan。validation floor为sequential formatter、RV64/LA64 release build、
+RV64 canonical wrapper、新文件/全diff whitespace、mdBook、source audit及完整owner/domain/concurrency/resource
+review；LA64 runtime、record-lock userspace与LTP仍Not Run且不属于Stage 1 closure。
+
+本gate未发现Apollyon/Keter，也未改变R0 target、owner、ABI、visible semantics、Contract Impact或acceptance。
+Stage 1现为Ready / Not Active，contract cutover仍为`None`；没有修改code、current contracts、register、profile、
+rootfs或test assets。唯一合法后续动作是等待开发者独立授权Stage 1 Active，不能自动实现或进入Stage 1 -> 2 gate。
+
+## Stage 1 checkpoint split correction — 2026-07-31
+
+开发者在resolution review中指出：原Stage 1把行为保持的flock目录迁移与POSIX range-domain新语义放在同一closure
+边界，无法独立证明结构迁移，也使失败归属和后续activation过宽。开发者批准保持R0 target的路线修正，把Stage 1
+拆为两个独立checkpoint；authoritative定义与逐checkpoint manifest已回写
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#stage-1-readyinode-range-domain-与-assignment-proof)。
+本节supersede上一条resolution记录中的单一Stage 1 manifest和“下一步激活Stage 1”措辞，不重写当时的解析事实。
+
+- Checkpoint 1A只把现有`fs::flock`100% rename为`fs::lock::flock`，建立纯wiring parent、更新`Inode` import和
+  `fs` re-export，并对current `FLOCK`/`OPENED-DESC` contract做locator-only更新。它不得创建POSIX child/state、
+  修改flock函数体或改变effective contract语义。
+- 1A验证收窄为kernel formatter、代表性RV64 release build、100% rename/旧路径/source audit、whitespace、
+  `git diff --check`和mdBook；QEMU、KUnit runtime、LTP、LA64 build、userspace oracle均Not Run且不属于1A closure。
+- Checkpoint 1B在1A独立Closed后才可另行激活；它增加`lock::posix`、inode-owned range domain、opaque holder接线与
+  focused KUnit，并保留原Stage 1双架构build、RV64 canonical wrapper和完整review floor。
+
+本修正没有执行production code、build或测试，没有修改current contract/register/profile/rootfs/test asset；也未改变
+Stage 1总write set、最终validation floor、R0 owner/ABI/visible semantics/Contract Impact/acceptance。当前唯一合法
+后续动作是等待开发者独立授权Checkpoint 1A Active；1A closure必须停止，不能自动激活1B。
