@@ -115,6 +115,8 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
   - [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)
   - [Mount admission](./contracts/vfs/mount-admission.md)
   - [Local whole-file flock](./contracts/vfs/flock.md)
+- [Device 当前契约](./contracts/device/index.md)
+  - [Device number namespace](./contracts/device/device-number.md)
 - [Signal 当前契约](./contracts/signal/index.md)
   - [Pending routing 与 ordinary action selection](./contracts/signal/pending-routing.md)
   - [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)

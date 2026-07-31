@@ -168,7 +168,9 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 **Last Verified:** 2026-05-27
 **Exit Condition:** 补上 `mknod` / FIFO 创建的 syscall 路径，并决定是否为该架构提供 legacy `readdir` 兼容入口后，再重新跑 `read03` 和 `readdir21`。
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md),
+[VFS Make Node RFC Draft](../rfcs/vfs-make-node/index.md)（只覆盖 node creation；named FIFO I/O 与 legacy
+`readdir` 不随该 RFC promotion 自动关闭）
 
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。
