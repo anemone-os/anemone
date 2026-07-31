@@ -1129,10 +1129,10 @@ impl<T: AsRef<[u8]> + ?Sized> fmt::Display for Packet<&T> {
                 TcpOption::MaxSegmentSize(value) => write!(f, " mss={value}")?,
                 TcpOption::WindowScale(value) => write!(f, " ws={value}")?,
                 TcpOption::SackPermitted => write!(f, " sACK")?,
-                TcpOption::SackRange(slice) => write!(f, " sACKr{slice:?}")?, /* debug print
-                                                                                * conveniently
-                                                                                * includes the
-                                                                                * []s */
+                TcpOption::SackRange(slice) => write!(f, " sACKr{slice:?}")?, /* debug print */
+                // conveniently
+                // includes the
+                // []s
                 TcpOption::TimeStamp { tsval, tsecr } => {
                     write!(f, " tsval {tsval:08x} tsecr {tsecr:08x}")?
                 },

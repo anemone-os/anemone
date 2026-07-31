@@ -105,10 +105,27 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
+- [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
+  domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。
+  final close删除holder grant并提交cooperative recheck hint，不承诺precise close/signal/restart winner。
+  RV64/LA64 developer-run acceptance均通过264项enabled KUnit、11项focused oracle与双libc五项flock LTP；
+  LA64末尾halt由已登记的power driver缺失解释。`FLOCK-CUTOVER`已把
+  [`OPENED-DESC-RETIRE-001`](./contracts/task/opened-description-lifecycle.md)与三个
+  [`FLOCK-*`](./contracts/vfs/flock.md) ID原子切换为Effective，执行证据见
+  [transaction](./devlog/transactions/2026-07-29-flock.md)。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
   Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
+- [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：R0已实现并关闭；Stage 1/2分别建立initial-domain唯一Stack、
+  logical interface/static IPv4 control plane与production local path，Stage 3/4完成Endpoint/File lifecycle、
+  unconnected UDP transaction、blocking与poll/select/epoll、capacity/copy-fault/fragment证据。Stage 5以同源guest
+  case和bounded host peer完成RV64/LA64 remote-external双向proof；两项获批LA64 Route Correction修复PCH-PIC/
+  EIOINTC delivery与同步VirtIO block空IRQ handler，保持原owner与R0 target。最终双架构均为274/274 KUnit、UDP
+  17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown；LA64无电源驱动时在halt后由monitor `quit`收尾。
+  `NET-UDP-FINAL-CUTOVER`已原子使四项[UDP Socket contract](./contracts/net/udp-socket.md) Active；hardware、
+  `smp>1`、full network LTP与final harness保持Not Run。执行证据见
+  [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入

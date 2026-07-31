@@ -6,10 +6,10 @@
 **参与领域：** fs / device / scheduler latch / task signal
 **覆盖范围：** `ppoll` / `pselect6` 的 snapshot/subscribe/final-scan loop、source-neutral persistent route 与 readiness hint publication
 **不覆盖：** `POLLPRI` / exception readiness、epoll watch/policy、Linux UAPI layout、具体 source predicate 定义
-**实现位置：** `anemone-kernel/src/fs/iomux/`、`anemone-kernel/src/fs/api/iomux/`、各 pollable source 的 `poll` 路径
+**实现位置：** `anemone-kernel/src/fs/iomux/`、`anemone-kernel/src/fs/iomux/api/`、各 pollable source 的 `poll` 路径
 **依赖：** `SCHED-LATCH-001..003`、`SCHED-WAKE-001..004`
 **Pending Successor：** None
-**最后核验：** 2026-07-27
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 
@@ -26,7 +26,7 @@
 
 **违反表现：** 睡在未 armed source 上、register window 内的 readiness 永久丢失、snapshot probe 污染 source queue，或两个 syscall 分裂成不同 wait protocol。
 
-**验证 / Enforcement：** `fs/iomux/wait.rs`、`fs/api/iomux/{wait,ppoll,pselect6}.rs` 与 `PollRequest` / `PollRegisterResult` source audit；poll/select 阻塞与 timeout 回归。
+**验证 / Enforcement：** `fs/iomux/wait.rs`、`fs/iomux/api/{wait,ppoll,pselect6}.rs` 与 `PollRequest` / `PollRegisterResult` source audit；poll/select 阻塞与 timeout 回归。
 
 **最初来源：** [Sched Latch RFC](../../rfcs/sched-latch/invariants.md)；[实现事务](../../devlog/transactions/2026-06-03-sched-latch.md)。
 

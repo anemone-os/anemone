@@ -7,6 +7,7 @@ mod dentry;
 mod epoll;
 mod eventfd;
 pub mod fanotify;
+mod flock;
 // mod error;
 mod file;
 mod filesystem;
@@ -18,7 +19,7 @@ mod namei;
 mod path;
 mod permission;
 mod superblock;
-pub mod timerfd;
+mod timerfd;
 mod uio;
 
 // filesystem drivers
@@ -30,6 +31,7 @@ mod pipe;
 pub mod proc;
 
 mod ramfs;
+mod socket;
 
 pub mod api;
 
@@ -62,6 +64,7 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub(crate) use self::{
+    flock::{FlockMode, FlockOperation, FlockOutcome, request_flock, retire_flock},
     inode::RenameFlags,
     iomux::PollRoute,
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},

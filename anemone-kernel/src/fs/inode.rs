@@ -9,7 +9,7 @@ use core::{
 };
 
 use crate::{
-    fs::{file::FileMode, permission::FsPermChecker},
+    fs::{file::FileMode, flock::FlockDomain, permission::FsPermChecker},
     prelude::{vmo::VmObject, *},
     task::credentials::cap::{Capability, FileCapabilities},
     utils::any_opaque::AnyOpaque,
@@ -163,24 +163,32 @@ impl TryFrom<u64> for Ino {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InodeType {
+    /// Linux-style ordinary anon-inode control object.
+    ///
+    /// This is an internal VFS kind, not a Linux `S_IF*` type. Its userspace
+    /// `S_IFMT` projection is intentionally zero rather than `S_IFREG`.
+    Anon,
     Regular,
     Dir,
     Char,
     Block,
     Symlink,
     Fifo,
+    Socket,
 }
 
 impl InodeType {
     /// Convert to Linux's mode bits, with only file type bits set.
     pub const fn to_linux_mode_bits(self) -> u32 {
         match self {
+            Self::Anon => 0,
             Self::Regular => linux_mode::S_IFREG,
             Self::Dir => linux_mode::S_IFDIR,
             Self::Char => linux_mode::S_IFCHR,
             Self::Block => linux_mode::S_IFBLK,
             Self::Symlink => linux_mode::S_IFLNK,
             Self::Fifo => linux_mode::S_IFIFO,
+            Self::Socket => linux_mode::S_IFSOCK,
         }
     }
 }
@@ -599,6 +607,8 @@ pub(super) struct Inode {
     indexed: AtomicBool,
     /// Logical memory mapping for this inode, if any.
     mapping: Option<Arc<dyn VmObject>>,
+    /// Sole local whole-file flock grant and wait-notification domain.
+    flock: FlockDomain,
     /// Cached metadata that can be updated by the inode's file operations
     /// without accesing underlying filesystem, thus speeding up common
     /// operations like `stat` and `write`.
@@ -664,6 +674,7 @@ impl Inode {
             rc: AtomicUsize::new(0),
             indexed: AtomicBool::new(false),
             mapping: None,
+            flock: FlockDomain::new(),
             meta: RwLock::new(meta),
         }
     }
@@ -915,6 +926,10 @@ impl InodeRef {
     pub(super) fn new(inode: Arc<Inode>) -> Self {
         inode.inc_rc();
         Self(inode)
+    }
+
+    pub(super) fn flock_domain(&self) -> &FlockDomain {
+        &self.inode().flock
     }
 
     /// Get the inode number.

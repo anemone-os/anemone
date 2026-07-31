@@ -102,13 +102,31 @@ defmt = ["dep:defmt", "heapless/defmt"]
 "auto-icmp-echo-reply" = []
 
 default = [
-  "std", "log", # needed for `cargo test --no-default-features --features default` :/
-  "medium-ethernet", "medium-ip", "medium-ieee802154",
-  "phy-raw_socket", "phy-tuntap_interface",
-  "proto-ipv4",  "proto-dhcpv4", "proto-ipv6", "proto-ipv6-slaac", "proto-dns",
-  "proto-ipv4-fragmentation", "proto-sixlowpan-fragmentation",
-  "socket-raw", "socket-icmp", "socket-udp", "socket-tcp", "socket-dhcpv4", "socket-dns", "socket-mdns",
-  "packetmeta-id", "async", "multicast", "auto-icmp-echo-reply"
+  "std",
+  "log",                           # needed for `cargo test --no-default-features --features default` :/
+  "medium-ethernet",
+  "medium-ip",
+  "medium-ieee802154",
+  "phy-raw_socket",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "proto-dhcpv4",
+  "proto-ipv6",
+  "proto-ipv6-slaac",
+  "proto-dns",
+  "proto-ipv4-fragmentation",
+  "proto-sixlowpan-fragmentation",
+  "socket-raw",
+  "socket-icmp",
+  "socket-udp",
+  "socket-tcp",
+  "socket-dhcpv4",
+  "socket-dns",
+  "socket-mdns",
+  "packetmeta-id",
+  "async",
+  "multicast",
+  "auto-icmp-echo-reply",
 ]
 
 # Private features
@@ -133,7 +151,7 @@ iface-max-addr-count-8 = []
 iface-max-multicast-group-count-1 = []
 iface-max-multicast-group-count-2 = []
 iface-max-multicast-group-count-3 = []
-iface-max-multicast-group-count-4 = [] # Default
+iface-max-multicast-group-count-4 = []    # Default
 iface-max-multicast-group-count-5 = []
 iface-max-multicast-group-count-6 = []
 iface-max-multicast-group-count-7 = []
@@ -149,7 +167,7 @@ iface-max-multicast-group-count-1024 = []
 iface-max-sixlowpan-address-context-count-1 = []
 iface-max-sixlowpan-address-context-count-2 = []
 iface-max-sixlowpan-address-context-count-3 = []
-iface-max-sixlowpan-address-context-count-4 = [] # Default
+iface-max-sixlowpan-address-context-count-4 = []    # Default
 iface-max-sixlowpan-address-context-count-5 = []
 iface-max-sixlowpan-address-context-count-6 = []
 iface-max-sixlowpan-address-context-count-7 = []
@@ -169,7 +187,7 @@ iface-neighbor-cache-count-4 = []
 iface-neighbor-cache-count-5 = []
 iface-neighbor-cache-count-6 = []
 iface-neighbor-cache-count-7 = []
-iface-neighbor-cache-count-8 = [] # Default
+iface-neighbor-cache-count-8 = []    # Default
 iface-neighbor-cache-count-16 = []
 iface-neighbor-cache-count-32 = []
 iface-neighbor-cache-count-64 = []
@@ -180,7 +198,7 @@ iface-neighbor-cache-count-1024 = []
 
 iface-max-route-count-0 = []
 iface-max-route-count-1 = []
-iface-max-route-count-2 = [] # Default
+iface-max-route-count-2 = []    # Default
 iface-max-route-count-3 = []
 iface-max-route-count-4 = []
 iface-max-route-count-5 = []
@@ -207,7 +225,7 @@ iface-max-prefix-count-8 = []
 fragmentation-buffer-size-256 = []
 fragmentation-buffer-size-512 = []
 fragmentation-buffer-size-1024 = []
-fragmentation-buffer-size-1500 = [] # Default
+fragmentation-buffer-size-1500 = []  # Default
 fragmentation-buffer-size-2048 = []
 fragmentation-buffer-size-4096 = []
 fragmentation-buffer-size-8192 = []
@@ -218,7 +236,7 @@ fragmentation-buffer-size-65536 = []
 assembler-max-segment-count-1 = []
 assembler-max-segment-count-2 = []
 assembler-max-segment-count-3 = []
-assembler-max-segment-count-4 = [] # Default
+assembler-max-segment-count-4 = []  # Default
 assembler-max-segment-count-8 = []
 assembler-max-segment-count-16 = []
 assembler-max-segment-count-32 = []
@@ -226,7 +244,7 @@ assembler-max-segment-count-32 = []
 reassembly-buffer-size-256 = []
 reassembly-buffer-size-512 = []
 reassembly-buffer-size-1024 = []
-reassembly-buffer-size-1500 = [] # Default
+reassembly-buffer-size-1500 = []  # Default
 reassembly-buffer-size-2048 = []
 reassembly-buffer-size-4096 = []
 reassembly-buffer-size-8192 = []
@@ -234,7 +252,7 @@ reassembly-buffer-size-16384 = []
 reassembly-buffer-size-32768 = []
 reassembly-buffer-size-65536 = []
 
-reassembly-buffer-count-1 = [] # Default
+reassembly-buffer-count-1 = []  # Default
 reassembly-buffer-count-2 = []
 reassembly-buffer-count-3 = []
 reassembly-buffer-count-4 = []
@@ -245,12 +263,12 @@ reassembly-buffer-count-32 = []
 ipv6-hbh-max-options-1 = []
 ipv6-hbh-max-options-2 = []
 ipv6-hbh-max-options-3 = []
-ipv6-hbh-max-options-4 = [] # Default
+ipv6-hbh-max-options-4 = []  # Default
 ipv6-hbh-max-options-8 = []
 ipv6-hbh-max-options-16 = []
 ipv6-hbh-max-options-32 = []
 
-dns-max-result-count-1 = [] # Default
+dns-max-result-count-1 = []  # Default
 dns-max-result-count-2 = []
 dns-max-result-count-3 = []
 dns-max-result-count-4 = []
@@ -258,7 +276,7 @@ dns-max-result-count-8 = []
 dns-max-result-count-16 = []
 dns-max-result-count-32 = []
 
-dns-max-server-count-1 = [] # Default
+dns-max-server-count-1 = []  # Default
 dns-max-server-count-2 = []
 dns-max-server-count-3 = []
 dns-max-server-count-4 = []
@@ -274,14 +292,14 @@ rpl-relations-buffer-count-1 = []
 rpl-relations-buffer-count-2 = []
 rpl-relations-buffer-count-4 = []
 rpl-relations-buffer-count-8 = []
-rpl-relations-buffer-count-16 = [] # Default
+rpl-relations-buffer-count-16 = []  # Default
 rpl-relations-buffer-count-32 = []
 rpl-relations-buffer-count-64 = []
 rpl-relations-buffer-count-128 = []
 
 rpl-parents-buffer-count-2 = []
 rpl-parents-buffer-count-4 = []
-rpl-parents-buffer-count-8 = [] # Default
+rpl-parents-buffer-count-8 = []  # Default
 rpl-parents-buffer-count-16 = []
 rpl-parents-buffer-count-32 = []
 
@@ -302,19 +320,51 @@ required-features = ["std", "phy-raw_socket", "proto-ipv4"]
 
 [[example]]
 name = "httpclient"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "proto-ipv6", "socket-tcp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "proto-ipv6",
+  "socket-tcp",
+]
 
 [[example]]
 name = "ping"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "proto-ipv6", "socket-icmp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "proto-ipv6",
+  "socket-icmp",
+]
 
 [[example]]
 name = "server"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "socket-tcp", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "socket-tcp",
+  "socket-udp",
+]
 
 [[example]]
 name = "client"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "socket-tcp", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "socket-tcp",
+  "socket-udp",
+]
 
 [[example]]
 name = "loopback"
@@ -322,39 +372,101 @@ required-features = ["log", "medium-ethernet", "proto-ipv4", "socket-tcp"]
 
 [[example]]
 name = "loopback_benchmark"
-required-features = ["std", "log", "medium-ethernet", "proto-ipv4", "socket-tcp"]
+required-features = [
+  "std",
+  "log",
+  "medium-ethernet",
+  "proto-ipv4",
+  "socket-tcp",
+]
 
 [[example]]
 name = "multicast"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "multicast", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "multicast",
+  "socket-udp",
+]
 
 [[example]]
 name = "multicast6"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv6", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv6",
+  "socket-udp",
+]
 
 [[example]]
 name = "benchmark"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "socket-raw", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "socket-raw",
+  "socket-udp",
+]
 
 [[example]]
 name = "dhcp_client"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "proto-dhcpv4", "socket-raw"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "proto-dhcpv4",
+  "socket-raw",
+]
 
 [[example]]
 name = "sixlowpan"
-required-features = ["std", "medium-ieee802154", "phy-raw_socket", "proto-sixlowpan", "proto-sixlowpan-fragmentation", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ieee802154",
+  "phy-raw_socket",
+  "proto-sixlowpan",
+  "proto-sixlowpan-fragmentation",
+  "socket-udp",
+]
 
 [[example]]
 name = "sixlowpan_benchmark"
-required-features = ["std", "medium-ieee802154", "phy-raw_socket", "proto-sixlowpan", "proto-sixlowpan-fragmentation", "socket-udp"]
+required-features = [
+  "std",
+  "medium-ieee802154",
+  "phy-raw_socket",
+  "proto-sixlowpan",
+  "proto-sixlowpan-fragmentation",
+  "socket-udp",
+]
 
 [[example]]
 name = "dns"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv4", "socket-dns"]
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv4",
+  "socket-dns",
+]
 
 [[example]]
 name = "slaac"
-required-features = ["std", "medium-ethernet", "medium-ip", "phy-tuntap_interface", "proto-ipv6", "socket-udp"]
-
-[profile.release]
-debug = 2
+required-features = [
+  "std",
+  "medium-ethernet",
+  "medium-ip",
+  "phy-tuntap_interface",
+  "proto-ipv6",
+  "socket-udp",
+]

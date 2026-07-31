@@ -24,6 +24,13 @@
 
 ## Completed
 
+- [Network UDP](./2026-07-29-net-udp.md)：R0 Stage 0-5已关闭。domain/control两次cutover和final
+  `NET-UDP-FINAL-CUTOVER`现已使initial-domain/global Stack、static IPv4 control plane及四项UDP/Socket contract
+  Active；最终RV64/LA64均为274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown。
+  LA64无电源驱动时在halt后由monitor `quit`收尾；hardware、`smp>1`、full network LTP与final harness Not Run。
+- [Flock](./2026-07-29-flock.md)：R0 Stage 0-1已关闭；RV64/LA64 developer-run acceptance均通过264项
+  enabled KUnit、11项focused oracle与双libc五项flock LTP。LA64末尾halt归因于已登记的power driver缺失；
+  `FLOCK-CUTOVER`已原子激活task retirement handoff与三个VFS flock contract ID。
 - [Network Frame Path Stage 4](./2026-07-27-net-frame-path-stage4.md)：单一post-close conformance checkpoint已完成
   registry-owned pending handoff、post-`Late` activation与host-test metadata修正；NFP-008/009/010关闭，既有
   contracts保持Effective且无第二次cutover。

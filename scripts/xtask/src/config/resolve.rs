@@ -335,7 +335,7 @@ mod tests {
         );
         replace_file_text(
             workspace.0.join("conf/.defconfig"),
-            "max_logical_cpus = 16",
+            "max_logical_cpus = 1",
             "max_logical_cpus = 99",
         );
         replace_file_text(
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(action.system.profile, CargoProfile::Release);
         assert_eq!(
             action.system.kernel_config.parameters.max_logical_cpus,
-            Some(16)
+            Some(1)
         );
         assert_eq!(action.system.kernel_config.parameters.system_hz, Some(100));
     }

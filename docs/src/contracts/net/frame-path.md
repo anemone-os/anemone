@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/crates/{anemone-net-api,anemone-smoltcp-stack}`、`anemone-kernel/src/{device/net,driver/net,net}`
 **依赖：** 本页内部依赖按条目声明
 **Pending Successor：** None
-**最后核验：** 2026-07-27
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 
@@ -18,7 +18,7 @@
 | shared semantic types | `anemone-net-api` | values、move-only token traits | 跨provider/stack表达同一handoff，不拥有runtime state |
 | backing、queue token、DMA与completion | concrete frame provider | callback-scoped frame token、recheck edge | frame I/O与资源回收 |
 | link/resource durable truth | concrete provider；规范化publication snapshot由`device/net`拥有 | snapshot + edge-only wake | worker醒来后重读owner fact |
-| smoltcp object、`InterfaceId` mapping与deadline | concrete stack instance | opaque `InterfaceId`、wake/work capability | 串行bounded protocol progression |
+| smoltcp object、`InterfaceId` mapping与deadline | initial-domain唯一`DomainStack`内的concrete Stack instance | narrow per-interface pump port、wake/work capability | 串行bounded protocol progression |
 | worker admission与explicit work | kernel attach/worker owner | stateless wake capability | 安排pump，不复制provider或stack truth |
 
 notification、wake edge、统计与diagnostic label都不是行为真相源。当前production source不保留
@@ -32,20 +32,27 @@ smoltcp object，也不拥有runtime registry。stack只依赖shared API与smolt
 driver/device停在frame/link边界，不依赖endpoint、socket或protocol object。descriptor、DMA address、VirtIO
 header、hardware queue token、driver backing、smoltcp object identity与Linux readiness不得越过各自object fence。
 
+conditional validation seam同样服从依赖方向：不拥有或运行某一test harness的crate不得让feature、type、method或
+module理解该harness vocabulary。确需跨crate验证时，下层只暴露按能力命名的artifact-neutral seam，ordinary
+dependency不启用它，并为临时probe声明正式consumer出现后的替换/删除gate。`anemone-net-api`不承载具体harness
+feature、runtime或test-control type。
+
 **Owner：** `anemone-net-api`拥有共享semantic surface；runtime state仍由provider、netdev、stack与attach
 authority分别唯一拥有。
 
 **违反表现：** driver公开实现`smoltcp::phy::Device`；shared API返回concrete kernel/smoltcp object；kernel
-按smoltcp handle决策；API crate形成第二个runtime registry或解释Linux errno/readiness。
+按smoltcp handle决策；API crate形成第二个runtime registry或解释Linux errno/readiness；kernel KUnit等具体
+harness vocabulary进入不拥有该harness的stack/shared API crate，或临时probe在正式consumer出现后继续作为
+production capability。
 
 **验证 / Enforcement：** crate dependency/public-surface audit；host gate以真实stack和正式deterministic
 provider完成ownership、exhaustion、deadline与双实例matrix；non-host base build无packet injection或endpoint
-construction。
+construction；source audit确认具体harness vocabulary停在其owner，conditional probe按能力命名并带退出条件。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
 **当前来源：** [Network Frame Path transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)的
-`NFP-FINAL-CUTOVER`。
+`NFP-FINAL-CUTOVER`与[net-udp Stage 2 post-close boundary correction](../../devlog/transactions/2026-07-29-net-udp.md)。
 
 ## NET-FRAME-OWN-001 — frame backing只有一个访问owner
 
@@ -112,18 +119,23 @@ attach authority只请求推进，不在owner外修改smoltcp object或发布Lin
 **违反表现：** 两个worker并发poll同一stack；IRQ进入smoltcp；kernel缓存smoltcp handle；ordinary worker
 调用无界poll；deadline读取wall clock或另一条隐藏时间线。
 
-**验证 / Enforcement：** host serialization、exact budget、deadline/owner-blocked与multi-instance tests；
-kernel source audit确认worker只持唯一`PumpCore`且每轮受静态budget/repoll上界约束；RV64 worker/timer wiring
-与normal shutdown evidence。
+**验证 / Enforcement：** host serialization、exact budget、deadline/owner-blocked、multi-instance与one-Stack/
+two-provider tests；kernel source audit确认worker只持narrow per-interface port且每轮受静态budget/repoll上界约束，
+domain Stack lock在round间释放；Stage 5 final RV64/LA64 remote-external guest/peer双marker分别证明virtio-mmio与
+virtio-pci provider ingress/egress、worker/timer wiring和normal shutdown markers。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
 **当前来源：** [Network Frame Path transaction](../../devlog/transactions/2026-07-26-net-frame-path.md)的
 `NFP-FINAL-CUTOVER`。
 
+**当前 enforcement 更新：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
+`NET-UDP-DOMAIN-CUTOVER`将production从per-netdev Stack迁移为initial-domain唯一Stack与per-provider narrow pump
+port；本ID的单instance唯一推进语义保持不变。
+
 ## 当前接受边界
 
-- production runtime proof只覆盖RV64 QEMU virtio-mmio单NIC；多实例隔离由两个真实host stack/provider
-  domain证明。LA64、virtio-pci、hardware与`smp>1`均Not Run。
+- production runtime proof覆盖RV64 QEMU virtio-mmio单NIC与LA64 QEMU virtio-pci单NIC；多实例隔离由两个真实
+  host stack/provider domain证明。hardware、其它provider/deployment与`smp>1`均Not Run。
 - 本页不提供socket/control-plane或完整teardown；host-test control不进入kernel dependency。
 - runtime hotplug/detach/restart未实现；无法证明device/CPU不再访问的provider/backing保留到reset/power-off。

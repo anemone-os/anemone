@@ -93,6 +93,17 @@
 如果拆分会移动 owner surface、改变公共接口、扩大 write set、改变共享 contract 或引入新抽象层，必须先停止并上报扩展理
 由、范围和验证计划。
 
+### KUnit 与 validation 模块
+
+除 KUnit framework 本身外，不默认为一组测试新建 `kunit.rs`、`tests.rs` 或 `kunit_support.rs`。owner-local
+KUnit 应放在被测语义文件末尾的 inline `#[cfg(feature = "kunit")] mod kunits`；跨多个子模块的 composition
+测试放在其最低共同 owner 的 `mod.rs` 中。只有拥有独立编译边界、外部 consumer 或明确阶段生命周期的
+validation/probe facade 才单独成文件，并按提供的能力而不是具体 test harness 命名。
+
+长期 host fixture 可以保留独立 conditional validation module，但其中每个入口都必须有真实测试 consumer，且
+不得进入 production dependency。为缺失 production consumer 临时建立的 probe 必须说明替换/删除 gate；正式
+consumer 出现后，测试改走真实路径或删除重复 coverage，不能让 probe 自然沉淀为 production API。
+
 ### 类型命名规范
 
 如非实体确实就是这样的名字或者具备业务属性或者承载明确领域含义，在类型名称中使用以下词语时需要认真考虑：

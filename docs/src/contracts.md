@@ -112,7 +112,9 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 契约层从本规则生效后按触达迁移。当前不批量把既有 RFC 的不变量搬入 `docs/src/contracts/`；首个需要跨 RFC 修改或复用既有共享规则的 RFC 或合格的 contract-bearing small change，应按本页提取最小 contract 闭包，并把新入口加入本节和 `docs/src/SUMMARY.md`。
 
 - [VFS 当前契约](./contracts/vfs/index.md)
+  - [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)
   - [Mount admission](./contracts/vfs/mount-admission.md)
+  - [Local whole-file flock](./contracts/vfs/flock.md)
 - [Signal 当前契约](./contracts/signal/index.md)
   - [Pending routing 与 ordinary action selection](./contracts/signal/pending-routing.md)
   - [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
@@ -121,7 +123,12 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 - [Network 当前契约](./contracts/net/index.md)
   - [Frame path](./contracts/net/frame-path.md)
   - [Netdev lifecycle](./contracts/net/netdev-lifecycle.md)
+  - [Interface domain](./contracts/net/interface-domain.md)
+  - [IPv4 control plane](./contracts/net/control-plane.md)
+  - [UDP Socket](./contracts/net/udp-socket.md)
   - [Attach lifecycle](./contracts/net/attach-lifecycle.md)
+- [Build Configuration 当前契约](./contracts/configuration/index.md)
+  - [System target 与 resolved selection](./contracts/configuration/system-target.md)
 - [System Power 当前契约](./contracts/power/index.md)
   - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
 - [Scheduler 当前契约](./contracts/scheduler/index.md)
@@ -142,3 +149,4 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 - [TTY 当前契约](./contracts/tty/index.md)
   - [Serial TTY data plane](./contracts/tty/data-plane.md)
   - [TTY controlling relation 与 job control](./contracts/tty/job-control.md)
+- [Interrupt Flow 当前契约](./contracts/interrupt/index.md)

@@ -1,0 +1,9 @@
+name = "flock-test"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/debug/flock-test"

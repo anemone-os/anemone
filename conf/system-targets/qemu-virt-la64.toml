@@ -4,5 +4,11 @@ platform = "qemu-virt-la64"
 fstype = "ext4"
 source = { type = "block", path = "vda" }
 
+[network.ipv4]
+interface = "eth0"
+address = "10.0.2.15"
+prefix = 24
+default-gateway = "10.0.2.2"
+
 [initial-program]
 type = "rootfs-entry"

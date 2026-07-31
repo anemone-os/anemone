@@ -19,11 +19,15 @@ use anemone_abi::fs::linux::stat::EXT4_SUPER_MAGIC;
 
 fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
     match ty {
+        InodeType::Anon => unreachable!("anonymous inode kind cannot be loaded from ext4"),
         InodeType::Dir => &EXT4_DIR_INODE_OPS,
         InodeType::Regular => &EXT4_REG_INODE_OPS,
         InodeType::Block | InodeType::Char => &EXT4_DEV_INODE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_INODE_OPS,
         InodeType::Fifo => unimplemented!("ext4 fifo inode ops"),
+        InodeType::Socket => {
+            unreachable!("anonymous socket inode must not use an ext4 superblock")
+        },
     }
 }
 
