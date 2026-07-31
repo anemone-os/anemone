@@ -1,6 +1,6 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
+**状态：** R0 implementation plan / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
 **适用修订：** R0
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
@@ -15,8 +15,9 @@ authorization 已作为三个独立事件完成；Stage 0现已关闭。开发�
 `Stage 0 -> Stage 1 Implementation Resolution Gate`，并把物理namespace迁移与POSIX range-domain实现拆为
 1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed。开发者随后独立授权只读
 `Stage 1 -> Stage 2 Implementation Resolution Gate`；本次已从clean live source把Stage 2完整解析为两个有序
-checkpoint。开发者随后分别授权并独立关闭Checkpoint 2A/2B，Stage 2 Closed。Stage 3仍为Outline且尚未解析或
-授权；Stage 2 stacked candidate也不是current POSIX record-lock支持。
+checkpoint。开发者随后分别授权并独立关闭Checkpoint 2A/2B，Stage 2 Closed。独立的
+`Stage 2 -> Stage 3 Implementation Resolution Gate`现已把最后阶段解析为单一原子checkpoint；Stage 3为
+Ready / Not Active，Stage 2 stacked candidate仍不是current POSIX record-lock支持。
 
 ## 实施原则
 
@@ -91,7 +92,7 @@ checkpoint。开发者随后分别授权并独立关闭Checkpoint 2A/2B，Stage 
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
 | Stage 1 | Closed；1A/1B Closed | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 已独立关闭；下一步只能另行授权`1 -> 2`resolution |
 | Stage 2 | Closed；2A/2B Closed | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-08-01已独立关闭2B与Stage 2；停在`2 -> 3`resolution gate前 |
-| Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
+| Stage 3 | Ready / Not Active | 补齐focused oracle topology/race、运行专用LTP组与RV64/LA64 runtime、完成最终review并原子cut over current contracts | `POSIX-LOCK-CUTOVER` | 已于2026-08-01解析；等待开发者独立授权Active |
 
 ## Stage 0 Ready：File-table Episode 与 Holder Foundation
 
@@ -1066,39 +1067,192 @@ wrapper；获批manifest扩张只适配`task/files/episode.rs`中3个既有KUnit
 contract cutover继续为`None`，全部prospective IDs保持Not Effective。LA64 runtime、focused fcntl LTP、Stage 3与
 `POSIX-LOCK-CUTOVER`均Not Run / 未授权；执行明确停在下一resolution gate前。
 
-## Stage 2 -> Stage 3 Implementation Resolution Gate
+## Stage 2 -> Stage 3 Implementation Resolution Gate — 2026-08-01
 
-Stage 2独立Closed后，读取完整production diff、transaction evidence、ABI/focused oracle结果、LTP固定source与两套
-libc case inventory、tracked rootfs/runner入口、双架构build/runtime资产、current contracts/register和全部review
-finding。gate必须冻结：
+Stage 2独立Closed后，本gate从clean `dev/drc/omega@763485819a50`读取Stage 0-2完整production diff、transaction
+evidence、13项focused oracle、fixed Linux/LTP source、两套libc case inventory、tracked rootfs/runner、双架构
+build/runtime入口、current contracts、register与全部review finding。preflight确认：
 
-- `fcntl-test`的`posix-record-lock` suite与逐case target/非目标/race-admissible classification；
-- focused `fcntl` LTP group中`fcntl14/fcntl14_64`及实际相关subcase，明确deadlock/mandatory/compat排除；
-- RV64/LA64相同profile的顺序执行命令、调用者显式选择的sdcard master、日志路径、PASS/FAIL/TCONF/BROK与timeout
-  判据、重复/stress次数和Not Run边界；
-- full diff独立review、current contract最小闭包、register/current-limitations同步、public navigation与
-  `POSIX-LOCK-CUTOVER`原子write set。
+- Stage 2已经交付全部production语义；Stage 3不需要新的kernel capability、ABI wrapper、KUnit hook、runner
+  framework或rootfs wiring。正常路线的production kernel diff必须相对Stage 2 HEAD为零。
+- 两份pretest rootfs已经安装`fcntl-test`，`user-test`已经在competition root前执行
+  `fcntl-test posix-record-lock`；RV64/LA64 wrapper都显式接收调用者选择的sdcard master、重建对应rootfs、重建
+  kernel并自然运行到shutdown。
+- 当前focused app的2A 8项与2B 5项已经覆盖native ABI/range/query、ordinary close/dup3/close-range、blocking、
+  signal与ordinary replay；剩余产品义务是independent-open same-owner、`CLONE_FILES` participation/exit、真实
+  `UNSHARE`、exec/CLOEXEC、flock/advisory隔离以及close/commit race的userspace envelope。
+- 当前tracked LTP profile仍为`sys`，general `fcntl` group仍注释`fcntl14/fcntl14_64`。为避免无关fcntl case决定
+  本RFC closure，Stage 3建立只含这两个case的`posix-record-lock` group，而不修改general `fcntl.txt`。
+- fixed `fcntl14.c`实际执行block 1/2中的case 1-45、negative-whence block 3和open-ended-after-append block 4；
+  table中的case 46-58没有被该source的`main()`调用。每个binary在全PASS时产生96个TPASS。block 2只以
+  `S_ISGID` mode重复advisory record-lock矩阵，不验证mandatory read/write enforcement；`fcntl14_64`在本RFC两种
+  64位native userland中只是`_FILE_OFFSET_BITS=64`构建，不证明32-bit compat ABI。
+- register没有POSIX-lock-specific active blocker。`ANE-20260616-LTP-POST-SUMMARY-HANG`仍是相关环境风险；本阶段
+  任一60秒case timeout、5秒kill-grace未reap或post-summary不推进都记为infra failure并阻止cutover，不能归类为
+  target PASS或TCONF。
 
-只有上述交付、验证、停止/退出条件与manifest完整后，Stage 3才Ready；不得因Stage 2 syscall smoke成功自动进入
-runtime或cutover。
+本gate没有发现Apollyon/Keter，也没有改变R0 target、owner、ABI、visible semantics、Contract Impact或acceptance。
+Stage 3解析为下面一个不可拆分的原子checkpoint：测试consumer、双架构runtime、full review、current-contract
+write-back与closure必须在同一候选和同一最终commit中收口；不存在先行partial cutover。Ready不授权Active。
 
-## Stage 3 Outline：产品证据、最终 Review 与原子 Cutover
+<a id="posix-record-lock-stage-3"></a>
 
-概括目的：
+## Stage 3 Ready：产品证据、最终 Review 与原子 Cutover
 
-- 用focused oracle证明range、owner topology、close、blocking、signal/restart与race envelope；用focused LTP组
-  对照固定source形成兼容证据；分别完成RV64和LA64 end-to-end runtime。
-- 对Stage 0基线到最终候选做完整owner/lifecycle/concurrency/resource/ABI review，修正finding并重跑owning
-  evidence；最后一次性cut over `FILES-POSIX-OWNER-001`、`POSIX-LOCK-DOMAIN/WAIT/LIFECYCLE-001`及产品能力。
+### 成熟度、交付与原子边界
 
-前置依赖：Stage 2 Closed；测试盘、runner与双架构环境可用；没有active Apollyon/Keter；Stage 3完整Ready并另行
-取得Active授权。
+Stage 3当前为**Ready / Not Active**。唯一合法下一动作是开发者另行授权整个Stage 3 Active；不得只启用LTP或先写
+current contract，也不得把本次docs-only resolution当成runtime/cutover证据。
 
-受保护边界：build、单架构boot、KUnit、focused oracle与LTP互不替代；缺失runtime必须标记Not Run。任何一项
-prospective contract都不得提前Effective；失败时全部保持Not Cut Over，不能用静默兼容把target内缺陷降为限制。
+本阶段一次性交付：
 
-解析触发点：仅由Stage 2 -> 3 gate基于live assets冻结精确case、命令、日志、重复次数、cutover文件和closure
-write set。本文不在Outline阶段猜测个人测试盘路径或最终LTP分数。
+1. 保留2A 8项、2B 5项及其marker，新增`POSIXLOCK3`六项产品case，并增加最终
+   `POSIXLOCK:SUMMARY:PASS:19` aggregate；`user-test`只把旧“stage 2A”提示改为稳定的POSIX record-lock suite名称。
+2. 注册只含`fcntl14`与`fcntl14_64`的`posix-record-lock` LTP group，并让tracked profile只选择该group；general
+   `fcntl.txt`、`full.txt`、runner policy与LTP fixture保持不变。
+3. 在相同最终候选上顺序完成RV64与LA64 app/kernel build及canonical end-to-end wrapper；每个architecture都必须
+   同时通过KUnit、19项focused oracle、glibc/musl各2项LTP与正常shutdown。
+4. runtime通过后起草原子cutover候选；从R0 implementation baseline `092f44dceaf3`到包含current-contract与
+   closure write-back的最终候选做一次独立full-diff owner/lifecycle/concurrency/resource/ABI review，相对Stage 2
+   HEAD审计production kernel diff为零。
+5. 所有证据与review关闭后形成一个`posix-record-lock: complete stage 3`原子commit。未提交candidate中的current
+   contract文本不构成effective事实；commit前任何失败都保持全部prospective ID Not Effective。
+
+### Focused oracle 六项补充
+
+所有case继续只走已有`anemone-rs` typed wrapper与真实production syscall，不增加test-only kernel API、counter、
+reset hook或probe facade：
+
+| Case | 必须证明 | 不得固化 |
+| --- | --- | --- |
+| `independent-open-close-reacquire` | 同一episode内两个独立open是same holder；关闭任一相关fd删除该holder在inode上的全部旧grant；另一live binding随后可以重新assignment | opened-description identity或holder-wide close epoch |
+| `clone-files-exit-final-teardown` | `CLONE_FILES` participant共享holder且不互相冲突；一个sharer exit不提前清grant；最后participant teardown后外部holder可立即取得lock | TGID作为owner或某个固定report PID |
+| `close-range-unshare` | unique episode对未占用高fd范围执行`UNSHARE`仍保持holder；真实shared episode的同一路径建立不继承grant的新holder，旧grant仍属于remaining sharer | storage copy等同semantic split |
+| `exec-holder-cloexec` | unique holder成功exec保留非-CLOEXEC lock；shared episode exec得到不继承旧grant的新holder；任一CLOEXEC相关fd关闭会清除旧holder在该inode上的全部grant | exec总是split或CLOEXEC只释放opened description |
+| `advisory-flock-namespace` | ordinary read/write不被POSIX grant强制拒绝；POSIX与现有flock可在同一local regular inode独立取得各自grant | mandatory I/O、OFD或共同conflict engine |
+| `close-set-race-envelope` | 真实shared-table worker与close并发64轮；每轮只接受success或`EBADF`，并在join后由fresh holder证明没有persistent grant/wait leak | 要求两种winner都出现或固定调度顺序 |
+
+exec helper mode只服务同一`fcntl-test` binary的fresh-image断言，参数中的fd只定位继承slot，不充当owner identity。
+六项可以复用现有fork/clone/pipe/mmap/wait/exec工具，但不得为单次case抽象新的通用process harness。
+
+### Focused LTP 分类与分数边界
+
+新增`posix-record-lock` group精确包含：
+
+```text
+fcntl14
+fcntl14_64
+```
+
+两种libc root都必须存在，因此每个architecture的runner summary必须为`attempted=4 passed=4 failed=0
+infra_failed=0 skipped=0`；每个binary还必须保留96个TPASS且无TFAIL/TBROK/TCONF。两架构合计是8个case invocation、
+768个TPASS证据，但closure按architecture分别判断，不把总数当成另一架构的替代证明。
+
+分类边界：
+
+- cases 1-45、invalid whence与open-ended append都在R0 native range/conflict/blocking target内，必须PASS；
+- block 2没有ordinary I/O enforcement assertion，因此其PASS只证明带`S_ISGID`mode的文件仍走同一advisory
+  record-lock语义，不把mandatory locking写成已支持；
+- `fcntl14_64`只形成native large-file构建的重复兼容证据，不形成32-bit compat、`F_GETLK64/F_SETLK64`或另一套
+  struct layout claim；
+- deadlock detection、OFD、remote/non-regular admission、fairness与performance均未被这两个case覆盖，继续按R0
+  non-goal排除，不用TCONF伪装为target proof。
+
+runner为比赛兼容会对exit 0也打印`FAIL LTP CASE <name> : 0`；该固定文本本身不是失败判据。唯一判据是case exit、
+filtered TFAIL/TBROK/TCONF、timeout/infra诊断及root/group/profile summary。任一case TCONF、missing/skipped、非零、
+timeout或未reap都阻止Stage 3 closure。
+
+### Resolved Write Set Manifest
+
+Test consumer与selection source：
+
+- `anemone-apps/fcntl-test/src/main.rs`
+- `anemone-apps/fcntl-test/src/posix_record_lock.rs`
+- `anemone-apps/user-test/src/main.rs`
+- `anemone-apps/user-test/src/ltp/config.rs`
+- `anemone-apps/user-test/ltp/profile.txt`
+- `anemone-apps/user-test/ltp/groups/posix-record-lock.txt`（新建）
+
+原子contract cutover与public write-back：
+
+- `docs/src/contracts/task/file-table-posix-lock.md`（新建；`FILES-POSIX-OWNER-001`与
+  `POSIX-LOCK-LIFECYCLE-001`）
+- `docs/src/contracts/vfs/posix-record-lock.md`（新建；`POSIX-LOCK-DOMAIN-001`与
+  `POSIX-LOCK-WAIT-001`）
+- `docs/src/contracts/{task/index.md,vfs/index.md}`
+- `docs/src/{contracts.md,SUMMARY.md,rfcs.md}`
+- `docs/src/rfcs/posix-record-lock/{index.md,invariants.md,implementation.md,tracking-issues.md}`
+- `docs/src/devlog/transactions/{2026-07-31-posix-record-lock.md,index.md}`
+- `docs/src/devlog/2026-07-20_to_2026-08-02.md`
+
+两个current-contract页只保存effective最小闭包，不复制RFC测试矩阵：task页拥有episode identity、split与
+fd-removal/exit/CLOEXEC cleanup orchestration；VFS页拥有inode domain、range/conflict truth与wait publication。
+跨owner lifecycle handoff由task file-state protocol owner编排，VFS domain同步提交range removal与guard-out
+notification。两页互相链接并分别指向Preserve contract，不制造“共同owner”。
+
+Validation-only且正常closure必须保持diff为零：
+
+- `anemone-kernel/**`、`anemone-abi/**`、`anemone-rs/**`、其它app与wrapper scripts；
+- `conf/rootfs/pretest-{rv64,la64}.toml`、调用者选择的sdcard master与LOCAL.md解析出的private asset位置；
+- `anemone-apps/user-test/ltp/groups/{fcntl.txt,full.txt}`、runner policy/fixture/output代码；
+- existing `VFS-FILE-KIND-*`、`FLOCK-*`、`OPENED-DESC-*`、`SCHED-LATCH-*`与`SCHED-WAKE-*`current contract正文；
+- `docs/src/register/{open-issues.md,current-limitations.md}`。若真实结果要求新增defect/limitation或改变上述任一
+  production/contract正文，先停止并报告write-set/target影响，不能在本原子stage中静默扩张。
+
+### 顺序验证与证据判据
+
+从Stage 3最终test candidate按以下顺序执行；`<rv64-preliminary-sdcard-master>`与
+`<la64-preliminary-sdcard-master>`由调用者按LOCAL.md显式选择，公共文档不持久化个人绝对路径：
+
+```sh
+just fmt kernel --check
+just fmt fcntl-test --check
+just fmt user-test --check
+just xtask app build fcntl-test --arch riscv64
+just xtask app build fcntl-test --arch loongarch64
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+./scripts/run-user-test-rv64.sh <rv64-preliminary-sdcard-master> build/posix-record-lock-stage3-rv64.log
+./scripts/run-user-test-la64.sh <la64-preliminary-sdcard-master> build/posix-record-lock-stage3-la64.log
+```
+
+两个app/kernel build顺序执行，wrapper也必须RV64完成后才进入LA64，避免共享`build/` export与kernel artifact
+漂移。每个wrapper必须exit 0，并在自己的日志中同时满足：全部enabled KUnit与`All tests passed!`；
+`POSIXLOCK2A:SUMMARY:PASS:8`、`POSIXLOCK2B:SUMMARY:PASS:5`、`POSIXLOCK3:SUMMARY:PASS:6`、
+`POSIXLOCK:SUMMARY:PASS:19`；glibc/musl各2/2且profile 4/4；无TFAIL/TBROK/TCONF/timeout/infra；init/user-test
+进入并完成orderly `PowerOff`。KUnit数量只记录实际值，不把历史288硬编码为最终不变量。
+
+runtime通过后执行owner/bypass/source scan、相对Stage 2 HEAD的production-zero-diff audit、全部新文件独立
+`git diff --no-index --check /dev/null <file>`、`git diff --check`与`mdbook build docs`。独立full-diff review必须从
+`092f44dceaf3`逐项确认：episode是唯一holder truth；inode domain是唯一grant/wait publication truth；所有
+fd-removal与final detach都guard-out cleanup；closed binding不能late grant且其它live binding可重新assignment；
+Event round无lost wake/nested wait；signal replay不保存旧binding/range；raw UAPI被fcntl adapter包含；diagnostic
+TGID不驱动behavior；flock/opened-description/backend/scheduler contract均未退化；测试没有把调度winner、mandatory、
+compat或非目标写成product guarantee。
+
+所有review finding先按owner修复并从最早受影响的owning evidence重跑。Apollyon/Keter必须为零；Euclid必须有明确
+disposition，若实际影响owner、lifecycle、ABI、target或acceptance则按真实等级阻止closure。
+
+### Cutover、退出与停止条件
+
+runtime validation全部通过前，不起草effective contract正文、不更新Active contract导航、不把RFC写成Closed。
+随后在未提交的原子cutover candidate中完成以下docs write-back，并把该candidate纳入最终独立review：
+
+- 原子建立`FILES-POSIX-OWNER-001`、`POSIX-LOCK-DOMAIN-001`、`POSIX-LOCK-WAIT-001`与
+  `POSIX-LOCK-LIFECYCLE-001`为Active，并记录R0与本transaction为source/evidence；
+- 对所有Preserve IDs记录full-diff/source review结论但不改写其规则；
+- 把RFC、Stage 3与transaction同步关闭，更新contract/RFC/transaction/SUMMARY导航与双周devlog；
+- 确认register无需新增target内缺陷或accepted limitation，然后形成唯一原子commit。
+
+只有该commit落地时上述current contract才Effective；review或commit前失败必须撤销candidate cutover文本并保留
+Not Cut Over，不允许留下半套Active导航。
+
+以下任一情况立即停止且保持Not Cut Over：focused case无法在现有userspace/test manifest内表达；需要修改kernel、
+ABI、wrapper、rootfs、runner policy或Preserve contract正文；任一architecture缺少runtime或任一target LTP不是PASS；
+64轮race出现非`0/EBADF`、persistent grant/wait leak或hang；full review存在Apollyon/Keter；current contract最小闭包
+无法由上述两个owner页诚实表达。若修复会改变target、owner、ABI、visible semantics、non-goal或acceptance，进入
+`Target Renegotiation Gate`；否则先上报精确manifest expansion与重跑计划。Stage 3成功后R0即完整Closed，没有
+自动进入后续RFC或实现工作。
 
 ## 最终停止边界
 

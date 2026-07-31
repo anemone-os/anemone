@@ -13,7 +13,9 @@
   独立`Stage 1 -> 2`gate又把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal
   replay；2A/2B现均已独立关闭，Stage 2 Closed，交付native ABI、全部fd-removal cleanup、blocking Event recheck、
   ordinary signal replay与13-case focused suite。contract cutover仍为None，全部prospective IDs保持Not Effective；
-  Stage 3继续Outline，LA64 runtime、focused LTP与最终cutover均Not Run。
+  独立`Stage 2 -> 3`gate已把Stage 3解析为单一原子checkpoint，冻结六项补充oracle、两case专用LTP group、
+  RV64/LA64 runtime、full review与current-contract write-back。Stage 3 Ready / Not Active；Stage 3双架构runtime、
+  focused LTP与最终cutover仍Not Run。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

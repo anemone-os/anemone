@@ -1,6 +1,6 @@
 # POSIX Record Lock 目标和不变量
 
-**状态：** R0 Accepted / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
+**状态：** R0 Accepted / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **适用修订：** R0
@@ -442,4 +442,5 @@ R0 target最终关闭必须同时满足：
 wait/signal replay；2A/2B现均已独立关闭，Stage 2 Closed。Stage 2已证明binding-scoped close/commit、
 nonblocking/query、blocking Event recheck与ordinary signal replay纵切，但尚未交付Stage 3的双架构runtime、focused
 LTP与最终产品证据，不能作为standalone/current capability。current-contract语义write-back仍只属于最终
-`POSIX-LOCK-CUTOVER`；截至Stage 2 closure semantic cutover均为`None`，全部Introduce项继续Not Effective。
+`POSIX-LOCK-CUTOVER`；截至Stage 2 closure semantic cutover均为`None`，全部Introduce项继续Not Effective。独立
+resolution现已把Stage 3解析为单一原子checkpoint；Ready不授权runtime或cutover。

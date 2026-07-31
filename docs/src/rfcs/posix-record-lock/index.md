@@ -1,6 +1,6 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** R0 / Accepted for Implementation / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
+**状态：** R0 / Accepted for Implementation / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-01
@@ -13,11 +13,10 @@
 `SCHED-WAKE-001..004`。完整 R0 delta 见
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
-后续 Outline 中尚未解析的类型、锁、容器、模块路径、stage、write set 与精确验证命令属于滚动
-implementation resolution，不因缺失本身构成 finding。
-**下一步：** Stage 0-2已独立关闭，Stage 2的2A/2B均Closed。下一动作只能是开发者另行授权的
-`Stage 2 -> Stage 3 Implementation Resolution Gate`；Stage 3仍为Outline，本轮不解析或执行Stage 3，也不进行任何
-semantic contract cutover。
+Stage 3的交付、case、命令、write set与cutover边界已由滚动implementation resolution冻结。
+**下一步：** Stage 0-2已独立关闭，Stage 2的2A/2B均Closed；独立的`Stage 2 -> Stage 3 Implementation
+Resolution Gate`已把最后阶段解析为一个原子checkpoint。下一动作只能是开发者另行授权Stage 3 Active；当前不执行
+测试、双架构runtime或semantic contract cutover。
 
 ## 文档状态
 
@@ -29,7 +28,8 @@ resolution gate已基于live source把Stage 1解析为两个独立checkpoint：1
 alignment，1B建立inode-associated POSIX range domain与focused proof。两者现均已关闭，Stage 1 Closed。
 其后的独立只读gate把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal replay；
 2A/2B现已分别独立关闭，Stage 2 Closed。current contract语义仍未更新，Stage 2 stacked candidate不是可独立合入
-或对外声称的POSIX record-lock capability。
+或对外声称的POSIX record-lock capability。最新独立resolution已把Stage 3解析为单一原子checkpoint；它仍是
+Ready / Not Active。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
 此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
@@ -152,7 +152,7 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Tracking Issues](./tracking-issues.md)：当前无 active Apollyon / Keter
-- [实施计划](./implementation.md)：Stage 0-2 Closed；Stage 3 Outline / Not Authorized
+- [实施计划](./implementation.md)：Stage 0-2 Closed；Stage 3 Ready / Not Active
 - [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0执行证据、Stage 1 resolution与
   Checkpoint 1A/1B closure，以及Stage 2 resolution和2A/2B closure evidence
 
@@ -419,6 +419,6 @@ closure contract cutover继续为`None`，完整stacked candidate仍不是standa
 - RV64 与 LA64 分别形成真实 guest runtime，build 或单架构结果不能替代另一架构；
 - full-diff review、register audit 与 transaction evidence 分别记录实现事实、Not Run 与剩余限制。
 
-最终 stage 的命令、case 名单、重复轮数与日志判据尚未解析；它们必须由
-[实施计划](./implementation.md) 的滚动 resolution gate 从 live source、runner 与固定测试资产冻结，不能从本
-R0 target 正文推导 future write set 或执行授权。
+最终 Stage 3 已由[实施计划](./implementation.md#posix-record-lock-stage-3)从live source、runner与固定测试资产
+解析为单一原子checkpoint，冻结了case、LTP分类、双架构命令、重复轮数、contract最小闭包与write set。Ready不
+构成执行授权，R0 target正文也不替代该计划权威。

@@ -1,10 +1,10 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
+**状态：** Active transaction / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
-**实施计划：** [Stage 2 — Checkpoint 2A/2B](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-2)
+**实施计划：** [Stage 3 Ready](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-3)
 **适用修订：** R0
 **Contract Cutover：** semantic `None` through Stage 2 closure；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
 `POSIX-LOCK-*`继续 Not Effective
@@ -17,9 +17,10 @@ file-table sharing episode、显式participation与opaque holder foundation，�
 
 Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
 把Stage 1解析并拆为1A/1B；两者现均已独立关闭，Stage 1 Closed。开发者随后另行授权只读`Stage 1 -> 2`
-resolution gate；Stage 2已解析为2A/2B，开发者随后分别授权并关闭两个checkpoint，Stage 2 Closed。Stage 3仍为
-Outline，下一resolution gate、Stage 3实现与semantic contract cutover均未授权。Stage 0-2 stacked candidate仍不是
-可独立合入或写成current支持的POSIX record-lock capability。
+resolution gate；Stage 2已解析为2A/2B，开发者随后分别授权并关闭两个checkpoint，Stage 2 Closed。开发者现已
+授权独立的`Stage 2 -> 3`只读resolution gate；Stage 3已解析为单一原子checkpoint并保持Ready / Not Active，
+Stage 3实现与semantic contract cutover仍未授权。Stage 0-2 stacked candidate仍不是可独立合入或写成current支持的
+POSIX record-lock capability。
 
 ## R0 acceptance 与 activation
 
@@ -729,3 +730,38 @@ Checkpoint 2B现为Closed，Stage 2 Closed。contract cutover继续为`None`，�
 LA64 runtime、focused fcntl LTP、broad stress、Stage 3与`POSIX-LOCK-CUTOVER`均Not Run / 未授权。执行在
 `Stage 2 -> Stage 3 Implementation Resolution Gate`前停止，没有解析或激活下一stage，也不把stacked candidate
 写成current POSIX record-lock支持。
+
+## Stage 2 -> Stage 3 Implementation Resolution Gate — 2026-08-01
+
+开发者在Stage 2独立关闭后要求解析Stage 3，并判断该阶段应保持小而原子。本gate只获得read-only preflight与
+canonical docs write-back授权，不授权test source、LTP profile、build、QEMU、runtime、contract cutover或commit。
+preflight从clean `dev/drc/omega@763485819a50`读取Stage 0-2实际diff、13项focused suite与runtime证据、live
+task-files/VFS/fcntl/wait/signal owner、fixed Linux/LTP source、两套libc inventory、rootfs/wrapper、current
+contracts、register和全部review finding。authoritative Ready definition与resolved manifest已写入
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-3)，本节不复制第二份计划。
+
+resolution确认：
+
+- Stage 2已经交付完整production capability；正常Stage 3路线要求kernel、ABI、`anemone-rs`、rootfs与wrapper
+  相对Stage 2 HEAD保持diff为零，只补test consumer、专用LTP group、双架构证据、contract最小闭包与closure。
+- `fcntl-test`保留2A 8项与2B 5项，Stage 3增加六项product case：independent-open close/reacquire、
+  `CLONE_FILES` sharer exit/final teardown、unique/shared `close_range(UNSHARE)`、exec/CLOEXEC、advisory/flock
+  namespace和64轮close/set race；最终aggregate固定为19项。
+- tracked profile不启用整个general `fcntl` group，而注册只含`fcntl14/fcntl14_64`的`posix-record-lock` group。
+  fixed source每个binary实际形成96个TPASS；其mandatory-mode block不验证mandatory I/O，`_64`在RV64/LA64上也
+  不证明32-bit compat。每架构必须由glibc/musl 4/4 case和384个TPASS共同形成证据。
+- RV64/LA64按同一最终candidate顺序执行repository app/kernel build与canonical wrapper，日志分别写入
+  `build/posix-record-lock-stage3-{rv64,la64}.log`。调用者在activation时从LOCAL.md显式选择各架构preliminary
+  sdcard master；公共文档不持久化private asset绝对路径。
+- current contract最小闭包解析为task-owned`file-table-posix-lock.md`承载`FILES-POSIX-OWNER-001`与
+  lifecycle orchestration，VFS-owned`posix-record-lock.md`承载domain/wait truth。两个页面互链并保留唯一owner，
+  不复制RFC测试计划或建立共同owner。
+
+Stage 3因此是一个不可拆分的原子checkpoint：test/profile candidate、双架构runtime、独立full-diff review、四个
+Introduce ID的current-contract write-back、RFC/transaction closure与唯一最终commit必须共同成功。任一target
+case、architecture、timeout、review或contract归属失败都保持全部ID Not Effective；需要production、ABI、runner、
+rootfs、Preserve contract或register修改时先停止并报告扩张/target影响。
+
+本gate未修改production source、test source、LTP group/profile、current contracts、register、rootfs或wrapper，
+未运行formatter、build、QEMU、KUnit、focused oracle或LTP。R0、Contract Impact与acceptance不变，Stage 3现在为
+**Ready / Not Active**；唯一合法下一动作是等待开发者另行授权整个Stage 3 Active，不能提前运行证据或cutover。
