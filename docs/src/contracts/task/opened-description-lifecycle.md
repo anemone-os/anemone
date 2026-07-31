@@ -77,7 +77,7 @@ static hook先于flock cleanup；close等待waiter execution/placement；或把�
 lifecycle framework。
 
 **验证 / Enforcement：** `ProcFile::release_description_ref()`、全部fd publication/removal caller、
-`OpenedDescriptionRetirementCtx`与`fs::flock::retire_flock()` source audit和常开lifecycle assertions；
+`OpenedDescriptionRetirementCtx`与`fs::lock::flock::retire_flock()` source audit和常开lifecycle assertions；
 owner-local KUnit、focused dup/fork/final-close/no-grant waiter/concurrent-close regressions。
 
 **最初来源：** [RFC-20260728-flock R0](../../rfcs/flock/invariants.md#opened-desc-retire-001---terminal-episode-固定进入窄-vfs-flock-cleanup)。

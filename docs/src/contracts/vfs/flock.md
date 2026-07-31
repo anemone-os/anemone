@@ -6,7 +6,7 @@
 **参与领域：** VFS inode/file / task opened-description lifecycle / scheduler wait / Linux syscall ABI
 **覆盖范围：** local whole-file advisory flock的grant/conflict truth、blocking recheck与terminal holder cleanup
 **不覆盖：** remote/distributed flock、mandatory locking、lease、deadlock detection、公平性、POSIX/OFD record locks、通用file-lock framework
-**实现位置：** `anemone-kernel/src/fs/{flock/{mod.rs,api/{mod.rs,flock.rs}},inode.rs}`、`anemone-kernel/src/task/files/opened_description.rs`
+**实现位置：** `anemone-kernel/src/fs/{lock/flock/{mod.rs,api/{mod.rs,flock.rs}},inode.rs}`、`anemone-kernel/src/task/files/opened_description.rs`
 **依赖：** `OPENED-DESC-001/002/003`、`OPENED-DESC-LIVENESS-001`、`OPENED-DESC-RETIRE-001`、`SCHED-WAKE-001..004`
 **Pending Successor：** None
 **最后核验：** 2026-07-29

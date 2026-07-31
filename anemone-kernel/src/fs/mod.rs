@@ -7,13 +7,13 @@ mod dentry;
 mod epoll;
 mod eventfd;
 pub mod fanotify;
-mod flock;
 // mod error;
 mod file;
 mod filesystem;
 mod inode;
 mod inode_shrinker;
 mod iomux;
+mod lock;
 mod mount;
 mod namei;
 mod path;
@@ -64,9 +64,9 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub(crate) use self::{
-    flock::{FlockMode, FlockOperation, FlockOutcome, request_flock, retire_flock},
     inode::RenameFlags,
     iomux::PollRoute,
+    lock::{FlockMode, FlockOperation, FlockOutcome, request_flock, retire_flock},
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };
 pub use cache_stats::resident_file_inode_cache_pages;

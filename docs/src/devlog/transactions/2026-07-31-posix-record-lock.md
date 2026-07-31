@@ -1,6 +1,6 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active / 1B Gated
+**状态：** Active transaction / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Closed / 1B Ready / Not Active
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
@@ -16,8 +16,8 @@ file-table sharing episode、显式participation与opaque holder foundation，�
 成功exec和exit topology；不实现range domain、`fcntl` ABI、close-to-VFS cleanup或blocking wait。
 
 Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
-现已完成，Stage 1为Ready / Not Active；后续checkpoint修正把1A/1B拆开，下一次授权只允许进入1A。Stage 1代码、
-Checkpoint 1B、Stage 1 -> 2 gate及任何semantic contract cutover仍未授权。
+现已完成，Stage 1为Ready / Not Active；后续checkpoint修正把1A/1B拆开，Checkpoint 1A现已独立关闭。
+Checkpoint 1B虽已满足1A前置但仍为Ready / Not Active；Stage 1 -> 2 gate及任何semantic contract cutover均未授权。
 Stage 0代码不是可独立合入的POSIX record-lock capability；current contracts与register保持不变。
 
 ## R0 acceptance 与 activation
@@ -250,3 +250,61 @@ rootfs或test assets。唯一合法后续动作是等待开发者独立授权Sta
 本修正没有执行production code、build或测试，没有修改current contract/register/profile/rootfs/test asset；也未改变
 Stage 1总write set、最终validation floor、R0 owner/ABI/visible semantics/Contract Impact/acceptance。当前唯一合法
 后续动作是等待开发者独立授权Checkpoint 1A Active；1A closure必须停止，不能自动激活1B。
+
+## Checkpoint 1A activation, stop and route correction approval — 2026-07-31
+
+开发者随后创建并持续推进唯一GOAL“完成Stage 1 Checkpoint 1A”，明确不得进入1B。activation preflight从
+`dev/drc/omega@57e34f44`读取`AGENTS.md`、`LOCAL.md`、canonical RFC四页、register、current transaction、
+`FLOCK` / `OPENED-DESC` current contracts与live source；dirty state为空，1A frozen manifest与验证/停止合同有效。
+
+首次候选把三个`fs/flock/**`文件逐字移动到`fs/lock/flock/**`，增加纯wiring `lock/mod.rs`，更新`fs/mod.rs`、
+`inode.rs`与两个current-contract locator。`just fmt kernel --check`通过；RV64 canonical build在sandbox内首先命中
+既有`lwext4` `Bad system call` / SIGSYS，sandbox外相同命令进入Rust compile后以`E0365` / `E0603`失败。根因是
+主模块原有`pub(super)`在迁入`fs::lock::flock`后只对新父模块`fs::lock`可见，无法再由parent re-export给
+`fs::inode`；原位置中同一声明的父模块就是`fs`。
+
+该失败触发“flock文件必须100% rename”的1A停止条件。候选保持uncommitted并立即停止；独立边界review确认，
+compatibility alias、wrapper/facade、保留旧模块或移动`Inode`都会越过1A owner/API/manifest边界，且不存在在主模块
+逐字不变时恢复原`fs`内可见范围的合法路线。
+
+向开发者上报的最小Route Correction只允许以下两处改动：
+
+```rust
+pub(in crate::fs) struct FlockDomain
+pub(in crate::fs) const fn new()
+```
+
+开发者以“批准”明确授权该修正并恢复1A执行。authoritative implementation现要求两个API文件继续100% rename，
+主模块除上述两处visibility恢复外逐字不变，并增加exact-diff audit。该修正精确恢复迁移前scope，不扩大crate-public
+surface，不改变owner、function body、wait/cleanup、ABI、visible semantics、shared-contract规则、acceptance、
+resolved write set或validation floor；R0不递增，semantic contract cutover仍为`None`，1B继续Not Active。
+
+## Checkpoint 1A implementation and validation closure — 2026-07-31
+
+恢复执行后，只在moved主模块把`FlockDomain`与`FlockDomain::new()`改为`pub(in crate::fs)`。最终source diff还包括
+纯wiring `fs::lock` parent、`fs/mod.rs` root wiring替换、`Inode` import更新，以及两个current-contract locator；
+没有POSIX child/state、compatibility alias、共同trait/facade、function-body或opened-description source改动。
+
+验证与审计结果：
+
+- `just fmt kernel --check`通过；
+- `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`在sandbox内再次由`lwext4`
+  `Bad system call` / exit 159停止，sandbox外完全相同命令通过；后者证明代表性RV64 production/KUnit compile，
+  前者只记为既有seccomp环境限制；
+- 两个API文件分别与baseline blob逐字一致；主模块在仅转换两处批准visibility后与baseline逐字一致，因而全部
+  flock function body、grant/wait/retirement与syscall registration保持不变；
+- production source中旧`fs/flock/**`文件与`fs::flock`引用为零；`fs::lock` parent只声明private `flock` child和
+  既有窄re-export，未出现POSIX state或共同owner；
+- `task/files/opened_description.rs` diff为零；两个current contract diff只刷新implementation/source-audit
+  locator，stable ID、owner、规则、来源和effective状态不变；
+- `git diff --check`通过；新`lock/mod.rs`的no-index whitespace check无诊断，其exit 1只表示文件不同于
+  `/dev/null`；`mdbook build docs`通过。
+
+Checkpoint 1A因此按独立边界关闭，semantic contract cutover为`None`；`FLOCK-*`与`OPENED-DESC-*` effective规则
+保持不变，全部prospective `FILES-POSIX-OWNER-001` / `POSIX-LOCK-*`继续Not Effective。QEMU、KUnit runtime、LTP、
+LA64 build与userspace oracle均Not Run且不属于1A closure。Checkpoint 1B现在是Ready / Not Active，必须等待开发者
+另行授权；本次执行在1A closure处停止。
+
+完整diff与docs validation完成后曾启动一位新的只读subagent终审；开发者随即明确指示“不需要再review，直接
+提交”，该review在形成结论前被中止，因此本transaction不声称存在1A subagent review结果。主执行者对完整source、
+contract、write set与状态diff的审查未发现active Apollyon/Keter；本次按开发者最新指令直接进入checkpoint提交。

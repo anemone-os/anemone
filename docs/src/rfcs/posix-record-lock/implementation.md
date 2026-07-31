@@ -1,6 +1,6 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Ready / Not Active / 1B Gated
+**状态：** R0 implementation plan / Stage 0 Closed / Stage 1 Ready / Checkpoint 1A Closed / 1B Ready / Not Active
 **适用修订：** R0
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
@@ -13,7 +13,8 @@
 canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
 authorization 已作为三个独立事件完成；Stage 0现已关闭。开发者随后独立授权并完成只读
 `Stage 0 -> Stage 1 Implementation Resolution Gate`，Stage 1现为Ready / Not Active。后续checkpoint粒度修正把
-物理namespace迁移与POSIX range-domain实现拆为1A/1B；下一次独立授权只能激活Checkpoint 1A。
+物理namespace迁移与POSIX range-domain实现拆为1A/1B；Checkpoint 1A现已独立关闭，1B虽已满足结构前置并保持
+Ready，但仍须开发者另行授权才可激活。
 
 ## 实施原则
 
@@ -86,7 +87,7 @@ authorization 已作为三个独立事件完成；Stage 0现已关闭。开发�
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
-| Stage 1 | Ready / Not Active；1A Ready，1B Gated | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 resolution gate与checkpoint split已完成；下一步只允许独立激活1A |
+| Stage 1 | Ready / Not Active；1A Closed，1B Ready / Not Active | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 1A已独立关闭；下一步只允许开发者另行授权1B Active |
 | Stage 2 | Outline | 实现 native ABI、binding-scoped close/commit、blocking wait 与 signal restart vertical slice | None | Stage 1 独立关闭后 |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
 
@@ -417,15 +418,18 @@ Apollyon/Keter或Target Renegotiation。Stage 1完整解析为Ready / Not Active
 调整作为保持target的Route Correction写回本节；它不形成shared lock owner或新RFC revision。随后开发者指出
 结构迁移与新domain不应共用一个closure边界，批准把Stage 1拆为Checkpoint 1A/1B：1A只关闭行为保持的namespace
 alignment，1B才引入POSIX state与proof。该checkpoint修正不改变Stage 1总write set或最终validation floor。
+Checkpoint 1A首次执行随后发现，目录嵌套会让迁移后主模块中的两处`pub(super)`从原`fs`父模块收窄到
+`fs::lock`，因此无法维持`Inode`现有crate-private flock domain接线。开发者批准保持target的最小Route
+Correction：两个API文件继续100% rename，主模块只允许把`FlockDomain`及其`new()`的visibility精确恢复为
+`pub(in crate::fs)`；除此之外仍须逐字不变。该修正不改变owner、behavior、ABI、public API、shared contract、
+acceptance或Stage 1总write set。
 
 ## Stage 1 Ready：Inode Range Domain 与 Assignment Proof
 
 ### 阶段成熟度与前置条件
 
-Stage 1当前是`Ready / Not Active`，但只允许Checkpoint 1A成为下一activation point。开始1A前必须重新读取live
-HEAD、dirty state、本节manifest、current `VFS-FILE-KIND` / `FLOCK` / `OPENED-DESC` contracts、register与
-transaction，并由开发者明确授权Checkpoint 1A Active。Ready、transaction仍Active或用户允许候选文件进入
-write set都不构成启动授权。
+Stage 1当前是`Ready / Not Active`。Checkpoint 1A已按本节边界独立关闭；Checkpoint 1B成为唯一可能的下一
+activation point，但本次1A closure不构成1B授权。
 
 Checkpoint 1B的完整定义已经解析，但它在1A独立Closed、transaction记录closure且开发者另行授权前不可激活。
 如果`PosixLockHolder`、`Inode` construction、`FlockDomain`或KUnit runner相对resolution baseline漂移，必须在
@@ -435,16 +439,17 @@ Checkpoint 1B的完整定义已经解析，但它在1A独立Closed、transaction
 
 | Checkpoint | 状态 | 目的 | 独立关闭边界 |
 | --- | --- | --- | --- |
-| 1A — Lock namespace alignment | Ready / Not Active | 行为保持地把现有`fs::flock`迁入纯wiring的`fs::lock::flock`，建立后续POSIX child的物理归类位置 | 100% rename、单架构代表性build、locator-only contract更新与source/docs review通过；POSIX state为零；关闭后停止 |
-| 1B — POSIX inode range domain | Gated by 1A Closed / Not Active | 在已关闭的module基线上增加独立POSIX range domain、holder接线与focused proof | 双架构build、RV64 runtime、range/domain source audit与full-diff review通过；Stage 1 Closed并停止在`1 -> 2` gate前 |
+| 1A — Lock namespace alignment | Closed | 行为保持地把现有`fs::flock`迁入纯wiring的`fs::lock::flock`，建立后续POSIX child的物理归类位置 | 两个API文件100% rename，主模块仅有两处已批准visibility恢复；单架构代表性build、locator-only contract更新与source/docs review通过；POSIX state为零；已关闭并停止 |
+| 1B — POSIX inode range domain | Ready / Not Active | 在已关闭的module基线上增加独立POSIX range domain、holder接线与focused proof | 双架构build、RV64 runtime、range/domain source audit与full-diff review通过；Stage 1 Closed并停止在`1 -> 2` gate前 |
 
 ### Checkpoint 1A — Lock Namespace Alignment
 
 #### 交付与 Resolved Write Set Manifest
 
-- 把`anemone-kernel/src/fs/flock/{mod.rs,api/{mod.rs,flock.rs}}`100% rename到
-  `anemone-kernel/src/fs/lock/flock/{mod.rs,api/{mod.rs,flock.rs}}`；文件内容、syscall registration、
-  `FlockDomain` grant/wait/retirement与opened-description cleanup行为不变。
+- 把`anemone-kernel/src/fs/flock/{mod.rs,api/{mod.rs,flock.rs}}`rename到
+  `anemone-kernel/src/fs/lock/flock/{mod.rs,api/{mod.rs,flock.rs}}`；两个API文件保持100% identical，主模块只允许
+  `FlockDomain`与`FlockDomain::new()`由`pub(super)`变为`pub(in crate::fs)`，精确恢复嵌套前的`fs`内部可见范围。
+  其它文件内容、syscall registration、`FlockDomain` grant/wait/retirement与opened-description cleanup行为不变。
 - 新建`anemone-kernel/src/fs/lock/mod.rs`，本checkpoint只声明`flock` child并做维持现有visibility所需的窄
   re-export；不得提前声明`posix` child、保存state或定义共同trait/facade。
 - `anemone-kernel/src/fs/mod.rs`只把root `flock` wiring替换为private `lock` module，并维持现有crate-private
@@ -466,17 +471,26 @@ git diff --check
 mdbook build docs
 ```
 
-随后检查`git diff --find-renames=100% --summary`、production source中旧`fs/flock/**`文件与`fs::flock`引用为零，
-以及`FlockDomain`、syscall adapter、opened-description retirement与全部flock function body的逐字/结构审计；
-确认current contract diff只触及两个locator。历史RFC/transaction路径不回写。`lock/mod.rs`新文件另做no-index
-whitespace检查。RV64 build只证明
+随后检查两个API文件的`git diff --find-renames=100% --summary`、主模块除两处批准visibility外的exact-diff、
+production source中旧`fs/flock/**`文件与`fs::flock`引用为零，以及`FlockDomain`、syscall adapter、
+opened-description retirement与全部flock function body的逐字/结构审计；确认current contract diff只触及两个
+locator。历史RFC/transaction路径不回写。`lock/mod.rs`新文件另做no-index whitespace检查。RV64 build只证明
 公共module wiring、syscall registration与既有KUnit在代表性production配置下编译，不冒充runtime或行为proof。
 
 1A不运行QEMU、KUnit runtime、LTP、LA64 build或userspace oracle，也不修改profile/rootfs/register。以下任一情况
-立即停止：flock文件无法保持100% rename；需要改变函数体、wait/cleanup顺序、public API或current contract规则；
+立即停止：两个API文件无法保持100% rename，或主模块需要两处批准visibility以外的改动；需要改变函数体、
+wait/cleanup顺序、public API或current contract规则；
 需要compatibility alias、共同state/trait/facade、POSIX child/state或manifest外代码才能编译；review出现active
 Apollyon/Keter。成功时transaction记录1A Closed、contract semantic cutover None及locator-only更新，然后停止；
 Checkpoint 1B继续Not Active，不能由1A closure自动进入。
+
+#### Checkpoint 1A 关闭结果
+
+Checkpoint 1A已关闭。最终实现保持纯wiring parent与两个独立visibility surface；两个API文件为100% rename，
+主模块只有两处批准的`pub(in crate::fs)`恢复，全部function body、flock grant/wait/retirement与
+opened-description cleanup保持不变。两个current contract只更新implementation locator，semantic cutover为
+`None`；POSIX child/state、compatibility alias、共同trait/facade、QEMU、KUnit runtime、LTP与LA64 build均未进入
+本checkpoint。完整停止、修正、验证与review证据见transaction。1B保持Ready / Not Active。
 
 ### Checkpoint 1B — POSIX Inode Range Domain
 
