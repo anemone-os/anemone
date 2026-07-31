@@ -40,7 +40,7 @@ use crate::{
     sync::mono::MonoFlow,
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
-        files::FileTableParticipation,
+        files::FilesState,
         jobctl::group::{ThreadGroupMembers, UserJobControl},
         kthread::KThreadTaskLocal,
         sig::{
@@ -124,9 +124,10 @@ pub struct Task {
 
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
-    /// This task's semantic participation in one file-table sharing episode.
-    /// Temporary table observers never clone or replace this capability.
-    files_participation: RwLock<Option<FileTableParticipation>>,
+    /// This task's file state and semantic participation in one sharing
+    /// episode. Temporary table observers never clone or replace this
+    /// capability.
+    files_state: RwLock<Option<FilesState>>,
     /// Identity, group, and capability state used for permission checks.
     cred: RwLock<CredentialSet>,
     /// Irreversible bit set by `PR_SET_NO_NEW_PRIVS`.
@@ -454,7 +455,7 @@ impl Task {
             sched_entity: SpinLock::new(sched),
             fpu_used: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
-            files_participation: RwLock::new(Some(FileTableParticipation::new_empty())),
+            files_state: RwLock::new(Some(FilesState::new_empty())),
             cred: RwLock::new(CredentialSet::new_root()),
             no_new_privs: AtomicBool::new(false),
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
@@ -504,7 +505,7 @@ impl Task {
                 sched_entity: SpinLock::new(SchedEntity::new_idle()),
                 fpu_used: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
-                files_participation: RwLock::new(Some(FileTableParticipation::new_empty())),
+                files_state: RwLock::new(Some(FilesState::new_empty())),
                 cred: RwLock::new(CredentialSet::new_root()),
                 no_new_privs: AtomicBool::new(false),
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),

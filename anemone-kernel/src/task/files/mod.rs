@@ -10,7 +10,8 @@ mod table;
 
 pub use descriptor::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode};
 pub use episode::FdReservation;
-pub(crate) use episode::FileTableParticipation;
+pub(crate) use episode::FilesState;
 pub use opened_description::{FileDescOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx};
 pub(crate) use opened_description::{OpenedDescriptionCapability, OpenedDescriptionLease};
-pub use table::{Fd, FilesState};
+pub use table::Fd;
+use table::FileTable;

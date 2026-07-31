@@ -157,6 +157,21 @@ counter测试和test-only状态机。
 
 **状态：** Neutralized / 2026-07-31 implementation-plan review；未增加production test hook或扩大Stage 0 write set。
 
+### EUCLID-POSIX-LOCK-003：task-files facade 与 fd-table storage 命名倒置
+
+**原问题：** Stage 0实现中的`FileTableParticipation`已经承担Task-facing attach/fork/split/detach、fd operation
+delegation与holder获取，是完整task files facade；同一实现却把只保存bitmap、reservation与fd slots的内部容器
+继续命名为`FilesState`。类型名因此把aggregate与storage的责任宽窄倒置，后续holder/VFS consumer接线会沿用
+不自然的owner vocabulary，但当前唯一participant truth、锁与lifecycle行为没有错误。
+
+**修复：** task-owned facade改称`FilesState`，纯allocator/publication container改称private `FileTable`，
+`Task.files_participation`改称`Task.files_state`，内部accessor同步使用table vocabulary。`FileTableEpisode`、holder、
+observer、participant count、attached诊断字段、detach与opened-description release顺序全部保持不变；current
+`OPENED-DESC` contract只同步实现owner名称，不改变effective语义。
+
+**状态：** Neutralized / 2026-07-31 post-Stage 0 engineering audit。开发者明确批准该同owner命名checkpoint与
+聚焦commit；R0、Stage 0 closure、contract cutover与Stage 1 Outline/Unauthorized状态不变。验证证据见transaction。
+
 ### KETER-POSIX-LOCK-006：Episode 拆分未约束现有 lifecycle orchestration 的归属
 
 **原问题：** Stage 0曾声明`table.rs`只拥有allocator/slot、`episode.rs`拥有sharing/lifecycle/holder，却没有处理

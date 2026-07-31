@@ -61,8 +61,8 @@ wrapper。现有 `anemone-apps/user-test/ltp/groups/fcntl.txt` 暂时注释掉 `
 
 当前 task file state 已具备与本 target 相邻、但不能直接冒充 holder contract 的事实：
 
-- `FilesState` 拥有 fd slot allocation/publication；`CLONE_FILES` 共享同一 live table handle，普通 fork 复制
-  slot publication；
+- task-owned `FilesState`承载file-table participation与sharing lifecycle；episode-owned `FileTable`拥有fd slot
+  allocation/publication，`CLONE_FILES`共享同一live table，普通fork复制slot publication；
 - `close_range(CLOSE_RANGE_UNSHARE)` 已能替换当前 task 的 table handle，成功 exec 会关闭 `FD_CLOEXEC`
   slots；
 - `ProcFile` 是 opened file description，dup 与普通 fork 的 fd aliases 可以共享它；

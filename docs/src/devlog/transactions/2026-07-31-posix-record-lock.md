@@ -167,3 +167,29 @@ Stage 0成功关闭，contract cutover为`None`；current contracts与register�
 全部`POSIX-LOCK-*`继续Not Effective。当前代码只是后续record-lock capability的内部foundation，不能作为
 standalone POSIX-lock支持单独合入。Stage 1保持Outline/Unauthorized；本轮没有运行
 `Stage 0 -> Stage 1 Implementation Resolution Gate`，唯一合法后续动作是等待开发者独立授权。
+
+## Post-Stage 0 engineering audit and naming alignment — 2026-07-31
+
+Stage 0关闭后的独立软件工程审查确认一个Euclid：`FileTableParticipation`实际已是完整Task files facade，而
+`FilesState`只保存allocator/publication，类型名把aggregate与storage的责任宽窄倒置。开发者明确批准按RFC
+positioning的原候选方向完成同owner命名checkpoint并提交聚焦commit，不授权进入Stage 0 -> 1 resolution gate。
+
+实现把task-owned facade改称`FilesState`、纯slot container改称files-module private `FileTable`、Task字段改称
+`files_state`，并让内部accessor使用table vocabulary。`FileTableEpisode`、episode inner的唯一participant count、
+`attached`诊断字段、holder、observer、锁、attach/fork/split/detach、terminal drain与guard-out
+opened-description release全部保持原样。current `OPENED-DESC` contract只同步实现owner名称和“每task独立
+participation、共享episode-owned table”的既有事实；R0 target、owner、public API、ABI、visible semantics、
+acceptance与contract cutover均未改变。
+
+验证结果：
+
+- `just fmt kernel --check`通过；
+- RV64 release build首次在sandbox内以既有`lwext4` `Bad system call` / exit 159失败，sandbox外相同canonical
+  命令通过；LA64 release build同样通过；两者只作为production/KUnit compile evidence；
+- 全树source scan确认production code中旧`FileTableParticipation` / `files_participation`为零，`FilesState`只有
+  task-owned facade定义，`FileTable`保持`task::files` private；
+- `git diff --check`与`mdbook build docs`通过，完整diff review未发现Apollyon/Keter或额外Euclid。
+
+本checkpoint不重写Stage 0历史manifest或当时的执行事实；implementation中的post-Stage 0 supersession和
+`EUCLID-POSIX-LOCK-003`记录当前术语。未运行QEMU、LTP或Stage 1 gate；Stage 1继续Outline/Unauthorized，全部
+prospective POSIX-lock contract ID继续Not Effective。

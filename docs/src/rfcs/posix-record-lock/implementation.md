@@ -345,6 +345,19 @@ manifest内修复并从formatter起完整重跑。最终独立review为Apollyon/
 instrumentation或remaining Stage 0 blocker。contract cutover为`None`，current contracts/register未修改；
 Stage 0代码不构成standalone POSIX-lock capability。Stage 1保持Outline/Unauthorized，本轮未运行下述gate。
 
+### Post-Stage 0 naming alignment
+
+2026-07-31的独立软件工程审查确认Stage 0 owner/lifecycle模型正确，但private类型名把task-facing aggregate与
+纯fd-table storage的责任宽窄倒置：原`FileTableParticipation`实际已经承担完整Task files facade，原
+`FilesState`则只保存allocator/publication。开发者批准在进入下一resolution gate前完成同owner、行为保持的
+命名校正：task-owned facade改称`FilesState`，episode-owned slot container改称`FileTable`，Task字段相应改为
+`files_state`。`FileTableEpisode`、participant唯一真相、holder、observer、锁、detach与guard-out release协议均
+保持不变。
+
+本节只supersede上文completed Stage 0段落中的private Rust名称，不重写历史manifest或执行事实；该调整不改变
+R0 target、owner、public API、shared-contract语义、ABI、visible semantics、acceptance、contract cutover或Stage 1
+成熟度。对应Euclid处置与验证证据记录在tracking issue和transaction；Stage 1及其resolution gate仍未授权。
+
 ## Stage 0 -> Stage 1 Implementation Resolution Gate
 
 前置条件是Stage 0已按上述review、验证和退出条件独立Closed，并由开发者单独授权本只读gate。gate读取Stage 0

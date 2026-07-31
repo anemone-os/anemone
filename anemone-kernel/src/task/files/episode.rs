@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use super::{
-    Fd, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FilesState, LinuxOpenCompat,
+    Fd, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FileTable, LinuxOpenCompat,
     OpenAccessMode, opened_description::ProcFile,
 };
 
@@ -32,7 +32,7 @@ struct FileTableEpisodeInner {
     /// Semantic participants, not storage observers. Only attach, split, and
     /// explicit detach change this count.
     participants: usize,
-    files: FilesState,
+    table: FileTable,
 }
 
 #[derive(Debug)]
@@ -42,35 +42,35 @@ struct FileTableEpisode {
 }
 
 impl FileTableEpisode {
-    fn new(files: FilesState) -> Arc<Self> {
+    fn new(table: FileTable) -> Arc<Self> {
         Arc::new(Self {
             inner: RwLock::new(FileTableEpisodeInner {
                 participants: 1,
-                files,
+                table,
             }),
             holder: PosixLockHolder::new(),
         })
     }
 }
 
-/// The one task-owned capability that makes a task a semantic participant in
-/// a file-table sharing episode.
+/// Task-owned file state for one file-table sharing episode.
 ///
-/// Cloning the underlying `Arc` is deliberately confined to storage observers;
-/// semantic sharing must go through `attach`, and termination must consume this
-/// capability through `detach`.
+/// This facade is also the task's semantic participation capability. Cloning
+/// the underlying `Arc` is deliberately confined to storage observers;
+/// semantic sharing must go through `attach`, and termination must consume
+/// this state through `detach`.
 #[derive(Debug)]
-pub(crate) struct FileTableParticipation {
+pub(crate) struct FilesState {
     episode: Arc<FileTableEpisode>,
     /// Missing-detach assertion state only. This flag never drives episode
     /// behavior or cleanup; participant truth remains in `episode.inner`.
     attached: bool,
 }
 
-impl FileTableParticipation {
+impl FilesState {
     pub(crate) fn new_empty() -> Self {
         Self {
-            episode: FileTableEpisode::new(FilesState::new()),
+            episode: FileTableEpisode::new(FileTable::new()),
             attached: true,
         }
     }
@@ -98,7 +98,7 @@ impl FileTableParticipation {
             "cannot fork a terminal file-table episode"
         );
         Self {
-            episode: FileTableEpisode::new(inner.files.fork()),
+            episode: FileTableEpisode::new(inner.table.fork()),
             attached: true,
         }
     }
@@ -119,7 +119,7 @@ impl FileTableParticipation {
                 return false;
             }
 
-            let fresh = FileTableEpisode::new(inner.files.fork());
+            let fresh = FileTableEpisode::new(inner.table.fork());
             inner.participants -= 1;
             fresh
         };
@@ -140,7 +140,7 @@ impl FileTableParticipation {
             );
             inner.participants -= 1;
             if inner.participants == 0 {
-                inner.files.drain_all_published_fds()
+                inner.table.drain_all_published_fds()
             } else {
                 Vec::new()
             }
@@ -149,22 +149,22 @@ impl FileTableParticipation {
         closed
     }
 
-    fn with_files<R>(&self, f: impl FnOnce(&FilesState) -> R) -> R {
+    fn with_table<R>(&self, f: impl FnOnce(&FileTable) -> R) -> R {
         let inner = self.episode.inner.read();
         assert!(
             inner.participants > 0,
             "terminal file-table episode used by a participant"
         );
-        f(&inner.files)
+        f(&inner.table)
     }
 
-    fn with_files_mut<R>(&self, f: impl FnOnce(&mut FilesState) -> R) -> R {
+    fn with_table_mut<R>(&self, f: impl FnOnce(&mut FileTable) -> R) -> R {
         let mut inner = self.episode.inner.write();
         assert!(
             inner.participants > 0,
             "terminal file-table episode mutated by a participant"
         );
-        f(&mut inner.files)
+        f(&mut inner.table)
     }
 
     fn observer(&self) -> FileTableObserver {
@@ -178,7 +178,7 @@ impl FileTableParticipation {
     }
 }
 
-impl Drop for FileTableParticipation {
+impl Drop for FilesState {
     fn drop(&mut self) {
         assert!(
             !self.attached,
@@ -203,7 +203,7 @@ impl FileTableObserver {
             inner.participants > 0,
             "cannot reserve an fd in a terminal file-table episode"
         );
-        inner.files.reserve_fd()
+        inner.table.reserve_fd()
     }
 
     fn commit_reserved_fd(&self, fd: Fd, file_desc: Arc<FileDesc>) {
@@ -212,11 +212,11 @@ impl FileTableObserver {
             inner.participants > 0,
             "cannot publish an fd in a terminal file-table episode"
         );
-        inner.files.commit_reserved_fd(fd, file_desc);
+        inner.table.commit_reserved_fd(fd, file_desc);
     }
 
     fn rollback_reserved_fd(&self, fd: Fd) {
-        self.episode.inner.write().files.rollback_reserved_fd(fd);
+        self.episode.inner.write().table.rollback_reserved_fd(fd);
     }
 }
 
@@ -262,20 +262,20 @@ impl Drop for FdReservation {
 }
 
 impl Task {
-    fn with_files<R>(&self, f: impl FnOnce(&FilesState) -> R) -> R {
-        let participation = self.files_participation.read();
-        participation
+    fn with_table<R>(&self, f: impl FnOnce(&FileTable) -> R) -> R {
+        let files_state = self.files_state.read();
+        files_state
             .as_ref()
             .expect("detached task used its file table")
-            .with_files(f)
+            .with_table(f)
     }
 
-    fn with_files_mut<R>(&self, f: impl FnOnce(&mut FilesState) -> R) -> R {
-        let participation = self.files_participation.read();
-        participation
+    fn with_table_mut<R>(&self, f: impl FnOnce(&mut FileTable) -> R) -> R {
+        let files_state = self.files_state.read();
+        files_state
             .as_ref()
             .expect("detached task mutated its file table")
-            .with_files_mut(f)
+            .with_table_mut(f)
     }
 
     fn release_description_ref(pfile: Arc<ProcFile>) {
@@ -288,37 +288,37 @@ impl Task {
         }
     }
 
-    fn replace_files_participation(&mut self, participation: FileTableParticipation) {
+    fn replace_files_state(&mut self, files_state: FilesState) {
         let old = self
-            .files_participation
+            .files_state
             .write()
-            .replace(participation)
-            .expect("new task must own its initial file-table participation");
+            .replace(files_state)
+            .expect("new task must own its initial files state");
         Self::release_description_refs(old.detach());
     }
 
     pub(crate) fn share_files_from(&mut self, parent: &Task) {
-        let participation = parent.files_participation.read();
-        let shared = participation
+        let files_state = parent.files_state.read();
+        let shared = files_state
             .as_ref()
             .expect("clone parent has detached its file table")
             .attach();
-        drop(participation);
-        self.replace_files_participation(shared);
+        drop(files_state);
+        self.replace_files_state(shared);
     }
 
     pub(crate) fn fork_files_from(&mut self, parent: &Task) {
-        let participation = parent.files_participation.read();
-        let forked = participation
+        let files_state = parent.files_state.read();
+        let forked = files_state
             .as_ref()
             .expect("fork parent has detached its file table")
             .fork();
-        drop(participation);
-        self.replace_files_participation(forked);
+        drop(files_state);
+        self.replace_files_state(forked);
     }
 
     pub(crate) fn split_files_if_shared(&self) -> bool {
-        self.files_participation
+        self.files_state
             .write()
             .as_mut()
             .expect("detached task cannot split its file table")
@@ -335,12 +335,12 @@ impl Task {
             "fd-table exit cleanup must run in a sleepable context"
         );
 
-        let participation = self
-            .files_participation
+        let files_state = self
+            .files_state
             .write()
             .take()
             .expect("task file-table participation detached more than once");
-        Self::release_description_refs(participation.detach());
+        Self::release_description_refs(files_state.detach());
     }
 
     pub fn open_fd(
@@ -351,7 +351,7 @@ impl Task {
         compat: LinuxOpenCompat,
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
-        self.with_files_mut(|files| files.open_fd(file, access, status_flags, compat, fd_flags))
+        self.with_table_mut(|table| table.open_fd(file, access, status_flags, compat, fd_flags))
     }
 
     pub fn open_fd_with_description_ops(
@@ -363,8 +363,8 @@ impl Task {
         fd_flags: FdFlags,
         description_ops: FileDescOps,
     ) -> Result<Fd, SysError> {
-        self.with_files_mut(|files| {
-            files.open_fd_with_description_ops(
+        self.with_table_mut(|table| {
+            table.open_fd_with_description_ops(
                 file,
                 access,
                 status_flags,
@@ -376,8 +376,8 @@ impl Task {
     }
 
     pub fn reserve_fd(&self) -> Result<FdReservation, SysError> {
-        let participation = self.files_participation.read();
-        let table = participation
+        let files_state = self.files_state.read();
+        let table = files_state
             .as_ref()
             .expect("detached task cannot reserve an fd")
             .observer();
@@ -390,21 +390,21 @@ impl Task {
     }
 
     pub fn get_fd(&self, fd: Fd) -> Result<Arc<FileDesc>, SysError> {
-        self.with_files(|files| files.get_fd(fd))
+        self.with_table(|table| table.get_fd(fd))
     }
 
     pub fn opened_fd_numbers_snapshot(&self) -> Vec<Fd> {
-        self.with_files(FilesState::opened_fd_numbers_snapshot)
+        self.with_table(FileTable::opened_fd_numbers_snapshot)
     }
 
     pub fn close_fd(&self, fd: Fd) -> Result<(), SysError> {
-        let pfile = self.with_files_mut(|files| files.close_fd(fd))?;
+        let pfile = self.with_table_mut(|table| table.close_fd(fd))?;
         Self::release_description_ref(pfile);
         Ok(())
     }
 
     pub fn dup(&self, old_fd: Fd) -> Result<Fd, SysError> {
-        self.with_files_mut(|files| files.dup(old_fd))
+        self.with_table_mut(|table| table.dup(old_fd))
     }
 
     pub fn dup_ge_than(
@@ -413,17 +413,17 @@ impl Task {
         min_new_fd: Fd,
         close_on_exec: bool,
     ) -> Result<Fd, SysError> {
-        self.with_files_mut(|files| files.dup_ge_than(old_fd, min_new_fd, close_on_exec))
+        self.with_table_mut(|table| table.dup_ge_than(old_fd, min_new_fd, close_on_exec))
     }
 
     pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {
-        let closed = self.with_files_mut(|files| files.dup3(old_fd, new_fd, flags))?;
+        let closed = self.with_table_mut(|table| table.dup3(old_fd, new_fd, flags))?;
         Self::release_description_refs(closed);
         Ok(new_fd)
     }
 
     pub fn close_cloexec_fds(&self) {
-        let closed = self.with_files_mut(FilesState::close_on_exec);
+        let closed = self.with_table_mut(FileTable::close_on_exec);
         Self::release_description_refs(closed);
     }
 
@@ -438,9 +438,9 @@ impl Task {
         }
 
         if flags.contains(crate::fs::api::close::CloseRangeFlags::CLOEXEC) {
-            self.with_files(|files| files.set_close_on_exec_range(first, last));
+            self.with_table(|table| table.set_close_on_exec_range(first, last));
         } else {
-            let closed = self.with_files_mut(|files| files.close_range(first, last));
+            let closed = self.with_table_mut(|table| table.close_range(first, last));
             Self::release_description_refs(closed);
         }
     }
@@ -450,10 +450,10 @@ impl Task {
 mod kunits {
     use super::*;
 
-    fn open_root(participation: &FileTableParticipation) -> Fd {
-        participation
-            .with_files_mut(|files| {
-                files.open_fd(
+    fn open_root(files_state: &FilesState) -> Fd {
+        files_state
+            .with_table_mut(|table| {
+                table.open_fd(
                     vfs_open(Path::new("/")).unwrap(),
                     OpenAccessMode::Read,
                     FileStatusFlags::empty(),
@@ -472,7 +472,7 @@ mod kunits {
 
     #[kunit]
     fn posix_holder_fork_and_share_follow_episode_identity() {
-        let parent = FileTableParticipation::new_empty();
+        let parent = FilesState::new_empty();
         let forked = parent.fork();
         let shared = parent.attach();
 
@@ -486,7 +486,7 @@ mod kunits {
 
     #[kunit]
     fn posix_holder_split_changes_only_a_shared_episode() {
-        let mut caller = FileTableParticipation::new_empty();
+        let mut caller = FilesState::new_empty();
         let unique_holder = caller.holder();
         assert!(!caller.split_if_shared());
         assert!(unique_holder.same_identity(&caller.holder()));
@@ -503,10 +503,10 @@ mod kunits {
 
     #[kunit]
     fn final_detach_ignores_storage_observers_and_drains_once() {
-        let first = FileTableParticipation::new_empty();
+        let first = FilesState::new_empty();
         let fd = open_root(&first);
-        let capability = first.with_files(|files| {
-            files
+        let capability = first.with_table(|table| {
+            table
                 .get_fd(fd)
                 .unwrap()
                 .opened_description_capability()
@@ -523,13 +523,13 @@ mod kunits {
         assert_eq!(closed.len(), 1);
         release_all(closed);
         assert!(capability.try_lease().is_none());
-        assert!(observer.episode.inner.read().files.get_fd(fd).is_err());
+        assert!(observer.episode.inner.read().table.get_fd(fd).is_err());
         assert!(
             another_observer
                 .episode
                 .inner
                 .read()
-                .files
+                .table
                 .opened_fd_numbers_snapshot()
                 .is_empty()
         );

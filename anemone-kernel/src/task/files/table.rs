@@ -37,7 +37,7 @@ impl TryFromSyscallArg for Fd {
 }
 
 #[derive(Debug)]
-pub struct FilesState {
+pub(super) struct FileTable {
     // `bitmap` is the allocator truth source: a set bit means the slot is
     // either published or reserved. `reserved_bitmap` marks the unpublished
     // subset. Published slots are the only ones visible through `fds`.
@@ -46,7 +46,7 @@ pub struct FilesState {
     fds: Vec<Option<Arc<FileDesc>>>,
 }
 // fd alloc
-impl FilesState {
+impl FileTable {
     fn alloc(&mut self) -> Result<Fd, SysError> {
         if let Some(fd_idx) = self.bitmap.find_and_set_first_zero() {
             let fd = Fd::new(fd_idx as u32).unwrap();
@@ -146,7 +146,7 @@ impl FilesState {
 }
 
 // operations
-impl FilesState {
+impl FileTable {
     pub fn new() -> Self {
         Self {
             bitmap: Bitmap::new(),
@@ -280,11 +280,11 @@ impl FilesState {
                 let reserved = self.reserved_bitmap.test(fd);
                 assert!(
                     self.bitmap.test(fd) == (opened || reserved),
-                    "FilesState bitmap/fds open-state diverged"
+                    "FileTable bitmap/fds open-state diverged"
                 );
                 assert!(
                     !(opened && reserved),
-                    "FilesState slot cannot be both open and reserved"
+                    "FileTable slot cannot be both open and reserved"
                 );
 
                 opened.then(|| Fd::new(fd as u32).expect("fd table index must fit in Fd"))
@@ -430,19 +430,19 @@ impl FilesState {
     }
 }
 
-impl Drop for FilesState {
+impl Drop for FileTable {
     fn drop(&mut self) {
         assert!(
             self.fds.iter().all(Option::is_none),
-            "FilesState dropped with published fd slots; missing explicit fd-table cleanup"
+            "FileTable dropped with published fd slots; missing explicit fd-table cleanup"
         );
         assert!(
             self.bitmap.is_empty(),
-            "FilesState dropped with allocator bits set; missing explicit fd-table cleanup"
+            "FileTable dropped with allocator bits set; missing explicit fd-table cleanup"
         );
         assert!(
             self.reserved_bitmap.is_empty(),
-            "FilesState dropped with reserved fd slots; missing explicit fd-table cleanup"
+            "FileTable dropped with reserved fd slots; missing explicit fd-table cleanup"
         );
     }
 }
