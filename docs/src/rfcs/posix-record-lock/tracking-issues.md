@@ -1,6 +1,6 @@
 # POSIX Record Lock Tracking Issues
 
-**状态：** R0 / Stage 0-1 Closed / Checkpoint 1A-1B Closed / no current findings / Not Cut Over
+**状态：** R0 / Stage 0-1 Closed / Stage 2 Ready / Not Active / no current findings / Not Cut Over
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
@@ -9,12 +9,16 @@
 停止条件或验收判断的 design finding。当前没有 active Apollyon 或 Keter；既有结论保留在 Neutralized 作为
 后续 implementation resolution 与 review 的边界依据。
 
-[实施计划](./implementation.md) 已把 Stage 0关闭；后续独立只读resolution gate未发现新的design finding，
-并把Stage 1解析为Ready / Not Active。开发者随后批准把结构迁移与新domain拆为Checkpoint 1A/1B；该路线修正
+[实施计划](./implementation.md) 已把 Stage 0关闭；后续独立只读resolution gate把Stage 1解析为
+Ready / Not Active。开发者随后批准把结构迁移与新domain拆为Checkpoint 1A/1B；该路线修正
 不改变target/owner/contract语义，因此不新增tracking finding。1A执行中的嵌套visibility摩擦按获批Route
 Correction关闭，未形成target或design finding；1A/1B与Stage 1现均已Closed。1B实现期间唯一路线修正是删除
 KUnit对coalesce后具体diagnostic report值的过强断言；R0明确允许任一合法report snapshot，因此不形成finding。
-Stage 2以后仍保持Outline，`Stage 1 -> 2`resolution gate未授权。
+独立`Stage 1 -> 2`resolution gate随后核验live binding/removal、ABI、wait/restart与test wiring，把Stage 2完整拆为
+2A/2B并保持Ready / Not Active；随后owner review发现原计划把`fcntl(2)` command-family ABI错误下沉到
+`fs::lock`core，形成`KETER-POSIX-LOCK-009`。开发者接受把现有`fcntl.rs`目录化为
+`fcntl/{mod.rs,posix_lock.rs}`并保持VFS core为normalized internal owner；该finding已在同一docs-only Route
+Correction中neutralize，没有授权实现。
 Stage 0实现审查发现的显式detach consumer遗漏与runtime发现的kthread exit遗漏均已neutralize；最终独立review为
 Apollyon/Keter/Euclid/Safe全0。
 后续 finding 仍按影响
@@ -195,3 +199,24 @@ consumer或必须保持的public owner surface，必须按API/write-set扩展停
 
 **状态：** Neutralized / 2026-07-31 implementation-plan review；只解析Stage 0文件级manifest与owner角色，未冻结
 Rust类型/函数、修改production source、改变target/contract或授权Stage 0 Active。
+
+### KETER-POSIX-LOCK-009：`fcntl` command-family ABI 被错误下沉到 VFS lock core
+
+**原问题：** Stage 2首次Ready plan保留`fs/api/fcntl.rs`作为general syscall dispatcher，却计划新建
+`fs/lock/posix/api.rs`承担raw `struct flock` copy、relative-whence normalization、admission与errno/restart映射。
+POSIX record lock没有独立syscall；`F_GETLK/F_SETLK/F_SETLKW`属于`fcntl(2)` command family。该落点会让VFS
+lock core理解用户指针、raw command和Linux错误语义，并制造一个名为`api`、实际却不是syscall owner的旁路入口。
+
+**修复：** [Stage 2 Ready plan](./implementation.md#stage-2-ready--not-activenative-abiclosecommit-与-blocking-wait)
+现在要求Checkpoint 2A把现有`fs/api/fcntl.rs`行为保持地迁入`fs/api/fcntl/mod.rs`，由root继续拥有
+`sys_fcntl`、command decode与总dispatch；新建`fs/api/fcntl/posix_lock.rs`承担record-lock command-family的
+raw copy、validation/normalization、copyout和errno/restart映射。`fs/lock/posix.rs`只接收normalized internal
+operation并拥有grant/conflict/query/assignment/wait/cleanup truth；`fs/lock/mod.rs`与`fs/mod.rs`只逐名
+crate-private re-export真实consumer所需的internal operation/cleanup，整个`fs::lock`保持private；`task::files`
+close cleanup直接调用该窄VFS API，不绕回`fcntl`。旧`fcntl.rs`与原计划的`fs/lock/posix/api.rs`均不得保留
+compatibility入口。
+
+**状态：** Neutralized / 2026-07-31 Stage 2 docs-only Route Correction。开发者明确接受目录化规范；修正只调整
+Ready implementation route与resolved manifest，不改变R0 target、state/protocol owner、ABI、visible semantics、
+Contract Impact、acceptance或cutover。Stage 2保持Ready / Not Active，未修改production source或运行测试；证据见
+[transaction correction](../../devlog/transactions/2026-07-31-posix-record-lock.md#stage-2-fcntlposix-api-owner-correction--2026-07-31)。

@@ -1,20 +1,21 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Stage 2 Outline
+**状态：** R0 implementation plan / Stage 0-1 Closed / Checkpoint 1A-1B Closed / Stage 2 Ready / Not Active
 **适用修订：** R0
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **目标与不变量：** [POSIX Record Lock 目标和不变量](./invariants.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 active Apollyon / Keter
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
-**Contract Cutover：** Stage 1 semantic cutover `None`；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
+**Contract Cutover：** Stage 2 resolution semantic cutover `None`；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
 
 本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
 canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
 authorization 已作为三个独立事件完成；Stage 0现已关闭。开发者随后独立授权并完成只读
 `Stage 0 -> Stage 1 Implementation Resolution Gate`，并把物理namespace迁移与POSIX range-domain实现拆为
-1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed；本次未进入`Stage 1 -> 2`resolution gate，Stage 2
-继续为Outline且未获授权。
+1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed。开发者随后独立授权只读
+`Stage 1 -> Stage 2 Implementation Resolution Gate`；本次已从clean live source把Stage 2完整解析为两个有序
+checkpoint。Stage 2当前为Ready / Not Active，不因本次解析自动获得实现授权。
 
 ## 实施原则
 
@@ -88,7 +89,7 @@ authorization 已作为三个独立事件完成；Stage 0现已关闭。开发�
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
 | Stage 1 | Closed；1A/1B Closed | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 已独立关闭；下一步只能另行授权`1 -> 2`resolution |
-| Stage 2 | Outline | 实现 native ABI、binding-scoped close/commit、blocking wait 与 signal restart vertical slice | None | Stage 1 独立关闭后 |
+| Stage 2 | Ready / Not Active；2A/2B已解析 | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-07-31已完成独立`1 -> 2`resolution；等待开发者另行授权2A |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
 
 ## Stage 0 Ready：File-table Episode 与 Holder Foundation
@@ -713,22 +714,307 @@ focused test assets和固定Linux/LTP source。输出必须完整解析：
 解析只能把Stage 2变成Ready/Not Active。若需要nested active wait、producer等待waiter、同步close cancellation、
 shared fd-table private lock下回调VFS，或只能改变target race outcomes，停止并进入RFC review。
 
-## Stage 2 Outline：Native ABI、Close/Commit 与 Blocking Wait
+## Stage 2 Ready / Not Active：Native ABI、Close/Commit 与 Blocking Wait
 
-概括目的：
+### Resolution baseline 与前置核验
 
-- 在native RV64/LA64 ABI owner实现`F_GETLK/F_SETLK/F_SETLKW`与`struct flock`copy/normalize/admission；
-  VFS只接收normalized operation、opaque holder与窄binding validation capability。
-- 把任意相关fd close的holder x inode cleanup、closed-binding late-grant exclusion、blocking recheck wait与ordinary
-  signal restart组合成真实syscall vertical slice，并保留close/signal/commit允许结果集合。
+本次只读gate核验clean `dev/drc/omega@9d1204e0`、Stage 1完整diff与closure evidence，并重新读取live
+fd-table、`fcntl`、POSIX domain、Event/wait、signal restart、ABI/app/rootfs owner。结论如下：
 
-前置依赖：Stage 1 Closed；range domain API与holder topology稳定；wait-core register状态已核验。
+- `FileDesc.published: AtomicBool`已经是单一slot object的publication truth。`get_fd()`取得同一个`Arc<FileDesc>`；
+  close先把该对象置为unpublished，fd reuse创建新的`FileDesc`。因此operation-local binding可直接组合当前episode
+  holder与当前slot capability，不需要holder-wide close epoch、fd generation registry或同步close cancellation。
+- `FileTable::{close_fd,close_range,dup3,close_on_exec,drain_all_published_fds}`覆盖普通close、dup3 replacement、
+  close_range、CLOEXEC与final episode drain，但当前在unpublish后只返回`ProcFile`。Checkpoint 2A必须让这些路径把
+  被撤销的同一`FileDesc`交给episode owner；否则cleanup无法证明closed-binding revalidation和fd reuse隔离。
+- holder capture、slot lookup与split必须受同一`Task.files_state` episode guard约束。分别调用`get_fd()`与holder getter
+  会允许concurrent split拼出不属于同一episode的capability，因此不得作为实现路线。
+- current general `fs/api/fcntl.rs`仍是唯一`fcntl`syscall dispatcher。Checkpoint 2A先把其现有行为保持地迁入
+  `fs/api/fcntl/mod.rs`，由module root继续拥有`sys_fcntl`、command decode与总dispatch；POSIX-specific raw
+  copy、validation/normalization、copyout及errno/restart映射落在同一syscall-owner subtree的
+  `fs/api/fcntl/posix_lock.rs`。该child先把Linux command/UAPI语义化为Anemone内部operation，再调用
+  `fs::lock`窄internal API；`fs::lock`parent不导出dispatcher-facing entry，不保存state，也不形成
+  flock/POSIX共同facade。
+- native RV64/LA64都采用asm-generic `struct flock`：32 bytes，alignment 8，field offsets依次为
+  `l_type=0`、`l_whence=2`、`l_start=8`、`l_len=16`、`l_pid=24`。现有typed user pointer会把未对齐地址映射为
+  `EINVAL`，与Linux byte-copy ABI不符；本路径必须通过`UserReadSlice<u8>` / `UserWriteSlice<u8>`复制固定32-byte
+  buffer，并在kernel buffer内按native-endian field解析。
+- `SysError`当前没有`EOVERFLOW`carrier；Stage 2 normalization需要增加精确variant，而不能把signed `off_t`
+  overflow折成`EINVAL`、`EFBIG`或wraparound。
+- `Event::listen()`已经按`ActiveWait::begin -> register -> predicate/signal check -> sleep -> cleanup -> finish`闭合
+  lost-wake窗口；prediction内只取得POSIX domain spin guard，不进入sleepable slow path。producer在domain guard外
+  `publish()`即可消费current `SCHED-WAKE-001..004`，无需新的wait primitive或flock共享framework。
+- register旧项`ANE-20260531-SCHED-EVENT-WAKE-RUNNABLE-RACE`描述的`try_to_wake_up() -> task_enqueue()`尾巴已不存在：
+  Event listener携带exact `WakeToken`，wait completion校验current identity；owner CPU的`local_wake_enqueue()`重新
+  分类stale/current/queued状态。2026-07-25 `SCHED-WAKE` cutover与后续canonical wrapper均正常收敛。因此本gate
+  按register的active-defect边界移除该过期Open项，在transaction保留关闭证据；不修改scheduler current contract。
+- `anemone-rs::sys::linux::fs::fcntl()`已有raw syscall entry。真实`fcntl-test` consumer只需要在
+  `os/linux/fs.rs`按checkpoint增加窄typed record-lock wrapper；2A增加query/nonblocking consumer使用的入口，2B再随
+  blocking consumer增加`fcntl_setlkw`，不修改raw layer。现有`user-test::local_run_cmd()`、两份tracked pretest
+  rootfs的`[[apps]]`与xtask app driver可以直接安装、执行并检查child exit，不建立新runner或wrapper。
 
-受保护边界：不支持compat64命令面、non-regular/O_PATH、OFD/deadlock/mandatory/remote；不改变ordinary I/O；
-不让opened-description final release或flock承担POSIX cleanup；不在本阶段cut over current contract。
+初始gate未发现Apollyon/Keter；后续owner review识别并同轮neutralize了
+[`KETER-POSIX-LOCK-009`](./tracking-issues.md#keter-posix-lock-009fcntl-command-family-abi-被错误下沉到-vfs-lock-core)：
+record-lock没有独立syscall，原`fs/lock/posix/api.rs`路线会把`fcntl(2)` command-family ABI下沉到VFS lock core。
+修正只调整Ready implementation route与manifest，不改变R0 target、state/protocol owner、ABI、visible semantics、
+contract或acceptance boundary，因此保持R0且Stage 2仍为Ready / Not Active。若activation preflight发现上述
+scheduler旁路仍有live consumer，必须恢复register项并把它列为Stage 2 Keter；不得让POSIX route自行绕过wait core。
 
-解析触发点：Stage 1 -> 2 gate冻结精确ABI文件、syscall/files/VFS/wait模块、userspace oracle最小slice、runtime
-smoke、停止/退出条件和manifest。Stage 2成功仍不能启用focused LTP组或把NYI contract写成已支持。
+### 阶段拆分与激活顺序
+
+| Checkpoint | 当前成熟度 | 交付 | 独立边界 |
+| --- | --- | --- | --- |
+| 2A — Native ABI、binding 与nonblocking/query | Ready / Not Active | 原生`struct flock`、`F_GETLK/F_SETLK`、operation-local binding、全部fd-removal cleanup、focused userspace纵切 | 形成无blocking waiter的完整close/commit协议；不得独立作为产品capability合入或cut over |
+| 2B — Blocking wait、signal replay 与Stage 2 closure | Ready / Not Active；受2A Closed约束 | `F_SETLKW`、Event predicate recheck、ordinary restart、focused signal/close race纵切与stage-wide review | 2A独立Closed后才可激活；closure必须停在`Stage 2 -> 3`resolution gate前 |
+
+两个checkpoint共同构成一个stacked Stage 2 candidate。2A虽然具备可执行syscall slice，但R0 target还缺
+`F_SETLKW`与signal/restart，不能单独合入、发布或写成current支持；2B关闭后仍需Stage 3双架构产品证据、focused
+LTP和原子`POSIX-LOCK-CUTOVER`。解析Ready不授权2A，2A关闭也不自动授权2B。
+
+### Stage-wide实现路线
+
+#### ABI copy、validation 与normalization
+
+- 在`anemone-abi::fs::linux::fcntl`增加`#[repr(C)]` native `Flock`与`F_RDLCK/F_WRLCK/F_UNLCK`。使用常量
+  assertion冻结size/alignment/全部field offset；首版不增加`F_GETLK64/F_SETLK64/F_SETLKW64`或32-bit compat layout。
+- raw copy保持一个32-byte kernel buffer。copy-in先保留padding与未改字段；`F_GETLK`无冲突时只把`l_type`改为
+  `F_UNLCK`，有冲突时输出`SEEK_SET`、absolute start、finite length或open-ended zero length、mode与diagnostic
+  `l_pid`。copyout仍写整个原始buffer，失败返回`EFAULT`且不改变domain state。
+- validation固定为：command decode；fd/`O_PATH` binding admission；copy-in；type/whence/range normalization；
+  `S_IFREG` admission；set-operation access；最后进入query/grant/wait。invalid fd或`O_PATH`为`EBADF`，bad user
+  storage为`EFAULT`，invalid type/whence/negative absolute start为`EINVAL`，signed `off_t`算术不可表示为
+  `EOVERFLOW`，non-regular为`EINVAL`；read/write set分别要求readable/writable，unlock不要求access。
+- normalization只在一次invocation开始时取得opened-description position与inode size snapshot。`SEEK_SET/CUR/END`、
+  signed start/length在足够宽的临时整数中计算，再验证结果可由native signed offset表达；positive length生成有限
+  half-open range，negative length反向生成有限range，zero length保持open-ended。blocking同一invocation只复用
+  normalized range；ordinary replay从raw syscall参数重新lookup/copy/snapshot/normalize。
+- `anemone-rs::os::linux::fs`在2A提供`fcntl_getlk`、`fcntl_setlk`与仅供ABI/conformance consumer使用的raw-pointer
+  entry；2B随真实blocking consumer增加`fcntl_setlkw`。typed wrapper不缓存fd target、holder、range或restart state。
+
+#### Operation-local binding 与fd-removal handoff
+
+- 在`task::files`建立不可clone的crate-private `PosixLockBinding`。它只持当前episode的opaque holder和当前slot的
+  `Arc<FileDesc>`，提供VFS file/access/path-only/liveness所需的窄只读能力；不暴露`Task`、`FilesState`、
+  `FileTable` guard、fd number或participant count，也不保存range/conflict/wait state。
+- `Task`通过单一owner API在同一`files_state` read guard内完成episode holder capture与slot lookup。domain
+  serialization内以`FileDesc.published`重验binding：guard内仍live才允许query或grant commit；unpublished binding
+  返回`EBADF`且不得留下grant。`published`继续是slot truth，不新增generation、close epoch或holder inode mirror。
+- `FileTable` removal改为返回被unpublish的`Arc<FileDesc>`，而不是只返回`ProcFile`。episode owner在持有同一holder
+  snapshot的前提下完成slot removal，随后释放`files_state`/table guard，依次调用窄VFS POSIX cleanup，最后才释放
+  opened-description publication ref。普通close、dup3 replacement、close_range、CLOEXEC与final detach全部走该
+  helper；reserved slot仍只是allocator state，不触发cleanup。
+- cleanup在目标inode domain guard内删除该holder的全部segments；无论是否找到grant都在guard外提交一次recheck，
+  因为closed binding本身可能是blocking predicate变化。removed segments与可能的last holder ref在guard外drop；
+  cleanup不等待waiter运行，不占用`FileDescOps::final_release`，不调用filesystem backend或flock domain。
+- 合法线性化集合固定为：set先在domain guard内观察live并commit，则close随后unpublish并cleanup；close先
+  unpublish，则该旧binding的后续commit被拒绝。另一个仍live binding（包括dup3完成后的新slot）可以在cleanup后
+  独立commit；若它在cleanup前commit，随后cleanup可以删除该grant。close不承诺与syscall return形成唯一全序。
+- final participant detach只在真实episode终结时drain table并逐slot cleanup；shared participant exit不清理remaining
+  holder grants。split/fork规则保持Stage 0语义，不因temporary observer、opened-description refcount或fd count改变。
+
+#### Domain、wait 与restart
+
+- `posix.rs`继续是single inode domain owner，并新增一个domain-private `Event`；无需拆分core。它只接收已经
+  normalized的range、mode、operation-local binding与wait policy，返回internal query/assignment/liveness/
+  interruption outcome；不读取raw command、用户指针、`struct flock`、relative `l_whence`或Linux errno。
+  `fs::lock`parent只窄re-export这些internal operation与cleanup能力；`fs/mod.rs`只把真实cross-owner consumer所需
+  名称crate-private re-export给`task::files`，不公开整个`fs::lock`module或建立通用file-lock facade。
+- `fs/api/fcntl/mod.rs`只拥有general command decode与总dispatch；`fs/api/fcntl/posix_lock.rs`完成record-lock
+  command-family的copy/validation/normalization、internal outcome到`EAGAIN`/`EBADF`/restart的映射与query copyout，
+  不保存grant/wait truth。`task::files`的fd-removal handoff直接调用VFS POSIX cleanup API，不绕回`fcntl`subtree。
+- domain operation统一在single `segments` guard内先重验binding，再检查conflict并commit。nonblocking conflict、
+  query snapshot、binding retired与interruption先保持internal outcome，再由`fcntl` adapter映射为Linux-visible结果；
+  unlock、same-owner replacement与cleanup在guard外publish recheck。waiter不进入segments collection，不预占grant，
+  也不建立fairness或deadlock graph。
+- `F_SETLKW`冲突时调用domain Event的interruptible non-exclusive `listen()`；prediction只在domain guard内检查
+  `!binding_live || !conflict`，不持guard park。wake后回到同一operation loop再次重验binding/conflict/commit。
+  同一invocation可有多轮Event wait，但前一轮已由Event完整cleanup/finish后才开始下一轮；不得nested active wait。
+- Event返回signal/force且assignment尚未commit时，operation-local listener已清理，domain返回internal
+  interrupted outcome，`fcntl` ABI owner再映射为`RestartSyscall::Idempotent`。signal finalizer按`SA_RESTART`决定
+  完整syscall replay或用户可见`EINTR`；domain、binding与normalized range不进入restart carrier。commit一旦成功，
+  本次返回success，later signal不得改写。
+- producer只提交notification，不观察physical placement或errno；close不等待blocked operation退出。现有
+  `SCHED-WAKE-001..004`与Event fail-closed outcome assertions是Stage 2的scheduler边界，scheduler source不进入写集。
+
+#### Focused KUnit 与userspace vertical slice
+
+KUnit不设数量目标，也不复制ABI/range/query/blocking用户态矩阵。只有无需test-only state machine、能够直接经过
+production binding/removal/domain transition的lifecycle组合才保留；自然的最小义务是：
+
+- old binding被unpublish后不能late commit，fd number复用的新`FileDesc`不会使旧binding复活；
+- live commit先发生时，随后任意相关fd cleanup删除holder x inode grants；
+- cleanup完成后，同holder的其它live binding仍可独立重新commit。
+
+这些义务可以按failure定位自然拆合，但不得为凑case增加production getter、reset hook、counter或probe facade。
+若某一项只能通过test-only interleaving实现，则不创建该KUnit；改由常开liveness assertion、domain-guard source proof与
+focused userspace race共同记录证据。既有Stage 1 range KUnit继续回归，不重复改写。
+
+新建`anemone-apps/fcntl-test`，使用现有app manifest形状并提供`posix-record-lock` suite。Checkpoint 2A至少覆盖
+native layout/unaligned pointer、validation/errno order、positive/negative/open-ended normalization、query与
+nonblocking conflict、same-owner assignment、fork owner隔离、ordinary close/fd reuse及代表性dup/close-range
+cleanup；2B再加入blocking wake、close-while-waiting、signal `EINTR`、`SA_RESTART`完整replay以及handler修改
+fd/user flock/position后的重新解析。race case只断言R0允许结果集合与最终grant/wait cleanup，不冻结调度winner。
+
+两份pretest rootfs安装`/bin/fcntl-test`；`user-test::run_local_tests()`在进入competition root前顺序执行
+`/bin/fcntl-test posix-record-lock`，child非零必须让canonical wrapper失败。tracked LTP profile与`fcntl.txt`保持不变；
+Stage 2日志中的app marker是focused vertical-slice runtime evidence，不是focused LTP或最终双架构产品证据。
+
+### Checkpoint 2A — Native ABI、Binding 与 Nonblocking / Query
+
+#### 2A交付与Resolved Write Set Manifest
+
+2A完成上文ABI、normalization、binding、全部fd-removal handoff和`F_GETLK/F_SETLK`。`F_SETLKW`在general command
+decode处继续明确NYI，直到2B原子接入wait/restart；2A不得用busy loop、polling或uninterruptible wait填补。
+
+Production source：
+
+- `anemone-abi/src/fs.rs`；
+- `anemone-rs/src/os/linux/fs.rs`；
+- `anemone-kernel/src/syserror.rs`；
+- `anemone-kernel/src/fs/api/fcntl.rs`（迁移来源；2A完成后删除该旧路径）；
+- `anemone-kernel/src/fs/api/fcntl/mod.rs`（新建；行为保持地承接现有root并保留`sys_fcntl`、command decode与总dispatch）；
+- `anemone-kernel/src/fs/api/fcntl/posix_lock.rs`（新建；record-lock command-family ABI adapter）；
+- `anemone-kernel/src/fs/mod.rs`（只增加窄crate-private POSIX operation/cleanup re-export；`mod lock`保持private）；
+- `anemone-kernel/src/fs/lock/mod.rs`；
+- `anemone-kernel/src/fs/lock/posix.rs`；
+- `anemone-kernel/src/task/files/descriptor.rs`；
+- `anemone-kernel/src/task/files/episode.rs`；
+- `anemone-kernel/src/task/files/mod.rs`；
+- `anemone-kernel/src/task/files/table.rs`。
+
+Existing KUnit consumer adaptation：
+
+- `anemone-kernel/src/task/files/opened_description.rs`（只适配现有KUnit对`FileTable` removal返回值的直接
+  consumer；production opened-description语义不变）。
+
+Userspace/runtime source：
+
+- `anemone-apps/fcntl-test/Cargo.toml`、`Cargo.lock`、`app.toml`与`src/main.rs`（均新建）；
+- `anemone-apps/user-test/src/main.rs`；
+- `conf/rootfs/pretest-rv64.toml`；
+- `conf/rootfs/pretest-la64.toml`。
+
+文档与执行证据write-back：
+
+- `docs/src/rfcs/posix-record-lock/{index.md,invariants.md,implementation.md,tracking-issues.md}`；
+- `docs/src/devlog/transactions/2026-07-31-posix-record-lock.md`；
+- `docs/src/devlog/transactions/index.md`、当前双周devlog与`docs/src/rfcs.md`。
+
+本次resolution已单独修改`docs/src/register/open-issues.md`以移除过期scheduler issue；该文件不是未来2A manifest的
+一部分，2A实现不得继续修改。
+
+Validation-only、明确不在2A写集：
+
+- `anemone-rs/src/sys/linux/fs.rs`（raw `fcntl`已存在）与其它app；
+- `anemone-kernel/src/fs/{file.rs,inode.rs}`、`fs/lock/flock/**`、filesystem backend；
+- clone/exec/exit/close syscall adapter；
+- `anemone-kernel/src/sched/**`、`task/sig/**`与所有current contracts；
+- `anemone-apps/user-test/ltp/{profile.txt,groups/fcntl.txt}`、wrapper scripts与sdcard master；
+- fixed `xref/linux-6.6.32`与`etc/preliminary/.../fcntl14.c`。
+
+#### 2A审计、验证与停止条件
+
+source/caller audit必须逐项证明：所有published-slot removal都返回原slot object并在private guard外按
+POSIX cleanup -> opened-description release排序；holder与slot来自同一episode snapshot；domain commit只读
+`published`决定binding liveness；fd reuse不共享slot object；flock/final-release/backend/scheduler零修改；原
+`fs/api/fcntl.rs`路径归零且全部既有non-record-lock branch在`fcntl/mod.rs`行为保持；raw UAPI、relative whence与
+Linux errno不进入VFS core；`fcntl`subtree不拥有grant/wait truth；`fs/mod.rs`只出现明确列举的crate-private
+operation/cleanup re-export且`fs::lock`保持private；`F_SETLKW`仍没有半套wait consumer。
+
+按顺序执行：
+
+```sh
+just fmt kernel --check
+just fmt fcntl-test --check
+just fmt user-test --check
+just xtask app build fcntl-test --arch riscv64
+just xtask app build fcntl-test --arch loongarch64
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+./scripts/run-user-test-rv64.sh <sdcard-image> build/posix-record-lock-stage2a-rv64.log
+```
+
+`<sdcard-image>`由调用者显式选择。两个app build与两个kernel build顺序执行，避免共享artifact漂移。wrapper必须
+exit 0，日志同时包含全部enabled KUnit、`All tests passed!`、2A focused case/marker、tracked profile随行结果与正常
+shutdown；随行LTP不证明record-lock。随后执行full caller/owner scan、new-file与全diff whitespace、
+`git diff --check`、`mdbook build docs`及从2A baseline到候选的owner/lifecycle/ABI/resource review。
+
+以下任一情况立即停止2A：
+
+- binding需要holder-wide epoch、完整Task/table guard、dynamic observer registry或opened-description identity；
+- close必须在table guard内回调VFS、等待waiter/operation，或不能覆盖dup3/CLOEXEC/final drain；
+- old binding可以在unpublish后commit persistent grant，或fd reuse能复活旧binding；
+- raw user pointer/relative whence进入domain，typed copy强制未对齐`EINVAL`，或overflow不能精确为`EOVERFLOW`；
+- 旧`fs/api/fcntl.rs`仍作为compatibility入口保留、既有`fcntl`branch因目录化迁移改变行为，或record-lock ABI
+  adapter落到`fs::lock`core；
+- POSIX state进入flock/backend/final-release/holder，`fs::lock`parent获得共同state/policy，或为接线把整个
+  `fs::lock`module/common facade扩大为crate-visible；
+- 为证明2A必须接入blocking wait、修改scheduler/signal/current contract、启用LTP case或弱化R0 race envelope；
+- review存在active Apollyon/Keter，或需要manifest外production文件。
+
+2A退出要求nonblocking/query与全部removal路径组成完整binding-scoped协议，focused app/KUnit/source证据分层通过，
+没有temporary hook或manifest越界。contract cutover仍为`None`；2A candidate不得单独合入。transaction记录2A Closed
+后必须停止，等待开发者另行授权2B。
+
+### Checkpoint 2B — Blocking Wait、Signal Replay 与 Stage 2 Closure
+
+#### 2B交付与Resolved Write Set Manifest
+
+前置为2A独立Closed且其binding/cleanup/ABI接口未漂移。2B只把`F_SETLKW`接到同一normalized operation与domain，
+增加Event wait/recheck、signal interruption/ordinary replay和focused runtime cases；不重开2A close/ABI owner选择。
+
+Production source：
+
+- `anemone-kernel/src/fs/api/fcntl/mod.rs`；
+- `anemone-kernel/src/fs/api/fcntl/posix_lock.rs`；
+- `anemone-kernel/src/fs/lock/posix.rs`；
+
+Userspace source：
+
+- `anemone-rs/src/os/linux/fs.rs`；
+- `anemone-apps/fcntl-test/src/main.rs`。
+
+文档write-back与2A相同；`docs/src/register/open-issues.md`不属于2B写集。`anemone-abi`、task/files、rootfs和
+`user-test`在2B均为validation-only；若2A接口不足，必须先停止并提交精确Route Correction / manifest expansion，
+不能在2B静默重构。scheduler、signal、flock、current contracts、LTP profile/group与wrapper仍明确不修改。
+
+#### 2B wait/restart audit、验证与停止条件
+
+审计必须沿完整调用链确认：每轮Event先register再在single domain guard内重验binding/conflict；guard不跨park；
+producer guard外publish且不等waiter；每轮listener/ActiveWait在下一轮前finish；signal return前无grant commit且资源已清理；
+domain interruption outcome只由`fcntl/posix_lock.rs`映射为restart，restart carrier只保存`Idempotent`分类，
+trap/signal finalizer重放原始syscall；commit后不返回`EINTR`；close/signal/notification race只产生R0允许结果且无
+grant/wait泄漏；raw UAPI与Linux errno仍未进入`fs/lock/posix.rs`，close cleanup仍不依赖`fcntl`subtree。
+
+在最终2B source上从formatter重新执行2A全部命令，RV64日志改为
+`build/posix-record-lock-stage2-rv64.log`，并要求2A case继续通过、2B blocking/signal/replay case与最终app marker通过、
+guest正常shutdown。随后重跑source/bypass/whitespace/mdBook与从Stage 1 baseline到完整Stage 2的独立
+owner/lifecycle/concurrency/resource/ABI review。LA64 app/kernel build只证明compile；LA64 QEMU、focused LTP、broad
+stress与`POSIX-LOCK-CUTOVER`仍Not Run，留给Stage 3。
+
+以下任一情况立即停止2B：
+
+- active wait内进入sleepable lock或第二Event/Latch wait，listener不能在return前清理，或guard必须跨park；
+- producer需要授予range、决定errno、观察placement或等待waiter运行；
+- signal restart必须保存旧binding/holder/range/snapshot，或commit后仍可能返回interrupted；
+- close必须同步取消waiter，或waiter能用closed binding在cleanup后留下persistent grant；
+- 需要修改wait core/signal finalizer才能达到R0，或current `SCHED-WAKE`与live source再次不一致；
+- userspace case只能固定单一close/signal/commit winner，或把deadlock detection/OFD/mandatory/compat写成PASS；
+- active Apollyon/Keter、manifest越界或target/owner/ABI/acceptance变化仍未处理。
+
+#### Stage 2退出条件
+
+- native ABI、normalization、query/nonblocking/blocking、operation-local binding、全部close cleanup与ordinary replay
+  在同一production route闭合；single inode domain仍是唯一grant truth；
+- meaningful lifecycle KUnit（若保留）、focused userspace suite、双架构app/kernel build、RV64 runtime、source audit与
+  full-diff review各自只证明声明的层级且全部通过；
+- current contracts、flock/backend/scheduler/signal/LTP group保持未修改，无temporary bridge、test-only production
+  surface、Apollyon/Keter或未批准manifest扩张；
+- transaction记录2A/2B分别Closed、Stage 2 Closed、contract cutover `None`、全部prospective IDs仍Not Effective，
+  并明确Stage 3、LA64 runtime、focused LTP与最终cutover尚未授权/Not Run。
+
+Stage 2关闭必须停在`Stage 2 -> Stage 3 Implementation Resolution Gate`前。不得因RV64 focused app通过而自动解析或
+执行Stage 3，也不得把Stage 2 stacked candidate单独描述为current POSIX record-lock支持。
 
 ## Stage 2 -> Stage 3 Implementation Resolution Gate
 
