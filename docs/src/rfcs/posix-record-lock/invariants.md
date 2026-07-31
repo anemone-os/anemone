@@ -1,12 +1,13 @@
 # POSIX Record Lock 目标和不变量
 
-**状态：** Draft Target
+**状态：** R0 Accepted / Stage 0 Closed / Not Cut Over
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
-本文定义本 RFC 尚未 cut over 的 contract delta、target invariants 与 RFC-local proof obligations。当前已经
-生效的共享规则仍以 `docs/src/contracts/` 为准；Draft 中的 `Introduce` 项只是提案，不能作为当前实现事实。
+本文定义本 RFC 尚未 cut over 的 R0 contract delta、target invariants 与 RFC-local proof obligations。当前
+已经生效的共享规则仍以 `docs/src/contracts/` 为准；R0 中的 `Introduce` 项在 `POSIX-LOCK-CUTOVER` 前继续
+Not Effective，不能作为当前实现事实。
 
 ## 规则分类
 
@@ -433,6 +434,6 @@ R0 target最终关闭必须同时满足：
 7. transaction记录每个checkpoint、review、validation、cutover、correction与remaining gap；accepted limitation
    或新open defect按归属进入register，不留在tracker伪装成实现进度。
 
-当前Draft已由[实施计划](./implementation.md)解析首个Stage 0 Ready definition与后续Outline，但尚未共同通过
-R0 review，也不满足implementation closure。transaction bootstrap、Active authorization与current-contract
-write-back仍是相互独立的后续gate。
+当前 R0 已共同接受 target 与[实施计划](./implementation.md)的首个 Stage 0 Ready definition，transaction 已
+建立且 Stage 0已独立关闭。Stage 0只证明episode/holder foundation；current-contract write-back仍只属于最终
+`POSIX-LOCK-CUTOVER`，本阶段contract cutover为`None`，全部Introduce项继续Not Effective。

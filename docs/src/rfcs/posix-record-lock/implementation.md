@@ -1,18 +1,17 @@
 # POSIX Record Lock 实施计划
 
-**状态：** Draft implementation plan / Stage 0 Ready / Not Authorized
-**适用修订：** Draft
+**状态：** R0 implementation plan / Stage 0 Closed / Stage 1 Outline
+**适用修订：** R0
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **目标与不变量：** [POSIX Record Lock 目标和不变量](./invariants.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 active Apollyon / Keter
-**事务日志：** None；尚未进入实现
+**事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
 **Contract Cutover：** prospective `POSIX-LOCK-CUTOVER`；当前 Not Cut Over
 
-本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它现在是本
-public Draft 的 canonical implementation plan，但不是 accepted R0、transaction 或实现授权。Stage 0 的
-`Ready` 只表示交付、实现路线、审计、验证、停止条件和 resolved write set 已经闭合；R0 acceptance、
-transaction bootstrap 与开发者明确的 Active authorization 仍是相互独立的后续事件。
+本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
+canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Active authorization 已
+作为三个独立事件完成；Stage 0现已关闭，其后的resolution gate仍未授权。
 
 ## 实施原则
 
@@ -83,7 +82,7 @@ transaction bootstrap 与开发者明确的 Active authorization 仍是相互独
 
 | Stage | 成熟度 | 概括目的 | Contract Cutover | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| Stage 0 | Ready / Not Active | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 本文已完成；R0、transaction 与启动仍待独立授权 |
+| Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
 | Stage 1 | Outline | 建立 inode-associated normalized range domain与 assignment/conflict/query proof | None | Stage 0 独立关闭后 |
 | Stage 2 | Outline | 实现 native ABI、binding-scoped close/commit、blocking wait 与 signal restart vertical slice | None | Stage 1 独立关闭后 |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
@@ -92,7 +91,7 @@ transaction bootstrap 与开发者明确的 Active authorization 仍是相互独
 
 ### 阶段成熟度与激活前置
 
-Stage 0 当前是 `Ready / Not Active`。进入 Active 前必须依次满足：
+Stage 0 当前是 `Closed`。进入 Active 前必须依次满足：
 
 1. Draft target、Contract Impact、proof obligations 与本文 Stage 0 共同通过 review，并被接受为 `R0 /
    Accepted for Implementation`；接受不改变 current contract。
@@ -103,6 +102,12 @@ Stage 0 当前是 `Ready / Not Active`。进入 Active 前必须依次满足：
    task construction/rollback 或 exec/exit ordering 已漂移，先更新本文并重新 review Stage 0。
 5. 开发者明确授权 Stage 0 从 Ready 进入 Active。public Draft、R0 acceptance 或 transaction creation 本身均不
    构成启动授权。
+
+**2026-07-31 activation result：** 五项前置均完成。R0 review 接受 target、Contract Impact、proof obligations
+与本阶段；transaction 随后建立，开发者明确授权本轮唯一 GOAL“完成 Stage 0”。实现审查发现 unpublished
+task 的显式 detach consumer 超出原七文件 manifest，因此触发停止合同；开发者批准下述精确扩展后以
+`goal resume`恢复 Stage 0。扩展只关闭 existing task-construction consumer，不改变 target、owner、public API、
+shared contract、ABI、visible semantics、acceptance或验证层级。
 
 ### 要证明的组合假设
 
@@ -223,6 +228,12 @@ Stage 0 Active时允许修改的production source：
 - `anemone-kernel/src/task/api/clone/mod.rs`
 - `anemone-kernel/src/task/api/execve/kernel.rs`
 - `anemone-kernel/src/task/api/exit/mod.rs`
+- `anemone-kernel/src/task/kthread/kthreadd.rs`
+- `anemone-kernel/src/sched/class/runqueue.rs`
+- `anemone-kernel/src/sched/class/rt.rs`
+- `anemone-kernel/src/sched/class/fair/stride.rs`
+- `anemone-kernel/src/sched/request.rs`
+- `anemone-kernel/src/sched/api/priority/setpriority.rs`
 
 文档与执行证据write-back：
 
@@ -246,8 +257,8 @@ Validation-only输入，不在写集：
 - `conf/rootfs/pretest-rv64.toml`
 - 调用者显式选择的sdcard master；wrapper只读取master并创建`build/runtime/pretest-rv64/`下的运行副本
 
-Stage 0明确不得修改`anemone-abi/**`、`anemone-apps/**`、`anemone-kernel/src/fs/**`、
-`anemone-kernel/src/sched/**`、current contracts、register、rootfs/profile或公共RFC target正文。R0 acceptance与
+Stage 0明确不得修改`anemone-abi/**`、`anemone-apps/**`、`anemone-kernel/src/fs/**`、上述六个显式
+detach KUnit consumer之外的`anemone-kernel/src/sched/**`、current contracts、register、rootfs/profile或公共RFC target正文。R0 acceptance与
 transaction bootstrap自身由独立授权完成，不借Stage 0 source manifest自动执行。
 
 如果更自然且保持target的实现需要扩大上述文件集，执行者必须先停止并提交manifest expansion：说明新增文件、
@@ -279,10 +290,11 @@ just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
 ./scripts/run-user-test-rv64.sh <sdcard-image> build/posix-record-lock-stage0-rv64.log
 ```
 
-`<sdcard-image>`必须由调用者按仓库公开接口显式选择，不能替换成无阶段含义的默认路径。Stage 0 Ready基线依赖
-tracked `anemone-apps/user-test/ltp/profile.txt`没有active group；activation preflight若发现profile已经漂移，必须先
-更新并重新review本验证路线，不能临时截断canonical wrapper或把无关LTP变成Stage 0验收。日志必须点名上述三类
-topology的全部新增case、出现`All tests passed!`、进入init/user-test并完成正常guest shutdown；canonical wrapper
+`<sdcard-image>`必须由调用者按仓库公开接口显式选择，不能替换成无阶段含义的默认路径。2026-07-31 activation
+preflight发现tracked `anemone-apps/user-test/ltp/profile.txt`为`sys`，不是Ready时假定的空窗口；live group只含
+`confstr01`与`sysconf01`，由双libc形成四个case。保持profile不变并运行canonical wrapper；这些结果只作环境
+回归，不成为record-lock或Stage 0 topology验收。日志必须点名上述三类topology的全部新增case、出现
+`All tests passed!`、进入init/user-test并完成正常guest shutdown；canonical wrapper
 必须正常返回exit 0，不得在marker后通过QEMU monitor或host timeout提前结束，也不得忽略wrapper状态。rootfs
 rebuild、runtime disk副本和日志是ignored build side effects，不修改sdcard master或tracked rootfs/profile。
 
@@ -326,6 +338,12 @@ owner、target、ABI、contract或acceptance变化进入RFC review/Target Renego
 - transaction记录`contract cutover: None`、current contracts未修改、Stage 0代码不可作为partial feature单独
   合入，并把Stage 0标记Closed。
 - Stage 1是否已经解析为Ready不属于Stage 0 closure；关闭后必须停在下一独立resolution gate。
+
+**2026-07-31 closure result：** caller inventory、三项production-route KUnit、RV64/LA64 build、RV64完整
+wrapper、whitespace、mdBook与full-diff review全部满足。首次runtime发现published kthread缺少detach，已在原
+manifest内修复并从formatter起完整重跑。最终独立review为Apollyon/Keter/Euclid/Safe全0，无temporary
+instrumentation或remaining Stage 0 blocker。contract cutover为`None`，current contracts/register未修改；
+Stage 0代码不构成standalone POSIX-lock capability。Stage 1保持Outline/Unauthorized，本轮未运行下述gate。
 
 ## Stage 0 -> Stage 1 Implementation Resolution Gate
 

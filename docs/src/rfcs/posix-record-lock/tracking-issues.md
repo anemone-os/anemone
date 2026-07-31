@@ -1,18 +1,18 @@
 # POSIX Record Lock Tracking Issues
 
-**状态：** Draft / no active Apollyon or Keter
+**状态：** R0 / Stage 0 Closed / no current findings
 **最后更新：** 2026-07-31
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
-**事务日志：** None；尚未进入实现。
+**事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
 
 本文只跟踪已经由文档 review 或后续实现反馈确认、并会影响 target、owner/contract boundary、实现顺序、
 停止条件或验收判断的 design finding。当前没有 active Apollyon 或 Keter；既有结论保留在 Neutralized 作为
 后续 implementation resolution 与 review 的边界依据。
 
-[实施计划](./implementation.md) 已把 Stage 0 解析为 Ready / Not Active，后续类型/锁/容器/逐文件 write set 与
-精确命令继续由滚动 resolution gate 解析；尚未接受 R0、建立 transaction、授权执行或运行验证都是当前 Draft
-阶段的预期状态，不构成 tracking issue。若后续 review 发现问题，应先把修复折回 `index.md`、`invariants.md`
-或 `implementation.md`，本文只记录 finding 状态与依据。
+[实施计划](./implementation.md) 已把 Stage 0关闭，后续阶段仍保持 Outline。实现审查发现的显式 detach
+consumer遗漏与runtime发现的kthread exit遗漏均已neutralize；最终独立review为Apollyon/Keter/Euclid/Safe全0。
+后续 finding 仍按影响
+写回 `index.md`、`invariants.md` 或 `implementation.md`，本文只记录 finding 状态与依据。
 
 ## Apollyon
 
@@ -44,7 +44,7 @@ obligations 与首个完整 Ready stage；`implementation.md` 是该阶段及 re
 acceptance；Ready、R0 acceptance、transaction bootstrap、Active authorization 与 contract cutover继续分离。
 
 **状态：** Neutralized / 2026-07-31 document review；当时尚未创建 `implementation.md`、transaction 或执行授权；
-当前 implementation 已创建但仍无 R0 / transaction / 执行授权。
+当前 R0、transaction 与 Stage 0 Active authorization 已作为后续独立事件完成。
 
 ### KETER-POSIX-LOCK-002：Close cleanup 对 concurrent operation 的约束范围不一致
 
@@ -60,7 +60,36 @@ late persistent grant；其它 live binding 可以在 cleanup 后独立线性化
 domain mutation 的 Ready stage 基于 live source 解析并证明。
 
 **状态：** Neutralized / 2026-07-31 target review；未创建 holder × inode epoch；当前 implementation resolution
-未改变该结论，也未创建 transaction 或执行授权。
+未改变该结论；当前 transaction 与执行授权是其后的独立事件。
+
+### KETER-POSIX-LOCK-007：显式 detach contract 遗漏 unpublished task consumers
+
+**原问题：** Stage 0 初始七文件 manifest只覆盖ordinary clone/exec/exit，却遗漏`kthreadd` publish failure与五个
+scheduler owner-local KUnit helper。这些路径在`guard.forget()`或publish failure后自然drop unpublished
+`Task`；一旦 participation `Drop`只允许暴露missing-detach bug，它们会违反“semantic cleanup不得依赖Drop”的
+Stage 0 correctness boundary。仅修已列caller会让production与test construction形成两套生命周期纪律。
+
+**修复：** 完整caller review把新增范围限制为`task/kthread/kthreadd.rs`及五个scheduler KUnit文件。
+`FileTableParticipation`增加只用于missing-detach assertion的attached状态；显式`detach(mut self)`先完成语义
+withdrawal再撤销该标记，`Drop`只`assert!(!attached)`且绝不清理。kthreadd publish failure与五个helper在
+unpublished task可回收前显式调用`detach_files_for_exit()`；clone全部fallible early return同时纳入审计。
+
+**状态：** Neutralized / 2026-07-31 Stage 0 implementation review。原停止合同已触发；开发者批准精确六文件
+manifest expansion并以`goal resume`恢复执行。扩展不改变target、owner、public API、shared contract、ABI、
+visible semantics、acceptance或contract cutover；实际修复与验证记录在transaction。
+
+### KETER-POSIX-LOCK-008：published kthread exit 未撤销 file-table participation
+
+**原问题：** 首次RV64 canonical run中，三项新topology KUnit均通过，但TTY KUnit停止并join一个正常published
+worker后触发participation missing-detach断言。`kthread_exit()`绕过user-process `kernel_exit()`，此前只断言
+fd table为空；空slot不等于episode participant已撤销，因此deferred Task disposal仍会依赖natural Drop。
+
+**修复：** `kthread_exit()`在sleepable current-kthread context、topology unpublication与deferred disposal之前
+调用同一`detach_files_for_exit()` owner API。该调用同时保留未来kthread实际持有fd时guard-out release所需边界，
+不建立第二套kthread-onlytable cleanup。文件已在原Stage 0 resolved manifest内，无需扩展owner或write set。
+
+**状态：** Neutralized / 2026-07-31 RV64 runtime feedback。失败run明确记录为Not PASS；修复后从formatter、
+双架构build与canonical RV64 wrapper重跑owning evidence。target、ABI、contract、visible semantics与acceptance不变。
 
 ### KETER-POSIX-LOCK-003：Contract Impact 未覆盖相邻 lifecycle / wait 最小闭包
 

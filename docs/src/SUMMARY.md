@@ -163,6 +163,7 @@
 			- [目标与不变量](./rfcs/posix-record-lock/invariants.md)
 			- [迁移实施计划](./rfcs/posix-record-lock/implementation.md)
 			- [Tracking Issues](./rfcs/posix-record-lock/tracking-issues.md)
+			- [事务日志](./devlog/transactions/2026-07-31-posix-record-lock.md)
 			- [背景材料](./rfcs/posix-record-lock/backgrounds/index.md)
 				- [前置定位共识](./rfcs/posix-record-lock/backgrounds/positionings.md)
 		- [System Target Model](./rfcs/system-target-model/index.md)

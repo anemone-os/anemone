@@ -6,6 +6,9 @@
 
 ## Active
 
+- [POSIX Record Lock](./2026-07-31-posix-record-lock.md)：R0已接受，Stage 0已独立关闭；file-table episode、
+  explicit participation与opaque holder topology通过双架构build及RV64 runtime，contract cutover为None，
+  Stage 1未授权。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)

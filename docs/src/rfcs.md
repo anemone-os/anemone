@@ -105,12 +105,13 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260731-posix-record-lock](./rfcs/posix-record-lock/index.md)：Public Draft / Target Review；提议为本地
+- [RFC-20260731-posix-record-lock](./rfcs/posix-record-lock/index.md)：R0 / Accepted for Implementation；提议为本地
   `S_IFREG` 文件增加 native RV64/LA64 POSIX process-associated byte-range record lock，保持现有 `flock`
-  namespace 与 opened-description retirement 独立。Stage 0 已解析为 Ready / Not Active；当前无 active
-  Apollyon / Keter，但尚未接受 R0、建立 transaction、授权实现或切换任何 current contract。完整 target delta、
+  namespace 与 opened-description retirement 独立。Stage 0已关闭，只建立file-table episode与holder
+  topology；最终review全零，contract cutover为None，Stage 1及其resolution gate未授权。完整target delta、
   proof obligations 与滚动阶段见 [目标和不变量](./rfcs/posix-record-lock/invariants.md)及
-  [实施计划](./rfcs/posix-record-lock/implementation.md)。
+  [实施计划](./rfcs/posix-record-lock/implementation.md)，执行证据见
+  [事务日志](./devlog/transactions/2026-07-31-posix-record-lock.md)。
 - [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
   domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。
   final close删除holder grant并提交cooperative recheck hint，不承诺precise close/signal/restart winner。

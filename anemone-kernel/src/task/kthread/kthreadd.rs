@@ -102,9 +102,13 @@ pub fn init_kthreadd() {
         "kthreadd task-local control link must be installed before publish"
     );
 
-    let task = guard
-        .publish(task, TaskBinding::KThread)
-        .unwrap_or_else(|(_, e)| panic!("failed to publish kthreadd task: {:?}", e));
+    let task = match guard.publish(task, TaskBinding::KThread) {
+        Ok(task) => task,
+        Err((task, e)) => {
+            task.detach_files_for_exit();
+            panic!("failed to publish kthreadd task: {:?}", e);
+        },
+    };
     assert!(
         task.tid() == Tid::KTHREADD && task.tgid() == Tid::KTHREADD,
         "published kthreadd must have fixed tid/tgid {}",
@@ -204,7 +208,8 @@ pub(super) fn spawn(request: SpawnRequest) {
 
     let task = match guard.publish(task, TaskBinding::KThread) {
         Ok(task) => task,
-        Err((_task, err)) => {
+        Err((task, err)) => {
+            task.detach_files_for_exit();
             reply.complete(SpawnOutcome::Failed(err));
             return;
         },

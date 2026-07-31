@@ -1,37 +1,33 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** Draft / Public Target Review
-**修订：** Draft
+**状态：** R0 / Accepted for Implementation / Stage 0 Closed
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-07-31
 **领域：** fs / VFS / task files / scheduler wait / signal restart / syscall ABI
-**事务日志：** None；本草案尚未进入实现。
+**事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
 **影响契约：** 拟 Introduce `FILES-POSIX-OWNER-001`、`POSIX-LOCK-DOMAIN-001`、
 `POSIX-LOCK-WAIT-001`、`POSIX-LOCK-LIFECYCLE-001`；Preserve `VFS-FILE-KIND-001`、
 `FLOCK-DOMAIN-001`、`FLOCK-WAIT-001`、`FLOCK-LIFECYCLE-001`、`OPENED-DESC-001/002/003`、
 `OPENED-DESC-RETIRE-001`、`OPENED-DESC-LIVENESS-001`、`SCHED-LATCH-001..003` 与
-`SCHED-WAKE-001..004`。完整 Draft delta 见
+`SCHED-WAKE-001..004`。完整 R0 delta 见
 [Contract Impact](./invariants.md#contract-impact)。
 **开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
 后续 Outline 中尚未解析的类型、锁、容器、模块路径、stage、write set 与精确验证命令属于滚动
 implementation resolution，不因缺失本身构成 finding。
-**下一步：** 联合 review Draft target、contract delta、proof obligations 与
-[实施计划](./implementation.md) 的 Stage 0 Ready definition / resolved manifest。只有这些输入一起通过 review
-后才形成 R0 acceptance；R0 不自动创建 transaction 或授权 Stage 0 Active。
+**下一步：** 停在 Stage 0 closure；等待开发者独立授权
+Stage 0 -> Stage 1 Implementation Resolution Gate。该 gate、Stage 1与任何contract cutover均未授权。
 
 ## 文档状态
 
-本文与 [目标和不变量](./invariants.md) 是 POSIX process-associated byte-range record lock 的 public Draft
-正文。它们提出尚未生效的 target，不是 current contract、实现事实或执行授权。target review 与
-`implementation.md` resolution 是 R0 acceptance 前的两个文档层输入：当前 review 可以修正 target、记录
-finding并继续撰写 Draft `implementation.md`；若后续出现 active Keter，必须作为明确 stop condition，不能随
-阶段冻结被遗漏。只有不存在 active blocker、首个阶段完整达到 Ready 并与 target一起被接受后，才形成 R0。当前 public Draft 与
-pre-acceptance Ready resolution不建立transaction devlog或执行授权；R0接受后进入实现时仍需独立建立
-transaction并取得stage启动授权。
+本文与 [目标和不变量](./invariants.md) 是 POSIX process-associated byte-range record lock 的公共 canonical
+R0 target。2026-07-31 独立 review 已共同接受 target、Contract Impact、proof obligations 与首个完整 Ready
+stage；随后建立 transaction，开发者明确授权 Stage 0 Active。R0 target 尚未 cut over，不是 current contract，
+Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record-lock capability。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
-提升本身只改变文档可见性和引用入口，不接受 R0、不创建 transaction、不授权 Stage 0，也不更新 current
-contract。
+此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
+activation 是其后的独立事件。三者均不更新 current contract。
 
 此前的定位讨论已经冻结为[背景材料](./backgrounds/positionings.md)，只保留决策来路，不再作为维护面。
 后续 review 应直接修正本文或 `invariants.md`；不得继续向 positioning 回写新 target，也不得让背景材料覆盖
@@ -149,7 +145,8 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Tracking Issues](./tracking-issues.md)：当前无 active Apollyon / Keter
-- [实施计划](./implementation.md)：Stage 0 Ready / Not Active；后续阶段保持 Outline
+- [实施计划](./implementation.md)：Stage 0 Closed；Stage 1与后续阶段保持 Outline
+- [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0 执行、finding 与验证证据
 
 Current contracts：
 
@@ -173,8 +170,8 @@ Current contracts：
 
 ## 修订记录
 
-本文仍为 Draft，尚无已接受语义修订。第一次 target acceptance 才形成 `R0`；Git 保存 Draft review 历史，
-不创建 `index-v1.md` 或 amendment 副本。
+2026-07-31 首次 target acceptance 形成 `R0`。Git 保存此前 Draft review 历史，不创建 `index-v1.md` 或
+amendment 副本。
 
 ## Target Capability
 
@@ -393,8 +390,9 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 
 ## 收口
 
-当前完成 Draft target 正文与首个 Stage 0 Ready resolution，不声称 target 已接受、Stage 0 已进入 Active、实现已
-开始或任何 validation 已运行。
+当前 R0 target 已接受，transaction 已建立，Stage 0已按实现、验证与全零独立review关闭；执行事实只由
+[transaction](../../devlog/transactions/2026-07-31-posix-record-lock.md)记录。Stage 0 contract cutover为
+`None`，current contracts未修改，全部prospective ID继续Not Effective。
 最终 R0 implementation closure 至少需要：
 
 - 新增 contract IDs 在 `POSIX-LOCK-CUTOVER` 原子写入 current contracts，Preserve IDs 经 source/review 证明
@@ -410,4 +408,4 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 
 最终 stage 的命令、case 名单、重复轮数与日志判据尚未解析；它们必须由
 [实施计划](./implementation.md) 的滚动 resolution gate 从 live source、runner 与固定测试资产冻结，不能从本
-Draft target 正文推导 future write set 或执行授权。
+R0 target 正文推导 future write set 或执行授权。
