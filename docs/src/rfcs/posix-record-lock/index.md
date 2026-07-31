@@ -1,9 +1,9 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** R0 / Accepted for Implementation / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Not Cut Over
+**状态：** R0 / Accepted for Implementation / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
 **修订：** R0
 **负责人：** doruche
-**最后更新：** 2026-07-31
+**最后更新：** 2026-08-01
 **领域：** fs / VFS / task files / scheduler wait / signal restart / syscall ABI
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
 **影响契约：** 拟 Introduce `FILES-POSIX-OWNER-001`、`POSIX-LOCK-DOMAIN-001`、
@@ -15,9 +15,9 @@
 **开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
 后续 Outline 中尚未解析的类型、锁、容器、模块路径、stage、write set 与精确验证命令属于滚动
 implementation resolution，不因缺失本身构成 finding。
-**下一步：** Stage 1已按1A/1B两个checkpoint独立关闭，Stage 2也已解析为2A/2B；Checkpoint 2A现已独立关闭。
-Checkpoint 2B仍为Ready / Not Active，只有开发者另行授权才能激活。Stage 2尚未关闭，本轮不授权2B、Stage 3或
-任何semantic contract cutover。
+**下一步：** Stage 0-2已独立关闭，Stage 2的2A/2B均Closed。下一动作只能是开发者另行授权的
+`Stage 2 -> Stage 3 Implementation Resolution Gate`；Stage 3仍为Outline，本轮不解析或执行Stage 3，也不进行任何
+semantic contract cutover。
 
 ## 文档状态
 
@@ -28,8 +28,8 @@ Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record
 resolution gate已基于live source把Stage 1解析为两个独立checkpoint：1A行为保持地完成lock namespace
 alignment，1B建立inode-associated POSIX range domain与focused proof。两者现均已关闭，Stage 1 Closed。
 其后的独立只读gate把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal replay；
-2A现已独立关闭，2B继续Ready / Not Active。Stage 2尚未关闭，current contract语义仍未更新，2A candidate不是
-可独立合入或对外声称的POSIX record-lock capability。
+2A/2B现已分别独立关闭，Stage 2 Closed。current contract语义仍未更新，Stage 2 stacked candidate不是可独立合入
+或对外声称的POSIX record-lock capability。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
 此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
@@ -60,10 +60,10 @@ waiter graph 或 lifecycle registry。
 
 ### Anemone 当前事实
 
-Checkpoint 2A candidate现已接入`F_GETLK`、nonblocking `F_SETLK`、native `struct flock` copy boundary与
-userspace wrapper；`F_SETLKW`仍在command decode返回`ENOSYS`，blocking/signal/restart尚未实现。由于Stage 2未关闭
-且`POSIX-LOCK-CUTOVER`仍为`None`，这些代码不能写成current POSIX record-lock支持。现有
-`anemone-apps/user-test/ltp/groups/fcntl.txt`仍注释掉`fcntl14` / `fcntl14_64`，不能把其它`fcntl` case或2A focused
+Stage 2 stacked candidate现已接入`F_GETLK`、`F_SETLK/F_SETLKW`、native `struct flock` copy boundary、
+operation-local binding、blocking Event recheck与ordinary signal replay。由于Stage 3、双架构runtime/focused LTP
+和`POSIX-LOCK-CUTOVER`仍未执行，这些代码不能写成current POSIX record-lock支持。现有
+`anemone-apps/user-test/ltp/groups/fcntl.txt`仍注释掉`fcntl14` / `fcntl14_64`，不能把其它`fcntl` case或Stage 2 focused
 suite当成focused LTP与最终双架构产品证据。
 
 当前 task file state 已具备与本 target 相邻、但不能直接冒充 holder contract 的事实：
@@ -152,9 +152,9 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Tracking Issues](./tracking-issues.md)：当前无 active Apollyon / Keter
-- [实施计划](./implementation.md)：Stage 0-1 Closed；Stage 2已解析为2A/2B，Ready / Not Active
+- [实施计划](./implementation.md)：Stage 0-2 Closed；Stage 3 Outline / Not Authorized
 - [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0执行证据、Stage 1 resolution与
-  Checkpoint 1A/1B closure，以及Stage 2 resolution evidence
+  Checkpoint 1A/1B closure，以及Stage 2 resolution和2A/2B closure evidence
 
 Current contracts：
 
@@ -404,8 +404,8 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 `None`；后续只读resolution把Stage 1拆为1A/1B。1A已完成行为保持的`fs::lock::flock` namespace alignment，
 只对current contracts做locator-only更新；1B已完成inode-owned range domain、opaque holder接线与focused KUnit。
 Stage 1 semantic cutover仍为`None`，全部prospective ID继续Not Effective；Stage 2已经独立解析为2A native
-ABI/binding/nonblocking-query与2B blocking wait/signal replay。2A现已独立关闭，2B仍Ready / Not Active，Stage 2
-尚未关闭；截至2A closure contract cutover继续为`None`，2A candidate不是standalone/current支持。
+ABI/binding/nonblocking-query与2B blocking wait/signal replay。2A/2B现均已独立关闭，Stage 2 Closed；截至Stage 2
+closure contract cutover继续为`None`，完整stacked candidate仍不是standalone/current支持。
 最终 R0 implementation closure 至少需要：
 
 - 新增 contract IDs 在 `POSIX-LOCK-CUTOVER` 原子写入 current contracts，Preserve IDs 经 source/review 证明

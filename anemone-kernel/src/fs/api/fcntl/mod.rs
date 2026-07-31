@@ -54,7 +54,7 @@ impl TryFromSyscallArg for FcntlCmd {
             F_SETFL => Ok(Self::SetFl),
             F_GETLK => Ok(Self::GetLk),
             F_SETLK => Ok(Self::SetLk),
-            F_SETLKW => Err(SysError::NotYetImplemented),
+            F_SETLKW => Ok(Self::SetLkw),
             F_GETOWN => Ok(Self::GetOwn),
             F_SETOWN => Ok(Self::SetOwn),
             F_GETSIG => Err(SysError::NotYetImplemented),
@@ -150,6 +150,7 @@ fn sys_fcntl(raw_fd: u64, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
         },
         FcntlCmd::GetLk => posix_lock::get_lock(&task, fd, arg),
         FcntlCmd::SetLk => posix_lock::set_lock(&task, fd, arg),
+        FcntlCmd::SetLkw => posix_lock::set_lock_waiting(&task, fd, arg),
         _ => {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);
             Err(SysError::NotYetImplemented)

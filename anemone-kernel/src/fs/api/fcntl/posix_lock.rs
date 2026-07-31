@@ -208,6 +208,19 @@ pub(super) fn get_lock(task: &Task, fd: Fd, arg: u64) -> Result<u64, SysError> {
 }
 
 pub(super) fn set_lock(task: &Task, fd: Fd, arg: u64) -> Result<u64, SysError> {
+    set_lock_with_policy(task, fd, arg, false)
+}
+
+pub(super) fn set_lock_waiting(task: &Task, fd: Fd, arg: u64) -> Result<u64, SysError> {
+    set_lock_with_policy(task, fd, arg, true)
+}
+
+fn set_lock_with_policy(
+    task: &Task,
+    fd: Fd,
+    arg: u64,
+    wait_for_conflict: bool,
+) -> Result<u64, SysError> {
     let binding = binding(task, fd)?;
     let raw = copy_in(arg)?;
     let requested = normalize(&binding, &raw, true)?;
@@ -215,12 +228,24 @@ pub(super) fn set_lock(task: &Task, fd: Fd, arg: u64) -> Result<u64, SysError> {
     validate_set_access(&binding, requested.operation)?;
 
     let outcome = match requested.operation.mode() {
-        Some(mode) => set_posix_lock(&binding, requested.range, mode, task.tgid().get()),
+        Some(mode) => set_posix_lock(
+            &binding,
+            requested.range,
+            mode,
+            task.tgid().get(),
+            wait_for_conflict,
+        ),
         None => unlock_posix_lock(&binding, requested.range),
     };
     match outcome {
         PosixLockSetOutcome::Applied => Ok(0),
         PosixLockSetOutcome::Conflict(_) => Err(SysError::Again),
         PosixLockSetOutcome::BindingRetired => Err(SysError::BadFileDescriptor),
+        PosixLockSetOutcome::Interrupted => {
+            // The domain has already retired this operation's Event listener.
+            // Ordinary restart must replay raw fcntl arguments so a handler's
+            // fd, flock storage, position, or inode changes are all observed.
+            Err(SysError::RestartSyscall(RestartSyscall::Idempotent))
+        },
     }
 }

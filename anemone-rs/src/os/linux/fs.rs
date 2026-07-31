@@ -359,6 +359,22 @@ pub fn fcntl_setlk(fd: Fd, lock: &Flock) -> Result<(), Errno> {
     unsafe { fcntl_setlk_raw(fd as i32, (lock as *const Flock).cast()) }
 }
 
+/// Invoke blocking `F_SETLKW` with typed native `struct flock` storage.
+///
+/// This entry deliberately accepts a raw typed pointer instead of `&Flock`:
+/// a signal handler may change that storage before `SA_RESTART` replays the
+/// syscall, so holding a Rust shared reference across the blocking call would
+/// express an invalid immutability guarantee. Invalid userspace storage remains
+/// a normal syscall `EFAULT`, not a Rust memory access in this wrapper.
+pub fn fcntl_setlkw(fd: Fd, lock: *const Flock) -> Result<(), Errno> {
+    fs::fcntl(
+        fd as u64,
+        fcntl::F_SETLKW as u64,
+        lock as u64,
+    )
+    .map(|_| ())
+}
+
 /// Low-level byte-pointer form of `fcntl(F_GETLK)` for ABI conformance tests.
 ///
 /// # Safety

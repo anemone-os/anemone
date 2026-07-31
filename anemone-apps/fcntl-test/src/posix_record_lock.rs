@@ -1,22 +1,69 @@
-use core::mem::{align_of, offset_of, size_of};
+use core::{
+    cell::UnsafeCell,
+    mem::{align_of, offset_of, size_of},
+    ptr::null_mut,
+    sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering},
+};
 
 use anemone_rs::{
-    abi::fs::linux::{
-        fcntl::{F_RDLCK, F_UNLCK, F_WRLCK, Flock},
-        open::{O_CREAT, O_PATH, O_RDONLY, O_RDWR, O_WRONLY},
-        seek::{SEEK_CUR, SEEK_END, SEEK_SET},
+    abi::{
+        fs::linux::{
+            fcntl::{F_RDLCK, F_UNLCK, F_WRLCK, Flock},
+            open::{O_CREAT, O_PATH, O_RDONLY, O_RDWR, O_WRONLY},
+            seek::{SEEK_CUR, SEEK_END, SEEK_SET},
+        },
+        process::linux::signal::{self as linux_signal, SigAction, SigSet},
     },
     os::linux::{
         fs::{
             AtFd, Fd, PipeFlags, close, close_range, dup, dup3, fcntl_getlk, fcntl_getlk_raw,
-            fcntl_setlk, fcntl_setlk_raw, ftruncate, openat, pipe2, unlinkat, write,
+            fcntl_setlk, fcntl_setlk_raw, fcntl_setlkw, ftruncate, openat, pipe2, read, unlinkat,
+            write,
         },
-        process::{WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, getpid, wait4},
+        process::{
+            CloneFlags, MmapFlags, MmapProt, Tid, WStatus, WStatusRaw, WaitFor, WaitOptions, exit,
+            fork, getpid, mmap, sched_yield,
+            signal::{self, SigNo},
+            spawn_raw_thread, wait4,
+        },
     },
     prelude::*,
 };
 
 const MODE: u32 = 0o600;
+const THREAD_STACK_SIZE: usize = 16 * 1024;
+const SETTLE_YIELDS: usize = 128;
+const WAIT_RETRIES: usize = 100_000;
+const REPLAY_PATH: &str = "/fcntl-test-replay";
+
+static SIGNAL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static REPLAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+static REPLAY_CASE: AtomicUsize = AtomicUsize::new(0);
+static REPLAY_DONE: AtomicUsize = AtomicUsize::new(0);
+static REPLAY_OPENED_FD: AtomicU32 = AtomicU32::new(u32::MAX);
+static REPLAY_ERROR: AtomicI32 = AtomicI32::new(0);
+
+#[anemone_rs::signal_handler]
+fn usr1_handler(_: SigNo) {
+    if REPLAY_ACTIVE.load(Ordering::SeqCst) != 0 {
+        let case = unsafe { &*(REPLAY_CASE.load(Ordering::SeqCst) as *const ThreadCase) };
+        let result = (|| {
+            close(case.fd)?;
+            let reopened = open_file(Path::new(REPLAY_PATH))?;
+            REPLAY_OPENED_FD.store(reopened, Ordering::SeqCst);
+            ensure(write(reopened, b"x")? == 1)?;
+            unsafe {
+                *case.request.get() = lock(F_WRLCK, SEEK_CUR, 0, 1);
+            }
+            Ok(())
+        })();
+        if let Err(errno) = result {
+            REPLAY_ERROR.store(errno, Ordering::SeqCst);
+        }
+        REPLAY_DONE.store(1, Ordering::SeqCst);
+    }
+    SIGNAL_COUNT.fetch_add(1, Ordering::SeqCst);
+}
 
 fn ensure(condition: bool) -> Result<(), Errno> {
     if condition { Ok(()) } else { Err(EIO) }
@@ -61,6 +108,23 @@ fn wait_child(pid: u32) -> Result<(), Errno> {
 
 fn child_result(result: Result<(), Errno>) -> ! {
     exit(if result.is_ok() { 0 } else { 1 })
+}
+
+fn settle() -> Result<(), Errno> {
+    for _ in 0..SETTLE_YIELDS {
+        sched_yield()?;
+    }
+    Ok(())
+}
+
+fn wait_for(value: &AtomicUsize, expected: usize) -> Result<(), Errno> {
+    for _ in 0..WAIT_RETRIES {
+        if value.load(Ordering::SeqCst) == expected {
+            return Ok(());
+        }
+        sched_yield()?;
+    }
+    Err(ETIMEDOUT)
 }
 
 fn child_getlk(
@@ -359,14 +423,272 @@ fn test_close_range_cleanup() -> Result<(), Errno> {
     Ok(())
 }
 
+struct LockHolder {
+    pid: Tid,
+    release: Fd,
+}
+
+fn spawn_lock_holder(path: &'static Path, request: Flock) -> Result<LockHolder, Errno> {
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (release_read, release_write) = pipe2(PipeFlags::empty())?;
+    match fork()? {
+        Some(pid) => {
+            close(ready_write)?;
+            close(release_read)?;
+            let mut ready = [0u8; 1];
+            ensure(read(ready_read, &mut ready)? == 1)?;
+            close(ready_read)?;
+            Ok(LockHolder {
+                pid,
+                release: release_write,
+            })
+        },
+        None => child_result((|| {
+            close(ready_read)?;
+            close(release_write)?;
+            let fd = open_file(path)?;
+            fcntl_setlk(fd, &request)?;
+            ensure(write(ready_write, b"r")? == 1)?;
+            close(ready_write)?;
+            let mut release = [0u8; 1];
+            ensure(read(release_read, &mut release)? == 1)?;
+            close(release_read)?;
+            fcntl_setlk(fd, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+            close(fd)
+        })()),
+    }
+}
+
+fn release_lock_holder(holder: LockHolder) -> Result<(), Errno> {
+    ensure(write(holder.release, b"x")? == 1)?;
+    close(holder.release)?;
+    wait_child(holder.pid)
+}
+
+#[repr(C)]
+struct ThreadCase {
+    fd: Fd,
+    request: UnsafeCell<Flock>,
+    ready: AtomicUsize,
+    done: AtomicUsize,
+    result: AtomicI32,
+    tid: AtomicU32,
+}
+
+// The request is mutated only by the worker's own signal handler after the
+// first syscall invocation has retired its kernel listener. `ready`, handler
+// completion, and `done` provide the cross-thread publication boundaries.
+unsafe impl Sync for ThreadCase {}
+
+impl ThreadCase {
+    const fn new(fd: Fd, request: Flock) -> Self {
+        Self {
+            fd,
+            request: UnsafeCell::new(request),
+            ready: AtomicUsize::new(0),
+            done: AtomicUsize::new(0),
+            result: AtomicI32::new(0),
+            tid: AtomicU32::new(0),
+        }
+    }
+}
+
+fn map_thread_case(fd: Fd, request: Flock) -> Result<&'static ThreadCase, Errno> {
+    let ptr = mmap(
+        0,
+        size_of::<ThreadCase>(),
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?
+    .as_ptr() as *mut ThreadCase;
+    unsafe {
+        ptr.write(ThreadCase::new(fd, request));
+        Ok(&*ptr)
+    }
+}
+
+extern "C" fn setlkw_thread(arg: usize) -> ! {
+    let case = unsafe { &*(arg as *const ThreadCase) };
+    case.tid.store(
+        anemone_rs::os::linux::process::gettid().expect("fcntl-test: gettid failed"),
+        Ordering::SeqCst,
+    );
+    case.ready.store(1, Ordering::SeqCst);
+    let result = fcntl_setlkw(case.fd, case.request.get());
+    case.result
+        .store(result.err().unwrap_or(0), Ordering::SeqCst);
+    case.done.store(1, Ordering::SeqCst);
+    exit(0)
+}
+
+fn spawn_setlkw_thread(case: &'static ThreadCase) -> Result<Tid, Errno> {
+    let stack = mmap(
+        0,
+        THREAD_STACK_SIZE,
+        MmapProt::PROT_READ | MmapProt::PROT_WRITE,
+        MmapFlags::MAP_PRIVATE | MmapFlags::MAP_ANONYMOUS,
+        None,
+        None,
+    )?;
+    let stack_top = unsafe { stack.as_ptr().add(THREAD_STACK_SIZE) };
+    let flags = CloneFlags::VM
+        | CloneFlags::FS
+        | CloneFlags::FILES
+        | CloneFlags::SIGHAND
+        | CloneFlags::THREAD
+        | CloneFlags::SYSVSEM;
+    unsafe {
+        spawn_raw_thread(
+            flags,
+            stack_top,
+            None,
+            null_mut(),
+            None,
+            setlkw_thread,
+            case as *const ThreadCase as usize,
+        )
+    }
+}
+
+fn start_waiter(fd: Fd, request: Flock) -> Result<&'static ThreadCase, Errno> {
+    let case = map_thread_case(fd, request)?;
+    spawn_setlkw_thread(case)?;
+    wait_for(&case.ready, 1)?;
+    settle()?;
+    ensure(case.done.load(Ordering::SeqCst) == 0)?;
+    Ok(case)
+}
+
+fn wait_thread(case: &ThreadCase) -> Result<i32, Errno> {
+    wait_for(&case.done, 1)?;
+    Ok(case.result.load(Ordering::SeqCst))
+}
+
+fn install_handler(flags: u64) -> Result<(), Errno> {
+    let action = SigAction {
+        sighandler: usr1_handler as *const (),
+        sa_flags: flags,
+        sa_restorer: core::ptr::null(),
+        sa_mask: SigSet { bits: 0 },
+    };
+    signal::sigaction(SigNo::SIGUSR1, Some(&action), None)
+}
+
+fn signal_waiter(case: &ThreadCase) -> Result<usize, Errno> {
+    let before = SIGNAL_COUNT.load(Ordering::SeqCst);
+    signal::tgkill(getpid()?, case.tid.load(Ordering::SeqCst), SigNo::SIGUSR1)?;
+    wait_for(&SIGNAL_COUNT, before + 1)?;
+    Ok(before + 1)
+}
+
+fn test_blocking_wake() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-blocking");
+    remove(path);
+    let holder = spawn_lock_holder(path, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    let waiter = open_file(path)?;
+    let case = start_waiter(waiter, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    release_lock_holder(holder)?;
+    ensure(wait_thread(case)? == 0)?;
+    fcntl_setlk(waiter, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    close(waiter)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_close_while_waiting() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-close-wait");
+    remove(path);
+    let holder = spawn_lock_holder(path, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    let waiter = open_file(path)?;
+    let case = start_waiter(waiter, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    close(waiter)?;
+    ensure(wait_thread(case)? == EBADF)?;
+    release_lock_holder(holder)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_signal_eintr() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-signal-eintr");
+    remove(path);
+    install_handler(0)?;
+    let holder = spawn_lock_holder(path, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    let waiter = open_file(path)?;
+    let case = start_waiter(waiter, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    signal_waiter(case)?;
+    ensure(wait_thread(case)? == EINTR)?;
+    close(waiter)?;
+    release_lock_holder(holder)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_signal_restart() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-signal-restart");
+    remove(path);
+    install_handler(linux_signal::SA_RESTART)?;
+    let holder = spawn_lock_holder(path, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    let waiter = open_file(path)?;
+    let case = start_waiter(waiter, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    signal_waiter(case)?;
+    settle()?;
+    ensure(case.done.load(Ordering::SeqCst) == 0)?;
+    release_lock_holder(holder)?;
+    ensure(wait_thread(case)? == 0)?;
+    fcntl_setlk(waiter, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    close(waiter)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_restart_replays_fd_flock_and_position() -> Result<(), Errno> {
+    remove(Path::new(REPLAY_PATH));
+    install_handler(linux_signal::SA_RESTART)?;
+    let holder = spawn_lock_holder(Path::new(REPLAY_PATH), lock(F_WRLCK, SEEK_SET, 0, 1))?;
+    let waiter = open_file(Path::new(REPLAY_PATH))?;
+    let case = start_waiter(waiter, lock(F_WRLCK, SEEK_SET, 0, 1))?;
+
+    REPLAY_CASE.store(case as *const ThreadCase as usize, Ordering::SeqCst);
+    REPLAY_DONE.store(0, Ordering::SeqCst);
+    REPLAY_OPENED_FD.store(u32::MAX, Ordering::SeqCst);
+    REPLAY_ERROR.store(0, Ordering::SeqCst);
+    REPLAY_ACTIVE.store(1, Ordering::SeqCst);
+    signal_waiter(case)?;
+    wait_for(&REPLAY_DONE, 1)?;
+    ensure(REPLAY_ERROR.load(Ordering::SeqCst) == 0)?;
+    ensure(REPLAY_OPENED_FD.load(Ordering::SeqCst) == waiter)?;
+    ensure(wait_thread(case)? == 0)?;
+    REPLAY_ACTIVE.store(0, Ordering::SeqCst);
+
+    // The replayed SEEK_CUR request starts at the handler-advanced position 1,
+    // so it can commit while the child still owns [0, 1).
+    fork_getlk(
+        waiter,
+        lock(F_WRLCK, SEEK_SET, 1, 1),
+        F_WRLCK,
+        1,
+        1,
+        getpid()?,
+    )?;
+    fcntl_setlk(waiter, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    release_lock_holder(holder)?;
+    close(waiter)?;
+    remove(Path::new(REPLAY_PATH));
+    Ok(())
+}
+
 struct Results {
+    marker: &'static str,
     passed: usize,
     failed: usize,
 }
 
 impl Results {
-    const fn new() -> Self {
+    const fn new(marker: &'static str) -> Self {
         Self {
+            marker,
             passed: 0,
             failed: 0,
         }
@@ -376,11 +698,11 @@ impl Results {
         match test() {
             Ok(()) => {
                 self.passed += 1;
-                println!("POSIXLOCK2A:PASS:{name}");
+                println!("{}:PASS:{name}", self.marker);
             },
             Err(errno) => {
                 self.failed += 1;
-                println!("POSIXLOCK2A:FAIL:{name}:{errno}");
+                println!("{}:FAIL:{name}:{errno}", self.marker);
             },
         }
     }
@@ -388,7 +710,7 @@ impl Results {
 
 pub(crate) fn run() -> Result<(), Errno> {
     println!("POSIXLOCK2A:START");
-    let mut results = Results::new();
+    let mut results = Results::new("POSIXLOCK2A");
     results.case(
         "native-abi-unaligned",
         test_native_abi_and_unaligned_pointer,
@@ -410,14 +732,36 @@ pub(crate) fn run() -> Result<(), Errno> {
     results.case("dup3-replacement-cleanup", test_dup3_replacement_cleanup);
     results.case("close-range-cleanup", test_close_range_cleanup);
 
-    if results.failed == 0 {
-        println!("POSIXLOCK2A:SUMMARY:PASS:{}", results.passed);
-        Ok(())
-    } else {
+    if results.failed != 0 {
         println!(
             "POSIXLOCK2A:SUMMARY:FAIL:passed={}:failed={}",
             results.passed, results.failed
         );
-        Err(EIO)
+        return Err(EIO);
     }
+    println!("POSIXLOCK2A:SUMMARY:PASS:{}", results.passed);
+
+    println!("POSIXLOCK2B:START");
+    let mut blocking = Results::new("POSIXLOCK2B");
+    blocking.case("blocking-wake", test_blocking_wake);
+    blocking.case("close-while-waiting", test_close_while_waiting);
+    blocking.case("signal-eintr", test_signal_eintr);
+    blocking.case("signal-restart", test_signal_restart);
+    blocking.case(
+        "restart-replays-fd-flock-position",
+        test_restart_replays_fd_flock_and_position,
+    );
+    if blocking.failed != 0 {
+        println!(
+            "POSIXLOCK2B:SUMMARY:FAIL:passed={}:failed={}",
+            blocking.passed, blocking.failed
+        );
+        return Err(EIO);
+    }
+    println!("POSIXLOCK2B:SUMMARY:PASS:{}", blocking.passed);
+    println!(
+        "POSIXLOCK2:SUMMARY:PASS:{}",
+        results.passed + blocking.passed
+    );
+    Ok(())
 }

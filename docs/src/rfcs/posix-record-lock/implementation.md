@@ -1,13 +1,13 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0-1 Closed / Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active
+**状态：** R0 implementation plan / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
 **适用修订：** R0
-**最后更新：** 2026-07-31
+**最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **目标与不变量：** [POSIX Record Lock 目标和不变量](./invariants.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 active Apollyon / Keter
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
-**Contract Cutover：** semantic `None` through Checkpoint 2A closure；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
+**Contract Cutover：** semantic `None` through Stage 2 closure；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
 
 本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
 canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
@@ -15,8 +15,8 @@ authorization 已作为三个独立事件完成；Stage 0现已关闭。开发�
 `Stage 0 -> Stage 1 Implementation Resolution Gate`，并把物理namespace迁移与POSIX range-domain实现拆为
 1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed。开发者随后独立授权只读
 `Stage 1 -> Stage 2 Implementation Resolution Gate`；本次已从clean live source把Stage 2完整解析为两个有序
-checkpoint。开发者随后明确授权并独立关闭Checkpoint 2A；2B仍为Ready / Not Active，不得由2A closure自动激活。
-Stage 2尚未关闭，2A candidate也不是current POSIX record-lock支持。
+checkpoint。开发者随后分别授权并独立关闭Checkpoint 2A/2B，Stage 2 Closed。Stage 3仍为Outline且尚未解析或
+授权；Stage 2 stacked candidate也不是current POSIX record-lock支持。
 
 ## 实施原则
 
@@ -90,7 +90,7 @@ Stage 2尚未关闭，2A candidate也不是current POSIX record-lock支持。
 | --- | --- | --- | --- | --- |
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
 | Stage 1 | Closed；1A/1B Closed | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 已独立关闭；下一步只能另行授权`1 -> 2`resolution |
-| Stage 2 | 2A Closed；2B Ready / Not Active；Stage 2未关闭 | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-07-31已独立关闭2A并停止；等待开发者另行授权2B |
+| Stage 2 | Closed；2A/2B Closed | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-08-01已独立关闭2B与Stage 2；停在`2 -> 3`resolution gate前 |
 | Stage 3 | Outline | 完成 focused oracle、LTP、RV64/LA64 runtime、最终 review 与 current-contract cutover | `POSIX-LOCK-CUTOVER` | Stage 2 独立关闭后 |
 
 ## Stage 0 Ready：File-table Episode 与 Holder Foundation
@@ -717,7 +717,7 @@ shared fd-table private lock下回调VFS，或只能改变target race outcomes�
 
 <a id="posix-record-lock-stage-2"></a>
 
-## Stage 2：Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active
+## Stage 2 Closed：Checkpoint 2A/2B Closed
 
 ### Resolution baseline 与前置核验
 
@@ -1000,9 +1000,15 @@ Userspace source：
 - `anemone-rs/src/os/linux/fs.rs`；
 - `anemone-apps/fcntl-test/src/posix_record_lock.rs`。
 
-文档write-back与2A相同；`docs/src/register/open-issues.md`不属于2B写集。`anemone-abi`、task/files、rootfs和
-`user-test`在2B均为validation-only；若2A接口不足，必须先停止并提交精确Route Correction / manifest expansion，
-不能在2B静默重构。scheduler、signal、flock、current contracts、LTP profile/group与wrapper仍明确不修改。
+Existing KUnit consumer adaptation：
+
+- `anemone-kernel/src/task/files/episode.rs`（只把3个既有KUnit对`set_posix_lock`的直接调用适配为显式
+  `wait_for_conflict = false`；production task/files语义不变）。
+
+文档write-back与2A相同；`docs/src/register/open-issues.md`不属于2B写集。`anemone-abi`、除上述既有KUnit
+consumer adaptation外的task/files、rootfs和`user-test`在2B均为validation-only；若2A接口仍不足，必须先停止并
+提交精确Route Correction / manifest expansion，不能在2B静默重构。scheduler、signal、flock、current contracts、
+LTP profile/group与wrapper仍明确不修改。
 
 #### 2B wait/restart audit、验证与停止条件
 
@@ -1041,6 +1047,24 @@ stress与`POSIX-LOCK-CUTOVER`仍Not Run，留给Stage 3。
 
 Stage 2关闭必须停在`Stage 2 -> Stage 3 Implementation Resolution Gate`前。不得因RV64 focused app通过而自动解析或
 执行Stage 3，也不得把Stage 2 stacked candidate单独描述为current POSIX record-lock支持。
+
+#### Checkpoint 2B 与 Stage 2 关闭结果
+
+Checkpoint 2B已独立Closed，Stage 2 Closed。最终实现把`F_SETLKW`接到2A的同一native adapter、operation-local
+binding与inode-owned domain，通过`Event`完成register-before-predicate的interruptible recheck；assignment、unlock与
+close cleanup均在domain guard外publish。中断只在listener/active wait清理后映射为
+`RestartSyscall::Idempotent`，由既有signal finalizer重放原始fd、flock pointer与相对位置，不保存旧binding或range。
+
+最终5项2B focused case覆盖blocking wake、close while waiting返回`EBADF`、无`SA_RESTART`的`EINTR`、普通
+`SA_RESTART`完整重放，以及handler同时改变fd、flock storage与file position后的重放；2A的8项case继续通过。
+formatter、双架构app/kernel build、source/whitespace与mdBook检查通过；RV64 canonical wrapper为288/288 KUnit、
+`POSIXLOCK2A:SUMMARY:PASS:8`、`POSIXLOCK2B:SUMMARY:PASS:5`、总计13/13、tracked `sys` profile双libc 4/4及正常
+`PowerOff`。最终独立只读复核为Apollyon/Keter/Euclid/Safe全0。
+
+本checkpoint没有修改scheduler、signal、flock、current contracts、tracked LTP group/profile、rootfs、user-test或
+wrapper；获批manifest扩张只适配`task/files/episode.rs`中3个既有KUnit caller并显式传入nonblocking policy。
+contract cutover继续为`None`，全部prospective IDs保持Not Effective。LA64 runtime、focused fcntl LTP、Stage 3与
+`POSIX-LOCK-CUTOVER`均Not Run / 未授权；执行明确停在下一resolution gate前。
 
 ## Stage 2 -> Stage 3 Implementation Resolution Gate
 

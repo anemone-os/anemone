@@ -1,12 +1,12 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Stage 2 not Closed / Not Cut Over
+**状态：** Active transaction / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
 **实施计划：** [Stage 2 — Checkpoint 2A/2B](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-2)
 **适用修订：** R0
-**Contract Cutover：** semantic `None` through Checkpoint 2A closure；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
+**Contract Cutover：** semantic `None` through Stage 2 closure；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
 `POSIX-LOCK-*`继续 Not Effective
 
 ## 边界
@@ -17,9 +17,9 @@ file-table sharing episode、显式participation与opaque holder foundation，�
 
 Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
 把Stage 1解析并拆为1A/1B；两者现均已独立关闭，Stage 1 Closed。开发者随后另行授权只读`Stage 1 -> 2`
-resolution gate；Stage 2已解析为2A/2B，开发者随后只授权并已关闭Checkpoint 2A。Checkpoint 2B仍为Ready /
-Not Active，Stage 2尚未关闭，任何2B/Stage 3实现或semantic contract cutover均未授权。Stage 0/1/2A stacked
-candidate仍不是可独立合入或写成current支持的POSIX record-lock capability。
+resolution gate；Stage 2已解析为2A/2B，开发者随后分别授权并关闭两个checkpoint，Stage 2 Closed。Stage 3仍为
+Outline，下一resolution gate、Stage 3实现与semantic contract cutover均未授权。Stage 0-2 stacked candidate仍不是
+可独立合入或写成current支持的POSIX record-lock capability。
 
 ## R0 acceptance 与 activation
 
@@ -640,3 +640,92 @@ Contract cutover继续为`None`，全部prospective IDs保持Not Effective。
 
 Checkpoint 2A现为Closed并在此停止。Checkpoint 2B继续Ready / Not Active，Stage 2尚未关闭；2A candidate不得
 standalone合入、发布或写成current POSIX record-lock支持。后续只能由开发者另行授权2B，不得自动进入2B或Stage 3。
+
+## Checkpoint 2B activation preflight — 2026-08-01
+
+开发者把“完成Stage 2 Checkpoint 2B”设为本轮唯一GOAL，并明确要求不得自动进入下一gate、checkpoint单独提交且
+实现后由一位subagent独立review。本轮从clean `dev/drc/omega@71eb5e08`读取`AGENTS.md`、`LOCAL.md`、canonical
+RFC正文、implementation、tracking issues、register、本transaction、current contracts与live 2A/wait/signal/test
+owner。2A仍独立Closed，worktree无未提交改动；其binding、cleanup、native ABI与focused suite接口相对closure
+commit没有漂移。
+
+preflight确认2B可以沿authoritative Ready路线直接实现：现有`Event::listen()`已经完成listener registration、
+single-active wait、predicate/signal recheck与return前cleanup；signal finalizer仍只通过
+`RestartSyscall::Idempotent`恢复原始syscall context；2A的`PosixLockBinding`与domain commit-time `published`
+recheck足以约束close-before-commit。无需修改scheduler、signal、task/files、ABI、rootfs、user-test、current
+contracts、LTP profile/group或wrapper，也无需扩张public/shared contract。
+
+Checkpoint 2B现由Ready进入Active。frozen production/userspace manifest、wait/restart audit、validation floor、
+停止条件与Stage 2退出条件继续以
+[`implementation.md`](../../rfcs/posix-record-lock/implementation.md#checkpoint-2b--blocking-waitsignal-replay-与-stage-2-closure)
+为唯一计划权威；contract cutover仍为`None`，全部prospective IDs继续Not Effective。若实现触发任一停止条件，
+本checkpoint必须停下并记录证据；成功关闭也必须停在`Stage 2 -> Stage 3 Implementation Resolution Gate`前。
+
+## Checkpoint 2B KUnit consumer manifest expansion — 2026-08-01
+
+首次RV64 kernel build在sandbox外越过已知`lwext4`环境限制后，编译器确认2A owner-local lifecycle KUnit仍有3处
+直接调用`set_posix_lock`。2B最初把内部API增加显式`wait_for_conflict`参数时，这些validation-only caller需要传入
+`false`；为避免越界，主执行者先保持原四参数形状并在POSIX domain内尝试窄request carrier。开发者随后明确确认：
+如果增加参数更合理，可以扩展manifest。
+
+authoritative `implementation.md`现把`anemone-kernel/src/task/files/episode.rs`纳入2B的Existing KUnit consumer
+adaptation，只允许3个既有KUnit调用增加`wait_for_conflict = false`。相应实现删除只为兼容旧调用形状引入的
+request carrier，保留更直接的`mode + report_tgid + wait_for_conflict`内部operation API。该扩展不修改production
+task/files代码，不改变public API、owner、ABI、visible semantics、shared contract、acceptance或validation floor；
+scheduler、signal、current contracts及其它validation-only路径仍不进入写集。
+
+## Checkpoint 2B implementation, validation and Stage 2 closure — 2026-08-01
+
+2B最终实现保持2A owner边界：`fcntl/mod.rs`只增加`F_SETLKW` decode/dispatch，
+`fcntl/posix_lock.rs`复用native byte-copy、normalization与binding admission，并只在domain明确返回未提交的
+`Interrupted`后映射`RestartSyscall::Idempotent`；`fs/lock/posix.rs`继续只接收normalized range/mode/binding。
+inode domain增加notification-only `Event`，每轮先register listener再在domain guard内重验binding/conflict，guard
+不跨park；assignment、unlock与close cleanup先提交authoritative state，再在guard外publish。producer不授予waiter、
+不决定errno且不等待waiter运行。
+
+ordinary signal路径在`Event::listen()`已清listener并finish `ActiveWait`后才返回domain interruption；既有signal
+finalizer重放原始syscall context，不保存旧binding、holder、range或normalization snapshot。userspace typed wrapper
+使用`*const Flock`而非跨blocking syscall建立`&Flock`，使handler可以在`SA_RESTART` replay前合法改变flock storage。
+最终5项2B focused case分别覆盖blocking wake、close while waiting返回`EBADF`、无`SA_RESTART`的`EINTR`、普通
+restart，以及handler同时替换fd、flock storage与file position后的完整重放；2A的8项case保持通过。
+
+最终source依次通过：
+
+```text
+just fmt kernel --check
+just fmt fcntl-test --check
+just fmt user-test --check
+just xtask app build fcntl-test --arch riscv64
+just xtask app build fcntl-test --arch loongarch64
+just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G
+just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G
+git diff --check
+mdbook build docs
+```
+
+两个kernel build与RV64 wrapper沿用repository canonical route在sandbox外执行；sandbox内`lwext4`仍可复现
+`Bad system call`，相同命令在外部成功，因此只分类为环境限制。最终canonical runtime命令exit 0：
+
+```text
+./scripts/run-user-test-rv64.sh \
+  etc/preliminary/images/sdcard-rv.img \
+  build/posix-record-lock-stage2-rv64.log
+```
+
+日志包含288项KUnit与`All tests passed!`、`POSIXLOCK2A:SUMMARY:PASS:8`、
+`POSIXLOCK2B:SUMMARY:PASS:5`、`POSIXLOCK2:SUMMARY:PASS:13`、tracked `sys` profile的glibc 2/2、musl 2/2及
+orderly `PowerOff`。随行`sys` LTP不证明record-lock。source/caller/bypass scan确认scheduler、signal、flock、
+current contracts、tracked LTP profile/group、rootfs、user-test与wrapper均无2B diff；没有raw UAPI进入VFS core、
+temporary bridge或test-only production hook。获批manifest扩张仅让`task/files/episode.rs`中3个既有KUnit caller
+显式传入`wait_for_conflict = false`。
+
+唯一独立只读subagent从Stage 1 closure baseline `9d1204e0`到最终worktree执行Stage-wide integrated audit，确认
+register-before-predicate、guard-out park/publish、listener/ActiveWait cleanup、no-commit-then-interrupt、
+closed-binding late-grant exclusion，以及2A native ABI/binding/all-removal cleanup在2B组合后均成立；最终disposition
+为Apollyon 0、Keter 0、Euclid 0、Safe 0。focused waiter用`ready + sched_yield`而非production introspection hook
+建立阻塞时序置信；broad stress留给Stage 3，不据此扩大本checkpoint。
+
+Checkpoint 2B现为Closed，Stage 2 Closed。contract cutover继续为`None`，全部prospective IDs保持Not Effective；
+LA64 runtime、focused fcntl LTP、broad stress、Stage 3与`POSIX-LOCK-CUTOVER`均Not Run / 未授权。执行在
+`Stage 2 -> Stage 3 Implementation Resolution Gate`前停止，没有解析或激活下一stage，也不把stacked candidate
+写成current POSIX record-lock支持。

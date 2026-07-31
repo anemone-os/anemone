@@ -155,18 +155,23 @@ pub(crate) enum PosixLockSetOutcome {
     Applied,
     Conflict(PosixLockConflict),
     BindingRetired,
+    Interrupted,
 }
 
 #[derive(Debug)]
 pub(in crate::fs) struct PosixLockDomain {
     /// Sole persistent truth for POSIX holder-to-range grants on this inode.
     segments: SpinLock<Vec<PosixLockSegment>>,
+    /// Notification only. Grant and waiter eligibility remain derivable from
+    /// `segments` plus the operation-local binding liveness capability.
+    recheck: Event,
 }
 
 impl PosixLockDomain {
     pub(in crate::fs) const fn new() -> Self {
         Self {
             segments: SpinLock::new(Vec::new()),
+            recheck: Event::new(),
         }
     }
 
@@ -330,25 +335,50 @@ impl PosixLockDomain {
         range: PosixLockRange,
         mode: PosixLockMode,
         report_tgid: u32,
+        wait_for_conflict: bool,
     ) -> PosixLockSetOutcome {
-        let replaced = {
-            let mut segments = self.segments.lock();
-            if !binding.is_live() {
-                return PosixLockSetOutcome::BindingRetired;
+        loop {
+            let replaced = {
+                let mut segments = self.segments.lock();
+                if !binding.is_live() {
+                    return PosixLockSetOutcome::BindingRetired;
+                }
+                if let Some(conflict) =
+                    Self::find_conflict(&segments, binding.holder(), range, mode)
+                {
+                    if !wait_for_conflict {
+                        return PosixLockSetOutcome::Conflict(conflict);
+                    }
+                    None
+                } else {
+                    let replacement = Self::rebuild_assignment(
+                        &segments,
+                        binding.holder(),
+                        range,
+                        Some((mode, report_tgid)),
+                    );
+                    Some(core::mem::replace(&mut *segments, replacement))
+                }
+            };
+
+            if let Some(replaced) = replaced {
+                drop(replaced);
+                // Same-owner replacement can remove ranges that blocked other
+                // owners. Notification stays outside the domain guard and is
+                // only a hint; every woken operation rechecks authoritative state.
+                self.recheck.publish(usize::MAX, false);
+                return PosixLockSetOutcome::Applied;
             }
-            if let Some(conflict) = Self::find_conflict(&segments, binding.holder(), range, mode) {
-                return PosixLockSetOutcome::Conflict(conflict);
+
+            let predicate_ready = self.recheck.listen(false, || {
+                let segments = self.segments.lock();
+                !binding.is_live()
+                    || Self::find_conflict(&segments, binding.holder(), range, mode).is_none()
+            });
+            if !predicate_ready {
+                return PosixLockSetOutcome::Interrupted;
             }
-            let replacement = Self::rebuild_assignment(
-                &segments,
-                binding.holder(),
-                range,
-                Some((mode, report_tgid)),
-            );
-            core::mem::replace(&mut *segments, replacement)
-        };
-        drop(replaced);
-        PosixLockSetOutcome::Applied
+        }
     }
 
     fn unlock_binding(
@@ -364,12 +394,17 @@ impl PosixLockDomain {
             if !segments.iter().any(|segment| {
                 segment.owner.same_identity(binding.holder()) && segment.range.overlaps(range)
             }) {
-                return PosixLockSetOutcome::Applied;
+                None
+            } else {
+                let replacement =
+                    Self::rebuild_assignment(&segments, binding.holder(), range, None);
+                Some(core::mem::replace(&mut *segments, replacement))
             }
-            let replacement = Self::rebuild_assignment(&segments, binding.holder(), range, None);
-            core::mem::replace(&mut *segments, replacement)
         };
         drop(replaced);
+        // Unlock is an eligibility transition. Spurious publication for an
+        // idempotent no-op is harmless because waiters always recheck.
+        self.recheck.publish(usize::MAX, false);
         PosixLockSetOutcome::Applied
     }
 
@@ -387,6 +422,9 @@ impl PosixLockDomain {
         // Holder references can be terminal. Keep their destruction outside
         // the inode-domain guard so cleanup cannot re-enter the lock owner.
         drop(removed);
+        // Publish even when this holder had no grant: unpublishing the binding
+        // itself can satisfy a blocked operation's liveness predicate.
+        self.recheck.publish(usize::MAX, false);
     }
 }
 
@@ -407,12 +445,15 @@ pub(crate) fn set_posix_lock(
     range: PosixLockRange,
     mode: PosixLockMode,
     report_tgid: u32,
+    wait_for_conflict: bool,
 ) -> PosixLockSetOutcome {
-    binding
-        .file()
-        .inode()
-        .posix_lock_domain()
-        .set_binding(binding, range, mode, report_tgid)
+    binding.file().inode().posix_lock_domain().set_binding(
+        binding,
+        range,
+        mode,
+        report_tgid,
+        wait_for_conflict,
+    )
 }
 
 pub(crate) fn unlock_posix_lock(

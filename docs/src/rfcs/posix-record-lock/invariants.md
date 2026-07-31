@@ -1,7 +1,7 @@
 # POSIX Record Lock 目标和不变量
 
-**状态：** R0 Accepted / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / Not Cut Over
-**最后更新：** 2026-07-31
+**状态：** R0 Accepted / Stage 0-2 Closed / Stage 3 Outline / Not Cut Over
+**最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **适用修订：** R0
 
@@ -439,7 +439,7 @@ R0 target最终关闭必须同时满足：
 建立且 Stage 0已独立关闭。后续独立只读resolution gate保持本页target不变，并把Stage 1解析为两个checkpoint：
 1A行为保持地完成module alignment，1B建立inode-associated range domain与assignment/conflict/query proof。
 两者现均已独立关闭。其后的独立只读gate把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking
-wait/signal replay；2A现已独立关闭，2B继续Ready / Not Active，Stage 2尚未关闭。2A已证明binding-scoped
-close/commit与nonblocking/query纵切，但尚未交付blocking/signal/restart或最终产品证据，不能作为standalone/current
-capability。current-contract语义write-back仍只属于最终`POSIX-LOCK-CUTOVER`；截至2A closure semantic cutover均为
-`None`，全部Introduce项继续Not Effective。
+wait/signal replay；2A/2B现均已独立关闭，Stage 2 Closed。Stage 2已证明binding-scoped close/commit、
+nonblocking/query、blocking Event recheck与ordinary signal replay纵切，但尚未交付Stage 3的双架构runtime、focused
+LTP与最终产品证据，不能作为standalone/current capability。current-contract语义write-back仍只属于最终
+`POSIX-LOCK-CUTOVER`；截至Stage 2 closure semantic cutover均为`None`，全部Introduce项继续Not Effective。

@@ -1,7 +1,7 @@
 # POSIX Record Lock Tracking Issues
 
-**状态：** R0 / Stage 0-1 and Checkpoint 2A Closed / Checkpoint 2B Ready / Not Active / no current findings / Not Cut Over
-**最后更新：** 2026-07-31
+**状态：** R0 / Stage 0-2 Closed / Stage 3 Outline / no current findings / Not Cut Over
+**最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
 
@@ -20,7 +20,8 @@ KUnit对coalesce后具体diagnostic report值的过强断言；R0明确允许任
 `fcntl/{mod.rs,posix_lock.rs}`并保持VFS core为normalized internal owner；该finding已在同一docs-only Route
 Correction中neutralize。Checkpoint 2A随后获得独立授权并已Closed；其primary/final review发现的terminal offset、
 command/fd validation precedence与suite-owner manifest问题均已修复并记录在Neutralized。最终独立只读复核为
-Apollyon/Keter/Euclid/Safe全0。Checkpoint 2B仍Ready / Not Active，Stage 2尚未关闭。
+Apollyon/Keter/Euclid/Safe全0。Checkpoint 2B随后独立关闭；其primary与独立只读review同样没有active finding，
+Stage 2 Closed。Stage 3仍为Outline / Not Authorized。
 此前Stage 0实现审查发现的显式detach consumer遗漏与runtime发现的kthread exit遗漏也均已neutralize；Stage 0当时的
 独立review同样为Apollyon/Keter/Euclid/Safe全0。
 后续 finding 仍按影响

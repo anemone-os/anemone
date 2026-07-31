@@ -649,7 +649,7 @@ mod kunits {
         let old = files.binding(fd).unwrap();
         let range = PosixLockRange::finite(0, 1);
         assert_eq!(
-            set_posix_lock(&old, range, PosixLockMode::Write, 1),
+            set_posix_lock(&old, range, PosixLockMode::Write, 1, false),
             PosixLockSetOutcome::Applied
         );
 
@@ -660,7 +660,7 @@ mod kunits {
             )
             .unwrap();
         assert_eq!(
-            set_posix_lock(&old, range, PosixLockMode::Write, 1),
+            set_posix_lock(&old, range, PosixLockMode::Write, 1, false),
             PosixLockSetOutcome::BindingRetired
         );
         release_all(closed);
@@ -679,7 +679,7 @@ mod kunits {
         assert_eq!(reused, fd);
         let fresh = files.binding(reused).unwrap();
         assert_eq!(
-            set_posix_lock(&fresh, range, PosixLockMode::Write, 2),
+            set_posix_lock(&fresh, range, PosixLockMode::Write, 2, false),
             PosixLockSetOutcome::Applied
         );
 
