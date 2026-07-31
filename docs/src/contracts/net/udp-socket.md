@@ -127,7 +127,9 @@ local copy；fragment进入UDP demux；旧retire释放新port owner。
 
 **验证 / Enforcement：** full bind-conflict/port0/implicit/demux/reuse matrix，selection/admission/capacity与provider
 recovery host tests，short/zero/fault/concurrent receive、fragment rejection KUnit/real-consumer tests，以及RV64/LA64
-loopback、self-external与remote-external双向runtime。
+focused UDP runtime。Stage 5 transaction保留loopback、self-external与remote-external双向cutover evidence；通用
+`run-user-test`不再维护专用host peer，后续external-path持续回归由进入canonical验证的真实UDP consumer承接；
+validation asset维护见[2026-07-31清理记录](../../devlog/changes/2026-07-31-net-udp-external-peer-retirement.md)。
 
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/invariants.md#net-udp-bind-001--bind-conflictport-allocation与commit属于stack)中的bind/datagram target。
 
@@ -162,7 +164,8 @@ route；old edge命中新association。
 
 **验证 / Enforcement：** initial-unbound writable、route/request failure、Endpoint/provider saturation/recovery、
 snapshot/register/final-scan、multi-waiter/signal、poll/select/epoll coexistence、dup/fork/close/retire及晚到hint
-KUnit/host/real-consumer matrix；双架构17项UDP与11项epoll runtime。
+KUnit/host/real-consumer matrix；双架构focused UDP与11项epoll runtime。Stage 5 transaction保留17项UDP的
+cutover evidence，current wrapper不把focused case数量冻结为长期接口。
 
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/invariants.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离)。
 
@@ -173,8 +176,9 @@ KUnit/host/real-consumer matrix；双架构17项UDP与11项epoll runtime。
 
 - 当前能力是IPv4 unconnected UDP：`socket(AF_INET, SOCK_DGRAM, 0)`、`bind`、`getsockname`、`sendto`、
   `recvfrom`、blocking/nonblocking与ordinary poll/select/epoll；其余能力不从本页外推。
-- QEMU runtime覆盖RV64 virtio-mmio与LA64 virtio-pci的single-NIC、`smp=1` loopback/self-external/remote-external；
-  physical hardware、`smp>1`、任意其它NIC或deployment均Not Run。
+- Stage 5 cutover evidence覆盖RV64 virtio-mmio与LA64 virtio-pci的single-NIC、`smp=1`
+  loopback/self-external/remote-external；当前focused runner不再重复专用remote peer。physical hardware、`smp>1`、
+  任意其它NIC或deployment均Not Run。
 - full network LTP与final harness Not Run；当前Linux ABI证据是RFC列出的focused real-consumer matrix和LTP whitelist
   4/4，不宣称完整Linux socket兼容。
 - runtime address/route reconfiguration、hotplug/detach/restart和完整network teardown不在当前target；这些非目标不
