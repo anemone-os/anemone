@@ -8,21 +8,22 @@ use core::{
 use anemone_rs::{
     abi::{
         fs::linux::{
+            close_range::CLOSE_RANGE_UNSHARE,
             fcntl::{F_RDLCK, F_UNLCK, F_WRLCK, Flock},
-            open::{O_CREAT, O_PATH, O_RDONLY, O_RDWR, O_WRONLY},
+            open::{O_CLOEXEC, O_CREAT, O_PATH, O_RDONLY, O_RDWR, O_WRONLY},
             seek::{SEEK_CUR, SEEK_END, SEEK_SET},
         },
         process::linux::signal::{self as linux_signal, SigAction, SigSet},
     },
     os::linux::{
         fs::{
-            AtFd, Fd, PipeFlags, close, close_range, dup, dup3, fcntl_getlk, fcntl_getlk_raw,
-            fcntl_setlk, fcntl_setlk_raw, fcntl_setlkw, ftruncate, openat, pipe2, read, unlinkat,
-            write,
+            AtFd, Fd, FlockOperation, PipeFlags, close, close_range, dup, dup3, fcntl_getlk,
+            fcntl_getlk_raw, fcntl_setlk, fcntl_setlk_raw, fcntl_setlkw, flock, ftruncate, openat,
+            pipe2, read, unlinkat, write,
         },
         process::{
-            CloneFlags, MmapFlags, MmapProt, Tid, WStatus, WStatusRaw, WaitFor, WaitOptions, exit,
-            fork, getpid, mmap, sched_yield,
+            CloneFlags, MmapFlags, MmapProt, Tid, WStatus, WStatusRaw, WaitFor, WaitOptions, clone,
+            execve, exit, fork, getpid, mmap, sched_yield,
             signal::{self, SigNo},
             spawn_raw_thread, wait4,
         },
@@ -34,6 +35,7 @@ const MODE: u32 = 0o600;
 const THREAD_STACK_SIZE: usize = 16 * 1024;
 const SETTLE_YIELDS: usize = 128;
 const WAIT_RETRIES: usize = 100_000;
+const CLOSE_SET_RACE_ROUNDS: usize = 64;
 const REPLAY_PATH: &str = "/fcntl-test-replay";
 
 static SIGNAL_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -172,6 +174,37 @@ fn fork_can_lock(path: &Path) -> Result<(), Errno> {
             close(fd)
         })()),
     }
+}
+
+fn fork_cannot_lock(path: &Path) -> Result<(), Errno> {
+    match fork()? {
+        Some(pid) => wait_child(pid),
+        None => child_result((|| {
+            let fd = open_file(path)?;
+            expect_errno(fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0)), EAGAIN)?;
+            close(fd)
+        })()),
+    }
+}
+
+fn clone_files_process() -> Result<Option<Tid>, Errno> {
+    clone(
+        CloneFlags::FILES,
+        Some(linux_signal::SIGCHLD),
+        None,
+        None,
+        null_mut(),
+        None,
+    )
+}
+
+fn send_byte(fd: Fd) -> Result<(), Errno> {
+    ensure(write(fd, b"x")? == 1)
+}
+
+fn receive_byte(fd: Fd) -> Result<(), Errno> {
+    let mut byte = [0u8; 1];
+    ensure(read(fd, &mut byte)? == 1)
 }
 
 fn write_i16(raw: &mut [u8], offset: usize, value: i16) {
@@ -679,6 +712,346 @@ fn test_restart_replays_fd_flock_and_position() -> Result<(), Errno> {
     Ok(())
 }
 
+fn test_independent_open_close_reacquire() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-independent-open");
+    remove(path);
+    let first = open_file(path)?;
+    let second = open_file(path)?;
+    fcntl_setlk(first, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+
+    let mut same_owner = lock(F_WRLCK, SEEK_SET, 0, 1);
+    fcntl_getlk(second, &mut same_owner)?;
+    ensure(same_owner.l_type == F_UNLCK)?;
+
+    close(second)?;
+    fork_can_lock(path)?;
+
+    fcntl_setlk(first, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+    fork_cannot_lock(path)?;
+    close(first)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_clone_files_exit_final_teardown() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-clone-files-exit");
+    remove(path);
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (release_read, release_write) = pipe2(PipeFlags::empty())?;
+
+    let helper = match fork()? {
+        Some(pid) => pid,
+        None => child_result((|| {
+            close(ready_read)?;
+            close(release_write)?;
+            let fd = open_file(path)?;
+            fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+            match clone_files_process()? {
+                Some(pid) => wait_child(pid)?,
+                None => child_result(fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0))),
+            }
+            send_byte(ready_write)?;
+            receive_byte(release_read)
+            // Deliberately leave the target fd published. This helper is the
+            // final episode participant, so process exit must drain it and
+            // remove the holder's grants.
+        })()),
+    };
+
+    close(ready_write)?;
+    close(release_read)?;
+    receive_byte(ready_read)?;
+    let probe = open_file(path)?;
+    expect_errno(fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0)), EAGAIN)?;
+    send_byte(release_write)?;
+    wait_child(helper)?;
+    fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+    fcntl_setlk(probe, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    close(probe)?;
+    close(release_write)?;
+    close(ready_read)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_close_range_unshare() -> Result<(), Errno> {
+    const UNUSED_FD: u32 = 1024;
+
+    let path = Path::new("/fcntl-test-close-range-unshare");
+    remove(path);
+    let fd = open_file(path)?;
+    fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+
+    close_range(UNUSED_FD, UNUSED_FD, CLOSE_RANGE_UNSHARE)?;
+    let mut same_owner = lock(F_WRLCK, SEEK_SET, 0, 1);
+    fcntl_getlk(fd, &mut same_owner)?;
+    ensure(same_owner.l_type == F_UNLCK)?;
+    fork_cannot_lock(path)?;
+
+    match clone_files_process()? {
+        Some(pid) => wait_child(pid)?,
+        None => child_result((|| {
+            close_range(UNUSED_FD, UNUSED_FD, CLOSE_RANGE_UNSHARE)?;
+            expect_errno(fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0)), EAGAIN)
+        })()),
+    }
+    fork_cannot_lock(path)?;
+    close(fd)?;
+    fork_can_lock(path)?;
+    remove(path);
+    Ok(())
+}
+
+fn parse_fd(value: Option<&str>) -> Result<Fd, Errno> {
+    value.ok_or(EINVAL)?.parse::<Fd>().map_err(|_| EINVAL)
+}
+
+pub(crate) fn exec_child(
+    mode: &str,
+    first: Option<&str>,
+    second: Option<&str>,
+    third: Option<&str>,
+    fourth: Option<&str>,
+) -> Result<(), Errno> {
+    match mode {
+        "--posix-exec-preserve" => {
+            let fd = parse_fd(first)?;
+            let ready = parse_fd(second)?;
+            let release = parse_fd(third)?;
+            ensure(fourth.is_none())?;
+            let mut own_query = lock(F_WRLCK, SEEK_SET, 0, 1);
+            fcntl_getlk(fd, &mut own_query)?;
+            ensure(own_query.l_type == F_UNLCK)?;
+            send_byte(ready)?;
+            receive_byte(release)
+        },
+        "--posix-exec-shared" => {
+            let fd = parse_fd(first)?;
+            ensure(second.is_none() && third.is_none() && fourth.is_none())?;
+            expect_errno(fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0)), EAGAIN)
+        },
+        "--posix-exec-cloexec" => {
+            let survivor = parse_fd(first)?;
+            let cloexec = parse_fd(second)?;
+            let ready = parse_fd(third)?;
+            let release = parse_fd(fourth)?;
+            expect_errno(fcntl_setlk(cloexec, &lock(F_WRLCK, SEEK_SET, 0, 1)), EBADF)?;
+            let mut own_query = lock(F_WRLCK, SEEK_SET, 0, 1);
+            fcntl_getlk(survivor, &mut own_query)?;
+            ensure(own_query.l_type == F_UNLCK)?;
+            send_byte(ready)?;
+            receive_byte(release)
+        },
+        _ => Err(EINVAL),
+    }
+}
+
+fn test_exec_holder_cloexec() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-exec-holder");
+    remove(path);
+
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (release_read, release_write) = pipe2(PipeFlags::empty())?;
+    let unique = match fork()? {
+        Some(pid) => pid,
+        None => {
+            let result = (|| {
+                close(ready_read)?;
+                close(release_write)?;
+                let fd = open_file(path)?;
+                fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+                let fd_arg = format!("{fd}");
+                let ready_arg = format!("{ready_write}");
+                let release_arg = format!("{release_read}");
+                execve(
+                    "/bin/fcntl-test",
+                    &[
+                        "fcntl-test",
+                        "--posix-exec-preserve",
+                        fd_arg.as_str(),
+                        ready_arg.as_str(),
+                        release_arg.as_str(),
+                    ],
+                    &[],
+                )?;
+                Err(EIO)
+            })();
+            child_result(result)
+        },
+    };
+    close(ready_write)?;
+    close(release_read)?;
+    receive_byte(ready_read)?;
+    let probe = open_file(path)?;
+    expect_errno(fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0)), EAGAIN)?;
+    send_byte(release_write)?;
+    wait_child(unique)?;
+    fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+    fcntl_setlk(probe, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    close(probe)?;
+    close(release_write)?;
+    close(ready_read)?;
+
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (release_read, release_write) = pipe2(PipeFlags::empty())?;
+    let shared = match fork()? {
+        Some(pid) => pid,
+        None => child_result((|| {
+            close(ready_read)?;
+            close(release_write)?;
+            let fd = open_file(path)?;
+            fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+            match clone_files_process()? {
+                Some(pid) => wait_child(pid)?,
+                None => {
+                    let fd_arg = format!("{fd}");
+                    child_result((|| {
+                        execve(
+                            "/bin/fcntl-test",
+                            &["fcntl-test", "--posix-exec-shared", fd_arg.as_str()],
+                            &[],
+                        )?;
+                        Err(EIO)
+                    })())
+                },
+            }
+            send_byte(ready_write)?;
+            receive_byte(release_read)
+        })()),
+    };
+    close(ready_write)?;
+    close(release_read)?;
+    receive_byte(ready_read)?;
+    let probe = open_file(path)?;
+    expect_errno(fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0)), EAGAIN)?;
+    send_byte(release_write)?;
+    wait_child(shared)?;
+    fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+    fcntl_setlk(probe, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    close(probe)?;
+    close(release_write)?;
+    close(ready_read)?;
+
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (release_read, release_write) = pipe2(PipeFlags::empty())?;
+    let cloexec_case = match fork()? {
+        Some(pid) => pid,
+        None => {
+            let result = (|| {
+                close(ready_read)?;
+                close(release_write)?;
+                let survivor = open_file(path)?;
+                let cloexec = openat(AtFd::Cwd, path, O_RDWR | O_CLOEXEC, 0)?;
+                fcntl_setlk(survivor, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+                let survivor_arg = format!("{survivor}");
+                let cloexec_arg = format!("{cloexec}");
+                let ready_arg = format!("{ready_write}");
+                let release_arg = format!("{release_read}");
+                execve(
+                    "/bin/fcntl-test",
+                    &[
+                        "fcntl-test",
+                        "--posix-exec-cloexec",
+                        survivor_arg.as_str(),
+                        cloexec_arg.as_str(),
+                        ready_arg.as_str(),
+                        release_arg.as_str(),
+                    ],
+                    &[],
+                )?;
+                Err(EIO)
+            })();
+            child_result(result)
+        },
+    };
+    close(ready_write)?;
+    close(release_read)?;
+    receive_byte(ready_read)?;
+    let probe = open_file(path)?;
+    fcntl_setlk(probe, &lock(F_WRLCK, SEEK_SET, 0, 0))?;
+    fcntl_setlk(probe, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    send_byte(release_write)?;
+    wait_child(cloexec_case)?;
+    close(probe)?;
+    close(release_write)?;
+    close(ready_read)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_advisory_flock_namespace() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-advisory-flock");
+    remove(path);
+    let holder = open_file(path)?;
+    fcntl_setlk(holder, &lock(F_WRLCK, SEEK_SET, 0, 1))?;
+
+    match fork()? {
+        Some(pid) => wait_child(pid)?,
+        None => child_result((|| {
+            let flock_fd = open_file(path)?;
+            flock(flock_fd, FlockOperation::ExclusiveNonblocking)?;
+
+            let writer = open_file(path)?;
+            ensure(write(writer, b"a")? == 1)?;
+            let reader = openat(AtFd::Cwd, path, O_RDONLY, 0)?;
+            let mut byte = [0u8; 1];
+            ensure(read(reader, &mut byte)? == 1 && byte[0] == b'a')?;
+            expect_errno(
+                fcntl_setlk(flock_fd, &lock(F_WRLCK, SEEK_SET, 0, 1)),
+                EAGAIN,
+            )?;
+
+            flock(flock_fd, FlockOperation::Unlock)?;
+            close(reader)?;
+            close(writer)?;
+            close(flock_fd)
+        })()),
+    }
+
+    fcntl_setlk(holder, &lock(F_UNLCK, SEEK_SET, 0, 0))?;
+    close(holder)?;
+    remove(path);
+    Ok(())
+}
+
+fn test_close_set_race_envelope() -> Result<(), Errno> {
+    let path = Path::new("/fcntl-test-close-set-race");
+    remove(path);
+
+    for _ in 0..CLOSE_SET_RACE_ROUNDS {
+        let fd = open_file(path)?;
+        let (go_read, go_write) = pipe2(PipeFlags::empty())?;
+        let (result_read, result_write) = pipe2(PipeFlags::empty())?;
+        let worker = match clone_files_process()? {
+            Some(pid) => pid,
+            None => {
+                receive_byte(go_read)?;
+                let result = fcntl_setlk(fd, &lock(F_WRLCK, SEEK_SET, 0, 0))
+                    .err()
+                    .unwrap_or(0);
+                let bytes = result.to_ne_bytes();
+                child_result(ensure(write(result_write, &bytes)? == bytes.len()))
+            },
+        };
+
+        send_byte(go_write)?;
+        close(fd)?;
+        wait_child(worker)?;
+        let mut bytes = [0u8; size_of::<i32>()];
+        ensure(read(result_read, &mut bytes)? == bytes.len())?;
+        let result = i32::from_ne_bytes(bytes);
+        ensure(result == 0 || result == EBADF)?;
+        close(result_write)?;
+        close(result_read)?;
+        close(go_write)?;
+        close(go_read)?;
+        fork_can_lock(path)?;
+    }
+
+    remove(path);
+    Ok(())
+}
+
 struct Results {
     marker: &'static str,
     passed: usize,
@@ -762,6 +1135,33 @@ pub(crate) fn run() -> Result<(), Errno> {
     println!(
         "POSIXLOCK2:SUMMARY:PASS:{}",
         results.passed + blocking.passed
+    );
+
+    println!("POSIXLOCK3:START");
+    let mut product = Results::new("POSIXLOCK3");
+    product.case(
+        "independent-open-close-reacquire",
+        test_independent_open_close_reacquire,
+    );
+    product.case(
+        "clone-files-exit-final-teardown",
+        test_clone_files_exit_final_teardown,
+    );
+    product.case("close-range-unshare", test_close_range_unshare);
+    product.case("exec-holder-cloexec", test_exec_holder_cloexec);
+    product.case("advisory-flock-namespace", test_advisory_flock_namespace);
+    product.case("close-set-race-envelope", test_close_set_race_envelope);
+    if product.failed != 0 {
+        println!(
+            "POSIXLOCK3:SUMMARY:FAIL:passed={}:failed={}",
+            product.passed, product.failed
+        );
+        return Err(EIO);
+    }
+    println!("POSIXLOCK3:SUMMARY:PASS:{}", product.passed);
+    println!(
+        "POSIXLOCK:SUMMARY:PASS:{}",
+        results.passed + blocking.passed + product.passed
     );
     Ok(())
 }

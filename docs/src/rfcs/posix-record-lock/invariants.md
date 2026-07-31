@@ -1,13 +1,13 @@
 # POSIX Record Lock 目标和不变量
 
-**状态：** R0 Accepted / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
+**状态：** R0 Effective / Cut Over
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **适用修订：** R0
 
-本文定义本 RFC 尚未 cut over 的 R0 contract delta、target invariants 与 RFC-local proof obligations。当前
-已经生效的共享规则仍以 `docs/src/contracts/` 为准；R0 中的 `Introduce` 项在 `POSIX-LOCK-CUTOVER` 前继续
-Not Effective，不能作为当前实现事实。
+本文保留本RFC的R0 contract delta、target invariants与RFC-local proof obligations。`POSIX-LOCK-CUTOVER`已经
+完成；当前effective规则以task [file-table POSIX lock](../../contracts/task/file-table-posix-lock.md)与VFS
+[POSIX record lock](../../contracts/vfs/posix-record-lock.md) current contracts为唯一权威。
 
 ## 规则分类
 
@@ -20,15 +20,15 @@ Not Effective，不能作为当前实现事实。
 
 ## Contract Impact
 
-所有 Introduce 项拟在同一个 `POSIX-LOCK-CUTOVER` 生效。该 gate 所在 stage 尚未解析；R0 acceptance、
-`implementation.md` 创建、Ready resolution、代码落地或单项测试通过都不会让它提前生效。
+所有Introduce项已由同一个`POSIX-LOCK-CUTOVER`生效。R0 acceptance、`implementation.md`创建、Ready
+resolution、代码落地或单项测试通过均未让它提前生效；只有最终原子cutover建立current authority。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | 生效 Gate |
 | --- | --- | --- | --- | --- |
-| `FILES-POSIX-OWNER-001` | Introduce | None（尚未生效） | file-table sharing episode 唯一拥有 POSIX holder identity、participation 与 split semantics | `POSIX-LOCK-CUTOVER` |
-| `POSIX-LOCK-DOMAIN-001` | Introduce | None（尚未生效） | inode-associated VFS POSIX domain 唯一拥有 granted ranges、mode 与 conflict truth | `POSIX-LOCK-CUTOVER` |
-| `POSIX-LOCK-WAIT-001` | Introduce | None（尚未生效） | operation-local single-active wait、predicate recheck 与 notification-only progress | `POSIX-LOCK-CUTOVER` |
-| `POSIX-LOCK-LIFECYCLE-001` | Introduce | None（尚未生效） | 任意相关 fd close 删除既有 holder × inode grants，并排除 closed-binding late grant | `POSIX-LOCK-CUTOVER` |
+| `FILES-POSIX-OWNER-001` | Introduce | [当前规则](../../contracts/task/file-table-posix-lock.md#files-posix-owner-001--file-table-sharing-episode-是唯一-holder-identity) | file-table sharing episode 唯一拥有 POSIX holder identity、participation 与 split semantics | `POSIX-LOCK-CUTOVER` |
+| `POSIX-LOCK-DOMAIN-001` | Introduce | [当前规则](../../contracts/vfs/posix-record-lock.md#posix-lock-domain-001--inode-associated-domain-是唯一-grant-与-conflict-truth) | inode-associated VFS POSIX domain 唯一拥有 granted ranges、mode 与 conflict truth | `POSIX-LOCK-CUTOVER` |
+| `POSIX-LOCK-WAIT-001` | Introduce | [当前规则](../../contracts/vfs/posix-record-lock.md#posix-lock-wait-001--wait-publication-只服务-predicate-recheck) | operation-local single-active wait、predicate recheck 与 notification-only progress | `POSIX-LOCK-CUTOVER` |
+| `POSIX-LOCK-LIFECYCLE-001` | Introduce | [当前规则](../../contracts/task/file-table-posix-lock.md#posix-lock-lifecycle-001--任意相关-fd-removal-清除旧-grant-并排除-closed-binding-late-grant) | 任意相关 fd close 删除既有 holder × inode grants，并排除 closed-binding late grant | `POSIX-LOCK-CUTOVER` |
 | `VFS-FILE-KIND-001` | Preserve | [当前规则](../../contracts/vfs/file-kind.md#vfs-file-kind-001--inode-kind-是唯一-file-type-truth) | admission 只消费 VFS kind，不建立 provider/file-ops 特判 | 全程 |
 | `FLOCK-DOMAIN-001` | Preserve | [当前规则](../../contracts/vfs/flock.md#flock-domain-001--inode-associated-domain-是唯一-grant-truth) | flock grant domain 不接收 POSIX ranges、holder 或 cleanup state | 全程 |
 | `FLOCK-WAIT-001` | Preserve | [当前规则](../../contracts/vfs/flock.md#flock-wait-001--wait-publication-与-predicate-recheck-闭合进度) | POSIX 与 flock 不共享 waiter、notification 或 progress truth | 全程 |
@@ -440,7 +440,6 @@ R0 target最终关闭必须同时满足：
 1A行为保持地完成module alignment，1B建立inode-associated range domain与assignment/conflict/query proof。
 两者现均已独立关闭。其后的独立只读gate把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking
 wait/signal replay；2A/2B现均已独立关闭，Stage 2 Closed。Stage 2已证明binding-scoped close/commit、
-nonblocking/query、blocking Event recheck与ordinary signal replay纵切，但尚未交付Stage 3的双架构runtime、focused
-LTP与最终产品证据，不能作为standalone/current capability。current-contract语义write-back仍只属于最终
-`POSIX-LOCK-CUTOVER`；截至Stage 2 closure semantic cutover均为`None`，全部Introduce项继续Not Effective。独立
-resolution现已把Stage 3解析为单一原子checkpoint；Ready不授权runtime或cutover。
+nonblocking/query、blocking Event recheck与ordinary signal replay纵切；Stage 3随后完成双架构runtime、focused
+LTP与最终产品证据。`POSIX-LOCK-CUTOVER`已把四项Introduce ID原子写入current contracts，Preserve闭包保持
+不变；R0与Stage 0-3均Closed。

@@ -6,16 +6,6 @@
 
 ## Active
 
-- [POSIX Record Lock](./2026-07-31-posix-record-lock.md)：R0已接受，Stage 0已独立关闭；file-table episode、
-  explicit participation与opaque holder topology通过双架构build及RV64 runtime，contract cutover为None，
-  后续只读gate把Stage 1拆成1A结构迁移/1B range domain；两者现均已关闭，完成`fs::lock::flock`
-  namespace alignment、inode-owned POSIX range domain与focused KUnit。Stage 1 semantic cutover仍为None，
-  独立`Stage 1 -> 2`gate又把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal
-  replay；2A/2B现均已独立关闭，Stage 2 Closed，交付native ABI、全部fd-removal cleanup、blocking Event recheck、
-  ordinary signal replay与13-case focused suite。contract cutover仍为None，全部prospective IDs保持Not Effective；
-  独立`Stage 2 -> 3`gate已把Stage 3解析为单一原子checkpoint，冻结六项补充oracle、两case专用LTP group、
-  RV64/LA64 runtime、full review与current-contract write-back。Stage 3 Ready / Not Active；Stage 3双架构runtime、
-  focused LTP与最终cutover仍Not Run。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
@@ -34,6 +24,10 @@
 
 ## Completed
 
+- [POSIX Record Lock](./2026-07-31-posix-record-lock.md)：R0 Stage 0-3已关闭；file-table episode holder、
+  inode-associated range domain、native `fcntl` ABI、任意fd-removal cleanup、blocking wait/signal replay与19项focused
+  suite完成。最终RV64/LA64均为288/288 KUnit、19/19 focused、双libc LTP 4/4与384个TPASS；LA64末尾halt归因于
+  已知power-off driver缺失。`POSIX-LOCK-CUTOVER`已原子激活四项task/VFS contract ID。
 - [Network UDP](./2026-07-29-net-udp.md)：R0 Stage 0-5已关闭。domain/control两次cutover和final
   `NET-UDP-FINAL-CUTOVER`现已使initial-domain/global Stack、static IPv4 control plane及四项UDP/Socket contract
   Active；最终RV64/LA64均为274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown。

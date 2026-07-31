@@ -1,13 +1,14 @@
 # POSIX Record Lock 实施计划
 
-**状态：** R0 implementation plan / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
+**状态：** R0 implementation plan / Stage 0-3 Closed / Cut Over
 **适用修订：** R0
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-posix-record-lock](./index.md)
 **目标与不变量：** [POSIX Record Lock 目标和不变量](./invariants.md)
 **开放问题：** [Tracking Issues](./tracking-issues.md) 当前无 active Apollyon / Keter
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
-**Contract Cutover：** semantic `None` through Stage 2 closure；1A只更新locator；prospective `POSIX-LOCK-CUTOVER`仍Not Cut Over
+**Contract Cutover：** Stage 0-2 semantic `None`；1A只更新locator；Stage 3已完成
+`POSIX-LOCK-CUTOVER`，四项Introduce ID现为Active
 
 本文从 2026-07-31 的 live source 解析首个可执行阶段，并为后续阶段保留滚动 resolution gate。它是 R0 的
 canonical implementation plan。R0 acceptance、transaction bootstrap 与开发者明确的 Stage 0 Active
@@ -16,8 +17,8 @@ authorization 已作为三个独立事件完成；Stage 0现已关闭。开发�
 1A/1B。Checkpoint 1A/1B现均已独立关闭，Stage 1 Closed。开发者随后独立授权只读
 `Stage 1 -> Stage 2 Implementation Resolution Gate`；本次已从clean live source把Stage 2完整解析为两个有序
 checkpoint。开发者随后分别授权并独立关闭Checkpoint 2A/2B，Stage 2 Closed。独立的
-`Stage 2 -> Stage 3 Implementation Resolution Gate`现已把最后阶段解析为单一原子checkpoint；Stage 3为
-Ready / Not Active，Stage 2 stacked candidate仍不是current POSIX record-lock支持。
+`Stage 2 -> Stage 3 Implementation Resolution Gate`把最后阶段解析为单一原子checkpoint；Stage 3现已关闭，
+`POSIX-LOCK-CUTOVER`已完成。
 
 ## 实施原则
 
@@ -92,7 +93,7 @@ Ready / Not Active，Stage 2 stacked candidate仍不是current POSIX record-lock
 | Stage 0 | Closed | 建立显式 file-table episode/participation truth、opaque holder 与 fork/share/unshare/exec/exit topology proof | None | 2026-07-31 已独立关闭；已停止 |
 | Stage 1 | Closed；1A/1B Closed | 先行为保持地建立`fs::lock`物理namespace，再建立inode-associated normalized range domain与assignment/conflict/query proof | None | 2026-07-31 已独立关闭；下一步只能另行授权`1 -> 2`resolution |
 | Stage 2 | Closed；2A/2B Closed | 先接入native ABI、operation-local binding、全部fd-removal cleanup与nonblocking/query纵切，再闭合blocking wait、signal restart与Stage 2 review | None | 2026-08-01已独立关闭2B与Stage 2；停在`2 -> 3`resolution gate前 |
-| Stage 3 | Ready / Not Active | 补齐focused oracle topology/race、运行专用LTP组与RV64/LA64 runtime、完成最终review并原子cut over current contracts | `POSIX-LOCK-CUTOVER` | 已于2026-08-01解析；等待开发者独立授权Active |
+| Stage 3 | Closed / Cut Over | 补齐focused oracle topology/race、运行专用LTP组与RV64/LA64 runtime、完成最终review并原子cut over current contracts | `POSIX-LOCK-CUTOVER` | 2026-08-01已关闭；无后续自动gate |
 
 ## Stage 0 Ready：File-table Episode 与 Holder Foundation
 
@@ -1097,12 +1098,12 @@ write-back与closure必须在同一候选和同一最终commit中收口；不存
 
 <a id="posix-record-lock-stage-3"></a>
 
-## Stage 3 Ready：产品证据、最终 Review 与原子 Cutover
+## Stage 3 Closed：产品证据、最终 Review 与原子 Cutover
 
 ### 成熟度、交付与原子边界
 
-Stage 3当前为**Ready / Not Active**。唯一合法下一动作是开发者另行授权整个Stage 3 Active；不得只启用LTP或先写
-current contract，也不得把本次docs-only resolution当成runtime/cutover证据。
+Stage 3现为**Closed / Cut Over**。本节保留原子checkpoint当时冻结的交付、验证、review与停止边界；实际执行
+证据和cutover见transaction。
 
 本阶段一次性交付：
 
@@ -1253,6 +1254,20 @@ ABI、wrapper、rootfs、runner policy或Preserve contract正文；任一archite
 无法由上述两个owner页诚实表达。若修复会改变target、owner、ABI、visible semantics、non-goal或acceptance，进入
 `Target Renegotiation Gate`；否则先上报精确manifest expansion与重跑计划。Stage 3成功后R0即完整Closed，没有
 自动进入后续RFC或实现工作。
+
+### Stage 3 closure result
+
+Stage 3在现有userspace/test manifest内补齐六项产品case并建立精确两case的专用LTP group；production kernel、
+ABI、`anemone-rs`、rootfs、wrapper、general LTP group、Preserve contract与register相对Stage 2 HEAD保持零diff。
+最终按RV64、LA64顺序执行canonical wrappers：两架构均通过288/288 KUnit、19/19 focused、glibc/musl各2/2和
+384个TPASS，无TFAIL/TBROK/TCONF/timeout/infra。RV64自主PowerOff；LA64完成orderly shutdown后因已知缺少
+power-off driver停在terminal halt，由host退出QEMU，不宣称machine power-off capability，也不归类为POSIX-lock
+失败。
+
+最终完整diff review确认episode、inode domain、fd-removal cleanup、closed-binding exclusion、wait round、signal
+replay、raw-UAPI containment及flock/opened-description/backend/scheduler Preserve边界成立，Apollyon、Keter、
+Euclid、Safe均为0。两个current-contract页原子建立四项Active ID；R0、Stage 0-3与transaction同步关闭，
+`POSIX-LOCK-CUTOVER`完成。Stage 3之后没有自动follow-up gate。
 
 ## 最终停止边界
 

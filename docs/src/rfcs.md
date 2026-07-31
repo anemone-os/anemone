@@ -105,18 +105,12 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260731-posix-record-lock](./rfcs/posix-record-lock/index.md)：R0 / Accepted for Implementation；提议为本地
-  `S_IFREG` 文件增加 native RV64/LA64 POSIX process-associated byte-range record lock，保持现有 `flock`
-  conflict namespace 与 opened-description retirement 独立。Stage 0已关闭，只建立file-table episode与holder
-  topology；最终review全零，contract cutover为None。后续独立只读gate已把inode range domain的Stage 1解析为
-  1A结构迁移与1B range domain；两者现均已关闭，完成`fs::lock::flock` namespace alignment、inode-owned
-  range domain与focused proof。Stage 1 semantic cutover为None。独立只读
-  `Stage 1 -> 2`gate已把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal replay；
-  2A/2B现均已独立关闭，Stage 2 Closed；RV64 focused runtime通过288/288 KUnit、2A 8/8、2B 5/5与双libc随行
-  `sys` 4/4。contract cutover仍为None，stacked candidate不是standalone/current支持；Stage 3双架构runtime、focused
-  fcntl LTP与最终cutover均Not Run。独立`Stage 2 -> 3`gate已把最后阶段解析为一个原子checkpoint，冻结六项补充oracle、
-  两case专用LTP group、双架构runtime、full review与四个Introduce ID的current-contract write-back；Stage 3现为
-  Ready / Not Active。完整target delta、
+- [RFC-20260731-posix-record-lock](./rfcs/posix-record-lock/index.md)：R0已实现并关闭；本地`S_IFREG`支持native
+  RV64/LA64 POSIX process-associated byte-range record lock，file-table episode拥有holder identity，inode-associated
+  VFS domain拥有range/conflict/wait truth，任意相关fd removal执行窄cleanup handoff；现有`flock`与
+  opened-description lifecycle保持独立。最终双架构均为288/288 KUnit、19/19 focused、双libc LTP 4/4与384个
+  TPASS；LA64在orderly shutdown后因已知缺少power-off driver停在末尾halt，不宣称machine power-off capability。
+  `POSIX-LOCK-CUTOVER`已原子激活四项task/VFS contract ID，最终review四级finding全0。完整target delta、
   proof obligations 与滚动阶段见 [目标和不变量](./rfcs/posix-record-lock/invariants.md)及
   [实施计划](./rfcs/posix-record-lock/implementation.md)，执行证据见
   [事务日志](./devlog/transactions/2026-07-31-posix-record-lock.md)。

@@ -1,13 +1,13 @@
 # POSIX Record Lock 事务日志
 
-**状态：** Active transaction / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
+**状态：** Completed / R0 / Stage 0-3 Closed / Cut Over
 **日期：** 2026-07-31
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260731-posix-record-lock R0](../../rfcs/posix-record-lock/index.md)
-**实施计划：** [Stage 3 Ready](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-3)
+**实施计划：** [Stage 3 Closed / Cut Over](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-3)
 **适用修订：** R0
-**Contract Cutover：** semantic `None` through Stage 2 closure；1A只更新locator；`FILES-POSIX-OWNER-001`与全部
-`POSIX-LOCK-*`继续 Not Effective
+**Contract Cutover：** `POSIX-LOCK-CUTOVER` Completed；`FILES-POSIX-OWNER-001`、
+`POSIX-LOCK-DOMAIN-001`、`POSIX-LOCK-WAIT-001`与`POSIX-LOCK-LIFECYCLE-001` Active
 
 ## 边界
 
@@ -17,10 +17,9 @@ file-table sharing episode、显式participation与opaque holder foundation，�
 
 Stage 0关闭及命名校正完成后，开发者另行授权只读`Stage 0 -> Stage 1 Implementation Resolution Gate`。该gate
 把Stage 1解析并拆为1A/1B；两者现均已独立关闭，Stage 1 Closed。开发者随后另行授权只读`Stage 1 -> 2`
-resolution gate；Stage 2已解析为2A/2B，开发者随后分别授权并关闭两个checkpoint，Stage 2 Closed。开发者现已
-授权独立的`Stage 2 -> 3`只读resolution gate；Stage 3已解析为单一原子checkpoint并保持Ready / Not Active，
-Stage 3实现与semantic contract cutover仍未授权。Stage 0-2 stacked candidate仍不是可独立合入或写成current支持的
-POSIX record-lock capability。
+resolution gate；Stage 2已解析为2A/2B，开发者随后分别授权并关闭两个checkpoint，Stage 2 Closed。开发者随后
+授权独立的`Stage 2 -> 3`只读resolution gate与整个Stage 3原子checkpoint。双架构runtime、最终review、
+current-contract write-back与唯一commit共同关闭Stage 3；R0现已Cut Over，后续扩展不得自动进入新gate。
 
 ## R0 acceptance 与 activation
 
@@ -765,3 +764,101 @@ rootfs、Preserve contract或register修改时先停止并报告扩张/target影
 本gate未修改production source、test source、LTP group/profile、current contracts、register、rootfs或wrapper，
 未运行formatter、build、QEMU、KUnit、focused oracle或LTP。R0、Contract Impact与acceptance不变，Stage 3现在为
 **Ready / Not Active**；唯一合法下一动作是等待开发者另行授权整个Stage 3 Active，不能提前运行证据或cutover。
+
+## Stage 3 activation preflight — 2026-08-01
+
+开发者创建并持续推进唯一GOAL“完成Stage 3”，明确要求按一个checkpoint提交、不得自动进入下一gate。activation
+preflight从clean `dev/drc/omega@7df91047`读取`AGENTS.md`、`LOCAL.md`、canonical RFC正文、implementation、
+tracking issues、register、current transaction、Preserve contracts与live test/runtime owners；worktree初始无
+未提交改动，Stage 2 closure source与Stage 3 resolution baseline之间只有docs-only plan diff。
+
+preflight确认六项product oracle可全部在现有`fcntl-test` consumer内复用真实fork、`CLONE_FILES`、exec、pipe、
+flock、fcntl与close-range路径，不需要kernel/ABI/anemone-rs/rootfs/wrapper改动、test-only kernel hook或通用process
+harness。专用LTP group只注册`fcntl14/fcntl14_64`，tracked profile原子切换到该group；general `fcntl`/`full` group与
+runner policy保持不变。`ANE-20260616-LTP-POST-SUMMARY-HANG`继续作为runtime infra停止条件，任何timeout、kill-grace
+未reap或summary后不推进都不能记为PASS。LA64当前power-off limitation不预先改写Stage 3判据，canonical wrapper的
+真实exit与日志收尾仍是唯一runtime证据。
+
+Stage 3现由Ready进入Active。authoritative交付、write set、顺序验证、cutover与停止条件继续只由
+[implementation.md](../../rfcs/posix-record-lock/implementation.md#posix-record-lock-stage-3)拥有；本节只记录
+授权与preflight事实。全部runtime通过前不创建effective contract文本，四项Introduce ID继续Not Effective。
+
+## Stage 3 dual-architecture runtime acceptance — 2026-08-01
+
+Stage 3在冻结的六个test/userspace文件内完成candidate：保留2A八项与2B五项，增加六项product oracle和最终
+`POSIXLOCK:SUMMARY:PASS:19`；新`posix-record-lock` group只含`fcntl14/fcntl14_64`，tracked profile只选择该
+group。没有增加通用process harness、kernel test hook或production API。formatter、两架构`fcntl-test` app build、
+RV64 `user-test` app build与两架构kernel build通过；RV64 kernel build在sandbox内复现既有`lwext4` `Bad system
+call`/SIGSYS，同一repository command在sandbox外exit 0，因此只分类为执行环境限制。相对Stage 2 HEAD
+`763485819a50`的protected production/current-contract scan为零：kernel、ABI、`anemone-rs`、rootfs、wrapper、
+general LTP group、Preserve/current contract与register均无diff。
+
+最终按RV64、LA64顺序重跑canonical wrappers。RV64日志`build/posix-record-lock-stage3-rv64.log`包含288项KUnit与`All tests passed!`、
+2A 8/8、2B 5/5、Stage 3 6/6及aggregate 19/19；glibc/musl各自2/2，profile为
+`attempted=4 passed=4 failed=0 infra_failed=0 skipped=0`，共384个TPASS且无TFAIL/TBROK/TCONF/timeout/infra，
+末尾进入orderly `PowerOff` machine action，wrapper自主exit 0。
+
+随后顺序运行LA64 canonical wrapper：
+
+```sh
+./scripts/run-user-test-la64.sh \
+  etc/preliminary/images/sdcard-la.img \
+  build/posix-record-lock-stage3-la64.log
+```
+
+LA64同样通过288项KUnit、2A 8/8、2B 5/5、Stage 3 6/6、aggregate 19/19、glibc/musl各2/2与384个TPASS；
+profile为`attempted=4 passed=4 failed=0 infra_failed=0 skipped=0`，没有TFAIL/TBROK/TCONF/timeout/infra。guest完成
+filesystem、network与device shutdown，发布orderly PowerOff episode并进入machine action，随后明确记录
+`no power off handler succeeded, halting the system`。开发者确认LA64当前本来没有power-off driver，该末尾halt是
+已知且合理的平台边界：orderly shutdown协议已经完成，但不宣称machine power-off capability。确认terminal halt后
+退出host-side QEMU，日志以`QEMU: Terminated`收尾，wrapper exit 0。该分类与既有
+`ANE-20260726-SYSTEM-POWER-ARCH-COVERAGE`一致，不是POSIX-lock failure、timeout、infra failure或Not Run。
+
+**Disposition：** 双架构runtime acceptance通过；每架构均为288/288 KUnit、19/19 focused、双libc 4/4与384个
+TPASS。LA64末尾halt只保留为外部platform limitation，不改变R0 target、POSIX-lock acceptance、owner、ABI、
+visible semantics或Contract Impact，也不要求production/write-set expansion。Stage 3继续Active / Not Cut Over，
+现在可以起草原子effective contract candidate并进入final full-diff review；在review、docs验证与唯一commit全部完成
+前，四项Introduce ID仍Not Effective。
+
+## POSIX-LOCK-CUTOVER — 2026-08-01
+
+Stage 3最终candidate从R0 activation baseline `092f44dceaf3`执行完整change review。review确认：
+
+- file-table sharing episode是holder identity与participation的唯一truth；`FileTable` slot publication是
+  operation-local binding liveness的唯一truth，不以TGID、opened description、fd number或storage refcount
+  反推behavior owner；
+- inode-associated `PosixLockDomain`唯一保存grant range、mode与conflict predicate；report TGID只是
+  可stale的诊断snapshot，不驱动owner equality、conflict、coalesce或cleanup；
+- close、dup3 replacement、close-range、CLOEXEC与final table teardown均先撤销slot publication，再在
+  episode/table guard外进入窄VFS cleanup handoff。domain commit在同一serialization下重验binding，
+  因而closed binding不会late grant，其它live binding仍可在cleanup后独立assignment；
+- blocking path只把Event用作predicate-recheck notification，不保存candidate或grant truth；每轮listener
+  在下一轮前finish/cancel/retire，不引入nested wait。signal interruption返回ordinary idempotent
+  restart carrier，重放时重新lookup、copy-in与normalize，不保存旧binding/range snapshot；
+- raw native `struct flock`、relative whence、user pointer与errno translation被包含在`fcntl(2)` adapter；
+  VFS core只消费normalized range/mode/binding。`VFS-FILE-KIND-*`、`FLOCK-*`、`OPENED-DESC-*`、
+  `SCHED-LATCH-*`与`SCHED-WAKE-*`的owner、生命周期与可见语义均保持不变。
+
+最终review分类为Apollyon 0 / Keter 0 / Euclid 0 / Safe 0。Stage 3相对Stage 2 HEAD
+`763485819a50`的protected scan为零diff：kernel、ABI、`anemone-rs`、rootfs、wrapper、general LTP
+groups、既有Preserve contract与register均未修改。
+
+最终证据按RV64、LA64顺序产生：两架构均为288/288 KUnit、
+`POSIXLOCK2A:SUMMARY:PASS:8`、`POSIXLOCK2B:SUMMARY:PASS:5`、
+`POSIXLOCK3:SUMMARY:PASS:6`、`POSIXLOCK:SUMMARY:PASS:19`；glibc/musl各2/2，profile合计4/4，
+每架构384个TPASS，无TFAIL/TBROK/TCONF/timeout/infra failure。RV64完成machine power-off；LA64完成
+filesystem/network/device orderly shutdown与PowerOff episode后，因当前未实现power-off driver进入
+`no power off handler succeeded, halting the system`。该terminal halt是已登记platform boundary，不是
+POSIX-lock failure，也不声称LA64 machine power-off capability；确认halt后host结束QEMU，wrapper exit 0。
+
+`git diff --check`、三个Stage 3新文件的独立`git diff --no-index --check`、current-status/navigation/
+link scan与`mdbook build docs`通过。因此本cutover原子建立并激活：
+
+- `FILES-POSIX-OWNER-001`；
+- `POSIX-LOCK-DOMAIN-001`；
+- `POSIX-LOCK-WAIT-001`；
+- `POSIX-LOCK-LIFECYCLE-001`。
+
+R0、Stage 0-3与transaction同步Closed / Completed；register无新增target内缺陷或accepted limitation。
+Stage 3之后没有自动follow-up gate；任何OFD、deadlock detection、mandatory locking、32-bit compat、
+remote lock或新architecture capability均必须由独立RFC revision或follow-up RFC重新授权。

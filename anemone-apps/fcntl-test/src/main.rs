@@ -10,12 +10,23 @@ fn main() -> Result<(), Errno> {
     let mut args = env::args();
     let _ = args.next();
     let suite = args.next().ok_or(EINVAL)?;
-    if args.next().is_some() {
-        return Err(EINVAL);
-    }
 
     match suite {
-        "posix-record-lock" => posix_record_lock::run(),
+        "posix-record-lock" if args.next().is_none() => posix_record_lock::run(),
+        mode if mode.starts_with("--posix-exec-") => {
+            let result = posix_record_lock::exec_child(
+                mode,
+                args.next(),
+                args.next(),
+                args.next(),
+                args.next(),
+            );
+            if args.next().is_some() {
+                Err(EINVAL)
+            } else {
+                result
+            }
+        },
         _ => Err(EINVAL),
     }
 }

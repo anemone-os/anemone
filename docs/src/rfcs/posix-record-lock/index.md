@@ -1,35 +1,31 @@
 # RFC-20260731-posix-record-lock
 
-**状态：** R0 / Accepted for Implementation / Stage 0-2 Closed / Stage 3 Ready / Not Active / Not Cut Over
+**状态：** Closed / R0 Cut Over
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-01
 **领域：** fs / VFS / task files / scheduler wait / signal restart / syscall ABI
 **事务日志：** [2026-07-31 POSIX Record Lock](../../devlog/transactions/2026-07-31-posix-record-lock.md)
-**影响契约：** 拟 Introduce `FILES-POSIX-OWNER-001`、`POSIX-LOCK-DOMAIN-001`、
+**影响契约：** 已 Introduce `FILES-POSIX-OWNER-001`、`POSIX-LOCK-DOMAIN-001`、
 `POSIX-LOCK-WAIT-001`、`POSIX-LOCK-LIFECYCLE-001`；Preserve `VFS-FILE-KIND-001`、
 `FLOCK-DOMAIN-001`、`FLOCK-WAIT-001`、`FLOCK-LIFECYCLE-001`、`OPENED-DESC-001/002/003`、
 `OPENED-DESC-RETIRE-001`、`OPENED-DESC-LIVENESS-001`、`SCHED-LATCH-001..003` 与
 `SCHED-WAKE-001..004`。完整 R0 delta 见
 [Contract Impact](./invariants.md#contract-impact)。
-**开放问题：** 当前无 active Apollyon / Keter；本轮关闭记录见 [Tracking Issues](./tracking-issues.md#neutralized)。
-Stage 3的交付、case、命令、write set与cutover边界已由滚动implementation resolution冻结。
-**下一步：** Stage 0-2已独立关闭，Stage 2的2A/2B均Closed；独立的`Stage 2 -> Stage 3 Implementation
-Resolution Gate`已把最后阶段解析为一个原子checkpoint。下一动作只能是开发者另行授权Stage 3 Active；当前不执行
-测试、双架构runtime或semantic contract cutover。
+**开放问题：** None；全部design findings已neutralize，最终review见
+[Tracking Issues](./tracking-issues.md#neutralized)。
+**下一步：** None；Stage 0-3与`POSIX-LOCK-CUTOVER`已关闭，后续扩展必须建立独立RFC revision或follow-up RFC。
 
 ## 文档状态
 
 本文与 [目标和不变量](./invariants.md) 是 POSIX process-associated byte-range record lock 的公共 canonical
 R0 target。2026-07-31 独立 review 已共同接受 target、Contract Impact、proof obligations 与首个完整 Ready
-stage；随后建立 transaction，开发者明确授权 Stage 0 Active。R0 target 尚未 cut over，不是 current contract，
-Stage 0 foundation 已独立关闭，但仍不是可独立合入的 POSIX record-lock capability。其后的独立只读
+stage；随后建立 transaction，开发者明确授权 Stage 0 Active。Stage 0 foundation 随后独立关闭。其后的独立只读
 resolution gate已基于live source把Stage 1解析为两个独立checkpoint：1A行为保持地完成lock namespace
 alignment，1B建立inode-associated POSIX range domain与focused proof。两者现均已关闭，Stage 1 Closed。
 其后的独立只读gate把Stage 2解析为2A native ABI/binding/nonblocking-query与2B blocking wait/signal replay；
-2A/2B现已分别独立关闭，Stage 2 Closed。current contract语义仍未更新，Stage 2 stacked candidate不是可独立合入
-或对外声称的POSIX record-lock capability。最新独立resolution已把Stage 3解析为单一原子checkpoint；它仍是
-Ready / Not Active。
+2A/2B现已分别独立关闭，Stage 2 Closed。Stage 3补齐六项产品oracle、专用LTP group、双架构runtime与最终review，
+`POSIX-LOCK-CUTOVER`已把四项新ID原子写入task/VFS current contracts。R0、Stage 0-3与transaction均已关闭。
 
 本目录自本次提升起是该提案的公共 canonical source；此前的私有工作稿不再承担共享链接、target 或计划权威。
 此前 public promotion 只改变文档可见性和引用入口；本次 R0 acceptance、transaction bootstrap 与 Stage 0
@@ -60,11 +56,11 @@ waiter graph 或 lifecycle registry。
 
 ### Anemone 当前事实
 
-Stage 2 stacked candidate现已接入`F_GETLK`、`F_SETLK/F_SETLKW`、native `struct flock` copy boundary、
-operation-local binding、blocking Event recheck与ordinary signal replay。由于Stage 3、双架构runtime/focused LTP
-和`POSIX-LOCK-CUTOVER`仍未执行，这些代码不能写成current POSIX record-lock支持。现有
-`anemone-apps/user-test/ltp/groups/fcntl.txt`仍注释掉`fcntl14` / `fcntl14_64`，不能把其它`fcntl` case或Stage 2 focused
-suite当成focused LTP与最终双架构产品证据。
+R0现已接入`F_GETLK`、`F_SETLK/F_SETLKW`、native `struct flock` copy boundary、operation-local
+binding、blocking Event recheck与ordinary signal replay。Stage 3双架构runtime/focused LTP已通过，
+`POSIX-LOCK-CUTOVER`已将四项ID写入current contracts。general
+`anemone-apps/user-test/ltp/groups/fcntl.txt`保持不变；最终产品证据来自只含
+`fcntl14` / `fcntl14_64`的专用`posix-record-lock` group，而不是整个general `fcntl` group。
 
 当前 task file state 已具备与本 target 相邻、但不能直接冒充 holder contract 的事实：
 
@@ -151,8 +147,8 @@ Linux generic POSIX path 以 `current->files` 作为 behavior owner，以 `curre
 RFC target：
 
 - [目标和不变量](./invariants.md)
-- [Tracking Issues](./tracking-issues.md)：当前无 active Apollyon / Keter
-- [实施计划](./implementation.md)：Stage 0-2 Closed；Stage 3 Ready / Not Active
+- [Tracking Issues](./tracking-issues.md)：Closed / no current findings
+- [实施计划](./implementation.md)：Stage 0-3 Closed / Cut Over
 - [事务日志](../../devlog/transactions/2026-07-31-posix-record-lock.md)：Stage 0执行证据、Stage 1 resolution与
   Checkpoint 1A/1B closure，以及Stage 2 resolution和2A/2B closure evidence
 
@@ -381,32 +377,23 @@ unshare/exec 后的 episode 分离。`l_pid` 只保留报告用途。
 参与无 cycle 程序的基础 grant correctness。首版对 cycle 可能持续阻塞，直到 signal 或外部变化打破等待；
 验收必须把 deadlock cases 标为 excluded/TCONF/Not Run，而非 PASS。
 
-## 风险
+## 已闭合风险
 
-- **file-table lifecycle 当前缺少显式 holder episode truth。** 后续实现前必须从 live sharing/unshare/exec/exit
-  path 解析单一 lifecycle surface；不得用 `Arc::strong_count()`、fd slot 数或 opened-description refcount
-  反推行为 identity。
-- **close 与在途 commit 跨 task/VFS owner。** 通过 binding-scoped validation、窄 cleanup handoff 与共同最终
-  状态约束，不要求 producer同步取消 waiter，也不建立 holder × inode invocation epoch；具体验证、串行化与
-  私有校正路线必须在首次同时接入 binding close 与 grant commit 的 Ready stage 解析并证明。
-- **range replacement 容易产生 overlap/overflow 缺陷。** 由 normalized half-open/open-ended model、
-  owner-local focused proof 与 userspace oracle共同覆盖，不让 raw UAPI range进入 VFS core。
-- **wait source 可能触发 nested scheduler wait。** 首个接入 blocking wait 的 Ready stage 必须审计 begin 到
-  retire 的完整调用链；若任何 post-begin path 会睡眠，停止并重排 owner boundary，不能放宽 wait-core
-  assertion。
-- **LTP `fcntl` family 混有 deadlock、mandatory 与 runner signal/wait 行为。** focused group 必须逐 case 分类；
-  不能用整组 timeout 反推 record-lock core，也不能把明确非目标伪造成 PASS。
+- file-table episode已成为holder identity与participation的唯一truth，不使用`Arc::strong_count()`、fd
+  slot数或opened-description refcount反推行为identity。
+- close/commit跨task/VFS owner路径已由binding-scoped liveness、domain serialization与guard-out cleanup
+  handoff闭合，没有holder x inode invocation epoch或producer等待waiter的扩张。
+- normalized half-open/open-ended range、overflow边界与same-owner assignment已由KUnit、focused
+  userspace与LTP分层验证；raw UAPI保持在`fcntl` adapter。
+- blocking path已审计Event active round、predicate recheck与signal/restart cleanup，未引入nested wait。
+- 专用LTP group只选择target内的`fcntl14/fcntl14_64`；mandatory I/O、deadlock、OFD与32-bit
+  compat均未被扩大为R0保证。
 
 ## 收口
 
-当前 R0 target 已接受，transaction 已建立，Stage 0已按实现、验证与全零独立review关闭；执行事实只由
-[transaction](../../devlog/transactions/2026-07-31-posix-record-lock.md)记录。Stage 0 contract cutover为
-`None`；后续只读resolution把Stage 1拆为1A/1B。1A已完成行为保持的`fs::lock::flock` namespace alignment，
-只对current contracts做locator-only更新；1B已完成inode-owned range domain、opaque holder接线与focused KUnit。
-Stage 1 semantic cutover仍为`None`，全部prospective ID继续Not Effective；Stage 2已经独立解析为2A native
-ABI/binding/nonblocking-query与2B blocking wait/signal replay。2A/2B现均已独立关闭，Stage 2 Closed；截至Stage 2
-closure contract cutover继续为`None`，完整stacked candidate仍不是standalone/current支持。
-最终 R0 implementation closure 至少需要：
+当前 R0、Stage 0-3与transaction均已关闭；执行事实由
+[transaction](../../devlog/transactions/2026-07-31-posix-record-lock.md)记录。Stage 0-2的semantic contract
+cutover均为`None`，Stage 1A只对flock locator做行为保持更新；最终Stage 3同时满足：
 
 - 新增 contract IDs 在 `POSIX-LOCK-CUTOVER` 原子写入 current contracts，Preserve IDs 经 source/review 证明
   未退化；
@@ -419,6 +406,7 @@ closure contract cutover继续为`None`，完整stacked candidate仍不是standa
 - RV64 与 LA64 分别形成真实 guest runtime，build 或单架构结果不能替代另一架构；
 - full-diff review、register audit 与 transaction evidence 分别记录实现事实、Not Run 与剩余限制。
 
-最终 Stage 3 已由[实施计划](./implementation.md#posix-record-lock-stage-3)从live source、runner与固定测试资产
-解析为单一原子checkpoint，冻结了case、LTP分类、双架构命令、重复轮数、contract最小闭包与write set。Ready不
-构成执行授权，R0 target正文也不替代该计划权威。
+[实施计划](./implementation.md#posix-record-lock-stage-3)冻结的case、LTP分类、双架构命令、重复轮数、
+contract最小闭包与write set均按原子checkpoint完成；`POSIX-LOCK-CUTOVER`已将四项
+Introduce ID切换为Active，Preserve规则保持不变，register无新增target内缺陷或accepted
+limitation。Stage 3之后没有自动follow-up gate。

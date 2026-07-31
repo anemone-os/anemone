@@ -97,9 +97,9 @@ fn run_local_tests() {
     // local_run_cmd("/bin/udp-test", &["udp-test"], &[]);
     // println!("user-test: udp test finished.");
 
-    println!("user-test: running POSIX record lock stage 2A test...");
+    println!("user-test: running POSIX record lock test...");
     local_run_cmd("/bin/fcntl-test", &["fcntl-test", "posix-record-lock"], &[]);
-    println!("user-test: POSIX record lock stage 2A test finished.");
+    println!("user-test: POSIX record lock test finished.");
 }
 
 /// competition tests.
