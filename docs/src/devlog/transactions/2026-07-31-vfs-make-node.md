@@ -1,6 +1,6 @@
 # 2026-07-31 - VFS Make Node
 
-**Status:** Active / R1 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Ready / Not Active
+**Status:** Active / R1 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Active / C1 Closed / C2 Not Active
 **Opened:** 2026-08-01；canonical path 于 2026-07-31 public promotion 时预留
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260731-vfs-make-node R1](../../rfcs/vfs-make-node/index.md),
@@ -147,3 +147,36 @@ LA64 runtime、ext4/ramfs behavior与hardware均Not Run。current contracts未�
 remaining delta保持Not Cut Over。
 
 **Result / stop:** R1 Accepted for Implementation；Stage 2 Ready / Not Active。C1、C2、C3均未激活，当前停止。
+
+## Stage 2 execution log
+
+### 2026-08-01 - Checkpoint C1 activation and closure
+
+**Authorization / preflight:** 开发者建立新的唯一 GOAL，明确授权依次完成 Stage 2 C1、C2，并要求每个
+checkpoint 独立 commit、前一 checkpoint 关闭后不自动进入下一 gate，最终由 subagent review。C1 从 clean
+`dev/drc/alpha@a09d7d66` 激活；进入时 canonical R1、implementation、tracking issues、register、current
+transaction 与 live source 已重新读取，`kconfig` 和 `conf/.defconfig` 均保持 `kunit = true`、
+`fs_ext4 = true`、`max_logical_cpus = 1`。C1 write-set 锁定
+[§7.2](../../rfcs/vfs-make-node/implementation.md#72-checkpoint-c1--behavior-preserving-vfsinode-module-split)
+列出的 `fs/mod.rs`、`fs/vfs/` 与旧/新 `fs/inode*`；activation-time contract cutover 为 None。
+
+**Implementation / diff:** `fs/mod.rs` 只保留 module declaration、原稳定 re-export 与 filesystem-driver
+init；global VFS singleton/mount/filesystem registry 移入 `fs/vfs/mod.rs`，`PathResolution`、全部 VFS
+operation 与原 inline KUnit 移入 `fs/vfs/ops.rs`。`fs/inode.rs` 按冻结角色拆为
+`inode/{mod.rs,ops.rs,metadata.rs,object.rs}`；原先相对 `fs` 生效的 `pub(super)` 在多一层 module 后机械写为
+`pub(in crate::fs)`，有效 visibility 不变。未新增 function pointer、request type、helper abstraction 或
+production behavior；source dirty set 恰好是 C1 manifest。移动规模为删除两个旧 flat 文件共 2252 行，并在
+七个新/保留文件中一一重放相同职责；该规模只来自目录化移动。
+
+**Audit / review:** old/new public type、impl、KUnit 名称集合及 `crate::fs::*` /
+`crate::fs::inode::*` re-export sweep 一致；全部 16 个原 VFS KUnit 留在 `vfs/ops.rs`，2 个 stat KUnit 留在
+`inode/metadata.rs`。review 确认状态 owner、调用方向、函数签名、public surface 与 shared contract 均未改变，
+没有相邻重构或 C2 feature wiring；Apollyon 0、Keter 0、Euclid 0、Safe 0。
+
+**Validation:** `just fmt kernel --check` 与 `git diff --check` 通过；RV64、LA64 canonical release preset
+build 均通过。首次 sandbox 内 RV64 build 在 lwext4 C 编译触发既知 `Bad system call` / SIGSYS；完全相同命令
+在 sandbox 外进入 Rust 编译并暴露、修正 module-depth visibility 后通过，故该首次失败分类为环境限制而非
+kernel defect。C1 按合同未运行 QEMU/LTP；make-node syscall/backend/runtime proof 均 Not Run。
+
+**Closure / stop:** C1 Closed；`VFS-MAKE-NODE-CUTOVER` 继续 Not Cut Over，current contract 未修改。
+C2 保持 Not Active，C1 closure 本身不构成 C2 activation。

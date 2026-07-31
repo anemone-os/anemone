@@ -1,6 +1,6 @@
 # VFS Make Node 实施计划
 
-**状态：** R1 Accepted / Stage 1 Closed；Stage 2 Ready / Not Active
+**状态：** R1 Accepted / Stage 1 Closed；Stage 2 Active / C1 Closed / C2 Not Active
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **目标与不变量：** [VFS Make Node 目标与不变量](./invariants.md)
