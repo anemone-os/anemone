@@ -13,7 +13,7 @@ Keep the review scoped to the requested files, subsystem, or patch unless eviden
 
 Also check the repository-level coding rules in `AGENTS.md`, especially the kernel code-shape constraints. Treat violations of single-source-of-truth, diagnostic-field boundaries, narrow interfaces, assertion policy, or temporary-bridge exit conditions as review issues, not as cosmetic style comments.
 
-For an RFC-driven or cross-subsystem change, read `docs/src/contracts.md`, the relevant effective contract IDs, the RFC `Contract Impact` / target invariants, and the transaction cutover record before treating a rule as current. Existing RFC text may be historical or proposal-local; it must not override an extracted current contract. If no contract has been extracted yet and the change is the first cross-RFC reuse or replacement, require the minimum contract closure rather than a repository-wide invariant inventory.
+For an RFC-driven or cross-subsystem change, first read `docs/src/development-workflow.md`, `docs/src/contracts.md`, the relevant effective contract IDs, and the RFC `Contract Impact` / target invariants. For a claimed cutover, read the evidence named by that cutover, whether it lives in a change record, RFC closure, Git/PR, or an optional transaction. Existing RFC text may be historical or proposal-local; it must not override an extracted current contract. If no contract has been extracted yet and the change is the first cross-RFC reuse or replacement, require the minimum contract closure rather than a repository-wide invariant inventory.
 
 ## Review Modes
 
@@ -22,17 +22,22 @@ Choose the review mode explicitly and keep its evidence boundary visible:
 - In a **change review**, judge whether the requested patch or stage preserves correctness, current contracts, architecture, maintainability, and diagnosis. Follow a risk across files only when the patch exposes a real boundary dependency.
 - In a **periodic engineering audit**, inspect a bounded subsystem, owner surface, or completed implementation slice even when no failing behavior is known. Check whether the code still expresses a coherent responsibility topology, local semantic model, and interaction protocol. Read the live implementation and its current callers; do not infer the design from file names or an RFC alone.
 
-Schedule periodic audits at natural semantic boundaries: after a meaningful implementation slice, before an `N -> N+1 Implementation Resolution Gate` or cutover, or when repeated edits add new roles, compatibility bridges, state carriers, or cross-owner coordination to the same surface. Do not use a fixed line, file, or commit-count threshold.
+Schedule periodic audits at natural semantic boundaries: after a meaningful implementation slice, before the next explicitly authorized stage or cutover, or when repeated edits add new roles, compatibility bridges, state carriers, or cross-owner coordination to the same surface. Do not use a fixed line, file, or commit-count threshold.
 
-An audit authorizes findings, not an automatic refactor. Keep proposed repairs bounded by the current owner and known work. Stop and request a write-set, public-API, owner, ABI, or contract decision when the repair would cross one of those boundaries.
+An audit authorizes findings, not an automatic refactor. Keep proposed repairs inside the current Implementation Boundary. Stop and request a target, owner, public-API, ABI, contract, acceptance, or validation decision when the repair would cross one of those boundaries.
 
-## RFC Plan Maturity and Engineering Compromise
+## RFC and Gate Maturity
 
-For an RFC document or RFC-driven implementation review, read each stage's maturity before judging precision:
+Review only the artifacts and gates the work actually needs:
 
-- A future `Outline` needs a coherent purpose, prerequisites, protected target / contract / correctness boundaries, and a resolution trigger. Do not emit a finding merely because it omits concrete types, function signatures, algorithms, per-file paths, a complete corner-case matrix, or exact test commands.
-- The next `Ready` stage must be directly executable and reviewable: deliverables, implementation route or explicit probe, audit, observability, validation, stop/exit conditions, cutover, and resolved write set are all required. Ready does not imply authorization to become Active.
-- An Outline becomes a finding only when a missing dependency or protected boundary breaks target reachability, or when a possible protocol/state owner, public API, shared-contract, ABI, visible-semantics, or acceptance change is deferred without a resolution or renegotiation gate.
+- An RFC defaults to `index.md`. Do not require `implementation.md`, `invariants.md`, `tracking-issues.md`, backgrounds, or a transaction unless a concrete proof, staging, evidence, or open-decision need justifies it.
+- A future planned stage needs a coherent purpose, prerequisites, protected target / contract / correctness boundaries, and a resolution trigger. Do not emit a finding merely because it omits concrete types, signatures, algorithms, per-file paths, a complete corner-case matrix, or exact commands.
+- An executable checkpoint or stage must have enough definition to preserve its target, dependencies, Implementation Boundary, acceptance, validation, exit, and stop conditions. Internal route and file choices may remain implementation decisions when they do not change those semantics.
+- A future stage becomes a finding only when a missing dependency or protected boundary breaks target reachability, or when a possible protocol/state owner, public API, shared-contract, ABI, visible-semantics, acceptance, or validation change is deferred without an explicit review or renegotiation point.
+
+Formal gates are appropriate for contract cutover, ABI publication, owner migration, high-risk probes, unsafe intermediate states, or explicit human authorization. Ordinary commits do not need separate resolution, activation, and closure states. An existing implementation plan does not authorize entering a later gate when the user authorized only the current one.
+
+## Engineering Compromise
 
 Engineering cost may justify proposing a weaker target, but never silent degradation. Review a `Target Renegotiation Gate` for concrete cost evidence, the original target impact, non-negotiable correctness invariants, completed-slice/code disposition, comparable options, candidate reduced-target semantics, revision/contract impact, validation, decision authority, and remaining-gap routing. A coherent reduced target must be independently useful, ABI-honest, explicitly reject unsupported behavior, preserve ownership/lifetime/concurrency safety, and avoid cementing the wrong abstraction. The agent proposing it cannot approve it.
 
@@ -156,9 +161,21 @@ For protocols or abstractions with multiple phases, carriers, registrations, ack
 
 10. **Tests and evidence**
     - Match verification to risk: targeted tests for narrow behavior, broader regression runs for shared contracts.
-    - For a contract cutover, verify the transaction names every changed ID, records old/new effective semantics and scope, and provides evidence for all participating domains; a passing narrow test cannot prove a broader contract transition.
+    - For a contract cutover, verify the cutover evidence names every changed ID, records old/new effective semantics and scope, and covers all participating domains. The evidence may live in an atomic change record, RFC closure, Git/PR, or an optional transaction; a passing narrow test cannot prove a broader contract transition.
     - Prefer tests that encode externally visible semantics, race-prone paths, and failure cases instead of only the happy path.
     - When a finding is uncertain, state the missing evidence and suggest the smallest log, test, or inspection that would confirm it.
+
+## Architecture Friction Scan
+
+Before closing a Patch, small iteration, checkpoint, stage, or RFC implementation, scan the actual diff for architecture friction: duplicate truth, owner penetration, private-representation leakage, public-API growth for a local need, caller/architecture/test special cases, temporary bridges without exit conditions, hidden failure/cancellation/cleanup order, abstractions without a real obligation, or weakened oracle/validation/ABI honesty.
+
+Require concrete evidence from a code path, state/owner/lifecycle model, or accepted next step. Ordinary imports, module registration, compile failures, toolchain/environment problems, file length alone, and adjacent debt not worsened by the change are not architecture-friction findings.
+
+- No concrete friction or only Safe: emit no placeholder friction report.
+- Residual Euclid: implementation may close, but report the evidence, model mismatch, impact, and smallest repair direction.
+- Keter/Apollyon: stop before completion or cutover and report the current diff/code disposition plus the required owner/RFC/target decision.
+
+This closeout rule does not suppress the explicit result of a requested formal review: when no blocking issue is found in a formal review, say so and identify residual test risk as usual.
 
 ## Review Output
 
