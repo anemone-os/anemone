@@ -105,6 +105,14 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
+- [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
+  domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。
+  final close删除holder grant并提交cooperative recheck hint，不承诺precise close/signal/restart winner。
+  RV64/LA64 developer-run acceptance均通过264项enabled KUnit、11项focused oracle与双libc五项flock LTP；
+  LA64末尾halt由已登记的power driver缺失解释。`FLOCK-CUTOVER`已把
+  [`OPENED-DESC-RETIRE-001`](./contracts/task/opened-description-lifecycle.md)与三个
+  [`FLOCK-*`](./contracts/vfs/flock.md) ID原子切换为Effective，执行证据见
+  [transaction](./devlog/transactions/2026-07-29-flock.md)。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续

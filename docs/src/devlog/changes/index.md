@@ -32,6 +32,8 @@
 
 ## 当前记录
 
+- [2026-07-31 - Alpha/Omega Flock/UDP integration](./2026-07-31-alpha-omega-flock-udp-integration.md)
+- [2026-07-31 - Anonymous inode UAPI kind](./2026-07-31-anon-inode-uapi-kind.md)
 - [2026-07-31 - FS owner-local syscall API](./2026-07-31-fs-owner-local-syscall-api.md)
 - [2026-07-31 - Net UDP external peer retirement](./2026-07-31-net-udp-external-peer-retirement.md)
 - [2026-07-31 - IRQ flow protocol](./2026-07-31-irq-flow-protocol.md)

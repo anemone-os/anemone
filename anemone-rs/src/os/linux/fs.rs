@@ -22,6 +22,38 @@ pub type Fd = u32;
 pub use anemone_abi::fs::linux::epoll::EpollEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlockOperation {
+    Shared,
+    SharedNonblocking,
+    Exclusive,
+    ExclusiveNonblocking,
+    Unlock,
+}
+
+impl FlockOperation {
+    const fn to_linux(self) -> u32 {
+        use anemone_abi::fs::linux::flock::{LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN};
+
+        match self {
+            Self::Shared => LOCK_SH,
+            Self::SharedNonblocking => LOCK_SH | LOCK_NB,
+            Self::Exclusive => LOCK_EX,
+            Self::ExclusiveNonblocking => LOCK_EX | LOCK_NB,
+            Self::Unlock => LOCK_UN,
+        }
+    }
+}
+
+pub fn flock(fd: Fd, operation: FlockOperation) -> Result<(), Errno> {
+    fs::flock(fd as u64, operation.to_linux() as u64).map(|_| ())
+}
+
+/// Raw Linux flock entry for invalid-fd and invalid-flag ABI cases.
+pub fn flock_raw(fd: i32, operation: u32) -> Result<(), Errno> {
+    fs::flock(fd as i64 as u64, operation as u64).map(|_| ())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AtFd {
     Cwd,
     Fd(Fd),
@@ -269,6 +301,25 @@ pub fn statx(dirfd: AtFd, path: &Path, flags: u32, mask: u32) -> Result<StatX, E
 pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {
     let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
     fs::mkdirat(dirfd.to_raw() as u64, path.as_ptr() as u64, mode as u64).map(|_| ())
+}
+
+pub fn linkat(
+    olddirfd: AtFd,
+    oldpath: &Path,
+    newdirfd: AtFd,
+    newpath: &Path,
+    flags: u32,
+) -> Result<(), Errno> {
+    let oldpath = CString::new(oldpath.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    let newpath = CString::new(newpath.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    fs::linkat(
+        olddirfd.to_raw() as u64,
+        oldpath.as_ptr() as u64,
+        newdirfd.to_raw() as u64,
+        newpath.as_ptr() as u64,
+        flags as u64,
+    )
+    .map(|_| ())
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {

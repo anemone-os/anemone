@@ -1,0 +1,11 @@
+[package]
+name = "flock-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anemone-rs = { path = "../../anemone-rs" }
+
+[workspace]
+members = ["."]
+name = "flock-test"

@@ -70,6 +70,7 @@ fn ext4_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, S
 
 fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let file_ops = match inode.ty() {
+        InodeType::Anon => unreachable!("anonymous inode kind cannot be opened from ext4"),
         InodeType::Dir => &EXT4_DIR_FILE_OPS,
         InodeType::Regular => &EXT4_REG_FILE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_FILE_OPS,

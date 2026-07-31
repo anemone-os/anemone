@@ -1,8 +1,6 @@
 use anemone_abi::{
     fs::linux::epoll::{EPOLLERR, EPOLLHUP, EPOLLIN, EPOLLOUT, EpollEvent},
     process::linux::signal::SigSet as LinuxSigSet,
-    syscall::{SYS_EPOLL_PWAIT, SYS_EPOLL_PWAIT2},
-    time::linux::TimeSpec,
 };
 
 use crate::{
@@ -12,7 +10,7 @@ use crate::{
         iomux::IomuxWaitRound,
     },
     prelude::*,
-    syscall::user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWriteSlice, user_addr},
+    syscall::user_access::{UserReadPtr, UserWriteSlice},
     task::{
         files::{Fd, FileDesc},
         sig::{SigNo, TemporaryMaskWaitContext, set::SigSet},
@@ -214,7 +212,7 @@ fn linux_event_bytes(events: PollEvent, data: u64, dst: &mut [u8]) {
     dst[8..16].copy_from_slice(&data.to_ne_bytes());
 }
 
-fn run_epoll_wait(
+pub(super) fn run_epoll_wait(
     context: &'static str,
     epfd: Fd,
     events_addr: Option<VirtAddr>,
@@ -300,59 +298,4 @@ fn run_epoll_wait(
             Ok(0)
         },
     }
-}
-
-#[syscall(SYS_EPOLL_PWAIT)]
-fn sys_epoll_pwait(
-    epfd: Fd,
-    #[validate_with(user_addr.nullable())] events_addr: Option<VirtAddr>,
-    maxevents: i32,
-    timeout_ms: i32,
-    #[validate_with(user_addr.nullable())] sigmask_addr: Option<VirtAddr>,
-    sigsetsize: usize,
-) -> Result<u64, SysError> {
-    let timeout = (timeout_ms >= 0).then(|| Duration::from_millis(timeout_ms as u64));
-    run_epoll_wait(
-        "sys_epoll_pwait",
-        epfd,
-        events_addr,
-        maxevents,
-        timeout,
-        sigmask_addr,
-        sigsetsize,
-    )
-}
-
-#[syscall(SYS_EPOLL_PWAIT2)]
-fn sys_epoll_pwait2(
-    epfd: Fd,
-    #[validate_with(user_addr.nullable())] events_addr: Option<VirtAddr>,
-    maxevents: i32,
-    #[validate_with(user_addr.nullable())] timeout_addr: Option<VirtAddr>,
-    #[validate_with(user_addr.nullable())] sigmask_addr: Option<VirtAddr>,
-    sigsetsize: usize,
-) -> Result<u64, SysError> {
-    let timeout = timeout_addr
-        .map(|timeout_addr| {
-            let task = get_current_task();
-            let usp_handle = task.clone_uspace_handle();
-            let mut usp = usp_handle.lock();
-            let TimeSpec { tv_sec, tv_nsec } =
-                UserReadPtr::<TimeSpec>::try_new(timeout_addr, &mut usp)?.read();
-            if tv_sec < 0 || tv_nsec < 0 || tv_nsec >= 1_000_000_000 {
-                return Err(SysError::InvalidArgument);
-            }
-            Ok(Duration::new(tv_sec as u64, tv_nsec as u32))
-        })
-        .transpose()?;
-
-    run_epoll_wait(
-        "sys_epoll_pwait2",
-        epfd,
-        events_addr,
-        maxevents,
-        timeout,
-        sigmask_addr,
-        sigsetsize,
-    )
 }

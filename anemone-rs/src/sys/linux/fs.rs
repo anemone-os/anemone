@@ -1,5 +1,9 @@
 use super::*;
 
+pub fn flock(fd: u64, operation: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_FLOCK, fd, operation, 0, 0, 0, 0) }
+}
+
 pub fn epoll_create1(flags: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_EPOLL_CREATE1, flags, 0, 0, 0, 0, 0) }
 }
@@ -104,6 +108,26 @@ pub fn pselect6(
 
 pub fn mkdirat(dirfd: u64, path_ptr: u64, mode: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_MKDIRAT, dirfd, path_ptr, mode, 0, 0, 0) }
+}
+
+pub fn linkat(
+    olddirfd: u64,
+    oldpath_ptr: u64,
+    newdirfd: u64,
+    newpath_ptr: u64,
+    flags: u64,
+) -> Result<u64, Errno> {
+    unsafe {
+        syscall(
+            SYS_LINKAT,
+            olddirfd,
+            oldpath_ptr,
+            newdirfd,
+            newpath_ptr,
+            flags,
+            0,
+        )
+    }
 }
 
 pub fn unlinkat(dirfd: u64, path_ptr: u64, flags: u64) -> Result<u64, Errno> {

@@ -3,13 +3,13 @@
 **Contract ID：** `OPENED-DESC`
 **状态：** Active
 **Owner：** `task::files` 的 opened-description publication lifecycle
-**参与领域：** task fd table / VFS opened file / fanotify / anonymous control fds
-**覆盖范围：** opened-description identity、terminal publication lifecycle、non-owning liveness capability、dup/fork sharing 与当前 final-release hook
+**参与领域：** task fd table / VFS opened file / VFS flock / fanotify / anonymous control fds
+**覆盖范围：** opened-description identity、terminal publication lifecycle、non-owning liveness capability、dup/fork sharing、flock retirement handoff 与当前 final-release hook
 **不覆盖：** VFS inode lifetime、epoll watch lifecycle、动态 lifecycle observer registry
-**实现位置：** `anemone-kernel/src/task/files.rs`
+**实现位置：** `anemone-kernel/src/task/files/`
 **依赖：** None
 **Pending Successor：** None
-**最后核验：** 2026-07-26
+**最后核验：** 2026-07-29
 
 ## 状态与能力所有权
 
@@ -19,6 +19,7 @@
 | `Unpublished -> Live(n) -> Retired` publication lifecycle | `ProcFile::description_refs` | fd-table mutation 返回待 release 的 `ProcFile` capability | 决定 semantic final release 与 terminal liveness |
 | fd number allocation / publication | `FilesState` | syscall 持 reservation 或 fd key | fd table 可见性与 reuse |
 | non-owning identity/liveness capability | `ProcFile` lifecycle owner | consumer 持 opaque capability或 operation-local lease | 比较 identity、取得短 live target lease并在 commit 前验证 |
+| flock terminal-retirement handoff | `ProcFile` lifecycle owner编排；VFS flock domain执行grant cleanup | fd table只返回待release的`ProcFile`；VFS只接收窄retirement context | final published ref移除后终结holder的flock relation并提交recheck hint |
 | 静态 final-release hook | opened-description 创建时固定的 `FileDescOps` | hook 只借用 file/access/suppression context | 最后一个 published slot 移除后执行一次 feature-neutral cleanup |
 
 ## OPENED-DESC-001 — Published slot refcount 是 final release 的唯一真相
@@ -56,6 +57,28 @@
 **最初来源：** live `FileDescOps::final_release` implementation。
 
 **当前来源：** live `task::files` implementation，2026-07-26 源码核验。
+
+## OPENED-DESC-RETIRE-001 — Terminal retirement 固定进入窄 VFS flock handoff
+
+**规则：** `ProcFile` lifecycle owner单独编排terminal retirement。fd table先在自己的private guard内撤销slot
+publication并释放guard；首次`Live(1) -> Retired`后，owner exactly-once进入固定、窄、不可失败的VFS flock
+retirement handoff。handoff删除该holder已经存在的grant，并无论是否找到grant都向目标flock domain提交一次
+recheck notification；完成边界只包括grant cleanup与notification submission，不等待waiter运行、errno选择、
+physical placement或operation-local cleanup。handoff返回后才运行现有creation-time
+`FileDescOps::final_release`。该顺序不建立dynamic observer registry、backend hook或future feature extension
+surface。
+
+**违反表现：** fd-table guard内回调VFS；同一terminal episode重复或遗漏handoff；没有grant时跳过notification；
+static hook先于flock cleanup；close等待waiter execution/placement；或把固定flock handoff扩张为可注册的通用
+lifecycle framework。
+
+**验证 / Enforcement：** `ProcFile::release_description_ref()`、全部fd publication/removal caller、
+`OpenedDescriptionRetirementCtx`与`fs::flock::retire_flock()` source audit和常开lifecycle assertions；
+owner-local KUnit、focused dup/fork/final-close/no-grant waiter/concurrent-close regressions。
+
+**最初来源：** [RFC-20260728-flock R0](../../rfcs/flock/invariants.md#opened-desc-retire-001---terminal-episode-固定进入窄-vfs-flock-cleanup)。
+
+**当前来源：** [FLOCK-CUTOVER](../../devlog/transactions/2026-07-29-flock.md#flock-cutover---2026-07-29)。
 
 ## OPENED-DESC-LIVENESS-001 — Non-owning capability 只验证 terminal opened-description liveness
 

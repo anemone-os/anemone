@@ -1,8 +1,8 @@
 //! timerfd system calls.
 
-mod create;
-mod gettime;
-mod settime;
+mod timerfd_create;
+mod timerfd_gettime;
+mod timerfd_settime;
 
 use anemone_abi::time::linux::timerfd::{
     TFD_CLOEXEC, TFD_NONBLOCK, TFD_TIMER_ABSTIME, TFD_TIMER_CANCEL_ON_SET,

@@ -533,7 +533,7 @@ static EVENTFD_INODE_OPS: InodeOps = InodeOps {
 };
 
 fn create_eventfd(counter: u32, semaphore: bool) -> Result<File, SysError> {
-    let path = anony_new_inode(InodeType::Regular, &EVENTFD_INODE_OPS, NilOpaque::new())?;
+    let path = anony_new_inode(InodeType::Anon, &EVENTFD_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
         OpenedFile::with_mode(

@@ -39,6 +39,13 @@ pub mod linux {
         pub const EFD_NONBLOCK: u32 = O_NONBLOCK;
     }
 
+    pub mod flock {
+        pub const LOCK_SH: u32 = 1;
+        pub const LOCK_EX: u32 = 2;
+        pub const LOCK_NB: u32 = 4;
+        pub const LOCK_UN: u32 = 8;
+    }
+
     pub mod epoll {
         use core::mem::{offset_of, size_of};
 
