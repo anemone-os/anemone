@@ -32,6 +32,7 @@
 
 ## 当前记录
 
+- [2026-07-31 - IRQ flow protocol](./2026-07-31-irq-flow-protocol.md)
 - [2026-07-25 - Asynchronous wake delivery](./2026-07-25-asynchronous-wake-delivery.md)
 - [2026-07-24 - QEMU SMP Platform用途别名](./2026-07-24-qemu-smp-platform-aliases.md)
 - [2026-07-24 - mount fstype/source compatibility](./2026-07-24-mount-fstype-source-compat.md)

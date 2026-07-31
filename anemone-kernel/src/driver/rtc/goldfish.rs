@@ -91,8 +91,6 @@ impl DriverOps for GoldfishDriver {
 
         let state = GoldfishState { base, remap };
 
-        request_irq(pdev, &IRQ_HANDLER, None)?;
-
         device.set_drv_state(AnyOpaque::new(state));
 
         {}
@@ -113,10 +111,6 @@ impl PlatformDriver for GoldfishDriver {
         &["google,goldfish-rtc"]
     }
 }
-
-static IRQ_HANDLER: IrqHandler = IrqHandler::new(handle_irq);
-
-fn handle_irq(prv_data: &AnyOpaque) {}
 
 #[initcall(driver)]
 fn init() {

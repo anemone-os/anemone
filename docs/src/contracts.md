@@ -147,3 +147,4 @@ RFC 的 `invariants.md` 仍有独立职责，但不再维护整个领域的 curr
 - [TTY 当前契约](./contracts/tty/index.md)
   - [Serial TTY data plane](./contracts/tty/data-plane.md)
   - [TTY controlling relation 与 job control](./contracts/tty/job-control.md)
+- [Interrupt Flow 当前契约](./contracts/interrupt/index.md)

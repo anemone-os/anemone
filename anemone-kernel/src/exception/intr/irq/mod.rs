@@ -4,6 +4,9 @@
 //! does not handle CPU-internal interrupts such as timer interrupts and
 //! inter-processor interrupts. They are handled manually in arch-specific code.
 
+mod flow;
+pub use flow::IrqFlowType;
+
 use core::fmt::Debug;
 
 use crate::{
@@ -81,7 +84,7 @@ pub struct IrqDesc {
     virq: VirtIrq,
     hwirq: HwIrq,
     trigger: IrqTriggerType,
-    flow: &'static dyn IrqFlow,
+    flow: IrqFlowType,
     domain: Arc<IrqDomain>,
     handler: &'static IrqHandler,
     prv_data: MonoOnce<AnyOpaque>,
@@ -99,48 +102,7 @@ impl IrqHandler {
     }
 }
 
-/// The flow of an interrupt.
-///
-/// We didn't implement this as an enum since there are many
-pub trait IrqFlow: 'static + Sync {
-    fn enter(&self, desc: &IrqDesc);
-    fn exit(&self, desc: &IrqDesc);
-}
-
-impl Debug for dyn IrqFlow {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "dyn IrqFlow")
-    }
-}
-
-// TODO: flow guard
-
-#[derive(Debug)]
-pub struct EdgeFlow;
-
-impl IrqFlow for EdgeFlow {
-    fn enter(&self, desc: &IrqDesc) {
-        desc.domain.ops.read_irqsave().ack(desc.hwirq);
-    }
-
-    fn exit(&self, desc: &IrqDesc) {}
-}
-
-#[derive(Debug)]
-pub struct LevelFlow;
-
-impl IrqFlow for LevelFlow {
-    fn enter(&self, desc: &IrqDesc) {
-        desc.domain.ops.read_irqsave().mask(desc.hwirq);
-    }
-
-    fn exit(&self, desc: &IrqDesc) {
-        desc.domain.ops.read_irqsave().eoi(desc.hwirq);
-        desc.domain.ops.read_irqsave().unmask(desc.hwirq);
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrqTriggerType {
     Edge,
     Level,
@@ -160,10 +122,14 @@ impl IrqTriggerType {
 pub struct InterruptInfo {
     pub hwirq: HwIrq,
     pub trigger: IrqTriggerType,
+    pub flow: IrqFlowType,
 }
 
 impl InterruptInfo {
-    pub fn parse_2_cell_specifier(specifier: InterruptSpecifier<'_>) -> Option<Self> {
+    pub fn parse_2_cell_specifier(
+        specifier: InterruptSpecifier<'_>,
+        flow: IrqFlowType,
+    ) -> Option<Self> {
         if specifier.raw.len() != 8 {
             return None;
         }
@@ -174,6 +140,7 @@ impl InterruptInfo {
         Some(Self {
             hwirq,
             trigger: trigger_type,
+            flow,
         })
     }
 }
@@ -195,15 +162,14 @@ pub trait IrqChip: Send + Sync {
     /// Acknowledge the given interrupt line, clearing the pending state.
     fn ack(&self, irq: HwIrq);
 
-    /// End the interrupt, allowing it to be delivered again.
+    /// Complete the controller-side interrupt transaction.
     ///
-    /// This only makes sense for level-triggered interrupts, since
-    /// edge-triggered interrupts are automatically deasserted by the hardware
-    /// after being acknowledged.
+    /// The selected IRQ flow decides whether this operation is required; its
+    /// use is independent of the source's electrical trigger type.
     fn eoi(&self, irq: HwIrq);
 
     /// Translate the raw interrupt specifier from firmware into the
-    /// corresponding hardware IRQ number and trigger type.
+    /// corresponding hardware IRQ number, trigger type, and controller flow.
     fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo>;
 
     fn as_core_irq_chip(&self) -> Option<&dyn CoreIrqChip> {
@@ -328,7 +294,11 @@ pub fn request_irq(
     let ops = domain.ops.read_irqsave();
     let intr_info_raw = fwnode.interrupt_info().ok_or(SysError::NoInterruptInfo)?;
     kdebugln!("request intr info");
-    let InterruptInfo { hwirq, trigger } = ops
+    let InterruptInfo {
+        hwirq,
+        trigger,
+        flow,
+    } = ops
         .xlate(InterruptSpecifier {
             fwnode: fwnode.as_ref(),
             raw: intr_info_raw,
@@ -342,16 +312,11 @@ pub fn request_irq(
         let virq = unsafe { alloc_virq() };
         domain.map(virq, hwirq);
 
-        // TODO: custom flow handler.
-
         let desc = IrqDesc {
             virq,
             hwirq,
             trigger,
-            flow: match trigger {
-                IrqTriggerType::Edge => &EdgeFlow,
-                IrqTriggerType::Level => &LevelFlow,
-            },
+            flow,
             domain: domain.clone(),
             handler,
             prv_data: unsafe { MonoOnce::new() },
@@ -409,9 +374,9 @@ pub fn handle_domain_irq(domain: &IrqDomain, hwirq: HwIrq) -> Result<(), SysErro
         .get_mut(&virq)
         .expect("desc must exist for allocated virq");
 
-    desc.flow.enter(desc);
-    (desc.handler.func)(desc.prv_data.get());
-    desc.flow.exit(desc);
+    flow::execute(desc.flow, &desc.domain.ops, desc.hwirq, || {
+        (desc.handler.func)(desc.prv_data.get());
+    });
 
     Ok(())
 }
