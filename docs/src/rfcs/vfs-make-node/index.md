@@ -1,22 +1,21 @@
 # RFC-20260731-vfs-make-node
 
-**状态：** Draft / Public Document Review / Not Accepted
-**修订：** Draft
+**状态：** Accepted for Implementation
+**修订：** R0
 **负责人：** doruche, Codex
-**最后更新：** 2026-07-31
+**最后更新：** 2026-08-01
 **领域：** fs / VFS / syscall ABI / ext4 / ramfs
-**事务日志：** None；公开 Draft 尚未进入实现
+**事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 **影响契约：** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Refine 已提取 current baseline 的
 `DEVICE-NUMBER-001` 与 `VFS-MOUNT-ADMISSION-002`；Introduce `VFS-MAKE-NODE-001`、
 `VFS-SPECIAL-NODE-RDEV-001`
-**开放问题：** None active；[Tracking Issues](./tracking-issues.md) 保留本轮两个 Keter、两个 Euclid 的
+**开放问题：** None active；[Tracking Issues](./tracking-issues.md) 保留本轮四个 Keter、两个 Euclid 的
 Neutralized 历史
-**下一步：** review 当前公开 Draft 与 [implementation plan](./implementation.md)；16/16
-device-number current baseline 已完成 docs-only 提取，但 R0 acceptance、transaction 与任何 stage activation
-仍需分别授权
+**下一步：** 完成已激活的 [Stage 1](./implementation.md#5-stage-1-ready--device-number-prerequisite)；
+`DEVICE-NUMBER-CUTOVER` 前仍保持 16/16 current baseline，Stage 1 关闭后停止，不自动进入 `1 -> 2` gate
 
-> 本目录自 2026-07-31 起是 `vfs-make-node` 提案与 target 的公共 canonical source。公开提升只完成
-> `DEVICE-NUMBER-BASELINE-EXTRACTION` 与文档导航，不使 Draft target 生效，也不授权 Stage 1。
+> 本目录自 2026-07-31 起是 `vfs-make-node` 提案与 target 的公共 canonical source。2026-08-01 的独立复审
+> 接受 R0；Stage 1 已由本轮唯一 GOAL 激活，但 target contract 仍须在各自 cutover gate 后才生效。
 
 ## 摘要
 
@@ -29,6 +28,12 @@ VFS 在 `InodeOps` 虚表中新增 `make_node` function pointer。syscall adapte
 负责原子建立 namespace entry 与真实 inode metadata。成功结果必须能被 lookup、`stat` / `statx`、
 `getdents64` 和 unlink；ext4 必须在 reload 后恢复同一 kind、permission、owner 与适用的 `rdev`，ramfs
 必须在 resident lifetime 内保持同一 identity。
+
+R0 明确接受一项 Linux 可见偏差：本 revision 的 `mknodat` 不应用 process umask，最终 permission 直接使用
+调用者请求的 permission bits。真正的 umask 需要 task/fs-state owner 与全部创建类调用点共同接入，必须由后续
+独立工作统一实现；本 RFC 不为 `mknodat` 建立局部 mask、读取 `sys_umask` stub，或借 Stage 2 扩大 task/create
+surface。因此下文的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与 errno matrix，
+不包含 umask-adjusted permission semantics。
 
 本 RFC 不把 named FIFO 数据面、按设备号 open provider 或 pathname socket endpoint 混入 make-node 核心。
 首版只顺带接入不改变既有 owner 的现有能力：regular node 复用 ordinary regular-file behavior，device node
@@ -71,8 +76,8 @@ devfs/TTY/block endpoint 的 publication owner、既有号码或 provider lifecy
 - ext4 与 ramfs 的 ordinary inode attributes 当前都把 `rdev` 报告为 `None`；
 - ext4 special-node open 存在 `unimplemented!()`，ramfs 对非 ordinary kind 的 open 进入 `unreachable!()`；
 - mount 对 non-block source 当前返回 `EINVAL`，而 Linux/LTP 对 character node source 要求 `ENOTBLK`；
-- `sys_umask` 当前仍是 stub；make-node 不能为自己复制一套 umask/owner policy，后续 implementation
-  resolution 必须复用共同 VFS create policy，若该 owner surface 不足则先上报 shared-surface expansion。
+- `sys_umask` 当前仍是 stub；R0 接受 `mknodat` 不应用 process umask。真正的 mask state 与所有创建类调用点
+  由后续独立工作统一收口，本 RFC 只复用现有 owner/group 与 create admission，不读取该 stub 或复制局部 mask。
 
 活动登记册中的
 [`ANE-20260527-LTP-MKNOD-LEGACY-READDIR`](../../register/open-issues.md#ane-20260527-ltp-mknod-legacy-readdir)
@@ -92,6 +97,8 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
   backend owner surface。
 - 支持 type bits 为 0、`S_IFREG`、`S_IFIFO`、`S_IFCHR`、`S_IFBLK` 与 `S_IFSOCK` 的 Linux
   make-node admission；`S_IFDIR` 返回 `EPERM`，`S_IFLNK` 与其它非法 type bits 返回 `EINVAL`。
+- 明确本 revision 不应用 process umask；ext4/ramfs 的最终 permission bits 使用 `mode` 中请求的 permission
+  bits，不能读取 `sys_umask` stub、task-local mask 或建立 mknod-local mask state。
 - 对 character/block creation 执行 `CAP_MKNOD` gate；R0 不采用 Linux `WHITEOUT_DEV` 的 capability 例外，
   character 0:0 仍要求 `CAP_MKNOD`；regular/FIFO/socket 不借此要求设备创建 capability。
 - 将 syscall 的 32-bit encoded device number 完整 decode 为 12-bit major + 20-bit minor；`dev` 只对
@@ -124,8 +131,11 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
 - 不实现 overlayfs whiteout identity、copy-up/rename whiteout protocol，或为 character 0:0 绕过
   `CAP_MKNOD`。
 - 不实现 legacy `readdir` syscall，也不把它与 `mknodat` 共用 closure claim。
-- 不把 current create policy 尚未统一具备的 Linux corner case 复制成 mknod-local 特判；如果 common VFS
-  owner 无法满足 target，必须在 implementation resolution 上报 shared-surface expansion。
+- 不实现 process umask state、`umask(2)` 行为或其它创建类 syscall 的 mask 接入；这需要 task/fs-state owner
+  与全部 create call sites，由后续独立工作统一完成。
+- 不把 current create policy 尚未统一具备的其它 Linux corner case 复制成 mknod-local 特判；如果 common VFS
+  owner 无法满足本 revision 的 owner/group/permission target，必须在 implementation resolution 上报
+  shared-surface expansion。
 - 不为未来 filesystem、device class 或特殊文件数据面建立通用 factory/framework。
 - 不新建专用 `mknod-test` app，或把临时 `user-test` probe 沉淀成 production API。
 
@@ -135,8 +145,10 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Implementation plan](./implementation.md)：一个 device-number prerequisite + 一个 make-node 主实现阶段；
-  Stage 1 Ready / Not Active，Stage 2 Outline
+  Stage 1 Active，Stage 2 Outline
 - [Tracking Issues](./tracking-issues.md)：保存当前影响 target / implementation readiness 的 finding
+- [No-umask accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)：
+  本 revision 的 requested permission bits 不经 process umask 屏蔽
 - [背景材料索引](./backgrounds/index.md)：历史定位材料，不是 accepted target 或 current contract
 
 Current contracts：
@@ -159,6 +171,12 @@ Current contracts：
 - `xref:linux-6.6.32:fs/namei.c#do_mknodat`
 - `xref:linux-6.6.32:fs/namei.c#may_mknod`
 - `xref:linux-6.6.32:fs/namei.c#vfs_mknod`
+
+## 修订记录
+
+| 修订 | 日期 | 状态 | 语义变化 | Review / 事务 |
+| --- | --- | --- | --- | --- |
+| R0 | 2026-08-01 | Accepted for Implementation | 初始 accepted target：12/20 device-number prerequisite、canonical `mknodat`、ext4+ramfs make-node closure；明确 requested permission bits 不应用 process umask | [独立 R0 复审与 activation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r0-acceptance-and-stage-1-activation-preflight---2026-08-01) |
 
 ## 方案
 
@@ -188,6 +206,10 @@ overlayfs/whiteout owner 与 lifecycle，因此不接受该例外。用户态 ch
 pathname、duplicate name、bad pointer、bad relative `dirfd`、non-directory `dirfd`、symlink loop、read-only
 mount 与 parent DAC failure 由现有 syscall/VFS owner 返回 Linux-compatible errno。validation order 的精确代码
 形状属于 implementation resolution，但不能用 backend error 或成功空操作绕过 ABI admission。
+
+permission bits 不采用 Linux 的 umask-adjusted 结果：syscall adapter/VFS 把调用者请求的 permission bits 原样
+纳入最终 node description，backend 持久/驻留保存该结果。该偏差必须保持可见且可测试；不得让当前
+`sys_umask` stub 的返回值偶然驱动行为，也不得在本 RFC 内补一份 task-local 或 mknod-local umask owner。
 
 syscall 的 `dev` 参数按 Linux 32-bit encoded device number 解释；全部 bit pattern 都能 round-trip 为
 12-bit major + 20-bit minor。Linux packed layout 只存在于 `mknodat` decode、`stat`/`statx` projection、loop
@@ -266,8 +288,8 @@ KUnit 与 source audit 应覆盖 mode/`dev_t` codec、capability gate、backend 
 
 ## Contract Impact
 
-规范性 contract delta、owner 与 cutover 条件见 [目标和不变量](./invariants.md#contract-impact)。Draft 与
-accepted-but-not-effective 阶段不修改 target contract delta。公开提升 gate 已从 live source docs-only 提取
+规范性 contract delta、owner 与 cutover 条件见 [目标和不变量](./invariants.md#contract-impact)。R0 accepted-but-
+not-effective 阶段不修改 target contract delta。公开提升 gate 已从 live source docs-only 提取
 16/16 `DEVICE-NUMBER-001` baseline；实现期先由独立 `DEVICE-NUMBER-CUTOVER` 完成 12/20 normalization、通用 inode
 category-neutral number 与既有 consumer 迁移，关闭后才能进入 make-node stage。最终
 `VFS-MAKE-NODE-CUTOVER` 再原子 Introduce filesystem-backed make-node/`rdev` 并 Refine mount `ENOTBLK`。
@@ -278,6 +300,8 @@ category-neutral number 与既有 consumer 迁移，关闭后才能进入 make-n
 接受本 RFC 意味着以下 target 被固定，但不自动授权实现：
 
 - RV64/LA64 canonical `mknodat(33)` 与上述 mode/capability matrix，包括 R0 不采用 whiteout 例外；
+- 本 revision 的 requested permission bits 不经 process umask 屏蔽；这是已接受的可见限制，Linux mode
+  compatibility claim 不覆盖 umask-adjusted permission，后续由独立 umask 工作统一退出；
 - 完整 Linux 32-bit device-number ABI、12-bit major + 20-bit minor internal numeric domain，以及 packed
   representation 只留在 ABI/on-disk boundary；
 - `Inode::ty()` 唯一决定 Char/Block category，通用 inode `rdev` 只保存 category-neutral number，typed
@@ -310,6 +334,7 @@ category-neutral number 与既有 consumer 迁移，关闭后才能进入 make-n
 - 把 named FIFO、device provider open 或 pathname socket endpoint 并入本 revision；
 - 改变本 revision 已接受的 device-number numeric owner，或进一步改变 devfs publication、mount source、
   provider lifecycle 或 opened-description owner；
+- 在本 RFC 内引入 task/fs-state umask owner、读取 `sys_umask` stub 或扩展其它创建类调用点；
 - 新增长期 test app/validation facade，或让临时 probe 成为 production dependency。
 
 ## 备选方案
@@ -362,8 +387,9 @@ kind truth。filesystem 只接收 VFS semantic description。
 
 ## 收口
 
-本文仍是公开 Draft，没有 accepted revision、transaction 或 target contract cutover。实施计划已经撰写，
-但正文/计划 review 完成只表示文档可进入下一次决策，不表示 Stage 1 或后续实现已获授权。
+R0 已接受，transaction 与 Stage 1 已激活；`DEVICE-NUMBER-001` 仍保持 16/16 effective baseline，所有 target
+contract 均尚未 cut over。Stage 1 关闭只完成 device-number prerequisite，必须在此停止，不自动解析或启动
+Stage 2。
 
 最终 RFC closure 至少需要：
 

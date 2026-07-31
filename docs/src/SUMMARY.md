@@ -140,6 +140,7 @@
 			- [目标与不变量](./rfcs/vfs-make-node/invariants.md)
 			- [实施计划](./rfcs/vfs-make-node/implementation.md)
 			- [Tracking Issues](./rfcs/vfs-make-node/tracking-issues.md)
+			- [事务日志](./devlog/transactions/2026-07-31-vfs-make-node.md)
 			- [背景材料](./rfcs/vfs-make-node/backgrounds/index.md)
 				- [定位共识](./rfcs/vfs-make-node/backgrounds/positioning.md)
 		- [System Power](./rfcs/system-power/index.md)

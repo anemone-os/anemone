@@ -12,12 +12,13 @@ devfs/TTY publication lifecycle、hotplug/unpublish、provider replacement或 bl
 **实现位置：** `anemone-kernel/src/device/{devnum.rs,char/mod.rs,block/mod.rs}`、
 `anemone-kernel/src/fs/inode.rs`
 **依赖：** None
-**Pending Successor：** None
-**Review Context：** [VFS Make Node](../../rfcs/vfs-make-node/index.md)仍是未接受的公开 Draft
-**最后核验：** 2026-07-31
+**Pending Successor：** [VFS Make Node R0 `DEVICE-NUMBER-CUTOVER`](../../rfcs/vfs-make-node/index.md)；
+尚未生效
+**Review Context：** VFS Make Node R0 已接受，Stage 1 Active；本页仍保持 16/16 effective baseline
+**最后核验：** 2026-08-01
 
 本页是 2026-07-31 `DEVICE-NUMBER-BASELINE-EXTRACTION` 从 live owner 提取的 current baseline。该 docs-only
-提取没有修改代码，也没有把 VFS Make Node Draft 的 12/20 target、category-neutral inode number 或
+提取没有修改代码，也没有把 VFS Make Node R0 的 12/20 target、category-neutral inode number 或
 `DEVICE-NUMBER-CUTOVER` 写成 current fact。
 
 ## 状态与能力所有权
@@ -70,5 +71,5 @@ virtio-block publication的 runtime smoke；MMC endpoint因平台缺失保持 No
 - mount admission只消费 `DeviceId::Block`并进入 block registry；其 source-kind与 visible errno由
   [`VFS-MOUNT-ADMISSION-002`](../vfs/mount-admission.md#vfs-mount-admission-002--source-kind-owned-admission)
   拥有。
-- VFS Make Node Draft 提议的 12/20 common domain、category-neutral generic inode number与 raw escape removal
-  只有在 `DEVICE-NUMBER-CUTOVER` 完成后才可更新本 ID。
+- VFS Make Node R0 接受的 12/20 common domain、category-neutral generic inode number与 raw escape removal
+  只有在 `DEVICE-NUMBER-CUTOVER` 完成后才可更新本 ID；R0 acceptance/Stage 1 activation 本身不改变本页规则。

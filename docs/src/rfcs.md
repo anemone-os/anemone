@@ -105,12 +105,14 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：公开 Draft；提议以 canonical
+- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R0 Accepted for Implementation；以 canonical
   `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs atomic creation与filesystem-backed `rdev`形成完整
-  node-creation capability。docs-only promotion已提取 live 16/16
+  node-creation target；R0 明确接受 requested permission bits 不应用 process umask，并把 task/fs-state 与全部
+  create call sites 留给[独立 limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)。
+  docs-only promotion已提取 live 16/16
   [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) current baseline；12/20 Refine、make-node target、
-  mount `ENOTBLK`与两个新VFS contract ID均尚未cut over。Stage 1 Ready / Not Active，Stage 2 Outline；未建立
-  transaction，也未授权实现。
+  mount `ENOTBLK`与两个新VFS contract ID均尚未cut over。Stage 1 Active，Stage 2 Outline；执行证据见
+  [transaction](./devlog/transactions/2026-07-31-vfs-make-node.md)。
 - [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
   domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。
   final close删除holder grant并提交cooperative recheck hint，不承诺precise close/signal/restart winner。

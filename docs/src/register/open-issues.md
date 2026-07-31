@@ -165,12 +165,14 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 **Impact:** 这两项会继续把旧白名单的通过率卡在 syscall 入口层，和具体文件系统逻辑无关。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
-**Exit Condition:** 补上 `mknod` / FIFO 创建的 syscall 路径，并决定是否为该架构提供 legacy `readdir` 兼容入口后，再重新跑 `read03` 和 `readdir21`。
+**Last Verified:** 2026-08-01
+**Exit Condition:** VFS Make Node R0 只交付 node creation；其 `VFS-MAKE-NODE-CUTOVER` 完成后仍需分别补齐
+named FIFO I/O 与 legacy `readdir` 决策，再重新跑 `read03` 和 `readdir21`，才能关闭本合并旧条目。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md),
-[VFS Make Node RFC Draft](../rfcs/vfs-make-node/index.md)（只覆盖 node creation；named FIFO I/O 与 legacy
-`readdir` 不随该 RFC promotion 自动关闭）
+[VFS Make Node R0](../rfcs/vfs-make-node/index.md)及其
+[transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)（只覆盖 node creation；named FIFO I/O 与 legacy
+`readdir` 不随 R0 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
 
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。

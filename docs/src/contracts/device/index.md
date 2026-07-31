@@ -1,11 +1,11 @@
 # Device 当前契约
 
 **Owner：** device-number numeric namespace、character/block endpoint identity 与各自 registry admission
-**覆盖范围：** 本轮按触达提取的 16/16 typed device-number namespace、endpoint-owned number、producer-owned
+**覆盖范围：** 当前 effective 16/16 typed device-number namespace、endpoint-owned number、producer-owned
 number/name policy 与 registry-derived key
 **不覆盖：** device discovery、devfs/TTY publication lifecycle、provider open/lifetime、block I/O、hotplug/unpublish、
 ordinary-filesystem special-node creation
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-01
 
 本目录只登记已经由 live code 与既有执行证据证明生效的 Device 共享规则，不声称枚举 device subsystem
 全部不变量。
@@ -13,7 +13,8 @@ ordinary-filesystem special-node creation
 ## Contract Surfaces
 
 - [Device number namespace](./device-number.md)：16/16 typed numeric domain、char/block namespace separation、
-  endpoint-owned number 与 producer/registry ownership。
+  endpoint-owned number 与 producer/registry ownership；VFS Make Node R0 的 12/20 Refine 是尚未生效的
+  pending successor。
 
 ## 邻接契约
 

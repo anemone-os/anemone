@@ -1,15 +1,15 @@
 # VFS Make Node 实施计划
 
-**状态：** Public RFC Draft / Stage 1 Ready / Not Active；Stage 2 Outline
-**最后更新：** 2026-07-31
+**状态：** R0 Accepted / Stage 1 Active；Stage 2 Outline
+**最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **目标与不变量：** [VFS Make Node 目标与不变量](./invariants.md)
 **当前契约：** [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1616-typed-device-number-namespace)
 为 live 16/16 baseline；其余受影响 ID 见 [Contract Impact](./invariants.md#contract-impact)
-**事务日志：** None；RFC 尚未接受，任何阶段都未获执行授权
+**事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 **Contract Cutover：** `DEVICE-NUMBER-CUTOVER`、`VFS-MAKE-NODE-CUTOVER` 均 Not Cut Over
 
-本文只把 Draft target 转换为可执行顺序、首阶段 write set、验证与停止条件，不重新定义
+本文只把 R0 accepted target 转换为可执行顺序、首阶段 write set、验证与停止条件，不重新定义
 [`index.md`](./index.md) 和 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI 或 proof
 obligations。它是一份窄 RFC 的实施计划：除一个必须先独立关闭的 device-number prerequisite 外，make-node
 实现保持一个完整 stage，不再按 syscall、VFS、filesystem backend 或验证拆成多个 contract-bearing stage；
@@ -20,7 +20,7 @@ obligations。它是一份窄 RFC 的实施计划：除一个必须先独立关�
 发生冲突时按以下顺序判断：
 
 1. `docs/src/contracts/` 描述已经生效的 shared rules；
-2. `index.md` 与 `invariants.md` 描述本 RFC 的 Draft / accepted-but-not-effective target；
+2. `index.md` 与 `invariants.md` 描述本 RFC 的 accepted-but-not-effective target；
 3. 本文拥有实施顺序、stage maturity、首个 Ready stage、resolved manifest、验证与停止条件；
 4. transaction 只记录 preflight、授权、执行事实、review、验证和 cutover，不复制第二份计划；
 5. register / current limitations 只记录实际开放缺陷与已接受限制。
@@ -99,7 +99,7 @@ kernel build、QEMU、KUnit 与 LTP 均 Not Run，也不属于本 docs-only gate
 
 | Stage                                | 成熟度             | 单一交付                                                                                     | Contract Cutover        | 解析触发点                                        |
 | ------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
-| Stage 1 — Device-number prerequisite | Ready / Not Active | 12/20 category-neutral numeric domain 与全部既有 consumer 迁移                               | `DEVICE-NUMBER-CUTOVER` | entry gate、R0 acceptance、transaction 与独立授权 |
+| Stage 1 — Device-number prerequisite | Active             | 12/20 category-neutral numeric domain 与全部既有 consumer 迁移                               | `DEVICE-NUMBER-CUTOVER` | entry gate、R0 acceptance、transaction 与独立授权 |
 | Stage 2 — Make-node vertical slice   | Outline            | RV64/LA64 `mknodat` 到 ext4/ramfs persistence、metadata/open/mount 与用户态 proof 的完整闭环 | `VFS-MAKE-NODE-CUTOVER` | Stage 1 Closed 后的独立 `1 -> 2` resolution       |
 
 Stage 1 不交付 make-node syscall；Stage 2 不重新打开 device-number namespace。两次 cutover 各自保持旧 contract
@@ -109,7 +109,9 @@ Stage 1 不交付 make-node syscall；Stage 2 不重新打开 device-number name
 
 ### 5.1 成熟度、前置条件与受保护边界
 
-本阶段 `Ready / Not Active`。当前公开 Draft 和本文撰写都不授权修改 source 或 target contract。
+本阶段于 2026-08-01 经独立 R0 复审、transaction preflight 与用户的 Stage 1 唯一 GOAL 激活为 `Active`。
+本次 activation 只授权第 5.5 节 frozen manifest 和 `DEVICE-NUMBER-CUTOVER`；不授权 Stage 2 或
+`1 -> 2 Implementation Resolution Gate`。
 
 激活前必须满足：
 
@@ -207,9 +209,15 @@ Production / ABI codec / consumer-local KUnit：
 Public write-back（公开路径已由第 2 节 entry gate 建立；Stage 1 未激活前不得写入 implementation closure）：
 
 - `docs/src/contracts/device/device-number.md`
+- `docs/src/contracts/device/index.md`
+- `docs/src/SUMMARY.md`
+- `docs/src/rfcs.md`
 - `docs/src/rfcs/vfs-make-node/index.md`
 - `docs/src/rfcs/vfs-make-node/invariants.md`
 - `docs/src/rfcs/vfs-make-node/implementation.md`
+- `docs/src/rfcs/vfs-make-node/tracking-issues.md`
+- `docs/src/register/current-limitations.md`
+- `docs/src/register/open-issues.md`
 - `docs/src/devlog/transactions/2026-07-31-vfs-make-node.md`
 - `docs/src/devlog/transactions/index.md`
 - `docs/src/devlog/2026-07-20_to_2026-08-02.md`
@@ -250,13 +258,16 @@ Stage 2 当前是 `Outline / Not Active`。本节预计路径、类型和命令�
 
 ### 7.2 受保护 target 与禁止扩张
 
-- 保持 Draft 的完整 node-kind、dirfd、mode、`dev`、`CAP_MKNOD`（含 char 0:0 无 whiteout 例外）与 errno matrix；
+- 保持 R0 的完整 node-kind、dirfd、mode、`dev`、`CAP_MKNOD`（含 char 0:0 无 whiteout 例外）与 errno matrix；
+- 保持 R0 明确不应用 process umask 的 requested-permission semantics；不得读取 `sys_umask` stub、建立
+  mknod-local/task-local mask，或借本阶段扩展全部创建类调用点；
 - 保持 ext4 + ramfs acceptance boundary、atomic publication/reload 和 provider-independent creation；
 - backend 不接收 task、fd table、raw Linux mode/dev_t、capability 或 provider handle；
 - 不实现 named FIFO、device provider open、pathname socket endpoint、legacy `readdir` 或 overlayfs whiteout；
 - 不为单个 LTP pathname、filesystem、provider 或执行顺序增加 production 特判；
-- 不把 `sys_umask` stub 扩张为独立全系统项目；只复用/收窄 existing common-create owner，若无法形成 callback 前
-  final metadata，命中停止条件并上报 shared-surface expansion。
+- 不把 `sys_umask` stub 扩张为独立全系统项目；requested permission bits 直接进入 existing common-create
+  handoff，只复用现有 owner/group policy。若不扩大 task/全部 create surface 就无法形成这一 R0 final metadata，
+  命中停止条件并上报，而不是顺带实现 umask。
 
 ### 7.3 预计 owner 与文件面
 
@@ -308,7 +319,8 @@ checkpoint 关闭不自动授权 feature wiring；下一 checkpoint 必须按 St
 
 ### 7.5 Ready resolution 必须闭合的实现问题
 
-1. final node description 的 Rust shape，以及 common VFS create path 如何在 callback 前得到 permission、uid、gid；
+1. final node description 的 Rust shape，以及 common VFS create path 如何在 callback 前得到 requested permission
+   bits（不应用 process umask）、uid、gid；
 2. regular node 复用 `touch` 还是统一进入 backend `make_node`，同时确保只有一个 publication path；
 3. lwext4 如何在 `add_entry` 前设置 final mode/owner/适用 `rdev`，每个 fallible step 的 rollback 与 free-inode 顺序；
 4. ext4 `ext4_inode_get_dev/set_dev` adapter、reload/getattr codec 与 uid/gid 持久化 proof；
@@ -348,6 +360,7 @@ Stage 2 Ready definition 至少应覆盖：
 出现以下证据时 Stage 2 必须在 cutover 前停止：
 
 - callback 前 final owner/permission 无法由 existing VFS owner 形成，需扩大 shared create contract；
+- 需要读取 `sys_umask` stub、建立 task/fs-state mask owner或修改其它创建类调用点才能继续；
 - ext4 无法在失败后避免可 lookup 的半初始化 node，或需要接受 cache-only `rdev`；
 - 需要改变 `InodeOps::make_node` owner、node-kind/ABI/errno matrix、ext4+ramfs acceptance boundary；
 - 需要 FIFO/device/socket 数据面、通用 provider resolver、opened-description handoff 或新生命周期协议；

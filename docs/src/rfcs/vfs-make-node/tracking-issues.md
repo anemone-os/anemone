@@ -1,17 +1,18 @@
 # VFS Make Node Tracking Issues
 
-**状态：** Public Draft Review / No Active Findings
-**最后更新：** 2026-07-31
+**状态：** R0 Accepted / No Active Findings
+**最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
-**事务日志：** None；公开 Draft 尚未进入实现
+**事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 
 本文只跟踪已经影响 target、owner / contract boundary、implementation resolution、停止边界或验收判断的
 design finding。implementation 进度与执行证据不放在这里；Draft target 修复已经折回 `index.md` /
 `invariants.md`，本文只保留 finding 的问题、决定、修复位置与状态历史。
 
-本轮 review 没有 Apollyon，两个 Keter 与两个 Euclid 均已在 Draft target 中 Neutralized。这里的
-Neutralized 只表示文档层问题已有自然落点；[implementation plan](./implementation.md) 已独立撰写，但不因此
-建立 accepted revision、public contract、transaction、Active stage 或代码实现授权。
+本轮 review 没有 Apollyon，四个 Keter 与两个 Euclid 均已在 Draft target / implementation manifest 中
+Neutralized。这里的
+Neutralized 表示文档层问题已有自然落点。2026-08-01 独立复审确认 Apollyon/Keter/Euclid/Safe 全 0，R0
+随后接受并建立 transaction；Stage 1 仅按本轮唯一 GOAL 激活，所有 target contract 仍待对应 cutover。
 
 ## Apollyon
 
@@ -30,6 +31,41 @@ None active。
 None。
 
 ## Neutralized
+
+### KETER-VFS-MAKE-NODE-004：Stage 1 manifest 无法覆盖 R0、transaction 与 closure write-back
+
+**原问题：** Stage 1 Ready 的 public write-back 只列出 current device-number contract、RFC 三页、transaction、
+transaction index 与双周 devlog，却遗漏 `docs/src/SUMMARY.md`、`docs/src/rfcs.md`、本 tracking page 与
+`docs/src/register/current-limitations.md`。device owner index 与旧 mknod register backlink 也会在 cutover/接受后
+失真。R0 接受、transaction 双向导航、已接受 umask limitation 与 Stage 1 closure 因而必然需要越过 frozen
+manifest。
+
+**决定：** 开发者明确授权完成 R0 接受、transaction setup 与 Stage 1 closure 所需的全部 documentation-level
+write-set expansion。第 5.5 节现在显式列出上述四页、device owner index 与相关 open-issue backlink；source
+manifest 不扩大，task/umask owner 与 Stage 2 production surface仍不进入 Stage 1。transaction 建立后记录该
+授权、实际 baseline 与 activation，不复制第二份计划。
+
+**修复位置：** [Stage 1 Resolved Write Set Manifest](./implementation.md#55-resolved-write-set-manifest)。
+
+**状态：** Neutralized / 2026-08-01；独立复审确认 manifest 闭合，R0/transaction/activation 已执行。
+
+### KETER-VFS-MAKE-NODE-003：Process umask 的可见语义与 owner 边界未固定
+
+**原问题：** Draft 已记录 `sys_umask` 是 stub，却同时承诺 Linux mode admission、最终 permission 与 permission
+proof，没有规定 `mknodat` 是否屏蔽 process umask。实现可能顺带扩张 task/fs-state 与全部 create call sites，
+也可能忽略 umask 却继续声称完整 Linux permission parity；两条路线改变不同的 target/acceptance boundary。
+
+**决定：** 开发者接受本 revision 的可见偏差：`mknodat` 最终 permission 直接使用 requested bits，不应用
+process umask。本 RFC 不读取 `sys_umask` stub、不建立 mknod-local/task-local mask，也不扩大其它创建类调用点；
+Linux compatibility claim 收窄为 node-kind、`dev_t`、dirfd、capability 与 errno matrix。后续独立 umask 工作必须
+建立 task/fs-state 唯一 owner、统一 `umask(2)` 与全部 create call sites，并以跨创建路径验证完成后才能退出
+current limitation。
+
+**修复位置：** [摘要、目标、非目标、ABI 与接受边界](./index.md)、
+[MAKE-NODE-ABI-001](./invariants.md#make-node-abi-001--rv64la64-使用-canonical-mknodat-与-linux-node-matrix)、
+[Stage 2 protected target](./implementation.md#72-受保护-target-与禁止扩张)。
+
+**状态：** Neutralized / 2026-08-01；已登记 current limitation，Stage 1 source manifest 保持不变。
 
 ### KETER-VFS-MAKE-NODE-001：Linux device-number ABI 范围与内部 identity 边界尚未解析
 
