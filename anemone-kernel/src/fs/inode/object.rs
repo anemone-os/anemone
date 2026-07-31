@@ -441,6 +441,14 @@ impl InodeRef {
         (self.inode().ops.touch)(self, name, perm)
     }
 
+    pub fn make_node(
+        &self,
+        name: &str,
+        description: MakeNodeDescription,
+    ) -> Result<InodeRef, SysError> {
+        (self.inode().ops.make_node)(self, name, description)
+    }
+
     pub fn mkdir(&self, name: &str, perm: InodePerm) -> Result<InodeRef, SysError> {
         (self.inode().ops.mkdir)(self, name, perm)
     }

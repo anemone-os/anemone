@@ -105,16 +105,18 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
-- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R1 Accepted for Implementation；以 canonical
-  `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs backend-local atomic creation与filesystem-backed `rdev`
-  形成完整node-creation target；R1继承requested permission bits不应用process umask的限制，并把task/fs-state与全部
+- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R2 Accepted for Implementation；以 canonical
+  `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs有序publication与filesystem-backed `rdev`
+  形成完整node-creation target；R2继承requested permission bits不应用process umask的限制，并把task/fs-state与全部
   create call sites 留给[独立 limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)。
   Stage 1与`DEVICE-NUMBER-CUTOVER`已把
   [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) Refine为effective 12/20 category-neutral baseline；
-  make-node target、mount `ENOTBLK`与两个新VFS contract ID仍未cut over。R1要求backend-local final metadata
-  先于dirent commit并回滚commit前失败；若既有common-create backend/cache/dentry窗口需要新跨ownertransaction，
+  make-node target、mount `ENOTBLK`与两个新VFS contract ID仍未cut over。R2要求backend-local final metadata
+  先于dirent publication、正常并发不可见中间态、成功reload与可实施cleanup；lwext4任意I/O failure/crash
+  atomicity由[accepted limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)
+  和后续lwext4/Rust wrapper事务负责。若既有common-create backend/cache/dentry窗口需要新跨ownertransaction，
   则由[独立open issue](./register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)承接，不阻塞本RFC。
-  Stage 1 Closed，Stage 2已解析为Ready / Not Active，C1仍需独立授权；执行证据见
+  Stage 1 Closed，Stage 2 Active且C1-C2 Closed；C3 validation/probe removal/review/cutover仍Not Active，执行证据见
   [transaction](./devlog/transactions/2026-07-31-vfs-make-node.md)。
 - [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
   domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock namespace独立。

@@ -64,6 +64,7 @@ pub mod linux {
     pub const SYS_IOCTL: u64 = 29;
     pub const SYS_FLOCK: u64 = 32;
 
+    pub const SYS_MKNODAT: u64 = 33;
     pub const SYS_MKDIRAT: u64 = 34;
     pub const SYS_UNLINKAT: u64 = 35;
     pub const SYS_SYMLINKAT: u64 = 36;

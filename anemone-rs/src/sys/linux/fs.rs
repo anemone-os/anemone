@@ -110,6 +110,15 @@ pub fn mkdirat(dirfd: u64, path_ptr: u64, mode: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_MKDIRAT, dirfd, path_ptr, mode, 0, 0, 0) }
 }
 
+pub fn mknodat(
+    dirfd: u64,
+    path_ptr: u64,
+    mode: u64,
+    dev: u64,
+) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_MKNODAT, dirfd, path_ptr, mode, dev, 0, 0) }
+}
+
 pub fn linkat(
     olddirfd: u64,
     oldpath_ptr: u64,

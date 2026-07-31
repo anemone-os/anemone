@@ -88,6 +88,16 @@ mod primitives {
         inode.chmod(perm, ctime);
     }
 
+    fn new_inode_owner(parent: &InodeRef) -> (Uid, Gid) {
+        let cred = get_current_task().cred();
+        let gid = if parent.inode().perm().contains(InodePerm::ISGID) {
+            parent.gid()
+        } else {
+            cred.gid.fs
+        };
+        (cred.uid.fs, gid)
+    }
+
     /// Mount a filesystem at the specified mountpoint.
     pub fn vfs_mount_at<'a, R: Into<PathResolution<'a>>>(
         fs_name: &str,
@@ -162,6 +172,26 @@ mod primitives {
         init_new_inode_owner(parent.inode(), &inode, perm);
 
         let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
+
+        Ok(PathRef::new(parent.mount().clone(), dentry))
+    }
+
+    pub fn vfs_make_node_at(
+        parent: &PathRef,
+        name: &str,
+        mode: InodeMode,
+        rdev: DeviceId,
+    ) -> Result<PathRef, SysError> {
+        if parent.inode().ty() != InodeType::Dir {
+            return Err(SysError::NotDir);
+        }
+        parent.mount().ensure_writable()?;
+
+        let perm = new_inode_perm(parent.inode(), mode.ty(), mode.perm());
+        let (uid, gid) = new_inode_owner(parent.inode());
+        let description = MakeNodeDescription::new(InodeMode::new(mode.ty(), perm), uid, gid, rdev);
+        let inode = parent.inode().make_node(name, description)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }

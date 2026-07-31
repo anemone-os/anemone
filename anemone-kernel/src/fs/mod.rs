@@ -50,7 +50,7 @@ pub use self::{
     filesystem::{FileSystem, FileSystemFlags, FileSystemOps},
     inode::{
         DeviceId, Ino, InoIsZero, InodeMeta, InodeMode, InodeOps, InodePerm, InodeRef, InodeStat,
-        InodeType, ModifType, OpenedFile,
+        InodeType, MakeNodeDescription, ModifType, OpenedFile,
     },
     iomux::{PollEvent, PollRegisterResult, PollRequest},
     mount::{Mount, MountAttrFlags, MountData, MountSource},
@@ -65,7 +65,7 @@ pub use self::{
 };
 pub(crate) use self::{
     flock::{FlockMode, FlockOperation, FlockOutcome, request_flock, retire_flock},
-    inode::RenameFlags,
+    inode::{RenameFlags, reject_make_node},
     iomux::PollRoute,
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
 };

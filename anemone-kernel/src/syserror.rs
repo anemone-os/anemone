@@ -65,6 +65,8 @@ pub enum SysError {
     IsDir,
     /// The target is not a regular file.
     NotReg,
+    /// The target is not a block device.
+    NotBlockDevice,
     /// The target is not a symbolic link.
     NotSymlink,
     /// The entity is busy (e.g. still has active references).
@@ -226,6 +228,7 @@ impl SysError {
             SysError::IdentifierRemoved => EIDRM,
             SysError::NotDir => ENOTDIR,
             SysError::IsDir => EISDIR,
+            SysError::NotBlockDevice => ENOTBLK,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,
             SysError::FileTooLarge => EFBIG,
             SysError::DirNotEmpty => ENOTEMPTY,

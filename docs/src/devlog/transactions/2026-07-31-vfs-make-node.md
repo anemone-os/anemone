@@ -1,12 +1,12 @@
 # 2026-07-31 - VFS Make Node
 
-**Status:** Active / R1 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Active / C1 Closed / C2 Not Active
+**Status:** Active / R2 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Active / C1-C2 Closed / C3 Not Active
 **Opened:** 2026-08-01；canonical path 于 2026-07-31 public promotion 时预留
 **Owner:** doruche, Codex
-**Canonical Plan:** [RFC-20260731-vfs-make-node R1](../../rfcs/vfs-make-node/index.md),
+**Canonical Plan:** [RFC-20260731-vfs-make-node R2](../../rfcs/vfs-make-node/index.md),
 [目标与不变量](../../rfcs/vfs-make-node/invariants.md),
 [Stage 2 Ready](../../rfcs/vfs-make-node/implementation.md#7-stage-2-ready--make-node-vertical-slice)
-**Canonical Revision:** R1
+**Canonical Revision:** R2
 **Contract Impact:** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Stage 1已在
 `DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`为Effective；`VFS-MAKE-NODE-001`、
 `VFS-SPECIAL-NODE-RDEV-001` 与 `VFS-MOUNT-ADMISSION-002` 保持 Not Cut Over
@@ -129,7 +129,8 @@ allocation/resource；existing common-create handoff不得因make-node退化。�
 
 **Live resolution evidence:** `fs/mod.rs`为1271行、`fs/inode.rs`为1061行，C1固定同owner目录化拆分并保持全部
 re-export/visibility/signature/behavior。RV64/LA64 syscall table均缺`mknodat(33)`；`Capability::MKNOD`与
-`RawAtFd`/`AtFd`规则可只读复用。32个`InodeOps` static分布于26个文件，已在authoritative Ready manifest冻结。
+`RawAtFd`/`AtFd`规则可只读复用。resolution当时把`InodeOps` static误记为32个；C2 live sweep更正为feature前
+34个、仍分布于同一组26个文件，路径manifest没有变化。
 common create当前在backend return后补owner，故C2固定VFS callback前形成`MakeNodeDescription`，regular mknodat
 也走backend `make_node`。
 
@@ -180,3 +181,100 @@ kernel defect。C1 按合同未运行 QEMU/LTP；make-node syscall/backend/runti
 
 **Closure / stop:** C1 Closed；`VFS-MAKE-NODE-CUTOVER` 继续 Not Cut Over，current contract 未修改。
 C2 保持 Not Active，C1 closure 本身不构成 C2 activation。
+
+### 2026-08-01 - Checkpoint C2 activation, Review Hold and closure
+
+**Authorization / baseline:** 同一开发者GOAL在C1独立关闭后明确授权继续完成C2，但不授权C3。C2从clean
+`dev/drc/alpha@1115be0d`激活；重新核对R1 target、§7.3路线、§7.5停止条件与§7.6 production/temporary/docs
+manifest后，没有发现需改变owner、ABI、node matrix、errno、acceptance或shared contract的证据。activation-time
+contract cutover为None；C3 runtime、probe removal、final contract review/cutover继续未授权。
+
+**Implementation:** RV64/LA64 syscall registry增加asm-generic `mknodat(33)`，adapter以`RawAtFd`保留absolute
+path忽略invalid dirfd，完成`0/REG/FIFO/CHR/BLK/SOCK`、DIR=`EPERM`、LNK/invalid=`EINVAL`、CHR/BLK
+`CAP_MKNOD`（包括char 0:0）与canonical Linux `dev_t` decode。VFS在backend callback前完成writable mount、DAC、
+requested permission及既有uid/gid inheritance并形成窄`MakeNodeDescription`；regular也走同一`make_node` route，
+未读取umask stub或修改其它create caller。
+
+ext4/lwext4在`add_entry`前写final kind/mode、完整u32 uid/gid与适用rdev；dirent失败释放未链接inode，释放成功后
+清除dirty以避免`Drop`把已释放slot写回。reload/getattr/sync复用同一owner与canonical rdev codec；FIFO open为
+`EOPNOTSUPP`，Char/Block/Socket为`ENXIO`。ramfs在既有write transaction中先完成final metadata，再seed inode并
+插入dirent；duplicate在allocation/publication前拒绝，post-allocation路径没有新增fallible external resource。
+Regular/Fifo/Char/Block/Socket均有稳定resident identity与explicit open error。mount先检查Block kind与numeric
+rdev，non-block、null source和missing identity为`ENOTBLK`，合法number的provider miss仍为`ENOENT`。
+
+durable `anemone-rs`保留raw syscall、typed `AtFd`/`Path` wrapper与unsafe pointer form。validation-only manifest已
+准备并保留temporary `vfs_make_node_probe`、`vfs-make-node` focused LTP group及profile/registration；probe覆盖
+ext4/ramfs node matrix、metadata/stat/statx/getdents/unlink、regular I/O、special open、relative/absolute dirfd、
+bad pointer、duplicate、RO mount、CAP_MKNOD、char 0:0、provider independence与ext4 overlong-name precommit
+admission/no-dirent路径。它们只编译、未执行，必须由C3运行后删除/恢复；未形成production dispatch或长期API。
+
+**Initializer / source audit:** resolution的32-static计数发生live drift：C2 activation前实际为34个；C2在已授权
+`fs/ramfs/inode.rs`内增加一个special-node vtable，最终35个static全部恰有一个`make_node`。只有ext4与ramfs
+directory使用真实callback，其余33个均使用共同`EPERM`拒绝函数；26文件manifest与owner集合不变。ext4/ramfs
+special open无`unimplemented!()`或错误的ordinary fallback；make-node production route没有provider lookup；
+Linux packed device codec仍只由`anemone_abi::fs::linux::dev_t`拥有，ext4 helper只调用该codec。mount顺序保持
+kind -> rdev -> provider，C2 source/validation dirty paths全部位于§7.6 manifest。
+
+**KUnit / review:** owner-local KUnit只完成编译，覆盖mode/dev/capability normalization、完整kind matrix与char 0:0、
+`MakeNodeDescription`合法性、ext4 canonical rdev projection与special-open errno、ramfs final metadata/duplicate
+admission/rdev projection/special-open、mount Block/rdev admission；未运行，不能作为rollback/reload runtime proof。
+pre-closure review先修正ext4 special vtable绕过`ext4_open`、missing-rdev mount仍为`EINVAL`、free-unlinked后dirty
+inode可能写回三个finding。最终独立subagent review随后报告一个Apollyon、三个Keter和一个Euclid：R1 strict
+backend atomicity超出lwext4自然能力；overlong-name probe只能证明admission/no-dirent；mode高于Linux `umode_t`
+位宽应截断而非`EINVAL`；文档提前声称C2 Closed/committed/no findings；ext4 socket注释已过时。C2因此进入
+Review Hold，没有checkpoint commit。
+
+**Validation:** `just fmt kernel --check`、`just fmt user-test --check`与`git diff --check`通过。最新production tree的
+RV64、LA64 canonical release preset build均通过并编译KUnit；首次sandbox内RV64仍在lwext4 C编译触发既知
+`Bad system call`/SIGSYS，相同命令在sandbox外通过，分类为environmental。temporary user-test分别通过
+`just app build --arch riscv64 user-test`与`just app build --arch loongarch64 user-test`。C2按合同未运行QEMU、
+KUnit runtime、LTP或probe；ext4/ramfs真实runtime、reload、failure-path与双架构acceptance均Not Run，留给C3。
+
+**Hold / stop:** C2未关闭、未提交。temporary probe/profile仍在树中，current contract未修改，
+`VFS-MAKE-NODE-CUTOVER`及三个remaining delta全部Not Cut Over；C3保持Not Active。target/acceptance finding
+触发下述R2 Target Renegotiation Gate；不得运行C3、删除probe、恢复profile或声称partial/runtime capability。
+
+## R2 Target Renegotiation and C2 Review Hold - 2026-08-01
+
+**Evidence:** ext4 make-node已经在同一`fs_lock`内先形成final mode/uid/gid/rdev，再调用lwext4 `add_entry`；local
+child reference也在释放锁前Drop，因此正常并发lookup不能观察中间状态。成功路径的owner/rdev persistence与reload
+route同样存在。但lwext4以dirty inode reference、directory block mutation和lazy block-cache writeback组合create，
+Rust wrapper没有跨child inode与parent dirent的journal/rollback handle，无法在合理工程量内承诺任意内部I/O
+failure、crash或power-loss下物理全有或全无。R1 strict backend atomicity因此不是当前实现能够诚实关闭的claim。
+
+**Developer decision / R2:** 开发者接受reduced但自洽的R2 target：保留final metadata先于publication、同一backend
+锁下的normal-runtime serialization、成功normal sync/reload、pre-publication rejection、未链接inodecleanup、
+no-panic与existing common-create无退化；明确不保证lwext4任意I/O failure/crash atomicity。修复责任归属后续
+lwext4及`lwext4-rust`改进事务，不要求本RFC临时改造lwext4。未来若其它target guarantee仍无法在合理工程量内
+承诺，可以再次提出Target Renegotiation，但实现/agent无权静默妥协或把较弱能力写成原target closure。
+
+**Natural-shape audit:** C2 diff没有forced flush、双阶段truth、fault-injection production hook、伪journal或第二套
+publication protocol。metadata-before-publication、同锁调用、name边界validation、`free_unlinked` cleanup、u32
+owner和rdev persistence都是自然正确性/错误抵抗结构，保留。overlong-name probe只声明admission/no-dirent，不能
+作为allocation rollback proof；strict lwext4 failure/crash gap登记为
+[accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)。
+
+**Other review dispositions:** syscall normalizer按Linux 16-bit `umode_t`先截断mode高位，再做kind/permission解析；
+相关KUnit改为验证高位被忽略。ext4 socket stale comment删除。R2 RFC、invariants、implementation、tracking、
+register、transaction、RFC index与双周devlog同步改写；在最终format/build/docs与同一subagent复审通过前，C2继续
+Review Hold且没有commit。QEMU、KUnit runtime、LTP、probe、真实ext4/ramfs runtime/reload/failure path均Not Run。
+
+**Final review:** 同一只读subagent对R2 canonical target、accepted limitation、全部production/temporary/docs diff
+与validation provenance复审，结论Apollyon 0、Keter 0、Safe 0；唯一Euclid指出temporary probe注释仍把256-byte
+component误称为backend rejection、RFC用户态proof仍泛称backend rollback。两处均收窄为namei
+pre-publication rejection与unlinked-inode cleanup后关闭。review确认35个`InodeOps` static位于冻结26文件，只有
+ext4/ramfs directory使用真实callback；无forced flush、伪journal、双状态、fault hook、proof-only production seam、
+provider lookup、raw codec重复或write-set扩张。R2 owner/exit condition与未来Target Renegotiation边界自洽。
+
+**Final validation:** 最新tree通过`just fmt kernel --check`、`just fmt user-test --check`、`git diff --check`、
+`mdbook build docs`、RV64/LA64 canonical release preset build和双架构`just app build ... user-test`。三个new file
+分别执行`git diff --no-index --check /dev/null <file>`，均只以“与空文件不同”的status 1结束且无whitespace
+diagnostic。RV64 sandbox build在lwext4 C编译重现`Bad system call`/SIGSYS，相同命令在sandbox外通过，继续分类为
+environmental。一次并行双架构build因共享`build/generated/device-tree/platform.dtb`竞争导致LA64缺文件；RV64完成
+后顺序重跑同一LA64 canonical命令通过，故分类为验证编排竞争而非source defect。KUnit只随release build编译；
+QEMU、KUnit runtime、LTP、temporary probe、真实ext4/ramfs runtime/reload/failure path均Not Run。
+
+**Closure / stop:** C2以独立`vfs-make-node: implement node creation`checkpoint commit关闭。temporary probe、focused
+profile与group按计划保留给C3；current contract未修改，`VFS-MAKE-NODE-CUTOVER`及三个remaining delta全部Not Cut
+Over。Stage 2保持Active，C3保持Not Active；本GOAL在此停止，不自动运行C3、删除probe、恢复profile、修改current
+contract或声称runtime/partial capability。

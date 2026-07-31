@@ -279,6 +279,7 @@ fn proc_fd_read_dir(
 }
 
 static PROC_FD_DIR_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: proc_fd_lookup,
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),
@@ -294,6 +295,7 @@ static PROC_FD_DIR_INODE_OPS: InodeOps = InodeOps {
 };
 
 static PROC_FD_ENTRY_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotDir),
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),

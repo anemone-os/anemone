@@ -1,6 +1,6 @@
 # VFS Make Node 实施计划
 
-**状态：** R1 Accepted / Stage 1 Closed；Stage 2 Active / C1 Closed / C2 Not Active
+**状态：** R2 Accepted / Stage 1 Closed；Stage 2 Active / C1-C2 Closed / C3 Not Active
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **目标与不变量：** [VFS Make Node 目标与不变量](./invariants.md)
@@ -9,7 +9,7 @@
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 **Contract Cutover：** `DEVICE-NUMBER-CUTOVER` Effective；`VFS-MAKE-NODE-CUTOVER` Not Cut Over
 
-本文只把 R1 accepted target 转换为可执行顺序、stage write set、验证与停止条件，不重新定义
+本文只把 R2 accepted target 转换为可执行顺序、stage write set、验证与停止条件，不重新定义
 [`index.md`](./index.md) 和 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI 或 proof
 obligations。它是一份窄 RFC 的实施计划：除一个必须先独立关闭的 device-number prerequisite 外，make-node
 实现保持一个完整 stage，不再按 syscall、VFS、filesystem backend 或验证拆成多个 contract-bearing stage；
@@ -79,7 +79,8 @@ kernel build、QEMU、KUnit 与 LTP 均 Not Run，也不属于本 docs-only gate
   major/minor 与 encoded integer；`device::devnum` 继续唯一拥有结构化 numeric domain。stat、loop 与后续
   `mknodat` 只能调用该窄 codec，不复制位运算，也不把 packed value 存入 generic metadata。
 - VFS 在 backend callback 前决定 parent、mount/DAC/common-create admission 与 final permission/uid/gid；backend
-  在本地先完成最终metadata，再提交dirent并回滚提交前失败；VFS按既有协议materialize callback返回的同一inode。
+  在本地先完成最终metadata，再串行化进入dirent publication并清理仍未链接的失败分配；VFS按既有协议
+  materialize callback返回的同一inode。strict lwext4 failure/crash atomicity不属于本revision。
   既有backend commit到inode-cache/dentry materialization窗口若需新的跨owner transaction protocol，只登记为
   开放问题；Stage 2不得比touch/mkdir引入更弱失败路径，但不负责该架构改造。
 - ext4 与 ramfs 都是首版必要 backend。`InodeOps` initializer sweep 只是新增 function pointer 的机械伴随修改，
@@ -102,7 +103,7 @@ kernel build、QEMU、KUnit 与 LTP 均 Not Run，也不属于本 docs-only gate
 | Stage                                | 成熟度             | 单一交付                                                                                     | Contract Cutover        | 解析触发点                                        |
 | ------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
 | Stage 1 — Device-number prerequisite | Closed             | 12/20 category-neutral numeric domain 与全部既有 consumer 迁移                               | `DEVICE-NUMBER-CUTOVER` Effective | entry gate、R0 acceptance、transaction 与独立授权 |
-| Stage 2 — Make-node vertical slice   | Ready / Not Active | RV64/LA64 `mknodat` 到 ext4/ramfs persistence、metadata/open/mount 与用户态 proof 的完整闭环 | `VFS-MAKE-NODE-CUTOVER` Not Cut Over | 2026-08-01 独立 `1 -> 2` resolution已完成；仍需单独activation |
+| Stage 2 — Make-node vertical slice   | Active / C1-C2 Closed / C3 Not Active | RV64/LA64 `mknodat` 到 ext4/ramfs persistence、metadata/open/mount 与用户态 proof 的完整闭环 | `VFS-MAKE-NODE-CUTOVER` Not Cut Over | C1-C2已独立关闭；C3仍需单独activation |
 
 Stage 1 不交付 make-node syscall；Stage 2 不重新打开 device-number namespace。两次 cutover 各自保持旧 contract
 直到相应 stage 完整通过，不能把 Stage 1 的 build/KUnit 证据写成 make-node implementation proof。
@@ -242,7 +243,7 @@ Rust 文件的正常改写外，任何其它 source/docs 路径都属于 expansi
 ## 6. `1 -> 2 Implementation Resolution Gate`（Completed / 2026-08-01）
 
 该独立docs-only gate从clean `dev/drc/alpha@c72721dd`开始，读取Stage 1 final diff/review/validation与effective
-`DEVICE-NUMBER-001`，并重新审计live syscall registry、capability、common-create、32个`InodeOps` static、
+`DEVICE-NUMBER-001`，并重新审计live syscall registry、capability、common-create、34个`InodeOps` static、
 ext4/lwext4 create与reload、ramfs transaction、mount/error mapping、stat/statx/getdents以及LTP/user-test入口。
 `fs/mod.rs`为1271行、`fs/inode.rs`为1061行，确认feature前应先做同owner行为保持拆分。
 
@@ -270,20 +271,22 @@ mode/capability admission、VFS `InodeOps::make_node` handoff、ext4/ramfs 全 n
 `rdev` persistence、explicit unsupported open、stat/statx/getdents/unlink、regular ordinary I/O 与 mount
 `ENOTBLK`。这些不是多个可独立验收的能力，全部共享 `VFS-MAKE-NODE-CUTOVER`。
 
-Stage 2当前是`Ready / Not Active`。Ready不等于授权：C1、C2、C3都未激活，且前一checkpoint关闭不会自动
-激活下一checkpoint。只有C3满足全部closure条件后才能执行一次`VFS-MAKE-NODE-CUTOVER`；C1/C2均不得写current
+Stage 2当前是`Active / C1-C2 Closed / C3 Not Active`。Ready plan本身不等于授权：开发者已独立授权并关闭
+C1、C2；C2 review触发R2 target renegotiation，并在R2 source/docs复审和C2 validation闭合后关闭。C2 closure
+不会自动激活C3。只有C3满足全部closure条件后才能执行一次`VFS-MAKE-NODE-CUTOVER`；C1/C2均未写current
 contract或宣称partial make-node capability。
 
-- 保持 R1 的完整 node-kind、dirfd、mode、`dev`、`CAP_MKNOD`（含 char 0:0 无 whiteout 例外）与 errno matrix；
-- 保持 R1 继承的 no-umask requested-permission semantics；不得读取 `sys_umask` stub、建立
+- 保持 R2 的完整 node-kind、dirfd、mode、`dev`、`CAP_MKNOD`（含 char 0:0 无 whiteout 例外）与 errno matrix；
+- 保持 R2 继承的 no-umask requested-permission semantics；不得读取 `sys_umask` stub、建立
   mknod-local/task-local mask，或借本阶段扩展全部创建类调用点；
-- 保持 ext4 + ramfs acceptance boundary、backend-local final-metadata/dirent commit、提交前rollback、reload与
-  provider-independent creation；既有common-create跨cache/dentry窗口只要求无退化并登记，不引入新架构协议；
+- 保持 ext4 + ramfs acceptance boundary、final metadata先于publication、正常并发不可见中间态、成功路径reload、
+  可预先判定错误不发布node与未链接inodecleanup；不要求lwext4任意I/O failure或crash下全有或全无，也不增加
+  forced flush、伪journal、双阶段truth或validation-only production hook；
 - backend 不接收 task、fd table、raw Linux mode/dev_t、capability 或 provider handle；
 - 不实现 named FIFO、device provider open、pathname socket endpoint、legacy `readdir` 或 overlayfs whiteout；
 - 不为单个 LTP pathname、filesystem、provider 或执行顺序增加 production 特判；
 - 不把 `sys_umask` stub 扩张为独立全系统项目；requested permission bits 直接进入 existing common-create
-  handoff，只复用现有 owner/group policy。若不扩大 task/全部 create surface 就无法形成这一 R1 final metadata，
+  handoff，只复用现有 owner/group policy。若不扩大 task/全部 create surface 就无法形成这一 R2 final metadata，
   命中停止条件并上报，而不是顺带实现 umask。
 
 下面三个checkpoint的顺序、manifest与停止边界均已冻结；任何source/docs路径越界先停止并报告。
@@ -335,10 +338,12 @@ C2把syscall/VFS和ext4/ramfs/mount实现合并为一个checkpoint；任何子�
    permission和既有gid inheritance；regular `mknodat`也走`make_node`，不复用当前commit后补owner的`touch`。
 3. non-directory parent在VFS dispatch前返回`ENOTDIR`。ext4/ramfs以外的directory initializer都显式接入共同窄
    `EPERM`拒绝函数；不得用success stub、filesystem-specific fallback或让pseudo-fs获得可写namespace。
-4. lwext4新增backend-local make-node路径：allocate inode后依次写final mode、完整u32 uid/gid与适用rdev，最后
-   `add_entry`；commit前任一步失败释放未链接inode及临时resource。C helper修复uid/gid high bits，Rust `FileAttr`
-   增加rdev，`inode/attr.rs`使用u32 owner并暴露dev access；ext4 reload/getattr/sync读取并持久化同一owner/rdev。
-   FIFO open返回`EOPNOTSUPP`，Char/Block/Socket返回`ENXIO`，不得保留`unimplemented!()`。
+4. lwext4新增backend-local make-node路径：allocate inode后依次写final mode、完整u32 uid/gid与适用rdev，再在同一
+   backend lock内调用`add_entry`。可预先判定的name/duplicate错误在allocation/publication前拒绝；`add_entry`
+   返回失败且child仍未链接时尝试释放inode并传播cleanup失败。C helper修复uid/gid high bits，Rust `FileAttr`
+   增加rdev，`inode/attr.rs`使用u32 owner并暴露dev access；ext4 normal sync/reload/getattr读取并持久化同一
+   owner/rdev。不得增加forced flush或伪transaction来声称任意I/O failure/crash atomicity。FIFO open返回
+   `EOPNOTSUPP`，Char/Block/Socket返回`ENXIO`，不得保留`unimplemented!()`。
 5. ramfs在现有write transaction内支持Regular/Fifo/Char/Block/Socket：final metadata在`seed_inode`与parent
    insertion前完成；private `RamfsSpecial`只保存category-neutral `DeviceId`，`Inode::ty()`仍是kind唯一truth。
    rollback沿现有transaction撤销；FIFO open返回`EOPNOTSUPP`，Char/Block/Socket返回`ENXIO`，不得进入
@@ -350,25 +355,29 @@ C2把syscall/VFS和ext4/ramfs/mount实现合并为一个checkpoint；任何子�
    profile选择只服务C3验证，必须在cutover前删除/恢复，durable wrapper保留。
 
 C2 KUnit只放在对应semantic owner末尾，覆盖mode/dev/capability normalization、description合法性、ext4/ramfs
-提交前rollback与reload/projection、special-open/ENOTBLK边界；不为机械initializer sweep新建tests文件。
+metadata/projection、ramfs duplicate admission、special-open/ENOTBLK边界；不把未执行KUnit或无法安全注入的
+lwext4 failure写成rollback/reload proof，也不为机械initializer sweep新建tests文件。
 
 C2 closure要求`just fmt kernel --check`、`git diff --check`、双架构release build、initializer/residual-panic/
-raw-codec/provider-lookup source audit和完整diff review。C2不运行或声称最终runtime closure，不删除临时probe，
-不修改current contract；关闭后C3仍须独立授权。
+raw-codec/provider-lookup/source-shape audit和完整diff review。source-shape audit必须确认没有只为strict atomicity
+proof引入的flush、双状态、fault hook或validation-only production seam；自然的metadata-before-publication、
+边界检查与未链接inodecleanup保留。C2不运行或声称最终runtime closure，不删除临时probe，不修改current
+contract；关闭后C3仍须独立授权。
 
 ### 7.4 Checkpoint C3 — Validation, probe removal, final review and cutover
 
 C3先在temporary validation窗口运行证据，再删除probe/恢复profile，最后对exact production tree复验与cutover。
 
 1. focused group临时包含`mknod01`至`mknod09`、`mknodat01`、`mknodat02`与`mount02`，glibc/musl和RV64/LA64
-   分别记录PASS/FAIL/TCONF/BROK。不得把全部case机械要求PASS：逐case对照R1 node-kind/dev/dirfd/capability/
+   分别记录PASS/FAIL/TCONF/BROK。不得把全部case机械要求PASS：逐case对照R2 node-kind/dev/dirfd/capability/
    errno/no-umask target分类；依赖named FIFO I/O、legacy ownership/SGID或完整Linux umask的out-of-target失败单独
    记录，不得冒充in-target closure，也不得用其扩大RFC。任一in-target失败阻塞cutover。
 2. temporary `vfs_make_node_probe`通过durable wrapper覆盖ext4与ramfs的Regular/Fifo/Char/Block/Socket、requested
    mode/uid/gid/rdev、stat/statx/getdents/unlink、duplicate、bad pointer/path/relative dirfd、absolute-path invalid
    dirfd、RO mount、CAP_MKNOD与char 0:0、regular I/O、special open errno、unknown provider independence、
-   ext4 eviction/remount-reload。rollback fault point无法安全注入时可由owner-local KUnit证明，但真实失败后lookup
-   无残留至少要有用户态证据。
+   ext4 eviction/remount-reload。failure proof只覆盖可稳定触发的pre-publication rejection与未链接inodecleanup；
+   不要求通过不自然fault hook证明lwext4 `add_entry`内部或crash atomicity，也不得把namei提前拒绝的overlong name
+   误写成backend rollback证据。
 3. 依次运行：
 
    ```text
@@ -380,14 +389,15 @@ C3先在temporary validation窗口运行证据，再删除probe/恢复profile，
    ```
 
    wrapper只写worktree-local runtime disk/log，不直接修改只读master。build通过不替代runtime；两架构runtime均为
-   R1 acceptance floor，未运行或infra failure必须如实记录且不得cutover。
+   R2 acceptance floor，未运行或infra failure必须如实记录且不得cutover。
 4. runtime证据读取完成后，删除临时probe文件与`vfs-make-node` LTP group/registration，恢复`main.rs`和
    `ltp/profile.txt`到长期状态；保留真实ABI consumer的`anemone-rs` wrapper。随后重跑format、双架构release build、
    `git diff --check`与production-source audit，确认无probe、test-path dispatch、provider lookup、raw packed truth、
    panic/success stub或遗漏initializer。
-5. final review分别检查owner/API、backend-local commit/rollback、existing common-create handoff无退化、reload、
-   ABI/errno、resource cleanup和validation provenance。`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`保持独立Open；
-   它不因Stage 2关闭而解决，也不阻塞R1，但任何Stage 2新增failure window仍是finding。
+5. final review分别检查owner/API、final-metadata/publication锁顺序、existing common-create handoff无退化、成功路径
+   reload、ABI/errno、可实施resource cleanup、自然代码形状和validation provenance。
+   `ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`保持独立Open，lwext4 strict failure/crash atomicity limitation
+   保持Accepted；二者不因Stage 2关闭而解决，也不阻塞R2，但任何Stage 2新增failure window或伪造proof仍是finding。
 
 只有全部in-target target、两backend、双架构runtime、错误矩阵、probe删除、final review与docs write-back闭合，
 `VFS-MAKE-NODE-CUTOVER`才原子Introduce `VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`并Refine
@@ -404,7 +414,9 @@ contract。
 
 - callback 前 final owner/permission 无法由 existing VFS owner 形成，需扩大 shared create contract；
 - 需要读取 `sys_umask` stub、建立 task/fs-state mask owner或修改其它创建类调用点才能继续；
-- ext4/ramfs无法在dirent commit前完成final metadata与提交前rollback，或需要接受cache-only `rdev`；
+- ext4/ramfs无法在dirent publication前形成final metadata、无法阻止正常并发lookup观察中间态、无法清理确认仍未
+  链接的失败分配，或需要接受cache-only `rdev`；lwext4任意I/O failure/crash atomicity本身已由R2移出target，
+  不再单独触发本停止条件；
 - make-node新增比现有touch/mkdir更弱的post-backend failure path。仅当关闭的是既有common-create publication窗口且
   需要不小的跨owner架构改造时，记录/更新开放问题后继续，不把它误判为本RFC必须修复；
 - 需要改变 `InodeOps::make_node` owner、node-kind/ABI/errno matrix、ext4+ramfs acceptance boundary；
@@ -432,8 +444,9 @@ C1只允许第7.2节列出的`fs/mod.rs`、`fs/vfs/`与`fs/inode/`old/new path�
 - `anemone-kernel/crates/anemos/lwext4-rust/c/lwext4/src/ext4_inode.c`
 - `anemone-rs/src/{sys/linux/fs.rs,os/linux/fs.rs}`
 
-新增`InodeOps::make_node`的机械initializer manifest在2026-08-01冻结为以下26个文件（32个static）；其中与上面
-semantic owner重复的路径不代表第二次授权：
+新增`InodeOps::make_node`的机械initializer manifest在2026-08-01冻结为以下26个文件。C2 live sweep更正：
+feature前实际为34个static而非resolution时误记的32个；C2在既有`fs/ramfs/inode.rs` semantic owner内新增一个
+special-node vtable，最终为35个。路径集合没有变化；其中与上面semantic owner重复的路径不代表第二次授权：
 
 - `anemone-kernel/src/device/{console.rs,tty/endpoint.rs}`
 - `anemone-kernel/src/fs/anonymous/anony_fs.rs`

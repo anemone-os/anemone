@@ -95,9 +95,9 @@ fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<Mount
         knoticeln!(
             "mount: rejecting source fstype={} source_kind=block-device source_empty=true reason=null-source errno={:?}",
             fstype,
-            SysError::InvalidArgument
+            SysError::NotBlockDevice
         );
-        return Err(SysError::InvalidArgument);
+        return Err(SysError::NotBlockDevice);
     };
 
     let dev = match get_current_task().lookup_path(Path::new(raw.as_ref()), ResolveFlags::empty()) {
@@ -112,13 +112,14 @@ fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<Mount
         },
     };
 
-    if dev.inode().ty() != InodeType::Block {
+    let source_ty = dev.inode().ty();
+    if source_ty != InodeType::Block {
         knoticeln!(
             "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=not-block-device errno={:?}",
             fstype,
-            SysError::InvalidArgument
+            SysError::NotBlockDevice
         );
-        return Err(SysError::InvalidArgument);
+        return Err(SysError::NotBlockDevice);
     }
 
     let attr = match dev.inode().get_attr() {
@@ -133,15 +134,17 @@ fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<Mount
         },
     };
 
-    let Some(number) = attr.rdev.number() else {
-        knoticeln!(
-            "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=missing-device-number errno={:?}",
-            fstype,
-            SysError::InvalidArgument
-        );
-        return Err(SysError::InvalidArgument);
+    let devnum = match block_mount_devnum(source_ty, attr.rdev) {
+        Ok(devnum) => devnum,
+        Err(err) => {
+            knoticeln!(
+                "mount: rejecting source fstype={} source_kind=block-device source_empty=false reason=missing-device-number errno={:?}",
+                fstype,
+                err
+            );
+            return Err(err);
+        },
     };
-    let devnum = BlockDevNum::from(number);
 
     let Some(dev) = get_block_dev(devnum) else {
         knoticeln!(
@@ -153,6 +156,15 @@ fn parse_block_mount_source(fstype: &str, raw: Option<Box<str>>) -> Result<Mount
     };
 
     Ok(MountSource::Block(dev))
+}
+
+fn block_mount_devnum(ty: InodeType, rdev: DeviceId) -> Result<BlockDevNum, SysError> {
+    if ty != InodeType::Block {
+        return Err(SysError::NotBlockDevice);
+    }
+    rdev.number()
+        .map(BlockDevNum::from)
+        .ok_or(SysError::NotBlockDevice)
 }
 
 fn normalize_fstype(fstype: &str) -> NormalizedFsType<'_> {
@@ -526,6 +538,27 @@ fn sys_mount(
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::device::devnum::{DeviceNumber, MajorNum, MinorNum};
+
+    #[kunit]
+    fn block_mount_admission_distinguishes_identity_from_provider_lookup() {
+        assert_eq!(
+            block_mount_devnum(InodeType::Regular, DeviceId::None).unwrap_err(),
+            SysError::NotBlockDevice
+        );
+        assert_eq!(
+            block_mount_devnum(InodeType::Block, DeviceId::None).unwrap_err(),
+            SysError::NotBlockDevice
+        );
+
+        let number = DeviceNumber::new(MajorNum::new(7), MinorNum::new(3));
+        assert_eq!(
+            block_mount_devnum(InodeType::Block, DeviceId::Number(number))
+                .unwrap()
+                .number(),
+            number
+        );
+    }
 
     #[kunit]
     fn test_mount_flags_accept_rdonly_and_silent() {

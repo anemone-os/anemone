@@ -303,6 +303,37 @@ pub fn mkdirat(dirfd: AtFd, path: &Path, mode: u32) -> Result<(), Errno> {
     fs::mkdirat(dirfd.to_raw() as u64, path.as_ptr() as u64, mode as u64).map(|_| ())
 }
 
+pub fn mknodat(dirfd: AtFd, path: &Path, mode: u32, dev: u32) -> Result<(), Errno> {
+    let path = CString::new(path.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    fs::mknodat(
+        dirfd.to_raw() as u64,
+        path.as_ptr() as u64,
+        mode as u64,
+        dev as u64,
+    )
+    .map(|_| ())
+}
+
+/// Raw pointer form for ABI conformance tests and libc shims.
+///
+/// # Safety
+/// `path` must satisfy the Linux pathname pointer contract unless the caller
+/// deliberately tests kernel pointer validation and handles `EFAULT`.
+pub unsafe fn mknodat_raw(
+    dirfd: i32,
+    path: *const u8,
+    mode: u32,
+    dev: u32,
+) -> Result<(), Errno> {
+    fs::mknodat(
+        dirfd as i64 as u64,
+        path as u64,
+        mode as u64,
+        dev as u64,
+    )
+    .map(|_| ())
+}
+
 pub fn linkat(
     olddirfd: AtFd,
     oldpath: &Path,

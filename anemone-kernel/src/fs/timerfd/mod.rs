@@ -674,6 +674,7 @@ fn timerfd_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
 }
 
 static TIMERFD_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotDir),
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),

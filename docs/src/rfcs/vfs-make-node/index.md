@@ -1,7 +1,7 @@
 # RFC-20260731-vfs-make-node
 
 **状态：** Accepted for Implementation
-**修订：** R1
+**修订：** R2
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-01
 **领域：** fs / VFS / syscall ABI / ext4 / ramfs
@@ -9,15 +9,20 @@
 **影响契约：** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；`DEVICE-NUMBER-001` Refine已Effective；
 `VFS-MOUNT-ADMISSION-002` Refine与`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001` Introduce仍Not Cut Over
 **开放问题：** [ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)
-记录既有 common-create 跨 backend/cache/dentry publication 窗口；[Tracking Issues](./tracking-issues.md)
-保留五个 Keter、两个 Euclid 的 Neutralized 历史
+记录既有 common-create 跨 backend/cache/dentry publication 窗口；
+[ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)
+记录 lwext4/Rust wrapper 无法提供的 crash/I/O-failure atomicity；[Tracking Issues](./tracking-issues.md)
+保留一个 Apollyon、五个 Keter、两个 Euclid 的 Neutralized 历史
 **下一步：** [Stage 1](./implementation.md#5-stage-1-closed--device-number-prerequisite)与
 `DEVICE-NUMBER-CUTOVER`已关闭；[Stage 2](./implementation.md#7-stage-2-ready--make-node-vertical-slice)
-已解析为Ready / Not Active，必须另行授权，不自动激活Checkpoint C1
+Active且Checkpoint C1-C2已关闭，Checkpoint C3仍Not Active，必须另行授权
 
 > 本目录自 2026-07-31 起是 `vfs-make-node` 提案与 target 的公共 canonical source。2026-08-01 的独立复审
 > 接受 R0；2026-08-01 的 Stage 2 resolution 又接受 R1，将强制原子性收窄为 backend-local make-node commit，
 > 并把需要新跨 owner transaction protocol 的既有 common-create publication 缺口登记为本 RFC 外开放问题。
+> C2 review暴露lwext4/Rust wrapper无法合理承诺任意I/O failure或crash下的dirent/inode全有或全无；开发者
+> 因此接受R2，只保留正常执行下的有序、串行化publication、成功路径持久/reload和可实施的错误抵抗，严格
+> failure/crash atomicity转交后续lwext4集成事务。
 > Stage 1 已关闭并使`DEVICE-NUMBER-001`生效，其余target contract仍须在最终cutover gate后才生效。
 
 ## 摘要
@@ -28,11 +33,11 @@
 
 VFS 在 `InodeOps` 虚表中新增 `make_node` function pointer。syscall adapter 负责 Linux `mode`、`dev_t`
 与 `dirfd` admission；VFS 负责 pathname、parent、mount writable、目录权限与共同创建策略；ext4 和 ramfs
-负责原子建立 namespace entry 与真实 inode metadata。成功结果必须能被 lookup、`stat` / `statx`、
+负责有序建立 namespace entry 与真实 inode metadata。成功结果必须能被 lookup、`stat` / `statx`、
 `getdents64` 和 unlink；ext4 必须在 reload 后恢复同一 kind、permission、owner 与适用的 `rdev`，ramfs
 必须在 resident lifetime 内保持同一 identity。
 
-R1 继承 R0 明确接受的一项 Linux 可见偏差：本 revision 的 `mknodat` 不应用 process umask，最终 permission 直接使用
+R2 继承 R0/R1 明确接受的一项 Linux 可见偏差：本 revision 的 `mknodat` 不应用 process umask，最终 permission 直接使用
 调用者请求的 permission bits。真正的 umask 需要 task/fs-state owner 与全部创建类调用点共同接入，必须由后续
 独立工作统一实现；本 RFC 不为 `mknodat` 建立局部 mask、读取 `sys_umask` stub，或借 Stage 2 扩大 task/create
 surface。因此下文的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与 errno matrix，
@@ -102,7 +107,7 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
   make-node admission；`S_IFDIR` 返回 `EPERM`，`S_IFLNK` 与其它非法 type bits 返回 `EINVAL`。
 - 明确本 revision 不应用 process umask；ext4/ramfs 的最终 permission bits 使用 `mode` 中请求的 permission
   bits，不能读取 `sys_umask` stub、task-local mask 或建立 mknod-local mask state。
-- 对 character/block creation 执行 `CAP_MKNOD` gate；R1 继承 R0 不采用 Linux `WHITEOUT_DEV` capability例外的决定，
+- 对 character/block creation 执行 `CAP_MKNOD` gate；R2 继承 R0/R1 不采用 Linux `WHITEOUT_DEV` capability例外的决定，
   character 0:0 仍要求 `CAP_MKNOD`；regular/FIFO/socket 不借此要求设备创建 capability。
 - 将 syscall 的 32-bit encoded device number 完整 decode 为 12-bit major + 20-bit minor；`dev` 只对
   character/block node 形成 category-neutral `DeviceNumber`，其它支持 kind 忽略 `dev`。
@@ -112,9 +117,10 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
   不转为用户可写 namespace。
 - 使 ext4/ramfs 创建结果具有真实 immutable kind、permission、owner 与适用的 `rdev`；ext4 在
   eviction/reload 或 remount/reload 后保持这些属性。
-- 保证 ext4/ramfs 在 backend-local creation boundary 内先形成最终 kind/permission/owner/适用`rdev`，再提交
-  directory entry；提交前失败必须回滚本次 make-node allocation/resource。成功不依赖 device provider 已注册，
-  也不把 provider handle 保存进普通 filesystem inode。
+- 保证 ext4/ramfs 在 backend-local creation boundary 内先形成最终 kind/permission/owner/适用`rdev`，再进入
+  directory-entry publication；同一backend锁阻止正常并发lookup观察中间状态。可在publication前判定的错误不得
+  留下node；已分配但仍未链接的inode必须尝试回收并传播cleanup失败。成功不依赖device provider已注册，也不把
+  provider handle保存进普通filesystem inode。
 - 让 regular node 直接获得现有 ordinary regular-file behavior，不建立第二套 regular backend。
 - 让未纳入数据面的 special node open 明确返回错误，不 panic、不退化成 regular file。
 - 复用现有 mount admission：character node 作为 block-backed filesystem source 时返回 `ENOTBLK`，不进入
@@ -139,6 +145,8 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
   与全部 create call sites，由后续独立工作统一完成。
 - 不为既有 touch/mkdir/common-create 的 backend commit 到 inode-cache/dentry materialization 窗口建立新的跨 owner
   transaction/rollback protocol；如果关闭该窗口需要不小的架构变动，本 RFC 只记录问题，不以此阻塞 make-node。
+- 不承诺lwext4 block-cache写回、任意内部I/O failure或crash/power-loss下child inode与parent dirent全有或全无；
+  不为本RFC向lwext4临时拼接flush ordering、journal transaction或双状态补偿协议。
 - 不把 current create policy 尚未统一具备的其它 Linux corner case 复制成 mknod-local 特判；如果 common VFS
   owner 无法满足本 revision 的 owner/group/permission target，必须在 implementation resolution 上报
   shared-surface expansion。
@@ -151,10 +159,12 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Implementation plan](./implementation.md)：一个 device-number prerequisite + 一个 make-node 主实现阶段；
-  Stage 1 Closed，Stage 2 Ready / Not Active
+  Stage 1 Closed，Stage 2 Active / C1-C2 Closed / C3 Not Active
 - [Tracking Issues](./tracking-issues.md)：保存当前影响 target / implementation readiness 的 finding
 - [No-umask accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)：
   本 revision 的 requested permission bits 不经 process umask 屏蔽
+- [Lwext4 make-node atomicity limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)：
+  正常执行保持有序、串行化publication；严格failure/crash atomicity由后续lwext4/Rust wrapper事务负责
 - [Common-create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)：
   既有 backend commit 到 inode-cache/dentry materialization 的跨 owner 缺口，不属于 R1 make-node closure
 - [背景材料索引](./backgrounds/index.md)：历史定位材料，不是 accepted target 或 current contract
@@ -186,6 +196,7 @@ Current contracts：
 | --- | --- | --- | --- | --- |
 | R0 | 2026-08-01 | Accepted for Implementation | 初始 accepted target：12/20 device-number prerequisite、canonical `mknodat`、ext4+ramfs make-node closure；明确 requested permission bits 不应用 process umask | [独立 R0 复审与 activation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r0-acceptance-and-stage-1-activation-preflight---2026-08-01) |
 | R1 | 2026-08-01 | Accepted for Implementation | 保留 backend-local final-metadata + dirent atomic commit 与提交前 rollback；既有 common-create backend/cache/dentry publication 缺口若需新跨 owner transaction protocol，则登记为独立开放问题，不由本 RFC 修复或阻塞 | [Stage 1 -> Stage 2 resolution](../../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01) |
+| R2 | 2026-08-01 | Accepted for Implementation | 保留final metadata先于publication、正常并发不可见中间态、成功sync/reload与可实施cleanup；不承诺lwext4任意I/O failure或crash下inode/dirent全有或全无，修复责任转交后续lwext4/Rust wrapper事务 | [C2 target renegotiation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r2-target-renegotiation-and-c2-review-hold---2026-08-01) |
 
 ## 方案
 
@@ -237,13 +248,17 @@ admission 的窄 node description，返回完整 `InodeRef`。description 只表
 
 VFS 在 callback 前完成 parent resolution、writable-mount gate、directory permission 与共同 create policy，
 并在 callback 成功后沿既有 common-create handoff materialize callback 返回的同一 inode。filesystem callback
-必须在其 backend-local creation boundary 内先写入最终 metadata，再原子提交 directory entry；提交前失败必须
-回滚本次 make-node allocation/resource。具体使用 transaction 还是显式 rollback 属于 implementation preference。
+必须在其backend-local creation boundary内先写入最终metadata，再进入directory-entry publication，并以同一backend
+锁阻止正常并发lookup观察中间状态。可在publication前判定的失败不得留下node；已分配但仍未链接的inode必须尝试
+回收并诚实传播cleanup失败。是否具有更强transaction/rollback能力由backend本身决定，不能把lwext4没有提供的
+journal或crash guarantee写成本RFC事实。
 
-R1 不把既有 common-create 的 backend commit 到 inode-cache/dentry materialization 窗口改写成 make-node 的新增
+R2 不把既有 common-create 的 backend commit 到 inode-cache/dentry materialization 窗口改写成 make-node 的新增
 架构责任。实现必须复用现有协议、不得引入比 touch/mkdir 更弱的新失败路径，也不得以 panic/success stub 隐藏失败；
 若关闭该既有窗口需要跨 backend、inode cache、dentry cache 与全部 create caller 的新 transaction/rollback
-protocol，则记录开放问题并继续按本 RFC 的 backend-local边界验收。
+protocol，则记录开放问题并继续按本 RFC 的 backend-local边界验收。lwext4 block-cache writeback、`add_entry`
+内部partial dirty与crash/power-loss ordering的系统性修复由后续lwext4/Rust wrapper事务负责；本RFC不增加forced
+flush、伪journal或只服务proof的production状态。
 
 ### Kind、`rdev` 与 backend coverage
 
@@ -294,8 +309,9 @@ registry lookup。该变化不把 mount owner 移入 make-node，也不产生 de
 `st_rdev` / `statx` projection、ramfs coverage 或 ext4 reload 可以通过临时修改现有 `user-test` 加入最小
 probe；probe 在对应 cutover closure 前删除，执行逻辑、观察结果与删除事实进入 transaction evidence。
 
-KUnit 与 source audit 应覆盖 mode/`dev_t` codec、capability gate、backend rollback、kind/rdev projection 与
-禁止 panic，但不能替代至少一条真实用户态 syscall 路径。首个 prerequisite 的命令、manifest 与停止条件已在
+KUnit 与 source audit 应覆盖 mode/`dev_t` codec、capability gate、pre-publication rejection、未链接inode
+cleanup、kind/rdev projection与禁止panic，但不能替代至少一条真实用户态syscall路径。首个prerequisite的命令、
+manifest与停止条件已在
 [implementation plan](./implementation.md) 冻结；make-node 主阶段的精确 profile、probe 和命令由独立
 `1 -> 2 Implementation Resolution Gate` 在 Stage 1 关闭后解析。
 
@@ -311,7 +327,7 @@ normalization、通用inode category-neutral number与既有consumer迁移。最
 
 接受本 RFC 意味着以下 target 被固定，但不自动授权实现：
 
-- RV64/LA64 canonical `mknodat(33)` 与上述 mode/capability matrix，包括 R1 不采用 whiteout 例外；
+- RV64/LA64 canonical `mknodat(33)` 与上述 mode/capability matrix，包括 R2 不采用 whiteout 例外；
 - 本 revision 的 requested permission bits 不经 process umask 屏蔽；这是已接受的可见限制，Linux mode
   compatibility claim 不覆盖 umask-adjusted permission，后续由独立 umask 工作统一退出；
 - 完整 Linux 32-bit device-number ABI、12-bit major + 20-bit minor internal numeric domain，以及 packed
@@ -320,7 +336,9 @@ normalization、通用inode category-neutral number与既有consumer迁移。最
   `CharDevNum` / `BlockDevNum` 只作为 registry-domain key；
 - `InodeOps::make_node` owner surface；
 - ext4 + ramfs backend coverage；
-- immutable kind/`rdev`、backend-local atomic create/rollback 与 ext4 reload；
+- immutable kind/`rdev`、final metadata先于publication、正常并发不可见中间态与ext4成功路径reload；
+- 可预先判定的错误不发布node，未链接inode执行best-effort cleanup；lwext4任意I/O failure与crash atomicity
+  明确不在本revision保证内；
 - common-create 跨 backend/cache/dentry publication 使用既有协议且不得退化；若完整原子化需要不小的跨 owner
   架构改动，则由独立开放问题承接，不阻塞本 revision；
 - regular behavior、metadata ABI 与 mount `ENOTBLK` companion integration；
@@ -344,8 +362,8 @@ normalization、通用inode category-neutral number与既有consumer迁移。最
 - 允许 success 后 kind/`rdev` 无法 stat 或 ext4 reload；
 - 缩小 12/20 device-number 范围、截断/拒绝合法 Linux encoding、增加 raw escape，或重新让 `rdev`
   category 与 `Inode::ty()` 并列驱动行为；
-- 放宽 backend-local 失败原子性，接受 dirent commit 时 metadata 未完成、提交前资源不回滚、cache-only `rdev`
-  或 open-time panic；
+- 允许正常并发lookup观察final metadata形成前的node、把可预先判定的错误移到publication后、跳过未链接inode
+  cleanup、接受cache-only `rdev`或open-time panic；
 - 把 named FIFO、device provider open 或 pathname socket endpoint 并入本 revision；
 - 改变本 revision 已接受的 device-number numeric owner，或进一步改变 devfs publication、mount source、
   provider lifecycle 或 opened-description owner；
@@ -403,18 +421,18 @@ kind truth。filesystem 只接收 VFS semantic description。
 
 ## 收口
 
-R1已接受；Stage 1与`DEVICE-NUMBER-CUTOVER`已关闭，`DEVICE-NUMBER-001`现为effective 12/20 baseline。
+R2已接受；Stage 1与`DEVICE-NUMBER-CUTOVER`已关闭，`DEVICE-NUMBER-001`现为effective 12/20 baseline。
 `VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`、`VFS-MOUNT-ADMISSION-002` Refine与
-`VFS-MAKE-NODE-CUTOVER`仍Not Cut Over。Stage 2已完整解析为Ready / Not Active；当前必须在此停止，不自动
-激活Checkpoint C1。
+`VFS-MAKE-NODE-CUTOVER`仍Not Cut Over。Stage 2为Active，Checkpoint C1-C2已关闭；当前必须在此停止，不自动
+激活Checkpoint C3。
 
 最终 RFC closure 至少需要：
 
 - RV64/LA64 `mknodat` ABI 与 libc `mknod`/`mknodat` 用户路径证据；
 - ext4、ramfs 各 node-kind create/stat/getdents/unlink 证据；
 - ext4 kind/permission/owner/`rdev` reload 证据；
-- invalid mode、CAP_MKNOD（包括 character 0:0 无 whiteout 例外）、bad dirfd/path、duplicate、RO mount 与
-  backend-local pre-commit rollback证据；
+- invalid mode、CAP_MKNOD（包括 character 0:0 无 whiteout 例外）、bad dirfd/path、duplicate、RO mount、
+  pre-publication rejection与未链接inode cleanup证据；
 - regular-node ordinary I/O、special-node explicit unsupported open 与 no-panic audit；
 - character source `mount02` / `ENOTBLK` 证据；
 - focused KUnit/source audit、目标架构 build 与用户态 runtime 分开记录；

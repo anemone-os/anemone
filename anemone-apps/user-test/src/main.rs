@@ -9,6 +9,7 @@ mod guest;
 mod ltp;
 mod process;
 mod runtime;
+mod vfs_make_node_probe;
 
 use anemone_rs::{
     abi::system::native::power::SHUTDOWN_MAGIC, os::anemone::power::shutdown, prelude::*,
@@ -104,6 +105,8 @@ fn run_comp_tests() {
     guest::init_competition_environment();
 
     ltp::install_ltp_fixtures();
+
+    vfs_make_node_probe::run();
 
     // competition::run_competition_tests();
     ltp::run_ltp_tests();

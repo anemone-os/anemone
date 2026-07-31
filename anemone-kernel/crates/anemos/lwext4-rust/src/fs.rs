@@ -157,6 +157,40 @@ impl<Hal: SystemHal, Dev: BlockDevice> Ext4Filesystem<Hal, Dev> {
         Ok(child.ino())
     }
 
+    pub fn make_node(
+        &mut self,
+        parent: u32,
+        name: &str,
+        ty: InodeType,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+        rdev: u32,
+    ) -> Ext4Result<u32> {
+        if name.len() > u8::MAX as usize {
+            // ENAMETOOLONG; lwext4's ulibc errno subset does not name it.
+            return Err(Ext4Error::new(
+                36,
+                "make-node name exceeds ext4 dirent limit",
+            ));
+        }
+        assert_ne!(ty, InodeType::Directory);
+        assert_ne!(ty, InodeType::Symlink);
+
+        let mut parent = self.inode_ref(parent)?;
+        let mut child = self.alloc_inode(ty)?;
+        child.set_mode((child.mode() & !0o7777) | (mode & 0o7777));
+        child.set_owner(uid, gid);
+        child.set_device(rdev);
+        let ino = child.ino();
+
+        if let Err(err) = parent.add_entry(name, &mut child) {
+            child.free_unlinked()?;
+            return Err(err);
+        }
+        Ok(ino)
+    }
+
     pub fn rename(
         &mut self,
         src_dir: u32,

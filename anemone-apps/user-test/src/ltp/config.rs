@@ -105,6 +105,10 @@ pub(super) struct LtpGroup {
 
 pub(super) const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
+        name: "vfs-make-node",
+        cases: include_str!("../../ltp/groups/vfs-make-node.txt"),
+    },
+    LtpGroup {
         name: "chmod",
         cases: include_str!("../../ltp/groups/chmod.txt"),
     },

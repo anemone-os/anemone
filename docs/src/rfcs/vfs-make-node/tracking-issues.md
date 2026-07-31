@@ -1,6 +1,6 @@
 # VFS Make Node Tracking Issues
 
-**状态：** R1 Accepted / No Active Findings
+**状态：** R2 Accepted / No Active Findings / C2 Closed
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
@@ -9,12 +9,13 @@
 design finding。implementation 进度与执行证据不放在这里；Draft target 修复已经折回 `index.md` /
 `invariants.md`，本文只保留 finding 的问题、决定、修复位置与状态历史。
 
-本轮 review 没有 Apollyon，五个 Keter 与两个 Euclid 均已在 accepted target / implementation manifest 中
-Neutralized。这里的
-Neutralized 表示文档层问题已有自然落点。2026-08-01 独立复审确认 Apollyon/Keter/Euclid/Safe 全 0，R0
+五个早期Keter与两个Euclid均已在accepted target / implementation manifest中Neutralized。这里的Neutralized
+表示文档层问题已有自然落点。2026-08-01 独立复审确认Apollyon/Keter/Euclid/Safe全0，R0
 随后接受并建立transaction；Stage 1独立终审再次确认Apollyon/Keter/Euclid/Safe全0，
 `DEVICE-NUMBER-CUTOVER`已生效并关闭Stage 1。后续resolution接受R1原子性边界并把Stage 2解析为Ready / Not Active；
-其余target contract保持Not Cut Over。
+其余target contract保持Not Cut Over。C2 final review随后发现一个Apollyon：R1 strict backend failure/crash
+atomicity超出lwext4/Rust wrapper的自然能力。开发者通过Target Renegotiation Gate接受R2，将该责任明确转交后续
+lwext4集成事务；R2 write-back、source-shape audit与第二轮复审已关闭该finding并完成C2。
 
 ## Apollyon
 
@@ -34,6 +35,32 @@ None。
 
 ## Neutralized
 
+### APOLLYON-VFS-MAKE-NODE-001：R1 strict atomicity 超出 lwext4/Rust wrapper 自然能力
+
+**原问题：** R1要求backend-local dirent atomic commit和提交前全部rollback，但live lwext4以dirty inode
+reference、directory block mutation和lazy block-cache writeback组合create。当前wrapper可以在同一锁内先形成final
+metadata、再调用`add_entry`，也可以回收确认仍未链接的inode；它不能在合理工程量内证明`add_entry`任意I/O failure
+或crash/power-loss下child inode与parent dirent物理全有或全无。继续硬凑会要求forced flush、伪journal、双状态补偿
+或大幅改造lwext4，既不可信也会扭曲当前内核中已经自然的syscall/VFS/metadata路径。
+
+**决定：** 开发者接受R2。首版继续要求final metadata先于publication、同一backend锁阻止正常并发lookup观察
+中间态、成功normal sync/reload保持metadata、可预先判定的错误不发布node，并对确认仍未链接的inode执行cleanup。
+lwext4任意内部I/O failure与crash/power-loss strict atomicity明确移出本revision，登记current limitation；系统性
+修复由后续lwext4/Rust wrapper事务负责。后续若又有target guarantee在合理工程量内无法实现，必须再次触发
+Target Renegotiation Gate，不得由实现或agent自行降级。
+
+**代码形状处置：** C2 source audit未发现forced flush、双阶段truth、fault injection production hook或伪journal。
+metadata-before-publication、name boundary validation、同锁串行化和`free_unlinked`都是自然正确性/错误抵抗结构，
+予以保留；validation不得把namei提前拒绝的overlong name误写成backend rollback proof。
+
+**修复位置：** [R2 VFS handoff与接受边界](./index.md#vfs-与-filesystem-handoff)、
+[MAKE-NODE-ATOMIC-001](./invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup)、
+[Stage 2 R2 plan](./implementation.md#7-stage-2-ready--make-node-vertical-slice)、
+[accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)与
+[transaction renegotiation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r2-target-renegotiation-and-c2-review-hold---2026-08-01)。
+
+**状态：** Neutralized / 2026-08-01；R2 accepted，第二轮复审Apollyon/Keter均为0，C2已关闭。
+
 ### KETER-VFS-MAKE-NODE-005：R0 混合了 backend-local 与 common-create 跨 owner 原子性
 
 **原问题：** R0要求任何backend commit后的fallible step都移到commit前或具备rollback，同时live VFS的touch/mkdir
@@ -47,7 +74,7 @@ touch/mkdir更弱；若完整关闭既有backend/cache/dentry窗口需要不小�
 不由本RFC解决或阻塞cutover。panic、success stub、cache-only `rdev`与post-dirent metadata patch仍不可接受。
 
 **修复位置：** [R1 VFS handoff与接受边界](./index.md#vfs-与-filesystem-handoff)、
-[MAKE-NODE-ATOMIC-001](./invariants.md#make-node-atomic-001--backend-local-commit-不得发布半初始化-node)、
+[MAKE-NODE-ATOMIC-001](./invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup)、
 [Stage 2 Ready](./implementation.md#7-stage-2-ready--make-node-vertical-slice)、
 [ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)与
 [transaction resolution](../../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01)。

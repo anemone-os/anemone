@@ -15,6 +15,35 @@ use crate::{
 
 use super::file::{EXT4_DIR_FILE_OPS, EXT4_REG_FILE_OPS};
 
+fn encode_ext4_rdev(rdev: DeviceId) -> u32 {
+    match rdev {
+        DeviceId::None => 0,
+        DeviceId::Number(number) => {
+            let (major, minor) = number.decompose();
+            anemone_abi::fs::linux::dev_t::encode(major.get() as u32, minor.get() as u32)
+        },
+    }
+}
+
+fn decode_ext4_rdev(ty: InodeType, raw: u32) -> DeviceId {
+    if !matches!(ty, InodeType::Char | InodeType::Block) {
+        return DeviceId::None;
+    }
+    let (major, minor) = anemone_abi::fs::linux::dev_t::decode(raw);
+    DeviceId::Number(crate::device::devnum::DeviceNumber::new(
+        crate::device::devnum::MajorNum::new(major as usize),
+        crate::device::devnum::MinorNum::new(minor as usize),
+    ))
+}
+
+fn ext4_special_open_error(ty: InodeType) -> SysError {
+    match ty {
+        InodeType::Fifo => SysError::NotSupported,
+        InodeType::Char | InodeType::Block | InodeType::Socket => SysError::NoSuchDeviceOrAddress,
+        _ => unreachable!("only an ext4 special node has a special open error"),
+    }
+}
+
 fn ext4_lookup_child(dir: &InodeRef, name: &str) -> Result<(Ino, InodeType), SysError> {
     let sb = dir.sb();
     ext4_sb(&sb).with_fs(|fs| {
@@ -68,15 +97,45 @@ fn ext4_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, S
     ext4_create_child(dir, name, InodeType::Dir, perm)
 }
 
+fn ext4_make_node(
+    dir: &InodeRef,
+    name: &str,
+    description: MakeNodeDescription,
+) -> Result<InodeRef, SysError> {
+    let sb = dir.sb();
+    let raw_rdev = encode_ext4_rdev(description.rdev);
+    let raw_ino = ext4_sb(&sb).write_tx(|| {
+        ext4_sb(&sb).with_fs(|fs| {
+            match fs.lookup(dir.ino().get() as u32, name) {
+                Ok(_) => return Err(SysError::AlreadyExists),
+                Err(err) if err.code == ENOENT as i32 => {},
+                Err(err) => return Err(map_ext4_error(err)),
+            }
+            fs.make_node(
+                dir.ino().get() as u32,
+                name,
+                map_vfs_inode_type(description.mode.ty())?,
+                description.mode.perm().bits() as u32,
+                description.uid.get(),
+                description.gid.get(),
+                raw_rdev,
+            )
+            .map_err(map_ext4_error)
+        })
+    })?;
+
+    sb.iget(ext4_ino(raw_ino)?)
+}
+
 fn ext4_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let file_ops = match inode.ty() {
         InodeType::Anon => unreachable!("anonymous inode kind cannot be opened from ext4"),
         InodeType::Dir => &EXT4_DIR_FILE_OPS,
         InodeType::Regular => &EXT4_REG_FILE_OPS,
         InodeType::Symlink => &EXT4_SYMLINK_FILE_OPS,
-        InodeType::Fifo => unimplemented!("ext4 fifo file"),
-        InodeType::Char | InodeType::Block => unimplemented!("ext4 dev file"),
-        InodeType::Socket => return Err(SysError::NotSupported),
+        ty @ (InodeType::Fifo | InodeType::Char | InodeType::Block | InodeType::Socket) => {
+            return Err(ext4_special_open_error(ty));
+        },
     };
 
     Ok(OpenedFile::new(file_ops, NilOpaque::new()))
@@ -145,9 +204,23 @@ fn ext4_fs_dev(sb: &SuperBlock) -> DeviceId {
 
 fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let sb = inode.sb();
-    // fchown updates the VFS inode cache first; lwext4 has no owner setter yet,
-    // so stat must report the cached owner instead of re-reading disk attrs.
+    // VFS metadata is authoritative while the inode is resident; eviction and
+    // explicit sync persist the same owner through lwext4's u32 setters.
     let meta = inode.inode().meta_snapshot();
+
+    let rdev = if matches!(inode.ty(), InodeType::Char | InodeType::Block) {
+        let raw = ext4_sb(&sb).read_tx(|| {
+            ext4_sb(&sb).with_fs(|fs| {
+                let mut attr = lwext4_rust::FileAttr::default();
+                fs.get_attr(inode.ino().get() as u32, &mut attr)
+                    .map_err(map_ext4_error)?;
+                Ok(attr.rdev)
+            })
+        })?;
+        decode_ext4_rdev(inode.ty(), raw)
+    } else {
+        DeviceId::None
+    };
 
     Ok(InodeStat {
         fs_dev: ext4_fs_dev(&sb),
@@ -156,7 +229,7 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         nlink: meta.nlink,
         uid: meta.uid,
         gid: meta.gid,
-        rdev: DeviceId::None,
+        rdev,
         size: meta.size,
         atime: meta.atime,
         mtime: meta.mtime,
@@ -399,6 +472,7 @@ fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
 }
 
 pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
+    make_node: ext4_make_node,
     lookup: ext4_lookup,
     touch: ext4_touch,
     mkdir: ext4_mkdir,
@@ -414,6 +488,7 @@ pub(super) static EXT4_DIR_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotSupported),
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),
@@ -429,6 +504,7 @@ pub(super) static EXT4_REG_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotSupported),
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),
@@ -437,13 +513,14 @@ pub(super) static EXT4_DEV_INODE_OPS: InodeOps = InodeOps {
     unlink: |_, _| Err(SysError::NotDir),
     rmdir: |_, _| Err(SysError::NotDir),
     rename: |_, _, _, _, _| Err(SysError::NotSupported),
-    open: |_| Err(SysError::NotSupported),
+    open: ext4_open,
     truncate: |_, _| Err(SysError::NotSupported),
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: ext4_get_attr,
 };
 
 pub(super) static EXT4_SYMLINK_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotSupported),
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),
@@ -457,3 +534,35 @@ pub(super) static EXT4_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     read_link: ext4_read_link,
     get_attr: ext4_get_attr,
 };
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::device::devnum::{DeviceNumber, MajorNum, MinorNum};
+
+    #[kunit]
+    fn ext4_rdev_projection_uses_canonical_linux_codec() {
+        let number = DeviceNumber::new(MajorNum::new(0xabc), MinorNum::new(0x54321));
+        let raw = encode_ext4_rdev(DeviceId::Number(number));
+        assert_eq!(
+            decode_ext4_rdev(InodeType::Char, raw),
+            DeviceId::Number(number)
+        );
+        assert_eq!(
+            decode_ext4_rdev(InodeType::Block, raw),
+            DeviceId::Number(number)
+        );
+        assert_eq!(decode_ext4_rdev(InodeType::Socket, raw), DeviceId::None);
+    }
+
+    #[kunit]
+    fn ext4_special_open_errno_is_explicit_for_each_persisted_kind() {
+        assert_eq!(
+            ext4_special_open_error(InodeType::Fifo),
+            SysError::NotSupported
+        );
+        for ty in [InodeType::Char, InodeType::Block, InodeType::Socket] {
+            assert_eq!(ext4_special_open_error(ty), SysError::NoSuchDeviceOrAddress);
+        }
+    }
+}

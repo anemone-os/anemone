@@ -10,6 +10,12 @@ pub struct InodeOps {
 
     pub touch: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError>,
 
+    pub make_node: fn(
+        dir: &InodeRef,
+        name: &str,
+        description: MakeNodeDescription,
+    ) -> Result<InodeRef, SysError>,
+
     pub mkdir: fn(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, SysError>,
 
     pub symlink: fn(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError>,
@@ -57,6 +63,38 @@ pub struct InodeOps {
     pub get_attr: fn(&InodeRef) -> Result<InodeStat, SysError>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MakeNodeDescription {
+    pub mode: InodeMode,
+    pub uid: Uid,
+    pub gid: Gid,
+    pub rdev: DeviceId,
+}
+
+impl MakeNodeDescription {
+    pub fn new(mode: InodeMode, uid: Uid, gid: Gid, rdev: DeviceId) -> Self {
+        assert_eq!(
+            matches!(mode.ty(), InodeType::Char | InodeType::Block),
+            matches!(rdev, DeviceId::Number(_)),
+            "only character and block nodes carry a device number"
+        );
+        Self {
+            mode,
+            uid,
+            gid,
+            rdev,
+        }
+    }
+}
+
+pub(crate) fn reject_make_node(
+    _: &InodeRef,
+    _: &str,
+    _: MakeNodeDescription,
+) -> Result<InodeRef, SysError> {
+    Err(SysError::PermissionDenied)
+}
+
 pub struct OpenedFile {
     pub file_ops: &'static FileOps,
     /// Open-time VFS behavior for the resulting file object.
@@ -93,5 +131,31 @@ impl RenameFlags {
     /// only one supported flag.
     pub fn validate(&self) -> Result<(), SysError> {
         Ok(())
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::device::devnum::{DeviceNumber, MajorNum, MinorNum};
+
+    #[kunit]
+    fn make_node_description_requires_device_number_only_for_device_kinds() {
+        let number = DeviceId::Number(DeviceNumber::new(MajorNum::new(1), MinorNum::new(2)));
+        let device = MakeNodeDescription::new(
+            InodeMode::new(InodeType::Char, InodePerm::IRUSR),
+            Uid::ROOT,
+            Gid::ROOT,
+            number,
+        );
+        assert_eq!(device.rdev, number);
+
+        let regular = MakeNodeDescription::new(
+            InodeMode::new(InodeType::Regular, InodePerm::IRUSR),
+            Uid::ROOT,
+            Gid::ROOT,
+            DeviceId::None,
+        );
+        assert_eq!(regular.rdev, DeviceId::None);
     }
 }

@@ -329,6 +329,7 @@ fn boot_tty_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
 }
 
 static BOOT_TTY_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotSupported),
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),
