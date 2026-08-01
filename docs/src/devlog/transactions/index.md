@@ -24,6 +24,9 @@
 
 ## Completed
 
+- [LoongArch LSX Sticky-Lazy Context](./2026-08-01-loongarch-lsx-context.md)：R0已完成per-task first-use
+  policy、唯一128-bit trapframe backing、user trap save/restore、clone/exec和Linux-compatible signal
+  extcontext；2K1000 build与用户实机验收通过。LASX、HWCAP和full-lazy保持accepted limitations。
 - [Network Frame Path Stage 4](./2026-07-27-net-frame-path-stage4.md)：单一post-close conformance checkpoint已完成
   registry-owned pending handoff、post-`Late` activation与host-test metadata修正；NFP-008/009/010关闭，既有
   contracts保持Effective且无第二次cutover。

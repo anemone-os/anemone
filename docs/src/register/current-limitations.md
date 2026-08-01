@@ -2,6 +2,36 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260801-LA64-LSX-STICKY-LAZY-SCOPE
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** LoongArch64 / user trap / FPU / LSX / signal ABI
+
+**Summary:** LoongArch userspace已支持128-bit LSX context：第一次SXD按`CPUCFG2.LSX`建立task-owned
+sticky policy，此后每次user trap/return完整保存恢复32个LSX register及共享FCC/FCSR；clone继承，成功
+exec重置，signal frame使用Linux-compatible `LSX_CTX_MAGIC` payload。当前实现优先保证正确性，不实现
+Linux per-CPU last-owner/full-lazy优化，因此LSX task在每次user/kernel round trip承担完整save+restore成本。
+
+本能力不包含256-bit LASX、LBT、`AT_HWCAP`/`AT_HWCAP2`或IFUNC feature publication；普通kernel codegen
+继续使用`-lsx`，ASXD稳定投递`SIGILL`且ASXE始终关闭。显式执行LSX的程序可以使用该context能力，但依赖
+auxv自动选择LSX实现的libc/runtime仍不能从kernel获知该feature。
+
+first-use只检查触发SXD的当前CPU。R0依赖在线LoongArch CPU对LSX capability同构，不提供per-CPU feature
+map、LSX-aware affinity或异构核心迁移保证；2K1000验收位于该同构边界内。
+
+**Exit Condition:** 只有出现可量化的LSX trap开销、LASX workload或动态feature publication需求时，才通过
+follow-up RFC分别引入per-CPU owner/full-lazy、256-bit context或HWCAP framework，并重新证明migration、
+clone/exec、signal ABI和unsupported CPU路径。异构拓扑还必须先建立per-CPU capability owner与调度约束；
+这些扩展不阻塞当前LSX R0。
+
+**Owner:** EDGW, Codex
+**Last Verified:** 2026-08-01
+**Related:** [LoongArch LSX Context RFC](../rfcs/loongarch-lsx-context/index.md),
+[事务日志](../devlog/transactions/2026-08-01-loongarch-lsx-context.md),
+[software unaligned access开放问题](./open-issues.md#ane-20260801-la64-soft-unaligned-user-memory-corruption)
+
 ## ANE-20260726-SYSTEM-POWER-BEST-EFFORT-BOUNDARIES
 
 **Type:** Limitation

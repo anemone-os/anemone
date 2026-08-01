@@ -105,6 +105,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
+- [RFC-20260801-loongarch-lsx-context](./rfcs/loongarch-lsx-context/index.md)：R0已实现并关闭；以per-task
+  sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
+  clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
+  `AT_HWCAP*`和Linux full-lazy owner优化保持明确非目标；software unaligned access问题独立登记。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
