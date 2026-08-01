@@ -1,7 +1,7 @@
 # RFC-20260731-vfs-make-node
 
 **状态：** Closed
-**修订：** R3
+**修订：** R2
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-01
 **领域：** fs / VFS / syscall ABI / ext4 / ramfs
@@ -14,8 +14,8 @@
 记录 lwext4/Rust wrapper 无法提供的 crash/I/O-failure atomicity；[Tracking Issues](./tracking-issues.md)
 保留一个 Apollyon、五个 Keter、两个 Euclid 的 Neutralized 历史
 **下一步：** None；[Stage 1](./implementation.md#5-stage-1-closed--device-number-prerequisite)与
-[Stage 2](./implementation.md#7-stage-2-closed--make-node-vertical-slice)均已关闭，后续named FIFO/device data
-plane、legacy `readdir`及lwext4 strict failure/crash atomicity由独立条目拥有
+[Stage 2](./implementation.md#7-stage-2-closed--make-node-vertical-slice)均已关闭，后续umask、named FIFO/device
+data plane、legacy `readdir`及lwext4 strict failure/crash atomicity由独立条目拥有
 
 > 本目录自 2026-07-31 起是 `vfs-make-node` 提案与 target 的公共 canonical source。2026-08-01 的独立复审
 > 接受 R0；2026-08-01 的 Stage 2 resolution 又接受 R1，将强制原子性收窄为 backend-local make-node commit，
@@ -25,8 +25,6 @@ plane、legacy `readdir`及lwext4 strict failure/crash atomicity由独立条目�
 > failure/crash atomicity转交后续lwext4集成事务。
 > Stage 1 已关闭并使`DEVICE-NUMBER-001`生效；Stage 2 C3完成双架构runtime、probe退出与最终review后，
 > `VFS-MAKE-NODE-CUTOVER`已原子使其余三个target contract delta生效。
-> 外层分支合流时，仓库已存在完整task filesystem-context umask owner及`openat`/`mkdirat`接入。用户接受R3，
-> 要求`mknodat`复用同一owner；R0-R2 no-umask文字继续记录branch-local历史，不再描述合流后的current behavior。
 
 ## 摘要
 
@@ -40,9 +38,11 @@ VFS 在 `InodeOps` 虚表中新增 `make_node` function pointer。syscall adapte
 `getdents64` 和 unlink；ext4 必须在 reload 后恢复同一 kind、permission、owner 与适用的 `rdev`，ramfs
 必须在 resident lifetime 内保持同一 identity。
 
-R3复用已经生效的task filesystem-context umask owner。`mknodat`与`openat`/`mkdirat`在各自syscall adapter读取
-同一共享filesystem context的一次mask snapshot，再把调整后的final permission交给VFS；make-node不建立局部mask、
-不把task状态泄漏给backend。R0-R2明确接受的no-umask偏差只保留为branch-local revision历史。
+R2 继承 R0/R1 明确接受的一项 Linux 可见偏差：本 revision 的 `mknodat` 不应用 process umask，最终 permission 直接使用
+调用者请求的 permission bits。真正的 umask 需要 task/fs-state owner 与全部创建类调用点共同接入，必须由后续
+独立工作统一实现；本 RFC 不为 `mknodat` 建立局部 mask、读取 `sys_umask` stub，或借 Stage 2 扩大 task/create
+surface。因此下文的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与 errno matrix，
+不包含 umask-adjusted permission semantics。
 
 本 RFC 不把 named FIFO 数据面、按设备号 open provider 或 pathname socket endpoint 混入 make-node 核心。
 首版只顺带接入不改变既有 owner 的现有能力：regular node 复用 ordinary regular-file behavior，device node
@@ -85,8 +85,8 @@ devfs/TTY/block endpoint 的 publication owner、既有号码或 provider lifecy
 - ext4 与 ramfs 的 ordinary inode attributes 当前都把 `rdev` 报告为 `None`；
 - ext4 special-node open 存在 `unimplemented!()`，ramfs 对非 ordinary kind 的 open 进入 `unreachable!()`；
 - mount 对 non-block source 当前返回 `EINVAL`，而 Linux/LTP 对 character node source 要求 `ENOTBLK`；
-- 外层合流前的独立umask工作已经让task filesystem context唯一拥有mask，并接入`umask(2)`、`openat`与`mkdirat`；
-  R3只让新增`mknodat`复用同一窄接口，不移动owner或复制局部mask。
+- `sys_umask` 当前仍是 stub；R1 继承 R0 接受的 `mknodat` no-umask边界。真正的 mask state 与所有创建类调用点
+  由后续独立工作统一收口，本 RFC 只复用现有 owner/group 与 create admission，不读取该 stub 或复制局部 mask。
 
 活动登记册中的
 [`ANE-20260527-LTP-MKNOD-LEGACY-READDIR`](../../register/open-issues.md#ane-20260527-ltp-mknod-legacy-readdir)
@@ -106,8 +106,8 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
   backend owner surface。
 - 支持 type bits 为 0、`S_IFREG`、`S_IFIFO`、`S_IFCHR`、`S_IFBLK` 与 `S_IFSOCK` 的 Linux
   make-node admission；`S_IFDIR` 返回 `EPERM`，`S_IFLNK` 与其它非法 type bits 返回 `EINVAL`。
-- 对normalized requested permission应用当前task filesystem-context umask；ext4/ramfs只接收调整后的final
-  permission，不能读取task state或建立mknod-local mask state。
+- 明确本 revision 不应用 process umask；ext4/ramfs 的最终 permission bits 使用 `mode` 中请求的 permission
+  bits，不能读取 `sys_umask` stub、task-local mask 或建立 mknod-local mask state。
 - 对 character/block creation 执行 `CAP_MKNOD` gate；R2 继承 R0/R1 不采用 Linux `WHITEOUT_DEV` capability例外的决定，
   character 0:0 仍要求 `CAP_MKNOD`；regular/FIFO/socket 不借此要求设备创建 capability。
 - 将 syscall 的 32-bit encoded device number 完整 decode 为 12-bit major + 20-bit minor；`dev` 只对
@@ -142,7 +142,8 @@ Linux node-kind、`dev` 与 capability admission 以固定公共参考
 - 不实现 overlayfs whiteout identity、copy-up/rename whiteout protocol，或为 character 0:0 绕过
   `CAP_MKNOD`。
 - 不实现 legacy `readdir` syscall，也不把它与 `mknodat` 共用 closure claim。
-- 不移动既有process umask owner，不实现POSIX default ACL，也不把mask state下沉到VFS/backend。
+- 不实现 process umask state、`umask(2)` 行为或其它创建类 syscall 的 mask 接入；这需要 task/fs-state owner
+  与全部 create call sites，由后续独立工作统一完成。
 - 不为既有 touch/mkdir/common-create 的 backend commit 到 inode-cache/dentry materialization 窗口建立新的跨 owner
   transaction/rollback protocol；如果关闭该窗口需要不小的架构变动，本 RFC 只记录问题，不以此阻塞 make-node。
 - 不承诺lwext4 block-cache写回、任意内部I/O failure或crash/power-loss下child inode与parent dirent全有或全无；
@@ -161,8 +162,8 @@ RFC target：
 - [Implementation plan](./implementation.md)：一个 device-number prerequisite + 一个 make-node 主实现阶段；
   Stage 1-2 Closed / C1-C3 Closed
 - [Tracking Issues](./tracking-issues.md)：保存当前影响 target / implementation readiness 的 finding
-- [umask文件创建掩码](../../devlog/changes/2026-07-27-umask-file-creation-mask.md)：
-  R3复用既有task filesystem-context owner并关闭branch-local no-umask limitation
+- [R2 no-umask历史决定](./tracking-issues.md#keter-vfs-make-node-003process-umask-的可见语义与-owner-边界未固定)：
+  本 revision 的 requested permission bits 不经 process umask 屏蔽
 - [Lwext4 make-node atomicity limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)：
   正常执行保持有序、串行化publication；严格failure/crash atomicity由后续lwext4/Rust wrapper事务负责
 - [Common-create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)：
@@ -197,7 +198,6 @@ Current contracts：
 | R0 | 2026-08-01 | Accepted for Implementation | 初始 accepted target：12/20 device-number prerequisite、canonical `mknodat`、ext4+ramfs make-node closure；明确 requested permission bits 不应用 process umask | [独立 R0 复审与 activation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r0-acceptance-and-stage-1-activation-preflight---2026-08-01) |
 | R1 | 2026-08-01 | Accepted for Implementation | 保留 backend-local final-metadata + dirent atomic commit 与提交前 rollback；既有 common-create backend/cache/dentry publication 缺口若需新跨 owner transaction protocol，则登记为独立开放问题，不由本 RFC 修复或阻塞 | [Stage 1 -> Stage 2 resolution](../../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01) |
 | R2 | 2026-08-01 | Accepted for Implementation | 保留final metadata先于publication、正常并发不可见中间态、成功sync/reload与可实施cleanup；不承诺lwext4任意I/O failure或crash下inode/dirent全有或全无，修复责任转交后续lwext4/Rust wrapper事务 | [C2 target renegotiation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r2-target-renegotiation-and-c2-review-hold---2026-08-01) |
-| R3 | 2026-08-01 | Accepted / Integrated | 外层合流已具备task filesystem-context唯一umask owner；`mknodat`复用同一mask snapshot接口，R0-R2 no-umask保留为branch-local历史 | [umask小迭代记录](../../devlog/changes/2026-07-27-umask-file-creation-mask.md) |
 
 ## 方案
 
@@ -228,9 +228,9 @@ pathname、duplicate name、bad pointer、bad relative `dirfd`、non-directory `
 mount 与 parent DAC failure 由现有 syscall/VFS owner 返回 Linux-compatible errno。validation order 的精确代码
 形状属于 implementation resolution，但不能用 backend error 或成功空操作绕过 ABI admission。
 
-syscall adapter对normalized requested permission读取当前task filesystem context的一次umask snapshot，并把
-调整后的final permission纳入node description；backend持久/驻留保存该结果。mask owner仍与root/cwd同属
-`FsState`，make-node不得补一份task-local或mknod-local owner。
+permission bits 不采用 Linux 的 umask-adjusted 结果：syscall adapter/VFS 把调用者请求的 permission bits 原样
+纳入最终 node description，backend 持久/驻留保存该结果。该偏差必须保持可见且可测试；不得让当前
+`sys_umask` stub 的返回值偶然驱动行为，也不得在本 RFC 内补一份 task-local 或 mknod-local umask owner。
 
 syscall 的 `dev` 参数按 Linux 32-bit encoded device number 解释；全部 bit pattern 都能 round-trip 为
 12-bit major + 20-bit minor。Linux packed layout 只存在于 `mknodat` decode、`stat`/`statx` projection、loop
@@ -329,7 +329,8 @@ normalization、通用inode category-neutral number与既有consumer迁移。最
 接受本 RFC 意味着以下 target 被固定，但不自动授权实现：
 
 - RV64/LA64 canonical `mknodat(33)` 与上述 mode/capability matrix，包括 R2 不采用 whiteout 例外；
-- requested permission通过既有task filesystem-context umask owner形成final permission；
+- 本 revision 的 requested permission bits 不经 process umask 屏蔽；这是已接受的可见限制，Linux mode
+  compatibility claim 不覆盖 umask-adjusted permission，后续由独立 umask 工作统一退出；
 - 完整 Linux 32-bit device-number ABI、12-bit major + 20-bit minor internal numeric domain，以及 packed
   representation 只留在 ABI/on-disk boundary；
 - `Inode::ty()` 唯一决定 Char/Block category，通用 inode `rdev` 只保存 category-neutral number，typed
@@ -367,7 +368,7 @@ normalization、通用inode category-neutral number与既有consumer迁移。最
 - 把 named FIFO、device provider open 或 pathname socket endpoint 并入本 revision；
 - 改变本 revision 已接受的 device-number numeric owner，或进一步改变 devfs publication、mount source、
   provider lifecycle 或 opened-description owner；
-- 移动task/fs-state umask owner、在VFS/backend复制mask state，或绕过既有窄snapshot接口；
+- 在本 RFC 内引入 task/fs-state umask owner、读取 `sys_umask` stub 或扩展其它创建类调用点；
 - 新增长期 test app/validation facade，或让临时 probe 成为 production dependency。
 
 ## 备选方案
@@ -421,7 +422,7 @@ kind truth。filesystem 只接收 VFS semantic description。
 
 ## 收口
 
-R3已完成外层合流；R2的Stage 1与`DEVICE-NUMBER-CUTOVER`建立effective 12/20 `DEVICE-NUMBER-001` baseline；Stage 2
+R2已实现并关闭。Stage 1与`DEVICE-NUMBER-CUTOVER`建立effective 12/20 `DEVICE-NUMBER-001` baseline；Stage 2
 C1完成同owner结构拆分，C2完成合并feature implementation，C3完成RV64/LA64 runtime、临时probe/profile退出、
 精确生产树复验与最终review。`VFS-MAKE-NODE-CUTOVER`已原子Introduce `VFS-MAKE-NODE-001`、
 `VFS-SPECIAL-NODE-RDEV-001`并Refine `VFS-MOUNT-ADMISSION-002`，三项现均为effective current contract。

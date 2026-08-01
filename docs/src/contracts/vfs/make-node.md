@@ -43,15 +43,17 @@ ext4/ramfs 必须在各自 backend creation boundary 内先形成 final metadata
 publication 前可判定的失败留下可 lookup node；special open panic或落入 regular fallback；或长期保留 proof-only
 production seam。
 
-**验证 / Enforcement：** VFS/backend source 与 lock-order audit；RV64/LA64 各 293 项 boot KUnit；两架构 ext4
-remount/reload 与 ext4/ramfs node-matrix probe；两架构 glibc/musl 各 11 个 `mknod*`/`mknodat*` case 全部通过；
-删除临时 probe/profile 后的双架构 release build、initializer/residual-panic/provider-lookup audit 与 final review。
+**验证 / Enforcement：** R2 closure包括VFS/backend source与lock-order audit、RV64/LA64各293项boot KUnit、两架构
+ext4 remount/reload与ext4/ramfs node-matrix probe，以及两架构glibc/musl各11个`mknod*`/`mknodat*`case。后续
+umask refinement由`mknodat`对task filesystem-context窄接口的source audit、共享owner/lifecycle KUnit与既有
+umask用户矩阵共同约束；本次合流未重跑`mknodat` permission runtime matrix，不能用原R2 no-umask probe替代。
 
 **最初来源：** Closed [VFS Make Node R2 RFC](../../rfcs/vfs-make-node/index.md) 与
 [implementation transaction](../../devlog/transactions/2026-07-31-vfs-make-node.md)。
 
-**当前来源：** R2 cutover与[umask文件创建掩码](../../devlog/changes/2026-07-27-umask-file-creation-mask.md)；
-合流后的R3复用既有task filesystem-context owner，并退出branch-local no-umask limitation。
+**当前来源：** R2 cutover、后续独立的[umask文件创建掩码](../../devlog/changes/2026-07-27-umask-file-creation-mask.md)
+建立的task filesystem-context owner与未来creator复用义务，以及本次合流中`mknodat`对该窄接口的source
+integration；三者共同退出已过时的no-umask limitation，不重开已关闭RFC。
 
 ## VFS-SPECIAL-NODE-RDEV-001 — Filesystem-backed special-node `rdev` 是单一 numeric truth
 
