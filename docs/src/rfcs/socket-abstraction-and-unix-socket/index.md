@@ -9,7 +9,7 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** None（R0 accepted；未授权实现或 contract cutover）
+**执行记录：** None（R0 accepted；Stage 1 Ready / Not Active；未授权实现或 contract cutover）
 
 ## 文档状态
 
@@ -17,13 +17,14 @@
 的 target、owner、ABI、failure/cleanup、Contract Impact 与 acceptance 边界；私有 positioning 不成为公共依赖或
 并列 canonical source。
 
-本文不是 current contract，也不表示任何实现 gate 已经 Ready/Active。当前 UDP、opened-description、VFS、iomux 与
-epoll 语义继续以 `docs/src/contracts/` 下的 Active contract 为准。R0 acceptance 只接受 target；Stage 1 仍需独立
-resolution 与实施授权后才能进入代码工作。达到 `SOCKET-UNIX-CUTOVER` 的全部验收前，不得修改 current contract。
+本文不是 current contract，也不表示任何实现 gate 已经 Active。当前 UDP、opened-description、VFS、iomux 与epoll
+语义继续以 `docs/src/contracts/` 下的 Active contract 为准。R0 acceptance只接受target；独立resolution已把Stage 1
+解析为Ready / Not Active，仍需另行实施授权后才能进入代码工作。达到`SOCKET-UNIX-CUTOVER`的全部验收前，不得修改
+current contract。
 
 本 RFC 按当前规模保留[目标与不变量](./invariants.md)，并因已经出现真实多阶段实施需要而增加一份
-[实施路线](./implementation.md)。实施路线当前只保存 Outline 级语义阶段，不使任何 gate 成为 Ready/Active；当前不
-创建 tracking page 或 transaction，也不预先冻结内部类型、文件布局和精确命令。
+[实施路线](./implementation.md)。其中Stage 1已按live source解析为两个有序checkpoint，Stage 2--4仍为Outline；当前
+不创建tracking page或transaction，也不把Ready状态当作实施授权。
 
 ## 摘要
 
@@ -529,7 +530,7 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
   [VFS create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)、
   [non-UTF-8 pathname](../../register/current-limitations.md#ane-20260801-vfs-non-utf8-pathname)
 - External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`
-- commit / PR / transaction：None（R0 accepted；未授权实现或 cutover）
+- commit / PR / transaction：None（R0 accepted；Stage 1 resolution已完成；未授权实现或cutover）
 
 ## 修订记录
 
@@ -539,4 +540,5 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 
 ## Closure
 
-Not Cut Over。没有代码、runtime、contract cutover 或实现授权；所有 validation claim 均为未来 acceptance 要求。
+Not Cut Over。Stage 1为Ready / Not Active；没有代码、runtime、contract cutover或实现授权，所有validation claim均为
+未来实施与acceptance要求。

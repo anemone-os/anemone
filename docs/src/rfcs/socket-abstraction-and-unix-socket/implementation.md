@@ -1,19 +1,19 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / No Stage Active
+**状态：** R0 Accepted / Stage 1 Ready
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R0
-**当前实施阶段：** None（所有 Stage 均为 Outline；未授权代码或 contract cutover）
+**当前实施阶段：** Stage 1 Ready / Not Active（未授权代码或 contract cutover）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
 最终 validation boundary 仍由父 RFC [index](./index.md)和[目标与不变量](./invariants.md)定义；本页不建立并列
 target、执行状态总表或验证证据副本。
 
-R0 acceptance 已于 2026-08-02 完成；Stage 1 resolution、当前 Stage 的实施授权与最终
-`SOCKET-UNIX-CUTOVER` 仍是相互独立的动作。R0 只接受 target，不使任何 Stage 成为 Ready/Active。进入每个 Stage
-前必须根据 live source、前一 Stage 实际 diff、review finding 与验证证据解析当前 Stage；前一 Stage 关闭后停止，
-不自动进入下一 Stage。
+R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Stage 1 的实施授权与最终
+`SOCKET-UNIX-CUTOVER` 仍是独立动作。resolution 只把 Stage 1 解析为 Ready / Not Active，不授权代码。进入后续
+Stage 前仍必须根据 live source、前一 Stage 实际 diff、review finding 与验证证据解析当前 Stage；前一 Stage关闭后
+停止，不自动进入下一 Stage。
 
 ## 全局 Implementation Boundary
 
@@ -83,9 +83,9 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
   import/re-export、定向测试和行为保持型拆分在当前 Stage boundary 内自然闭合。
 - Stage 1 在关闭前必须同时拥有 UDP 与 Unix 两个真实 consumer。允许在 Stage 内先后迁移，但不得把只有 UDP 的
   common front 当成独立 Stage closure。
-- Stage 2 先闭合 namespace、listener、connection admission 与 address lifecycle；Stage 3 再把完整 stream operation、
-  blocking 与 readiness 一起闭合。若 live evidence 表明二者无法安全分离，在激活前合并或重排，不建立 temporary
-  adapter 维持旧计划。
+- Stage 2 先闭合 namespace、listener、connection admission 与 address lifecycle；Stage 3 再在Stage 1 basic
+  stream/wait基线上把完整operation、shutdown与readiness一起闭合。若 live evidence 表明二者无法安全分离，在
+  激活前合并或重排，不建立 temporary adapter 维持旧计划。
 - 对应 Linux conformance oracle 必须在相关行为落地前形成 focused validation input；oracle 负责证伪 ABI bluff，
   不冻结 Linux 内部对象图、锁序或算法。
 - 普通执行证据由 Git/PR 保存。当前不创建 transaction；只有实际执行变成长周期、多 checkpoint、probe/
@@ -105,15 +105,16 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 
 | 阶段 | 当前状态 | 概括目的 | 前置依赖 | 下一步解析触发点 |
 | --- | --- | --- | --- | --- |
-| Entry | R0 Accepted / Stage 1 unresolved | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 由独立 Stage 1 resolution 授权触发实施解析 |
-| Stage 1 | Outline / Not Active | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 完成；Stage 1 获独立实施授权 | 读取最新 UDP Socket/ABI/opened-description/wait source 并激活已解析边界 |
+| Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；未激活 Stage 1 |
+| Stage 1 | Ready / Not Active | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 已完成；Stage 1 尚待独立实施授权 | 只能由明确 Stage 1 或 Checkpoint 1A 实施授权激活 |
 | Stage 2 | Outline | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed | 读取 Stage 1 实际 front、Unix endpoint/stream owner 与 validation evidence |
-| Stage 3 | Outline | 闭合完整 stream operation、blocking 与 poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
+| Stage 3 | Outline | 闭合完整stream operation、shutdown与poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
 
-所有 Stage 当前只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。进入当前 Stage 前才解析必要的
-内部 checkpoint、deliverable、定向 validation 与退出条件；不创建逐文件 write set、Resolved Write Set Manifest 或
-精确命令清单。若用户只授权当前 Stage，关闭后必须停止。
+Stage 1 已按下文解析到可执行粒度；Stage 2--4 仍只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。
+不创建逐文件 write set 或 Resolved Write Set Manifest；预计模块只作非穷举提示。同 owner 新文件、模块注册、
+import/re-export、定向测试和行为保持型拆分可在当前 checkpoint 内自然闭合。若用户只授权当前 Stage 或 checkpoint，
+关闭后必须停止。
 
 ## Entry — R0 与首阶段解析
 
@@ -133,41 +134,147 @@ acceptance 或 current contracts。
 checkpoint 只能作为同一 Stage 的 review/恢复边界；任何 checkpoint 都不能单独宣称 Socket Abstraction 已被两个
 完整 consumer 证明。
 
-**退出：** R0 已被 owner/reviewer 接受，且 Stage 1 的语义 deliverable、验证类别、停止/退出条件已经解析时，Entry
-完成并使 Stage 1 成为 Ready / Not Active。实施授权不是 Entry 退出条件；只有后续独立授权才能使 Stage 1 Active。
-当前解析尚未发生，因此 RFC 保持 Accepted / R0，Stage 1 保持 Outline / Not Active。
+**退出：** R0 已被 owner/reviewer 接受，Stage 1 的语义 deliverable、两个有序 checkpoint、验证、停止与退出条件也已
+按下文解析。Entry 当前为 Completed，Stage 1 为 Ready / Not Active。实施授权不是 Entry 退出条件；只有后续明确
+授权才能使 Stage 1 或 Checkpoint 1A Active。
 
-## Stage 1 — 双 consumer Socket front vertical slice
+## Stage 1 Ready / Not Active — 双 consumer Socket front vertical slice
 
 **目的：** 在同一 Stage 中建立最小 general Socket front，并让现有 UDP 与 Unix `socketpair` connected-stream
 vertical slice 都通过该 front 的 creation、ABI/FileOps、opened-description 与 family dispatch 路径运行。
 
-**前置：** Entry resolution 完成；Stage 1 已根据当时 live source 独立解析，并另行取得实施授权。
+**前置：** Entry resolution 已完成；开始代码前仍需另行取得 Stage 1 或 Checkpoint 1A 实施授权。若授权只点名一个
+checkpoint，其 closure 不激活下一个 checkpoint；若用户明确授权整个 Stage 1，仍按 1A -> review -> 1B 的顺序执行。
 
-**受保护边界：** UDP Endpoint、binding/datagram transaction、readiness与final release可见语义不变；Unix
-family state不进入Network Stack；共同层不解释private state或保存第二份type/role/readiness；本 Stage不引入pathname
-binding，也不 Refine iomux/epoll current contract。
+### Live baseline 与解析结论
 
-**预期交付：**
+resolution 读取的 live baseline 包括：`fs::socket::udp` 以 UDP-specific `FileOps` 与 `UdpSocketFile`承载private
+association；`socket/bind/getsockname/sendto/recvfrom` adapter通过该FileOps identity取得concrete UDP state；
+`task::files`已提供单fd reservation、opened-description status、静态direct-read/final-release hook与exactly-once
+terminal callback；UDP source已经接入current iomux snapshot/register/final-scan协议。Network Stack Endpoint与
+`anemone-net-api`不需要为Unix Socket改变。
 
-- immutable ops/type association、family-private storage envelope、共同 FileOps/opened-description integration 与
-  family-neutral resolver/ABI lowering 形成 production path；
-- UDP 从 syscall/FileOps 对 UDP concrete type 的直接识别迁移到共同 front，同时保持现有 contract 与 runtime；
-- Unix `socketpair` 形成两个可回滚 publication 的connected endpoint，并通过最小真实 byte-stream/lifecycle 路径
-  证明第二 consumer；Stage closure 不要求 pathname、listener 或最终 readiness matrix；
-- Stage 内为尚未交付的 target operation 保持明确 unsupported，不用成功 no-op、future TCP slot、dynamic class
-  registry 或无退出条件桥接占位。
+基于这些事实，Stage 1 不需要 probe，也不需要把 Unix state 放入 Network Stack、VFS inode或pipe owner。它解析为两个
+有序 checkpoint：Checkpoint 1A 先完成共同 front 与 UDP 行为保持迁移，Checkpoint 1B 再以 Unix `socketpair`闭合
+第二consumer和Stage 1。1A结束时只有UDP消费共同front，因而只是安全的owner-migration checkpoint，不能单独宣称
+`SOCKET-FRONT-001`已被两个consumer证明。
 
-**验证类别：** front/source/owner audit；resolver、fd publication rollback、dup/fork/final release、socketpair peer/
-stream lifecycle 的 owner-local proof；RV64/LA64 canonical build 与 focused socketpair runtime；现有 UDP 的 ABI、
-bind/send/receive、blocking/readiness 与 lifecycle regression。精确 case 与命令在 Stage 1 resolution 中确定。
+`socketpair`一旦对用户成功，默认blocking opened description就不能在empty/full predicate上临时返回`EAGAIN`、
+`EOPNOTSUPP`或busy-poll。因此Stage 1必须随paired creation一并交付basic read/write blocking loop、`O_NONBLOCK`/
+`SOCK_NONBLOCK`、ordered-prefix progress、EOF、`EPIPE`/`SIGPIPE`与peer final close的HUP。支撑这些operation的
+ordinary READABLE/WRITABLE/HANG_UP source predicate和route publication同属Stage 1；shutdown、`MSG_*`、RDHUP/ERR、
+half-close与完整poll/select/epoll矩阵仍由Stage 3闭合。这个划分增加的是target内的实施顺序，不改变R0 target、
+Contract Impact或最终acceptance。
 
-**Cutover：** None。所有 pending Socket/Unix/IOMUX/Epoll contract ID 保持未生效。
+### Stage 1 Implementation Boundary
 
-**停止 / 退出：** 如果第二 consumer 只能靠尚未解析的 pathname或readiness语义才能形成真实 production slice，先停止
-并判断 Stage 1 与后续 Stage 的合并/重排；不得关闭一个只有 UDP 的 common front。退出要求两个 consumer 已实际
-消费共同 front、UDP regression 未退化、Stage 1 临时迁移路径已删除或有明确同 Stage 删除点。关闭后停止，不自动进入
-Stage 2。
+**Target：** 建立唯一common Socket file/front、静态ops/type witness和family-private envelope；把当前UDP全部迁移到
+该front且保持current行为；交付`AF_UNIX + SOCK_STREAM + protocol 0`的`socketpair`，并以真实basic stream/wait/
+final-release路径证明Unix是第二consumer。
+
+**Non-goals：** Unix single-socket creation、pathname bind、listen/connect/accept、address snapshot/query、shutdown、
+`send*`/`recv*`与`MSG_*`、socket options、RDHUP/ERR、half-close与完整iomux/epoll conformance、Unix datagram与TCP
+均不进入本Stage。尚未交付的target operation必须从descriptor absence或typed unsupported稳定拒绝，不建立success
+no-op或caller特判。
+
+**Owner / handoff：**
+
+- general Socket owner只保存一份静态ops/type association及对应opaque private storage，并拥有共同anonymous Socket
+  inode/FileOps、family-neutral resolver、opened-description hook和blocking/wait orchestration；只有关联的concrete ops
+  可以解释private storage；
+- UDP private state继续拥有operation serialization、source association与Endpoint capability，Network Stack继续唯一
+  拥有Endpoint/binding/datagram/readiness facts；1A只改变kernel dispatch shape；
+- Unix endpoint owner拥有endpoint role和connection association；paired connection唯一拥有peer relation，两条
+  directional stream分别拥有bytes、capacity、writer/reader terminal与basic source predicate。endpoint只持side与
+  connection capability，不复制directional facts；
+- `task::files`继续唯一拥有fd reservation/publication、status/fd-local flags和semantic final release。Socket ABI只传
+  normalized type/request、typed outcome与user-copy cursor，不把Task、fd number、raw pointer或Linux errno传给family。
+
+**Failure / cleanup：**
+
+- UDP single creation在fd publication前由creation guard拥有abort；1A必须把UDP现有source/Endpoint retirement顺序原样
+  收入共同creation/final-release orchestration，不能让`Drop`或`Arc` count变成semantic close；
+- socketpair transaction先用现有fd reservation能力取得两个slot，并按tracked Linux oracle在publication前完成fd pair
+  copyout、paired state与两份opened description准备。任一reservation、copyout或preparation失败都撤销两个reservation
+  及全部unpublished Unix state；用户内存可以保留oracle允许的fd数字前缀，但对应slot不得live。两次commit之后不再有
+  可返回失败；不为形式上的同时publication扩张task/files为generic multi-fd transaction；
+- directional buffer capacity是normal resource boundary，必须进入KernelConfig并形成partial progress或not-ready，不能
+  用无界queue、panic或allocator-OOM分类吸收；copy fault不得消费/提交超过已成功copy的prefix。若当前generic read/write
+  trampoline无法保持该边界，可窄化复用或扩展创建时固定的direct-user transaction hook，但不得改变opened-description
+  lifecycle owner或暴露family private state；
+- final release先撤销本endpoint的新operation/source publication，再由connection/direction owner提交peer可观察的EOF/
+  write failure并取得需要通知的route snapshot，guard外notify/drop。关闭非最后dup/fork alias不得推进这些事实。
+
+**Protected ABI / contract：**
+
+- 1A完整保持`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
+  `NET-SOCKET-WAIT-001`；现有UDP family/type/protocol/flag errno、bind/getsockname、send/receive、blocking/readiness、
+  copy与final-release结果不得漂移；
+- resolver只接受本Stage两个resolved type：IPv4 UDP与Unix stream。`SOCK_NONBLOCK`进入shared description status，
+  `SOCK_CLOEXEC`进入各fd-local flag；raw tuple不进入Socket或private state。`socketpair`只支持Unix stream pair，UDP
+  pair继续按Linux oracle稳定拒绝；
+- Stage 1 Unix成功面至少包括paired create、basic read/write及其自然vector projection、blocking/nonblocking、
+  dup/fork/final close、EOF与`EPIPE`/`SIGPIPE`。对read/readv与write/writev，ABI adapter、user-copy cursor和
+  family commit必须共同保证只报告/消费/提交成功prefix；完整`MSG_PEEK`、shutdown与fault/race矩阵留待Stage 3复核；
+- basic Unix source只从direction owner的current bytes/capacity/EOF/terminal-write outcome投影普通READABLE/
+  WRITABLE，并在peer final close使endpoint完整terminal时投影current source-neutral HANG_UP；它服从current
+  `IOMUX-POLL-001..003` publication/final-scan协议，不发布RDHUP/ERR，不缓存ready mask，不改变epoll policy。本Stage
+  不执行任何pending Socket/Unix/IOMUX/Epoll contract cutover。
+
+### Checkpoint 1A — Common front 与 UDP migration
+
+**Deliverable：** 引入最小general Socket front、static ops/type witness、common Socket inode/FileOps与description hooks；
+把`socket/bind/getsockname/sendto/recvfrom`和poll/final release改为只识别common front并经UDP ops分发。现有
+`UdpSocketFile`职责作为UDP-private state保留或按同owner语义命名/拆分；ABI adapter、common FileOps与final-release
+hook不得再按UDP concrete FileOps/private type分类。旧UDP-only dispatch在1A内删除，不保留双路径。
+
+**Focused proof：** owner-local proof覆盖resolver witness、unsupported capability、single creation abort、common
+final-release到UDP retire的exactly-once handoff；现有UDP host topology与real `udp-test`回归继续证明bind/send/receive、
+blocking/readiness、dup/fork/CLOEXEC与retire/reuse。测试不冻结case数量，只要求每个高风险handoff有能够证伪回归的
+oracle；不得为了满足数量复制相同路径。
+
+**Exit / stop：** source audit必须证明syscall/FileOps/opened-description只有common front identity，只有UDP ops解释
+UDP private state，Network Stack及`anemone-net-api`没有Unix/future-TCP改动，current UDP runtime无退化。若迁移需要
+common层保存第二份family/type/readiness、让UDP ops接收rawLinux ABI，或扩大Network contract，立即停止。1A通过后
+只标记checkpoint closed并review完整diff；不自动激活1B，不做contract cutover。
+
+### Checkpoint 1B — Unix socketpair production vertical slice
+
+**Deliverable：** 增加Unix stream concrete ops、paired endpoint与connection/directional owner；接通
+`socketpair(AF_UNIX, SOCK_STREAM, 0, ...)`及两种creation flag；通过common FileOps/description hook交付basic
+read/write/vector、blocking/nonblocking、ordinary READABLE/WRITABLE recheck、dup/fork/final-close、EOF、
+`EPIPE`/`SIGPIPE`与full-close HANG_UP。Unix single-socket create capability保持明确unsupported，留给Stage 2与unbound/
+pathname role一起闭合。Unix不导入`net`owner；不把两根pipe拼成并列lifecycle/readiness truth。
+
+directional capacity作为单一KernelConfig项进入现有kconfig生成/验证owner，并以编译期non-zero assertion保护。Stage 1
+不预建backlog、pathname registry、SocketClass、dynamic ops registry、option bag、pending error或future TCP slot。
+
+**Focused proof：**
+
+- owner-local proof组合验证paired connection只提交一次、两条direction不串线、capacity/partial progress、
+  snapshot-register-recheck窗口、copy-fault prefix、pair abort、close非最后alias与final-close terminal handoff；这些语义
+  由composition test按共同state transition证明，acceptance看oracle覆盖而不看test数量；
+- 同一`socket-test` guest consumer在RV64与LA64验证resolver/flags、bad pair pointer不留下live fd、双向byte order、
+  empty/full blocking wake、nonblocking `EAGAIN`、dup/fork alias与final EOF/`EPIPE`/HUP。glibc/musl的focused
+  `socketpair02`只作为creation flag的独立ABI oracle；要求Unix datagram成功的`socketpair01`不属于本R0 target；
+- 1A的既有UDP real-consumer回归必须在1B最终diff上重跑。新增Unix case不得复制已有UDP、opened-description或iomux
+  owner-local proof；只补跨owner handoff与用户可见结果。
+
+**Canonical validation：** 使用repository入口执行`just test xtask`、`just test net-host`、`just fmt all --check`、
+双架构`socket-test` app build与两个显式release preset build；RV64/LA64 build串行，避免共享generated DTB竞争。focused
+guest evidence通过两架构`run-user-test` wrapper及显式preliminary image运行，并在同源guest路径执行`socket-test`、
+UDP regression与选择的`socketpair02` oracle。最后运行source/residual-reference audit、`git diff --check`与
+`mdbook build docs`。命令成功只证明其对应层级，不把build、KUnit或一架构runtime冒充另一层证据。
+
+**Not Run / non-claim：** pathname/listener/connect/accept、shutdown与`MSG_*`、RDHUP/ERR、half-close及其HUP矩阵、
+完整socket LTP、final harness、physical hardware与`smp>1`均不属于Stage 1 closure proof；保持Not Run / Not Cut Over。
+Stage 1不要求以case数量证明质量，也不因未运行广泛但非当前oracle的suite而阻塞。
+
+**Exit / stop：** 两个consumer必须实际消费同一front，旧UDP-only dispatch与Stage 1 migration bridge为零；Unix
+pair transaction、stream predicate、copy progress、wait与final release均有唯一owner和focused runtime。若basic
+blocking只能通过第二套socket wait queue、family隐藏wait loop、ready cache或跨sleep private phase实现，若pair rollback
+需要改变task/files lifecycle/shared contract，或若正确EOF/`EPIPE`必须提前引入Stage 3的第二truth，停止并先修订路线或
+回RFC review。1B通过后Stage 1 Closed；Cutover仍为None，并停止在未解析、未授权的Stage 2之前。
 
 ## Stage 2 — Pathname namespace 与 connection admission
 
@@ -182,6 +289,8 @@ Unix registry只索引stable inode identity，不按pathname或permission裁决�
 
 **预期交付：**
 
+- 激活Unix single-socket creation并建立unbound/bound/listening/connected role owner；single creation失败与final release
+  继续复用Stage 1的common creation/lifecycle边界；
 - pathname bind 复用 `VFS-CREATION-001` production handoff，并以 stable inode identity 提交 live binding 与
   immutable local-name snapshot；
 - listen、connect、accept 建立唯一 backlog/admission/connection commit，并闭合accepted child的copyout/fd
@@ -204,10 +313,11 @@ failed-bind inert-inode退路，Stage 2必须记录具体failure point、errno�
 回写register。退出要求namespace/listener/connection owner与cleanup闭合，focused pathname runtime通过；关闭后停止，
 不自动进入Stage 3。
 
-## Stage 3 — Stream operation、blocking 与 readiness closure
+## Stage 3 — Stream operation 与完整 readiness closure
 
-**目的：** 以 Stage 2 已确定的endpoint/listener/connection/directional truth为唯一来源，闭合父 RFC 的完整 stream
-operation、blocking/nonblocking、shutdown/terminal语义和poll/select/epoll readiness。
+**目的：** 在Stage 1 basic socketpair stream/wait与Stage 2 namespace/connection admission基线上，以实际endpoint/
+listener/connection/directional truth为唯一来源，闭合父RFC的完整stream operation、shutdown/terminal语义和
+poll/select/epoll readiness。
 
 **前置：** Stage 2 Closed；Stage 3 已根据实际predicate、wait race、copy progress与lifecycle evidence独立解析和授权。
 
@@ -217,8 +327,8 @@ Unix首版不得产生pending error、ERR readiness或成功`SO_ERROR`。
 
 **预期交付：**
 
-- read/write/vector与目标send/receive path在同一family operation boundary下表达ordered-prefix partial progress、
-  `MSG_PEEK`、zero-length、copy fault、signal、EOF、shutdown、peer close与SIGPIPE；
+- 复核Stage 1 read/write/vector的ordered-prefix边界，并让目标send/receive、`MSG_PEEK`、zero-length、copy fault、
+  signal、EOF、shutdown、peer close与SIGPIPE在同一family operation boundary下完整闭合；
 - connect/accept/send/receive的blocking loop统一使用attempt、snapshot/register、recheck/final-scan协议，同时保留各自
   predicate、transaction与typed outcome；
 - source-neutral receive-half-close与完整HUP成为独立事实，poll/select/epoll按current consumer protocol投影
