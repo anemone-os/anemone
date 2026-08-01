@@ -118,19 +118,26 @@ machine termination，再更新 current contract 的 architecture coverage。不
 
 **Summary:** 当前 AHCI 第一阶段只支持 firmware-described AHCI 1.x 的单一 implemented port、slot-zero
 同步 polling、单 PRD DMA bounce buffer、ATA IDENTIFY 与 512-byte LBA48 DMA EXT read/write。IRQ
-completion、NCQ、multi-port、ATAPI、port multiplier、runtime hotplug、partition scan、power
-management 和明确的 cache-flush durability contract 尚未实现；当前 generic controller 仍依赖
-firmware 完成 pinmux/clock/reset/PHY/coherency setup。`just build` 已通过，但 KUnit runtime、2K1000
-实机 probe/read/write/shutdown/reboot 尚未运行。RFC 还保持 Review Hold，因为 probe rollback 释放
-DMA owner 和 IDENTIFY capacity boundary 两项 Apollyon 尚未修复。
+completion、NCQ、multi-port、ATAPI、port multiplier、runtime hotplug、power management和明确的
+cache-flush durability contract尚未实现；shutdown不quiesce controller，read timeout仍以panic作为诊断
+fail-stop bridge。当前generic controller仍依赖firmware完成pinmux/clock/reset/PHY/coherency setup。
 
-**Exit Condition:** 关闭 [AHCI Controller RFC](../rfcs/ahci-controller/index.md) 的 lifecycle/capacity
-tracking issues，明确 shutdown/cache 语义，并完成 focused KUnit 与用户侧 controller/sector/read/write
-证据；新增异步、多 port、hotplug 或 ATAPI 能力时建立新的 owner/RFC gate。
+AHCI当前通过generic block `register_block_disk()`消费one-time primary MBR discovery；原Draft的partition-scan
+non-goal只排除AHCI-owned scanner，不能再写成当前没有partition能力。GPT、重扫和可变partition-table lifecycle
+仍不在该generic能力内。双架构完整KUnit runtime各自通过10个已注册AHCI helper case；但`ata.rs`的IDENTIFY
+helper没有`#[kunit]`注册，capacity upper-bound regression/source audit仍未完成，2K1000实机
+probe/read/write/shutdown/reboot仍Not Run。probe rollback DMA owner与IDENTIFY capacity boundary的live
+Apollyon继续由open issue拥有。原AHCI RFC已经Terminated，没有active gate；终止文档不关闭这些代码限制。
+
+**Exit Condition:** 当前没有active exit plan。只有未来另行授权的工作实际关闭lifecycle/capacity open issue、
+明确shutdown/cache/timeout语义并完成focused KUnit与用户侧controller/sector/read/write证据后，才能缩减本
+limitation；不得重新激活已终止RFC。新增异步、多port、hotplug或ATAPI能力仍需新的owner/RFC边界。
 
 **Owner:** EDGW, Codex
-**Last Verified:** 2026-07-23
-**Related:** [AHCI Controller 事务日志](../devlog/transactions/2026-07-23-ahci-controller.md), [开放问题](./open-issues.md)
+**Last Verified:** 2026-08-01
+**Related:** [Terminated AHCI RFC](../rfcs/ahci-controller/index.md),
+[AHCI Controller 事务日志](../devlog/transactions/2026-07-23-ahci-controller.md),
+[lifecycle/capacity开放问题](./open-issues.md#ane-20260723-ahci-probe-lifecycle-and-capacity)
 
 ## ANE-20260713-SCHED-RT-NOIRQ-BUCKET-ALLOCATION
 

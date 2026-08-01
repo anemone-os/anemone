@@ -110,7 +110,14 @@ resolved finding 折回 canonical target/implementation；普通 neutralized fin
 
 Draft 修订写 `Draft`，第一次接受记为 `R0`。只有目标、非目标、target invariant、owner、ABI/visible semantics、contract delta 或 acceptance boundary 的已接受变化才递增 `R<n>`；措辞、证据、内部路线、文件布局和验证命令调整不递增。
 
-RFC 状态使用 `Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`。状态表达当前修订，不代替用户对当前任务的实现授权。Closed RFC 的新语义修订原地更新当前 target；只有确实需要独立长期执行历史时才建立新 transaction。核心目标、主要 owner、总体方案或大部分证明边界改变时，新建 follow-up RFC。
+RFC 状态使用 `Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`、`Terminated`。状态表达当前修订，
+不代替用户对当前任务的实现授权。`Terminated`只用于维护者明确永久取消尚未满足acceptance/closure的RFC：
+它没有active gate或current-contract cutover，未运行证据保持Not Run，supporting implementation/tracking只能
+保留为historical，且不得恢复。未来相关工作必须作为独立任务重新分类并取得新的授权/Implementation Boundary；
+只有按三档规则仍属于RFC时才新建RFC。临时暂停仍使用`Review Hold`，由其它
+accepted RFC替代则使用`Superseded`，不能用`Terminated`伪装`Closed`。Closed RFC 的新语义修订原地更新
+当前target；只有确实需要独立长期执行历史时才建立新transaction。核心目标、主要owner、总体方案或大部分
+证明边界改变时，新建follow-up RFC。
 
 ## 生命周期
 

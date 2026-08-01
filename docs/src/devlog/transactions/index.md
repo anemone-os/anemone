@@ -6,7 +6,6 @@
 
 ## Active
 
-- [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
@@ -18,8 +17,9 @@
 - [Cred Merge](./2026-06-02-cred-merge.md)
 - [Sched Latch](./2026-06-03-sched-latch.md)
 
-## Closed / Deferred
+## Closed / Deferred / Terminated
 
+- [AHCI Controller](./2026-07-23-ahci-controller.md)：未接受Draft已Terminated，不再有active gate；第一阶段实现与结构移动证据保留，live lifecycle/capacity defect、shutdown/timeout限制及hardware Not Run由register拥有。此项不是Completed。
 - [Sched EEVDF-lite](./2026-07-09-sched-eevdf-lite.md)：Stage 3/R1 runtime acceptance 失败后延期关闭；关闭时恢复 RR，后续 default 已由 Fair / Stride 接管，四个 Keter 保持未解决。此项不是 Completed。
 
 ## Completed

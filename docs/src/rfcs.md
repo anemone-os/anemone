@@ -21,7 +21,10 @@ docs/src/rfcs/<short-slug>/
 - `Contract Impact` 只列 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve` 流水。
 - RFC 单向链接 current baseline；current contract 不为 pending proposal 维护默认 backlink。
 - Git 保存物理文本历史；RFC `R0`、`R1` 只标记已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
-- 状态使用 `Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`；它不代替用户对当前实现任务的授权。
+- 状态使用`Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`、`Terminated`；它不代替用户对当前
+  实现任务的授权。`Terminated`表示维护者永久取消未满足acceptance/closure的RFC：无active gate、无current
+  contract、不得恢复。未来相关工作必须独立重新分类并取得新的授权/Implementation Boundary；只有仍命中RFC
+  分级时才新建RFC。
 
 ## 实现与反馈
 
@@ -118,8 +121,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
-  ATA block facade与2K1000 platform integration文档入口；本次merge保留其RFC、transaction和register
-  页面，但不重新裁决或同步AHCI lifecycle/completion，状态与开放项以RFC页为准。
+  ATA block facade与2K1000 platform integration历史入口。未接受Draft已Terminated，不再形成active gate或
+  current contract；既有实现/证据保留，live lifecycle/capacity defect与可见限制以register为准。
 - [RFC-20260720-unix-jobctl](./rfcs/unix-jobctl/index.md)：R1已实现并关闭；`UJ-CUTOVER`将ThreadGroup-owned stop/continue phase、mandatory user-entry barrier、stopped/continued child report、Signal control ordering与procfs projection作为同一个integrated unit切换为[current contract](./contracts/task/job-control.md)。TTY relation与terminal policy现已由[TTY job-control contract](./contracts/tty/job-control.md)接入；orphaned-pgrp、ptrace、`si_uid = 0`与SIGCHLD publication order继续由register跟踪。
 - [RFC-20260716-dw-mshc-sd-cold-discovery](./rfcs/dw-mshc-sd-cold-discovery/index.md)：Accepted / Runtime Validation；固化 protocol-neutral DW-MSHC host、one-shot SD Memory discovery、typed card bus、`mmcblkN` endpoint 与 VisionFive 2 whole-disk `mmcblk0` ext4 rootfs 边界。两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已同步；实机 attach/read/write/rootfs 仍待验证。
 - [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：已实现并关闭；platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分开约束物理 ID backing 和最大启用逻辑 CPU 数，固定 per-CPU 表使用槽位内建 `CachePadded<T>` 的 `CpuTable` / `PhysCpuTable` 编码索引域与缓存布局。VisionFive 2 容量修正由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。

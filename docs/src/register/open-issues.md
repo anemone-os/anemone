@@ -101,6 +101,9 @@ build及 runtime stress 证明不再递归耗尽 kernel stack且 COW 隔离保�
 **Impact:** HBA 可能继续 DMA 到已释放内存，或设备返回值触发内部 FIS assertion，造成内存破坏或
 kernel panic。
 
+原AHCI RFC已在Draft阶段Terminated；因为实现仍保留，本issue继续Open，但不再从原RFC产生active gate。
+任何修复都必须由新的授权边界拥有并在完成后回写本register。
+
 **Owner:** EDGW, Codex
 **Last Verified:** 2026-07-23
 **Exit Condition:** 所有 post-start failure path 先停止 engine/FIS receive 再释放 DMA/MMIO owner；

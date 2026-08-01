@@ -47,6 +47,8 @@ transaction 只用于长期、多 checkpoint、多 cutover、probe/renegotiation
 - current contract 保存 effective shared rules；
 - transaction index/SUMMARY 只提供导航，不再要求双周日志入口；
 - Completed transaction 不因后续修订重新打开；需要独立长期历史时另建记录，否则使用 RFC closure 和 Git/PR。
+- Terminated transaction表示维护者永久停止未完成执行：不是Completed，不保留active Next，也不得重开；
+  已有证据保留，live defect/limitation链接register，未来相关工作作为独立任务重新分类并授权。
 
 ## 双周开发日志（可选）
 
