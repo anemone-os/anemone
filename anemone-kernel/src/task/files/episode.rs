@@ -605,8 +605,8 @@ impl Task {
 mod kunits {
     use super::*;
     use crate::fs::{
-        InodePerm, PosixLockMode, PosixLockRange, PosixLockSetOutcome, set_posix_lock, vfs_touch,
-        vfs_unlink,
+        InodePerm, PosixLockMode, PosixLockRange, PosixLockSetOutcome, set_posix_lock,
+        vfs_touch_as_root, vfs_unlink,
     };
 
     fn open_root(files_state: &FilesState) -> Fd {
@@ -633,7 +633,7 @@ mod kunits {
     #[kunit]
     fn posix_binding_rejects_late_commit_and_fd_reuse_gets_a_fresh_slot() {
         let path = Path::new("/kunit-posix-binding-liveness");
-        let _created = vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        let _created = vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
         let files = FilesState::new_empty();
         let fd = files
             .with_table_mut(|table| {

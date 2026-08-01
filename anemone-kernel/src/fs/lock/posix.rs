@@ -482,7 +482,7 @@ pub(crate) fn retire_posix_locks(binding: &PosixLockBinding) {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::fs::{InodePerm, vfs_link, vfs_lookup, vfs_touch, vfs_unlink};
+    use crate::fs::{InodePerm, vfs_link, vfs_lookup, vfs_touch_as_root, vfs_unlink};
 
     fn finite(start: u64, end: u64) -> PosixLockRange {
         PosixLockRange::finite(start, end)
@@ -639,10 +639,10 @@ mod kunits {
         let source_path = Path::new("/kunit-posix-lock-source");
         let alias_path = Path::new("/kunit-posix-lock-alias");
         let other_path = Path::new("/kunit-posix-lock-other");
-        let source = vfs_touch(source_path, InodePerm::all_rwx()).unwrap();
+        let source = vfs_touch_as_root(source_path, InodePerm::all_rwx()).unwrap();
         vfs_link(source_path, alias_path).unwrap();
         let alias = vfs_lookup(alias_path).unwrap();
-        let other_inode = vfs_touch(other_path, InodePerm::all_rwx()).unwrap();
+        let other_inode = vfs_touch_as_root(other_path, InodePerm::all_rwx()).unwrap();
         let owner = PosixLockHolder::new_for_kunit();
         let observer = PosixLockHolder::new_for_kunit();
 

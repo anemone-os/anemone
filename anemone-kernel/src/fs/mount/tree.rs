@@ -819,8 +819,8 @@ mod kunits {
         let lower = Path::new("/kunit-vfs-mnt/lower-file");
         let upper = Path::new("/kunit-vfs-mnt/upper-file");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_touch(lower, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(lower, InodePerm::all_rwx()).unwrap();
         assert_eq!(
             vfs_lookup(lower).unwrap().to_string(),
             "/kunit-vfs-mnt/lower-file"
@@ -841,7 +841,7 @@ mod kunits {
         assert_eq!(vfs_lookup(lower).unwrap_err(), SysError::NotFound);
         assert_eq!(vfs_rmdir(mountpoint).unwrap_err(), SysError::IsMountPoint);
 
-        let file = vfs_touch(upper, InodePerm::all_rwx()).unwrap();
+        let file = vfs_touch_as_root(upper, InodePerm::all_rwx()).unwrap();
         let reopened = vfs_open(upper).unwrap();
         assert_eq!(reopened.write(b"mounted").unwrap(), 7);
         reopened.seek_set_checked(0).unwrap();
@@ -884,7 +884,7 @@ mod kunits {
     fn test_vfs_direct_mount_rejects_covered_target_pathref() {
         let mountpoint = Path::new("/kunit-vfs-covered-target");
 
-        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host_mp = vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         let first = mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -913,7 +913,7 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-busy");
         let live = Path::new("/kunit-vfs-busy/live");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -922,7 +922,7 @@ mod kunits {
         )
         .unwrap();
 
-        let live_ref = vfs_touch(live, InodePerm::all_rwx()).unwrap();
+        let live_ref = vfs_touch_as_root(live, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_unmount(mountpoint).unwrap_err(), SysError::Busy);
 
         drop(live_ref);
@@ -936,7 +936,7 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-parent-mnt");
         let nested = Path::new("/kunit-vfs-parent-mnt/nested");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -945,7 +945,7 @@ mod kunits {
         )
         .unwrap();
 
-        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(nested, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -968,7 +968,7 @@ mod kunits {
         let nested = Path::new("/kunit-vfs-lazy/nested");
         let nested_file = Path::new("/kunit-vfs-lazy/nested/file");
 
-        let host_mountpoint = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host_mountpoint = vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -976,7 +976,7 @@ mod kunits {
             mountpoint,
         )
         .unwrap();
-        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(nested, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -984,7 +984,7 @@ mod kunits {
             nested,
         )
         .unwrap();
-        let nested_file_ref = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+        let nested_file_ref = vfs_touch_as_root(nested_file, InodePerm::all_rwx()).unwrap();
 
         let mount_root = vfs_lookup(mountpoint).unwrap();
         let nested_root = vfs_lookup(nested).unwrap();
@@ -1023,8 +1023,8 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-umount-nofollow");
         let symlink = Path::new("/kunit-vfs-umount-nofollow-link");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_symlink(mountpoint, symlink).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_symlink_as_root(mountpoint, symlink).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1054,8 +1054,8 @@ mod kunits {
         let inner_dir = Path::new("/kunit-vfs-walk/sub");
         let inner_file = Path::new("/kunit-vfs-walk/sub/file");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        vfs_touch(host_sibling, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(host_sibling, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1071,8 +1071,8 @@ mod kunits {
             "/kunit-vfs-walk"
         );
 
-        vfs_mkdir(inner_dir, InodePerm::all_rwx()).unwrap();
-        let inner = vfs_touch(inner_file, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(inner_dir, InodePerm::all_rwx()).unwrap();
+        let inner = vfs_touch_as_root(inner_file, InodePerm::all_rwx()).unwrap();
 
         assert_eq!(
             vfs_lookup(Path::new("/kunit-vfs-walk/./sub/./file"))
@@ -1113,8 +1113,8 @@ mod kunits {
         let left_file = Path::new("/kunit-vfs-left-mnt/file");
         let right_file = Path::new("/kunit-vfs-right-mnt/file");
 
-        vfs_mkdir(left_mount, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(right_mount, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(left_mount, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(right_mount, InodePerm::all_rwx()).unwrap();
 
         vfs_mount_at(
             "ramfs",
@@ -1131,10 +1131,10 @@ mod kunits {
         )
         .unwrap();
 
-        let left = vfs_touch(left_file, InodePerm::all_rwx()).unwrap();
+        let left = vfs_touch_as_root(left_file, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_lookup(right_file).unwrap_err(), SysError::NotFound);
 
-        let right = vfs_touch(right_file, InodePerm::all_rwx()).unwrap();
+        let right = vfs_touch_as_root(right_file, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_lookup(left_file).unwrap().inode(), left.inode());
         assert_eq!(vfs_lookup(right_file).unwrap().inode(), right.inode());
 
@@ -1159,7 +1159,7 @@ mod kunits {
         const NFILES: usize = 8;
 
         let mountpoint = Path::new("/kunit-vfs-cycle");
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
 
         for round in 0..NROUNDS {
             vfs_mount_at(
@@ -1174,7 +1174,7 @@ mod kunits {
                 let path = format!("/kunit-vfs-cycle/file-{round}-{file_idx}");
                 let payload = format!("round-{round}-file-{file_idx}-payload");
 
-                vfs_touch(Path::new(&path), InodePerm::all_rwx()).unwrap();
+                vfs_touch_as_root(Path::new(&path), InodePerm::all_rwx()).unwrap();
 
                 let opened = vfs_open(Path::new(&path)).unwrap();
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
@@ -1203,7 +1203,7 @@ mod kunits {
         const NFILES_PER_DIR: usize = 6;
 
         let mountpoint = Path::new("/kunit-vfs-churn");
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1214,14 +1214,14 @@ mod kunits {
 
         for dir_idx in 0..NDIRS {
             let dir = format!("/kunit-vfs-churn/dir-{dir_idx}");
-            vfs_mkdir(Path::new(&dir), InodePerm::all_rwx()).unwrap();
+            vfs_mkdir_as_root(Path::new(&dir), InodePerm::all_rwx()).unwrap();
 
             for file_idx in 0..NFILES_PER_DIR {
                 let file = format!("{dir}/file-{file_idx}");
                 let alias = format!("/kunit-vfs-churn/alias-{dir_idx}-{file_idx}");
                 let payload = format!("dir-{dir_idx}-file-{file_idx}-payload");
 
-                let created = vfs_touch(Path::new(&file), InodePerm::all_rwx()).unwrap();
+                let created = vfs_touch_as_root(Path::new(&file), InodePerm::all_rwx()).unwrap();
                 let opened = vfs_open(Path::new(&file)).unwrap();
 
                 assert_eq!(opened.write(payload.as_bytes()).unwrap(), payload.len());
@@ -1263,7 +1263,7 @@ mod kunits {
         let first_file = Path::new("/kunit-vfs-path-stack/first");
         let second_file = Path::new("/kunit-vfs-path-stack/second");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1271,7 +1271,7 @@ mod kunits {
             mountpoint,
         )
         .unwrap();
-        vfs_touch(first_file, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(first_file, InodePerm::all_rwx()).unwrap();
 
         vfs_mount_at(
             "ramfs",
@@ -1280,7 +1280,7 @@ mod kunits {
             mountpoint,
         )
         .unwrap();
-        vfs_touch(second_file, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(second_file, InodePerm::all_rwx()).unwrap();
 
         assert_eq!(vfs_lookup(first_file).unwrap_err(), SysError::NotFound);
         assert_eq!(
@@ -1307,7 +1307,7 @@ mod kunits {
         let visible_file = Path::new("/kunit-vfs-direct-stack/visible");
         let hidden_file = Path::new("/kunit-vfs-direct-stack/hidden");
 
-        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host_mp = vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         let first = mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1331,7 +1331,7 @@ mod kunits {
             .inode()
             .touch("hidden", InodePerm::all_rwx())
             .unwrap();
-        vfs_touch(visible_file, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(visible_file, InodePerm::all_rwx()).unwrap();
 
         let second_root = PathRef::new(second.clone(), second.root().clone());
         assert_eq!(
@@ -1359,7 +1359,7 @@ mod kunits {
         const NLAYERS: usize = 6;
 
         let mountpoint = Path::new("/kunit-vfs-direct-stack-stress");
-        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host_mp = vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         let mut mounts = Vec::new();
         let mut next_target = host_mp;
 
@@ -1419,7 +1419,7 @@ mod kunits {
     #[kunit]
     fn test_vfs_mount_generation_bumps_on_attach_and_detach() {
         let mountpoint = Path::new("/kunit-vfs-generation");
-        let host_mp = vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host_mp = vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
 
         let before_mount = mount_placement_generation();
         let mnt = mount_at(
@@ -1446,9 +1446,9 @@ mod kunits {
         let target_dir = Path::new("/kunit-vfs-bind-target");
         let target_file = Path::new("/kunit-vfs-bind-target/file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
-        let source_file_ref = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
+        let source_file_ref = vfs_touch_as_root(source_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let target = vfs_lookup(target_dir).unwrap();
@@ -1484,9 +1484,9 @@ mod kunits {
         let target_dir = Path::new("/kunit-vfs-bind-plain-target");
         let target_nested_file = Path::new("/kunit-vfs-bind-plain-target/nested/child-file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1494,7 +1494,7 @@ mod kunits {
             nested,
         )
         .unwrap();
-        let child_file = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+        let child_file = vfs_touch_as_root(nested_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let target = vfs_lookup(target_dir).unwrap();
@@ -1523,9 +1523,9 @@ mod kunits {
         let target_nested = Path::new("/kunit-vfs-rbind-target/nested");
         let target_nested_file = Path::new("/kunit-vfs-rbind-target/nested/child-file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(nested, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(nested, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1533,7 +1533,7 @@ mod kunits {
             nested,
         )
         .unwrap();
-        let child_file = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+        let child_file = vfs_touch_as_root(nested_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let source_child = vfs_lookup(nested).unwrap();
@@ -1572,10 +1572,10 @@ mod kunits {
         let rw_dir = Path::new("/kunit-vfs-bind-rw-target");
         let rw_file = Path::new("/kunit-vfs-bind-rw-target/file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(ro_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(rw_dir, InodePerm::all_rwx()).unwrap();
-        let file_ref = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(ro_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(rw_dir, InodePerm::all_rwx()).unwrap();
+        let file_ref = vfs_touch_as_root(source_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let ro_target = vfs_lookup(ro_dir).unwrap();
@@ -1610,10 +1610,10 @@ mod kunits {
         let target_dir = Path::new("/kunit-vfs-bind-file-target-dir");
         let target_file = Path::new("/kunit-vfs-bind-file-target-dir/file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
-        let source_file_ref = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
-        let target_file_ref = vfs_touch(target_file, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
+        let source_file_ref = vfs_touch_as_root(source_file, InodePerm::all_rwx()).unwrap();
+        let target_file_ref = vfs_touch_as_root(target_file, InodePerm::all_rwx()).unwrap();
 
         let source_file_path = vfs_lookup(source_file).unwrap();
         let target = vfs_lookup(target_dir).unwrap();
@@ -1644,10 +1644,10 @@ mod kunits {
         let stale_target_dir = Path::new("/kunit-vfs-bind-stale-target");
         let live_target_dir = Path::new("/kunit-vfs-bind-live-target");
 
-        let stale_source = vfs_mkdir(stale_source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(live_source_dir, InodePerm::all_rwx()).unwrap();
-        let stale_target = vfs_mkdir(stale_target_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(live_target_dir, InodePerm::all_rwx()).unwrap();
+        let stale_source = vfs_mkdir_as_root(stale_source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(live_source_dir, InodePerm::all_rwx()).unwrap();
+        let stale_target = vfs_mkdir_as_root(stale_target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(live_target_dir, InodePerm::all_rwx()).unwrap();
 
         vfs_mount_at(
             "ramfs",
@@ -1689,9 +1689,9 @@ mod kunits {
         let source_subdir = Path::new("/kunit-vfs-bind-root-src/sub");
         let target_dir = Path::new("/kunit-vfs-bind-root-target");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(source_subdir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_subdir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_subdir).unwrap();
         let target = vfs_lookup(target_dir).unwrap();
@@ -1721,8 +1721,8 @@ mod kunits {
         let target_dir = Path::new("/kunit-vfs-move-target");
         let target_file = Path::new("/kunit-vfs-move-target/file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1730,7 +1730,7 @@ mod kunits {
             source_dir,
         )
         .unwrap();
-        vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(source_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let target = vfs_lookup(target_dir).unwrap();
@@ -1780,8 +1780,8 @@ mod kunits {
         let target_nested = Path::new("/kunit-vfs-move-tree-target/nested");
         let target_file = Path::new("/kunit-vfs-move-tree-target/nested/file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1789,7 +1789,7 @@ mod kunits {
             source_dir,
         )
         .unwrap();
-        vfs_mkdir(nested_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(nested_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1797,7 +1797,7 @@ mod kunits {
             nested_dir,
         )
         .unwrap();
-        let child_file = vfs_touch(nested_file, InodePerm::all_rwx()).unwrap();
+        let child_file = vfs_touch_as_root(nested_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let child_mount = vfs_lookup(nested_dir).unwrap().mount().clone();
@@ -1828,8 +1828,8 @@ mod kunits {
         let target_dir = Path::new("/kunit-vfs-move-retry-target");
         let target_file = Path::new("/kunit-vfs-move-retry-target/file");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1837,7 +1837,7 @@ mod kunits {
             source_dir,
         )
         .unwrap();
-        let file = vfs_touch(source_file, InodePerm::all_rwx()).unwrap();
+        let file = vfs_touch_as_root(source_file, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let target = vfs_lookup(target_dir).unwrap();
@@ -1874,8 +1874,8 @@ mod kunits {
         let nested_dir = Path::new("/kunit-vfs-move-cycle-src/nested");
         let target_dir = Path::new("/kunit-vfs-move-cycle-target");
 
-        vfs_mkdir(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(target_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1883,7 +1883,7 @@ mod kunits {
             source_dir,
         )
         .unwrap();
-        vfs_mkdir(nested_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(nested_dir, InodePerm::all_rwx()).unwrap();
 
         let source = vfs_lookup(source_dir).unwrap();
         let nested = vfs_lookup(nested_dir).unwrap();
@@ -1913,8 +1913,8 @@ mod kunits {
         let inner_dir = Path::new("/kunit-vfs-private/inner");
         let stale_dir = Path::new("/kunit-vfs-private-stale");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let stale = vfs_mkdir(stale_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
+        let stale = vfs_mkdir_as_root(stale_dir, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1929,7 +1929,7 @@ mod kunits {
             stale_dir,
         )
         .unwrap();
-        vfs_mkdir(inner_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(inner_dir, InodePerm::all_rwx()).unwrap();
 
         let mount_root = vfs_lookup(mountpoint).unwrap();
         let inner = vfs_lookup(inner_dir).unwrap();
@@ -1955,7 +1955,7 @@ mod kunits {
         let mountpoint = Path::new("/kunit-vfs-remount-ro");
         let file_path = Path::new("/kunit-vfs-remount-ro/file");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "ramfs",
             MountSource::Pseudo,
@@ -1964,7 +1964,7 @@ mod kunits {
         )
         .unwrap();
 
-        let file = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let file = vfs_touch_as_root(file_path, InodePerm::all_rwx()).unwrap();
         let opened = vfs_open(file_path).unwrap();
         assert_eq!(opened.write(b"rw").unwrap(), 2);
 
@@ -1972,7 +1972,8 @@ mod kunits {
         remount_attrs(&mount_root, MountAttrFlags::RDONLY).unwrap();
         assert_eq!(opened.write(b"ro").unwrap_err(), SysError::ReadOnlyFs);
         assert_eq!(
-            vfs_touch(Path::new("/kunit-vfs-remount-ro/new"), InodePerm::all_rwx()).unwrap_err(),
+            vfs_touch_as_root(Path::new("/kunit-vfs-remount-ro/new"), InodePerm::all_rwx())
+                .unwrap_err(),
             SysError::ReadOnlyFs
         );
 
@@ -1991,7 +1992,7 @@ mod kunits {
     fn test_vfs_remount_rejects_plain_directory_target() {
         let dir = Path::new("/kunit-vfs-remount-dir");
 
-        let path = vfs_mkdir(dir, InodePerm::all_rwx()).unwrap();
+        let path = vfs_mkdir_as_root(dir, InodePerm::all_rwx()).unwrap();
         assert_eq!(
             remount_attrs(&path, MountAttrFlags::RDONLY).unwrap_err(),
             SysError::InvalidArgument

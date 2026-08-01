@@ -5,6 +5,7 @@
 
 use anemone_abi::fs::linux::open::*;
 
+use super::creation::{KernelCreationPolicy, kernel_touch_at};
 use crate::{
     fs::{
         api::args::{AtFd, LinuxInodePerm},
@@ -231,19 +232,21 @@ impl OpenHow {
 /// - the opened file still is not a true anonymous inode that can be relinked
 ///   with Linux `O_TMPFILE` semantics;
 /// - creation/open/unlink is not atomic across the whole sequence.
-fn open_tmpfile_at(dir: &PathRef, how: OpenHow, checker: &FsPermChecker) -> Result<File, SysError> {
+fn open_tmpfile_at(
+    dir: &PathRef,
+    how: OpenHow,
+    policy: &KernelCreationPolicy,
+) -> Result<File, SysError> {
     if dir.inode().ty() != InodeType::Dir {
         return Err(SysError::NotDir);
     }
-    dir.mount().ensure_writable()?;
-    checker.check_path(dir, FsAccess::WRITE | FsAccess::EXECUTE)?;
 
     loop {
         let seq = TMPFILE_NAME_COUNTER.fetch_add(1, Ordering::Relaxed);
         let name = format!(".anemone-tmpfile-{seq}");
         let leaf = Path::new(name.as_str());
 
-        match vfs_touch_at(dir, leaf, how.perm) {
+        match kernel_touch_at(policy, dir, name.as_str(), how.perm) {
             Ok(_) => {
                 let file = match vfs_open_at(dir, leaf) {
                     Ok(file) => file,
@@ -361,15 +364,16 @@ fn create_or_open_path(
     dirfd: AtFd,
     path: &Path,
     how: OpenHow,
-    checker: &FsPermChecker,
+    policy: &KernelCreationPolicy,
 ) -> Result<(File, bool), SysError> {
+    let checker = policy.checker();
     let task = get_current_task();
     let parent_flags = how.resolve_flags().remove_last_symlink_flags();
     let (parent, name) = if path.is_absolute() {
-        task.lookup_parent_path(path, parent_flags)?
+        task.lookup_parent_path_with_checker(path, parent_flags, checker)?
     } else {
         let dir_path = dirfd.to_pathref(true)?;
-        task.lookup_parent_path_from(&dir_path, path, parent_flags)?
+        task.lookup_parent_path_from_with_checker(&dir_path, path, parent_flags, checker)?
     };
 
     let leaf = Path::new(name.as_str());
@@ -387,22 +391,34 @@ fn create_or_open_path(
             }
             Ok((file_for_path(pathref, how.access)?, false))
         },
-        Err(SysError::NotFound) => {
-            parent.mount().ensure_writable()?;
-            checker.check_path(&parent, FsAccess::WRITE | FsAccess::EXECUTE)?;
-
-            match vfs_touch_at(&parent, leaf, how.perm) {
-                Ok(created) => Ok((file_for_path(created, how.access)?, true)),
-                Err(SysError::AlreadyExists) if !how.create.excl => {
-                    let pathref =
-                        task.lookup_path_from_with_checker(&parent, leaf, resolve_flags, checker)?;
-                    Ok((file_for_path(pathref, how.access)?, false))
-                },
-                Err(err) => Err(err),
-            }
+        Err(SysError::NotFound) => match kernel_touch_at(policy, &parent, &name, how.perm) {
+            Ok(created) => Ok((file_for_path(created, how.access)?, true)),
+            Err(SysError::AlreadyExists) if !how.create.excl => {
+                let pathref =
+                    task.lookup_path_from_with_checker(&parent, leaf, resolve_flags, checker)?;
+                Ok((file_for_path(pathref, how.access)?, false))
+            },
+            Err(err) => Err(err),
         },
         Err(err) => Err(err),
     }
+}
+
+fn kernel_openat(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<u64, SysError> {
+    let policy = KernelCreationPolicy::for_current();
+    let checker = policy.checker();
+
+    let (file, created) = if how.create.tmpfile {
+        let dir = lookup_open_path(dirfd, path, how, checker)?;
+        (open_tmpfile_at(&dir, how, &policy)?, true)
+    } else if how.create.creat {
+        create_or_open_path(dirfd, path, how, &policy)?
+    } else {
+        let pathref = lookup_open_path(dirfd, path, how, checker)?;
+        (file_for_path(pathref, how.access)?, false)
+    };
+
+    finish_open(file, how, checker, created)
 }
 
 #[syscall(SYS_OPENAT)]
@@ -412,25 +428,9 @@ fn sys_openat(
     flags: u32,
     mode: u32,
 ) -> Result<u64, SysError> {
-    let task = get_current_task();
-    let mut how = OpenHow::from_linux(flags, mode)?;
-    if how.create.creat || how.create.tmpfile {
-        how.perm = task.mask_creation_perm(how.perm);
-    }
+    let how = OpenHow::from_linux(flags, mode)?;
     let path = Path::new(pathname.as_ref());
-    let checker = FsPermChecker::for_current_fs();
-
-    let (file, created) = if how.create.tmpfile {
-        let dir = lookup_open_path(dirfd, &path, how, &checker)?;
-        (open_tmpfile_at(&dir, how, &checker)?, true)
-    } else if how.create.creat {
-        create_or_open_path(dirfd, &path, how, &checker)?
-    } else {
-        let pathref = lookup_open_path(dirfd, &path, how, &checker)?;
-        (file_for_path(pathref, how.access)?, false)
-    };
-
-    finish_open(file, how, &checker, created)
+    kernel_openat(dirfd, path, how)
 }
 
 #[cfg(feature = "kunit")]
@@ -530,15 +530,15 @@ mod kunits {
     fn test_stage1_tmpfile_is_unlinked_but_remains_usable() {
         let dir_path = Path::new("/kunit-openat-tmpfile");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
         let before = read_dir_entries(dir_path);
         let dir = vfs_lookup(dir_path).unwrap();
-        let checker = FsPermChecker::for_current_fs();
+        let policy = KernelCreationPolicy::for_kunit_root(InodePerm::empty());
 
         let file = open_tmpfile_at(
             &dir,
             open_how(O_TMPFILE | O_RDWR, InodePerm::all_rwx()),
-            &checker,
+            &policy,
         )
         .unwrap();
 
@@ -561,7 +561,7 @@ mod kunits {
     fn test_stage1_tmpfile_requires_write_access_mode() {
         let dir_path = Path::new("/kunit-openat-tmpfile-ro");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
 
         assert_eq!(
             OpenHow::from_linux(O_TMPFILE, InodePerm::all_rwx().bits() as u32).unwrap_err(),
@@ -575,10 +575,10 @@ mod kunits {
     fn test_finish_open_tmpfile_skips_odirectory_result_check() {
         let dir_path = Path::new("/kunit-openat-tmpfile-sys");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
         let before = read_dir_entries(dir_path);
         let dir = vfs_lookup(dir_path).unwrap();
-        let checker = FsPermChecker::for_current_fs();
+        let policy = KernelCreationPolicy::for_kunit_root(InodePerm::empty());
         let how = open_how(
             O_TMPFILE | O_RDWR,
             InodePerm::from_bits_truncate(
@@ -586,9 +586,9 @@ mod kunits {
             ),
         );
 
-        let file = open_tmpfile_at(&dir, how, &checker).unwrap();
+        let file = open_tmpfile_at(&dir, how, &policy).unwrap();
 
-        let fd = Fd::new(finish_open(file, how, &checker, true).unwrap() as u32).unwrap();
+        let fd = Fd::new(finish_open(file, how, policy.checker(), true).unwrap() as u32).unwrap();
 
         let task = get_current_task();
         let file = task.get_fd(fd).unwrap();
@@ -603,7 +603,7 @@ mod kunits {
     #[kunit]
     fn test_finish_open_readonly_trunc_truncates_regular_file() {
         let path = Path::new("/kunit-openat-readonly-trunc");
-        let created = vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        let created = vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
         let file = created.open().unwrap();
         file.write(b"payload").unwrap();
 

@@ -14,7 +14,7 @@ mod kunits {
     fn test_inode_truncate_rejects_directory() {
         let path = Path::new("/kunit-truncate-dir");
 
-        let dir = vfs_mkdir(path, InodePerm::all_rwx()).unwrap();
+        let dir = vfs_mkdir_as_root(path, InodePerm::all_rwx()).unwrap();
 
         let cred = get_current_task().cred();
         assert_eq!(dir.inode().truncate(0, &cred).unwrap_err(), SysError::IsDir);

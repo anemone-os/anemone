@@ -259,7 +259,7 @@ mod kunits {
         let mountpoint = format!("/kunit-devfs-{test_name}");
         let mountpoint_path = Path::new(mountpoint.as_str());
 
-        vfs_mkdir(mountpoint_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint_path, InodePerm::all_rwx()).unwrap();
         vfs_mount_at(
             "devfs",
             MountSource::Pseudo,

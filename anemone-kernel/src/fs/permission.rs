@@ -92,6 +92,14 @@ impl FsPermChecker {
         self.cred.gid.fs == gid || self.cred.groups.contains(&gid)
     }
 
+    pub(in crate::fs) fn fsuid(&self) -> Uid {
+        self.cred.uid.fs
+    }
+
+    pub(in crate::fs) fn fsgid(&self) -> Gid {
+        self.cred.gid.fs
+    }
+
     /// Check whether the checker owns the inode or has CAP_FOWNER.
     pub fn owner_or_capable(&self, inode: &InodeRef) -> bool {
         self.is_owner(inode) || self.has_cap(Capability::FOWNER)

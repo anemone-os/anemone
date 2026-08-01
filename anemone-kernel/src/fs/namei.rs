@@ -495,8 +495,9 @@ fn do_resolve_components(
 
                 let target = child.inode().read_link()?;
                 // empty symlink. invalid.
-                // actually we should check this in upper layers (e.g. vfs_symlink). but some
-                // redundant checks won't hurt and it can prevent some weird edge cases.
+                // actually we should check this in upper layers (e.g. vfs_symlink_as_root). but
+                // some redundant checks won't hurt and it can prevent some
+                // weird edge cases.
                 if target.components().next().is_none() {
                     return Err(SysError::InvalidArgument);
                 }

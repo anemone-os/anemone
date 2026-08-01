@@ -121,8 +121,10 @@ fn materialize_embedded_at(mountpoint: &Path, bytes: &[u8]) -> Result<String, Ma
     let temp = step(
         vfs_touch_at(
             &root,
-            Path::new(EMBEDDED_TEMP_NAME),
+            EMBEDDED_TEMP_NAME,
             InodePerm::IRUSR | InodePerm::IWUSR,
+            Uid::ROOT,
+            Gid::ROOT,
         ),
         "create-temp",
         &temp_path,
@@ -158,7 +160,7 @@ fn mount_embedded_ramfs(mountpoint: &Path) -> Result<PathRef, MaterializeError> 
             ));
         },
         Err(SysError::NotFound) => step(
-            vfs_mkdir(mountpoint, InodePerm::all_rx() | InodePerm::IWUSR),
+            vfs_mkdir_as_root(mountpoint, InodePerm::all_rx() | InodePerm::IWUSR),
             "create-mountpoint",
             mountpoint,
         )?,

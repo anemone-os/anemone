@@ -215,15 +215,19 @@ impl Task {
         path: &Path,
         flags: ResolveFlags,
     ) -> Result<(PathRef, String), SysError> {
-        let fs_state = self.fs_state.read();
         let checker = FsPermChecker::new(self.cred());
-        resolve_parent_from_with_root_checked(
-            fs_state.root(),
-            fs_state.cwd(),
-            path,
-            flags,
-            &checker,
-        )
+        self.lookup_parent_path_with_checker(path, flags, &checker)
+    }
+
+    /// Look up a parent directory using an explicit credential snapshot.
+    pub(crate) fn lookup_parent_path_with_checker(
+        &self,
+        path: &Path,
+        flags: ResolveFlags,
+        checker: &FsPermChecker,
+    ) -> Result<(PathRef, String), SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_parent_from_with_root_checked(fs_state.root(), fs_state.cwd(), path, flags, checker)
     }
 
     /// Lookup the parent directory of a path in this task's filesystem context,
@@ -234,9 +238,21 @@ impl Task {
         path: &Path,
         flags: ResolveFlags,
     ) -> Result<(PathRef, String), SysError> {
-        let fs_state = self.fs_state.read();
         let checker = FsPermChecker::new(self.cred());
-        resolve_parent_from_with_root_checked(fs_state.root(), from, path, flags, &checker)
+        self.lookup_parent_path_from_with_checker(from, path, flags, &checker)
+    }
+
+    /// Look up a parent directory from an explicit start using an explicit
+    /// credential snapshot.
+    pub(crate) fn lookup_parent_path_from_with_checker(
+        &self,
+        from: &PathRef,
+        path: &Path,
+        flags: ResolveFlags,
+        checker: &FsPermChecker,
+    ) -> Result<(PathRef, String), SysError> {
+        let fs_state = self.fs_state.read();
+        resolve_parent_from_with_root_checked(fs_state.root(), from, path, flags, checker)
     }
 
     /// Get the current working directory of this task, relative to its root.
