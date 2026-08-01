@@ -231,6 +231,25 @@ fn test_partial_cross_page_fault() -> Result<(), Errno> {
         },
         4,
     );
+    let mut written_prefix = [0u8; 4];
+    expect_count(
+        "partial write commits only copied prefix",
+        unsafe {
+            syscall6(
+                SYS_READ,
+                [
+                    source_pipe.0 as u64,
+                    written_prefix.as_mut_ptr() as u64,
+                    written_prefix.len() as u64,
+                    0,
+                    0,
+                    0,
+                ],
+            )
+        },
+        written_prefix.len() as u64,
+    );
+    assert_eq!(&written_prefix, b"1234");
 
     expect_errno(
         "exact rt_sigaction copyin crosses protected page",
@@ -278,6 +297,25 @@ fn test_partial_cross_page_fault() -> Result<(), Errno> {
         },
         4,
     );
+    let mut unread_suffix = [0u8; 4];
+    expect_count(
+        "partial read leaves uncommitted pipe suffix",
+        unsafe {
+            syscall6(
+                SYS_READ,
+                [
+                    destination_pipe.0 as u64,
+                    unread_suffix.as_mut_ptr() as u64,
+                    unread_suffix.len() as u64,
+                    0,
+                    0,
+                    0,
+                ],
+            )
+        },
+        unread_suffix.len() as u64,
+    );
+    assert_eq!(&unread_suffix, b"EFGH");
     close_pair(destination_pipe);
     munmap(destination, PAGE_SIZE * 2)
 }

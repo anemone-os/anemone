@@ -6,7 +6,7 @@
 use anemone_abi::fs::linux::open::*;
 
 use crate::{
-    fs::pipe::{OpenedPipe, create_anonymous_pipe},
+    fs::pipe::{OpenedPipe, create_anonymous_pipe, pipe_rx_file_desc_ops},
     prelude::{
         handler::{TryFromSyscallArg, syscall_arg_flag32},
         user_access::{UserWriteSlice, user_addr},
@@ -63,12 +63,13 @@ fn sys_pipe2(
     rx.check_status_flags(rx_status_flags.to_file_op_status_flags())?;
     tx.check_status_flags(tx_status_flags.to_file_op_status_flags())?;
 
-    let rx = task.open_fd(
+    let rx = task.open_fd_with_description_ops(
         rx,
         OpenAccessMode::Read,
         rx_status_flags,
         LinuxOpenCompat::empty(),
         fd_flags,
+        pipe_rx_file_desc_ops(),
     )?;
     let tx = task
         .open_fd(

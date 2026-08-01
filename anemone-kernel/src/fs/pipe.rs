@@ -11,9 +11,12 @@ use crate::{
     fs::{FcntlCtx, FileFcntlCmd, FileFcntlOutcome, FileMode},
     prelude::*,
     syscall::user_access::UserWritePtr,
-    task::sig::{
-        SigNo, Signal,
-        info::{SiCode, SigInfoFields, SigKill},
+    task::{
+        files::{FileDescOps, FileStatusFlags, OpenedFileReadUserCtx},
+        sig::{
+            SigNo, Signal,
+            info::{SiCode, SigInfoFields, SigKill},
+        },
     },
     utils::{
         any_opaque::{AnyOpaque, NilOpaque},
@@ -117,7 +120,13 @@ impl Pipe {
 
         let pipe = Arc::new(SpinLock::new(pipe));
 
-        (PipeRx { pipe: pipe.clone() }, PipeTx { pipe })
+        (
+            PipeRx {
+                pipe: pipe.clone(),
+                operation: Mutex::new(()),
+            },
+            PipeTx { pipe },
+        )
     }
 
     fn capacity(&self) -> usize {
@@ -133,6 +142,10 @@ impl Pipe {
 #[derive(Opaque)]
 struct PipeRx {
     pipe: Arc<SpinLock<Pipe>>,
+    /// Serializes consumption by kernel-buffer reads and direct-user read
+    /// transactions. Pipe bytes remain owned solely by `Pipe::buf`; this gate
+    /// only keeps a staged prefix stable until copyout commits its exact count.
+    operation: Mutex<()>,
 }
 
 impl Drop for PipeRx {
@@ -335,42 +348,153 @@ fn pipe_rx_read(
         .cast::<PipeRx>()
         .expect("internal error: pipe rx file without correct private data");
 
-    let mut pipe = rx.pipe.lock();
-
-    let (result, routes) = if pipe.buf.is_empty() {
-        if pipe.tx_cnt == 0 {
-            // no tx alive. return EOF.
-            (Ok(0), None)
-        } else if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
-            (Err(SysError::Again), None)
-        } else {
-            while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
-                if get_current_task().has_unmasked_signal() {
-                    return Err(SysError::Interrupted);
-                }
-                drop(pipe);
-                yield_now();
-                pipe = rx.pipe.lock();
+    loop {
+        let mut pipe = rx.pipe.lock();
+        while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
+            if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
+                return Err(SysError::Again);
             }
-
-            // out of loop. see what happened.
-            if pipe.buf.is_empty() {
-                // all tx dead
-                (Ok(0), None)
-            } else {
-                // data available!
-                let (read, routes) = pipe_read_locked(&mut pipe, buf);
-                (Ok(read), routes)
+            if get_current_task().has_unmasked_signal() {
+                return Err(SysError::Interrupted);
             }
+            drop(pipe);
+            yield_now();
+            pipe = rx.pipe.lock();
         }
-    } else {
+
+        if pipe.buf.is_empty() {
+            // No transmitter and no buffered data remains.
+            return Ok(0);
+        }
+        drop(pipe);
+
+        // Never hold the uninterruptible operation mutex while waiting for
+        // bytes. A competing reader may consume the observed prefix before we
+        // acquire it, so admission must be rechecked under both owners.
+        let _operation = rx.operation.lock();
+        let mut pipe = rx.pipe.lock();
+        if pipe.buf.is_empty() {
+            if pipe.tx_cnt == 0 {
+                return Ok(0);
+            }
+            drop(pipe);
+            continue;
+        }
+
         let (read, routes) = pipe_read_locked(&mut pipe, buf);
-        (Ok(read), routes)
+        drop(pipe);
+        notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "rx_read");
+        return Ok(read);
+    }
+}
+
+fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<usize, SysError> {
+    assert!(
+        !ctx.notification_suppressed,
+        "pipe read transaction must remain an access-notification source"
+    );
+
+    let requested = ctx.dst.remaining();
+    if requested == 0 {
+        return Ok(0);
+    }
+
+    let rx = ctx
+        .file
+        .prv()
+        .cast::<PipeRx>()
+        .expect("internal error: pipe rx transaction without correct private data");
+    let (_operation, staged_len) = loop {
+        let mut pipe = rx.pipe.lock();
+        while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
+            if ctx.status_flags.contains(FileStatusFlags::NONBLOCK) {
+                return Err(SysError::Again);
+            }
+            if get_current_task().has_unmasked_signal() {
+                return Err(SysError::Interrupted);
+            }
+            drop(pipe);
+            yield_now();
+            pipe = rx.pipe.lock();
+        }
+
+        if pipe.buf.is_empty() {
+            // All transmitters are gone and no buffered byte remains.
+            return Ok(0);
+        }
+        drop(pipe);
+
+        let operation = rx.operation.lock();
+        let pipe = rx.pipe.lock();
+        if pipe.buf.is_empty() {
+            if pipe.tx_cnt == 0 {
+                return Ok(0);
+            }
+            drop(pipe);
+            drop(operation);
+            continue;
+        }
+        let staged_len = requested.min(pipe.buf.len());
+        drop(pipe);
+        break (operation, staged_len);
     };
 
-    drop(pipe);
-    notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "rx_read");
-    result
+    let mut staged = Vec::new();
+    staged
+        .try_reserve_exact(staged_len)
+        .map_err(|_| SysError::OutOfMemory)?;
+    {
+        // The RX operation gate excludes every consumer while writers may only
+        // append. The selected tail prefix therefore remains stable across the
+        // allocation and the later user copy without holding a spinlock there.
+        let pipe = rx.pipe.lock();
+        assert!(
+            pipe.buf.len() >= staged_len,
+            "pipe staged prefix was consumed outside the RX operation gate"
+        );
+        staged.extend(pipe.buf.iter().take(staged_len));
+    }
+    assert_eq!(
+        staged.len(),
+        staged_len,
+        "pipe snapshot did not cover its staged prefix"
+    );
+
+    let copied = ctx.dst.write_from_slice(&staged)?;
+    assert!(
+        copied > 0 && copied <= staged.len(),
+        "nonempty pipe copyout made invalid progress"
+    );
+
+    let routes = {
+        let mut pipe = rx.pipe.lock();
+        for expected in &staged[..copied] {
+            let actual = pipe
+                .buf
+                .try_pop()
+                .expect("pipe staged prefix disappeared before commit");
+            assert_eq!(
+                actual, *expected,
+                "pipe staged prefix changed before read commit"
+            );
+        }
+        (copied > 0).then(|| pipe.tx_poll_routes.clone())
+    };
+
+    notify_pipe_poll_routes(
+        routes,
+        Some(PollEvent::WRITABLE),
+        "tx",
+        "rx_read_user_commit",
+    );
+    Ok(copied)
+}
+
+pub(crate) fn pipe_rx_file_desc_ops() -> FileDescOps {
+    FileDescOps {
+        read_user_transaction: Some(pipe_rx_read_user_transaction),
+        ..FileDescOps::default()
+    }
 }
 
 fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
