@@ -62,8 +62,8 @@ fn copy_affinity_from_user(mask_addr: u64, len: usize) -> Result<CpuMask, SysErr
         let task = get_current_task();
         let uspace = task.clone_uspace_handle();
         let mut usp = uspace.lock();
-        let user = UserReadSlice::<u8>::try_new(user_addr(mask_addr)?, copied_len, &mut usp)?;
-        user.copy_to_slice(&mut raw);
+        let mut user = UserReadSlice::<u8>::try_new(user_addr(mask_addr)?, copied_len, &mut usp)?;
+        user.copy_to_slice(&mut raw)?;
     }
     Ok(decode_affinity(&raw))
 }

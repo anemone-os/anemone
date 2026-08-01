@@ -38,6 +38,8 @@
 - [2026-07-31 - FS owner-local syscall API](./2026-07-31-fs-owner-local-syscall-api.md)
 - [2026-07-31 - Net UDP external peer retirement](./2026-07-31-net-udp-external-peer-retirement.md)
 - [2026-07-31 - IRQ flow protocol](./2026-07-31-irq-flow-protocol.md)
+- [2026-07-29 - Minimal global membarrier](./2026-07-29-minimal-global-membarrier.md)
+- [2026-07-27 - umask 文件创建掩码](./2026-07-27-umask-file-creation-mask.md)
 - [2026-07-25 - Asynchronous wake delivery](./2026-07-25-asynchronous-wake-delivery.md)
 - [2026-07-24 - QEMU SMP Platform用途别名](./2026-07-24-qemu-smp-platform-aliases.md)
 - [2026-07-24 - mount fstype/source compatibility](./2026-07-24-mount-fstype-source-compat.md)

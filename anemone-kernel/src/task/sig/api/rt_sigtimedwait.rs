@@ -36,14 +36,14 @@ fn sys_rt_sigtimedwait(
         let mut usp = usp_handle.lock();
         let mut uthese = SigSet::new_with_mask(
             UserReadPtr::<linux_signal::SigSet>::try_new(uthese, &mut usp)?
-                .read()
+                .read()?
                 .bits,
         );
         uthese.clear(SigNo::SIGKILL);
         uthese.clear(SigNo::SIGSTOP);
 
         let timeout = if let Some(uts) = uts {
-            let timeout_ts = UserReadPtr::<TimeSpec>::try_new(uts, &mut usp)?.read();
+            let timeout_ts = UserReadPtr::<TimeSpec>::try_new(uts, &mut usp)?.read()?;
             if timeout_ts.tv_sec < 0
                 || timeout_ts.tv_nsec < 0
                 || timeout_ts.tv_nsec >= 1_000_000_000
@@ -160,7 +160,7 @@ fn sys_rt_sigtimedwait(
             if let Some(uinfo) = uinfo {
                 let mut usp = usp_handle.lock();
                 UserWritePtr::<linux_signal::SigInfoWrapper>::try_new(uinfo, &mut usp)?
-                    .write(signal.to_linux_siginfo());
+                    .write(signal.to_linux_siginfo())?;
             }
 
             Ok(no.as_usize() as u64)

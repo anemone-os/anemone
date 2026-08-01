@@ -61,6 +61,13 @@ mod driver_core {
             self.write_u32(off, val);
         }
 
+        pub fn is_enabled(&self, context: usize, irq: usize) -> bool {
+            let word = irq / 32;
+            let bit = irq % 32;
+            let off = ENABLE_BASE + context * ENABLE_STRIDE + word * 4;
+            self.read_u32(off) & (1 << bit) != 0
+        }
+
         pub fn clear_enable_words(&self, context: usize, nwords: usize) {
             let base = ENABLE_BASE + context * ENABLE_STRIDE;
             for i in 0..nwords {
@@ -132,7 +139,21 @@ impl IrqChip for SiFivePlic {
             kwarningln!("sifive-plic: eoi invalid hwirq {}", hwirq);
             return;
         }
-        self.regs().complete(self.current_s_context(), hwirq);
+        let context = self.current_s_context();
+        let regs = self.regs();
+        let was_enabled = regs.is_enabled(context, hwirq);
+
+        // FastEoi normally reaches completion with the source still enabled.
+        // Keep the controller-local fallback because this target silently
+        // ignores completion for a disabled source: temporarily enable only
+        // for completion, then restore the state observed on entry.
+        if !was_enabled {
+            regs.set_enable(context, hwirq, true);
+        }
+        regs.complete(context, hwirq);
+        if !was_enabled {
+            regs.set_enable(context, hwirq, false);
+        }
     }
 
     fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo> {

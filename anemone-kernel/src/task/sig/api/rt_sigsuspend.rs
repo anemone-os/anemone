@@ -32,7 +32,7 @@ fn sys_rt_sigsuspend(
         let mut usp = usp_handle.lock();
         let mut mask = SigSet::new_with_mask(
             UserReadPtr::<linux_signal::SigSet>::try_new(umask, &mut usp)?
-                .read()
+                .read()?
                 .bits,
         );
         mask.clear(SigNo::SIGKILL);

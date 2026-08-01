@@ -186,7 +186,7 @@ fn write_i32_field(
     offset: usize,
     value: i32,
 ) -> Result<(), SysError> {
-    UserWritePtr::<i32>::try_new(user_addr_offset(base, offset)?, usp)?.write(value);
+    UserWritePtr::<i32>::try_new(user_addr_offset(base, offset)?, usp)?.write(value)?;
     Ok(())
 }
 
@@ -196,7 +196,7 @@ fn write_u32_field(
     offset: usize,
     value: u32,
 ) -> Result<(), SysError> {
-    UserWritePtr::<u32>::try_new(user_addr_offset(base, offset)?, usp)?.write(value);
+    UserWritePtr::<u32>::try_new(user_addr_offset(base, offset)?, usp)?.write(value)?;
     Ok(())
 }
 
@@ -224,7 +224,7 @@ fn write_rusage(rusage: Option<VirtAddr>, cpu_usage: ThreadGroupCpuUsage) -> Res
     let usp = task.clone_uspace_handle();
     let mut guard = usp.lock();
 
-    UserWritePtr::<RUsage>::try_new(rusage, &mut guard)?.write(rusage_from_cpu(cpu_usage));
+    UserWritePtr::<RUsage>::try_new(rusage, &mut guard)?.write(rusage_from_cpu(cpu_usage))?;
     Ok(())
 }
 

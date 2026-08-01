@@ -3,7 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     arch::riscv64::exception::{__ktrap_return_to_task, RiscV64TrapFrame, utrap_return_to_task},
     prelude::*,
-    sched::{ParameterList, SchedArchTrait, TaskContextArch},
+    sched::{ParameterList, SchedArchTrait, TaskContextArch, TaskPropertiesArch},
     task::exit::kernel_exit,
 };
 
@@ -57,8 +57,21 @@ impl TaskContextArch for TaskContext {
 }
 
 pub struct RiscV64SchedArch;
+
+pub struct RiscV64TaskProperties;
+
+impl TaskPropertiesArch for RiscV64TaskProperties {
+    const NEW: Self = Self;
+
+    fn inherit_for_clone(&self, _parent: &Self) {}
+
+    fn reset_for_exec(&self) {}
+}
+
 impl SchedArchTrait for RiscV64SchedArch {
     type TaskContext = TaskContext;
+    type TaskProperties = RiscV64TaskProperties;
+
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
         unsafe {
             assert!(IntrArch::local_intr_disabled());

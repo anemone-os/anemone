@@ -16,6 +16,7 @@ use crate::prelude::*;
 
 #[derive(Debug)]
 pub enum IpiPayload {
+    MemoryBarrier,
     TlbShootdown {
         vpn: Option<VirtPageNum>,
     },
@@ -37,6 +38,7 @@ pub enum IpiPayload {
 impl IpiPayload {
     fn copy_for_broadcast(&self) -> Self {
         match self {
+            Self::MemoryBarrier => Self::MemoryBarrier,
             Self::TlbShootdown { vpn } => Self::TlbShootdown { vpn: *vpn },
             Self::EnqueueNewTask { tid } => Self::EnqueueNewTask { tid: *tid },
             Self::WakeUpTaskStaleSafe { .. } => {
@@ -218,6 +220,12 @@ pub fn handle_ipi() {
                 break;
             };
             match &msg.payload {
+                MemoryBarrier => {
+                    // The completion store below only acknowledges transport;
+                    // membarrier requires this explicit full data fence.
+                    full_memory_barrier();
+                    msg.is_accomplished.store(true, Ordering::Release);
+                },
                 TlbShootdown { vpn } => {
                     if let Some(vpn) = *vpn {
                         PagingArch::tlb_shootdown(vpn);
@@ -269,6 +277,7 @@ mod kunits {
     fn test_broadcast_copy_reconstructs_only_eligible_payloads() {
         let tid = Tid::new(7);
         let copies = [
+            IpiPayload::MemoryBarrier.copy_for_broadcast(),
             IpiPayload::TlbShootdown { vpn: None }.copy_for_broadcast(),
             IpiPayload::EnqueueNewTask { tid }.copy_for_broadcast(),
             IpiPayload::RunKUnitPerCpu {
@@ -279,6 +288,7 @@ mod kunits {
         ];
 
         let mut copies = copies.into_iter();
+        assert!(matches!(copies.next().unwrap(), IpiPayload::MemoryBarrier));
         assert!(matches!(
             copies.next().unwrap(),
             IpiPayload::TlbShootdown { vpn: None }

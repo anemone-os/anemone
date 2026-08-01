@@ -1,10 +1,11 @@
 # System Target Model Tracking Issues
 
-**状态：** Closed（R6；无 live design issue）
-**最后更新：** 2026-07-24
+**状态：** Closed（R7；无 live design issue）
+**最后更新：** 2026-07-27
 **父 RFC：** [RFC-20260722-system-target-model](./index.md)
 **迁移计划：** [迁移实施计划](./implementation.md)
-**事务日志：** [R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
+**事务日志：** [R7 rootfs incremental extra size](../../devlog/transactions/2026-07-27-system-target-model-r7-rootfs-extra-size.md)；
+[R6 named bind and initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
 [R4A QEMU provider DT cutover](../../devlog/transactions/2026-07-24-system-target-model-r4-qemu-dt.md)；
 [R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
 [R0-R2 history](../../devlog/transactions/2026-07-22-system-target-model.md)

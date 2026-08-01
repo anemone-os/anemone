@@ -67,9 +67,9 @@ fn read_clone_args(uargs: u64, size: usize) -> Result<CloneArgs, SysError> {
 
     let uargs = user_addr(uargs)?;
     let bytes = get_current_task().clone_uspace_handle().with_usp(|usp| {
-        let uslice = UserReadSlice::<u8>::try_new(uargs, size, usp)?;
+        let mut uslice = UserReadSlice::<u8>::try_new(uargs, size, usp)?;
         let mut bytes = vec![0u8; size];
-        uslice.copy_to_slice(&mut bytes);
+        uslice.copy_to_slice(&mut bytes)?;
         Ok::<_, SysError>(bytes)
     })?;
 
@@ -191,7 +191,7 @@ fn reject_deferred_clone3_features(
 fn validate_pidfd_ptr(pidfd: u64) -> Result<(), SysError> {
     let pidfd = user_addr(pidfd)?;
     get_current_task().clone_uspace_handle().with_usp(|usp| {
-        UserWritePtr::<i32>::try_new(pidfd, usp)?;
+        UserWritePtr::<i32>::try_new(pidfd, usp)?.fault_in()?;
         Ok::<_, SysError>(())
     })
 }

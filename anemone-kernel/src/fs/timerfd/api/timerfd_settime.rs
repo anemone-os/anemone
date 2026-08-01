@@ -22,7 +22,7 @@ fn sys_timerfd_settime(
     let uspace = task.clone_uspace_handle();
     let new_value = {
         let mut usp = uspace.lock();
-        UserReadPtr::<ITimerSpec>::try_new(new_value, &mut usp)?.read()
+        UserReadPtr::<ITimerSpec>::try_new(new_value, &mut usp)?.read()?
     };
     validate_settime_value(new_value)?;
 
@@ -31,7 +31,7 @@ fn sys_timerfd_settime(
 
     if let Some(old_value) = old_value {
         let mut usp = uspace.lock();
-        UserWritePtr::<ITimerSpec>::try_new(old_value, &mut usp)?.write(old_snapshot);
+        UserWritePtr::<ITimerSpec>::try_new(old_value, &mut usp)?.write(old_snapshot)?;
     }
 
     Ok(0)

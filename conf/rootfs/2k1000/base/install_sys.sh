@@ -1,52 +1,44 @@
-#!/busybox sh
+#!/home/bin/busybox sh
 
-# set -x
+echo Installing Anemone toolchain...
+set -eu
 
-echo Installing Anemone userspace into rootfs...
-# BusyBox 1.33.1 hush rejects `set -u`; restore nounset only after /bin/sh
-# switches to ash or the selected hush implementation supports it.
-set -e
+BUSYBOX=/home/bin/busybox
+# board-init invokes this after chrooting to /linux, so the default root `/`
+# names the Linux root (the outer mount path is /linux).
+ROOT=${1:-/}
+ROOT=${ROOT%/}
+INSTALL_MARKER="$ROOT/etc/.anemone-installed"
+REINSTALL_MARKER=/home/.anemone_need_reinstall
+INSTALL_VERSION=2
 
-BUSYBOX=/busybox
-
-"$BUSYBOX" mkdir -p /bin /dev /dev/shm /etc /mnt /proc /root /run /tmp /usr /var
-"$BUSYBOX" --install -s /bin
-
-if [ -f /symlinks.sh ]; then
-    "$BUSYBOX" sh /symlinks.sh
+if [ ! -f "$REINSTALL_MARKER" ] \
+    && [ -f "$INSTALL_MARKER" ] \
+    && [ "$("$BUSYBOX" cat "$INSTALL_MARKER")" = "$INSTALL_VERSION" ]; then
+    echo "Anemone toolchain is already installed."
+    exit 0
 fi
 
-for link in /sbin /usr/bin /usr/sbin; do
-    if [ ! -e "$link" ]; then
-        "$BUSYBOX" ln -s /bin "$link"
-    fi
+"$BUSYBOX" mkdir -p "$ROOT/etc" "$ROOT/root" "$ROOT/usr/bin" "$ROOT/usr/sbin"
+"$BUSYBOX" ln -sfn /usr/bin "$ROOT/bin"
+"$BUSYBOX" ln -sfn /usr/sbin "$ROOT/sbin"
+
+for applet in sh ls init vi; do
+    echo "Installing $applet..."
+    "$BUSYBOX" ln -sf /home/bin/busybox "$ROOT/usr/bin/$applet"
 done
 
-# Folder-based roots may omit the standard /usr directories.
-for name in include lib libexec share; do
-    if [ ! -e "/usr/$name" ]; then
-        "$BUSYBOX" ln -s "/$name" "/usr/$name"
-    fi
-done
+echo "Installing remaining BusyBox applets..."
+"$BUSYBOX" --install -s $ROOT/usr/bin
 
-export PATH=/bin:/sbin:/usr/bin:/usr/sbin
-export HOME=/root
-export TERM=linux
-export LD_LIBRARY_PATH=/lib:/usr/lib
+echo "Copying configuration files..."
 
-"$BUSYBOX" mount -n -t devfs devfs /dev
-"$BUSYBOX" mount -n -t ramfs none /dev/shm
-"$BUSYBOX" mount -n -t ramfs none /run
-"$BUSYBOX" mount -n -t ramfs none /tmp
-"$BUSYBOX" mount -n -t proc proc /proc
-"$BUSYBOX" chmod 1777 /tmp
+"$BUSYBOX" cp -Rf /home/etc/. "$ROOT/etc/"
+"$BUSYBOX" cp -Rf /home/root/. "$ROOT/root/"
+"$BUSYBOX" rm -f "$ROOT/usr/sbin/init"
+"$BUSYBOX" ln -s /usr/bin/init "$ROOT/usr/sbin/init"
+"$BUSYBOX" ln -sf /home/sbin/shutdown "$ROOT/usr/bin/poweroff"
+echo "$INSTALL_VERSION" > "$INSTALL_MARKER"
+"$BUSYBOX" rm -f "$REINSTALL_MARKER"
 
-if [ -f /tests/try_build.sh ]; then
-    echo "Running native GCC/Git smoke test from /tests..."
-    if ! (cd /tests && "$BUSYBOX" sh ./try_build.sh); then
-        echo "Native GCC smoke test failed; continuing to the interactive shell."
-    fi
-fi
-
-echo "Anemone userspace is ready."
-cat /etc/logo.txt
+echo "Anemone toolchain is ready."

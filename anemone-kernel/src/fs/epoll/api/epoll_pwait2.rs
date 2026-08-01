@@ -23,7 +23,7 @@ fn sys_epoll_pwait2(
             let usp_handle = task.clone_uspace_handle();
             let mut usp = usp_handle.lock();
             let TimeSpec { tv_sec, tv_nsec } =
-                UserReadPtr::<TimeSpec>::try_new(timeout_addr, &mut usp)?.read();
+                UserReadPtr::<TimeSpec>::try_new(timeout_addr, &mut usp)?.read()?;
             if tv_sec < 0 || tv_nsec < 0 || tv_nsec >= 1_000_000_000 {
                 return Err(SysError::InvalidArgument);
             }

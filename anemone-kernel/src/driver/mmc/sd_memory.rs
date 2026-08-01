@@ -9,7 +9,7 @@ use crate::{
     device::{
         block::{
             BlockDev, BlockDevRegistration, BlockSize, devfs::publish_block_device,
-            register_block_device,
+            register_block_disk,
         },
         devnum::GeneralMinorAllocator,
         kobject::{KObjIdent, KObjectBase, KObjectOps},
@@ -23,8 +23,18 @@ use crate::{
     prelude::*,
 };
 
-const fn devnum_for(id: usize) -> BlockDevNum {
-    BlockDevNum::new(MajorNum::new(devnum::block::major::MMC), MinorNum::new(id))
+/// Linux MMC disk minors reserve three bits for partition numbers.
+const DISK_MINOR_STRIDE: usize = 8;
+
+fn devnum_for(id: usize) -> Result<BlockDevNum, SysError> {
+    let minor = id
+        .checked_mul(DISK_MINOR_STRIDE)
+        .filter(|minor| *minor < (1usize << devnum::MINOR_BITS))
+        .ok_or(SysError::NoMinorAvailable)?;
+    Ok(BlockDevNum::new(
+        MajorNum::new(devnum::block::major::MMC),
+        MinorNum::new(minor),
+    ))
 }
 
 fn name_for(id: usize) -> String {
@@ -72,20 +82,23 @@ impl DriverOps for SdMemoryBlockDriver {
         }
         let total_blocks = usize::try_from(blocks).map_err(|_| SysError::ResourceExhausted)?;
 
-        let minor = MINORS
+        let disk_id = MINORS
             .lock_irqsave()
             .alloc()
             .ok_or(SysError::NoMinorAvailable)?;
-        let devnum = devnum_for(minor.get());
+        let devnum = devnum_for(disk_id.get())?;
         let endpoint = Arc::new(SdMemoryBlockDev {
             devnum,
             card: card.clone(),
             total_blocks,
         });
-        register_block_device(BlockDevRegistration {
-            name: name_for(minor.get()),
-            device: endpoint,
-        })?;
+        let devnums = register_block_disk(
+            BlockDevRegistration {
+                name: name_for(disk_id.get()),
+                device: endpoint,
+            },
+            DISK_MINOR_STRIDE,
+        )?;
 
         kinfoln!(
             "sd-memory card{}: registered as devnum={} blocks={} block_size={}B",
@@ -94,13 +107,15 @@ impl DriverOps for SdMemoryBlockDriver {
             total_blocks,
             BlockSize::UNIT_BYTES
         );
-        if let Err(error) = publish_block_device(devnum) {
-            knoticeln!(
-                "sd-memory card{} registered as {}, but devfs publish failed: {:?}",
-                card.id().get(),
-                devnum,
-                error
-            );
+        for endpoint_devnum in devnums {
+            if let Err(error) = publish_block_device(endpoint_devnum) {
+                knoticeln!(
+                    "sd-memory card{} block endpoint {} registered, but devfs publish failed: {:?}",
+                    card.id().get(),
+                    endpoint_devnum,
+                    error
+                );
+            }
         }
         Ok(())
     }
@@ -317,7 +332,8 @@ fn init() {
 
 #[kunit]
 fn endpoint_identity_uses_one_local_id() {
-    assert_eq!(devnum_for(0).minor(), MinorNum::new(0));
+    assert_eq!(devnum_for(0).unwrap().minor(), MinorNum::new(0));
+    assert_eq!(devnum_for(1).unwrap().minor(), MinorNum::new(8));
     assert_eq!(name_for(0), "mmcblk0");
 }
 

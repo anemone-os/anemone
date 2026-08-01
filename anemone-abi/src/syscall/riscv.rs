@@ -252,6 +252,8 @@ pub mod linux {
 
     pub const SYS_EXECVEAT: u64 = 281;
 
+    pub const SYS_MEMBARRIER: u64 = 283;
+
     pub const SYS_PWRITEV2: u64 = 287;
 
     pub const SYS_STATX: u64 = 291;

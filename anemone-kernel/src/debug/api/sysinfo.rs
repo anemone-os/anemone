@@ -28,7 +28,7 @@ fn sys_sysinfo(#[validate_with(user_addr)] info: VirtAddr) -> Result<u64, SysErr
 
         let usp_handle = task.clone_uspace_handle();
         let mut usp = usp_handle.lock();
-        UserWritePtr::<SysInfo>::try_new(info, &mut usp)?.write(sys_info);
+        UserWritePtr::<SysInfo>::try_new(info, &mut usp)?.write(sys_info)?;
     }
 
     Ok(0)

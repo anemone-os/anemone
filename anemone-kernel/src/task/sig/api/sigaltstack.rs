@@ -46,7 +46,7 @@ fn sys_sigaltstack(
         };
 
         let mut guard = usp.lock();
-        UserWritePtr::<linux_signal::SigStack>::try_new(uoss, &mut guard)?.write(ss);
+        UserWritePtr::<linux_signal::SigStack>::try_new(uoss, &mut guard)?.write(ss)?;
     }
 
     if let Some(uss) = uss {
@@ -56,7 +56,7 @@ fn sys_sigaltstack(
             ss_size,
         } = {
             let mut guard = usp.lock();
-            UserReadPtr::<linux_signal::SigStack>::try_new(uss, &mut guard)?.read()
+            UserReadPtr::<linux_signal::SigStack>::try_new(uss, &mut guard)?.read()?
         };
 
         let mut sig_altstack = task.sig_altstack.lock();

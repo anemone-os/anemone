@@ -16,6 +16,8 @@ mod utrap;
 pub use utrap::*;
 mod signal;
 pub use signal::*;
+mod user_ptr;
+pub use user_ptr::LA64UserPtrAccessor;
 
 /// LoongArch64 trap architecture implementation.
 pub struct LA64TrapArch;
@@ -23,6 +25,7 @@ pub struct LA64TrapArch;
 impl TrapArchTrait for LA64TrapArch {
     type TrapFrame = LA64TrapFrame;
     type SyscallCtx = LA64SyscallCtx;
+    type UserPtrAccessor = LA64UserPtrAccessor;
 
     unsafe fn load_utrapframe(mut trapframe: Self::TrapFrame) -> ! {
         unsafe { utrap_return_to_task(&mut trapframe) }
@@ -104,6 +107,38 @@ static_assert!(offset_of!(LA64TrapFrame, gpr) == 0);
 static_assert!(size_of::<Gpr>() == 32 * size_of::<u64>());
 
 impl LA64TrapFrame {
+    /// Read a GPR while preserving the architectural zero-register semantics.
+    pub(super) fn read_gpr(&self, index: u8) -> u64 {
+        assert!(index < 32);
+        if index == 0 {
+            0
+        } else {
+            self.gpr.r(index as usize)
+        }
+    }
+
+    /// Write a GPR while preserving the architectural zero-register semantics.
+    pub(super) fn write_gpr(
+        &mut self,
+        index: u8,
+        value: u64,
+    ) {
+        assert!(index < 32);
+        if index != 0 {
+            self.gpr.r[index as usize] = value;
+        }
+    }
+
+    /// Return the saved exception ERA.
+    pub(super) fn era(&self) -> u64 {
+        self.era
+    }
+
+    /// Advance ERA past a successfully emulated 32-bit instruction.
+    pub(super) fn advance_era_after_emulated_instruction(&mut self) {
+        self.era += 4;
+    }
+
     pub fn kernel_init_frame(
         entry: VirtAddr,
         stack_top: VirtAddr,

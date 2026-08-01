@@ -136,12 +136,12 @@ fn tty_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult
 
 fn read_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
     ctx.uspace()
-        .with_usp(|usp| Ok(UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read()))
+        .with_usp(|usp| UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
     ctx.uspace().with_usp(|usp| {
-        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value);
+        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value)?;
         Ok(())
     })
 }
@@ -302,7 +302,7 @@ fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError
         }
         let pgid = foreground.pgid();
         if relation::commit_foreground(&snapshot, foreground) {
-            kinfoln!(
+            kdebugln!(
                 "TTY: foreground commit sid={} pgid={}",
                 caller.session().sid(),
                 pgid

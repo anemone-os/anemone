@@ -33,7 +33,7 @@ fn sys_times(
             tms_stime: mono_to_clock_ticks(usage.self_kernel_mono()),
             tms_cutime: mono_to_clock_ticks(usage.reaped_user_mono()),
             tms_cstime: mono_to_clock_ticks(usage.reaped_kernel_mono()),
-        });
+        })?;
     }
 
     Ok(mono_to_clock_ticks(monotonic_uptime()) as u64)

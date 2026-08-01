@@ -142,7 +142,7 @@ fn sys_futex(
             let timeout = if let Some(timeout_ptr) = timeout_ptr {
                 let mut usp = usp_handle.lock();
                 let TimeSpec { tv_sec, tv_nsec } =
-                    UserReadPtr::<TimeSpec>::try_new(timeout_ptr, &mut usp)?.read();
+                    UserReadPtr::<TimeSpec>::try_new(timeout_ptr, &mut usp)?.read()?;
 
                 if tv_sec < 0 || tv_nsec < 0 || tv_nsec >= 1_000_000_000 {
                     knoticeln!(
@@ -172,7 +172,7 @@ fn sys_futex(
             let timeout = if let Some(timeout_ptr) = timeout_ptr {
                 let mut usp = usp_handle.lock();
                 let TimeSpec { tv_sec, tv_nsec } =
-                    UserReadPtr::<TimeSpec>::try_new(timeout_ptr, &mut usp)?.read();
+                    UserReadPtr::<TimeSpec>::try_new(timeout_ptr, &mut usp)?.read()?;
 
                 if tv_sec < 0 || tv_nsec < 0 || tv_nsec >= 1_000_000_000 {
                     knoticeln!(

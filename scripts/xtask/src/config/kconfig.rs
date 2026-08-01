@@ -58,6 +58,7 @@ pub struct Parameters {
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
+    pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
@@ -74,9 +75,11 @@ pub struct Parameters {
     pub oom_kill_threshold: Option<u8>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
+    pub initial_umask: Option<u16>,
     pub ramdisk_count: Option<usize>,
     pub loop_device_count: Option<usize>,
     pub ns16550a_default_baud: Option<u32>,
+    pub ns16550a_fallback_clock_hz: Option<u32>,
     pub tty_raw_rx_capacity_bytes: Option<usize>,
     pub tty_canonical_line_capacity_bytes: Option<usize>,
     pub tty_input_capacity_bytes: Option<usize>,
@@ -144,6 +147,7 @@ impl Parameters {
         materialize!(max_path_len_bytes);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
+        materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
@@ -160,9 +164,11 @@ impl Parameters {
         materialize!(oom_kill_threshold);
         materialize!(symlink_resolve_limit);
         materialize!(max_fd_per_process);
+        materialize!(initial_umask);
         materialize!(ramdisk_count);
         materialize!(loop_device_count);
         materialize!(ns16550a_default_baud);
+        materialize!(ns16550a_fallback_clock_hz);
         materialize!(tty_raw_rx_capacity_bytes);
         materialize!(tty_canonical_line_capacity_bytes);
         materialize!(tty_input_capacity_bytes);
@@ -256,6 +262,8 @@ pub const MAX_PATH_LEN_BYTES: usize = {};
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Maximum kernel staging buffer used by one getdents64 call.
+pub const GETDENTS64_BUFFER_BYTES: usize = {};
 /// Fixed pipe backing and default logical capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Allocation policy for ordinary task IDs.
@@ -307,12 +315,16 @@ pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Default maximum number of file descriptors per process.
 /// Might be overridden by certain syscalls.
 pub const MAX_FD_PER_PROCESS: usize = {};
+/// Initial file creation mask for user filesystem contexts.
+pub const INITIAL_UMASK: u16 = {};
 /// Number of static ramdisk block devices to publish at boot.
 pub const RAMDISK_COUNT: usize = {};
 /// Number of static loop block devices to publish at boot.
 pub const LOOP_DEVICE_COUNT: usize = {};
 /// Default NS16550A baud used when stdout-path has no device-specific options.
 pub const NS16550A_DEFAULT_BAUD: u32 = {};
+/// NS16550A input clock used when firmware omits clock-frequency.
+pub const NS16550A_FALLBACK_CLOCK_HZ: u32 = {};
 /// Per-port fixed raw TTY RX FIFO capacity in bytes.
 pub const TTY_RAW_RX_CAPACITY_BYTES: usize = {};
 /// Maximum canonical TTY line size including its delimiter.
@@ -392,6 +404,7 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(max_path_len_bytes),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
+            resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
@@ -408,9 +421,11 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(oom_kill_threshold),
             resolved!(symlink_resolve_limit),
             resolved!(max_fd_per_process),
+            resolved!(initial_umask),
             resolved!(ramdisk_count),
             resolved!(loop_device_count),
             resolved!(ns16550a_default_baud),
+            resolved!(ns16550a_fallback_clock_hz),
             resolved!(tty_raw_rx_capacity_bytes),
             resolved!(tty_canonical_line_capacity_bytes),
             resolved!(tty_input_capacity_bytes),
@@ -502,6 +517,17 @@ mod tests {
                 "missing generated constant {expected}"
             );
         }
+    }
+
+    #[test]
+    fn getdents64_buffer_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
+        );
     }
 
     #[test]

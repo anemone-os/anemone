@@ -43,10 +43,19 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
+- [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
+  RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供
+  fallible copyin/copyout，typed exact access与VFS partial progress边界已经固化。早于本RFC的
+  `RemoteUspFenceGuard`锁内同步shootdown问题保持明确follow-up，不被R0 closure写成已修复。
+- [RFC-20260801-loongarch-lsx-context](./rfcs/loongarch-lsx-context/index.md)：R0已实现并关闭；以per-task
+  sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
+  clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
+  `AT_HWCAP*`和Linux full-lazy owner优化保持明确非目标；software unaligned access问题独立登记。
 - [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R2 Closed；以 canonical
   `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs有序publication与filesystem-backed `rdev`
-  形成完整node-creation target；R2继承requested permission bits不应用process umask的限制，并把task/fs-state与全部
-  create call sites 留给[独立 limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)。
+  形成完整node-creation target。R2分支内接受的no-umask边界属于历史closure；合流后的current implementation
+  复用既有task filesystem context唯一owner，与`openat`/`mkdirat`一致对`mknodat` requested permission应用
+  process umask，见[umask小迭代记录](./devlog/changes/2026-07-27-umask-file-creation-mask.md)。
   Stage 1与`DEVICE-NUMBER-CUTOVER`已把
   [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) Refine为effective 12/20 category-neutral baseline；
   Stage 2的`VFS-MAKE-NODE-CUTOVER`又使

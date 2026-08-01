@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     UartLineConfig,
-    regs::{InterruptReason, Ns16550ARegisters, RxSample},
+    regs::{InterruptReason, Ns16550ARegisters, RxSample, UartVariant},
 };
 
 static_assert!(
@@ -120,13 +120,14 @@ impl PortCounters {
     }
 }
 
-pub(super) struct Ns16550APort {
+pub(super) struct Uart16550Port {
     id: TtyPortId,
     /// Stable diagnostic identity for logs and review. It does not decide port
     /// behavior or replace the OF-path `TtyPortId`.
     base: PhysAddr,
     reg_shift: usize,
     reg_io_width: usize,
+    variant: UartVariant,
     remap: IoRemap,
     /// Authoritative boot-applied configuration snapshot, not a diagnostic
     /// cache. Runtime register reads must not replace it.
@@ -136,12 +137,13 @@ pub(super) struct Ns16550APort {
     counters: PortCounters,
 }
 
-impl Ns16550APort {
+impl Uart16550Port {
     fn new(
         id: TtyPortId,
         base: PhysAddr,
         reg_shift: usize,
         reg_io_width: usize,
+        variant: UartVariant,
         remap: IoRemap,
         applied_line: AppliedLine,
     ) -> Result<Arc<Self>, SysError> {
@@ -151,6 +153,7 @@ impl Ns16550APort {
             base,
             reg_shift,
             reg_io_width,
+            variant,
             remap,
             applied_line,
             raw_rx: SpinLock::new(raw_rx),
@@ -162,10 +165,11 @@ impl Ns16550APort {
 
     fn regs(&self) -> Ns16550ARegisters {
         unsafe {
-            Ns16550ARegisters::from_raw(
+            Ns16550ARegisters::from_raw_variant(
                 self.remap.as_ptr().as_ptr().cast(),
                 self.reg_shift,
                 self.reg_io_width,
+                self.variant,
             )
         }
     }
@@ -213,9 +217,7 @@ impl Ns16550APort {
         while causes < NS16550A_IRQ_RX_BUDGET_BYTES && bytes < batch.len() {
             match regs.interrupt_reason() {
                 InterruptReason::None => break,
-                InterruptReason::RxAvailable
-                | InterruptReason::RxLineStatus
-                | InterruptReason::RxTimeout => {
+                InterruptReason::RxAvailable | InterruptReason::RxLineStatus => {
                     causes += 1;
                     let drained = drain_samples(&mut batch[bytes..], || regs.read_rx_sample());
                     bytes += drained.bytes;
@@ -227,9 +229,26 @@ impl Ns16550APort {
                         break;
                     }
                 },
+                InterruptReason::RxTimeout => {
+                    causes += 1;
+                    let drained = drain_samples(&mut batch[bytes..], || regs.read_rx_sample());
+                    bytes += drained.bytes;
+                    line_errors += drained.line_errors;
+                    if drained.bytes == 0 {
+                        let _ = regs.clear_spurious_rx_timeout();
+                    }
+                    if bytes == batch.len() {
+                        budget_exhausted = regs.rx_status().data_ready;
+                        break;
+                    }
+                },
                 InterruptReason::ModemStatus => {
                     causes += 1;
                     regs.clear_modem_status();
+                },
+                InterruptReason::BusyDetect => {
+                    causes += 1;
+                    regs.clear_busy_detect();
                 },
                 // TX interrupts are disabled and unknown causes have no bounded
                 // owner-local acknowledgement. Stop rather than spin in IRQ.
@@ -268,11 +287,11 @@ impl Ns16550APort {
     }
 }
 
-struct Ns16550ATtyPort {
-    port: Arc<Ns16550APort>,
+struct Uart16550TtyPort {
+    port: Arc<Uart16550Port>,
 }
 
-impl TtyPort for Ns16550ATtyPort {
+impl TtyPort for Uart16550TtyPort {
     fn id(&self) -> &TtyPortId {
         self.port.id()
     }
@@ -298,11 +317,11 @@ impl TtyPort for Ns16550ATtyPort {
     }
 }
 
-struct Ns16550AConsole {
-    port: Arc<Ns16550APort>,
+struct Uart16550Console {
+    port: Arc<Uart16550Port>,
 }
 
-impl Console for Ns16550AConsole {
+impl Console for Uart16550Console {
     fn output(&self, s: &str) {
         let accepted = self.port.submit_tx_bytes(s.as_bytes());
         self.port
@@ -315,28 +334,37 @@ impl Console for Ns16550AConsole {
 /// Driver-local state installed by the early synchronous probe.
 ///
 /// `attachment == None` is the sole Quiescent truth; `Some` is the sole Active
-/// truth. The attachment lives here rather than in `Ns16550APort`, avoiding a
+/// truth. The attachment lives here rather than in `Uart16550Port`, avoiding a
 /// `port -> attachment -> endpoint -> port` strong-reference cycle.
 #[derive(Opaque)]
-pub(super) struct Ns16550ADevice {
-    port: Arc<Ns16550APort>,
-    tty_port: Arc<Ns16550ATtyPort>,
+pub(super) struct Uart16550Device {
+    port: Arc<Uart16550Port>,
+    tty_port: Arc<Uart16550TtyPort>,
     attachment: SpinLock<Option<TtyPortAttachment>>,
 }
 
-impl Ns16550ADevice {
+impl Uart16550Device {
     pub(super) fn new(
         id: TtyPortId,
         base: PhysAddr,
         reg_shift: usize,
         reg_io_width: usize,
+        variant: UartVariant,
         remap: IoRemap,
         applied_line: AppliedLine,
     ) -> Result<(Self, Arc<dyn Console>), SysError> {
-        let port = Ns16550APort::new(id, base, reg_shift, reg_io_width, remap, applied_line)?;
-        let tty_port = Arc::try_new(Ns16550ATtyPort { port: port.clone() })
+        let port = Uart16550Port::new(
+            id,
+            base,
+            reg_shift,
+            reg_io_width,
+            variant,
+            remap,
+            applied_line,
+        )?;
+        let tty_port = Arc::try_new(Uart16550TtyPort { port: port.clone() })
             .map_err(|_| SysError::OutOfMemory)?;
-        let console: Arc<dyn Console> = Arc::try_new(Ns16550AConsole { port: port.clone() })
+        let console: Arc<dyn Console> = Arc::try_new(Uart16550Console { port: port.clone() })
             .map_err(|_| SysError::OutOfMemory)?;
         Ok((
             Self {
@@ -348,19 +376,19 @@ impl Ns16550ADevice {
         ))
     }
 
-    pub(super) fn port(&self) -> &Arc<Ns16550APort> {
+    pub(super) fn port(&self) -> &Arc<Uart16550Port> {
         &self.port
     }
 
     pub(super) fn activate(&self, device: &dyn Device) -> Result<(), SysError> {
         assert!(
             self.attachment.lock_irqsave().is_none(),
-            "NS16550A TTY transport activated twice"
+            "UART16550 TTY transport activated twice"
         );
 
         let tty_port: Arc<dyn TtyPort> = self.tty_port.clone();
         let (attachment, notifier) = attach_unpublished_port(tty_port)?;
-        let irq_context = AnyOpaque::new(Ns16550AIrqContext {
+        let irq_context = AnyOpaque::new(Uart16550IrqContext {
             port: self.port.clone(),
             notifier,
         });
@@ -374,7 +402,7 @@ impl Ns16550ADevice {
             let mut slot = self.attachment.lock_irqsave();
             assert!(
                 slot.is_none(),
-                "NS16550A activation slot changed during commit"
+                "UART16550 activation slot changed during commit"
             );
             *slot = Some(attachment);
         }
@@ -384,8 +412,8 @@ impl Ns16550ADevice {
 }
 
 #[derive(Opaque)]
-struct Ns16550AIrqContext {
-    port: Arc<Ns16550APort>,
+struct Uart16550IrqContext {
+    port: Arc<Uart16550Port>,
     notifier: TtyRxNotifier,
 }
 
@@ -393,8 +421,8 @@ pub(super) static IRQ_HANDLER: IrqHandler = IrqHandler::new(handle_irq);
 
 fn handle_irq(private: &AnyOpaque) {
     let context = private
-        .cast::<Ns16550AIrqContext>()
-        .expect("NS16550A IRQ received invalid private data");
+        .cast::<Uart16550IrqContext>()
+        .expect("UART16550 IRQ received invalid private data");
     context.port.handle_irq(&context.notifier);
 }
 

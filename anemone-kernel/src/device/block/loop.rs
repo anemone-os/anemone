@@ -418,12 +418,12 @@ fn copy_name(raw: &mut [u8; LO_NAME_SIZE], name: &str) {
 
 fn read_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>) -> Result<T, SysError> {
     ctx.uspace()
-        .with_usp(|usp| Ok(UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read()))
+        .with_usp(|usp| UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>, value: T) -> Result<(), SysError> {
     ctx.uspace().with_usp(|usp| {
-        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value);
+        UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value)?;
         Ok(())
     })
 }

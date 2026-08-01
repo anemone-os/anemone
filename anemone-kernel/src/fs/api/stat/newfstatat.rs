@@ -24,7 +24,7 @@ fn sys_newfstatat(
     let mut guard = usp.lock();
 
     let mut statbuf = UserWritePtr::<Stat>::try_new(statbuf, &mut guard)?;
-    statbuf.write(kbuf);
+    statbuf.write(kbuf)?;
 
     Ok(0)
 }

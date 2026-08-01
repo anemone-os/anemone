@@ -24,6 +24,12 @@
 
 ## Completed
 
+- [Exception-backed User Pointer Access](./2026-08-01-exception-userptr-access.md)：R0已完成RV64/LA64
+  page-bounded bytewise copy、per-CPU exact-PC recovery、一次page-fault retry和typed/VFS partial边界；用户
+  确认既有实现已验收。早于R0的remote fence锁边界保持follow-up。
+- [LoongArch LSX Sticky-Lazy Context](./2026-08-01-loongarch-lsx-context.md)：R0已完成per-task first-use
+  policy、唯一128-bit trapframe backing、user trap save/restore、clone/exec和Linux-compatible signal
+  extcontext；2K1000 build与用户实机验收通过。LASX、HWCAP和full-lazy保持accepted limitations。
 - [VFS Make Node](./2026-07-31-vfs-make-node.md)：R2 Stage 1-2与C1-C3已关闭；`DEVICE-NUMBER-CUTOVER`
   建立12/20 category-neutral device-number baseline，`VFS-MAKE-NODE-CUTOVER`原子激活make-node handoff、
   filesystem-backed `rdev`与mount kind-first `ENOTBLK`。RV64/LA64各完成293项KUnit、ext4 reload/双backend
@@ -49,6 +55,7 @@
   分路、resident inode best-effort writeback 与共享 machine fallback；四个 contract ID 已原子 cutover。
   RV64 power-off 有两条 QEMU evidence；RV64 reboot runtime、LA64 machine capability 与 hardware未运行。
 - [Epoll](./2026-07-26-epoll.md)：R2 Stage 0-2与2R/2D均已关闭；timer absolute deadline与pipe capacity/atomic-threshold修复通过双root closure，`EPOLL-CUTOVER`已使epoll ABI、iomux Refine与三个`EPOLL-*` ID同步生效。MM COW issue继续由register独立跟踪。
+- [System Target Model R7 Rootfs Incremental Extra Size](./2026-07-27-system-target-model-r7-rootfs-extra-size.md)：folder rootfs新增optional `extra-size`并映射为`virt-make-fs --size=+<value>`；image base继续拥有容量，2k1000配置256 MiB增量余量。
 - [System Target Model R6 Named Bind and Initial Argv](./2026-07-24-system-target-model-r6-bind-argv.md)：R6A已完成具名opaque bind、optional QEMU argv group与两种initial-program source共享的完整argv；`BOOT-PROTOCOL-001`已Refine，决赛脚本/配置不在范围。
 - [System Target Model R4A QEMU Provider DT Cutover](./2026-07-24-system-target-model-r4-qemu-dt.md)：QEMU committed DTS与DT maintenance CLI已删除；firmware使用runtime FDT，embedded由normal build生成build-local DTB。R4A关闭，R4B保持Outline；LA64 runtime按用户指示Not Run。
 - [System Target Model R3 Explicit Inputs](./2026-07-24-system-target-model-r3-explicit-inputs.md)：R3A已删除implicit local/default selection与preset presentation defaults，rootfs type、QEMU CPU和fmt scope已显式；双架构build与四份DT check通过，contract cutover为None。

@@ -4,8 +4,8 @@
 **状态：** Active
 **Owner：** VFS make-node protocol / filesystem-backed special-node identity
 **参与领域：** `mknodat` syscall adapter / VFS inode creation / ext4 / ramfs / stat and mount consumers
-**覆盖范围：** filesystem-backed regular/FIFO/character/block/socket node creation、final metadata handoff、ext4/ramfs representation 与 special-node numeric `rdev`
-**不覆盖：** process umask、named FIFO/device/socket data plane、device provider resolution、legacy `readdir`、lwext4 任意 I/O failure/crash atomicity、既有 common-create cache/dentry publication window
+**覆盖范围：** filesystem-backed regular/FIFO/character/block/socket node creation、task filesystem-context umask adjustment、final metadata handoff、ext4/ramfs representation 与 special-node numeric `rdev`
+**不覆盖：** POSIX default ACL、named FIFO/device/socket data plane、device provider resolution、legacy `readdir`、lwext4 任意 I/O failure/crash atomicity、既有 common-create cache/dentry publication window
 **实现位置：** `anemone-kernel/src/fs/{api/mknodat.rs,vfs/ops.rs,inode,ext4,ramfs}`、`anemone-kernel/src/task/credentials/cap.rs`、`anemone-kernel/crates/anemos/lwext4-rust`、`anemone-rs/src/{sys,os}/linux/fs.rs`
 **依赖：** `VFS-FILE-KIND-001`、`DEVICE-NUMBER-001`
 **Pending Successor：** None
@@ -16,6 +16,7 @@
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
 | raw Linux mode / `dev_t` / dirfd / capability admission | `mknodat` syscall adapter | VFS 只收到 normalized kind、permission 与 numeric `rdev` | Linux ABI 与错误分类 |
+| process umask | task filesystem context | syscall adapter只读取一次mask snapshot；VFS/backend只收到调整后的permission | 与`openat`/`mkdirat`共享唯一mask truth |
 | parent、mount/DAC 与 final semantic description | VFS make-node protocol | backend 只收到 `MakeNodeDescription` | common-create admission 与唯一 handoff |
 | inode allocation、representation 与 dirent publication | ext4 / ramfs backend | VFS materialize callback 返回的同一 inode | backend-local create transaction |
 | filesystem-backed numeric `rdev` | inode metadata；ext4/ramfs 分别拥有持久/resident representation | stat/mount consumer 只读投影 | special-node identity；不表示 provider 存在 |
@@ -25,7 +26,7 @@
 
 **规则：** syscall adapter 只拥有 Linux `mknodat` 参数读取及 mode/`dev_t`/dirfd/`CAP_MKNOD` admission。VFS
 唯一拥有 parent resolution、writable mount、directory DAC、共同创建策略与 dentry materialization，并通过
-`InodeOps::make_node` 把 final kind、requested permission、uid/gid 与适用 numeric `rdev` 交给 backend。backend
+`InodeOps::make_node` 把 final kind、umask-adjusted permission、uid/gid 与适用 numeric `rdev` 交给 backend。backend
 不得重新读取 task、fd table、raw Linux mode、capability 或 device registry。
 
 ext4/ramfs 必须在各自 backend creation boundary 内先形成 final metadata，再串行化进入 dirent publication；
@@ -33,10 +34,10 @@ ext4/ramfs 必须在各自 backend creation boundary 内先形成 final metadata
 传播 cleanup failure。lwext4 任意内部 I/O failure/crash atomicity 与既有 common-create cache/dentry window
 分别由已登记 limitation/open issue 拥有，不得用 forced flush、双状态或 validation hook 伪装为本规则的证明。
 
-本规则的首版 permission 是调用者 requested bits，不应用 process umask；该可见限制由
-[ANE-20260801-VFS-MAKE-NODE-NO-UMASK](../../register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)
-拥有。regular node 使用普通文件数据路径；FIFO 返回 `EOPNOTSUPP`，character/block/socket open 返回 `ENXIO`，
-本规则不引入这些 special node 的数据面。
+`mknodat`在syscall adapter内复用task filesystem context的唯一umask owner，对normalized requested permission
+读取一次mask snapshot并形成final permission；不得在VFS、inode或backend建立第二份mask state。regular node使用
+普通文件数据路径；FIFO返回`EOPNOTSUPP`，character/block/socket open返回`ENXIO`，本规则不引入这些special node
+的数据面。
 
 **违反表现：** backend 解析 raw mode 或查询当前 task/provider；callback 后补写驱动行为的 backend metadata；
 publication 前可判定的失败留下可 lookup node；special open panic或落入 regular fallback；或长期保留 proof-only
@@ -49,7 +50,8 @@ remount/reload 与 ext4/ramfs node-matrix probe；两架构 glibc/musl 各 11 �
 **最初来源：** Closed [VFS Make Node R2 RFC](../../rfcs/vfs-make-node/index.md) 与
 [implementation transaction](../../devlog/transactions/2026-07-31-vfs-make-node.md)。
 
-**当前来源：** 同最初来源；`VFS-MAKE-NODE-CUTOVER` 于 2026-08-01 生效。
+**当前来源：** R2 cutover与[umask文件创建掩码](../../devlog/changes/2026-07-27-umask-file-creation-mask.md)；
+合流后的R3复用既有task filesystem-context owner，并退出branch-local no-umask limitation。
 
 ## VFS-SPECIAL-NODE-RDEV-001 — Filesystem-backed special-node `rdev` 是单一 numeric truth
 

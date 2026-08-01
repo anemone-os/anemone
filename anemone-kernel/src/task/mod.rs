@@ -36,7 +36,7 @@ use core::fmt::{Debug, Display};
 use crate::{
     mm::stack::KernelStack,
     prelude::*,
-    sched::class::SchedEntity,
+    sched::{TaskPropertiesArch, class::SchedEntity},
     sync::mono::MonoFlow,
     task::{
         cpu_usage::{TaskCpuUsage, ThreadGroupCpuUsage},
@@ -118,9 +118,17 @@ pub struct Task {
     /// Scheduling entity. Used for scheduling.
     sched_entity: SpinLock<SchedEntity>,
 
+    /// Architecture-owned task properties. Generic task code may borrow this
+    /// object but cannot replace it or mutate architecture-private fields.
+    arch_properties: TaskArchProperties,
+
     /// Whether this task has used FPU. This is used to optimize FPU context
     /// switching.
     fpu_used: AtomicBool,
+    /// Monotonic latch used only to emit the first software-unaligned-access
+    /// notice for this task. Access correctness never depends on this field.
+    #[cfg(feature = "soft_unaligned_access")]
+    soft_unaligned_access_enabled: AtomicBool,
 
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
@@ -453,7 +461,10 @@ impl Task {
                 ))
             },
             sched_entity: SpinLock::new(sched),
+            arch_properties: <TaskArchProperties as TaskPropertiesArch>::NEW,
             fpu_used: AtomicBool::new(false),
+            #[cfg(feature = "soft_unaligned_access")]
+            soft_unaligned_access_enabled: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
             files_state: RwLock::new(Some(FilesState::new_empty())),
             cred: RwLock::new(CredentialSet::new_root()),
@@ -503,7 +514,10 @@ impl Task {
                     ))
                 },
                 sched_entity: SpinLock::new(SchedEntity::new_idle()),
+                arch_properties: <TaskArchProperties as TaskPropertiesArch>::NEW,
                 fpu_used: AtomicBool::new(false),
+                #[cfg(feature = "soft_unaligned_access")]
+                soft_unaligned_access_enabled: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
                 files_state: RwLock::new(Some(FilesState::new_empty())),
                 cred: RwLock::new(CredentialSet::new_root()),
@@ -532,6 +546,19 @@ impl Task {
 // region: context accessors
 
 impl Task {
+    pub fn arch_properties(&self) -> &TaskArchProperties {
+        &self.arch_properties
+    }
+
+    pub fn inherit_arch_properties_for_clone(&self, parent: &Task) {
+        self.arch_properties
+            .inherit_for_clone(&parent.arch_properties);
+    }
+
+    pub fn reset_arch_properties_for_exec(&self) {
+        self.arch_properties.reset_for_exec();
+    }
+
     /// Get a pointer to this task's scheduling context.
     ///
     /// # Safety
@@ -703,6 +730,17 @@ impl Task {
 
     pub fn set_fpu_used(&self) {
         self.fpu_used.store(true, Ordering::Release);
+    }
+
+    /// Mark this task as having entered software unaligned access.
+    ///
+    /// Returns `true` only for the first transition. The latch controls the
+    /// one-time performance notice and does not publish any other state.
+    #[cfg(feature = "soft_unaligned_access")]
+    pub fn enable_soft_unaligned_access(&self) -> bool {
+        !self
+            .soft_unaligned_access_enabled
+            .swap(true, Ordering::Relaxed)
     }
 
     /// Return a credential snapshot.

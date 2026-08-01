@@ -103,8 +103,8 @@ pub(super) fn load_iovecs(
     ];
     {
         let mut guard = uspace.lock();
-        let ptr_slice = UserReadSlice::try_new(iov, iovcnt, &mut guard)?;
-        ptr_slice.copy_to_slice(&mut raw_iovecs);
+        let mut ptr_slice = UserReadSlice::try_new(iov, iovcnt, &mut guard)?;
+        ptr_slice.copy_to_slice(&mut raw_iovecs)?;
     }
 
     let mut iovecs = Vec::new();

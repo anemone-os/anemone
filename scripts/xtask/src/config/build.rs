@@ -29,7 +29,13 @@ impl TargetTriple {
 }
 
 impl FsType {
-    pub fn mkfs(&self, root_tree: &Path, output: &Path, use_sudo: bool) -> anyhow::Result<()> {
+    pub fn mkfs(
+        &self,
+        root_tree: &Path,
+        output: &Path,
+        extra_size: Option<&str>,
+        use_sudo: bool,
+    ) -> anyhow::Result<()> {
         match self {
             FsType::Ext4 => {
                 let mut command = if use_sudo && !is_effective_root() {
@@ -44,6 +50,9 @@ impl FsType {
                 };
 
                 command.arg("--type=ext4").arg("--format=raw");
+                if let Some(extra_size) = extra_size {
+                    command.arg(format!("--size=+{extra_size}"));
+                }
                 command.arg(root_tree).arg(output);
 
                 cmd_echo(&command);

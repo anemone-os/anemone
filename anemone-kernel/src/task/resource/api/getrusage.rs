@@ -61,7 +61,7 @@ fn sys_getrusage(
             rusage.ru_utime = duration_to_timeval(cpu_usage.self_user());
             rusage.ru_stime = duration_to_timeval(cpu_usage.self_kernel());
 
-            UserWritePtr::<RUsage>::try_new(usage, &mut usp)?.write(rusage);
+            UserWritePtr::<RUsage>::try_new(usage, &mut usp)?.write(rusage)?;
         },
         RUsageWho::Children => {
             let cpu_usage = task.get_thread_group().cpu_usage_snapshot();
@@ -69,7 +69,7 @@ fn sys_getrusage(
             rusage.ru_utime = duration_to_timeval(cpu_usage.reaped_user());
             rusage.ru_stime = duration_to_timeval(cpu_usage.reaped_kernel());
 
-            UserWritePtr::<RUsage>::try_new(usage, &mut usp)?.write(rusage);
+            UserWritePtr::<RUsage>::try_new(usage, &mut usp)?.write(rusage)?;
         },
         RUsageWho::Thread => {
             let cpu_usage = task.cpu_usage_snapshot();
@@ -77,7 +77,7 @@ fn sys_getrusage(
             rusage.ru_utime = duration_to_timeval(cpu_usage.user());
             rusage.ru_stime = duration_to_timeval(cpu_usage.kernel());
 
-            UserWritePtr::<RUsage>::try_new(usage, &mut usp)?.write(rusage);
+            UserWritePtr::<RUsage>::try_new(usage, &mut usp)?.write(rusage)?;
         },
     }
 

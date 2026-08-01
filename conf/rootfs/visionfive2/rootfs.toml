@@ -9,22 +9,21 @@ arch = "riscv64"
 [fs]
 # Filesystem type to use.
 fstype = "ext4"
-# Start from the pre-sized Alpine ext4 image and recursively copy the Anemone
-# override tree into it. Image bases own their capacity and reject `size`.
-base = "conf/rootfs/visionfive2/rootfs-alpine.img"
-override = "conf/rootfs/visionfive2/base"
-type = "image"
+base = "conf/rootfs/visionfive2/base"
+type = "folder"
+extra-size = "256M"
 
 # Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
 [init]
-path = "/sbin/init"
+path = "/sbin/board-init"
 
-# Directories to create in the generated rootfs.
-[[dirs]]
-path = "/dev"
+[[apps]]
+name = "board-init"
+installed_dir = "/sbin"
 
-[[dirs]]
-path = "/mnt"
+[[apps]]
+name = "shutdown"
+installed_dir = "/sbin"
 
 [[files]]
 # Fixed-path handoff: run a successful build with the same visionfive2-rv64

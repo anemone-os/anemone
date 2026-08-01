@@ -243,7 +243,7 @@ fn write_splice_output(
 
 fn read_user_offset(task: &Task, ptr: VirtAddr) -> Result<usize, SysError> {
     let usp = task.clone_uspace_handle();
-    let offset = UserReadPtr::<i64>::try_new(ptr, &mut usp.lock())?.read();
+    let offset = UserReadPtr::<i64>::try_new(ptr, &mut usp.lock())?.read()?;
     if offset < 0 {
         return Err(SysError::InvalidArgument);
     }
@@ -254,7 +254,7 @@ fn read_user_offset(task: &Task, ptr: VirtAddr) -> Result<usize, SysError> {
 fn write_user_offset(task: &Task, ptr: VirtAddr, offset: usize) -> Result<(), SysError> {
     let offset = i64::try_from(offset).map_err(|_| SysError::FileTooLarge)?;
     let usp = task.clone_uspace_handle();
-    UserWritePtr::<i64>::try_new(ptr, &mut usp.lock())?.write(offset);
+    UserWritePtr::<i64>::try_new(ptr, &mut usp.lock())?.write(offset)?;
     Ok(())
 }
 

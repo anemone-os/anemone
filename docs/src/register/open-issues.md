@@ -1,5 +1,33 @@
 # 开放问题
 
+## ANE-20260801-LA64-SOFT-UNALIGNED-USER-MEMORY-CORRUPTION
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Apollyon
+**Area:** LoongArch64 / user trap / software unaligned access / user memory
+
+**Symptom / Trigger:** 在不支持硬件 Unaligned Access 的 2K1000 实机上，启用
+`soft_unaligned_access` 后运行重负载任务，尤其是构建大型系统或用 GCC 编译超大源文件时，会在不同
+输入文件和 GCC pass 中出现用户态坏地址、page fault 或 internal compiler error。故障点并不稳定，
+LSX 上下文支持会改变其暴露位置但不能消除故障；当前证据表明软件非对齐访存路径存在未解决 bug，
+可能破坏被模拟进程的用户态内存。
+
+**Impact:** 软件模拟目前不能为长时间或内存密集型 workload 提供可靠性保证。轻量 workload、单个
+测试或一次成功编译不能作为安全证据；继续把普通用户态镜像依赖在该路径上，可能产生静默错误、进程
+崩溃或编译器 ICE。
+
+**Owner:** LoongArch64 / user memory
+**Last Verified:** 2026-08-01
+**Exit Condition:** 定位并修复软件非对齐访存路径中的内存破坏原因，并在不使用
+`-mstrict-align` 规避的 2K1000 实机上完成大型系统构建和超大文件编译压力验证，证明跨页、权限失败、
+寄存器提交及重复异常处理不会破坏用户态内存。
+**Related:** [开发日志：2026-07-20 至 2026-08-02](../devlog/2026-07-20_to_2026-08-02.md)
+
+**Workaround:** 保留 `soft_unaligned_access` 仅作为既有非严格对齐二进制无法立即替换时的应急 fallback。
+对于不支持硬件 Unaligned Access 的 CPU，磁盘/rootfs 中的工具链和用户态程序应尽可能使用原生以
+`-mstrict-align` 构建的二进制，避免触发软件模拟路径。
+
 ## ANE-20260727-NET-FRAME-PATH-CONFORMANCE
 
 **Type:** Issue

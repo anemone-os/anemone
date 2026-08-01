@@ -51,11 +51,12 @@ and artifact path coherent.
 ### Rootfs Manifest
 
 `conf/rootfs/` owns filesystem composition: architecture, explicit base type, base tree, init, apps,
-directories, and host files. Folder image capacity is one implementation policy: `virt-make-fs`
-computes it automatically, so manifests have no capacity field. Rootfs construction consumes app
-manifests and may consume fixed-path outputs from a prior repository action. The recipe or adjacent
-documentation owns that command order; the rootfs task does not infer invocation history or freshness
-from path existence.
+directories, and host files. Folder images retain `virt-make-fs` automatic sizing; an optional
+`extra-size` adds free space through `--size=+<value>` without replacing that estimate with an
+absolute capacity. Image roots reject `extra-size` because the base image owns capacity. Rootfs
+construction consumes app manifests and may consume fixed-path outputs from a prior repository
+action. The recipe or adjacent documentation owns that command order; the rootfs task does not infer
+invocation history or freshness from path existence.
 
 ## Cross-Layer Invariants
 

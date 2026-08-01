@@ -29,6 +29,18 @@ struct LinuxDirent64Header {
 
 const DIRENT64_ALIGN: usize = size_of::<u64>();
 const DIRENT64_HEADER_SIZE: usize = size_of::<LinuxDirent64Header>();
+const MAX_DIRENT64_RECORD_LEN: usize =
+    (DIRENT64_HEADER_SIZE + MAX_FILE_NAME_LEN_BYTES + 1 + DIRENT64_ALIGN - 1)
+        & !(DIRENT64_ALIGN - 1);
+
+static_assert!(
+    GETDENTS64_BUFFER_BYTES >= MAX_DIRENT64_RECORD_LEN,
+    "getdents64_buffer_bytes must fit the largest supported dirent"
+);
+static_assert!(
+    GETDENTS64_BUFFER_BYTES <= u32::MAX as usize,
+    "getdents64_buffer_bytes must fit the Linux count argument"
+);
 
 fn dirent64_dtype(ty: InodeType) -> u8 {
     match ty {
@@ -54,6 +66,15 @@ fn dirent64_record_len(name_len: usize) -> Result<usize, SysError> {
         .and_then(|n| n.checked_add(1))
         .ok_or(SysError::InvalidArgument)?;
     align_up(unaligned, DIRENT64_ALIGN).ok_or(SysError::InvalidArgument)
+}
+
+const fn getdents64_buffer_len(count: u32) -> usize {
+    let requested = count as usize;
+    if requested > GETDENTS64_BUFFER_BYTES {
+        GETDENTS64_BUFFER_BYTES
+    } else {
+        requested
+    }
 }
 
 fn map_byte_writer_error(_: ByteWriterError) -> SysError {
@@ -93,8 +114,7 @@ impl DirSink for LinuxDirent64Sink {
 
         let header = LinuxDirent64Header {
             d_ino: entry.ino.get(),
-            // actually this field can be any value. user space programs are not expected to
-            // interpret it.
+            // Linux userspace treats d_off as an opaque directory position.
             d_off: 39,
             d_reclen: u16::try_from(reclen).map_err(|_| SysError::InvalidArgument)?,
             d_type: dirent64_dtype(entry.ty),
@@ -136,21 +156,49 @@ fn sys_getdents64(
         (usp, fd)
     };
 
-    let buf_len = count as usize;
+    // Linux permits getdents64 to return fewer bytes than count. Keep count
+    // accepted as-is while bounding only this kernel's staging transaction.
+    let buf_len = getdents64_buffer_len(count);
+    {
+        // Directory backends may call DirSink with hardware interrupts
+        // disabled. Resolve the complete user destination before entering
+        // that lock domain; no user-space lock may be acquired by push().
+        let mut guard = usp.lock();
+        let mut dst = UserWriteSlice::<u8>::try_new(dirp, buf_len, &mut guard)?;
+        dst.fault_in()?;
+    }
+
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(buf_len)
+        .map_err(|_| SysError::OutOfMemory)?;
+    buffer.resize(buf_len, 0);
+
+    let writer = unsafe { ByteWriter::new(NonNull::from(buffer.as_mut_slice())) };
+    let mut sink = LinuxDirent64Sink::new(writer, buf_len);
+    let written = match fd.read_dir(&mut sink) {
+        Ok(ReadDirResult::Progressed) | Ok(ReadDirResult::Eof) => sink.written(),
+        Err(err) => return Err(err),
+    };
 
     let mut guard = usp.lock();
-    let mut slice = UserWriteSlice::<u8>::try_new(dirp, buf_len, &mut guard)?;
-    let written = unsafe {
-        slice.with_readable_ptr(|ptr| {
-            let buffer = NonNull::new(ptr).expect("user slice pointer should not be null");
-            let writer = unsafe { ByteWriter::new(buffer) };
-            let mut sink = LinuxDirent64Sink::new(writer, buf_len);
-
-            match fd.read_dir(&mut sink) {
-                Ok(ReadDirResult::Progressed) | Ok(ReadDirResult::Eof) => Ok(sink.written()),
-                Err(err) => Err(err),
-            }
-        })?
-    }?;
+    let mut dst = UserWriteSlice::<u8>::try_new(dirp, written, &mut guard)?;
+    dst.copy_from_slice(&buffer[..written])?;
     Ok(written as u64)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn getdents64_buffer_len_preserves_small_requests() {
+        assert_eq!(getdents64_buffer_len(0), 0);
+        assert_eq!(getdents64_buffer_len(512), 512);
+    }
+
+    #[kunit]
+    fn getdents64_buffer_len_clamps_without_rejecting_count() {
+        assert_eq!(getdents64_buffer_len(u32::MAX), GETDENTS64_BUFFER_BYTES);
+    }
 }

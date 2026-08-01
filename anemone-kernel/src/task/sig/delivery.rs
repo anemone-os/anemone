@@ -643,10 +643,7 @@ fn perform_signal_action(
                 let usp = task.clone_uspace_handle();
                 let mut guard = usp.lock();
                 match UserWritePtr::<RtSigFrame>::try_new(sigframe_base, &mut guard) {
-                    Ok(mut uptr) => {
-                        uptr.write(frame);
-                        Ok(())
-                    },
+                    Ok(mut uptr) => uptr.write(frame),
                     Err(e) => Err(e),
                 }
             };

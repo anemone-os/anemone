@@ -41,7 +41,7 @@ fn sys_rt_sigpending(
 
     {
         let mut guard = usp.lock();
-        UserWritePtr::<linux_signal::SigSet>::try_new(uset, &mut guard)?.write(set);
+        UserWritePtr::<linux_signal::SigSet>::try_new(uset, &mut guard)?.write(set)?;
     }
 
     Ok(0)

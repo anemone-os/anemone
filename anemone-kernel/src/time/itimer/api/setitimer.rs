@@ -53,12 +53,12 @@ pub fn sys_setitimer(
                 };
 
                 let mut usp = usp_handle.lock();
-                UserWritePtr::<OldITimerVal>::try_new(old_value, &mut usp)?.write(itimerval);
+                UserWritePtr::<OldITimerVal>::try_new(old_value, &mut usp)?.write(itimerval)?;
             }
 
             let new_itimerval = {
                 let mut usp = usp_handle.lock();
-                UserReadPtr::<OldITimerVal>::try_new(new_value, &mut usp)?.read()
+                UserReadPtr::<OldITimerVal>::try_new(new_value, &mut usp)?.read()?
             };
 
             let timeval_to_duration = |tv| {

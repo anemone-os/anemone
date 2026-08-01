@@ -10,7 +10,7 @@ use crate::{
     arch::loongarch64::{
         exception::{
             intr::handle_intr,
-            trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
+            trap::{LA64Exception, LA64Interrupt, LA64TrapFrame, LA64UserPtrAccessor},
         },
         mm::load_addr_local,
     },
@@ -149,6 +149,7 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
     let ecode = estat.ecode();
     if ecode == 0 {
         // interrupt
+        LA64UserPtrAccessor::assert_hwirq_not_armed();
         percpu::on_entering_hwirq();
 
         let intr_flags = estat
@@ -191,6 +192,9 @@ unsafe extern "C" fn rust_ktrap_entry(trapframe: *mut LA64TrapFrame) {
         let esubcode = estat.esubcode();
         let reason = LA64Exception::try_from((ecode, esubcode))
             .unwrap_or_else(|_| panic!("unknown trap with code {}:{}", ecode, esubcode));
+        if LA64UserPtrAccessor::dispatch_exception(trapframe, reason, trapframe.badv) {
+            return;
+        }
         match reason {
             LA64Exception::PageModified => {
                 panic!(

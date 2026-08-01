@@ -1,0 +1,12 @@
+[package]
+name = "board-init"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anemone-rs = { path = "../../anemone-rs" }
+serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
+toml = { version = "0.9.12", default-features = false, features = ["parse", "serde"] }
+
+[workspace]
+members = ["."]

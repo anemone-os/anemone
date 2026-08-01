@@ -105,18 +105,19 @@ fn sys_getrandom(
 
     let mut buf = UserWriteSlice::<u8>::try_new(buf, size, &mut guard)?;
     let seed = next_stage1_seed(size);
+    let mut random = Vec::new();
+    random
+        .try_reserve_exact(size)
+        .map_err(|_| SysError::OutOfMemory)?;
+    random.resize(size, 0);
 
     // This is a temporary compatibility bridge for userspace that only checks
     // getrandom(2) buffer shape and errno behavior. It deliberately does not
     // claim entropy, blocking readiness, or cryptographic unpredictability; the
     // bridge should disappear once a real kernel entropy source owns random
     // bytes for getrandom(2) and /dev/urandom.
-    unsafe {
-        buf.with_ptr(|ptr| {
-            let slice = unsafe { &mut *ptr };
-            fill_stage1_random_bytes(slice, seed);
-        });
-    }
+    fill_stage1_random_bytes(&mut random, seed);
+    buf.copy_from_slice(&random)?;
 
     Ok(size as u64)
 }

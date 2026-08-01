@@ -56,8 +56,8 @@ fn sys_get_robust_list(
     let mut usp = usp_handle.lock();
 
     UserWritePtr::<u64>::try_new(head_ptr, &mut usp)?
-        .write(head.map(|head| head.get()).unwrap_or(0));
-    UserWritePtr::<usize>::try_new(len_ptr, &mut usp)?.write(size_of::<RobustListHead>());
+        .write(head.map(|head| head.get()).unwrap_or(0))?;
+    UserWritePtr::<usize>::try_new(len_ptr, &mut usp)?.write(size_of::<RobustListHead>())?;
 
     Ok(0)
 }

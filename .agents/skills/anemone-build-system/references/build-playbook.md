@@ -63,8 +63,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### Rootfs
 
 - Validate the manifest's base tree, declared host files, and app inputs before execution.
-- Confirm `fs.type` is explicit. Folder images always use automatic sizing; there is no manifest
-  capacity policy.
+- Confirm `fs.type` is explicit. Folder images use automatic sizing; optional `extra-size` adds free
+  space to that estimate, while image bases reject it.
 - Confirm architecture and installed artifacts agree with the intended kernel/platform.
 - When a recipe consumes a fixed repository output, run the documented producer action first and stop if it fails; path existence alone is not freshness evidence.
 - Determine the exact output directory that will be replaced.

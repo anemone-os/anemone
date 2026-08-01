@@ -260,6 +260,7 @@ pub fn kernel_clone(
         // register still points at the parent's trap stack until we rebind it.
         (*frame_ptr).set_scratch(new_task.kstack().stack_top().get());
     }
+    new_task.inherit_arch_properties_for_clone(&current_task);
 
     let new_uspace = if flags.contains(CloneFlags::VM) {
         if flags.contains(CloneFlags::VFORK) {
@@ -336,16 +337,16 @@ pub fn kernel_clone(
 
     let new_tid = new_task.tid();
 
-    // this is not for argument validation, but rather to ensure the page containing
-    // `child_tid` will be mapped.
-    // once we implement exception-table based user-space memory access, we can
-    // remove this eager validation.
+    // The child address space is not active yet, so the hardware accessor cannot
+    // probe it here. Keep this one explicit MM validation to preserve clone's
+    // pre-publication EFAULT boundary; the eventual child-side store still uses
+    // exception-backed access to close an unmap race before first user entry.
     if flags.intersects(CloneFlags::CHILD_CLEARTID | CloneFlags::CHILD_SETTID) {
         if let Some(child_tid) = child_tid {
             let new_uspace = new_task.clone_uspace_handle();
             let mut usp_guard = new_uspace.lock();
-            match UserWritePtr::<Tid>::try_new(child_tid, &mut usp_guard) {
-                Ok(uptr) => {},
+            match usp_guard.inject_page_fault(child_tid, PageFaultType::Write) {
+                Ok(fence) => drop(fence),
                 Err(e) => {
                     drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };
@@ -422,8 +423,10 @@ pub fn kernel_clone(
         if let Some(parent_tid) = parent_tid {
             // again, map_err cannot be used here.
             let mut usp_guard = cur_uspace.lock();
-            match UserWritePtr::<Tid>::try_new(parent_tid, &mut usp_guard) {
-                Ok(mut uptr) => uptr.write(new_tid),
+            match UserWritePtr::<Tid>::try_new(parent_tid, &mut usp_guard)
+                .and_then(|mut uptr| uptr.write(new_tid))
+            {
+                Ok(()) => {},
                 Err(e) => {
                     drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };
@@ -479,17 +482,33 @@ extern "C" fn enter_cloned_user_task(
     let task = get_current_task();
     let frame = *unsafe { Box::from_raw(trap_frame) };
 
-    unsafe {
-        if clone_flags.contains(CloneFlags::CHILD_SETTID) {
-            if !child_tid.is_null() {
-                child_tid.write(current_task_id());
-            } else {
-                kdebugln!(
-                    "enter_cloned_user_task: CHILD_SETTID flag is set, but child_tid pointer is null. ignoring..."
+    if clone_flags.contains(CloneFlags::CHILD_SETTID) {
+        if !child_tid.is_null() {
+            let addr = VirtAddr::new(child_tid as u64);
+            let uspace = task.clone_uspace_handle();
+            let mut guard = uspace.lock();
+            if let Err(e) = UserWritePtr::<Tid>::try_new(addr, &mut guard)
+                .and_then(|mut uptr| uptr.write(current_task_id()))
+            {
+                // A CLONE_VM peer may unmap the address after parent-side
+                // validation. The child is already published, so this race can
+                // no longer be reported to clone's parent; leave the store
+                // unapplied, but never let the bad pointer become a kernel fault.
+                knoticeln!(
+                    "enter_cloned_user_task: failed CHILD_SETTID write for task {} at {:#x}: {:?}",
+                    task.tid(),
+                    addr.get(),
+                    e
                 );
             }
+        } else {
+            kdebugln!(
+                "enter_cloned_user_task: CHILD_SETTID flag is set, but child_tid pointer is null. ignoring..."
+            );
         }
+    }
 
+    unsafe {
         // The architecture facade performs the final jobctl/user-entry gate and
         // privilege accounting. Disable interrupts before entering that common
         // path so no kernel timer trap can observe a half-committed transition.

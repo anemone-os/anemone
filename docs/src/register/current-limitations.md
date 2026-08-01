@@ -2,29 +2,35 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
-## ANE-20260801-VFS-MAKE-NODE-NO-UMASK
+## ANE-20260801-LA64-LSX-STICKY-LAZY-SCOPE
 
 **Type:** Limitation
-**Status:** Active / Accepted
-**Severity:** Medium
-**Area:** VFS / task fs-state / syscall ABI / file creation
+**Status:** Active
+**Severity:** Low
+**Area:** LoongArch64 / user trap / FPU / LSX / signal ABI
 
-**Summary:** VFS Make Node R2 继承 R0/R1 接受的 no-umask 边界：`mknodat` 最终 permission 直接使用调用者
-requested bits。当前 `sys_umask` 仍是无状态 stub，本 RFC 不读取它、不建立 mknod-local/task-local mask，也不
-扩展其它创建类调用点。因而 R2 的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与
-errno matrix，不覆盖 umask-adjusted permission。`VFS-MAKE-NODE-CUTOVER`生效后，本限制随current
-`mknodat`能力一起成为active visible boundary。
+**Summary:** LoongArch userspace已支持128-bit LSX context：第一次SXD按`CPUCFG2.LSX`建立task-owned
+sticky policy，此后每次user trap/return完整保存恢复32个LSX register及共享FCC/FCSR；clone继承，成功
+exec重置，signal frame使用Linux-compatible `LSX_CTX_MAGIC` payload。当前实现优先保证正确性，不实现
+Linux per-CPU last-owner/full-lazy优化，因此LSX task在每次user/kernel round trip承担完整save+restore成本。
 
-**Exit Condition:** 后续独立 umask 工作为 task/fs-state mask 建立唯一 owner，统一实现 `umask(2)` 与所有创建类
-调用点的 common-create handoff，并完成跨 create/open/mkdir/mknod 等路径的 permission、fork/exec/lifecycle 与
-双架构用户态验证；完成对应 RFC/contract cutover 后，再修订 make-node target/验证并关闭本限制。不得只在
-`mknodat` 局部加 mask 后宣称退出。
+本能力不包含256-bit LASX、LBT、`AT_HWCAP`/`AT_HWCAP2`或IFUNC feature publication；普通kernel codegen
+继续使用`-lsx`，ASXD稳定投递`SIGILL`且ASXE始终关闭。显式执行LSX的程序可以使用该context能力，但依赖
+auxv自动选择LSX实现的libc/runtime仍不能从kernel获知该feature。
 
-**Owner:** doruche
+first-use只检查触发SXD的当前CPU。R0依赖在线LoongArch CPU对LSX capability同构，不提供per-CPU feature
+map、LSX-aware affinity或异构核心迁移保证；2K1000验收位于该同构边界内。
+
+**Exit Condition:** 只有出现可量化的LSX trap开销、LASX workload或动态feature publication需求时，才通过
+follow-up RFC分别引入per-CPU owner/full-lazy、256-bit context或HWCAP framework，并重新证明migration、
+clone/exec、signal ABI和unsupported CPU路径。异构拓扑还必须先建立per-CPU capability owner与调度约束；
+这些扩展不阻塞当前LSX R0。
+
+**Owner:** EDGW, Codex
 **Last Verified:** 2026-08-01
-**Related:** [VFS Make Node R2](../rfcs/vfs-make-node/index.md),
-[R2 invariants](../rfcs/vfs-make-node/invariants.md#make-node-abi-001--rv64la64-使用-canonical-mknodat-与-linux-node-matrix),
-[transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)
+**Related:** [LoongArch LSX Context RFC](../rfcs/loongarch-lsx-context/index.md),
+[事务日志](../devlog/transactions/2026-08-01-loongarch-lsx-context.md),
+[software unaligned access开放问题](./open-issues.md#ane-20260801-la64-soft-unaligned-user-memory-corruption)
 
 ## ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY
 
@@ -732,10 +738,25 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Low
 **Area:** signal / procfs / resource limits / kconfig / user-test
 
-**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声，`rt_sigqueueinfo01` 附近的 `unknown syscall number 283` 是缺少 `membarrier` 的线程库噪声；它们不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声；原 `unknown syscall number 283` 已由只公布 `MEMBARRIER_CMD_GLOBAL` 的最小实现完成源码和 SMP KUnit closure，但 signal profile 尚未复跑。它们都不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
 
-**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` / `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
+**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和 `sched_getaffinity` 启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` 与已注册的最小 `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-14
-**Related:** [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-07-29
+**Related:** [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md), [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+
+## ANE-20260729-MEMBARRIER-GLOBAL-ONLY
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Medium
+**Area:** syscall ABI / IPI / scheduler / userspace runtime
+
+**Summary:** Anemone 当前只公布并实现无需注册的 `MEMBARRIER_CMD_GLOBAL`。实现通过调用方前后 full data fence、全在线 CPU 同步 fence IPI 和统一 task-switch fence 建立功能正确但高成本的 global rendezvous。global/private expedited registration、private scope、sync-core、rseq、CPU-target flag、registrations query、CPU hotplug 等价语义和性能保证均未实现；对应命令明确返回 `EINVAL`，不能被记录为 silent compatibility。
+
+**Exit Condition:** 后续 accepted target 为需要的 command family 明确 state owner、注册/exec 生命周期、target selection、IPI/scheduler handoff、架构 sync-core/rseq 义务和验证矩阵；完成对应 cutover 后只移除实际闭合的子项，不能以 no-op success 关闭本限制。
+
+**Owner:** doruche
+**Last Verified:** 2026-07-29
+**Related:** [Global membarrier 当前契约](../contracts/membarrier/global-rendezvous.md), [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md)

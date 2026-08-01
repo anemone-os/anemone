@@ -93,6 +93,7 @@ fn sys_mknodat(
 
     parent.mount().ensure_writable()?;
     checker.check_path(&parent, FsAccess::WRITE | FsAccess::EXECUTE)?;
+    let mode = InodeMode::new(mode.ty(), task.mask_creation_perm(mode.perm()));
     vfs_make_node_at(&parent, &name, mode, rdev)?;
     Ok(0)
 }

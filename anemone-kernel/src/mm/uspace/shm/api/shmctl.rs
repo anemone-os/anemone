@@ -138,14 +138,14 @@ fn segment_ds(segment: &ShmSegment) -> ShmIdDs {
 fn write_user<T: Copy>(addr: VirtAddr, value: T) -> Result<(), SysError> {
     let usp = get_current_task().clone_uspace_handle();
     usp.with_usp(|usp| {
-        UserWritePtr::<T>::try_new(addr, usp)?.write(value);
+        UserWritePtr::<T>::try_new(addr, usp)?.write(value)?;
         Ok(())
     })
 }
 
 fn read_user<T: Copy>(addr: VirtAddr) -> Result<T, SysError> {
     let usp = get_current_task().clone_uspace_handle();
-    usp.with_usp(|usp| Ok(UserReadPtr::<T>::try_new(addr, usp)?.read()))
+    usp.with_usp(|usp| UserReadPtr::<T>::try_new(addr, usp)?.read())
 }
 
 fn stats_return(stats: ShmRegistryStats) -> u64 {

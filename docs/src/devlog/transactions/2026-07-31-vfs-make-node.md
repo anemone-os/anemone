@@ -11,6 +11,9 @@
 `DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`为Effective；Stage 2已在`VFS-MAKE-NODE-CUTOVER`
 Introduce `VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`并Refine `VFS-MOUNT-ADMISSION-002`为Effective
 
+> 本transaction只记录R0-R2 branch-local执行事实。外层合流后R3复用既有task filesystem-context umask
+> owner；该修订不改写本页当时接受、验证和cutover的no-umask历史。
+
 ## Scope and authorization
 
 用户建立唯一 GOAL：完成 Stage 1，并要求读取 canonical RFC、implementation、tracking issues、register、current
@@ -36,7 +39,7 @@ R0/transaction/closure。开发者的上述决定分别关闭这两个 acceptanc
 Draft repair 把 no-umask semantics 折回 RFC 摘要、目标/非目标、ABI/接受边界、target invariant、Stage 2 protected
 boundary/stop condition 与 tracking issue；Linux claim 明确不包含 umask-adjusted permission，并登记具有统一
 owner、全部 call-site cutover 与跨创建路径 proof 退出条件的
-[current limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)。Stage 1 public
+[当时的no-umask limitation；合流后由umask小迭代关闭](../changes/2026-07-27-umask-file-creation-mask.md)。Stage 1 public
 manifest补齐 `SUMMARY.md`、`rfcs.md`、tracking、register、device owner index 与 open-issue backlink。
 
 第二轮独立只读 R0 review 对修订后全文、invariants、implementation 与 tracking 复审，结论为 Apollyon 0、
@@ -343,7 +346,7 @@ provider lookup或重复raw codec，special open没有panic/success stub，tempo
 
 **Final review / cutover / stop:** owner/API、final-metadata/publication顺序、existing common-create handoff、reload、
 ABI/errno、resource cleanup、自然代码形状与validation provenance复审无active Apollyon/Keter/Euclid/Safe finding。
-`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`继续Open，no-umask与lwext4 strict failure/crash atomicity继续为
-Active accepted limitations；均不因本closure虚假关闭。`VFS-MAKE-NODE-CUTOVER`因此原子Introduce
+`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`继续Open；在本R2 branch-local closure时，no-umask与lwext4
+strict failure/crash atomicity仍是Active accepted limitations，前者随后由外层合流R3关闭。`VFS-MAKE-NODE-CUTOVER`因此原子Introduce
 `VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`并Refine`VFS-MOUNT-ADMISSION-002`。Stage 2、R2 RFC与本
 transaction Completed；C3以单一`vfs-make-node: close stage 2`commit关闭，并在此停止，不进入任何后续gate。

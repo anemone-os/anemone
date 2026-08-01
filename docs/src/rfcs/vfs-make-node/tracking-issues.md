@@ -5,6 +5,9 @@
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 
+> 下列finding记录R0-R2 branch-local决策历史。外层合流的R3已复用既有task filesystem-context umask owner，
+> 不重新打开当时“是否在R2内建立umask owner”的finding。
+
 本文只跟踪已经影响 target、owner / contract boundary、implementation resolution、停止边界或验收判断的
 design finding。implementation 进度与执行证据不放在这里；Draft target 修复已经折回 `index.md` /
 `invariants.md`，本文只保留 finding 的问题、决定、修复位置与状态历史。

@@ -27,7 +27,7 @@ fn sys_gettimeofday(
         tv.write(TimeVal {
             tv_sec: uptime.as_secs() as i64,
             tv_usec: (uptime.subsec_micros()) as i64,
-        });
+        })?;
     }
 
     if let Some(_tz) = tz {

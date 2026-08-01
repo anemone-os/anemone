@@ -72,7 +72,7 @@ fn copy_in(addr: u64) -> Result<[u8; FLOCK_SIZE], SysError> {
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
-    UserReadSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?.copy_to_slice(&mut raw);
+    UserReadSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?.copy_to_slice(&mut raw)?;
     Ok(raw)
 }
 
@@ -80,7 +80,7 @@ fn copy_out(addr: u64, raw: &[u8; FLOCK_SIZE]) -> Result<(), SysError> {
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
-    UserWriteSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?.copy_from_slice(raw);
+    UserWriteSlice::<u8>::try_new(user_addr(addr)?, raw.len(), &mut usp)?.copy_from_slice(raw)?;
     Ok(())
 }
 

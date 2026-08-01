@@ -65,7 +65,7 @@ fn sys_rt_sigaction(
         );
 
         let mut guard = usp.lock();
-        UserWritePtr::<linux_signal::SigAction>::try_new(oldact, &mut guard)?.write(kbuf);
+        UserWritePtr::<linux_signal::SigAction>::try_new(oldact, &mut guard)?.write(kbuf)?;
     }
 
     if let Some(act) = act {
@@ -76,7 +76,7 @@ fn sys_rt_sigaction(
             sa_mask,
         } = {
             let mut guard = usp.lock();
-            let uact = UserReadPtr::<linux_signal::SigAction>::try_new(act, &mut guard)?.read();
+            let uact = UserReadPtr::<linux_signal::SigAction>::try_new(act, &mut guard)?.read()?;
             uact
         };
 

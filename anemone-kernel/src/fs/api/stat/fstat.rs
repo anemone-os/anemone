@@ -20,7 +20,7 @@ fn sys_fstat(fd: Fd, #[validate_with(user_addr)] statbuf: VirtAddr) -> Result<u6
     let mut guard = usp.lock();
 
     let mut statbuf = UserWritePtr::<Stat>::try_new(statbuf, &mut guard)?;
-    statbuf.write(kbuf);
+    statbuf.write(kbuf)?;
 
     Ok(0)
 }

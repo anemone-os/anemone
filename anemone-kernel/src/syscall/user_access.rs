@@ -2,9 +2,9 @@
 //!
 //! TODO: tlb shootdown, out of mutex lock.
 
-use core::str;
+use core::{mem::MaybeUninit, str};
 
-use crate::prelude::*;
+use crate::{arch::UserPtrAccessor, exception::trap::UserPtrAccessorArch, prelude::*};
 
 fn user_pointer_addr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
@@ -24,21 +24,7 @@ fn user_memory_error(err: SysError) -> SysError {
     }
 }
 
-/// The validated range is only valid when caller holds the lock of the
-/// [UserSpace].
-///
-/// We don't consider [Protection::EXECUTE] here since syscalls only read/write
-/// user memory, and the execute permission is only relevant for instruction
-/// fetches.
-///
-/// Note: Write does not means the address is readable. A page
-/// can be mapped write-only.
-unsafe fn validate_user_range(
-    write: bool,
-    usp: &mut UserSpace,
-    start: VirtAddr,
-    len: usize,
-) -> Result<(), SysError> {
+fn validate_user_range(start: VirtAddr, len: usize) -> Result<(), SysError> {
     if start.get() >= KernelLayout::USPACE_TOP_ADDR {
         return Err(SysError::BadAddress);
     }
@@ -54,40 +40,52 @@ unsafe fn validate_user_range(
         return Ok(());
     }
 
-    let svpn = start.page_down();
-    let evpn = VirtAddr::new(end).page_up();
+    Ok(())
+}
 
+fn fault_in_user_range(
+    usp: &mut UserSpace,
+    start: VirtAddr,
+    len: usize,
+    access: PageFaultType,
+) -> Result<(), SysError> {
+    validate_user_range(start, len)?;
+    if len == 0 {
+        return Ok(());
+    }
+
+    let end = VirtAddr::new(start.get() + len as u64);
+    let svpn = start.page_down();
+    let evpn = end.page_up();
     for vpn in VirtPageRange::new(svpn, evpn - svpn).iter() {
-        let _guard = usp
-            .inject_page_fault(
-                vpn.to_virt_addr(),
-                if write {
-                    PageFaultType::Write
-                } else {
-                    PageFaultType::Read
-                },
-            )
+        let fence = usp
+            .inject_page_fault(vpn.to_virt_addr(), access)
             .map_err(user_memory_error)?;
+        drop(fence);
     }
     Ok(())
 }
 
-// explain this weird state machine... why write pointer can't be readable
-// naturally?
+fn read_user_bytes(usp: &mut UserSpace, dst: &mut [u8], src: VirtAddr) -> Result<usize, SysError> {
+    UserPtrAccessor::read(usp, dst, src).map_err(|error| user_memory_error(error.error()))
+}
+
+fn write_user_bytes(usp: &mut UserSpace, dst: VirtAddr, src: &[u8]) -> Result<usize, SysError> {
+    UserPtrAccessor::write(usp, dst, src).map_err(|error| user_memory_error(error.error()))
+}
+
 mod ptrs {
     use super::*;
 
     #[derive(Debug)]
     pub struct UserReadPtr<'a, T: ?Sized> {
         pub(super) ptr: *const T,
-        pub(super) writable: bool,
         pub(super) usp: &'a mut UserSpace,
     }
 
     #[derive(Debug)]
     pub struct UserWritePtr<'a, T: ?Sized> {
         pub(super) ptr: *mut T,
-        pub(super) readable: bool,
         pub(super) usp: &'a mut UserSpace,
     }
 
@@ -97,85 +95,52 @@ mod ptrs {
     impl<'a, T: Copy> UserReadPtr<'a, T> {
         pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
-            if addr.get() % align_of::<T>() as u64 != 0 {
-                return Err(SysError::NotAligned);
-            }
-
-            unsafe {
-                validate_user_range(false, usp, addr, size_of::<T>())?;
-            }
+            validate_user_range(addr, size_of::<T>())?;
 
             Ok(UserReadPtr {
                 ptr: addr.as_ptr(),
-                writable: false,
                 usp,
             })
         }
 
-        pub fn read(&self) -> T {
-            unsafe { self.ptr.read() }
-        }
-
-        pub fn to_write(mut self) -> Result<UserWritePtr<'a, T>, SysError> {
-            if !self.writable {
-                unsafe {
-                    validate_user_range(
-                        true,
-                        self.usp,
-                        VirtAddr::new(self.ptr as u64),
-                        size_of::<T>(),
-                    )?;
-                }
-                self.writable = true;
-            }
-            Ok(UserWritePtr {
-                ptr: self.ptr as *mut T,
-                readable: true,
-                usp: self.usp,
-            })
+        pub fn read(&mut self) -> Result<T, SysError> {
+            let mut value = MaybeUninit::<T>::zeroed();
+            let bytes = unsafe {
+                core::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>())
+            };
+            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr as u64))?;
+            Ok(unsafe { value.assume_init() })
         }
     }
 
     impl<'a, T: Copy> UserWritePtr<'a, T> {
         pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
-            if addr.get() % align_of::<T>() as u64 != 0 {
-                return Err(SysError::NotAligned);
-            }
-
-            unsafe {
-                validate_user_range(true, usp, addr, size_of::<T>())?;
-            }
+            validate_user_range(addr, size_of::<T>())?;
             Ok(UserWritePtr {
                 ptr: addr.as_ptr_mut(),
-                readable: false,
                 usp,
             })
         }
 
-        pub fn write(&mut self, val: T) {
-            unsafe {
-                self.ptr.write(val);
-            }
+        pub fn write(&mut self, val: T) -> Result<(), SysError> {
+            let bytes = unsafe {
+                core::slice::from_raw_parts((&val as *const T).cast::<u8>(), size_of::<T>())
+            };
+            write_user_bytes(self.usp, VirtAddr::new(self.ptr as u64), bytes)?;
+            Ok(())
         }
 
-        pub fn to_read(mut self) -> Result<UserReadPtr<'a, T>, SysError> {
-            if !self.readable {
-                unsafe {
-                    validate_user_range(
-                        false,
-                        self.usp,
-                        VirtAddr::new(self.ptr as u64),
-                        size_of::<T>(),
-                    )?;
-                }
-                self.readable = true;
-            }
-            Ok(UserReadPtr {
-                ptr: self.ptr as *const T,
-                writable: true,
-                usp: self.usp,
-            })
+        /// Resolve and validate the complete write range before a syscall
+        /// performs an external side effect. Ordinary copyout must call
+        /// [Self::write] directly and use the exception-backed fast path.
+        pub(crate) fn fault_in(&mut self) -> Result<(), SysError> {
+            fault_in_user_range(
+                self.usp,
+                VirtAddr::new(self.ptr as u64),
+                size_of::<T>(),
+                PageFaultType::Write,
+            )
         }
     }
 
@@ -186,20 +151,13 @@ mod ptrs {
             usp: &'a mut UserSpace,
         ) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
-            if addr.get() % align_of::<T>() as u64 != 0 {
-                return Err(SysError::NotAligned);
-            }
-
             let byte_len = len
                 .checked_mul(size_of::<T>())
                 .ok_or(SysError::InvalidArgument)?;
-            unsafe {
-                validate_user_range(false, usp, addr, byte_len)?;
-            }
+            validate_user_range(addr, byte_len)?;
 
             Ok(UserReadPtr {
                 ptr: core::ptr::slice_from_raw_parts(addr.as_ptr(), len),
-                writable: false,
                 usp,
             })
         }
@@ -208,75 +166,14 @@ mod ptrs {
         ///
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
         /// explicitly check the buffer size.
-        pub fn copy_to_slice(&self, dst: &mut [T]) {
+        pub fn copy_to_slice(&mut self, dst: &mut [T]) -> Result<(), SysError> {
             debug_assert!(self.ptr.len() <= dst.len(), "kernel buffer is too small");
 
-            unsafe {
-                dst[..self.ptr.len()].copy_from_slice(&*self.ptr);
-            }
-        }
-
-        pub fn to_write(mut self) -> Result<UserWritePtr<'a, [T]>, SysError> {
-            if !self.writable {
-                let byte_len = self
-                    .ptr
-                    .len()
-                    .checked_mul(size_of::<T>())
-                    .expect("we already checked this in try_new");
-                unsafe {
-                    validate_user_range(
-                        true,
-                        self.usp,
-                        VirtAddr::new(self.ptr.cast::<T>() as u64),
-                        byte_len,
-                    )?;
-                }
-                self.writable = true;
-            }
-            Ok(UserWritePtr {
-                ptr: self.ptr as *mut [T],
-                readable: true,
-                usp: self.usp,
-            })
-        }
-
-        /// You want to perform some sophisticated pointer arithmetic/operations
-        /// that are not covered by the provided APIs? Use this method.
-        ///
-        /// **The pointer is only valid for read operations.**
-        pub unsafe fn with_ptr<F, R>(&self, f: F) -> R
-        where
-            F: FnOnce(*const [T]) -> R,
-        {
-            f(self.ptr)
-        }
-
-        /// See [Self::with_ptr].
-        ///
-        /// This method will validate the writable permission if it is not
-        /// validated yet.
-        pub unsafe fn with_writable_ptr<F, R>(&mut self, f: F) -> Result<R, SysError>
-        where
-            F: FnOnce(*mut [T]) -> R,
-        {
-            if !self.writable {
-                let byte_len = self
-                    .ptr
-                    .len()
-                    .checked_mul(size_of::<T>())
-                    .expect("we already checked this in try_new");
-                unsafe {
-                    validate_user_range(
-                        true,
-                        self.usp,
-                        VirtAddr::new(self.ptr.cast::<T>() as u64),
-                        byte_len,
-                    )?;
-                }
-                self.writable = true;
-            }
-            // TODO: this is ub.
-            Ok(f(self.ptr as *mut [T]))
+            let byte_len = self.ptr.len() * size_of::<T>();
+            let bytes =
+                unsafe { core::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), byte_len) };
+            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr.cast::<T>() as u64))?;
+            Ok(())
         }
     }
 
@@ -287,20 +184,13 @@ mod ptrs {
             usp: &'a mut UserSpace,
         ) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
-            if addr.get() % align_of::<T>() as u64 != 0 {
-                return Err(SysError::NotAligned);
-            }
-
             let byte_len = len
                 .checked_mul(size_of::<T>())
                 .ok_or(SysError::InvalidArgument)?;
-            unsafe {
-                validate_user_range(true, usp, addr, byte_len)?;
-            }
+            validate_user_range(addr, byte_len)?;
 
             Ok(UserWritePtr {
                 ptr: core::ptr::slice_from_raw_parts_mut(addr.as_ptr_mut(), len),
-                readable: false,
                 usp,
             })
         }
@@ -309,74 +199,29 @@ mod ptrs {
         ///
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
         /// explicitly check the buffer size.
-        pub fn copy_from_slice(&mut self, src: &[T]) {
+        pub fn copy_from_slice(&mut self, src: &[T]) -> Result<(), SysError> {
             debug_assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
 
-            unsafe {
-                (&mut *self.ptr)[..src.len()].copy_from_slice(src);
-            }
+            let byte_len = src.len() * size_of::<T>();
+            let bytes = unsafe { core::slice::from_raw_parts(src.as_ptr().cast::<u8>(), byte_len) };
+            write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<T>() as u64), bytes)?;
+            Ok(())
         }
 
-        pub fn to_read(mut self) -> Result<UserReadPtr<'a, [T]>, SysError> {
-            if !self.readable {
-                let byte_len = self
-                    .ptr
-                    .len()
-                    .checked_mul(size_of::<T>())
-                    .expect("we already checked this in try_new");
-                unsafe {
-                    validate_user_range(
-                        false,
-                        self.usp,
-                        VirtAddr::new(self.ptr.cast::<T>() as u64),
-                        byte_len,
-                    )?;
-                }
-                self.readable = true;
-            }
-            Ok(UserReadPtr {
-                ptr: self.ptr as *const [T],
-                writable: true,
-                usp: self.usp,
-            })
-        }
-
-        /// You want to perform some sophisticated pointer arithmetic/operations
-        /// that are not covered by the provided APIs? Use this method.
-        ///
-        /// **The pointer is only valid for write operations.**
-        pub unsafe fn with_ptr<F, R>(&mut self, f: F) -> R
-        where
-            F: FnOnce(*mut [T]) -> R,
-        {
-            f(self.ptr)
-        }
-
-        /// See [Self::with_ptr].
-        ///
-        /// This method will validate the readable permission if it is not
-        /// validated yet.
-        pub unsafe fn with_readable_ptr<F, R>(&mut self, f: F) -> Result<R, SysError>
-        where
-            F: FnOnce(*mut [T]) -> R,
-        {
-            if !self.readable {
-                let byte_len = self
-                    .ptr
-                    .len()
-                    .checked_mul(size_of::<T>())
-                    .expect("we already checked this in try_new");
-                unsafe {
-                    validate_user_range(
-                        false,
-                        self.usp,
-                        VirtAddr::new(self.ptr.cast::<T>() as u64),
-                        byte_len,
-                    )?;
-                }
-                self.readable = true;
-            }
-            Ok(f(self.ptr as *mut [T]))
+        /// See [UserWritePtr::fault_in]. This deliberately retains the old MM
+        /// walk only for callers that require complete prevalidation.
+        pub(crate) fn fault_in(&mut self) -> Result<(), SysError> {
+            let byte_len = self
+                .ptr
+                .len()
+                .checked_mul(size_of::<T>())
+                .expect("we already checked this in try_new");
+            fault_in_user_range(
+                self.usp,
+                VirtAddr::new(self.ptr.cast::<T>() as u64),
+                byte_len,
+                PageFaultType::Write,
+            )
         }
     }
 
@@ -385,18 +230,17 @@ mod ptrs {
         /// the null terminator).
         ///
         /// A null-terminator will be appended after the string automatically.
-        pub fn write_utf8_str(&mut self, s: &str) {
+        pub fn write_utf8_str(&mut self, s: &str) -> Result<(), SysError> {
             debug_assert!(
                 s.as_bytes().len() + 1 <= self.ptr.len(),
                 "string too long for user slice: {} bytes, but slice length is {}",
                 s.as_bytes().len(),
                 self.ptr.len()
             );
-            unsafe {
-                let ptr_ref = &mut *self.ptr;
-                ptr_ref[0..s.as_bytes().len()].copy_from_slice(s.as_bytes());
-                ptr_ref[s.as_bytes().len()] = 0;
-            }
+            self.copy_from_slice(s.as_bytes())?;
+            let terminator = VirtAddr::new(self.ptr.cast::<u8>() as u64 + s.len() as u64);
+            write_user_bytes(self.usp, terminator, &[0])?;
+            Ok(())
         }
 
         /// Panics if the bytes are too long to fit in the user slice (including
@@ -404,18 +248,17 @@ mod ptrs {
         ///
         /// A null-terminator will be appended after the bytes automatically. So
         /// passed-in `bytes` don't need to have a null terminator.
-        pub fn write_bytes_with_null_terminator(&mut self, bytes: &[u8]) {
+        pub fn write_bytes_with_null_terminator(&mut self, bytes: &[u8]) -> Result<(), SysError> {
             debug_assert!(
                 bytes.len() + 1 <= self.ptr.len(),
                 "bytes too long for user slice: {} bytes, but slice length is {}",
                 bytes.len(),
                 self.ptr.len()
             );
-            unsafe {
-                let ptr_ref = &mut *self.ptr;
-                ptr_ref[0..bytes.len()].copy_from_slice(bytes);
-                ptr_ref[bytes.len()] = 0;
-            }
+            self.copy_from_slice(bytes)?;
+            let terminator = VirtAddr::new(self.ptr.cast::<u8>() as u64 + bytes.len() as u64);
+            write_user_bytes(self.usp, terminator, &[0])?;
+            Ok(())
         }
     }
 }
@@ -486,13 +329,8 @@ mod validators {
         if elem_size == 0 {
             return Err(SysError::InvalidArgument);
         }
-        if start.get() % align_of::<T>() as u64 != 0 {
-            return Err(SysError::NotAligned);
-        }
-
         let elem_size_u64 = elem_size as u64;
         let mut current = start;
-        let mut validated_until = 0u64;
         let mut values = Vec::new();
 
         loop {
@@ -506,14 +344,8 @@ mod validators {
                 return Err(SysError::BadAddress);
             }
 
-            if elem_end > validated_until {
-                unsafe {
-                    validate_user_range(false, usp, current, elem_size)?;
-                }
-                validated_until = VirtAddr::new(elem_end).page_up().to_virt_addr().get();
-            }
-
-            let value = unsafe { (current.get() as *const T).read() };
+            let mut user_value = UserReadPtr::<T>::try_new(current, usp)?;
+            let value = user_value.read()?;
             if value == terminator {
                 if include_terminator {
                     values.push(value);

@@ -64,14 +64,14 @@ fn sys_capget(
     {
         let mut data_ptr =
             UserWritePtr::<abi::UserCapData>::try_new(user_addr(data_addr)?, &mut usp)?;
-        data_ptr.write(data[0]);
+        data_ptr.write(data[0])?;
     }
     if tocopy > 1 {
         let mut high_ptr = UserWritePtr::<abi::UserCapData>::try_new(
             user_addr_offset(data_addr, USER_CAP_DATA_SIZE)?,
             &mut usp,
         )?;
-        high_ptr.write(data[1]);
+        high_ptr.write(data[1])?;
     }
 
     Ok(0)

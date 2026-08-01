@@ -489,14 +489,21 @@ pub fn exit_robust_list() -> Result<(), SysError> {
         list_op_pending,
     } = {
         let mut usp = usp_handle.lock();
-        let Ok(head_ptr) = UserReadPtr::<RobustListHead>::try_new(head_ptr, &mut usp) else {
+        let Ok(mut head_ptr) = UserReadPtr::<RobustListHead>::try_new(head_ptr, &mut usp) else {
             knoticeln!(
                 "futex: invalid robust list head pointer {:#x?}, skip cleaning up futexes",
                 head_ptr
             );
             return Ok(());
         };
-        head_ptr.read()
+        let Ok(head) = head_ptr.read() else {
+            knoticeln!(
+                "futex: inaccessible robust list head pointer {:#x?}, skip cleaning up futexes",
+                head_ptr
+            );
+            return Ok(());
+        };
+        head
     };
 
     if !list_op_pending.is_null() {
@@ -541,7 +548,17 @@ pub fn exit_robust_list() -> Result<(), SysError> {
         {
             let mut usp = usp_handle.lock();
             match UserReadPtr::<RobustList>::try_new(VirtAddr::new(curr_ptr as u64), &mut usp) {
-                Ok(ptr) => curr_ptr = ptr.read().next,
+                Ok(mut ptr) => match ptr.read() {
+                    Ok(entry) => curr_ptr = entry.next,
+                    Err(e) => {
+                        knoticeln!(
+                            "futex: inaccessible robust list entry pointer {:#x?}, stop cleaning up futexes: {:?}",
+                            curr_ptr,
+                            e
+                        );
+                        break;
+                    },
+                },
                 Err(e) => {
                     knoticeln!(
                         "futex: invalid robust list entry pointer {:#x?}, stop cleaning up futexes: {:?}",

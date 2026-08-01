@@ -52,9 +52,11 @@ action inputs supplied as `--bind name=value`, not tracked configuration. Provid
 build and QEMU; fixed QEMU args and required/optional argv groups are QEMU-only.
 
 Formatting also requires an explicit scope: `all`, `kernel`, or an app name.
-Rootfs manifests require an explicit filesystem base type; folder roots use the repository's single
-automatic sizing policy rather than a manifest capacity option. QEMU Platforms require an explicit
-CPU model, while an omitted BIOS means xtask emits no `-bios` argument.
+Rootfs manifests require an explicit filesystem base type. Folder roots use `virt-make-fs` automatic
+sizing and may request additional free space through `extra-size`; the value is incremental rather
+than an absolute image capacity. Image roots reject this field because their base image owns
+capacity. QEMU Platforms require an explicit CPU model, while an omitted BIOS means xtask emits no
+`-bios` argument.
 
 QEMU DT has no maintenance or source write-back action. Firmware delivery consumes the runtime FDT;
 embedded QEMU delivery is materialized only by normal build from the selected provider's resolved machine,

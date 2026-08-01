@@ -134,6 +134,8 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [System target 与 resolved selection](./contracts/configuration/system-target.md)
 - [System Power 当前契约](./contracts/power/index.md)
   - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
+- [Membarrier 当前契约](./contracts/membarrier/index.md)
+  - [Global rendezvous](./contracts/membarrier/global-rendezvous.md)
 - [Scheduler 当前契约](./contracts/scheduler/index.md)
   - [Asynchronous wake delivery](./contracts/scheduler/wake-delivery.md)
   - [Latch wait round](./contracts/scheduler/latch-wait-round.md)

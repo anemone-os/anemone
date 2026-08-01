@@ -49,7 +49,7 @@ fn sys_getgroups(gidsetsize: i32, grouplist: u64) -> Result<u64, SysError> {
             groups.len(),
             &mut usp,
         )?;
-        list.copy_from_slice(groups);
+        list.copy_from_slice(groups)?;
     }
     Ok(groups.len() as u64)
 }

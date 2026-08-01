@@ -128,6 +128,18 @@ pub fn run_percpu_test(test_fn: fn()) {
     PERCPU_KUNIT_BARRIER.wait_all_done();
 }
 
+fn sync_filesystem_mutations() {
+    for sb in crate::fs::mounted_superblocks() {
+        sb.fs().sync_fs(&sb).unwrap_or_else(|err| {
+            panic!(
+                "failed to sync filesystem {} after KUnit cleanup: {:?}",
+                sb.fs().name(),
+                err
+            )
+        });
+    }
+}
+
 /// Since we don't support stack unwinding, there is no need to count failed
 /// tests separately - if a test panics, the kernel will crash and we won't
 /// reach the end of the test runner.
@@ -169,6 +181,11 @@ pub fn kunit_runner() {
         }
         kprintln!("{}ok{}", GREEN_BOLD, RESET);
     }
+
+    // VFS KUnits remove their fixtures before returning, but block-backed
+    // filesystems may retain those namespace updates in a writeback cache.
+    // Make the cleanup durable before a host-side test gate can stop the VM.
+    sync_filesystem_mutations();
 
     kprintln!("{}All tests passed!{}", BOLD, RESET);
 }

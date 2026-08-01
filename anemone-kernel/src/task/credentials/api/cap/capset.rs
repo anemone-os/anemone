@@ -58,15 +58,16 @@ fn sys_capset(
     }
 
     let low = {
-        let data_ptr = UserReadPtr::<abi::UserCapData>::try_new(user_addr(data_addr)?, &mut usp)?;
-        data_ptr.read()
+        let mut data_ptr =
+            UserReadPtr::<abi::UserCapData>::try_new(user_addr(data_addr)?, &mut usp)?;
+        data_ptr.read()?
     };
     let high = if tocopy > 1 {
         UserReadPtr::<abi::UserCapData>::try_new(
             user_addr_offset(data_addr, USER_CAP_DATA_SIZE)?,
             &mut usp,
         )?
-        .read()
+        .read()?
     } else {
         abi::UserCapData::default()
     };

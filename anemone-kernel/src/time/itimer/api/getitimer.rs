@@ -52,7 +52,7 @@ pub fn sys_getitimer(
             };
 
             let mut usp = usp_handle.lock();
-            UserWritePtr::<OldITimerVal>::try_new(curr_value, &mut usp)?.write(itimerval);
+            UserWritePtr::<OldITimerVal>::try_new(curr_value, &mut usp)?.write(itimerval)?;
 
             Ok(0)
         },

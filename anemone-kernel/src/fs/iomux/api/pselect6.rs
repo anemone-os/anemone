@@ -254,7 +254,7 @@ pub fn sys_pselect6(
         // checked lazily when we actually try to access those fds.
         let mut collect_fds = |ptr: Option<VirtAddr>| {
             ptr.map(|ptr| {
-                let fdset = UserReadPtr::<FdSet>::try_new(ptr, &mut usp)?.read();
+                let fdset = UserReadPtr::<FdSet>::try_new(ptr, &mut usp)?.read()?;
                 let mut bitmap = Bitmap::new_with(Box::new(fdset.fds_bits));
                 trim_fdset(&mut bitmap, n);
                 Ok(bitmap)
@@ -271,7 +271,7 @@ pub fn sys_pselect6(
         let timeout = tsp
             .map(|tsp| {
                 let TimeSpec { tv_sec, tv_nsec } =
-                    UserReadPtr::<TimeSpec>::try_new(tsp, &mut usp)?.read();
+                    UserReadPtr::<TimeSpec>::try_new(tsp, &mut usp)?.read()?;
                 if tv_sec < 0 || tv_nsec < 0 || tv_nsec >= 1_000_000_000 {
                     return Err(SysError::InvalidArgument);
                 }
@@ -282,7 +282,7 @@ pub fn sys_pselect6(
         let sigmask = sig
             .map(|sig| {
                 let linux_signal::SigSetArgPack { p, size } =
-                    UserReadPtr::<linux_signal::SigSetArgPack>::try_new(sig, &mut usp)?.read();
+                    UserReadPtr::<linux_signal::SigSetArgPack>::try_new(sig, &mut usp)?.read()?;
                 if p.is_null() {
                     return Ok(None);
                 }
@@ -291,7 +291,7 @@ pub fn sys_pselect6(
                 }
                 let linux_signal::SigSet { bits } =
                     UserReadPtr::<linux_signal::SigSet>::try_new(user_addr(p as u64)?, &mut usp)?
-                        .read();
+                        .read()?;
                 Ok(Some(SigSet::new_with_mask(bits)))
             })
             .transpose()?
@@ -308,9 +308,7 @@ pub fn sys_pselect6(
     let mut exp_ready = exp_interests.as_ref().map(|_| FdBitmap::new());
 
     if exp_interests.as_ref().is_some_and(|fds| !fds.is_empty()) {
-        knoticeln!(
-            "sys_pselect6: exceptfds requested; exception readiness is a compatibility stub"
-        );
+        kdebugln!("sys_pselect6: exceptfds requested; exception readiness is a compatibility stub");
     }
 
     let token = sigmask.map(|mask| task.begin_temporary_sig_mask(mask));
@@ -346,7 +344,7 @@ pub fn sys_pselect6(
             let fdset = FdSet {
                 fds_bits: *fds.dwords(),
             };
-            UserWritePtr::<FdSet>::try_new(ptr, &mut usp)?.write(fdset);
+            UserWritePtr::<FdSet>::try_new(ptr, &mut usp)?.write(fdset)?;
             Ok(())
         };
 

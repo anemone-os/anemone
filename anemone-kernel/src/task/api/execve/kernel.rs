@@ -97,6 +97,7 @@ pub fn kernel_execve_from_pathref(
                 // dethreading possibly triggers yield, which will change mapping to old
                 // uspace!!!
                 usp.activate();
+                task.reset_arch_properties_for_exec();
                 task.switch_exec_ctx(name, usp, flags, false);
 
                 let ksp = task.kstack().stack_top();

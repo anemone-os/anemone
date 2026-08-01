@@ -12,8 +12,9 @@ use crate::{
             trap::{LA64Exception, LA64Interrupt, LA64TrapFrame},
         },
         fpu::{
-            get_fpu_status, init_fpu_for_current_task, load_next_frs, save_current_frs,
-            set_fpu_status,
+            get_fpu_status, get_lsx_status, init_fpu_for_current_task, init_lsx_for_current_task,
+            load_next_frs, load_next_lsx, lsx_supported, save_current_frs, save_current_lsx,
+            set_extension_status, set_fpu_status,
         },
     },
     prelude::{fault::handle_user_page_fault, *},
@@ -26,6 +27,9 @@ use crate::{
         },
     },
 };
+
+#[cfg(feature = "soft_unaligned_access")]
+use crate::arch::loongarch64::exception::unaligned::handle_user_unaligned_access;
 
 // User trap entry point. The kernel does not save or restore floating-point
 // registers here because user-mode traps currently do not use them.
@@ -197,7 +201,17 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
     // valid for the duration of this function.
     let trapframe = unsafe { trapframe.as_mut().expect("trapframe should never be null") };
 
-    if get_fpu_status() {
+    if get_lsx_status() {
+        assert!(
+            get_fpu_status(),
+            "LSX enabled without the shared FPU register file"
+        );
+        assert!(
+            get_current_task().arch_properties().lsx_used(),
+            "LSX enabled for a task that has not used LSX"
+        );
+        save_current_lsx(trapframe.fpu_regs_mut());
+    } else if get_fpu_status() {
         debug_assert!(
             get_current_task().fpu_used(),
             "FPU enabled but current task's fpu_used is false. This should never happen because we set fpu_used to true when enabling FPU for the current task."
@@ -205,8 +219,8 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         save_current_frs(trapframe.fpu_regs_mut());
     }
 
-    // Fpu are disabled in kernel mode
-    set_fpu_status(false);
+    // User extension state lives only in the trapframe while the kernel runs.
+    set_extension_status(false, false);
 
     get_current_task().on_user_trap_entry();
 
@@ -324,6 +338,64 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
                         kinfoln!("({}) enabled fpu for {}", cur_cpu_id(), current_task_id());
                     }
                 },
+                LA64Exception::Simd128ExtensionDisabled => {
+                    let task = get_current_task();
+                    if task.arch_properties().lsx_used() || !lsx_supported() {
+                        kerrln!(
+                            "({}) cannot enable LSX for {}, pc: {:#x}",
+                            cur_cpu_id(),
+                            current_task_id(),
+                            trapframe.era,
+                        );
+                        task.recv_signal(Signal::new(
+                            SigNo::SIGILL,
+                            SiCode::Kernel,
+                            SigInfoFields::Ill(SigFault {
+                                addr: VirtAddr::new(trapframe.era),
+                            }),
+                        ));
+                    } else {
+                        init_lsx_for_current_task(trapframe);
+                        kinfoln!("({}) enabled LSX for {}", cur_cpu_id(), current_task_id());
+                    }
+                },
+                LA64Exception::Simd256ExtensionDisabled => {
+                    kerrln!(
+                        "({}) unsupported ASX instruction from {}, pc: {:#x}",
+                        cur_cpu_id(),
+                        current_task_id(),
+                        trapframe.era,
+                    );
+                    get_current_task().recv_signal(Signal::new(
+                        SigNo::SIGILL,
+                        SiCode::Kernel,
+                        SigInfoFields::Ill(SigFault {
+                            addr: VirtAddr::new(trapframe.era),
+                        }),
+                    ));
+                },
+                LA64Exception::AddressAlignment => {
+                    #[cfg(feature = "soft_unaligned_access")]
+                    handle_user_unaligned_access(trapframe, VirtAddr::new(trapframe.badv));
+
+                    #[cfg(not(feature = "soft_unaligned_access"))]
+                    {
+                        kerrln!(
+                            "({}) unsupported unaligned access for task {}: soft_unaligned_access is disabled, pc={:#x}, address={:#x}",
+                            cur_cpu_id(),
+                            current_task_id(),
+                            trapframe.era,
+                            trapframe.badv,
+                        );
+                        get_current_task().recv_signal(Signal::new(
+                            SigNo::SIGBUS,
+                            SiCode::BusAdraln,
+                            SigInfoFields::Fault(SigFault {
+                                addr: VirtAddr::new(trapframe.badv),
+                            }),
+                        ));
+                    }
+                },
                 _ => {
                     kerrln!(
                         "({}) user {} aborted with unhandled exception: {:?}, pc: {:#x}, badv: {:#x}",
@@ -351,13 +423,22 @@ unsafe extern "C" fn rust_utrap_entry(trapframe: *mut LA64TrapFrame) {
         restart_syscall.map(|restart| (restart, syscall_ctx)),
     );
 
-    if get_current_task().fpu_used() {
+    restore_user_extensions(trapframe);
+    get_current_task().on_prv_change(Privilege::User);
+}
+
+fn restore_user_extensions(trapframe: &LA64TrapFrame) {
+    let task = get_current_task();
+    if task.arch_properties().lsx_used() {
+        assert!(task.fpu_used(), "an LSX task must own scalar FPU state");
+        load_next_lsx(trapframe.fpu_regs());
+        set_extension_status(true, true);
+    } else if task.fpu_used() {
         load_next_frs(trapframe.fpu_regs());
         set_fpu_status(true);
     } else {
-        set_fpu_status(false);
+        set_extension_status(false, false);
     }
-    get_current_task().on_prv_change(Privilege::User);
 }
 unsafe extern "C" {
     unsafe fn __utrap_entry() -> !;
@@ -366,12 +447,7 @@ unsafe extern "C" {
 
 pub unsafe fn utrap_return_to_task(trapframe: &mut LA64TrapFrame) -> ! {
     arbitrate_user_entry(trapframe, None);
-    if get_current_task().fpu_used() {
-        load_next_frs(trapframe.fpu_regs());
-        set_fpu_status(true);
-    } else {
-        set_fpu_status(false);
-    }
+    restore_user_extensions(trapframe);
     get_current_task().on_prv_change(Privilege::User);
     unsafe { __utrap_return_to_task(trapframe) }
 }

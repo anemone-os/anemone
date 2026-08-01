@@ -91,17 +91,10 @@ fn sys_wait4(
         let task = get_current_task();
         let usp = task.clone_uspace_handle();
         let mut guard = usp.lock();
-        match UserWritePtr::<i32>::try_new(wstatus_ptr, &mut guard) {
-            Ok(mut uptr) => uptr.write(kbuf),
-            Err(e) => {
-                knoticeln!(
-                    "wait4: failed to write wstatus for reaped child {}: {:?} at address {:#x}",
-                    outcome.tgid,
-                    e,
-                    wstatus_ptr.get()
-                );
-            },
-        }
+        // Linux claims the wait result before status copyout. EFAULT is
+        // reported to userspace, but it does not restore a consumed report or
+        // reaped child.
+        UserWritePtr::<i32>::try_new(wstatus_ptr, &mut guard)?.write(kbuf)?;
     }
 
     Ok(outcome.tgid.get() as u64)

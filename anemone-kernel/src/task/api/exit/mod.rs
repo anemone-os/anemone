@@ -37,9 +37,17 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             let cleard = {
                 let mut guard = usp.lock();
                 match UserWritePtr::<Tid>::try_new(addr, &mut guard) {
-                    Ok(mut uptr) => {
-                        uptr.write(Tid::new(0));
-                        true
+                    Ok(mut uptr) => match uptr.write(Tid::new(0)) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            knoticeln!(
+                                "failed to clear child tid for task {}: {:?} at address {:#x}",
+                                task.tid(),
+                                e,
+                                addr.get()
+                            );
+                            false
+                        },
                     },
                     Err(e) => {
                         knoticeln!(

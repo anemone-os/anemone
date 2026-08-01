@@ -33,7 +33,7 @@ fn sys_clock_getres(
         {
             let mut usp = usp_handle.lock();
             if let Some(tp) = tp {
-                UserWritePtr::<TimeSpec>::try_new(tp, &mut usp)?.write(ts);
+                UserWritePtr::<TimeSpec>::try_new(tp, &mut usp)?.write(ts)?;
             }
         }
 

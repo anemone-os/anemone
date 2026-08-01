@@ -82,7 +82,7 @@ fn sys_utimensat(
     let times = if let Some(utimes) = utimes {
         let usp_handle = task.clone_uspace_handle();
         let mut usp = usp_handle.lock();
-        let times = UserReadPtr::<[TimeSpec; 2]>::try_new(utimes, &mut usp)?.read();
+        let times = UserReadPtr::<[TimeSpec; 2]>::try_new(utimes, &mut usp)?.read()?;
         let times = [requested_time(times[0])?, requested_time(times[1])?];
         if matches!(times, [RequestedTime::Omit, RequestedTime::Omit]) {
             return Ok(0);

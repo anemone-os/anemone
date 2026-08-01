@@ -1,9 +1,9 @@
 # VFS Make Node 目标和不变量
 
-**状态：** R2 Effective / RFC Closed
+**状态：** R3 Effective / RFC Closed
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
-**适用修订：** R2
+**适用修订：** R3
 
 本文定义本RFC的contract delta、target invariants与RFC-local proof obligations。当前已经生效的共享规则仍以
 `docs/src/contracts/`中的稳定ID为准；`DEVICE-NUMBER-001` Refine已在`DEVICE-NUMBER-CUTOVER`生效，make-node
@@ -13,7 +13,7 @@
 
 - **Correctness Invariant：** kind/numeric `rdev` 单一真相源、owner boundary、正常执行下有序且串行化的
   backend publication、成功路径reload一致性、可实施cleanup与ABI诚实性；违反即实现不正确，不能降级接受。
-- **Target Guarantee / Capability：** Linux node-kind/capability matrix、明确不应用 process umask 的 requested
+- **Target Guarantee / Capability：** Linux node-kind/capability matrix、复用task filesystem-context umask的final
   permission semantics、`InodeOps::make_node`、ext4+ramfs coverage、metadata observation、mount `ENOTBLK`
   与用户态 proof；新修订接受前不能缩减或把已接受限制写成 Linux parity。
 - **Implementation Preference：** Rust description 类型、字段物理落点、regular dispatch、helper/module、
@@ -182,10 +182,9 @@ character/block creation 要求 effective `CAP_MKNOD`；只有这两类消费并
 `S_IFCHR + WHITEOUT_DEV` 的 capability 例外；
 character 0:0 缺少 effective `CAP_MKNOD` 时仍返回 `EPERM`。
 
-R2 继承 R0/R1 的 no-umask 边界。最终 permission 直接使用调用者 `mode` 中请求的 permission bits；syscall/VFS/backend
-不得读取当前 `sys_umask` stub、缓存 task-local mask 或建立 mknod-local mask owner。该规则是本 revision
-明确接受的 Linux 可见偏差，不得把 node-kind/dev_t/errno compatibility claim 扩大成 umask parity。退出该偏差
-需要后续独立工作为 task/fs-state mask、`umask(2)` 与全部创建类调用点建立共同 owner、handoff 和验证。
+R3复用既有task filesystem-context唯一umask owner。syscall adapter对normalized requested permission读取一次
+mask snapshot并形成final permission；VFS/backend不得读取task state、缓存mask或建立mknod-local owner。R0-R2
+no-umask边界继续保留为branch-local revision历史，不再驱动current behavior。
 
 `dev` syscall argument 是 32-bit Linux encoded device number；全部输入无损 decode 为 12-bit major + 20-bit
 minor 的 `DeviceNumber`。syscall adapter 不把 packed value 或 Char/Block tag传给 filesystem。
@@ -196,8 +195,8 @@ minor 的 `DeviceNumber`。syscall adapter 不把 packed value 或 Char/Block ta
 
 **违反表现：** `mknod()` libc wrapper 继续得到 `ENOSYS`；新增错误 legacy number；FIFO-only；socket node 被
 当成 endpoint；regular/FIFO/socket 被错误要求 CAP_MKNOD；device number 在 backend 才 decode；invalid type
-成功创建 ordinary file；character 0:0 被无特权创建或被误解释为已有 whiteout protocol；当前 umask stub
-偶然改变 permission；或文档/测试把未实现的 umask adjustment 宣称为 Linux-compatible behavior。
+成功创建 ordinary file；character 0:0 被无特权创建或被误解释为已有 whiteout protocol；`mknodat`绕过
+task filesystem-context mask或重复应用mask。
 
 **Cutover：** RFC-local ABI target，在 `VFS-MAKE-NODE-CUTOVER` 一并验证。
 
@@ -320,7 +319,7 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 |
 | --- | --- | --- |
 | raw `dirfd` / pathname / `mode_t` / `dev_t` syscall input | `mknodat` ABI adapter | VFS 只接收 normalized request |
-| requested permission bits | 当前 `mknodat` adapter / VFS creation handoff | backend 保存不经 process umask 屏蔽的 final permission；后续独立 umask owner 尚不存在 |
+| process umask与requested permission | task filesystem context / `mknodat` adapter | adapter读取一次snapshot；VFS/backend只保存调整后的final permission |
 | 12/20 numeric device-number domain | `device::devnum` | ABI/persistence codec 与 registry key 只做边界转换 |
 | parent resolution、mount/DAC/common-create admission、dentry materialization | VFS creation protocol | backend 接收 admitted description |
 | directory backend operation | `InodeOps::make_node` | VFS 持 function capability，不访问 backend private state |
@@ -365,8 +364,8 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
 - successful unlink 只终止 namespace link；本 revision 不建立需要随 unlink 取消的 FIFO/device/socket state。
 - ramfs resident node 随 ramfs inode/link lifetime 结束；ext4 on-disk node 由 ext4 unlink/eviction 规则管理。
 - make-node request、credential snapshot 与 temporary decode state 不得逃逸出一次 operation。
-- 本 revision 不创建、读取或缓存 process umask state；requested permission bits 直接随 operation-local request
-  进入 backend。后续统一 umask cutover 前不得让任一局部 mask 成为并列 truth。
+- 本revision不创建或缓存第二份process umask state；adapter只通过task filesystem context窄接口形成final
+  permission，VFS/backend不得让局部mask成为并列truth。
 - unsupported open 不得通过 panic 代替错误 cleanup。
 
 ## 禁止退化项
@@ -377,8 +376,7 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
 - 不得让 generic inode 同时保存 kind 与 typed Char/Block `rdev` category，或保留 raw packing escape。
 - 不得按 filesystem name/pathname/LTP case 在 syscall 层分发。
 - 不得让 backend 访问 task、fd table、raw Linux mode/capability 或 provider registry。
-- 不得在 `mknodat` 内实现局部 umask、读取当前 `sys_umask` stub，或把 task/fs-state 与其它 create call sites
-  拉入本 revision。
+- 不得在`mknodat`、VFS或backend实现局部umask，也不得绕过或移动task filesystem-context唯一owner。
 - 不得从 FileOps、provider type 或 path 反推并覆盖 inode kind/`rdev`。
 - 不得把 success-but-open-panics 当成诚实 unsupported behavior。
 - 不得以 named FIFO/device open/socket endpoint 复杂度为理由缩减 make-node creation target。
@@ -392,8 +390,8 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
   TTY/device endpoint号码与publication lifecycle；后续独立gate已把make-node stage解析为Ready但未激活。
 - `VFS-MAKE-NODE-001` 与 `VFS-SPECIAL-NODE-RDEV-001` 已在同一 `VFS-MAKE-NODE-CUTOVER` 进入 current contract。
 - `VFS-MOUNT-ADMISSION-002` 已在同一 cutover 完成 `ENOTBLK` Refine。
-- RV64/LA64 `mknodat(33)`、libc `mknod()` / `mknodat()`、node-kind/capability/dirfd/error matrix 有明确证据；
-  permission proof 明确验证 requested bits 不经 process umask 屏蔽，不把该结果宣称为完整 Linux mode parity。
+- RV64/LA64 `mknodat(33)`、libc `mknod()` / `mknodat()`、node-kind/capability/dirfd/error matrix 有R2证据；
+  R3合流另外以既有umask KUnit/用户矩阵与`mknodat`source audit证明复用同一owner，合流后双架构runtime待重验。
 - ext4 与 ramfs 覆盖全部 in-target node kind；ext4 reload proof 覆盖 kind/permission/owner/`rdev`。
 - stat/statx/getdents/unlink、regular ordinary I/O、special-node explicit unsupported open 与 mount `ENOTBLK`
   均有与 claim 相称的验证。
@@ -409,5 +407,5 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
 - 临时 validation probe 已删除，production code 不依赖测试路径、case name 或执行顺序。
 - named FIFO data plane、device-node provider open、pathname socket endpoint 与 legacy `readdir` 明确保留在本
   revision 之外，不能由 make-node closure 冒充完成。
-- process umask、`umask(2)` state ownership 与其它创建类调用点明确留给独立后续工作；current limitation 只有
-  在共同 owner、全部 call-site cutover 与跨创建路径验证闭合后才能退出。
+- process umask与`umask(2)`继续由既有task filesystem context拥有；R3只增加`mknodat`consumer，不改变
+  `openat`/`mkdirat`既有handoff。

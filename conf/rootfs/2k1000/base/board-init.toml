@@ -1,0 +1,18 @@
+[[mounts]]
+"dest" = "/linux"
+"dev" = "sda2"
+"fs" = "ext4"
+
+[[mounts]]
+"dest" = "/linux/home"
+"dev" = "sda3"
+"fs" = "ext4"
+
+[[run]]
+"path" = "/home/install_sys.sh"
+"args" = ["install_sys.sh"]
+
+[init]
+"root" = "/linux"
+"path" = "/usr/sbin/init"
+"args" = ["init"]

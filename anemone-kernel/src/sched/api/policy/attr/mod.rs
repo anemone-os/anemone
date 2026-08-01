@@ -69,8 +69,8 @@ pub(super) fn read_size(attr_addr: u64) -> Result<u32, SysError> {
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
-    let user = UserReadSlice::<u8>::try_new(user_addr(attr_addr)?, raw.len(), &mut usp)?;
-    user.copy_to_slice(&mut raw);
+    let mut user = UserReadSlice::<u8>::try_new(user_addr(attr_addr)?, raw.len(), &mut usp)?;
+    user.copy_to_slice(&mut raw)?;
     Ok(u32::from_ne_bytes(raw))
 }
 
@@ -84,16 +84,17 @@ pub(super) fn copy_from_user(attr_addr: u64, size: usize) -> Result<SchedAttr, S
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
-    let user = UserReadSlice::<u8>::try_new(user_addr(attr_addr)?, size, &mut usp)?;
+    let mut user = UserReadSlice::<u8>::try_new(user_addr(attr_addr)?, size, &mut usp)?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(size)
+        .map_err(|_| SysError::OutOfMemory)?;
+    bytes.resize(size, 0);
+    user.copy_to_slice(&mut bytes)?;
     let mut known = [0u8; SCHED_ATTR_SIZE_VER1];
-    let future_tail_is_zero = unsafe {
-        user.with_ptr(|ptr| {
-            let bytes = &*ptr;
-            let copied = bytes.len().min(known.len());
-            known[..copied].copy_from_slice(&bytes[..copied]);
-            bytes[copied..].iter().all(|byte| *byte == 0)
-        })
-    };
+    let copied = bytes.len().min(known.len());
+    known[..copied].copy_from_slice(&bytes[..copied]);
+    let future_tail_is_zero = bytes[copied..].iter().all(|byte| *byte == 0);
     if !future_tail_is_zero {
         return Err(SysError::ArgumentTooLarge);
     }
@@ -112,7 +113,7 @@ pub(super) fn best_effort_write_known_size(attr_addr: u64) {
     let Ok(mut user) = UserWriteSlice::<u8>::try_new(addr, raw.len(), &mut usp) else {
         return;
     };
-    user.copy_from_slice(&raw);
+    _ = user.copy_from_slice(&raw);
 }
 
 /// Validate the full caller-declared output while preserving its future tail.
@@ -123,7 +124,7 @@ pub(super) fn copy_to_user(attr_addr: u64, usize: usize, attr: SchedAttr) -> Res
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
     let mut user = UserWriteSlice::<u8>::try_new(user_addr(attr_addr)?, usize, &mut usp)?;
-    user.copy_from_slice(&raw[..copied]);
+    user.copy_from_slice(&raw[..copied])?;
     Ok(())
 }
 

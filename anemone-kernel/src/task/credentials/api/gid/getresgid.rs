@@ -26,13 +26,13 @@ fn sys_getresgid(
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();
     {
-        UserWritePtr::<Gid>::try_new(rgidp, &mut usp)?.write(cred.gid.real);
+        UserWritePtr::<Gid>::try_new(rgidp, &mut usp)?.write(cred.gid.real)?;
     }
     {
-        UserWritePtr::<Gid>::try_new(egidp, &mut usp)?.write(cred.gid.effective);
+        UserWritePtr::<Gid>::try_new(egidp, &mut usp)?.write(cred.gid.effective)?;
     }
     {
-        UserWritePtr::<Gid>::try_new(sgidp, &mut usp)?.write(cred.gid.saved);
+        UserWritePtr::<Gid>::try_new(sgidp, &mut usp)?.write(cred.gid.saved)?;
     }
     Ok(0)
 }

@@ -29,7 +29,7 @@ pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<(Ipv4Address, u16)
     let uspace = task.clone_uspace_handle();
     let mut bytes = [0u8; SOCKADDR_IN_LEN];
     UserReadSlice::<u8>::try_new(addr, SOCKADDR_IN_LEN, &mut uspace.lock())?
-        .copy_to_slice(&mut bytes);
+        .copy_to_slice(&mut bytes)?;
     let family = u16::from_ne_bytes(bytes[0..2].try_into().unwrap());
     if family != AF_INET as u16 {
         return Err(SysError::AddressFamilyNotSupported);
@@ -54,7 +54,7 @@ fn write_sockaddr_value(
 
     let mut len_bytes = [0u8; size_of::<socklen_t>()];
     UserReadSlice::<u8>::try_new(addrlen_addr, len_bytes.len(), &mut uspace.lock())?
-        .copy_to_slice(&mut len_bytes);
+        .copy_to_slice(&mut len_bytes)?;
     let user_len = socklen_t::from_ne_bytes(len_bytes);
     if (user_len as i32) < 0 {
         return Err(SysError::InvalidArgument);
@@ -69,14 +69,14 @@ fn write_sockaddr_value(
     if copy_len != 0 {
         let addr = user_addr(addr)?;
         UserWriteSlice::<u8>::try_new(addr, copy_len, &mut uspace.lock())?
-            .copy_from_slice(&bytes[..copy_len]);
+            .copy_from_slice(&bytes[..copy_len])?;
     }
 
     // Linux move_addr_to_user exposes any successful prefix copy before this
     // actual-length store. A fault here must not roll that copy back.
     let actual = (SOCKADDR_IN_LEN as socklen_t).to_ne_bytes();
     UserWriteSlice::<u8>::try_new(addrlen_addr, actual.len(), &mut uspace.lock())?
-        .copy_from_slice(&actual);
+        .copy_from_slice(&actual)?;
     Ok(())
 }
 
@@ -109,7 +109,7 @@ pub(super) fn read_payload(addr: u64, len: usize) -> Result<Vec<u8>, SysError> {
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut payload = vec![0; len];
-    UserReadSlice::<u8>::try_new(addr, len, &mut uspace.lock())?.copy_to_slice(&mut payload);
+    UserReadSlice::<u8>::try_new(addr, len, &mut uspace.lock())?.copy_to_slice(&mut payload)?;
     Ok(payload)
 }
 
@@ -122,7 +122,7 @@ pub(super) fn write_payload(addr: u64, payload: &[u8], len: usize) -> Result<usi
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     UserWriteSlice::<u8>::try_new(addr, copied, &mut uspace.lock())?
-        .copy_from_slice(&payload[..copied]);
+        .copy_from_slice(&payload[..copied])?;
     Ok(copied)
 }
 
