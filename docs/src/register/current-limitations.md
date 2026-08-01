@@ -32,6 +32,28 @@ clone/exec、signal ABI和unsupported CPU路径。异构拓扑还必须先建立
 [事务日志](../devlog/transactions/2026-08-01-loongarch-lsx-context.md),
 [software unaligned access开放问题](./open-issues.md#ane-20260801-la64-soft-unaligned-user-memory-corruption)
 
+## ANE-20260801-VFS-NON-UTF8-PATHNAME
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** VFS / user access / pathname representation / filesystem backends
+
+**Summary:** 当前 filesystem pathname syscall 由 user-access boundary 把 NUL-terminated bytes 转为 `Box<str>`，
+namei 又把每个 normal component 转为 `String`；dentry、ramfs 与现有 ext4 adapter 也沿用 string name。因此包含
+非 UTF-8 byte sequence 的 Linux pathname 会在进入普通 VFS lookup/create 前返回错误。后续 AF_UNIX pathname
+consumer 可以在 `sockaddr_un` ABI boundary 按 raw bytes 解析长度和 NUL，但仍继承这条 VFS component 限制；它不得
+通过 Unix-local 编码、私有 pathname table 或绕过 generic lookup 伪装完整 byte-path 支持。
+
+**Exit Condition:** 由后续独立 VFS pathname 工作建立 byte-preserving user-access、path/component、namei、dentry、
+symlink 与 writable filesystem backend representation，明确显示/诊断边界和非法 NUL/`/` 处理，并验证 ordinary
+pathname syscall 与 AF_UNIX 等真实 consumer。完成对应 target、实现和 contract cutover 后，consumer 才能移除
+本限制；不得只在单个 syscall 内做可逆编码或 case-specific fallback。
+
+**Owner:** VFS pathname / user-access（待独立 RFC）
+**Last Verified:** 2026-08-01
+**Related:** [VFS current contracts](../contracts/vfs/index.md)
+
 ## ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY
 
 **Type:** Limitation
