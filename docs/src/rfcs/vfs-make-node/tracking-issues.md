@@ -1,6 +1,6 @@
 # VFS Make Node Tracking Issues
 
-**状态：** R2 Accepted / No Active Findings / C2 Closed
+**状态：** R2 Closed / No Active Findings / C1-C3 Closed
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
@@ -15,7 +15,8 @@ design finding。implementation 进度与执行证据不放在这里；Draft tar
 `DEVICE-NUMBER-CUTOVER`已生效并关闭Stage 1。后续resolution接受R1原子性边界并把Stage 2解析为Ready / Not Active；
 其余target contract保持Not Cut Over。C2 final review随后发现一个Apollyon：R1 strict backend failure/crash
 atomicity超出lwext4/Rust wrapper的自然能力。开发者通过Target Renegotiation Gate接受R2，将该责任明确转交后续
-lwext4集成事务；R2 write-back、source-shape audit与第二轮复审已关闭该finding并完成C2。
+lwext4集成事务；R2 write-back、source-shape audit与第二轮复审已关闭该finding并完成C2。C3双架构runtime、
+临时probe退出、精确生产树复验与最终owner/API/lifecycle/ABI/cleanup review没有新增active finding，RFC已关闭。
 
 ## Apollyon
 
@@ -55,7 +56,7 @@ metadata-before-publication、name boundary validation、同锁串行化和`free
 
 **修复位置：** [R2 VFS handoff与接受边界](./index.md#vfs-与-filesystem-handoff)、
 [MAKE-NODE-ATOMIC-001](./invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup)、
-[Stage 2 R2 plan](./implementation.md#7-stage-2-ready--make-node-vertical-slice)、
+[Stage 2 R2 plan](./implementation.md#7-stage-2-closed--make-node-vertical-slice)、
 [accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)与
 [transaction renegotiation](../../devlog/transactions/2026-07-31-vfs-make-node.md#r2-target-renegotiation-and-c2-review-hold---2026-08-01)。
 
@@ -75,7 +76,7 @@ touch/mkdir更弱；若完整关闭既有backend/cache/dentry窗口需要不小�
 
 **修复位置：** [R1 VFS handoff与接受边界](./index.md#vfs-与-filesystem-handoff)、
 [MAKE-NODE-ATOMIC-001](./invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup)、
-[Stage 2 Ready](./implementation.md#7-stage-2-ready--make-node-vertical-slice)、
+[Stage 2 plan](./implementation.md#7-stage-2-closed--make-node-vertical-slice)、
 [ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)与
 [transaction resolution](../../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01)。
 

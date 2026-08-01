@@ -196,13 +196,13 @@ publication线性化点、post-commit failure/rollback和并发lookup语义，�
 
 **Owner:** doruche
 **Last Verified:** 2026-08-01
-**Exit Condition:** VFS Make Node R2 只交付 node creation；其 `VFS-MAKE-NODE-CUTOVER` 完成后仍需分别补齐
+**Exit Condition:** VFS Make Node R2已完成`VFS-MAKE-NODE-CUTOVER`且只交付node creation；仍需分别补齐
 named FIFO I/O 与 legacy `readdir` 决策，再重新跑 `read03` 和 `readdir21`，才能关闭本合并旧条目。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md),
 [VFS Make Node R2](../rfcs/vfs-make-node/index.md)及其
 [transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)（只覆盖 node creation；named FIFO I/O 与 legacy
-`readdir` 不随 R2 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
+`readdir` 未随 R2 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
 
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。

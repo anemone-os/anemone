@@ -1,13 +1,13 @@
 # VFS Make Node 目标和不变量
 
-**状态：** R2 Accepted Target / `DEVICE-NUMBER-001` Effective / Remaining Not Effective
+**状态：** R2 Effective / RFC Closed
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **适用修订：** R2
 
 本文定义本RFC的contract delta、target invariants与RFC-local proof obligations。当前已经生效的共享规则仍以
-`docs/src/contracts/`中的稳定ID为准；`DEVICE-NUMBER-001` Refine已在`DEVICE-NUMBER-CUTOVER`生效，其余
-Refine / Introduce项在`VFS-MAKE-NODE-CUTOVER`前仍不是current fact。
+`docs/src/contracts/`中的稳定ID为准；`DEVICE-NUMBER-001` Refine已在`DEVICE-NUMBER-CUTOVER`生效，make-node
+两个Introduce ID与mount Refine也已在`VFS-MAKE-NODE-CUTOVER`生效。
 
 ## 规则分类
 
@@ -26,15 +26,15 @@ Refine / Introduce项在`VFS-MAKE-NODE-CUTOVER`前仍不是current fact。
 | `VFS-FILE-KIND-001` | Preserve | [当前规则](../../contracts/vfs/file-kind.md#vfs-file-kind-001--inode-kind-是唯一-file-type-truth) | make-node 只构造既有 immutable kind，不新增第二份 file-type truth | 全程；无需改写 current rule |
 | `DEVICE-NUMBER-001` | Refine | [当前12/20规则](../../contracts/device/device-number.md#device-number-001--1220-category-neutral-device-number-domain)；2026-07-31 docs-only extraction曾建立16/16 baseline | common numeric domain改为12-bit major + 20-bit minor；通用inode metadata不保存Char/Block category或raw packing；typed registry key只在consumer boundary构造 | `DEVICE-NUMBER-CUTOVER` Effective / 2026-08-01 |
 | `TTY-ENDPOINT-001` | Preserve | [当前规则](../../contracts/tty/data-plane.md#tty-endpoint-001--endpoint-publication是稳定的单向transaction) | 保持 `ttyS<N>` 4:`64+N`、console 5:1、deterministic identity 与 publication lifecycle | 全程；device-number cutover 需证明数值未变 |
-| `VFS-MAKE-NODE-001` | Introduce | None（尚未生效） | VFS admission 经 `InodeOps::make_node` 向 backend 交付窄 semantic description；backend-local先完成最终metadata，再串行化进入dirent publication，并清理仍未链接的失败分配 | `VFS-MAKE-NODE-CUTOVER` |
-| `VFS-SPECIAL-NODE-RDEV-001` | Introduce | None（尚未生效） | ext4/ramfs filesystem-backed character/block node 持久/驻留保存 category-neutral numeric `rdev`；kind 只来自 `Inode::ty()` | `VFS-MAKE-NODE-CUTOVER` |
-| `VFS-MOUNT-ADMISSION-002` | Refine | [当前规则](../../contracts/vfs/mount-admission.md#vfs-mount-admission-002--source-kind-owned-admission) | 保持 source-kind owner；non-block inode source 在 registry lookup 前稳定返回 `ENOTBLK` | `VFS-MAKE-NODE-CUTOVER` |
+| `VFS-MAKE-NODE-001` | Introduce | [当前规则](../../contracts/vfs/make-node.md#vfs-make-node-001--make-node-admission-与-backend-publication-只有一个-handoff) | VFS admission 经 `InodeOps::make_node` 向 backend 交付窄 semantic description；backend-local先完成最终metadata，再串行化进入dirent publication，并清理仍未链接的失败分配 | `VFS-MAKE-NODE-CUTOVER` Effective / 2026-08-01 |
+| `VFS-SPECIAL-NODE-RDEV-001` | Introduce | [当前规则](../../contracts/vfs/make-node.md#vfs-special-node-rdev-001--filesystem-backed-special-node-rdev-是单一-numeric-truth) | ext4/ramfs filesystem-backed character/block node 持久/驻留保存 category-neutral numeric `rdev`；kind 只来自 `Inode::ty()` | `VFS-MAKE-NODE-CUTOVER` Effective / 2026-08-01 |
+| `VFS-MOUNT-ADMISSION-002` | Refine | [当前规则](../../contracts/vfs/mount-admission.md#vfs-mount-admission-002--source-kind-owned-admission) | 保持 source-kind owner；non-block inode source 在 registry lookup 前稳定返回 `ENOTBLK` | `VFS-MAKE-NODE-CUTOVER` Effective / 2026-08-01 |
 
 R0 acceptance曾为`DEVICE-NUMBER-001`建立pending-successor link；2026-08-01 `DEVICE-NUMBER-CUTOVER`已把该
 target原子写入current contract。`DEVICE-NUMBER-BASELINE-EXTRACTION`建立的16/16规则只保留为历史baseline。
-后续make-node stage只能复用已关闭的device-number owner边界。最终VFS cutover应在
-VFS contract 下建立稳定的 make-node/filesystem-backed-rdev surface，容纳两个 Introduce ID；不得为每个 ID
-单独建页，也不得把 RFC-local validation 规则写入 current contract。
+后续make-node stage复用了已关闭的device-number owner边界。最终VFS cutover已在VFS contract下建立单一
+make-node/filesystem-backed-rdev surface容纳两个Introduce ID，没有为每个ID单独建页，也没有把RFC-local
+validation规则写入current contract。
 
 R2再次修订原子性接受边界：backend-local final metadata必须先于dirent publication，同一backend锁必须阻止
 正常并发lookup观察中间状态；成功路径必须在normal sync/reload后恢复同一metadata。可预先判定的错误不得发布node，
@@ -384,14 +384,14 @@ exhaustive dispatch 与 no-panic，不能代替真实 syscall runtime。
 - 不得以 named FIFO/device open/socket endpoint 复杂度为理由缩减 make-node creation target。
 - 不得新建无真实长期 consumer 的 test app/validation facade。
 
-## 完成标准
+## 完成证据
 
 - `VFS-FILE-KIND-001` 经 source audit 证明保持 Preserve，无第二份 kind truth。
 - `DEVICE-NUMBER-BASELINE-EXTRACTION` 已只提取 live 16/16 current rule；未提前发布 12/20 target。
 - `DEVICE-NUMBER-001` 已在独立`DEVICE-NUMBER-CUTOVER`完成12/20 Refine，保持char/block namespace、
   TTY/device endpoint号码与publication lifecycle；后续独立gate已把make-node stage解析为Ready但未激活。
-- `VFS-MAKE-NODE-001` 与 `VFS-SPECIAL-NODE-RDEV-001` 在同一 `VFS-MAKE-NODE-CUTOVER` 进入 current contract。
-- `VFS-MOUNT-ADMISSION-002` 同一 cutover 完成 `ENOTBLK` Refine，失败时保持旧 current rule。
+- `VFS-MAKE-NODE-001` 与 `VFS-SPECIAL-NODE-RDEV-001` 已在同一 `VFS-MAKE-NODE-CUTOVER` 进入 current contract。
+- `VFS-MOUNT-ADMISSION-002` 已在同一 cutover 完成 `ENOTBLK` Refine。
 - RV64/LA64 `mknodat(33)`、libc `mknod()` / `mknodat()`、node-kind/capability/dirfd/error matrix 有明确证据；
   permission proof 明确验证 requested bits 不经 process umask 屏蔽，不把该结果宣称为完整 Linux mode parity。
 - ext4 与 ramfs 覆盖全部 in-target node kind；ext4 reload proof 覆盖 kind/permission/owner/`rdev`。

@@ -56,6 +56,11 @@ fn sys_mknodat(
     dev: u32,
 ) -> Result<u64, SysError> {
     let path = Path::new(pathname.as_ref());
+    // mknodat has no AT_EMPTY_PATH mode. Linux classifies an empty pathname
+    // as a missing lookup target before capability or backend admission.
+    if path.as_bytes().is_empty() {
+        return Err(SysError::NotFound);
+    }
     let checker = FsPermChecker::for_current_fs();
     let (mode, rdev) = normalize_make_node(mode, dev, checker.has_cap(Capability::MKNOD))?;
     let task = get_current_task();

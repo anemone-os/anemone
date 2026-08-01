@@ -253,7 +253,16 @@ impl<Hal: SystemHal, Dev: BlockDevice> Ext4Filesystem<Hal, Dev> {
             child_ref.dec_nlink();
         }
         if child_ref.nlink() == 0 {
-            child_ref.truncate(0)?;
+            // lwext4 only admits regular files, directories, and symlinks to
+            // its truncate path. FIFO, device, and socket inodes carry no
+            // file data to release, and truncating them would reject an
+            // otherwise valid unlink with EINVAL.
+            if matches!(
+                child_ref.inode_type(),
+                InodeType::RegularFile | InodeType::Directory | InodeType::Symlink
+            ) {
+                child_ref.truncate(0)?;
+            }
             unsafe {
                 ext4_inode_set_del_time(child_ref.inner.inode, u32::MAX);
                 child_ref.mark_dirty();

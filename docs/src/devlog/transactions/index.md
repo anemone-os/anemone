@@ -6,9 +6,6 @@
 
 ## Active
 
-- [VFS Make Node](./2026-07-31-vfs-make-node.md)：R1已接受；Stage 1与`DEVICE-NUMBER-CUTOVER`已关闭，
-  `DEVICE-NUMBER-001`现为effective 12/20 category-neutral baseline。Stage 2已解析为Ready / Not Active；
-  backend-local原子性保持强制，既有common-create跨owner publication窗口由独立open issue承接。C1未激活。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：第一阶段 generic AHCI/ATA block 实现已落地并完成 driver owner 结构移动；probe DMA 生命周期、capacity boundary、shutdown policy 与硬件验证仍处于 Review Hold。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
@@ -27,6 +24,10 @@
 
 ## Completed
 
+- [VFS Make Node](./2026-07-31-vfs-make-node.md)：R2 Stage 1-2与C1-C3已关闭；`DEVICE-NUMBER-CUTOVER`
+  建立12/20 category-neutral device-number baseline，`VFS-MAKE-NODE-CUTOVER`原子激活make-node handoff、
+  filesystem-backed `rdev`与mount kind-first `ENOTBLK`。RV64/LA64各完成293项KUnit、ext4 reload/双backend
+  probe与双libc 11个in-target LTP case；LA64无power driver的末尾halt按预期由monitor退出。
 - [Network UDP](./2026-07-29-net-udp.md)：R0 Stage 0-5已关闭。domain/control两次cutover和final
   `NET-UDP-FINAL-CUTOVER`现已使initial-domain/global Stack、static IPv4 control plane及四项UDP/Socket contract
   Active；最终RV64/LA64均为274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown。

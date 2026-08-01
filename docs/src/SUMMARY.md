@@ -5,6 +5,7 @@
 	- [当前契约模板](./contract-template.md)
 	- [VFS 当前契约](./contracts/vfs/index.md)
 		- [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)
+		- [Make node 与 filesystem-backed rdev](./contracts/vfs/make-node.md)
 		- [Mount admission](./contracts/vfs/mount-admission.md)
 		- [Local whole-file flock](./contracts/vfs/flock.md)
 	- [Device 当前契约](./contracts/device/index.md)

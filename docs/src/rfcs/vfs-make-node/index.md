@@ -1,21 +1,21 @@
 # RFC-20260731-vfs-make-node
 
-**状态：** Accepted for Implementation
+**状态：** Closed
 **修订：** R2
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-01
 **领域：** fs / VFS / syscall ABI / ext4 / ramfs
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 **影响契约：** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；`DEVICE-NUMBER-001` Refine已Effective；
-`VFS-MOUNT-ADMISSION-002` Refine与`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001` Introduce仍Not Cut Over
+`VFS-MOUNT-ADMISSION-002` Refine与`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001` Introduce已Effective
 **开放问题：** [ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)
 记录既有 common-create 跨 backend/cache/dentry publication 窗口；
 [ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY](../../register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)
 记录 lwext4/Rust wrapper 无法提供的 crash/I/O-failure atomicity；[Tracking Issues](./tracking-issues.md)
 保留一个 Apollyon、五个 Keter、两个 Euclid 的 Neutralized 历史
-**下一步：** [Stage 1](./implementation.md#5-stage-1-closed--device-number-prerequisite)与
-`DEVICE-NUMBER-CUTOVER`已关闭；[Stage 2](./implementation.md#7-stage-2-ready--make-node-vertical-slice)
-Active且Checkpoint C1-C2已关闭，Checkpoint C3仍Not Active，必须另行授权
+**下一步：** None；[Stage 1](./implementation.md#5-stage-1-closed--device-number-prerequisite)与
+[Stage 2](./implementation.md#7-stage-2-closed--make-node-vertical-slice)均已关闭，后续umask、named FIFO/device
+data plane、legacy `readdir`及lwext4 strict failure/crash atomicity由独立条目拥有
 
 > 本目录自 2026-07-31 起是 `vfs-make-node` 提案与 target 的公共 canonical source。2026-08-01 的独立复审
 > 接受 R0；2026-08-01 的 Stage 2 resolution 又接受 R1，将强制原子性收窄为 backend-local make-node commit，
@@ -23,7 +23,8 @@ Active且Checkpoint C1-C2已关闭，Checkpoint C3仍Not Active，必须另行�
 > C2 review暴露lwext4/Rust wrapper无法合理承诺任意I/O failure或crash下的dirent/inode全有或全无；开发者
 > 因此接受R2，只保留正常执行下的有序、串行化publication、成功路径持久/reload和可实施的错误抵抗，严格
 > failure/crash atomicity转交后续lwext4集成事务。
-> Stage 1 已关闭并使`DEVICE-NUMBER-001`生效，其余target contract仍须在最终cutover gate后才生效。
+> Stage 1 已关闭并使`DEVICE-NUMBER-001`生效；Stage 2 C3完成双架构runtime、probe退出与最终review后，
+> `VFS-MAKE-NODE-CUTOVER`已原子使其余三个target contract delta生效。
 
 ## 摘要
 
@@ -159,7 +160,7 @@ RFC target：
 
 - [目标和不变量](./invariants.md)
 - [Implementation plan](./implementation.md)：一个 device-number prerequisite + 一个 make-node 主实现阶段；
-  Stage 1 Closed，Stage 2 Active / C1-C2 Closed / C3 Not Active
+  Stage 1-2 Closed / C1-C3 Closed
 - [Tracking Issues](./tracking-issues.md)：保存当前影响 target / implementation readiness 的 finding
 - [No-umask accepted limitation](../../register/current-limitations.md#ane-20260801-vfs-make-node-no-umask)：
   本 revision 的 requested permission bits 不经 process umask 屏蔽
@@ -421,12 +422,12 @@ kind truth。filesystem 只接收 VFS semantic description。
 
 ## 收口
 
-R2已接受；Stage 1与`DEVICE-NUMBER-CUTOVER`已关闭，`DEVICE-NUMBER-001`现为effective 12/20 baseline。
-`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`、`VFS-MOUNT-ADMISSION-002` Refine与
-`VFS-MAKE-NODE-CUTOVER`仍Not Cut Over。Stage 2为Active，Checkpoint C1-C2已关闭；当前必须在此停止，不自动
-激活Checkpoint C3。
+R2已实现并关闭。Stage 1与`DEVICE-NUMBER-CUTOVER`建立effective 12/20 `DEVICE-NUMBER-001` baseline；Stage 2
+C1完成同owner结构拆分，C2完成合并feature implementation，C3完成RV64/LA64 runtime、临时probe/profile退出、
+精确生产树复验与最终review。`VFS-MAKE-NODE-CUTOVER`已原子Introduce `VFS-MAKE-NODE-001`、
+`VFS-SPECIAL-NODE-RDEV-001`并Refine `VFS-MOUNT-ADMISSION-002`，三项现均为effective current contract。
 
-最终 RFC closure 至少需要：
+RFC closure 证据包括：
 
 - RV64/LA64 `mknodat` ABI 与 libc `mknod`/`mknodat` 用户路径证据；
 - ext4、ramfs 各 node-kind create/stat/getdents/unlink 证据；
@@ -437,5 +438,5 @@ R2已接受；Stage 1与`DEVICE-NUMBER-CUTOVER`已关闭，`DEVICE-NUMBER-001`�
 - character source `mount02` / `ENOTBLK` 证据；
 - focused KUnit/source audit、目标架构 build 与用户态 runtime 分开记录；
 - docs-only baseline extraction、`DEVICE-NUMBER-CUTOVER` 与 `VFS-MAKE-NODE-CUTOVER` 分别记录 affected
-  contract IDs 的 Effective / Not Cut Over 结果，前一 gate 未关闭不得合并声称后续 closure；
+  contract IDs 的独立 Effective 结果，前一 gate 未关闭时没有合并声称后续 closure；
 - 活动登记册按真实 closure 拆分或更新：make-node 已关闭不自动表示 named FIFO I/O 或 legacy `readdir` 已关闭。

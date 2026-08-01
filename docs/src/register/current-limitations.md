@@ -5,14 +5,15 @@
 ## ANE-20260801-VFS-MAKE-NODE-NO-UMASK
 
 **Type:** Limitation
-**Status:** Accepted / Pending `VFS-MAKE-NODE-CUTOVER`
+**Status:** Active / Accepted
 **Severity:** Medium
 **Area:** VFS / task fs-state / syscall ABI / file creation
 
 **Summary:** VFS Make Node R2 继承 R0/R1 接受的 no-umask 边界：`mknodat` 最终 permission 直接使用调用者
 requested bits。当前 `sys_umask` 仍是无状态 stub，本 RFC 不读取它、不建立 mknod-local/task-local mask，也不
 扩展其它创建类调用点。因而 R2 的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与
-errno matrix，不覆盖 umask-adjusted permission；`mknodat` 本身在 `VFS-MAKE-NODE-CUTOVER` 前仍未生效。
+errno matrix，不覆盖 umask-adjusted permission。`VFS-MAKE-NODE-CUTOVER`生效后，本限制随current
+`mknodat`能力一起成为active visible boundary。
 
 **Exit Condition:** 后续独立 umask 工作为 task/fs-state mask 建立唯一 owner，统一实现 `umask(2)` 与所有创建类
 调用点的 common-create handoff，并完成跨 create/open/mkdir/mknod 等路径的 permission、fork/exec/lifecycle 与
@@ -28,7 +29,7 @@ errno matrix，不覆盖 umask-adjusted permission；`mknodat` 本身在 `VFS-MA
 ## ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY
 
 **Type:** Limitation
-**Status:** Accepted / Pending `VFS-MAKE-NODE-CUTOVER`
+**Status:** Active / Accepted
 **Severity:** Medium
 **Area:** VFS make-node / ext4 / lwext4 / failure recovery / durability
 

@@ -1,15 +1,15 @@
 # 2026-07-31 - VFS Make Node
 
-**Status:** Active / R2 Accepted / Stage 1 Closed / `DEVICE-NUMBER-CUTOVER` Effective / Stage 2 Active / C1-C2 Closed / C3 Not Active
+**Status:** Completed / R2 Closed / Stage 1-2 Closed / C1-C3 Closed / Both Cutovers Effective
 **Opened:** 2026-08-01；canonical path 于 2026-07-31 public promotion 时预留
 **Owner:** doruche, Codex
 **Canonical Plan:** [RFC-20260731-vfs-make-node R2](../../rfcs/vfs-make-node/index.md),
 [目标与不变量](../../rfcs/vfs-make-node/invariants.md),
-[Stage 2 Ready](../../rfcs/vfs-make-node/implementation.md#7-stage-2-ready--make-node-vertical-slice)
+[Stage 2 plan and closure](../../rfcs/vfs-make-node/implementation.md#7-stage-2-closed--make-node-vertical-slice)
 **Canonical Revision:** R2
 **Contract Impact:** Preserve `VFS-FILE-KIND-001`、`TTY-ENDPOINT-001`；Stage 1已在
-`DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`为Effective；`VFS-MAKE-NODE-001`、
-`VFS-SPECIAL-NODE-RDEV-001` 与 `VFS-MOUNT-ADMISSION-002` 保持 Not Cut Over
+`DEVICE-NUMBER-CUTOVER` Refine `DEVICE-NUMBER-001`为Effective；Stage 2已在`VFS-MAKE-NODE-CUTOVER`
+Introduce `VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`并Refine `VFS-MOUNT-ADMISSION-002`为Effective
 
 ## Scope and authorization
 
@@ -142,7 +142,7 @@ registry lookup前区分`ENOTBLK`，合法Block provider miss保持`ENOENT`。du
 
 **Validation plan / disposition:** authoritative命令、LTP case分类、temporary probe coverage、双架构runtime、
 source audit、probe exit与single cutover见
-[Stage 2 Ready](../../rfcs/vfs-make-node/implementation.md#7-stage-2-ready--make-node-vertical-slice)。本resolution
+[Stage 2 plan](../../rfcs/vfs-make-node/implementation.md#7-stage-2-closed--make-node-vertical-slice)。本resolution
 只运行`git diff --check`、`mdbook build docs`与状态一致性扫描；kernel format/build、KUnit、QEMU、LTP、RV64/
 LA64 runtime、ext4/ramfs behavior与hardware均Not Run。current contracts未修改，`VFS-MAKE-NODE-CUTOVER`及三个
 remaining delta保持Not Cut Over。
@@ -278,3 +278,72 @@ QEMU、KUnit runtime、LTP、temporary probe、真实ext4/ramfs runtime/reload/f
 profile与group按计划保留给C3；current contract未修改，`VFS-MAKE-NODE-CUTOVER`及三个remaining delta全部Not Cut
 Over。Stage 2保持Active，C3保持Not Active；本GOAL在此停止，不自动运行C3、删除probe、恢复profile、修改current
 contract或声称runtime/partial capability。
+
+### 2026-08-01 - Checkpoint C3 activation and validation preflight
+
+**Authorization / baseline:** 开发者建立新的唯一GOAL，独立授权完成Stage 2 C3，并重申只执行C3的前置条件、
+frozen write set、review、validation、退出与write-back，不自动进入任何后续gate。C3从clean
+`dev/drc/alpha@132c10d9`激活；进入时重新读取AGENTS/LOCAL、R2 canonical RFC、implementation、tracking、
+register、current contracts与本transaction。`kconfig`和`conf/.defconfig`均保持`kunit = true`、
+`fs_ext4 = true`、`max_logical_cpus = 1`；RV64/LA64 preliminary master均为4 GiB ordinary file且wrapper只复制到
+worktree-local runtime path。activation-time contract cutover为None，三个remaining delta继续Not Cut Over。
+
+**Validation preflight:** temporary focused group、profile、registration与probe均仍位于§7.6 validation-only
+manifest；durable`anemone-rs`wrapper与C2 production tree保持clean baseline。preflight发现probe能验证ext4即时
+metadata却尚未制造eviction/remount reload；C3在已冻结的`main.rs`与temporary probe内补充chroot前真实
+`/dev/vdb` mount -> create -> normal unmount/sync/evict -> remount -> metadata/data复验 -> cleanup路线。该修复不增加
+production hook、public API、owner或contract surface，probe仍须在runtime取证后完整删除。
+
+**Write-set lock / stop:** C3只允许§7.6 production、validation-only与documentation/cutover manifest；当前预计
+只写temporary probe/main、随后删除/恢复全部validation-only path，并在成功时原子更新三个VFS contract delta。
+任一in-target失败、双架构runtime缺失、probe无法删除、final review finding或停止条件命中时保持全部Not Cut Over。
+
+**Runtime finding / approved expansion:** 首次RV64 runtime的291项KUnit全部PASS，随后pre-chroot reload probe在
+privileged character-node create收到`EPERM`，因此LTP尚未开始。live credential source确认
+`Capability::MKNOD`自credentials初始实现以来一直标记`[NYI]`且未进入`IMPLEMENTED`；root的
+permitted/effective/bounding均由该集合初始化，所以C2正确的effective-capability gate暴露了既有缺口。开发者明确
+批准将`task/credentials/cap.rs`加入C3 manifest，在原credential owner内启用`MKNOD`并验证root projection、
+non-root drop及既有capability transition；不改变R2 target、owner、public API或shared contract。修复及双架构
+runtime闭合前，三个remaining delta继续Not Cut Over。
+
+### 2026-08-01 - Checkpoint C3 runtime closure and `VFS-MAKE-NODE-CUTOVER`
+
+**Natural bug fixes / write set:** 启用`CAP_MKNOD`后，RV64 focused runtime继续暴露两个保持R2 target的自然缺陷。
+lwext4 unlink在child link count归零后无条件调用truncate；其C实现只接受regular/directory/symlink，导致合法FIFO
+unlink返回`EINVAL`。wrapper现只对这三类有data语义的inode执行truncate，special inode直接进入既有deletion-time
+cleanup。`mknod06`同时证明empty pathname应为`ENOENT`；`mknodat`没有`AT_EMPTY_PATH`，adapter现于capability/backend
+admission前完成该分类。两个修复分别位于已冻结的lwext4 wrapper和syscall adapter owner，不改变public API、shared
+contract、node matrix或acceptance boundary。开发者进一步明确：此类同owner、保持target/ABI/acceptance的自然bug
+修复默认批准扩展；owner transfer、public API/shared contract、visible semantics、acceptance或target变化仍须停止。
+
+**RV64 runtime:** canonical wrapper绑定`etc/preliminary/images/sdcard-rv.img`并只修改worktree-local副本。
+最终日志`build/vfs-make-node-stage2-rv64.log`启动293项KUnit并全部通过至用户态；新增
+`mknod_is_a_supported_linux_capability`与`root_starts_with_mknod_in_all_limit_sets`均为`ok`。pre-chroot ext4真实
+unmount/remount reload probe与chroot后的ext4/ramfs完整probe均PASS。glibc、musl各attempted 12 / passed 11 /
+failed 1：`mknod01..09`、`mknodat01..02`全部PASS；唯一`mount02`失败见下述classification。运行到达orderly
+filesystem -> network -> device shutdown与PowerOff machine action。
+
+**LA64 runtime:** canonical wrapper绑定`etc/preliminary/images/sdcard-la.img`，得到与RV64相同的293项KUnit、两个
+probe PASS以及glibc/musl各11/12 focused PASS。运行到达orderly filesystem -> network -> device shutdown；LA64
+没有power-off driver，machine action按预期停在`no power off handler succeeded, halting the system`，随后通过QEMU
+monitor手动退出且wrapper返回0。开发者确认该终态是已知平台边界，不是测试缺陷。硬件仍Not Run。
+
+**`mount02` classification:** 赛题LTP case请求`ext2`。既有scoring compatibility bridge在syscall adapter把
+`ext2`归一化为no-device `ramfs`，所以character/file/null-source/remount子项没有进入R2的ext4 block-source
+admission；glibc/musl及双架构均以相同6 PASS / 6 FAIL结束。修复该alias只为让case变绿会越过本RFC并误改既有
+兼容边界，因此不做。temporary probe已在真实ext4 mount path证明regular/FIFO/character/socket source先返回
+`ENOTBLK`，有效Block identity但provider缺失返回`ENOENT`；这才是`VFS-MOUNT-ADMISSION-002` Refine的直接证据。
+
+**Probe exit / exact production tree:** runtime取证后删除`vfs_make_node_probe.rs`、focused group与registration，
+恢复`main.rs`和长期`profile.txt = sys`。residual search确认user-test/kernel/anemone-rs中没有probe或test-path
+dispatch。exact production tree通过`just fmt kernel --check`、`just fmt user-test --check`、`git diff --check`，并
+在sandbox外串行通过RV64/LA64 canonical release build；串行执行避免共享generated DTB竞争。source audit确认35个
+production `InodeOps` static均有`make_node`initializer，只有ext4/ramfs directory使用真实callback；make-node没有
+provider lookup或重复raw codec，special open没有panic/success stub，temporary validation没有production残留。
+
+**Final review / cutover / stop:** owner/API、final-metadata/publication顺序、existing common-create handoff、reload、
+ABI/errno、resource cleanup、自然代码形状与validation provenance复审无active Apollyon/Keter/Euclid/Safe finding。
+`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`继续Open，no-umask与lwext4 strict failure/crash atomicity继续为
+Active accepted limitations；均不因本closure虚假关闭。`VFS-MAKE-NODE-CUTOVER`因此原子Introduce
+`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`并Refine`VFS-MOUNT-ADMISSION-002`。Stage 2、R2 RFC与本
+transaction Completed；C3以单一`vfs-make-node: close stage 2`commit关闭，并在此停止，不进入任何后续gate。

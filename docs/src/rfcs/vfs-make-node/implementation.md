@@ -1,13 +1,13 @@
 # VFS Make Node 实施计划
 
-**状态：** R2 Accepted / Stage 1 Closed；Stage 2 Active / C1-C2 Closed / C3 Not Active
+**状态：** R2 Closed / Stage 1-2 Closed / C1-C3 Closed
 **最后更新：** 2026-08-01
 **父 RFC：** [RFC-20260731-vfs-make-node](./index.md)
 **目标与不变量：** [VFS Make Node 目标与不变量](./invariants.md)
 **当前契约：** [`DEVICE-NUMBER-001`](../../contracts/device/device-number.md#device-number-001--1220-category-neutral-device-number-domain)
 已由 Stage 1 cut over为live 12/20 baseline；其余受影响ID见[Contract Impact](./invariants.md#contract-impact)
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
-**Contract Cutover：** `DEVICE-NUMBER-CUTOVER` Effective；`VFS-MAKE-NODE-CUTOVER` Not Cut Over
+**Contract Cutover：** `DEVICE-NUMBER-CUTOVER` Effective；`VFS-MAKE-NODE-CUTOVER` Effective
 
 本文只把 R2 accepted target 转换为可执行顺序、stage write set、验证与停止条件，不重新定义
 [`index.md`](./index.md) 和 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI 或 proof
@@ -103,7 +103,7 @@ kernel build、QEMU、KUnit 与 LTP 均 Not Run，也不属于本 docs-only gate
 | Stage                                | 成熟度             | 单一交付                                                                                     | Contract Cutover        | 解析触发点                                        |
 | ------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
 | Stage 1 — Device-number prerequisite | Closed             | 12/20 category-neutral numeric domain 与全部既有 consumer 迁移                               | `DEVICE-NUMBER-CUTOVER` Effective | entry gate、R0 acceptance、transaction 与独立授权 |
-| Stage 2 — Make-node vertical slice   | Active / C1-C2 Closed / C3 Not Active | RV64/LA64 `mknodat` 到 ext4/ramfs persistence、metadata/open/mount 与用户态 proof 的完整闭环 | `VFS-MAKE-NODE-CUTOVER` Not Cut Over | C1-C2已独立关闭；C3仍需单独activation |
+| Stage 2 — Make-node vertical slice   | Closed / C1-C3 Closed | RV64/LA64 `mknodat` 到 ext4/ramfs persistence、metadata/open/mount 与用户态 proof 的完整闭环 | `VFS-MAKE-NODE-CUTOVER` Effective | C1-C3均已独立关闭 |
 
 Stage 1 不交付 make-node syscall；Stage 2 不重新打开 device-number namespace。两次 cutover 各自保持旧 contract
 直到相应 stage 完整通过，不能把 Stage 1 的 build/KUnit 证据写成 make-node implementation proof。
@@ -262,7 +262,7 @@ resolution固定以下结论：
 本gate只修改RFC/transaction/register/navigation/devlog文档并运行docs验证；kernel build、KUnit、QEMU、LTP、
 RV64/LA64 runtime与Stage 2行为全部Not Run。结果是`Stage 2 Ready / Not Active`；C1仍需用户独立授权。
 
-## 7. Stage 2 Ready — Make-node vertical slice
+## 7. Stage 2 Closed — Make-node vertical slice
 
 ### 7.1 成熟度、单一交付与受保护边界
 
@@ -271,10 +271,9 @@ mode/capability admission、VFS `InodeOps::make_node` handoff、ext4/ramfs 全 n
 `rdev` persistence、explicit unsupported open、stat/statx/getdents/unlink、regular ordinary I/O 与 mount
 `ENOTBLK`。这些不是多个可独立验收的能力，全部共享 `VFS-MAKE-NODE-CUTOVER`。
 
-Stage 2当前是`Active / C1-C2 Closed / C3 Not Active`。Ready plan本身不等于授权：开发者已独立授权并关闭
-C1、C2；C2 review触发R2 target renegotiation，并在R2 source/docs复审和C2 validation闭合后关闭。C2 closure
-不会自动激活C3。只有C3满足全部closure条件后才能执行一次`VFS-MAKE-NODE-CUTOVER`；C1/C2均未写current
-contract或宣称partial make-node capability。
+Stage 2现为`Closed / C1-C3 Closed`。Ready plan本身不等于授权：开发者先后独立授权并关闭C1、C2、C3；C2
+review触发R2 target renegotiation，并在R2 source/docs复审和C2 validation闭合后关闭。C3满足全部closure条件后
+才执行唯一一次`VFS-MAKE-NODE-CUTOVER`；C1/C2均未提前写current contract或宣称partial make-node capability。
 
 - 保持 R2 的完整 node-kind、dirfd、mode、`dev`、`CAP_MKNOD`（含 char 0:0 无 whiteout 例外）与 errno matrix；
 - 保持 R2 继承的 no-umask requested-permission semantics；不得读取 `sys_umask` stub、建立
@@ -405,6 +404,23 @@ C3先在temporary validation窗口运行证据，再删除probe/恢复profile，
 navigation/status；任一必要项失败时三项全部Not Cut Over，不把syscall注册、单backend或单架构结果写成partial
 contract。
 
+2026-08-01 C3 closure满足上述条件。RV64/LA64各运行293项KUnit并进入用户态；新增`CAP_MKNOD` projection KUnit
+均通过。两架构temporary probe均完成ext4真实unmount/remount reload与ext4/ramfs node matrix、metadata/rdev、
+regular I/O、special open、unlink和mount admission验证。每个架构的glibc/musl均运行12个focused case，其中
+`mknod01..09`、`mknodat01..02`共11个全部通过；唯一`mount02`失败使用既有`ext2 -> ramfs`compatibility alias，
+没有进入R2的ext4 block-source admission，故按out-of-target compatibility路径分类。direct probe已在真实ext4
+路径证明non-block=`ENOTBLK`与valid block identity/provider miss=`ENOENT`。LA64完成orderly filesystem/network/
+device shutdown后因已知无power driver停在halt，由QEMU monitor手动退出；这是预期平台终态，不是测试缺陷。
+
+runtime同时暴露并关闭三个自然缺陷：credentials owner原先未把既有`Capability::MKNOD`纳入root implemented sets；
+lwext4 unlink对无data的special inode错误调用truncate而返回`EINVAL`；empty pathname在capability admission后才
+分类。修复分别保持原owner与R2 ABI/target：启用并KUnit锁定root `CAP_MKNOD`，只对lwext4可truncate kind释放data，
+并让无`AT_EMPTY_PATH`的`mknodat`先返回`ENOENT`。临时probe、focused group/registration已删除，profile恢复`sys`；
+exact production tree的format、whitespace与RV64/LA64 release build通过，probe/provider/raw-codec/panic/
+initializer与owner/API/lifecycle/ABI/cleanup审计无active finding。因此`VFS-MAKE-NODE-CUTOVER`原子Introduce
+`VFS-MAKE-NODE-001`、`VFS-SPECIAL-NODE-RDEV-001`并Refine`VFS-MOUNT-ADMISSION-002`，Stage 2与RFC Closed。
+hardware、final harness、named FIFO/device/socket data plane与legacy`readdir`保持Not Run/非目标。
+
 `just test xtask`默认是optional repository-health check；只有实际修改Justfile、`scripts/xtask`或build config时
 才升级为mandatory。硬件、final harness、named FIFO/device/socket data plane与legacy `readdir`均Not Run/非目标。
 
@@ -440,6 +456,8 @@ C1只允许第7.2节列出的`fs/mod.rs`、`fs/vfs/`与`fs/inode/`old/new path�
 - `anemone-kernel/src/fs/ext4/{mod.rs,inode.rs,superblock.rs}`
 - `anemone-kernel/src/fs/ramfs/{mod.rs,inode.rs}`
 - `anemone-kernel/src/{syserror.rs,fs/api/mount/mount.rs}`
+- `anemone-kernel/src/task/credentials/cap.rs`（C3 runtime发现既有`Capability::MKNOD`未进入
+  `IMPLEMENTED`；开发者已批准在credential owner内启用并验证该accepted ABI gate）
 - `anemone-kernel/crates/anemos/lwext4-rust/src/{fs.rs,inode/attr.rs}`
 - `anemone-kernel/crates/anemos/lwext4-rust/c/lwext4/src/ext4_inode.c`
 - `anemone-rs/src/{sys/linux/fs.rs,os/linux/fs.rs}`
@@ -463,8 +481,8 @@ special-node vtable，最终为35个。路径集合没有变化；其中与上�
 - `anemone-kernel/src/fs/socket/udp/mod.rs`
 - `anemone-kernel/src/fs/timerfd/mod.rs`
 
-`anemone-kernel/src/task/credentials/cap.rs`、`anemone-abi/src/fs.rs`、stat/statx/getdents与wrapper scripts只作为
-只读审计/validation input；若实现证据表明必须修改，先走expansion，不能静默扩大manifest。
+`anemone-abi/src/fs.rs`、stat/statx/getdents与wrapper scripts只作为只读审计/validation input；若实现证据表明
+必须修改，先走expansion，不能静默扩大manifest。
 
 #### Validation-only temporary manifest
 
