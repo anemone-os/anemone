@@ -2,8 +2,7 @@ platform = "2k1000-la64"
 
 [root]
 fstype = "ext4"
-source = { type = "block", path = "sda" }
+source = { type = "block", path = "sda3" }
 
 [initial-program]
 type = "rootfs-entry"
-argv = ["busybox", "--materialize", "--args", "init"]

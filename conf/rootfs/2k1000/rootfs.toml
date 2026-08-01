@@ -9,28 +9,18 @@ arch = "loongarch64"
 [fs]
 # Filesystem type to use.
 fstype = "ext4"
-# Build a fresh ext4 image from the LoongArch folder root. The developer-provided
-# base tree carries the strict-align musl/GCC toolchain.
 base = "conf/rootfs/2k1000/base"
 type = "folder"
-# Keep enough free space for ext4 metadata and native test build outputs.
 extra-size = "256M"
 
 # Init process configuration. This will be written into /.anemone/init and used by kernel to launch the init process.
 [init]
-path = "/sbin/init"
+path = "/sbin/board-init"
 
-# Directories to create in the generated rootfs.
-[[dirs]]
-path = "/dev"
+[[apps]]
+name = "board-init"
+installed_dir = "/sbin"
 
-[[dirs]]
-path = "/mnt"
-
-[[files]]
-source = "build/anemoneImage-la64-raw"
-installed_path = "/boot/anemoneImage-raw"
-
-[[files]]
-source = "conf/rootfs/2k1000/base/busybox"
-installed_path = "/sbin/init"
+[[apps]]
+name = "shutdown"
+installed_dir = "/sbin"
