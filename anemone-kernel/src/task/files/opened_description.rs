@@ -264,12 +264,13 @@ mod opened_description_liveness_kunits {
     use super::*;
     use crate::{
         fs::{FlockMode, FlockOperation, FlockOutcome, request_flock},
-        task::files::Fd,
+        task::files::{Fd, FdAllocCeiling},
     };
 
     fn open_root(files: &mut FileTable) -> Fd {
         files
             .open_fd(
+                FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap(),
                 vfs_open(Path::new("/")).unwrap(),
                 OpenAccessMode::Read,
                 FileStatusFlags::empty(),
@@ -308,7 +309,9 @@ mod opened_description_liveness_kunits {
     fn aliases_keep_description_live_until_terminal_release() {
         let mut files = FileTable::new();
         let first = open_root(&mut files);
-        let second = files.dup(first).unwrap();
+        let second = files
+            .dup(first, FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap())
+            .unwrap();
 
         let capability = files
             .get_fd(first)
@@ -336,7 +339,9 @@ mod opened_description_liveness_kunits {
     fn flock_domain_keeps_one_owner_truth_across_aliases_and_conversion() {
         let mut files = FileTable::new();
         let first = open_root(&mut files);
-        let alias = files.dup(first).unwrap();
+        let alias = files
+            .dup(first, FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap())
+            .unwrap();
         let independent = open_root(&mut files);
         let (first_file, first_owner) = target(&files, first);
         let (alias_file, alias_owner) = target(&files, alias);
@@ -414,7 +419,9 @@ mod opened_description_liveness_kunits {
     fn terminal_release_cleans_grant_and_blocks_retired_owner_recommit() {
         let mut files = FileTable::new();
         let first = open_root(&mut files);
-        let alias = files.dup(first).unwrap();
+        let alias = files
+            .dup(first, FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap())
+            .unwrap();
         let independent = open_root(&mut files);
         let (first_file, first_owner) = target(&files, first);
         let (independent_file, independent_owner) = target(&files, independent);

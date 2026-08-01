@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-02 - rlimit core 与 RLIMIT_NOFILE](./2026-08-02-rlimit-core-nofile.md)
 - [2026-08-01 - Alpha/Omega POSIX lock/VFS integration](./2026-08-01-alpha-omega-posix-lock-vfs-integration.md)
 - [2026-07-31 - Network host test organization](./2026-07-31-net-host-test-organization.md)
 - [2026-07-31 - Alpha/Omega Flock/UDP integration](./2026-07-31-alpha-omega-flock-udp-integration.md)

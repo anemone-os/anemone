@@ -19,40 +19,7 @@ fn sys_getrlimit(
     kdebugln!("getrlimit: resource={:?}, rlim={:?}", resource, rlim);
 
     let task = get_current_task();
-    let rlimit = match resource {
-        RLimitResource::Cpu => {
-            RLimit {
-                rlim_cur: u64::MAX, // no CPU time limit
-                rlim_max: u64::MAX,
-            }
-        },
-        RLimitResource::Fsize => {
-            RLimit {
-                rlim_cur: u64::MAX, // no file size limit
-                rlim_max: u64::MAX,
-            }
-        },
-        RLimitResource::NoFile => RLimit {
-            rlim_cur: MAX_FD_PER_PROCESS as u64,
-            rlim_max: MAX_FD_PER_PROCESS as u64,
-        },
-        RLimitResource::Stack => RLimit {
-            rlim_cur: 1 << (USER_STACK_SHIFT_KB + 10),
-            rlim_max: 1 << (USER_STACK_SHIFT_KB + 10),
-        },
-        RLimitResource::Core => RLimit {
-            rlim_cur: 0, // no core dump
-            rlim_max: 0,
-        },
-        RLimitResource::Nproc => RLimit {
-            rlim_cur: u64::MAX, // no process limit
-            rlim_max: u64::MAX,
-        },
-        r => {
-            kwarningln!("getrlimit: unimplemented resource {:?}", r);
-            return Err(SysError::NotYetImplemented);
-        },
-    };
+    let rlimit: RLimit = task.get_thread_group().read_rlimit(resource)?.into_abi();
 
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();

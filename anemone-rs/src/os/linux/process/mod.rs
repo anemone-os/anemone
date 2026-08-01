@@ -5,7 +5,7 @@ use core::arch::naked_asm;
 use core::ptr::NonNull;
 
 use alloc::ffi::CString;
-use anemone_abi::process::linux::{clone, mmap, signal::SIGCHLD, wait};
+use anemone_abi::process::linux::{clone, mmap, resource::RLimit, signal::SIGCHLD, wait};
 use bitflags::bitflags;
 
 use crate::{prelude::*, sys::linux::process};
@@ -432,6 +432,30 @@ pub fn wait4(
         0,
     )
     .and_then(|x| Ok(if x == 0 { None } else { Some(x as Tid) }))
+}
+
+#[cfg(target_arch = "riscv64")]
+pub fn getrlimit(resource: u32) -> Result<RLimit, Errno> {
+    let mut limit = RLimit::default();
+    process::getrlimit(resource, &mut limit as *mut RLimit as u64).map(|_| limit)
+}
+
+/// Query or atomically update one process resource policy.
+///
+/// When both pointers are present, `old_limit` receives the pre-update pair.
+pub fn prlimit64(
+    pid: i32,
+    resource: u32,
+    new_limit: Option<&RLimit>,
+    old_limit: Option<&mut RLimit>,
+) -> Result<(), Errno> {
+    process::prlimit64(
+        pid,
+        resource,
+        new_limit.map_or(0, |limit| limit as *const RLimit as u64),
+        old_limit.map_or(0, |limit| limit as *mut RLimit as u64),
+    )
+    .map(|_| ())
 }
 
 pub mod signal;

@@ -297,14 +297,14 @@ limitation；不得重新激活已终止RFC。新增异步、多port、hotplug�
 **Severity:** Medium
 **Area:** procfs / sysctl / kconfig / SysV shm / user-test
 
-**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施。本轮已补齐 `/proc/sys/kernel/shmmax`、`shmall` 和 `shmmni` 的只读观察面，但这不等于完整 SysV shm LTP infra 已关闭：`shmget02` 的 save / restore 路径仍需要可写 sysctl 语义，`shmget03` 仍读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
+**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施。本轮已补齐 `/proc/sys/kernel/shmmax`、`shmall` 和 `shmmni` 的只读观察面，但这不等于完整 SysV shm LTP infra 已关闭：`shmget02` 的 save / restore 路径仍需要可写 sysctl 语义，`shmget03` 仍读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF。2026-08-02 的 rlimit 小迭代已为 common `prlimit64` 和 RV64 legacy `getrlimit` 提供固定 `RLIMIT_CORE=(0,0)` readback，focused 双架构 QEMU matrix通过；但 `shmat01` 与完整 SysV shm profile 尚未复跑，不能据此关闭该 case。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
 
-**Exit Condition:** 为 SysV shm 相关可写 sysctl、`/proc/sysvipc/shm` 视图、测试环境可消费的内核配置视图和 LTP 所需的基础 rlimit 读路径补齐最小可观察语义；明确 profile 对架构 TCONF 项的处理策略；随后重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
+**Exit Condition:** 为 SysV shm 相关可写 sysctl、`/proc/sysvipc/shm` 视图和测试环境可消费的内核配置视图补齐最小可观察语义；明确 profile 对架构 TCONF 项的处理策略；随后重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`，确认已接线的 rlimit readback 在真实 LTP setup 中不再形成遮蔽。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-14
+**Last Verified:** 2026-08-02
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [rlimit core 与 RLIMIT_NOFILE 小迭代](../devlog/changes/2026-08-02-rlimit-core-nofile.md)
 
 ## ANE-20260526-SIGNAL-RESTORER-LEGACY-COMPAT
 
@@ -456,13 +456,13 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Severity:** Medium
 **Area:** procfs / devfs / resource limits / mmap
 
-**Summary:** LTP memory 组仍依赖若干尚未系统化的 Linux 可观察接口：`mmap04` 需要 `/proc/self/maps`，`mmap12` 需要 `/proc/self/pagemap`，`mmap14` 现在可以打开 `/proc/<pid>/status`，但仍需要其中 `VmLck` 反映真实 locked-memory accounting；`mmap10` 需要 `/dev/zero` mmap backing，`mmap18` 需要 `MAP_GROWSDOWN` 和 `getrlimit(RLIMIT_CORE)`，`munmap03` 需要 `getrlimit(RLIMIT_DATA)`。这些不是本轮 mmap errno 收口能局部修掉的核心 VMA 编辑问题。
+**Summary:** LTP memory 组仍依赖若干尚未系统化的 Linux 可观察接口：`mmap04` 需要 `/proc/self/maps`，`mmap12` 需要 `/proc/self/pagemap`，`mmap14` 现在可以打开 `/proc/<pid>/status`，但仍需要其中 `VmLck` 反映真实 locked-memory accounting；`mmap10` 需要 `/dev/zero` mmap backing。2026-08-02 已为 common `prlimit64` 和 RV64 legacy `getrlimit` 提供固定 `RLIMIT_CORE=(0,0)` readback，但 memory profile 未复跑，`mmap18` 仍缺 `MAP_GROWSDOWN`；`munmap03` 需要的 `RLIMIT_DATA` readback仍未实现。这些不是本轮 mmap errno 收口能局部修掉的核心 VMA 编辑问题。
 
-**Exit Condition:** 为 procfs 补齐 memory 组所需的 maps / pagemap 只读语义，并让 `/proc/<pid>/status` 的 `VmLck`、RSS/segment 类字段接入真实 mm 账本；为 `/dev/zero` 提供匿名零页 mmap backing，明确支持或拒绝 `MAP_GROWSDOWN` 的栈增长模型，并实现 LTP 所需的基础 rlimit 读写语义后，重新验证 `mmap04`、`mmap10`、`mmap12`、`mmap14`、`mmap18` 和 `munmap03`。
+**Exit Condition:** 为 procfs 补齐 memory 组所需的 maps / pagemap 只读语义，并让 `/proc/<pid>/status` 的 `VmLck`、RSS/segment 类字段接入真实 mm 账本；为 `/dev/zero` 提供匿名零页 mmap backing，明确支持或拒绝 `MAP_GROWSDOWN` 的栈增长模型，补齐 `RLIMIT_DATA` 所需的诚实 readback后，重新验证 `mmap04`、`mmap10`、`mmap12`、`mmap14`、`mmap18` 和 `munmap03`。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-03
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-08-02
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [rlimit core 与 RLIMIT_NOFILE 小迭代](../devlog/changes/2026-08-02-rlimit-core-nofile.md)
 
 ## ANE-20260529-PROC-TGID-STAT-STAGE1
 
@@ -745,13 +745,13 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Low
 **Area:** signal / procfs / resource limits / kconfig / user-test
 
-**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声；原 `unknown syscall number 283` 已由只公布 `MEMBARRIER_CMD_GLOBAL` 的最小实现完成源码和 SMP KUnit closure，但 signal profile 尚未复跑。它们都不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。2026-08-02 的 rlimit 小迭代已让 common `prlimit64` 与 RV64 legacy `getrlimit` 对 `RLIMIT_CORE` 返回固定 `(0,0)`，focused 双架构 QEMU matrix通过；`kill11` setup是否已在真实 signal profile 中解除遮蔽仍 Not Run。`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声；原 `unknown syscall number 283` 已由只公布 `MEMBARRIER_CMD_GLOBAL` 的最小实现完成源码和 SMP KUnit closure，但 signal profile 尚未复跑。它们都不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
 
-**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和 `sched_getaffinity` 启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` 与已注册的最小 `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
+**Exit Condition:** 为 LTP signal profile 所需的 kconfig fixture 和 `sched_getaffinity` 启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、已接线的 `getrlimit(RLIMIT_CORE)`、kconfig fixture、`sched_getaffinity` 与已注册的最小 `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-29
-**Related:** [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md), [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-08-02
+**Related:** [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md), [rlimit core 与 RLIMIT_NOFILE 小迭代](../devlog/changes/2026-08-02-rlimit-core-nofile.md), [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260729-MEMBARRIER-GLOBAL-ONLY
 
