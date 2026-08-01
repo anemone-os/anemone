@@ -16,6 +16,9 @@ path = "/dev"
 [[dirs]]
 path = "/mnt"
 
+[[dirs]]
+path = "/proc"
+
 [[apps]]
 name = "init"
 installed_dir = "/sbin"
@@ -29,12 +32,24 @@ name = "userptr"
 installed_dir = "/bin"
 
 # [[apps]]
+# name = "fcntl-test"
+# installed_dir = "/bin"
+
+# [[apps]]
 # name = "ioctl-test"
 # installed_dir = "/bin"
 
-[[apps]]
-name = "epoll-test"
-installed_dir = "/bin"
+# [[apps]]
+# name = "epoll-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "flock-test"
+# installed_dir = "/bin"
+#
+# [[apps]]
+# name = "udp-test"
+# installed_dir = "/bin"
 
 # [[apps]]
 # name = "fair-test"

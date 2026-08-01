@@ -132,8 +132,10 @@ pub struct Task {
 
     /// Filesystem state shared by task-related FS operations.
     fs_state: Arc<RwLock<FsState>>,
-    /// File descriptor table state.
-    files_state: RwLock<Arc<RwLock<FilesState>>>,
+    /// This task's file state and semantic participation in one sharing
+    /// episode. Temporary table observers never clone or replace this
+    /// capability.
+    files_state: RwLock<Option<FilesState>>,
     /// Identity, group, and capability state used for permission checks.
     cred: RwLock<CredentialSet>,
     /// Irreversible bit set by `PR_SET_NO_NEW_PRIVS`.
@@ -464,7 +466,7 @@ impl Task {
             #[cfg(feature = "soft_unaligned_access")]
             soft_unaligned_access_enabled: AtomicBool::new(false),
             fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
-            files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
+            files_state: RwLock::new(Some(FilesState::new_empty())),
             cred: RwLock::new(CredentialSet::new_root()),
             no_new_privs: AtomicBool::new(false),
             cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),
@@ -517,7 +519,7 @@ impl Task {
                 #[cfg(feature = "soft_unaligned_access")]
                 soft_unaligned_access_enabled: AtomicBool::new(false),
                 fs_state: Arc::new(RwLock::new(FsState::new_hanging())),
-                files_state: RwLock::new(Arc::new(RwLock::new(FilesState::new()))),
+                files_state: RwLock::new(Some(FilesState::new_empty())),
                 cred: RwLock::new(CredentialSet::new_root()),
                 no_new_privs: AtomicBool::new(false),
                 cpu_usage: NoIrqRwLock::new(TaskCpuUsage::ZERO),

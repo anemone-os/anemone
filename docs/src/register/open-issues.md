@@ -182,6 +182,36 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 **Severity:** Medium
 **Workaround:** 无需针对该问题绕过；完整 `O_PATH` 能力仍见 `ANE-20260528-OPATH-STAGE1-CAPABILITIES`。
 
+## ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY
+
+**Type:** Issue
+**Status:** Open
+**Area:** fs / VFS create / inode cache / dentry lifecycle
+
+**Symptom / Trigger:** live common-create先由filesystem backend提交inode/dirent，随后VFS初始化部分owner metadata并
+materialize inode cache/dentry。backend commit到cache/dentry完成之间存在跨owner failure window；当前touch/mkdir
+已经使用该路线，它不是VFS Make Node R2新引入的问题。
+
+**Impact:** 若post-backend步骤失败，完整端到端原子性可能需要在backend、inode cache、dentry cache与全部create
+caller之间建立统一transaction/rollback。只在mknodat局部补偿会制造并列create protocol或让不同创建路径语义分裂。
+
+**Owner:** VFS common-create protocol（待独立设计）；各filesystem只拥有backend-local commit/rollback
+
+**Last Verified:** 2026-08-01
+
+**Exit Condition:** 由独立RFC/迭代解析所有create call site、唯一transaction owner、backend commit与cache/dentry
+publication线性化点、post-commit failure/rollback和并发lookup语义，并以touch/mkdir/mknodat等真实consumer共同验证。
+若工程证据表明现有handoff已经不可失败，也可用source invariant与fault-path proof关闭，无需强行引入framework。
+
+**Related:** [VFS Make Node R2](../rfcs/vfs-make-node/index.md)、
+[MAKE-NODE-ATOMIC-001](../rfcs/vfs-make-node/invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup)、
+[Stage 2 resolution](../devlog/transactions/2026-07-31-vfs-make-node.md#stage-1---stage-2-implementation-resolution-gate---2026-08-01)
+
+**Severity:** Medium
+**Workaround:** VFS Make Node R2只保证backend-local final metadata先于dirent publication、正常并发不可见
+中间态与可实施cleanup，并要求复用既有common-create handoff且不新增比touch/mkdir更弱的失败路径；本问题不阻塞
+该RFC cutover。lwext4自身strict failure/crash atomicity由独立accepted limitation承接，不与本跨owner问题混合。
+
 ## ANE-20260527-LTP-MKNOD-LEGACY-READDIR
 
 **Type:** Issue
@@ -193,10 +223,14 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 **Impact:** 这两项会继续把旧白名单的通过率卡在 syscall 入口层，和具体文件系统逻辑无关。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-27
-**Exit Condition:** 补上 `mknod` / FIFO 创建的 syscall 路径，并决定是否为该架构提供 legacy `readdir` 兼容入口后，再重新跑 `read03` 和 `readdir21`。
+**Last Verified:** 2026-08-01
+**Exit Condition:** VFS Make Node R2已完成`VFS-MAKE-NODE-CUTOVER`且只交付node creation；仍需分别补齐
+named FIFO I/O 与 legacy `readdir` 决策，再重新跑 `read03` 和 `readdir21`，才能关闭本合并旧条目。
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md),
+[VFS Make Node R2](../rfcs/vfs-make-node/index.md)及其
+[transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)（只覆盖 node creation；named FIFO I/O 与 legacy
+`readdir` 未随 R2 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
 
 **Severity:** Medium
 **Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。
@@ -238,25 +272,6 @@ IDENTIFY 明确拒绝超出 LBA48 domain 的 capacity，并由 focused KUnit/sou
 
 **Severity:** High
 **Workaround:** 当前先用 glibc memory 组验证 mmap / mremap errno 修复；musl memory 组需要等 scheduler 断言修复后再作为完整回归依据。
-
-## ANE-20260531-SCHED-EVENT-WAKE-RUNNABLE-RACE
-
-**Type:** Issue
-**Status:** Open
-**Area:** sched / event / task / user-test
-
-**Symptom / Trigger:** 在 `Event::listen*()` 的等待循环与 `publish()` 唤醒交错时，`prepare_listener()` 会过早把当前 task 标成 `Waiting`，而 waker 侧 `try_to_wake_up()` 先把它切回 `Runnable` 再独立调用 `task_enqueue()`；如果 waiter 在这段窗口里完成一轮 `schedule()` 并进入下一轮等待，旧 wake 的尾巴就可能撞上新的 `Waiting` 状态，触发 `anemone-kernel/src/sched/processor.rs:255` 的 `assert!(task.status() == TaskStatus::Runnable)`。
-
-**Impact:** 会让部分 user-test / LTP profile 随机 panic，遮蔽后续语义回归判断；这是 scheduler / event 的状态交错问题，不是平台硬件语义差异本身。
-
-**Owner:** doruche
-**Last Verified:** 2026-05-31
-**Exit Condition:** 将 event 等待轮次、唤醒归属和 task 入队时序收口，确保 waiter 下一轮不会接到前一轮 wake 的尾巴，并在已知触发 profile 上不再出现该断言。
-
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [RFC-20260601-sched-wait-refactor](../rfcs/sched-wait-refactor/index.md), [Sched Wait Refactor 事务日志](../devlog/transactions/2026-06-01-sched-wait-refactor.md)
-
-**Severity:** High
-**Workaround:** 继续用同一类 profile 复跑确认是否命中该竞态，但不要把它当成已收敛的功能缺口。
 
 ## ANE-20260602-SHMAT1-SIGILL-MASKS-SEGV-HANG-REVALIDATION
 

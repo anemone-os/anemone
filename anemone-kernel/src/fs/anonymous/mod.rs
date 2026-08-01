@@ -49,10 +49,18 @@ pub fn anony_new_inode(
 
     let inode = Arc::new(Inode::new(ino, ty, ops, sb.clone(), prv));
 
+    // Ordinary anon-inode control objects have no Linux file-type bits and use
+    // mode 0600. Typed objects merely hosted in this namespace (for example,
+    // pipes and boot TTYs) retain their explicit type and existing permissions.
+    let perm = if ty == InodeType::Anon {
+        InodePerm::IRUSR | InodePerm::IWUSR
+    } else {
+        InodePerm::all_rwx()
+    };
     let meta = InodeMeta {
         nlink: 1,
         size: 0,
-        perm: InodePerm::all_rwx(),
+        perm,
         uid: Uid::ROOT,
         gid: Gid::ROOT,
         atime: Duration::ZERO,

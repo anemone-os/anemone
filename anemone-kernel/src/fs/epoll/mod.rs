@@ -3,15 +3,14 @@ use crate::{
     task::files::{Fd, OpenedDescriptionCapability},
 };
 
+mod api;
 mod file;
 mod ready;
 mod watch;
 
-use file::EpollWaitPublication;
-pub(in crate::fs) use file::{create_epoll_file, epoll_from_file, teardown_epoll_file};
+use file::{EpollWaitPublication, create_epoll_file, epoll_from_file, teardown_epoll_file};
 use ready::{SLOT_COUNT, ScanSlots, SlotId, WatchSlots};
-use watch::EpollWatch;
-pub(in crate::fs) use watch::WatchPolicy;
+use watch::{EpollWatch, WatchPolicy};
 
 struct EpollOperation {
     closing: bool,
@@ -24,23 +23,23 @@ struct EpollOperation {
 /// The mutex serializes ctl/teardown/scan/harvest decisions; it does not own
 /// target readiness or opened-description liveness. Source callbacks only
 /// publish per-watch ET causality and invalidate the epoll-file wait coverage.
-pub(in crate::fs) struct Epoll {
+struct Epoll {
     operation: Mutex<EpollOperation>,
     wait_publication: EpollWaitPublication,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::fs) struct EpollEvent {
+struct EpollEvent {
     events: PollEvent,
     user_data: u64,
 }
 
 impl EpollEvent {
-    pub(in crate::fs) const fn events(self) -> PollEvent {
+    const fn events(self) -> PollEvent {
         self.events
     }
 
-    pub(in crate::fs) const fn user_data(self) -> u64 {
+    const fn user_data(self) -> u64 {
         self.user_data
     }
 }
@@ -56,7 +55,7 @@ struct HarvestClaim {
 /// Dropping an uncommitted batch restores every claimed ET obligation. The
 /// syscall adapter may therefore validate/copy bytes without turning partial
 /// user-memory progress into an event or ONESHOT policy commit.
-pub(in crate::fs) struct EpollHarvest<'a> {
+struct EpollHarvest<'a> {
     epoll: &'a Epoll,
     operation: MutexGuard<'a, EpollOperation>,
     claims: Vec<HarvestClaim>,
@@ -65,11 +64,11 @@ pub(in crate::fs) struct EpollHarvest<'a> {
 }
 
 impl EpollHarvest<'_> {
-    pub(in crate::fs) fn events(&self) -> &[EpollEvent] {
+    fn events(&self) -> &[EpollEvent] {
         &self.events
     }
 
-    pub(in crate::fs) fn commit(mut self) {
+    fn commit(mut self) {
         assert!(!self.committed, "epoll harvest batch committed twice");
         assert_eq!(
             self.claims.len(),
@@ -131,7 +130,7 @@ impl Drop for EpollHarvest<'_> {
 }
 
 impl Epoll {
-    pub(in crate::fs) fn try_new() -> Result<Arc<Self>, SysError> {
+    fn try_new() -> Result<Arc<Self>, SysError> {
         let slots = WatchSlots::try_new()?;
         let wait_publication = EpollWaitPublication::try_new()?;
         Arc::try_new(Self {
@@ -145,7 +144,7 @@ impl Epoll {
         .map_err(|_| SysError::OutOfMemory)
     }
 
-    pub(in crate::fs) fn ctl_add(
+    fn ctl_add(
         self: &Arc<Self>,
         fd: Fd,
         target: OpenedDescriptionCapability,
@@ -206,7 +205,7 @@ impl Epoll {
         Ok(())
     }
 
-    pub(in crate::fs) fn ctl_modify(
+    fn ctl_modify(
         self: &Arc<Self>,
         fd: Fd,
         target: OpenedDescriptionCapability,
@@ -249,11 +248,7 @@ impl Epoll {
         Ok(())
     }
 
-    pub(in crate::fs) fn ctl_delete(
-        &self,
-        fd: Fd,
-        target: &OpenedDescriptionCapability,
-    ) -> Result<(), SysError> {
+    fn ctl_delete(&self, fd: Fd, target: &OpenedDescriptionCapability) -> Result<(), SysError> {
         let mut operation = self.operation.lock();
         Self::ensure_open(&operation)?;
         let (slot, current) = operation
@@ -269,7 +264,7 @@ impl Epoll {
 
     /// Build a bounded-scan batch while retaining the per-instance operation
     /// permit for the syscall adapter's all-or-rollback copyout.
-    pub(in crate::fs) fn harvest(&self, maxevents: usize) -> Result<EpollHarvest<'_>, SysError> {
+    fn harvest(&self, maxevents: usize) -> Result<EpollHarvest<'_>, SysError> {
         if maxevents == 0 {
             return Err(SysError::InvalidArgument);
         }
@@ -368,7 +363,7 @@ impl Epoll {
     ///
     /// The epoll opened-description final-release hook is the normal caller.
     /// Watched targets are never entered or synchronously unlinked.
-    pub(in crate::fs) fn teardown(&self) {
+    fn teardown(&self) {
         let mut operation = self.operation.lock();
         if operation.closing {
             return;

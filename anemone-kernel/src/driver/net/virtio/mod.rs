@@ -113,17 +113,13 @@ impl DriverOps for VirtIONetDriver {
                 PublishError::IdentityExhausted => {
                     kerrln!("network-device identity space exhausted");
                 },
-                PublishError::NameTooLong => {
-                    kerrln!("network-device name exceeded its capacity");
-                },
             }
             SysError::ProbeFailed
         })?;
         kinfoln!(
-            "VirtIO-Net {} published as {} (ifindex {}, MAC {:?}, frame capacity {})",
+            "VirtIO-Net {} published as netdev {} (MAC {:?}, frame capacity {})",
             vdev.name(),
-            snapshot.name(),
-            snapshot.ifindex(),
+            snapshot.id().index(),
             snapshot.facts().ethernet_address,
             snapshot.facts().max_frame_len,
         );

@@ -30,6 +30,21 @@
 - [LoongArch LSX Sticky-Lazy Context](./2026-08-01-loongarch-lsx-context.md)：R0已完成per-task first-use
   policy、唯一128-bit trapframe backing、user trap save/restore、clone/exec和Linux-compatible signal
   extcontext；2K1000 build与用户实机验收通过。LASX、HWCAP和full-lazy保持accepted limitations。
+- [VFS Make Node](./2026-07-31-vfs-make-node.md)：R2 Stage 1-2与C1-C3已关闭；`DEVICE-NUMBER-CUTOVER`
+  建立12/20 category-neutral device-number baseline，`VFS-MAKE-NODE-CUTOVER`原子激活make-node handoff、
+  filesystem-backed `rdev`与mount kind-first `ENOTBLK`。RV64/LA64各完成293项KUnit、ext4 reload/双backend
+  probe与双libc 11个in-target LTP case；LA64无power driver的末尾halt按预期由monitor退出。
+- [POSIX Record Lock](./2026-07-31-posix-record-lock.md)：R0 Stage 0-3已关闭；file-table episode holder、
+  inode-associated range domain、native `fcntl` ABI、任意fd-removal cleanup、blocking wait/signal replay与19项focused
+  suite完成。最终RV64/LA64均为288/288 KUnit、19/19 focused、双libc LTP 4/4与384个TPASS；LA64末尾halt归因于
+  已知power-off driver缺失。`POSIX-LOCK-CUTOVER`已原子激活四项task/VFS contract ID。
+- [Network UDP](./2026-07-29-net-udp.md)：R0 Stage 0-5已关闭。domain/control两次cutover和final
+  `NET-UDP-FINAL-CUTOVER`现已使initial-domain/global Stack、static IPv4 control plane及四项UDP/Socket contract
+  Active；最终RV64/LA64均为274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown。
+  LA64无电源驱动时在halt后由monitor `quit`收尾；hardware、`smp>1`、full network LTP与final harness Not Run。
+- [Flock](./2026-07-29-flock.md)：R0 Stage 0-1已关闭；RV64/LA64 developer-run acceptance均通过264项
+  enabled KUnit、11项focused oracle与双libc五项flock LTP。LA64末尾halt归因于已登记的power driver缺失；
+  `FLOCK-CUTOVER`已原子激活task retirement handoff与三个VFS flock contract ID。
 - [Network Frame Path Stage 4](./2026-07-27-net-frame-path-stage4.md)：单一post-close conformance checkpoint已完成
   registry-owned pending handoff、post-`Late` activation与host-test metadata修正；NFP-008/009/010关闭，既有
   contracts保持Effective且无第二次cutover。

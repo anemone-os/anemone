@@ -20,6 +20,7 @@ extern crate alloc;
 
 mod boot;
 mod boot_defs;
+mod network_defs;
 
 pub mod kconfig_defs;
 pub mod platform_defs;

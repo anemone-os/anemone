@@ -56,6 +56,43 @@
                 "source"
             ]
         },
+        "network": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "ipv4": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "interface": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "address": {
+                            "type": "string",
+                            "format": "ipv4"
+                        },
+                        "prefix": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 32
+                        },
+                        "default-gateway": {
+                            "type": "string",
+                            "format": "ipv4"
+                        }
+                    },
+                    "required": [
+                        "interface",
+                        "address",
+                        "prefix"
+                    ]
+                }
+            },
+            "required": [
+                "ipv4"
+            ]
+        },
         "initial-program": {
             "type": "object",
             "oneOf": [

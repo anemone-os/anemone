@@ -61,7 +61,7 @@ bitflags! {
         const SYS_TIME = 1u64 << abi::CAP_SYS_TIME;
         /// [NYI] Allows privileged tty configuration operations.
         const SYS_TTY_CONFIG = 1u64 << abi::CAP_SYS_TTY_CONFIG;
-        /// [NYI] Allows privileged mknod operations.
+        /// Allows privileged character and block node creation.
         const MKNOD = 1u64 << abi::CAP_MKNOD;
         /// [NYI] Allows taking file leases.
         const LEASE = 1u64 << abi::CAP_LEASE;
@@ -105,7 +105,8 @@ bitflags! {
             | Self::SYS_CHROOT.bits()
             | Self::SYS_ADMIN.bits()
             | Self::SYS_NICE.bits()
-            | Self::SYS_RESOURCE.bits();
+            | Self::SYS_RESOURCE.bits()
+            | Self::MKNOD.bits();
     }
 }
 
@@ -261,5 +262,29 @@ impl CredCapabilities {
 
     pub fn set_ambient(&mut self, ambient: Capability) {
         self.ambient = ambient;
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn mknod_is_a_supported_linux_capability() {
+        assert_eq!(
+            Capability::from_number(abi::CAP_MKNOD),
+            Ok(Capability::MKNOD)
+        );
+    }
+
+    #[kunit]
+    fn root_starts_with_mknod_in_all_limit_sets() {
+        let caps = CredCapabilities::new_root();
+
+        assert!(caps.permitted().contains(Capability::MKNOD));
+        assert!(caps.effective().contains(Capability::MKNOD));
+        assert!(caps.bounding().contains(Capability::MKNOD));
+        assert!(!caps.inheritable().contains(Capability::MKNOD));
+        assert!(!caps.ambient().contains(Capability::MKNOD));
     }
 }

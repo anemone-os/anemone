@@ -104,6 +104,14 @@ pub struct Parameters {
     pub net_pump_ingress_budget_frames: Option<usize>,
     pub net_pump_egress_budget_steps: Option<usize>,
     pub net_worker_repoll_rounds: Option<usize>,
+    pub net_local_link_packet_capacity: Option<usize>,
+    pub net_local_link_mtu_bytes: Option<usize>,
+    pub net_udp_endpoint_capacity: Option<usize>,
+    pub net_udp_tx_datagram_capacity: Option<usize>,
+    pub net_udp_rx_datagram_capacity: Option<usize>,
+    pub net_udp_max_payload_bytes: Option<usize>,
+    pub net_udp_ephemeral_port_first: Option<u16>,
+    pub net_udp_ephemeral_port_last: Option<u16>,
 }
 
 impl Parameters {
@@ -184,6 +192,14 @@ impl Parameters {
         materialize!(net_pump_ingress_budget_frames);
         materialize!(net_pump_egress_budget_steps);
         materialize!(net_worker_repoll_rounds);
+        materialize!(net_local_link_packet_capacity);
+        materialize!(net_local_link_mtu_bytes);
+        materialize!(net_udp_endpoint_capacity);
+        materialize!(net_udp_tx_datagram_capacity);
+        materialize!(net_udp_rx_datagram_capacity);
+        materialize!(net_udp_max_payload_bytes);
+        materialize!(net_udp_ephemeral_port_first);
+        materialize!(net_udp_ephemeral_port_last);
         Ok(())
     }
 
@@ -355,6 +371,22 @@ pub const NET_PUMP_INGRESS_BUDGET_FRAMES: usize = {};
 pub const NET_PUMP_EGRESS_BUDGET_STEPS: usize = {};
 /// Maximum immediate repoll rounds before a network worker yields.
 pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
+/// Shared packet-slot capacity of the production local software link.
+pub const NET_LOCAL_LINK_PACKET_CAPACITY: usize = {};
+/// Maximum IP-medium packet size of the production local software link.
+pub const NET_LOCAL_LINK_MTU_BYTES: usize = {};
+/// Maximum number of live UDP endpoints in the initial domain.
+pub const NET_UDP_ENDPOINT_CAPACITY: usize = {};
+/// Per-endpoint UDP transmit datagram capacity.
+pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};
+/// Per-endpoint UDP receive datagram capacity.
+pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = {};
+/// Maximum UDP payload bytes reserved by one protocol engine datagram.
+pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
+/// First port in the deterministic UDP ephemeral allocation range.
+pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = {};
+/// Last port in the deterministic UDP ephemeral allocation range.
+pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -414,6 +446,14 @@ pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
             resolved!(net_pump_ingress_budget_frames),
             resolved!(net_pump_egress_budget_steps),
             resolved!(net_worker_repoll_rounds),
+            resolved!(net_local_link_packet_capacity),
+            resolved!(net_local_link_mtu_bytes),
+            resolved!(net_udp_endpoint_capacity),
+            resolved!(net_udp_tx_datagram_capacity),
+            resolved!(net_udp_rx_datagram_capacity),
+            resolved!(net_udp_max_payload_bytes),
+            resolved!(net_udp_ephemeral_port_first),
+            resolved!(net_udp_ephemeral_port_last),
         )
     }
 }
@@ -442,4 +482,63 @@ impl Config {
 pub struct KernelConfig {
     pub features: HashMap<String, bool>,
     pub parameters: Parameters,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn defaults() -> Parameters {
+        Config::from_str(include_str!("../../../../conf/.defconfig"))
+            .unwrap()
+            .parameters
+    }
+
+    #[test]
+    fn udp_defaults_materialize_and_generate_exact_constants() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        let generated = parameters.gen_kconfig_defs();
+        for expected in [
+            "pub const NET_UDP_ENDPOINT_CAPACITY: usize = 64;",
+            "pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = 8;",
+            "pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = 64;",
+            "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1472;",
+            "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 32768;",
+            "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 60999;",
+        ] {
+            assert!(
+                generated.contains(expected),
+                "missing generated constant {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn udp_parameter_semantics_are_deferred_to_kernel_compilation() {
+        let mut parameters = defaults();
+        parameters.net_udp_endpoint_capacity = Some(0);
+        parameters.net_udp_tx_datagram_capacity = Some(usize::MAX);
+        parameters.net_udp_max_payload_bytes = Some(1);
+        parameters.net_udp_ephemeral_port_first = Some(60_000);
+        parameters.net_udp_ephemeral_port_last = Some(50_000);
+        parameters.materialize_defaults(None).unwrap();
+
+        let generated = parameters.gen_kconfig_defs();
+        for expected in [
+            "pub const NET_UDP_ENDPOINT_CAPACITY: usize = 0;".to_string(),
+            format!(
+                "pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};",
+                usize::MAX
+            ),
+            "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1;".to_string(),
+            "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 60000;".to_string(),
+            "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 50000;".to_string(),
+        ] {
+            assert!(
+                generated.contains(&expected),
+                "missing generated constant {expected}"
+            );
+        }
+    }
 }

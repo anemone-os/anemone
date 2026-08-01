@@ -1,105 +1,43 @@
 # 公开草案与 RFC
 
-公共仓库中的草案只用于共享评审尚未定稿、但已经需要协作讨论的方案。
+公开 RFC 只用于已经进入共享决策、且涉及 owner、ABI、shared contract、非平凡生命周期/并发、多个 cutover、probe 或 target 风险的方案。Patch 默认没有过程文档；值得长期保存但边界局部的判断使用小迭代记录。完整分级见[开发工作流](./development-workflow.md)。
 
-不是所有个人草稿都需要进入仓库；只有当一个问题已经进入共享决策流程时，才需要公开草案页面。
+## 默认形状
 
-## 什么时候需要公开草案
-
-满足以下任一条件时，适合创建公开草案：
-
-- 方案影响多个子系统；
-- 方案会改变 ABI、兼容性或外部契约；
-- 方案需要跨人、跨时间异步评审；
-- 方案预计会经历多轮讨论，且结论需要长期追踪。
-
-## 存放方式
-
-公开草案统一放在 `docs/src/rfcs/` 下，并默认使用目录级 RFC：
+RFC 默认只有一个 canonical 入口：
 
 ```text
 docs/src/rfcs/<short-slug>/
   index.md
-  implementation.md
-  invariants.md          # 可选；协议、不变量或证明义务复杂时使用
-  tracking-issues.md     # 可选；review 或实现反馈发现设计问题时使用
-  backgrounds/           # 可选；保存历史背景、问题清单和被拒绝方案
-    index.md
 ```
 
-`index.md` 是总入口，负责说明状态、范围、文档地图、accepted target、contract delta、接受边界和下一步。`implementation.md` 是实现计划，负责记录 future Outline、下一个 Ready 阶段、滚动解析、验证、contract cutover、反馈 gate 和停止边界。`invariants.md` 在 RFC 改变共享 contract，或正确性依赖明确协议、不变量或证明义务时创建；它保存 `Contract Impact`、target invariants 和 RFC-local proof obligations，不维护整个领域的 current contract。`tracking-issues.md` 只在存在一组需要持续 review、分级和关闭的设计问题时创建；这些问题可以来自文档层 review，也可以来自实现期反馈。`backgrounds/` 只保存背景材料，不覆盖 accepted target 或 [当前契约](./contracts.md)。
+`index.md` 保存 accepted target、non-goals、owner/handoff/failure/cleanup、ABI/visible semantics、实际 contract delta、Implementation Boundary、acceptance、validation 和 closure。
 
-## RFC 修订与 Git 历史
+只有出现真实需要时才增加 `invariants.md`、`implementation.md`、`tracking-issues.md` 或 `backgrounds/`。transaction 也不是 RFC 实现的默认产物；只有长期、多 checkpoint、多 cutover、probe/renegotiation 证据需要独立执行历史时才创建。具体形状见 [RFC 模板](./rfc-template.md)。
 
-RFC 不需要独立 Git 仓库。整个 Anemone 仓库的 Git 保存文本 diff、review 和提交历史；RFC 自身只用 `R0`、`R1`、`R2` 标记已经接受的 target 语义版本。Draft 尚未形成 accepted target 时写 `Draft`，第一次接受进入实现时形成 `R0`。
+## Target、current contract 与 Git
 
-只有目标、非目标、accepted target、target invariant、状态所有权、ABI / 外部可见语义或接受边界发生已接受的变化时才递增修订。普通措辞、链接、证据补充，以及保持 target 的阶段顺序、write set 或验证调整不递增。Git diff 是待 review 的修订提案；RFC `index.md` / `invariants.md` 保存当前修订的 target 和 delta，已经生效的跨 RFC 共享规则保存在 `docs/src/contracts/`。不要创建 `index-v1.md`、独立 amendment 文件或要求读者回放 patch 链。
+- RFC target 在 cutover 前不能覆盖[当前契约](./contracts.md)。
+- `Contract Impact` 只列 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve` 流水。
+- RFC 单向链接 current baseline；current contract 不为 pending proposal 维护默认 backlink。
+- Git 保存物理文本历史；RFC `R0`、`R1` 只标记已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
+- 状态使用 `Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`；它不代替用户对当前实现任务的授权。
 
-`implementation.md` 和 `tracking-issues.md` 保留增量历史：已完成阶段不静默重写，后来发现的问题保留来源、状态迁移和 neutralize 依据。Closed RFC 的新语义修订需要代码实现时，应建立引用目标修订的新事务，而不是继续延长旧的 Completed 事务。完整规则见 [RFC 工作流](./rfc-workflow.md#git-历史与语义修订)。
+## 实现与反馈
 
-RFC 页首 `状态` 描述当前修订：后续修订已接受但仍需实现时回到 `Accepted for Implementation`，该修订收口后再回到 `Closed`；旧修订的关闭事实留在修订记录和旧事务中。既有 RFC 不因新规则批量补写 `R0`，只在后续真实语义修订时依据可验证历史建立 baseline。
+Implementation Boundary 约束 target、owner、handoff、ABI、contract、acceptance 和 validation，不冻结逐文件 write set。同 owner 的内部 import/module 注册、新文件、定向测试和行为保持型拆分可以自然闭合；越过语义边界时必须停止。
 
-大型重构应把不变量、实现顺序、历史材料拆成同一目录下的子文档，避免 devlog 或 register 直接引用个人草稿。
+普通实现、commit 和单次 RFC closure 不需要 transaction，也不需要 resolution/activation/closure 三段式状态。只有独立安全的 checkpoint、contract cutover、probe、不安全中间态或明确人工授权点才建立 gate。用户只授权一个 gate 时，完成后不得自动进入下一 gate。
 
-RFC 被接受进入实现阶段，不表示所有未来阶段都已经精确设计。它表示 accepted target、contract delta、correctness boundaries、最终证明义务和反馈入口足够明确，第一个可执行阶段已经完整解析为 Ready；更远阶段可以保持 Outline，只说明目的、依赖、受保护边界和解析触发点。只能通过真实接口、状态流转、错误路径或集成结果验证的风险，可以作为受控 probe / vertical slice gate 带入实现。
+每次实现收口前都进行架构摩擦扫描。没有具体摩擦或只剩 Safe 时不写占位结论；Euclid 在仍残留时简短报告；Keter/Apollyon 必须在完成声明或 cutover 前停止。不要建立 `friction.md` 或全局摩擦台账。
 
-不要为 probe / feedback 默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在 `backgrounds/` 下增加具体命名的证据文件。
+实现反馈可以在 accepted target 内修正路线；改变 target invariant、owner、ABI、contract、acceptance 或 validation claim 时，必须停止并由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。agent 不能批准自己的 reduced target。
 
-实现反馈不能自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。如果工程证据说明原 target 代价过高或只能形成较弱能力，当前 gate 在 cutover 前停止，由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。correctness invariant 不能作为工程妥协项；较弱 target 只有在 RFC revision / `Contract Impact` 更新、重新接受并完成对应 cutover 后才成为当前有效结果。
+## 导航与历史
 
-每个 RFC 入口都应在页首明确给出：
+新 RFC 更新本页、`docs/src/SUMMARY.md` 和 RFC 内必要链接，使页面可达；导航只提供链接与范围，不复制阶段、验证和问题状态。既有 RFC、transaction、manifest 和历史状态作为 legacy history 保留，不批量迁移。
 
-- `状态`
-- `修订`
-- `负责人`
-- `最后更新`
-- `领域`
-- `影响契约`
-- `开放问题`
-- `下一步`
-
-完整生命周期见 [RFC 工作流](./rfc-workflow.md)。可直接复制的草案结构见 [RFC 模板](./rfc-template.md)；当前契约的组织和模板见 [当前契约](./contracts.md) 与 [当前契约模板](./contract-template.md)。
-
-## 实现期事务日志
-
-RFC 一旦进入实现阶段，必须建立对应的事务级 devlog：
-
-```text
-docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
-```
-
-同时更新：
-
-- RFC `index.md` 页首的 `事务日志` 字段；
-- `docs/src/devlog/transactions/index.md`；
-- 当前双周 devlog，只追加该事务的入口摘要；
-- `docs/src/SUMMARY.md`，让 RFC 和事务日志都出现在 mdBook 导航中。
-
-事务日志记录实际执行、checkpoint、review 结论、验证证据、contract cutover、实现期反馈、target renegotiation 证据/决定、剩余限制和更正说明；RFC 记录 accepted target、delta、边界和计划；current contract 记录 effective shared rule。事务日志应链接回 RFC，RFC 也应链接到事务日志。若实现期反馈只改变执行事实，追加事务日志即可；若它在保持 target 时解析或改变阶段计划，更新 `implementation.md`；若它需要改变 target invariant、ABI 或接受边界，先停止 cutover 并进入 RFC review / `Target Renegotiation Gate`，接受后再更新 RFC target / `Contract Impact`，并在实际 cutover 时更新对应 contract IDs。
-
-事务日志还应标明实现的 RFC 修订、受影响 contract IDs 和各自 cutover gate。首次实现通常对应 `R0`；Closed RFC 的后续 `R1`、`R2` 如果需要代码工作，应分别建立可独立收口的新事务。旧事务继续作为原修订的执行证据，不重新打开。
-
-## Tracking Issues
-
-不是每个 RFC 都需要 `tracking-issues.md`。只有当问题清单会影响实现顺序、review gate、停止边界或验收判断时，才在 RFC 根目录创建它。
-
-`tracking-issues.md` 是当前问题跟踪页，不是历史归档：
-
-- 当前仍影响实现或验收的问题放在 `tracking-issues.md`；
-- 实现期暴露出的接口摩擦、状态机不闭合、边界错误或抽象过度，若会改变 accepted target 或 current contract，也应作为设计问题进入 `tracking-issues.md`；
-- 已过期的旧问题清单、被否决方案和历史 review 材料放在 `backgrounds/`；
-- 实际阶段推进、checkpoint、验证证据和更正说明仍写入事务日志；
-- 不要用它替代 GitHub issue、PR 讨论或双周 devlog。
-
-问题等级必须使用当前 review skill 的名称：
-
-- `Apollyon`：错误结果、数据损坏、安全问题、崩溃或严重不可恢复状态，必须修。
-- `Keter`：不会马上爆炸，但会阻塞后续开发或把核心抽象带错方向，必须修。
-- `Euclid`：通常值得修，但不阻塞主线。
-- `Safe`：记录即可，默认不修，除非局部且低成本。
-- `Neutralized`：已经处理完成的问题；必须保留 neutralize 依据和对应事务日志条目。
-
-旧文档可能仍出现 `P0/P1/P2/P3` 历史称呼；新增 RFC、review 输出和 tracking issue 不再使用这些旧等级名。
+旧文档可能仍出现 `Accepted for Implementation`、Ready/Active/Closed、逐文件 manifest、强制 transaction 或 `P0/P1/P2/P3` 等历史形状；它们说明当时流程，不覆盖当前[开发工作流](./development-workflow.md)。
 
 ## 当前 RFC
 
@@ -113,10 +51,52 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
   `AT_HWCAP*`和Linux full-lazy owner优化保持明确非目标；software unaligned access问题独立登记。
+- [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R2 Closed；以 canonical
+  `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs有序publication与filesystem-backed `rdev`
+  形成完整node-creation target。R2分支内接受的no-umask边界属于历史closure；合流后的current implementation
+  复用既有task filesystem context唯一owner，与`openat`/`mkdirat`一致对`mknodat` requested permission应用
+  process umask，见[umask小迭代记录](./devlog/changes/2026-07-27-umask-file-creation-mask.md)。
+  Stage 1与`DEVICE-NUMBER-CUTOVER`已把
+  [`DEVICE-NUMBER-001`](./contracts/device/device-number.md) Refine为effective 12/20 category-neutral baseline；
+  Stage 2的`VFS-MAKE-NODE-CUTOVER`又使
+  [`VFS-MAKE-NODE-001`与`VFS-SPECIAL-NODE-RDEV-001`](./contracts/vfs/make-node.md)及mount `ENOTBLK` Refine
+  effective。R2要求backend-local final metadata
+  先于dirent publication、正常并发不可见中间态、成功reload与可实施cleanup；lwext4任意I/O failure/crash
+  atomicity由[accepted limitation](./register/current-limitations.md#ane-20260801-vfs-make-node-lwext4-atomicity)
+  和后续lwext4/Rust wrapper事务负责。若既有common-create backend/cache/dentry窗口需要新跨ownertransaction，
+  则由[独立open issue](./register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)承接，不阻塞本RFC。
+  Stage 1-2与C1-C3均Closed；双架构runtime、probe退出、final review与cutover证据见
+  [completed transaction](./devlog/transactions/2026-07-31-vfs-make-node.md)。
+- [RFC-20260731-posix-record-lock](./rfcs/posix-record-lock/index.md)：R0已实现并关闭；本地`S_IFREG`支持native
+  RV64/LA64 POSIX process-associated byte-range record lock，file-table episode拥有holder identity，inode-associated
+  VFS domain拥有range/conflict/wait truth，任意相关fd removal执行窄cleanup handoff；现有`flock`与
+  opened-description lifecycle保持独立。最终双架构均为288/288 KUnit、19/19 focused、双libc LTP 4/4与384个
+  TPASS；LA64在orderly shutdown后因已知缺少power-off driver停在末尾halt，不宣称machine power-off capability。
+  `POSIX-LOCK-CUTOVER`已原子激活四项task/VFS contract ID，最终review四级finding全0。完整target delta、
+  proof obligations 与滚动阶段见 [目标和不变量](./rfcs/posix-record-lock/invariants.md)及
+  [实施计划](./rfcs/posix-record-lock/implementation.md)，执行证据见
+  [事务日志](./devlog/transactions/2026-07-31-posix-record-lock.md)。
+- [RFC-20260728-flock](./rfcs/flock/index.md)：R0已实现并关闭；opened-description持有、inode-associated VFS
+  domain统一裁决的本地whole-file advisory flock支持generic local default并保持record-lock conflict namespace独立。
+  final close删除holder grant并提交cooperative recheck hint，不承诺precise close/signal/restart winner。
+  RV64/LA64 developer-run acceptance均通过264项enabled KUnit、11项focused oracle与双libc五项flock LTP；
+  LA64末尾halt由已登记的power driver缺失解释。`FLOCK-CUTOVER`已把
+  [`OPENED-DESC-RETIRE-001`](./contracts/task/opened-description-lifecycle.md)与三个
+  [`FLOCK-*`](./contracts/vfs/flock.md) ID原子切换为Effective，执行证据见
+  [transaction](./devlog/transactions/2026-07-29-flock.md)。
 - [RFC-20260726-net-frame-path](./rfcs/net-frame-path/index.md)：R1的Stage 1-3与`NFP-FINAL-CUTOVER`历史closure
   保持；单一Stage 4已修正registry pending capability owner、post-`Late` boot order与host-test metadata，
   NFP-008/009/010同步neutralize，R1重新Closed。六个Network ID和`SYSTEM-POWER-ORDERLY-001` Refine继续
   Effective；Stage 4 contract cutover为None，未续写原Completed transaction或修改current contracts。
+- [RFC-20260729-net-udp](./rfcs/net-udp/index.md)：R0已实现并关闭；Stage 1/2分别建立initial-domain唯一Stack、
+  logical interface/static IPv4 control plane与production local path，Stage 3/4完成Endpoint/File lifecycle、
+  unconnected UDP transaction、blocking与poll/select/epoll、capacity/copy-fault/fragment证据。Stage 5以同源guest
+  case和bounded host peer完成RV64/LA64 remote-external双向proof；两项获批LA64 Route Correction修复PCH-PIC/
+  EIOINTC delivery与同步VirtIO block空IRQ handler，保持原owner与R0 target。最终双架构均为274/274 KUnit、UDP
+  17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown；LA64无电源驱动时在halt后由monitor `quit`收尾。
+  `NET-UDP-FINAL-CUTOVER`已原子使四项[UDP Socket contract](./contracts/net/udp-socket.md) Active；hardware、
+  `smp>1`、full network LTP与final harness保持Not Run。执行证据见
+  [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
@@ -168,25 +148,6 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 - [RFC-20260603-IOCTL-LOOP](./rfcs/ioctl-loop/index.md)：已实现并关闭；完成 `ioctl(2)` VFS 分发、统一 block ioctl、静态 loop 设备池与第一阶段 loop ioctl。扩展 loop sysfs、partscan、direct I/O、autoclear 和 ioctl LTP 缺口继续由 register 跟踪。
 - [RFC-20260622-sched-eevdf-lite](./rfcs/sched-eevdf-lite/index.md)：Stage 3/R1 runtime acceptance 失败后延期关闭，不是 Completed；关闭时 default 曾恢复为 RR，后续已由 Fair / Stride 切换为 Fair。EEVDF 保留为可运行实验原型，但显著吞吐回归与百万级 yield self-pick 仍存在，`EEVDF-001` / `EEVDF-018` / `EEVDF-004` / `EEVDF-020` 保持未解决 Keter。事务日志见 [2026-07-09-sched-eevdf-lite](./devlog/transactions/2026-07-09-sched-eevdf-lite.md)，证据见 [Stage 3 eligibility 回归背景](./rfcs/sched-eevdf-lite/backgrounds/stage3-eligibility-regression-20260711.md)。
 
-当一个 feature 被多个 RFC 分段覆盖时，本页可以作为轻量聚合入口，或由其中一个 umbrella RFC 在 `index.md` 中聚合链接。聚合入口只列出相关 current contracts、RFC、事务日志、register / current limitations 及其覆盖范围；不要在这里复制规则正文、阶段完成度、验证证据或问题状态。跨 RFC 已生效的共享规则以提取后的 current contract 为准，accepted target 以对应 RFC 为准，执行事实以 transaction devlog 为准。
+当一个 feature 被多个 RFC 分段覆盖时，本页可以作为轻量聚合入口，或由其中一个 umbrella RFC 在 `index.md` 中聚合链接。聚合入口只列出相关 current contracts、RFC、按需 transaction、register / current limitations 及其覆盖范围；不要复制规则正文、阶段完成度、验证矩阵或问题状态。
 
-## 目录级 RFC 何时必需
-
-满足以下任一条件时，必须使用目录级 RFC，而不是单文件草案：
-
-- 迁移跨多个子系统，且需要阶段性实施计划；
-- 方案正确性依赖明确不变量或协议证明；
-- 需要保留历史备选、问题清单、review 结论或验证证据；
-- devlog 事务日志需要引用该计划作为 canonical source。
-
-## 如何避免误导 agent
-
-只要边界清楚，公开草案不会误导 agent。
-
-关键在于：
-
-- 已提取的当前共享规则写在 current contracts；活动问题和限制写在 register；实现事实由代码与事务证据支持；
-- 草案只陈述提议、问题与待决事项；
-- 草案被接受后成为 target source，不自动变成 current fact；只有 cutover gate 通过后，长期共享规则才写入 current contract。
-
-换句话说，草案是输入材料，不是当前事实本身。
+已提取的共享规则以 current contract 为准，accepted target 以对应 RFC 为准，执行事实以 live code、Git/PR 和被 closure/cutover 引用的证据为准。Draft/Accepted RFC 是目标来源，不是当前事实；只有达到 cutover 的验证和停止条件后，长期共享规则才写入 current contract。

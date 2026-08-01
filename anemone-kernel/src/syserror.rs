@@ -65,12 +65,16 @@ pub enum SysError {
     IsDir,
     /// The target is not a regular file.
     NotReg,
+    /// The target is not a block device.
+    NotBlockDevice,
     /// The target is not a symbolic link.
     NotSymlink,
     /// The entity is busy (e.g. still has active references).
     Busy,
     /// File is too large.
     FileTooLarge,
+    /// A signed ABI range or offset cannot represent the requested result.
+    Overflow,
     /// The directory is not empty.
     DirNotEmpty,
     /// Trying to link across different filesystems.
@@ -85,6 +89,26 @@ pub enum SysError {
     NoSpace,
     /// Operation would block and nonblocking mode was requested.
     Again,
+    /// The requested socket address family is unsupported.
+    AddressFamilyNotSupported,
+    /// The requested socket base type is unsupported.
+    SocketTypeNotSupported,
+    /// The requested socket protocol is unsupported.
+    ProtocolNotSupported,
+    /// The file descriptor does not refer to a socket.
+    NotSocket,
+    /// The requested local address/port conflicts with an active binding.
+    AddressInUse,
+    /// The requested local address is not owned by this network domain.
+    AddressNotAvailable,
+    /// A bounded network buffer or endpoint resource is exhausted.
+    NoBufferSpace,
+    /// A datagram send did not provide a destination address.
+    DestinationAddressRequired,
+    /// A datagram exceeds the supported protocol or interface limit.
+    MessageTooLong,
+    /// The network control plane has no route to the destination.
+    NetworkUnreachable,
     /// Pipe write attempted after all readers were gone.
     BrokenPipe,
     /// The file does not support seeking.
@@ -206,13 +230,25 @@ impl SysError {
             SysError::IdentifierRemoved => EIDRM,
             SysError::NotDir => ENOTDIR,
             SysError::IsDir => EISDIR,
+            SysError::NotBlockDevice => ENOTBLK,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,
             SysError::FileTooLarge => EFBIG,
+            SysError::Overflow => EOVERFLOW,
             SysError::DirNotEmpty => ENOTEMPTY,
             SysError::CrossDeviceLink => EXDEV,
             SysError::ReadOnlyFs => EROFS,
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
             SysError::Again => EAGAIN,
+            SysError::AddressFamilyNotSupported => EAFNOSUPPORT,
+            SysError::SocketTypeNotSupported => ESOCKTNOSUPPORT,
+            SysError::ProtocolNotSupported => EPROTONOSUPPORT,
+            SysError::NotSocket => ENOTSOCK,
+            SysError::AddressInUse => EADDRINUSE,
+            SysError::AddressNotAvailable => EADDRNOTAVAIL,
+            SysError::NoBufferSpace => ENOBUFS,
+            SysError::DestinationAddressRequired => EDESTADDRREQ,
+            SysError::MessageTooLong => EMSGSIZE,
+            SysError::NetworkUnreachable => ENETUNREACH,
             SysError::BrokenPipe => EPIPE,
             SysError::IllegalSeek => ESPIPE,
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't

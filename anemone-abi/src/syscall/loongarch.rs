@@ -62,7 +62,9 @@ pub mod linux {
     pub const SYS_FCNTL: u64 = 25;
 
     pub const SYS_IOCTL: u64 = 29;
+    pub const SYS_FLOCK: u64 = 32;
 
+    pub const SYS_MKNODAT: u64 = 33;
     pub const SYS_MKDIRAT: u64 = 34;
     pub const SYS_UNLINKAT: u64 = 35;
     pub const SYS_SYMLINKAT: u64 = 36;
@@ -213,6 +215,11 @@ pub mod linux {
     pub const SYS_SHMCTL: u64 = 195;
     pub const SYS_SHMAT: u64 = 196;
     pub const SYS_SHMDT: u64 = 197;
+    pub const SYS_SOCKET: u64 = 198;
+    pub const SYS_BIND: u64 = 200;
+    pub const SYS_GETSOCKNAME: u64 = 204;
+    pub const SYS_SENDTO: u64 = 206;
+    pub const SYS_RECVFROM: u64 = 207;
 
     pub const SYS_READAHEAD: u64 = 213;
 

@@ -9,8 +9,8 @@ use idalloc::{IdAllocatorWithReserve, IdentityBijection, OneShotAllocWithReserve
 
 use crate::prelude::*;
 
-pub const MAJOR_BITS: usize = 16;
-pub const MINOR_BITS: usize = 16;
+pub const MAJOR_BITS: usize = 12;
+pub const MINOR_BITS: usize = 20;
 
 pub const UNNAMED_MAJOR: usize = 0;
 
@@ -72,51 +72,90 @@ impl MinorNum {
     }
 }
 
-macro_rules! gen_devnum {
+/// Category-neutral device number stored by generic inode metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DeviceNumber {
+    major: MajorNum,
+    minor: MinorNum,
+}
+
+impl DeviceNumber {
+    pub const fn new(major: MajorNum, minor: MinorNum) -> Self {
+        Self { major, minor }
+    }
+
+    pub const fn decompose(self) -> (MajorNum, MinorNum) {
+        (self.major, self.minor)
+    }
+
+    pub const fn major(self) -> MajorNum {
+        self.major
+    }
+
+    pub const fn minor(self) -> MinorNum {
+        self.minor
+    }
+}
+
+impl Display for DeviceNumber {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}:{}", self.major.get(), self.minor.get())
+    }
+}
+
+macro_rules! gen_typed_devnum {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub struct $name {
-            major: MajorNum,
-            minor: MinorNum,
-        }
-        impl Display for $name {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                write!(f, "{}:{}", self.major.get(), self.minor.get())
-            }
-        }
+        pub struct $name(DeviceNumber);
+
         impl $name {
             pub const fn new(major: MajorNum, minor: MinorNum) -> Self {
-                assert!(major.get() < (1 << MAJOR_BITS));
-                assert!(minor.get() < (1 << MINOR_BITS));
-
-                Self { major, minor }
+                Self(DeviceNumber::new(major, minor))
             }
 
-            pub fn raw(&self) -> usize {
-                (self.major.get() << MINOR_BITS) | self.minor.get()
+            pub const fn number(self) -> DeviceNumber {
+                self.0
             }
 
-            pub fn decompose(&self) -> (MajorNum, MinorNum) {
-                (self.major, self.minor)
+            pub const fn decompose(self) -> (MajorNum, MinorNum) {
+                self.0.decompose()
             }
 
-            pub fn major(&self) -> MajorNum {
-                self.major
+            pub const fn major(self) -> MajorNum {
+                self.0.major()
             }
 
-            pub fn minor(&self) -> MinorNum {
-                self.minor
+            pub const fn minor(self) -> MinorNum {
+                self.0.minor()
+            }
+        }
+
+        impl Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                Display::fmt(&self.0, f)
+            }
+        }
+
+        impl From<DeviceNumber> for $name {
+            fn from(number: DeviceNumber) -> Self {
+                Self(number)
+            }
+        }
+
+        impl From<$name> for DeviceNumber {
+            fn from(devnum: $name) -> Self {
+                devnum.number()
             }
         }
     };
 }
 
-gen_devnum!(CharDevNum);
-gen_devnum!(BlockDevNum);
+gen_typed_devnum!(CharDevNum);
+gen_typed_devnum!(BlockDevNum);
 
 impl From<u64> for MajorNum {
     fn from(value: u64) -> Self {
-        debug_assert!(value < (1 << MAJOR_BITS) as u64);
+        assert!(value < (1 << MAJOR_BITS) as u64);
         Self(value as usize)
     }
 }
@@ -129,7 +168,7 @@ impl Into<u64> for MajorNum {
 
 impl From<u64> for MinorNum {
     fn from(value: u64) -> Self {
-        debug_assert!(value < (1 << MINOR_BITS) as u64);
+        assert!(value < (1 << MINOR_BITS) as u64);
         Self(value as usize)
     }
 }
@@ -197,12 +236,53 @@ mod kunits {
     }
 
     #[kunit]
-    fn internal_device_key_remains_16_bit_major_and_minor() {
-        let devnum = BlockDevNum::new(MajorNum::new(2048), MinorNum::new(0x1234));
-        assert_eq!(devnum.raw(), 0x0800_1234);
+    fn device_number_uses_linux_12_20_domain() {
+        let devnum = DeviceNumber::new(
+            MajorNum::new((1 << MAJOR_BITS) - 1),
+            MinorNum::new((1 << MINOR_BITS) - 1),
+        );
         assert_eq!(
             devnum.decompose(),
-            (MajorNum::new(2048), MinorNum::new(0x1234))
+            (
+                MajorNum::new((1 << MAJOR_BITS) - 1),
+                MinorNum::new((1 << MINOR_BITS) - 1)
+            )
         );
+    }
+
+    #[kunit]
+    fn typed_keys_explicitly_wrap_the_common_number() {
+        let number = DeviceNumber::new(MajorNum::new(2048), MinorNum::new(0x12345));
+        let char_dev = CharDevNum::from(number);
+        let block_dev = BlockDevNum::from(number);
+
+        assert_eq!(char_dev.number(), number);
+        assert_eq!(block_dev.number(), number);
+        assert_eq!(DeviceNumber::from(char_dev), number);
+        assert_eq!(DeviceNumber::from(block_dev), number);
+    }
+
+    #[kunit]
+    fn linux_dev_t_codec_roundtrips_representative_and_boundary_numbers() {
+        use anemone_abi::fs::linux::dev_t;
+
+        let numbers = [
+            DeviceNumber::new(MajorNum::new(0), MinorNum::new(0)),
+            DeviceNumber::new(MajorNum::new(1), MinorNum::new(3)),
+            DeviceNumber::new(MajorNum::new(2048), MinorNum::new(0x12345)),
+            DeviceNumber::new(
+                MajorNum::new((1 << MAJOR_BITS) - 1),
+                MinorNum::new((1 << MINOR_BITS) - 1),
+            ),
+        ];
+
+        for number in numbers {
+            let (major, minor) = number.decompose();
+            let encoded = dev_t::encode(major.get() as u32, minor.get() as u32);
+            assert_eq!(
+                dev_t::decode(encoded),
+                (major.get() as u32, minor.get() as u32)
+            );
+        }
     }
 }

@@ -25,7 +25,7 @@ pub mod kobject;
 pub mod resource;
 
 pub mod devnum;
-pub use devnum::{BlockDevNum, CharDevNum, MajorNum, MinorNum};
+pub use devnum::{BlockDevNum, CharDevNum, DeviceNumber, MajorNum, MinorNum};
 
 // subsystems
 pub mod block;

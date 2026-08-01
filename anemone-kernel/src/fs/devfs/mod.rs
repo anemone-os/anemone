@@ -105,6 +105,13 @@ fn devfs_publish_node(
         return Err(SysError::InvalidArgument);
     }
 
+    // Socket inodes are anonymous VFS objects in the current socket stage.
+    // Admit them here only after named socket nodes gain an explicit devfs
+    // owner, open contract, and lifecycle.
+    if attr.ty == InodeType::Socket {
+        return Err(SysError::NotSupported);
+    }
+
     if matches!(kind, DevfsNodeKind::Dir) && attr.ty != InodeType::Dir {
         return Err(SysError::InvalidArgument);
     }
@@ -220,6 +227,18 @@ mod kunits {
 
     const DEVFS_TEST_SINK_CAPACITY: usize = 64;
 
+    struct UnreachableSocketNodeOps;
+
+    impl DevfsNodeOps for UnreachableSocketNodeOps {
+        fn open(&self, _inode: &InodeRef) -> Result<OpenedFile, SysError> {
+            unreachable!("rejected devfs socket node must not be opened")
+        }
+
+        fn get_attr(&self, _inode: &InodeRef, _attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
+            unreachable!("rejected devfs socket node must not expose attributes")
+        }
+    }
+
     fn devfs_read_dir_entries(root: &File) -> Vec<DirEntry> {
         let mut sink = FixedSizeDirSink::<DEVFS_TEST_SINK_CAPACITY>::new();
         let mut entries = Vec::new();
@@ -265,6 +284,23 @@ mod kunits {
             .into_iter()
             .map(|entry| entry.name)
             .collect()
+    }
+
+    #[kunit]
+    fn test_devfs_rejects_socket_inode_publication() {
+        assert_eq!(
+            publish(DevfsPublish {
+                name: "kunit-socket".to_string(),
+                attr: DevfsNodeAttr {
+                    ty: InodeType::Socket,
+                    perm: InodePerm::all_rwx(),
+                    rdev: DeviceId::None,
+                },
+                ops: Arc::new(UnreachableSocketNodeOps),
+            })
+            .unwrap_err(),
+            SysError::NotSupported
+        );
     }
 
     #[kunit]
@@ -327,10 +363,13 @@ mod kunits {
         assert_eq!(null_attr.mode.ty(), InodeType::Char);
         assert_eq!(
             null_attr.rdev,
-            DeviceId::Char(CharDevNum::new(
-                MajorNum::new(devnum::char::major::MEMORY),
-                MinorNum::new(devnum::char::minor::NULL)
-            ))
+            DeviceId::Number(
+                CharDevNum::new(
+                    MajorNum::new(devnum::char::major::MEMORY),
+                    MinorNum::new(devnum::char::minor::NULL)
+                )
+                .number()
+            )
         );
 
         assert_eq!(null.write(b"abc").unwrap(), 3);
@@ -358,10 +397,13 @@ mod kunits {
         assert_eq!(attr.mode.ty(), InodeType::Block);
         assert_eq!(
             attr.rdev,
-            DeviceId::Block(BlockDevNum::new(
-                MajorNum::new(devnum::block::major::RAMDISK),
-                MinorNum::new(0)
-            ))
+            DeviceId::Number(
+                BlockDevNum::new(
+                    MajorNum::new(devnum::block::major::RAMDISK),
+                    MinorNum::new(0)
+                )
+                .number()
+            )
         );
         assert!(attr.size > 0);
 

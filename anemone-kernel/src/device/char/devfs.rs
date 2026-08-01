@@ -11,10 +11,16 @@ fn opened_char_file() -> OpenedFile {
 }
 
 fn char_file_devnum(file: &File) -> Result<CharDevNum, SysError> {
-    match file.inode().get_attr()?.rdev {
-        DeviceId::Char(devnum) => Ok(devnum),
-        _ => Err(SysError::InvalidArgument),
+    let inode = file.inode();
+    if inode.ty() != InodeType::Char {
+        return Err(SysError::InvalidArgument);
     }
+    let number = inode
+        .get_attr()?
+        .rdev
+        .number()
+        .ok_or(SysError::InvalidArgument)?;
+    Ok(CharDevNum::from(number))
 }
 
 fn char_file_read(
@@ -109,7 +115,7 @@ pub fn publish_char_device(devnum: CharDevNum) -> Result<Ino, SysError> {
         attr: DevfsNodeAttr {
             ty: InodeType::Char,
             perm: InodePerm::all_rw(),
-            rdev: DeviceId::Char(devnum),
+            rdev: DeviceId::Number(devnum.number()),
         },
         ops: Arc::new(CharDevFsNodeOps { devnum }),
     })

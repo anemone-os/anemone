@@ -272,10 +272,7 @@ impl BlockDevRegistry {
         self.register_batch(vec![registration])
     }
 
-    fn register_batch(
-        &mut self,
-        registrations: Vec<BlockDevRegistration>,
-    ) -> Result<(), SysError> {
+    fn register_batch(&mut self, registrations: Vec<BlockDevRegistration>) -> Result<(), SysError> {
         for (index, registration) in registrations.iter().enumerate() {
             let devnum = registration.device.devnum();
             if self.devices.contains_key(&devnum)

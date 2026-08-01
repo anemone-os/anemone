@@ -288,9 +288,14 @@ impl IrqChip for Loongson2K1000Intc {
             kwarningln!("2k1000-icu: invalid hwirq {}", irq);
             return None;
         }
+        let trigger = trigger_type(irq);
         Some(InterruptInfo {
             hwirq: HwIrq::new(irq),
-            trigger: trigger_type(irq),
+            trigger,
+            flow: match trigger {
+                IrqTriggerType::Edge => IrqFlowType::EdgeAck,
+                IrqTriggerType::Level => IrqFlowType::LevelMaskEoi,
+            },
         })
     }
 

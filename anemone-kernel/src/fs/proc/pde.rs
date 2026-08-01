@@ -136,6 +136,7 @@ fn proc_pde_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
 }
 
 static PROC_PDE_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: proc_pde_lookup,
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),

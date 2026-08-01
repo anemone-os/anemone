@@ -12,7 +12,7 @@ use super::{
 /// Internal watch policy. Linux-shaped bits remain in the future syscall
 /// adapter; this type carries only epoll-owner semantics.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::fs) struct WatchPolicy {
+pub(super) struct WatchPolicy {
     interests: PollEvent,
     edge_triggered: bool,
     one_shot: bool,
@@ -20,7 +20,7 @@ pub(in crate::fs) struct WatchPolicy {
 }
 
 impl WatchPolicy {
-    pub(in crate::fs) const fn new(
+    pub(super) const fn new(
         interests: PollEvent,
         edge_triggered: bool,
         one_shot: bool,

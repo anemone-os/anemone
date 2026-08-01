@@ -122,10 +122,13 @@ impl DriverOps for AhciDriver {
         let devnum = devnum_for(disk_id.get())?;
         let disk = Arc::new(AtaDisk::new(devnum, controller, identity));
         let name = name_for(disk_id.get());
-        let devnums = register_block_disk(BlockDevRegistration {
-            name: name.clone(),
-            device: disk.clone(),
-        }, DISK_MINOR_STRIDE)?;
+        let devnums = register_block_disk(
+            BlockDevRegistration {
+                name: name.clone(),
+                device: disk.clone(),
+            },
+            DISK_MINOR_STRIDE,
+        )?;
 
         for endpoint_devnum in devnums {
             if let Err(error) = publish_block_device(endpoint_devnum) {

@@ -76,6 +76,17 @@ pub(super) struct RamfsReg {
     state: Arc<RamfsRegState>,
 }
 
+#[derive(Opaque)]
+pub(super) struct RamfsSpecial {
+    rdev: DeviceId,
+}
+
+impl RamfsSpecial {
+    fn new(rdev: DeviceId) -> Self {
+        Self { rdev }
+    }
+}
+
 impl RamfsReg {
     pub(super) fn new() -> Self {
         Self {
@@ -212,6 +223,62 @@ fn ramfs_mkdir(dir: &InodeRef, name: &str, perm: InodePerm) -> Result<InodeRef, 
     ramfs_create_child(dir, name, InodeType::Dir, perm)
 }
 
+fn ramfs_make_node(
+    dir: &InodeRef,
+    name: &str,
+    description: MakeNodeDescription,
+) -> Result<InodeRef, SysError> {
+    assert!(matches!(
+        description.mode.ty(),
+        InodeType::Regular
+            | InodeType::Fifo
+            | InodeType::Char
+            | InodeType::Block
+            | InodeType::Socket
+    ));
+
+    let sb = dir.sb();
+    ramfs_sb(&sb).write_tx(|| {
+        let dir_data = ramfs_dir(dir)?;
+        if dir_data.contains(name) {
+            return Err(SysError::AlreadyExists);
+        }
+
+        let new_ino = ramfs_sb(&sb).alloc_ino();
+        let ty = description.mode.ty();
+        let (prv, mapping, ops): (AnyOpaque, Option<Arc<dyn VmObject>>, &'static InodeOps) =
+            if ty == InodeType::Regular {
+                let reg = RamfsReg::new();
+                let mapping: Arc<dyn VmObject> = Arc::new(RamfsRegMapping::new(reg.state()));
+                (AnyOpaque::new(reg), Some(mapping), &RAMFS_REG_INODE_OPS)
+            } else {
+                (
+                    AnyOpaque::new(RamfsSpecial::new(description.rdev)),
+                    None,
+                    &RAMFS_SPECIAL_INODE_OPS,
+                )
+            };
+        let mut new_inode = Arc::new(Inode::new(new_ino, ty, ops, sb.clone(), prv));
+        Arc::get_mut(&mut new_inode)
+            .expect("new ramfs inode should be uniquely owned before seeding")
+            .set_mapping(mapping);
+        new_inode.set_meta(&InodeMeta {
+            nlink: 1,
+            size: 0,
+            perm: description.mode.perm(),
+            uid: description.uid,
+            gid: description.gid,
+            atime: Duration::ZERO,
+            mtime: Duration::ZERO,
+            ctime: Duration::ZERO,
+        });
+
+        let inode = sb.seed_inode(new_inode);
+        assert!(dir_data.insert(name.to_string(), inode.ino()).is_ok());
+        Ok(inode)
+    })
+}
+
 fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let target_text = target.to_string();
@@ -249,13 +316,16 @@ fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     ramfs_sb(&sb).read_tx(|| ramfs_lookup_locked(parent, name))
 }
 
-/// Open is not yet implemented for ramfs.
 fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
     let file_ops = match inode.ty() {
         InodeType::Dir => &RAMFS_DIR_FILE_OPS,
         InodeType::Regular => &RAMFS_REG_FILE_OPS,
         InodeType::Symlink => &RAMFS_SYMLINK_FILE_OPS,
-        _ => unreachable!(),
+        InodeType::Fifo => return Err(SysError::NotSupported),
+        InodeType::Char | InodeType::Block | InodeType::Socket => {
+            return Err(SysError::NoSuchDeviceOrAddress);
+        },
+        InodeType::Anon => unreachable!("anonymous inode kind cannot be opened from ramfs"),
     };
     Ok(OpenedFile::new(file_ops, NilOpaque::new()))
 }
@@ -376,6 +446,16 @@ fn ramfs_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
 
 fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
+    let rdev = if matches!(inode.ty(), InodeType::Char | InodeType::Block) {
+        inode
+            .inode()
+            .prv()
+            .cast::<RamfsSpecial>()
+            .expect("ramfs device node must carry RamfsSpecial")
+            .rdev
+    } else {
+        DeviceId::None
+    };
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,
@@ -384,7 +464,7 @@ fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         nlink: meta.nlink,
         uid: meta.uid,
         gid: meta.gid,
-        rdev: DeviceId::None,
+        rdev,
         size: meta.size,
         atime: meta.atime,
         mtime: meta.mtime,
@@ -393,6 +473,7 @@ fn ramfs_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
 }
 
 pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
+    make_node: ramfs_make_node,
     touch: ramfs_touch,
     mkdir: ramfs_mkdir,
     symlink: ramfs_symlink_create,
@@ -407,7 +488,24 @@ pub(super) static RAMFS_DIR_INODE_OPS: InodeOps = InodeOps {
     get_attr: ramfs_get_attr,
 };
 
+static RAMFS_SPECIAL_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
+    touch: |_, _, _| Err(SysError::NotDir),
+    mkdir: |_, _, _| Err(SysError::NotDir),
+    symlink: |_, _, _| Err(SysError::NotDir),
+    lookup: |_, _| Err(SysError::NotDir),
+    open: ramfs_open,
+    truncate: |_, _| Err(SysError::NotReg),
+    link: |_, _, _| Err(SysError::NotDir),
+    unlink: |_, _| Err(SysError::NotDir),
+    rmdir: |_, _| Err(SysError::NotDir),
+    rename: |_, _, _, _, _| Err(SysError::NotSupported),
+    read_link: |_| Err(SysError::NotSymlink),
+    get_attr: ramfs_get_attr,
+};
+
 pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),
     symlink: |_, _, _| Err(SysError::NotDir),
@@ -423,6 +521,7 @@ pub(super) static RAMFS_REG_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     touch: |_, _, _| Err(SysError::NotDir),
     mkdir: |_, _, _| Err(SysError::NotDir),
     symlink: |_, _, _| Err(SysError::NotDir),
@@ -436,3 +535,61 @@ pub(super) static RAMFS_SYMLINK_INODE_OPS: InodeOps = InodeOps {
     read_link: ramfs_read_link,
     get_attr: ramfs_get_attr,
 };
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::{
+        device::devnum::{DeviceNumber, MajorNum, MinorNum},
+        fs::ramfs::ramfs_mount,
+    };
+
+    #[kunit]
+    fn make_node_commits_final_metadata_and_special_open_boundary() {
+        let sb = ramfs_mount(MountData::Null).unwrap();
+        let root = sb.root_inode();
+        let number = DeviceNumber::new(MajorNum::new(7), MinorNum::new(9));
+        let description = MakeNodeDescription::new(
+            InodeMode::new(InodeType::Block, InodePerm::from_bits(0o6750).unwrap()),
+            Uid::new(0x12345),
+            Gid::new(0x23456),
+            DeviceId::Number(number),
+        );
+
+        let node = ramfs_make_node(&root, "block", description).unwrap();
+        let attr = node.get_attr().unwrap();
+        assert_eq!(attr.mode, description.mode);
+        assert_eq!(attr.uid, description.uid);
+        assert_eq!(attr.gid, description.gid);
+        assert_eq!(attr.rdev, description.rdev);
+        assert!(matches!(node.open(), Err(SysError::NoSuchDeviceOrAddress)));
+
+        // Duplicate admission happens before ino allocation or cache/dirent
+        // publication, so the original committed node remains the sole entry.
+        assert_eq!(
+            ramfs_make_node(&root, "block", description).unwrap_err(),
+            SysError::AlreadyExists
+        );
+        assert_eq!(ramfs_lookup(&root, "block").unwrap().ino(), node.ino());
+    }
+
+    #[kunit]
+    fn fifo_and_socket_have_explicit_open_errors_without_rdev_projection() {
+        let sb = ramfs_mount(MountData::Null).unwrap();
+        let root = sb.root_inode();
+        for (name, ty, expected) in [
+            ("fifo", InodeType::Fifo, SysError::NotSupported),
+            ("socket", InodeType::Socket, SysError::NoSuchDeviceOrAddress),
+        ] {
+            let description = MakeNodeDescription::new(
+                InodeMode::new(ty, InodePerm::IRUSR),
+                Uid::ROOT,
+                Gid::ROOT,
+                DeviceId::None,
+            );
+            let node = ramfs_make_node(&root, name, description).unwrap();
+            assert_eq!(node.get_attr().unwrap().rdev, DeviceId::None);
+            assert!(matches!(node.open(), Err(err) if err == expected));
+        }
+    }
+}

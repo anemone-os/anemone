@@ -106,3 +106,9 @@ just qemu --preset "$preset" "${provider_bindings[@]}" \
     --bind kernel-image=build/anemone.elf \
     --bind disk-x0="$sdcard_target" \
     --bind disk-x1="$rootfs_target" 2>&1 | tee "$log_file"
+
+required_guest_marker="All tests passed!"
+if ! grep -Fq "$required_guest_marker" "$log_file"; then
+    error "required guest marker missing: $required_guest_marker; see $log_file"
+    exit 1
+fi

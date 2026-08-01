@@ -5,6 +5,7 @@
 //! fallback.
 
 use serde::Deserialize;
+use std::net::Ipv4Addr;
 
 use super::reference::{AppRef, PlatformRef};
 
@@ -15,6 +16,7 @@ pub struct Config {
     pub root: Root,
     #[serde(rename = "initial-program")]
     pub initial_program: InitialProgramSource,
+    pub network: Option<Network>,
 }
 
 impl Config {
@@ -22,8 +24,103 @@ impl Config {
         let config: Self = toml::from_str(content)?;
         config.root.validate()?;
         config.initial_program.validate()?;
+        if let Some(network) = &config.network {
+            network.validate()?;
+        }
         Ok(config)
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Network {
+    pub ipv4: StaticIpv4,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StaticIpv4 {
+    pub interface: String,
+    #[serde(deserialize_with = "deserialize_ipv4")]
+    pub address: Ipv4Addr,
+    pub prefix: u8,
+    #[serde(
+        rename = "default-gateway",
+        deserialize_with = "deserialize_optional_ipv4",
+        default
+    )]
+    pub default_gateway: Option<Ipv4Addr>,
+}
+
+impl Network {
+    fn validate(&self) -> anyhow::Result<()> {
+        let ipv4 = &self.ipv4;
+        if ipv4.interface.is_empty() {
+            anyhow::bail!("system target network IPv4 interface must not be empty");
+        }
+        if ipv4.prefix > 32 {
+            anyhow::bail!("system target network IPv4 prefix must not exceed 32");
+        }
+        validate_external_address(ipv4.address, ipv4.prefix)?;
+        if let Some(gateway) = ipv4.default_gateway {
+            validate_gateway(gateway)?;
+        }
+        Ok(())
+    }
+}
+
+fn deserialize_ipv4<'de, D>(deserializer: D) -> Result<Ipv4Addr, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
+}
+
+fn deserialize_optional_ipv4<'de, D>(deserializer: D) -> Result<Option<Ipv4Addr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_ipv4(deserializer).map(Some)
+}
+
+fn validate_external_address(address: Ipv4Addr, prefix: u8) -> anyhow::Result<()> {
+    if address.is_unspecified()
+        || address.is_multicast()
+        || address.is_broadcast()
+        || address.is_loopback()
+    {
+        anyhow::bail!("system target external IPv4 address must be unicast and non-loopback");
+    }
+
+    if prefix < 31 {
+        let bits = u32::from(address);
+        let mask = if prefix == 0 {
+            0
+        } else {
+            u32::MAX << (32 - prefix)
+        };
+        let network = bits & mask;
+        let broadcast = network | !mask;
+        if bits == network || bits == broadcast {
+            anyhow::bail!(
+                "system target external IPv4 address must not be a subnet network or broadcast address"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_gateway(gateway: Ipv4Addr) -> anyhow::Result<()> {
+    if gateway.is_unspecified()
+        || gateway.is_multicast()
+        || gateway.is_broadcast()
+        || gateway.is_loopback()
+    {
+        anyhow::bail!("system target IPv4 default gateway must be unicast and non-loopback");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,6 +207,52 @@ mod tests {
             config.initial_program,
             InitialProgramSource::RootfsEntry { argv: None }
         ));
+        assert!(config.network.is_none());
+    }
+
+    #[test]
+    fn parses_optional_static_ipv4_network() {
+        let content = example_target().replace(
+            "[initial-program]",
+            "[network.ipv4]\ninterface = \"eth0\"\naddress = \"10.0.2.15\"\nprefix = 24\ndefault-gateway = \"10.0.2.2\"\n\n[initial-program]",
+        );
+        let config = Config::from_str(&content).unwrap();
+        let ipv4 = &config.network.unwrap().ipv4;
+        assert_eq!(ipv4.interface, "eth0");
+        assert_eq!(ipv4.address.octets(), [10, 0, 2, 15]);
+        assert_eq!(ipv4.prefix, 24);
+        assert_eq!(ipv4.default_gateway.unwrap().octets(), [10, 0, 2, 2]);
+    }
+
+    #[test]
+    fn rejects_invalid_static_ipv4_network() {
+        let valid = example_target().replace(
+            "[initial-program]",
+            "[network.ipv4]\ninterface = \"eth0\"\naddress = \"10.0.2.15\"\nprefix = 24\n\n[initial-program]",
+        );
+        for (needle, replacement) in [
+            ("\ninterface = \"eth0\"", "\ninterface = \"\""),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"not-an-ip\""),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"0.0.0.0\""),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"127.0.0.1\""),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"224.0.0.1\""),
+            ("\naddress = \"10.0.2.15\"", "\naddress = \"10.0.2.255\""),
+            ("\nprefix = 24", "\nprefix = 33"),
+        ] {
+            assert!(
+                Config::from_str(&valid.replacen(needle, replacement, 1)).is_err(),
+                "accepted invalid replacement: {replacement}"
+            );
+        }
+
+        let gateway = valid.replace(
+            "\nprefix = 24",
+            "\nprefix = 24\ndefault-gateway = \"255.255.255.255\"",
+        );
+        assert!(Config::from_str(&gateway).is_err());
+
+        let unknown = valid.replace("\nprefix = 24", "\nprefix = 24\nroute = []");
+        assert!(Config::from_str(&unknown).is_err());
     }
 
     #[test]

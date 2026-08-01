@@ -284,6 +284,7 @@ fn console_devfs_get_attr(inode: &InodeRef, attr: DevfsNodeAttr) -> Result<Inode
 }
 
 static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotSupported),
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),
@@ -299,6 +300,7 @@ static CONSOLE_STDIN_INODE_OPS: InodeOps = InodeOps {
 };
 
 static CONSOLE_STDOUT_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: |_, _| Err(SysError::NotSupported),
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),
@@ -400,7 +402,7 @@ pub(crate) fn prepare_devfs() -> Result<ConsoleDevfsPublication, SysError> {
         attr: DevfsNodeAttr {
             ty: InodeType::Char,
             perm: InodePerm::all_rw(),
-            rdev: DeviceId::Char(console_devnum()),
+            rdev: DeviceId::Number(console_devnum().number()),
         },
         ops,
     }))

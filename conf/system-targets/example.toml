@@ -8,6 +8,14 @@ platform = "example"
 fstype = "ext4"
 source = { type = "block", path = "vda" }
 
+# Optional first-version static IPv4 deployment. Omitting this section leaves
+# the target loopback-only; no external interface is selected implicitly.
+# [network.ipv4]
+# interface = "eth0"
+# address = "10.0.2.15"
+# prefix = 24
+# default-gateway = "10.0.2.2"
+
 # Rootfs metadata remains the default initial-program source. To embed one
 # app artifact instead, use `type = "embedded-app"` with `app = "<app-slug>"`.
 # Either variant may add a complete non-empty `argv`, including `argv[0]`.

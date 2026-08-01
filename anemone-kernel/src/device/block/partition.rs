@@ -216,20 +216,20 @@ pub(super) fn registrations_for_disk(
                 "block {disk_name}: protective GPT detected; GPT is unsupported, publishing whole disk only"
             );
             return Ok(vec![disk]);
-        }
+        },
         MbrTable::Present(slots) => slots,
     };
 
     let mut registrations = vec![disk];
     for (index, slot) in slots.into_iter().enumerate() {
         match slot {
-            MbrSlot::Empty => {}
+            MbrSlot::Empty => {},
             MbrSlot::Invalid => {
                 knoticeln!(
                     "block {disk_name}: ignoring invalid MBR primary partition {}",
                     index + 1
                 );
-            }
+            },
             MbrSlot::Partition(partition) => {
                 let partition_minor = disk_minor
                     .get()
@@ -256,7 +256,7 @@ pub(super) fn registrations_for_disk(
                         total_blocks,
                     }),
                 });
-            }
+            },
         }
     }
 
@@ -374,9 +374,7 @@ mod kunits {
         registrations[1].device.read_blocks(0, &mut sector).unwrap();
         assert_eq!(sector[0], 0x5a);
         assert_eq!(
-            registrations[1]
-                .device
-                .read_blocks(3, &mut sector),
+            registrations[1].device.read_blocks(3, &mut sector),
             Err(SysError::IO)
         );
         assert_eq!(disk.reads.load(Ordering::Relaxed), 2);
@@ -404,9 +402,6 @@ mod kunits {
         );
 
         set_partition(&mut sector, 0, GPT_PROTECTIVE_PARTITION_TYPE, 1, 15);
-        assert_eq!(
-            parse_mbr(&sector, TEST_BLOCKS, 1),
-            MbrTable::ProtectiveGpt
-        );
+        assert_eq!(parse_mbr(&sector, TEST_BLOCKS, 1), MbrTable::ProtectiveGpt);
     }
 }

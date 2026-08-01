@@ -4,8 +4,12 @@ use anemone_net_api::{Duration, EthernetAddress, Instant, LinkState, Recheck};
 use anemone_smoltcp_stack::{PumpBudget, PumpError, Stack};
 
 use support::{
-    BoundedProvider, ManualClock, assert_icmp_echo_reply, build_icmp_echo_request,
-    build_raw_ipv4_packet, prime_bounded_neighbor,
+    clock::ManualClock,
+    frame::BoundedProvider,
+    packet::{
+        assert_icmp_echo_reply, build_icmp_echo_request, build_raw_ipv4_packet,
+        prime_bounded_neighbor,
+    },
 };
 
 #[test]

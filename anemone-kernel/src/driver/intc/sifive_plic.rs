@@ -143,10 +143,10 @@ impl IrqChip for SiFivePlic {
         let regs = self.regs();
         let was_enabled = regs.is_enabled(context, hwirq);
 
-        // The PLIC silently ignores completion for a source that is disabled
-        // on this target. LevelFlow masks before invoking the handler, so use
-        // Linux's PLIC EOI sequence: temporarily enable the source, complete
-        // it, then restore the disabled state before LevelFlow unmasks it.
+        // FastEoi normally reaches completion with the source still enabled.
+        // Keep the controller-local fallback because this target silently
+        // ignores completion for a disabled source: temporarily enable only
+        // for completion, then restore the state observed on entry.
         if !was_enabled {
             regs.set_enable(context, hwirq, true);
         }
@@ -173,11 +173,11 @@ impl IrqChip for SiFivePlic {
 
         Some(InterruptInfo {
             hwirq,
-            // refer to PLIC's gateway mechanism, which ensures that kernel always perceives an
-            // effect equivalent to level-triggered interrupts.
-            //
-            // ...?🤔
+            // The PLIC gateway presents a level-like source to software, but
+            // claim already acknowledges it. Completion must therefore follow
+            // the handler without a generic level mask/unmask transaction.
             trigger: IrqTriggerType::Level,
+            flow: IrqFlowType::FastEoi,
         })
     }
 

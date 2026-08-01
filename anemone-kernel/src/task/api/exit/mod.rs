@@ -100,7 +100,7 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // wake waiters, so it must happen while the exiting task is still in a
         // sleepable, interrupts-enabled process context. Deferred task disposal
         // and `Drop` are memory cleanup only.
-        task.close_all_fds_for_exit();
+        task.detach_files_for_exit();
 
         task.set_exit_code(code);
 
@@ -230,16 +230,11 @@ pub fn kthread_exit(result: i32) -> ! {
         );
         task.complete_kthread_returned_entry(result);
 
-        // This assertion is the temporary task-local resource closeout boundary: before
-        // any future consumer is allowed to inherit or open fds in a kthread,
-        // this must be replaced by a full kthread-safe fd-table closeout helper
-        // that can run opened-description final-release hooks in process
-        // context.
-        assert!(
-            task.opened_fd_numbers_snapshot().is_empty(),
-            "kthread {} exited with published fd table entries",
-            task.tid()
-        );
+        // Kthreads bypass the user-process exit path, but they are ordinary
+        // file-table participants. Detach here while the current kthread is
+        // still in sleepable process context, before topology unpublication
+        // and deferred disposal can make task Drop the only remaining path.
+        task.detach_files_for_exit();
 
         // task.set_exit_code(ExitCode::Exited(result as i8));
         defer_to_dispose(task.clone());

@@ -1,17 +1,16 @@
 # 小迭代记录
 
-小迭代记录保存不需要 RFC、但又比双周开发日志摘要更具体的修复、调查和局部实现事实。它不是单纯的事后流水账；当一个小问题需要先写清楚再动手时，小迭代记录也可以作为轻量方案记录使用。
+小迭代记录保存不需要 RFC、但又值得长期追溯的局部决策、修复、调查和实现事实。Patch 默认不写正式记录；只有代码、测试和 Git 无法低成本恢复本轮判断时，才升级为小迭代。
 
 它的职责是回答：
 
 - 触发这次工作的症状、测试失败或观察是什么；
-- 本轮要解决的局部问题是什么，为什么不需要 RFC；
-- 选择的局部解决方案是什么，拒绝了哪些轻量替代方案；
+- 本轮要解决的局部问题和选择的处理方式；
 - 本次实际改了什么，不改什么；
 - 验证到什么程度；
-- 还有哪些局部 tracking issues、风险、延期项或 register / current limitations 链接。
+- 还有哪些风险、延期项、架构摩擦或 register / current limitations 链接。
 
-小迭代记录不是 backlog，也不是中大型设计草案。它可以在记录本体中包含 `Problem`、`Solution` 和 `Tracking Issues` 章节，让这次局部迭代自洽可读；但 tracking issues 只服务于当前记录，不承担仓库级 accepted contract、跨子系统不变量或长期阶段计划。严格的 contract-bearing small change 可以在一个已完整解析的原子 checkpoint 中记录 `Contract Impact / Cutover`，effective 正文仍只位于 current contract。未定稿的中大型方案应走私有草案或 RFC 工作流；跨多天、跨子系统、需要阶段 gate 或审计证据的实现应走事务日志。
+小迭代记录不是 backlog，也不是小型 RFC。默认正文只需要 `Problem / Context`、`Decision`、`Change`、`Validation` 和 `Remaining Risk / Links`；`Tracking Issues`、`Architecture Friction`、`Contract Impact / Cutover` 和背景材料只在确有内容时增加。严格的 contract-bearing small change 可以在一个已完整解析的原子 checkpoint 中记录 cutover，effective 正文仍只位于 current contract。未决 owner、ABI、shared contract、生命周期/并发协议、probe、多个语义 cutover 或 target renegotiation 应升级 RFC。
 
 ## 命名与链接
 
@@ -19,22 +18,29 @@
 - 默认使用单文件：`YYYY-MM-DD-short-slug.md`。
 - 如果需要背景材料，可以使用同名目录：`YYYY-MM-DD-short-slug/index.md`。
 - 目录版记录可以包含 `backgrounds/`，用于保存证据摘要、Linux / LTP 对照、历史材料或运行记录。
-- 双周开发日志保留一条短摘要，并在 `Related` 或 `Details` 中链接对应记录。
+- 将新记录加入本页和必要的 mdBook 导航；不要求再写双周日志摘要。
 - register、current limitations、RFC 背景材料和事务日志可以按需链接小迭代记录。
 
 ## 单文件与目录边界
 
 优先使用单文件，保持小迭代记录低摩擦。只有当单文件会变成难以扫读的证据包时，才升级为目录。
 
-目录版记录仍以 `index.md` 为记录本体，回答 problem、scope、solution、change、validation、tracking issues、risk 和 links。`backgrounds/` 只保存事实材料，不定义计划、不变量、阶段 gate 或独立 review issue。
+目录版记录仍以 `index.md` 为记录本体。`backgrounds/` 只保存事实材料，不定义计划、不变量、阶段 gate 或独立 review issue。
 
-除单一原子 contract cutover 外，如果一个小迭代记录开始需要仓库级 accepted target、非平凡不变量、跨阶段计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，它应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。升级时，原小迭代记录保留为事实历史，并链接到新的 RFC 或事务日志。
+除单一原子 contract cutover 外，如果一个小迭代开始需要仓库级 accepted target、非平凡不变量、跨阶段计划、probe、target renegotiation 或无法在本轮关闭的 Apollyon/Keter，它应升级 RFC，而不是继续扩张 `changes/` 目录。升级时，原记录保留为事实历史并链接新的 RFC；transaction 仍按需创建。
 
 ## 当前记录
 
+- [2026-08-01 - Alpha/Omega POSIX lock/VFS integration](./2026-08-01-alpha-omega-posix-lock-vfs-integration.md)
+- [2026-07-31 - Network host test organization](./2026-07-31-net-host-test-organization.md)
+- [2026-07-31 - Alpha/Omega Flock/UDP integration](./2026-07-31-alpha-omega-flock-udp-integration.md)
+- [2026-07-31 - Anonymous inode UAPI kind](./2026-07-31-anon-inode-uapi-kind.md)
+- [2026-07-31 - FS owner-local syscall API](./2026-07-31-fs-owner-local-syscall-api.md)
+- [2026-07-31 - Net UDP external peer retirement](./2026-07-31-net-udp-external-peer-retirement.md)
+- [2026-07-31 - IRQ flow protocol](./2026-07-31-irq-flow-protocol.md)
 - [2026-07-29 - Minimal global membarrier](./2026-07-29-minimal-global-membarrier.md)
-- [2026-07-25 - Asynchronous wake delivery](./2026-07-25-asynchronous-wake-delivery.md)
 - [2026-07-27 - umask 文件创建掩码](./2026-07-27-umask-file-creation-mask.md)
+- [2026-07-25 - Asynchronous wake delivery](./2026-07-25-asynchronous-wake-delivery.md)
 - [2026-07-24 - QEMU SMP Platform用途别名](./2026-07-24-qemu-smp-platform-aliases.md)
 - [2026-07-24 - mount fstype/source compatibility](./2026-07-24-mount-fstype-source-compat.md)
 - [2026-07-24 - FIONBIO opened-description status 更新](./2026-07-24-fionbio.md)

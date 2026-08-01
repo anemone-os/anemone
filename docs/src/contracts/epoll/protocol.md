@@ -6,10 +6,10 @@
 **参与领域：** fs / iomux / task opened-description / scheduler latch / signal / Linux syscall ABI
 **覆盖范围：** watch publication/lifecycle、LT/ET/ONESHOT delivery、bounded scan/copyout、epoll-file pollability
 **不覆盖：** target source predicate、source-private route容器、nested epoll、socket readiness、MM fork行为
-**实现位置：** `anemone-kernel/src/fs/epoll/`、`anemone-kernel/src/fs/api/iomux/epoll/`
+**实现位置：** `anemone-kernel/src/fs/epoll/`、`anemone-kernel/src/fs/epoll/api/`
 **依赖：** `IOMUX-POLL-001..003`、`OPENED-DESC-001..003`、`OPENED-DESC-LIVENESS-001`、`SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`
 **Pending Successor：** None
-**最后核验：** 2026-07-27
+**最后核验：** 2026-07-31
 
 ## 状态与能力所有权
 

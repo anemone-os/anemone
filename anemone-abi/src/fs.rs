@@ -39,6 +39,13 @@ pub mod linux {
         pub const EFD_NONBLOCK: u32 = O_NONBLOCK;
     }
 
+    pub mod flock {
+        pub const LOCK_SH: u32 = 1;
+        pub const LOCK_EX: u32 = 2;
+        pub const LOCK_NB: u32 = 4;
+        pub const LOCK_UN: u32 = 8;
+    }
+
     pub mod epoll {
         use core::mem::{offset_of, size_of};
 
@@ -124,6 +131,31 @@ pub mod linux {
         pub const S_IROTH: u32 = 0o000004;
         pub const S_IWOTH: u32 = 0o000002;
         pub const S_IXOTH: u32 = 0o000001;
+    }
+
+    /// Linux userspace `dev_t` packing (`new_encode_dev` / `new_decode_dev`).
+    ///
+    /// The packed form is an ABI boundary representation. Kernel-internal
+    /// device identity should retain separate major and minor components.
+    pub mod dev_t {
+        const MAJOR_BITS: u32 = 12;
+        const MINOR_BITS: u32 = 20;
+
+        const MAJOR_MASK: u32 = (1 << MAJOR_BITS) - 1;
+        const MINOR_MASK: u32 = (1 << MINOR_BITS) - 1;
+
+        pub const fn encode(major: u32, minor: u32) -> u32 {
+            assert!(major <= MAJOR_MASK);
+            assert!(minor <= MINOR_MASK);
+
+            (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
+        }
+
+        pub const fn decode(encoded: u32) -> (u32, u32) {
+            let major = (encoded >> 8) & MAJOR_MASK;
+            let minor = (encoded & 0xff) | ((encoded >> 12) & (MINOR_MASK & !0xff));
+            (major, minor)
+        }
     }
 
     pub mod at {
@@ -441,6 +473,8 @@ pub mod linux {
     }
 
     pub mod fcntl {
+        use core::mem::{align_of, offset_of, size_of};
+
         pub const F_DUPFD: u32 = 0;
         pub const F_GETFD: u32 = 1;
         pub const F_SETFD: u32 = 2;
@@ -458,6 +492,33 @@ pub mod linux {
         pub const F_DUPFD_CLOEXEC: u32 = F_LINUX_SPECIFIC_BASE + 6;
         pub const F_SETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 7;
         pub const F_GETPIPE_SZ: u32 = F_LINUX_SPECIFIC_BASE + 8;
+
+        pub const F_RDLCK: i16 = 0;
+        pub const F_WRLCK: i16 = 1;
+        pub const F_UNLCK: i16 = 2;
+
+        /// Native asm-generic Linux `struct flock` layout on RV64 and LA64.
+        ///
+        /// Kernel adapters copy this record as bytes because Linux permits an
+        /// unaligned userspace pointer and requires untouched padding/fields
+        /// to survive an `F_GETLK` round trip.
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[repr(C)]
+        pub struct Flock {
+            pub l_type: i16,
+            pub l_whence: i16,
+            pub l_start: i64,
+            pub l_len: i64,
+            pub l_pid: i32,
+        }
+
+        const _: [(); 32] = [(); size_of::<Flock>()];
+        const _: [(); 8] = [(); align_of::<Flock>()];
+        const _: [(); 0] = [(); offset_of!(Flock, l_type)];
+        const _: [(); 2] = [(); offset_of!(Flock, l_whence)];
+        const _: [(); 8] = [(); offset_of!(Flock, l_start)];
+        const _: [(); 16] = [(); offset_of!(Flock, l_len)];
+        const _: [(); 24] = [(); offset_of!(Flock, l_pid)];
     }
 
     pub mod ioctl {

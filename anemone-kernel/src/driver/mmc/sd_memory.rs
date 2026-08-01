@@ -92,10 +92,13 @@ impl DriverOps for SdMemoryBlockDriver {
             card: card.clone(),
             total_blocks,
         });
-        let devnums = register_block_disk(BlockDevRegistration {
-            name: name_for(disk_id.get()),
-            device: endpoint,
-        }, DISK_MINOR_STRIDE)?;
+        let devnums = register_block_disk(
+            BlockDevRegistration {
+                name: name_for(disk_id.get()),
+                device: endpoint,
+            },
+            DISK_MINOR_STRIDE,
+        )?;
 
         kinfoln!(
             "sd-memory card{}: registered as devnum={} blocks={} block_size={}B",

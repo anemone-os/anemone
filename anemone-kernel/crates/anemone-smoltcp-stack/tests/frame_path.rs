@@ -7,7 +7,14 @@ use anemone_net_api::{
 use anemone_smoltcp_stack::{PumpBudget, Stack};
 use std::sync::{Arc, Mutex, TryLockError, mpsc};
 
-use support::*;
+use support::{
+    clock::ManualClock,
+    frame::{
+        DeterministicProvider, DeterministicRxToken, DeterministicTxToken, FRAME_CAPACITY, RxSlot,
+        TxSlot,
+    },
+    packet::{assert_icmp_echo_reply, build_icmp_echo_request, prime_neighbor},
+};
 
 #[test]
 fn rx_consume_recycles_owner_backing() {

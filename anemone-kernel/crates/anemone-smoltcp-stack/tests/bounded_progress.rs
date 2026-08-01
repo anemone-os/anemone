@@ -8,8 +8,11 @@ use anemone_smoltcp_stack::{PumpBudget, Stack};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use support::{
-    BoundedProvider, FRAME_CAPACITY, TxSlot, assert_icmp_echo_reply, build_icmp_echo_request,
-    build_raw_ipv4_packet, prime_bounded_neighbor, raw_ipv4_marker,
+    frame::{BoundedProvider, FRAME_CAPACITY, TxSlot},
+    packet::{
+        assert_icmp_echo_reply, build_icmp_echo_request, build_raw_ipv4_packet,
+        prime_bounded_neighbor, raw_ipv4_marker,
+    },
 };
 
 #[test]

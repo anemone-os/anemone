@@ -273,7 +273,15 @@ pub fn kernel_clone(
         // new task's sigaltstack should be the same as parent's since VM is not set.
         new_task.sig_altstack = NoIrqSpinLock::new(current_task.sig_altstack.lock().clone());
 
-        let (new_usp, _guard) = cur_uspace.fork()?;
+        let (new_usp, _guard) = match cur_uspace.fork() {
+            Ok(forked) => forked,
+            Err(e) => {
+                let _ = unsafe { Box::from_raw(frame_ptr) };
+                unsafe { guard.forget() };
+                new_task.detach_files_for_exit();
+                return Err(e);
+            },
+        };
 
         Arc::new(new_usp)
     };
@@ -294,9 +302,9 @@ pub fn kernel_clone(
     }
 
     if flags.contains(CloneFlags::FILES) {
-        new_task.replace_files_state_handle(current_task.files_state());
+        new_task.share_files_from(&current_task);
     } else {
-        new_task.set_files_state(current_task.files_state().read().fork());
+        new_task.fork_files_from(&current_task);
     }
 
     // Credential state is inherited before the task is published. Scheduler
@@ -343,7 +351,7 @@ pub fn kernel_clone(
                     drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };
                     unsafe { guard.forget() };
-                    new_task.close_all_fds_for_exit();
+                    new_task.detach_files_for_exit();
                     defer_to_dispose(Arc::new(new_task));
                     return Err(e);
                 },
@@ -381,7 +389,7 @@ pub fn kernel_clone(
                 kcritln!("clone: CLONE_PARENT flag set, called by init task. this is invalid...");
                 let _ = unsafe { Box::from_raw(frame_ptr) };
                 unsafe { guard.forget() };
-                new_task.close_all_fds_for_exit();
+                new_task.detach_files_for_exit();
                 return Err(SysError::InvalidArgument);
             }
         } else {
@@ -423,7 +431,7 @@ pub fn kernel_clone(
                     drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };
                     unsafe { guard.forget() };
-                    new_task.close_all_fds_for_exit();
+                    new_task.detach_files_for_exit();
                     defer_to_dispose(Arc::new(new_task));
                     return Err(e);
                 },
@@ -448,7 +456,7 @@ pub fn kernel_clone(
             knoticeln!("failed to publish cloned task: {:?}", e);
 
             // distroy this task immediately is a bit heavy. send it to defer queue.
-            new_task.close_all_fds_for_exit();
+            new_task.detach_files_for_exit();
             defer_to_dispose(Arc::new(new_task));
 
             // some resoureces cannot be rolled back. but we'll try our best.
