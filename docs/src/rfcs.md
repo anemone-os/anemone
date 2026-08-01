@@ -105,6 +105,10 @@ docs/src/devlog/transactions/YYYY-MM-DD-<short-slug>.md
 
 ### 其它领域
 
+- [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
+  RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供
+  fallible copyin/copyout，typed exact access与VFS partial progress边界已经固化。早于本RFC的
+  `RemoteUspFenceGuard`锁内同步shootdown问题保持明确follow-up，不被R0 closure写成已修复。
 - [RFC-20260801-loongarch-lsx-context](./rfcs/loongarch-lsx-context/index.md)：R0已实现并关闭；以per-task
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、

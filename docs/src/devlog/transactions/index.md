@@ -24,6 +24,9 @@
 
 ## Completed
 
+- [Exception-backed User Pointer Access](./2026-08-01-exception-userptr-access.md)：R0已完成RV64/LA64
+  page-bounded bytewise copy、per-CPU exact-PC recovery、一次page-fault retry和typed/VFS partial边界；用户
+  确认既有实现已验收。早于R0的remote fence锁边界保持follow-up。
 - [LoongArch LSX Sticky-Lazy Context](./2026-08-01-loongarch-lsx-context.md)：R0已完成per-task first-use
   policy、唯一128-bit trapframe backing、user trap save/restore、clone/exec和Linux-compatible signal
   extcontext；2K1000 build与用户实机验收通过。LASX、HWCAP和full-lazy保持accepted limitations。
