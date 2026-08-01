@@ -58,6 +58,7 @@ pub struct Parameters {
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
+    pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
@@ -146,6 +147,7 @@ impl Parameters {
         materialize!(max_path_len_bytes);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
+        materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
@@ -260,6 +262,8 @@ pub const MAX_PATH_LEN_BYTES: usize = {};
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Maximum kernel staging buffer used by one getdents64 call.
+pub const GETDENTS64_BUFFER_BYTES: usize = {};
 /// Fixed pipe backing and default logical capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Allocation policy for ordinary task IDs.
@@ -400,6 +404,7 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(max_path_len_bytes),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
+            resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
@@ -512,6 +517,17 @@ mod tests {
                 "missing generated constant {expected}"
             );
         }
+    }
+
+    #[test]
+    fn getdents64_buffer_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
+        );
     }
 
     #[test]

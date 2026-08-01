@@ -4,10 +4,13 @@
 use core::{mem::size_of, ptr};
 
 use anemone_rs::{
-    abi::{process::linux::signal as linux_signal, syscall::*},
+    abi::{
+        process::linux::{signal as linux_signal, wait},
+        syscall::*,
+    },
     os::linux::{
         fs::{self, Fd, PipeFlags},
-        process::{MmapFlags, MmapProt, mmap, mprotect, munmap},
+        process::{self, MmapFlags, MmapProt, mmap, mprotect, munmap},
     },
     prelude::*,
 };
@@ -25,6 +28,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("partial-cross-page-fault", test_partial_cross_page_fault),
     ("permissions-and-unmap", test_permissions_and_unmap),
     ("side-effects-after-efault", test_side_effects_after_efault),
+    ("wait4-copyout-order", test_wait4_copyout_order),
 ];
 
 unsafe fn syscall6(sysno: u64, args: [u64; 6]) -> Result<u64, Errno> {
@@ -347,6 +351,45 @@ fn test_side_effects_after_efault() -> Result<(), Errno> {
     assert!(written > 0, "directory cursor advanced across EFAULT");
     munmap(dirents, PAGE_SIZE)?;
     fs::close(dirfd)
+}
+
+fn test_wait4_copyout_order() -> Result<(), Errno> {
+    let gate = fs::pipe2(PipeFlags::empty())?;
+    let child = match process::fork()? {
+        Some(pid) => pid,
+        None => {
+            fs::close(gate.1).expect("child failed to close gate writer");
+            let mut release = [0u8; 1];
+            fs::read(gate.0, &mut release).expect("child failed to wait on gate");
+            process::exit(23)
+        },
+    };
+
+    fs::close(gate.0)?;
+    expect_count(
+        "wait4 WNOHANG does not touch status without a result",
+        unsafe {
+            syscall6(
+                SYS_WAIT4,
+                [child as u64, BAD_LOW, wait::WNOHANG as u64, 0, 0, 0],
+            )
+        },
+        0,
+    );
+    fs::write(gate.1, b"x")?;
+    fs::close(gate.1)?;
+
+    expect_errno(
+        "wait4 reports status copyout failure",
+        unsafe { syscall6(SYS_WAIT4, [child as u64, BAD_LOW, 0, 0, 0, 0]) },
+        EFAULT,
+    );
+    expect_errno(
+        "wait4 copyout failure still consumes child",
+        unsafe { syscall6(SYS_WAIT4, [child as u64, 0, 0, 0, 0, 0]) },
+        ECHILD,
+    );
+    Ok(())
 }
 
 fn run_test(name: &str, test: TestFn) -> Result<(), Errno> {

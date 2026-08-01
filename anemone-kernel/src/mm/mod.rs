@@ -1,6 +1,7 @@
 //! Memory management subsystem.
 
 pub mod addr;
+pub mod api;
 pub mod dma;
 pub mod frame;
 pub mod kmalloc;

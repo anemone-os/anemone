@@ -8,7 +8,6 @@ use crate::{
 };
 
 pub mod handler;
-mod membarrier;
 pub mod user_access;
 
 const INVALID_SYSCALL: SyscallHandler = SyscallHandler {

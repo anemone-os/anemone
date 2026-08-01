@@ -29,6 +29,18 @@ struct LinuxDirent64Header {
 
 const DIRENT64_ALIGN: usize = size_of::<u64>();
 const DIRENT64_HEADER_SIZE: usize = size_of::<LinuxDirent64Header>();
+const MAX_DIRENT64_RECORD_LEN: usize =
+    (DIRENT64_HEADER_SIZE + MAX_FILE_NAME_LEN_BYTES + 1 + DIRENT64_ALIGN - 1)
+        & !(DIRENT64_ALIGN - 1);
+
+static_assert!(
+    GETDENTS64_BUFFER_BYTES >= MAX_DIRENT64_RECORD_LEN,
+    "getdents64_buffer_bytes must fit the largest supported dirent"
+);
+static_assert!(
+    GETDENTS64_BUFFER_BYTES <= u32::MAX as usize,
+    "getdents64_buffer_bytes must fit the Linux count argument"
+);
 
 fn dirent64_dtype(ty: InodeType) -> u8 {
     match ty {
@@ -54,6 +66,15 @@ fn dirent64_record_len(name_len: usize) -> Result<usize, SysError> {
         .and_then(|n| n.checked_add(1))
         .ok_or(SysError::InvalidArgument)?;
     align_up(unaligned, DIRENT64_ALIGN).ok_or(SysError::InvalidArgument)
+}
+
+const fn getdents64_buffer_len(count: u32) -> usize {
+    let requested = count as usize;
+    if requested > GETDENTS64_BUFFER_BYTES {
+        GETDENTS64_BUFFER_BYTES
+    } else {
+        requested
+    }
 }
 
 fn map_byte_writer_error(_: ByteWriterError) -> SysError {
@@ -135,7 +156,9 @@ fn sys_getdents64(
         (usp, fd)
     };
 
-    let buf_len = count as usize;
+    // Linux permits getdents64 to return fewer bytes than count. Keep count
+    // accepted as-is while bounding only this kernel's staging transaction.
+    let buf_len = getdents64_buffer_len(count);
     {
         // Directory backends may call DirSink with hardware interrupts
         // disabled. Resolve the complete user destination before entering
@@ -162,4 +185,20 @@ fn sys_getdents64(
     let mut dst = UserWriteSlice::<u8>::try_new(dirp, written, &mut guard)?;
     dst.copy_from_slice(&buffer[..written])?;
     Ok(written as u64)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn getdents64_buffer_len_preserves_small_requests() {
+        assert_eq!(getdents64_buffer_len(0), 0);
+        assert_eq!(getdents64_buffer_len(512), 512);
+    }
+
+    #[kunit]
+    fn getdents64_buffer_len_clamps_without_rejecting_count() {
+        assert_eq!(getdents64_buffer_len(u32::MAX), GETDENTS64_BUFFER_BYTES);
+    }
 }
