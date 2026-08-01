@@ -4,14 +4,13 @@ use alloc::{vec, vec::Vec};
 use core::mem::size_of;
 
 use anemone_abi::net::linux::{AF_INET, MSG_DONTWAIT, SockAddrIn, socklen_t};
-use anemone_net_api::{
-    Ipv4Address,
-    udp::{UdpBindError, UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError, UdpSendError},
-};
+use anemone_net_api::Ipv4Address;
 
 use crate::{
+    fs::socket::{
+        SocketAddress, SocketBindError, SocketQueryError, SocketReceiveError, SocketSendError,
+    },
     kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
-    net::udp::{BindError, SendError},
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
 };
@@ -19,7 +18,7 @@ use crate::{
 const SOCKADDR_IN_LEN: usize = size_of::<SockAddrIn>();
 const MAX_SOCKADDR_INPUT_LEN: usize = 128;
 
-pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<(Ipv4Address, u16), SysError> {
+pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
     let len = len as usize;
     if !(SOCKADDR_IN_LEN..=MAX_SOCKADDR_INPUT_LEN).contains(&len) {
         return Err(SysError::InvalidArgument);
@@ -39,7 +38,7 @@ pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<(Ipv4Address, u16)
     if !address.is_unspecified() && !address.is_unicast() {
         return Err(SysError::InvalidArgument);
     }
-    Ok((address, port))
+    Ok(SocketAddress::Ipv4 { address, port })
 }
 
 fn write_sockaddr_value(
@@ -83,16 +82,18 @@ fn write_sockaddr_value(
 pub(super) fn write_sockaddr_in(
     addr: u64,
     addrlen: u64,
-    binding: Option<UdpLocalBinding>,
+    address: Option<SocketAddress>,
 ) -> Result<(), SysError> {
-    let (address, port) = binding
-        .map(|binding| (binding.address(), binding.port()))
-        .unwrap_or((Ipv4Address::UNSPECIFIED, 0));
+    let (address, port) = match address {
+        None => (Ipv4Address::UNSPECIFIED, 0),
+        Some(SocketAddress::Ipv4 { address, port }) => (address, port),
+    };
     write_sockaddr_value(addr, addrlen, address, port)
 }
 
-pub(super) fn write_peer(addr: u64, addrlen: u64, peer: UdpPeer) -> Result<(), SysError> {
-    write_sockaddr_value(addr, addrlen, peer.address(), peer.port())
+pub(super) fn write_peer(addr: u64, addrlen: u64, peer: SocketAddress) -> Result<(), SysError> {
+    let SocketAddress::Ipv4 { address, port } = peer;
+    write_sockaddr_value(addr, addrlen, address, port)
 }
 
 pub(super) fn read_payload(addr: u64, len: usize) -> Result<Vec<u8>, SysError> {
@@ -128,49 +129,51 @@ pub(super) fn write_payload(addr: u64, payload: &[u8], len: usize) -> Result<usi
 
 pub(super) fn validate_message_flags(flags: i32) -> Result<bool, SysError> {
     if flags & !MSG_DONTWAIT != 0 {
-        knoticeln!("udp: unsupported sendto/recvfrom flags {:#x}", flags);
+        knoticeln!("socket: unsupported sendto/recvfrom flags {:#x}", flags);
         return Err(SysError::NotSupported);
     }
     Ok(flags & MSG_DONTWAIT != 0)
 }
 
-pub(super) fn map_bind_error(error: BindError) -> SysError {
+pub(super) fn map_bind_error(error: SocketBindError) -> SysError {
     match error {
-        BindError::AddressUnavailable => SysError::AddressNotAvailable,
-        BindError::Stack(UdpBindError::UnknownEndpoint) => SysError::BadFileDescriptor,
-        BindError::Stack(UdpBindError::AlreadyBound) => SysError::InvalidArgument,
-        BindError::Stack(UdpBindError::PortInUse) => SysError::AddressInUse,
-        BindError::Stack(UdpBindError::EphemeralPortsExhausted) => SysError::Again,
+        SocketBindError::Unsupported => SysError::NotSupported,
+        SocketBindError::Retired => SysError::BadFileDescriptor,
+        SocketBindError::AlreadyBound => SysError::InvalidArgument,
+        SocketBindError::AddressInUse => SysError::AddressInUse,
+        SocketBindError::AddressUnavailable => SysError::AddressNotAvailable,
+        SocketBindError::ResourceExhausted => SysError::Again,
     }
 }
 
-pub(super) fn map_query_error(error: UdpQueryError) -> SysError {
+pub(super) fn map_query_error(error: SocketQueryError) -> SysError {
     match error {
-        UdpQueryError::UnknownEndpoint => SysError::BadFileDescriptor,
+        SocketQueryError::Unsupported => SysError::NotSupported,
+        SocketQueryError::Retired => SysError::BadFileDescriptor,
+        SocketQueryError::Copy(error) => error,
     }
 }
 
-pub(super) fn map_send_error(error: SendError) -> SysError {
+pub(super) fn map_send_error(error: SocketSendError) -> SysError {
     match error {
-        SendError::Bind(UdpBindError::UnknownEndpoint) => SysError::BadFileDescriptor,
-        SendError::Bind(UdpBindError::AlreadyBound) => SysError::InvalidArgument,
-        SendError::Bind(UdpBindError::PortInUse) => SysError::AddressInUse,
-        SendError::Bind(UdpBindError::EphemeralPortsExhausted) => SysError::Again,
-        SendError::NoRoute | SendError::InterfaceUnavailable => SysError::NetworkUnreachable,
-        SendError::SourceUnavailable => SysError::AddressNotAvailable,
-        SendError::Stack(UdpSendError::UnknownEndpoint) => SysError::BadFileDescriptor,
-        SendError::Stack(UdpSendError::UnboundEndpoint) => SysError::InvalidArgument,
-        SendError::Stack(UdpSendError::UnknownInterface) => SysError::NetworkUnreachable,
-        SendError::Stack(UdpSendError::UnsupportedSource) => SysError::AddressNotAvailable,
-        SendError::Stack(UdpSendError::InvalidDestination) => SysError::InvalidArgument,
-        SendError::Stack(UdpSendError::MessageTooLong { .. }) => SysError::MessageTooLong,
-        SendError::Stack(UdpSendError::WouldBlock) => SysError::Again,
+        SocketSendError::Unsupported => SysError::NotSupported,
+        SocketSendError::Retired => SysError::BadFileDescriptor,
+        SocketSendError::InvalidState => SysError::InvalidArgument,
+        SocketSendError::AddressInUse => SysError::AddressInUse,
+        SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
+        SocketSendError::ResourceExhausted | SocketSendError::WouldBlock => SysError::Again,
+        SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
+        SocketSendError::InvalidDestination => SysError::InvalidArgument,
+        SocketSendError::MessageTooLong => SysError::MessageTooLong,
+        SocketSendError::Copy(error) => error,
     }
 }
 
-pub(super) fn map_receive_error(error: UdpReceiveError) -> SysError {
+pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
     match error {
-        UdpReceiveError::UnknownEndpoint => SysError::BadFileDescriptor,
-        UdpReceiveError::WouldBlock => SysError::Again,
+        SocketReceiveError::Unsupported => SysError::NotSupported,
+        SocketReceiveError::Retired => SysError::BadFileDescriptor,
+        SocketReceiveError::WouldBlock => SysError::Again,
+        SocketReceiveError::Copy(error) => error,
     }
 }

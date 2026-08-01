@@ -1,19 +1,19 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / Stage 1 Ready
+**状态：** R0 Accepted / Stage 1 Active
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R0
-**当前实施阶段：** Stage 1 Ready / Not Active（未授权代码或 contract cutover）
+**当前实施阶段：** Stage 1 / Checkpoint 1A Closed；Checkpoint 1B Not Active（无 contract cutover）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
 最终 validation boundary 仍由父 RFC [index](./index.md)和[目标与不变量](./invariants.md)定义；本页不建立并列
 target、执行状态总表或验证证据副本。
 
-R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Stage 1 的实施授权与最终
-`SOCKET-UNIX-CUTOVER` 仍是独立动作。resolution 只把 Stage 1 解析为 Ready / Not Active，不授权代码。进入后续
-Stage 前仍必须根据 live source、前一 Stage 实际 diff、review finding 与验证证据解析当前 Stage；前一 Stage关闭后
-停止，不自动进入下一 Stage。
+R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint 1A 随后取得独立实施授权并已关闭。
+Checkpoint 1B 与最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；1A closure 不关闭 Stage 1、不激活 1B，也不使 pending
+contract 生效。进入后续 Stage 前仍必须根据 live source、前一 Stage 实际 diff、review finding 与验证证据解析当前
+Stage；前一 Stage 关闭后停止，不自动进入下一 Stage。
 
 ## 全局 Implementation Boundary
 
@@ -105,8 +105,8 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 
 | 阶段 | 当前状态 | 概括目的 | 前置依赖 | 下一步解析触发点 |
 | --- | --- | --- | --- | --- |
-| Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；未激活 Stage 1 |
-| Stage 1 | Ready / Not Active | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 已完成；Stage 1 尚待独立实施授权 | 只能由明确 Stage 1 或 Checkpoint 1A 实施授权激活 |
+| Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
+| Stage 1 | Active / 1A Closed / 1B Not Active | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与 1A 已完成；1B 尚待独立实施授权 | 只能由明确 Checkpoint 1B 实施授权继续 |
 | Stage 2 | Outline | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed | 读取 Stage 1 实际 front、Unix endpoint/stream owner 与 validation evidence |
 | Stage 3 | Outline | 闭合完整stream operation、shutdown与poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
@@ -135,16 +135,16 @@ checkpoint 只能作为同一 Stage 的 review/恢复边界；任何 checkpoint 
 完整 consumer 证明。
 
 **退出：** R0 已被 owner/reviewer 接受，Stage 1 的语义 deliverable、两个有序 checkpoint、验证、停止与退出条件也已
-按下文解析。Entry 当前为 Completed，Stage 1 为 Ready / Not Active。实施授权不是 Entry 退出条件；只有后续明确
-授权才能使 Stage 1 或 Checkpoint 1A Active。
+按下文解析。Entry 以 Stage 1 Ready / Not Active 状态完成；后续独立授权已激活并关闭 Checkpoint 1A，但未激活
+Checkpoint 1B。
 
-## Stage 1 Ready / Not Active — 双 consumer Socket front vertical slice
+## Stage 1 Active — 双 consumer Socket front vertical slice
 
 **目的：** 在同一 Stage 中建立最小 general Socket front，并让现有 UDP 与 Unix `socketpair` connected-stream
 vertical slice 都通过该 front 的 creation、ABI/FileOps、opened-description 与 family dispatch 路径运行。
 
-**前置：** Entry resolution 已完成；开始代码前仍需另行取得 Stage 1 或 Checkpoint 1A 实施授权。若授权只点名一个
-checkpoint，其 closure 不激活下一个 checkpoint；若用户明确授权整个 Stage 1，仍按 1A -> review -> 1B 的顺序执行。
+**前置：** Entry resolution 与 Checkpoint 1A 已完成。Checkpoint 1B 仍需另行取得明确实施授权；一个 checkpoint 的
+closure 不激活下一个 checkpoint，Stage 1 继续保持 1A -> review -> 1B 的顺序。
 
 ### Live baseline 与解析结论
 
@@ -221,7 +221,11 @@ no-op或caller特判。
   `IOMUX-POLL-001..003` publication/final-scan协议，不发布RDHUP/ERR，不缓存ready mask，不改变epoll policy。本Stage
   不执行任何pending Socket/Unix/IOMUX/Epoll contract cutover。
 
-### Checkpoint 1A — Common front 与 UDP migration
+### Checkpoint 1A Closed — Common front 与 UDP migration
+
+**状态：** Closed。共同 front、UDP 等价迁移、完整 diff review 与 focused proof 已闭合；执行证据由 Git/PR 保存。
+当前仍只有 UDP 一个真实 consumer，因此本 checkpoint 不宣称 Stage 1、`SOCKET-FRONT-001` 或任何 current-contract
+cutover 已完成。Checkpoint 1B 保持 Not Active。
 
 **Deliverable：** 引入最小general Socket front、static ops/type witness、common Socket inode/FileOps与description hooks；
 把`socket/bind/getsockname/sendto/recvfrom`和poll/final release改为只识别common front并经UDP ops分发。现有

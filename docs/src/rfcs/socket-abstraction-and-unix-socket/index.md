@@ -9,7 +9,7 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** None（R0 accepted；Stage 1 Ready / Not Active；未授权实现或 contract cutover）
+**执行记录：** Git/PR（Checkpoint 1A Closed；Checkpoint 1B Not Active）；transaction None；contract cutover None
 
 ## 文档状态
 
@@ -18,13 +18,14 @@
 并列 canonical source。
 
 本文不是 current contract，也不表示任何实现 gate 已经 Active。当前 UDP、opened-description、VFS、iomux 与epoll
-语义继续以 `docs/src/contracts/` 下的 Active contract 为准。R0 acceptance只接受target；独立resolution已把Stage 1
-解析为Ready / Not Active，仍需另行实施授权后才能进入代码工作。达到`SOCKET-UNIX-CUTOVER`的全部验收前，不得修改
-current contract。
+语义继续以 `docs/src/contracts/` 下的 Active contract 为准。R0 acceptance 只接受 target；独立 resolution 把
+Stage 1 解析为两个有序 checkpoint，Checkpoint 1A 已取得授权并关闭，Checkpoint 1B 仍为 Not Active。达到
+`SOCKET-UNIX-CUTOVER` 的全部验收前，不得修改 current contract。
 
 本 RFC 按当前规模保留[目标与不变量](./invariants.md)，并因已经出现真实多阶段实施需要而增加一份
-[实施路线](./implementation.md)。其中Stage 1已按live source解析为两个有序checkpoint，Stage 2--4仍为Outline；当前
-不创建tracking page或transaction，也不把Ready状态当作实施授权。
+[实施路线](./implementation.md)。其中 Stage 1 已按 live source 解析为两个有序 checkpoint，1A 已关闭且 1B 保持
+Not Active，Stage 2--4 仍为 Outline；当前不创建 tracking page 或 transaction，也不把前一 checkpoint closure
+当作下一 checkpoint 的实施授权。
 
 ## 摘要
 
@@ -41,9 +42,10 @@ namespace、buffer、transaction 或状态机。
 ## 背景与 Current Baseline
 
 当前 [Network UDP Socket contract](../../contracts/net/udp-socket.md) 已经固定 kernel Socket 与 protocol Endpoint 的
-owner fence、opened-description final release、UDP bind/send/receive transaction 和 readiness recheck。live source
-仍由 UDP-specific file/private/source 结构承载，并由 syscall adapter 直接识别 UDP FileOps；这是一条已经完成 cutover
-的具体能力，不是 general Socket contract。
+owner fence、opened-description final release、UDP bind/send/receive transaction 和 readiness recheck。Checkpoint
+1A 已把 live UDP file/opened-description/syscall dispatch 迁移到共同 Socket front，但 UDP private/source 与 Network
+Stack Endpoint 仍各守原 owner；当前只有 UDP 一个真实 consumer，因此这仍是一条已生效的具体 UDP 能力，不是 general
+Socket contract cutover。
 
 [VFS Creation 与 Make Node contract](../../contracts/vfs/make-node.md#vfs-creation-001--current-task-creation-policy-止于-kernel-operation)
 已经固定 user-thread named-object creation 的 current-context owner：task filesystem context 唯一拥有 process
@@ -530,7 +532,7 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
   [VFS create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)、
   [non-UTF-8 pathname](../../register/current-limitations.md#ane-20260801-vfs-non-utf8-pathname)
 - External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`
-- commit / PR / transaction：None（R0 accepted；Stage 1 resolution已完成；未授权实现或cutover）
+- commit / PR：Git/PR 保存 Checkpoint 1A 实现、review 与验证证据；transaction：None；cutover：None
 
 ## 修订记录
 
@@ -540,5 +542,5 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 
 ## Closure
 
-Not Cut Over。Stage 1为Ready / Not Active；没有代码、runtime、contract cutover或实现授权，所有validation claim均为
-未来实施与acceptance要求。
+Not Cut Over。Checkpoint 1A 已关闭，Checkpoint 1B 保持 Not Active，Stage 1 尚未关闭。1A 只证明共同 front 上的 UDP
+等价迁移；Unix 第二 consumer 与后续 acceptance 均未运行，任何 pending Socket/Unix/IOMUX/Epoll contract 都尚未生效。

@@ -4,7 +4,7 @@ use anemone_abi::{
 };
 
 use crate::{
-    fs::socket::{prepare_udp_socket, udp_file_desc_ops},
+    fs::socket::{SocketOps, UDP_SOCKET_OPS, prepare_socket, socket_file_desc_ops},
     prelude::*,
     task::files::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
@@ -12,8 +12,17 @@ use crate::{
 const SOCK_TYPE_MASK: i32 = 0xf;
 const SUPPORTED_FLAGS: i32 = SOCK_NONBLOCK | SOCK_CLOEXEC;
 
-#[syscall(SYS_SOCKET)]
-fn sys_socket(family: i32, socket_type: i32, protocol: i32) -> Result<u64, SysError> {
+struct ResolvedSocket {
+    ops: &'static SocketOps,
+    status_flags: FileStatusFlags,
+    fd_flags: FdFlags,
+}
+
+fn resolve_socket(
+    family: i32,
+    socket_type: i32,
+    protocol: i32,
+) -> Result<ResolvedSocket, SysError> {
     if family != AF_INET {
         return Err(SysError::AddressFamilyNotSupported);
     }
@@ -27,27 +36,81 @@ fn sys_socket(family: i32, socket_type: i32, protocol: i32) -> Result<u64, SysEr
         return Err(SysError::ProtocolNotSupported);
     }
 
-    let task = get_current_task();
-    let reservation = task.reserve_fd()?;
-    let (file, creation) = prepare_udp_socket()?;
-
     let mut status_flags = FileStatusFlags::empty();
     status_flags.set(FileStatusFlags::NONBLOCK, socket_type & SOCK_NONBLOCK != 0);
-    file.check_status_flags(status_flags.to_file_op_status_flags())?;
     let fd_flags = if socket_type & SOCK_CLOEXEC != 0 {
         FdFlags::CLOSE_ON_EXEC
     } else {
         FdFlags::empty()
     };
+    Ok(ResolvedSocket {
+        ops: &UDP_SOCKET_OPS,
+        status_flags,
+        fd_flags,
+    })
+}
+
+#[syscall(SYS_SOCKET)]
+fn sys_socket(family: i32, socket_type: i32, protocol: i32) -> Result<u64, SysError> {
+    let resolved = resolve_socket(family, socket_type, protocol)?;
+
+    let task = get_current_task();
+    let reservation = task.reserve_fd()?;
+    let (file, creation) = prepare_socket(resolved.ops)?;
+
+    file.check_status_flags(resolved.status_flags.to_file_op_status_flags())?;
     let file_desc = FileDesc::new_opened(
         file,
         OpenAccessMode::ReadWrite,
-        status_flags,
+        resolved.status_flags,
         LinuxOpenCompat::empty(),
-        fd_flags,
-        udp_file_desc_ops(),
+        resolved.fd_flags,
+        socket_file_desc_ops(),
     );
     let fd = reservation.commit(file_desc);
     creation.commit();
     Ok(fd.raw() as u64)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn resolver_normalizes_udp_protocol_and_creation_flags() {
+        let default = resolve_socket(AF_INET, SOCK_DGRAM, 0).unwrap();
+        let explicit = resolve_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP).unwrap();
+        assert!(core::ptr::eq(default.ops, explicit.ops));
+        assert!(default.status_flags.is_empty());
+        assert!(default.fd_flags.is_empty());
+
+        let flagged = resolve_socket(
+            AF_INET,
+            SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            IPPROTO_UDP,
+        )
+        .unwrap();
+        assert!(flagged.status_flags.contains(FileStatusFlags::NONBLOCK));
+        assert!(flagged.fd_flags.contains(FdFlags::CLOSE_ON_EXEC));
+    }
+
+    #[kunit]
+    fn resolver_rejects_unsupported_capabilities_before_creation() {
+        assert!(matches!(
+            resolve_socket(AF_INET + 1, SOCK_DGRAM, 0),
+            Err(SysError::AddressFamilyNotSupported)
+        ));
+        assert!(matches!(
+            resolve_socket(AF_INET, SOCK_DGRAM | 0x4000_0000, 0),
+            Err(SysError::InvalidArgument)
+        ));
+        assert!(matches!(
+            resolve_socket(AF_INET, 1, 0),
+            Err(SysError::SocketTypeNotSupported)
+        ));
+        assert!(matches!(
+            resolve_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP + 1),
+            Err(SysError::ProtocolNotSupported)
+        ));
+    }
 }

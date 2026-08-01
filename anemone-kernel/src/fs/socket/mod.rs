@@ -1,7 +1,10 @@
 mod api;
+mod front;
 mod udp;
 
-use udp::{
-    begin_udp_send, bind_udp_socket, prepare_udp_socket, query_udp_socket, receive_udp_socket,
-    udp_file_desc_ops, udp_socket_from_file,
+use front::{
+    SocketAddress, SocketAddressSink, SocketBindError, SocketCreation, SocketOps,
+    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveSink, SocketSendError,
+    SocketSendPayload, SocketType, prepare_socket, socket_file_desc_ops, socket_from_file,
 };
+use udp::UDP_SOCKET_OPS;

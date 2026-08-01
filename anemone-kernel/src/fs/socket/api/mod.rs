@@ -10,7 +10,7 @@ use crate::{
     prelude::*,
 };
 
-fn wait_for_udp_file(
+fn wait_for_socket_file(
     context: &'static str,
     task: &Arc<Task>,
     file: &File,
@@ -22,21 +22,24 @@ fn wait_for_udp_file(
                 IomuxScanOutcome::from_ready_count(usize::from(!events.is_empty())),
             ),
             PollRegisterResult::Subscribed(_) => {
-                kwarningln!("{}: UDP snapshot unexpectedly subscribed", context);
+                kwarningln!("{}: Socket snapshot unexpectedly subscribed", context);
                 Err(SysError::IO)
             },
             PollRegisterResult::SubscribedRecheck if mode.is_register() => {
                 Ok(IomuxScanOutcome::Recheck)
             },
             PollRegisterResult::SubscribedRecheck => {
-                kwarningln!("{}: UDP snapshot unexpectedly requested recheck", context);
+                kwarningln!(
+                    "{}: Socket snapshot unexpectedly requested recheck",
+                    context
+                );
                 Err(SysError::IO)
             },
             PollRegisterResult::Ready(events) if !events.is_empty() => {
                 Ok(IomuxScanOutcome::Ready(1))
             },
             PollRegisterResult::Ready(_) if mode.is_register() => {
-                kwarningln!("{}: UDP register scan returned empty ready", context);
+                kwarningln!("{}: Socket register scan returned empty ready", context);
                 Ok(IomuxScanOutcome::Unsupported)
             },
             PollRegisterResult::Ready(_) => Ok(IomuxScanOutcome::NotReady),
@@ -46,7 +49,7 @@ fn wait_for_udp_file(
     let ready = outcome.into_result_without_temporary_mask()?;
     assert_eq!(
         ready, 1,
-        "UDP wait returned without its single source ready"
+        "Socket wait returned without its single source ready"
     );
     Ok(())
 }
