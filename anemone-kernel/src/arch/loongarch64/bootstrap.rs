@@ -207,7 +207,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
     #[unsafe(link_section = ".data")]
     static mut BSP_ARRIVED: bool = false;
     unsafe {
-        euen::csr_write(Euen::SXE | Euen::ASXE | Euen::BTE);
+        euen::csr_write(Euen::BTE);
 
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;

@@ -35,5 +35,6 @@ pub type TrapFrame = <TrapArch as TrapArchTrait>::TrapFrame;
 pub type SyscallCtx = <TrapArch as TrapArchTrait>::SyscallCtx;
 pub type UserPtrAccessor = <TrapArch as TrapArchTrait>::UserPtrAccessor;
 pub type TaskContext = <SchedArch as SchedArchTrait>::TaskContext;
+pub type TaskArchProperties = <SchedArch as SchedArchTrait>::TaskProperties;
 pub type LocalClockSource = <TimeArch as TimeArchTrait>::LocalClockSource;
 pub type LocalClockEvent = <TimeArch as TimeArchTrait>::LocalClockEvent;

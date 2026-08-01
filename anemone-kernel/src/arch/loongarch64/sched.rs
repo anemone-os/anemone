@@ -1,12 +1,11 @@
 use core::arch::naked_asm;
 
 use crate::{
-    arch::loongarch64::{
-        exception::trap::{__ktrap_return_to_task, LA64TrapFrame, utrap_return_to_task},
-        fpu::FpuTaskContext,
+    arch::loongarch64::exception::trap::{
+        __ktrap_return_to_task, LA64TrapFrame, utrap_return_to_task,
     },
     prelude::*,
-    sched::{ParameterList, SchedArchTrait, TaskContextArch},
+    sched::{ParameterList, SchedArchTrait, TaskContextArch, TaskPropertiesArch},
     task::exit::kernel_exit,
 };
 
@@ -19,7 +18,6 @@ pub struct LA64TaskContext {
     sp: u64,
     /// Callee-Saved GPRs $s0 - $s11
     s: [u64; 10],
-    fpu: FpuTaskContext,
 }
 
 impl TaskContextArch for LA64TaskContext {
@@ -27,7 +25,6 @@ impl TaskContextArch for LA64TaskContext {
         ra: 0,
         sp: 0,
         s: [0; 10],
-        fpu: FpuTaskContext::ZEROED,
     };
 
     fn pc(&self) -> u64 {
@@ -46,7 +43,6 @@ impl TaskContextArch for LA64TaskContext {
             ra: user_task_entry_primary as *const () as u64,
             sp: kstack_top.get(),
             s,
-            fpu: FpuTaskContext::ZEROED,
         }
     }
 
@@ -59,22 +55,48 @@ impl TaskContextArch for LA64TaskContext {
             ra: kernel_task_entry_primary as *const () as u64,
             sp: stack_top.get(),
             s,
-            fpu: FpuTaskContext::ZEROED,
         }
-    }
-}
-
-impl LA64TaskContext {
-    pub fn clear_fpu(&mut self) {
-        self.fpu = FpuTaskContext::ZEROED;
     }
 }
 
 /// LoongArch64 scheduler architecture hooks.
 pub struct LA64SchedArch;
 
+pub struct LA64TaskProperties {
+    lsx_used: AtomicBool,
+}
+
+impl LA64TaskProperties {
+    pub fn lsx_used(&self) -> bool {
+        self.lsx_used.load(Ordering::Acquire)
+    }
+
+    /// Mark LSX as used, returning true only for the first use in this image.
+    pub fn mark_lsx_used(&self) -> bool {
+        self.lsx_used
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+}
+
+impl TaskPropertiesArch for LA64TaskProperties {
+    const NEW: Self = Self {
+        lsx_used: AtomicBool::new(false),
+    };
+
+    fn inherit_for_clone(&self, parent: &Self) {
+        self.lsx_used
+            .store(parent.lsx_used.load(Ordering::Acquire), Ordering::Release);
+    }
+
+    fn reset_for_exec(&self) {
+        self.lsx_used.store(false, Ordering::Release);
+    }
+}
+
 impl SchedArchTrait for LA64SchedArch {
     type TaskContext = LA64TaskContext;
+    type TaskProperties = LA64TaskProperties;
 
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext) {
         debug_assert!(IntrArch::local_intr_disabled());
@@ -82,6 +104,23 @@ impl SchedArchTrait for LA64SchedArch {
             __switch(cur, next);
         }
     }
+}
+
+#[kunit]
+fn task_properties_follow_clone_and_exec_lifecycle() {
+    let parent = LA64TaskProperties::NEW;
+    let child = LA64TaskProperties::NEW;
+
+    assert!(!parent.lsx_used());
+    assert!(parent.mark_lsx_used());
+    assert!(!parent.mark_lsx_used());
+
+    child.inherit_for_clone(&parent);
+    assert!(child.lsx_used());
+
+    child.reset_for_exec();
+    assert!(!child.lsx_used());
+    assert!(parent.lsx_used());
 }
 
 /// Save the current task context and restore the next one.

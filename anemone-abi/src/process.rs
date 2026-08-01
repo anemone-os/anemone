@@ -714,6 +714,7 @@ pub mod linux {
                 pub uc_sigmask: SigSet,
                 pub __unused: [u8; 1024 / 8 - size_of::<SigSet>()],
                 pub uc_mcontext: SigContext,
+                pub uc_extcontext: ExtContext,
             }
 
             /// The same as `struct sigaltstack` in Linux kernel.
@@ -735,17 +736,70 @@ pub mod linux {
                 pub sc_pc: u64,
                 pub sc_regs: [u64; 32],
                 pub sc_flags: u32,
-                pub sc_fpuctx: FpuContext,
             }
 
             #[derive(Debug, Clone, Copy)]
             #[repr(C)]
-            #[repr(align(16))]
-            pub struct FpuContext {
-                pub fregs: [u64; 32],
-                pub fcc: u64,
-                pub fcsr: u64,
+            pub struct SctxInfo {
+                pub magic: u32,
+                pub size: u32,
+                pub padding: u64,
             }
+
+            pub const SC_USED_FP: u32 = 1 << 0;
+            pub const FPU_CTX_MAGIC: u32 = 0x4650_5501;
+            pub const LSX_CTX_MAGIC: u32 = 0x5358_0001;
+
+            #[derive(Debug, Clone, Copy)]
+            #[repr(C)]
+            pub struct FpuContext {
+                pub regs: [u64; 32],
+                pub fcc: u64,
+                pub fcsr: u32,
+                pub reserved: u32,
+            }
+
+            #[derive(Debug, Clone, Copy)]
+            #[repr(C)]
+            pub struct LsxContext {
+                pub regs: [[u64; 2]; 32],
+                pub fcc: u64,
+                pub fcsr: u32,
+                pub reserved: u32,
+            }
+
+            #[derive(Clone, Copy)]
+            #[repr(C)]
+            pub union FpContextPayload {
+                pub fpu: FpuContext,
+                pub lsx: LsxContext,
+            }
+
+            #[derive(Clone, Copy)]
+            #[repr(C, align(16))]
+            pub struct ExtContext {
+                pub info: SctxInfo,
+                pub payload: FpContextPayload,
+                pub end: SctxInfo,
+            }
+
+            impl core::fmt::Debug for ExtContext {
+                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    f.debug_struct("ExtContext")
+                        .field("info", &self.info)
+                        .field("end", &self.end)
+                        .finish_non_exhaustive()
+                }
+            }
+
+            const _: () = assert!(size_of::<SctxInfo>() == 16);
+            const _: () = assert!(size_of::<FpuContext>() == 272);
+            const _: () = assert!(size_of::<LsxContext>() == 528);
+            const _: () = assert!(size_of::<SigContext>() == 272);
+            const _: () = assert!(
+                core::mem::offset_of!(UContext, uc_extcontext)
+                    == core::mem::offset_of!(UContext, uc_mcontext) + size_of::<SigContext>()
+            );
 
             impl SigContext {
                 pub fn pc(&self) -> u64 {

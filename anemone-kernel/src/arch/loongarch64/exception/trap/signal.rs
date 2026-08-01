@@ -1,11 +1,15 @@
 use core::arch::naked_asm;
 
 use crate::{
+    arch::loongarch64::fpu::FpuTaskContext,
     prelude::*,
     task::sig::{RtSigFrame, SignalArchTrait},
 };
 
-use anemone_abi::process::linux::signal as linux_signal;
+use anemone_abi::process::linux::{
+    signal as linux_signal,
+    ucontext::{FPU_CTX_MAGIC, FpuContext, LSX_CTX_MAGIC, LsxContext, SC_USED_FP, SctxInfo},
+};
 
 pub struct LA64SignalArch;
 
@@ -29,22 +33,45 @@ impl SignalArchTrait for LA64SignalArch {
             bits: mask.as_u64(),
         };
 
-        // mcontext.
-        // floating point registers are not implemented yet.
         buf.uc_mcontext.sc_pc = trapframe.era;
         buf.uc_mcontext.sc_regs.copy_from_slice(&trapframe.gpr.r);
-        // idk what sc_flags is for. let's just set it to 0.
-        buf.uc_mcontext.sc_flags = 0;
+        buf.uc_mcontext.sc_flags = if fpu { SC_USED_FP } else { 0 };
 
         if fpu {
-            buf.uc_mcontext
-                .sc_fpuctx
-                .fregs
-                .copy_from_slice(&trapframe.fpu_regs().f);
-            buf.uc_mcontext.sc_fpuctx.fcc = trapframe.fpu_regs().fcc;
-            buf.uc_mcontext.sc_fpuctx.fcsr = trapframe.fpu_regs().fcsr;
-        } else {
-            // keep
+            let fp = trapframe.fpu_regs();
+            if get_current_task().arch_properties().lsx_used() {
+                buf.uc_extcontext.info = SctxInfo {
+                    magic: LSX_CTX_MAGIC,
+                    size: (size_of::<SctxInfo>() + size_of::<LsxContext>()) as u32,
+                    padding: 0,
+                };
+                buf.uc_extcontext.payload.lsx = LsxContext {
+                    regs: fp.regs,
+                    fcc: fp.fcc,
+                    fcsr: fp.fcsr,
+                    reserved: 0,
+                };
+            } else {
+                buf.uc_extcontext.info = SctxInfo {
+                    magic: FPU_CTX_MAGIC,
+                    size: (size_of::<SctxInfo>() + size_of::<FpuContext>()) as u32,
+                    padding: 0,
+                };
+                // The FPU member is smaller than the union. Clear through its
+                // largest member first so no union tail reaches userspace.
+                buf.uc_extcontext.payload.lsx = LsxContext {
+                    regs: [[0; 2]; 32],
+                    fcc: 0,
+                    fcsr: 0,
+                    reserved: 0,
+                };
+                buf.uc_extcontext.payload.fpu = FpuContext {
+                    regs: fp.regs.map(|lanes| lanes[0]),
+                    fcc: fp.fcc,
+                    fcsr: fp.fcsr,
+                    reserved: 0,
+                };
+            }
         }
     }
 
@@ -59,12 +86,37 @@ impl SignalArchTrait for LA64SignalArch {
             .r
             .copy_from_slice(&ucontext.uc_mcontext.sc_regs);
         if fpu {
-            trapframe
-                .fpu_regs_mut()
-                .f
-                .copy_from_slice(&ucontext.uc_mcontext.sc_fpuctx.fregs);
-            trapframe.fpu_regs_mut().fcc = ucontext.uc_mcontext.sc_fpuctx.fcc;
-            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.sc_fpuctx.fcsr;
+            let info = ucontext.uc_extcontext.info;
+            match (info.magic, info.size as usize) {
+                (LSX_CTX_MAGIC, size)
+                    if size >= size_of::<SctxInfo>() + size_of::<LsxContext>() =>
+                {
+                    // SAFETY: The active union member is selected by the Linux
+                    // signal context magic and its checked minimum size.
+                    let lsx = unsafe { ucontext.uc_extcontext.payload.lsx };
+                    trapframe.fpu_regs_mut().regs = lsx.regs;
+                    trapframe.fpu_regs_mut().fcc = lsx.fcc;
+                    trapframe.fpu_regs_mut().fcsr = lsx.fcsr;
+                },
+                (FPU_CTX_MAGIC, size)
+                    if size >= size_of::<SctxInfo>() + size_of::<FpuContext>() =>
+                {
+                    // A signal handler may be the task's first LSX user. Clear
+                    // its upper lanes before restoring the interrupted scalar state.
+                    let fp = unsafe { ucontext.uc_extcontext.payload.fpu };
+                    *trapframe.fpu_regs_mut() = FpuTaskContext::ZEROED;
+                    for (reg, value) in trapframe.fpu_regs_mut().regs.iter_mut().zip(fp.regs) {
+                        reg[0] = value;
+                    }
+                    trapframe.fpu_regs_mut().fcc = fp.fcc;
+                    trapframe.fpu_regs_mut().fcsr = fp.fcsr;
+                },
+                _ => {
+                    // The interrupted context had not used FP/LSX. Sticky task
+                    // policy remains enabled if the signal handler used it.
+                    *trapframe.fpu_regs_mut() = FpuTaskContext::ZEROED;
+                },
+            }
         }
     }
 

@@ -4,6 +4,8 @@ use crate::prelude::*;
 pub trait SchedArchTrait {
     /// Task Context type
     type TaskContext: TaskContextArch;
+    /// Architecture-owned per-task properties.
+    type TaskProperties: TaskPropertiesArch;
     /// Switch from the current task to the next task. Saves and loads the
     /// callee-saved registers.
     ///
@@ -15,6 +17,18 @@ pub trait SchedArchTrait {
     ///
     /// **Must be called with interrupts disabled.**
     unsafe fn switch(cur: *mut TaskContext, next: *const TaskContext);
+}
+
+/// Lifecycle contract for architecture-owned per-task properties.
+pub trait TaskPropertiesArch: Sized + Send + Sync + 'static {
+    const NEW: Self;
+
+    /// Initialize an unpublished child from its parent after cloning the user
+    /// trapframe.
+    fn inherit_for_clone(&self, parent: &Self);
+
+    /// Discard properties belonging to the old image at successful exec commit.
+    fn reset_for_exec(&self);
 }
 
 pub trait TaskContextArch {

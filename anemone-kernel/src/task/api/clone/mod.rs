@@ -260,6 +260,7 @@ pub fn kernel_clone(
         // register still points at the parent's trap stack until we rebind it.
         (*frame_ptr).set_scratch(new_task.kstack().stack_top().get());
     }
+    new_task.inherit_arch_properties_for_clone(&current_task);
 
     let new_uspace = if flags.contains(CloneFlags::VM) {
         if flags.contains(CloneFlags::VFORK) {
