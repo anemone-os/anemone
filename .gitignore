@@ -19,3 +19,4 @@ LOCAL.md
 .devcontainer/local/
 .codex
 **/__pycache__
+containers
