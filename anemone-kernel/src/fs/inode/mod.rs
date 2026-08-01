@@ -9,7 +9,11 @@ use core::{
 };
 
 use crate::{
-    fs::{file::FileMode, flock::FlockDomain, permission::FsPermChecker},
+    fs::{
+        file::FileMode,
+        lock::{FlockDomain, PosixLockDomain},
+        permission::FsPermChecker,
+    },
     prelude::{vmo::VmObject, *},
     task::credentials::cap::{Capability, FileCapabilities},
     utils::any_opaque::AnyOpaque,

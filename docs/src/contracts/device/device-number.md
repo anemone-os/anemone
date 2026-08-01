@@ -10,10 +10,10 @@ registry key separation、endpoint-owned device number、producer-owned allocati
 **不覆盖：** Linux `mknodat` syscall input admission、ordinary-filesystem special-node `rdev`、device-provider resolver、
 devfs/TTY publication lifecycle、hotplug/unpublish、provider replacement或 block I/O
 **实现位置：** `anemone-kernel/src/device/{devnum.rs,char/mod.rs,block/mod.rs}`、
-`anemone-kernel/src/fs/inode.rs`
+`anemone-kernel/src/fs/inode/metadata.rs`
 **依赖：** None
-**Pending Successor：** None；VFS Make Node R0 `DEVICE-NUMBER-CUTOVER` 已生效
-**Review Context：** VFS Make Node R0 Stage 1 Closed；Stage 2 仍为 Outline / Not Active
+**Pending Successor：** None；VFS Make Node R2 `DEVICE-NUMBER-CUTOVER` 已生效
+**Review Context：** VFS Make Node R2 Closed；Stage 1-2 与 C1-C3 均已关闭
 **最后核验：** 2026-08-01
 
 本页最初由 2026-07-31 `DEVICE-NUMBER-BASELINE-EXTRACTION` 从 live owner 提取 16/16 baseline；2026-08-01

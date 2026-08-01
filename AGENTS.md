@@ -76,7 +76,7 @@
 * **窄接口优先。** 下层只需要唤醒能力、文件能力、任务身份或上下文窗口时，不要传完整 `Task`、`File`、`FileDesc`、私有锁或内部容器。优先定义窄的 ctx、token、handle 或 owner API，让调用者无法依赖不属于它的内部状态。
 * **断言策略要按 correctness 区分。** 轻量、局部、表示正确性不变量的检查使用 `assert!`，不要用 `debug_assert!`。`debug_assert!` 只用于昂贵扫描、统计诊断，或 release 路径不能承受的检查。cleanup / `Drop` 路径应先退订、释放或撤销发布状态，再用断言暴露 bug，避免 panic 放大泄漏或悬挂状态。如果fail-close会反过来要求内核实现新的功能或者代价很高，可以在注释中说明为什么不 fail-close，并做注释标记，便于后续 review。
 * **临时桥和兼容层必须带退出条件。** 为阶段迁移、LTP 兼容或 ABI 缺口引入的临时字段、fallback、双路径分发和兼容 wrapper，必须说明保留原因、行为边界和移除条件，不能让后续开发者误以为它是长期抽象。
-* **结构性拆分是设计维护，不是默认越界。** 简单小修不要为了整洁随手拆文件；但当一个文件已经混合 syscall ABI、核心状态机、设备/文件后端、测试兼容桥、锁/生命周期规则或多套 UAPI/internal 转换时，继续把新职责塞进去会固化错误 owner boundary。此时应先做模块边界判断：同一 owner 内、行为保持的目录化拆分（例如 `foo.rs` 拆成 `foo/{mod.rs, abi.rs, state.rs, ops.rs}`）是允许的结构维护；涉及 owner surface、public API、可见性策略或 shared contract 变化时，必须按 write set 扩展流程上报并记录。
+* **结构性拆分是设计维护，不是默认越界。** 简单小修不要为了整洁随手拆文件；但当一个文件已经混合 syscall ABI、核心状态机、设备/文件后端、测试兼容桥、锁/生命周期规则或多套 UAPI/internal 转换时，继续把新职责塞进去会固化错误 owner boundary。此时应先做模块边界判断：同一 owner 内、行为保持的目录化拆分（例如 `foo.rs` 拆成 `foo/{mod.rs, abi.rs, state.rs, ops.rs}`）是允许的结构维护；涉及 owner surface、public API、可见性策略或 shared contract 变化时，必须按 Implementation Boundary 的停止条件上报。
 * **重要常量进入kconfig作为可配置项。**
 
 ### 模块拆分不是默认越界
@@ -90,8 +90,7 @@
 - 只是把已有或本次必需的职责按 ABI、state、ops、lifecycle、compat、tests 等稳定角色分文件；
 - 验证方式能证明调用路径和外部行为未改变。
 
-如果拆分会移动 owner surface、改变公共接口、扩大 write set、改变共享 contract 或引入新抽象层，必须先停止并上报扩展理
-由、范围和验证计划。
+如果拆分会移动 owner surface、改变公共接口、越过 Implementation Boundary、改变共享 contract 或引入新抽象层，必须先停止并上报理由、范围和验证计划。
 
 ### KUnit 与 validation 模块
 
@@ -138,31 +137,29 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 明确的成功标准可以让你独立循环。模糊标准（“让它能工作”）则需要不断确认。
 
-### RFC / 大型实现反馈闭环
+### 开发工作流与实现反馈
 
-对于走 RFC 或事务 devlog 的大型实现，文档层闭合不是要求实现前消除所有不确定性。多阶段 RFC 接受时只要求第一个可执行阶段完整解析为 `Ready`；更远阶段保持 `Outline`，只说明概括目的、依赖、受保护边界和解析触发点。前一阶段关闭后，通过独立的 `N -> N+1 Implementation Resolution Gate` 读取 live source、实际 diff、review 与验证证据，再精确解析下一阶段的交付、实现路径、审计、验证、停止/退出条件、contract cutover 和 resolved write set。`Ready` 表示整个阶段已解析但尚未自动获得执行授权。
+完整规则见 `docs/src/development-workflow.md`。开发按风险分为三档：Patch 默认只产生代码、测试和 Git/PR 证据；值得长期追溯的局部决策使用一份自描述 small change record，不强制同步双周日志；owner、ABI、shared contract、非平凡并发/生命周期、probe、多 cutover 或 target renegotiation 未闭合时使用 RFC。RFC 默认只有 `index.md`，其它 supporting pages 与 transaction devlog 按真实需要创建。
 
-Review 不得仅因 future `Outline` 缺少具体类型、函数、算法、逐文件路径、完整 corner-case 矩阵或精确测试命令而形成 finding。只有 Outline 缺少必要依赖/受保护边界、无法说明 target 可达路径，或把可能改变 owner、ABI、contract / acceptance boundary 的决定无 gate 地推迟时，才属于文档层问题。
+默认使用语义级 `Implementation Boundary`，不维护逐文件 write set。边界必须说明 target/non-goals、owning subsystem、protocol/state owner、handoff、failure、cleanup、受保护的 public API/ABI/visible semantics/current contract、acceptance、验证 claim 和停止条件。预计文件或目录只能作为非穷举提示；边界内的 import/re-export、模块注册、同 owner 新文件、定向测试和行为保持型拆分可由 agent 自然闭合。用户显式给出的严格文件限制仍是本次任务的附加约束。
 
-高风险设计点应优先安排 probe / vertical slice gate，验证真实接口、状态流转、错误路径、性能或模块集成风险。探针必须保持最小 write set，说明失败信号和删除/回写条件；除非 RFC 接受对应 target delta、长期共享规则完成 contract cutover，并在事务日志中记录证据，否则探针代码不得自然沉淀为长期抽象。
+如果实现需要改变 target、owner、handoff、failure、cleanup、public API、ABI、visibility/shared contract、acceptance 或验证强度，或者要把无关问题纳入当前迭代，必须在完成声明或 cutover 前停止并上报。不得为了适配旧文件提示制造不自然的 adapter、重复状态或绕过路径。用户只授权某个 checkpoint/stage 时，完成后停止，不自动进入下一 gate。
 
-不要为反馈机制默认新建通用 `feedback.md`、`probe.md` 或 `experiments.md`。probe 计划写在 RFC `implementation.md`，执行反馈写在 transaction devlog；只有证据包过长时，才在对应 RFC 的 `backgrounds/` 下增加具体命名的证据文件。
+正式 gate 只用于 contract cutover、ABI 发布、owner 迁移、高风险 probe、不安全中间态或明确人工授权点。未来 stage 只需保留目的、依赖和受保护边界；不得仅因缺少具体类型、算法、逐文件路径或精确命令形成 finding。probe 计划放在按需 `implementation.md`，说明 hypothesis、protected boundary、failure signal、write-back 和退出条件；probe 代码不能因“已经能跑”自然沉淀为长期抽象。
 
-实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。如果真实工程证据表明原目标代价过高或只能形成较弱能力，当前 gate 必须在 cutover 前停止，由 RFC review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC，或保持 Not Cut Over。agent 可以提交证据与 reduced-target 提案，但无权自行批准；新 target 重新接受并完成对应 contract cutover 前，不得把更弱实现写成当前事实或原 target closure。
+实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。真实证据表明原目标代价过高或只能形成较弱能力时，review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC 或保持 Not Cut Over。agent 可以提交证据和 reduced-target 提案，不能自行批准；新 target 接受并完成对应 cutover 前，不得把更弱实现写成当前事实、accepted limitation 或原 target closure。
 
-不要把所有期望都写成不变量。correctness invariant 约束状态唯一 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性，不能作为工程妥协项；target guarantee / capability 在当前修订中具有约束力，但可以经过 target renegotiation 形成新修订；类型、helper、内部模块和数据结构等 implementation preference 由滚动阶段解析决定。accepted limitation 必须位于新 target 之外，新 target 范围内的错误仍进入 open issues。
+correctness invariant 约束唯一 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性，不能作为工程妥协项；target guarantee/capability 可以经 target renegotiation 修订；类型、helper、内部模块和数据结构属于 implementation preference。accepted limitation 必须位于新 target 之外，新 target 范围内的错误仍进入 open issues。
 
-实现期发现的问题按影响归属：执行事实写 transaction devlog；保持 target 的阶段 Outline/Ready 解析、顺序、write set、验证安排或停止条件变化回写 `implementation.md`；target invariant、状态所有权、ABI 边界或接受边界变化先进入 RFC review / `Target Renegotiation Gate`，接受后回写 RFC target / `Contract Impact` 和必要的 `tracking-issues.md`；已经生效的共享规则只在批准的 cutover gate 更新 current contract；接受限制或开放缺陷进入 register / current limitations。不要用临时兼容层绕过无法分类的设计反馈。
+执行事实和验证优先留在 Git/PR；只有按分级确有长期记录价值时才写 change record 或 transaction。保持 target 的实施路线、stage 顺序、验证安排和停止条件更新按需 `implementation.md`；target/owner/ABI/contract/acceptance 变化进入 RFC review；effective shared rule 只在 cutover 时更新 current contract；接受限制和开放缺陷进入 register。不要创建通用 `feedback.md`、`probe.md`、`experiments.md` 或 `friction.md`。
 
-RFC 的文本历史统一由整个仓库的 Git 保存，不为单个 RFC 建仓库，也不创建 `index-v1.md`、默认 amendment 文件或并列 canonical 副本。RFC 页首的 `R0`、`R1` 只标记已接受的 target 语义修订：目标、非目标、target invariant、状态所有权、ABI / 可见语义或接受边界变化时递增；措辞、证据和保持 target 的实现计划调整不递增。
+每次 Patch、小迭代、checkpoint、stage 或 RFC 实现收口前必须执行 Architecture Friction Scan，检查第二份状态真相、owner 穿透、私有表示泄漏、为局部需求扩大 public API、调用者/架构/测试特判、无退出条件的临时桥、隐含 failure/cleanup 顺序、无真实义务的新抽象层，以及通过降低 oracle/validation/ABI 诚实性换取“跑通”。结论必须有具体代码路径、状态/owner/lifecycle 模型或已接受下一步作为证据；普通 import/module 注册、编译错误、工具链问题和未被本轮恶化的相邻技术债不构成摩擦。
 
-RFC `index.md` / `invariants.md` 原地维护当前修订的 accepted target、contract delta 和 RFC-local proof obligations，`implementation.md` / `tracking-issues.md` 保留增量实施和问题历史；跨 RFC 已经生效的共享规则由 `docs/src/contracts/` 按稳定 owner / contract surface 维护。RFC 页首状态描述当前修订：新修订已接受但待实现时回到 `Accepted for Implementation`，收口后再回到 `Closed`。Closed RFC 的新修订需要代码实现时建立引用该修订的新 transaction，不重新打开或继续延长旧的 Completed transaction。若核心目标、主要 owner、整体方案或大部分证明边界已经改变，应新建 follow-up RFC。
+没有具体摩擦或只剩 Safe 时不输出占位结论。未在当前边界内消除的 Euclid 在收口时简短报告证据、模型偏差、影响和最小修正方向；Keter/Apollyon 必须立即停止，不得声明完成或 cutover，并报告当前 diff/代码处置和需要的 owner/RFC/target 决策。Patch 中需要长期保留的摩擦提示升级为小迭代；小迭代中的未决 owner/contract/protocol 摩擦提示升级 RFC。
 
-不批量把既有 RFC 整理成全领域不变量目录。后续 RFC 第一次跨文档复用、扩展或替换既有共享规则时，只提取本次变化所需的最小 contract 闭包：受影响规则、唯一 owner 和必要直接依赖。RFC 用稳定 ID 声明 `Contract Impact` 与生效 gate；Draft / Accepted target 不得提前覆盖 effective contract，只有 transaction cutover 达到验证和停止条件后才更新 current contract。旧 RFC 正文不要求逐份反向改写。
+RFC 文本历史由仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。`R0`、`R1` 只标记已接受 target 语义修订；措辞、证据、内部路线和文件布局调整不递增。历史 RFC、Completed transaction、manifest 和 change record 不批量迁移，新规则从新任务及活跃 RFC 的下一个未开始 gate 生效。
 
-小迭代只有在 target 已完整解析、owner / handoff / failure / cleanup 明确、write set 与验证有限，且代码和 contract 只有一个原子 cutover 时，才可以声明 `Contract Impact / Cutover`。change record 只保存 local target、baseline、实现和证据；effective 正文仍只在 current contract。需要 probe、多个 checkpoint、transitional contract、滚动 stage resolution、target renegotiation 或本轮无法关闭的 Apollyon / Keter 时必须升级 RFC，不能把 small change 扩成第二套 RFC。
-
-Contract 文档按 owner 和共同变化/共同证明的协议边界组织，不机械镜像源文件，不为每条小规则单独建页，也不建立 `misc` / `small-invariants` 容器。局部实现约束留在 assertion、关键注释和测试；只服务单个 RFC 的规则留在 RFC；跨 RFC / 模块共享规则才进入 contract。跨领域 contract 必须区分普通依赖与真实 handoff：后者必须声明唯一协议 owner、每份状态的唯一 owner、局部义务、线性化点和 cleanup，不能用“共同 owner”掩盖双重真相源。
+Contract 文档按 owner 和共同变化/共同证明的协议边界组织。`Contract Impact` 只列真实变化的 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve`。Draft/Accepted target 不得提前覆盖 effective contract；只有达到 cutover 的验证和停止条件后才更新 current contract，证据可以来自原子 change record、RFC closure、Git/PR 或按需 transaction。
 
 ---
 

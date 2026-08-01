@@ -558,6 +558,7 @@ mod kunits {
         unsafe {
             guard.forget();
         }
+        task.detach_files_for_exit();
         Arc::new(task)
     }
 

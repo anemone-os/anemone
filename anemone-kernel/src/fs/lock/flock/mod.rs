@@ -38,7 +38,7 @@ struct FlockGrant {
 }
 
 #[derive(Debug)]
-pub(super) struct FlockDomain {
+pub(in crate::fs) struct FlockDomain {
     /// Sole truth for holder-to-mode relations on this inode.
     grants: SpinLock<Vec<FlockGrant>>,
     recheck: Event,
@@ -53,7 +53,7 @@ enum LockAttempt {
 }
 
 impl FlockDomain {
-    pub(super) const fn new() -> Self {
+    pub(in crate::fs) const fn new() -> Self {
         Self {
             grants: SpinLock::new(Vec::new()),
             recheck: Event::new(),

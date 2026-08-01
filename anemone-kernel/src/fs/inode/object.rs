@@ -24,6 +24,8 @@ pub(in crate::fs) struct Inode {
     mapping: Option<Arc<dyn VmObject>>,
     /// Sole local whole-file flock grant and wait-notification domain.
     flock: FlockDomain,
+    /// Sole local POSIX byte-range grant and conflict domain.
+    posix_locks: PosixLockDomain,
     /// Cached metadata that can be updated by the inode's file operations
     /// without accesing underlying filesystem, thus speeding up common
     /// operations like `stat` and `write`.
@@ -90,6 +92,7 @@ impl Inode {
             indexed: AtomicBool::new(false),
             mapping: None,
             flock: FlockDomain::new(),
+            posix_locks: PosixLockDomain::new(),
             meta: RwLock::new(meta),
         }
     }
@@ -350,6 +353,10 @@ impl InodeRef {
 
     pub(in crate::fs) fn flock_domain(&self) -> &FlockDomain {
         &self.inode().flock
+    }
+
+    pub(in crate::fs) fn posix_lock_domain(&self) -> &PosixLockDomain {
+        &self.inode().posix_locks
     }
 
     /// Get the inode number.

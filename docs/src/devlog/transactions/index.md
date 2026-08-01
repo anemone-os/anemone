@@ -28,6 +28,10 @@
   建立12/20 category-neutral device-number baseline，`VFS-MAKE-NODE-CUTOVER`原子激活make-node handoff、
   filesystem-backed `rdev`与mount kind-first `ENOTBLK`。RV64/LA64各完成293项KUnit、ext4 reload/双backend
   probe与双libc 11个in-target LTP case；LA64无power driver的末尾halt按预期由monitor退出。
+- [POSIX Record Lock](./2026-07-31-posix-record-lock.md)：R0 Stage 0-3已关闭；file-table episode holder、
+  inode-associated range domain、native `fcntl` ABI、任意fd-removal cleanup、blocking wait/signal replay与19项focused
+  suite完成。最终RV64/LA64均为288/288 KUnit、19/19 focused、双libc LTP 4/4与384个TPASS；LA64末尾halt归因于
+  已知power-off driver缺失。`POSIX-LOCK-CUTOVER`已原子激活四项task/VFS contract ID。
 - [Network UDP](./2026-07-29-net-udp.md)：R0 Stage 0-5已关闭。domain/control两次cutover和final
   `NET-UDP-FINAL-CUTOVER`现已使initial-domain/global Stack、static IPv4 control plane及四项UDP/Socket contract
   Active；最终RV64/LA64均为274/274 KUnit、UDP 17/17、epoll 11/11、LTP 4/4、peer PASS与orderly shutdown。

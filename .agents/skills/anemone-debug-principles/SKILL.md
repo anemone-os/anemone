@@ -9,7 +9,7 @@ description: Use when debugging Anemone kernel, LTP, QEMU, runner, rootfs, or ar
 
 Use a progressive debug loop: build a shallow failure index first, debug a small representative batch, validate by failure-set diff, then re-cluster. Treat early groupings as tentative signatures, not root-cause truth.
 
-This skill governs debug process and evidence handling. Use `anemone-rfc-doc-workflow` when a stable conclusion needs public documentation, and use `anemone-build-system` before running build, rootfs, QEMU, or user-test commands.
+This skill governs debug process and evidence handling. Use `anemone-development-workflow` when a stable conclusion needs public documentation, and use `anemone-build-system` before running build, rootfs, QEMU, or user-test commands.
 
 ## Scope Scale
 
@@ -73,9 +73,9 @@ Keep `README.md` short: status, input logs, current signatures, leading hypothes
 
 ## Public Write-Back Rules
 
-- Simple obvious fix: a short biweekly devlog entry, or no formal docs if it is self-evident and not useful later.
-- Small semantic fix, compatibility triage, or reusable investigation: `docs/src/devlog/changes/YYYY-MM-DD-short-slug.md` plus a biweekly devlog summary.
-- RFC implementation debug: append execution facts, checkpoints, validation evidence, corrections, and handoff to the transaction devlog.
+- Simple obvious fix: treat it as a Patch; default to no formal process document.
+- Small semantic fix, compatibility triage, or reusable investigation: use one self-contained `docs/src/devlog/changes/YYYY-MM-DD-short-slug.md`; a biweekly summary is optional.
+- RFC implementation debug: keep execution facts and validation in Git/PR or the RFC closure by default; append checkpoints, corrections, and handoff to a transaction only when that optional execution record exists or is justified.
 - Still-active broken expected behavior: update `docs/src/register/open-issues.md`.
 - Accepted stage limitation or intentionally deferred capability: update `docs/src/register/current-limitations.md`.
 - Large evidence packets for an RFC or small-change record: use a specifically named `backgrounds/` evidence file, factual only, when the main record would become hard to scan.
@@ -84,7 +84,7 @@ Do not copy raw logs into public docs by default. Summarize the decisive lines, 
 
 ## Stop Conditions
 
-- Stop and report when the next correct step would change an accepted RFC invariant, ABI boundary, owner boundary, validation floor, or write set.
+- Stop and report when the next correct step would change an accepted target/invariant, ABI boundary, owner boundary, validation claim, or another protected part of the Implementation Boundary.
 - Stop and ask for user-run evidence when reproduction requires privileged images, long QEMU runs, or unavailable logs and the current evidence is insufficient.
 - Stop before landing a compatibility bridge that silently weakens external behavior unless the ABI tradeoff, observability, and removal condition are documented in the owning code/doc layer.
 

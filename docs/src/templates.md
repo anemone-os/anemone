@@ -2,165 +2,102 @@
 
 以下模板可直接复制使用。条目应保持简短、事实化。活动登记册默认只写最小必填字段；只有在可选字段能明显降低沟通成本时，才把它们加上。RFC、small-change 或调查证据引用仓库公共参考源码时，使用[外部源码引用规则](./external-source-references.md)；不得把私人 checkout 路径写入公共文档。
 
-## 开发日志条目
+## 双周开发日志条目（可选）
+
+双周日志不是 workflow gate；只有确需人工时间线时才使用。
 
 ```md
 ## 2026-05-22 - 简短任务标题
 
-**Date:** 2026-05-22
-**Authors:** name1, name2
 **Area:** scheduler / futex
-
-**Summary:** 用一句话说明这次改了什么。
-
-**Motivation / Symptom:** 触发这次工作的失败现象、任务目标或观察。
-
-**Change:** 实际发生的行为或结构变化。
-
-**Validation:** 实际运行的命令、测试或复现步骤。
-
-**Follow-up:** 仍然开放、存在风险或明确延期的内容。
-
-**Related:** issue ID、决策记录、公开调查材料。
+**Summary:** 一句话说明发生了什么。
+**Validation:** 已运行、用户运行或 Not Run。
+**Related:** change record / RFC / issue / commit。
 ```
 
 ## 小迭代记录
 
-默认使用单文件。如果需要背景材料，可以使用同名目录，并把下面的记录本体放在 `index.md`。
+默认使用单文件。没有真实内容的可选章节直接删除。
 
 ```md
 # ANE-CHG-20260522-short-slug
 
 **Type:** Bugfix / Small Feature / Cleanup / Investigation
-**Status:** Draft / Active / Completed / Reverted / Superseded / Follow-up
 **Date:** 2026-05-22
 **Authors:** name1, name2
 **Area:** scheduler / futex
 
-## Problem
+## Problem / Context
 
-触发这次工作的失败现象、任务目标或观察；说明为什么双周日志不足以承载这次记录，但又不需要 RFC。
+触发本轮工作的症状、目标、证据或不明显根因；说明为什么需要长期记录，而不是保持 Patch。
 
-## Scope
+## Decision
 
-本次只改什么；明确不改什么。
-
-## Solution
-
-本轮选择的局部方案、关键权衡、拒绝的轻量替代方案，以及不升级 RFC 的理由。
+局部方案、关键语义或兼容取舍，以及为什么不需要 RFC。
 
 ## Change
 
-实际发生的行为或结构变化。必要时列出关键文件、commit 或语义边界。
-
-## Contract Impact / Cutover（仅 contract-bearing small change）
-
-| Contract ID | 变化 | Cutover 前 effective baseline | 新 effective 规则 | 生效证据 |
-| --- | --- | --- | --- | --- |
-| SCHED-WAKE-001 | Replace | 旧规则与来源 | 新规则摘要 | 本 checkpoint 的 source / validation |
-
-说明唯一原子 cutover、失败时保持旧 contract 的边界，以及 current contract 的唯一正文链接。普通小迭代删除本节。
+实际行为或结构变化；必要时列出 Implementation Boundary、commit 或受影响 surface。
 
 ## Validation
 
-实际运行的命令、测试、复现步骤，或说明验证由用户运行 / 尚未运行。
+实际运行的命令、测试或复现；区分 agent 运行、用户运行和 Not Run。
 
-## Tracking Issues
+## Remaining Risk / Links
 
-本节只记录当前小迭代内部需要关闭的 review concern、方案缺口、验证缺口或延期项。问题关闭后，把结论折回 `Solution`、`Change`、`Validation` 或 `Risk / Follow-up`。
+- Current contract / register / limitation：
+- RFC / optional transaction：
+- 外部源码：`xref:<source-id>:<repo-relative-path>#<locator>` / `None`
+- Issue / PR / commit：
 
-### CHG-001 - 简短问题标题
+## Contract Impact / Cutover（仅原子 contract-bearing small change）
 
-**Status:** Open / Neutralized / Deferred / Superseded
-**Severity:** Keter / Euclid / Safe
+| Contract ID | 变化 | Cutover 前 baseline | 新规则 | 生效证据 |
+| --- | --- | --- | --- | --- |
+| SCHED-WAKE-001 | Replace | 当前规则与来源 | 新规则摘要 | source/runtime/commit |
 
-**Issue:** 问题、风险或缺口是什么。
+说明代码与 contract 的单一原子 cutover、失败时保持旧规则，以及 current contract 唯一正文链接。
 
-**Resolution:** 关闭依据、折回位置，或升级到 RFC / register / current limitations 的链接。
+## Architecture Friction（仅存在时）
 
-## Risk / Follow-up
-
-仍然开放、存在风险、明确延期，或需要 register / current limitations 记录的内容。
-
-## Links
-
-- Biweekly devlog:
-- Current contract:
-- Register / limitations:
-- RFC / transaction:
-- 外部源码证据：`xref:<source-id>:<repo-relative-path>#<locator>` / 无
-- Issue / PR / commit:
+- 等级：Euclid / Keter / Apollyon。
+- 证据：具体代码路径、状态/owner/lifecycle 模型。
+- 模型偏差与影响：局部可逆，还是阻碍当前/下一步。
+- 路由：当前边界内修正、Patch/小迭代、RFC review 或停止。
 ```
 
-目录版小迭代记录可以使用以下形态：
+`Tracking Issues` 只在当前小迭代确有尚待关闭的局部 concern 时增加；修复后把结论折回正文。不要拆出独立 `tracking-issues.md`、`invariants.md` 或 `implementation.md`。需要 probe、transitional contract、多个语义 checkpoint、target renegotiation 或本轮无法关闭的 Apollyon/Keter 时升级 RFC。
 
-```text
-docs/src/devlog/changes/2026-05-22-short-slug/
-  index.md
-  backgrounds/
-    ltp-evidence.md
-    linux-reference.md
-```
+## 事务日志（按需）
 
-`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。小迭代可以在记录本体中维护 `Tracking Issues` 章节，但不要在小迭代目录下拆出独立 `tracking-issues.md`、`invariants.md` 或 `implementation.md`；如果需要这些文件，说明问题已经进入 RFC 工作流。
-
-contract-bearing small change 只允许一个原子 implementation cutover。target、owner、handoff、failure、cleanup、write set 和验证必须在实现前已解析；effective contract 正文只写入 `docs/src/contracts/`。需要 probe、多个 checkpoint、transitional contract、滚动 stage resolution、target renegotiation 或无法在本轮关闭的 Apollyon / Keter 时，必须升级 RFC。
-
-## 事务日志
+只有长期、多 checkpoint、多 cutover、probe/renegotiation 或 handoff 需要独立执行历史时才使用。
 
 ```md
 # 2026-05-22 - 简短事务标题
 
 **Status:** Active / Blocked / Completed
 **Owners:** name1, name2
-**Area:** scheduler / futex / timer
-**Canonical Plan:** RFC 或计划链接。
-**Canonical Revision:** `R0` / `R1` / ...；非 RFC 事务写 `N/A`。
-**Contract Impact:** contract IDs、变化类型和计划 cutover gate；没有则写 `None`。
-**Current Phase:** 阶段名或阶段编号。
+**Canonical Target:** RFC 与修订链接。
+**Contract Delta:** 实际变化的 IDs；没有写 `None`。
 
 ## Scope
 
-这次事务要完成什么，不包含什么。
+说明本 transaction 为什么需要独立存在，以及它不承担的 target/计划正文。
 
-## Invariants
+## Checkpoint Log
 
-- 必须一直保持的不变量。
-- 阶段性交付不能破坏的边界。
+### 2026-05-22 - Checkpoint 标题
 
-## Phase Log
-
-### 2026-05-22 - 阶段标题
-
-**Phase:** 阶段编号或名称。
-**Change:** 本阶段实际推进的内容。
-**Audit:** 旁路审计、关键命中分类或 review 结论。
-**Observability:** 新增或验证的 debug / trace / 断言 / 日志证据。
-**Feedback:** `None` / `Execution Fact` / `Route Correction` / `Target Renegotiation Proposed` / `Target Renegotiation Decided`；说明写回了 transaction devlog / RFC target / `Contract Impact` / current contract / `implementation.md` / `tracking-issues.md` / register / current limitations。target renegotiation 在批准前必须保持当前 gate 未 cut over，agent 提案不能自行批准。
-**Contract Cutover:** 本阶段切换的 contract IDs、旧/新 effective 规则、生效范围和证据；未切换写 `None`。
-**Validation:** 实际运行的命令、测试或复现步骤。
-**Next:** 下一阶段入口条件。
-
-### YYYY-MM-DD - Target Renegotiation（仅在需要时）
-
-**Status:** Proposed / Accepted / Rejected / Superseded。
-**Trigger / Cost Evidence:** 真实接口、实现、测试或集成证据，以及具体成本来源。
-**Original Target:** 受影响的目标、target guarantees、ABI / acceptance boundary、contract IDs 和验证要求。
-**Correctness Invariants:** 不允许通过工程妥协削弱的状态 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性边界。
-**Completed Slice / Code Disposition:** 已完成能力，以及代码保留、dormant、删除或拆分决定。
-**Options / Proposed Reduced Target:** Route Correction / Accepted Reduced Target / Follow-up RFC / Not Cut Over；若建议降级，说明它为何独立有用、ABI 诚实、可验证且不固化错误 owner / abstraction。
-**Revision / Contract Impact:** RFC revision、`Contract Impact` 和计划 cutover；决定前 effective contract 不变。
-**Validation:** 新 target 自己必须满足的验证。
-**Decision / Authority:** reviewer / owner 的决定与证据链接。
-**Remaining Gap:** follow-up RFC、current limitations 或 open issues；新 target 范围内的错误不能登记为 limitation。
-
-## Open Items
-
-- 仍未完成但属于本事务范围的事项。
+**Change:** 实际完成内容。
+**Review / Feedback:** review、Route Correction 或 Target Renegotiation；没有写 `None`。
+**Contract Cutover:** 实际切换的 IDs 与证据；没有写 `None`。
+**Validation:** 已运行、用户运行和 Not Run。
+**Architecture Friction:** 仅存在时记录 Euclid；Keter/Apollyon 必须停止并记录代码处置。
+**Next / Stop:** 下一入口或停止条件。
 
 ## Closure
 
-事务完成时记录最终验证、每个受影响 contract ID 的 cutover / pending / Not Cut Over 结果、剩余限制和相关 register / devlog 链接。
+最终交付、验证、cutover/Not Cut Over、剩余问题/限制和证据链接。
 ```
 
 ## 问题条目
