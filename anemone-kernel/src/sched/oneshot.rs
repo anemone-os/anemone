@@ -553,6 +553,7 @@ mod kunits {
         let (sender, receiver) = channel::<u32>();
         let target = get_current_task();
         let cpu = target.cpuid();
+        let rounds = Arc::new(AtomicUsize::new(0));
         let worker = KThreadBuilder::new("oneshot-force-park")
             .cpu(cpu)
             .spawn(
@@ -560,18 +561,21 @@ mod kunits {
                 AnyOpaque::new(ParkedForceContext {
                     target,
                     sender: Some(sender),
+                    rounds: rounds.clone(),
                 }),
             )
             .expect("failed to spawn parked Force worker");
 
-        let mut rounds = 0;
         let result = receiver.recv_with_hook(|point| {
             if point == ReceivePoint::AfterBegin {
-                rounds += 1;
+                rounds.fetch_add(1, Ordering::Release);
             }
         });
         assert_eq!(result, Ok(37));
-        assert!(rounds >= 2, "parked Force did not rearm the receiver");
+        assert!(
+            rounds.load(Ordering::Acquire) >= 2,
+            "parked Force did not rearm the receiver"
+        );
         assert_eq!(worker.wait_exited(), 0);
     }
 
@@ -616,6 +620,7 @@ mod kunits {
     struct ParkedForceContext {
         target: Arc<Task>,
         sender: Option<Sender<u32>>,
+        rounds: Arc<AtomicUsize>,
     }
 
     fn force_parked_round_then_send(_: KThreadCtx, mut opaque: AnyOpaque) -> i32 {
@@ -625,12 +630,15 @@ mod kunits {
         wait_until_parked(&context.target);
         let sender = context.sender.take().expect("missing parked Force sender");
         notify(&context.target, true);
-        // Exit this helper so the forced receiver can run and rearm. The later
-        // IRQ callback both proves Sender is hardirq-safe and supplies the
-        // terminal value only after a distinct receive round has begun.
+        while context.rounds.load(Ordering::Acquire) < 2 {
+            yield_now();
+        }
+        // The IRQ callback proves Sender is hardirq-safe. Waiting for the
+        // second round explicitly avoids relying on timer duration as a
+        // scheduler synchronization boundary.
         unsafe {
             crate::time::timer::schedule_local_irq_timer_event(
-                Duration::from_millis(50),
+                Duration::from_millis(1),
                 Box::new(move || {
                     sender
                         .send(37)
