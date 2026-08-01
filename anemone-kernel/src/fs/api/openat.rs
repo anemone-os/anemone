@@ -13,7 +13,9 @@ use crate::{
     },
     prelude::{user_access::c_readonly_path, *},
     syscall::handler::TryFromSyscallArg,
-    task::files::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
+    task::files::{
+        FdFlags, FdReservation, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode,
+    },
 };
 
 static TMPFILE_NAME_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -269,6 +271,7 @@ fn open_tmpfile_at(
 }
 
 fn finish_open(
+    reservation: FdReservation,
     file: File,
     how: OpenHow,
     checker: &FsPermChecker,
@@ -310,8 +313,6 @@ fn finish_open(
         file.seek_set_checked(file.get_attr()?.size as usize)?;
     }
 
-    let task = get_current_task();
-    let reservation = task.reserve_fd()?;
     let reserved_fd = reservation.fd();
     let opened_path = file.path().clone();
     let file_desc = FileDesc::new_opened(
@@ -405,6 +406,10 @@ fn create_or_open_path(
 }
 
 fn kernel_openat(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<u64, SysError> {
+    // Reserve before pathname lookup can create a node or O_TRUNC can mutate an
+    // existing file. RLIMIT_NOFILE/EMFILE must leave the filesystem unchanged;
+    // FdReservation::drop rolls the slot back if any later operation fails.
+    let reservation = get_current_task().reserve_fd()?;
     let policy = KernelCreationPolicy::for_current();
     let checker = policy.checker();
 
@@ -418,7 +423,7 @@ fn kernel_openat(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<u64, SysError
         (file_for_path(pathref, how.access)?, false)
     };
 
-    finish_open(file, how, checker, created)
+    finish_open(reservation, file, how, checker, created)
 }
 
 #[syscall(SYS_OPENAT)]
@@ -588,7 +593,10 @@ mod kunits {
 
         let file = open_tmpfile_at(&dir, how, &policy).unwrap();
 
-        let fd = Fd::new(finish_open(file, how, policy.checker(), true).unwrap() as u32).unwrap();
+        let reservation = get_current_task().reserve_fd().unwrap();
+        let fd =
+            Fd::new(finish_open(reservation, file, how, policy.checker(), true).unwrap() as u32)
+                .unwrap();
 
         let task = get_current_task();
         let file = task.get_fd(fd).unwrap();
@@ -609,6 +617,7 @@ mod kunits {
 
         let fd = Fd::new(
             finish_open(
+                get_current_task().reserve_fd().unwrap(),
                 file,
                 open_how(O_RDONLY | O_TRUNC, InodePerm::empty()),
                 &FsPermChecker::for_current_fs(),

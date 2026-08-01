@@ -9,23 +9,70 @@ use crate::{
     prelude::*,
     syscall::{
         handler::TryFromSyscallArg,
-        user_access::{SyscallArgValidatorExt as _, UserWritePtr, user_addr},
+        user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
     },
-    task::task_resource::RLimitResource,
+    task::{credentials::cap::Capability, task_resource::RLimitResource},
 };
 
 #[derive(Debug)]
 enum PrLimitTarget {
-    Celf,
-    ThreadGroup(Tid),
+    SelfProcess,
+    Task(Tid),
 }
 
 impl TryFromSyscallArg for PrLimitTarget {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         match raw {
-            0 => Ok(Self::Celf),
-            tid => Ok(Self::ThreadGroup(Tid::try_from_syscall_arg(raw)?)),
+            0 => Ok(Self::SelfProcess),
+            tid => Ok(Self::Task(Tid::try_from_syscall_arg(tid)?)),
         }
+    }
+}
+
+struct ResolvedPrLimitTarget {
+    task: Arc<Task>,
+    thread_group: Arc<ThreadGroup>,
+}
+
+fn resolve_target(target: PrLimitTarget) -> Result<ResolvedPrLimitTarget, SysError> {
+    let (task, thread_group) = match target {
+        PrLimitTarget::SelfProcess => {
+            let task = get_current_task();
+            let thread_group = task.get_thread_group();
+            (task, thread_group)
+        },
+        // Linux accepts any live TID here, then applies the operation to the
+        // process-wide resource policy shared by that task's thread group.
+        PrLimitTarget::Task(tid) => {
+            get_task_and_thread_group(&tid).ok_or(SysError::NoSuchProcess)?
+        },
+    };
+    if thread_group.ty() != ThreadGroupType::User {
+        return Err(SysError::NoSuchProcess);
+    }
+    Ok(ResolvedPrLimitTarget { task, thread_group })
+}
+
+fn check_target_permission(target: &Task) -> Result<(), SysError> {
+    let current = get_current_task();
+    if current.tid() == target.tid() || current.has_cap(Capability::SYS_RESOURCE) {
+        return Ok(());
+    }
+
+    let caller = current.cred();
+    let target = target.cred();
+    // Linux permits an unprivileged cross-process operation only when the
+    // caller's real IDs match every real/effective/saved ID of the target.
+    let uid_match = target.uid.real == caller.uid.real
+        && target.uid.effective == caller.uid.real
+        && target.uid.saved == caller.uid.real;
+    let gid_match = target.gid.real == caller.gid.real
+        && target.gid.effective == caller.gid.real
+        && target.gid.saved == caller.gid.real;
+    if uid_match && gid_match {
+        Ok(())
+    } else {
+        Err(SysError::PermissionDenied)
     }
 }
 
@@ -44,60 +91,37 @@ fn sys_prlimit64(
         old_limit
     );
 
-    // for now all thread groups share the same limits and we don't support changing
-    // limits. so this is quite simplt.
-
     let task = get_current_task();
-    if let PrLimitTarget::ThreadGroup(tgid) = target {
-        let target_tg = get_thread_group(&tgid).ok_or(SysError::NoSuchProcess)?;
-        if target_tg.ty() != ThreadGroupType::User {
-            return Err(SysError::NoSuchProcess);
-        }
-    }
+    let target = resolve_target(target)?;
+    check_target_permission(&target.task)?;
 
     let usp_handle = task.clone_uspace_handle();
-    let mut usp = usp_handle.lock();
+    let proposed = if let Some(new_limit) = new_limit {
+        let mut usp = usp_handle.lock();
+        Some(
+            UserReadPtr::<RLimit>::try_new(new_limit, &mut usp)?
+                .read()?
+                .into(),
+        )
+    } else {
+        None
+    };
 
-    if let Some(new_limit) = new_limit {
-        knoticeln!("prlimit64: setting new limits is not supported, ignored.");
-    }
+    let old = if let Some(proposed) = proposed {
+        target.thread_group.update_rlimit(
+            resource,
+            proposed,
+            task.has_cap(Capability::SYS_RESOURCE),
+        )?
+    } else {
+        target.thread_group.read_rlimit(resource)?
+    };
 
     if let Some(old_limit) = old_limit {
-        let rlimit = match resource {
-            RLimitResource::Cpu => {
-                RLimit {
-                    rlim_cur: u64::MAX, // no CPU time limit
-                    rlim_max: u64::MAX,
-                }
-            },
-            RLimitResource::Fsize => {
-                RLimit {
-                    rlim_cur: u64::MAX, // no file size limit
-                    rlim_max: u64::MAX,
-                }
-            },
-            RLimitResource::NoFile => RLimit {
-                rlim_cur: MAX_FD_PER_PROCESS as u64,
-                rlim_max: MAX_FD_PER_PROCESS as u64,
-            },
-            RLimitResource::Stack => RLimit {
-                rlim_cur: 1 << (USER_STACK_SHIFT_KB + 10),
-                rlim_max: 1 << (USER_STACK_SHIFT_KB + 10),
-            },
-            RLimitResource::Core => RLimit {
-                rlim_cur: 0, // no core dump
-                rlim_max: 0,
-            },
-            RLimitResource::Nproc => RLimit {
-                rlim_cur: u64::MAX, // no process limit
-                rlim_max: u64::MAX,
-            },
-            r => {
-                kwarningln!("getrlimit: unimplemented resource {:?}", r);
-                return Err(SysError::NotYetImplemented);
-            },
-        };
-        UserWritePtr::<RLimit>::try_new(old_limit, &mut usp)?.write(rlimit)?;
+        let mut usp = usp_handle.lock();
+        // Linux exposes the pre-update pair. A later copyout failure does not
+        // roll back the already committed policy transaction.
+        UserWritePtr::<RLimit>::try_new(old_limit, &mut usp)?.write(old.into_abi())?;
     }
 
     Ok(0)

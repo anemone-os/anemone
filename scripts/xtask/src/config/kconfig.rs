@@ -312,8 +312,8 @@ pub const IO_SHRINK_THRESHOLD: u8 = {};
 pub const OOM_KILL_THRESHOLD: u8 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
-/// Default maximum number of file descriptors per process.
-/// Might be overridden by certain syscalls.
+/// Build-time file-table capacity and system-wide fd-number ceiling.
+/// Runtime rlimit syscalls change only the owning process policy.
 pub const MAX_FD_PER_PROCESS: usize = {};
 /// Initial file creation mask for user filesystem contexts.
 pub const INITIAL_UMASK: u16 = {};

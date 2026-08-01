@@ -138,4 +138,28 @@ pub fn wait4(pid: u64, wstatus_ptr: u64, options: u64, rusage_ptr: u64) -> Resul
     unsafe { syscall(SYS_WAIT4, pid, wstatus_ptr, options, rusage_ptr, 0, 0) }
 }
 
+#[cfg(target_arch = "riscv64")]
+pub fn getrlimit(resource: u32, limit_ptr: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_GETRLIMIT, resource as u64, limit_ptr, 0, 0, 0, 0) }
+}
+
+pub fn prlimit64(
+    pid: i32,
+    resource: u32,
+    new_limit_ptr: u64,
+    old_limit_ptr: u64,
+) -> Result<u64, Errno> {
+    unsafe {
+        syscall(
+            SYS_PRLIMIT64,
+            pid as i64 as u64,
+            resource as u64,
+            new_limit_ptr,
+            old_limit_ptr,
+            0,
+            0,
+        )
+    }
+}
+
 pub mod signal;
