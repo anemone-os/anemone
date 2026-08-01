@@ -1,135 +1,81 @@
 # 开发日志
 
-## 为什么要共享日志
+开发记录只保存以后无法从代码、测试和 Git 低成本恢复的事实。它不是每项开发的强制流水，也不承担 RFC target、current contract 或当前问题状态。
 
-在两位开发者协作时，最常见的调试问题通常是“这个子系统什么时候改过、改了什么”，而不是“某个人具体做了什么”。
+## 开发分级与默认记录
 
-因此，应该维护一条规范性的共享日志流，并在条目里标注作者，而不是各自维护一套正式日志。
+| 等级 | 适用范围 | 默认记录 |
+| --- | --- | --- |
+| Patch | 已确定语义的局部实现、修复、测试或结构闭包 | 无正式过程文档；代码、测试、验证和 Git/PR 足够 |
+| 小迭代 | 值得长期保留的局部决策、根因、兼容取舍或调查结论 | 一份 change record |
+| RFC | owner、ABI、contract、生命周期、并发、多个 cutover 或 target 仍需共享决策 | RFC `index.md`；其它页面和 transaction 按需 |
 
-## 存放约定
+详细升级条件、Implementation Boundary 和反馈规则见[开发工作流](./development-workflow.md)。
 
-- 规范日志文件放在 `docs/src/devlog/` 下。
-- 按双周建文件，例如 `docs/src/devlog/2026-05-11_to_2026-05-24.md`。
-- 记录按时间顺序追加，不回写历史。
-- 如果某项小迭代需要比双周条目更长的公开说明，应在 `docs/src/devlog/changes/` 下建立小迭代记录，双周开发日志只保留短事实摘要与链接。
-- 对跨多天、跨子系统、需要阶段性审计证据的大型重构，可以在 `docs/src/devlog/transactions/` 下建立事务日志。双周 devlog 只保留该事务的入口摘要。
-- 如果一项 RFC 已进入实现阶段，必须建立对应事务日志；RFC 保存 accepted target、contract delta 和计划，事务日志保存实际执行、contract cutover 和验证证据，已经生效的共享规则写入 current contracts。
+## Patch
 
-这样日常维护简单，同时也允许深度排障材料独立存在。
+Patch 默认不写双周日志、小迭代记录或 transaction。文件数、commit 数和耗时不决定等级；只要行为已经由 current contract、现有代码/测试或明确任务目标确定，且没有新的 owner、ABI、contract 或 acceptance 决策，就可以保持 Patch。
 
-## 双周开发日志
-
-双周开发日志是共享时间线，不是完整调查材料的堆放处。它应该能让读者快速扫出最近发生过什么、属于哪个领域、验证到什么程度，以及进一步材料在哪里。
-
-普通条目仍可以直接写完整字段；如果一次小迭代已经有独立小迭代记录，双周条目应压缩为：
-
-- 一句话说明发生了什么；
-- `Area` 或标题中体现 owning surface；
-- `Validation` 写明已运行、用户运行、或未运行的验证；
-- `Related` 链接对应的小迭代记录、current contract、register、RFC、事务日志或 issue。
-
-不要在双周开发日志中展开长篇问题分析、多轮尝试过程、大段日志、完整 review 结论、checkpoint handoff 或未来执行计划。这些内容应进入小迭代记录、事务日志、RFC 或 register。
+必要的关键注释、回归测试，以及修复后对现有 register/current limitation 的更新仍应完成。若 Patch 暴露了值得长期保存的局部架构摩擦或兼容判断，升级为小迭代；若暴露未决 owner/contract/protocol，升级 RFC。
 
 ## 小迭代记录
 
-小迭代记录用于承载不值得开 RFC、但又不适合塞进双周日志的一次局部迭代。它必须是自洽、可自描述的记录：读者只打开这一页，就能理解问题是什么、为什么按当前方案处理、实际推进到哪里、验证到哪里、还剩哪些局部风险。
+小迭代记录位于 `docs/src/devlog/changes/`，默认使用单文件 `YYYY-MM-DD-short-slug.md`。它回答：
 
-小迭代记录不只记录完成后的事实。对于仍在推进的小问题，它可以在记录内部维护 `Problem`、`Solution` 和 `Tracking Issues` 章节，用来说明本轮问题、局部方案、review concern、验证缺口和关闭依据。但这些 tracking issues 只服务于当前小迭代本身，不承担仓库级 accepted target、跨子系统不变量或长期阶段计划。严格的 contract-bearing small change 可以在同一原子 checkpoint 中声明 `Contract Impact / Cutover`；effective 规则仍只写入 current contract，不能由 tracking issue 或 change record 建立第二份长期权威。
+- Problem / Context：触发工作的问题或证据；
+- Decision：选择了什么局部语义或处理方式；
+- Change：实际发生的行为或结构变化；
+- Validation：实际运行、用户运行和 Not Run；
+- Remaining Risk / Links：仍有意义的风险和来源。
 
-适合建立小迭代记录的情况：
+`Contract Impact / Cutover`、`Tracking Issues`、`Architecture Friction` 和 `backgrounds/` 都是按需内容。不要为了填模板保留空章节。
 
-- 修复 LTP、user-test、兼容性或 ABI 边界问题，后续可能需要追溯当时判断；
-- 一次 bugfix 的触发条件、根因、验证或剩余风险超过双周日志的合理长度；
-- 小功能或局部清理影响明确 owning surface，且需要说明不改什么；
-- 一次调查没有进入 RFC，但产出的分类结论会影响后续诊断；
-- 一个局部问题需要先写清问题、解法和少量待关闭事项，确认它不值得启动 RFC；
-- register / current limitations 需要链接到更具体的修复或调查事实。
+小迭代不再强制同步双周日志。新增记录只需加入[小迭代索引](./devlog/changes/index.md)和必要的 mdBook 导航；register、current limitations、RFC 或 issue 可以按需链接它。
 
-不需要建立小迭代记录的情况：
+contract-bearing small change 只允许一个已完整解析的原子 cutover。protocol/state owner、handoff、failure、cleanup、Implementation Boundary 和验证必须明确；effective 正文仍只位于 current contract。需要 probe、transitional contract、多个语义 checkpoint、target renegotiation 或未关闭 Apollyon/Keter 时升级 RFC。
 
-- 纯格式化、局部重命名、注释修正或没有语义变化的清理；
-- 三五句话就能在双周日志里说清楚的简单修复；
-- 已经由 RFC 事务日志完整承载的阶段性实现；
-- 未定稿的中大型方案；这类内容应先走私有草案或 RFC 工作流。
+如果记录后来升级 RFC、被证明有误或被 supersede，追加简短来源/更正链接；不要扩张为第二套 RFC，也不要为本地 issue 拆出独立 `implementation.md`、`invariants.md` 或 `tracking-issues.md`。
 
-维护规则：
+## 事务日志（按需）
 
-- 默认使用单文件，文件名为 `YYYY-MM-DD-short-slug.md`，放在 `docs/src/devlog/changes/`。
-- 当记录需要背景材料时，可以升级为同名目录：`docs/src/devlog/changes/YYYY-MM-DD-short-slug/index.md` 是记录本体，`backgrounds/` 保存证据摘要、Linux / LTP 对照、历史材料或运行记录。
-- 双周开发日志追加一条短摘要并链接小迭代记录。
-- 小迭代记录可以被 register、current limitations、RFC 背景材料或后续事务日志引用。
-- `Tracking Issues` 章节可以记录本迭代内的 review concern、方案缺口、验证缺口和关闭依据；问题关闭后应把结论折回 `Solution`、`Change`、`Validation` 或 `Risk / Follow-up`，不要只在 tracker 中留下最终语义。
-- contract-bearing small change 只适用于 target、owner、handoff、failure、cleanup、有限 write set 和验证矩阵都已解析，且代码与 contract 只有一个原子 cutover 的局部变化。记录必须列出 baseline、变化分类、cutover 证据和失败时保持旧 contract 的边界。
-- 一旦需要 probe、多个 implementation checkpoint、transitional contract、滚动 stage resolution、target renegotiation，或存在本轮无法关闭的 Apollyon / Keter，就升级 RFC；不得继续扩张 small-change record。
-- 如果小迭代后来升级为 RFC，原记录保留事实历史，并在 `Status`、`Follow-up` 或 `Tracking Issues` 中标明被哪个 RFC 或事务日志取代。
-- 如果记录后来被证明有误，追加更正说明；不要静默改写已经完成的事实判断。
+transaction 只用于长期、多 checkpoint、多 cutover、probe/renegotiation 或需要独立 handoff 的执行历史。RFC 进入实现不自动触发 transaction。
 
-适合升级为目录的小迭代记录：
+使用 transaction 时：
 
-- 需要保留 Linux、LTP、用户日志或当前实现对照；
-- 需要多份验证证据或运行摘要；
-- 调查结论没有进入 RFC，但背景材料会被后续反复引用；
-- 单文件已经影响扫读。
+- RFC 保存 accepted target、contract delta 和 Implementation Boundary；
+- transaction 只追加 checkpoint、review、验证、cutover、更正、target renegotiation 和 handoff 事实；
+- current contract 保存 effective shared rules；
+- transaction index/SUMMARY 只提供导航，不再要求双周日志入口；
+- Completed transaction 不因后续修订重新打开；需要独立长期历史时另建记录，否则使用 RFC closure 和 Git/PR。
 
-目录形态只是让小迭代记录容纳证据包和局部跟踪，不是小型 RFC。`index.md` 仍是唯一的自描述记录本体；`backgrounds/` 只保存证据摘要、Linux / LTP 对照、历史材料或运行记录。除上述单一原子 contract cutover 外，如果记录开始需要仓库级 accepted target、非平凡不变量、跨阶段实施计划、独立 `tracking-issues.md`、多轮文档层 review 或多个 agent/checkpoint 编排，应升级为 RFC 工作流，而不是继续扩张 `changes/` 目录。
+## 双周开发日志（可选）
 
-## 事务日志
+双周 devlog 是人工选择的时间线摘要，不是 workflow gate。只有当一段时期的工作需要面向协作者提供时间入口时才写；Patch、小迭代、RFC、transaction 都不因存在而自动生成双周条目。
 
-事务日志用于记录一次大型重构或长期迁移从启动到收口的完整状态，而不是替代每日开发日志。
+条目应短而事实化：Summary、Area、Validation 和 Related 通常足够。不要复制 change record、RFC、transaction、register 或 current contract 中已经存在的状态、验证矩阵和问题结论。
 
-适合开事务日志的情况：
+## 架构摩擦反馈
 
-- 改动跨越多个子系统，且阶段之间存在明确前置条件。
-- 需要保留不变量、实现顺序、旁路审计、验证证据或回滚边界。
-- 单个双周日志条目会过长，且后续多次更新都需要引用同一上下文。
+每次实现收口前都要内部扫描架构摩擦，但只有发现具体信号时才对外记录：
 
-维护规则：
+- Euclid 可以在实现完成后写入 final report、change record、RFC closure 或 transaction；
+- Keter/Apollyon 必须在完成声明或 cutover 前停止；
+- 没有摩擦或只剩 Safe 时，不写“无摩擦”占位结论；
+- 不建立 `friction.md` 或全局摩擦台账。
 
-- 文件名使用 `YYYY-MM-DD-short-slug.md`，放在 `docs/src/devlog/transactions/`。
-- 双周 devlog 只追加入口记录，后续阶段推进优先更新事务日志。
-- RFC 驱动的事务日志必须链接回对应 RFC；对应 RFC 的 `事务日志` 字段也必须反向链接到该事务日志。
-- RFC 驱动的事务日志必须注明目标修订。Closed RFC 的后续语义修订需要代码工作时建立新事务，不重新打开或继续延长旧的 Completed 事务。
-- RFC 驱动的事务日志必须列出受影响 contract IDs、变化类型和计划 cutover gate；没有则明确写 `None`。
-- 每次更新只追加新的事务条目，不静默改写已经完成的阶段结论；确需更正时追加更正说明。
-- 实现期反馈先写入事务日志。若反馈保持 accepted target，只解析或改变阶段顺序、write set、验证安排、review gate 或停止条件，同步更新 RFC `implementation.md`。若工程证据要求改变 accepted target、不变量、ABI 边界或验收判断，当前阶段先保持未 cut over，并记录成本来源、已完成 slice、受影响语义、备选处置和代码去向；随后由 RFC review / `Target Renegotiation Gate` 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。只有新 target 重新接受且达到对应 cutover gate 后才更新 effective contract，并在同一事务条目记录证据。
-- 事务日志收口后，保留最终状态、验证证据和剩余限制链接。
+具体证据要求和停止阈值见[开发工作流：架构摩擦扫描](./development-workflow.md#架构摩擦扫描)。
 
-## 双周记录的常用字段
+## Register 与历史
 
-- `Date`
-- `Authors`
-- `Area`
-- `Summary`
-- `Motivation / Symptom`
-- `Change`
-- `Validation`
-- `Follow-up`
-- `Related`
+register/current limitations 只保存当前开放问题和接受限制。事项关闭后从 register 移除；长期历史由 Git、change record、RFC closure 或按需 transaction 保存。不要在 register 中保留 Closed/Neutralized 记录充当档案。
 
-如果双周条目只是指向小迭代记录或事务日志的入口摘要，可以省略 `Motivation / Symptom`、`Change` 和 `Follow-up` 中已经由目标页面承载的细节，但必须保留足够的摘要、验证状态和链接，让读者不打开目标页面也能判断这条记录的大意。
+既有 devlog、change record 和 transaction 都是 legacy history，不批量重写为新模板。新规则适用于新任务和活跃 RFC 的下一个尚未开始 gate。
 
-## 协作规则
+## 查询入口
 
-- 一个任务通常只写一条规范记录，即使两位开发者都参与了。
-- 如果一个任务跨多天推进，就写多条记录，而不是持续改写旧条目。
-- 如果旧记录后来被证明有误，追加一条更正记录，不要静默篡改历史。
-- 如果多人同时改同一个双周文件导致冲突过多，再考虑临时拆成更小周期，但默认仍以双周为单位。
-
-## 质量门槛
-
-开发日志最有价值的部分，是那些事后很难低成本恢复的事实：
-
-- 最初的症状或动机是什么；
-- 实际改了什么；
-- 用什么命令、测试或复现步骤验证过；
-- 还有哪些风险、不确定性或后续事项。
-
-不要把开发日志写成流水账。短而事实化的条目寿命更长。
-
-查询时优先按职责选择入口：
-
-- 看最近时间线：双周开发日志。
-- 查一次小修、小调查或局部语义变化：小迭代记录。
-- 查仍然生效的问题或接受限制：register / current limitations。
-- 查已经生效的跨 RFC 共享规则：current contracts。
-- 查中大型 target、contract delta 和实现阶段证据：RFC 与事务日志。
+- 查当前行为：代码、测试和 current contracts。
+- 查局部决策或调查：小迭代记录。
+- 查 accepted target、contract delta 和 acceptance：RFC。
+- 查长期多 checkpoint 执行证据：按需 transaction。
+- 查当前缺陷或接受限制：register/current limitations。
+- 查时间线：可选双周 devlog 或 Git 历史。

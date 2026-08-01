@@ -118,6 +118,7 @@ fn proc_root_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
 }
 
 pub static PROC_ROOT_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: proc_root_lookup,
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),

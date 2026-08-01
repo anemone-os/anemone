@@ -6,7 +6,7 @@
 **参与领域：** VFS inode / anonymous filesystem / stat ABI / persistent filesystem boundary
 **覆盖范围：** inode file-kind truth、ordinary anonymous control object、Linux `S_IFMT` projection
 **不覆盖：** inode identity topology、uid/gid credentials、opened-description flags、file operations、record-lock policy
-**实现位置：** `anemone-kernel/src/fs/{inode.rs,anonymous/mod.rs,eventfd/mod.rs,timerfd/mod.rs,epoll/file.rs,fanotify/file.rs,api/getdents64.rs,ext4}`
+**实现位置：** `anemone-kernel/src/fs/{inode/{metadata.rs,object.rs},anonymous/mod.rs,eventfd/mod.rs,timerfd/mod.rs,epoll/file.rs,fanotify/file.rs,api/getdents64.rs,ext4}`
 **依赖：** None
 **Pending Successor：** None
 **最后核验：** 2026-07-31

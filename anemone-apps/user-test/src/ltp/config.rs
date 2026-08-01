@@ -193,6 +193,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../../ltp/groups/pipe.txt"),
     },
     LtpGroup {
+        name: "posix-record-lock",
+        cases: include_str!("../../ltp/groups/posix-record-lock.txt"),
+    },
+    LtpGroup {
         name: "read-write",
         cases: include_str!("../../ltp/groups/read-write.txt"),
     },

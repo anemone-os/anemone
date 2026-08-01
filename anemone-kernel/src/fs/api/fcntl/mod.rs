@@ -3,6 +3,8 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/fcntl.2.html
 
+mod posix_lock;
+
 use crate::{
     fs::FileFcntlCmd,
     prelude::{handler::TryFromSyscallArg, *},
@@ -50,9 +52,9 @@ impl TryFromSyscallArg for FcntlCmd {
             F_SETFD => Ok(Self::SetFd),
             F_GETFL => Ok(Self::GetFl),
             F_SETFL => Ok(Self::SetFl),
-            F_GETLK => Err(SysError::NotYetImplemented),
-            F_SETLK => Err(SysError::NotYetImplemented),
-            F_SETLKW => Err(SysError::NotYetImplemented),
+            F_GETLK => Ok(Self::GetLk),
+            F_SETLK => Ok(Self::SetLk),
+            F_SETLKW => Ok(Self::SetLkw),
             F_GETOWN => Ok(Self::GetOwn),
             F_SETOWN => Ok(Self::SetOwn),
             F_GETSIG => Err(SysError::NotYetImplemented),
@@ -70,7 +72,11 @@ impl TryFromSyscallArg for FcntlCmd {
 }
 
 #[syscall(SYS_FCNTL)]
-fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
+fn sys_fcntl(raw_fd: u64, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
+    // Linux exposes command decoding before fd admission. Keep arg0 as an
+    // infallible transport so the syscall wrapper parses `cmd` first, then
+    // validate the fd here before dispatching the decoded command.
+    let fd = Fd::try_from_syscall_arg(raw_fd)?;
     kdebugln!("fcntl: fd={:?}, cmd={:?}, arg={:#x}", fd, cmd, arg);
 
     let task = get_current_task();
@@ -142,6 +148,9 @@ fn sys_fcntl(fd: Fd, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             let ctx = file.fcntl_ctx(file_cmd, arg)?;
             file.vfs_file().fcntl(ctx)
         },
+        FcntlCmd::GetLk => posix_lock::get_lock(&task, fd, arg),
+        FcntlCmd::SetLk => posix_lock::set_lock(&task, fd, arg),
+        FcntlCmd::SetLkw => posix_lock::set_lock_waiting(&task, fd, arg),
         _ => {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);
             Err(SysError::NotYetImplemented)

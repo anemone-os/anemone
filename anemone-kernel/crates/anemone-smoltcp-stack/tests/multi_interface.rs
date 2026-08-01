@@ -4,7 +4,8 @@ use anemone_net_api::{EthernetAddress, Instant, LinkState, Recheck};
 use anemone_smoltcp_stack::{PumpBudget, PumpError, Stack};
 
 use support::{
-    BoundedProvider, assert_icmp_echo_reply, build_icmp_echo_request, prime_bounded_neighbor,
+    frame::BoundedProvider,
+    packet::{assert_icmp_echo_reply, build_icmp_echo_request, prime_bounded_neighbor},
 };
 
 const FIRST_MAC: [u8; 6] = [0x02, 0, 0, 0, 13, 1];

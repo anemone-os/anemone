@@ -65,12 +65,16 @@ pub enum SysError {
     IsDir,
     /// The target is not a regular file.
     NotReg,
+    /// The target is not a block device.
+    NotBlockDevice,
     /// The target is not a symbolic link.
     NotSymlink,
     /// The entity is busy (e.g. still has active references).
     Busy,
     /// File is too large.
     FileTooLarge,
+    /// A signed ABI range or offset cannot represent the requested result.
+    Overflow,
     /// The directory is not empty.
     DirNotEmpty,
     /// Trying to link across different filesystems.
@@ -226,8 +230,10 @@ impl SysError {
             SysError::IdentifierRemoved => EIDRM,
             SysError::NotDir => ENOTDIR,
             SysError::IsDir => EISDIR,
+            SysError::NotBlockDevice => ENOTBLK,
             SysError::Busy | SysError::IrqAlreadyRequested => EBUSY,
             SysError::FileTooLarge => EFBIG,
+            SysError::Overflow => EOVERFLOW,
             SysError::DirNotEmpty => ENOTEMPTY,
             SysError::CrossDeviceLink => EXDEV,
             SysError::ReadOnlyFs => EROFS,

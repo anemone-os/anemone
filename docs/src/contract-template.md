@@ -51,7 +51,6 @@ docs/src/contracts/<owner>/
 **不覆盖：** 明确排除什么
 **实现位置：** 当前主要实现文件或模块；只作定位，不定义 owner
 **依赖：** 其它稳定 contract ID；没有则写 `None`
-**Pending Successor：** accepted-but-not-effective RFC；没有则写 `None`
 **最后核验：** YYYY-MM-DD
 
 ## 术语
@@ -76,7 +75,7 @@ docs/src/contracts/<owner>/
 
 **最初来源：** 首次引入本规则的 RFC / ADR / change record，以及初始 cutover 证据。
 
-**当前来源：** 最近一次改变本规则语义的 RFC，以及实际 cutover transaction / change record；从未改变时可以与最初来源相同。
+**当前来源：** 最近一次改变本规则语义的 RFC/change record，以及实际 cutover commit/PR/transaction；从未改变时可以与最初来源相同。
 
 以下字段默认继承文档头；只有不同时才增加：
 
@@ -100,14 +99,14 @@ docs/src/contracts/<owner>/
 
 | Retired ID | Successor / Removal | 来源 |
 | --- | --- | --- |
-| PREFIX-000 | PREFIX-001 / Removed | RFC / transaction |
+| PREFIX-000 | PREFIX-001 / Removed | RFC / change record / commit |
 
 这里只保留短映射，不复制旧规则正文。
 ```
 
 ## RFC `Contract Impact`
 
-RFC `invariants.md` 在涉及共享 contract 时加入：
+涉及共享 contract 时，默认在 RFC `index.md` 加入；只有表格或证明义务过长时才移到按需 `invariants.md`，不能两边复制：
 
 ```md
 ## Contract Impact
@@ -116,9 +115,12 @@ RFC `invariants.md` 在涉及共享 contract 时加入：
 | --- | --- | --- | --- | --- |
 | JOBCTL-STATE-001 | Introduce | None（尚未生效） | 新增 ThreadGroup job-control phase | Gate 3 |
 | SCHED-PICK-001 | Replace | [当前规则](../../contracts/scheduler/pick-request.md#sched-pick-001) | pending 改为 core-only full-pick request | Gate 3 |
-| WAIT-WAKE-004 | Preserve | [当前规则](../../contracts/wait-core/wake-publication.md#wait-wake-004) | 不变 | 全程 |
 
-变化类型只使用 `Introduce`、`Preserve`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。`Introduce` 只用于此前没有 effective 规则的新 ID，current rule 写 `None（尚未生效）`，并在 cutover 时创建 Active 条目；已有行为只是尚未提取时，应先建立 minimum effective baseline。Draft 和 accepted-but-not-effective 阶段不能把 target 写成当前 effective 规则。
+变化类型只使用 `Introduce`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。未变化规则放在 `Dependencies` 中链接，不登记 `Preserve`。`Introduce` 只用于此前没有 effective 规则的新 ID，current rule 写 `None（尚未生效）`，并在 cutover 时创建 Active 条目；已有行为只是尚未提取时，应先建立 minimum effective baseline。Draft 和 accepted-but-not-effective 阶段不能把 target 写成当前 effective 规则。
+
+### Dependencies
+
+- [WAIT-WAKE-004](../../contracts/wait-core/wake-publication.md#wait-wake-004)：未变化依赖。
 
 ## Target Invariants
 
@@ -139,7 +141,7 @@ RFC `invariants.md` 在涉及共享 contract 时加入：
 
 | Contract ID | 变化 | Cutover 前 effective baseline | 新 effective 规则 | 生效证据 |
 | --- | --- | --- | --- | --- |
-| SCHED-WAKE-001 | Replace | live owner + Closed RFC / 历史 transaction | 新规则摘要 | 当前 change record 的 source / runtime evidence |
+| SCHED-WAKE-001 | Replace | live owner + Closed RFC / 历史证据 | 新规则摘要 | 当前 change record 的 source / runtime evidence |
 ```
 
 change record 必须链接唯一 current contract 正文，说明代码与 contract 同 checkpoint 生效、失败时保持旧规则，并且不得保存 pending 多阶段 target、独立 invariants / implementation / tracking 文件或 transitional contract。任何这类需求都升级 RFC。

@@ -2,6 +2,59 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260801-VFS-MAKE-NODE-NO-UMASK
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** VFS / task fs-state / syscall ABI / file creation
+
+**Summary:** VFS Make Node R2 继承 R0/R1 接受的 no-umask 边界：`mknodat` 最终 permission 直接使用调用者
+requested bits。当前 `sys_umask` 仍是无状态 stub，本 RFC 不读取它、不建立 mknod-local/task-local mask，也不
+扩展其它创建类调用点。因而 R2 的 Linux compatibility claim 只覆盖 node-kind、`dev_t`、dirfd、capability 与
+errno matrix，不覆盖 umask-adjusted permission。`VFS-MAKE-NODE-CUTOVER`生效后，本限制随current
+`mknodat`能力一起成为active visible boundary。
+
+**Exit Condition:** 后续独立 umask 工作为 task/fs-state mask 建立唯一 owner，统一实现 `umask(2)` 与所有创建类
+调用点的 common-create handoff，并完成跨 create/open/mkdir/mknod 等路径的 permission、fork/exec/lifecycle 与
+双架构用户态验证；完成对应 RFC/contract cutover 后，再修订 make-node target/验证并关闭本限制。不得只在
+`mknodat` 局部加 mask 后宣称退出。
+
+**Owner:** doruche
+**Last Verified:** 2026-08-01
+**Related:** [VFS Make Node R2](../rfcs/vfs-make-node/index.md),
+[R2 invariants](../rfcs/vfs-make-node/invariants.md#make-node-abi-001--rv64la64-使用-canonical-mknodat-与-linux-node-matrix),
+[transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)
+
+## ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** VFS make-node / ext4 / lwext4 / failure recovery / durability
+
+**Summary:** VFS Make Node R2只承诺正常执行下的backend-local有序可见性：VFS在callback前形成final
+mode/uid/gid/rdev，lwext4 wrapper在同一backend锁内先写这些metadata、再进入directory-entry publication，因而
+并发lookup不能观察中间状态；成功路径仍必须在normal sync/reload后恢复同一metadata。可预先判定的错误必须在
+publication前拒绝，确认仍未链接的inode必须尝试cleanup并传播cleanup失败。
+
+当前lwext4以dirty inode reference、directory block mutation和lazy block-cache writeback组合create，Rust wrapper
+没有能够覆盖child inode与parent dirent的journal handle或rollback transaction。因此本revision不保证
+`add_entry`任意内部I/O failure、crash或power-loss下inode/dirent物理全有或全无，也不把block-cache writeback
+顺序写成durability frontier。该限制不否定当前内核中已经正确的syscall admission、VFS owner handoff、final
+metadata formation、normal concurrency serialization、reload projection与best-effort unlinked-inode cleanup。
+
+**Exit Condition:** 由后续lwext4及`lwext4-rust`改进事务读取真实C transaction/journal/block-cache边界，明确唯一
+failure/commit owner、dirent与inode持久化顺序、partial-I/O rollback、crash model和flush semantics；只有完成与
+claim相称的fault/crash或恢复验证后，才能修订make-node target/current contract并关闭本限制。不得在VFS局部增加
+forced flush、双状态truth、case-specific compensation或validation-only production hook冒充退出。
+
+**Owner:** lwext4 / `lwext4-rust` integration（待独立事务）
+**Last Verified:** 2026-08-01
+**Related:** [VFS Make Node R2](../rfcs/vfs-make-node/index.md),
+[R2 ordered-publication invariant](../rfcs/vfs-make-node/invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup),
+[R2 transaction decision](../devlog/transactions/2026-07-31-vfs-make-node.md#r2-target-renegotiation-and-c2-review-hold---2026-08-01)
+
 ## ANE-20260726-SYSTEM-POWER-BEST-EFFORT-BOUNDARIES
 
 **Type:** Limitation

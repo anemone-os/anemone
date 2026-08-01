@@ -180,6 +180,7 @@ mod kunits {
         unsafe {
             guard.forget();
         }
+        task.detach_files_for_exit();
         let target = Arc::new(task);
         let (sender, receiver) = crate::sched::oneshot::channel();
         let request = SchedRequest::new(

@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/fs/{filesystem.rs,api/mount/mount.rs,proc,ramfs,devfs,ext4,anonymous}`、`anemone-rs/src/os/linux.rs`
 **依赖：** None
 **Pending Successor：** None
-**最后核验：** 2026-07-24
+**最后核验：** 2026-08-01
 
 ## 状态与能力所有权
 
@@ -34,17 +34,17 @@
 
 ## VFS-MOUNT-ADMISSION-002 — Source-kind-owned admission
 
-**规则：** filesystem type 必须用 source-kind-tagged mount operation 将 no-device / block-device requirement 与 backend callback input 绑定为同一份真相源；不得再保存独立、可能漂移的 requirement 字段。legacy syscall adapter 在进入 VFS mount transaction 前解析 raw source：no-device 接受 null 或任意合法 source label、丢弃 label 并形成 `MountSource::Pseudo`；block-device 要求 non-null path，解析为已注册 block handle 后形成 `MountSource::Block`。统一 dispatch 只把 mount data交给 no-device callback，只把 block handle与 mount data交给 block-device callback；backend、mount tree和 procfs不得重新解释 raw source。
+**规则：** filesystem type 必须用 source-kind-tagged mount operation 将 no-device / block-device requirement 与 backend callback input 绑定为同一份真相源；不得再保存独立、可能漂移的 requirement 字段。legacy syscall adapter 在进入 VFS mount transaction 前解析 raw source：no-device 接受 null 或任意合法 source label、丢弃 label并形成 `MountSource::Pseudo`；block-device 要求 non-null path，先读取 source inode 的 immutable kind，只有 Block kind且存在有效numeric `rdev`时才在registry boundary构造typed block key并查询provider。character、regular、FIFO、socket或缺少identity的source在registry lookup前返回`ENOTBLK`；合法block number没有provider时返回`ENOENT`。成功lookup后形成`MountSource::Block`。统一dispatch只把mount data交给no-device callback，只把block handle与mount data交给block-device callback；backend、mount tree和procfs不得重新解释raw source。
 
 只表达 `flags=0`、`data=NULL` plain new mount 的高层 userspace wrapper 必须要求 caller 提供 source。需要表达 nullable raw pointer 的底层 syscall-word adapter可以保留该能力，但 in-tree app不得用它恢复 filesystem-specific null-source workaround。
 
-**违反表现：** syscall 以 fstype 字符串特判 source kind；backend 再次匹配 `MountSource`；no-device label进入 backing identity；block filesystem接受 null/non-block source；callback variant与 resolved source不匹配；或高层 app wrapper继续把 `None` 当 pseudo mount约定。
+**违反表现：** syscall以fstype字符串特判source kind；backend再次匹配`MountSource`；no-device label进入backing identity；block filesystem接受null/non-block source；通过numeric `rdev`而不是inode kind选择category；先查registry再判断kind；把non-block与provider miss合并为同一errno；callback variant与resolved source不匹配；或高层app wrapper继续把`None`当pseudo mount约定。
 
-**验证 / Enforcement：** tagged callback registrations与所有 backend signature source audit；`FileSystem::mount()` 的普通 `assert!` 锁定 variant/source handoff；RV64 release build、255项 KUnit、迁移后的 `user-test` guest初始化以及 mount01..07定向回归。
+**验证 / Enforcement：** tagged callback registrations与所有backend signature source audit；`FileSystem::mount()`的普通`assert!`锁定variant/source handoff；RV64/LA64各293项KUnit与release build；VFS Make Node临时probe在真实ext4 mount path证明regular/FIFO/character/socket稳定返回`ENOTBLK`、有效block identity的provider miss返回`ENOENT`。focused LTP `mount02`使用既有`ext2 -> ramfs` scoring alias，未进入本block-source path，因此其失败不替代上述直接证明。
 
 **最初来源：** [mount fstype/source compatibility 小迭代](../../devlog/changes/2026-07-24-mount-fstype-source-compat.md)。
 
-**当前来源：** 同最初来源。
+**当前来源：** [VFS Make Node R2](../../rfcs/vfs-make-node/index.md)于2026-08-01通过`VFS-MAKE-NODE-CUTOVER`完成kind-first `ENOTBLK` Refine；其余规则沿用最初来源。
 
 ## VFS-MOUNT-ADMISSION-003 — Syscall-only alias containment
 
@@ -57,4 +57,3 @@
 **最初来源：** Closed [mount-tree-legacy-api RFC](../../rfcs/mount-tree-legacy-api/invariants.md) 的 syscall-adapter containment边界。
 
 **当前来源：** [mount fstype/source compatibility 小迭代](../../devlog/changes/2026-07-24-mount-fstype-source-compat.md)完成 baseline提取；规则语义保持不变。
-

@@ -211,6 +211,7 @@ fn devfs_node_rename(
 }
 
 pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: devfs_root_lookup,
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),
@@ -226,6 +227,7 @@ pub(super) static DEVFS_ROOT_INODE_OPS: InodeOps = InodeOps {
 };
 
 pub(super) static DEVFS_NODE_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: devfs_node_lookup,
     touch: devfs_node_touch,
     mkdir: devfs_node_mkdir,

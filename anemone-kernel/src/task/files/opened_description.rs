@@ -4,7 +4,7 @@ use crate::{
 };
 
 #[cfg(feature = "kunit")]
-use super::{FdFlags, FilesState};
+use super::{FdFlags, FileTable};
 use super::{FileStatusFlags, LinuxOpenCompat, OpenAccessMode};
 
 /// Shared VFS opened handle.
@@ -267,7 +267,7 @@ mod opened_description_liveness_kunits {
         task::files::Fd,
     };
 
-    fn open_root(files: &mut FilesState) -> Fd {
+    fn open_root(files: &mut FileTable) -> Fd {
         files
             .open_fd(
                 vfs_open(Path::new("/")).unwrap(),
@@ -279,7 +279,7 @@ mod opened_description_liveness_kunits {
             .unwrap()
     }
 
-    fn target(files: &FilesState, fd: Fd) -> (Arc<File>, OpenedDescriptionCapability) {
+    fn target(files: &FileTable, fd: Fd) -> (Arc<File>, OpenedDescriptionCapability) {
         let file_desc = files.get_fd(fd).unwrap();
         (
             file_desc.vfs_file().clone(),
@@ -287,7 +287,7 @@ mod opened_description_liveness_kunits {
         )
     }
 
-    fn close(files: &mut FilesState, fd: Fd) {
+    fn close(files: &mut FileTable, fd: Fd) {
         files.close_fd(fd).unwrap().release_description_ref();
     }
 
@@ -306,7 +306,7 @@ mod opened_description_liveness_kunits {
 
     #[kunit]
     fn aliases_keep_description_live_until_terminal_release() {
-        let mut files = FilesState::new();
+        let mut files = FileTable::new();
         let first = open_root(&mut files);
         let second = files.dup(first).unwrap();
 
@@ -334,7 +334,7 @@ mod opened_description_liveness_kunits {
 
     #[kunit]
     fn flock_domain_keeps_one_owner_truth_across_aliases_and_conversion() {
-        let mut files = FilesState::new();
+        let mut files = FileTable::new();
         let first = open_root(&mut files);
         let alias = files.dup(first).unwrap();
         let independent = open_root(&mut files);
@@ -412,7 +412,7 @@ mod opened_description_liveness_kunits {
 
     #[kunit]
     fn terminal_release_cleans_grant_and_blocks_retired_owner_recommit() {
-        let mut files = FilesState::new();
+        let mut files = FileTable::new();
         let first = open_root(&mut files);
         let alias = files.dup(first).unwrap();
         let independent = open_root(&mut files);

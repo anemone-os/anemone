@@ -19,10 +19,16 @@ fn opened_block_file() -> OpenedFile {
 }
 
 fn block_file_devnum(file: &File) -> Result<BlockDevNum, SysError> {
-    match file.inode().get_attr()?.rdev {
-        DeviceId::Block(devnum) => Ok(devnum),
-        _ => Err(SysError::InvalidArgument),
+    let inode = file.inode();
+    if inode.ty() != InodeType::Block {
+        return Err(SysError::InvalidArgument);
     }
+    let number = inode
+        .get_attr()?
+        .rdev
+        .number()
+        .ok_or(SysError::InvalidArgument)?;
+    Ok(BlockDevNum::from(number))
 }
 
 fn block_file_io_handle(file: &File) -> Result<BlockDevIoHandle, SysError> {
@@ -329,7 +335,7 @@ pub fn publish_block_device(devnum: BlockDevNum) -> Result<Ino, SysError> {
         attr: DevfsNodeAttr {
             ty: InodeType::Block,
             perm: InodePerm::all_rw(),
-            rdev: DeviceId::Block(devnum),
+            rdev: DeviceId::Number(devnum.number()),
         },
         ops: Arc::new(BlockDevFsNodeOps { devnum }),
     })

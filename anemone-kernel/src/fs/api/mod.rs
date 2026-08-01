@@ -29,6 +29,7 @@ pub mod ioctl;
 pub mod linkat;
 pub mod lseek;
 pub mod mkdirat;
+pub mod mknodat;
 pub mod mount;
 pub mod openat;
 pub mod pipe2;

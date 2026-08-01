@@ -72,6 +72,7 @@ fn tgid_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
 }
 
 pub static TGID_INODE_OPS: InodeOps = InodeOps {
+    make_node: reject_make_node,
     lookup: tgid_lookup,
     touch: |_, _, _| Err(SysError::NotSupported),
     mkdir: |_, _, _| Err(SysError::NotSupported),

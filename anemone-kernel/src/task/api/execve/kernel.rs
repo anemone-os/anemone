@@ -70,6 +70,7 @@ pub fn kernel_execve_from_pathref(
                 task.dethread();
 
                 // these resoureces must be cleaned after dethreading.
+                task.split_files_if_shared();
                 task.close_cloexec_fds();
 
                 task.sig_disposition.write().clear_custom_actions();

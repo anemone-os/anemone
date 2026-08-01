@@ -181,9 +181,7 @@ pub(super) fn map_lwext4_inode_type(ty: LwExt4InodeType) -> Result<InodeType, Sy
         LwExt4InodeType::CharacterDevice => Ok(InodeType::Char),
         LwExt4InodeType::BlockDevice => Ok(InodeType::Block),
         LwExt4InodeType::Fifo => Ok(InodeType::Fifo),
-        // Socket inodes in this stage are anonymous VFS objects. Do not make
-        // an on-disk ext4 socket node observable through the new VFS type.
-        LwExt4InodeType::Socket => Err(SysError::NotSupported),
+        LwExt4InodeType::Socket => Ok(InodeType::Socket),
         _ => Err(SysError::NotSupported),
     }
 }
@@ -194,10 +192,11 @@ pub(super) fn map_vfs_inode_type(ty: InodeType) -> Result<LwExt4InodeType, SysEr
         InodeType::Anon => Err(SysError::NotSupported),
         InodeType::Dir => Ok(LwExt4InodeType::Directory),
         InodeType::Regular => Ok(LwExt4InodeType::RegularFile),
-        InodeType::Block | InodeType::Char => Err(SysError::NotYetImplemented),
+        InodeType::Block => Ok(LwExt4InodeType::BlockDevice),
+        InodeType::Char => Ok(LwExt4InodeType::CharacterDevice),
         InodeType::Symlink => Ok(LwExt4InodeType::Symlink),
         InodeType::Fifo => Ok(LwExt4InodeType::Fifo),
-        InodeType::Socket => Err(SysError::NotSupported),
+        InodeType::Socket => Ok(LwExt4InodeType::Socket),
     }
 }
 

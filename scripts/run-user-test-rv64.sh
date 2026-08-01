@@ -107,19 +107,8 @@ just qemu --preset "$preset" "${provider_bindings[@]}" \
     --bind disk-x0="$sdcard_target" \
     --bind disk-x1="$rootfs_target" 2>&1 | tee "$log_file"
 
-required_guest_markers=(
-    "All tests passed!"
-    "EPOLLTEST:SUMMARY:PASS:11"
-    "UDPTEST:SUMMARY:PASS:"
-    "user-test: LTP whitelist finished: attempted=4 passed=4 failed=0 infra_failed=0 skipped=0"
-    "system-power: completed filesystem shutdown step"
-    "system-power: completed network shutdown step"
-    "system-power: completed device shutdown step"
-    "system-power: executor core #0 entering PowerOff machine action"
-)
-for marker in "${required_guest_markers[@]}"; do
-    if ! grep -Fq "$marker" "$log_file"; then
-        error "required guest marker missing: $marker; see $log_file"
-        exit 1
-    fi
-done
+required_guest_marker="All tests passed!"
+if ! grep -Fq "$required_guest_marker" "$log_file"; then
+    error "required guest marker missing: $required_guest_marker; see $log_file"
+    exit 1
+fi

@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | opened-description object 与 status flags | `ProcFile` | published `FileDesc` / transient strong borrow | dup/fork 共享同一 description 语义 |
 | `Unpublished -> Live(n) -> Retired` publication lifecycle | `ProcFile::description_refs` | fd-table mutation 返回待 release 的 `ProcFile` capability | 决定 semantic final release 与 terminal liveness |
-| fd number allocation / publication | `FilesState` | syscall 持 reservation 或 fd key | fd table 可见性与 reuse |
+| fd number allocation / publication | file-table episode内的`FileTable` | task持`FilesState` participation；syscall持reservation或fd key | fd table 可见性与reuse |
 | non-owning identity/liveness capability | `ProcFile` lifecycle owner | consumer 持 opaque capability或 operation-local lease | 比较 identity、取得短 live target lease并在 commit 前验证 |
 | flock terminal-retirement handoff | `ProcFile` lifecycle owner编排；VFS flock domain执行grant cleanup | fd table只返回待release的`ProcFile`；VFS只接收窄retirement context | final published ref移除后终结holder的flock relation并提交recheck hint |
 | 静态 final-release hook | opened-description 创建时固定的 `FileDescOps` | hook 只借用 file/access/suppression context | 最后一个 published slot 移除后执行一次 feature-neutral cleanup |
@@ -28,7 +28,7 @@
 
 **违反表现：** 临时 `get_fd()` clone 延迟 user-visible close、同一 slot double release、fd reuse 命中旧 description，或底层 `Arc<File>` drop 偶然成为 final-close truth。
 
-**验证 / Enforcement：** `ProcFile::{acquire_description_ref,release_description_ref}`、`FilesState` publication/removal 与 task close/exit/dup paths 的常开 assertions 和 source audit。
+**验证 / Enforcement：** `ProcFile::{acquire_description_ref,release_description_ref}`、`FileTable` publication/removal 与 task close/exit/dup paths 的常开 assertions 和 source audit。
 
 **最初来源：** live `task::files` opened-description model；fanotify final-release transaction history。
 
@@ -36,11 +36,15 @@
 
 ## OPENED-DESC-002 — Dup/fork 共享 description，fd table 只拥有 publication
 
-**规则：** dup 与非 `CLONE_FILES` fork 产生新的 published fd slots，但共享同一个 `ProcFile`；`CLONE_FILES` tasks 共享同一 `FilesState` publication set。关闭一个 slot 只释放一个 published reference，只要任一共享 slot 仍存在就不得触发 terminal retirement。fd number、inode、path、raw `File` pointer、`Weak::upgrade()` 成功或底层 storage 存活均不能单独替代 opened-description identity/liveness。
+**规则：** dup 与非 `CLONE_FILES` fork 产生新的 published fd slots，但共享同一个 `ProcFile`；`CLONE_FILES`
+tasks各自持有`FilesState` participation，并共享同一episode-owned `FileTable` publication set。关闭一个slot只
+释放一个published reference，只要任一共享slot仍存在就不得触发terminal retirement。fd number、inode、path、
+raw `File` pointer、`Weak::upgrade()`成功或底层storage存活均不能单独替代opened-description
+identity/liveness。
 
 **违反表现：** close 一个 dup fd 使其它 alias 被视为 final-closed、fork 后复制独立 status truth、共享 table 被一个 task exit 提前 drain，或 raw fd reuse 被当成同一 description。
 
-**验证 / Enforcement：** `FileDesc::clone()`、`FilesState::fork()`、dup/close/exit 与 shared-table teardown audit；fd sharing regressions。
+**验证 / Enforcement：** `FileDesc::clone()`、`FileTable::fork()`、dup/close/exit与shared-table teardown audit；fd sharing regressions。
 
 **最初来源：** live `task::files` fd sharing semantics。
 
@@ -73,7 +77,7 @@ static hook先于flock cleanup；close等待waiter execution/placement；或把�
 lifecycle framework。
 
 **验证 / Enforcement：** `ProcFile::release_description_ref()`、全部fd publication/removal caller、
-`OpenedDescriptionRetirementCtx`与`fs::flock::retire_flock()` source audit和常开lifecycle assertions；
+`OpenedDescriptionRetirementCtx`与`fs::lock::flock::retire_flock()` source audit和常开lifecycle assertions；
 owner-local KUnit、focused dup/fork/final-close/no-grant waiter/concurrent-close regressions。
 
 **最初来源：** [RFC-20260728-flock R0](../../rfcs/flock/invariants.md#opened-desc-retire-001---terminal-episode-固定进入窄-vfs-flock-cleanup)。

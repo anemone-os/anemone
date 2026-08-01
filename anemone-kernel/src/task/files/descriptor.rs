@@ -91,10 +91,17 @@ impl FileDesc {
         self.pfile.acquire_description_ref();
     }
 
-    pub(super) fn unpublish_from_fd_table(&self) -> Arc<ProcFile> {
+    pub(super) fn unpublish_from_fd_table(&self) {
         let was_published = self.published.swap(false, Ordering::AcqRel);
         assert!(was_published, "unpublishing unpublished file descriptor");
-        self.pfile.clone()
+    }
+
+    pub(super) fn release_description_ref(&self) {
+        self.pfile.release_description_ref();
+    }
+
+    pub(super) fn is_published(&self) -> bool {
+        self.published.load(Ordering::Acquire)
     }
 
     /// Capture this opened-description identity only while it is live.
