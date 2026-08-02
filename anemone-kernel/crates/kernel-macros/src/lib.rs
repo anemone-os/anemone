@@ -17,7 +17,9 @@ pub fn percpu(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Defines a KUnit test case.
 ///
-/// The test function must have the signature `fn()`.
+/// The attribute accepts no arguments, and the test function must have the
+/// signature `fn()`. Cases run serially in the kernel boot environment defined
+/// by `crate::debug::kunit`; a panic terminates the kernel and the test run.
 #[proc_macro_attribute]
 pub fn kunit(attr: TokenStream, item: TokenStream) -> TokenStream {
     kunit::kunit_impl(attr, item)
