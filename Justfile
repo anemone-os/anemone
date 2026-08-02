@@ -6,10 +6,11 @@ default:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
-[doc("run a repository-owned test suite: `xtask`, `net-host`, `virtio-drivers`, or `lwext4`")]
+[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `virtio-drivers`, or `lwext4`")]
 test suite:
     @case {{ quote(suite) }} in \
         xtask) just test-xtask ;; \
+        symtab) just test-symtab ;; \
         net-host) just test-net-host ;; \
         virtio-drivers) just test-virtio-drivers ;; \
         lwext4) just test-lwext4 ;; \
@@ -19,6 +20,10 @@ test suite:
 [private]
 test-xtask:
     @cd scripts/xtask && cargo test
+
+[private]
+test-symtab:
+    @cargo test -p symtab --all-features
 
 [private]
 test-net-host:

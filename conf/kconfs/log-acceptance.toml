@@ -6,6 +6,7 @@ fs_ext4 = true
 kernel_preempt = false
 spin_lock_irqsave = true
 soft_unaligned_access = true
+kernel_symbols = true
 
 [parameters]
 bootstrap_heap_shift_kb = 16

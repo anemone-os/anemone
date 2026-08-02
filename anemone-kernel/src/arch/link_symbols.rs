@@ -25,6 +25,12 @@ unsafe extern "C" {
     /// memory.
     pub fn __etext();
 
+    /// The start of the checked, immutable kernel symbol table.
+    pub fn __sanemone_symtab();
+
+    /// The end of the checked, immutable kernel symbol table.
+    pub fn __eanemone_symtab();
+
     /// The start of the trampoline code in virtual memory.
     pub fn __strampoline();
 

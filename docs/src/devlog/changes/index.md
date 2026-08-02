@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-02 - Kernel backtrace symbolization](./2026-08-02-kernel-symbolization.md)
 - [2026-08-02 - KUnit execution boundary](./2026-08-02-kunit-execution-boundary.md)
 - [2026-08-02 - Kernel developer logging](./2026-08-02-kernel-developer-logging.md)
 - [2026-08-02 - lwext4 Rust safe facade](./2026-08-02-lwext4-rust-safe-facade.md)

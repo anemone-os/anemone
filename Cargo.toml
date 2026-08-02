@@ -3,6 +3,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "symtab",
     "anemone-kernel",
     "anemone-kernel/crates/buddy-system",
     "anemone-kernel/crates/anemone-net-api",
