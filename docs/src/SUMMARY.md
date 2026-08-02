@@ -59,6 +59,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-02 - Pipe Event wait](./devlog/changes/2026-08-02-pipe-event-wait.md)
 		- [2026-08-02 - rlimit core 与 RLIMIT_NOFILE](./devlog/changes/2026-08-02-rlimit-core-nofile.md)
 		- [2026-08-01 - Alpha/Omega POSIX lock/VFS integration](./devlog/changes/2026-08-01-alpha-omega-posix-lock-vfs-integration.md)
 		- [2026-07-31 - Alpha/Omega Flock/UDP integration](./devlog/changes/2026-07-31-alpha-omega-flock-udp-integration.md)
