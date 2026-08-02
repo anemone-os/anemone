@@ -29,7 +29,8 @@ impl<T, const N: usize> CircularLog<T, N> {
         }
     }
 
-    pub fn push(&mut self, item: T) {
+    pub fn push(&mut self, item: T) -> usize {
+        let sequence = self.head_seq;
         let idx = self.head_seq % N;
         let generation = self.head_seq / N;
         self.buffer[idx] = Slot {
@@ -37,6 +38,7 @@ impl<T, const N: usize> CircularLog<T, N> {
             generation,
         };
         self.head_seq += 1;
+        sequence
     }
 
     pub fn get_at(&self, seq: usize) -> Result<T, ReadErr>

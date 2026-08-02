@@ -1,0 +1,17 @@
+[build]
+name = "log-acceptance-rv64"
+arch = "riscv64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/log-test"
+
+[[dirs]]
+path = "/dev"
+
+[[apps]]
+name = "log-test"
+installed_dir = "/sbin"

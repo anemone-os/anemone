@@ -1,5 +1,13 @@
 use crate::syscall::SYS_ANEMONE_START;
 
-pub const SYS_DBG_PRINT: u64 = SYS_ANEMONE_START + 0;
+pub const SYS_DBG_LOG_CTL: u64 = SYS_ANEMONE_START + 0;
+
+pub const DBG_LOG_CTL_GET_LEVELS: u64 = 0;
+pub const DBG_LOG_CTL_SET_LEVELS: u64 = 1;
+
+pub const DBG_LOG_CTL_LEVEL_MASK: u64 = 0xff;
+pub const DBG_LOG_CTL_RECORD_LEVEL_SHIFT: u32 = 0;
+pub const DBG_LOG_CTL_CONSOLE_LEVEL_SHIFT: u32 = 8;
+pub const DBG_LOG_CTL_RESERVED_MASK: u64 = !0xffff;
 
 pub const SYS_POWER_SHUTDOWN: u64 = SYS_ANEMONE_START + 1;
