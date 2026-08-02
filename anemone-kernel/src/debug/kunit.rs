@@ -1,131 +1,43 @@
-/// In-kernel unit testing framework, inspired by Linux's KUnit but simplified
-/// for Anemone's needs.
-///
-/// Since we don't support stack unwinding now, a panic in a kunit test will
-/// crash the kernel.
+//! In-kernel unit testing framework.
+//!
+//! Registered cases run once and serially on the BSP `kinit` task after all
+//! configured CPUs have completed local initialization, Late initcalls and
+//! device attachment have finished, and the root filesystem has been mounted.
+//! Interrupts, the scheduler, timers, allocation and `kthreadd` are available.
+//! The initial userspace task has not been prepared, so the current task must
+//! not be treated as an ordinary process with user memory, files, filesystem
+//! state, credentials, signals or a userspace trap frame. Scheduler and wait
+//! tests may use its explicitly available kernel-task properties.
+//!
+//! Cases share the live kernel, global registries and root filesystem. There is
+//! no per-case isolation or execution-order contract. A case must withdraw its
+//! publications, restore changed global state and stop or join every kthread it
+//! creates before returning. Root-filesystem fixtures must also be removed;
+//! the runner syncs mounted filesystems after the suite so successful cleanup
+//! is durable.
+//!
+//! An unpublished `Task` may be constructed only as an owner-local data fixture
+//! for APIs that explicitly accept a detached task. It must not be published
+//! into the global task topology, enqueued onto a live processor or executed,
+//! and proves no task-topology or execution lifecycle.
+//! Tests that need running kernel concurrency must use the production
+//! `KThreadBuilder` lifecycle; spawning a userspace task is unsupported here.
+//! Multi-CPU tests must build an explicit topology with production kthread,
+//! scheduler or IPI interfaces; KUnit does not execute arbitrary test functions
+//! in per-CPU interrupt context. A passing case proves only the architecture,
+//! CPU count, devices and filesystem selected for that run.
+//!
+//! Semantic negative cases should assert the expected `Err`, `None` or rejected
+//! transition. Any panic is terminal for the kernel and the current test run:
+//! the runner deliberately does not unwind or continue through possibly
+//! partially mutated global state. Expected-panic tests therefore require a
+//! separate single-case boot and host-side terminal oracle, not this runner.
 use crate::prelude::*;
-
-struct PerCpuKUnitBarrier {
-    participants: AtomicUsize,
-    ready: AtomicUsize,
-    done: AtomicUsize,
-    start: AtomicBool,
-}
-
-impl PerCpuKUnitBarrier {
-    const fn new() -> Self {
-        Self {
-            participants: AtomicUsize::new(0),
-            ready: AtomicUsize::new(0),
-            done: AtomicUsize::new(0),
-            start: AtomicBool::new(false),
-        }
-    }
-
-    fn reset(&self) {
-        self.participants.store(ncpus(), Ordering::Release);
-        self.ready.store(0, Ordering::Release);
-        self.done.store(0, Ordering::Release);
-        self.start.store(false, Ordering::Release);
-    }
-
-    fn mark_ready(&self) {
-        self.ready.fetch_add(1, Ordering::AcqRel);
-    }
-
-    fn wait_all_ready(&self) {
-        while self.ready.load(Ordering::Acquire) < self.participants.load(Ordering::Acquire) {
-            core::hint::spin_loop();
-        }
-    }
-
-    fn release_start(&self) {
-        self.start.store(true, Ordering::Release);
-    }
-
-    fn wait_start(&self) {
-        while !self.start.load(Ordering::Acquire) {
-            core::hint::spin_loop();
-        }
-    }
-
-    fn mark_done(&self) {
-        self.done.fetch_add(1, Ordering::AcqRel);
-    }
-
-    fn wait_all_done(&self) {
-        while self.done.load(Ordering::Acquire) < self.participants.load(Ordering::Acquire) {
-            core::hint::spin_loop();
-        }
-    }
-}
-
-struct PerCpuRunGuard;
-
-impl PerCpuRunGuard {
-    fn acquire() -> Self {
-        while PERCPU_KUNIT_RUNNING
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            core::hint::spin_loop();
-        }
-        Self
-    }
-}
-
-impl Drop for PerCpuRunGuard {
-    fn drop(&mut self) {
-        PERCPU_KUNIT_RUNNING.store(false, Ordering::Release);
-    }
-}
-
-static PERCPU_KUNIT_RUNNING: AtomicBool = AtomicBool::new(false);
-static PERCPU_KUNIT_BARRIER: PerCpuKUnitBarrier = PerCpuKUnitBarrier::new();
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum KUnitKind {
-    Plain,
-    PerCpu,
-}
 
 #[repr(C)]
 pub struct KUnit {
     pub name: &'static str,
     pub test_fn: fn(),
-    pub kind: KUnitKind,
-}
-
-pub fn handle_percpu_ipi_test(test_fn: fn()) {
-    unsafe {
-        IntrArch::local_intr_enable();
-    }
-
-    PERCPU_KUNIT_BARRIER.mark_ready();
-    PERCPU_KUNIT_BARRIER.wait_start();
-    test_fn();
-    PERCPU_KUNIT_BARRIER.mark_done();
-
-    unsafe {
-        IntrArch::local_intr_disable();
-    }
-}
-
-pub fn run_percpu_test(test_fn: fn()) {
-    let _guard = PerCpuRunGuard::acquire();
-    let sync = PERCPU_KUNIT_BARRIER.reset();
-
-    broadcast_ipi_async(IpiPayload::RunKUnitPerCpu { test_fn })
-        .expect("failed to dispatch percpu kunit");
-
-    PERCPU_KUNIT_BARRIER.mark_ready();
-    PERCPU_KUNIT_BARRIER.wait_all_ready();
-    PERCPU_KUNIT_BARRIER.release_start();
-
-    test_fn();
-    PERCPU_KUNIT_BARRIER.mark_done();
-    PERCPU_KUNIT_BARRIER.wait_all_done();
 }
 
 fn sync_filesystem_mutations() {
@@ -140,9 +52,6 @@ fn sync_filesystem_mutations() {
     }
 }
 
-/// Since we don't support stack unwinding, there is no need to count failed
-/// tests separately - if a test panics, the kernel will crash and we won't
-/// reach the end of the test runner.
 pub fn kunit_runner() {
     // yansi doesn't work well in macros, so we manually print the ANSI codes here
     const GREEN_BOLD: &str = "\x1b[32;1m";
@@ -174,11 +83,7 @@ pub fn kunit_runner() {
     kprintln!("{}Running {} tests...{}", BOLD, kunits.len(), RESET);
     for kunit in kunits {
         kprint!("{}...", kunit.name);
-        // TODO: catch panics and count them as failures
-        match kunit.kind {
-            KUnitKind::Plain => (kunit.test_fn)(),
-            KUnitKind::PerCpu => run_percpu_test(kunit.test_fn),
-        }
+        (kunit.test_fn)();
         kprintln!("{}ok{}", GREEN_BOLD, RESET);
     }
 

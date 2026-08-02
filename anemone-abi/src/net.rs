@@ -1,16 +1,31 @@
 pub mod native {}
 
 pub mod linux {
-    //! Linux IPv4 socket ABI shared by RV64 and LA64.
+    //! Linux socket ABI shared by RV64 and LA64.
 
     use core::mem::{align_of, offset_of, size_of};
 
+    pub const AF_UNIX: i32 = 1;
+    pub const AF_LOCAL: i32 = AF_UNIX;
+    pub const PF_UNIX: i32 = AF_UNIX;
     pub const AF_INET: i32 = 2;
+    pub const SOCK_STREAM: i32 = 1;
     pub const SOCK_DGRAM: i32 = 2;
     pub const SOCK_NONBLOCK: i32 = 0x0800;
     pub const SOCK_CLOEXEC: i32 = 0x0008_0000;
     pub const IPPROTO_UDP: i32 = 17;
+    pub const SOL_SOCKET: i32 = 1;
+    pub const SO_TYPE: i32 = 3;
+    pub const SO_ERROR: i32 = 4;
+    pub const SO_ACCEPTCONN: i32 = 30;
+    pub const SO_PROTOCOL: i32 = 38;
+    pub const SO_DOMAIN: i32 = 39;
+    pub const SHUT_RD: i32 = 0;
+    pub const SHUT_WR: i32 = 1;
+    pub const SHUT_RDWR: i32 = 2;
+    pub const MSG_PEEK: i32 = 0x02;
     pub const MSG_DONTWAIT: i32 = 0x40;
+    pub const MSG_NOSIGNAL: i32 = 0x4000;
 
     #[allow(non_camel_case_types)]
     pub type socklen_t = u32;
@@ -46,6 +61,24 @@ pub mod linux {
         pub sin_zero: [u8; 8],
     }
 
+    pub const UNIX_PATH_MAX: usize = 108;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[repr(C)]
+    pub struct SockAddrUn {
+        pub sun_family: u16,
+        pub sun_path: [u8; UNIX_PATH_MAX],
+    }
+
+    impl Default for SockAddrUn {
+        fn default() -> Self {
+            Self {
+                sun_family: AF_UNIX as u16,
+                sun_path: [0; UNIX_PATH_MAX],
+            }
+        }
+    }
+
     impl SockAddrIn {
         pub const fn new(address: [u8; 4], port: u16) -> Self {
             Self {
@@ -79,4 +112,8 @@ pub mod linux {
     const _: [(); 2] = [(); offset_of!(SockAddrIn, sin_port)];
     const _: [(); 4] = [(); offset_of!(SockAddrIn, sin_addr)];
     const _: [(); 8] = [(); offset_of!(SockAddrIn, sin_zero)];
+    const _: [(); 110] = [(); size_of::<SockAddrUn>()];
+    const _: [(); 2] = [(); align_of::<SockAddrUn>()];
+    const _: [(); 0] = [(); offset_of!(SockAddrUn, sun_family)];
+    const _: [(); 2] = [(); offset_of!(SockAddrUn, sun_path)];
 }

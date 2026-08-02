@@ -72,25 +72,55 @@ impl<'a> UserBufferSink<'a> {
 
         let mut guard = self.uspace.lock();
         while copied < src.len() {
-            let Some((cursor, addr, available)) = current_range(self.segments, self.cursor)? else {
+            let range = match current_range(self.segments, self.cursor) {
+                Ok(range) => range,
+                Err(_) if copied > 0 => return Ok(copied),
+                Err(err) => return Err(err),
+            };
+            let Some((cursor, addr, available)) = range else {
                 break;
             };
             let copy_len = (src.len() - copied)
                 .min(available)
                 .min(bytes_until_page_end(addr));
 
-            match UserWriteSlice::<u8>::try_new(addr, copy_len, &mut guard) {
-                Ok(mut dst) => dst.copy_from_slice(&src[copied..copied + copy_len]),
+            let mut dst = match UserWriteSlice::<u8>::try_new(addr, copy_len, &mut guard) {
+                Ok(dst) => dst,
                 Err(err) if copied > 0 => return Ok(copied),
                 Err(err) => return Err(err),
-            }?;
+            };
+            let result = dst.copy_from_slice_partial(&src[copied..copied + copy_len]);
+            let chunk_copied = match result {
+                Ok(chunk_copied) => {
+                    assert_eq!(
+                        chunk_copied, copy_len,
+                        "successful user-buffer sink copy was short"
+                    );
+                    chunk_copied
+                },
+                Err(error) => {
+                    assert!(
+                        error.copied() < copy_len,
+                        "failed user-buffer sink copy reported full progress"
+                    );
+                    error.copied()
+                },
+            };
 
-            self.cursor = advance_cursor(self.segments, cursor, copy_len);
+            self.cursor = advance_cursor(self.segments, cursor, chunk_copied);
             self.written = self
                 .written
-                .checked_add(copy_len)
+                .checked_add(chunk_copied)
                 .expect("user-buffer sink progress overflow");
-            copied += copy_len;
+            copied += chunk_copied;
+
+            if let Err(error) = result {
+                return if copied > 0 {
+                    Ok(copied)
+                } else {
+                    Err(error.error())
+                };
+            }
         }
 
         Ok(copied)
@@ -227,25 +257,55 @@ impl<'a> UserBufferSource<'a> {
 
         let mut guard = self.uspace.lock();
         while copied < dst.len() {
-            let Some((cursor, addr, available)) = current_range(self.segments, self.cursor)? else {
+            let range = match current_range(self.segments, self.cursor) {
+                Ok(range) => range,
+                Err(_) if copied > 0 => return Ok(copied),
+                Err(err) => return Err(err),
+            };
+            let Some((cursor, addr, available)) = range else {
                 break;
             };
             let copy_len = (dst.len() - copied)
                 .min(available)
                 .min(bytes_until_page_end(addr));
 
-            match UserReadSlice::<u8>::try_new(addr, copy_len, &mut guard) {
-                Ok(mut src) => src.copy_to_slice(&mut dst[copied..copied + copy_len]),
+            let mut src = match UserReadSlice::<u8>::try_new(addr, copy_len, &mut guard) {
+                Ok(src) => src,
                 Err(err) if copied > 0 => return Ok(copied),
                 Err(err) => return Err(err),
-            }?;
+            };
+            let result = src.copy_to_slice_partial(&mut dst[copied..copied + copy_len]);
+            let chunk_copied = match result {
+                Ok(chunk_copied) => {
+                    assert_eq!(
+                        chunk_copied, copy_len,
+                        "successful user-buffer source copy was short"
+                    );
+                    chunk_copied
+                },
+                Err(error) => {
+                    assert!(
+                        error.copied() < copy_len,
+                        "failed user-buffer source copy reported full progress"
+                    );
+                    error.copied()
+                },
+            };
 
-            self.cursor = advance_cursor(self.segments, cursor, copy_len);
+            self.cursor = advance_cursor(self.segments, cursor, chunk_copied);
             self.consumed = self
                 .consumed
-                .checked_add(copy_len)
+                .checked_add(chunk_copied)
                 .expect("user-buffer source progress overflow");
-            copied += copy_len;
+            copied += chunk_copied;
+
+            if let Err(error) = result {
+                return if copied > 0 {
+                    Ok(copied)
+                } else {
+                    Err(error.error())
+                };
+            }
         }
 
         Ok(copied)

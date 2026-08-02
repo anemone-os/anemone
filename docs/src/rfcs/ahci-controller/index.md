@@ -1,13 +1,18 @@
 # AHCI Controller / ATA Block Device
 
-**状态：** Draft / Review Hold
-**修订：** `Draft`
+**状态：** Terminated
+**修订：** `Draft`（未接受即终止）
 **负责人：** EDGW, Codex
-**最后更新：** 2026-07-23
+**最后更新：** 2026-08-01
 **领域：** AHCI / SATA / ATA / DMA / block
 **开放问题：** [Tracking Issues](./tracking-issues.md)
 **事务日志：** [AHCI Controller 事务日志](../../devlog/transactions/2026-07-23-ahci-controller.md)
-**下一步：** 先修复 probe 失败路径的 DMA 生命周期和 IDENTIFY 容量边界，再进入硬件读写验证。
+**下一步：** None；本RFC不再推进，任何后续AHCI工作必须重新授权，不能恢复下列gate。
+
+> 本RFC于2026-08-01按维护者决定终止。它从未进入Accepted或current-contract cutover，`Terminated`不表示
+> 原接受边界已满足，也不把未运行证据改写为PASS。既有实现与历史证据保留；仍影响live code的安全缺陷和
+> 可见限制继续由register拥有。原Draft中的partition-scan non-goal只约束当时不在AHCI driver内实现扫描，
+> 不限制后来由generic block subsystem提供、AHCI当前已经消费的one-time primary MBR discovery。
 
 ## 背景
 
@@ -20,7 +25,7 @@ Loongson 2K1000 的设备树提供 `loongson,ls-ahci` 和 `generic-ahci` compati
 `dma-mask`，并由 firmware 声明 coherent DMA。驱动把一个已识别的 ATA disk 注册为 SCSI class
 block device，当前命名规则因此产生 `sda`。
 
-## 目标
+## 历史目标（未接受）
 
 - 发现并初始化一个 AHCI 1.x HBA 的单一已实现 port。
 - 通过 ATA `IDENTIFY DEVICE` 证明目标是支持 DMA、LBA、LBA48、512-byte logical sector 和
@@ -30,14 +35,18 @@ block device，当前命名规则因此产生 `sda`。
 - 保持 platform firmware 负责 pinmux、clock、reset、PHY 和 DMA coherency setup；generic AHCI
   driver 不按板载 MMIO 地址猜测控制器身份。
 
-## 非目标
+## 历史非目标
 
-本 revision 不承诺：多 port 或多 outstanding command、NCQ、IRQ completion、异步 request queue、
+原Draft不承诺：多 port 或多 outstanding command、NCQ、IRQ completion、异步 request queue、
 ATAPI、port multiplier、runtime hotplug、partition scan、power management、真实 cache flush
 持久化语义或 controller resource reclamation。上述能力需要重新审查 owner、生命周期和验证边界，
 不能在当前同步 port lock 内旁路实现。
 
-## 当前实现合同
+这里的`partition scan`只排除AHCI-owned scanner，不排除独立generic block能力。当前AHCI registration已通过
+`register_block_disk()`消费generic primary MBR discovery；GPT、重扫和可变partition-table lifecycle仍不由
+本历史Draft声明完成。
+
+## 终止时的实现事实（非current contract）
 
 ### Platform probe
 
@@ -64,10 +73,11 @@ interrupt、task-file、link presence 和 transferred-byte count。
 
 ### ATA identity and block ABI
 
-IDENTIFY response 只在 capability、command-set、logical-sector-size 和 LBA48 capacity 全部验证后
-提交为 `AtaIdentity`。model、serial、firmware 是 immutable `Box<str>` diagnostic snapshot；它们
-不参与 I/O 状态决策。`AtaDisk` 保留 identity 和 controller capability，通过 block registry 注册
-`BlockDevClass::Scsi`，当前命名为 `sdN`。
+IDENTIFY response当前验证DMA/LBA、LBA48/FLUSH CACHE EXT、512-byte logical-sector-size、nonzero capacity
+与host `usize` conversion后提交为`AtaIdentity`，但没有拒绝`sectors > 2^48`；该live defect由
+[register issue](../../register/open-issues.md#ane-20260723-ahci-probe-lifecycle-and-capacity)拥有。model、
+serial、firmware是immutable `Box<str>` diagnostic snapshot，不参与I/O状态决策。`AtaDisk`保留identity
+和controller capability，通过block registry注册SCSI-class `sdN` endpoint。
 
 block API 的最小单位是 512 bytes；I/O length 必须非零且 512-byte 对齐，range 必须在 identity
 capacity 内。大于单次 bounce buffer 的请求按连续 sector chunk 拆分；任何 chunk 失败都停止后续
@@ -83,20 +93,21 @@ non-fatal 的固定优先级分类。错误会记录 HBA/port register snapshot�
 panic，以保留可复现 controller hang 的完整上下文。这是临时诊断策略，不是最终 block ABI，退出
 条件见 [Tracking Issues](./tracking-issues.md)。
 
-## 接受边界
+## 终止时未满足的接受边界
 
-当前只能把 code shape、fake/helper KUnit 和 Loongson 2K1000 firmware integration 作为实现事实，
-不能把 RFC 标为 Accepted 或 Closed：
+终止时只能把 code shape、fake/helper KUnit 和 Loongson 2K1000 firmware integration 作为实现事实，
+不能把RFC标为Accepted或Closed；下列未满足项不再形成active gate：
 
 - probe 的所有失败出口必须保证 engine 停止后才释放 DMA/MMIO owner；
 - IDENTIFY capacity 必须先证明可编码进 48-bit FIS，并拒绝会触发内部 assertion 的设备响应；
 - shutdown 必须明确 quiesce/flush 的可见语义，不能保留当前无操作 stub 作为长期合同；
-- 需完成 focused KUnit/build/source audit，以及用户侧真实 controller probe、first/last-sector
-  read、越界 read、授权介质 write/readback 和重启稳定性验证。
+- 已注册AHCI helper KUnit已随本次合流在RV64/LA64 runtime通过，但capacity upper-bound regression/source
+  audit仍缺失；用户侧真实controller probe、first/last-sector read、越界read、授权介质write/readback和
+  重启稳定性验证仍Not Run。
 
 未运行的测试不记录为 PASS；destructive write 只能由用户指定 disposable media 或明确 LBA 后执行。
 
-## 方案取舍
+## 历史方案取舍
 
 ### 直接放回 block 目录
 

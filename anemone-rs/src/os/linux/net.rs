@@ -1,9 +1,10 @@
-//! Typed IPv4 UDP wrappers plus narrow raw ABI conformance entries.
+//! Typed socket wrappers plus narrow raw Linux ABI conformance entries.
 
 use anemone_abi::{
-    errno::Errno,
+    errno::{EINVAL, Errno},
     net::linux::{
-        AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SockAddrIn, socklen_t,
+        AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
+        SOL_SOCKET, SockAddrIn, SockAddrUn, UNIX_PATH_MAX, socklen_t,
     },
 };
 use bitflags::bitflags;
@@ -22,6 +23,8 @@ bitflags! {
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct MessageFlags: i32 {
         const DONTWAIT = anemone_abi::net::linux::MSG_DONTWAIT;
+        const PEEK = anemone_abi::net::linux::MSG_PEEK;
+        const NOSIGNAL = anemone_abi::net::linux::MSG_NOSIGNAL;
     }
 }
 
@@ -32,6 +35,115 @@ pub fn udp_socket(flags: SocketFlags) -> Result<Fd, Errno> {
         IPPROTO_UDP as u64,
     )
     .map(|fd| fd as Fd)
+}
+
+pub fn unix_stream_pair(flags: SocketFlags) -> Result<(Fd, Fd), Errno> {
+    let mut pair = [0i32; 2];
+    net::socketpair(
+        AF_UNIX as u64,
+        (SOCK_STREAM | flags.bits()) as u64,
+        0,
+        pair.as_mut_ptr() as u64,
+    )
+    .map(|_| (pair[0] as Fd, pair[1] as Fd))
+}
+
+pub fn unix_stream_socket(flags: SocketFlags) -> Result<Fd, Errno> {
+    net::socket(
+        AF_UNIX as u64,
+        (SOCK_STREAM | flags.bits()) as u64,
+        0,
+    )
+    .map(|fd| fd as Fd)
+}
+
+pub fn unix_path_address(pathname: &[u8]) -> Result<(SockAddrUn, socklen_t), Errno> {
+    if pathname.is_empty() || pathname.len() > UNIX_PATH_MAX {
+        return Err(EINVAL);
+    }
+    let mut address = SockAddrUn::default();
+    address.sun_path[..pathname.len()].copy_from_slice(pathname);
+    let len = core::mem::offset_of!(SockAddrUn, sun_path) + pathname.len();
+    Ok((address, len as socklen_t))
+}
+
+pub fn bind_unix_path(fd: Fd, pathname: &[u8]) -> Result<(), Errno> {
+    let (address, len) = unix_path_address(pathname)?;
+    net::bind(
+        fd as u64,
+        &address as *const SockAddrUn as u64,
+        len as u64,
+    )
+    .map(|_| ())
+}
+
+pub fn listen(fd: Fd, backlog: i32) -> Result<(), Errno> {
+    net::listen(fd as u64, backlog).map(|_| ())
+}
+
+pub fn connect_unix_path(fd: Fd, pathname: &[u8]) -> Result<(), Errno> {
+    let (address, len) = unix_path_address(pathname)?;
+    net::connect(
+        fd as u64,
+        &address as *const SockAddrUn as u64,
+        len as u64,
+    )
+    .map(|_| ())
+}
+
+pub fn accept_unix(fd: Fd) -> Result<Fd, Errno> {
+    net::accept(fd as u64, 0, 0).map(|accepted| accepted as Fd)
+}
+
+pub fn accept4_unix(fd: Fd, flags: SocketFlags) -> Result<Fd, Errno> {
+    net::accept4(fd as u64, 0, 0, flags.bits()).map(|accepted| accepted as Fd)
+}
+
+pub fn accept4_unix_raw(
+    fd: Fd,
+    address: *mut SockAddrUn,
+    len: *mut socklen_t,
+    flags: i32,
+) -> Result<Fd, Errno> {
+    net::accept4(
+        fd as u64,
+        address as u64,
+        len as u64,
+        flags,
+    )
+    .map(|accepted| accepted as Fd)
+}
+
+pub fn getsockname_unix_raw(
+    fd: Fd,
+    address: *mut SockAddrUn,
+    len: *mut socklen_t,
+) -> Result<(), Errno> {
+    net::getsockname(fd as u64, address as u64, len as u64).map(|_| ())
+}
+
+pub fn getpeername_unix_raw(
+    fd: Fd,
+    address: *mut SockAddrUn,
+    len: *mut socklen_t,
+) -> Result<(), Errno> {
+    net::getpeername(fd as u64, address as u64, len as u64).map(|_| ())
+}
+
+/// Raw socketpair entry for pointer and tuple conformance tests.
+pub unsafe fn socketpair_raw(
+    family: i32,
+    socket_type: i32,
+    protocol: i32,
+    pair: *mut i32,
+) -> Result<(), Errno> {
+    net::socketpair(
+        family as i64 as u64,
+        socket_type as i64 as u64,
+        protocol as i64 as u64,
+        pair as u64,
+    )
+    .map(|_| ())
 }
 
 pub fn bind_ipv4(fd: Fd, address: SockAddrIn) -> Result<(), Errno> {
@@ -91,6 +203,80 @@ pub fn recvfrom_ipv4(
     Ok((received as usize, peer))
 }
 
+pub fn shutdown(fd: Fd, how: i32) -> Result<(), Errno> {
+    net::shutdown(fd as u64, how as i64 as u64).map(|_| ())
+}
+
+pub unsafe fn sendto_raw(
+    fd: i32,
+    buf: *const u8,
+    len: usize,
+    flags: i32,
+    address: *const u8,
+    address_len: u32,
+) -> Result<usize, Errno> {
+    net::sendto(
+        fd as i64 as u64,
+        buf as u64,
+        len as u64,
+        flags as i64 as u64,
+        address as u64,
+        address_len as u64,
+    )
+    .map(|written| written as usize)
+}
+
+pub unsafe fn recvfrom_raw(
+    fd: i32,
+    buf: *mut u8,
+    len: usize,
+    flags: i32,
+    address: *mut u8,
+    address_len: *mut socklen_t,
+) -> Result<usize, Errno> {
+    net::recvfrom(
+        fd as i64 as u64,
+        buf as u64,
+        len as u64,
+        flags as i64 as u64,
+        address as u64,
+        address_len as u64,
+    )
+    .map(|read| read as usize)
+}
+
+pub unsafe fn getsockopt_raw(
+    fd: i32,
+    option: i32,
+    value: *mut u8,
+    len: *mut i32,
+) -> Result<(), Errno> {
+    net::getsockopt(
+        fd as i64 as u64,
+        SOL_SOCKET as u64,
+        option as i64 as u64,
+        value as u64,
+        len as u64,
+    )
+    .map(|_| ())
+}
+
+pub unsafe fn setsockopt_raw(
+    fd: i32,
+    option: i32,
+    value: *const u8,
+    len: i32,
+) -> Result<(), Errno> {
+    net::setsockopt(
+        fd as i64 as u64,
+        SOL_SOCKET as u64,
+        option as i64 as u64,
+        value as u64,
+        len as i64 as u64,
+    )
+    .map(|_| ())
+}
+
 /// Raw socket creation for ABI rejection and flag-conformance tests.
 pub unsafe fn socket_raw(family: i32, socket_type: i32, protocol: i32) -> Result<Fd, Errno> {
     net::socket(
@@ -113,46 +299,6 @@ pub unsafe fn getsockname_raw(
     len: *mut socklen_t,
 ) -> Result<(), Errno> {
     net::getsockname(fd as i64 as u64, address as u64, len as u64).map(|_| ())
-}
-
-/// Raw six-argument sendto ABI. The kernel registers it in Stage 3C.
-pub unsafe fn sendto_raw(
-    fd: i32,
-    buf: *const u8,
-    len: usize,
-    flags: i32,
-    address: *const u8,
-    address_len: u32,
-) -> Result<usize, Errno> {
-    net::sendto(
-        fd as i64 as u64,
-        buf as u64,
-        len as u64,
-        flags as i64 as u64,
-        address as u64,
-        address_len as u64,
-    )
-    .map(|written| written as usize)
-}
-
-/// Raw six-argument recvfrom ABI. The kernel registers it in Stage 3C.
-pub unsafe fn recvfrom_raw(
-    fd: i32,
-    buf: *mut u8,
-    len: usize,
-    flags: i32,
-    address: *mut u8,
-    address_len: *mut socklen_t,
-) -> Result<usize, Errno> {
-    net::recvfrom(
-        fd as i64 as u64,
-        buf as u64,
-        len as u64,
-        flags as i64 as u64,
-        address as u64,
-        address_len as u64,
-    )
-    .map(|read| read as usize)
 }
 
 pub use anemone_abi::net::linux::{InAddr, SockAddrIn as Ipv4SocketAddress};

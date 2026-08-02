@@ -52,50 +52,11 @@ mod primitives {
 
     use super::*;
 
-    fn new_inode_perm(parent: &InodeRef, ty: InodeType, mut perm: InodePerm) -> InodePerm {
-        let checker = FsPermChecker::for_current_fs();
-        let parent_perm = parent.inode().perm();
-
-        if ty == InodeType::Dir {
-            perm.remove(InodePerm::ISUID | InodePerm::ISGID);
-            if parent_perm.contains(InodePerm::ISGID) {
-                perm.insert(InodePerm::ISGID);
-            }
-            return perm;
-        }
-
-        if perm.contains(InodePerm::ISGID)
-            && perm.contains(InodePerm::IXGRP)
-            && parent_perm.contains(InodePerm::ISGID)
-            && !checker.fs_group_allowed(parent.gid())
-            && !checker.has_cap(Capability::FSETID)
-        {
-            perm.remove(InodePerm::ISGID);
-        }
-        perm
-    }
-
-    fn init_new_inode_owner(parent: &InodeRef, inode: &InodeRef, perm: InodePerm) {
-        let cred = get_current_task().cred();
-        let group = if parent.inode().perm().contains(InodePerm::ISGID) {
-            parent.gid()
-        } else {
-            cred.gid.fs
-        };
+    fn init_new_inode_metadata(inode: &InodeRef, perm: InodePerm, uid: Uid, gid: Gid) {
         let ctime = Instant::now().to_duration();
 
-        inode.chown(Some(cred.uid.fs), Some(group), ctime);
+        inode.chown(Some(uid), Some(gid), ctime);
         inode.chmod(perm, ctime);
-    }
-
-    fn new_inode_owner(parent: &InodeRef) -> (Uid, Gid) {
-        let cred = get_current_task().cred();
-        let gid = if parent.inode().perm().contains(InodePerm::ISGID) {
-            parent.gid()
-        } else {
-            cred.gid.fs
-        };
-        (cred.uid.fs, gid)
     }
 
     /// Mount a filesystem at the specified mountpoint.
@@ -150,28 +111,29 @@ mod primitives {
         resolve_from(dir, rel_path.target, rel_path.flags)
     }
 
-    pub fn vfs_touch<'a, R: Into<PathResolution<'a>>>(
+    /// Create an explicitly root-owned regular file in the visible namespace.
+    pub fn vfs_touch_as_root<'a, R: Into<PathResolution<'a>>>(
         path: R,
         perm: InodePerm,
     ) -> Result<PathRef, SysError> {
-        vfs_touch_at(&root_pathref(), path.into(), perm)
+        let path = path.into();
+        let (parent, name) = resolve_parent(path.target, path.flags)?;
+        vfs_touch_at(&parent, &name, perm, Uid::ROOT, Gid::ROOT)
     }
 
-    pub fn vfs_touch_at<'a, R: Into<PathResolution<'a>>>(
-        dir: &PathRef,
-        rel_path: R,
+    pub fn vfs_touch_at(
+        parent: &PathRef,
+        name: &str,
         perm: InodePerm,
+        uid: Uid,
+        gid: Gid,
     ) -> Result<PathRef, SysError> {
-        let rel_path = rel_path.into();
-        let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
-
         parent.mount().ensure_writable()?;
 
-        let perm = new_inode_perm(parent.inode(), InodeType::Regular, perm);
-        let inode = parent.inode().touch(&name, perm)?;
-        init_new_inode_owner(parent.inode(), &inode, perm);
+        let inode = parent.inode().touch(name, perm)?;
+        init_new_inode_metadata(&inode, perm, uid, gid);
 
-        let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -179,17 +141,13 @@ mod primitives {
     pub fn vfs_make_node_at(
         parent: &PathRef,
         name: &str,
-        mode: InodeMode,
-        rdev: DeviceId,
+        description: MakeNodeDescription,
     ) -> Result<PathRef, SysError> {
         if parent.inode().ty() != InodeType::Dir {
             return Err(SysError::NotDir);
         }
         parent.mount().ensure_writable()?;
 
-        let perm = new_inode_perm(parent.inode(), mode.ty(), mode.perm());
-        let (uid, gid) = new_inode_owner(parent.inode());
-        let description = MakeNodeDescription::new(InodeMode::new(mode.ty(), perm), uid, gid, rdev);
         let inode = parent.inode().make_node(name, description)?;
         let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
 
@@ -214,28 +172,29 @@ mod primitives {
         resolve(path.target, path.flags)?.inode().get_attr()
     }
 
-    pub fn vfs_mkdir<'a, R: Into<PathResolution<'a>>>(
+    /// Create an explicitly root-owned directory in the visible namespace.
+    pub fn vfs_mkdir_as_root<'a, R: Into<PathResolution<'a>>>(
         path: R,
         perm: InodePerm,
     ) -> Result<PathRef, SysError> {
-        vfs_mkdir_at(&root_pathref(), path.into(), perm)
+        let path = path.into();
+        let (parent, name) = resolve_parent(path.target, path.flags)?;
+        vfs_mkdir_at(&parent, &name, perm, Uid::ROOT, Gid::ROOT)
     }
 
-    pub fn vfs_mkdir_at<'a, R: Into<PathResolution<'a>>>(
-        dir: &PathRef,
-        rel_path: R,
+    pub fn vfs_mkdir_at(
+        parent: &PathRef,
+        name: &str,
         perm: InodePerm,
+        uid: Uid,
+        gid: Gid,
     ) -> Result<PathRef, SysError> {
-        let rel_path = rel_path.into();
-        let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
-
         parent.mount().ensure_writable()?;
 
-        let perm = new_inode_perm(parent.inode(), InodeType::Dir, perm);
-        let inode = parent.inode().mkdir(&name, perm)?;
-        init_new_inode_owner(parent.inode(), &inode, perm);
+        let inode = parent.inode().mkdir(name, perm)?;
+        init_new_inode_metadata(&inode, perm, uid, gid);
 
-        let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -271,30 +230,32 @@ mod primitives {
         Ok(())
     }
 
-    /// Create a symbolic link at `link_path` pointing to `target`.
-    pub fn vfs_symlink<'a, R: Into<PathResolution<'a>>>(
+    /// Create an explicitly root-owned symbolic link in the visible namespace.
+    pub fn vfs_symlink_as_root<'a, R: Into<PathResolution<'a>>>(
         target: &Path,
         link_path: R,
     ) -> Result<PathRef, SysError> {
-        vfs_symlink_at(&root_pathref(), target, link_path)
+        let link_path = link_path.into();
+        let (parent, name) = resolve_parent(link_path.target, link_path.flags)?;
+        vfs_symlink_at(&parent, target, &name, Uid::ROOT, Gid::ROOT)
     }
 
-    pub fn vfs_symlink_at<'a, R: Into<PathResolution<'a>>>(
-        dir: &PathRef,
+    pub fn vfs_symlink_at(
+        parent: &PathRef,
         target: &Path,
-        rel_path: R,
+        name: &str,
+        uid: Uid,
+        gid: Gid,
     ) -> Result<PathRef, SysError> {
-        let rel_path = rel_path.into();
         if target.components().next().is_none() {
             // empty symlink is not allowed.
             return Err(SysError::InvalidArgument);
         }
 
-        let (parent, name) = resolve_parent_from(dir, rel_path.target, rel_path.flags)?;
         parent.mount().ensure_writable()?;
-        let inode = parent.inode().symlink(&name, target)?;
-        init_new_inode_owner(parent.inode(), &inode, InodePerm::all_rwx());
-        let dentry = materialize_child_dentry(parent.dentry(), &name, inode)?;
+        let inode = parent.inode().symlink(name, target)?;
+        init_new_inode_metadata(&inode, InodePerm::all_rwx(), uid, gid);
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -500,14 +461,14 @@ mod kunits {
 
         assert_eq!(vfs_lookup(path).unwrap_err(), SysError::NotFound);
 
-        let created = vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        let created = vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
         let looked_up = vfs_lookup(path).unwrap();
 
         assert_eq!(created.to_string(), "/kunit-vfs-file");
         assert_eq!(looked_up.to_string(), "/kunit-vfs-file");
         assert_eq!(created.inode(), looked_up.inode());
         assert_eq!(
-            vfs_touch(path, InodePerm::all_rwx()).unwrap_err(),
+            vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap_err(),
             SysError::AlreadyExists
         );
 
@@ -516,13 +477,43 @@ mod kunits {
     }
 
     #[kunit]
+    fn test_vfs_creation_uses_explicit_owner_and_permission() {
+        let base_path = Path::new("/kunit-vfs-explicit-create");
+        let base = vfs_mkdir_as_root(base_path, InodePerm::all_rwx()).unwrap();
+        let uid = Uid::new(1234);
+        let gid = Gid::new(5678);
+
+        let dir_perm = InodePerm::IRUSR | InodePerm::IXUSR;
+        let dir = vfs_mkdir_at(&base, "dir", dir_perm, uid, gid).unwrap();
+        assert_eq!(dir.inode().perm(), dir_perm);
+        assert_eq!(dir.inode().uid(), uid);
+        assert_eq!(dir.inode().gid(), gid);
+
+        let file_perm = InodePerm::IRUSR | InodePerm::IWGRP;
+        let file = vfs_touch_at(&base, "file", file_perm, uid, gid).unwrap();
+        assert_eq!(file.inode().perm(), file_perm);
+        assert_eq!(file.inode().uid(), uid);
+        assert_eq!(file.inode().gid(), gid);
+
+        let link = vfs_symlink_at(&base, Path::new("file"), "link", uid, gid).unwrap();
+        assert_eq!(link.inode().perm(), InodePerm::all_rwx());
+        assert_eq!(link.inode().uid(), uid);
+        assert_eq!(link.inode().gid(), gid);
+
+        vfs_unlink_at(&base, Path::new("link")).unwrap();
+        vfs_unlink_at(&base, Path::new("file")).unwrap();
+        vfs_rmdir_at(&base, Path::new("dir")).unwrap();
+        vfs_rmdir(base_path).unwrap();
+    }
+
+    #[kunit]
     fn test_vfs_mkdir_link_and_rmdir() {
         let dir_path = Path::new("/kunit-vfs-dir");
         let file_path = Path::new("/kunit-vfs-dir/file");
         let link_path = Path::new("/kunit-vfs-link");
 
-        let dir = vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        let file = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let dir = vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
+        let file = vfs_touch_as_root(file_path, InodePerm::all_rwx()).unwrap();
 
         assert_eq!(dir.to_string(), "/kunit-vfs-dir");
         assert_eq!(file.to_string(), "/kunit-vfs-dir/file");
@@ -553,9 +544,9 @@ mod kunits {
         let file_path = Path::new("/kunit-vfs-sym-dir/target");
         let link_path = Path::new("/kunit-vfs-sym-dir/link");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        let target = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
-        let link = vfs_symlink(Path::new("target"), link_path).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
+        let target = vfs_touch_as_root(file_path, InodePerm::all_rwx()).unwrap();
+        let link = vfs_symlink_as_root(Path::new("target"), link_path).unwrap();
 
         assert_eq!(link.inode().ty(), InodeType::Symlink);
         assert_eq!(vfs_read_link(link_path).unwrap(), PathBuf::from("target"));
@@ -617,9 +608,9 @@ mod kunits {
         let file_path = Path::new("/kunit-vfs-sym-abs-dir/file");
         let mid_link = Path::new("/kunit-vfs-sym-abs-mid");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        let target = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
-        vfs_symlink(Path::new("/kunit-vfs-sym-abs-dir"), mid_link).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
+        let target = vfs_touch_as_root(file_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink_as_root(Path::new("/kunit-vfs-sym-abs-dir"), mid_link).unwrap();
 
         let resolved = vfs_lookup(Path::new("/kunit-vfs-sym-abs-mid/file")).unwrap();
         assert_eq!(resolved.inode(), target.inode());
@@ -636,10 +627,10 @@ mod kunits {
         let target_path = Path::new("/kunit-vfs-sym-parent-dir/target");
         let link_path = Path::new("/kunit-vfs-sym-parent-dir/subdir/up-link");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(subdir_path, InodePerm::all_rwx()).unwrap();
-        let target = vfs_touch(target_path, InodePerm::all_rwx()).unwrap();
-        vfs_symlink(Path::new("../target"), link_path).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(subdir_path, InodePerm::all_rwx()).unwrap();
+        let target = vfs_touch_as_root(target_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink_as_root(Path::new("../target"), link_path).unwrap();
 
         assert_eq!(
             vfs_read_link(link_path).unwrap(),
@@ -660,8 +651,8 @@ mod kunits {
         let target_path = Path::new("/kunit-vfs-sym-flag-link/new-file");
         let resolved_target = Path::new("/kunit-vfs-sym-flag-dir/new-file");
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        vfs_symlink(Path::new("/kunit-vfs-sym-flag-dir"), dir_link).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink_as_root(Path::new("/kunit-vfs-sym-flag-dir"), dir_link).unwrap();
 
         assert_eq!(
             vfs_lookup(PathResolution::new(
@@ -690,14 +681,14 @@ mod kunits {
             InodeType::Symlink
         );
         assert_eq!(
-            vfs_touch(
+            vfs_touch_as_root(
                 PathResolution::new(target_path, ResolveFlags::DENY_LAST_SYMLINK),
                 InodePerm::all_rwx()
             )
             .unwrap_err(),
             SysError::LinkEncountered
         );
-        let created = vfs_touch(target_path, InodePerm::all_rwx()).unwrap();
+        let created = vfs_touch_as_root(target_path, InodePerm::all_rwx()).unwrap();
         assert_eq!(
             vfs_lookup(resolved_target).unwrap().to_string(),
             "/kunit-vfs-sym-flag-dir/new-file"
@@ -718,8 +709,8 @@ mod kunits {
         let host_target = Path::new("/kunit-vfs-sym-host-target");
         let link_path = Path::new("/kunit-vfs-sym-mount/host-link");
 
-        vfs_mkdir(mountpoint, InodePerm::all_rwx()).unwrap();
-        let host = vfs_touch(host_target, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(mountpoint, InodePerm::all_rwx()).unwrap();
+        let host = vfs_touch_as_root(host_target, InodePerm::all_rwx()).unwrap();
 
         vfs_mount_at(
             "ramfs",
@@ -728,7 +719,7 @@ mod kunits {
             mountpoint,
         )
         .unwrap();
-        vfs_symlink(Path::new("/kunit-vfs-sym-host-target"), link_path).unwrap();
+        vfs_symlink_as_root(Path::new("/kunit-vfs-sym-host-target"), link_path).unwrap();
 
         assert_eq!(
             vfs_read_link(link_path).unwrap(),
@@ -750,11 +741,11 @@ mod kunits {
         let busybox_path = Path::new("/kunit-vfs-chroot-root/glibc/busybox");
         let sh_path = Path::new("/kunit-vfs-chroot-root/bin/sh");
 
-        vfs_mkdir(root_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(bin_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir(glibc_dir, InodePerm::all_rwx()).unwrap();
-        let busybox = vfs_touch(busybox_path, InodePerm::all_rwx()).unwrap();
-        vfs_symlink(Path::new("/glibc/busybox"), sh_path).unwrap();
+        vfs_mkdir_as_root(root_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(bin_dir, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(glibc_dir, InodePerm::all_rwx()).unwrap();
+        let busybox = vfs_touch_as_root(busybox_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink_as_root(Path::new("/glibc/busybox"), sh_path).unwrap();
 
         let logical_root = vfs_lookup(root_dir).unwrap();
         let resolved = resolve_from_with_root(
@@ -781,9 +772,9 @@ mod kunits {
             Path::new("/kunit-vfs-chroot-parent-root/kunit-vfs-chroot-parent-target");
         let outer_target = Path::new("/kunit-vfs-chroot-parent-target");
 
-        vfs_mkdir(root_dir, InodePerm::all_rwx()).unwrap();
-        let inner = vfs_touch(inner_target, InodePerm::all_rwx()).unwrap();
-        let outer = vfs_touch(outer_target, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(root_dir, InodePerm::all_rwx()).unwrap();
+        let inner = vfs_touch_as_root(inner_target, InodePerm::all_rwx()).unwrap();
+        let outer = vfs_touch_as_root(outer_target, InodePerm::all_rwx()).unwrap();
 
         let logical_root = vfs_lookup(root_dir).unwrap();
         let resolved = resolve_from_with_root(
@@ -809,8 +800,8 @@ mod kunits {
         let dir_path = Path::new("/kunit-vfs-sym-rmdir-dir");
         let dir_link = Path::new("/kunit-vfs-sym-rmdir-link");
 
-        vfs_symlink(Path::new("kunit-vfs-loop-b"), loop_a).unwrap();
-        vfs_symlink(Path::new("kunit-vfs-loop-a"), loop_b).unwrap();
+        vfs_symlink_as_root(Path::new("kunit-vfs-loop-b"), loop_a).unwrap();
+        vfs_symlink_as_root(Path::new("kunit-vfs-loop-a"), loop_b).unwrap();
 
         assert_eq!(vfs_lookup(loop_a).unwrap_err(), SysError::TooManyLinks);
         assert_eq!(
@@ -828,8 +819,8 @@ mod kunits {
             InodeType::Symlink
         );
 
-        vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
-        vfs_symlink(Path::new("/kunit-vfs-sym-rmdir-dir"), dir_link).unwrap();
+        vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_symlink_as_root(Path::new("/kunit-vfs-sym-rmdir-dir"), dir_link).unwrap();
         assert_eq!(vfs_rmdir(dir_link).unwrap_err(), SysError::NotDir);
 
         vfs_unlink(dir_link).unwrap();
@@ -841,7 +832,7 @@ mod kunits {
     #[kunit]
     fn test_vfs_file_read_write_semantics() {
         let path = Path::new("/kunit-vfs-rw");
-        let file = vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        let file = vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
 
         let opened = vfs_open(path).unwrap();
         assert_eq!(opened.pos(), 0);
@@ -887,7 +878,7 @@ mod kunits {
         let child_dir_path = Path::new("/kunit-vfs-attr-dir/subdir");
         let file_path = Path::new("/kunit-vfs-attr-dir/file");
 
-        let dir = vfs_mkdir(dir_path, InodePerm::all_rwx()).unwrap();
+        let dir = vfs_mkdir_as_root(dir_path, InodePerm::all_rwx()).unwrap();
         let dir_attr = vfs_get_attr(dir_path).unwrap();
 
         assert_eq!(dir_attr.ino, dir.inode().ino());
@@ -902,7 +893,7 @@ mod kunits {
         // dir size is filesystem-specific.
         assert_eq!(dir_attr.rdev, DeviceId::None);
 
-        let file = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let file = vfs_touch_as_root(file_path, InodePerm::all_rwx()).unwrap();
         let file_attr = vfs_get_attr(file_path).unwrap();
 
         assert_eq!(file_attr.ino, file.inode().ino());
@@ -917,7 +908,7 @@ mod kunits {
         assert_eq!(file_attr.size, 0);
         assert_eq!(file_attr.rdev, DeviceId::None);
 
-        vfs_mkdir(child_dir_path, InodePerm::all_rwx()).unwrap();
+        vfs_mkdir_as_root(child_dir_path, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_get_attr(dir_path).unwrap().nlink, 3);
 
         vfs_rmdir(child_dir_path).unwrap();
@@ -932,7 +923,7 @@ mod kunits {
         let file_path = Path::new("/kunit-vfs-attr-link-src");
         let link_path = Path::new("/kunit-vfs-attr-link-dst");
 
-        let created = vfs_touch(file_path, InodePerm::all_rwx()).unwrap();
+        let created = vfs_touch_as_root(file_path, InodePerm::all_rwx()).unwrap();
         assert_eq!(vfs_get_attr(file_path).unwrap().nlink, 1);
 
         vfs_link(file_path, link_path).unwrap();
@@ -957,7 +948,7 @@ mod kunits {
     fn test_vfs_get_attr_tracks_size_after_writes() {
         let path = Path::new("/kunit-vfs-attr-size");
 
-        vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
         let opened = vfs_open(path).unwrap();
 
         let initial = vfs_get_attr(path).unwrap();

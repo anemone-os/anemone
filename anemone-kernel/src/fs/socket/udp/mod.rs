@@ -1,25 +1,27 @@
-//! Anonymous UDP socket file and opened-description lifecycle association.
+//! UDP-private Socket state and its static common-front operations.
 
 mod source;
 
-use anemone_net_api::udp::{
-    UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError, UdpReceivedDatagram,
-};
+use anemone_net_api::udp::{UdpBindError, UdpPeer, UdpQueryError, UdpReceiveError, UdpSendError};
 
 use crate::{
     net::udp::{BindError, SendError, UdpEndpointPort, create_endpoint},
     prelude::*,
-    task::files::{FileDescOps, OpenedFileFinalReleaseCtx},
-    utils::any_opaque::{AnyOpaque, NilOpaque},
+    utils::any_opaque::AnyOpaque,
 };
 
+use super::{
+    SocketAddress, SocketAddressSink, SocketBindError, SocketCreation, SocketOps,
+    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveRequest, SocketSendError,
+    SocketSendRequest, SocketType,
+};
 use source::UdpSocketSource;
 
 #[derive(Opaque)]
-pub(super) struct UdpSocketFile {
+struct UdpSocketFile {
     source: Arc<UdpSocketSource>,
-    /// Serializes operations on one opened description. It owns no endpoint
-    /// state and is deliberately absent from final release.
+    /// Serializes UDP state-changing operation attempts. It owns no Endpoint
+    /// fact and is deliberately absent from final release.
     operation: Mutex<()>,
 }
 
@@ -42,14 +44,15 @@ impl UdpSocketFile {
     }
 }
 
-/// Owns rollback authority until the fully prepared file description becomes
-/// visible in an fd table. Capability clones never own semantic lifetime.
-pub(super) struct UdpSocketCreation {
+/// Owns rollback authority until the common Socket description is published.
+/// Capability clones never own semantic lifetime.
+#[derive(Opaque)]
+struct UdpSocketCreation {
     source: Option<Arc<UdpSocketSource>>,
 }
 
 impl UdpSocketCreation {
-    pub(super) fn commit(mut self) {
+    fn commit(&mut self) {
         self.source.take();
     }
 }
@@ -67,7 +70,13 @@ impl Drop for UdpSocketCreation {
     }
 }
 
-pub(super) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError> {
+fn udp_private(private: &AnyOpaque) -> &UdpSocketFile {
+    private
+        .cast::<UdpSocketFile>()
+        .expect("UDP SocketOps used without UDP private state")
+}
+
+fn prepare_udp_socket() -> Result<SocketPreparation, SysError> {
     let endpoint = create_endpoint().map_err(|error| match error {
         anemone_net_api::udp::UdpCreateError::EndpointCapacity => SysError::NoBufferSpace,
     })?;
@@ -82,172 +91,182 @@ pub(super) fn prepare_udp_socket() -> Result<(File, UdpSocketCreation), SysError
             return Err(error);
         },
     };
-    let creation = UdpSocketCreation {
-        source: Some(source.clone()),
-    };
-    let path = anony_new_inode(InodeType::Socket, &UDP_SOCKET_INODE_OPS, NilOpaque::new())?;
-    let file = anony_open_with(
-        &path,
-        OpenedFile::with_mode(
-            &UDP_SOCKET_FILE_OPS,
-            FileMode::STREAM,
-            AnyOpaque::new(UdpSocketFile::new(source)),
-        ),
-    )?;
-    Ok((file, creation))
-}
-
-pub(super) fn udp_socket_from_file(file: &File) -> Option<&UdpSocketFile> {
-    file.uses_file_ops(&UDP_SOCKET_FILE_OPS).then(|| {
-        file.private::<UdpSocketFile>()
-            .expect("UDP Socket FileOps used without UdpSocketFile private state")
+    Ok(SocketPreparation {
+        private: AnyOpaque::new(UdpSocketFile::new(source.clone())),
+        creation: SocketCreation {
+            commit: commit_udp_socket,
+            authority: AnyOpaque::new(UdpSocketCreation {
+                source: Some(source),
+            }),
+        },
     })
 }
 
-pub(super) fn bind_udp_socket(
-    socket: &UdpSocketFile,
-    address: anemone_net_api::Ipv4Address,
-    port: u16,
-) -> Result<(), BindError> {
+fn commit_udp_socket(creation: &mut AnyOpaque) {
+    creation
+        .cast_mut::<UdpSocketCreation>()
+        .expect("UDP creation commit used without UDP creation authority")
+        .commit();
+}
+
+fn bind_udp_socket(private: &AnyOpaque, address: SocketAddress) -> Result<(), SocketBindError> {
+    let SocketAddress::Ipv4 { address, port } = address else {
+        return Err(SocketBindError::Unsupported);
+    };
+    let socket = udp_private(private);
     let _operation = socket.operation.lock();
     socket
         .endpoint()
-        .ok_or(BindError::Stack(
-            anemone_net_api::udp::UdpBindError::UnknownEndpoint,
-        ))?
+        .ok_or(SocketBindError::Retired)?
         .bind(address, port)
         .map(|_| ())
+        .map_err(map_bind_error)
 }
 
-pub(super) fn query_udp_socket(
-    socket: &UdpSocketFile,
-) -> Result<(MutexGuard<'_, ()>, Option<UdpLocalBinding>), UdpQueryError> {
-    let operation = socket.operation.lock();
-    let binding = socket
+fn query_udp_socket(
+    private: &AnyOpaque,
+    sink: &mut dyn SocketAddressSink,
+) -> Result<(), SocketQueryError> {
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let address = socket
         .endpoint()
-        .ok_or(UdpQueryError::UnknownEndpoint)?
-        .binding()?;
-    Ok((operation, binding))
+        .ok_or(SocketQueryError::Retired)?
+        .binding()
+        .map(|binding| {
+            binding.map(|binding| SocketAddress::Ipv4 {
+                address: binding.address(),
+                port: binding.port(),
+            })
+        })
+        .map_err(|error| match error {
+            UdpQueryError::UnknownEndpoint => SocketQueryError::Retired,
+        })?;
+    sink.copy_address(address).map_err(SocketQueryError::Copy)
 }
 
-pub(super) struct UdpSendOperation<'a> {
-    endpoint: UdpEndpointPort,
-    _operation: MutexGuard<'a, ()>,
+fn udp_is_accepting(_private: &AnyOpaque) -> Result<bool, SocketQueryError> {
+    Ok(false)
 }
 
-impl UdpSendOperation<'_> {
-    pub(super) fn send(self, peer: UdpPeer, payload: &[u8]) -> Result<(), SendError> {
-        self.endpoint.send(peer, payload)
-    }
+fn send_udp_socket(
+    private: &AnyOpaque,
+    request: SocketSendRequest<'_>,
+) -> Result<usize, SocketSendError> {
+    let SocketSendRequest::Datagram { peer, payload } = request else {
+        return Err(SocketSendError::Unsupported);
+    };
+    let SocketAddress::Ipv4 { address, port } = peer else {
+        return Err(SocketSendError::Unsupported);
+    };
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let endpoint = socket.endpoint().ok_or(SocketSendError::Retired)?;
+    // Implicit binding is a persistent commit. Keep the family operation
+    // guard across the typed user-copy cursor so later MTU/capacity rejection
+    // cannot bypass that commit or change the existing serialization boundary.
+    endpoint.ensure_bound().map_err(map_send_error)?;
+    let payload = payload.bytes().map_err(SocketSendError::Copy)?;
+    let len = payload.len();
+    endpoint
+        .send(UdpPeer::new(address, port), payload)
+        .map_err(map_send_error)?;
+    Ok(len)
 }
 
-pub(super) fn begin_udp_send(socket: &UdpSocketFile) -> Result<UdpSendOperation<'_>, SendError> {
-    let operation = socket.operation.lock();
-    let endpoint = socket.endpoint().ok_or(SendError::Stack(
-        anemone_net_api::udp::UdpSendError::UnknownEndpoint,
-    ))?;
-    // Implicit binding is a persistent commit. Keep the operation guard across
-    // the later user copy so MTU/capacity rejection cannot bypass that commit.
-    endpoint.ensure_bound()?;
-    Ok(UdpSendOperation {
-        endpoint,
-        _operation: operation,
-    })
-}
-
-pub(super) fn receive_udp_socket(
-    socket: &UdpSocketFile,
-) -> Result<(MutexGuard<'_, ()>, UdpReceivedDatagram), UdpReceiveError> {
-    let operation = socket.operation.lock();
+fn receive_udp_socket(
+    private: &AnyOpaque,
+    request: SocketReceiveRequest<'_>,
+) -> Result<usize, SocketReceiveError> {
+    let SocketReceiveRequest::Datagram(sink) = request else {
+        return Err(SocketReceiveError::Unsupported);
+    };
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
     let datagram = socket
         .endpoint()
-        .ok_or(UdpReceiveError::UnknownEndpoint)?
-        .receive()?;
-    Ok((operation, datagram))
+        .ok_or(SocketReceiveError::Retired)?
+        .receive()
+        .map_err(|error| match error {
+            UdpReceiveError::UnknownEndpoint => SocketReceiveError::Retired,
+            UdpReceiveError::WouldBlock => SocketReceiveError::WouldBlock,
+        })?;
+    let peer = datagram.peer();
+    sink.copy_datagram(
+        datagram.payload(),
+        SocketAddress::Ipv4 {
+            address: peer.address(),
+            port: peer.port(),
+        },
+    )
+    .map_err(SocketReceiveError::Copy)
 }
 
-fn final_release_udp_socket(ctx: OpenedFileFinalReleaseCtx<'_>) {
-    assert!(
-        ctx.notification_suppressed,
-        "UDP socket description lost notification-suppression capability"
-    );
-    let socket =
-        udp_socket_from_file(ctx.file).expect("UDP final-release hook installed on a non-UDP file");
+fn poll_udp_socket(
+    private: &AnyOpaque,
+    request: &PollRequest<'_>,
+) -> Result<PollRegisterResult, SysError> {
+    udp_private(private).source.poll(request)
+}
+
+fn final_release_udp_socket(private: &AnyOpaque) {
     // Source retirement first withdraws association, reverse publication and
     // routes. No sleeping operation mutex or fd-table lock participates.
-    let result = socket.source.retire();
+    let result = udp_private(private).source.retire();
     assert!(
         result.is_ok(),
         "UDP final release lost its endpoint identity"
     );
 }
 
-pub(super) fn udp_file_desc_ops() -> FileDescOps {
-    FileDescOps {
-        final_release: Some(final_release_udp_socket),
-        notification_suppressed: true,
-        ..FileDescOps::default()
+fn map_bind_error(error: BindError) -> SocketBindError {
+    match error {
+        BindError::AddressUnavailable => SocketBindError::AddressUnavailable,
+        BindError::Stack(UdpBindError::UnknownEndpoint) => SocketBindError::Retired,
+        BindError::Stack(UdpBindError::AlreadyBound) => SocketBindError::AlreadyBound,
+        BindError::Stack(UdpBindError::PortInUse) => SocketBindError::AddressInUse,
+        BindError::Stack(UdpBindError::EphemeralPortsExhausted) => {
+            SocketBindError::ResourceExhausted
+        },
     }
 }
 
-fn udp_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(), SysError> {
-    if flags.contains(FileOpStatusFlags::DIRECT) {
-        return Err(SysError::InvalidArgument);
+fn map_send_error(error: SendError) -> SocketSendError {
+    match error {
+        SendError::Bind(UdpBindError::UnknownEndpoint) => SocketSendError::Retired,
+        SendError::Bind(UdpBindError::AlreadyBound) => SocketSendError::InvalidState,
+        SendError::Bind(UdpBindError::PortInUse) => SocketSendError::AddressInUse,
+        SendError::Bind(UdpBindError::EphemeralPortsExhausted) => {
+            SocketSendError::ResourceExhausted
+        },
+        SendError::NoRoute | SendError::InterfaceUnavailable => SocketSendError::NetworkUnreachable,
+        SendError::SourceUnavailable => SocketSendError::AddressUnavailable,
+        SendError::Stack(UdpSendError::UnknownEndpoint) => SocketSendError::Retired,
+        SendError::Stack(UdpSendError::UnboundEndpoint) => SocketSendError::InvalidState,
+        SendError::Stack(UdpSendError::UnknownInterface) => SocketSendError::NetworkUnreachable,
+        SendError::Stack(UdpSendError::UnsupportedSource) => SocketSendError::AddressUnavailable,
+        SendError::Stack(UdpSendError::InvalidDestination) => SocketSendError::InvalidDestination,
+        SendError::Stack(UdpSendError::MessageTooLong { .. }) => SocketSendError::MessageTooLong,
+        SendError::Stack(UdpSendError::WouldBlock) => SocketSendError::WouldBlock,
     }
-    Ok(())
 }
 
-static UDP_SOCKET_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _, _| Err(SysError::NotSupported),
-    write: |_, _, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
-    read_user_at: None,
-    write_user_at: None,
-    check_status_flags: udp_check_status_flags,
-    seek: |_, _, _| Err(SysError::IllegalSeek),
-    read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |file, request| {
-        udp_socket_from_file(file)
-            .expect("UDP FileOps poll used without UDP source")
-            .source
-            .poll(request)
-    },
-    fcntl: None,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
-};
-
-fn udp_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
-    let meta = inode.inode().meta_snapshot();
-    Ok(InodeStat {
-        fs_dev: DeviceId::None,
-        ino: inode.ino(),
-        mode: inode.mode(),
-        nlink: meta.nlink,
-        uid: meta.uid,
-        gid: meta.gid,
-        rdev: DeviceId::None,
-        size: meta.size,
-        atime: meta.atime,
-        mtime: meta.mtime,
-        ctime: meta.ctime,
-    })
-}
-
-static UDP_SOCKET_INODE_OPS: InodeOps = InodeOps {
-    make_node: reject_make_node,
-    lookup: |_, _| Err(SysError::NotDir),
-    touch: |_, _, _| Err(SysError::NotDir),
-    mkdir: |_, _, _| Err(SysError::NotDir),
-    symlink: |_, _, _| Err(SysError::NotDir),
-    link: |_, _, _| Err(SysError::NotDir),
-    unlink: |_, _| Err(SysError::NotDir),
-    rmdir: |_, _| Err(SysError::NotDir),
-    rename: |_, _, _, _, _| Err(SysError::NotSupported),
-    open: |_| unreachable!("UDP socket files are opened with explicit private state"),
-    truncate: |_, _| Err(SysError::NotSupported),
-    read_link: |_| Err(SysError::NotSymlink),
-    get_attr: udp_get_attr,
+pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
+    socket_type: SocketType::Ipv4Udp,
+    create: Some(prepare_udp_socket),
+    create_pair: None,
+    bind: Some(bind_udp_socket),
+    listen: None,
+    connect: None,
+    accept: None,
+    shutdown: None,
+    local_address: Some(query_udp_socket),
+    peer_address: None,
+    accepting: udp_is_accepting,
+    send: Some(send_udp_socket),
+    receive: Some(receive_udp_socket),
+    poll: poll_udp_socket,
+    final_release: final_release_udp_socket,
 };
 
 #[cfg(feature = "kunit")]
@@ -256,37 +275,57 @@ mod kunits {
 
     use anemone_abi::fs::linux::{mode, statx};
 
+    use crate::{
+        fs::socket::{SocketAddressSink, prepare_socket, socket_file_desc_ops, socket_from_file},
+        task::files::{OpenAccessMode, OpenedFileFinalReleaseCtx},
+    };
+
+    #[derive(Default)]
+    struct AddressCapture(Option<SocketAddress>);
+
+    impl SocketAddressSink for AddressCapture {
+        fn copy_address(&mut self, address: Option<SocketAddress>) -> Result<(), SysError> {
+            self.0 = address;
+            Ok(())
+        }
+    }
+
     #[kunit]
-    fn udp_file_association_projects_only_the_udp_socket() {
-        let (file, creation) = prepare_udp_socket().expect("KUnit UDP endpoint must fit");
-        let socket = udp_socket_from_file(&file).expect("prepared UDP file must classify");
-        assert_eq!(query_udp_socket(socket).unwrap().1, None);
+    fn common_file_association_projects_udp_through_static_ops() {
+        let (file, creation) =
+            prepare_socket(&UDP_SOCKET_OPS).expect("KUnit UDP endpoint must fit");
+        let socket = socket_from_file(&file).expect("prepared UDP file must be a Socket");
+        let mut address = AddressCapture::default();
+        socket.copy_local_address(&mut address).unwrap();
+        assert_eq!(address.0, None);
         creation.commit();
-        final_release_udp_socket(OpenedFileFinalReleaseCtx {
+        (socket_file_desc_ops().final_release.unwrap())(OpenedFileFinalReleaseCtx {
             file: &file,
-            access: crate::task::files::OpenAccessMode::ReadWrite,
+            access: OpenAccessMode::ReadWrite,
             notification_suppressed: true,
         });
     }
 
     #[kunit]
-    fn udp_creation_guard_retires_before_publication() {
-        let (file, creation) = prepare_udp_socket().expect("KUnit UDP endpoint must fit");
-        let socket = udp_socket_from_file(&file).expect("prepared UDP file must classify");
+    fn common_creation_guard_retires_udp_before_publication() {
+        let (file, creation) =
+            prepare_socket(&UDP_SOCKET_OPS).expect("KUnit UDP endpoint must fit");
+        let socket = socket_from_file(&file).expect("prepared UDP file must be a Socket");
         drop(creation);
-        assert!(matches!(
-            query_udp_socket(socket),
-            Err(anemone_net_api::udp::UdpQueryError::UnknownEndpoint)
-        ));
+        assert_eq!(
+            socket.copy_local_address(&mut AddressCapture::default()),
+            Err(SocketQueryError::Retired)
+        );
     }
 
     #[kunit]
-    fn udp_inode_projects_linux_socket_type() {
-        let (file, creation) = prepare_udp_socket().expect("KUnit UDP endpoint must fit");
+    fn common_socket_inode_projects_linux_socket_type() {
+        let (file, creation) =
+            prepare_socket(&UDP_SOCKET_OPS).expect("KUnit UDP endpoint must fit");
         let attr = file
             .inode()
             .get_attr()
-            .expect("UDP inode must report attrs");
+            .expect("Socket inode must report attrs");
         assert_eq!(attr.to_linux_stat().st_mode & mode::S_IFMT, mode::S_IFSOCK);
         assert_eq!(
             u32::from(attr.to_linux_statx(statx::BASIC_STATS).stx_mode) & mode::S_IFMT,

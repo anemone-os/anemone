@@ -60,6 +60,8 @@ pub struct Parameters {
     pub epoll_file_max_waiters: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
+    pub unix_stream_direction_capacity_bytes: Option<usize>,
+    pub unix_listener_max_backlog: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -149,6 +151,8 @@ impl Parameters {
         materialize!(epoll_file_max_waiters);
         materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
+        materialize!(unix_stream_direction_capacity_bytes);
+        materialize!(unix_listener_max_backlog);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -266,6 +270,10 @@ pub const EPOLL_FILE_MAX_WAITERS: usize = {};
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
 /// Fixed pipe backing and default logical capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
+/// Fixed byte capacity of each AF_UNIX stream direction.
+pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
+/// Maximum normalized listen backlog for AF_UNIX stream listeners.
+pub const UNIX_LISTENER_MAX_BACKLOG: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -312,8 +320,8 @@ pub const IO_SHRINK_THRESHOLD: u8 = {};
 pub const OOM_KILL_THRESHOLD: u8 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
-/// Default maximum number of file descriptors per process.
-/// Might be overridden by certain syscalls.
+/// Build-time file-table capacity and system-wide fd-number ceiling.
+/// Runtime rlimit syscalls change only the owning process policy.
 pub const MAX_FD_PER_PROCESS: usize = {};
 /// Initial file creation mask for user filesystem contexts.
 pub const INITIAL_UMASK: u16 = {};
@@ -406,6 +414,8 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(epoll_file_max_waiters),
             resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
+            resolved!(unix_stream_direction_capacity_bytes),
+            resolved!(unix_listener_max_backlog),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),
@@ -527,6 +537,22 @@ mod tests {
             parameters
                 .gen_kconfig_defs()
                 .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
+        );
+    }
+
+    #[test]
+    fn unix_stream_capacity_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = 65536;")
+        );
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const UNIX_LISTENER_MAX_BACKLOG: usize = 128;")
         );
     }
 

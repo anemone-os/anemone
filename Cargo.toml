@@ -3,6 +3,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "symtab",
     "anemone-kernel",
     "anemone-kernel/crates/buddy-system",
     "anemone-kernel/crates/anemone-net-api",
@@ -50,7 +51,7 @@ fast_radix_trie = { version = "1.1", default-features = false, features = [
     "realloc",
 ] }
 safe-mmio = { version = "0.3.0" }
-virtio-drivers = { version = "0.13.0", default-features = false, features = [
+virtio-drivers = { path = "anemone-kernel/crates/anemos/virtio-drivers", default-features = false, features = [
     "alloc",
 ] }
 typed-path = { version = "0.12.3", default-features = false }

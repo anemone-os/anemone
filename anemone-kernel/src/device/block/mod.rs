@@ -285,12 +285,16 @@ impl BlockDevRegistry {
             }
         }
 
+        // A batch describes aliases of one physical device (the whole disk and
+        // its partitions). They must share one coordination domain so raw I/O
+        // through different endpoints cannot enter the parent concurrently.
+        let io_lock = Arc::new(Mutex::new(()));
         for registration in registrations {
             let devnum = registration.device.devnum();
             let desc = BlockDevDesc {
                 name: registration.name,
                 ops: registration.device,
-                io_lock: Arc::new(Mutex::new(())),
+                io_lock: io_lock.clone(),
                 transient_refs: Arc::new(AtomicUsize::new(0)),
                 readahead: AtomicUsize::new(0),
             };
@@ -490,5 +494,38 @@ mod kunits {
             }),
             Err(SysError::DevAlreadyRegistered)
         );
+    }
+
+    #[kunit]
+    fn batch_endpoints_share_only_their_io_coordination_domain() {
+        let mut registry = BlockDevRegistry::new();
+        registry
+            .register_batch(vec![
+                BlockDevRegistration {
+                    name: "disk".to_string(),
+                    device: Arc::new(TestBlockDev(test_devnum(16))),
+                },
+                BlockDevRegistration {
+                    name: "disk1".to_string(),
+                    device: Arc::new(TestBlockDev(test_devnum(17))),
+                },
+            ])
+            .unwrap();
+        registry
+            .register(BlockDevRegistration {
+                name: "other".to_string(),
+                device: Arc::new(TestBlockDev(test_devnum(32))),
+            })
+            .unwrap();
+
+        let disk = registry.devices.get(&test_devnum(16)).unwrap();
+        let partition = registry.devices.get(&test_devnum(17)).unwrap();
+        let other = registry.devices.get(&test_devnum(32)).unwrap();
+        assert!(Arc::ptr_eq(&disk.io_lock, &partition.io_lock));
+        assert!(!Arc::ptr_eq(&disk.io_lock, &other.io_lock));
+        assert!(!Arc::ptr_eq(
+            &disk.transient_refs,
+            &partition.transient_refs
+        ));
     }
 }

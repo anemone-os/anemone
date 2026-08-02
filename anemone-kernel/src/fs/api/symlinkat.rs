@@ -3,10 +3,31 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/symlinkat.2.html
 
+use super::creation::{KernelCreationPolicy, kernel_symlink_at};
 use crate::{
     fs::api::args::AtFd,
     prelude::{user_access::c_readonly_path, *},
 };
+
+fn kernel_symlinkat(target: &Path, newdirfd: AtFd, linkpath: &Path) -> Result<(), SysError> {
+    let policy = KernelCreationPolicy::for_current();
+    let checker = policy.checker();
+    let task = get_current_task();
+    let (parent, name) = if linkpath.is_absolute() {
+        task.lookup_parent_path_with_checker(linkpath, ResolveFlags::empty(), checker)?
+    } else {
+        let newdir_path = newdirfd.to_pathref(true)?;
+        task.lookup_parent_path_from_with_checker(
+            &newdir_path,
+            linkpath,
+            ResolveFlags::empty(),
+            checker,
+        )?
+    };
+
+    kernel_symlink_at(&policy, &parent, &name, target)?;
+    Ok(())
+}
 
 #[syscall(SYS_SYMLINKAT)]
 fn sys_symlinkat(
@@ -23,23 +44,10 @@ fn sys_symlinkat(
         linkpath
     );
 
-    let linkpath = Path::new(linkpath.as_ref());
-    let task = get_current_task();
-    let (parent, name) = if linkpath.is_absolute() {
-        task.lookup_parent_path(linkpath, ResolveFlags::empty())?
-    } else {
-        let newdir_path = newdirfd.to_pathref(true)?;
-        task.lookup_parent_path_from(&newdir_path, linkpath, ResolveFlags::empty())?
-    };
-
-    parent.mount().ensure_writable()?;
-    FsPermChecker::for_current_fs().check_path(&parent, FsAccess::WRITE | FsAccess::EXECUTE)?;
-
-    vfs_symlink_at(
-        &parent,
+    kernel_symlinkat(
         Path::new(target.as_ref()),
-        Path::new(name.as_str()),
+        newdirfd,
+        Path::new(linkpath.as_ref()),
     )?;
-
     Ok(0)
 }

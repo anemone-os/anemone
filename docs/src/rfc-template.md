@@ -30,13 +30,17 @@ RFC 文本历史由整个仓库 Git 保存，不创建 per-RFC 仓库、版本�
 ```md
 # RFC-YYYYMMDD-short-slug
 
-**状态：** Draft / Accepted / Review Hold / Closed / Superseded
+**状态：** Draft / Accepted / Review Hold / Closed / Superseded / Terminated
 **修订：** Draft / R0 / R1 / ...
 **负责人：** name1, name2
 **最后更新：** YYYY-MM-DD
 **领域：** scheduler / fs / mm / ...
 **影响契约：** 实际变化的 contract IDs 与链接；没有则写 `None`
 **执行记录：** commit / PR / optional transaction；Draft 阶段可写 `None`
+
+`Terminated`只用于维护者永久取消尚未满足acceptance/closure的RFC。它没有active gate或current-contract
+cutover，supporting pages只能保留historical状态，且不得恢复。未来相关工作必须作为独立任务重新分类并取得
+新的授权/Implementation Boundary；只有仍命中RFC分级时才新建RFC。
 
 ## 摘要
 
@@ -128,7 +132,7 @@ RFC 文本历史由整个仓库 Git 保存，不创建 per-RFC 仓库、版本�
 ```md
 # <标题> 目标与不变量
 
-**状态：** Draft / Accepted Target / Superseded
+**状态：** Draft / Accepted Target / Superseded / Terminated Historical
 **最后更新：** YYYY-MM-DD
 **父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
 **适用修订：** Draft / R0 / R1 / ...
@@ -174,7 +178,7 @@ Contract Impact 默认放在 `index.md`；只有表格和证明义务过长时�
 ```md
 # <标题> 实施路线
 
-**状态：** Draft / Active / Completed
+**状态：** Draft / Active / Completed / Terminated Historical
 **最后更新：** YYYY-MM-DD
 **父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
 **当前修订：** Draft / R0 / R1 / ...
@@ -202,6 +206,9 @@ Contract Impact 默认放在 `index.md`；只有表格和证明义务过长时�
 **Stop / Exit:** 何时停止、何时可以独立关闭。
 
 未来 gate 只需要 Purpose、Prerequisites 和 Protected Boundary；到达前不冻结类型、算法、文件列表或精确命令。若用户只授权当前 gate，关闭后必须停止。
+
+父RFC进入`Terminated`时，全部未完成gate必须标为Cancelled，正文改为明确的历史原计划/Not Run事实；不得保留
+可执行前置、activation、cutover或从原RFC晋级的指令。
 
 ## Probe / Vertical Slice（按需）
 
@@ -239,7 +246,7 @@ Contract Impact 默认放在 `index.md`；只有表格和证明义务过长时�
 ```md
 # <标题> Tracking Issues
 
-**状态：** Active / Closed
+**状态：** Active / Closed / Terminated Historical
 **最后更新：** YYYY-MM-DD
 **父 RFC：** [RFC-YYYYMMDD-short-slug](./index.md)
 

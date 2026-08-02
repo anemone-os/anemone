@@ -1,11 +1,11 @@
 # 2026-07-23 - AHCI Controller
 
-**Status:** Active / Review Hold
+**Status:** Terminated
 **Owners:** EDGW, Codex
 **Area:** AHCI / SATA / ATA / DMA / block / platform bus
 **Canonical Plan:** [AHCI Controller / ATA Block Device RFC](../../rfcs/ahci-controller/index.md)
-**Canonical Revision:** `Draft`
-**Current Phase:** Baseline implementation and lifecycle review
+**Canonical Revision:** `Draft`（未接受即终止）
+**Current Phase:** Terminated / no active gate
 
 ## Scope
 
@@ -38,7 +38,7 @@ snapshot；model/serial/firmware/capacity 进入 probe log。
 未削弱目标或不变量，问题已写入 RFC canonical boundary 与 tracking。
 **Validation:** 该提交本身没有可从 commit message 恢复的运行日志；后续 agent 在当前结构移动后的
 LoongArch 配置执行 `just build` 通过，KUnit runtime、QEMU 和真实硬件 I/O 尚未运行。
-**Next:** Gate A lifecycle cleanup and capacity validation。
+**Next:** None；Gate A已随Draft终止而取消。
 
 ### 2026-07-23 - Owner-boundary move
 
@@ -52,9 +52,11 @@ AHCI module。文件内容和 block registration direction 保持不变。
 **Feedback:** `None`；结构边界与 RFC 一致。
 **Validation:** `just build` passed；`git diff --check` passed。`just fmt kernel --check` 仍报告移动前
 已有 AHCI 格式差异和工作区其他生成文件差异，未用 formatter 覆盖用户未提交文件。
-**Next:** Continue Gate A only after lifecycle write set is accepted.
+**Next:** None；不继续Gate A，任何后续工作需要新的授权边界。
 
-## Open Items
+## Termination-time live items
+
+以下条目不再是本transaction的执行队列；live defect/limitation由register继续拥有。
 
 - [AHCI-001](../../rfcs/ahci-controller/tracking-issues.md#ahci-001---probe-failure-can-release-live-dma-owner)：
   post-start probe failures must stop engines before DMA/MMIO release。
@@ -62,11 +64,15 @@ AHCI module。文件内容和 block registration direction 保持不变。
   reject out-of-domain IDENTIFY capacity before FIS construction。
 - [AHCI-003](../../rfcs/ahci-controller/tracking-issues.md#ahci-003---shutdown-does-not-quiesce-the-controller)：
   define shutdown quiesce and cache durability semantics。
-- [AHCI-005](../../rfcs/ahci-controller/tracking-issues.md#ahci-005---runtime-evidence-is-not-yet-available)：
-  KUnit runtime and user hardware evidence are not run。
+- [AHCI-005](../../rfcs/ahci-controller/tracking-issues.md#ahci-005---hardwareruntime-vertical-slice-evidence-is-not-available)：
+  已注册AHCI helper KUnit已在RV64/LA64 runtime通过；capacity upper-bound regression/proof仍缺失，
+  user hardware evidence仍Not Run。
 
 ## Closure
 
-事务尚未收口。当前可证明的是代码结构移动与 LoongArch kernel build；Apollyon lifecycle/capacity
-问题、shutdown policy 和 hardware runtime validation 仍保持 Open/Not Run。关闭前必须更新 RFC status、
-tracking issues、current limitations/register、双周 devlog 和本页最终验证记录。
+维护者于2026-08-01终止本transaction及其未接受Draft。除既有代码结构移动与LoongArch kernel build外，本次
+合流的RV64/LA64完整KUnit runtime各自通过10个已注册AHCI helper case；`ata.rs`的IDENTIFY helper没有
+`#[kunit]`注册，capacity upper-bound regression/source audit仍缺失。Apollyon lifecycle/capacity问题、
+shutdown/timeout限制保持Open，真实hardware runtime validation保持Not Run，分别由register拥有。
+`Terminated`不是`Completed`、`Closed`或acceptance，未满足项没有被改写为限制外成功，也没有后续gate。既有
+实现与历史证据保留；任何重新开发必须作为独立任务重新分类并取得新的授权/Implementation Boundary。

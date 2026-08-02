@@ -4,7 +4,11 @@
 
 use core::{mem::MaybeUninit, str};
 
-use crate::{arch::UserPtrAccessor, exception::trap::UserPtrAccessorArch, prelude::*};
+use crate::{
+    arch::UserPtrAccessor,
+    exception::trap::{UserPtrAccessError, UserPtrAccessorArch},
+    prelude::*,
+};
 
 fn user_pointer_addr(arg: u64) -> Result<VirtAddr, SysError> {
     if arg < KernelLayout::USPACE_TOP_ADDR {
@@ -66,12 +70,32 @@ fn fault_in_user_range(
     Ok(())
 }
 
-fn read_user_bytes(usp: &mut UserSpace, dst: &mut [u8], src: VirtAddr) -> Result<usize, SysError> {
-    UserPtrAccessor::read(usp, dst, src).map_err(|error| user_memory_error(error.error()))
+fn map_user_pointer_error(error: UserPtrAccessError) -> UserPtrAccessError {
+    UserPtrAccessError::new(user_memory_error(error.error()), error.copied())
 }
 
-fn write_user_bytes(usp: &mut UserSpace, dst: VirtAddr, src: &[u8]) -> Result<usize, SysError> {
-    UserPtrAccessor::write(usp, dst, src).map_err(|error| user_memory_error(error.error()))
+fn read_user_bytes(
+    usp: &mut UserSpace,
+    dst: &mut [u8],
+    src: VirtAddr,
+) -> Result<usize, UserPtrAccessError> {
+    let result = UserPtrAccessor::read(usp, dst, src).map_err(map_user_pointer_error);
+    if let Ok(copied) = result {
+        assert_eq!(copied, dst.len(), "successful user read was short");
+    }
+    result
+}
+
+fn write_user_bytes(
+    usp: &mut UserSpace,
+    dst: VirtAddr,
+    src: &[u8],
+) -> Result<usize, UserPtrAccessError> {
+    let result = UserPtrAccessor::write(usp, dst, src).map_err(map_user_pointer_error);
+    if let Ok(copied) = result {
+        assert_eq!(copied, src.len(), "successful user write was short");
+    }
+    result
 }
 
 mod ptrs {
@@ -108,7 +132,8 @@ mod ptrs {
             let bytes = unsafe {
                 core::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>())
             };
-            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr as u64))?;
+            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr as u64))
+                .map_err(|error| error.error())?;
             Ok(unsafe { value.assume_init() })
         }
     }
@@ -127,7 +152,8 @@ mod ptrs {
             let bytes = unsafe {
                 core::slice::from_raw_parts((&val as *const T).cast::<u8>(), size_of::<T>())
             };
-            write_user_bytes(self.usp, VirtAddr::new(self.ptr as u64), bytes)?;
+            write_user_bytes(self.usp, VirtAddr::new(self.ptr as u64), bytes)
+                .map_err(|error| error.error())?;
             Ok(())
         }
 
@@ -172,8 +198,26 @@ mod ptrs {
             let byte_len = self.ptr.len() * size_of::<T>();
             let bytes =
                 unsafe { core::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), byte_len) };
-            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr.cast::<T>() as u64))?;
+            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr.cast::<T>() as u64))
+                .map_err(|error| error.error())?;
             Ok(())
+        }
+    }
+
+    impl<'a> UserReadPtr<'a, [u8]> {
+        /// Ordinary byte-stream I/O needs the architecture-reported prefix so
+        /// its cursor can publish short progress instead of erasing it as an
+        /// exact typed-copy failure.
+        pub(crate) fn copy_to_slice_partial(
+            &mut self,
+            dst: &mut [u8],
+        ) -> Result<usize, UserPtrAccessError> {
+            debug_assert!(self.ptr.len() <= dst.len(), "kernel buffer is too small");
+            read_user_bytes(
+                self.usp,
+                &mut dst[..self.ptr.len()],
+                VirtAddr::new(self.ptr.cast::<u8>() as u64),
+            )
         }
     }
 
@@ -204,7 +248,8 @@ mod ptrs {
 
             let byte_len = src.len() * size_of::<T>();
             let bytes = unsafe { core::slice::from_raw_parts(src.as_ptr().cast::<u8>(), byte_len) };
-            write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<T>() as u64), bytes)?;
+            write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<T>() as u64), bytes)
+                .map_err(|error| error.error())?;
             Ok(())
         }
 
@@ -226,6 +271,16 @@ mod ptrs {
     }
 
     impl<'a> UserWritePtr<'a, [u8]> {
+        /// See [`UserReadPtr::copy_to_slice_partial`]. This byte-only entry
+        /// keeps partial progress out of scalar and structured copy APIs.
+        pub(crate) fn copy_from_slice_partial(
+            &mut self,
+            src: &[u8],
+        ) -> Result<usize, UserPtrAccessError> {
+            debug_assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
+            write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<u8>() as u64), src)
+        }
+
         /// Panics if the string is too long to fit in the user slice (including
         /// the null terminator).
         ///
@@ -239,7 +294,7 @@ mod ptrs {
             );
             self.copy_from_slice(s.as_bytes())?;
             let terminator = VirtAddr::new(self.ptr.cast::<u8>() as u64 + s.len() as u64);
-            write_user_bytes(self.usp, terminator, &[0])?;
+            write_user_bytes(self.usp, terminator, &[0]).map_err(|error| error.error())?;
             Ok(())
         }
 
@@ -257,7 +312,7 @@ mod ptrs {
             );
             self.copy_from_slice(bytes)?;
             let terminator = VirtAddr::new(self.ptr.cast::<u8>() as u64 + bytes.len() as u64);
-            write_user_bytes(self.usp, terminator, &[0])?;
+            write_user_bytes(self.usp, terminator, &[0]).map_err(|error| error.error())?;
             Ok(())
         }
     }

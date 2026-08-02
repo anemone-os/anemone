@@ -8,7 +8,7 @@ pub use dir::{DirEntry, DirLookupResult, DirReader};
 
 use core::marker::PhantomData;
 
-use crate::{SystemHal, ffi::*};
+use crate::ffi::*;
 
 /// Inode type.
 #[repr(u8)]
@@ -40,19 +40,22 @@ impl From<u8> for InodeType {
 }
 
 #[repr(transparent)]
-pub struct InodeRef<Hal: SystemHal> {
+pub struct InodeRef<'fs> {
     pub(crate) inner: Box<ext4_inode_ref>,
-    _phantom: PhantomData<Hal>,
+    // The C reference points into one filesystem and must be released before
+    // that filesystem is finalized. The marker is the Rust-visible lifetime
+    // proof; the C structure remains the authoritative reference state.
+    _filesystem: PhantomData<&'fs ext4_fs>,
 }
-impl<Hal: SystemHal> InodeRef<Hal> {
+impl<'fs> InodeRef<'fs> {
     pub(crate) fn new(inner: ext4_inode_ref) -> Self {
         Self {
             inner: Box::new(inner),
-            _phantom: PhantomData,
+            _filesystem: PhantomData,
         }
     }
 
-    pub fn ino(&self) -> u32 {
+    pub(crate) fn ino(&self) -> u32 {
         self.inner.index
     }
 
@@ -91,7 +94,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
     }
 }
 
-impl<Hal: SystemHal> Drop for InodeRef<Hal> {
+impl Drop for InodeRef<'_> {
     fn drop(&mut self) {
         let ret = unsafe { ext4_fs_put_inode_ref(self.inner.as_mut()) };
         if ret != 0 {

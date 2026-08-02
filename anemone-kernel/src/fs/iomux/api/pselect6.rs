@@ -55,6 +55,7 @@ fn scan_pselect_fdset(
     interest_fds: Option<&FdBitmap>,
     ready_fds: Option<&mut FdBitmap>,
     request: PollRequest<'_>,
+    reportable: PollEvent,
     nready: &mut usize,
     has_source: &mut bool,
     unsupported: &mut bool,
@@ -76,7 +77,7 @@ fn scan_pselect_fdset(
 
         match fd.poll(&request) {
             Ok(PollRegisterResult::Subscribed(revents)) if request.is_register() => {
-                if !revents.is_empty() {
+                if revents.intersects(reportable) {
                     ready_fds.set(fd_idx);
                     *nready += 1;
                 }
@@ -99,7 +100,7 @@ fn scan_pselect_fdset(
                 );
                 return Err(SysError::IO);
             },
-            Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
+            Ok(PollRegisterResult::Ready(revents)) if revents.intersects(reportable) => {
                 ready_fds.set(fd_idx);
                 *nready += 1;
             },
@@ -175,6 +176,10 @@ fn scan_pselect_fds(
         in_interests,
         in_ready.as_mut(),
         mode.poll_request(PollEvent::READABLE),
+        // Linux select groups HUP with read readiness and real source errors
+        // with both read and write readiness. RDHUP has no fd_set of its own;
+        // a receive-terminal source must also publish ordinary READABLE.
+        PollEvent::READABLE | PollEvent::ERROR | PollEvent::HANG_UP,
         &mut nready,
         &mut has_source,
         &mut unsupported,
@@ -188,6 +193,7 @@ fn scan_pselect_fds(
             out_interests,
             out_ready.as_mut(),
             mode.poll_request(PollEvent::WRITABLE),
+            PollEvent::WRITABLE | PollEvent::ERROR,
             &mut nready,
             &mut has_source,
             &mut unsupported,

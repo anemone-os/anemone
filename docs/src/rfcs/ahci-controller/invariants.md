@@ -1,5 +1,11 @@
 # AHCI Controller 不变量
 
+**状态：** Terminated / Historical
+**适用范围：** 未接受Draft的历史review约束；不是effective current contract
+
+> 本页随父RFC终止，不再授权实现或形成开发gate。它保留当时用于解释live code与register defect的设计审计
+> 边界；任何后续AHCI工作必须在新的授权边界中重新确认，而不能把本页视作已接受target。
+
 ## Owner 与生命周期
 
 - `AhciController.inner` 是 controller transaction 的唯一 mutable owner；`AhciPort` 不得在
@@ -54,5 +60,6 @@
 
 - 不得为了通过 probe 而放宽 MMIO/DMA bounds、capacity checks、interrupt error mask 或 link checks。
 - 不得在 block registry 中再维护一份 AHCI port readiness、capacity 或 DMA address 真相源。
-- 不得在当前 RFC 内增加 hotplug、NCQ、ATAPI、multi-port、IRQ queue、partition scan 或 cache flush
-  的半实现；这些能力需要新的 owner/lifecycle review 和验证 gate。
+- 原Draft不得在AHCI driver内增加hotplug、NCQ、ATAPI、multi-port、IRQ queue、partition scanner或cache
+  flush的半实现。该历史限制不约束后来由generic block subsystem提供且AHCI当前已经消费的primary MBR
+  discovery；任何新的AHCI-owned能力仍需要新的owner/lifecycle review与授权边界。

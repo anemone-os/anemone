@@ -1,7 +1,4 @@
 //! Helper for writing formatted strings to a fixed-size buffer.
-//!
-//! TODO: Avoid UTF-8 truncation when truncating.
-
 use core::fmt::Write;
 
 /// Defines the behavior when a formatted string exceeds the buffer size.
@@ -22,22 +19,35 @@ impl OverflowBehavior {
 pub struct BufferWriter<'a, const OVERFLOW_BEHAVIOR: usize> {
     buf: &'a mut [u8],
     pos: usize,
+    truncated: bool,
 }
 
 impl<'a, const OVERFLOW_BEHAVIOR: usize> BufferWriter<'a, OVERFLOW_BEHAVIOR> {
     const __VALIDATE: () = assert!(OVERFLOW_BEHAVIOR <= 2, "Invalid overflow behavior");
 
     pub fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, pos: 0 }
+        Self {
+            buf,
+            pos: 0,
+            truncated: false,
+        }
     }
 
     pub fn pos(&self) -> usize {
         self.pos
     }
+
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
 }
 
 impl<const OVERFLOW_BEHAVIOR: usize> Write for BufferWriter<'_, OVERFLOW_BEHAVIOR> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        if self.truncated {
+            return Ok(());
+        }
+
         let bytes = s.as_bytes();
         if self.pos + bytes.len() > self.buf.len() {
             match OVERFLOW_BEHAVIOR {
@@ -45,12 +55,17 @@ impl<const OVERFLOW_BEHAVIOR: usize> Write for BufferWriter<'_, OVERFLOW_BEHAVIO
                     panic!("Buffer overflow in BufferWriter");
                 },
                 OverflowBehavior::TRUNCATE => {
-                    // Silently truncate the output if it exceeds the buffer size. This is useful
-                    // for log messages where we don't want to panic even if the message is too
-                    // long.
                     let available = self.buf.len() - self.pos;
-                    self.buf[self.pos..].copy_from_slice(&bytes[..available]);
-                    self.pos += available;
+                    let mut copied = available;
+                    while !s.is_char_boundary(copied) {
+                        copied -= 1;
+                    }
+                    self.buf[self.pos..self.pos + copied].copy_from_slice(&bytes[..copied]);
+                    self.pos += copied;
+                    // Once any fragment overflows, later formatting fragments
+                    // must not fill the leftover bytes: the buffer represents a
+                    // prefix of the original UTF-8 message, not a stitched value.
+                    self.truncated = true;
                 },
                 OverflowBehavior::RETURN_ERROR => {
                     return Err(core::fmt::Error);

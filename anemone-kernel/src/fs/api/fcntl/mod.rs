@@ -71,6 +71,16 @@ impl TryFromSyscallArg for FcntlCmd {
     }
 }
 
+fn parse_dup_min_fd(raw: u64) -> Result<Fd, SysError> {
+    // F_DUPFD* owns a command-specific minimum, not an already-open fd.
+    // Linux reports EINVAL for negative or otherwise unrepresentable minima.
+    let minimum = raw as i32;
+    if minimum < 0 {
+        return Err(SysError::InvalidArgument);
+    }
+    Fd::new(minimum as u32).ok_or(SysError::InvalidArgument)
+}
+
 #[syscall(SYS_FCNTL)]
 fn sys_fcntl(raw_fd: u64, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
     // Linux exposes command decoding before fd admission. Keep arg0 as an
@@ -82,12 +92,12 @@ fn sys_fcntl(raw_fd: u64, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
     let task = get_current_task();
     match cmd {
         FcntlCmd::Dup => {
-            let min_fd = Fd::try_from_syscall_arg(arg)?;
+            let min_fd = parse_dup_min_fd(arg)?;
             let new_fd = task.dup_ge_than(fd, min_fd, false)?;
             Ok(new_fd.raw() as u64)
         },
         FcntlCmd::DupCloexec => {
-            let min_fd = Fd::try_from_syscall_arg(arg)?;
+            let min_fd = parse_dup_min_fd(arg)?;
             let new_fd = task.dup_ge_than(fd, min_fd, true)?;
             Ok(new_fd.raw() as u64)
         },
@@ -155,5 +165,20 @@ fn sys_fcntl(raw_fd: u64, cmd: FcntlCmd, arg: u64) -> Result<u64, SysError> {
             knoticeln!("[NYI] fcntl command {:?} is not supported yet", cmd);
             Err(SysError::NotYetImplemented)
         },
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn dup_minimum_has_command_specific_einval_boundary() {
+        assert_eq!(parse_dup_min_fd(0), Ok(Fd::new(0).unwrap()));
+        assert_eq!(
+            parse_dup_min_fd(i32::MAX as u64),
+            Err(SysError::InvalidArgument)
+        );
+        assert_eq!(parse_dup_min_fd(u64::MAX), Err(SysError::InvalidArgument));
     }
 }

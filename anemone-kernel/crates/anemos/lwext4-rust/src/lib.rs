@@ -9,10 +9,11 @@ extern crate log;
 
 mod ulibc;
 
-pub mod ffi {
+mod ffi {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
     #![allow(non_snake_case)]
+    #![allow(dead_code)]
 
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
@@ -25,5 +26,5 @@ mod util;
 
 pub use blockdev::{BlockDevice, EXT4_DEV_BSIZE};
 pub use error::{Ext4Error, Ext4Result};
-pub use fs::*;
-pub use inode::*;
+pub use fs::{Ext4Filesystem, FsConfig, StatFs};
+pub use inode::{DirEntry, DirLookupResult, DirReader, FileAttr, InodeRef, InodeType};

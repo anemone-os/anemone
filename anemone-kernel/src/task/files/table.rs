@@ -29,6 +29,27 @@ impl Fd {
     }
 }
 
+/// Caller-specific fd-number cutoff for one allocation operation.
+///
+/// The resource-policy owner validates and snapshots this value. `FileTable`
+/// consumes it without retaining a process or rlimit reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FdAllocCeiling(usize);
+
+impl FdAllocCeiling {
+    pub(crate) const fn new(ceiling: usize) -> Option<Self> {
+        if ceiling <= MAX_FD_PER_PROCESS {
+            Some(Self(ceiling))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) const fn contains(self, fd: Fd) -> bool {
+        (fd.raw() as usize) < self.0
+    }
+}
+
 impl TryFromSyscallArg for Fd {
     fn try_from_syscall_arg(raw: u64) -> Result<Self, SysError> {
         let raw = i32::try_from_syscall_arg(raw)? as u32;
@@ -47,35 +68,38 @@ pub(super) struct FileTable {
 }
 // fd alloc
 impl FileTable {
-    fn alloc(&mut self) -> Result<Fd, SysError> {
-        if let Some(fd_idx) = self.bitmap.find_and_set_first_zero() {
+    fn alloc(&mut self, ceiling: FdAllocCeiling) -> Result<Fd, SysError> {
+        if let Some(fd_idx) = self.bitmap.find_first_zero().filter(|fd| *fd < ceiling.0) {
+            self.bitmap.set(fd_idx);
             let fd = Fd::new(fd_idx as u32).unwrap();
-            debug_assert!(self.fds[fd_idx].is_none());
+            assert!(self.fds[fd_idx].is_none());
             Ok(fd)
         } else {
             Err(SysError::NoMoreFd)
         }
     }
 
-    fn alloc_ge_than(&mut self, min_fd: Fd) -> Result<Fd, SysError> {
-        if min_fd.raw() as usize >= self.fds.len() {
-            return Err(SysError::BadFileDescriptor);
+    fn alloc_ge_than(&mut self, min_fd: Fd, ceiling: FdAllocCeiling) -> Result<Fd, SysError> {
+        if !ceiling.contains(min_fd) {
+            return Err(SysError::InvalidArgument);
         }
 
         if let Some(fd_idx) = self
             .bitmap
-            .find_and_set_first_zero_from(min_fd.raw() as usize)
+            .find_first_zero_from(min_fd.raw() as usize)
+            .filter(|fd| *fd < ceiling.0)
         {
+            self.bitmap.set(fd_idx);
             let fd = Fd::new(fd_idx as u32).unwrap();
-            debug_assert!(self.fds[fd_idx].is_none());
+            assert!(self.fds[fd_idx].is_none());
             Ok(fd)
         } else {
             Err(SysError::NoMoreFd)
         }
     }
 
-    fn alloc_at(&mut self, fd: Fd) -> Result<(), SysError> {
-        if fd.raw() as usize >= self.fds.len() {
+    fn alloc_at(&mut self, fd: Fd, ceiling: FdAllocCeiling) -> Result<(), SysError> {
+        if !ceiling.contains(fd) {
             return Err(SysError::BadFileDescriptor);
         }
 
@@ -109,8 +133,8 @@ impl FileTable {
         file_desc
     }
 
-    pub(super) fn reserve_fd(&mut self) -> Result<Fd, SysError> {
-        let fd = self.alloc()?;
+    pub(super) fn reserve_fd(&mut self, ceiling: FdAllocCeiling) -> Result<Fd, SysError> {
+        let fd = self.alloc(ceiling)?;
         let idx = fd.raw() as usize;
         assert!(self.fds[idx].is_none());
         assert!(!self.reserved_bitmap.test(idx));
@@ -158,6 +182,7 @@ impl FileTable {
 
     pub(super) fn open_fd(
         &mut self,
+        ceiling: FdAllocCeiling,
         file: File,
         access: OpenAccessMode,
         status_flags: FileStatusFlags,
@@ -165,6 +190,7 @@ impl FileTable {
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
         self.open_fd_with_description_ops(
+            ceiling,
             file,
             access,
             status_flags,
@@ -176,6 +202,7 @@ impl FileTable {
 
     pub(super) fn open_fd_with_description_ops(
         &mut self,
+        ceiling: FdAllocCeiling,
         file: File,
         access: OpenAccessMode,
         status_flags: FileStatusFlags,
@@ -183,7 +210,7 @@ impl FileTable {
         fd_flags: FdFlags,
         description_ops: FileDescOps,
     ) -> Result<Fd, SysError> {
-        let fd = self.alloc()?;
+        let fd = self.alloc(ceiling)?;
         let file_desc = FileDesc::new_opened(
             file,
             access,
@@ -293,9 +320,9 @@ impl FileTable {
             .collect()
     }
 
-    pub(super) fn dup(&mut self, old_fd: Fd) -> Result<Fd, SysError> {
+    pub(super) fn dup(&mut self, old_fd: Fd, ceiling: FdAllocCeiling) -> Result<Fd, SysError> {
         let file_desc = self.get_fd(old_fd)?;
-        let fd = self.alloc()?;
+        let fd = self.alloc(ceiling)?;
         // note: new file desc, shared proc file.
         self.publish_fd_desc(
             fd,
@@ -314,9 +341,10 @@ impl FileTable {
         old_fd: Fd,
         min_new_fd: Fd,
         close_on_exec: bool,
+        ceiling: FdAllocCeiling,
     ) -> Result<Fd, SysError> {
         let file_desc = self.get_fd(old_fd)?;
-        let fd = self.alloc_ge_than(min_new_fd)?;
+        let fd = self.alloc_ge_than(min_new_fd, ceiling)?;
         let new_file_desc = Arc::new(FileDesc::new_unpublished(
             file_desc.pfile.clone(),
             if close_on_exec {
@@ -337,6 +365,7 @@ impl FileTable {
         old_fd: Fd,
         new_fd: Fd,
         flags: FdFlags,
+        ceiling: FdAllocCeiling,
     ) -> Result<Vec<Arc<FileDesc>>, SysError> {
         if new_fd.raw() as usize >= self.fds.len() {
             return Err(SysError::BadFileDescriptor);
@@ -344,6 +373,12 @@ impl FileTable {
 
         if old_fd == new_fd {
             return Err(SysError::InvalidArgument);
+        }
+
+        // Reject the caller-specific cutoff before withdrawing an existing
+        // target slot or running opened-description/POSIX-lock cleanup.
+        if !ceiling.contains(new_fd) {
+            return Err(SysError::BadFileDescriptor);
         }
 
         let file_desc = self.get_fd(old_fd)?;
@@ -356,7 +391,7 @@ impl FileTable {
             return Err(SysError::NoMoreFd);
         }
 
-        self.alloc_at(new_fd)?;
+        self.alloc_at(new_fd, ceiling)?;
         let new_file_desc = Arc::new(FileDesc::new_unpublished(file_desc.pfile.clone(), flags));
         self.publish_fd_desc(new_fd, new_file_desc);
         Ok(closed)
@@ -446,5 +481,119 @@ impl Drop for FileTable {
             self.reserved_bitmap.is_empty(),
             "FileTable dropped with reserved fd slots; missing explicit fd-table cleanup"
         );
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn ceiling(value: usize) -> FdAllocCeiling {
+        FdAllocCeiling::new(value).unwrap()
+    }
+
+    fn root_file() -> File {
+        vfs_open(Path::new("/")).unwrap()
+    }
+
+    fn open_root(table: &mut FileTable, ceiling: FdAllocCeiling) -> Fd {
+        table
+            .open_fd(
+                ceiling,
+                root_file(),
+                OpenAccessMode::Read,
+                FileStatusFlags::empty(),
+                LinuxOpenCompat::empty(),
+                FdFlags::empty(),
+            )
+            .unwrap()
+    }
+
+    fn release_all(table: &mut FileTable) {
+        for file_desc in table.drain_all_published_fds() {
+            file_desc.release_description_ref();
+        }
+    }
+
+    #[kunit]
+    fn allocation_range_honors_zero_boundary_and_full_lower_range() {
+        let mut table = FileTable::new();
+        assert_eq!(table.reserve_fd(ceiling(0)), Err(SysError::NoMoreFd));
+
+        let first = table.reserve_fd(ceiling(2)).unwrap();
+        let second = table.reserve_fd(ceiling(2)).unwrap();
+        assert_eq!(first, Fd::new(0).unwrap());
+        assert_eq!(second, Fd::new(1).unwrap());
+        assert_eq!(table.reserve_fd(ceiling(2)), Err(SysError::NoMoreFd));
+        assert!(!table.bitmap.test(2));
+
+        table.rollback_reserved_fd(first);
+        assert_eq!(table.reserve_fd(ceiling(2)).unwrap(), first);
+        table.rollback_reserved_fd(first);
+        table.rollback_reserved_fd(second);
+        assert!(table.bitmap.is_empty());
+        assert!(table.reserved_bitmap.is_empty());
+    }
+
+    #[kunit]
+    fn open_reserve_dup_and_target_dup_share_one_cutoff() {
+        let mut table = FileTable::new();
+        let original = open_root(&mut table, ceiling(2));
+        let reserved = table.reserve_fd(ceiling(2)).unwrap();
+        assert_eq!(table.reserve_fd(ceiling(2)), Err(SysError::NoMoreFd));
+        table.rollback_reserved_fd(reserved);
+
+        let duplicate = table.dup(original, ceiling(2)).unwrap();
+        assert_eq!(duplicate, Fd::new(1).unwrap());
+        let removed = table.close_fd(duplicate).unwrap();
+        removed.release_description_ref();
+
+        let minimum = Fd::new(3).unwrap();
+        let high = table
+            .dup_ge_than(original, minimum, false, ceiling(4))
+            .unwrap();
+        assert_eq!(high, minimum);
+        assert_eq!(
+            table.dup_ge_than(original, Fd::new(4).unwrap(), false, ceiling(4)),
+            Err(SysError::InvalidArgument)
+        );
+
+        table
+            .dup3(original, Fd::new(5).unwrap(), FdFlags::empty(), ceiling(6))
+            .unwrap();
+        let target_before = table.get_fd(Fd::new(5).unwrap()).unwrap();
+        assert!(matches!(
+            table.dup3(original, Fd::new(5).unwrap(), FdFlags::empty(), ceiling(5)),
+            Err(SysError::BadFileDescriptor)
+        ));
+        let target_after = table.get_fd(Fd::new(5).unwrap()).unwrap();
+        assert!(Arc::ptr_eq(&target_before, &target_after));
+
+        // Lowering never retracts already published descriptors.
+        assert!(table.get_fd(high).is_ok());
+        assert!(table.get_fd(Fd::new(5).unwrap()).is_ok());
+        release_all(&mut table);
+    }
+
+    #[kunit]
+    fn reservation_commit_uses_the_existing_slot_claim() {
+        let mut table = FileTable::new();
+        let fd = table.reserve_fd(ceiling(1)).unwrap();
+        let description = FileDesc::new_opened(
+            root_file(),
+            OpenAccessMode::Read,
+            FileStatusFlags::empty(),
+            LinuxOpenCompat::empty(),
+            FdFlags::empty(),
+            FileDescOps::default(),
+        );
+
+        // Commit consumes the reservation; it does not accept a new policy
+        // input or perform a second allocation after a concurrent lowering.
+        table.commit_reserved_fd(fd, description);
+        assert!(table.get_fd(fd).is_ok());
+        assert!(!table.reserved_bitmap.test(fd.raw() as usize));
+        assert_eq!(table.reserve_fd(ceiling(1)), Err(SysError::NoMoreFd));
+        release_all(&mut table);
     }
 }

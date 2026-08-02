@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
 use super::{
-    Fd, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FileTable, LinuxOpenCompat, OpenAccessMode,
+    Fd, FdAllocCeiling, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FileTable,
+    LinuxOpenCompat, OpenAccessMode,
 };
 
 /// Opaque POSIX record-lock owner identity for one file-table sharing episode.
@@ -287,13 +288,13 @@ struct FileTableObserver {
 }
 
 impl FileTableObserver {
-    fn reserve_fd(&self) -> Result<Fd, SysError> {
+    fn reserve_fd(&self, ceiling: FdAllocCeiling) -> Result<Fd, SysError> {
         let mut inner = self.episode.inner.write();
         assert!(
             inner.participants > 0,
             "cannot reserve an fd in a terminal file-table episode"
         );
-        inner.table.reserve_fd()
+        inner.table.reserve_fd(ceiling)
     }
 
     fn commit_reserved_fd(&self, fd: Fd, file_desc: Arc<FileDesc>) {
@@ -352,6 +353,10 @@ impl Drop for FdReservation {
 }
 
 impl Task {
+    pub(crate) fn fd_alloc_ceiling(&self) -> FdAllocCeiling {
+        self.get_thread_group().nofile_alloc_ceiling()
+    }
+
     fn with_table<R>(&self, f: impl FnOnce(&FileTable) -> R) -> R {
         let files_state = self.files_state.read();
         files_state
@@ -445,7 +450,10 @@ impl Task {
         compat: LinuxOpenCompat,
         fd_flags: FdFlags,
     ) -> Result<Fd, SysError> {
-        self.with_table_mut(|table| table.open_fd(file, access, status_flags, compat, fd_flags))
+        let ceiling = self.fd_alloc_ceiling();
+        self.with_table_mut(|table| {
+            table.open_fd(ceiling, file, access, status_flags, compat, fd_flags)
+        })
     }
 
     pub fn open_fd_with_description_ops(
@@ -457,8 +465,10 @@ impl Task {
         fd_flags: FdFlags,
         description_ops: FileDescOps,
     ) -> Result<Fd, SysError> {
+        let ceiling = self.fd_alloc_ceiling();
         self.with_table_mut(|table| {
             table.open_fd_with_description_ops(
+                ceiling,
                 file,
                 access,
                 status_flags,
@@ -470,12 +480,13 @@ impl Task {
     }
 
     pub fn reserve_fd(&self) -> Result<FdReservation, SysError> {
+        let ceiling = self.fd_alloc_ceiling();
         let files_state = self.files_state.read();
         let table = files_state
             .as_ref()
             .expect("detached task cannot reserve an fd")
             .observer();
-        let fd = table.reserve_fd()?;
+        let fd = table.reserve_fd(ceiling)?;
         Ok(FdReservation {
             table,
             fd,
@@ -515,7 +526,8 @@ impl Task {
     }
 
     pub fn dup(&self, old_fd: Fd) -> Result<Fd, SysError> {
-        self.with_table_mut(|table| table.dup(old_fd))
+        let ceiling = self.fd_alloc_ceiling();
+        self.with_table_mut(|table| table.dup(old_fd, ceiling))
     }
 
     pub fn dup_ge_than(
@@ -524,17 +536,19 @@ impl Task {
         min_new_fd: Fd,
         close_on_exec: bool,
     ) -> Result<Fd, SysError> {
-        self.with_table_mut(|table| table.dup_ge_than(old_fd, min_new_fd, close_on_exec))
+        let ceiling = self.fd_alloc_ceiling();
+        self.with_table_mut(|table| table.dup_ge_than(old_fd, min_new_fd, close_on_exec, ceiling))
     }
 
     pub fn dup3(&self, old_fd: Fd, new_fd: Fd, flags: FdFlags) -> Result<Fd, SysError> {
+        let ceiling = self.fd_alloc_ceiling();
         let closed = {
             let files_state = self.files_state.read();
             files_state
                 .as_ref()
                 .expect("detached task cannot duplicate an fd")
                 .with_removed(
-                    |table| table.dup3(old_fd, new_fd, flags),
+                    |table| table.dup3(old_fd, new_fd, flags, ceiling),
                     |file_descs, holder| {
                         file_descs
                             .into_iter()
@@ -605,14 +619,15 @@ impl Task {
 mod kunits {
     use super::*;
     use crate::fs::{
-        InodePerm, PosixLockMode, PosixLockRange, PosixLockSetOutcome, set_posix_lock, vfs_touch,
-        vfs_unlink,
+        InodePerm, PosixLockMode, PosixLockRange, PosixLockSetOutcome, set_posix_lock,
+        vfs_touch_as_root, vfs_unlink,
     };
 
     fn open_root(files_state: &FilesState) -> Fd {
         files_state
             .with_table_mut(|table| {
                 table.open_fd(
+                    FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap(),
                     vfs_open(Path::new("/")).unwrap(),
                     OpenAccessMode::Read,
                     FileStatusFlags::empty(),
@@ -633,11 +648,12 @@ mod kunits {
     #[kunit]
     fn posix_binding_rejects_late_commit_and_fd_reuse_gets_a_fresh_slot() {
         let path = Path::new("/kunit-posix-binding-liveness");
-        let _created = vfs_touch(path, InodePerm::all_rwx()).unwrap();
+        let _created = vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
         let files = FilesState::new_empty();
         let fd = files
             .with_table_mut(|table| {
                 table.open_fd(
+                    FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap(),
                     vfs_open(path).unwrap(),
                     OpenAccessMode::ReadWrite,
                     FileStatusFlags::empty(),
@@ -668,6 +684,7 @@ mod kunits {
         let reused = files
             .with_table_mut(|table| {
                 table.open_fd(
+                    FdAllocCeiling::new(MAX_FD_PER_PROCESS).unwrap(),
                     vfs_open(path).unwrap(),
                     OpenAccessMode::ReadWrite,
                     FileStatusFlags::empty(),

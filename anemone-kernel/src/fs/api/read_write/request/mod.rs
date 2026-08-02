@@ -116,10 +116,6 @@ pub(super) fn load_iovecs(
 
     for raw_iovec in raw_iovecs {
         let len = usize::try_from(raw_iovec.iov_len).map_err(|_| SysError::InvalidArgument)?;
-        if len == 0 {
-            continue;
-        }
-
         let new_total = total.checked_add(len).ok_or(SysError::InvalidArgument)?;
         if new_total > MAX_RW_COUNT {
             return Err(SysError::InvalidArgument);

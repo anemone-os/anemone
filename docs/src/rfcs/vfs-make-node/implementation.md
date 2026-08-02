@@ -9,10 +9,6 @@
 **事务日志：** [2026-07-31-vfs-make-node](../../devlog/transactions/2026-07-31-vfs-make-node.md)
 **Contract Cutover：** `DEVICE-NUMBER-CUTOVER` Effective；`VFS-MAKE-NODE-CUTOVER` Effective
 
-> 本文记录R2 branch-local实施与验证历史。外层合流接受的R3只让`mknodat`复用已经生效的task
-> filesystem-context umask owner；current semantics以[index](./index.md)、[invariants](./invariants.md)与
-> [VFS make-node contract](../../contracts/vfs/make-node.md)为准，不重写下列R2 checkpoint事实。
-
 本文只把 R2 accepted target 转换为可执行顺序、stage write set、验证与停止条件，不重新定义
 [`index.md`](./index.md) 和 [`invariants.md`](./invariants.md) 已经拥有的 target、owner、ABI 或 proof
 obligations。它是一份窄 RFC 的实施计划：除一个必须先独立关闭的 device-number prerequisite 外，make-node

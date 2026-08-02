@@ -159,6 +159,9 @@ impl PublishGuard {
             jobctl_unblocked: Event::new(),
             terminate_signal: None,
             itimers: ITimers::new(),
+            resource_limits: Some(NoIrqRwLock::new(
+                task_resource::UserResourceLimits::new_default(),
+            )),
             inner: NoIrqRwLock::new(ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive_executed(),
                 pgid: Some(Tid::INIT),
@@ -265,6 +268,9 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 node.task.tgid(),
                 parent_tgid
             );
+            // Snapshot the complete pair before child publication. The child
+            // owns an independent policy even when CLONE_FILES shares usage.
+            let resource_limits = parent_tg.fork_resource_limits();
             assert!(
                 parent_tg
                     .inner
@@ -292,6 +298,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                                 jobctl_unblocked: Event::new(),
                                 terminate_signal,
                                 itimers: ITimers::new(),
+                                resource_limits: Some(NoIrqRwLock::new(resource_limits)),
                                 inner: NoIrqRwLock::new(inner),
                             };
                             assert_thread_group_shape(tgid, &tg);
@@ -336,6 +343,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 jobctl_unblocked: Event::new(),
                 terminate_signal: None,
                 itimers: ITimers::new(),
+                resource_limits: None,
                 inner: NoIrqRwLock::new(ThreadGroupInner {
                     status: ThreadGroupStatus::new_alive(),
                     pgid: None,
@@ -406,6 +414,11 @@ fn assert_thread_group_shape(tgid: Tid, tg: &ThreadGroup) {
     match tg.ty {
         ThreadGroupType::User => {
             assert!(
+                tg.resource_limits.is_some(),
+                "task topology: user thread group {} missing resource policy",
+                tgid
+            );
+            assert!(
                 inner.pgid.is_some(),
                 "task topology: user thread group {} missing process group",
                 tgid
@@ -422,6 +435,11 @@ fn assert_thread_group_shape(tgid: Tid, tg: &ThreadGroup) {
             );
         },
         ThreadGroupType::KThread => {
+            assert!(
+                tg.resource_limits.is_none(),
+                "task topology: kthread {} must not carry user resource policy",
+                tgid
+            );
             assert!(
                 inner.pgid.is_none() && inner.sid.is_none(),
                 "task topology: kthread {} must not have process group/session",
@@ -454,6 +472,25 @@ fn assert_thread_group_shape(tgid: Tid, tg: &ThreadGroup) {
 pub fn get_task(tid: &Tid) -> Option<Arc<Task>> {
     let topology = TOPOLOGY.inner.read();
     topology.tasks.get(tid).map(|node| node.task.clone())
+}
+
+/// Resolve a live task together with the exact thread group that owns it.
+///
+/// Keeping both lookups in one topology transaction prevents exit/reap or
+/// identifier reuse from pairing a stale task with a different group.
+///
+/// ## Locks
+///
+/// [TOPOLOGY]
+pub(crate) fn get_task_and_thread_group(tid: &Tid) -> Option<(Arc<Task>, Arc<ThreadGroup>)> {
+    let topology = TOPOLOGY.inner.read();
+    let task = topology.tasks.get(tid)?.task.clone();
+    let thread_group = topology
+        .thread_groups
+        .get(&task.tgid())
+        .expect("task topology: published task missing thread group")
+        .clone();
+    Some((task, thread_group))
 }
 
 /// Get the init task, the ancestor of all other tasks.

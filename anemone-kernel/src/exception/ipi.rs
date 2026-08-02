@@ -17,21 +17,10 @@ use crate::prelude::*;
 #[derive(Debug)]
 pub enum IpiPayload {
     MemoryBarrier,
-    TlbShootdown {
-        vpn: Option<VirtPageNum>,
-    },
-    EnqueueNewTask {
-        tid: Tid,
-    },
-    WakeUpTaskStaleSafe {
-        task: Arc<Task>,
-        park: ParkState,
-    },
+    TlbShootdown { vpn: Option<VirtPageNum> },
+    EnqueueNewTask { tid: Tid },
+    WakeUpTaskStaleSafe { task: Arc<Task>, park: ParkState },
     SchedulerRequest(Box<SchedRequest>),
-    #[cfg(feature = "kunit")]
-    RunKUnitPerCpu {
-        test_fn: fn(),
-    },
     StopExecution,
 }
 
@@ -47,8 +36,6 @@ impl IpiPayload {
             Self::SchedulerRequest(_) => {
                 panic!("scheduler request cannot be copied for IPI broadcast")
             },
-            #[cfg(feature = "kunit")]
-            Self::RunKUnitPerCpu { test_fn } => Self::RunKUnitPerCpu { test_fn: *test_fn },
             Self::StopExecution => Self::StopExecution,
         }
     }
@@ -234,11 +221,6 @@ pub fn handle_ipi() {
                     }
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
-                #[cfg(feature = "kunit")]
-                RunKUnitPerCpu { test_fn } => {
-                    crate::debug::kunit::handle_percpu_ipi_test(*test_fn);
-                    msg.is_accomplished.store(true, Ordering::Release);
-                },
                 EnqueueNewTask { tid } => {
                     let tid = *tid;
                     let task = get_task(&tid).expect("internal error: no such task to wake up");
@@ -271,8 +253,6 @@ pub fn handle_ipi() {
 mod kunits {
     use super::*;
 
-    fn unused_test() {}
-
     #[kunit]
     fn test_broadcast_copy_reconstructs_only_eligible_payloads() {
         let tid = Tid::new(7);
@@ -280,10 +260,6 @@ mod kunits {
             IpiPayload::MemoryBarrier.copy_for_broadcast(),
             IpiPayload::TlbShootdown { vpn: None }.copy_for_broadcast(),
             IpiPayload::EnqueueNewTask { tid }.copy_for_broadcast(),
-            IpiPayload::RunKUnitPerCpu {
-                test_fn: unused_test,
-            }
-            .copy_for_broadcast(),
             IpiPayload::StopExecution.copy_for_broadcast(),
         ];
 
@@ -296,10 +272,6 @@ mod kunits {
         assert!(matches!(
             copies.next().unwrap(),
             IpiPayload::EnqueueNewTask { tid: copied } if copied == tid
-        ));
-        assert!(matches!(
-            copies.next().unwrap(),
-            IpiPayload::RunKUnitPerCpu { .. }
         ));
         assert!(matches!(copies.next().unwrap(), IpiPayload::StopExecution));
         assert!(copies.next().is_none());

@@ -1,0 +1,4 @@
+# Stage 1 AF_UNIX stream creation and flag oracle. socketpair01 requires
+# AF_UNIX datagram support, which is outside the accepted R0 target.
+socketpair02
+socket_r1_oracle
