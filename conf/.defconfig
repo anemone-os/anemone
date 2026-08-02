@@ -30,6 +30,7 @@ epoll_file_max_waiters = 64 # Fixed waiter-route capacity per epoll instance.
 getdents64_buffer_bytes = 2097152 # Maximum kernel staging buffer used by one getdents64 call.
 pipe_capacity_pages = 2 # Fixed pipe backing/default capacity in pages; must exceed the one-page atomic-write bound.
 unix_stream_direction_capacity_bytes = 65536 # Fixed byte capacity of each AF_UNIX stream direction.
+unix_listener_max_backlog = 128 # Maximum normalized listen backlog for AF_UNIX stream listeners.
 tid_alloc_policy = "oneshot" # Ordinary TID allocation policy: "bitmap" recycles IDs; "oneshot" never reuses them.
 system_hz = 100 # System timer frequency in hertz, i.e. number of timer interrupts per second
 sched_default_policy = "fair" # Default policy for fresh non-idle tasks: "fair", "rt_rr", or "rt_fifo".

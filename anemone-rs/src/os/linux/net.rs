@@ -75,6 +75,43 @@ pub fn bind_unix_path(fd: Fd, pathname: &[u8]) -> Result<(), Errno> {
     .map(|_| ())
 }
 
+pub fn listen(fd: Fd, backlog: i32) -> Result<(), Errno> {
+    net::listen(fd as u64, backlog).map(|_| ())
+}
+
+pub fn connect_unix_path(fd: Fd, pathname: &[u8]) -> Result<(), Errno> {
+    let (address, len) = unix_path_address(pathname)?;
+    net::connect(
+        fd as u64,
+        &address as *const SockAddrUn as u64,
+        len as u64,
+    )
+    .map(|_| ())
+}
+
+pub fn accept_unix(fd: Fd) -> Result<Fd, Errno> {
+    net::accept(fd as u64, 0, 0).map(|accepted| accepted as Fd)
+}
+
+pub fn accept4_unix(fd: Fd, flags: SocketFlags) -> Result<Fd, Errno> {
+    net::accept4(fd as u64, 0, 0, flags.bits()).map(|accepted| accepted as Fd)
+}
+
+pub fn accept4_unix_raw(
+    fd: Fd,
+    address: *mut SockAddrUn,
+    len: *mut socklen_t,
+    flags: i32,
+) -> Result<Fd, Errno> {
+    net::accept4(
+        fd as u64,
+        address as u64,
+        len as u64,
+        flags,
+    )
+    .map(|accepted| accepted as Fd)
+}
+
 pub fn getsockname_unix_raw(
     fd: Fd,
     address: *mut SockAddrUn,

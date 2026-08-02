@@ -99,6 +99,11 @@ pub enum SysError {
     NotSocket,
     /// The socket operation requires a connected peer.
     NotConnected,
+    /// The socket is already connected.
+    AlreadyConnected,
+    /// A pathname resolved, but no live listening socket admitted the
+    /// connection.
+    ConnectionRefused,
     /// The requested local address/port conflicts with an active binding.
     AddressInUse,
     /// The requested local address is not owned by this network domain.
@@ -246,6 +251,8 @@ impl SysError {
             SysError::ProtocolNotSupported => EPROTONOSUPPORT,
             SysError::NotSocket => ENOTSOCK,
             SysError::NotConnected => ENOTCONN,
+            SysError::AlreadyConnected => EISCONN,
+            SysError::ConnectionRefused => ECONNREFUSED,
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,
             SysError::NoBufferSpace => ENOBUFS,

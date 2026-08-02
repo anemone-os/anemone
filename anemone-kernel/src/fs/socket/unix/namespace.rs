@@ -102,6 +102,10 @@ impl LiveBinding {
     pub(super) fn matches(&self, inode: &InodeRef, generation: u64) -> bool {
         self.inode == *inode && self.generation == generation
     }
+
+    pub(super) fn matches_registration(&self, registration: &BindingRegistration) -> bool {
+        self.matches(&registration.inode, registration.generation)
+    }
 }
 
 pub(super) fn publish_binding(
@@ -123,6 +127,23 @@ pub(super) fn withdraw_binding(registration: BindingRegistration) {
 #[allow(dead_code)]
 pub(super) fn lookup_binding(inode: &InodeRef) -> Option<LiveBinding> {
     BINDINGS.lock().lookup(inode)
+}
+
+/// Resolve one connect attempt through the current task namespace and DAC.
+/// The returned capability carries no pathname or permission authority and is
+/// valid only for the admission revalidation performed by that attempt.
+pub(super) fn resolve_live_binding(pathname: &str) -> Result<LiveBinding, SysError> {
+    let checker = FsPermChecker::for_current_fs();
+    let path = get_current_task().lookup_path_with_checker(
+        Path::new(pathname),
+        ResolveFlags::empty(),
+        &checker,
+    )?;
+    checker.check_path(&path, FsAccess::WRITE)?;
+    if path.inode().ty() != InodeType::Socket {
+        return Err(SysError::ConnectionRefused);
+    }
+    lookup_binding(path.inode()).ok_or(SysError::ConnectionRefused)
 }
 
 pub(super) fn create_socket_pathname(pathname: &str) -> Result<InodeRef, SysError> {

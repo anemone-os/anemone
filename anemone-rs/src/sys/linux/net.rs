@@ -27,6 +27,22 @@ pub fn bind(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_BIND, fd, addr, addrlen, 0, 0, 0) }
 }
 
+pub fn listen(fd: u64, backlog: i32) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_LISTEN, fd, backlog as i64 as u64, 0, 0, 0, 0) }
+}
+
+pub fn connect(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_CONNECT, fd, addr, addrlen, 0, 0, 0) }
+}
+
+pub fn accept(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_ACCEPT, fd, addr, addrlen, 0, 0, 0) }
+}
+
+pub fn accept4(fd: u64, addr: u64, addrlen: u64, flags: i32) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_ACCEPT4, fd, addr, addrlen, flags as i64 as u64, 0, 0) }
+}
+
 pub fn getsockname(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_GETSOCKNAME, fd, addr, addrlen, 0, 0, 0) }
 }

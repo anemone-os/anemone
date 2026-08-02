@@ -8,10 +8,14 @@ use crate::{
 
 use super::{
     super::{
-        SocketAddress, SocketAddressSink, SocketBindError, SocketCreation, SocketOps,
-        SocketPairPreparation, SocketPreparation, SocketQueryError, SocketReceiveError,
-        SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketStreamReadSink,
-        SocketStreamWriteSource, SocketType,
+        SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
+        SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketPairPreparation,
+        SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveRequest,
+        SocketSendError, SocketSendRequest, SocketStreamReadSink, SocketStreamWriteSource,
+        SocketType,
+    },
+    admission::{
+        UnixListener, accept, connect, listen, notify_admission_routes, with_admission_commit,
     },
     namespace::{BindingRegistration, create_socket_pathname, publish_binding, withdraw_binding},
 };
@@ -22,7 +26,7 @@ static_assert!(
 );
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EndpointSide {
+pub(super) enum EndpointSide {
     First,
     Second,
 }
@@ -127,7 +131,7 @@ impl ConnectionState {
 }
 
 #[derive(Debug)]
-struct UnixConnection {
+pub(super) struct UnixConnection {
     /// One lock linearizes endpoint retirement, both directional facts, and
     /// route publication. The two direction entries remain the unique owners
     /// of their byte and terminal facts; this lock is not another truth source.
@@ -143,7 +147,7 @@ struct UnixConnection {
 }
 
 impl UnixConnection {
-    fn new(names: [Arc<EndpointName>; 2]) -> Arc<Self> {
+    pub(super) fn new(names: [Arc<EndpointName>; 2]) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(ConnectionState::new()),
             read_operations: [Mutex::new(()), Mutex::new(())],
@@ -154,14 +158,14 @@ impl UnixConnection {
 }
 
 #[derive(Debug)]
-struct EndpointName(SpinLock<Option<Arc<str>>>);
+pub(super) struct EndpointName(SpinLock<Option<Arc<str>>>);
 
 impl EndpointName {
     fn new() -> Arc<Self> {
         Arc::new(Self(SpinLock::new(None)))
     }
 
-    fn snapshot(&self) -> Option<Arc<str>> {
+    pub(super) fn snapshot(&self) -> Option<Arc<str>> {
         self.0.lock().clone()
     }
 
@@ -176,8 +180,9 @@ impl EndpointName {
 }
 
 #[derive(Debug)]
-enum EndpointAssociation {
+pub(super) enum EndpointAssociation {
     Unconnected,
+    Listening(Arc<UnixListener>),
     Connected {
         connection: Arc<UnixConnection>,
         side: EndpointSide,
@@ -186,16 +191,20 @@ enum EndpointAssociation {
 }
 
 #[derive(Debug)]
-enum BindingState {
+pub(super) enum BindingState {
     Unnamed,
     Preparing(Arc<str>),
     Bound(BindingRegistration),
 }
 
 #[derive(Debug)]
-struct EndpointState {
-    association: EndpointAssociation,
-    binding: BindingState,
+pub(super) struct EndpointState {
+    pub(super) association: EndpointAssociation,
+    pub(super) binding: BindingState,
+    /// Routes interested only in endpoint admission/lifecycle changes. They
+    /// carry no role, readiness, or errno truth and are pruned
+    /// opportunistically.
+    pub(super) lifecycle_routes: Arc<Vec<PollRoute>>,
 }
 
 #[derive(Debug)]
@@ -203,8 +212,8 @@ pub(super) struct UnixEndpointCore {
     /// Sole owner of endpoint role/association and bind publication phase.
     /// Connection/directional locks are always acquired after this lock when
     /// a commit must validate both owners.
-    state: SpinLock<EndpointState>,
-    name: Arc<EndpointName>,
+    pub(super) state: SpinLock<EndpointState>,
+    pub(super) name: Arc<EndpointName>,
 }
 
 impl UnixEndpointCore {
@@ -213,23 +222,64 @@ impl UnixEndpointCore {
             state: SpinLock::new(EndpointState {
                 association: EndpointAssociation::Unconnected,
                 binding: BindingState::Unnamed,
+                lifecycle_routes: Arc::new(Vec::new()),
             }),
             name: EndpointName::new(),
         })
     }
 
-    fn install_connection(&self, connection: Arc<UnixConnection>, side: EndpointSide) {
+    pub(super) fn new_with_name(name: Arc<EndpointName>) -> Arc<Self> {
+        Arc::new(Self {
+            state: SpinLock::new(EndpointState {
+                association: EndpointAssociation::Unconnected,
+                binding: BindingState::Unnamed,
+                lifecycle_routes: Arc::new(Vec::new()),
+            }),
+            name,
+        })
+    }
+
+    pub(super) fn peer_address_snapshot(&self) -> Option<SocketAddress> {
+        let (connection, side) = self
+            .connected()
+            .expect("queued Unix child lost its connected association");
+        connection.names[side.peer().index()]
+            .snapshot()
+            .map(SocketAddress::UnixPathname)
+    }
+
+    pub(super) fn install_connection(&self, connection: Arc<UnixConnection>, side: EndpointSide) {
+        let mut state = self.state.lock();
+        assert!(matches!(
+            state.association,
+            EndpointAssociation::Unconnected
+        ));
+        assert!(
+            state.lifecycle_routes.is_empty(),
+            "unpublished Unix endpoint unexpectedly carried lifecycle routes"
+        );
+        state.association = EndpointAssociation::Connected { connection, side };
+    }
+
+    pub(super) fn commit_connection(
+        &self,
+        connection: Arc<UnixConnection>,
+        side: EndpointSide,
+        empty_lifecycle_routes: Arc<Vec<PollRoute>>,
+    ) -> Arc<Vec<PollRoute>> {
         let mut state = self.state.lock();
         assert!(matches!(
             state.association,
             EndpointAssociation::Unconnected
         ));
         state.association = EndpointAssociation::Connected { connection, side };
+        core::mem::replace(&mut state.lifecycle_routes, empty_lifecycle_routes)
     }
 
     fn connected(&self) -> Result<(Arc<UnixConnection>, EndpointSide), EndpointAccessError> {
         match &self.state.lock().association {
             EndpointAssociation::Unconnected => Err(EndpointAccessError::Unconnected),
+            EndpointAssociation::Listening(_) => Err(EndpointAccessError::InvalidState),
             EndpointAssociation::Connected { connection, side } => Ok((connection.clone(), *side)),
             EndpointAssociation::Retired => Err(EndpointAccessError::Retired),
         }
@@ -288,12 +338,17 @@ impl UnixEndpointCore {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EndpointAccessError {
     Unconnected,
+    InvalidState,
     Retired,
 }
 
 #[derive(Debug, Opaque)]
 struct UnixEndpoint {
     core: Arc<UnixEndpointCore>,
+}
+
+pub(super) fn private_from_core(core: Arc<UnixEndpointCore>) -> AnyOpaque {
+    AnyOpaque::new(UnixEndpoint { core })
 }
 
 fn endpoint(private: &AnyOpaque) -> &UnixEndpoint {
@@ -309,8 +364,8 @@ fn prepare_unix_pair() -> Result<SocketPairPreparation, SysError> {
     first.install_connection(connection.clone(), EndpointSide::First);
     second.install_connection(connection, EndpointSide::Second);
     Ok(SocketPairPreparation {
-        first_private: AnyOpaque::new(UnixEndpoint { core: first }),
-        second_private: AnyOpaque::new(UnixEndpoint { core: second }),
+        first_private: private_from_core(first),
+        second_private: private_from_core(second),
     })
 }
 
@@ -318,9 +373,7 @@ fn commit_unix_socket(_creation: &mut AnyOpaque) {}
 
 fn prepare_unix_socket() -> Result<SocketPreparation, SysError> {
     Ok(SocketPreparation {
-        private: AnyOpaque::new(UnixEndpoint {
-            core: UnixEndpointCore::new_unconnected(),
-        }),
+        private: private_from_core(UnixEndpointCore::new_unconnected()),
         creation: SocketCreation {
             commit: commit_unix_socket,
             authority: NilOpaque::new(),
@@ -380,6 +433,7 @@ fn validate_connection(
             side: current_side,
         } if Arc::ptr_eq(current, connection) && *current_side == side => Ok(()),
         EndpointAssociation::Unconnected => Err(EndpointAccessError::Unconnected),
+        EndpointAssociation::Listening(_) => Err(EndpointAccessError::InvalidState),
         EndpointAssociation::Retired => Err(EndpointAccessError::Retired),
         EndpointAssociation::Connected { .. } => {
             panic!("Unix endpoint connection association changed after publication")
@@ -418,6 +472,21 @@ fn bind_unix_stream(private: &AnyOpaque, address: SocketAddress) -> Result<(), S
     Ok(())
 }
 
+fn listen_unix_stream(private: &AnyOpaque, backlog: i32) -> Result<(), SocketListenError> {
+    listen(&endpoint(private).core, backlog)
+}
+
+fn connect_unix_stream(
+    private: &AnyOpaque,
+    address: SocketAddress,
+) -> Result<(), SocketConnectError> {
+    connect(&endpoint(private).core, address)
+}
+
+fn accept_unix_stream(private: &AnyOpaque) -> Result<SocketAcceptItem, SocketAcceptError> {
+    accept(&endpoint(private).core)
+}
+
 fn query_unix_local_address(
     private: &AnyOpaque,
     sink: &mut dyn SocketAddressSink,
@@ -439,7 +508,9 @@ fn query_unix_peer_address(
 ) -> Result<(), SocketQueryError> {
     let endpoint = &endpoint(private).core;
     let (connection, side) = endpoint.connected().map_err(|error| match error {
-        EndpointAccessError::Unconnected => SocketQueryError::NotConnected,
+        EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+            SocketQueryError::NotConnected
+        },
         EndpointAccessError::Retired => SocketQueryError::Retired,
     })?;
     sink.copy_address(
@@ -462,7 +533,9 @@ fn receive_unix_stream(
     }
     let endpoint = &endpoint(private).core;
     let (connection, side) = endpoint.connected().map_err(|error| match error {
-        EndpointAccessError::Unconnected => SocketReceiveError::InvalidState,
+        EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+            SocketReceiveError::InvalidState
+        },
         EndpointAccessError::Retired => SocketReceiveError::Retired,
     })?;
     let incoming_index = side.peer().index();
@@ -471,7 +544,9 @@ fn receive_unix_stream(
     let staged_len = {
         let endpoint_state = endpoint.state.lock();
         validate_connection(&endpoint_state, &connection, side).map_err(|error| match error {
-            EndpointAccessError::Unconnected => SocketReceiveError::InvalidState,
+            EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+                SocketReceiveError::InvalidState
+            },
             EndpointAccessError::Retired => SocketReceiveError::Retired,
         })?;
         let connection_state = connection.state.lock();
@@ -507,7 +582,9 @@ fn receive_unix_stream(
     let (reader_routes, writer_routes) = {
         let endpoint_state = endpoint.state.lock();
         validate_connection(&endpoint_state, &connection, side).map_err(|error| match error {
-            EndpointAccessError::Unconnected => SocketReceiveError::InvalidState,
+            EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+                SocketReceiveError::InvalidState
+            },
             EndpointAccessError::Retired => SocketReceiveError::Retired,
         })?;
         let mut connection_state = connection.state.lock();
@@ -545,6 +622,7 @@ fn send_unix_stream(
     let endpoint = &endpoint(private).core;
     let (connection, side) = endpoint.connected().map_err(|error| match error {
         EndpointAccessError::Unconnected => SocketSendError::NotConnected,
+        EndpointAccessError::InvalidState => SocketSendError::InvalidState,
         EndpointAccessError::Retired => SocketSendError::Retired,
     })?;
     let index = side.index();
@@ -555,6 +633,7 @@ fn send_unix_stream(
         let endpoint_state = endpoint.state.lock();
         validate_connection(&endpoint_state, &connection, side).map_err(|error| match error {
             EndpointAccessError::Unconnected => SocketSendError::NotConnected,
+            EndpointAccessError::InvalidState => SocketSendError::InvalidState,
             EndpointAccessError::Retired => SocketSendError::Retired,
         })?;
         let connection_state = connection.state.lock();
@@ -583,6 +662,7 @@ fn send_unix_stream(
         let endpoint_state = endpoint.state.lock();
         validate_connection(&endpoint_state, &connection, side).map_err(|error| match error {
             EndpointAccessError::Unconnected => SocketSendError::NotConnected,
+            EndpointAccessError::InvalidState => SocketSendError::InvalidState,
             EndpointAccessError::Retired => SocketSendError::Retired,
         })?;
         let mut connection_state = connection.state.lock();
@@ -612,7 +692,9 @@ fn poll_unix_stream(
     let endpoint = &endpoint(private).core;
     let (connection, side) = match endpoint.connected() {
         Ok(association) => association,
-        Err(EndpointAccessError::Unconnected) => return Ok(PollRegisterResult::Unsupported),
+        Err(EndpointAccessError::Unconnected | EndpointAccessError::InvalidState) => {
+            return Ok(PollRegisterResult::Unsupported);
+        },
         Err(EndpointAccessError::Retired) => {
             return Ok(PollRegisterResult::Ready(PollEvent::HANG_UP));
         },
@@ -655,20 +737,40 @@ fn poll_unix_stream(
     }
 }
 
-fn final_release_unix_stream(private: &AnyOpaque) {
-    let endpoint = &endpoint(private).core;
-    let (association, binding) = {
+pub(super) fn retire_endpoint_core(endpoint: &Arc<UnixEndpointCore>) {
+    let empty_lifecycle_routes = Arc::new(Vec::new());
+    let empty_connect_routes = Arc::new(Vec::new());
+    let empty_accept_routes = Arc::new(Vec::new());
+    let (association, binding, lifecycle_routes, listener_close) = with_admission_commit(|| {
         let mut state = endpoint.state.lock();
         let association = core::mem::replace(&mut state.association, EndpointAssociation::Retired);
         assert!(
             !matches!(association, EndpointAssociation::Retired),
             "Unix endpoint final release ran more than once"
         );
+        let listener_close = match &association {
+            EndpointAssociation::Listening(listener) => {
+                Some(listener.close(empty_connect_routes, empty_accept_routes))
+            },
+            _ => None,
+        };
         let binding = core::mem::replace(&mut state.binding, BindingState::Unnamed);
-        (association, binding)
-    };
+        let lifecycle_routes =
+            core::mem::replace(&mut state.lifecycle_routes, empty_lifecycle_routes);
+        (association, binding, lifecycle_routes, listener_close)
+    });
     if let BindingState::Bound(registration) = binding {
         withdraw_binding(registration);
+    }
+    notify_admission_routes(&lifecycle_routes, "endpoint retirement");
+
+    if let Some(closed) = listener_close {
+        notify_admission_routes(&closed.connect_routes, "listener close");
+        notify_admission_routes(&closed.accept_routes, "listener close");
+        for child in closed.pending {
+            retire_endpoint_core(&child);
+        }
+        return;
     }
 
     let EndpointAssociation::Connected { connection, side } = association else {
@@ -699,11 +801,18 @@ fn final_release_unix_stream(private: &AnyOpaque) {
     notify_routes(&peer_routes, None, "peer final close");
 }
 
+fn final_release_unix_stream(private: &AnyOpaque) {
+    retire_endpoint_core(&endpoint(private).core);
+}
+
 pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::UnixStream,
     create: Some(prepare_unix_socket),
     create_pair: Some(prepare_unix_pair),
     bind: Some(bind_unix_stream),
+    listen: Some(listen_unix_stream),
+    connect: Some(connect_unix_stream),
+    accept: Some(accept_unix_stream),
     local_address: Some(query_unix_local_address),
     peer_address: Some(query_unix_peer_address),
     send: Some(send_unix_stream),

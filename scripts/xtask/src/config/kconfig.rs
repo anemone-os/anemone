@@ -61,6 +61,7 @@ pub struct Parameters {
     pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
+    pub unix_listener_max_backlog: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -151,6 +152,7 @@ impl Parameters {
         materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
+        materialize!(unix_listener_max_backlog);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -270,6 +272,8 @@ pub const GETDENTS64_BUFFER_BYTES: usize = {};
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Fixed byte capacity of each AF_UNIX stream direction.
 pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
+/// Maximum normalized listen backlog for AF_UNIX stream listeners.
+pub const UNIX_LISTENER_MAX_BACKLOG: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -411,6 +415,7 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
+            resolved!(unix_listener_max_backlog),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),
@@ -543,6 +548,11 @@ mod tests {
             parameters
                 .gen_kconfig_defs()
                 .contains("pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = 65536;")
+        );
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const UNIX_LISTENER_MAX_BACKLOG: usize = 128;")
         );
     }
 

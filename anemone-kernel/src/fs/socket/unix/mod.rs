@@ -1,5 +1,6 @@
 //! Unix stream endpoint, namespace, and family composition.
 
+mod admission;
 mod endpoint;
 mod namespace;
 

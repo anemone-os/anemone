@@ -1,11 +1,11 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Active / Checkpoint 2A Closed
+**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Closed / Checkpoint 2A/2B Closed
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R0
-**当前实施阶段：** Stage 2 Active；Checkpoint 2A Closed；Checkpoint 2B Not Active
-（无 contract cutover）
+**当前实施阶段：** Stage 2 Closed；Checkpoint 2A/2B Closed；已停止在未解析、未授权的 Stage 3 前
+（contract cutover None）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
 最终 validation boundary 仍由父 RFC [index](./index.md)和[目标与不变量](./invariants.md)定义；本页不建立并列
@@ -13,9 +13,9 @@ target、执行状态总表或验证证据副本。
 
 R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint 1A、1B 随后各自取得实施授权并依次
 关闭，Stage 1 因两个真实 consumer 均已落地而关闭。独立的 Stage 2 resolution 根据 Stage 1 actual diff、current
-contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解析为两个有序 checkpoint；Checkpoint 2A
-随后经独立授权实现并关闭，Checkpoint 2B仍为Not Active。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；resolution、checkpoint closure与Stage 2 closure均不使
-pending contract生效，也不自动进入下一 checkpoint或Stage。
+contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解析为两个有序 checkpoint；Checkpoint 2A、2B
+随后各自取得独立授权并依次关闭，Stage 2 已关闭并停止在 Stage 3 前。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；
+resolution、checkpoint closure 与 Stage 2 closure 均不使 pending contract 生效，也不自动进入下一 checkpoint 或 Stage。
 
 ## 全局 Implementation Boundary
 
@@ -109,7 +109,7 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | --- | --- | --- | --- | --- |
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
-| Stage 2 | Active；2A Closed；2B Not Active | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已在2A关闭后停止；只有新的明确授权才能激活2B |
+| Stage 2 | Closed；2A/2B Closed；Cutover None | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已完成并停止；Stage 3仍需独立解析与授权 |
 | Stage 3 | Outline | 闭合完整stream operation、shutdown与poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
 
@@ -297,11 +297,11 @@ monitor退出。最终dispatcher-only failure aggregation修正后，双架构ap
 完整socket LTP、final harness、physical hardware与`smp>1`均未运行，保持Not Run / Not Cut Over。任何pending
 Socket/Unix/IOMUX/Epoll contract均未生效。
 
-## Stage 2 Active — Pathname namespace 与 connection admission
+## Stage 2 Closed — Pathname namespace 与 connection admission
 
 **Resolution状态：** Completed 2026-08-02。Stage 2已解析为Checkpoint 2A“endpoint/name/namespace”和Checkpoint 2B
-“listener/connection admission”；2A随后独立激活并关闭，2B依赖2A且仍为Not Active。本resolution只保存accepted target内的
-实施顺序、验证与停止边界，不授权代码、不创建transaction、不修改current contract，也不增加R0修订号。
+“listener/connection admission”；两者随后各自取得独立授权并依次关闭，Stage 2 Closed / Cutover None。本resolution只保存
+accepted target内的实施顺序、验证与停止边界，不创建transaction、不修改current contract，也不增加R0修订号。
 
 ### Live baseline 与解析结论
 
@@ -401,7 +401,6 @@ state或caller特判。`OPENED-DESC-001..003`、`VFS-CREATION-001`、`VFS-MAKE-N
 
 **状态：** Closed。single Socket、endpoint/local-name owner、filesystem pathname bind、exact identity registry和
 `getsockname/getpeername`已形成可独立停止的namespace slice；transaction仍为None，contract cutover仍为None。
-Checkpoint 2B没有激活。
 
 **Purpose：** 把connection-only Unix endpoint提升为能承载single Socket、orthogonal local-name与exact binding cleanup的
 唯一role owner；接通single creation、filesystem pathname bind、getsockname/getpeername和namespace/address lifecycle，
@@ -468,13 +467,13 @@ machine power-off成功，LA64因当前平台无成功power-off handler在末尾
 notice记录pathname、ino与errno。该边界已登记为
 [`ANE-20260802-UNIX-BIND-RETIRED-INERT-INODE`](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)。
 
-**Not Run / non-claim：** `listen/connect/accept`、pathname data exchange、shutdown、RDHUP/完整HUP、完整socket LTP、
-final harness、physical hardware与`smp>1`均保持Not Run / Not Cut Over。Checkpoint 2B、Stage 3/4和所有pending
-Socket/Unix/IOMUX/Epoll contract均未激活或生效。
+**2A closure时的 Not Run / non-claim：** `listen/connect/accept`、pathname data exchange、shutdown、RDHUP/完整HUP、
+完整socket LTP、final harness、physical hardware与`smp>1`当时均为Not Run / Not Cut Over；Checkpoint 2B与后续Stage
+也尚未激活。后续2B证据只由下节closure拥有，不回写冒充2A证据。
 
-### Checkpoint 2B — Listener 与 connection admission
+### Checkpoint 2B Closed — Listener 与 connection admission
 
-**状态：** Not Active；只有2A Closed、完整diff已review且取得新的明确授权后才能激活。
+**状态：** Closed 2026-08-02；Stage 2 Closed / Cutover None；transaction None。已停止在未解析、未授权的Stage 3前。
 
 **Purpose：** 在2A endpoint/name/registry基础上，一次闭合listen backlog、connect commit、accept consume/fd publication
 与blocking/nonblocking admission，使filesystem pathname server/client通过Stage 1 basic stream形成production vertical
@@ -522,16 +521,45 @@ binding/private phase、重复connection或accept consume，若正确accept需�
 blocking只能通过第二套Socket wait queue、ready cache或提前修改iomux/epoll consumer policy实现，立即停止并回RFC review
 或先修订Stage 2路线。2B关闭后Stage 2 Closed / Cutover None，并停止在未解析、未授权的Stage 3之前。
 
+**Closure evidence：** syscall ABI按“一项syscall一个`.rs`”落在`listen.rs`、`connect.rs`、`accept/accept.rs`与
+`accept/accept4.rs`；`accept/mod.rs`只拥有两项accept syscall共同的fd reservation、child consume、peer-address copyout、
+FileDesc preparation与publication transaction。唯一`UnixListener`拥有normalized backlog、pending child、connect-capacity
+与accept-item predicate；endpoint association仍是role唯一truth，connection/direction继续复用Stage 1 owner。
+
+connect每次attempt重新执行pathname lookup、target `WRITE` DAC、exact binding/listener/client revalidation；跨sleep只保存
+non-owning recheck capability。route publication与predicate在同一owner lock/commit gate下复核，terminal register在没有保存
+route时返回`Ready`而不伪称`Subscribed`。client connection commit、listener close、accept consume与admission分别在guard外
+通知对应snapshot；owner-local KUnit显式先取得`Subscribed`，再证明client role变化、capacity恢复、listener close、accept
+admission/close均产生hint且final snapshot裁决为ready。`ADMISSION_COMMIT`内没有allocation、VFS、user copy、wait或notify。
+
+accept先reserve fd，再consume child；peer copyout或后续pre-publication失败关闭child并释放reservation，不requeue或发布fd。
+accepted description不继承listener `O_NONBLOCK`，只消费accept4的`SOCK_NONBLOCK | SOCK_CLOEXEC`。listener final close先撤销
+admission、唤醒connect/accept waiter并drain queued child；已accepted connection继续使用Stage 1 terminal/EOF/EPIPE路径。
+完整对抗review发现并关闭了client role变化lost-wake、terminal伪`Subscribed`、late listen错误`EINVAL`和非确定性signal test；
+最终review无剩余Apollyon、Keter或Euclid finding。
+
+formatter、`just test xtask` 66/66、RV64/LA64 `socket-test` app build与显式release preset build通过。最终canonical wrapper
+分别通过RV64 KUnit 361/361、LA64 KUnit 366/366，两个架构均为UDP 16/16、Unix 19/19，glibc/musl `socketpair02`各4 TPASS。
+RV64完成machine power-off；LA64完成filesystem/network/device orderly shutdown后因当前平台无成功power-off handler进入
+末尾halt，并由QEMU monitor退出。使用只读mounted初赛盘构造的glibc/musl focused admission oracle又各通过1 TPASS，覆盖
+backlog、errno、addrlen、accept flags/copy fault与listener lifecycle；临时替换只发生在worktree runtime副本，完成后两份
+binary的SHA256与mode均恢复为master内容，runtime uid/gid恢复为原始`0/0`。
+
+**Not Run / non-claim：** `shutdown`、`MSG_*`完整面、RDHUP/完整HUP、public listener/readiness conformance、完整socket LTP、
+final harness、physical hardware与`smp>1`继续Not Run / Not Cut Over。Stage 3/4与全部pending Socket/Unix/IOMUX/Epoll
+contract均未激活或生效。
+
 ### Stage 2 Cutover、evidence 与 write-back
 
-Stage 2没有独立current-contract cutover。Checkpoint 2A/2B与Stage 2 closure只由Git/PR保存实际review、validation与
-Not Run evidence；当前不创建transaction。只有执行期真实出现长周期、多恢复点、probe/renegotiation或需要独立审计的
-多个cutover时才重新判断是否建立transaction。
+Stage 2没有独立current-contract cutover。Checkpoint 2A/2B与Stage 2 closure由本页和Git/PR保存实际review、validation与
+Not Run evidence；transaction保持None。aggregate source/owner/lifecycle audit确认本Stage没有修改`task::files`、iomux或
+epoll owner/policy，general Socket不解释family backlog/private role，VFS binding registry不持pathname/permission truth，
+route只携带notification/recheck capability，旧Unix双路径为零。
 
-Stage 2 closure前必须完成一次aggregate source/owner/lifecycle audit，并把实际采用的bind publication路线写回本节或
-Git/PR evidence。若出现failed-bind inert inode或其它新的当前缺口，按具体可复现行为更新register；若未触发退路，不预建
-limitation或“未发生”记录。任何pending Socket/Unix/IOMUX/Epoll contract继续Not Effective；关闭后停止，不自动解析或
-激活Stage 3。
+2A已采用的failed-bind inert inode路线及其failure point、errno、residue、cleanup与observability继续由
+[`ANE-20260802-UNIX-BIND-RETIRED-INERT-INODE`](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)
+拥有；2B未产生新的current issue或accepted limitation，因此register不新增条目。所有pending Socket/Unix/IOMUX/Epoll
+contract继续Not Effective。Stage 2关闭后已停止，不自动解析或激活Stage 3。
 
 ## Stage 3 — Stream operation 与完整 readiness closure
 

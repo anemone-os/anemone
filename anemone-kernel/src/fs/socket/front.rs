@@ -48,6 +48,30 @@ pub(super) enum SocketQueryError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketListenError {
+    Unsupported,
+    Retired,
+    InvalidState,
+}
+
+pub(super) enum SocketConnectError {
+    Unsupported,
+    Retired,
+    InvalidState,
+    AlreadyConnected,
+    ConnectionRefused,
+    WouldBlock(SocketWait),
+    Operation(SysError),
+}
+
+pub(super) enum SocketAcceptError {
+    Unsupported,
+    Retired,
+    InvalidState,
+    WouldBlock(SocketWait),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketSendError {
     Unsupported,
     Retired,
@@ -120,11 +144,37 @@ pub(super) struct SocketPairPreparation {
     pub(super) second_private: AnyOpaque,
 }
 
+pub(super) struct SocketWait {
+    private: AnyOpaque,
+    poll: for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
+}
+
+impl SocketWait {
+    pub(super) fn new(
+        private: AnyOpaque,
+        poll: for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
+    ) -> Self {
+        Self { private, poll }
+    }
+
+    pub(super) fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        (self.poll)(&self.private, request)
+    }
+}
+
+pub(super) struct SocketAcceptItem {
+    pub(super) private: AnyOpaque,
+    pub(super) peer_address: Option<SocketAddress>,
+}
+
 pub(super) struct SocketOps {
     pub(super) socket_type: SocketType,
     pub(super) create: Option<fn() -> Result<SocketPreparation, SysError>>,
     pub(super) create_pair: Option<fn() -> Result<SocketPairPreparation, SysError>>,
     pub(super) bind: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketBindError>>,
+    pub(super) listen: Option<fn(&AnyOpaque, i32) -> Result<(), SocketListenError>>,
+    pub(super) connect: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketConnectError>>,
+    pub(super) accept: Option<fn(&AnyOpaque) -> Result<SocketAcceptItem, SocketAcceptError>>,
     pub(super) local_address:
         Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
     pub(super) peer_address:
@@ -164,6 +214,23 @@ impl Socket {
         self.ops.bind.ok_or(SocketBindError::Unsupported)?(&self.private, address)
     }
 
+    pub(super) fn listen(&self, backlog: i32) -> Result<(), SocketListenError> {
+        self.ops.listen.ok_or(SocketListenError::Unsupported)?(&self.private, backlog)
+    }
+
+    pub(super) fn connect(&self, address: SocketAddress) -> Result<(), SocketConnectError> {
+        self.ops.connect.ok_or(SocketConnectError::Unsupported)?(&self.private, address)
+    }
+
+    pub(super) fn accept(&self) -> Result<AcceptedSocket, SocketAcceptError> {
+        let item = self.ops.accept.ok_or(SocketAcceptError::Unsupported)?(&self.private)?;
+        Ok(AcceptedSocket {
+            ops: self.ops,
+            private: Some(item.private),
+            peer_address: item.peer_address,
+        })
+    }
+
     pub(super) fn copy_local_address(
         &self,
         sink: &mut dyn SocketAddressSink,
@@ -200,6 +267,41 @@ impl Socket {
     }
 }
 
+/// Owns a consumed accept item until its peer address is copied and its file
+/// description is fully prepared. Dropping it closes the child instead of
+/// requeueing or leaking a connection that the caller never received.
+pub(super) struct AcceptedSocket {
+    ops: &'static SocketOps,
+    private: Option<AnyOpaque>,
+    peer_address: Option<SocketAddress>,
+}
+
+impl AcceptedSocket {
+    pub(super) fn peer_address(&self) -> Option<SocketAddress> {
+        self.peer_address.clone()
+    }
+
+    pub(super) fn prepare_file(mut self) -> Result<File, SysError> {
+        // Allocate every normally fallible file resource before transferring
+        // the child private state. A failure here leaves `self.private` owned
+        // by this guard, whose Drop closes the consumed child.
+        let path = prepare_socket_path()?;
+        let private = self
+            .private
+            .take()
+            .expect("accepted Socket private state was consumed twice");
+        Ok(prepare_socket_file_at(&path, self.ops, private))
+    }
+}
+
+impl Drop for AcceptedSocket {
+    fn drop(&mut self) {
+        if let Some(private) = self.private.as_ref() {
+            (self.ops.final_release)(private);
+        }
+    }
+}
+
 /// Owns family rollback authority until the prepared opened description is
 /// published. The associated create operations alone interpret that authority.
 pub(super) struct SocketCreation {
@@ -221,16 +323,24 @@ pub(super) fn prepare_socket(ops: &'static SocketOps) -> Result<(File, SocketCre
 }
 
 fn prepare_socket_file(ops: &'static SocketOps, private: AnyOpaque) -> Result<File, SysError> {
-    let path = anony_new_inode(InodeType::Socket, &SOCKET_INODE_OPS, NilOpaque::new())?;
-    let file = anony_open_with(
-        &path,
+    let path = prepare_socket_path()?;
+    Ok(prepare_socket_file_at(&path, ops, private))
+}
+
+fn prepare_socket_path() -> Result<PathRef, SysError> {
+    anony_new_inode(InodeType::Socket, &SOCKET_INODE_OPS, NilOpaque::new())
+}
+
+fn prepare_socket_file_at(path: &PathRef, ops: &'static SocketOps, private: AnyOpaque) -> File {
+    anony_open_with(
+        path,
         OpenedFile::with_mode(
             &SOCKET_FILE_OPS,
             FileMode::STREAM,
             AnyOpaque::new(Socket { ops, private }),
         ),
-    )?;
-    Ok(file)
+    )
+    .expect("explicit anonymous Socket open is infallible")
 }
 
 pub(super) fn prepare_socket_pair(ops: &'static SocketOps) -> Result<(File, File), SysError> {
