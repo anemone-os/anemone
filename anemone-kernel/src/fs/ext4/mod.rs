@@ -10,7 +10,6 @@ use anemone_abi::errno::*;
 use lwext4_rust::{
     BlockDevice as LwExt4BlockDevice, Ext4Error as LwExt4Error, Ext4Filesystem as LwExt4Fs,
     FileAttr as LwExt4FileAttr, FsConfig as LwExt4FsConfig, InodeType as LwExt4InodeType,
-    SystemHal as LwExt4SystemHal,
 };
 
 use crate::{
@@ -28,15 +27,6 @@ pub(super) const EXT4_ROOT_INO: u32 = 2;
 mod glue {
     use super::*;
 
-    #[derive(Debug)]
-    pub struct Ext4Hal;
-
-    impl LwExt4SystemHal for Ext4Hal {
-        fn now() -> Option<Duration> {
-            None
-        }
-    }
-
     #[derive(Clone)]
     pub struct Ext4Disk {
         dev: Arc<dyn BlockDev>,
@@ -49,18 +39,16 @@ mod glue {
     }
 
     impl LwExt4BlockDevice for Ext4Disk {
-        fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> lwext4_rust::Ext4Result<usize> {
+        fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> lwext4_rust::Ext4Result<()> {
             self.dev
                 .write_blocks(block_id as usize, buf)
-                .map_err(|err| LwExt4Error::new(err.as_errno(), "block write failed"))?;
-            Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
+                .map_err(|err| LwExt4Error::new(err.as_errno(), "block write failed"))
         }
 
-        fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> lwext4_rust::Ext4Result<usize> {
+        fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> lwext4_rust::Ext4Result<()> {
             self.dev
                 .read_blocks(block_id as usize, buf)
-                .map_err(|err| LwExt4Error::new(err.as_errno(), "block read failed"))?;
-            Ok(buf.len() / lwext4_rust::EXT4_DEV_BSIZE)
+                .map_err(|err| LwExt4Error::new(err.as_errno(), "block read failed"))
         }
 
         fn num_blocks(&self) -> lwext4_rust::Ext4Result<u64> {
@@ -68,7 +56,7 @@ mod glue {
         }
     }
 
-    pub type Ext4Fs = LwExt4Fs<Ext4Hal, Ext4Disk>;
+    pub type Ext4Fs = LwExt4Fs<Ext4Disk>;
 
     /// `Ext4Fs` holds a pointer in itself which comes from C code, so it does
     /// not implement `Send` or `Sync`. We, however, ensure that all

@@ -55,15 +55,10 @@ fn main() {
     println!("cargo:rustc-link-lib=static={lwext4_lib}");
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rerun-if-changed=c/wrapper.h");
-    println!(
-        "cargo:rerun-if-changed={}/Makefile",
-        c_path.to_str().unwrap()
-    );
-    println!("cargo:rerun-if-changed={}/src", c_path.to_str().unwrap());
-    println!(
-        "cargo:rerun-if-changed={}/toolchain/musl-generic.cmake",
-        c_path.to_str().unwrap()
-    );
+    // Cargo watches directory inputs recursively. The CMake graph includes
+    // nested source/header/CMake files, so the vendored tree is the honest
+    // invalidation boundary for both the static library and generated config.
+    println!("cargo:rerun-if-changed={}", c_path.display());
 }
 
 fn generate_bindings_to_rust(executor: &BuildExecutor, toolchain: &Toolchain, out_dir: &Path) {
@@ -78,6 +73,15 @@ fn generate_bindings_to_rust(executor: &BuildExecutor, toolchain: &Toolchain, ou
             out_dir.display()
         ))
         .layout_tests(false)
+        .allowlist_type(
+            "^ext4_(bcache|blockdev|blockdev_iface|dir_en|dir_iter|dir_search_result|fs|inode|inode_ref|sblock)$",
+        )
+        .allowlist_function(
+            "^ext4_(bcache_(cleanup|fini_dynamic|init_dynamic)|block_(bind_bcache|cache_flush|cache_write_back|fini|init|readbytes|set_lb_size|writebytes)|blocks_(get_direct|set_direct)|dir_(add_entry|destroy_result|find_entry|iterator_fini|iterator_init|iterator_next|remove_entry)|fs_(alloc_inode|append_inode_dblk|get_inode_dblk_idx|get_inode_ref|init|init_inode_dblk_idx|inode_blocks_init|inode_links_count_inc|put_inode_ref|free_inode|truncate_inode|fini)|inode_(clear_flag|get_dev|get_gid|get_mode|get_size|get_uid|set_del_time|set_dev|set_gid|set_mode|set_size|set_uid))$",
+        )
+        .allowlist_var(
+            "^(CONFIG_BLOCK_DEV_CACHE_SIZE|E(IO|ISDIR|NOENT|NOTEMPTY|NOTSUP|OK)|EXT4_(DE_(BLKDEV|CHRDEV|DIR|FIFO|REG_FILE|SOCK|SYMLINK|UNKNOWN)|INODE_(BLOCKS|FLAG_EXTENTS)))$",
+        )
         .parse_callbacks(Box::new(CustomCargoCallbacks));
 
     for arg in toolchain.bindgen_clang_args(&bindgen_sysroot) {

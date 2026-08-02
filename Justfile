@@ -6,11 +6,12 @@ default:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
-[doc("run a repository-owned test suite: `xtask` or `net-host`")]
+[doc("run a repository-owned test suite: `xtask`, `net-host`, or `lwext4`")]
 test suite:
     @case {{ quote(suite) }} in \
         xtask) just test-xtask ;; \
         net-host) just test-net-host ;; \
+        lwext4) just test-lwext4 ;; \
         *) echo "unknown test suite:" {{ quote(suite) }} >&2; exit 2 ;; \
     esac
 
@@ -23,6 +24,14 @@ test-net-host:
     @cargo test -p anemone-net-api -p anemone-smoltcp-stack
     @cargo test -p anemone-smoltcp-stack --no-default-features --no-run
     @cargo check -p anemone-smoltcp-stack --no-default-features
+
+[private]
+test-lwext4:
+    @LWEXT4_CC="${LWEXT4_CC:-cc}" \
+        LWEXT4_CXX="${LWEXT4_CXX:-c++}" \
+        LWEXT4_AR="${LWEXT4_AR:-ar}" \
+        LWEXT4_SYSROOT="${LWEXT4_SYSROOT:-/}" \
+        cargo test -p lwext4_rust --lib
 
 [doc("clean the build artifacts of Anemone kernel")]
 clean:

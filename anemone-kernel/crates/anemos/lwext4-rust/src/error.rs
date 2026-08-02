@@ -9,7 +9,7 @@ pub type Ext4Result<T = ()> = Result<T, Ext4Error>;
 
 pub struct Ext4Error {
     pub code: i32,
-    pub context: Option<&'static str>,
+    context: Option<&'static str>,
 }
 impl Ext4Error {
     pub fn new(code: i32, context: impl Into<Option<&'static str>>) -> Self {

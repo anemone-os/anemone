@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-02 - lwext4 Rust safe facade](./2026-08-02-lwext4-rust-safe-facade.md)
 - [2026-08-02 - Pipe Event wait](./2026-08-02-pipe-event-wait.md)
 - [2026-08-02 - rlimit core 与 RLIMIT_NOFILE](./2026-08-02-rlimit-core-nofile.md)
 - [2026-08-02 - VFS/kernel creation boundary](./2026-08-02-vfs-kernel-creation-boundary.md)

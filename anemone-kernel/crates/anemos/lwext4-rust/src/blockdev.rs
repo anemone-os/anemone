@@ -10,11 +10,11 @@ use alloc::boxed::Box;
 pub const EXT4_DEV_BSIZE: usize = 512;
 
 pub trait BlockDevice {
-    /// Writes blocks to the device, starting from the given block ID.
-    fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> Ext4Result<usize>;
+    /// Writes the complete buffer, starting from the given block ID.
+    fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> Ext4Result<()>;
 
-    /// Reads blocks from the device, starting from the given block ID.
-    fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> Ext4Result<usize>;
+    /// Fills the complete buffer, starting from the given block ID.
+    fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> Ext4Result<()>;
 
     /// Gets the number of blocks on the device.
     fn num_blocks(&self) -> Ext4Result<u64>;
@@ -30,13 +30,13 @@ struct ResourceGuard<Dev> {
     block_dev_iface: Box<ext4_blockdev_iface>,
 }
 
-pub struct Ext4BlockDevice<Dev: BlockDevice> {
+pub(crate) struct Ext4BlockDevice<Dev: BlockDevice> {
     pub(crate) inner: Box<ext4_blockdev>,
     _guard: ResourceGuard<Dev>,
 }
 
 impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
-    pub fn new(dev: Dev) -> Ext4Result<Self> {
+    pub(crate) fn new(dev: Dev) -> Ext4Result<Self> {
         let mut dev = Box::new(dev);
 
         // Block size buffer
@@ -114,8 +114,25 @@ impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
         };
 
         bdev.part_offset = 0;
-        bdev.part_size = bdif.ph_bcnt * bdif.ph_bsize as u64;
+        let Some(part_size) = bdif.ph_bcnt.checked_mul(bdif.ph_bsize as u64) else {
+            error!(
+                "ext4 block device size overflow: blocks={} block_size={}",
+                bdif.ph_bcnt, bdif.ph_bsize
+            );
+            return EIO as _;
+        };
+        bdev.part_size = part_size;
         EOK as _
+    }
+
+    fn request_len(bdif: &ext4_blockdev_iface, block_id: u64, block_count: u32) -> Option<usize> {
+        let end = block_id.checked_add(block_count as u64)?;
+        if end > bdif.ph_bcnt {
+            return None;
+        }
+        usize::try_from(bdif.ph_bsize)
+            .ok()?
+            .checked_mul(block_count as usize)
     }
     unsafe extern "C" fn dev_bread(
         bdev: *mut ext4_blockdev,
@@ -129,10 +146,24 @@ impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
         }
 
         let (_bdev, bdif, dev) = unsafe { Self::dev_read_fields(bdev) };
-        let buf_len = (bdif.ph_bsize * blk_cnt) as usize;
+        let Some(buf_len) = Self::request_len(bdif, blk_id, blk_cnt) else {
+            error!(
+                "ext4 block read request is out of range: start={blk_id} count={blk_cnt} block_size={} capacity_blocks={}",
+                bdif.ph_bsize, bdif.ph_bcnt
+            );
+            return EIO as _;
+        };
+        if buf.is_null() {
+            error!(
+                "ext4 block read request has a null buffer: start={blk_id} count={blk_cnt} bytes={buf_len}"
+            );
+            return EIO as _;
+        }
         let buffer = unsafe { slice::from_raw_parts_mut(buf as *mut u8, buf_len) };
         if let Err(err) = dev.read_blocks(blk_id, buffer) {
-            error!("read_blocks failed: {err:?}");
+            error!(
+                "ext4 block read failed: start={blk_id} count={blk_cnt} bytes={buf_len}: {err:?}"
+            );
             return EIO as _;
         }
 
@@ -150,10 +181,24 @@ impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
         }
 
         let (_bdev, bdif, dev) = unsafe { Self::dev_read_fields(bdev) };
-        let buf_len = (bdif.ph_bsize * blk_cnt) as usize;
+        let Some(buf_len) = Self::request_len(bdif, blk_id, blk_cnt) else {
+            error!(
+                "ext4 block write request is out of range: start={blk_id} count={blk_cnt} block_size={} capacity_blocks={}",
+                bdif.ph_bsize, bdif.ph_bcnt
+            );
+            return EIO as _;
+        };
+        if buf.is_null() {
+            error!(
+                "ext4 block write request has a null buffer: start={blk_id} count={blk_cnt} bytes={buf_len}"
+            );
+            return EIO as _;
+        }
         let buffer = unsafe { slice::from_raw_parts(buf as *const u8, buf_len) };
         if let Err(err) = dev.write_blocks(blk_id, buffer) {
-            error!("read_blocks failed: {err:?}");
+            error!(
+                "ext4 block write failed: start={blk_id} count={blk_cnt} bytes={buf_len}: {err:?}"
+            );
             return EIO as _;
         }
 
@@ -172,7 +217,154 @@ impl<Dev: BlockDevice> Drop for Ext4BlockDevice<Dev> {
     fn drop(&mut self) {
         unsafe {
             let bdev = self.inner.as_mut();
-            ext4_block_fini(bdev);
+            let result = ext4_block_fini(bdev);
+            if result != EOK as _ {
+                error!(
+                    "ext4 block device close failed: {}",
+                    crate::Ext4Error::new(result, None)
+                );
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct TestDevice {
+        reads: usize,
+        writes: usize,
+        fail_reads: bool,
+        fail_writes: bool,
+    }
+
+    impl BlockDevice for TestDevice {
+        fn write_blocks(&mut self, _block_id: u64, _buf: &[u8]) -> Ext4Result<()> {
+            self.writes += 1;
+            if self.fail_writes {
+                Err(crate::Ext4Error::new(EIO as _, "injected write failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn read_blocks(&mut self, _block_id: u64, buf: &mut [u8]) -> Ext4Result<()> {
+            self.reads += 1;
+            if self.fail_reads {
+                Err(crate::Ext4Error::new(EIO as _, "injected read failure"))
+            } else {
+                buf.fill(0x5a);
+                Ok(())
+            }
+        }
+
+        fn num_blocks(&self) -> Ext4Result<u64> {
+            Ok(8)
+        }
+    }
+
+    struct CallbackFixture {
+        device: Box<TestDevice>,
+        interface: Box<ext4_blockdev_iface>,
+        blockdev: Box<ext4_blockdev>,
+    }
+
+    impl CallbackFixture {
+        fn new() -> Self {
+            let mut device = Box::new(TestDevice::default());
+            let mut interface: Box<ext4_blockdev_iface> = Box::new(unsafe { mem::zeroed() });
+            interface.ph_bsize = EXT4_DEV_BSIZE as u32;
+            interface.ph_bcnt = 8;
+            interface.p_user = device.as_mut() as *mut _ as *mut c_void;
+            let mut blockdev: Box<ext4_blockdev> = Box::new(unsafe { mem::zeroed() });
+            blockdev.bdif = interface.as_mut();
+            Self {
+                device,
+                interface,
+                blockdev,
+            }
+        }
+
+        fn bdev(&mut self) -> *mut ext4_blockdev {
+            self.blockdev.as_mut()
+        }
+    }
+
+    #[test]
+    fn callbacks_complete_exact_requests_and_propagate_transport_errors() {
+        let mut fixture = CallbackFixture::new();
+        let mut read_buf = [0u8; EXT4_DEV_BSIZE * 2];
+        let write_buf = [0xa5u8; EXT4_DEV_BSIZE * 2];
+
+        let read = unsafe {
+            Ext4BlockDevice::<TestDevice>::dev_bread(
+                fixture.bdev(),
+                read_buf.as_mut_ptr().cast(),
+                2,
+                2,
+            )
+        };
+        let write = unsafe {
+            Ext4BlockDevice::<TestDevice>::dev_bwrite(
+                fixture.bdev(),
+                write_buf.as_ptr().cast(),
+                2,
+                2,
+            )
+        };
+        assert_eq!(read, EOK as c_int);
+        assert_eq!(write, EOK as c_int);
+        assert_eq!(read_buf, [0x5a; EXT4_DEV_BSIZE * 2]);
+        assert_eq!(fixture.device.reads, 1);
+        assert_eq!(fixture.device.writes, 1);
+
+        fixture.device.fail_reads = true;
+        fixture.device.fail_writes = true;
+        let read = unsafe {
+            Ext4BlockDevice::<TestDevice>::dev_bread(
+                fixture.bdev(),
+                read_buf.as_mut_ptr().cast(),
+                2,
+                2,
+            )
+        };
+        let write = unsafe {
+            Ext4BlockDevice::<TestDevice>::dev_bwrite(
+                fixture.bdev(),
+                write_buf.as_ptr().cast(),
+                2,
+                2,
+            )
+        };
+        assert_eq!(read, EIO as c_int);
+        assert_eq!(write, EIO as c_int);
+    }
+
+    #[test]
+    fn zero_and_invalid_requests_never_reach_transport() {
+        let mut fixture = CallbackFixture::new();
+        let zero = unsafe {
+            Ext4BlockDevice::<TestDevice>::dev_bread(fixture.bdev(), ptr::null_mut(), 8, 0)
+        };
+        let mut byte = 0u8;
+        let out_of_range = unsafe {
+            Ext4BlockDevice::<TestDevice>::dev_bread(
+                fixture.bdev(),
+                (&mut byte as *mut u8).cast(),
+                8,
+                1,
+            )
+        };
+        fixture.interface.ph_bsize = u32::MAX;
+        let overflow =
+            Ext4BlockDevice::<TestDevice>::request_len(fixture.interface.as_ref(), 0, u32::MAX);
+
+        assert_eq!(zero, EOK as c_int);
+        assert_eq!(out_of_range, EIO as c_int);
+        assert_eq!(overflow, None);
+        assert_eq!(fixture.device.reads, 0);
+        assert_eq!(fixture.device.writes, 0);
     }
 }
