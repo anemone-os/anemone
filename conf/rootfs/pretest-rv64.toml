@@ -90,3 +90,11 @@ installed_dir = "/bin"
 [[files]]
 source = "anemone-apps/user-test/staged/riscv/mke2fs"
 installed_path = "/fixtures/user-test/tools/mke2fs"
+
+[[files]]
+source = "anemone-apps/user-test/staged/riscv/socket-r1-glibc"
+installed_path = "/fixtures/user-test/tools/socket-r1-glibc"
+
+[[files]]
+source = "anemone-apps/user-test/staged/riscv/socket-r1-musl"
+installed_path = "/fixtures/user-test/tools/socket-r1-musl"

@@ -1,11 +1,10 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R1 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Checkpoint 3A/3B Closed / Stage 4 Ready / Not Active
+**状态：** R1 Closed / Stage 1--4 Closed / Checkpoint 1A/1B/2A/2B/3A/3B Closed / `SOCKET-UNIX-CUTOVER` Effective
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R1
-**当前实施阶段：** Stage 4 Ready / Not Active；resolution completed；尚未取得实施或cutover授权
-（transaction None；contract cutover None）
+**当前实施阶段：** Stage 4 Closed 2026-08-02；transaction None；`SOCKET-UNIX-CUTOVER` Effective
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
 最终 validation boundary 仍由父 RFC [index](./index.md)和[目标与不变量](./invariants.md)定义；本页不建立并列
@@ -20,8 +19,8 @@ contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解�
 随后各自取得独立授权并依次关闭，Stage 3 已关闭并停止在 Stage 4 前。resolution、checkpoint closure 与 Stage 1--3
 closure均不使 pending contract 生效，也不自动进入下一 checkpoint 或 Stage。
 独立的 Stage 4 resolution 随后读取最终candidate、完整actual diff、review finding、validation provenance、current
-contracts与register，把最终综合验收和原子cutover解析为一个不拆checkpoint的Stage；本次resolution没有激活Stage 4、
-运行验证、修改current contract或执行cutover。
+contracts与register，把最终综合验收和原子cutover解析为一个不拆checkpoint的Stage；随后本轮明确授权激活并关闭整个
+Stage 4，未建立4A/4B或进入其它gate。
 
 ## 全局 Implementation Boundary
 
@@ -117,7 +116,7 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
 | Stage 2 | Closed；2A/2B Closed；Cutover None | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已完成并停止；Stage 3随后独立解析为Ready |
 | Stage 3 | Closed；3A/3B Closed；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 已完成并停止；Stage 4随后独立解析为Ready |
-| Stage 4 | Ready / Not Active；Cutover None | 复核最终candidate的综合acceptance并原子执行`SOCKET-UNIX-CUTOVER` | Stage 1-3 Closed；Stage 4 resolution completed | 只能由新的明确授权激活整个Stage 4 |
+| Stage 4 | Closed；`SOCKET-UNIX-CUTOVER` Effective | 复核最终candidate的综合acceptance并原子执行`SOCKET-UNIX-CUTOVER` | Stage 1-3 Closed；Stage 4 resolution completed | 已整体激活并关闭；没有下一gate |
 
 Stage 1--4 已按下文解析到可执行粒度；Stage 4不拆checkpoint，最终review、validation disposition与contract cutover共同
 构成一个原子closure unit。
@@ -607,7 +606,7 @@ Effective，本interlude不产生register条目，也不自动解析或激活Sta
 
 ## Stage 3 Closed — Stream operation 与完整 readiness closure
 
-**当前状态：** Closed 2026-08-02；Checkpoint 3A/3B Closed；Stage 4 Not Active；Cutover None；transaction None。
+**Stage 3 resolution时状态：** Closed 2026-08-02；Checkpoint 3A/3B Closed；当时Stage 4 Not Active、Cutover None；transaction None。
 Stage 3 resolution 已把本 Stage 解析为Checkpoint 3A“directional stream operation与message/query ABI”和Checkpoint 3B
 “listener/stream readiness与iomux/epoll projection”。resolution本身只更新accepted target内的实施路线、验证与停止边界；
 未修改R0 target、Contract Impact或current contract，未创建transaction，也未在当时授权任何代码实施。
@@ -806,7 +805,7 @@ transaction与contract cutover均为None，全部pending Socket/Unix/IOMUX/Epoll
 
 ### Checkpoint 3B Closed — Listener/stream readiness 与 iomux/epoll projection
 
-**状态：** Closed 2026-08-02；Stage 3 Closed / Cutover None；transaction None；Stage 4 Not Active。
+**3B closure时状态：** Closed 2026-08-02；当时Stage 3 Closed / Cutover None；transaction None；Stage 4 Not Active。
 
 **Purpose：** 只从3A最终direction truth和Stage 2 listener truth计算current readiness，把listener、connected stream、
 half-close与full HUP接入现有poll/select/epoll consumer protocol，并关闭Stage 3。
@@ -889,9 +888,9 @@ register；target、owner、ABI、Contract Impact、acceptance或validation stre
 本身不解析或授权Stage 4；后续独立resolution才基于完整actual diff、finding、validation与register把Stage 4解析为下文
 Ready状态。
 
-## Stage 4 Ready / Not Active — Integrated acceptance 与 `SOCKET-UNIX-CUTOVER`
+## Stage 4 Closed — Integrated acceptance 与 `SOCKET-UNIX-CUTOVER`
 
-**Resolution状态：** Completed 2026-08-02；Stage 4 Ready / Not Active；不拆checkpoint。本resolution只更新accepted
+**Resolution状态：** Completed 2026-08-02；随后Stage 4于同日整体激活并关闭；不拆checkpoint。本resolution只更新accepted
 target内的最终审查、证据复用、contract write-back与停止路线；未修改R1 target、Contract Impact、current contract或
 register，未创建transaction，未运行build/KUnit/QEMU/LTP，也未授权Stage 4实施或cutover。
 
@@ -1015,3 +1014,59 @@ Contract Impact、ABI、acceptance与validation strength。不得部分激活ID�
 退出要求所有pending ID共同满足父RFC acceptance，final review和Architecture Friction disposition完成，current contracts与
 RFC closure原子回写，实际限制和Not Run范围诚实记录，文档验证通过。届时Stage 4与父RFC同时Closed；Stage 4之后没有自动
 进入的下一gate。
+
+### Stage 4 closure 与 evidence index
+
+**Final candidate：** production source为`d027b6c9`；其后的`b32d5e00`只解析Stage 4路线，本Stage最终diff没有修改
+`anemone-kernel`、`anemone-abi`、`anemone-rs`或`conf/.defconfig`。Stage 4只新增一份长期focused dual-libc validation
+asset及其canonical pretest wiring，并完成current-contract/RFC cutover。
+
+最终综合source/change review覆盖`f0378d0f..d027b6c9`，结论Apollyon 0、Keter 0、production correctness blocker 0。
+review确认common Socket只持static ops witness与opaque envelope，syscall family分支止于ABI lowering；Unix endpoint、
+listener、direction与namespace各有唯一truth；VFS identity/generation、connect retry DAC、accept cleanup、operation gate、
+final release、independent RDHUP/HUP和epoll exact scan均符合R1 owner/handoff/cleanup。
+
+| Current contract | Final-candidate evidence |
+| --- | --- |
+| `SOCKET-FRONT-001` | front/descriptor/source audit；resolver、pair/single preparation与opened-description KUnit；两架构UDP 16/16与Unix 23/23真实consumer |
+| `SOCKET-ABI-001` | tuple/sockaddr/query/copy KUnit；双架构、双libc `socketpair02` 4 TPASS与tracked `socket_r1_oracle` 1 TPASS |
+| `SOCKET-WAIT-001` | operation/predicate/route audit；connect/accept/direction/late-hint owner proof；两架构blocking/nonblocking、poll/select/epoll runtime |
+| `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001` | role/listener/direction KUnit；两架构pathname admission、I/O、peek、shutdown、EOF/SIGPIPE、RDHUP/HUP suite |
+| `UNIX-SOCKET-NAMESPACE-001`、`UNIX-SOCKET-ADDRESS-001` | exact inode identity/generation、bind/name KUnit；两架构umask/DAC、hard-link/rename/unlink/rebind与addrlen/copy-fault runtime |
+| `UNIX-SOCKET-LIFECYCLE-001` | fd rollback、listener drain、stale binding、dup/fork/final release source/KUnit；两架构alias/close/admission runtime |
+| `IOMUX-POLL-002/003`、`EPOLL-READY-001` | independent `READ_HANG_UP` source/consumer audit与KUnit；双架构、双libc listener/ppoll/pselect/RDHUP/HUP/LT/ET/ONESHOT oracle |
+
+`just test xtask`为66/66，`just test net-host`全部通过。最终canonical wrapper串行运行并显式选择LOCAL中的preliminary
+master image：RV64通过373/373项KUnit、UDP 16/16、Unix 23/23、glibc/musl各`socketpair02` 4 TPASS与oracle 1 TPASS，
+完成machine power-off；LA64通过378/378项KUnit及相同guest/libc矩阵，完成filesystem/network/device orderly shutdown后
+进入已知terminal halt并由QEMU monitor退出。最终日志为`build/socket-stage4-oracle-rv64.log`
+（SHA-256 `2ca945ac24222be483f027bd287a3bffc7c45c7f24cc1e2ec25e3695723baf61`）和
+`build/socket-stage4-oracle-la64.log`
+（SHA-256 `c20909abe37283f94a1b73f0a741dd5ab6ebad5b4fe334b45a7224413fd1ae97`）。
+
+tracked oracle source SHA-256为`725210eb2af9544f94ba711419efb866b4b63e6bd7fb98bd833dafb54d9feb3e`；
+四份static binary按RV64 glibc/musl、LA64 glibc/musl依次为
+`25a8966f196dada592457d246549cdd50bf3e98af263d9ce09d1106a99e18201`、
+`9bcecb2fe2c5ae219361eac72ca92797054a402a00e49680d055df352bfbf0f3`、
+`7c7012e9450d28029b320ddef1db155117bceaf46154fda9c011616cd9acb61d`与
+`fb10460bbe36b57e166c1cc8cd6ec9084cf3c3912c8baf090a6927090eae4dc4`。对应compiler分别为Ubuntu
+`riscv64-linux-gnu-gcc 13.3.0`、`riscv64-linux-musl-gcc 16.1.0`、
+`loongarch64-unknown-linux-gnu-gcc 15.1.0`和`loongarch64-unknown-linux-musl-gcc 14.3.0`。
+tracked kernel config `conf/.defconfig` SHA-256为
+`33f5b17984c413955096c590e1a94bfbf256da97ca5189b9d3409b8be902ff47`；RV64/LA64 pretest rootfs config分别为
+`0274da5a97fd548ac632423d23c9bfac1159fb80166a1908453d9aecd22fe63a`与
+`0790e55b6d9a6f24cf6ac3b4213b18eeb7cc2558319b61a364fad5164b7a4851`。显式选择的preliminary master image分别为
+`56fa657a06a5ca7d9af41dca0bcd861931dd18523783e7a83b7499a744f76b89`与
+`fbce17bbd4f58d0e5b5fae104c771899b74b55267a01c09bac0d810979be04a2`；wrapper只覆盖worktree-local runtime副本，
+没有修改master image。
+
+原Euclid“non-socket fd与shutdown `how` lookup priority缺少直接runtime”由tracked oracle的invalid-fd/non-socket
+valid/invalid-`how`矩阵在四种arch/libc组合中关闭。唯一residual Euclid仍是shutdown/read/write/final-close三方竞争缺少
+可控copy barrier runtime；source中的per-direction sleepable operation gate、copy后association/terminal recheck、final-release
+withdraw-before-terminal顺序及相邻proof没有显示第二truth、lost wake或错误commit。最小补强是未来真实触达该race时加入
+test-only deterministic harness；不得把phase/barrier沉淀为production API。该coverage风险不改变R1 state model、ABI或
+mandatory acceptance，不进入register。
+
+`SOCKET-UNIX-CUTOVER`原子激活八个Socket/Unix Introduce ID，并Refine `IOMUX-POLL-002/003`与
+`EPOLL-READY-001`；register无需新增条目，transaction仍为None。physical hardware、`smp>1`、full socket/network LTP与
+final harness均Not Run。本Stage关闭后停止，没有下一gate被激活。

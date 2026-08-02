@@ -1,6 +1,6 @@
 # RFC-20260801-socket-abstraction-and-unix-socket
 
-**状态：** Accepted
+**状态：** Closed
 **修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-02
@@ -9,21 +9,20 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** Git/PR；当前Stage/checkpoint状态见[实施路线](./implementation.md)；transaction None；contract cutover None
+**执行记录：** Git/PR与[实施路线Stage 4 closure](./implementation.md#stage-4-closure-与-evidence-index)；transaction None；`SOCKET-UNIX-CUTOVER` Effective 2026-08-02
 
 ## 文档状态
 
-本文是 Socket Abstraction 与 Unix Socket 的公共 Accepted R1 RFC。它把前置定位中已经形成的方向固定为经过 review
-的 target、owner、ABI、failure/cleanup、Contract Impact 与 acceptance 边界；私有 positioning 不成为公共依赖或
-并列 canonical source。
+本文是 Socket Abstraction 与 Unix Socket 的公共 Closed R1 RFC。它保存经过review并已经cut over的target、owner、
+ABI、failure/cleanup、Contract Impact与acceptance历史；私有positioning不成为公共依赖或并列canonical source。
 
-本文不是 current contract，也不表示R1 acceptance自动激活任何实现gate。当前 UDP、opened-description、VFS、iomux
-与epoll语义继续以 `docs/src/contracts/` 下的 Active contract 为准；各Stage/checkpoint的resolution、activation与closure
-状态由[实施路线](./implementation.md)唯一记录。达到`SOCKET-UNIX-CUTOVER`的全部验收前，不得修改current contract。
+本文不是current contract；当前Socket、UDP、opened-description、VFS、iomux与epoll语义以`docs/src/contracts/`下的
+Active contract为准。各Stage/checkpoint的resolution、activation、closure与最终evidence由
+[实施路线](./implementation.md)记录；`SOCKET-UNIX-CUTOVER`已经完成。
 
 本 RFC 按当前规模保留[目标与不变量](./invariants.md)，并因已经出现真实多阶段实施需要而增加一份
-[实施路线](./implementation.md)。当前不创建tracking page或transaction；任何resolution或checkpoint/Stage closure都
-不自动授权下一个gate，也不使pending contract提前生效。
+[实施路线](./implementation.md)。本RFC没有创建tracking page或transaction；历史resolution或checkpoint/Stage closure
+均未自动授权下一gate，全部contract ID只在最终Stage 4原子cutover时生效。
 
 ## 摘要
 
@@ -392,21 +391,22 @@ predicate、snapshot与notification实现不因此冻结。
 
 ## Contract Impact
 
-以下均为 pending target；`SOCKET-UNIX-CUTOVER` 前 current contract 保持不变。
+以下是本RFC已经由`SOCKET-UNIX-CUTOVER`原子生效的delta；current truth现由[Socket contract](../../contracts/socket/index.md)、
+[IOMUX-POLL](../../contracts/iomux/poll-wait.md)与[Epoll Protocol](../../contracts/epoll/protocol.md)唯一拥有。
 
-| Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
+| Contract ID | 变化 | Cutover前规则 | 生效摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `SOCKET-FRONT-001` | Introduce | None（尚未生效） | general Socket 只拥有 immutable ops/type association、private storage envelope与共同FileOps projection，不拥有family runtime truth | `SOCKET-UNIX-CUTOVER` |
-| `SOCKET-ABI-001` | Introduce | None（尚未生效） | Linux tuple/sockaddr/flags/user copy/errno止于ABI adapter；resolved semantic type由静态ops唯一见证；首版`SO_ERROR`返回`ENOPROTOOPT` | `SOCKET-UNIX-CUTOVER` |
-| `SOCKET-WAIT-001` | Introduce | None（尚未生效） | 各operation读取各自owner-defined predicate，只共享`EAGAIN`分类与wait/recheck协议；notification不是truth；Unix首版无pending-error/error readiness | `SOCKET-UNIX-CUTOVER` |
-| `UNIX-SOCKET-STATE-001` | Introduce | None（尚未生效） | endpoint role、listener/backlog、connection与directional stream各有唯一owner | `SOCKET-UNIX-CUTOVER` |
-| `UNIX-SOCKET-STREAM-001` | Introduce | None（尚未生效） | connect/accept建立paired stream；send/receive、partial progress、peek、EOF、connected shutdown与SIGPIPE由directional owner提交；pre-connection shutdown返回`ENOTCONN` | `SOCKET-UNIX-CUTOVER` |
-| `UNIX-SOCKET-NAMESPACE-001` | Introduce | None（尚未生效） | bind只提交socket kind与`0777` requested permission；task filesystem context、user-thread kernel creation operation与context-free VFS primitive沿用`VFS-CREATION-001`的umask/admission/formation/handoff owner；Unix只索引stable inode identity到live binding | `SOCKET-UNIX-CUTOVER` |
-| `UNIX-SOCKET-ADDRESS-001` | Introduce | None（尚未生效） | bind-time immutable address snapshot独立于current namespace与binding key | `SOCKET-UNIX-CUTOVER` |
-| `UNIX-SOCKET-LIFECYCLE-001` | Introduce | None（尚未生效） | socketpair/connect/accept/stream/final-release handoff、unlink independence与stale-generation isolation | `SOCKET-UNIX-CUTOVER` |
-| `IOMUX-POLL-002` | Refine | [当前规则](../../contracts/iomux/poll-wait.md#iomux-poll-002--source-锁拥有-readiness-与-route-publication) | source-neutral readiness与route publication可独立承载receive-half-close category；具体predicate仍由source owner定义 | `SOCKET-UNIX-CUTOVER` |
-| `IOMUX-POLL-003` | Refine | [当前规则](../../contracts/iomux/poll-wait.md#iomux-poll-003--wake-只是-hint最终-predicate-决定返回) | final scan按interest投影RDHUP并保持真实source HUP/ERR mandatory；Unix首版不制造ERR | `SOCKET-UNIX-CUTOVER` |
-| `EPOLL-READY-001` | Refine | [当前规则](../../contracts/epoll/protocol.md#epoll-ready-001--bounded-exact-scan) | exact scan接入独立EPOLLRDHUP interest/delivery，不把兼容bit或source hint变成ready truth | `SOCKET-UNIX-CUTOVER` |
+| `SOCKET-FRONT-001` | Introduce | None | general Socket 只拥有 immutable ops/type association、private storage envelope与共同FileOps projection，不拥有family runtime truth | `SOCKET-UNIX-CUTOVER` |
+| `SOCKET-ABI-001` | Introduce | None | Linux tuple/sockaddr/flags/user copy/errno止于ABI adapter；resolved semantic type由静态ops唯一见证；首版`SO_ERROR`返回`ENOPROTOOPT` | `SOCKET-UNIX-CUTOVER` |
+| `SOCKET-WAIT-001` | Introduce | None | 各operation读取各自owner-defined predicate，只共享`EAGAIN`分类与wait/recheck协议；notification不是truth；Unix首版无pending-error/error readiness | `SOCKET-UNIX-CUTOVER` |
+| `UNIX-SOCKET-STATE-001` | Introduce | None | endpoint role、listener/backlog、connection与directional stream各有唯一owner | `SOCKET-UNIX-CUTOVER` |
+| `UNIX-SOCKET-STREAM-001` | Introduce | None | connect/accept建立paired stream；send/receive、partial progress、peek、EOF、connected shutdown与SIGPIPE由directional owner提交；pre-connection shutdown返回`ENOTCONN` | `SOCKET-UNIX-CUTOVER` |
+| `UNIX-SOCKET-NAMESPACE-001` | Introduce | None | bind只提交socket kind与`0777` requested permission；task filesystem context、user-thread kernel creation operation与context-free VFS primitive沿用`VFS-CREATION-001`的umask/admission/formation/handoff owner；Unix只索引stable inode identity到live binding | `SOCKET-UNIX-CUTOVER` |
+| `UNIX-SOCKET-ADDRESS-001` | Introduce | None | bind-time immutable address snapshot独立于current namespace与binding key | `SOCKET-UNIX-CUTOVER` |
+| `UNIX-SOCKET-LIFECYCLE-001` | Introduce | None | socketpair/connect/accept/stream/final-release handoff、unlink independence与stale-generation isolation | `SOCKET-UNIX-CUTOVER` |
+| `IOMUX-POLL-002` | Refine | 原Active publication/notification rule（Git历史） | source-neutral readiness与route publication可独立承载receive-half-close category；具体predicate仍由source owner定义 | `SOCKET-UNIX-CUTOVER` |
+| `IOMUX-POLL-003` | Refine | 原Active final-scan rule（Git历史） | final scan按interest投影RDHUP并保持真实source HUP/ERR mandatory；Unix首版不制造ERR | `SOCKET-UNIX-CUTOVER` |
+| `EPOLL-READY-001` | Refine | 原Active bounded exact-scan rule（Git历史） | exact scan接入独立EPOLLRDHUP interest/delivery，不把兼容bit或source hint变成ready truth | `SOCKET-UNIX-CUTOVER` |
 
 ### Dependencies
 
@@ -554,8 +554,8 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
   [retired-bind inert inode](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)、
   [pre-connection shutdown](../../register/current-limitations.md#ane-20260802-unix-preconnection-shutdown)
 - External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`、`net/socket.c`、`net/core/sock.c`与`fs/select.c`
-- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B、Stage 2 Checkpoint 2A/2B与Stage 3 Checkpoint 3A/3B实现、review和
-  验证证据，以及Stage 3 resolution/closure与Stage 4 resolution；transaction：None；cutover：None
+- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B、Stage 2 Checkpoint 2A/2B、Stage 3 Checkpoint 3A/3B与Stage 4
+  closure的实现、review、验证和cutover证据；transaction：None；`SOCKET-UNIX-CUTOVER` Effective
 
 ## 修订记录
 
@@ -568,8 +568,11 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 
 ## Closure
 
-Not Cut Over。Checkpoint 1A、1B、2A、2B、3A、3B与Stage 1/2/3已关闭；UDP与Unix `socketpair`共同证明front vertical
-slice，single Unix Socket、pathname namespace/name与listener/connection admission已形成Stage 2完整vertical slice，
-directional stream operation/message-query ABI与listener/stream readiness已形成Stage 3完整slice。Stage 4已经解析为一个不拆
-checkpoint的final conformance/cutover unit，但最终acceptance尚未运行；当前activation状态由[实施路线](./implementation.md)
-唯一记录。transaction与contract cutover保持None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。
+Closed / Cut Over 2026-08-02。Checkpoint 1A、1B、2A、2B、3A、3B与Stage 1--4全部关闭；UDP与Unix pathname stream
+两个真实consumer共同证明general front、ABI/wait、namespace/listener/directional stream/lifecycle及完整readiness面。
+最终source/change review为Apollyon 0、Keter 0且无production correctness blocker；逐ID evidence、双架构/双libc结果、
+唯一residual coverage Euclid与Not Run边界见[Stage 4 closure](./implementation.md#stage-4-closure-与-evidence-index)。
+
+`SOCKET-UNIX-CUTOVER`已经共同激活八个Socket/Unix contract ID，并Refine `IOMUX-POLL-002/003`与
+`EPOLL-READY-001`。现有register条目保持，不创建transaction。physical hardware、`smp>1`、full socket/network LTP与
+final harness均Not Run。本RFC关闭后没有自动进入或激活其它gate。

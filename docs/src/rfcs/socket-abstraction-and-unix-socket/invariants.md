@@ -1,14 +1,15 @@
 # Socket Abstraction 与 Unix Socket 目标和不变量
 
-**状态：** Accepted Target
+**状态：** R1 Closed / Effective via `SOCKET-UNIX-CUTOVER`
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **适用修订：** R1
 
-本文只定义本 RFC 的 pending target、correctness invariants 与 RFC-local proof obligations。当前 effective 规则仍以
-`docs/src/contracts/` 下的 Active contract 为准；本页中的 Introduce/Refine 目标在
-`SOCKET-UNIX-CUTOVER` 前均未生效。完整 UAPI 包络、Implementation Boundary、Contract Impact 与 acceptance 见父
-RFC，本文不复制 contract delta 表。
+本文保留本RFC已经接受并cut over的target、correctness invariants与RFC-local proof obligations；不承担current
+contract权威。`SOCKET-UNIX-CUTOVER`已经完成，当前effective规则唯一见[Socket contract](../../contracts/socket/index.md)、
+[IOMUX-POLL](../../contracts/iomux/poll-wait.md)与[Epoll Protocol](../../contracts/epoll/protocol.md)。完整UAPI包络、
+Implementation Boundary、Contract Impact、acceptance与closure见父RFC及[实施路线](./implementation.md)；本页不复制
+current contract正文或执行证据。
 
 ## 规则分类
 
