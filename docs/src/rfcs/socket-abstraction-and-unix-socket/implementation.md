@@ -1,19 +1,21 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / Stage 1 Closed
+**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Ready
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R0
-**当前实施阶段：** Stage 1 Closed；Stage 2 Outline / Not Active（无 contract cutover）
+**当前实施阶段：** Stage 2 Ready / Not Active；Checkpoint 2A Ready / Not Active；Checkpoint 2B Not Active
+（无 contract cutover）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
 最终 validation boundary 仍由父 RFC [index](./index.md)和[目标与不变量](./invariants.md)定义；本页不建立并列
 target、执行状态总表或验证证据副本。
 
 R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint 1A、1B 随后各自取得实施授权并依次
-关闭，Stage 1 因两个真实 consumer 均已落地而关闭。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；Stage 1 closure
-不激活 Stage 2，也不使 pending contract 生效。进入后续 Stage 前仍必须根据 live source、Stage 1 实际 diff、review
-finding 与验证证据解析当前 Stage；前一 Stage 关闭后停止，不自动进入下一 Stage。
+关闭，Stage 1 因两个真实 consumer 均已落地而关闭。独立的 Stage 2 resolution 现已根据 Stage 1 actual diff、current
+contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解析为两个有序 checkpoint，但没有激活
+Checkpoint 2A。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；resolution、checkpoint closure与Stage 2 closure均不使
+pending contract生效，也不自动进入下一 checkpoint或Stage。
 
 ## 全局 Implementation Boundary
 
@@ -107,11 +109,11 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | --- | --- | --- | --- | --- |
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
-| Stage 2 | Outline / Not Active | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；仍需独立 resolution 与实施授权 | 读取 Stage 1 实际 front、Unix endpoint/stream owner 与 validation evidence |
+| Stage 2 | Ready / Not Active；2A Ready；2B Not Active | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 由新的明确授权激活Checkpoint 2A；2A关闭后停止并独立授权2B |
 | Stage 3 | Outline | 闭合完整stream operation、shutdown与poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
 
-Stage 1 已按下文解析到可执行粒度；Stage 2--4 仍只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。
+Stage 1、2 已按下文解析到可执行粒度；Stage 3--4 仍只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。
 不创建逐文件 write set 或 Resolved Write Set Manifest；预计模块只作非穷举提示。同 owner 新文件、模块注册、
 import/re-export、定向测试和行为保持型拆分可在当前 checkpoint 内自然闭合。若用户只授权当前 Stage 或 checkpoint，
 关闭后必须停止。
@@ -245,7 +247,8 @@ common层保存第二份family/type/readiness、让UDP ops接收rawLinux ABI，�
 ### Checkpoint 1B Closed — Unix socketpair production vertical slice
 
 **状态：** Closed。Unix `socketpair` 已作为第二个真实 consumer 通过同一 Socket front 交付，Stage 1 随之关闭。
-transaction 仍为 None，contract cutover 仍为 None；Stage 2 保持 Outline / Not Active。
+transaction 仍为 None，contract cutover 仍为 None；本checkpoint关闭时没有解析或激活Stage 2，后续独立resolution
+不改变这一历史边界。
 
 **Deliverable：** 增加Unix stream concrete ops、paired endpoint与connection/directional owner；接通
 `socketpair(AF_UNIX, SOCK_STREAM, 0, ...)`及两种creation flag；通过common FileOps/description hook交付basic
@@ -281,7 +284,7 @@ Stage 1不要求以case数量证明质量，也不因未运行广泛但非当前
 pair transaction、stream predicate、copy progress、wait与final release均有唯一owner和focused runtime。若basic
 blocking只能通过第二套socket wait queue、family隐藏wait loop、ready cache或跨sleep private phase实现，若pair rollback
 需要改变task/files lifecycle/shared contract，或若正确EOF/`EPIPE`必须提前引入Stage 3的第二truth，停止并先修订路线或
-回RFC review。1B通过后Stage 1 Closed；Cutover仍为None，并停止在未解析、未授权的Stage 2之前。
+回RFC review。1B通过后Stage 1 Closed；Cutover仍为None，并按当时授权停止在尚未解析的Stage 2之前。
 
 **Closure evidence：** 最终 source review 无剩余 Apollyon/Keter；一项 suite dispatcher Euclid 已在本 checkpoint
 内以“两个 suite 均运行后再汇总返回”关闭。`just test xtask` 为 66/66，`just test net-host` 全部通过，RV64/LA64
@@ -294,42 +297,211 @@ monitor退出。最终dispatcher-only failure aggregation修正后，双架构ap
 完整socket LTP、final harness、physical hardware与`smp>1`均未运行，保持Not Run / Not Cut Over。任何pending
 Socket/Unix/IOMUX/Epoll contract均未生效。
 
-## Stage 2 — Pathname namespace 与 connection admission
+## Stage 2 Ready / Not Active — Pathname namespace 与 connection admission
 
-**目的：** 在 Stage 1 的共同 front 与 Unix endpoint/stream owner 上，闭合 filesystem pathname identity 到 live
-binding、listener backlog、connect/accept admission 与 Linux-visible address snapshot 生命周期。
+**Resolution状态：** Completed 2026-08-02。Stage 2已解析为Checkpoint 2A“endpoint/name/namespace”和Checkpoint 2B
+“listener/connection admission”；2A Ready / Not Active，2B依赖2A且Not Active。本resolution只保存accepted target内的
+实施顺序、验证与停止边界，不授权代码、不创建transaction、不修改current contract，也不增加R0修订号。
 
-**前置：** Stage 1 Closed；Stage 2 已根据 Stage 1 实际 diff、owner model 与验证证据独立解析和授权。
+### Live baseline 与解析结论
 
-**受保护边界：** VFS 继续唯一拥有pathname resolution、DAC、umask/final formation、inode/dentry与link/rename/unlink；
-Unix registry只索引stable inode identity，不按pathname或permission裁决；opened-description publication/final release
-边界不变；本 Stage不改变iomux/epoll consumer policy或提前cut over pending contract。
+Stage 1 closure后的live `SocketOps`已经拥有single/paired creation、bind/local-address、send/receive、poll与final-release
+能力族，但Unix descriptor只提供paired creation、basic stream/poll与final release；live `UnixEndpoint`也仍由一份
+`connection + side`直接表示已连接端。它没有single-socket state、local-name、binding、listener或accept transaction，
+因此Stage 2不能在现有connection-only object上继续追加optional pathname/backlog字段，也不能让general Socket以
+concrete Unix downcast补齐role。
 
-**预期交付：**
+current VFS已经由`KernelCreationPolicy`与`kernel_make_node_at`形成current-task lookup/DAC/umask/final metadata到
+context-free make-node的production handoff；`InodeRef`以完整resident object identity判等并由clone保持identity lifetime；
+`task::files`已有unpublished `FdReservation`及infallible commit。这些能力足以支撑pathname creation、stable identity
+registry与accept publication，不需要probe、VFS payload/callback、generic inode attachment、multi-fd transaction或
+opened-description lifecycle扩张。
 
-- 激活Unix single-socket creation并建立unbound/bound/listening/connected role owner；single creation失败与final release
-  继续复用Stage 1的common creation/lifecycle边界；
-- pathname bind 复用 `VFS-CREATION-001` production handoff，并以 stable inode identity 提交 live binding 与
-  immutable local-name snapshot；
-- listen、connect、accept 建立唯一 backlog/admission/connection commit，并闭合accepted child的copyout/fd
-  publication rollback或fail-forward；
-- getsockname/getpeername、accepted/peer address、hard-link/rename/unlink/rebind与stale generation保持namespace、
-  binding和address truth分离；
-- blocking connect/accept只通过对应operation predicate与共同wait/recheck协议重试，不缓存DAC授权、binding
-  capability或private phase。
+Linux 6.6.32 evidence显示：pathname bind先创建filesystem node再发布Unix address；listen要求已有local name并由backlog
+拥有admission；stream connect在full backlog返回`EAGAIN`并在blocking retry重新查找listener；accept先取得unused fd，
+consume连接后才copy peer address，copyout失败关闭已consume child且不发布fd；unnamed address输出只包含family长度。
+这些是scoped user-visible oracle，不导入Linux object graph或锁序：
+`xref:linux-6.6.32:net/unix/af_unix.c#unix_bind_bsd`、
+`xref:linux-6.6.32:net/unix/af_unix.c#unix_listen`、
+`xref:linux-6.6.32:net/unix/af_unix.c#unix_stream_connect`、
+`xref:linux-6.6.32:net/unix/af_unix.c#unix_accept`、
+`xref:linux-6.6.32:net/unix/af_unix.c#unix_getname`、
+`xref:linux-6.6.32:net/socket.c#__sys_accept4_file`与
+`xref:linux-6.6.32:net/socket.c#move_addr_to_user`。
 
-**验证类别：** namespace/listener/connection/source audit；bind publication、permission handoff、identity/generation、
-listener admission、accept publication 与 late capability owner-local proof；RV64/LA64 focused pathname server/client、
-DAC/umask、rename/link/unlink/rebind、blocking/nonblocking connect/accept runtime；相关 Linux sockaddr、listener race、
-accept copyout oracle。精确 matrix 在 Stage 2 resolution 中确定。
+resolution选择两个checkpoint而不是按syscall拆分：2A先让endpoint role/local-name与VFS identity形成可独立验证、可安全
+停止的namespace slice，并用现有socketpair证明name与connected association正交；2B再一次闭合listener backlog、
+connect commit与accept consume。`listen/connect/accept`不拆成独立正式gate，因为三者共同定义一个admission protocol，
+任一单独暴露都会产生没有完整producer/consumer/cleanup的半协议。
 
-**Cutover：** None。即使pathname vertical slice可运行，也不得提前写入current Socket/Unix contract。
+### Stage 2 Implementation Boundary
 
-**停止 / 退出：** 若自然实现必须扩张VFS common-create payload/callback/rollback、让inode保存runtime Socket payload、
-长期跨VFS持Unix global lock或用path compensation删除node，立即停止并回父RFC边界。若 live evidence 触发父RFC允许的
-failed-bind inert-inode退路，Stage 2必须记录具体failure point、errno、residue与cleanup evidence，并按真实当前行为
-回写register。退出要求namespace/listener/connection owner与cleanup闭合，focused pathname runtime通过；关闭后停止，
-不自动进入Stage 3。
+**Target：** 在Stage 1 common Socket front、opened-description与basic Unix stream之上，交付Unix single-socket creation、
+filesystem pathname bind、local/peer address observation、listen/connect/accept/accept4、blocking/nonblocking admission、
+namespace alias/unlink/rebind与对应final-release cleanup，使pathname连接可以通过现有read/write/vector路径实际交换数据。
+
+**Non-goals：** `shutdown`、connected-stream `sendto/recvfrom`的完整flag/addr行为、`MSG_PEEK`、RDHUP、完整HUP矩阵、
+listener/stream的poll/select/epoll conformance、socket option surface、`SO_ERROR`/pending-error/ERR readiness、Unix datagram、
+abstract namespace、TCP、non-UTF-8 pathname修复与VFS common-create事务均留在既定后续边界。Stage 2不得为了等待
+connect/accept提前cut over `IOMUX-POLL-002/003`或`EPOLL-READY-001`。
+
+**Owner / state model：**
+
+- Unix endpoint owner必须提供唯一role/association transition surface，表达unconnected、listening、connected与retired；
+  local-name fact与connected association正交，但仍由同一endpoint owner协调一次bind、binding registration与cleanup。
+  不能用多个boolean、pathname是否存在、Socket front字段或diagnostic id共同推导role。
+- listener state唯一拥有backlog limit、pending accepted endpoint、connect-capacity predicate、accept-item predicate与各自
+  recheck publication；两个operation可以共享wake infrastructure，但不得共享一份万能not-ready/ready fact。
+- paired connection与两个directional stream继续拥有Stage 1的peer、bytes、capacity、EOF与terminal truth。pathname
+  connect只能建立同一种connection/direction capability，不能复制一套pathname stream或把accepted queue变成第三份
+  connection truth。
+- Unix binding registry只拥有完整`InodeRef` identity到live binding capability的index。`ino`可以只作bucket/hash input，
+  最终命中、cleanup与generation isolation必须比较完整identity或exact publication capability；registry不保存pathname、
+  permission、listener ready mask或VFS private representation。
+- local-name是endpoint-owned、bind-time immutable observation fact；binding registration是独立admission capability。
+  accepted endpoint可以共享listener已提交的name capability，但不能继承listener registration。connection观察peer的
+  唯一name capability，不能复制connect使用的alias；这必须覆盖connected unnamed endpoint后续bind与peer close后的
+  address可观察期。
+
+精确enum、capability carrier、map/bucket、queue、lock、route storage与module path是implementation preference。live
+`unix/mod.rs`已经混合connection/direction、stream operation、poll、lifecycle与composition tests；在2A加入新职责前，
+允许并预期先做同owner、行为保持的目录化拆分，使endpoint/name、namespace、listener/admission、stream/lifecycle等角色
+拥有可审查的最低自然边界。拆分不是独立checkpoint，不得扩大public API、visibility policy或shared contract；精确
+文件名和re-export布局不冻结。
+
+**Handoff / failure / cleanup：**
+
+- bind transaction先完成typed pathname/name snapshot、同Socket state admission，以及任何会正常返回失败的registration
+  capacity/resource preparation；随后调用current-task kernel creation operation提交`InodeType::Socket + 0777` requested
+  permission。VFS返回stable identity后，Unix commit不得再分配会正常失败的资源、interruptible wait或重新做state
+  admission；registration与local-name在成功返回前共同可见。
+- VFS node可lookup而Unix binding尚未publish的短窗口保持父RFC允许边界，并发connect可以失败。final release或其它
+  late change若在VFS成功后使Unix commit无法安全完成，必须fail closed，不得让retired endpoint重新publication；若自然
+  结果是failed bind留下inert inode，调用者显式unlink后才能复用，final close不自动unlink。
+- connect每次attempt独立完成pathname lookup、prefix search、target `WRITE` DAC、socket-kind、exact identity registry
+  lookup与listener admission；一次DAC或binding capability不跨wait。commit必须一次性形成client connected association、
+  paired connection和由listener backlog拥有的accepted endpoint；任何retry、signal或late hint都不得duplicate commit。
+- accept transaction使用现有fd reservation与unpublished Socket边界。listener consume后由accept transaction唯一拥有
+  child；peer-address copyout成功后才commit fd。copyout或后续pre-publication失败按scoped Linux oracle关闭已consume child
+  并rollback fd，不requeue、泄漏child或发布无返回fd。accepted description不继承listener `O_NONBLOCK`；仅accept4 flags
+  决定accepted status/fd-local flags。
+- final release先撤销endpoint取得新operation、binding与listener admission的publication，再让late capability在commit前
+  revalidate/fail closed；随后drain queued child、提交对应direction terminal facts并取得需要通知的route snapshot，guard外
+  notify/drop。cleanup不等待waiter运行，不通过path lookup删除node，也不让old binding/queue token命中新generation。
+
+**Protected ABI / contract：** Stage 2补齐父RFC已接受的`AF_UNIX + SOCK_STREAM` syscall constants、`sockaddr_un`、
+addrlen/copyout、errno与creation/accept flags，但不增加R0之外的ABI。Stage 1 UDP与socketpair的resolver、FileOps、wait、
+stream、poll和final-release结果必须保持；新unconnected/bound/listening role进入既有FileOps时必须由Unix owner返回typed
+state outcome，不能panic、让general Socket downcast或用success no-op隐藏未支持operation。新增family-neutral syscall
+entry在UDP等不支持的operation上只通过static capability absence或typed outcome给出父RFC errno，不增加UDP peer/listener
+state或caller特判。`OPENED-DESC-001..003`、`VFS-CREATION-001`、`VFS-MAKE-NODE-001`与current iomux/epoll contract
+保持effective且不修改；Stage 2 Cutover为None。
+
+### Checkpoint 2A Ready / Not Active — Endpoint、name 与 pathname namespace
+
+**Purpose：** 把connection-only Unix endpoint提升为能承载single Socket、orthogonal local-name与exact binding cleanup的
+唯一role owner；接通single creation、filesystem pathname bind、getsockname/getpeername和namespace/address lifecycle，
+同时保持Stage 1 socketpair与basic stream行为。
+
+**Deliverable：**
+
+1. `AF_UNIX + SOCK_STREAM + protocol 0` single creation使用Stage 1 common preparation/publication/final-release路径；
+   unconnected、bound、connected与retired状态由一份Unix owner模型解释。现有read/write/vector/poll/final-release不再
+   假设每个Unix endpoint必然connected；新role的失败必须是typed、稳定且不改变Stage 3最终oracle。
+2. ABI boundary按raw bytes、family、addrlen与NUL boundary解析/输出filesystem `sockaddr_un`，继承non-UTF-8 limitation；
+   unnamed、truncation、actual-length store与copy fault服从父RFCscoped oracle。raw sockaddr/padding/user pointer不进入
+   endpoint、registry或VFS。
+3. pathname bind复用current-task `VFS-CREATION-001` production handoff，existing final entry映射`EADDRINUSE`，不要求
+   `CAP_MKNOD`；`umask 0027`下requested `0777`必须形成`0750` pathname inode。Socket/Unix不读取或缓存umask、uid/gid、
+   parent permission，也不扩张`MakeNodeDescription`。
+4. registry以stable identity索引exact live binding，支持同inode hard-link alias，rename/unlink不改变registration；
+   同名rebind的新identity/generation与old final-release cleanup隔离。mknodat/reload/inert socket inode没有registration，
+   不能自动恢复旧endpoint。
+5. local-name snapshot只服务getsockname/getpeername与后续accepted/recvfrom观察，不参与lookup、hash、DAC或cleanup。
+   socketpair endpoint与其它connected unnamed endpoint后续bind必须保持connection truth不变，并使peer通过唯一name
+   capability观察新name；peer close、rename、link与unlink不改写snapshot。
+
+**Focused validation：**
+
+- source/owner audit证明general Socket没有新增family/role/name/registry truth，VFS没有Socket runtime payload，registry
+  没有pathname/permission，Stage 1 connection/direction owner仍唯一；same-owner split若发生，旧path/re-export与双路径为零；
+- owner-local proof覆盖single preparation abort、role/name一次提交、bind prepare-before-publish、exact identity/alias、
+  generation-safe removal、final-release race、connected unnamed bind、peer-name capability与inert/reloaded inode miss；
+- focused Linux oracle覆盖`sockaddr_un` input/output length、NUL/truncation、copy ordering/fault、repeat bind、unnamed
+  getsockname/getpeername与connected-later-bind；oracle在相关代码落地前形成，不以header layout代替runtime side effect；
+- RV64/LA64 canonical release build与同源guest runtime验证single Socket flags、ext4 pathname bind/stat/mode、
+  `umask 0027 -> 0750`、parent DAC、rename/hard-link/unlink/rebind、final close不unlink、socketpair bind/name observation；
+  Stage 1双架构UDP与socketpair suite在最终2A diff上回归。ramfs identity与failure paths由owner-local proof覆盖；
+- `listen/connect/accept`、pathname data exchange、shutdown、RDHUP/完整HUP、完整socket LTP、final harness、hardware与
+  `smp>1`保持Not Run / Not Cut Over，不以2A namespace成功替代。
+
+**Exit / stop：** 2A退出要求single Socket与namespace/name slice形成独立安全实现，registry/local-name publication和
+final cleanup全闭合，Stage 1 regression与focused双架构runtime通过，完整diff review没有未解决Apollyon/Keter。若必须
+把runtime binding挂入generic inode/backend `prv`、按pathname做live lookup、持Unix global lock跨VFS、扩张VFS
+common-create payload/callback/rollback、通过path compensation unlink，或为了支持新role提前引入Stage 3 readiness/
+shutdown truth，立即停止。若采用inert-inode退路，2A closure必须记录具体failure point、errno、residue、cleanup与
+observability，并按实际当前行为回写register。2A关闭后只标记checkpoint closed并停止；不得自动激活2B。
+
+### Checkpoint 2B — Listener 与 connection admission
+
+**状态：** Not Active；只有2A Closed、完整diff已review且取得新的明确授权后才能激活。
+
+**Purpose：** 在2A endpoint/name/registry基础上，一次闭合listen backlog、connect commit、accept consume/fd publication
+与blocking/nonblocking admission，使filesystem pathname server/client通过Stage 1 basic stream形成production vertical
+slice。listen、connect与accept是同一个protocol的producer/commit/consumer，不再拆正式checkpoint。
+
+**Deliverable：**
+
+1. listen只由已绑定且role允许的endpoint建立或更新唯一listener state；backlog按Linux-visible规则归一化，并受一个
+   KernelConfig maximum约束。重复listen、capacity增长/收缩、listener close与queued count都由listener owner解释，
+   不能让wait queue或Socket front复制capacity/count。
+2. connect attempt在不持registry guard跨VFS或listener/client lock的前提下，取得operation-local exact binding
+   capability；listener与client按明确、可审查的lock order revalidate binding/listening/client role/capacity，再一次提交
+   connection、client association与pending accepted endpoint。资源在commit前准备；commit后不再有可返回失败。
+3. full backlog的nonblocking connect返回R0 target的`EAGAIN`且不建立`EINPROGRESS` intent。blocking connect只持窄
+   recheck/wake capability进入共同wait protocol；被唤醒后丢弃旧DAC/binding capability并从pathname lookup开始新attempt。
+   listener close、capacity增长、client final release与signal/cancel必须唤醒或终止相应wait，notification只提示重查。
+4. accept/accept4使用accept predicate而不是connect-capacity predicate；empty backlog的nonblocking结果为`EAGAIN`，
+   blocking path复用共同wait/recheck外壳。fd reservation、child consume、peer-address copyout、FileDesc preparation与fd
+   commit只有一个accept transaction owner；accept4只接收`SOCK_NONBLOCK | SOCK_CLOEXEC`，accept等价flags 0。
+5. connected client、queued child与accepted Socket复用Stage 1 connection/direction；accepted local-name共享listener
+   snapshot但没有registration，peer-name观察client唯一name capability。listener unlink/final close不终结已accepted
+   connection；listener close对queued-but-unaccepted child和存活peer只推进既有terminal/EOF/HUP路径，不创建pending error、
+   `ECONNRESET` latch或ERR readiness。
+
+**Focused validation：**
+
+- owner/predicate/commit/cancel表覆盖listen、connect、accept各自truth、linearization、late revalidation、signal与final
+  cleanup；source audit证明registry guard不跨VFS/listener、general Socket不解释backlog/private role，listener routes不携带
+  ready mask/errno/connection commit，public poll/epoll policy未改变；
+- owner-local deterministic proof覆盖backlog 0/bound/max与repeat listen、full/not-full transition、parallel connect唯一
+  commit、blocked connect重新DAC、listener/client close与late capability、accept empty/consume、fd exhaustion、copyout fault、
+  accepted flag/noninheritance、queued child drain及lost-wake/final-recheck；
+- focused Linux source/runtime oracle覆盖backlog归一化、listen/connect state errno、blocking connect与close/signal/capacity
+  竞争、accept reserve/consume/copyout/fd publication、unnamed/bound peer address与allowed race outcomes；
+- RV64/LA64同源guest pathname server/client验证blocking/nonblocking listen/connect/accept、basic read/write/vector、
+  backlog pressure、parent search/create DAC、target write DAC、`chmod`后新连接拒绝而既有stream继续、rename/link/unlink
+  listener、rebind、dup/fork/final close与accept4 flags；glibc/musl focused case覆盖ABI/errno/addrlen/copy fault；
+- Stage 1 UDP/socketpair与2A namespace/name matrix在最终2B diff上回归。shutdown、`MSG_*`完整面、RDHUP/完整HUP、
+  public listener/readiness conformance、完整socket LTP、final harness、hardware与`smp>1`继续Not Run / Not Cut Over。
+
+**Exit / stop：** 2B退出要求pathname namespace、listener、connection admission、address lifecycle与cleanup形成完整
+Stage 2 vertical slice，双架构focused runtime和两个libc oracle通过，所有临时unsupported/bridge从Stage 2 target surface
+退出，完整diff review没有未解决Apollyon/Keter。若attempt/wait必须让family ops隐藏task wait loop、跨sleep保留DAC/
+binding/private phase、重复connection或accept consume，若正确accept需要扩张task/files lifecycle/shared contract，若listener
+blocking只能通过第二套Socket wait queue、ready cache或提前修改iomux/epoll consumer policy实现，立即停止并回RFC review
+或先修订Stage 2路线。2B关闭后Stage 2 Closed / Cutover None，并停止在未解析、未授权的Stage 3之前。
+
+### Stage 2 Cutover、evidence 与 write-back
+
+Stage 2没有独立current-contract cutover。Checkpoint 2A/2B与Stage 2 closure只由Git/PR保存实际review、validation与
+Not Run evidence；当前不创建transaction。只有执行期真实出现长周期、多恢复点、probe/renegotiation或需要独立审计的
+多个cutover时才重新判断是否建立transaction。
+
+Stage 2 closure前必须完成一次aggregate source/owner/lifecycle audit，并把实际采用的bind publication路线写回本节或
+Git/PR evidence。若出现failed-bind inert inode或其它新的当前缺口，按具体可复现行为更新register；若未触发退路，不预建
+limitation或“未发生”记录。任何pending Socket/Unix/IOMUX/Epoll contract继续Not Effective；关闭后停止，不自动解析或
+激活Stage 3。
 
 ## Stage 3 — Stream operation 与完整 readiness closure
 

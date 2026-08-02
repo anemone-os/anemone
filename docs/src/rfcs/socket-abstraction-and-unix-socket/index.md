@@ -17,14 +17,13 @@
 的 target、owner、ABI、failure/cleanup、Contract Impact 与 acceptance 边界；私有 positioning 不成为公共依赖或
 并列 canonical source。
 
-本文不是 current contract，也不表示任何实现 gate 已经 Active。当前 UDP、opened-description、VFS、iomux 与epoll
-语义继续以 `docs/src/contracts/` 下的 Active contract 为准。R0 acceptance 只接受 target；独立 resolution 把
-Stage 1 解析为两个有序 checkpoint，Checkpoint 1A、1B 已分别取得授权并依次关闭；Stage 2 仍为 Outline / Not Active。达到
-`SOCKET-UNIX-CUTOVER` 的全部验收前，不得修改 current contract。
+本文不是 current contract，也不表示R0 acceptance自动激活任何实现gate。当前 UDP、opened-description、VFS、iomux
+与epoll语义继续以 `docs/src/contracts/` 下的 Active contract 为准；各Stage/checkpoint的resolution、activation与closure
+状态由[实施路线](./implementation.md)唯一记录。达到`SOCKET-UNIX-CUTOVER`的全部验收前，不得修改current contract。
 
 本 RFC 按当前规模保留[目标与不变量](./invariants.md)，并因已经出现真实多阶段实施需要而增加一份
-[实施路线](./implementation.md)。其中 Stage 1 已按 live source 解析并关闭两个有序 checkpoint，Stage 2--4 仍为
-Outline；当前不创建 tracking page 或 transaction，也不把 Stage 1 closure 当作下一 Stage 的 resolution 或实施授权。
+[实施路线](./implementation.md)。当前不创建tracking page或transaction；任何resolution或checkpoint/Stage closure都
+不自动授权下一个gate，也不使pending contract提前生效。
 
 ## 摘要
 
@@ -108,8 +107,9 @@ eventual target。
   VFS限制和开放问题继续由register拥有。
 - 以强行跨 VFS operation 持有 Unix global lock、proof-only state、双重 VFS truth 或新 generic rollback framework
   换取形式上的 bind 全有或全无。
-- 在当前 Outline 中冻结内部checkpoint、probe、逐文件write set、内部锁、queue/buffer算法或精确测试命令；
-  [实施路线](./implementation.md)只固定需要长期保存的语义阶段、受保护边界、验证类别与停止条件。
+- 父 RFC target本身不冻结内部checkpoint、probe、逐文件write set、内部锁、queue/buffer算法或精确测试命令；
+  [实施路线](./implementation.md)可以在各Stage resolution中固定需要长期保存的checkpoint顺序、语义边界、验证类别与
+  停止条件，但这些实施路线不构成新的target或current contract。
 
 ## Target Architecture
 
@@ -542,5 +542,5 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 ## Closure
 
 Not Cut Over。Checkpoint 1A、1B 与 Stage 1 已关闭；UDP 与 Unix `socketpair` 已作为两个真实 consumer 共同证明本阶段
-front vertical slice。Stage 2--4 仍为 Outline / Not Active，pathname与最终acceptance尚未运行；transaction保持None，
-任何 pending Socket/Unix/IOMUX/Epoll contract 都尚未生效。
+front vertical slice。后续checkpoint的当前resolution/activation状态由[实施路线](./implementation.md)唯一记录；pathname
+与最终acceptance尚未运行，transaction保持None，任何 pending Socket/Unix/IOMUX/Epoll contract 都尚未生效。

@@ -59,9 +59,9 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   family-owned operation predicate、Unix namespace/stream/lifecycle owner边界，以及bind跨VFS publication的诚实工程
   退路。首版已明确排除`SO_ERROR`、Unix pending-error与error readiness；
   [目标与不变量](./rfcs/socket-abstraction-and-unix-socket/invariants.md)中的六组ABI/lifecycle行为作为scoped Linux
-  6.6.32 conformance与实现期validation surface，不再构成R0 Review Hold；多阶段顺序与停止边界见
-  [实施路线](./rfcs/socket-abstraction-and-unix-socket/implementation.md)已把Stage 1解析为两个有序checkpoint；1A已完成
-  common front与UDP等价迁移并关闭，1B保持Not Active，Stage 1与current-contract cutover均未关闭。
+  6.6.32 conformance与实现期validation surface，不再构成R0 Review Hold；多阶段顺序、当前gate与停止边界由
+  [实施路线](./rfcs/socket-abstraction-and-unix-socket/implementation.md)唯一记录。RFC在最终
+  `SOCKET-UNIX-CUTOVER`前保持Not Cut Over，pending current-contract delta均未生效。
 - [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R2 Closed；以 canonical
   `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs有序publication与filesystem-backed `rdev`
   形成完整node-creation target。R2分支内接受的no-umask边界属于历史closure；合流后的current implementation
