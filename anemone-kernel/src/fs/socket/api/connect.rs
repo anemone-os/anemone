@@ -3,13 +3,13 @@ use anemone_abi::syscall::SYS_CONNECT;
 use crate::{
     fs::{
         iomux::PollEvent,
-        socket::{SocketConnectError, socket_from_file},
+        socket::{SocketConnectError, socket_from_file, wait_for_socket_operation},
     },
     prelude::*,
     task::files::{Fd, FileStatusFlags},
 };
 
-use super::{abi::read_socket_address, wait_for_socket_operation};
+use super::abi::read_socket_address;
 
 #[syscall(SYS_CONNECT)]
 fn sys_connect(fd: Fd, addr: u64, addrlen: u32) -> Result<u64, SysError> {

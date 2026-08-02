@@ -1,24 +1,18 @@
 use anemone_abi::syscall::SYS_RECVFROM;
 
 use crate::{
-    fs::{
-        iomux::PollEvent,
-        socket::{
-            SocketAddress, SocketAddressSink, SocketReceiveError, SocketReceiveFlags,
-            SocketReceiveRequest, SocketReceiveSink, SocketType, socket_from_file,
-        },
+    fs::socket::{
+        SocketAddress, SocketAddressSink, SocketReceiveFlags, SocketReceiveRequest,
+        SocketReceiveSink, SocketType, retry_socket_receive, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
     task::files::{Fd, FileStatusFlags},
 };
 
-use super::{
-    abi::{
-        map_query_error, map_receive_error, validate_receive_message_flags, write_payload,
-        write_peer, write_socket_address,
-    },
-    wait_for_socket_file,
+use super::abi::{
+    map_query_error, map_receive_error, validate_receive_message_flags, write_payload, write_peer,
+    write_socket_address,
 };
 
 struct ReceiveSink {
@@ -73,33 +67,29 @@ fn sys_recvfrom(
         let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
         let uspace = task.clone_uspace_handle();
         let mut stream_sink = UserBufferSink::new(&uspace, segments);
-        loop {
-            match socket.receive(SocketReceiveRequest::Stream {
-                sink: &mut stream_sink,
-                flags: SocketReceiveFlags {
-                    peek: message_flags.peek,
-                },
-            }) {
-                Ok(copied) => {
-                    if peer != 0 {
-                        let mut peer_address = PeerCapture::default();
-                        socket
-                            .copy_peer_address(&mut peer_address)
-                            .map_err(map_query_error)?;
-                        write_socket_address(
-                            SocketType::UnixStream,
-                            peer,
-                            addrlen,
-                            peer_address.0,
-                        )?;
-                    }
-                    return Ok(copied as u64);
-                },
-                Err(SocketReceiveError::WouldBlock) if !nonblocking => {},
-                Err(error) => return Err(map_receive_error(error)),
-            }
-            wait_for_socket_file("sys_recvfrom", &task, desc.vfs_file(), PollEvent::READABLE)?;
+        let copied = retry_socket_receive(
+            "sys_recvfrom",
+            &task,
+            desc.vfs_file(),
+            nonblocking,
+            || {
+                socket.receive(SocketReceiveRequest::Stream {
+                    sink: &mut stream_sink,
+                    flags: SocketReceiveFlags {
+                        peek: message_flags.peek,
+                    },
+                })
+            },
+            map_receive_error,
+        )?;
+        if peer != 0 {
+            let mut peer_address = PeerCapture::default();
+            socket
+                .copy_peer_address(&mut peer_address)
+                .map_err(map_query_error)?;
+            write_socket_address(SocketType::UnixStream, peer, addrlen, peer_address.0)?;
         }
+        return Ok(copied as u64);
     }
 
     let mut sink = ReceiveSink {
@@ -108,15 +98,15 @@ fn sys_recvfrom(
         peer,
         addrlen,
     };
-    loop {
-        match socket.receive(SocketReceiveRequest::Datagram(&mut sink)) {
-            Ok(copied) => return Ok(copied as u64),
-            Err(SocketReceiveError::WouldBlock) if !nonblocking => {},
-            Err(error) => return Err(map_receive_error(error)),
-        }
-
-        // The family attempt released its operation guard on WouldBlock;
-        // the shared wait owner schedules with only the source route alive.
-        wait_for_socket_file("sys_recvfrom", &task, desc.vfs_file(), PollEvent::READABLE)?;
-    }
+    // Each family attempt releases its operation guard on WouldBlock; the
+    // shared retry owner schedules with only the source route alive.
+    retry_socket_receive(
+        "sys_recvfrom",
+        &task,
+        desc.vfs_file(),
+        nonblocking,
+        || socket.receive(SocketReceiveRequest::Datagram(&mut sink)),
+        map_receive_error,
+    )
+    .map(|copied| copied as u64)
 }

@@ -10,7 +10,8 @@ use front::{
     SocketReceiveRequest, SocketReceiveSink, SocketSendError, SocketSendPayload, SocketSendRequest,
     SocketShutdown, SocketShutdownError, SocketStreamDestination, SocketStreamReadSink,
     SocketStreamWriteSource, SocketType, SocketWait, prepare_socket, prepare_socket_pair,
-    send_sigpipe, socket_file_desc_ops, socket_from_file,
+    retry_socket_receive, retry_socket_send, socket_file_desc_ops, socket_from_file,
+    wait_for_socket_operation,
 };
 use udp::UDP_SOCKET_OPS;
 use unix::UNIX_STREAM_SOCKET_OPS;

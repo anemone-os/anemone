@@ -1,6 +1,7 @@
 //! Family-neutral Socket front, static dispatch, and opened-description hooks.
 
 mod file;
+mod operation;
 
 use anemone_net_api::Ipv4Address;
 
@@ -9,7 +10,8 @@ use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 #[cfg(feature = "kunit")]
 use file::{SliceReadSink, SliceWriteSource};
 use file::{prepare_socket_file, prepare_socket_file_at, prepare_socket_path};
-pub(super) use file::{send_sigpipe, socket_file_desc_ops, socket_from_file};
+pub(super) use file::{socket_file_desc_ops, socket_from_file};
+pub(super) use operation::{retry_socket_receive, retry_socket_send, wait_for_socket_operation};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketType {

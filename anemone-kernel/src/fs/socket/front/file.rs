@@ -2,14 +2,8 @@
 
 use crate::{
     prelude::*,
-    task::{
-        files::{
-            FileDescOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx, OpenedFileWriteUserCtx,
-        },
-        sig::{
-            SigNo, Signal,
-            info::{SiCode, SigInfoFields, SigKill},
-        },
+    task::files::{
+        FileDescOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx, OpenedFileWriteUserCtx,
     },
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -18,6 +12,7 @@ use super::{
     Socket, SocketOps, SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest,
     SocketSendError, SocketSendRequest, SocketStreamDestination, SocketStreamReadSink,
     SocketStreamWriteSource,
+    operation::{retry_socket_receive, retry_socket_send},
 };
 
 pub(super) fn prepare_socket_file(
@@ -157,42 +152,32 @@ fn socket_read_with_ctx(
     sink: &mut dyn SocketStreamReadSink,
     flags: FileOpStatusFlags,
 ) -> Result<usize, SysError> {
-    loop {
-        let result = socket_from_file(file)
-            .expect("common Socket read used without Socket private state")
-            .receive(SocketReceiveRequest::Stream {
-                sink,
-                flags: SocketReceiveFlags { peek: false },
-            });
-        match result {
-            Ok(read) => return Ok(read),
-            Err(SocketReceiveError::WouldBlock) if !flags.contains(FileOpStatusFlags::NONBLOCK) => {
-                super::super::api::wait_for_socket_file(
-                    "socket read",
-                    &get_current_task(),
-                    file,
-                    PollEvent::READABLE,
-                )?;
-            },
-            Err(SocketReceiveError::WouldBlock) => return Err(SysError::Again),
-            Err(SocketReceiveError::Unsupported) => return Err(SysError::NotSupported),
-            Err(SocketReceiveError::Retired) => return Err(SysError::BadFileDescriptor),
-            Err(SocketReceiveError::InvalidState) => return Err(SysError::InvalidArgument),
-            Err(SocketReceiveError::Copy(error)) => return Err(error),
-        }
-    }
+    let task = get_current_task();
+    retry_socket_receive(
+        "socket read",
+        &task,
+        file,
+        flags.contains(FileOpStatusFlags::NONBLOCK),
+        || {
+            socket_from_file(file)
+                .expect("common Socket read used without Socket private state")
+                .receive(SocketReceiveRequest::Stream {
+                    sink,
+                    flags: SocketReceiveFlags { peek: false },
+                })
+        },
+        map_stream_file_receive_error,
+    )
 }
 
-pub(in crate::fs::socket) fn send_sigpipe() {
-    let task = get_current_task();
-    task.recv_signal(Signal::new(
-        SigNo::SIGPIPE,
-        SiCode::Kernel,
-        SigInfoFields::Kill(SigKill {
-            pid: task.tgid(),
-            uid: task.cred().uid.real,
-        }),
-    ));
+fn map_stream_file_receive_error(error: SocketReceiveError) -> SysError {
+    match error {
+        SocketReceiveError::WouldBlock => SysError::Again,
+        SocketReceiveError::Unsupported => SysError::NotSupported,
+        SocketReceiveError::Retired => SysError::BadFileDescriptor,
+        SocketReceiveError::InvalidState => SysError::InvalidArgument,
+        SocketReceiveError::Copy(error) => error,
+    }
 }
 
 fn socket_write_with_ctx(
@@ -200,43 +185,43 @@ fn socket_write_with_ctx(
     source: &mut dyn SocketStreamWriteSource,
     flags: FileOpStatusFlags,
 ) -> Result<usize, SysError> {
-    loop {
-        let result = socket_from_file(file)
-            .expect("common Socket write used without Socket private state")
-            .send(SocketSendRequest::Stream {
-                source,
-                destination: SocketStreamDestination::Absent,
-            });
-        match result {
-            Ok(written) => return Ok(written),
-            Err(SocketSendError::WouldBlock) if !flags.contains(FileOpStatusFlags::NONBLOCK) => {
-                super::super::api::wait_for_socket_file(
-                    "socket write",
-                    &get_current_task(),
-                    file,
-                    PollEvent::WRITABLE,
-                )?;
-            },
-            Err(SocketSendError::WouldBlock) => return Err(SysError::Again),
-            Err(SocketSendError::PeerClosed) => {
-                send_sigpipe();
-                return Err(SysError::BrokenPipe);
-            },
-            Err(SocketSendError::Unsupported) => return Err(SysError::NotSupported),
-            Err(SocketSendError::Retired) => return Err(SysError::BadFileDescriptor),
-            Err(SocketSendError::NotConnected) => return Err(SysError::NotConnected),
-            Err(SocketSendError::AlreadyConnected) => return Err(SysError::AlreadyConnected),
-            Err(SocketSendError::Copy(error)) => return Err(error),
-            Err(SocketSendError::InvalidState)
-            | Err(SocketSendError::AddressInUse)
-            | Err(SocketSendError::AddressUnavailable)
-            | Err(SocketSendError::ResourceExhausted)
-            | Err(SocketSendError::NetworkUnreachable)
-            | Err(SocketSendError::InvalidDestination)
-            | Err(SocketSendError::MessageTooLong) => {
-                unreachable!("datagram-only send outcome reached stream FileOps")
-            },
-        }
+    let task = get_current_task();
+    retry_socket_send(
+        "socket write",
+        &task,
+        file,
+        flags.contains(FileOpStatusFlags::NONBLOCK),
+        true,
+        || {
+            socket_from_file(file)
+                .expect("common Socket write used without Socket private state")
+                .send(SocketSendRequest::Stream {
+                    source,
+                    destination: SocketStreamDestination::Absent,
+                })
+        },
+        map_stream_file_send_error,
+    )
+}
+
+fn map_stream_file_send_error(error: SocketSendError) -> SysError {
+    match error {
+        SocketSendError::WouldBlock => SysError::Again,
+        SocketSendError::PeerClosed => SysError::BrokenPipe,
+        SocketSendError::Unsupported => SysError::NotSupported,
+        SocketSendError::Retired => SysError::BadFileDescriptor,
+        SocketSendError::NotConnected => SysError::NotConnected,
+        SocketSendError::AlreadyConnected => SysError::AlreadyConnected,
+        SocketSendError::Copy(error) => error,
+        SocketSendError::InvalidState
+        | SocketSendError::AddressInUse
+        | SocketSendError::AddressUnavailable
+        | SocketSendError::ResourceExhausted
+        | SocketSendError::NetworkUnreachable
+        | SocketSendError::InvalidDestination
+        | SocketSendError::MessageTooLong => {
+            unreachable!("datagram-only send outcome reached stream FileOps")
+        },
     }
 }
 
