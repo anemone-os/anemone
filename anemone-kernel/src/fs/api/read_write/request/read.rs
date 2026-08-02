@@ -98,7 +98,12 @@ impl<'a> ReadRequest<'a> {
         // Linux import_iovec() validates every destination range before the
         // subsequent file-mode admission in do_iter_read().
         for iovec in iovecs {
-            validate_user_write_buffer(self.uspace, iovec.base, iovec.len)?;
+            // A zero-length element carries no userspace range, but retaining
+            // it distinguishes an all-zero vector from iovcnt == 0 so the
+            // owning file operation can still apply its zero-length semantics.
+            if iovec.len != 0 {
+                validate_user_write_buffer(self.uspace, iovec.base, iovec.len)?;
+            }
         }
         self.validate_file_access()?;
 

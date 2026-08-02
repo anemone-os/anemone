@@ -4,12 +4,12 @@
 **状态：** Active
 **Owner：** 每个 `Epoll` instance；watch-local policy与generation由对应 `EpollWatch` 拥有
 **参与领域：** fs / iomux / task opened-description / scheduler latch / signal / Linux syscall ABI
-**覆盖范围：** watch publication/lifecycle、LT/ET/ONESHOT delivery、bounded scan/copyout、epoll-file pollability
-**不覆盖：** target source predicate、source-private route容器、nested epoll、socket readiness、MM fork行为
+**覆盖范围：** watch publication/lifecycle、LT/ET/ONESHOT与EPOLLRDHUP delivery、bounded scan/copyout、epoll-file pollability
+**不覆盖：** target source predicate、source-private route容器、nested epoll、Socket operation predicate、MM fork行为
 **实现位置：** `anemone-kernel/src/fs/epoll/`、`anemone-kernel/src/fs/epoll/api/`
 **依赖：** `IOMUX-POLL-001..003`、`OPENED-DESC-001..003`、`OPENED-DESC-LIVENESS-001`、`SCHED-LATCH-001..003`、`SIGNAL-TEMP-MASK-001..003`
 **Pending Successor：** None
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-02
 
 ## 状态与能力所有权
 
@@ -44,7 +44,9 @@ callback与ctl互锁，或两个结构同时推进watch active/generation truth�
 **规则：** epoll不维护ready queue或ready bitmap。每次operation在固定watch上界内扫描target predicate：
 LT每轮重新求值；ET只消费对应live generation的sticky dirty claim；ONESHOT disable、round-robin cursor与
 copyout commit/rollback由同一operation owner提交。source notification只是dirty/recheck hint，不能成为
-用户可见readiness truth。copyout失败或未提交batch必须恢复ET claim与ONESHOT policy，并重新发布activity。
+用户可见readiness truth。watch route始终覆盖独立receive-half-close recheck hint，但exact scan只在watch请求
+`EPOLLRDHUP`时交付该category；真实source HUP/ERR继续mandatory delivery，compat bit不能制造ready truth。
+copyout失败或未提交batch必须恢复ET claim与ONESHOT policy，并重新发布activity。
 
 **违反表现：** callback payload直接交付、stale generation消费新watch、LT依赖历史queue、maxevents长期饿死
 其它watch、fault后丢edge/错误disable ONESHOT，或coverage/diagnostic字段反向驱动ready结果。
@@ -54,7 +56,7 @@ copyout commit/rollback由同一operation owner提交。source notification只�
 
 **最初来源：** [RFC-20260726-epoll R1/R2](../../rfcs/epoll/invariants.md#operation-serialized-scandirty-与-copyout)。
 
-**当前来源：** [Stage 2 Checkpoint 2D / EPOLL-CUTOVER](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27)。
+**当前来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)的`SOCKET-UNIX-CUTOVER`；原bounded scan、watch policy与rollback规则来自[Stage 2 Checkpoint 2D / EPOLL-CUTOVER](../../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27)。
 
 ## EPOLL-FILE-001 — Non-sleeping Wait Publication
 

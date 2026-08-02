@@ -2,6 +2,56 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260802-UNIX-PRECONNECTION-SHUTDOWN
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / shutdown / endpoint role / connection admission
+
+**Summary:** Socket Abstraction与Unix Socket R1只在endpoint已经拥有connected direction时支持
+`shutdown(SHUT_RD/SHUT_WR/SHUT_RDWR)`。unconnected、已经bind但尚未connect/listen、以及listening Unix stream
+对三个合法`how`均返回`ENOTCONN`，不保存pending shutdown intent，也不改变后续bind、listen、connect、accept或
+新connection的direction初始状态。实现不得用success-no-op伪装兼容；该拒绝在syscall边界发出notice。
+
+Linux 6.6.32的`unix_shutdown()`即使没有peer也会成功设置`sk_shutdown`，该事实可以跨role持续并影响后续
+connection/admission。完整兼容需要为pre-connection phase定义新的唯一truth及其生命周期，而不能把shutdown bit同时
+留在endpoint与connected direction。R1明确接受上述用户可见差异，以保持direction-owned terminal truth和Stage 2
+admission owner边界。
+
+**Exit Condition:** 由follow-up RFC定义role-owned pre-connection shutdown intent、bind/listen/connect/accept上的可见
+语义，以及connection commit时向direction的一次性handoff或其它无双重truth方案；同时闭合listener admission、accepted
+child、repeated shutdown、close/retire和readiness影响，并以tracked Linux source、focused Linux/Anemone runtime及
+双架构回归完成新的target与contract cutover。仅把`ENOTCONN`改成成功no-op不能关闭本限制。
+
+**Owner:** Unix Socket endpoint role / listener admission / connection-direction handoff
+**Last Verified:** 2026-08-02
+**Related:** [Socket Abstraction与Unix Socket R1](../rfcs/socket-abstraction-and-unix-socket/index.md#r0---r1-target-renegotiation),
+[Checkpoint 3A](../rfcs/socket-abstraction-and-unix-socket/implementation.md#checkpoint-3a-closed--directional-stream-operation-与-messagequery-abi)
+
+## ANE-20260802-UNIX-BIND-RETIRED-INERT-INODE
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / VFS pathname creation / endpoint lifecycle
+
+**Summary:** AF_UNIX pathname bind先由current-task VFS creation operation创建`S_IFSOCK` inode，再由Unix owner在endpoint
+lock内共同发布exact identity registration与immutable local-name。若endpoint在VFS创建成功后、Unix commit前已经retire，
+实现fail closed并向bind返回`EBADF`；已经创建的pathname inode保持为没有registration和local-name的inert socket inode，
+不能作为live Unix binding恢复。cleanup不会按pathname补偿unlink，也不会让final close删除node；调用者必须显式unlink后
+才能复用该pathname。该失败通过kernel notice记录pathname、inode number与`errno=EBADF`。
+
+**Exit Condition:** 只有VFS common-create与Unix endpoint lifecycle形成不持Unix global lock跨VFS、且不通过pathname
+compensation删除新identity的自然prepare/commit协议，能够在该late-retire窗口安全撤销node或证明窗口不可达时，才可移除
+本限制。修复必须保持exact identity/generation cleanup、并发rename/rebind安全和current VFS owner边界，不能把runtime
+binding挂入generic inode/backend `prv`或扩张pathname-keyed状态。
+
+**Owner:** Unix Socket endpoint/namespace；VFS common-create protocol为跨owner依赖
+**Last Verified:** 2026-08-02
+**Related:** [Socket Abstraction与Unix Socket Checkpoint 2A](../rfcs/socket-abstraction-and-unix-socket/implementation.md#checkpoint-2a-closed--endpointname-与-pathname-namespace),
+[VFS create publication atomicity](./open-issues.md#ane-20260801-vfs-create-publication-atomicity)
+
 ## ANE-20260802-RV64-HWPROBE-CONSERVATIVE-CAPABILITIES
 
 **Type:** Limitation
@@ -56,6 +106,28 @@ clone/exec、signal ABI和unsupported CPU路径。异构拓扑还必须先建立
 **Related:** [LoongArch LSX Context RFC](../rfcs/loongarch-lsx-context/index.md),
 [事务日志](../devlog/transactions/2026-08-01-loongarch-lsx-context.md),
 [software unaligned access开放问题](./open-issues.md#ane-20260801-la64-soft-unaligned-user-memory-corruption)
+
+## ANE-20260801-VFS-NON-UTF8-PATHNAME
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** VFS / user access / pathname representation / filesystem backends
+
+**Summary:** 当前 filesystem pathname syscall 由 user-access boundary 把 NUL-terminated bytes 转为 `Box<str>`，
+namei 又把每个 normal component 转为 `String`；dentry、ramfs 与现有 ext4 adapter 也沿用 string name。因此包含
+非 UTF-8 byte sequence 的 Linux pathname 会在进入普通 VFS lookup/create 前返回错误。后续 AF_UNIX pathname
+consumer 可以在 `sockaddr_un` ABI boundary 按 raw bytes 解析长度和 NUL，但仍继承这条 VFS component 限制；它不得
+通过 Unix-local 编码、私有 pathname table 或绕过 generic lookup 伪装完整 byte-path 支持。
+
+**Exit Condition:** 由后续独立 VFS pathname 工作建立 byte-preserving user-access、path/component、namei、dentry、
+symlink 与 writable filesystem backend representation，明确显示/诊断边界和非法 NUL/`/` 处理，并验证 ordinary
+pathname syscall 与 AF_UNIX 等真实 consumer。完成对应 target、实现和 contract cutover 后，consumer 才能移除
+本限制；不得只在单个 syscall 内做可逆编码或 case-specific fallback。
+
+**Owner:** VFS pathname / user-access（待独立 RFC）
+**Last Verified:** 2026-08-01
+**Related:** [VFS current contracts](../contracts/vfs/index.md)
 
 ## ANE-20260801-VFS-MAKE-NODE-LWEXT4-ATOMICITY
 
@@ -143,19 +215,26 @@ machine termination，再更新 current contract 的 architecture coverage。不
 
 **Summary:** 当前 AHCI 第一阶段只支持 firmware-described AHCI 1.x 的单一 implemented port、slot-zero
 同步 polling、单 PRD DMA bounce buffer、ATA IDENTIFY 与 512-byte LBA48 DMA EXT read/write。IRQ
-completion、NCQ、multi-port、ATAPI、port multiplier、runtime hotplug、partition scan、power
-management 和明确的 cache-flush durability contract 尚未实现；当前 generic controller 仍依赖
-firmware 完成 pinmux/clock/reset/PHY/coherency setup。`just build` 已通过，但 KUnit runtime、2K1000
-实机 probe/read/write/shutdown/reboot 尚未运行。RFC 还保持 Review Hold，因为 probe rollback 释放
-DMA owner 和 IDENTIFY capacity boundary 两项 Apollyon 尚未修复。
+completion、NCQ、multi-port、ATAPI、port multiplier、runtime hotplug、power management和明确的
+cache-flush durability contract尚未实现；shutdown不quiesce controller，read timeout仍以panic作为诊断
+fail-stop bridge。当前generic controller仍依赖firmware完成pinmux/clock/reset/PHY/coherency setup。
 
-**Exit Condition:** 关闭 [AHCI Controller RFC](../rfcs/ahci-controller/index.md) 的 lifecycle/capacity
-tracking issues，明确 shutdown/cache 语义，并完成 focused KUnit 与用户侧 controller/sector/read/write
-证据；新增异步、多 port、hotplug 或 ATAPI 能力时建立新的 owner/RFC gate。
+AHCI当前通过generic block `register_block_disk()`消费one-time primary MBR discovery；原Draft的partition-scan
+non-goal只排除AHCI-owned scanner，不能再写成当前没有partition能力。GPT、重扫和可变partition-table lifecycle
+仍不在该generic能力内。双架构完整KUnit runtime各自通过10个已注册AHCI helper case；但`ata.rs`的IDENTIFY
+helper没有`#[kunit]`注册，capacity upper-bound regression/source audit仍未完成，2K1000实机
+probe/read/write/shutdown/reboot仍Not Run。probe rollback DMA owner与IDENTIFY capacity boundary的live
+Apollyon继续由open issue拥有。原AHCI RFC已经Terminated，没有active gate；终止文档不关闭这些代码限制。
+
+**Exit Condition:** 当前没有active exit plan。只有未来另行授权的工作实际关闭lifecycle/capacity open issue、
+明确shutdown/cache/timeout语义并完成focused KUnit与用户侧controller/sector/read/write证据后，才能缩减本
+limitation；不得重新激活已终止RFC。新增异步、多port、hotplug或ATAPI能力仍需新的owner/RFC边界。
 
 **Owner:** EDGW, Codex
-**Last Verified:** 2026-07-23
-**Related:** [AHCI Controller 事务日志](../devlog/transactions/2026-07-23-ahci-controller.md), [开放问题](./open-issues.md)
+**Last Verified:** 2026-08-01
+**Related:** [Terminated AHCI RFC](../rfcs/ahci-controller/index.md),
+[AHCI Controller 事务日志](../devlog/transactions/2026-07-23-ahci-controller.md),
+[lifecycle/capacity开放问题](./open-issues.md#ane-20260723-ahci-probe-lifecycle-and-capacity)
 
 ## ANE-20260713-SCHED-RT-NOIRQ-BUCKET-ALLOCATION
 
@@ -315,14 +394,14 @@ tracking issues，明确 shutdown/cache 语义，并完成 focused KUnit 与用�
 **Severity:** Medium
 **Area:** procfs / sysctl / kconfig / SysV shm / user-test
 
-**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施。本轮已补齐 `/proc/sys/kernel/shmmax`、`shmall` 和 `shmmni` 的只读观察面，但这不等于完整 SysV shm LTP infra 已关闭：`shmget02` 的 save / restore 路径仍需要可写 sysctl 语义，`shmget03` 仍读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF，`shmat01` 的只读写 fault 检查还会经过缺失的 `getrlimit(RLIMIT_CORE)` coredump 辅助路径。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
+**Summary:** SysV shm 组仍依赖若干当前未提供或未纳入当前架构目标的 Linux 可观察设施。本轮已补齐 `/proc/sys/kernel/shmmax`、`shmall` 和 `shmmni` 的只读观察面，但这不等于完整 SysV shm LTP infra 已关闭：`shmget02` 的 save / restore 路径仍需要可写 sysctl 语义，`shmget03` 仍读取 `/proc/sysvipc/shm`，`shmget05` / `shmget06` 需要可解析的 kernel `.config`，`shmctl05` 在当前 rv64 目标上因 `__NR_remap_file_pages` 不存在而 TCONF，`shmctl06` 因当前 64-bit ABI 不具备 `time_high` 字段而 TCONF。2026-08-02 的 rlimit 小迭代已为 common `prlimit64` 和 RV64 legacy `getrlimit` 提供固定 `RLIMIT_CORE=(0,0)` readback，focused 双架构 QEMU matrix通过；但 `shmat01` 与完整 SysV shm profile 尚未复跑，不能据此关闭该 case。这些不表示 SysV shm registry 或 asm-generic ABI 布局本身仍有同类小修缺口。
 
-**Exit Condition:** 为 SysV shm 相关可写 sysctl、`/proc/sysvipc/shm` 视图、测试环境可消费的内核配置视图和 LTP 所需的基础 rlimit 读路径补齐最小可观察语义；明确 profile 对架构 TCONF 项的处理策略；随后重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`。
+**Exit Condition:** 为 SysV shm 相关可写 sysctl、`/proc/sysvipc/shm` 视图和测试环境可消费的内核配置视图补齐最小可观察语义；明确 profile 对架构 TCONF 项的处理策略；随后重新验证 `shmctl03`、`shmget02`、`shmget03`、`shmget05`、`shmget06` 和 `shmat01`，确认已接线的 rlimit readback 在真实 LTP setup 中不再形成遮蔽。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-14
+**Last Verified:** 2026-08-02
 
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md)
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [rlimit core 与 RLIMIT_NOFILE 小迭代](../devlog/changes/2026-08-02-rlimit-core-nofile.md)
 
 ## ANE-20260526-SIGNAL-RESTORER-LEGACY-COMPAT
 
@@ -474,13 +553,13 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Severity:** Medium
 **Area:** procfs / devfs / resource limits / mmap
 
-**Summary:** LTP memory 组仍依赖若干尚未系统化的 Linux 可观察接口：`mmap04` 需要 `/proc/self/maps`，`mmap12` 需要 `/proc/self/pagemap`，`mmap14` 现在可以打开 `/proc/<pid>/status`，但仍需要其中 `VmLck` 反映真实 locked-memory accounting；`mmap10` 需要 `/dev/zero` mmap backing，`mmap18` 需要 `MAP_GROWSDOWN` 和 `getrlimit(RLIMIT_CORE)`，`munmap03` 需要 `getrlimit(RLIMIT_DATA)`。这些不是本轮 mmap errno 收口能局部修掉的核心 VMA 编辑问题。
+**Summary:** LTP memory 组仍依赖若干尚未系统化的 Linux 可观察接口：`mmap04` 需要 `/proc/self/maps`，`mmap12` 需要 `/proc/self/pagemap`，`mmap14` 现在可以打开 `/proc/<pid>/status`，但仍需要其中 `VmLck` 反映真实 locked-memory accounting；`mmap10` 需要 `/dev/zero` mmap backing。2026-08-02 已为 common `prlimit64` 和 RV64 legacy `getrlimit` 提供固定 `RLIMIT_CORE=(0,0)` readback，但 memory profile 未复跑，`mmap18` 仍缺 `MAP_GROWSDOWN`；`munmap03` 需要的 `RLIMIT_DATA` readback仍未实现。这些不是本轮 mmap errno 收口能局部修掉的核心 VMA 编辑问题。
 
-**Exit Condition:** 为 procfs 补齐 memory 组所需的 maps / pagemap 只读语义，并让 `/proc/<pid>/status` 的 `VmLck`、RSS/segment 类字段接入真实 mm 账本；为 `/dev/zero` 提供匿名零页 mmap backing，明确支持或拒绝 `MAP_GROWSDOWN` 的栈增长模型，并实现 LTP 所需的基础 rlimit 读写语义后，重新验证 `mmap04`、`mmap10`、`mmap12`、`mmap14`、`mmap18` 和 `munmap03`。
+**Exit Condition:** 为 procfs 补齐 memory 组所需的 maps / pagemap 只读语义，并让 `/proc/<pid>/status` 的 `VmLck`、RSS/segment 类字段接入真实 mm 账本；为 `/dev/zero` 提供匿名零页 mmap backing，明确支持或拒绝 `MAP_GROWSDOWN` 的栈增长模型，补齐 `RLIMIT_DATA` 所需的诚实 readback后，重新验证 `mmap04`、`mmap10`、`mmap12`、`mmap14`、`mmap18` 和 `munmap03`。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-03
-**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-08-02
+**Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [rlimit core 与 RLIMIT_NOFILE 小迭代](../devlog/changes/2026-08-02-rlimit-core-nofile.md)
 
 ## ANE-20260529-PROC-TGID-STAT-STAGE1
 
@@ -763,13 +842,13 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Low
 **Area:** signal / procfs / resource limits / kconfig / user-test
 
-**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。`kill11` 的 setup 仍依赖 `getrlimit(RLIMIT_CORE)`，当前 `getrlimit(4, ...)` 返回 `ENOSYS`；`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声；原 `unknown syscall number 283` 已由只公布 `MEMBARRIER_CMD_GLOBAL` 的最小实现完成源码和 SMP KUnit closure，但 signal profile 尚未复跑。它们都不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
+**Summary:** signal profile 中仍有若干 LTP 设施或 Linux 可观察面缺口，不应和本轮 signal syscall 语义修复混为一类。本轮已补齐 `/proc/sys/kernel/pid_max` 的只读观察面，但尚未复跑 signal profile，因此只表示该 ENOENT 缺口已有源码层修复。2026-08-02 的 rlimit 小迭代已让 common `prlimit64` 与 RV64 legacy `getrlimit` 对 `RLIMIT_CORE` 返回固定 `(0,0)`，focused 双架构 QEMU matrix通过；`kill11` setup是否已在真实 signal profile 中解除遮蔽仍 Not Run。`kill13` 通过 `/etc/ltp/anemone-kconfig` 检查 `CONFIG_UBSAN_SIGNED_OVERFLOW`，当前 fixture 未声明而 `TCONF`。日志里的 `unknown syscall number 123` 是缺少 `sched_getaffinity` 的 LTP 启动噪声；原 `unknown syscall number 283` 已由只公布 `MEMBARRIER_CMD_GLOBAL` 的最小实现完成源码和 SMP KUnit closure，但 signal profile 尚未复跑。它们都不是本次 `tgkill03` / `rt_sigqueueinfo01` 的直接根因。
 
-**Exit Condition:** 为 LTP signal profile 所需的剩余基础 `getrlimit`、kconfig fixture 和 `sched_getaffinity` 启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、`getrlimit`、kconfig fixture、`sched_getaffinity` 与已注册的最小 `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
+**Exit Condition:** 为 LTP signal profile 所需的 kconfig fixture 和 `sched_getaffinity` 启动探测 syscall 补齐最小可观察语义，并复跑 signal profile，确认 `pid_max`、已接线的 `getrlimit(RLIMIT_CORE)`、kconfig fixture、`sched_getaffinity` 与已注册的最小 `membarrier` 不再以设施缺口遮蔽 syscall 语义判断。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-29
-**Related:** [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md), [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-08-02
+**Related:** [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md), [rlimit core 与 RLIMIT_NOFILE 小迭代](../devlog/changes/2026-08-02-rlimit-core-nofile.md), [Signal LTP tgkill/sigqueueinfo 小迭代记录](../devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md), [procfs sysctl PDE 静态树小迭代记录](../devlog/changes/2026-06-14-procfs-sysctl-pde-tree.md), [开放问题：Signal LTP remaining semantics](./open-issues.md#ane-20260607-signal-ltp-remaining-semantics), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260729-MEMBARRIER-GLOBAL-ONLY
 

@@ -58,7 +58,7 @@ impl PollFd {
             events |= PollEvent::WRITABLE;
         }
         if linux_events.contains(LinuxPollEvent::RDHUP) {
-            events |= PollEvent::HANG_UP;
+            events |= PollEvent::READ_HANG_UP;
         }
 
         Ok(Self {

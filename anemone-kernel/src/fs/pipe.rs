@@ -2,8 +2,6 @@
 //! anonymous inodes to create pipes.
 //!
 //! Only anonymous pipes are supported for now.
-//!
-//! TODO: turn to [Event] based implementation.
 
 use anemone_abi::fs::linux::ioctl::FIONREAD;
 
@@ -11,9 +9,12 @@ use crate::{
     fs::{FcntlCtx, FileFcntlCmd, FileFcntlOutcome, FileMode},
     prelude::*,
     syscall::user_access::UserWritePtr,
-    task::sig::{
-        SigNo, Signal,
-        info::{SiCode, SigInfoFields, SigKill},
+    task::{
+        files::{FileDescOps, FileStatusFlags, OpenedFileReadUserCtx},
+        sig::{
+            SigNo, Signal,
+            info::{SiCode, SigInfoFields, SigKill},
+        },
     },
     utils::{
         any_opaque::{AnyOpaque, NilOpaque},
@@ -81,6 +82,15 @@ static PIPE_INODE_OPS: InodeOps = InodeOps {
 
 #[derive(Opaque)]
 struct Pipe {
+    inner: SpinLock<PipeInner>,
+    /// Direct read/write waiters only use these events as recheck hints. The
+    /// authoritative predicates remain under `inner`, and every publication
+    /// happens after releasing that lock.
+    read_recheck: Event,
+    write_recheck: Event,
+}
+
+struct PipeInner {
     /// [VecDeque] is definitely a terrible choice for the buffer, cz every byte
     /// read/written will cause metadata update, which is very costly.
     ///
@@ -107,19 +117,51 @@ struct Pipe {
 impl Pipe {
     fn new_anonymous() -> (PipeRx, PipeTx) {
         let pipe = Pipe {
-            buf: Box::new(RingBuffer::new()),
-            capacity: PIPE_STORAGE_BYTES,
-            rx_cnt: 1,
-            tx_cnt: 1,
-            rx_poll_routes: Arc::new(Vec::new()),
-            tx_poll_routes: Arc::new(Vec::new()),
+            inner: SpinLock::new(PipeInner {
+                buf: Box::new(RingBuffer::new()),
+                capacity: PIPE_STORAGE_BYTES,
+                rx_cnt: 1,
+                tx_cnt: 1,
+                rx_poll_routes: Arc::new(Vec::new()),
+                tx_poll_routes: Arc::new(Vec::new()),
+            }),
+            read_recheck: Event::new(),
+            write_recheck: Event::new(),
         };
 
-        let pipe = Arc::new(SpinLock::new(pipe));
+        let pipe = Arc::new(pipe);
 
-        (PipeRx { pipe: pipe.clone() }, PipeTx { pipe })
+        (
+            PipeRx {
+                pipe: pipe.clone(),
+                operation: Mutex::new(()),
+            },
+            PipeTx { pipe },
+        )
     }
 
+    fn wait_until_read_can_continue(&self) -> bool {
+        self.read_recheck.listen(false, || {
+            let pipe = self.inner.lock();
+            !pipe.buf.is_empty() || pipe.tx_cnt == 0
+        })
+    }
+
+    fn wait_until_write_can_continue(&self, requested: usize) -> bool {
+        let needs_atomic_write = requested <= PIPE_ATOMIC_WRITE_BYTES;
+        self.write_recheck.listen(false, || {
+            let pipe = self.inner.lock();
+            pipe.rx_cnt == 0
+                || if needs_atomic_write {
+                    pipe.available() >= requested
+                } else {
+                    pipe.available() > 0
+                }
+        })
+    }
+}
+
+impl PipeInner {
     fn capacity(&self) -> usize {
         self.capacity
     }
@@ -132,13 +174,18 @@ impl Pipe {
 
 #[derive(Opaque)]
 struct PipeRx {
-    pipe: Arc<SpinLock<Pipe>>,
+    pipe: Arc<Pipe>,
+    /// Serializes consumption by kernel-buffer reads and direct-user read
+    /// transactions. Pipe bytes remain owned solely by `PipeInner::buf`; this
+    /// gate only keeps a staged prefix stable until copyout commits its exact
+    /// count.
+    operation: Mutex<()>,
 }
 
 impl Drop for PipeRx {
     fn drop(&mut self) {
         let routes = {
-            let mut pipe = self.pipe.lock();
+            let mut pipe = self.pipe.inner.lock();
             pipe.rx_cnt -= 1;
 
             if pipe.rx_cnt == 0 {
@@ -148,19 +195,22 @@ impl Drop for PipeRx {
             }
         };
 
+        if routes.is_some() {
+            self.pipe.write_recheck.publish(usize::MAX, false);
+        }
         notify_pipe_poll_routes(routes, None, "tx", "rx_drop");
     }
 }
 
 #[derive(Opaque)]
 struct PipeTx {
-    pipe: Arc<SpinLock<Pipe>>,
+    pipe: Arc<Pipe>,
 }
 
 impl Drop for PipeTx {
     fn drop(&mut self) {
         let routes = {
-            let mut pipe = self.pipe.lock();
+            let mut pipe = self.pipe.inner.lock();
             pipe.tx_cnt -= 1;
 
             if pipe.tx_cnt == 0 {
@@ -170,6 +220,9 @@ impl Drop for PipeTx {
             }
         };
 
+        if routes.is_some() {
+            self.pipe.read_recheck.publish(usize::MAX, false);
+        }
         notify_pipe_poll_routes(routes, None, "rx", "tx_drop");
     }
 }
@@ -270,7 +323,7 @@ fn notify_pipe_poll_routes(
     }
 }
 
-fn pipe_rx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
+fn pipe_rx_revents(pipe: &PipeInner, interests: PollEvent) -> PollEvent {
     let mut revents = PollEvent::empty();
 
     if interests.contains(PollEvent::READABLE) && (!pipe.buf.is_empty() || pipe.tx_cnt == 0) {
@@ -284,7 +337,7 @@ fn pipe_rx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
     revents
 }
 
-fn pipe_tx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
+fn pipe_tx_revents(pipe: &PipeInner, interests: PollEvent) -> PollEvent {
     let mut revents = PollEvent::empty();
 
     // Linux-compatible writer readiness requires a complete atomic write to
@@ -303,7 +356,10 @@ fn pipe_tx_revents(pipe: &Pipe, interests: PollEvent) -> PollEvent {
     revents
 }
 
-fn pipe_read_locked(pipe: &mut Pipe, buf: &mut [u8]) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
+fn pipe_read_locked(
+    pipe: &mut PipeInner,
+    buf: &mut [u8],
+) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
     let read = pipe.buf.try_pop_slice(buf);
     let routes = if read > 0 {
         Some(pipe.tx_poll_routes.clone())
@@ -313,7 +369,7 @@ fn pipe_read_locked(pipe: &mut Pipe, buf: &mut [u8]) -> (usize, Option<Arc<Vec<P
     (read, routes)
 }
 
-fn pipe_write_locked(pipe: &mut Pipe, buf: &[u8]) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
+fn pipe_write_locked(pipe: &mut PipeInner, buf: &[u8]) -> (usize, Option<Arc<Vec<PipePollRoute>>>) {
     let to_write = pipe.available().min(buf.len());
     let written = pipe.buf.try_push_slice(&buf[..to_write]);
     let routes = if written > 0 {
@@ -335,42 +391,157 @@ fn pipe_rx_read(
         .cast::<PipeRx>()
         .expect("internal error: pipe rx file without correct private data");
 
-    let mut pipe = rx.pipe.lock();
-
-    let (result, routes) = if pipe.buf.is_empty() {
-        if pipe.tx_cnt == 0 {
-            // no tx alive. return EOF.
-            (Ok(0), None)
-        } else if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
-            (Err(SysError::Again), None)
-        } else {
-            while pipe.buf.is_empty() && pipe.tx_cnt > 0 {
-                if get_current_task().has_unmasked_signal() {
-                    return Err(SysError::Interrupted);
-                }
-                drop(pipe);
-                yield_now();
-                pipe = rx.pipe.lock();
+    loop {
+        let pipe = rx.pipe.inner.lock();
+        if pipe.buf.is_empty() && pipe.tx_cnt > 0 {
+            if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
+                return Err(SysError::Again);
             }
-
-            // out of loop. see what happened.
-            if pipe.buf.is_empty() {
-                // all tx dead
-                (Ok(0), None)
-            } else {
-                // data available!
-                let (read, routes) = pipe_read_locked(&mut pipe, buf);
-                (Ok(read), routes)
+            drop(pipe);
+            if !rx.pipe.wait_until_read_can_continue() {
+                return Err(SysError::Interrupted);
             }
+            continue;
         }
-    } else {
+
+        if pipe.buf.is_empty() {
+            // No transmitter and no buffered data remains.
+            return Ok(0);
+        }
+        drop(pipe);
+
+        // Never hold the uninterruptible operation mutex while waiting for
+        // bytes. A competing reader may consume the observed prefix before we
+        // acquire it, so admission must be rechecked under both owners.
+        let _operation = rx.operation.lock();
+        let mut pipe = rx.pipe.inner.lock();
+        if pipe.buf.is_empty() {
+            if pipe.tx_cnt == 0 {
+                return Ok(0);
+            }
+            drop(pipe);
+            continue;
+        }
+
         let (read, routes) = pipe_read_locked(&mut pipe, buf);
-        (Ok(read), routes)
+        drop(pipe);
+        drop(_operation);
+        if routes.is_some() {
+            rx.pipe.write_recheck.publish(usize::MAX, false);
+        }
+        notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "rx_read");
+        return Ok(read);
+    }
+}
+
+fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<usize, SysError> {
+    assert!(
+        !ctx.notification_suppressed,
+        "pipe read transaction must remain an access-notification source"
+    );
+
+    let requested = ctx.dst.remaining();
+    if requested == 0 {
+        return Ok(0);
+    }
+
+    let rx = ctx
+        .file
+        .prv()
+        .cast::<PipeRx>()
+        .expect("internal error: pipe rx transaction without correct private data");
+    let (_operation, staged_len) = loop {
+        let pipe = rx.pipe.inner.lock();
+        if pipe.buf.is_empty() && pipe.tx_cnt > 0 {
+            if ctx.status_flags.contains(FileStatusFlags::NONBLOCK) {
+                return Err(SysError::Again);
+            }
+            drop(pipe);
+            if !rx.pipe.wait_until_read_can_continue() {
+                return Err(SysError::Interrupted);
+            }
+            continue;
+        }
+
+        if pipe.buf.is_empty() {
+            // All transmitters are gone and no buffered byte remains.
+            return Ok(0);
+        }
+        drop(pipe);
+
+        let operation = rx.operation.lock();
+        let pipe = rx.pipe.inner.lock();
+        if pipe.buf.is_empty() {
+            if pipe.tx_cnt == 0 {
+                return Ok(0);
+            }
+            drop(pipe);
+            drop(operation);
+            continue;
+        }
+        let staged_len = requested.min(pipe.buf.len());
+        drop(pipe);
+        break (operation, staged_len);
     };
 
-    drop(pipe);
-    notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "rx_read");
-    result
+    let mut staged = Vec::new();
+    staged
+        .try_reserve_exact(staged_len)
+        .map_err(|_| SysError::OutOfMemory)?;
+    {
+        // The RX operation gate excludes every consumer while writers may only
+        // append. The selected tail prefix therefore remains stable across the
+        // allocation and the later user copy without holding a spinlock there.
+        let pipe = rx.pipe.inner.lock();
+        assert!(
+            pipe.buf.len() >= staged_len,
+            "pipe staged prefix was consumed outside the RX operation gate"
+        );
+        staged.extend(pipe.buf.iter().take(staged_len));
+    }
+    assert_eq!(
+        staged.len(),
+        staged_len,
+        "pipe snapshot did not cover its staged prefix"
+    );
+
+    let copied = ctx.dst.write_from_slice(&staged)?;
+    assert!(
+        copied > 0 && copied <= staged.len(),
+        "nonempty pipe copyout made invalid progress"
+    );
+
+    let routes = {
+        let mut pipe = rx.pipe.inner.lock();
+        for expected in &staged[..copied] {
+            let actual = pipe
+                .buf
+                .try_pop()
+                .expect("pipe staged prefix disappeared before commit");
+            assert_eq!(
+                actual, *expected,
+                "pipe staged prefix changed before read commit"
+            );
+        }
+        (copied > 0).then(|| pipe.tx_poll_routes.clone())
+    };
+
+    drop(_operation);
+    rx.pipe.write_recheck.publish(usize::MAX, false);
+    notify_pipe_poll_routes(
+        routes,
+        Some(PollEvent::WRITABLE),
+        "tx",
+        "rx_read_user_commit",
+    );
+    Ok(copied)
+}
+
+pub(crate) fn pipe_rx_file_desc_ops() -> FileDescOps {
+    FileDescOps {
+        read_user_transaction: Some(pipe_rx_read_user_transaction),
+        ..FileDescOps::default()
+    }
 }
 
 fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
@@ -379,7 +550,7 @@ fn pipe_rx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
         .cast::<PipeRx>()
         .expect("internal error: pipe rx file without correct private data");
 
-    let mut pipe = rx.pipe.lock();
+    let mut pipe = rx.pipe.inner.lock();
     if !request.is_register() {
         return Ok(PollRegisterResult::Ready(pipe_rx_revents(
             &pipe,
@@ -423,7 +594,7 @@ fn pipe_tx_write(
         .cast::<PipeTx>()
         .expect("internal error: pipe tx file without correct private data");
 
-    let mut pipe = tx.pipe.lock();
+    let mut pipe = tx.pipe.inner.lock();
 
     if pipe.rx_cnt == 0 {
         send_sigpipe();
@@ -453,12 +624,11 @@ fn pipe_tx_write(
                 pipe.available() == 0
             }
         {
-            if get_current_task().has_unmasked_signal() {
+            drop(pipe);
+            if !tx.pipe.wait_until_write_can_continue(buf.len()) {
                 return Err(SysError::Interrupted);
             }
-            drop(pipe);
-            yield_now();
-            pipe = tx.pipe.lock();
+            pipe = tx.pipe.inner.lock();
         }
 
         if pipe.rx_cnt == 0 {
@@ -479,6 +649,9 @@ fn pipe_tx_write(
     };
 
     drop(pipe);
+    if routes.is_some() {
+        tx.pipe.read_recheck.publish(usize::MAX, false);
+    }
     notify_pipe_poll_routes(routes, Some(PollEvent::READABLE), "rx", "tx_write");
     result
 }
@@ -497,7 +670,7 @@ fn send_sigpipe() {
 
 fn with_pipe_endpoint<T>(
     file: &File,
-    f: impl FnOnce(&Arc<SpinLock<Pipe>>, Option<&PipeRx>, Option<&PipeTx>) -> T,
+    f: impl FnOnce(&Arc<Pipe>, Option<&PipeRx>, Option<&PipeTx>) -> T,
 ) -> Option<T> {
     if let Some(rx) = file.prv().cast::<PipeRx>() {
         Some(f(&rx.pipe, Some(rx), None))
@@ -508,7 +681,7 @@ fn with_pipe_endpoint<T>(
     }
 }
 
-fn pipe_state(file: &File) -> Option<&Arc<SpinLock<Pipe>>> {
+fn pipe_state(file: &File) -> Option<&Arc<Pipe>> {
     if let Some(rx) = file.prv().cast::<PipeRx>() {
         Some(&rx.pipe)
     } else {
@@ -524,7 +697,8 @@ pub(super) fn display_name(file: &File) -> Option<PathBuf> {
 }
 
 fn readable_bytes(file: &File) -> Result<usize, SysError> {
-    with_pipe_endpoint(file, |pipe, _, _| pipe.lock().buf.len()).ok_or(SysError::InvalidArgument)
+    with_pipe_endpoint(file, |pipe, _, _| pipe.inner.lock().buf.len())
+        .ok_or(SysError::InvalidArgument)
 }
 
 fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
@@ -547,14 +721,14 @@ fn pipe_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 }
 
 fn pipe_set_capacity(
-    pipe: &SpinLock<Pipe>,
+    pipe: &Pipe,
     requested: u64,
-) -> Result<(usize, Option<Arc<Vec<PipePollRoute>>>), SysError> {
+) -> Result<(usize, bool, Option<Arc<Vec<PipePollRoute>>>), SysError> {
     if requested > i32::MAX as u64 {
         return Err(SysError::InvalidArgument);
     }
 
-    let mut pipe = pipe.lock();
+    let mut inner = pipe.inner.lock();
     let requested = requested as usize;
     let rounded = if requested == 0 {
         PagingArch::PAGE_SIZE_BYTES
@@ -562,27 +736,33 @@ fn pipe_set_capacity(
         align_up_power_of_2!(requested, PagingArch::PAGE_SIZE_BYTES)
     };
 
-    if rounded < pipe.buf.len() {
+    if rounded < inner.buf.len() {
         return Err(SysError::Busy);
     }
     if rounded > PIPE_STORAGE_BYTES {
         return Err(SysError::PermissionDenied);
     }
 
-    let was_writable = pipe.available() >= PIPE_ATOMIC_WRITE_BYTES;
-    pipe.capacity = rounded;
-    let became_writable = !was_writable && pipe.available() >= PIPE_ATOMIC_WRITE_BYTES;
-    let routes = became_writable.then(|| pipe.tx_poll_routes.clone());
-    Ok((pipe.capacity(), routes))
+    let increased = rounded > inner.capacity;
+    let was_writable = inner.available() >= PIPE_ATOMIC_WRITE_BYTES;
+    inner.capacity = rounded;
+    let became_writable = !was_writable && inner.available() >= PIPE_ATOMIC_WRITE_BYTES;
+    let routes = became_writable.then(|| inner.tx_poll_routes.clone());
+    Ok((inner.capacity(), increased, routes))
 }
 
 fn pipe_fcntl(file: &File, ctx: &FcntlCtx) -> Result<FileFcntlOutcome, SysError> {
     let pipe = pipe_state(file).expect("internal error: pipe fcntl without pipe private data");
 
     match ctx.cmd() {
-        FileFcntlCmd::GetPipeSize => Ok(FileFcntlOutcome::Handled(pipe.lock().capacity() as u64)),
+        FileFcntlCmd::GetPipeSize => Ok(FileFcntlOutcome::Handled(
+            pipe.inner.lock().capacity() as u64
+        )),
         FileFcntlCmd::SetPipeSize => {
-            let (capacity, routes) = pipe_set_capacity(pipe, ctx.arg())?;
+            let (capacity, increased, routes) = pipe_set_capacity(pipe, ctx.arg())?;
+            if increased {
+                pipe.write_recheck.publish(usize::MAX, false);
+            }
             notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "set_capacity");
             Ok(FileFcntlOutcome::Handled(capacity as u64))
         },
@@ -595,7 +775,7 @@ fn pipe_tx_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
         .cast::<PipeTx>()
         .expect("internal error: pipe tx file without correct private data");
 
-    let mut pipe = tx.pipe.lock();
+    let mut pipe = tx.pipe.inner.lock();
     if !request.is_register() {
         return Ok(PollRegisterResult::Ready(pipe_tx_revents(
             &pipe,

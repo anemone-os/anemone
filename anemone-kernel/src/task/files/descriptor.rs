@@ -7,7 +7,8 @@ use crate::{
 };
 
 use super::opened_description::{
-    FileDescOps, OpenedDescriptionCapability, OpenedFileReadUserCtx, ProcFile,
+    FileDescOps, OpenedDescriptionCapability, OpenedFileReadUserCtx, OpenedFileWriteUserCtx,
+    ProcFile,
 };
 
 #[derive(Debug)]
@@ -246,6 +247,36 @@ impl FileDesc {
         }))
     }
 
+    pub(crate) fn has_write_user_transaction(&self) -> bool {
+        self.pfile.description_ops.write_user_transaction.is_some()
+    }
+
+    pub(crate) fn write_user_transaction(
+        &self,
+        src: &mut UserBufferSource<'_>,
+    ) -> Option<Result<usize, SysError>> {
+        if !self.can_write() {
+            return Some(Err(SysError::BadFileDescriptor));
+        }
+
+        let write_user_transaction = self.pfile.description_ops.write_user_transaction?;
+        let mark = src.mark();
+        let result = write_user_transaction(OpenedFileWriteUserCtx {
+            file: self.pfile.file.as_ref(),
+            status_flags: self.file_flags(),
+            src,
+            notification_suppressed: self.notifications_suppressed(),
+        });
+        if let Ok(written) = result {
+            assert!(
+                written <= src.bytes_since(mark),
+                "opened-description write committed more bytes than it copied"
+            );
+            src.keep_prefix_from(mark, written);
+        }
+        Some(result)
+    }
+
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, SysError> {
         if !self.can_read() {
             return Err(SysError::BadFileDescriptor);
@@ -369,7 +400,6 @@ impl FileDesc {
         if file.is_stream() {
             return Some(Err(SysError::BadFileDescriptor));
         }
-
         let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
         Some(if flags.contains(FileStatusFlags::APPEND) {
             file.append_user_with_ctx(src, ctx).map_err(|e| e.into())
@@ -395,7 +425,6 @@ impl FileDesc {
         if file.is_stream() {
             return Some(Err(SysError::BadFileDescriptor));
         }
-
         let ctx = FileIoCtx::new(flags.to_file_op_status_flags());
         Some(if flags.contains(FileStatusFlags::APPEND) {
             file.append_user_at_current_end_with_ctx(src, ctx)

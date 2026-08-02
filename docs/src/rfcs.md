@@ -21,7 +21,10 @@ docs/src/rfcs/<short-slug>/
 - `Contract Impact` 只列 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve` 流水。
 - RFC 单向链接 current baseline；current contract 不为 pending proposal 维护默认 backlink。
 - Git 保存物理文本历史；RFC `R0`、`R1` 只标记已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
-- 状态使用 `Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`；它不代替用户对当前实现任务的授权。
+- 状态使用`Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`、`Terminated`；它不代替用户对当前
+  实现任务的授权。`Terminated`表示维护者永久取消未满足acceptance/closure的RFC：无active gate、无current
+  contract、不得恢复。未来相关工作必须独立重新分类并取得新的授权/Implementation Boundary；只有仍命中RFC
+  分级时才新建RFC。
 
 ## 实现与反馈
 
@@ -51,6 +54,15 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
   `AT_HWCAP*`和Linux full-lazy owner优化保持明确非目标；software unaligned access问题独立登记。
+- [RFC-20260801-socket-abstraction-and-unix-socket](./rfcs/socket-abstraction-and-unix-socket/index.md)：R1 Closed；以现有
+  IPv4 UDP与新增filesystem pathname `AF_UNIX + SOCK_STREAM`作为两个真实consumer，定义最小general Socket front、
+  family-owned operation predicate、Unix namespace/stream/lifecycle owner边界，以及bind跨VFS publication的诚实工程
+  退路。首版已明确排除`SO_ERROR`、Unix pending-error与error readiness；
+  [目标与不变量](./rfcs/socket-abstraction-and-unix-socket/invariants.md)中的六组ABI/lifecycle行为作为scoped Linux
+  6.6.32 conformance与实现期validation surface，不再构成R0 Review Hold；多阶段顺序、最终evidence与停止边界由
+  [实施路线](./rfcs/socket-abstraction-and-unix-socket/implementation.md)记录。Stage 4已经以双架构、双libc、
+  pathname真实consumer与UDP regression完成`SOCKET-UNIX-CUTOVER`，八个Socket/Unix ID及三项iomux/epoll Refine
+  同时生效；hardware、`smp>1`、full socket/network LTP与final harness保持Not Run。
 - [RFC-20260731-vfs-make-node](./rfcs/vfs-make-node/index.md)：R2 Closed；以 canonical
   `mknodat(33)`、`InodeOps::make_node`、ext4/ramfs有序publication与filesystem-backed `rdev`
   形成完整node-creation target。R2分支内接受的no-umask边界属于历史closure；合流后的current implementation
@@ -118,8 +130,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   [Epoll 事务日志](./devlog/transactions/2026-07-26-epoll.md)。
 - [RFC-20260722-system-target-model](./rfcs/system-target-model/index.md)：R6已实现并关闭；QEMU参数化统一为具名opaque-string bind并允许optional runtime argv group，两种initial-program source支持完整argv。决赛脚本与具体决赛配置不在RFC。R0-R5历史均保持关闭；[`BOOT-PROTOCOL-001`](./contracts/task/boot-protocol.md)已在R6A原子Refine。
 - [RFC-20260723-ahci-controller](./rfcs/ahci-controller/index.md)：PR #136带入的generic AHCI 1.x、
-  ATA block facade与2K1000 platform integration文档入口；本次merge保留其RFC、transaction和register
-  页面，但不重新裁决或同步AHCI lifecycle/completion，状态与开放项以RFC页为准。
+  ATA block facade与2K1000 platform integration历史入口。未接受Draft已Terminated，不再形成active gate或
+  current contract；既有实现/证据保留，live lifecycle/capacity defect与可见限制以register为准。
 - [RFC-20260720-unix-jobctl](./rfcs/unix-jobctl/index.md)：R1已实现并关闭；`UJ-CUTOVER`将ThreadGroup-owned stop/continue phase、mandatory user-entry barrier、stopped/continued child report、Signal control ordering与procfs projection作为同一个integrated unit切换为[current contract](./contracts/task/job-control.md)。TTY relation与terminal policy现已由[TTY job-control contract](./contracts/tty/job-control.md)接入；orphaned-pgrp、ptrace、`si_uid = 0`与SIGCHLD publication order继续由register跟踪。
 - [RFC-20260716-dw-mshc-sd-cold-discovery](./rfcs/dw-mshc-sd-cold-discovery/index.md)：Accepted / Runtime Validation；固化 protocol-neutral DW-MSHC host、one-shot SD Memory discovery、typed card bus、`mmcblkN` endpoint 与 VisionFive 2 whole-disk `mmcblk0` ext4 rootfs 边界。两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已同步；实机 attach/read/write/rootfs 仍待验证。
 - [RFC-20260714-cpu-logical-physical-id](./rfcs/cpu-logical-physical-id/index.md)：已实现并关闭；platform `MAX_PHYS_CPU_ID` 与 kconfig `MAX_LOGICAL_CPUS` 分开约束物理 ID backing 和最大启用逻辑 CPU 数，固定 per-CPU 表使用槽位内建 `CachePadded<T>` 的 `CpuTable` / `PhysCpuTable` 编码索引域与缓存布局。VisionFive 2 容量修正由用户复验通过，最终 table 布局与 LoongArch correction build 未由 agent 运行。

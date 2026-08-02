@@ -216,10 +216,19 @@ pub mod linux {
     pub const SYS_SHMAT: u64 = 196;
     pub const SYS_SHMDT: u64 = 197;
     pub const SYS_SOCKET: u64 = 198;
+    pub const SYS_SOCKETPAIR: u64 = 199;
     pub const SYS_BIND: u64 = 200;
+    pub const SYS_LISTEN: u64 = 201;
+    pub const SYS_ACCEPT: u64 = 202;
+    pub const SYS_CONNECT: u64 = 203;
     pub const SYS_GETSOCKNAME: u64 = 204;
+    pub const SYS_GETPEERNAME: u64 = 205;
     pub const SYS_SENDTO: u64 = 206;
     pub const SYS_RECVFROM: u64 = 207;
+    pub const SYS_SETSOCKOPT: u64 = 208;
+    pub const SYS_GETSOCKOPT: u64 = 209;
+    pub const SYS_SHUTDOWN: u64 = 210;
+    pub const SYS_ACCEPT4: u64 = 242;
 
     pub const SYS_READAHEAD: u64 = 213;
 

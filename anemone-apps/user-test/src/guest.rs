@@ -17,6 +17,14 @@ cfg_select! {
                 source: "/fixtures/user-test/tools/mke2fs",
                 dest: "/bin/mkfs.ext3",
             },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/socket-r1-glibc",
+                dest: "/glibc/ltp/testcases/bin/socket_r1_oracle",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/socket-r1-musl",
+                dest: "/musl/ltp/testcases/bin/socket_r1_oracle",
+            },
         ];
     },
     target_arch = "loongarch64" => {
@@ -28,6 +36,14 @@ cfg_select! {
             StagedCompetitionFixture {
                 source: "/fixtures/user-test/tools/mke2fs",
                 dest: "/bin/mkfs.ext3",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/socket-r1-glibc",
+                dest: "/glibc/ltp/testcases/bin/socket_r1_oracle",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/socket-r1-musl",
+                dest: "/musl/ltp/testcases/bin/socket_r1_oracle",
             },
         ];
     }

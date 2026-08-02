@@ -3,13 +3,12 @@
 //! Here lies /dev/console.
 
 use crate::{
-    debug::printk::KERNEL_LOG,
     fs::devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish, publish as devfs_publish},
     prelude::*,
     utils::{any_opaque::NilOpaque, identity::AnyIdentity},
 };
 
-use core::fmt::{Debug, Write};
+use core::fmt::{self, Debug, Write};
 
 pub trait Console: Send + Sync {
     fn output(&self, s: &str);
@@ -142,16 +141,7 @@ pub(crate) fn register_console_with_terminal_identity(
     }
 
     if flags.contains(ConsoleFlags::REPLAY) {
-        let it = KERNEL_LOG.iter_weak();
-        for record in it {
-            if !record.level.should_print() {
-                continue;
-            }
-
-            let full_msg_str =
-                core::str::from_utf8(&record.msg[..record.len]).unwrap_or("[Invalid UTF-8]");
-            ops.output(full_msg_str);
-        }
+        crate::debug::printk::replay_to(&mut ops.writer()).expect("console writer is infallible");
     }
 
     SUBSYS.consoles.lock_irqsave().push(ConsoleDesc {
@@ -175,6 +165,20 @@ pub fn output(msg: &str) {
         .iter()
         .filter(|desc| desc.enabled())
         .for_each(|desc| desc.ops.output(msg));
+}
+
+/// Materialize one printk-owned formatter while holding the console registry
+/// lock, so fragments from concurrent records cannot interleave. The closure
+/// receives only the console write capability, never printk record internals.
+pub(crate) fn output_with(mut output: impl FnMut(&mut dyn Write) -> fmt::Result) {
+    SUBSYS
+        .consoles
+        .lock_irqsave()
+        .iter()
+        .filter(|desc| desc.enabled())
+        .for_each(|desc| {
+            output(&mut desc.ops.writer()).expect("console writer is infallible");
+        });
 }
 
 /// Finalize the boot console selection after every boot console has registered.

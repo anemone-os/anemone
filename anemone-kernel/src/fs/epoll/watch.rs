@@ -39,7 +39,11 @@ impl WatchPolicy {
         // so a source that only supports one class (for example timerfd's
         // READABLE route) can still carry later ERROR/HANG_UP recheck hints;
         // delivery is filtered separately by the user policy below.
-        PollEvent::READABLE | PollEvent::WRITABLE | PollEvent::ERROR | PollEvent::HANG_UP
+        PollEvent::READABLE
+            | PollEvent::WRITABLE
+            | PollEvent::ERROR
+            | PollEvent::HANG_UP
+            | PollEvent::READ_HANG_UP
     }
 
     fn delivery_interests(self) -> PollEvent {
@@ -185,5 +189,34 @@ impl PollObserver for EpollWatch {
         // ET delivery for a replacement that reuses the same slot.
         self.restore_dirty();
         owner.publish_wait_activity();
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn read_hang_up_is_routed_but_only_delivered_when_requested() {
+        let unrequested = WatchPolicy::new(PollEvent::READABLE, false, false, 0);
+        assert!(
+            unrequested
+                .route_interests()
+                .contains(PollEvent::READ_HANG_UP)
+        );
+        assert_eq!(
+            unrequested.deliverable(PollEvent::READ_HANG_UP),
+            PollEvent::empty()
+        );
+        assert_eq!(
+            unrequested.deliverable(PollEvent::HANG_UP),
+            PollEvent::HANG_UP
+        );
+
+        let requested = WatchPolicy::new(PollEvent::READ_HANG_UP, false, false, 0);
+        assert_eq!(
+            requested.deliverable(PollEvent::READ_HANG_UP | PollEvent::HANG_UP),
+            PollEvent::READ_HANG_UP | PollEvent::HANG_UP
+        );
     }
 }

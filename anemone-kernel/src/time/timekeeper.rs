@@ -12,6 +12,56 @@ static BSP_BOOT_MONO: MonoOnce<u64> = unsafe { MonoOnce::new() };
 #[percpu]
 static BOOT_MONO: Option<u64> = None;
 
+const TIMESTAMP_READY: usize = 1usize << (usize::BITS - 1);
+
+/// Publication state for the boot timestamp snapshot path. The count is the
+/// only readiness truth while CPUs establish their local baselines; the high
+/// bit is published only by the last required CPU. Snapshot readers check this
+/// global word before touching any per-CPU timekeeping state.
+struct BootTimestampReadiness(AtomicUsize);
+
+impl BootTimestampReadiness {
+    const fn new() -> Self {
+        Self(AtomicUsize::new(0))
+    }
+
+    fn publish_local_baseline(&self, required_cpus: usize) {
+        assert!(required_cpus > 0 && required_cpus < TIMESTAMP_READY);
+        let mut current = self.0.load(Ordering::Acquire);
+        loop {
+            assert_eq!(
+                current & TIMESTAMP_READY,
+                0,
+                "boot timestamp readiness republished"
+            );
+            let count = current;
+            assert!(
+                count < required_cpus,
+                "too many boot timestamp participants"
+            );
+            let published = count + 1;
+            let next = if published == required_cpus {
+                published | TIMESTAMP_READY
+            } else {
+                published
+            };
+            match self
+                .0
+                .compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.0.load(Ordering::Acquire) & TIMESTAMP_READY != 0
+    }
+}
+
+static BOOT_TIMESTAMP_READINESS: BootTimestampReadiness = BootTimestampReadiness::new();
+
 /// Number of timer ticks since boot. Or you can call this "jiffies" if you
 /// like, like Linux does.
 static TICKS: AtomicU64 = AtomicU64::new(0);
@@ -58,12 +108,29 @@ pub fn set_boot_mono(is_bsp: bool) {
             b.write(boot_mono);
         });
     }
+    // Release publication comes after this CPU's local baseline and, for the
+    // BSP, the shared baseline. The last participant makes every CPU's
+    // snapshot path safe in one global transition.
+    BOOT_TIMESTAMP_READINESS.publish_local_baseline(ncpus());
 }
 
 /// Return the current monotonic time in the same units as the monotonic
 /// counter.
 pub fn monotonic_uptime() -> u64 {
     elapsed_mono_since_boot(LocalClockSource::curr_monotonic_time())
+}
+
+/// Return a non-panicking timestamp for early diagnostic consumers.
+///
+/// `None` is returned before every boot CPU has published its local baseline.
+/// The readiness check must stay before both the architecture counter read and
+/// any per-CPU access. Ordinary time consumers continue to use the strict
+/// [`monotonic_uptime`] API.
+pub fn try_monotonic_uptime() -> Option<u64> {
+    if !BOOT_TIMESTAMP_READINESS.is_ready() {
+        return None;
+    }
+    Some(monotonic_uptime())
 }
 
 /// Return the current monotonic uptime since the kernel established its boot
@@ -107,4 +174,23 @@ pub fn program_first_timer() {
     let now_mono = LocalClockSource::curr_monotonic_time();
     let deadline = now_mono.wrapping_add(mono_per_tick());
     LocalClockEvent::program_next_timer(deadline);
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn boot_timestamp_readiness_transitions_only_after_all_cpus() {
+        let readiness = BootTimestampReadiness::new();
+        assert!(!readiness.is_ready());
+        readiness.publish_local_baseline(2);
+        assert!(!readiness.is_ready());
+        readiness.publish_local_baseline(2);
+        assert!(readiness.is_ready());
+
+        let first = try_monotonic_uptime().expect("boot timestamp must be ready before KUnit");
+        let second = try_monotonic_uptime().expect("boot timestamp readiness must be persistent");
+        assert!(second >= first);
+    }
 }

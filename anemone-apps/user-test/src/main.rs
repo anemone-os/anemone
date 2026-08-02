@@ -20,7 +20,6 @@ fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
 
 /// local tests for development.
 fn run_local_tests() {
-
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");
@@ -97,10 +96,10 @@ fn run_local_tests() {
     // local_run_cmd("/bin/epoll-test", &["epoll-test"], &[]);
     // println!("user-test: epoll test finished.");
 
-    // 13. UDP endpoint/file/address lifecycle vertical slice
-    // println!("user-test: running udp test...");
-    // local_run_cmd("/bin/udp-test", &["udp-test"], &[]);
-    // println!("user-test: udp test finished.");
+    // 13. Socket suites: UDP regression and AF_UNIX Stage 1 vertical slice
+    println!("user-test: running socket test...");
+    local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
+    println!("user-test: socket test finished.");
 
     // println!("user-test: running POSIX record lock test...");
     // local_run_cmd(

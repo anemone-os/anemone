@@ -90,7 +90,9 @@ impl<'a> WriteRequest<'a> {
         }
 
         let mut position = self.position;
-        if self.file.vfs_file().has_write_user_at() {
+        if (position.is_sequential() && self.file.has_write_user_transaction())
+            || self.file.vfs_file().has_write_user_at()
+        {
             let segments = iovecs
                 .iter()
                 .map(|iov| UserBufferSegment::new(iov.base, iov.len))
@@ -145,7 +147,9 @@ fn write_user_source(
 ) -> Option<Result<usize, SysError>> {
     match position {
         RequestPosition::Positioned(offset) => file.write_user_at(offset, src),
-        RequestPosition::Sequential => file.write_user(src),
+        RequestPosition::Sequential => file
+            .write_user_transaction(src)
+            .or_else(|| file.write_user(src)),
     }
 }
 

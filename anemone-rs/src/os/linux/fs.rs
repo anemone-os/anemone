@@ -481,6 +481,16 @@ pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
     fs::write(fd as u64, buf.as_ptr() as u64, buf.len() as u64).map(|count| count as usize)
 }
 
+pub fn readv(fd: Fd, iovecs: &mut [anemone_abi::fs::linux::IoVec]) -> Result<usize, Errno> {
+    fs::readv(fd as u64, iovecs.as_mut_ptr() as u64, iovecs.len() as u64)
+        .map(|count| count as usize)
+}
+
+pub fn writev(fd: Fd, iovecs: &[anemone_abi::fs::linux::IoVec]) -> Result<usize, Errno> {
+    fs::writev(fd as u64, iovecs.as_ptr() as u64, iovecs.len() as u64)
+        .map(|count| count as usize)
+}
+
 pub fn pipe2(flags: PipeFlags) -> Result<(Fd, Fd), Errno> {
     let mut pipefd = [0i32; 2];
     fs::pipe2(pipefd.as_mut_ptr() as u64, flags.bits() as u64)

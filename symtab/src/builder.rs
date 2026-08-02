@@ -1,141 +1,100 @@
-//! This module provides functions to build a symbol table in memory.
-//! std crate is required for dynamic memory allocation.
+//! Host-side checked encoder for the shared symbol-table format.
 
-use std::{alloc::Layout, collections::BTreeSet, os::raw::c_char, ptr::NonNull};
+use std::{error::Error, fmt, vec::Vec};
 
-use super::{SymbolEntry, SymbolTable, SymbolType};
+use crate::{ENTRY_SIZE, HEADER_SIZE, MAGIC, SymbolTable, VERSION};
 
-#[derive(Debug, Clone)]
-pub struct BuilderSymbol {
-    address: u64,
-    name: String,
-    type_: SymbolType,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SymbolInput<'a> {
+    pub start: u64,
+    pub size: u64,
+    pub name: &'a str,
 }
 
-impl BuilderSymbol {
-    pub fn new<S>(address: u64, name: S, type_: SymbolType) -> Self
-    where
-        S: AsRef<str>,
-    {
-        Self {
-            address,
-            name: name.as_ref().to_string(),
-            type_,
+impl<'a> SymbolInput<'a> {
+    pub const fn new(start: u64, size: u64, name: &'a str) -> Self {
+        Self { start, size, name }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EncodeError {
+    TooLarge,
+    ZeroSizedSymbol,
+    AddressOverflow,
+    UnsortedSymbols,
+    EmptyName,
+}
+
+impl fmt::Display for EncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "cannot encode symbol table: {self:?}")
+    }
+}
+
+impl Error for EncodeError {}
+
+pub fn encode(symbols: &[SymbolInput<'_>]) -> Result<Vec<u8>, EncodeError> {
+    let entry_count = u32::try_from(symbols.len()).map_err(|_| EncodeError::TooLarge)?;
+    let entries_size = symbols
+        .len()
+        .checked_mul(ENTRY_SIZE)
+        .ok_or(EncodeError::TooLarge)?;
+    let strings_offset = HEADER_SIZE
+        .checked_add(entries_size)
+        .ok_or(EncodeError::TooLarge)?;
+    let mut strings_size = 0usize;
+    let mut previous_start = None;
+    for symbol in symbols {
+        if symbol.size == 0 {
+            return Err(EncodeError::ZeroSizedSymbol);
         }
-    }
-}
-
-impl PartialEq for BuilderSymbol {
-    fn eq(&self, other: &Self) -> bool {
-        self.address == other.address
-    }
-}
-
-impl Eq for BuilderSymbol {}
-
-impl PartialOrd for BuilderSymbol {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for BuilderSymbol {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.address.cmp(&other.address)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Builder {
-    symbols: BTreeSet<BuilderSymbol>,
-}
-
-/// This encapsulates the built symbol table and its layout,
-/// We do not implement Copy or Clone, thus preventing accidental
-/// use-after-free.
-#[derive(Debug)]
-pub struct BuiltSymbolTable {
-    raw: NonNull<u8>,
-    bytes: usize, // layout.size() maybe larger due to alignment padding
-    layout: Layout,
-}
-
-impl Builder {
-    pub fn new() -> Self {
-        Self {
-            symbols: BTreeSet::new(),
+        symbol
+            .start
+            .checked_add(symbol.size)
+            .ok_or(EncodeError::AddressOverflow)?;
+        if previous_start.is_some_and(|start| start >= symbol.start) {
+            return Err(EncodeError::UnsortedSymbols);
         }
-    }
-
-    /// Add a symbol to the builder. Returns true if the symbol was added,
-    /// false if a symbol with the same address already exists.
-    pub fn add_symbol(&mut self, symbol: BuilderSymbol) -> bool {
-        self.symbols.insert(symbol)
-    }
-
-    /// Consume the builder and build the symbol table.
-    pub fn build(self) -> BuiltSymbolTable {
-        // Calculate sizes
-        let num_symbols = self.symbols.len();
-        let entries_size = num_symbols * size_of::<SymbolEntry>();
-        let strtab_size: usize = self.symbols.iter().map(|s| s.name.len() + 1).sum();
-        let total_size = size_of::<u64>() * 2 + entries_size + strtab_size;
-        let padded_size = (total_size + 7) & !7; // align to 8 bytes
-        unsafe {
-            let layout = Layout::from_size_align(padded_size, 8).unwrap();
-            let ptr = std::alloc::alloc(layout);
-            if ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
-
-            // header
-            let magic_ptr = ptr as *mut u64;
-            magic_ptr.write(SymbolTable::MAGIC);
-            let num_symbols_ptr = magic_ptr.add(1);
-            num_symbols_ptr.write(num_symbols as u64);
-            // entries
-            let mut entry_ptr = num_symbols_ptr.add(1) as *mut SymbolEntry;
-            let mut strtab_ptr = entry_ptr.add(num_symbols) as *mut c_char;
-            let mut accumulated_offset: u32 = 0;
-            for symbol in self.symbols {
-                entry_ptr.write(SymbolEntry {
-                    address: symbol.address,
-                    name_offset: accumulated_offset,
-                    type_: symbol.type_ as u8,
-                });
-                let name_bytes = symbol.name.as_bytes();
-                core::ptr::copy_nonoverlapping(
-                    name_bytes.as_ptr(),
-                    strtab_ptr as *mut u8,
-                    name_bytes.len(),
-                );
-                strtab_ptr.add(name_bytes.len()).write(0); // null terminator
-                strtab_ptr = strtab_ptr.add(name_bytes.len() + 1);
-                accumulated_offset += (name_bytes.len() + 1) as u32;
-                entry_ptr = entry_ptr.add(1);
-            }
-
-            BuiltSymbolTable {
-                raw: NonNull::new_unchecked(ptr),
-                bytes: total_size,
-                layout,
-            }
+        if symbol.name.is_empty() {
+            return Err(EncodeError::EmptyName);
         }
+        strings_size = strings_size
+            .checked_add(symbol.name.len())
+            .ok_or(EncodeError::TooLarge)?;
+        previous_start = Some(symbol.start);
     }
-}
+    let total_size = strings_offset
+        .checked_add(strings_size)
+        .ok_or(EncodeError::TooLarge)?;
+    let total_size_u32 = u32::try_from(total_size).map_err(|_| EncodeError::TooLarge)?;
+    let strings_offset_u32 = u32::try_from(strings_offset).map_err(|_| EncodeError::TooLarge)?;
 
-impl BuiltSymbolTable {
-    pub fn as_bytes(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.raw.as_ptr(), self.bytes) }
-    }
-}
+    let mut bytes = vec![0; total_size];
+    bytes[..MAGIC.len()].copy_from_slice(&MAGIC);
+    bytes[8..10].copy_from_slice(&VERSION.to_le_bytes());
+    bytes[10..12].copy_from_slice(&(HEADER_SIZE as u16).to_le_bytes());
+    bytes[12..16].copy_from_slice(&total_size_u32.to_le_bytes());
+    bytes[16..20].copy_from_slice(&entry_count.to_le_bytes());
+    bytes[20..24].copy_from_slice(&strings_offset_u32.to_le_bytes());
 
-impl Drop for BuiltSymbolTable {
-    fn drop(&mut self) {
-        unsafe {
-            std::alloc::dealloc(self.raw.as_ptr() as *mut u8, self.layout);
-        }
+    let mut name_offset = 0usize;
+    for (index, symbol) in symbols.iter().enumerate() {
+        let entry = HEADER_SIZE + index * ENTRY_SIZE;
+        let name_offset_u32 = u32::try_from(name_offset).map_err(|_| EncodeError::TooLarge)?;
+        let name_len_u32 = u32::try_from(symbol.name.len()).map_err(|_| EncodeError::TooLarge)?;
+        bytes[entry..entry + 8].copy_from_slice(&symbol.start.to_le_bytes());
+        bytes[entry + 8..entry + 16].copy_from_slice(&symbol.size.to_le_bytes());
+        bytes[entry + 16..entry + 20].copy_from_slice(&name_offset_u32.to_le_bytes());
+        bytes[entry + 20..entry + 24].copy_from_slice(&name_len_u32.to_le_bytes());
+        let name_start = strings_offset + name_offset;
+        bytes[name_start..name_start + symbol.name.len()].copy_from_slice(symbol.name.as_bytes());
+        name_offset += symbol.name.len();
     }
+
+    // Keep producer and consumer checks coupled at the format owner boundary.
+    SymbolTable::parse(&bytes).expect("encoder must produce a parseable symbol table");
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -143,60 +102,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_symtab() {
-        let mut builder = Builder::new();
-        let symbols = [
-            BuilderSymbol {
-                address: 0x80000000,
-                name: "start".to_string(),
-                type_: SymbolType::Text,
-            },
-            BuilderSymbol {
-                address: 0x80001000,
-                name: "main".to_string(),
-                type_: SymbolType::Text,
-            },
-            BuilderSymbol {
-                address: 0x40002000,
-                name: "data_var".to_string(),
-                type_: SymbolType::Data,
-            },
-            BuilderSymbol {
-                address: 0x0,
-                name: "zero".to_string(),
-                type_: SymbolType::Unknown,
-            },
+    fn round_trip_preserves_order_ranges_and_names() {
+        let inputs = [
+            SymbolInput::new(0x8000, 0x20, "alpha"),
+            SymbolInput::new(0x9000, 0x30, "beta::gamma"),
         ];
-        for symbol in symbols {
-            assert!(builder.add_symbol(symbol));
-        }
-        let symtab = builder.build();
-        let size_1 = symtab.as_bytes().len();
-        let symtab = unsafe { SymbolTable::from_ptr(symtab.as_bytes().as_ptr()) }
-            .expect("symtab format mismatch");
-        assert_eq!(symtab.num_symbols(), 4);
-        let size_2 = symtab.raw.len() + 16;
-        assert_eq!(size_1, size_2);
+        let bytes = encode(&inputs).unwrap();
+        let symbols: Vec<_> = SymbolTable::parse(&bytes).unwrap().iter().collect();
+        assert_eq!(
+            symbols,
+            vec![
+                crate::Symbol {
+                    start: 0x8000,
+                    size: 0x20,
+                    name: "alpha",
+                },
+                crate::Symbol {
+                    start: 0x9000,
+                    size: 0x30,
+                    name: "beta::gamma",
+                },
+            ]
+        );
+    }
 
-        for symbol in symtab {
-            println!(
-                "Symbol: addr=0x{:x}, name={}, type={:?}",
-                symbol.address,
-                symbol.name.to_str().unwrap(),
-                symbol.type_
-            );
-        }
-
-        // lookup tests
-        let sym = symtab.lookup(0x80000000).unwrap();
-        assert_eq!(sym.name.to_str().unwrap(), "start");
-        let sym = symtab.lookup(0x80000FFF).unwrap();
-        assert_eq!(sym.name.to_str().unwrap(), "start");
-        let sym = symtab.lookup(0x80001000).unwrap();
-        assert_eq!(sym.name.to_str().unwrap(), "main");
-        let sym = symtab.lookup(0x40002010).unwrap();
-        assert_eq!(sym.name.to_str().unwrap(), "data_var");
-        let sym = symtab.lookup(0x1).unwrap();
-        assert_eq!(sym.name.to_str().unwrap(), "zero");
+    #[test]
+    fn invalid_inputs_fail_before_bytes_are_published() {
+        assert_eq!(
+            encode(&[SymbolInput::new(1, 0, "zero")]),
+            Err(EncodeError::ZeroSizedSymbol)
+        );
+        assert_eq!(
+            encode(&[SymbolInput::new(u64::MAX, 2, "overflow")]),
+            Err(EncodeError::AddressOverflow)
+        );
+        assert_eq!(
+            encode(&[
+                SymbolInput::new(2, 1, "second"),
+                SymbolInput::new(1, 1, "first"),
+            ]),
+            Err(EncodeError::UnsortedSymbols)
+        );
+        assert_eq!(
+            encode(&[SymbolInput::new(1, 1, "")]),
+            Err(EncodeError::EmptyName)
+        );
     }
 }

@@ -1,0 +1,17 @@
+[build]
+name = "rlimit-acceptance-rv64"
+arch = "riscv64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/rlimit-test"
+
+[[dirs]]
+path = "/dev"
+
+[[apps]]
+name = "rlimit-test"
+installed_dir = "/sbin"

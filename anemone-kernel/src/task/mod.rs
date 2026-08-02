@@ -269,6 +269,9 @@ pub struct ThreadGroup {
     terminate_signal: Option<SigNo>,
     /// POSIX interval timers. Shared by all member threads.
     itimers: ITimers,
+    /// User-process rlimit policy. Presence follows `ty`; it is absent for
+    /// kthreads and never acts as a second thread-group type discriminator.
+    resource_limits: Option<NoIrqRwLock<task_resource::UserResourceLimits>>,
     inner: NoIrqRwLock<ThreadGroupInner>,
 }
 

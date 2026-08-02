@@ -1,0 +1,17 @@
+[build]
+name = "rlimit-acceptance-la64"
+arch = "loongarch64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/rlimit-test"
+
+[[dirs]]
+path = "/dev"
+
+[[apps]]
+name = "rlimit-test"
+installed_dir = "/sbin"

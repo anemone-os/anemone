@@ -155,6 +155,14 @@ pub fn write(fd: u64, buf_ptr: u64, count: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_WRITE, fd, buf_ptr, count, 0, 0, 0) }
 }
 
+pub fn readv(fd: u64, iov_ptr: u64, iov_count: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_READV, fd, iov_ptr, iov_count, 0, 0, 0) }
+}
+
+pub fn writev(fd: u64, iov_ptr: u64, iov_count: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_WRITEV, fd, iov_ptr, iov_count, 0, 0, 0) }
+}
+
 pub fn pipe2(pipefd_ptr: u64, flags: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_PIPE2, pipefd_ptr, flags, 0, 0, 0, 0) }
 }

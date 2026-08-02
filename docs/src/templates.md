@@ -75,10 +75,14 @@
 ```md
 # 2026-05-22 - 简短事务标题
 
-**Status:** Active / Blocked / Completed
+**Status:** Active / Blocked / Completed / Terminated
 **Owners:** name1, name2
 **Canonical Target:** RFC 与修订链接。
 **Contract Delta:** 实际变化的 IDs；没有写 `None`。
+
+`Terminated`只用于维护者永久停止未完成transaction：它不是`Completed`，不得保留active `Next`或重开；
+已有checkpoint/Not Run证据继续保留，live defect/limitation只链接register。未来相关工作重新分类和授权，
+不从原transaction续跑。
 
 ## Scope
 
