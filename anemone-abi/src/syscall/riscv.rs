@@ -236,6 +236,9 @@ pub mod linux {
     pub const SYS_MUNLOCK: u64 = 229;
     pub const SYS_MADVISE: u64 = 233;
 
+    pub const SYS_RISCV_HWPROBE: u64 = 258;
+    pub const SYS_RISCV_FLUSH_ICACHE: u64 = 259;
+
     pub const SYS_WAIT4: u64 = 260;
 
     pub const SYS_PRLIMIT64: u64 = 261;
@@ -257,6 +260,7 @@ pub mod linux {
     pub const SYS_PWRITEV2: u64 = 287;
 
     pub const SYS_STATX: u64 = 291;
+    pub const SYS_RSEQ: u64 = 293;
 
     pub const SYS_CLONE3: u64 = 435;
 

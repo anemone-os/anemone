@@ -2,6 +2,31 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260802-RV64-HWPROBE-CONSERVATIVE-CAPABILITIES
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** RISC-V / syscall ABI / CPU capabilities
+
+**Summary:** RV64 `riscv_hwprobe` 已提供 Linux 6.6 的 flags、CPU mask、用户内存和
+unknown-key ABI，但当前只发布 CPU 准入规则保证的 IMA、F/D 与 C，并把 misaligned
+performance 报告为 unknown。`mvendorid`、`marchid`、`mimpid` 暂作为 unknown key；Vector、
+Zba、Zbb、Zbs 也不发布。该缩减避免在尚无 per-hart capability/ID snapshot owner 时把当前
+hart 或 FDT 的局部事实错误投影到任意用户 CPU mask。
+
+因此 Linux 6.6 `tools/testing/selftests/riscv/hwprobe` 要求 ID key 0..2 被识别的基础用例
+不在当前 acceptance 内；用户态必须把 unknown key 当作 capability 不可用并使用通用路径。
+
+**Exit Condition:** RISC-V CPU discovery/boot 建立每个已注册 hart 的不可变 SBI ID 与 ISA
+capability snapshot，在所有 AP 发布完成后才开放 syscall，并按用户 CPU mask 对 value-like key
+做一致性聚合、对 feature-like key 做交集；只有内核具备对应用户上下文支持时才能发布 Vector。
+随后通过 Linux hwprobe selftest、异构 mask 定向测试和 QEMU/实机验证关闭本限制。
+
+**Owner:** RISC-V CPU capability discovery
+**Last Verified:** 2026-08-02
+**Related:** [RISC-V architecture syscalls 小迭代](../devlog/changes/2026-08-02-riscv-arch-syscalls.md)
+
 ## ANE-20260801-LA64-LSX-STICKY-LAZY-SCOPE
 
 **Type:** Limitation
