@@ -101,7 +101,6 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), SysError> {
                 if inode_ref.size() != meta.size {
                     inode_ref.set_len(meta.size)?;
                 }
-                // TODO: implement lwext4's Hal and use update_[x]time directly
                 inode_ref.set_atime(&meta.atime);
                 inode_ref.set_mtime(&meta.mtime);
                 inode_ref.set_ctime(&meta.ctime);

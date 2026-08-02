@@ -1,5 +1,3 @@
-use alloc::ffi::CString;
-
 use crate::{prelude::*, sys};
 
 pub mod debug;

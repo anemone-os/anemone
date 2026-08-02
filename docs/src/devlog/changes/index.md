@@ -31,6 +31,11 @@
 
 ## 当前记录
 
+- [2026-08-02 - Kernel backtrace symbolization](./2026-08-02-kernel-symbolization.md)
+- [2026-08-02 - KUnit execution boundary](./2026-08-02-kunit-execution-boundary.md)
+- [2026-08-02 - Kernel developer logging](./2026-08-02-kernel-developer-logging.md)
+- [2026-08-02 - lwext4 Rust safe facade](./2026-08-02-lwext4-rust-safe-facade.md)
+- [2026-08-02 - Pipe Event wait](./2026-08-02-pipe-event-wait.md)
 - [2026-08-02 - rlimit core 与 RLIMIT_NOFILE](./2026-08-02-rlimit-core-nofile.md)
 - [2026-08-02 - VFS/kernel creation boundary](./2026-08-02-vfs-kernel-creation-boundary.md)
 - [2026-08-01 - Alpha/Omega POSIX lock/VFS integration](./2026-08-01-alpha-omega-posix-lock-vfs-integration.md)

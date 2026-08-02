@@ -6,7 +6,7 @@ use core::{
 use super::InodeRef;
 
 use crate::{
-    Ext4Result, InodeType, SystemHal, WritebackGuard, error::Context, ffi::*, util::get_block_size,
+    Ext4Result, InodeType, error::Context, ffi::*, fs::WritebackGuard, util::get_block_size,
 };
 
 fn take<'a>(buf: &mut &'a [u8], cnt: usize) -> &'a [u8] {
@@ -22,7 +22,7 @@ fn take_mut<'a>(buf: &mut &'a mut [u8], cnt: usize) -> &'a mut [u8] {
     first
 }
 
-impl<Hal: SystemHal> InodeRef<Hal> {
+impl InodeRef<'_> {
     fn get_inode_fblock(&mut self, block: u32) -> Ext4Result<u64> {
         unsafe {
             let mut fblock = 0u64;
@@ -64,7 +64,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         }
     }
 
-    pub fn read_at(&mut self, mut buf: &mut [u8], pos: u64) -> Ext4Result<usize> {
+    pub(crate) fn read_at(&mut self, mut buf: &mut [u8], pos: u64) -> Ext4Result<usize> {
         unsafe {
             let file_size = self.size();
             let block_size = get_block_size(self.superblock());
@@ -149,7 +149,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         }
     }
 
-    pub fn write_at(&mut self, mut buf: &[u8], pos: u64) -> Ext4Result<usize> {
+    pub(crate) fn write_at(&mut self, mut buf: &[u8], pos: u64) -> Ext4Result<usize> {
         unsafe {
             let mut file_size = self.size();
             if pos > file_size {
@@ -229,7 +229,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         }
     }
 
-    pub fn truncate(&mut self, size: u64) -> Ext4Result<()> {
+    pub(crate) fn truncate(&mut self, size: u64) -> Ext4Result<()> {
         unsafe {
             let bdev = (*self.inner.fs).bdev;
             let _guard = WritebackGuard::new(bdev);
@@ -237,7 +237,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         }
     }
 
-    pub fn set_symlink(&mut self, target: &[u8]) -> Ext4Result<()> {
+    pub(crate) fn set_symlink(&mut self, target: &[u8]) -> Ext4Result<()> {
         let block_size = get_block_size(self.superblock());
         if target.len() > block_size as usize {
             // ENAMETOOLONG

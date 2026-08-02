@@ -1,14 +1,12 @@
 use core::time::Duration;
 
-use crate::{SystemHal, error::Context, ffi::*, util::get_block_size};
+use crate::{error::Context, ffi::*};
 
 use super::{InodeRef, InodeType};
 
 /// Filesystem node metadata.
 #[derive(Clone, Debug, Default)]
 pub struct FileAttr {
-    /// ID of device containing file
-    pub device: u64,
     /// Inode number
     pub ino: u32,
     /// Number of hard links
@@ -25,10 +23,6 @@ pub struct FileAttr {
     pub rdev: u32,
     /// Total size in bytes
     pub size: u64,
-    /// Block size for filesystem I/O
-    pub block_size: u64,
-    /// Number of 512B blocks allocated
-    pub blocks: u64,
 
     /// Time of last access
     pub atime: Duration,
@@ -54,7 +48,7 @@ fn decode_time(time: u32, extra: u32) -> Duration {
     Duration::new(sec as u64 + ((epoch as u64) << 32), nsec)
 }
 
-impl<Hal: SystemHal> InodeRef<Hal> {
+impl InodeRef<'_> {
     pub(crate) fn free_unlinked(mut self) -> crate::Ext4Result<()> {
         assert_eq!(self.nlink(), 0, "only an unlinked inode may be rolled back");
         unsafe { ext4_fs_free_inode(self.inner.as_mut()) }
@@ -65,11 +59,11 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         Ok(())
     }
 
-    pub fn inode_type(&self) -> InodeType {
+    pub(crate) fn inode_type(&self) -> InodeType {
         ((self.mode() >> 12) as u8).into()
     }
 
-    pub fn is_dir(&self) -> bool {
+    pub(crate) fn is_dir(&self) -> bool {
         self.inode_type() == InodeType::Directory
     }
 
@@ -77,7 +71,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         unsafe { ext4_inode_get_size(self.superblock() as *const _ as _, self.inner.inode) }
     }
 
-    pub fn mode(&self) -> u32 {
+    pub(crate) fn mode(&self) -> u32 {
         unsafe { ext4_inode_get_mode(self.superblock() as *const _ as _, self.inner.inode) }
     }
     pub fn set_mode(&mut self, mode: u32) {
@@ -87,14 +81,14 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         }
     }
 
-    pub fn nlink(&self) -> u16 {
+    pub(crate) fn nlink(&self) -> u16 {
         u16::from_le(self.raw_inode().links_count)
     }
 
-    pub fn uid(&self) -> u32 {
+    pub(crate) fn uid(&self) -> u32 {
         unsafe { ext4_inode_get_uid(self.inner.inode) }
     }
-    pub fn gid(&self) -> u32 {
+    pub(crate) fn gid(&self) -> u32 {
         unsafe { ext4_inode_get_gid(self.inner.inode) }
     }
 
@@ -106,11 +100,11 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         }
     }
 
-    pub fn device(&self) -> u32 {
+    pub(crate) fn device(&self) -> u32 {
         unsafe { ext4_inode_get_dev(self.inner.inode) }
     }
 
-    pub fn set_device(&mut self, dev: u32) {
+    pub(crate) fn set_device(&mut self, dev: u32) {
         unsafe {
             ext4_inode_set_dev(self.inner.inode, dev);
             self.mark_dirty();
@@ -139,24 +133,7 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         self.mark_dirty();
     }
 
-    pub fn update_atime(&mut self) {
-        if let Some(dur) = Hal::now() {
-            self.set_atime(&dur);
-        }
-    }
-    pub fn update_mtime(&mut self) {
-        if let Some(dur) = Hal::now() {
-            self.set_mtime(&dur);
-        }
-    }
-    pub fn update_ctime(&mut self) {
-        if let Some(dur) = Hal::now() {
-            self.set_ctime(&dur);
-        }
-    }
-
-    pub fn get_attr(&self, attr: &mut FileAttr) {
-        attr.device = 0;
+    pub(crate) fn get_attr(&self, attr: &mut FileAttr) {
         attr.ino = u32::from_le(self.inner.index);
         attr.nlink = self.nlink() as _;
         attr.mode = self.mode();
@@ -165,11 +142,6 @@ impl<Hal: SystemHal> InodeRef<Hal> {
         attr.gid = self.gid() as _;
         attr.rdev = self.device();
         attr.size = self.size();
-        attr.block_size = get_block_size(self.superblock()) as _;
-        attr.blocks = unsafe {
-            ext4_inode_get_blocks_count(self.superblock() as *const _ as _, self.inner.inode)
-        };
-
         let inode = self.raw_inode();
         attr.atime = decode_time(inode.access_time, inode.atime_extra);
         attr.mtime = decode_time(inode.modification_time, inode.mtime_extra);

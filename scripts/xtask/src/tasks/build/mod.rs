@@ -109,6 +109,10 @@ struct BuildContext {
     disasm: bool,
 }
 
+const fn kernel_link_passes(kernel_symbols: bool) -> usize {
+    if kernel_symbols { 2 } else { 1 }
+}
+
 impl BuildContext {
     fn new(resolved: ResolvedSystemBuild, disasm: bool) -> Self {
         Self { resolved, disasm }
@@ -145,6 +149,11 @@ impl BuildContext {
             .arg("-p")
             .arg("build/apps")
             .run_echo()?;
+
+        // The discovery pass always sees one canonical valid empty table. A
+        // disabled build does not compile the consumer, but keeping this input
+        // valid avoids a stale non-empty blob becoming implicit build state.
+        symtab::prepare_empty_table()?;
 
         self.gen_rust_defs()?;
         self.gen_kernel_lds()?;
@@ -222,13 +231,91 @@ impl BuildContext {
     }
 
     fn build_kernel(&self) -> anyhow::Result<()> {
-        log_progress!("COMPILE", "Compiling kernel");
+        let kernel_symbols = self
+            .resolved
+            .kernel_config
+            .features
+            .get("kernel_symbols")
+            .copied()
+            .unwrap_or(false);
+        let link_passes = kernel_link_passes(kernel_symbols);
+
+        log_progress!(
+            "COMPILE",
+            if link_passes == 2 {
+                "Compiling kernel discovery pass"
+            } else {
+                "Compiling kernel"
+            }
+        );
+        self.compile_kernel()?;
+        let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
+
+        if link_passes == 2 {
+            std::fs::copy(&built_kernel_path, symtab::DISCOVERY_ELF).with_context(|| {
+                format!(
+                    "failed to preserve discovery ELF '{}'",
+                    symtab::DISCOVERY_ELF
+                )
+            })?;
+            let discovery = symtab::generate_from_discovery(Path::new(symtab::DISCOVERY_ELF))?;
+            log_progress!(
+                "SYMTAB",
+                &format!(
+                    "discovery selected {} text/function symbols",
+                    discovery.len()
+                )
+            );
+
+            log_progress!("COMPILE", "Compiling kernel final pass");
+            self.compile_kernel()?;
+            let stats = symtab::verify_and_publish(
+                &discovery,
+                Path::new(&built_kernel_path),
+                Path::new(symtab::PASS_MAP),
+                Path::new("build/anemone.elf"),
+                Path::new("build/kernel.map"),
+            )?;
+            log_progress!(
+                "SYMTAB",
+                &format!(
+                    "verified entries={} strings={} bytes={}",
+                    stats.entries, stats.strings, stats.total
+                )
+            );
+        } else {
+            std::fs::copy(&built_kernel_path, "build/anemone.elf")?;
+            std::fs::copy(symtab::PASS_MAP, "build/kernel.map")?;
+        }
+
+        kernel_output::build_uboot_artifact(
+            &self.resolved.platform.build.arch,
+            self.resolved.platform.uboot.as_ref(),
+        )?;
+
+        if self.disasm {
+            log_progress!("DISASM", "Generating kernel disassembly");
+
+            let sh = Shell::new()?;
+            let disasm = sh
+                .cmd(&self.resolved.platform.build.arch.target_triple().objdump())
+                .arg("-d")
+                .arg("-S")
+                .arg("build/anemone.elf")
+                .echo()
+                .read()?;
+            sh.write_file("build/anemone.disasm", disasm)?;
+        }
+        Ok(())
+    }
+
+    fn compile_kernel(&self) -> anyhow::Result<()> {
         let sh = Shell::new()?;
         let rustflags = BuildContext::build_rustflags(&[
             "-C",
             "link-arg=-Tbuild/generated/kernel.lds",
             "-C",
-            "link-arg=-Map=build/kernel.map",
+            &format!("link-arg=-Map={}", symtab::PASS_MAP),
         ]);
         let mut build = sh
             .with_current_dir("anemone-kernel")
@@ -257,27 +344,6 @@ impl BuildContext {
             }
         }
         build.run_echo()?;
-
-        let built_kernel_path = format!("{}/anemone-kernel", self.cargo_build_dir());
-        std::fs::copy(built_kernel_path, "build/anemone.elf")?;
-
-        kernel_output::build_uboot_artifact(
-            &self.resolved.platform.build.arch,
-            self.resolved.platform.uboot.as_ref(),
-        )?;
-
-        if self.disasm {
-            log_progress!("DISASM", "Generating kernel disassembly");
-
-            let disasm = sh
-                .cmd(&self.resolved.platform.build.arch.target_triple().objdump())
-                .arg("-d")
-                .arg("-S")
-                .arg("build/anemone.elf")
-                .echo()
-                .read()?;
-            sh.write_file("build/anemone.disasm", disasm)?;
-        }
         Ok(())
     }
 
@@ -380,6 +446,12 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn kernel_symbol_feature_selects_exactly_one_or_two_link_passes() {
+        assert_eq!(kernel_link_passes(false), 1);
+        assert_eq!(kernel_link_passes(true), 2);
     }
 
     #[test]
