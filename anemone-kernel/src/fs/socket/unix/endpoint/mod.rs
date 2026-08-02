@@ -12,9 +12,10 @@ use super::{
     super::{
         SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
         SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketPairPreparation,
-        SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveRequest,
-        SocketSendError, SocketSendRequest, SocketStreamReadSink, SocketStreamWriteSource,
-        SocketType,
+        SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveFlags,
+        SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketShutdown,
+        SocketShutdownError, SocketStreamDestination, SocketStreamReadSink,
+        SocketStreamWriteSource, SocketType,
     },
     admission::{
         UnixListener, accept, connect, listen, notify_admission_routes, with_admission_commit,
@@ -23,7 +24,10 @@ use super::{
 };
 
 pub(super) use stream::{EndpointSide, UnixConnection};
-use stream::{poll_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream};
+use stream::{
+    poll_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream,
+    shutdown_unix_stream,
+};
 
 #[derive(Debug)]
 pub(super) struct EndpointName(SpinLock<Option<Arc<str>>>);
@@ -335,6 +339,14 @@ fn query_unix_peer_address(
     .map_err(SocketQueryError::Copy)
 }
 
+fn query_unix_accepting(private: &AnyOpaque) -> Result<bool, SocketQueryError> {
+    match &endpoint(private).core.state.lock().association {
+        EndpointAssociation::Listening(_) => Ok(true),
+        EndpointAssociation::Retired => Err(SocketQueryError::Retired),
+        EndpointAssociation::Unconnected | EndpointAssociation::Connected { .. } => Ok(false),
+    }
+}
+
 pub(super) fn retire_endpoint_core(endpoint: &Arc<UnixEndpointCore>) {
     let empty_lifecycle_routes = Arc::new(Vec::new());
     let empty_connect_routes = Arc::new(Vec::new());
@@ -389,8 +401,10 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     listen: Some(listen_unix_stream),
     connect: Some(connect_unix_stream),
     accept: Some(accept_unix_stream),
+    shutdown: Some(shutdown_unix_stream),
     local_address: Some(query_unix_local_address),
     peer_address: Some(query_unix_peer_address),
+    accepting: query_unix_accepting,
     send: Some(send_unix_stream),
     receive: Some(receive_unix_stream),
     poll: poll_unix_stream,
@@ -423,14 +437,42 @@ mod kunits {
         private: &AnyOpaque,
         sink: &mut dyn SocketStreamReadSink,
     ) -> Result<usize, SocketReceiveError> {
-        receive_unix_stream(private, SocketReceiveRequest::Stream(sink))
+        receive_stream_with_flags_for_test(private, sink, false)
+    }
+
+    fn receive_stream_with_flags_for_test(
+        private: &AnyOpaque,
+        sink: &mut dyn SocketStreamReadSink,
+        peek: bool,
+    ) -> Result<usize, SocketReceiveError> {
+        receive_unix_stream(
+            private,
+            SocketReceiveRequest::Stream {
+                sink,
+                flags: SocketReceiveFlags { peek },
+            },
+        )
     }
 
     fn send_stream_for_test(
         private: &AnyOpaque,
         source: &mut dyn SocketStreamWriteSource,
     ) -> Result<usize, SocketSendError> {
-        send_unix_stream(private, SocketSendRequest::Stream(source))
+        send_stream_with_destination_for_test(private, source, SocketStreamDestination::Absent)
+    }
+
+    fn send_stream_with_destination_for_test(
+        private: &AnyOpaque,
+        source: &mut dyn SocketStreamWriteSource,
+        destination: SocketStreamDestination,
+    ) -> Result<usize, SocketSendError> {
+        send_unix_stream(
+            private,
+            SocketSendRequest::Stream {
+                source,
+                destination,
+            },
+        )
     }
 
     struct ReadCapture(Vec<u8>);
@@ -748,6 +790,130 @@ mod kunits {
             Ok(2)
         );
         assert_eq!(suffix.0, b"ad");
+    }
+
+    #[kunit]
+    fn peek_copies_without_consuming_or_releasing_capacity() {
+        let pair = prepare_unix_pair().unwrap();
+        assert_eq!(
+            send_stream_for_test(&pair.first_private, &mut WriteBytes(b"peek")),
+            Ok(4)
+        );
+
+        let mut peek = PartialReadCapture {
+            bytes: Vec::new(),
+            limit: 2,
+        };
+        assert_eq!(
+            receive_stream_with_flags_for_test(&pair.second_private, &mut peek, true),
+            Ok(2)
+        );
+        assert_eq!(peek.bytes, b"pe");
+
+        let mut whole = ReadCapture(Vec::new());
+        assert_eq!(
+            receive_stream_for_test(&pair.second_private, &mut whole),
+            Ok(4)
+        );
+        assert_eq!(whole.0, b"peek");
+    }
+
+    #[kunit]
+    fn shutdown_is_idempotent_and_direction_owned() {
+        let pair = prepare_unix_pair().unwrap();
+        assert_eq!(
+            send_stream_for_test(&pair.first_private, &mut WriteBytes(b"queued")),
+            Ok(6)
+        );
+        assert_eq!(
+            shutdown_unix_stream(&pair.first_private, SocketShutdown::Write),
+            Ok(())
+        );
+        assert_eq!(
+            shutdown_unix_stream(&pair.first_private, SocketShutdown::Write),
+            Ok(())
+        );
+        assert_eq!(
+            send_stream_for_test(&pair.first_private, &mut WriteBytes(b"x")),
+            Err(SocketSendError::PeerClosed)
+        );
+
+        let mut queued = ReadCapture(Vec::new());
+        assert_eq!(
+            receive_stream_for_test(&pair.second_private, &mut queued),
+            Ok(6)
+        );
+        assert_eq!(queued.0, b"queued");
+        assert_eq!(
+            receive_stream_for_test(&pair.second_private, &mut ReadCapture(Vec::new())),
+            Ok(0)
+        );
+        assert_eq!(
+            send_stream_for_test(&pair.second_private, &mut WriteBytes(b"reply")),
+            Ok(5)
+        );
+        let mut reply = ReadCapture(Vec::new());
+        assert_eq!(
+            receive_stream_for_test(&pair.first_private, &mut reply),
+            Ok(5)
+        );
+        assert_eq!(reply.0, b"reply");
+
+        let pair = prepare_unix_pair().unwrap();
+        assert_eq!(
+            send_stream_for_test(&pair.second_private, &mut WriteBytes(b"buffered")),
+            Ok(8)
+        );
+        assert_eq!(
+            shutdown_unix_stream(&pair.first_private, SocketShutdown::Read),
+            Ok(())
+        );
+        let mut buffered = ReadCapture(Vec::new());
+        assert_eq!(
+            receive_stream_for_test(&pair.first_private, &mut buffered),
+            Ok(8)
+        );
+        assert_eq!(buffered.0, b"buffered");
+        assert_eq!(
+            receive_stream_for_test(&pair.first_private, &mut ReadCapture(Vec::new())),
+            Ok(0)
+        );
+        assert_eq!(
+            send_stream_for_test(&pair.second_private, &mut WriteBytes(b"x")),
+            Err(SocketSendError::PeerClosed)
+        );
+
+        assert_eq!(
+            shutdown_unix_stream(&pair.first_private, SocketShutdown::ReadWrite),
+            Ok(())
+        );
+        final_release_unix_stream(&pair.first_private);
+        final_release_unix_stream(&pair.second_private);
+    }
+
+    #[kunit]
+    fn stream_destination_and_r1_unconnected_shutdown_return_typed_outcomes() {
+        let pair = prepare_unix_pair().unwrap();
+        assert_eq!(
+            send_stream_with_destination_for_test(
+                &pair.first_private,
+                &mut WriteBytes(b"x"),
+                SocketStreamDestination::Present,
+            ),
+            Err(SocketSendError::AlreadyConnected)
+        );
+
+        let single = prepare_unix_socket().unwrap();
+        for how in [
+            SocketShutdown::Read,
+            SocketShutdown::Write,
+            SocketShutdown::ReadWrite,
+        ] {
+            assert_eq!(
+                shutdown_unix_stream(&single.private, how),
+                Err(SocketShutdownError::NotConnected)
+            );
+        }
     }
 
     #[kunit]

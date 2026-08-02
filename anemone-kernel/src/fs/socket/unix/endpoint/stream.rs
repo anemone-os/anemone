@@ -3,7 +3,10 @@
 use crate::{
     fs::{
         iomux::PollRoute,
-        socket::{SocketReceiveError, SocketReceiveRequest, SocketSendError, SocketSendRequest},
+        socket::{
+            SocketReceiveError, SocketReceiveRequest, SocketSendError, SocketSendRequest,
+            SocketShutdown, SocketShutdownError, SocketStreamDestination,
+        },
     },
     kconfig_defs::UNIX_STREAM_DIRECTION_CAPACITY_BYTES,
     prelude::*,
@@ -79,10 +82,6 @@ impl StreamDirection {
 
 #[derive(Debug)]
 pub(super) struct ConnectionState {
-    /// Peer-visible full-close facts. Endpoint operation admission remains in
-    /// the corresponding `UnixEndpointCore`; these entries only project the
-    /// terminal handoff into connection/readiness semantics.
-    endpoint_terminal: [bool; 2],
     /// Entry N owns bytes written by endpoint N and read by its peer.
     directions: [StreamDirection; 2],
     /// Each endpoint owns the routes used to recheck its combined predicates.
@@ -92,7 +91,6 @@ pub(super) struct ConnectionState {
 impl ConnectionState {
     fn new() -> Self {
         Self {
-            endpoint_terminal: [false, false],
             directions: [StreamDirection::new(), StreamDirection::new()],
             routes: [Arc::new(Vec::new()), Arc::new(Vec::new())],
         }
@@ -102,20 +100,20 @@ impl ConnectionState {
         let index = side.index();
         let incoming = &self.directions[side.peer().index()];
         let outgoing = &self.directions[index];
+        let receive_terminal = !incoming.writer_open || !incoming.reader_open;
+        let send_terminal = !outgoing.writer_open || !outgoing.reader_open;
         let mut events = PollEvent::empty();
         if interests.contains(PollEvent::READABLE)
-            && (!incoming.bytes.is_empty() || !incoming.writer_open)
+            && (!incoming.bytes.is_empty() || receive_terminal)
         {
             events |= PollEvent::READABLE;
         }
-        if interests.contains(PollEvent::WRITABLE)
-            && outgoing.reader_open
-            && outgoing.available() > 0
-        {
+        if interests.contains(PollEvent::WRITABLE) && (send_terminal || outgoing.available() > 0) {
             events |= PollEvent::WRITABLE;
         }
-        // Full peer close is mandatory even when the caller did not request it.
-        if self.endpoint_terminal[side.peer().index()] {
+        // Full HUP is a projection of the two direction terminal facts, not a
+        // separately writable endpoint or readiness bit.
+        if receive_terminal && send_terminal {
             events |= PollEvent::HANG_UP;
         }
         events
@@ -213,7 +211,7 @@ pub(super) fn receive_unix_stream(
     private: &AnyOpaque,
     request: SocketReceiveRequest<'_>,
 ) -> Result<usize, SocketReceiveError> {
-    let SocketReceiveRequest::Stream(sink) = request else {
+    let SocketReceiveRequest::Stream { sink, flags } = request else {
         return Err(SocketReceiveError::Unsupported);
     };
     if sink.remaining() == 0 {
@@ -240,7 +238,7 @@ pub(super) fn receive_unix_stream(
         let connection_state = connection.state.lock();
         let incoming = &connection_state.directions[incoming_index];
         if incoming.bytes.is_empty() {
-            return if incoming.writer_open {
+            return if incoming.writer_open && incoming.reader_open {
                 Err(SocketReceiveError::WouldBlock)
             } else {
                 Ok(0)
@@ -266,6 +264,17 @@ pub(super) fn receive_unix_stream(
         copied > 0 && copied <= staged.len(),
         "nonempty Unix read copy made invalid progress"
     );
+
+    if flags.peek {
+        let endpoint_state = endpoint.state.lock();
+        validate_connection(&endpoint_state, &connection, side).map_err(|error| match error {
+            EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+                SocketReceiveError::InvalidState
+            },
+            EndpointAccessError::Retired => SocketReceiveError::Retired,
+        })?;
+        return Ok(copied);
+    }
 
     let (reader_routes, writer_routes) = {
         let endpoint_state = endpoint.state.lock();
@@ -301,13 +310,22 @@ pub(super) fn send_unix_stream(
     private: &AnyOpaque,
     request: SocketSendRequest<'_>,
 ) -> Result<usize, SocketSendError> {
-    let SocketSendRequest::Stream(source) = request else {
+    let SocketSendRequest::Stream {
+        source,
+        destination,
+    } = request
+    else {
         return Err(SocketSendError::Unsupported);
     };
-    if source.remaining() == 0 {
-        return Ok(0);
-    }
     let endpoint = &endpoint(private).core;
+    if destination == SocketStreamDestination::Present {
+        return match endpoint.connected() {
+            Ok(_) => Err(SocketSendError::AlreadyConnected),
+            Err(EndpointAccessError::Unconnected) => Err(SocketSendError::NotConnected),
+            Err(EndpointAccessError::InvalidState) => Err(SocketSendError::InvalidState),
+            Err(EndpointAccessError::Retired) => Err(SocketSendError::Retired),
+        };
+    }
     let (connection, side) = endpoint.connected().map_err(|error| match error {
         EndpointAccessError::Unconnected => SocketSendError::NotConnected,
         EndpointAccessError::InvalidState => SocketSendError::InvalidState,
@@ -326,8 +344,11 @@ pub(super) fn send_unix_stream(
         })?;
         let connection_state = connection.state.lock();
         let outgoing = &connection_state.directions[index];
-        if !outgoing.reader_open {
+        if !outgoing.writer_open || !outgoing.reader_open {
             return Err(SocketSendError::PeerClosed);
+        }
+        if source.remaining() == 0 {
+            return Ok(0);
         }
         if outgoing.available() == 0 {
             return Err(SocketSendError::WouldBlock);
@@ -355,7 +376,7 @@ pub(super) fn send_unix_stream(
         })?;
         let mut connection_state = connection.state.lock();
         let outgoing = &mut connection_state.directions[index];
-        if !outgoing.reader_open {
+        if !outgoing.writer_open || !outgoing.reader_open {
             return Err(SocketSendError::PeerClosed);
         }
         assert!(
@@ -371,6 +392,59 @@ pub(super) fn send_unix_stream(
     notify_routes(&writer_routes, Some(PollEvent::WRITABLE), "write commit");
     notify_routes(&peer_routes, Some(PollEvent::READABLE), "write commit");
     Ok(copied)
+}
+
+pub(super) fn shutdown_unix_stream(
+    private: &AnyOpaque,
+    how: SocketShutdown,
+) -> Result<(), SocketShutdownError> {
+    let endpoint = &endpoint(private).core;
+    let (connection, side) = endpoint.connected().map_err(|error| match error {
+        EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+            SocketShutdownError::NotConnected
+        },
+        EndpointAccessError::Retired => SocketShutdownError::Retired,
+    })?;
+    let index = side.index();
+    let incoming_index = side.peer().index();
+
+    // The operation gates are the stable copy/commit boundary. Shutdown waits
+    // outside every spinlock, then changes only direction-owned facts.
+    let _read_operation = matches!(how, SocketShutdown::Read | SocketShutdown::ReadWrite)
+        .then(|| connection.read_operations[index].lock());
+    let _write_operation = matches!(how, SocketShutdown::Write | SocketShutdown::ReadWrite)
+        .then(|| connection.write_operations[index].lock());
+
+    let (changed, own_routes, peer_routes) = {
+        let endpoint_state = endpoint.state.lock();
+        validate_connection(&endpoint_state, &connection, side).map_err(|error| match error {
+            EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+                SocketShutdownError::NotConnected
+            },
+            EndpointAccessError::Retired => SocketShutdownError::Retired,
+        })?;
+        let mut state = connection.state.lock();
+        let mut changed = false;
+        if matches!(how, SocketShutdown::Read | SocketShutdown::ReadWrite) {
+            changed |= state.directions[incoming_index].reader_open;
+            state.directions[incoming_index].reader_open = false;
+        }
+        if matches!(how, SocketShutdown::Write | SocketShutdown::ReadWrite) {
+            changed |= state.directions[index].writer_open;
+            state.directions[index].writer_open = false;
+        }
+        (
+            changed,
+            state.routes[index].clone(),
+            state.routes[incoming_index].clone(),
+        )
+    };
+
+    if changed {
+        notify_routes(&own_routes, None, "local shutdown");
+        notify_routes(&peer_routes, None, "peer shutdown");
+    }
+    Ok(())
 }
 
 pub(super) fn poll_unix_stream(
@@ -431,15 +505,9 @@ pub(super) fn retire_connection_endpoint(connection: &Arc<UnixConnection>, side:
     let empty_routes = Arc::new(Vec::new());
     let (own_routes, peer_routes) = {
         let mut state = connection.state.lock();
-        assert!(
-            !state.endpoint_terminal[index],
-            "Unix connection observed duplicate endpoint terminal handoff"
-        );
-
         // Endpoint publication is already withdrawn by the caller. Expose the
         // connection-owned terminal facts next, before any route notification.
         // New attempts fail closed; staged attempts recheck before commit.
-        state.endpoint_terminal[index] = true;
         state.directions[index].writer_open = false;
         state.directions[peer_index].reader_open = false;
         let own_routes = core::mem::replace(&mut state.routes[index], empty_routes);

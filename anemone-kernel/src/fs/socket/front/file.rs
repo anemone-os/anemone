@@ -15,8 +15,9 @@ use crate::{
 };
 
 use super::{
-    Socket, SocketOps, SocketReceiveError, SocketReceiveRequest, SocketSendError,
-    SocketSendRequest, SocketStreamReadSink, SocketStreamWriteSource,
+    Socket, SocketOps, SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest,
+    SocketSendError, SocketSendRequest, SocketStreamDestination, SocketStreamReadSink,
+    SocketStreamWriteSource,
 };
 
 pub(super) fn prepare_socket_file(
@@ -159,7 +160,10 @@ fn socket_read_with_ctx(
     loop {
         let result = socket_from_file(file)
             .expect("common Socket read used without Socket private state")
-            .receive(SocketReceiveRequest::Stream(sink));
+            .receive(SocketReceiveRequest::Stream {
+                sink,
+                flags: SocketReceiveFlags { peek: false },
+            });
         match result {
             Ok(read) => return Ok(read),
             Err(SocketReceiveError::WouldBlock) if !flags.contains(FileOpStatusFlags::NONBLOCK) => {
@@ -179,7 +183,7 @@ fn socket_read_with_ctx(
     }
 }
 
-fn send_sigpipe() {
+pub(in crate::fs::socket) fn send_sigpipe() {
     let task = get_current_task();
     task.recv_signal(Signal::new(
         SigNo::SIGPIPE,
@@ -199,7 +203,10 @@ fn socket_write_with_ctx(
     loop {
         let result = socket_from_file(file)
             .expect("common Socket write used without Socket private state")
-            .send(SocketSendRequest::Stream(source));
+            .send(SocketSendRequest::Stream {
+                source,
+                destination: SocketStreamDestination::Absent,
+            });
         match result {
             Ok(written) => return Ok(written),
             Err(SocketSendError::WouldBlock) if !flags.contains(FileOpStatusFlags::NONBLOCK) => {
@@ -218,6 +225,7 @@ fn socket_write_with_ctx(
             Err(SocketSendError::Unsupported) => return Err(SysError::NotSupported),
             Err(SocketSendError::Retired) => return Err(SysError::BadFileDescriptor),
             Err(SocketSendError::NotConnected) => return Err(SysError::NotConnected),
+            Err(SocketSendError::AlreadyConnected) => return Err(SysError::AlreadyConnected),
             Err(SocketSendError::Copy(error)) => return Err(error),
             Err(SocketSendError::InvalidState)
             | Err(SocketSendError::AddressInUse)

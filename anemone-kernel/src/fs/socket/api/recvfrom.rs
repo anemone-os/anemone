@@ -4,16 +4,20 @@ use crate::{
     fs::{
         iomux::PollEvent,
         socket::{
-            SocketAddress, SocketReceiveError, SocketReceiveRequest, SocketReceiveSink,
-            socket_from_file,
+            SocketAddress, SocketAddressSink, SocketReceiveError, SocketReceiveFlags,
+            SocketReceiveRequest, SocketReceiveSink, SocketType, socket_from_file,
         },
     },
     prelude::*,
+    syscall::user_access::user_addr,
     task::files::{Fd, FileStatusFlags},
 };
 
 use super::{
-    abi::{map_receive_error, validate_message_flags, write_payload, write_peer},
+    abi::{
+        map_query_error, map_receive_error, validate_receive_message_flags, write_payload,
+        write_peer, write_socket_address,
+    },
     wait_for_socket_file,
 };
 
@@ -22,6 +26,16 @@ struct ReceiveSink {
     len: usize,
     peer: u64,
     addrlen: u64,
+}
+
+#[derive(Default)]
+struct PeerCapture(Option<SocketAddress>);
+
+impl SocketAddressSink for PeerCapture {
+    fn copy_address(&mut self, address: Option<SocketAddress>) -> Result<(), SysError> {
+        self.0 = address;
+        Ok(())
+    }
 }
 
 impl SocketReceiveSink for ReceiveSink {
@@ -46,8 +60,47 @@ fn sys_recvfrom(
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    let per_call_nonblocking = validate_message_flags(flags)?;
-    let nonblocking = per_call_nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
+    let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
+    let nonblocking =
+        message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
+
+    if socket.socket_type() == SocketType::UnixStream {
+        let segment = if len == 0 {
+            None
+        } else {
+            Some(UserBufferSegment::new(user_addr(buf)?, len))
+        };
+        let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
+        let uspace = task.clone_uspace_handle();
+        let mut stream_sink = UserBufferSink::new(&uspace, segments);
+        loop {
+            match socket.receive(SocketReceiveRequest::Stream {
+                sink: &mut stream_sink,
+                flags: SocketReceiveFlags {
+                    peek: message_flags.peek,
+                },
+            }) {
+                Ok(copied) => {
+                    if peer != 0 {
+                        let mut peer_address = PeerCapture::default();
+                        socket
+                            .copy_peer_address(&mut peer_address)
+                            .map_err(map_query_error)?;
+                        write_socket_address(
+                            SocketType::UnixStream,
+                            peer,
+                            addrlen,
+                            peer_address.0,
+                        )?;
+                    }
+                    return Ok(copied as u64);
+                },
+                Err(SocketReceiveError::WouldBlock) if !nonblocking => {},
+                Err(error) => return Err(map_receive_error(error)),
+            }
+            wait_for_socket_file("sys_recvfrom", &task, desc.vfs_file(), PollEvent::READABLE)?;
+        }
+    }
 
     let mut sink = ReceiveSink {
         buf,

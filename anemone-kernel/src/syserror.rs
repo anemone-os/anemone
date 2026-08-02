@@ -95,6 +95,8 @@ pub enum SysError {
     SocketTypeNotSupported,
     /// The requested socket protocol is unsupported.
     ProtocolNotSupported,
+    /// The requested socket option is unsupported at its protocol level.
+    ProtocolOptionNotSupported,
     /// The file descriptor does not refer to a socket.
     NotSocket,
     /// The socket operation requires a connected peer.
@@ -249,6 +251,7 @@ impl SysError {
             SysError::AddressFamilyNotSupported => EAFNOSUPPORT,
             SysError::SocketTypeNotSupported => ESOCKTNOSUPPORT,
             SysError::ProtocolNotSupported => EPROTONOSUPPORT,
+            SysError::ProtocolOptionNotSupported => ENOPROTOOPT,
             SysError::NotSocket => ENOTSOCK,
             SysError::NotConnected => ENOTCONN,
             SysError::AlreadyConnected => EISCONN,

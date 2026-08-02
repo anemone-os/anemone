@@ -3,7 +3,9 @@
 use alloc::{vec, vec::Vec};
 use core::mem::size_of;
 
-use anemone_abi::net::linux::{AF_INET, AF_UNIX, MSG_DONTWAIT, SockAddrIn, SockAddrUn, socklen_t};
+use anemone_abi::net::linux::{
+    AF_INET, AF_UNIX, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, SockAddrIn, SockAddrUn, socklen_t,
+};
 use anemone_net_api::Ipv4Address;
 
 use crate::{
@@ -94,6 +96,21 @@ pub(super) fn read_socket_address(
         SocketType::Ipv4Udp => read_sockaddr_in(addr, len),
         SocketType::UnixStream => read_sockaddr_un(addr, len),
     }
+}
+
+pub(super) fn validate_raw_socket_address(addr: u64, len: u32) -> Result<(), SysError> {
+    let len = len as usize;
+    if len > MAX_SOCKADDR_INPUT_LEN {
+        return Err(SysError::InvalidArgument);
+    }
+    if len == 0 {
+        return Ok(());
+    }
+    let addr = user_addr(addr)?;
+    let task = get_current_task();
+    let uspace = task.clone_uspace_handle();
+    let mut bytes = vec![0u8; len];
+    UserReadSlice::<u8>::try_new(addr, len, &mut uspace.lock())?.copy_to_slice(&mut bytes)
 }
 
 fn write_sockaddr_bytes(addr: u64, addrlen: u64, bytes: &[u8]) -> Result<(), SysError> {
@@ -202,12 +219,50 @@ pub(super) fn write_payload(addr: u64, payload: &[u8], len: usize) -> Result<usi
     Ok(copied)
 }
 
-pub(super) fn validate_message_flags(flags: i32) -> Result<bool, SysError> {
-    if flags & !MSG_DONTWAIT != 0 {
-        knoticeln!("socket: unsupported sendto/recvfrom flags {:#x}", flags);
+pub(super) struct SendMessageFlags {
+    pub(super) nonblocking: bool,
+    pub(super) no_signal: bool,
+}
+
+pub(super) fn validate_send_message_flags(
+    socket_type: SocketType,
+    flags: i32,
+) -> Result<SendMessageFlags, SysError> {
+    let supported = match socket_type {
+        SocketType::Ipv4Udp => MSG_DONTWAIT,
+        SocketType::UnixStream => MSG_DONTWAIT | MSG_NOSIGNAL,
+    };
+    if flags & !supported != 0 {
+        knoticeln!("socket: unsupported sendto flags {:#x}", flags);
         return Err(SysError::NotSupported);
     }
-    Ok(flags & MSG_DONTWAIT != 0)
+    Ok(SendMessageFlags {
+        nonblocking: flags & MSG_DONTWAIT != 0,
+        no_signal: flags & MSG_NOSIGNAL != 0,
+    })
+}
+
+pub(super) struct ReceiveMessageFlags {
+    pub(super) nonblocking: bool,
+    pub(super) peek: bool,
+}
+
+pub(super) fn validate_receive_message_flags(
+    socket_type: SocketType,
+    flags: i32,
+) -> Result<ReceiveMessageFlags, SysError> {
+    let supported = match socket_type {
+        SocketType::Ipv4Udp => MSG_DONTWAIT,
+        SocketType::UnixStream => MSG_DONTWAIT | MSG_PEEK,
+    };
+    if flags & !supported != 0 {
+        knoticeln!("socket: unsupported recvfrom flags {:#x}", flags);
+        return Err(SysError::NotSupported);
+    }
+    Ok(ReceiveMessageFlags {
+        nonblocking: flags & MSG_DONTWAIT != 0,
+        peek: flags & MSG_PEEK != 0,
+    })
 }
 
 pub(super) fn map_bind_error(error: SocketBindError) -> SysError {
@@ -236,6 +291,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::Unsupported => SysError::NotSupported,
         SocketSendError::Retired => SysError::BadFileDescriptor,
         SocketSendError::NotConnected => SysError::NotConnected,
+        SocketSendError::AlreadyConnected => SysError::AlreadyConnected,
         SocketSendError::InvalidState => SysError::InvalidArgument,
         SocketSendError::AddressInUse => SysError::AddressInUse,
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,

@@ -4,10 +4,13 @@ mod bind;
 mod connect;
 mod getpeername;
 mod getsockname;
+mod getsockopt;
 mod listen;
 mod recvfrom;
 mod resolve;
 mod sendto;
+mod setsockopt;
+mod shutdown;
 mod socket;
 mod socketpair;
 

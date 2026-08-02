@@ -72,3 +72,27 @@ pub fn recvfrom(
 ) -> Result<u64, Errno> {
     unsafe { syscall(SYS_RECVFROM, fd, buf, len, flags, addr, addrlen) }
 }
+
+pub fn setsockopt(
+    fd: u64,
+    level: u64,
+    option: u64,
+    value: u64,
+    len: u64,
+) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_SETSOCKOPT, fd, level, option, value, len, 0) }
+}
+
+pub fn getsockopt(
+    fd: u64,
+    level: u64,
+    option: u64,
+    value: u64,
+    len: u64,
+) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_GETSOCKOPT, fd, level, option, value, len, 0) }
+}
+
+pub fn shutdown(fd: u64, how: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_SHUTDOWN, fd, how, 0, 0, 0, 0) }
+}

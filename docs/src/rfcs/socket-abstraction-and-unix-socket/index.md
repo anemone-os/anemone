@@ -1,7 +1,7 @@
 # RFC-20260801-socket-abstraction-and-unix-socket
 
 **状态：** Accepted
-**修订：** R0
+**修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-02
 **领域：** fs / socket / Unix IPC / VFS / task files / iomux / epoll
@@ -9,15 +9,15 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** Git/PR（Stage 1/2 Closed；Checkpoint 1A/1B/2A/2B Closed；Stage 3 Ready / Not Active）；transaction None；contract cutover None
+**执行记录：** Git/PR（Stage 1/2 Closed；Checkpoint 1A/1B/2A/2B/3A Closed；Stage 3 Active；3B Ready / Not Active）；transaction None；contract cutover None
 
 ## 文档状态
 
-本文是 Socket Abstraction 与 Unix Socket 的公共 Accepted R0 RFC。它把前置定位中已经形成的方向固定为经过 review
+本文是 Socket Abstraction 与 Unix Socket 的公共 Accepted R1 RFC。它把前置定位中已经形成的方向固定为经过 review
 的 target、owner、ABI、failure/cleanup、Contract Impact 与 acceptance 边界；私有 positioning 不成为公共依赖或
 并列 canonical source。
 
-本文不是 current contract，也不表示R0 acceptance自动激活任何实现gate。当前 UDP、opened-description、VFS、iomux
+本文不是 current contract，也不表示R1 acceptance自动激活任何实现gate。当前 UDP、opened-description、VFS、iomux
 与epoll语义继续以 `docs/src/contracts/` 下的 Active contract 为准；各Stage/checkpoint的resolution、activation与closure
 状态由[实施路线](./implementation.md)唯一记录。达到`SOCKET-UNIX-CUTOVER`的全部验收前，不得修改current contract。
 
@@ -78,7 +78,7 @@ eventual target。
 - 建立一份由现有 IPv4 UDP 与新增 Unix stream 共同消费的 general `Socket` front，固定其 immutable ops/type
   association、type-private storage、共同 FileOps projection、opened-description integration 与 ABI containment。
 - 交付 `AF_UNIX + SOCK_STREAM + protocol 0` 的 `socket`、`socketpair`、pathname bind/listen/connect/accept、
-  connected byte-stream I/O、shutdown、地址查询、blocking/nonblocking 和 poll/select/epoll 能力。
+  connected byte-stream I/O与shutdown、地址查询、blocking/nonblocking 和 poll/select/epoll 能力。
 - 让 VFS inode identity、Unix live pathname binding 与 Linux-visible Socket address snapshot 各有唯一 owner，闭合
   bind/connect/unlink/final-close/stale identity 的 handoff 与 cleanup。
 - 为 Unix endpoint role、listener backlog、connection、两个 directional byte stream、EOF/half-close/HUP 建立明确的
@@ -98,6 +98,9 @@ eventual target。
   compatibility。
 - `SO_ERROR`、Unix Socket error readiness，以及 Linux AF_UNIX 对 listener close 清理 queued-but-unaccepted connection
   或 endpoint close 丢弃未读 inbound bytes 所产生的一次性 `ECONNRESET` pending-error 兼容语义。
+- Linux AF_UNIX 在unconnected、bound或listening role上成功并持久化的pre-connection shutdown。R1在没有connected
+  direction时对三个合法`how`均明确返回`ENOTCONN`，不保存pending shutdown intent，也不改变后续bind/listen/connect/
+  accept；该兼容缺口由[register](../../register/current-limitations.md#ane-20260802-unix-preconnection-shutdown)记录。
 - 完整 BSD Socket framework、万能 Rust trait、统一 backend registry、共同 datagram/stream transaction 或通用
   connection state machine。
 - 修改 smoltcp/network control plane 来承载 Unix Socket，或把 Unix IPC state 放进 `anemone-net-api` /
@@ -130,7 +133,7 @@ Endpoint capability 与 Network Stack 交互；Unix Socket 继续留在 kernel I
 
 ### SocketOps 表先固定能力族，不冻结 Rust 签名
 
-本 R0 不再把 `SocketOps` surface 留成完全开放问题。它应覆盖本 target 的 creation、Socket syscall、共同
+本 R1 不再把 `SocketOps` surface 留成完全开放问题。它应覆盖本 target 的 creation、Socket syscall、共同
 FileOps、wait/readiness 与 semantic final release 所需能力；每项能力必须至少有 UDP 或 Unix stream 这一真实
 consumer，不能为未来 TCP 预留没有当前义务的 slot。下表中的 entry 名称只表示方向，不冻结最终字段名、参数、返回
 类型、`Option<fn>` / typed unsupported 的物理表达或多个紧密 entry 是否合并：
@@ -300,6 +303,10 @@ receive/read 由 inbound direction owner裁决data、`MSG_PEEK`、EOF 与 partia
 `MSG_NOSIGNAL` 的 send/write 产生 `SIGPIPE + EPIPE`，带 flag 时只返回 `EPIPE`。`SHUT_RD/WR/RDWR` 与 final close
 通过 directional owner 推进，不由 Socket front、wait source 或 opened-description 复制 half-close truth。
 
+R1只在endpoint已经关联paired connection时提供上述shutdown能力。unconnected、bound与listening role没有direction
+owner，因而三个合法`how`均返回`ENOTCONN`且不产生状态；invalid `how`仍返回`EINVAL`，fd/socket lookup保持Linux
+错误优先级。不得用success-no-op伪装Linux兼容，也不得为该排除面在endpoint或listener中增加shutdown bit。
+
 首版不为 teardown 建立一次性 reset/pending-error latch。listener close 清理 queued-but-unaccepted connection，或
 endpoint final close 丢弃该 endpoint 尚未读取的 inbound bytes时，由 listener/connection/directional owner推进已有
 terminal、EOF、RDHUP/HUP与后续`EPIPE`/`SIGPIPE`语义；已经排队到存活endpoint inbound direction的数据仍先于EOF
@@ -326,7 +333,7 @@ terminal、EOF、RDHUP/HUP与后续`EPIPE`/`SIGPIPE`语义；已经排队到存�
 - `socket`、`socketpair`；
 - `bind`、`listen`、`connect`、`accept`、`accept4`；
 - `getsockname`、`getpeername`；
-- `shutdown(SHUT_RD/SHUT_WR/SHUT_RDWR)`；
+- connected Unix stream的`shutdown(SHUT_RD/SHUT_WR/SHUT_RDWR)`；没有connected direction时返回`ENOTCONN`；
 - family-neutral `getsockopt` / `setsockopt` ABI entry；immutable type query 由 descriptor 投影，runtime
   `SO_ACCEPTCONN` 由 concrete ops 的 role query 回答，首版没有成功的 mutable option；
 - Unix stream 的 `read`、`write`、`readv`、`writev` 与 connected-stream `sendto` / `recvfrom`；
@@ -393,7 +400,7 @@ predicate、snapshot与notification实现不因此冻结。
 | `SOCKET-ABI-001` | Introduce | None（尚未生效） | Linux tuple/sockaddr/flags/user copy/errno止于ABI adapter；resolved semantic type由静态ops唯一见证；首版`SO_ERROR`返回`ENOPROTOOPT` | `SOCKET-UNIX-CUTOVER` |
 | `SOCKET-WAIT-001` | Introduce | None（尚未生效） | 各operation读取各自owner-defined predicate，只共享`EAGAIN`分类与wait/recheck协议；notification不是truth；Unix首版无pending-error/error readiness | `SOCKET-UNIX-CUTOVER` |
 | `UNIX-SOCKET-STATE-001` | Introduce | None（尚未生效） | endpoint role、listener/backlog、connection与directional stream各有唯一owner | `SOCKET-UNIX-CUTOVER` |
-| `UNIX-SOCKET-STREAM-001` | Introduce | None（尚未生效） | connect/accept建立paired stream；send/receive、partial progress、peek、EOF、shutdown与SIGPIPE由directional owner提交 | `SOCKET-UNIX-CUTOVER` |
+| `UNIX-SOCKET-STREAM-001` | Introduce | None（尚未生效） | connect/accept建立paired stream；send/receive、partial progress、peek、EOF、connected shutdown与SIGPIPE由directional owner提交；pre-connection shutdown返回`ENOTCONN` | `SOCKET-UNIX-CUTOVER` |
 | `UNIX-SOCKET-NAMESPACE-001` | Introduce | None（尚未生效） | bind只提交socket kind与`0777` requested permission；task filesystem context、user-thread kernel creation operation与context-free VFS primitive沿用`VFS-CREATION-001`的umask/admission/formation/handoff owner；Unix只索引stable inode identity到live binding | `SOCKET-UNIX-CUTOVER` |
 | `UNIX-SOCKET-ADDRESS-001` | Introduce | None（尚未生效） | bind-time immutable address snapshot独立于current namespace与binding key | `SOCKET-UNIX-CUTOVER` |
 | `UNIX-SOCKET-LIFECYCLE-001` | Introduce | None（尚未生效） | socketpair/connect/accept/stream/final-release handoff、unlink independence与stale-generation isolation | `SOCKET-UNIX-CUTOVER` |
@@ -476,6 +483,20 @@ attachment。
 
 R0 acceptance 只接受 target，不授权实现。
 
+### R0 -> R1 Target Renegotiation
+
+2026-08-02，Checkpoint 3A final review确认Linux 6.6.32 `unix_shutdown()`在没有peer时仍成功写入
+`sk_shutdown`，该状态可跨unconnected/bound/listening role持续存在；完整兼容因此需要新增role-owned
+pre-connection shutdown truth，并定义它对listen/connect admission、accepted child以及connection commit时direction
+初始化的handoff。R0同时要求shutdown truth只由connected direction拥有，禁止endpoint-local副本，两者无法在原
+Implementation Boundary内同时成立。
+
+review比较了两条路线：扩大owner/handoff以实现Linux持久语义，或诚实收窄首版能力。维护者批准R1 reduced target：
+unconnected、bound与listening Unix stream的合法shutdown稳定返回`ENOTCONN`，不改变任何role、admission或未来
+connection。connected direction的shutdown、EOF、half-close、`EPIPE`/`SIGPIPE`与readiness target保持不变；唯一owner、
+lifecycle与ABI containment correctness invariant不降低。Contract Impact种类和cutover保持不变，当前contract没有更新；
+新的Linux兼容缺口进入register，3A validation增加三种role与错误优先级matrix。
+
 ### 最终 closure 证据
 
 最终 `SOCKET-UNIX-CUTOVER` 至少需要：
@@ -530,13 +551,17 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 - Register：
   [VFS create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)、
   [non-UTF-8 pathname](../../register/current-limitations.md#ane-20260801-vfs-non-utf8-pathname)、
-  [retired-bind inert inode](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)
+  [retired-bind inert inode](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)、
+  [pre-connection shutdown](../../register/current-limitations.md#ane-20260802-unix-preconnection-shutdown)
 - External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`、`net/socket.c`、`net/core/sock.c`与`fs/select.c`
-- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B与Stage 2 Checkpoint 2A/2B实现、review和验证证据，以及Stage 3
-  resolution；transaction：None；cutover：None
+- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B、Stage 2 Checkpoint 2A/2B与Stage 3 Checkpoint 3A实现、review和
+  验证证据，以及Stage 3 resolution；transaction：None；cutover：None
 
 ## 修订记录
 
+- **R1（2026-08-02）：** 接受connected-direction-only shutdown reduced target；unconnected、bound与listening
+  role稳定返回`ENOTCONN`且不保存pending intent。该修订保持direction唯一truth与既有Contract Impact/cutover，新增
+  register limitation和role/errno validation，不授权3B或current-contract cutover。
 - **R0（2026-08-02）：** 接受本文 target、non-goals、owner/handoff、ABI、Contract Impact、acceptance 与 validation
   boundary；不授权 Stage 1 resolution、代码实现或 current-contract cutover。Draft 期间的措辞、证据和 review 修正
   由 Git 保存，不建立并列历史副本。
@@ -545,5 +570,6 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 
 Not Cut Over。Checkpoint 1A、1B、2A、2B与Stage 1/2已关闭；UDP与Unix `socketpair`共同证明front vertical slice，
 single Unix Socket、pathname namespace/name与listener/connection admission已形成Stage 2完整vertical slice。Stage 3已
-解析为3A directional stream operation/message-query ABI与3B listener/stream readiness两个checkpoint，但均未激活；Stage 4
-仍未解析或激活，最终acceptance尚未运行。transaction保持None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。
+解析为3A directional stream operation/message-query ABI与3B listener/stream readiness两个checkpoint；3A已关闭，Stage 3
+保持Active，3B Ready / Not Active。Stage 4仍未解析或激活，最终acceptance尚未运行。transaction与contract cutover保持
+None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。

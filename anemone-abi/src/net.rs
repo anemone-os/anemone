@@ -14,7 +14,18 @@ pub mod linux {
     pub const SOCK_NONBLOCK: i32 = 0x0800;
     pub const SOCK_CLOEXEC: i32 = 0x0008_0000;
     pub const IPPROTO_UDP: i32 = 17;
+    pub const SOL_SOCKET: i32 = 1;
+    pub const SO_TYPE: i32 = 3;
+    pub const SO_ERROR: i32 = 4;
+    pub const SO_ACCEPTCONN: i32 = 30;
+    pub const SO_PROTOCOL: i32 = 38;
+    pub const SO_DOMAIN: i32 = 39;
+    pub const SHUT_RD: i32 = 0;
+    pub const SHUT_WR: i32 = 1;
+    pub const SHUT_RDWR: i32 = 2;
+    pub const MSG_PEEK: i32 = 0x02;
     pub const MSG_DONTWAIT: i32 = 0x40;
+    pub const MSG_NOSIGNAL: i32 = 0x4000;
 
     #[allow(non_camel_case_types)]
     pub type socklen_t = u32;

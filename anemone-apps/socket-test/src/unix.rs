@@ -13,7 +13,11 @@ use anemone_rs::{
             open::O_NONBLOCK,
             poll::{POLLHUP, POLLIN, POLLOUT, PollFd},
         },
-        net::linux::{AF_UNIX, SOCK_STREAM, SockAddrUn, socklen_t},
+        net::linux::{
+            AF_INET, AF_UNIX, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, SHUT_RD,
+            SHUT_RDWR, SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PROTOCOL, SO_TYPE,
+            SOCK_DGRAM, SOCK_STREAM, SockAddrUn, socklen_t,
+        },
         process::linux::signal::{SigAction, SigSet},
         syscall::{
             linux::{SYS_FCHMODAT, SYS_RENAMEAT2, SYS_SETUID, SYS_UMASK},
@@ -28,7 +32,8 @@ use anemone_rs::{
         },
         net::{
             SocketFlags, accept_unix, accept4_unix_raw, bind_unix_path, connect_unix_path,
-            getpeername_unix_raw, getsockname_unix_raw, listen, socketpair_raw, unix_stream_pair,
+            getpeername_unix_raw, getsockname_unix_raw, getsockopt_raw, listen, recvfrom_raw,
+            sendto_raw, setsockopt_raw, shutdown, socketpair_raw, udp_socket, unix_stream_pair,
             unix_stream_socket,
         },
         process::{
@@ -70,6 +75,7 @@ const CLOSE_WAKE_PATH: &str = "/mnt/socket-test-2b-close-wake";
 const SIGNAL_PATH: &str = "/mnt/socket-test-2b-signal";
 const PARALLEL_PATH_A: &str = "/mnt/socket-test-2b-parallel-a";
 const PARALLEL_PATH_B: &str = "/mnt/socket-test-2b-parallel-b";
+const STAGE3A_PATH: &str = "/mnt/socket-test-3a-stream";
 
 extern "C" fn sigpipe_handler(_signo: i32) {
     SIGPIPE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -902,13 +908,15 @@ fn test_bidirectional_vector_and_nonblocking() -> Result<(), Errno> {
     close(second)
 }
 
-fn test_zero_length_io_ignores_peer_state() -> Result<(), Errno> {
+fn test_zero_length_io_observes_send_state() -> Result<(), Errno> {
     let (first, second) = unix_stream_pair(SocketFlags::empty())?;
     close(second)?;
 
     let mut empty = [];
     ensure(read(first, &mut empty)? == 0)?;
-    ensure(write(first, &empty)? == 0)?;
+    let before = SIGPIPE_COUNT.load(Ordering::SeqCst);
+    expect_errno(write(first, &empty), EPIPE)?;
+    ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before + 1)?;
 
     let mut read_iov = [IoVec {
         iov_base: core::ptr::null_mut(),
@@ -919,8 +927,37 @@ fn test_zero_length_io_ignores_peer_state() -> Result<(), Errno> {
         iov_len: 0,
     }];
     ensure(readv(first, &mut read_iov)? == 0)?;
-    ensure(writev(first, &write_iov)? == 0)?;
-    close(first)
+    let before = SIGPIPE_COUNT.load(Ordering::SeqCst);
+    expect_errno(writev(first, &write_iov), EPIPE)?;
+    ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before + 1)?;
+    close(first)?;
+
+    let single = unix_stream_socket(SocketFlags::empty())?;
+    expect_errno(
+        unsafe { sendto_raw(single as i32, empty.as_ptr(), 0, 0, core::ptr::null(), 0) },
+        ENOTCONN,
+    )?;
+    close(single)?;
+
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    shutdown(first, SHUT_WR)?;
+    let before = SIGPIPE_COUNT.load(Ordering::SeqCst);
+    expect_errno(
+        unsafe {
+            sendto_raw(
+                first as i32,
+                empty.as_ptr(),
+                0,
+                MSG_NOSIGNAL,
+                core::ptr::null(),
+                0,
+            )
+        },
+        EPIPE,
+    )?;
+    ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before)?;
+    close(first)?;
+    close(second)
 }
 
 fn fill_until_blocked(fd: Fd) -> Result<(), Errno> {
@@ -1026,6 +1063,328 @@ fn test_dup_fork_final_close_eof_epipe_hup() -> Result<(), Errno> {
     close(first)
 }
 
+fn query_socket_option(fd: Fd, option: i32) -> Result<i32, Errno> {
+    let mut value = 0i32;
+    let mut len = size_of::<i32>() as i32;
+    unsafe {
+        getsockopt_raw(fd as i32, option, (&mut value as *mut i32).cast(), &mut len)?;
+    }
+    ensure(len == size_of::<i32>() as i32)?;
+    Ok(value)
+}
+
+fn test_connected_message_peek_flags_and_fail_forward() -> Result<(), Errno> {
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let (first_raw, second_raw) = (first as i32, second as i32);
+    let initial_status = fcntl_getfl(second)?;
+    let mut no_data = [0u8; 1];
+    expect_errno(
+        unsafe {
+            recvfrom_raw(
+                second_raw,
+                no_data.as_mut_ptr(),
+                no_data.len(),
+                MSG_DONTWAIT,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        },
+        EAGAIN,
+    )?;
+    ensure(fcntl_getfl(second)? == initial_status)?;
+
+    let payload = b"stream";
+    ensure(
+        unsafe {
+            sendto_raw(
+                first_raw,
+                payload.as_ptr(),
+                payload.len(),
+                MSG_DONTWAIT | MSG_NOSIGNAL,
+                core::ptr::null(),
+                0,
+            )
+        }? == payload.len(),
+    )?;
+
+    let mut prefix = [0u8; 2];
+    ensure(
+        unsafe {
+            recvfrom_raw(
+                second_raw,
+                prefix.as_mut_ptr(),
+                prefix.len(),
+                MSG_PEEK,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        }? == prefix.len(),
+    )?;
+    ensure(&prefix == b"st")?;
+
+    let mut received = [0u8; 6];
+    let mut peer = SockAddrUn::default();
+    let mut peer_len = size_of::<SockAddrUn>() as socklen_t;
+    ensure(
+        unsafe {
+            recvfrom_raw(
+                second_raw,
+                received.as_mut_ptr(),
+                received.len(),
+                0,
+                (&mut peer as *mut SockAddrUn).cast(),
+                &mut peer_len,
+            )
+        }? == received.len(),
+    )?;
+    ensure(&received == payload && peer.sun_family == AF_UNIX as u16 && peer_len == 2)?;
+
+    let destination = SockAddrUn::default();
+    expect_errno(
+        unsafe {
+            sendto_raw(
+                first_raw,
+                b"x".as_ptr(),
+                1,
+                0,
+                (&destination as *const SockAddrUn).cast(),
+                2,
+            )
+        },
+        EISCONN,
+    )?;
+    expect_errno(
+        unsafe {
+            sendto_raw(
+                first_raw,
+                b"x".as_ptr(),
+                1,
+                0x4000_0000,
+                core::ptr::null(),
+                0,
+            )
+        },
+        EOPNOTSUPP,
+    )?;
+    expect_errno(
+        unsafe {
+            recvfrom_raw(
+                second_raw,
+                received.as_mut_ptr(),
+                received.len(),
+                MSG_NOSIGNAL,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        },
+        EOPNOTSUPP,
+    )?;
+
+    ensure(write(first, b"f")? == 1)?;
+    let mut consumed = [0u8; 1];
+    expect_errno(
+        unsafe {
+            recvfrom_raw(
+                second_raw,
+                consumed.as_mut_ptr(),
+                consumed.len(),
+                0,
+                (&mut peer as *mut SockAddrUn).cast(),
+                1usize as *mut socklen_t,
+            )
+        },
+        EFAULT,
+    )?;
+    expect_errno(
+        unsafe {
+            recvfrom_raw(
+                second_raw,
+                consumed.as_mut_ptr(),
+                consumed.len(),
+                MSG_DONTWAIT,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        },
+        EAGAIN,
+    )?;
+    close(first)?;
+    close(second)
+}
+
+fn test_shutdown_buffered_eof_and_sigpipe() -> Result<(), Errno> {
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let first_raw = first as i32;
+    ensure(write(first, b"buffered")? == 8)?;
+    shutdown(first, SHUT_WR)?;
+    shutdown(first, SHUT_WR)?;
+
+    let before = SIGPIPE_COUNT.load(Ordering::SeqCst);
+    expect_errno(
+        unsafe { sendto_raw(first_raw, b"x".as_ptr(), 1, 0, core::ptr::null(), 0) },
+        EPIPE,
+    )?;
+    ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before + 1)?;
+    let before = SIGPIPE_COUNT.load(Ordering::SeqCst);
+    expect_errno(
+        unsafe {
+            sendto_raw(
+                first_raw,
+                b"x".as_ptr(),
+                1,
+                MSG_NOSIGNAL,
+                core::ptr::null(),
+                0,
+            )
+        },
+        EPIPE,
+    )?;
+    ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before)?;
+
+    let mut buffered = [0u8; 8];
+    ensure(read(second, &mut buffered)? == 8 && &buffered == b"buffered")?;
+    ensure(read(second, &mut buffered)? == 0)?;
+    ensure(write(second, b"reply")? == 5)?;
+    let mut reply = [0u8; 5];
+    ensure(read(first, &mut reply)? == 5 && &reply == b"reply")?;
+
+    shutdown(first, SHUT_RD)?;
+    shutdown(first, SHUT_RDWR)?;
+    expect_errno(shutdown(first, 3), EINVAL)?;
+    expect_errno(shutdown(Fd::MAX, 3), EBADF)?;
+    close(first)?;
+    close(second)?;
+
+    unlink_if_present(STAGE3A_PATH, 0)?;
+    let listener = unix_stream_socket(SocketFlags::empty())?;
+    for how in [SHUT_RD, SHUT_WR, SHUT_RDWR] {
+        expect_errno(shutdown(listener, how), ENOTCONN)?;
+    }
+    bind_unix_path(listener, STAGE3A_PATH.as_bytes())?;
+    for how in [SHUT_RD, SHUT_WR, SHUT_RDWR] {
+        expect_errno(shutdown(listener, how), ENOTCONN)?;
+    }
+    listen(listener, 1)?;
+    for how in [SHUT_RD, SHUT_WR, SHUT_RDWR] {
+        expect_errno(shutdown(listener, how), ENOTCONN)?;
+    }
+
+    // R1 rejection must not leave a pending shutdown intent that changes
+    // later admission or the newly connected directions.
+    let client = unix_stream_socket(SocketFlags::empty())?;
+    connect_unix_path(client, STAGE3A_PATH.as_bytes())?;
+    let accepted = accept_unix(listener)?;
+    ensure(write(client, b"r1")? == 2)?;
+    let mut payload = [0u8; 2];
+    ensure(read(accepted, &mut payload)? == 2 && &payload == b"r1")?;
+    close(accepted)?;
+    close(client)?;
+    close(listener)?;
+    unlink_if_present(STAGE3A_PATH, 0)
+}
+
+fn test_socket_option_queries_and_pathname_stream() -> Result<(), Errno> {
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let first_raw = first as i32;
+    ensure(query_socket_option(first, SO_TYPE)? == SOCK_STREAM)?;
+    ensure(query_socket_option(first, SO_DOMAIN)? == AF_UNIX)?;
+    ensure(query_socket_option(first, SO_PROTOCOL)? == 0)?;
+    ensure(query_socket_option(first, SO_ACCEPTCONN)? == 0)?;
+
+    let mut truncated = [0xa5u8; 4];
+    let mut truncated_len = 2i32;
+    unsafe {
+        getsockopt_raw(
+            first_raw,
+            SO_TYPE,
+            truncated.as_mut_ptr(),
+            &mut truncated_len,
+        )?;
+    }
+    ensure(truncated_len == 2 && truncated[..2] == SOCK_STREAM.to_ne_bytes()[..2])?;
+
+    let mut zero_len = 0i32;
+    unsafe {
+        getsockopt_raw(first_raw, SO_TYPE, core::ptr::null_mut(), &mut zero_len)?;
+    }
+    ensure(zero_len == 0)?;
+    let mut invalid_len = -1i32;
+    expect_errno(
+        unsafe { getsockopt_raw(first_raw, SO_TYPE, truncated.as_mut_ptr(), &mut invalid_len) },
+        EINVAL,
+    )?;
+    let mut full_len = size_of::<i32>() as i32;
+    expect_errno(
+        unsafe { getsockopt_raw(first_raw, SO_TYPE, core::ptr::null_mut(), &mut full_len) },
+        EFAULT,
+    )?;
+    ensure(full_len == size_of::<i32>() as i32)?;
+    expect_errno(
+        unsafe { getsockopt_raw(first_raw, SO_ERROR, truncated.as_mut_ptr(), &mut full_len) },
+        ENOPROTOOPT,
+    )?;
+    expect_errno(
+        unsafe { setsockopt_raw(first_raw, SO_TYPE, core::ptr::null(), 4) },
+        ENOPROTOOPT,
+    )?;
+    expect_errno(
+        unsafe { setsockopt_raw(-1, SO_TYPE, core::ptr::null(), -1) },
+        EINVAL,
+    )?;
+
+    let udp = udp_socket(SocketFlags::empty())?;
+    ensure(query_socket_option(udp, SO_TYPE)? == SOCK_DGRAM)?;
+    ensure(query_socket_option(udp, SO_DOMAIN)? == AF_INET)?;
+    ensure(query_socket_option(udp, SO_PROTOCOL)? == IPPROTO_UDP)?;
+    ensure(query_socket_option(udp, SO_ACCEPTCONN)? == 0)?;
+    close(udp)?;
+
+    unlink_if_present(STAGE3A_PATH, 0)?;
+    let listener = unix_stream_socket(SocketFlags::empty())?;
+    bind_unix_path(listener, STAGE3A_PATH.as_bytes())?;
+    listen(listener, 1)?;
+    ensure(query_socket_option(listener, SO_ACCEPTCONN)? == 1)?;
+    let client = unix_stream_socket(SocketFlags::empty())?;
+    connect_unix_path(client, STAGE3A_PATH.as_bytes())?;
+    let accepted = accept_unix(listener)?;
+    ensure(query_socket_option(accepted, SO_ACCEPTCONN)? == 0)?;
+    ensure(
+        unsafe {
+            sendto_raw(
+                client as i32,
+                b"path".as_ptr(),
+                4,
+                MSG_NOSIGNAL,
+                core::ptr::null(),
+                0,
+            )
+        }? == 4,
+    )?;
+    let mut pathname_payload = [0u8; 4];
+    ensure(
+        unsafe {
+            recvfrom_raw(
+                accepted as i32,
+                pathname_payload.as_mut_ptr(),
+                pathname_payload.len(),
+                0,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        }? == 4,
+    )?;
+    ensure(&pathname_payload == b"path")?;
+    shutdown(accepted, SHUT_WR)?;
+    let mut eof = [0u8; 1];
+    ensure(read(client, &mut eof)? == 0)?;
+    close(accepted)?;
+    close(client)?;
+    close(listener)?;
+    unlink_if_present(STAGE3A_PATH, 0)?;
+    close(first)?;
+    close(second)
+}
+
 struct Results {
     passed: usize,
     failed: usize,
@@ -1110,12 +1469,24 @@ pub(crate) fn run() -> Result<(), Errno> {
         "bidirectional-vector-nonblocking",
         test_bidirectional_vector_and_nonblocking,
     );
-    results.case("zero-length-io", test_zero_length_io_ignores_peer_state);
+    results.case("zero-length-io", test_zero_length_io_observes_send_state);
     results.case("empty-blocking-wake", test_empty_blocking_wake);
     results.case("full-blocking-wake", test_full_blocking_wake);
     results.case(
         "dup-fork-final-close-eof-epipe-hup",
         test_dup_fork_final_close_eof_epipe_hup,
+    );
+    results.case(
+        "connected-message-peek-flags-fail-forward",
+        test_connected_message_peek_flags_and_fail_forward,
+    );
+    results.case(
+        "shutdown-buffered-eof-sigpipe",
+        test_shutdown_buffered_eof_and_sigpipe,
+    );
+    results.case(
+        "socket-option-query-pathname-stream",
+        test_socket_option_queries_and_pathname_stream,
     );
 
     if results.failed == 0 {

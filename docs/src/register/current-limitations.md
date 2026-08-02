@@ -2,6 +2,33 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260802-UNIX-PRECONNECTION-SHUTDOWN
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / shutdown / endpoint role / connection admission
+
+**Summary:** Socket Abstraction与Unix Socket R1只在endpoint已经拥有connected direction时支持
+`shutdown(SHUT_RD/SHUT_WR/SHUT_RDWR)`。unconnected、已经bind但尚未connect/listen、以及listening Unix stream
+对三个合法`how`均返回`ENOTCONN`，不保存pending shutdown intent，也不改变后续bind、listen、connect、accept或
+新connection的direction初始状态。实现不得用success-no-op伪装兼容；该拒绝在syscall边界发出notice。
+
+Linux 6.6.32的`unix_shutdown()`即使没有peer也会成功设置`sk_shutdown`，该事实可以跨role持续并影响后续
+connection/admission。完整兼容需要为pre-connection phase定义新的唯一truth及其生命周期，而不能把shutdown bit同时
+留在endpoint与connected direction。R1明确接受上述用户可见差异，以保持direction-owned terminal truth和Stage 2
+admission owner边界。
+
+**Exit Condition:** 由follow-up RFC定义role-owned pre-connection shutdown intent、bind/listen/connect/accept上的可见
+语义，以及connection commit时向direction的一次性handoff或其它无双重truth方案；同时闭合listener admission、accepted
+child、repeated shutdown、close/retire和readiness影响，并以tracked Linux source、focused Linux/Anemone runtime及
+双架构回归完成新的target与contract cutover。仅把`ENOTCONN`改成成功no-op不能关闭本限制。
+
+**Owner:** Unix Socket endpoint role / listener admission / connection-direction handoff
+**Last Verified:** 2026-08-02
+**Related:** [Socket Abstraction与Unix Socket R1](../rfcs/socket-abstraction-and-unix-socket/index.md#r0---r1-target-renegotiation),
+[Checkpoint 3A](../rfcs/socket-abstraction-and-unix-socket/implementation.md#checkpoint-3a-closed--directional-stream-operation-与-messagequery-abi)
+
 ## ANE-20260802-UNIX-BIND-RETIRED-INERT-INODE
 
 **Type:** Limitation

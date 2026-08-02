@@ -9,7 +9,7 @@ use crate::{prelude::*, utils::any_opaque::AnyOpaque};
 #[cfg(feature = "kunit")]
 use file::{SliceReadSink, SliceWriteSource};
 use file::{prepare_socket_file, prepare_socket_file_at, prepare_socket_path};
-pub(super) use file::{socket_file_desc_ops, socket_from_file};
+pub(super) use file::{send_sigpipe, socket_file_desc_ops, socket_from_file};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketType {
@@ -49,6 +49,20 @@ pub(super) enum SocketListenError {
     InvalidState,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketShutdown {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketShutdownError {
+    Unsupported,
+    Retired,
+    NotConnected,
+}
+
 pub(super) enum SocketConnectError {
     Unsupported,
     Retired,
@@ -71,6 +85,7 @@ pub(super) enum SocketSendError {
     Unsupported,
     Retired,
     NotConnected,
+    AlreadyConnected,
     InvalidState,
     AddressInUse,
     AddressUnavailable,
@@ -116,17 +131,34 @@ pub(super) trait SocketStreamWriteSource {
     fn copy_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, SysError>;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketStreamDestination {
+    Absent,
+    Present,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SocketReceiveFlags {
+    pub(super) peek: bool,
+}
+
 pub(super) enum SocketSendRequest<'a> {
     Datagram {
         peer: SocketAddress,
         payload: &'a mut dyn SocketSendPayload,
     },
-    Stream(&'a mut dyn SocketStreamWriteSource),
+    Stream {
+        source: &'a mut dyn SocketStreamWriteSource,
+        destination: SocketStreamDestination,
+    },
 }
 
 pub(super) enum SocketReceiveRequest<'a> {
     Datagram(&'a mut dyn SocketReceiveSink),
-    Stream(&'a mut dyn SocketStreamReadSink),
+    Stream {
+        sink: &'a mut dyn SocketStreamReadSink,
+        flags: SocketReceiveFlags,
+    },
 }
 
 pub(super) struct SocketPreparation {
@@ -170,10 +202,12 @@ pub(super) struct SocketOps {
     pub(super) listen: Option<fn(&AnyOpaque, i32) -> Result<(), SocketListenError>>,
     pub(super) connect: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketConnectError>>,
     pub(super) accept: Option<fn(&AnyOpaque) -> Result<SocketAcceptItem, SocketAcceptError>>,
+    pub(super) shutdown: Option<fn(&AnyOpaque, SocketShutdown) -> Result<(), SocketShutdownError>>,
     pub(super) local_address:
         Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
     pub(super) peer_address:
         Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
+    pub(super) accepting: fn(&AnyOpaque) -> Result<bool, SocketQueryError>,
     pub(super) send:
         Option<for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>>,
     pub(super) receive: Option<
@@ -224,6 +258,14 @@ impl Socket {
             private: Some(item.private),
             peer_address: item.peer_address,
         })
+    }
+
+    pub(super) fn shutdown(&self, how: SocketShutdown) -> Result<(), SocketShutdownError> {
+        self.ops.shutdown.ok_or(SocketShutdownError::Unsupported)?(&self.private, how)
+    }
+
+    pub(super) fn is_accepting(&self) -> Result<bool, SocketQueryError> {
+        (self.ops.accepting)(&self.private)
     }
 
     pub(super) fn copy_local_address(
@@ -351,7 +393,10 @@ mod kunits {
 
         let mut byte = SliceWriteSource { bytes: b"x" };
         assert_eq!(
-            first_socket.send(SocketSendRequest::Stream(&mut byte)),
+            first_socket.send(SocketSendRequest::Stream {
+                source: &mut byte,
+                destination: SocketStreamDestination::Absent,
+            }),
             Ok(1)
         );
         let mut empty_bytes = [];
@@ -359,7 +404,10 @@ mod kunits {
             bytes: &mut empty_bytes,
         };
         assert_eq!(
-            second_socket.receive(SocketReceiveRequest::Stream(&mut empty)),
+            second_socket.receive(SocketReceiveRequest::Stream {
+                sink: &mut empty,
+                flags: SocketReceiveFlags { peek: false },
+            }),
             Ok(0)
         );
         let mut received = [0u8; 1];
@@ -367,7 +415,10 @@ mod kunits {
             bytes: &mut received,
         };
         assert_eq!(
-            second_socket.receive(SocketReceiveRequest::Stream(&mut sink)),
+            second_socket.receive(SocketReceiveRequest::Stream {
+                sink: &mut sink,
+                flags: SocketReceiveFlags { peek: false },
+            }),
             Ok(1)
         );
         assert_eq!(received, *b"x");
@@ -375,12 +426,18 @@ mod kunits {
         second_socket.final_release();
         let mut empty = SliceWriteSource { bytes: b"" };
         assert_eq!(
-            first_socket.send(SocketSendRequest::Stream(&mut empty)),
-            Ok(0)
+            first_socket.send(SocketSendRequest::Stream {
+                source: &mut empty,
+                destination: SocketStreamDestination::Absent,
+            }),
+            Err(SocketSendError::PeerClosed)
         );
         let mut byte = SliceWriteSource { bytes: b"x" };
         assert_eq!(
-            first_socket.send(SocketSendRequest::Stream(&mut byte)),
+            first_socket.send(SocketSendRequest::Stream {
+                source: &mut byte,
+                destination: SocketStreamDestination::Absent,
+            }),
             Err(SocketSendError::PeerClosed)
         );
 
@@ -389,7 +446,10 @@ mod kunits {
         let udp_socket = socket_from_file(&udp_file).expect("UDP file must be a Socket");
         let mut empty = SliceWriteSource { bytes: b"" };
         assert_eq!(
-            udp_socket.send(SocketSendRequest::Stream(&mut empty)),
+            udp_socket.send(SocketSendRequest::Stream {
+                source: &mut empty,
+                destination: SocketStreamDestination::Absent,
+            }),
             Err(SocketSendError::Unsupported)
         );
         drop(creation);

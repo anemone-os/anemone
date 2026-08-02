@@ -1,10 +1,10 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / Checkpoint 3A/3B Not Active
+**状态：** R1 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Active / Checkpoint 3A Closed / 3B Not Active
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
-**当前修订：** R0
-**当前实施阶段：** Stage 3 Ready / Not Active；已解析为 Checkpoint 3A/3B，均未取得实施授权
+**当前修订：** R1
+**当前实施阶段：** Stage 3 Active；Checkpoint 3A Closed；Checkpoint 3B Ready / Not Active
 （transaction None；contract cutover None）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
@@ -112,7 +112,7 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
 | Stage 2 | Closed；2A/2B Closed；Cutover None | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已完成并停止；Stage 3随后独立解析为Ready |
-| Stage 3 | Ready / Not Active；3A/3B Not Active；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 只能由新的明确授权激活Checkpoint 3A |
+| Stage 3 | Active；3A Closed / 3B Ready / Not Active；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 已在3A关闭后停止；3B未授权 |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
 
 Stage 1--3 已按下文解析到可执行粒度；Stage 4 仍只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。
@@ -600,12 +600,17 @@ audit，不构成本interlude finding或cutover blocker。
 `MSG_*`、RDHUP/ERR与完整readiness closure未实现或验证。全部pending Socket/Unix/IOMUX/Epoll contract继续Not
 Effective，本interlude不产生register条目，也不自动解析或激活Stage 3。
 
-## Stage 3 Ready — Stream operation 与完整 readiness closure
+## Stage 3 Active — Stream operation 与完整 readiness closure
 
-**Resolution状态：** Completed 2026-08-02；Stage 3 Ready / Not Active，解析为Checkpoint 3A“directional stream
+**Resolution状态：** Completed 2026-08-02；Stage 3 Active / 3A Closed / 3B Ready / Not Active，解析为Checkpoint 3A“directional stream
 operation与message/query ABI”和Checkpoint 3B“listener/stream readiness与iomux/epoll projection”。本resolution只更新
 accepted target内的实施路线、验证与停止边界；未修改R0 target、Contract Impact或current contract，未创建transaction，
 也未授权任何代码实施。
+
+Checkpoint 3A实施期review发现Linux会在没有peer时持久化`sk_shutdown`，而R0禁止endpoint-local shutdown truth。
+2026-08-02 Target Renegotiation已由维护者批准为R1 reduced target：unconnected、bound与listening role返回
+`ENOTCONN`且不保存pending intent；connected direction语义不变。该修订新增register limitation与role/errno验证，
+不改变Contract Impact/cutover，不激活3B，也不创建transaction。
 
 ### Live baseline、Linux oracle 与解析结论
 
@@ -663,7 +668,7 @@ Socket ABI/wait boundary。
 
 **Non-goals：** `SO_ERROR`、Unix pending-error/ERR readiness、成功mutable socket option、`sendmsg/recvmsg`、ancillary data、
 credentials、`MSG_WAITALL`/OOB、Unix datagram/seqpacket/abstract namespace、TCP、socket timeout、async I/O、splice与新
-iomux/epoll delivery policy均不进入本Stage。unsupported flag/option必须按R0稳定拒绝并保留必要notice，不能为了运行现有
+iomux/epoll delivery policy均不进入本Stage。unsupported flag/option必须按R1稳定拒绝并保留必要notice，不能为了运行现有
 程序静默成功。
 
 **Owner / state model：**
@@ -700,10 +705,11 @@ Stage 3解析后的operation表如下；它定义owner与证明义务，不冻�
   Unix和UDP可以消费同一normalized message envelope，但各自保留stream prefix与datagram whole-message transaction，不建立
   generic packet/stream queue或共同consume result；
 - send/receive在零进展时返回typed would-block/terminal/copy outcome，已有successful prefix不得被随后signal、shutdown、
-  peer close或copy fault抹去。`MSG_PEEK`必须在并发reader与shutdown下保持不consume；zero-length在R0 scoped oracle允许的
-  state检查前后次序内稳定，不能触发wait、SIGPIPE或虚假consume；
-- shutdown在connected direction上提交幂等terminal transition，invalid `how`、unconnected/listening/retired role返回typed
-  outcome；transition与正在进行的copy/commit必须有明确linearization。final release继续先撤销endpoint operation publication，
+  peer close或copy fault抹去。`MSG_PEEK`必须在并发reader与shutdown下保持不consume；zero-length在R1 scoped oracle允许的
+  state检查前后次序内稳定：receive不等待或虚假consume，send仍先裁决connection与terminal state，因此terminal
+  zero-length send可以返回`EPIPE`并按`MSG_NOSIGNAL`决定`SIGPIPE`，但不得进入capacity wait或虚假commit；
+- shutdown在connected direction上提交幂等terminal transition；invalid `how`返回`EINVAL`，unconnected/bound/listening
+  返回`ENOTCONN`且不产生状态，retired/fd失败保持对应fd错误。transition与正在进行的copy/commit必须有明确linearization。final release继续先撤销endpoint operation publication，
   再提交双向terminal并在guard外notify/drop，不改为等待operation/waiter完成；
 - Unix `recvfrom` peer-address snapshot继续来自peer endpoint唯一name capability。payload/stream consume与用户地址copyout的
   fail-forward、addrlen store和partial user-memory效果服从scoped Linux oracle；UDP现有datagram copy/consume contract保持
@@ -712,7 +718,7 @@ Stage 3解析后的operation表如下；它定义owner与证明义务，不冻�
   触发final/exact scan，不能携带RDHUP/HUP/errno/bytes或推进ET/ONESHOT policy。
 
 **Protected ABI / contract：** Stage 3补齐父RFC已经接受的`shutdown`、`sendto/recvfrom`stream semantics、message flags、
-`SOL_SOCKET` query/rejection与RDHUP ABI，不增加R0之外的新成功面。`O_NONBLOCK`与`MSG_DONTWAIT`只决定当前operation是否等待；
+`SOL_SOCKET` query/rejection与RDHUP ABI，不增加R1之外的新成功面。`O_NONBLOCK`与`MSG_DONTWAIT`只决定当前operation是否等待；
 `MSG_NOSIGNAL`只抑制本次terminal send的SIGPIPE；accepted Socket status inheritance继续由Stage 2规则拥有。UDP tuple、address、
 datagram atomicity、blocking/readiness、SIGPIPE absence与final release必须保持`NET-*`current contracts。Stage 3可以实现
 `IOMUX-POLL-002/003`与`EPOLL-READY-001`的pending target shape，但current contract正文和状态在Stage 4前不修改。
@@ -722,7 +728,9 @@ datagram atomicity、blocking/readiness、SIGPIPE absence与final release必须�
 owner之外visibility，不增加facade/trait层，也不冻结文件名。ABI syscall继续遵守一项syscall一个语义文件；只有真实共享的
 normalization、copy或wait义务留在最低共同owner。
 
-### Checkpoint 3A Ready / Not Active — Directional stream operation 与 message/query ABI
+### Checkpoint 3A Closed — Directional stream operation 与 message/query ABI
+
+**状态：** Closed 2026-08-02；Stage 3保持Active；Checkpoint 3B Ready / Not Active；Cutover None；transaction None。
 
 **Purpose：** 在不改变iomux/epoll consumer policy的前提下，先让direction owner完整表达read/write terminal与shutdown，
 并闭合Unix connected message、flags、query/rejection和prefix/copy语义，为3B提供稳定source facts。
@@ -731,7 +739,8 @@ normalization、copy或wait义务留在最低共同owner。
 
 1. `SHUT_RD/SHUT_WR/SHUT_RDWR`通过family capability进入Unix direction owner；local read/write terminal、peer对偶terminal、
    repeated shutdown、concurrent shutdown/I/O与final close各有一次可解释commit。buffered data仍按scoped oracle先于EOF交付，
-   terminal send返回`EPIPE`，zero progress时按`MSG_NOSIGNAL`决定SIGPIPE；
+   terminal send返回`EPIPE`，zero progress时按`MSG_NOSIGNAL`决定SIGPIPE；没有connected direction的三种role按R1返回
+   `ENOTCONN`且不改变后续role/admission；
 2. read/write/readv/writev与connected `sendto/recvfrom`共享同一direction truth和prefix transaction。sendto允许null destination，
    connected Unix携带destination稳定返回`EISCONN`；send接受`MSG_DONTWAIT | MSG_NOSIGNAL`，receive接受
    `MSG_DONTWAIT | MSG_PEEK`，其它flag不以no-op成功。per-call nonblocking不修改opened-description status；
@@ -751,8 +760,10 @@ normalization、copy或wait义务留在最低共同owner。
   general Socket不解释Unix private state，UDP datagram transaction与current wait source未改变；
 - owner-local proof覆盖四种direction端点组合、buffered-before-EOF、read/write operation与shutdown/final-close竞争、repeated
   shutdown、capacity恢复、peek/consume、zero-length、short copy、copy fault、signal与SIGPIPE/NOSIGNAL；
-- focused Linux 6.6.32 source/runtime oracle覆盖sendto null/non-null address、message flag拒绝、shutdown role/errno、buffered
+- focused Linux 6.6.32 source/runtime oracle覆盖sendto null/non-null address、message flag拒绝、connected shutdown与buffered
   receive、partial progress、recvfrom peer/addrlen/copy fault，以及supported/unsupported socket option的optlen/copyout；
+- R1 differential matrix独立覆盖unconnected、bound、listening三个role的`ENOTCONN`、无状态副作用及fd/invalid-`how`
+  错误优先级，不把Linux pre-connection成功行为误报为通过；
 - RV64/LA64同源guest runtime覆盖socketpair与pathname accepted stream的read/write/vector、sendto/recvfrom、blocking/
   nonblocking、peek、shutdown、peer close、dup/fork/final release和query matrix；glibc/musl focused case覆盖raw syscall ABI/
   errno/copy side effect；Stage 1/2 Unix与UDP send/receive/blocking/lifecycle suite在3A final diff上回归；
@@ -762,9 +773,31 @@ normalization、copy或wait义务留在最低共同owner。
 **Exit / stop：** 3A退出要求所有target operation与query的temporary unsupported/compat bridge为零，direction/shutdown/
 prefix truth唯一，focused双架构/双libc与UDP regression通过，完整diff review没有未解决Apollyon/Keter。若shutdown只能通过
 endpoint与direction双写truth、in-flight user copy无法在不持spinlock或新增stale generation cache的前提下正确linearize，
-若family-neutral message shape迫使UDP改变datagram commit/copy contract，或Linux oracle要求加入R0排除的`SO_ERROR`/
+若family-neutral message shape迫使UDP改变datagram commit/copy contract，或Linux oracle要求加入R1排除的`SO_ERROR`/
 pending-error/其它成功option，立即停止并回RFC review/Target Renegotiation。3A关闭后只标记checkpoint closed并停止；
 不得自动激活3B或修改current contract。
+
+**Closure evidence：** common Socket front只新增family-neutral shutdown、message与query capability；endpoint仍唯一拥有role/
+association，connection direction仍唯一拥有bytes、capacity与writer/reader terminal facts，原`endpoint_terminal`副本已经删除。
+shutdown、staged read/write与final release遵守endpoint-state到connection-state锁序，operation gate和commit前recheck阻止terminal/
+retired transition后的非法prefix提交；route只携带recheck capability，truth更新后在guard外notify。R1的unconnected、bound与
+listening `ENOTCONN`拒绝不保存intent，raw oracle确认后续connect/accept与data exchange不受影响。
+
+最终RV64/LA64显式release kernel build与`socket-test` app build通过；canonical preliminary wrapper分别通过KUnit 366/366与
+371/371，两个架构均为UDP 16/16、Unix 22/22，glibc/musl `socketpair02`各4 TPASS。RV64正常power-off；LA64完成
+filesystem/network/device orderly shutdown后因当前平台无成功power-off handler进入既有末尾halt，并由QEMU monitor退出。
+临时双libc raw-syscall probe在RV64/LA64四种组合均输出`SOCKET3A_R1_LIBC_PASS`，覆盖三种pre-connection role、无后续状态
+副作用、shutdown fd/`how`优先级、signed negative `setsockopt` optlen、`ENOPROTOOPT`与`getsockopt`长度/copyout；probe与
+临时profile wiring均已移除，初赛master image未修改。formatter与`git diff --check`通过。
+
+最终独立diff review为Apollyon 0、Keter 0、Euclid 1。残余Euclid是验证覆盖而非状态模型缺陷：non-socket fd配合valid/
+invalid `how`的lookup-priority cross-check没有直接runtime case，shutdown与staged read/write/final-close竞争也只有operation
+gate、recheck与锁序source proof，没有同步并发runtime test。最小补强是在后续真实触达该面时加入non-socket errno matrix和
+可控copy barrier race test；本缺口不扩大3A ABI/owner、不进入register，也不授权3B。
+
+**3A closure时的 Not Run / non-claim：** public listener poll、independent RDHUP、poll/select/epoll完整readiness矩阵、完整
+socket/network LTP、final harness、physical hardware与`smp>1`均未运行或未cut over。Stage 3保持Active，3B保持Ready /
+Not Active；transaction与contract cutover均为None，全部pending Socket/Unix/IOMUX/Epoll contract继续Not Effective。
 
 ### Checkpoint 3B Ready / Not Active — Listener/stream readiness 与 iomux/epoll projection
 
@@ -818,7 +851,7 @@ Exit后，implementation页才标记Stage 3 Closed；`SOCKET-FRONT-001`、`SOCKE
 `UNIX-SOCKET-*`以及`IOMUX-POLL-002/003`、`EPOLL-READY-001`仍保持Pending/Not Effective，统一留待Stage 4
 `SOCKET-UNIX-CUTOVER`。
 
-如果实施只采用R0内的owner-local路线修正、module split或focused oracle，不增加修订号，也不更新register。只有实际出现
+如果实施只采用R1内的owner-local路线修正、module split或focused oracle，不增加修订号，也不更新register。只有实际出现
 新的current defect、采用新的accepted engineering limitation，或现有inert-inode limitation的可见边界发生变化时才维护
 register；target、owner、ABI、Contract Impact、acceptance或validation strength变化必须先回RFC review。Stage 3 closure
 不解析Stage 4，后者仍需基于完整actual diff、finding、validation与register状态取得新的明确授权。

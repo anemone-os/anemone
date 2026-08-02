@@ -145,6 +145,10 @@ fn query_udp_socket(
     sink.copy_address(address).map_err(SocketQueryError::Copy)
 }
 
+fn udp_is_accepting(_private: &AnyOpaque) -> Result<bool, SocketQueryError> {
+    Ok(false)
+}
+
 fn send_udp_socket(
     private: &AnyOpaque,
     request: SocketSendRequest<'_>,
@@ -255,8 +259,10 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     listen: None,
     connect: None,
     accept: None,
+    shutdown: None,
     local_address: Some(query_udp_socket),
     peer_address: None,
+    accepting: udp_is_accepting,
     send: Some(send_udp_socket),
     receive: Some(receive_udp_socket),
     poll: poll_udp_socket,

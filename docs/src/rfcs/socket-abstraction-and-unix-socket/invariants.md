@@ -3,7 +3,7 @@
 **状态：** Accepted Target
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
-**适用修订：** R0
+**适用修订：** R1
 
 本文只定义本 RFC 的 pending target、correctness invariants 与 RFC-local proof obligations。当前 effective 规则仍以
 `docs/src/contracts/` 下的 Active contract 为准；本页中的 Introduce/Refine 目标在
@@ -238,12 +238,17 @@ fd/opened-description状态反推。
 connection owner决定，不由local-name是否unnamed反推。Socketpair直接形成connected role，但unnamed address不因此
 等于unconnected。
 
+R1不在endpoint role或listener保存pre-connection shutdown intent。unconnected、bound与listening role没有可提交
+terminal transition的direction，对三个合法`how`均返回`ENOTCONN`且保持role/admission不变；只有connection commit
+后的direction可以拥有和推进shutdown/EOF fact。
+
 **Owner：** Unix endpoint role owner、listener state、connection state与每个directional stream按上文分别唯一拥有。
 
 **依赖：** `SOCKET-FRONT-001`、`OPENED-DESC-001..003`。
 
 **违反表现：** Socket front与backend各有connected/listening bit；backlog同时存在listener和wait queue；两端各自
-复制peer relation并可独立修改；half-close从fd count推导；local-name决定connection state；或diagnostic id驱动role。
+复制peer relation并可独立修改；half-close从fd count推导；local-name决定connection state；在endpoint/listener保存
+pre-connection shutdown bit或用success-no-op伪装该排除面；或diagnostic id驱动role。
 
 **Cutover / Proof：** `SOCKET-UNIX-CUTOVER`；object/state transition audit与concurrent bind/listen/connect/accept/
 shutdown/close tests。
@@ -261,7 +266,7 @@ send/write只向outbound direction提交有序byte prefix，允许partial progre
 progress与retry不能重复字节、重排或让两端同时拥有同一buffer region。copy-fault consume的用户可见结果服从父RFC
 的scoped Linux conformance；内部copy chunk与cursor不提前冻结。
 
-peer write-side shutdown或terminal close在inbound direction形成durable EOF；buffered data先于EOF被读取。local
+connected stream的peer write-side shutdown或terminal close在inbound direction形成durable EOF；buffered data先于EOF被读取。local
 `SHUT_WR`阻止新的outbound commit并使peer最终观察receive half-close；`SHUT_RD`、`SHUT_RDWR`与close按scoped Linux
 conformance推进directional facts。peer不再接收时send/write返回`EPIPE`，未带`MSG_NOSIGNAL`还产生`SIGPIPE`；
 signal publication不能发生在family state guard内，也不能把失败写成zero-length success。
@@ -283,8 +288,8 @@ bytes/capacity/shutdown/EOF；Socket ABI层只映射typed outcome与signal/errno
 peek消费；EOF越过buffered data；两根pipe各自复制peer close；shutdown state在Socket与stream各一份；EPIPE无SIGPIPE
 或`MSG_NOSIGNAL`仍发signal；首版为close路径私建reset/pending-error state。
 
-**Cutover / Proof：** `SOCKET-UNIX-CUTOVER`；socketpair/pathname connection、partial/peek/copy-fault、shutdown/
-EOF/SIGPIPE、listener-abort、discarded-unread-data close与concurrent close runtime matrix。
+**Cutover / Proof：** `SOCKET-UNIX-CUTOVER`；socketpair/pathname connection、partial/peek/copy-fault、connected shutdown/
+EOF/SIGPIPE、unconnected/bound/listening `ENOTCONN`、listener-abort、discarded-unread-data close与concurrent close runtime matrix。
 
 ### UNIX-SOCKET-NAMESPACE-001 — Stable VFS inode identity索引live binding
 

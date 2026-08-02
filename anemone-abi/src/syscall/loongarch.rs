@@ -225,6 +225,9 @@ pub mod linux {
     pub const SYS_GETPEERNAME: u64 = 205;
     pub const SYS_SENDTO: u64 = 206;
     pub const SYS_RECVFROM: u64 = 207;
+    pub const SYS_SETSOCKOPT: u64 = 208;
+    pub const SYS_GETSOCKOPT: u64 = 209;
+    pub const SYS_SHUTDOWN: u64 = 210;
     pub const SYS_ACCEPT4: u64 = 242;
 
     pub const SYS_READAHEAD: u64 = 213;
