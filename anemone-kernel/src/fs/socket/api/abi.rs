@@ -85,7 +85,7 @@ fn read_sockaddr_un(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
     parse_sockaddr_un(&bytes[..len])
 }
 
-pub(super) fn read_bind_address(
+pub(super) fn read_socket_address(
     socket_type: SocketType,
     addr: u64,
     len: u32,
@@ -248,6 +248,16 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
     }
 }
 
+pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
+    match error {
+        SocketReceiveError::Unsupported => SysError::NotSupported,
+        SocketReceiveError::Retired => SysError::BadFileDescriptor,
+        SocketReceiveError::InvalidState => SysError::NotConnected,
+        SocketReceiveError::WouldBlock => SysError::Again,
+        SocketReceiveError::Copy(error) => error,
+    }
+}
+
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
@@ -309,15 +319,5 @@ mod kunits {
             .len(),
             SOCKADDR_UN_LEN + 1,
         );
-    }
-}
-
-pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
-    match error {
-        SocketReceiveError::Unsupported => SysError::NotSupported,
-        SocketReceiveError::Retired => SysError::BadFileDescriptor,
-        SocketReceiveError::InvalidState => SysError::NotConnected,
-        SocketReceiveError::WouldBlock => SysError::Again,
-        SocketReceiveError::Copy(error) => error,
     }
 }

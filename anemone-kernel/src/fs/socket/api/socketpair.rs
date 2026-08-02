@@ -1,64 +1,34 @@
 use core::mem::size_of;
 
-use anemone_abi::{
-    net::linux::{
-        AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
-    },
-    syscall::SYS_SOCKETPAIR,
+#[cfg(feature = "kunit")]
+use anemone_abi::net::linux::{
+    AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
 };
+use anemone_abi::{net::linux::AF_INET, syscall::SYS_SOCKETPAIR};
 
 use crate::{
-    fs::socket::{
-        SocketOps, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket_pair,
-        socket_file_desc_ops,
-    },
+    fs::socket::{prepare_socket_pair, socket_file_desc_ops},
     prelude::*,
     syscall::user_access::{UserWritePtr, user_addr},
-    task::files::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
+    task::files::{FileDesc, LinuxOpenCompat, OpenAccessMode},
 };
 
-const SOCK_TYPE_MASK: i32 = 0xf;
-const SUPPORTED_FLAGS: i32 = SOCK_NONBLOCK | SOCK_CLOEXEC;
-
-struct ResolvedSocketPair {
-    ops: &'static SocketOps,
-    status_flags: FileStatusFlags,
-    fd_flags: FdFlags,
-}
+use super::resolve::{ResolvedSocket, resolve_socket};
 
 fn resolve_socket_pair(
     family: i32,
     socket_type: i32,
     protocol: i32,
-) -> Result<ResolvedSocketPair, SysError> {
-    if socket_type & !(SOCK_TYPE_MASK | SUPPORTED_FLAGS) != 0 {
-        return Err(SysError::InvalidArgument);
-    }
-
-    let ops = match (family, socket_type & SOCK_TYPE_MASK) {
-        (AF_UNIX, SOCK_STREAM) if protocol == 0 => &UNIX_STREAM_SOCKET_OPS,
-        (AF_UNIX, SOCK_STREAM) => return Err(SysError::ProtocolNotSupported),
-        (AF_UNIX, _) => return Err(SysError::SocketTypeNotSupported),
-        // UDP is a real common-front consumer, but paired creation remains a
-        // permanently absent capability rather than a family-specific branch
-        // after resolution.
-        (AF_INET, SOCK_DGRAM) if protocol == 0 || protocol == IPPROTO_UDP => &UDP_SOCKET_OPS,
-        (AF_INET, SOCK_DGRAM) => return Err(SysError::ProtocolNotSupported),
-        (AF_INET, _) => return Err(SysError::NotSupported),
-        _ => return Err(SysError::AddressFamilyNotSupported),
-    };
-
-    let mut status_flags = FileStatusFlags::empty();
-    status_flags.set(FileStatusFlags::NONBLOCK, socket_type & SOCK_NONBLOCK != 0);
-    let fd_flags = if socket_type & SOCK_CLOEXEC != 0 {
-        FdFlags::CLOSE_ON_EXEC
-    } else {
-        FdFlags::empty()
-    };
-    Ok(ResolvedSocketPair {
-        ops,
-        status_flags,
-        fd_flags,
+) -> Result<ResolvedSocket, SysError> {
+    resolve_socket(family, socket_type, protocol).map_err(|error| {
+        // Linux reports EOPNOTSUPP for an AF_INET socketpair type that is not
+        // available, while socket(2) keeps ESOCKTNOSUPPORT. Tuple/type
+        // normalization remains shared; this is only syscall errno projection.
+        if family == AF_INET && error == SysError::SocketTypeNotSupported {
+            SysError::NotSupported
+        } else {
+            error
+        }
     })
 }
 
@@ -129,6 +99,10 @@ fn sys_socketpair(
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::{
+        fs::socket::{UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS},
+        task::files::{FdFlags, FileStatusFlags},
+    };
 
     #[kunit]
     fn resolver_accepts_unix_stream_flags_and_rejects_udp_pair_capability() {

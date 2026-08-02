@@ -57,6 +57,7 @@ const CONNECTED_PATH: &str = "/mnt/socket-test-2a-connected";
 const DAC_DIR: &str = "/mnt/socket-test-2a-dac";
 const DAC_PATH: &str = "/mnt/socket-test-2a-dac/denied";
 const ADMISSION_PATH: &str = "/mnt/socket-test-2b-admission";
+const ACCEPTED_REBIND_PATH: &str = "/mnt/socket-test-2b-accepted-rebind";
 const BOUND_CLIENT_PATH: &str = "/mnt/socket-test-2b-bound-client";
 const ACCEPT_WAKE_PATH: &str = "/mnt/socket-test-2b-accept-wake";
 const BLOCKING_PATH: &str = "/mnt/socket-test-2b-blocking";
@@ -398,6 +399,15 @@ fn test_pathname_admission_backlog_flags_and_lifecycle() -> Result<(), Errno> {
 
     let (local, local_len) = unix_name(first_accepted, false)?;
     ensure_pathname(&local, local_len, ADMISSION_PATH)?;
+    // Accepted sockets inherit the listener's local name without inheriting
+    // its live binding registration. A second bind must therefore fail before
+    // creating a pathname rather than reaching name publication again.
+    unlink_if_present(ACCEPTED_REBIND_PATH, 0)?;
+    expect_errno(
+        bind_unix_path(first_accepted, ACCEPTED_REBIND_PATH.as_bytes()),
+        EINVAL,
+    )?;
+    expect_errno(fstatat(AtFd::Cwd, Path::new(ACCEPTED_REBIND_PATH)), ENOENT)?;
     let (unnamed_peer, unnamed_peer_len) = unix_name(first_accepted, true)?;
     ensure_unnamed(&unnamed_peer, unnamed_peer_len)?;
 

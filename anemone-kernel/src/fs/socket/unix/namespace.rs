@@ -122,9 +122,7 @@ pub(super) fn withdraw_binding(registration: BindingRegistration) {
     );
 }
 
-/// This is the only namespace-to-Unix handoff consumed by Stage 2B. It is
-/// deliberately dormant in 2A except for owner-local identity proof.
-#[allow(dead_code)]
+/// This is the only namespace-to-Unix handoff consumed by connection admission.
 pub(super) fn lookup_binding(inode: &InodeRef) -> Option<LiveBinding> {
     BINDINGS.lock().lookup(inode)
 }

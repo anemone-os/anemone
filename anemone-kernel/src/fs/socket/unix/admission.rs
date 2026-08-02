@@ -11,7 +11,7 @@ use super::{
         SocketWait,
     },
     endpoint::{
-        BindingState, EndpointAssociation, EndpointSide, UnixConnection, UnixEndpointCore,
+        BindingPublication, EndpointAssociation, EndpointSide, UnixConnection, UnixEndpointCore,
         private_from_core,
     },
     namespace::{LiveBinding, resolve_live_binding},
@@ -328,7 +328,7 @@ pub(super) fn listen(
         if matches!(&state.association, EndpointAssociation::Retired) {
             return Err(SocketListenError::Retired);
         }
-        if !matches!(state.binding, BindingState::Bound(_)) {
+        if !matches!(state.binding, BindingPublication::Live(_)) {
             return Err(SocketListenError::InvalidState);
         }
         match &state.association {
@@ -361,7 +361,7 @@ fn current_listener(
     let state = endpoint.state.lock();
     let binding_matches = matches!(
         &state.binding,
-        BindingState::Bound(registration) if binding.matches_registration(registration)
+        BindingPublication::Live(registration) if binding.matches_registration(registration)
     );
     if !binding_matches {
         return Err(SocketConnectError::ConnectionRefused);

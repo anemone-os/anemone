@@ -561,6 +561,43 @@ route只携带notification/recheck capability，旧Unix双路径为零。
 拥有；2B未产生新的current issue或accepted limitation，因此register不新增条目。所有pending Socket/Unix/IOMUX/Epoll
 contract继续Not Effective。Stage 2关闭后已停止，不自动解析或激活Stage 3。
 
+## Stage 1--2 implementation feedback interlude — 软件工程审查
+
+**状态：** Closed 2026-08-02；Stage 1/2保持Closed，Stage 3保持Not Active，Cutover与transaction均为None。本节只
+记录已关闭实现的review反馈与同owner修正，不修改R0 target、owner、ABI、shared contract、acceptance或validation
+强度。
+
+本轮source/owner/lifecycle审查发现一项correctness finding：accepted endpoint共享listener的不可变local-name
+capability，但没有继承listener的live namespace registration；旧`BindingState::Unnamed`把“没有registration”错误地
+等同于“没有name”。因此对accepted socket再次`bind`会先创建VFS inode、发布registry，再在重复name publication的
+assertion处panic，留下跨owner的半发布状态。修正后`BindingPublication::{Absent, Preparing, Live}`只表达endpoint-local
+registration phase，name仍由`EndpointName`唯一拥有；bind admission同时检查name与publication，在任何VFS创建前将
+accepted rebinding稳定映射为既有`EINVAL`。owner-local KUnit证明该路径没有进入namespace preparation，guest regression
+同时证明目标pathname保持`ENOENT`。
+
+审查还完成了三项行为保持型结构维护。共同front由单文件拆为`front/{mod.rs,file.rs}`：前者拥有typed request/outcome、
+static `SocketOps` dispatch与creation/accept guard，后者拥有anonymous inode、common `FileOps`、opened-description hooks、
+user-copy adapter与`SIGPIPE`映射。Unix endpoint由单文件拆为`endpoint/{mod.rs,stream.rs}`：前者拥有role、local name、
+binding publication与family composition，后者拥有paired connection、directional bytes/terminal facts、stream operation与
+readiness route；跨sibling能力只使用`pub(in crate::fs::socket...)`，没有扩大socket owner之外的可见性。`socket(2)`与
+`socketpair(2)`的tuple/flag normalization收敛到`api/resolve.rs`，`socketpair`只保留其Linux-specific
+`EOPNOTSUPP` errno projection；resolver matrix与双架构runtime证明既有ABI不变。另将shared sockaddr reader改为中性的
+`read_socket_address`，移除已失效的dead-code annotation，并把receive errno mapping移回production helper区域。
+
+**Validation evidence：** `just fmt all --check`、`git diff --check`、`just test xtask` 66/66与`just test net-host`
+通过；RV64/LA64 `socket-test` app build与两个显式release preset build通过。RV64 canonical build第一次在sandbox内命中
+既有`lwext4` `Bad system call/SIGSYS`，完全相同命令在sandbox外通过，故只归类为环境限制。最终两架构canonical
+pretest wrapper运行同源guest路径：RV64 KUnit 362/362、LA64 KUnit 367/367，均为UDP 16/16、Unix 19/19，glibc/musl
+`socketpair02`各4 TPASS；RV64正常power-off，LA64完成filesystem/network/device orderly shutdown后因无成功
+power-off handler进入既有末尾halt，并由QEMU monitor退出。独立change review复核publication/retire锁序、module
+visibility、resolver ABI/errno、lifecycle与证据边界后没有Apollyon、Keter或Euclid finding。唯一residual coverage gap是
+`socketpair(AF_INET, unsupported-type)`的`EOPNOTSUPP` syscall adapter没有直接assert；其分支保持基线等价并经source
+audit，不构成本interlude finding或cutover blocker。
+
+**Not Run / non-claim：** 完整socket LTP、final harness、physical hardware与`smp>1`未运行；Stage 3拥有的shutdown、
+`MSG_*`、RDHUP/ERR与完整readiness closure未实现或验证。全部pending Socket/Unix/IOMUX/Epoll contract继续Not
+Effective，本interlude不产生register条目，也不自动解析或激活Stage 3。
+
 ## Stage 3 — Stream operation 与完整 readiness closure
 
 **目的：** 在Stage 1 basic socketpair stream/wait与Stage 2 namespace/connection admission基线上，以实际endpoint/

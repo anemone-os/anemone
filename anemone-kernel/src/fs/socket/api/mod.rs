@@ -6,6 +6,7 @@ mod getpeername;
 mod getsockname;
 mod listen;
 mod recvfrom;
+mod resolve;
 mod sendto;
 mod socket;
 mod socketpair;
