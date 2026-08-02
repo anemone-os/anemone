@@ -317,9 +317,9 @@ impl<H: Hal, T: Transport> VirtIOSound<H, T> {
         Ok(chmap_infos)
     }
 
-    /// If the VIRTIO_SND_JACK_F_REMAP feature bit is set in the jack information, then the driver can send a
-    /// control request to change the association and/or sequence number for the specified jack ID.
-    /// # Arguments
+    /// If the VIRTIO_SND_JACK_F_REMAP feature bit is set in the jack
+    /// information, then the driver can send a control request to change
+    /// the association and/or sequence number for the specified jack ID. # Arguments
     ///
     /// * `jack_id` - A u32 int which is in the range of [0, jacks)
     pub fn jack_remap(&mut self, jack_id: u32, association: u32, sequence: u32) -> Result {
@@ -496,7 +496,8 @@ impl<H: Hal, T: Transport> VirtIOSound<H, T> {
     ///
     /// Currently supports only output stream.
     ///
-    /// This is a blocking method that will not return until the audio playback is complete.
+    /// This is a blocking method that will not return until the audio playback
+    /// is complete.
     pub fn pcm_xfer(&mut self, stream_id: u32, frames: &[u8]) -> Result {
         const U32_SIZE: usize = size_of::<u32>();
         if !self.set_up {
@@ -522,8 +523,8 @@ impl<H: Hal, T: Transport> VirtIOSound<H, T> {
         let mut tail = 0;
 
         loop {
-            // Add as buffers to the TX queue if possible. 3 descriptors are required for the 2
-            // input buffers and 1 output buffer.
+            // Add as buffers to the TX queue if possible. 3 descriptors are required for
+            // the 2 input buffers and 1 output buffer.
             if self.tx_queue.available_desc() >= 3 {
                 if let Some(buffer) = remaining_buffers.next() {
                     // SAFETY: The buffers being added to the queue are non-empty and are not
@@ -577,7 +578,8 @@ impl<H: Hal, T: Transport> VirtIOSound<H, T> {
     ///
     /// This is a non-blocking method that returns a token.
     ///
-    /// The length of the `frames` must be equal to the buffer size set for the stream corresponding to the `stream_id`.
+    /// The length of the `frames` must be equal to the buffer size set for the
+    /// stream corresponding to the `stream_id`.
     pub fn pcm_xfer_nb(&mut self, stream_id: u32, frames: &[u8]) -> Result<u16> {
         if !self.set_up {
             self.set_up()?;
@@ -595,9 +597,10 @@ impl<H: Hal, T: Transport> VirtIOSound<H, T> {
         buf[U32_SIZE..U32_SIZE + period_size].copy_from_slice(frames);
         let mut rsp = VirtIOSndPcmStatus::new_box_zeroed().unwrap();
 
-        // SAFETY: `buf` and `rsp` are owned allocations (a `Vec` and a `Box`, respectively)
-        // that are stored in `self` until the corresponding call to `pcm_xfer_ok`. The stored
-        // buffers are not used before the call to `pcm_xfer_ok`.
+        // SAFETY: `buf` and `rsp` are owned allocations (a `Vec` and a `Box`,
+        // respectively) that are stored in `self` until the corresponding call
+        // to `pcm_xfer_ok`. The stored buffers are not used before the call to
+        // `pcm_xfer_ok`.
         let token = unsafe { self.tx_queue.add(&[&buf], &mut [rsp.as_mut_bytes()])? };
 
         if self.tx_queue.should_notify() {
@@ -608,13 +611,14 @@ impl<H: Hal, T: Transport> VirtIOSound<H, T> {
         Ok(token)
     }
 
-    /// The PCM frame transmission corresponding to the given token has been completed.
+    /// The PCM frame transmission corresponding to the given token has been
+    /// completed.
     pub fn pcm_xfer_ok(&mut self, token: u16) -> Result {
         assert!(self.token_buf.contains_key(&token));
         assert!(self.token_rsp.contains_key(&token));
 
-        // SAFETY: The buffers passed into `pop_used` are the same buffers from a previous call
-        // to `add` that returned `token`.
+        // SAFETY: The buffers passed into `pop_used` are the same buffers from a
+        // previous call to `add` that returned `token`.
         unsafe {
             self.tx_queue.pop_used(
                 token,
@@ -1162,9 +1166,11 @@ pub enum NotificationType {
     JackConnected = 0x1000,
     /// An external device has been disconnected from the jack.
     JackDisconnected,
-    /// A hardware buffer period has elapsed, the period size is controlled using the `period_bytes` field.
+    /// A hardware buffer period has elapsed, the period size is controlled
+    /// using the `period_bytes` field.
     PcmPeriodElapsed = 0x1100,
-    /// An underflow for the output stream or an overflow for the inputstream has occurred.
+    /// An underflow for the output stream or an overflow for the inputstream
+    /// has occurred.
     PcmXrun,
 }
 
@@ -1254,7 +1260,8 @@ pub struct VirtIOSndJackInfo {
     hda_reg_defconf: u32,
     /// indicates a pin capabilities value
     hda_reg_caps: u32,
-    /// indicates the current jack connection status (1 - connected, 0 - disconnected)
+    /// indicates the current jack connection status (1 - connected, 0 -
+    /// disconnected)
     connected: u8,
 
     _padding: [u8; 7],

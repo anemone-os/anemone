@@ -173,7 +173,7 @@ impl FakeSoundDevice {
                     {
                         response.extend_from_slice(jack_info.as_bytes());
                     }
-                }
+                },
                 R_PCM_INFO => {
                     let request = VirtIOSndQueryInfo::read_from_bytes(&request)
                         .expect("R_PCM_INFO control request wrong length");
@@ -192,7 +192,7 @@ impl FakeSoundDevice {
                     {
                         response.extend_from_slice(pcm_info.as_bytes());
                     }
-                }
+                },
                 R_CHMAP_INFO => {
                     let request = VirtIOSndQueryInfo::read_from_bytes(&request)
                         .expect("R_CHMAP_INFO control request wrong length");
@@ -211,7 +211,7 @@ impl FakeSoundDevice {
                     {
                         response.extend_from_slice(chmap_info.as_bytes());
                     }
-                }
+                },
                 R_PCM_SET_PARAMS => {
                     let request = VirtIOSndPcmSetParams::read_from_bytes(&request)
                         .expect("R_PCM_SET_PARAMS request wrong length");
@@ -224,7 +224,7 @@ impl FakeSoundDevice {
                         }
                         .as_bytes(),
                     );
-                }
+                },
                 R_PCM_PREPARE | R_PCM_START | R_PCM_STOP | R_PCM_RELEASE => {
                     let _request =
                         VirtIOSndPcmHdr::read_from_bytes(&request).expect("Request wrong length");
@@ -234,10 +234,10 @@ impl FakeSoundDevice {
                         }
                         .as_bytes(),
                     );
-                }
+                },
                 _ => {
                     panic!("Unexpected control request, header {:?}", header);
-                }
+                },
             }
             response
         }

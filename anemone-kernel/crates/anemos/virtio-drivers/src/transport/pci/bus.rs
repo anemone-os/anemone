@@ -1,4 +1,5 @@
-//! Module for dealing with a PCI bus in general, without anything specific to VirtIO.
+//! Module for dealing with a PCI bus in general, without anything specific to
+//! VirtIO.
 
 use bitflags::bitflags;
 use core::{
@@ -19,7 +20,8 @@ const MAX_DEVICES: u8 = 32;
 /// The maximum number of functions on a device.
 const MAX_FUNCTIONS: u8 = 8;
 
-/// The offset in bytes to the status and command fields within PCI configuration space.
+/// The offset in bytes to the status and command fields within PCI
+/// configuration space.
 const STATUS_COMMAND_OFFSET: u8 = 0x04;
 /// The offset in bytes to BAR0 within PCI configuration space.
 const BAR0_OFFSET: u8 = 0x10;
@@ -104,11 +106,13 @@ pub struct PciRoot<C: ConfigurationAccess> {
 pub enum Cam {
     /// The PCI memory-mapped Configuration Access Mechanism.
     ///
-    /// This provides access to 256 bytes of configuration space per device function.
+    /// This provides access to 256 bytes of configuration space per device
+    /// function.
     MmioCam,
     /// The PCIe memory-mapped Enhanced Configuration Access Mechanism.
     ///
-    /// This provides access to 4 KiB of configuration space per device function.
+    /// This provides access to 4 KiB of configuration space per device
+    /// function.
     Ecam,
 }
 
@@ -121,8 +125,8 @@ impl Cam {
         }
     }
 
-    /// Returns the offset in bytes within the CAM region for the given device, function and
-    /// register.
+    /// Returns the offset in bytes within the CAM region for the given device,
+    /// function and register.
     pub fn cam_offset(self, device_function: DeviceFunction, register_offset: u8) -> u32 {
         assert!(device_function.valid());
 
@@ -143,8 +147,8 @@ impl Cam {
 }
 
 impl<C: ConfigurationAccess> PciRoot<C> {
-    /// Creates a new `PciRoot` to access a PCI root complex through the given configuration access
-    /// implementation.
+    /// Creates a new `PciRoot` to access a PCI root complex through the given
+    /// configuration access implementation.
     pub fn new(configuration_access: C) -> Self {
         Self {
             configuration_access,
@@ -272,8 +276,8 @@ impl<C: ConfigurationAccess> PciRoot<C> {
 
         // For IO BARs bits 2 and 3 can be part of the address.
         let flag_bits = if io_space { 0b11 } else { 0b1111 };
-        // A wrapping add is necessary to correctly handle the case of unused BARs, which read back
-        // as 0, and should be treated as size 0.
+        // A wrapping add is necessary to correctly handle the case of unused BARs,
+        // which read back as 0, and should be treated as size 0.
         let size = (!(size_mask & !flag_bits)).wrapping_add(1);
 
         // Restore the original value.
@@ -310,13 +314,15 @@ impl<C: ConfigurationAccess> PciRoot<C> {
         }
     }
 
-    /// Sets the address of the given 32-bit memory or I/O BAR of the given device function.
+    /// Sets the address of the given 32-bit memory or I/O BAR of the given
+    /// device function.
     pub fn set_bar_32(&mut self, device_function: DeviceFunction, bar_index: u8, address: u32) {
         self.configuration_access
             .write_word(device_function, BAR0_OFFSET + 4 * bar_index, address);
     }
 
-    /// Sets the address of the given 64-bit memory BAR of the given device function.
+    /// Sets the address of the given 64-bit memory BAR of the given device
+    /// function.
     pub fn set_bar_64(&mut self, device_function: DeviceFunction, bar_index: u8, address: u64) {
         self.configuration_access.write_word(
             device_function,
@@ -353,15 +359,16 @@ pub trait ConfigurationAccess {
     ///
     /// # Safety
     ///
-    /// This function allows concurrent mutable access to the PCI CAM. To avoid this causing
-    /// problems, the returned `ConfigurationAccess` instance must only be used to read read-only
-    /// fields.
+    /// This function allows concurrent mutable access to the PCI CAM. To avoid
+    /// this causing problems, the returned `ConfigurationAccess` instance
+    /// must only be used to read read-only fields.
     unsafe fn unsafe_clone(&self) -> Self;
 }
 
-/// `ConfigurationAccess` implementation for memory-mapped access to a PCI root complex, via either
-/// a 16 MiB region for the PCI Configuration Access Mechanism or a 256 MiB region for the PCIe
-/// Enhanced Configuration Access Mechanism.
+/// `ConfigurationAccess` implementation for memory-mapped access to a PCI root
+/// complex, via either a 16 MiB region for the PCI Configuration Access
+/// Mechanism or a 256 MiB region for the PCIe Enhanced Configuration Access
+/// Mechanism.
 pub struct MmioCam<'a> {
     mmio: UniqueMmioPointer<'a, [ReadPureWrite<u32>]>,
     cam: Cam,
@@ -374,9 +381,10 @@ impl MmioCam<'_> {
     ///
     /// # Safety
     ///
-    /// `mmio_base` must be a valid pointer to an appropriately-mapped MMIO region of at least
-    /// 16 MiB (if `cam == Cam::MmioCam`) or 256 MiB (if `cam == Cam::Ecam`). The pointer must be
-    /// valid for the lifetime `'a`, which implies that no Rust references may be used to access any
+    /// `mmio_base` must be a valid pointer to an appropriately-mapped MMIO
+    /// region of at least 16 MiB (if `cam == Cam::MmioCam`) or 256 MiB (if
+    /// `cam == Cam::Ecam`). The pointer must be valid for the lifetime
+    /// `'a`, which implies that no Rust references may be used to access any
     /// of the memory region at least during that lifetime.
     pub unsafe fn new(mmio_base: *mut u8, cam: Cam) -> Self {
         assert!(mmio_base as usize & 0x3 == 0);
@@ -423,8 +431,8 @@ impl ConfigurationAccess for MmioCam<'_> {
     }
 }
 
-// SAFETY: `&MmioCam` only allows MMIO reads, which are fine to happen concurrently on different CPU
-// cores.
+// SAFETY: `&MmioCam` only allows MMIO reads, which are fine to happen
+// concurrently on different CPU cores.
 unsafe impl Sync for MmioCam<'_> {}
 
 /// Information about a PCI Base Address Register.
@@ -434,8 +442,8 @@ pub enum BarInfo {
     Memory {
         /// The size of the BAR address and where it can be located.
         address_type: MemoryBarType,
-        /// If true, then reading from the region doesn't have side effects. The CPU may cache reads
-        /// and merge repeated stores.
+        /// If true, then reading from the region doesn't have side effects. The
+        /// CPU may cache reads and merge repeated stores.
         prefetchable: bool,
         /// The memory address, always 16-byte aligned.
         address: u64,
@@ -452,8 +460,8 @@ pub enum BarInfo {
 }
 
 impl BarInfo {
-    /// Returns whether this BAR is a 64-bit memory region, and so takes two entries in the table in
-    /// configuration space.
+    /// Returns whether this BAR is a 64-bit memory region, and so takes two
+    /// entries in the table in configuration space.
     pub fn takes_two_entries(&self) -> bool {
         matches!(
             self,
@@ -464,8 +472,8 @@ impl BarInfo {
         )
     }
 
-    /// Returns the address and size of this BAR if it is a memory bar, or `None` if it is an IO
-    /// BAR.
+    /// Returns the address and size of this BAR if it is a memory bar, or
+    /// `None` if it is an IO BAR.
     pub fn memory_address_size(&self) -> Option<(u64, u64)> {
         if let Self::Memory { address, size, .. } = self {
             Some((*address, *size))
@@ -490,7 +498,7 @@ impl Display for BarInfo {
             ),
             Self::IO { address, size } => {
                 write!(f, "I/O space at {:#010x}, size {}", address, size)
-            }
+            },
         }
     }
 }
@@ -498,11 +506,13 @@ impl Display for BarInfo {
 /// The location allowed for a memory BAR.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MemoryBarType {
-    /// The BAR has a 32-bit address and can be mapped anywhere in 32-bit address space.
+    /// The BAR has a 32-bit address and can be mapped anywhere in 32-bit
+    /// address space.
     Width32,
     /// The BAR must be mapped below 1MiB.
     Below1MiB,
-    /// The BAR has a 64-bit address and can be mapped anywhere in 64-bit address space.
+    /// The BAR has a 64-bit address and can be mapped anywhere in 64-bit
+    /// address space.
     Width64,
 }
 
@@ -571,19 +581,22 @@ impl<C: ConfigurationAccess> Iterator for CapabilityIterator<'_, C> {
 /// Information about a PCI device capability.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct CapabilityInfo {
-    /// The offset of the capability in the PCI configuration space of the device function.
+    /// The offset of the capability in the PCI configuration space of the
+    /// device function.
     pub offset: u8,
     /// The ID of the capability.
     pub id: u8,
-    /// The third and fourth bytes of the capability, to save reading them again.
+    /// The third and fourth bytes of the capability, to save reading them
+    /// again.
     pub private_header: u16,
 }
 
 /// An iterator which enumerates PCI devices and functions on a given bus.
 #[derive(Debug)]
 pub struct BusDeviceIterator<C: ConfigurationAccess> {
-    /// This must only be used to read read-only fields, and must not be exposed outside this
-    /// module, because it uses the same CAM as the main `PciRoot` instance.
+    /// This must only be used to read read-only fields, and must not be exposed
+    /// outside this module, because it uses the same CAM as the main
+    /// `PciRoot` instance.
     configuration_access: C,
     next: DeviceFunction,
 }
@@ -644,8 +657,8 @@ pub struct DeviceFunction {
 }
 
 impl DeviceFunction {
-    /// Returns whether the device and function numbers are valid, i.e. the device is between 0 and
-    /// 31, and the function is between 0 and 7.
+    /// Returns whether the device and function numbers are valid, i.e. the
+    /// device is between 0 and 31, and the function is between 0 and 7.
     pub fn valid(&self) -> bool {
         self.device < 32 && self.function < 8
     }
@@ -785,7 +798,8 @@ mod tests {
             ]
         );
 
-        // Status and command should be restored to their initial values, as should BAR values.
+        // Status and command should be restored to their initial values, as should BAR
+        // values.
         assert_eq!(root.configuration_access, fake_cam_orig);
     }
 
@@ -846,7 +860,8 @@ mod tests {
             ]
         );
 
-        // Status and command should be restored to their initial values, as should BAR values.
+        // Status and command should be restored to their initial values, as should BAR
+        // values.
         assert_eq!(root.configuration_access, fake_cam_orig);
     }
 
@@ -894,7 +909,8 @@ mod tests {
             ]
         );
 
-        // Status and command should be restored to their initial values, as should BAR values.
+        // Status and command should be restored to their initial values, as should BAR
+        // values.
         assert_eq!(root.configuration_access, fake_cam_orig);
     }
 

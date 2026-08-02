@@ -63,7 +63,8 @@ pub trait Transport {
     /// Disables and resets the given queue.
     fn queue_unset(&mut self, queue: u16);
 
-    /// Returns whether the queue is in use, i.e. has a nonzero PFN or is marked as ready.
+    /// Returns whether the queue is in use, i.e. has a nonzero PFN or is marked
+    /// as ready.
     fn queue_used(&mut self, queue: u16) -> bool;
 
     /// Acknowledges an interrupt.
@@ -133,8 +134,9 @@ pub trait Transport {
         value: T,
     ) -> Result<()>;
 
-    /// Safely reads multiple fields from config space by ensuring that the config generation is the
-    /// same before and after all reads, and retrying if not.
+    /// Safely reads multiple fields from config space by ensuring that the
+    /// config generation is the same before and after all reads, and
+    /// retrying if not.
     fn read_consistent<T>(&self, f: impl Fn() -> Result<T>) -> Result<T> {
         loop {
             let before = self.read_config_generation();

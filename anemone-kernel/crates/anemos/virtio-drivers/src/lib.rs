@@ -1,14 +1,16 @@
 //! VirtIO guest drivers.
 //!
-//! These drivers can be used by bare-metal code (such as a bootloader or OS kernel) running in a VM
-//! to interact with VirtIO devices provided by the VMM (such as QEMU or crosvm).
+//! These drivers can be used by bare-metal code (such as a bootloader or OS
+//! kernel) running in a VM to interact with VirtIO devices provided by the VMM
+//! (such as QEMU or crosvm).
 //!
 //! # Usage
 //!
-//! You must first implement the [`Hal`] trait, to allocate DMA regions and translate between
-//! physical addresses (as seen by devices) and virtual addresses (as seen by your program). You can
-//! then construct the appropriate transport for the VirtIO device, e.g. for an MMIO device (perhaps
-//! discovered from the device tree):
+//! You must first implement the [`Hal`] trait, to allocate DMA regions and
+//! translate between physical addresses (as seen by devices) and virtual
+//! addresses (as seen by your program). You can then construct the appropriate
+//! transport for the VirtIO device, e.g. for an MMIO device (perhaps discovered
+//! from the device tree):
 //!
 //! ```
 //! use core::ptr::NonNull;
@@ -20,7 +22,8 @@
 //! # }
 //! ```
 //!
-//! You can then check what kind of VirtIO device it is and construct the appropriate driver:
+//! You can then check what kind of VirtIO device it is and construct the
+//! appropriate driver:
 //!
 //! ```
 //! # use virtio_drivers::Hal;
@@ -80,13 +83,15 @@ pub type Result<T = ()> = core::result::Result<T, Error>;
 /// The error type of VirtIO drivers.
 #[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
 pub enum Error {
-    /// There are not enough descriptors available in the virtqueue, try again later.
+    /// There are not enough descriptors available in the virtqueue, try again
+    /// later.
     #[error("Virtqueue is full")]
     QueueFull,
     /// The device is not ready.
     #[error("Device not ready")]
     NotReady,
-    /// The device used a different descriptor chain to the one we were expecting.
+    /// The device used a different descriptor chain to the one we were
+    /// expecting.
     #[error("Device used a different descriptor chain to the one we were expecting")]
     WrongToken,
     /// The queue is already in use.
@@ -104,7 +109,8 @@ pub enum Error {
     /// The request was not supported by the device.
     #[error("Request not supported by device")]
     Unsupported,
-    /// The config space advertised by the device is smaller than the driver expected.
+    /// The config space advertised by the device is smaller than the driver
+    /// expected.
     #[error("Config space advertised by the device is smaller than expected")]
     ConfigSpaceTooSmall,
     /// The device doesn't have any config space, but the driver expects some.
@@ -132,7 +138,8 @@ fn align_up_phys(size: PhysAddr) -> PhysAddr {
     (size + PAGE_SIZE_PHYS) & !(PAGE_SIZE_PHYS - 1)
 }
 
-/// The number of pages required to store `size` bytes, rounded up to a whole number of pages.
+/// The number of pages required to store `size` bytes, rounded up to a whole
+/// number of pages.
 fn pages(size: usize) -> usize {
     size.div_ceil(PAGE_SIZE)
 }

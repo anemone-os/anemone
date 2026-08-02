@@ -1,10 +1,12 @@
 //! Driver for VirtIO block devices.
 
-use crate::config::{ReadOnly, read_config};
-use crate::hal::Hal;
-use crate::queue::VirtQueue;
-use crate::transport::{InterruptStatus, Transport};
-use crate::{Error, Result};
+use crate::{
+    Error, Result,
+    config::{ReadOnly, read_config},
+    hal::Hal,
+    queue::VirtQueue,
+    transport::{InterruptStatus, Transport},
+};
 use bitflags::bitflags;
 use log::info;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
@@ -21,8 +23,8 @@ const SUPPORTED_FEATURES: BlkFeature = BlkFeature::RO
 ///
 /// This is a simple virtual block device, e.g. disk.
 ///
-/// Read and write requests (and other exotic requests) are placed in the queue and serviced
-/// (probably out of order) by the device except where noted.
+/// Read and write requests (and other exotic requests) are placed in the queue
+/// and serviced (probably out of order) by the device except where noted.
 ///
 /// # Example
 ///
@@ -78,12 +80,14 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         })
     }
 
-    /// Gets the capacity of the block device, in 512 byte ([`SECTOR_SIZE`]) sectors.
+    /// Gets the capacity of the block device, in 512 byte ([`SECTOR_SIZE`])
+    /// sectors.
     pub fn capacity(&self) -> u64 {
         self.capacity
     }
 
-    /// Returns true if the block device is read-only, or false if it allows writes.
+    /// Returns true if the block device is read-only, or false if it allows
+    /// writes.
     pub fn readonly(&self) -> bool {
         self.negotiated_features.contains(BlkFeature::RO)
     }
@@ -105,7 +109,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         self.queue.set_dev_notify(false);
     }
 
-    /// Sends the given request to the device and waits for a response, with no extra data.
+    /// Sends the given request to the device and waits for a response, with no
+    /// extra data.
     fn request(&mut self, request: BlkReq) -> Result {
         let mut resp = BlkResp::default();
         self.queue.add_notify_wait_pop(
@@ -116,7 +121,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         resp.status.into()
     }
 
-    /// Sends the given request to the device and waits for a response, including the given data.
+    /// Sends the given request to the device and waits for a response,
+    /// including the given data.
     fn request_read(&mut self, request: BlkReq, data: &mut [u8]) -> Result {
         let mut resp = BlkResp::default();
         self.queue.add_notify_wait_pop(
@@ -140,7 +146,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
 
     /// Requests the device to flush any pending writes to storage.
     ///
-    /// This will be ignored if the device doesn't support the `VIRTIO_BLK_F_FLUSH` feature.
+    /// This will be ignored if the device doesn't support the
+    /// `VIRTIO_BLK_F_FLUSH` feature.
     pub fn flush(&mut self) -> Result {
         if self.negotiated_features.contains(BlkFeature::FLUSH) {
             self.request(BlkReq {
@@ -154,8 +161,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
 
     /// Gets the device ID.
     ///
-    /// The ID is written as ASCII into the given buffer, which must be 20 bytes long, and the used
-    /// length returned.
+    /// The ID is written as ASCII into the given buffer, which must be 20 bytes
+    /// long, and the used length returned.
     pub fn device_id(&mut self, id: &mut [u8; 20]) -> Result<usize> {
         self.request_read(
             BlkReq {
@@ -187,30 +194,33 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         )
     }
 
-    /// Submits a request to read one or more blocks, but returns immediately without waiting for
-    /// the read to complete.
+    /// Submits a request to read one or more blocks, but returns immediately
+    /// without waiting for the read to complete.
     ///
     /// # Arguments
     ///
     /// * `block_id` - The identifier of the first block to read.
-    /// * `req` - A buffer which the driver can use for the request to send to the device. The
-    ///   contents don't matter as `read_blocks_nb` will initialise it, but like the other buffers
-    ///   it needs to be valid (and not otherwise used) until the corresponding
-    ///   `complete_read_blocks` call. Its length must be a non-zero multiple of [`SECTOR_SIZE`].
+    /// * `req` - A buffer which the driver can use for the request to send to
+    ///   the device. The contents don't matter as `read_blocks_nb` will
+    ///   initialise it, but like the other buffers it needs to be valid (and
+    ///   not otherwise used) until the corresponding `complete_read_blocks`
+    ///   call. Its length must be a non-zero multiple of [`SECTOR_SIZE`].
     /// * `buf` - The buffer in memory into which the block should be read.
-    /// * `resp` - A mutable reference to a variable provided by the caller
-    ///   to contain the status of the request. The caller can safely
-    ///   read the variable only after the request is complete.
+    /// * `resp` - A mutable reference to a variable provided by the caller to
+    ///   contain the status of the request. The caller can safely read the
+    ///   variable only after the request is complete.
     ///
     /// # Usage
     ///
-    /// It will submit request to the VirtIO block device and return a token identifying
-    /// the position of the first Descriptor in the chain. If there are not enough
-    /// Descriptors to allocate, then it returns [`Error::QueueFull`].
+    /// It will submit request to the VirtIO block device and return a token
+    /// identifying the position of the first Descriptor in the chain. If
+    /// there are not enough Descriptors to allocate, then it returns
+    /// [`Error::QueueFull`].
     ///
-    /// The caller can then call `peek_used` with the returned token to check whether the device has
-    /// finished handling the request. Once it has, the caller must call `complete_read_blocks` with
-    /// the same buffers before reading the response.
+    /// The caller can then call `peek_used` with the returned token to check
+    /// whether the device has finished handling the request. Once it has,
+    /// the caller must call `complete_read_blocks` with the same buffers
+    /// before reading the response.
     ///
     /// ```
     /// # use virtio_drivers::{Error, Hal};
@@ -241,8 +251,9 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
     ///
     /// # Safety
     ///
-    /// `req`, `buf` and `resp` are still borrowed by the underlying VirtIO block device even after
-    /// this method returns. Thus, it is the caller's responsibility to guarantee that they are not
+    /// `req`, `buf` and `resp` are still borrowed by the underlying VirtIO
+    /// block device even after this method returns. Thus, it is the
+    /// caller's responsibility to guarantee that they are not
     /// accessed before the request is completed in order to avoid data races.
     pub unsafe fn read_blocks_nb(
         &mut self,
@@ -258,8 +269,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
             reserved: 0,
             sector: block_id as u64,
         };
-        // SAFETY: The caller promises that `req`, `buf` and `resp` are not accessed before the
-        // request is completed.
+        // SAFETY: The caller promises that `req`, `buf` and `resp` are not accessed
+        // before the request is completed.
         let token = unsafe {
             self.queue
                 .add(&[req.as_bytes()], &mut [buf, resp.as_mut_bytes()])?
@@ -274,8 +285,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
     ///
     /// # Safety
     ///
-    /// The same buffers (`req`, `buf` and `resp`) must be passed in again as were passed to
-    /// `read_blocks_nb` when it returned the token.
+    /// The same buffers (`req`, `buf` and `resp`) must be passed in again as
+    /// were passed to `read_blocks_nb` when it returned the token.
     pub unsafe fn complete_read_blocks(
         &mut self,
         token: u16,
@@ -283,8 +294,9 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         buf: &mut [u8],
         resp: &mut BlkResp,
     ) -> Result<()> {
-        // SAFETY: The caller promises that `req`, `buf` and `resp` are the same that were passed to
-        // the corresponding `read_blocks_nb` call which added them to the queue.
+        // SAFETY: The caller promises that `req`, `buf` and `resp` are the same that
+        // were passed to the corresponding `read_blocks_nb` call which added
+        // them to the queue.
         unsafe {
             self.queue
                 .pop_used(token, &[req.as_bytes()], &mut [buf, resp.as_mut_bytes()])?;
@@ -310,21 +322,22 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         )
     }
 
-    /// Submits a request to write one or more blocks, but returns immediately without waiting for
-    /// the write to complete.
+    /// Submits a request to write one or more blocks, but returns immediately
+    /// without waiting for the write to complete.
     ///
     /// # Arguments
     ///
     /// * `block_id` - The identifier of the first block to write.
-    /// * `req` - A buffer which the driver can use for the request to send to the device. The
-    ///   contents don't matter as `read_blocks_nb` will initialise it, but like the other buffers
-    ///   it needs to be valid (and not otherwise used) until the corresponding
-    ///   `complete_write_blocks` call.
-    /// * `buf` - The buffer in memory containing the data to write to the blocks. Its length must
-    ///   be a non-zero multiple of [`SECTOR_SIZE`].
-    /// * `resp` - A mutable reference to a variable provided by the caller
-    ///   to contain the status of the request. The caller can safely
-    ///   read the variable only after the request is complete.
+    /// * `req` - A buffer which the driver can use for the request to send to
+    ///   the device. The contents don't matter as `read_blocks_nb` will
+    ///   initialise it, but like the other buffers it needs to be valid (and
+    ///   not otherwise used) until the corresponding `complete_write_blocks`
+    ///   call.
+    /// * `buf` - The buffer in memory containing the data to write to the
+    ///   blocks. Its length must be a non-zero multiple of [`SECTOR_SIZE`].
+    /// * `resp` - A mutable reference to a variable provided by the caller to
+    ///   contain the status of the request. The caller can safely read the
+    ///   variable only after the request is complete.
     ///
     /// # Usage
     ///
@@ -347,8 +360,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
             reserved: 0,
             sector: block_id as u64,
         };
-        // SAFETY: The caller promises that `req`, `buf` and `resp` are not accessed before the
-        // request is completed.
+        // SAFETY: The caller promises that `req`, `buf` and `resp` are not accessed
+        // before the request is completed.
         let token = unsafe {
             self.queue
                 .add(&[req.as_bytes(), buf], &mut [resp.as_mut_bytes()])?
@@ -363,8 +376,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
     ///
     /// # Safety
     ///
-    /// The same buffers (`req`, `buf` and `resp`) must be passed in again as were passed to
-    /// `write_blocks_nb` when it returned the token.
+    /// The same buffers (`req`, `buf` and `resp`) must be passed in again as
+    /// were passed to `write_blocks_nb` when it returned the token.
     pub unsafe fn complete_write_blocks(
         &mut self,
         token: u16,
@@ -372,8 +385,9 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         buf: &[u8],
         resp: &mut BlkResp,
     ) -> Result<()> {
-        // SAFETY: The caller promises that `req`, `buf` and `resp` are the same that were passed to
-        // the corresponding `write_blocks_nb` call which added them to the queue.
+        // SAFETY: The caller promises that `req`, `buf` and `resp` are the same that
+        // were passed to the corresponding `write_blocks_nb` call which added
+        // them to the queue.
         unsafe {
             self.queue
                 .pop_used(token, &[req.as_bytes(), buf], &mut [resp.as_mut_bytes()])?;
@@ -381,8 +395,9 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
         resp.status.into()
     }
 
-    /// Fetches the token of the next completed request from the used ring and returns it, without
-    /// removing it from the used ring. If there are no pending completed requests returns `None`.
+    /// Fetches the token of the next completed request from the used ring and
+    /// returns it, without removing it from the used ring. If there are no
+    /// pending completed requests returns `None`.
     pub fn peek_used(&mut self) -> Option<u16> {
         self.queue.peek_used()
     }
@@ -397,8 +412,8 @@ impl<H: Hal, T: Transport> VirtIOBlk<H, T> {
 
 impl<H: Hal, T: Transport> Drop for VirtIOBlk<H, T> {
     fn drop(&mut self) {
-        // Clear any pointers pointing to DMA regions, so the device doesn't try to access them
-        // after they have been freed.
+        // Clear any pointers pointing to DMA regions, so the device doesn't try to
+        // access them after they have been freed.
         self.transport.queue_unset(QUEUE);
     }
 }
@@ -504,8 +519,8 @@ impl Default for BlkResp {
     }
 }
 
-/// The standard sector size of a VirtIO block device. Data is read and written in multiples of this
-/// size.
+/// The standard sector size of a VirtIO block device. Data is read and written
+/// in multiples of this size.
 pub const SECTOR_SIZE: usize = 512;
 
 bitflags! {

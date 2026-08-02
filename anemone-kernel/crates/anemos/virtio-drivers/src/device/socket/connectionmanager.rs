@@ -4,9 +4,7 @@ use super::{
 };
 use crate::{Hal, Result, transport::Transport};
 use alloc::{boxed::Box, vec::Vec};
-use core::cmp::min;
-use core::convert::TryInto;
-use core::hint::spin_loop;
+use core::{cmp::min, convert::TryInto, hint::spin_loop};
 use log::debug;
 use zerocopy::FromZeros;
 
@@ -16,8 +14,8 @@ const DEFAULT_PER_CONNECTION_BUFFER_CAPACITY: u32 = 1024;
 ///
 /// This keeps track of multiple vsock connections.
 ///
-/// `RX_BUFFER_SIZE` is the size in bytes of each buffer used in the RX virtqueue. This must be
-/// bigger than `size_of::<VirtioVsockHdr>()`.
+/// `RX_BUFFER_SIZE` is the size in bytes of each buffer used in the RX
+/// virtqueue. This must be bigger than `size_of::<VirtioVsockHdr>()`.
 ///
 /// # Example
 ///
@@ -58,8 +56,8 @@ pub struct VsockConnectionManager<
 struct Connection {
     info: ConnectionInfo,
     buffer: RingBuffer,
-    /// The peer sent a SHUTDOWN request, but we haven't yet responded with a RST because there is
-    /// still data in the buffer.
+    /// The peer sent a SHUTDOWN request, but we haven't yet responded with a
+    /// RST because there is still data in the buffer.
     peer_requested_shutdown: bool,
 }
 
@@ -78,13 +76,14 @@ impl Connection {
 impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
     VsockConnectionManager<H, T, RX_BUFFER_SIZE>
 {
-    /// Construct a new connection manager wrapping the given low-level VirtIO socket driver.
+    /// Construct a new connection manager wrapping the given low-level VirtIO
+    /// socket driver.
     pub fn new(driver: VirtIOSocket<H, T, RX_BUFFER_SIZE>) -> Self {
         Self::new_with_capacity(driver, DEFAULT_PER_CONNECTION_BUFFER_CAPACITY)
     }
 
-    /// Construct a new connection manager wrapping the given low-level VirtIO socket driver, with
-    /// the given per-connection buffer capacity.
+    /// Construct a new connection manager wrapping the given low-level VirtIO
+    /// socket driver, with the given per-connection buffer capacity.
     pub fn new_with_capacity(
         driver: VirtIOSocket<H, T, RX_BUFFER_SIZE>,
         per_connection_buffer_capacity: u32,
@@ -116,9 +115,9 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
 
     /// Sends a request to connect to the given destination.
     ///
-    /// This returns as soon as the request is sent; you should wait until `poll` returns a
-    /// `VsockEventType::Connected` event indicating that the peer has accepted the connection
-    /// before sending data.
+    /// This returns as soon as the request is sent; you should wait until
+    /// `poll` returns a `VsockEventType::Connected` event indicating that
+    /// the peer has accepted the connection before sending data.
     pub fn connect(&mut self, destination: VsockAddr, src_port: u32) -> Result {
         if self.connections.iter().any(|connection| {
             connection.info.dst == destination && connection.info.src_port == src_port
@@ -160,8 +159,8 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
                 if connection.is_some() || event.destination.cid != guest_cid {
                     return Ok(None);
                 }
-                // Add the new connection to our list, at least for now. It will be removed again
-                // below if we weren't listening on the port.
+                // Add the new connection to our list, at least for now. It will be removed
+                // again below if we weren't listening on the port.
                 connections.push(Connection::new(
                     event.source,
                     event.destination.port,
@@ -205,8 +204,8 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
                     // No need to pass the request on to the client, as we've already rejected it.
                     return Ok(None);
                 }
-            }
-            VsockEventType::Connected => {}
+            },
+            VsockEventType::Connected => {},
             VsockEventType::Disconnected { reason } => {
                 // Wait until client reads all data before removing connection.
                 if connection.buffer.is_empty() {
@@ -217,17 +216,17 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
                 } else {
                     connection.peer_requested_shutdown = true;
                 }
-            }
+            },
             VsockEventType::Received { .. } => {
                 // Already copied the buffer in the callback above.
-            }
+            },
             VsockEventType::CreditRequest => {
                 // If the peer requested credit, send an update.
                 self.driver.credit_update(&connection.info)?;
                 // No need to pass the request on to the client, we've already handled it.
                 return Ok(None);
-            }
-            VsockEventType::CreditUpdate => {}
+            },
+            VsockEventType::CreditUpdate => {},
         }
 
         Ok(Some(event))
@@ -242,8 +241,8 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
 
         connection.info.done_forwarding(bytes_read);
 
-        // If buffer is now empty and the peer requested shutdown, finish shutting down the
-        // connection.
+        // If buffer is now empty and the peer requested shutdown, finish shutting down
+        // the connection.
         if connection.peer_requested_shutdown && connection.buffer.is_empty() {
             self.driver.force_close(&connection.info)?;
             self.connections.swap_remove(connection_index);
@@ -252,10 +251,11 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
         Ok(bytes_read)
     }
 
-    /// Returns the number of bytes in the receive buffer available to be read by `recv`.
+    /// Returns the number of bytes in the receive buffer available to be read
+    /// by `recv`.
     ///
-    /// When the available bytes is 0, it indicates that the receive buffer is empty and does not
-    /// contain any data.
+    /// When the available bytes is 0, it indicates that the receive buffer is
+    /// empty and does not contain any data.
     pub fn recv_buffer_available_bytes(&mut self, peer: VsockAddr, src_port: u32) -> Result<usize> {
         let (_, connection) = get_connection(&mut self.connections, peer, src_port)?;
         Ok(connection.buffer.used())
@@ -278,12 +278,12 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
         }
     }
 
-    /// Requests to shut down the connection cleanly, telling the peer that we won't send or receive
-    /// any more data.
+    /// Requests to shut down the connection cleanly, telling the peer that we
+    /// won't send or receive any more data.
     ///
-    /// This returns as soon as the request is sent; you should wait until `poll` returns a
-    /// `VsockEventType::Disconnected` event if you want to know that the peer has acknowledged the
-    /// shutdown.
+    /// This returns as soon as the request is sent; you should wait until
+    /// `poll` returns a `VsockEventType::Disconnected` event if you want to
+    /// know that the peer has acknowledged the shutdown.
     pub fn shutdown(&mut self, destination: VsockAddr, src_port: u32) -> Result {
         let (_, connection) = get_connection(&mut self.connections, destination, src_port)?;
 
@@ -301,10 +301,11 @@ impl<H: Hal, T: Transport, const RX_BUFFER_SIZE: usize>
     }
 }
 
-/// Returns the connection from the given list matching the given peer address and local port, and
-/// its index.
+/// Returns the connection from the given list matching the given peer address
+/// and local port, and its index.
 ///
-/// Returns `Err(SocketError::NotConnected)` if there is no matching connection in the list.
+/// Returns `Err(SocketError::NotConnected)` if there is no matching connection
+/// in the list.
 fn get_connection(
     connections: &mut [Connection],
     peer: VsockAddr,
@@ -319,7 +320,8 @@ fn get_connection(
         .ok_or(SocketError::NotConnected)
 }
 
-/// Returns the connection from the given list matching the event, if any, and its index.
+/// Returns the connection from the given list matching the event, if any, and
+/// its index.
 fn get_connection_for_event<'a>(
     connections: &'a mut [Connection],
     event: &VsockEvent,
@@ -364,7 +366,8 @@ impl RingBuffer {
         self.buffer.len() - self.used
     }
 
-    /// Adds the given bytes to the buffer if there is enough capacity for them all.
+    /// Adds the given bytes to the buffer if there is enough capacity for them
+    /// all.
     ///
     /// Returns true if they were added, or false if they were not.
     pub fn add(&mut self, bytes: &[u8]) -> bool {
@@ -374,8 +377,8 @@ impl RingBuffer {
 
         // The index of the first available position in the buffer.
         let first_available = (self.start + self.used) % self.buffer.len();
-        // The number of bytes to copy from `bytes` to `buffer` between `first_available` and
-        // `buffer.len()`.
+        // The number of bytes to copy from `bytes` to `buffer` between
+        // `first_available` and `buffer.len()`.
         let copy_length_before_wraparound = min(bytes.len(), self.buffer.len() - first_available);
         self.buffer[first_available..first_available + copy_length_before_wraparound]
             .copy_from_slice(&bytes[0..copy_length_before_wraparound]);
@@ -387,14 +390,15 @@ impl RingBuffer {
         true
     }
 
-    /// Reads and removes as many bytes as possible from the buffer, up to the length of the given
-    /// buffer.
+    /// Reads and removes as many bytes as possible from the buffer, up to the
+    /// length of the given buffer.
     pub fn drain(&mut self, out: &mut [u8]) -> usize {
         let bytes_read = min(self.used, out.len());
 
         // The number of bytes to copy out between `start` and the end of the buffer.
         let read_before_wraparound = min(bytes_read, self.buffer.len() - self.start);
-        // The number of bytes to copy out from the beginning of the buffer after wrapping around.
+        // The number of bytes to copy out from the beginning of the buffer after
+        // wrapping around.
         let read_after_wraparound = bytes_read
             .checked_sub(read_before_wraparound)
             .unwrap_or_default();

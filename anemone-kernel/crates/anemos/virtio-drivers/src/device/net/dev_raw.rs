@@ -1,10 +1,14 @@
-use super::{Config, EthernetAddress, Features, VirtioNetHdr, VirtioNetHdrLegacy};
-use super::{MIN_BUFFER_LEN, QUEUE_RECEIVE, QUEUE_TRANSMIT, SUPPORTED_FEATURES};
-use crate::config::read_config;
-use crate::hal::Hal;
-use crate::queue::VirtQueue;
-use crate::transport::{InterruptStatus, Transport};
-use crate::{Error, Result};
+use super::{
+    Config, EthernetAddress, Features, MIN_BUFFER_LEN, QUEUE_RECEIVE, QUEUE_TRANSMIT,
+    SUPPORTED_FEATURES, VirtioNetHdr, VirtioNetHdrLegacy,
+};
+use crate::{
+    Error, Result,
+    config::read_config,
+    hal::Hal,
+    queue::VirtQueue,
+    transport::{InterruptStatus, Transport},
+};
 use core::mem::size_of;
 use log::{debug, info, warn};
 use zerocopy::IntoBytes;
@@ -144,24 +148,26 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
     /// [`Error::QueueFull`].
     ///
     /// The caller needs to fill the `tx_buf` with a header by calling
-    /// [`fill_buffer_header`] before transmission. Then it calls [`poll_transmit`]
-    /// with the returned token to check whether the device has finished handling
-    /// the request. Once it has, the caller must call [`transmit_complete`] with
-    /// the same buffer before reading the result (transmitted length).
+    /// [`fill_buffer_header`] before transmission. Then it calls
+    /// [`poll_transmit`] with the returned token to check whether the
+    /// device has finished handling the request. Once it has, the caller
+    /// must call [`transmit_complete`] with the same buffer before reading
+    /// the result (transmitted length).
     ///
     /// # Safety
     ///
-    /// `tx_buf` is still borrowed by the underlying VirtIO net device even after
-    /// this method returns. Thus, it is the caller's responsibility to guarantee
-    /// that they are not accessed before the request is completed in order to
-    /// avoid data races.
+    /// `tx_buf` is still borrowed by the underlying VirtIO net device even
+    /// after this method returns. Thus, it is the caller's responsibility
+    /// to guarantee that they are not accessed before the request is
+    /// completed in order to avoid data races.
     ///
     /// [`fill_buffer_header`]: Self::fill_buffer_header
     /// [`poll_transmit`]: Self::poll_transmit
     /// [`transmit_complete`]: Self::transmit_complete
     pub unsafe fn transmit_begin(&mut self, tx_buf: &[u8]) -> Result<u16> {
         self.check_tx_buf_len(tx_buf)?;
-        // SAFETY: The caller promises that `tx_buf` is not accessed before the request completes.
+        // SAFETY: The caller promises that `tx_buf` is not accessed before the request
+        // completes.
         let token = unsafe { self.send_queue.add(&[tx_buf], &mut [])? };
         if self.send_queue.should_notify() {
             self.transport.notify(QUEUE_TRANSMIT);
@@ -176,8 +182,8 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
         self.send_queue.peek_used()
     }
 
-    /// Completes a transmission operation which was started by [`transmit_begin`].
-    /// Returns number of bytes transmitted.
+    /// Completes a transmission operation which was started by
+    /// [`transmit_begin`]. Returns number of bytes transmitted.
     ///
     /// # Safety
     ///
@@ -186,8 +192,8 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
     ///
     /// [`transmit_begin`]: Self::transmit_begin
     pub unsafe fn transmit_complete(&mut self, token: u16, tx_buf: &[u8]) -> Result<usize> {
-        // SAFETY: The caller promises that `tx_buf` is the same one passed to the corresponding
-        // call to `transmit_begin`.
+        // SAFETY: The caller promises that `tx_buf` is the same one passed to the
+        // corresponding call to `transmit_begin`.
         let len = unsafe { self.send_queue.pop_used(token, &[tx_buf], &mut [])? };
         Ok(len as usize)
     }
@@ -207,16 +213,17 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
     ///
     /// # Safety
     ///
-    /// `rx_buf` is still borrowed by the underlying VirtIO net device even after
-    /// this method returns. Thus, it is the caller's responsibility to guarantee
-    /// that they are not accessed before the request is completed in order to
-    /// avoid data races.
+    /// `rx_buf` is still borrowed by the underlying VirtIO net device even
+    /// after this method returns. Thus, it is the caller's responsibility
+    /// to guarantee that they are not accessed before the request is
+    /// completed in order to avoid data races.
     ///
     /// [`poll_receive`]: Self::poll_receive
     /// [`receive_complete`]: Self::receive_complete
     pub unsafe fn receive_begin(&mut self, rx_buf: &mut [u8]) -> Result<u16> {
         Self::check_rx_buf_len(rx_buf)?;
-        // SAFETY: The caller promises that `rx_buf` is not accessed before the request completes.
+        // SAFETY: The caller promises that `rx_buf` is not accessed before the request
+        // completes.
         let token = unsafe { self.recv_queue.add(&[], &mut [rx_buf])? };
         if self.recv_queue.should_notify() {
             self.transport.notify(QUEUE_RECEIVE);
@@ -231,7 +238,8 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
         self.recv_queue.peek_used()
     }
 
-    /// Completes a transmission operation which was started by [`receive_begin`].
+    /// Completes a transmission operation which was started by
+    /// [`receive_begin`].
     ///
     /// After completion, the `rx_buf` will contain a header followed by the
     /// received packet. It returns the length of the header and the length of
@@ -248,8 +256,8 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
         token: u16,
         rx_buf: &mut [u8],
     ) -> Result<(usize, usize)> {
-        // SAFETY: The caller promises that `rx_buf` is the same one passed to the corresponding
-        // call to `receive_begin`.
+        // SAFETY: The caller promises that `rx_buf` is the same one passed to the
+        // corresponding call to `receive_begin`.
         let len = unsafe { self.recv_queue.pop_used(token, &[], &mut [rx_buf])? } as usize;
         let hdr_size = if self.legacy_header {
             size_of::<VirtioNetHdrLegacy>()
@@ -309,8 +317,8 @@ impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> VirtIONetRaw<H, T, QUEUE_SIZ
 
 impl<H: Hal, T: Transport, const QUEUE_SIZE: usize> Drop for VirtIONetRaw<H, T, QUEUE_SIZE> {
     fn drop(&mut self) {
-        // Clear any pointers pointing to DMA regions, so the device doesn't try to access them
-        // after they have been freed.
+        // Clear any pointers pointing to DMA regions, so the device doesn't try to
+        // access them after they have been freed.
         self.transport.queue_unset(QUEUE_RECEIVE);
         self.transport.queue_unset(QUEUE_TRANSMIT);
     }

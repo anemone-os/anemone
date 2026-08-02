@@ -4,13 +4,15 @@ mod edid;
 
 pub use self::edid::Edid;
 
-use crate::config::{ReadOnly, WriteOnly, read_config};
-use crate::hal::{BufferDirection, Dma, Hal};
-use crate::queue::VirtQueue;
-use crate::transport::{InterruptStatus, Transport};
-use crate::{Error, PAGE_SIZE, Result, pages};
-use alloc::boxed::Box;
-use alloc::vec::Vec;
+use crate::{
+    Error, PAGE_SIZE, Result,
+    config::{ReadOnly, WriteOnly, read_config},
+    hal::{BufferDirection, Dma, Hal},
+    pages,
+    queue::VirtQueue,
+    transport::{InterruptStatus, Transport},
+};
+use alloc::{boxed::Box, vec::Vec};
 use bitflags::bitflags;
 use log::info;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
@@ -149,9 +151,11 @@ impl<H: Hal, T: Transport> VirtIOGpu<H, T> {
         self.change_resolution(display_info.rect.width, display_info.rect.height)
     }
 
-    /// Set or change the framebuffer resolution. If a framebuffer already exists, tears down the
-    /// existing resource before creating the new one. Can be called before or after
-    /// [`setup_framebuffer`](Self::setup_framebuffer) to set an explicit resolution.
+    /// Set or change the framebuffer resolution. If a framebuffer already
+    /// exists, tears down the existing resource before creating the new
+    /// one. Can be called before or after
+    /// [`setup_framebuffer`](Self::setup_framebuffer) to set an explicit
+    /// resolution.
     ///
     /// Returns a mutable slice to the new framebuffer memory.
     pub fn change_resolution(&mut self, width: u32, height: u32) -> Result<&mut [u8]> {
@@ -256,7 +260,8 @@ impl<H: Hal, T: Transport> VirtIOGpu<H, T> {
         Ok(Rsp::read_from_prefix(&self.queue_buf_recv).unwrap().0)
     }
 
-    /// Send a mouse cursor operation request to the device and block for a response.
+    /// Send a mouse cursor operation request to the device and block for a
+    /// response.
     fn cursor_request<Req: IntoBytes + Immutable>(&mut self, req: Req) -> Result {
         req.write_to_prefix(&mut self.queue_buf_send).unwrap();
         self.cursor_queue.add_notify_wait_pop(
@@ -379,8 +384,8 @@ impl<H: Hal, T: Transport> VirtIOGpu<H, T> {
 
 impl<H: Hal, T: Transport> Drop for VirtIOGpu<H, T> {
     fn drop(&mut self) {
-        // Clear any pointers pointing to DMA regions, so the device doesn't try to access them
-        // after they have been freed.
+        // Clear any pointers pointing to DMA regions, so the device doesn't try to
+        // access them after they have been freed.
         self.transport.queue_unset(QUEUE_TRANSMIT);
         self.transport.queue_unset(QUEUE_CURSOR);
     }

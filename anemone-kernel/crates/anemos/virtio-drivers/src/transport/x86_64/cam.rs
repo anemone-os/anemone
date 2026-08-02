@@ -6,7 +6,8 @@ use crate::{
 
 const PKVM_SIGNATURE: &[u8] = b"PKVM";
 
-/// A PCI configuration access mechanism using hypercalls implemented by the x86-64 pKVM hypervisor.
+/// A PCI configuration access mechanism using hypercalls implemented by the
+/// x86-64 pKVM hypervisor.
 pub struct HypCam {
     /// The physical base address of the PCI root complex.
     phys_base: PhysAddr,
@@ -14,12 +15,14 @@ pub struct HypCam {
 }
 
 impl HypCam {
-    /// Creates a new `HypCam` for the PCI root complex at the given physical base address.
+    /// Creates a new `HypCam` for the PCI root complex at the given physical
+    /// base address.
     pub fn new(phys_base: PhysAddr, cam: Cam) -> Self {
         Self { phys_base, cam }
     }
 
-    /// Returns whether we are running under pKVM by checking the CPU ID signature.
+    /// Returns whether we are running under pKVM by checking the CPU ID
+    /// signature.
     pub fn is_pkvm() -> bool {
         cpuid_signature() == PKVM_SIGNATURE
     }

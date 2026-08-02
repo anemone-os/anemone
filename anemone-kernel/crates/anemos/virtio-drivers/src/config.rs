@@ -39,10 +39,12 @@ impl<T: Copy + FromBytes + Immutable + IntoBytes> ReadWrite<T> {
     }
 }
 
-/// Marker trait for configuration space registers from which the driver may read.
+/// Marker trait for configuration space registers from which the driver may
+/// read.
 pub trait ConfigReadable<T> {}
 
-/// Marker trait for configuration space registers to which the driver may write.
+/// Marker trait for configuration space registers to which the driver may
+/// write.
 pub trait ConfigWritable<T> {}
 
 impl<T: Copy + FromBytes> ConfigReadable<T> for ReadOnly<T> {}
@@ -50,8 +52,8 @@ impl<T: Copy + FromBytes + Immutable + IntoBytes> ConfigReadable<T> for ReadWrit
 impl<T: Copy + FromBytes + Immutable + IntoBytes> ConfigWritable<T> for ReadWrite<T> {}
 impl<T: Copy + Immutable + IntoBytes> ConfigWritable<T> for WriteOnly<T> {}
 
-/// Wrapper for [`Transport::read_config_space`] with an extra dummy parameter to force the correct
-/// type to be inferred.
+/// Wrapper for [`Transport::read_config_space`] with an extra dummy parameter
+/// to force the correct type to be inferred.
 #[inline(always)]
 #[doc(hidden)]
 pub fn read_help<T, V, R>(transport: &T, offset: usize, _dummy_r: Option<R>) -> Result<V, Error>
@@ -63,8 +65,8 @@ where
     transport.read_config_space(offset)
 }
 
-/// Wrapper for [`Transport::write_config_space`] with an extra dummy parameter to force the correct
-/// type to be inferred.
+/// Wrapper for [`Transport::write_config_space`] with an extra dummy parameter
+/// to force the correct type to be inferred.
 #[inline(always)]
 #[doc(hidden)]
 pub fn write_help<T, V, W>(
@@ -81,7 +83,8 @@ where
     transport.write_config_space(offset, value)
 }
 
-/// Reads the given field of the given struct from the device config space via the given transport.
+/// Reads the given field of the given struct from the device config space via
+/// the given transport.
 #[macro_export]
 macro_rules! read_config {
     ($transport:expr, $struct:ty, $field:ident) => {{
@@ -95,7 +98,8 @@ macro_rules! read_config {
     }};
 }
 
-/// Writes the given field of the given struct from the device config space via the given transport.
+/// Writes the given field of the given struct from the device config space via
+/// the given transport.
 #[macro_export]
 macro_rules! write_config {
     ($transport:expr, $struct:ty, $field:ident, $value:expr) => {{

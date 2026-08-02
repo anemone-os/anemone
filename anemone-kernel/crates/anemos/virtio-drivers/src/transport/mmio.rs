@@ -59,7 +59,8 @@ pub enum MmioError {
     /// The header doesn't start with the expected magic value 0x74726976.
     #[error("Invalid magic value {0:#010x} (expected 0x74726976)")]
     BadMagic(u32),
-    /// The header reports a version number that is neither 1 (legacy) nor 2 (modern).
+    /// The header reports a version number that is neither 1 (legacy) nor 2
+    /// (modern).
     #[error("Unsupported Virtio MMIO version {0}")]
     UnsupportedVersion(u32),
     /// The header reports a device ID of 0.
@@ -99,7 +100,8 @@ pub struct VirtIOHeader {
     /// Reserved
     __r1: [u32; 2],
 
-    /// Flags representing device features understood and activated by the driver
+    /// Flags representing device features understood and activated by the
+    /// driver
     driver_features: WriteOnly<u32>,
 
     /// Activated (guest) features word selection
@@ -151,12 +153,12 @@ pub struct VirtIOHeader {
     /// Writing to this register notifies the device about location of the
     /// virtual queue in the Guest’s physical address space. This value is
     /// the index number of a page starting with the queue Descriptor Table.
-    /// Value zero (0x0) means physical address zero (0x00000000) and is illegal.
-    /// When the driver stops using the queue it writes zero (0x0) to this
-    /// register. Reading from this register returns the currently used page
-    /// number of the queue, therefore a value other than zero (0x0) means that
-    /// the queue is in use. Both read and write accesses apply to the queue
-    /// selected by writing to QueueSel.
+    /// Value zero (0x0) means physical address zero (0x00000000) and is
+    /// illegal. When the driver stops using the queue it writes zero (0x0)
+    /// to this register. Reading from this register returns the currently
+    /// used page number of the queue, therefore a value other than zero
+    /// (0x0) means that the queue is in use. Both read and write accesses
+    /// apply to the queue selected by writing to QueueSel.
     legacy_queue_pfn: ReadPureWrite<u32>,
 
     /// new interface only
@@ -276,13 +278,14 @@ pub struct MmioTransport<'a> {
 }
 
 impl<'a> MmioTransport<'a> {
-    /// Constructs a new VirtIO MMIO transport, or returns an error if the header reports an
-    /// unsupported version.
+    /// Constructs a new VirtIO MMIO transport, or returns an error if the
+    /// header reports an unsupported version.
     ///
     /// # Safety
     ///
-    /// `header` must point to a properly aligned valid VirtIO MMIO region, which must remain valid
-    /// for the lifetime `'a`. This includes the config space following the header, if any.
+    /// `header` must point to a properly aligned valid VirtIO MMIO region,
+    /// which must remain valid for the lifetime `'a`. This includes the
+    /// config space following the header, if any.
     pub unsafe fn new(header: NonNull<VirtIOHeader>, mmio_size: usize) -> Result<Self, MmioError> {
         let Some(config_space_size) = mmio_size.checked_sub(CONFIG_SPACE_OFFSET) else {
             return Err(MmioError::MmioRegionTooSmall);
@@ -294,19 +297,19 @@ impl<'a> MmioTransport<'a> {
             unsafe { header.cast::<u8>().byte_add(CONFIG_SPACE_OFFSET) },
             config_space_size,
         );
-        // SAFETY: The caller promises that the config space following the header is an MMIO region
-        // valid for `'a`.
+        // SAFETY: The caller promises that the config space following the header is an
+        // MMIO region valid for `'a`.
         let config_space = unsafe { UniqueMmioPointer::new(config_space) };
 
-        // SAFETY: The caller promises that `header` is a properly aligned MMIO region valid for
-        // `'a`.
+        // SAFETY: The caller promises that `header` is a properly aligned MMIO region
+        // valid for `'a`.
         let header = unsafe { UniqueMmioPointer::new(header) };
 
         Self::new_from_unique(header, config_space)
     }
 
-    /// Constructs a new VirtIO MMIO transport, or returns an error if the header reports an
-    /// unsupported version.
+    /// Constructs a new VirtIO MMIO transport, or returns an error if the
+    /// header reports an unsupported version.
     pub fn new_from_unique(
         header: UniqueMmioPointer<'a, VirtIOHeader>,
         config_space: UniqueMmioPointer<'a, [u8]>,
@@ -337,8 +340,8 @@ impl<'a> MmioTransport<'a> {
     }
 }
 
-// SAFETY: `&MmioTransport` only allows MMIO reads or getting the config space, both of which are
-// fine to happen concurrently on different CPU cores.
+// SAFETY: `&MmioTransport` only allows MMIO reads or getting the config space,
+// both of which are fine to happen concurrently on different CPU cores.
 unsafe impl Sync for MmioTransport<'_> {}
 
 impl Transport for MmioTransport<'_> {
@@ -382,10 +385,10 @@ impl Transport for MmioTransport<'_> {
         match self.version {
             MmioVersion::Legacy => {
                 field!(self.header, legacy_guest_page_size).write(guest_page_size);
-            }
+            },
             MmioVersion::Modern => {
                 // No-op, modern devices don't care.
-            }
+            },
         }
     }
 
@@ -424,7 +427,7 @@ impl Transport for MmioTransport<'_> {
                 field!(self.header, queue_num).write(size);
                 field!(self.header, legacy_queue_align).write(align);
                 field!(self.header, legacy_queue_pfn).write(pfn);
-            }
+            },
             MmioVersion::Modern => {
                 field!(self.header, queue_sel).write(queue.into());
                 field!(self.header, queue_num).write(size);
@@ -435,7 +438,7 @@ impl Transport for MmioTransport<'_> {
                 field!(self.header, queue_device_low).write(device_area as u32);
                 field!(self.header, queue_device_high).write((device_area >> 32) as u32);
                 field!(self.header, queue_ready).write(1);
-            }
+            },
         }
     }
 
@@ -446,12 +449,13 @@ impl Transport for MmioTransport<'_> {
                 field!(self.header, queue_num).write(0);
                 field!(self.header, legacy_queue_align).write(0);
                 field!(self.header, legacy_queue_pfn).write(0);
-            }
+            },
             MmioVersion::Modern => {
                 field!(self.header, queue_sel).write(queue.into());
 
                 field!(self.header, queue_ready).write(0);
-                // Wait until we read the same value back, to ensure synchronisation (see 4.2.2.2).
+                // Wait until we read the same value back, to ensure synchronisation (see
+                // 4.2.2.2).
                 let queue_ready = field_shared!(self.header, queue_ready);
                 while queue_ready.read() != 0 {}
 
@@ -462,7 +466,7 @@ impl Transport for MmioTransport<'_> {
                 field!(self.header, queue_driver_high).write(0);
                 field!(self.header, queue_device_low).write(0);
                 field!(self.header, queue_device_high).write(0);
-            }
+            },
         }
     }
 
@@ -499,9 +503,10 @@ impl Transport for MmioTransport<'_> {
         if self.config_space.len() < offset + size_of::<T>() {
             Err(Error::ConfigSpaceTooSmall)
         } else {
-            // SAFETY: The caller of `MmioTransport::new` guaranteed that the header pointer was
-            // valid, including the config space. We have checked that the value is properly aligned
-            // for `T` and within the bounds of the config space. Reading the config space shouldn't
+            // SAFETY: The caller of `MmioTransport::new` guaranteed that the header pointer
+            // was valid, including the config space. We have checked that the
+            // value is properly aligned for `T` and within the bounds of the
+            // config space. Reading the config space shouldn't
             // have side-effects.
             unsafe {
                 let ptr = self.config_space.ptr().cast::<T>().byte_add(offset);
@@ -529,9 +534,10 @@ impl Transport for MmioTransport<'_> {
         if self.config_space.len() < offset + size_of::<T>() {
             Err(Error::ConfigSpaceTooSmall)
         } else {
-            // SAFETY: The caller of `MmioTransport::new` guaranteed that the header pointer was
-            // valid, including the config space. We have checked that the value is properly aligned
-            // for `T` and within the bounds of the config space.
+            // SAFETY: The caller of `MmioTransport::new` guaranteed that the header pointer
+            // was valid, including the config space. We have checked that the
+            // value is properly aligned for `T` and within the bounds of the
+            // config space.
             unsafe {
                 let ptr = self.config_space.ptr_nonnull().cast::<T>().byte_add(offset);
                 self.config_space.child(ptr).write_unsafe(value);

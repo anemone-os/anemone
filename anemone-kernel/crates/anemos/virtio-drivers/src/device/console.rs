@@ -3,11 +3,13 @@
 #[cfg(feature = "embedded-io")]
 mod embedded_io;
 
-use crate::config::{ReadOnly, WriteOnly, read_config, write_config};
-use crate::hal::Hal;
-use crate::queue::VirtQueue;
-use crate::transport::{InterruptStatus, Transport};
-use crate::{Error, PAGE_SIZE, Result};
+use crate::{
+    Error, PAGE_SIZE, Result,
+    config::{ReadOnly, WriteOnly, read_config, write_config},
+    hal::Hal,
+    queue::VirtQueue,
+    transport::{InterruptStatus, Transport},
+};
 use alloc::boxed::Box;
 use bitflags::bitflags;
 use core::fmt::{self, Display, Formatter, Write};
@@ -105,9 +107,9 @@ impl<H: Hal, T: Transport> VirtIOConsole<H, T> {
             negotiated_features.contains(Features::RING_EVENT_IDX),
         )?;
 
-        // Safe because no alignment or initialisation is required for [u8], the DMA buffer is
-        // dereferenceable, and the lifetime of the reference matches the lifetime of the DMA buffer
-        // (which we don't otherwise access).
+        // Safe because no alignment or initialisation is required for [u8], the DMA
+        // buffer is dereferenceable, and the lifetime of the reference matches
+        // the lifetime of the DMA buffer (which we don't otherwise access).
         let queue_buf_rx = Box::new([0; PAGE_SIZE]);
 
         transport.finish_init();
@@ -139,12 +141,13 @@ impl<H: Hal, T: Transport> VirtIOConsole<H, T> {
         }
     }
 
-    /// Makes a request to the device to receive data, if there is not already an outstanding
-    /// receive request or some data already received and not yet returned.
+    /// Makes a request to the device to receive data, if there is not already
+    /// an outstanding receive request or some data already received and not
+    /// yet returned.
     fn poll_retrieve(&mut self) -> Result<()> {
         if self.receive_token.is_none() && self.cursor == self.pending_len {
-            // SAFETY: The buffer lasts at least as long as the queue, and there are no other
-            // outstanding requests using the buffer.
+            // SAFETY: The buffer lasts at least as long as the queue, and there are no
+            // other outstanding requests using the buffer.
             self.receive_token = Some(unsafe {
                 self.receiveq
                     .add(&[], &mut [self.queue_buf_rx.as_mut_slice()])
@@ -156,8 +159,8 @@ impl<H: Hal, T: Transport> VirtIOConsole<H, T> {
         Ok(())
     }
 
-    /// Acknowledges a pending interrupt, if any, and completes the outstanding finished read
-    /// request if there is one.
+    /// Acknowledges a pending interrupt, if any, and completes the outstanding
+    /// finished read request if there is one.
     ///
     /// Returns true if new data has been received.
     pub fn ack_interrupt(&mut self) -> Result<bool> {
@@ -169,7 +172,8 @@ impl<H: Hal, T: Transport> VirtIOConsole<H, T> {
         self.finish_receive()
     }
 
-    /// If there is an outstanding receive request and it has finished, completes it.
+    /// If there is an outstanding receive request and it has finished,
+    /// completes it.
     ///
     /// Returns true if new data has been received.
     fn finish_receive(&mut self) -> Result<bool> {
@@ -199,7 +203,8 @@ impl<H: Hal, T: Transport> VirtIOConsole<H, T> {
 
     /// Returns the next available character from the console, if any.
     ///
-    /// If no data has been received this will not block but immediately return `Ok<None>`.
+    /// If no data has been received this will not block but immediately return
+    /// `Ok<None>`.
     pub fn recv(&mut self, pop: bool) -> Result<Option<u8>> {
         self.finish_receive()?;
         if self.cursor == self.pending_len {
@@ -261,8 +266,8 @@ impl<H: Hal, T: Transport> Write for VirtIOConsole<H, T> {
 
 impl<H: Hal, T: Transport> Drop for VirtIOConsole<H, T> {
     fn drop(&mut self) {
-        // Clear any pointers pointing to DMA regions, so the device doesn't try to access them
-        // after they have been freed.
+        // Clear any pointers pointing to DMA regions, so the device doesn't try to
+        // access them after they have been freed.
         self.transport.queue_unset(QUEUE_RECEIVEQ_PORT_0);
         self.transport.queue_unset(QUEUE_TRANSMITQ_PORT_0);
     }

@@ -1,4 +1,5 @@
-//! This module defines the socket device protocol according to the virtio spec v1.1 5.10 Socket Device
+//! This module defines the socket device protocol according to the virtio spec
+//! v1.1 5.10 Socket Device
 
 use super::error::{self, SocketError};
 use crate::config::ReadOnly;
@@ -15,11 +16,13 @@ use zerocopy::{
 /// Well-known CID for the host.
 pub const VMADDR_CID_HOST: u64 = 2;
 
-/// Currently only stream sockets are supported. type is 1 for stream socket types.
+/// Currently only stream sockets are supported. type is 1 for stream socket
+/// types.
 #[derive(Copy, Clone, Debug)]
 #[repr(u16)]
 pub enum SocketType {
-    /// Stream sockets provide in-order, guaranteed, connection-oriented delivery without message boundaries.
+    /// Stream sockets provide in-order, guaranteed, connection-oriented
+    /// delivery without message boundaries.
     Stream = 1,
     /// seqpacket socket type introduced in virtio-v1.2.
     SeqPacket = 2,
@@ -35,12 +38,14 @@ impl From<SocketType> for U16<LittleEndian> {
 #[derive(FromBytes, Immutable, IntoBytes)]
 #[repr(C)]
 pub struct VirtioVsockConfig {
-    /// The guest_cid field contains the guest’s context ID, which uniquely identifies
-    /// the device for its lifetime. The upper 32 bits of the CID are reserved and zeroed.
+    /// The guest_cid field contains the guest’s context ID, which uniquely
+    /// identifies the device for its lifetime. The upper 32 bits of the CID
+    /// are reserved and zeroed.
     ///
-    /// According to virtio spec v1.1 2.4.1 Driver Requirements: Device Configuration Space,
-    /// drivers MUST NOT assume reads from fields greater than 32 bits wide are atomic.
-    /// So we need to split the u64 guest_cid into two parts.
+    /// According to virtio spec v1.1 2.4.1 Driver Requirements: Device
+    /// Configuration Space, drivers MUST NOT assume reads from fields
+    /// greater than 32 bits wide are atomic. So we need to split the u64
+    /// guest_cid into two parts.
     pub guest_cid_low: ReadOnly<u32>,
     pub guest_cid_high: ReadOnly<u32>,
 }
@@ -57,7 +62,8 @@ pub struct VirtioVsockHdr {
     pub socket_type: U16<LittleEndian>,
     pub op: U16<LittleEndian>,
     pub flags: U32<LittleEndian>,
-    /// Total receive buffer space for this socket. This includes both free and in-use buffers.
+    /// Total receive buffer space for this socket. This includes both free and
+    /// in-use buffers.
     pub buf_alloc: U32<LittleEndian>,
     /// Free-running bytes received counter.
     pub fwd_cnt: U32<LittleEndian>,

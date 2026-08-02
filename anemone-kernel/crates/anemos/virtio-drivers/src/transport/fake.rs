@@ -181,7 +181,8 @@ impl<C> Debug for State<C> {
 }
 
 impl<C> State<C> {
-    /// Creates a state for a fake transport, with the given queues and VirtIO configuration space.
+    /// Creates a state for a fake transport, with the given queues and VirtIO
+    /// configuration space.
     pub const fn new(queues: Vec<QueueStatus>, config_space: C) -> Self {
         Self {
             status: DeviceStatus::empty(),
@@ -213,7 +214,8 @@ impl<C> State<C> {
 
     /// Simulates the device reading from the given queue.
     ///
-    /// Data is read into the `data` buffer passed in. Returns the number of bytes actually read.
+    /// Data is read into the `data` buffer passed in. Returns the number of
+    /// bytes actually read.
     ///
     /// The fake device always uses descriptors in order.
     pub fn read_from_queue<const QUEUE_SIZE: usize>(&mut self, queue_index: u16) -> Vec<u8> {
@@ -236,12 +238,13 @@ impl<C> State<C> {
         ret.unwrap()
     }
 
-    /// Simulates the device reading data from the given queue and then writing a response back.
+    /// Simulates the device reading data from the given queue and then writing
+    /// a response back.
     ///
     /// The fake device always uses descriptors in order.
     ///
-    /// Returns true if a descriptor chain was available and processed, or false if no descriptors were
-    /// available.
+    /// Returns true if a descriptor chain was available and processed, or false
+    /// if no descriptors were available.
     pub fn read_write_queue<const QUEUE_SIZE: usize>(
         &mut self,
         queue_index: u16,
@@ -266,8 +269,8 @@ impl<C> State<C> {
 
     /// Checks if the given queue has been notified.
     ///
-    /// If it has, returns true and resets the status so this will return false until it is notified
-    /// again.
+    /// If it has, returns true and resets the status so this will return false
+    /// until it is notified again.
     pub fn poll_queue_notified(state: &Mutex<Self>, queue_index: u16) -> bool {
         state.lock().unwrap().queues[usize::from(queue_index)]
             .notified

@@ -1,7 +1,6 @@
 //! Driver for VirtIO 9p devices.
 
-use alloc::string::String;
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use log::warn;
 
 use super::common::Feature;

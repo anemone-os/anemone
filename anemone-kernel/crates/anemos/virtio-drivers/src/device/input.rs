@@ -1,14 +1,18 @@
 //! Driver for VirtIO input devices.
 
 use super::common::Feature;
-use crate::Error;
-use crate::config::{ReadOnly, WriteOnly, read_config, write_config};
-use crate::hal::Hal;
-use crate::queue::VirtQueue;
-use crate::transport::{InterruptStatus, Transport};
+use crate::{
+    Error,
+    config::{ReadOnly, WriteOnly, read_config, write_config},
+    hal::Hal,
+    queue::VirtQueue,
+    transport::{InterruptStatus, Transport},
+};
 use alloc::{boxed::Box, string::String};
-use core::cmp::min;
-use core::mem::{offset_of, size_of};
+use core::{
+    cmp::min,
+    mem::{offset_of, size_of},
+};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 /// Virtual human interface devices such as keyboards, mice and tablets.
@@ -70,7 +74,8 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
     pub fn pop_pending_event(&mut self) -> Option<InputEvent> {
         if let Some(token) = self.event_queue.peek_used() {
             let event = &mut self.event_buf[token as usize];
-            // SAFETY: We are passing the same buffer as we passed to `VirtQueue::add` and it is still valid.
+            // SAFETY: We are passing the same buffer as we passed to `VirtQueue::add` and
+            // it is still valid.
             unsafe {
                 self.event_queue
                     .pop_used(token, &[], &mut [event.as_mut_bytes()])
@@ -81,9 +86,9 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
             // SAFETY: The buffer lasts as long as the queue.
             if let Ok(new_token) = unsafe { self.event_queue.add(&[], &mut [event.as_mut_bytes()]) }
             {
-                // This only works because nothing happen between `pop_used` and `add` that affects
-                // the list of free descriptors in the queue, so `add` reuses the descriptor which
-                // was just freed by `pop_used`.
+                // This only works because nothing happen between `pop_used` and `add` that
+                // affects the list of free descriptors in the queue, so `add`
+                // reuses the descriptor which was just freed by `pop_used`.
                 assert_eq!(new_token, token);
                 if self.event_queue.should_notify() {
                     self.transport.notify(QUEUE_EVENT);
@@ -94,8 +99,8 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
         None
     }
 
-    /// Query a specific piece of information by `select` and `subsel`, and write
-    /// result to `out`, return the result size.
+    /// Query a specific piece of information by `select` and `subsel`, and
+    /// write result to `out`, return the result size.
     pub fn query_config_select(
         &mut self,
         select: InputConfigSelect,
@@ -116,8 +121,8 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
         Ok(size)
     }
 
-    /// Queries a specific piece of information by `select` and `subsel`, allocates a sufficiently
-    /// large byte buffer for it, and returns it.
+    /// Queries a specific piece of information by `select` and `subsel`,
+    /// allocates a sufficiently large byte buffer for it, and returns it.
     fn query_config_select_alloc(
         &mut self,
         select: InputConfigSelect,
@@ -138,8 +143,8 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
         Ok(buf)
     }
 
-    /// Queries a specific piece of information by `select` and `subsel` into a newly-allocated
-    /// buffer, and tries to convert it to a string.
+    /// Queries a specific piece of information by `select` and `subsel` into a
+    /// newly-allocated buffer, and tries to convert it to a string.
     ///
     /// Returns an error if it is not valid UTF-8.
     fn query_config_string(
@@ -152,12 +157,14 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
         )?)
     }
 
-    /// Queries and returns the name of the device, or an error if it is not valid UTF-8.
+    /// Queries and returns the name of the device, or an error if it is not
+    /// valid UTF-8.
     pub fn name(&mut self) -> Result<String, Error> {
         self.query_config_string(InputConfigSelect::IdName, 0)
     }
 
-    /// Queries and returns the serial number of the device, or an error if it is not valid UTF-8.
+    /// Queries and returns the serial number of the device, or an error if it
+    /// is not valid UTF-8.
     pub fn serial_number(&mut self) -> Result<String, Error> {
         self.query_config_string(InputConfigSelect::IdSerial, 0)
     }
@@ -178,7 +185,8 @@ impl<H: Hal, T: Transport> VirtIOInput<H, T> {
         self.query_config_select_alloc(InputConfigSelect::PropBits, 0)
     }
 
-    /// Queries and returns a bitmap of supported event codes for the given event type.
+    /// Queries and returns a bitmap of supported event codes for the given
+    /// event type.
     ///
     /// If the event type is not supported an empty slice will be returned.
     pub fn ev_bits(&mut self, event_type: u8) -> Result<Box<[u8]>, Error> {
@@ -212,8 +220,8 @@ unsafe impl<H: Hal, T: Transport + Sync> Sync for VirtIOInput<H, T> where
 
 impl<H: Hal, T: Transport> Drop for VirtIOInput<H, T> {
     fn drop(&mut self) {
-        // Clear any pointers pointing to DMA regions, so the device doesn't try to access them
-        // after they have been freed.
+        // Clear any pointers pointing to DMA regions, so the device doesn't try to
+        // access them after they have been freed.
         self.transport.queue_unset(QUEUE_EVENT);
         self.transport.queue_unset(QUEUE_STATUS);
     }
@@ -237,12 +245,13 @@ pub enum InputConfigSelect {
     PropBits = 0x10,
     /// subsel specifies the event type using EV_* constants in the underlying
     /// evdev implementation. If size is non-zero the event type is supported
-    /// and a bitmap of supported event codes is returned in u.bitmap. Individual
-    /// bits in the bitmap correspond to implementation-defined input event codes,
-    /// for example keys or pointing device axes.
+    /// and a bitmap of supported event codes is returned in u.bitmap.
+    /// Individual bits in the bitmap correspond to implementation-defined
+    /// input event codes, for example keys or pointing device axes.
     EvBits = 0x11,
-    /// subsel specifies the absolute axis using ABS_* constants in the underlying
-    /// evdev implementation. Information about the axis will be returned in u.abs.
+    /// subsel specifies the absolute axis using ABS_* constants in the
+    /// underlying evdev implementation. Information about the axis will be
+    /// returned in u.abs.
     AbsInfo = 0x12,
 }
 
@@ -286,8 +295,8 @@ pub struct DevIDs {
     pub version: u16,
 }
 
-/// Both queues use the same `virtio_input_event` struct. `type`, `code` and `value`
-/// are filled according to the Linux input layer (evdev) interface.
+/// Both queues use the same `virtio_input_event` struct. `type`, `code` and
+/// `value` are filled according to the Linux input layer (evdev) interface.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, FromBytes, Immutable, IntoBytes, KnownLayout)]
 pub struct InputEvent {

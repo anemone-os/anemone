@@ -25,7 +25,8 @@ use zerocopy::{FromBytes, Immutable, IntoBytes};
 /// The PCI vendor ID for VirtIO devices.
 pub const VIRTIO_VENDOR_ID: u16 = 0x1af4;
 
-/// The offset to add to a VirtIO device ID to get the corresponding PCI device ID.
+/// The offset to add to a VirtIO device ID to get the corresponding PCI device
+/// ID.
 const PCI_DEVICE_ID_OFFSET: u16 = 0x1040;
 
 const TRANSITIONAL_NETWORK: u16 = 0x1000;
@@ -42,7 +43,8 @@ pub(crate) const CAP_BAR_OFFSET: u8 = 4;
 pub(crate) const CAP_BAR_OFFSET_OFFSET: u8 = 8;
 /// The offset of the `length` field within `virtio_pci_cap`.
 pub(crate) const CAP_LENGTH_OFFSET: u8 = 12;
-/// The offset of the`notify_off_multiplier` field within `virtio_pci_notify_cap`.
+/// The offset of the`notify_off_multiplier` field within
+/// `virtio_pci_notify_cap`.
 pub(crate) const CAP_NOTIFY_OFF_MULTIPLIER_OFFSET: u8 = 16;
 
 /// Common configuration.
@@ -68,8 +70,8 @@ pub(crate) fn device_type(pci_device_id: u16) -> Option<DeviceType> {
     }
 }
 
-/// Returns the type of VirtIO device to which the given PCI vendor and device ID corresponds, or
-/// `None` if it is not a recognised VirtIO device.
+/// Returns the type of VirtIO device to which the given PCI vendor and device
+/// ID corresponds, or `None` if it is not a recognised VirtIO device.
 pub fn virtio_device_type(device_function_info: &DeviceFunctionInfo) -> Option<DeviceType> {
     if device_function_info.vendor_id == VIRTIO_VENDOR_ID {
         device_type(device_function_info.device_id)
@@ -98,8 +100,8 @@ pub struct PciTransport {
 }
 
 impl PciTransport {
-    /// Construct a new PCI VirtIO device driver for the given device function on the given PCI
-    /// root controller.
+    /// Construct a new PCI VirtIO device driver for the given device function
+    /// on the given PCI root controller.
     ///
     /// The PCI device must already have had its BARs allocated.
     pub fn new<H: Hal, C: ConfigurationAccess>(
@@ -146,21 +148,21 @@ impl PciTransport {
             match cfg_type {
                 VIRTIO_PCI_CAP_COMMON_CFG if common_cfg.is_none() => {
                     common_cfg = Some(struct_info);
-                }
+                },
                 VIRTIO_PCI_CAP_NOTIFY_CFG if cap_len >= 20 && notify_cfg.is_none() => {
                     notify_cfg = Some(struct_info);
                     notify_off_multiplier = root.configuration_access.read_word(
                         device_function,
                         capability.offset + CAP_NOTIFY_OFF_MULTIPLIER_OFFSET,
                     );
-                }
+                },
                 VIRTIO_PCI_CAP_ISR_CFG if isr_cfg.is_none() => {
                     isr_cfg = Some(struct_info);
-                }
+                },
                 VIRTIO_PCI_CAP_DEVICE_CFG if device_cfg.is_none() => {
                     device_cfg = Some(struct_info);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -169,8 +171,8 @@ impl PciTransport {
             device_function,
             &common_cfg.ok_or(VirtioPciError::MissingCommonConfig)?,
         )?;
-        // SAFETY: `get_bar_region` should always return a valid MMIO region, assuming the PCI root
-        // is behaving.
+        // SAFETY: `get_bar_region` should always return a valid MMIO region, assuming
+        // the PCI root is behaving.
         let common_cfg = unsafe { UniqueMmioPointer::new(common_cfg) };
 
         let notify_cfg = notify_cfg.ok_or(VirtioPciError::MissingNotifyConfig)?;
@@ -180,8 +182,8 @@ impl PciTransport {
             ));
         }
         let notify_region = get_bar_region_slice::<H, _, _>(root, device_function, &notify_cfg)?;
-        // SAFETY: `get_bar_region` should always return a valid MMIO region, assuming the PCI root
-        // is behaving.
+        // SAFETY: `get_bar_region` should always return a valid MMIO region, assuming
+        // the PCI root is behaving.
         let notify_region = unsafe { UniqueMmioPointer::new(notify_region) };
 
         let isr_status = get_bar_region::<H, _, _>(
@@ -189,13 +191,13 @@ impl PciTransport {
             device_function,
             &isr_cfg.ok_or(VirtioPciError::MissingIsrConfig)?,
         )?;
-        // SAFETY: `get_bar_region` should always return a valid MMIO region, assuming the PCI root
-        // is behaving.
+        // SAFETY: `get_bar_region` should always return a valid MMIO region, assuming
+        // the PCI root is behaving.
         let isr_status = unsafe { UniqueMmioPointer::new(isr_status) };
 
         let config_space = if let Some(device_cfg) = device_cfg {
-            // SAFETY: `get_bar_region_slice` should always return a valid MMIO region, assuming the
-            // PCI root is behaving.
+            // SAFETY: `get_bar_region_slice` should always return a valid MMIO region,
+            // assuming the PCI root is behaving.
             Some(unsafe {
                 UniqueMmioPointer::new(get_bar_region_slice::<H, _, _>(
                     root,
@@ -289,8 +291,8 @@ impl Transport for PciTransport {
     }
 
     fn queue_unset(&mut self, _queue: u16) {
-        // The VirtIO spec doesn't allow queues to be unset once they have been set up for the PCI
-        // transport, so this is a no-op.
+        // The VirtIO spec doesn't allow queues to be unset once they have been
+        // set up for the PCI transport, so this is a no-op.
     }
 
     fn queue_used(&mut self, queue: u16) -> bool {
@@ -299,7 +301,8 @@ impl Transport for PciTransport {
     }
 
     fn ack_interrupt(&mut self) -> InterruptStatus {
-        // Reading the ISR status resets it to 0 and causes the device to de-assert the interrupt.
+        // Reading the ISR status resets it to 0 and causes the device to de-assert the
+        // interrupt.
         let isr_status = self.isr_status.read();
         InterruptStatus::from_bits_retain(isr_status.into())
     }
@@ -325,9 +328,10 @@ impl Transport for PciTransport {
         if config_space.len() * size_of::<u32>() < offset + size_of::<T>() {
             Err(Error::ConfigSpaceTooSmall)
         } else {
-            // SAFETY: If we have a config space pointer it must be valid for its length, and we
-            // just checked that the offset and size of the access was within the length and
-            // properly aligned. Reading the config space shouldn't have side-effects.
+            // SAFETY: If we have a config space pointer it must be valid for its length,
+            // and we just checked that the offset and size of the access was
+            // within the length and properly aligned. Reading the config space
+            // shouldn't have side-effects.
             unsafe {
                 let ptr = config_space.ptr().cast::<T>().byte_add(offset);
                 Ok(config_space
@@ -357,9 +361,9 @@ impl Transport for PciTransport {
         if config_space.len() * size_of::<u32>() < offset + size_of::<T>() {
             Err(Error::ConfigSpaceTooSmall)
         } else {
-            // SAFETY: If we have a config space pointer it must be valid for its length, and we
-            // just checked that the offset and size of the access was within the length and
-            // properly aligned.
+            // SAFETY: If we have a config space pointer it must be valid for its length,
+            // and we just checked that the offset and size of the access was
+            // within the length and properly aligned.
             unsafe {
                 let ptr = config_space.ptr_nonnull().cast::<T>().byte_add(offset);
                 config_space.child(ptr).write_unsafe(value);
@@ -372,8 +376,8 @@ impl Transport for PciTransport {
 // SAFETY: MMIO can be done from any thread or CPU core.
 unsafe impl Send for PciTransport {}
 
-// SAFETY: `&PciTransport` only allows MMIO reads or getting the config space, both of which are
-// fine to happen concurrently on different CPU cores.
+// SAFETY: `&PciTransport` only allows MMIO reads or getting the config space,
+// both of which are fine to happen concurrently on different CPU cores.
 unsafe impl Sync for PciTransport {}
 
 impl Drop for PciTransport {
@@ -384,7 +388,8 @@ impl Drop for PciTransport {
     }
 }
 
-/// `virtio_pci_common_cfg`, see 4.1.4.3 "Common configuration structure layout".
+/// `virtio_pci_common_cfg`, see 4.1.4.3 "Common configuration structure
+/// layout".
 #[repr(C)]
 pub(crate) struct CommonCfg {
     pub device_feature_select: ReadPureWrite<u32>,
@@ -405,7 +410,8 @@ pub(crate) struct CommonCfg {
     pub queue_device: ReadPureWrite<u64>,
 }
 
-/// Information about a VirtIO structure within some BAR, as provided by a `virtio_pci_cap`.
+/// Information about a VirtIO structure within some BAR, as provided by a
+/// `virtio_pci_cap`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct VirtioCapabilityInfo {
     /// The bar in which the structure can be found.
@@ -436,7 +442,8 @@ fn get_bar_region<H: Hal, T, C: ConfigurationAccess>(
         return Err(VirtioPciError::BarOffsetOutOfRange);
     }
     let paddr = bar_address as PhysAddr + struct_info.offset as PhysAddr;
-    // SAFETY: The paddr and size describe a valid MMIO region, at least according to the PCI bus.
+    // SAFETY: The paddr and size describe a valid MMIO region, at least according
+    // to the PCI bus.
     let vaddr = unsafe { H::mmio_phys_to_virt(paddr, struct_info.length as usize) };
     if !(vaddr.as_ptr() as usize).is_multiple_of(align_of::<T>()) {
         return Err(VirtioPciError::Misaligned {
@@ -474,8 +481,8 @@ pub enum VirtioPciError {
     /// No valid `VIRTIO_PCI_CAP_NOTIFY_CFG` capability was found.
     #[error("No valid `VIRTIO_PCI_CAP_NOTIFY_CFG` capability was found.")]
     MissingNotifyConfig,
-    /// `VIRTIO_PCI_CAP_NOTIFY_CFG` capability has a `notify_off_multiplier` that is not a multiple
-    /// of 2.
+    /// `VIRTIO_PCI_CAP_NOTIFY_CFG` capability has a `notify_off_multiplier`
+    /// that is not a multiple of 2.
     #[error(
         "`VIRTIO_PCI_CAP_NOTIFY_CFG` capability has a `notify_off_multiplier` that is not a multiple of 2: {0}"
     )]

@@ -1,9 +1,14 @@
 use alloc::vec;
 
-use super::net_buf::{RxBuffer, TxBuffer};
-use super::{EthernetAddress, VirtIONetRaw};
-use crate::transport::InterruptStatus;
-use crate::{Error, Result, hal::Hal, transport::Transport};
+use super::{
+    EthernetAddress, VirtIONetRaw,
+    net_buf::{RxBuffer, TxBuffer},
+};
+use crate::{
+    Error, Result,
+    hal::Hal,
+    transport::{InterruptStatus, Transport},
+};
 
 /// Driver for a VirtIO network device.
 ///

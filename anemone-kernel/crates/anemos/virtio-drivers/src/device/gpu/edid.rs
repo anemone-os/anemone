@@ -101,9 +101,11 @@ impl DetailedTiming {
     ///
     /// Returns `None` if the active pixel counts are zero.
     fn parse(bytes: &[u8; DTD_LEN]) -> Option<Self> {
-        // Horizontal active: lower 8 bits at byte 2, upper 4 bits in high nibble of byte 4.
+        // Horizontal active: lower 8 bits at byte 2, upper 4 bits in high nibble of
+        // byte 4.
         let h_active = bytes[2] as u32 | ((bytes[4] as u32 & 0xF0) << 4);
-        // Vertical active: lower 8 bits at byte 5, upper 4 bits in high nibble of byte 7.
+        // Vertical active: lower 8 bits at byte 5, upper 4 bits in high nibble of byte
+        // 7.
         let v_active = bytes[5] as u32 | ((bytes[7] as u32 & 0xF0) << 4);
         if h_active == 0 || v_active == 0 {
             return None;
@@ -175,8 +177,9 @@ impl Edid {
 mod tests {
     use super::*;
 
-    /// Real EDID captured from QEMU virtio-GPU with `-device virtio-gpu,xres=1920,yres=1080`.
-    /// QEMU generates this EDID dynamically. The base block (bytes 0-127) contains:
+    /// Real EDID captured from QEMU virtio-GPU with `-device
+    /// virtio-gpu,xres=1920,yres=1080`. QEMU generates this EDID
+    /// dynamically. The base block (bytes 0-127) contains:
     /// - Manufacturer: "RHT" (Red Hat), product code 0x1234
     /// - DTD1 preferred mode: 1920x1080 @ 60Hz
     /// - 8 Standard Timings: 2048x1152, 1920x1080, 1920x1200, 1600x1200,
@@ -216,7 +219,8 @@ mod tests {
         Edid { data, size }
     }
 
-    /// Extract the DTD1 bytes from the QEMU EDID for direct DetailedTiming tests.
+    /// Extract the DTD1 bytes from the QEMU EDID for direct DetailedTiming
+    /// tests.
     fn qemu_dtd1_bytes() -> [u8; DTD_LEN] {
         let data = qemu_edid();
         data[DTD1_OFFSET..DTD1_OFFSET + DTD_LEN].try_into().unwrap()
@@ -334,9 +338,10 @@ mod tests {
     fn qemu_edid_standard_timings() {
         let edid = make_edid(qemu_edid(), 256);
         let res = edid.standard_timings();
-        // QEMU advertises 8 standard timings, sorted by total pixel count (largest first).
-        // Note: 1600x1200 (1,920,000 px) > 1680x1050 (1,764,000 px) despite narrower width,
-        // and 1280x1024 (1,310,720 px) > 1440x900 (1,296,000 px) for the same reason.
+        // QEMU advertises 8 standard timings, sorted by total pixel count (largest
+        // first). Note: 1600x1200 (1,920,000 px) > 1680x1050 (1,764,000 px)
+        // despite narrower width, and 1280x1024 (1,310,720 px) > 1440x900
+        // (1,296,000 px) for the same reason.
         assert_eq!(
             res,
             vec![

@@ -28,8 +28,8 @@ unsafe impl Hal for FakeHal {
     unsafe fn dma_dealloc(_paddr: PhysAddr, vaddr: NonNull<u8>, pages: usize) -> i32 {
         assert_ne!(pages, 0);
         let layout = Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap();
-        // Safe because the layout is the same as was used when the memory was allocated by
-        // `dma_alloc` above.
+        // Safe because the layout is the same as was used when the memory was allocated
+        // by `dma_alloc` above.
         unsafe {
             dealloc(vaddr.as_ptr(), layout);
         }
@@ -42,8 +42,8 @@ unsafe impl Hal for FakeHal {
 
     unsafe fn share(buffer: NonNull<[u8]>, direction: BufferDirection) -> PhysAddr {
         assert_ne!(buffer.len(), 0);
-        // To ensure that the driver is handling and unsharing buffers properly, allocate a new
-        // buffer and copy to it if appropriate.
+        // To ensure that the driver is handling and unsharing buffers properly,
+        // allocate a new buffer and copy to it if appropriate.
         let mut shared_buffer = <[u8]>::new_box_zeroed_with_elems(buffer.len()).unwrap();
         if let BufferDirection::DriverToDevice | BufferDirection::Both = direction {
             unsafe {

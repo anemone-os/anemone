@@ -30,7 +30,8 @@ macro_rules! configwrite {
     };
 }
 
-/// PCI transport for VirtIO using hypercalls implemented by the x86-64 pKVM hypervisor for IO BARs.
+/// PCI transport for VirtIO using hypercalls implemented by the x86-64 pKVM
+/// hypervisor for IO BARs.
 #[derive(Debug)]
 pub struct HypPciTransport {
     device_type: DeviceType,
@@ -48,8 +49,8 @@ pub struct HypPciTransport {
 }
 
 impl HypPciTransport {
-    /// Constructs a new x86-64 pKVM PCI VirtIO transport for the given device function on the given
-    /// PCI root controller.
+    /// Constructs a new x86-64 pKVM PCI VirtIO transport for the given device
+    /// function on the given PCI root controller.
     pub fn new<C: ConfigurationAccess>(
         root: &mut PciRoot<C>,
         device_function: DeviceFunction,
@@ -94,21 +95,21 @@ impl HypPciTransport {
             match cfg_type {
                 VIRTIO_PCI_CAP_COMMON_CFG if common_cfg.is_none() => {
                     common_cfg = Some(struct_info);
-                }
+                },
                 VIRTIO_PCI_CAP_NOTIFY_CFG if cap_len >= 20 && notify_cfg.is_none() => {
                     notify_cfg = Some(struct_info);
                     notify_off_multiplier = root.configuration_access.read_word(
                         device_function,
                         capability.offset + CAP_NOTIFY_OFF_MULTIPLIER_OFFSET,
                     );
-                }
+                },
                 VIRTIO_PCI_CAP_ISR_CFG if isr_cfg.is_none() => {
                     isr_cfg = Some(struct_info);
-                }
+                },
                 VIRTIO_PCI_CAP_DEVICE_CFG if device_cfg.is_none() => {
                     device_cfg = Some(struct_info);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -227,8 +228,8 @@ impl Transport for HypPciTransport {
     }
 
     fn queue_unset(&mut self, _queue: u16) {
-        // The VirtIO spec doesn't allow queues to be unset once they have been set up for the PCI
-        // transport, so this is a no-op.
+        // The VirtIO spec doesn't allow queues to be unset once they have been
+        // set up for the PCI transport, so this is a no-op.
     }
 
     fn queue_used(&mut self, queue: u16) -> bool {
@@ -238,7 +239,8 @@ impl Transport for HypPciTransport {
     }
 
     fn ack_interrupt(&mut self) -> InterruptStatus {
-        // Reading the ISR status resets it to 0 and causes the device to de-assert the interrupt.
+        // Reading the ISR status resets it to 0 and causes the device to de-assert the
+        // interrupt.
         let isr_status: u8 = self.isr_status.read(0);
         InterruptStatus::from_bits_truncate(isr_status.into())
     }

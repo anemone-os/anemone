@@ -3,30 +3,32 @@
 use core::arch::asm;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
-/// This CPUID returns the signature and should be used to determine if VM is running under pKVM,
-/// KVM or not. See the Linux header `arch/x86/include/uapi/asm/kvm_para.h`.
+/// This CPUID returns the signature and should be used to determine if VM is
+/// running under pKVM, KVM or not. See the Linux header
+/// `arch/x86/include/uapi/asm/kvm_para.h`.
 const KVM_CPUID_SIGNATURE: u32 = 0x40000000;
 
-// See `include/uapi/linux/kvm_para.h`. (These hypercalls numbers can change depending on the
-// upstream progress.)
+// See `include/uapi/linux/kvm_para.h`. (These hypercalls numbers can change
+// depending on the upstream progress.)
 const KVM_HC_PKVM_OP: u64 = 20;
 const PKVM_GHC_IOREAD: u64 = KVM_HC_PKVM_OP + 3;
 const PKVM_GHC_IOWRITE: u64 = KVM_HC_PKVM_OP + 4;
 
-/// The maximum number of bytes that can be read or written by a single IO hypercall.
+/// The maximum number of bytes that can be read or written by a single IO
+/// hypercall.
 const HYP_IO_MAX: usize = 8;
 
 /// Gets the signature CPU ID.
 pub fn cpuid_signature() -> [u8; 4] {
     let signature: u32;
 
-    // SAFETY: Assembly call. The argument for cpuid is passed via rax and in case of
-    // KVM_CPUID_SIGNATURE returned via rbx, rcx and rdx. Ideally using a named argument in
-    // inline asm for rbx would be more straightforward, but when "rbx" is directly used
-    // LLVM complains that it is used internally.
+    // SAFETY: Assembly call. The argument for cpuid is passed via rax and in case
+    // of KVM_CPUID_SIGNATURE returned via rbx, rcx and rdx. Ideally using a
+    // named argument in inline asm for rbx would be more straightforward, but
+    // when "rbx" is directly used LLVM complains that it is used internally.
     //
-    // Therefore use r8 instead and push rbx to the stack before making cpuid call, store
-    // rbx content to r8 as use it as inline asm output and pop the rbx.
+    // Therefore use r8 instead and push rbx to the stack before making cpuid call,
+    // store rbx content to r8 as use it as inline asm output and pop the rbx.
     unsafe {
         asm!(
             "push rbx",
@@ -45,11 +47,13 @@ pub fn cpuid_signature() -> [u8; 4] {
 fn __vmcall_impl(hypcall: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> u64 {
     let ret: u64;
 
-    // SAFETY: Assembly call. Arguments for vmcall are passed via rax, rbx, rcx, rdx and rsi.
-    // Ideally using a named argument in the inline asm for rbx would be more straightforward,
-    // but when "rbx" is used directly LLVM complains that it is used internally.
+    // SAFETY: Assembly call. Arguments for vmcall are passed via rax, rbx, rcx, rdx
+    // and rsi. Ideally using a named argument in the inline asm for rbx would
+    // be more straightforward, but when "rbx" is used directly LLVM complains
+    // that it is used internally.
     //
-    // Therefore use temp register to store rbx content and restore it back afterwards.
+    // Therefore use temp register to store rbx content and restore it back
+    // afterwards.
     unsafe {
         asm!(
             "xchg %rbx, {0:r}",
@@ -66,9 +70,9 @@ fn __vmcall_impl(hypcall: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> u64 {
     ret
 }
 
-// This block uses inline assembly to perform a vmcall, interacting directly with the hypervisor.
-// The pKVM hypervisor can share RAX/RBX/RCX/RDX/RSI with pKVM host during hypercall
-// handling.
+// This block uses inline assembly to perform a vmcall, interacting directly
+// with the hypervisor. The pKVM hypervisor can share RAX/RBX/RCX/RDX/RSI with
+// pKVM host during hypercall handling.
 macro_rules! vmcall {
     ($hypcall:expr) => {
         __vmcall_impl($hypcall, 0, 0, 0, 0)
@@ -97,7 +101,8 @@ pub fn hyp_io_write(address: u64, size: usize, data: u64) {
     vmcall!(PKVM_GHC_IOWRITE, address, size as u64, data);
 }
 
-/// A region of physical address space which may be accessed by IO read and/or write hypercalls.
+/// A region of physical address space which may be accessed by IO read and/or
+/// write hypercalls.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HypIoRegion {
     /// The physical address of the start of the IO region.

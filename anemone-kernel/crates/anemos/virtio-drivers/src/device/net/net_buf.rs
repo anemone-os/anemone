@@ -58,7 +58,8 @@ impl RxBuffer {
         self.packet_len
     }
 
-    /// Returns all data in the buffer, including both the header and the packet.
+    /// Returns all data in the buffer, including both the header and the
+    /// packet.
     pub fn as_bytes(&self) -> &[u8] {
         self.buf.as_bytes()
     }
