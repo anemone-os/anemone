@@ -20,9 +20,10 @@ use crate::{
 use super::resolve_epoll_fd;
 
 const COMPAT_READINESS_BITS: u32 =
-    EPOLLPRI | EPOLLRDNORM | EPOLLRDBAND | EPOLLWRNORM | EPOLLWRBAND | EPOLLMSG | EPOLLRDHUP;
+    EPOLLPRI | EPOLLRDNORM | EPOLLRDBAND | EPOLLWRNORM | EPOLLWRBAND | EPOLLMSG;
 const ACCEPTED_EVENT_BITS: u32 = EPOLLIN
     | EPOLLOUT
+    | EPOLLRDHUP
     | anemone_abi::fs::linux::epoll::EPOLLERR
     | EPOLLHUP
     | COMPAT_READINESS_BITS
@@ -98,6 +99,9 @@ fn watch_policy(event: EpollEvent) -> Result<WatchPolicy, SysError> {
     if event.events & EPOLLOUT != 0 {
         interests |= PollEvent::WRITABLE;
     }
+    if event.events & EPOLLRDHUP != 0 {
+        interests |= PollEvent::READ_HANG_UP;
+    }
     Ok(WatchPolicy::new(
         interests,
         event.events & EPOLLET != 0,
@@ -146,4 +150,19 @@ fn sys_epoll_ctl(
         EpollCtlOp::Delete => epoll.ctl_delete(target_fd, &target)?,
     }
     Ok(0)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn epollrdhup_is_a_real_delivery_interest() {
+        let policy = watch_policy(EpollEvent::new(EPOLLRDHUP, 0x52)).unwrap();
+        assert_eq!(
+            policy.deliverable(PollEvent::READ_HANG_UP),
+            PollEvent::READ_HANG_UP
+        );
+        assert_eq!(policy.deliverable(PollEvent::READABLE), PollEvent::empty());
+    }
 }

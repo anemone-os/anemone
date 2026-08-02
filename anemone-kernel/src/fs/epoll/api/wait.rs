@@ -207,9 +207,29 @@ fn linux_event_bytes(events: PollEvent, data: u64, dst: &mut [u8]) {
     if events.contains(PollEvent::HANG_UP) {
         linux_events |= EPOLLHUP;
     }
+    if events.contains(PollEvent::READ_HANG_UP) {
+        linux_events |= anemone_abi::fs::linux::epoll::EPOLLRDHUP;
+    }
     dst.fill(0);
     dst[0..4].copy_from_slice(&linux_events.to_ne_bytes());
     dst[8..16].copy_from_slice(&data.to_ne_bytes());
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use anemone_abi::fs::linux::epoll::EPOLLRDHUP;
+
+    #[kunit]
+    fn linux_copyout_projects_read_hang_up_independently() {
+        let mut bytes = [0u8; size_of::<EpollEvent>()];
+        linux_event_bytes(PollEvent::READ_HANG_UP, 0x5244, &mut bytes);
+        assert_eq!(
+            u32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
+            EPOLLRDHUP
+        );
+        assert_eq!(u64::from_ne_bytes(bytes[8..16].try_into().unwrap()), 0x5244);
+    }
 }
 
 pub(super) fn run_epoll_wait(

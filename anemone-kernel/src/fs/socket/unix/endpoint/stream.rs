@@ -1,19 +1,19 @@
 //! Paired connection, directional byte-stream, and stream readiness owner.
 
 use crate::{
-    fs::{
-        iomux::PollRoute,
-        socket::{
-            SocketReceiveError, SocketReceiveRequest, SocketSendError, SocketSendRequest,
-            SocketShutdown, SocketShutdownError, SocketStreamDestination,
-        },
+    fs::socket::{
+        SocketReceiveError, SocketReceiveRequest, SocketSendError, SocketSendRequest,
+        SocketShutdown, SocketShutdownError, SocketStreamDestination,
     },
     kconfig_defs::UNIX_STREAM_DIRECTION_CAPACITY_BYTES,
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
 
-use super::{EndpointAccessError, EndpointAssociation, EndpointName, EndpointState, endpoint};
+use super::{
+    EndpointAccessError, EndpointAssociation, EndpointName, EndpointState, UnixPollRoute, endpoint,
+    replacement_poll_routes,
+};
 
 static_assert!(
     UNIX_STREAM_DIRECTION_CAPACITY_BYTES > 0,
@@ -38,21 +38,6 @@ impl EndpointSide {
         match self {
             Self::First => Self::Second,
             Self::Second => Self::First,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct UnixPollRoute {
-    route: PollRoute,
-    interests: PollEvent,
-}
-
-impl UnixPollRoute {
-    fn new(route: &PollRoute, interests: PollEvent) -> Self {
-        Self {
-            route: route.clone(),
-            interests,
         }
     }
 }
@@ -111,6 +96,9 @@ impl ConnectionState {
         if interests.contains(PollEvent::WRITABLE) && (send_terminal || outgoing.available() > 0) {
             events |= PollEvent::WRITABLE;
         }
+        if interests.contains(PollEvent::READ_HANG_UP) && receive_terminal {
+            events |= PollEvent::READ_HANG_UP;
+        }
         // Full HUP is a projection of the two direction terminal facts, not a
         // separately writable endpoint or readiness bit.
         if receive_terminal && send_terminal {
@@ -145,26 +133,13 @@ impl UnixConnection {
             names,
         })
     }
-}
 
-fn replacement_routes(
-    current: &Arc<Vec<UnixPollRoute>>,
-    route: &PollRoute,
-    interests: PollEvent,
-) -> Arc<Vec<UnixPollRoute>> {
-    let retained = current
-        .iter()
-        .filter(|entry| !entry.route.is_prunable())
-        .count();
-    let mut replacement = Vec::with_capacity(retained + 1);
-    replacement.extend(
-        current
-            .iter()
-            .filter(|entry| !entry.route.is_prunable())
-            .cloned(),
-    );
-    replacement.push(UnixPollRoute::new(route, interests));
-    Arc::new(replacement)
+    pub(super) fn install_routes(&self, side: EndpointSide, routes: Arc<Vec<UnixPollRoute>>) {
+        let mut state = self.state.lock();
+        let slot = &mut state.routes[side.index()];
+        assert!(slot.is_empty(), "Unix connection routes installed twice");
+        *slot = routes;
+    }
 }
 
 fn notify_routes(
@@ -447,7 +422,7 @@ pub(super) fn shutdown_unix_stream(
     Ok(())
 }
 
-pub(super) fn poll_unix_stream(
+pub(super) fn poll_connected_unix_stream(
     private: &AnyOpaque,
     request: &PollRequest<'_>,
 ) -> Result<PollRegisterResult, SysError> {
@@ -480,7 +455,7 @@ pub(super) fn poll_unix_stream(
             }
             connection.state.lock().routes[side.index()].clone()
         };
-        let replacement = replacement_routes(&expected, route, request.interests());
+        let replacement = replacement_poll_routes(&expected, route, request.interests());
         let (previous, events) = {
             let endpoint_state = endpoint.state.lock();
             if validate_connection(&endpoint_state, &connection, side).is_err() {

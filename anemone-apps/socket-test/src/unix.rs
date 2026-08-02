@@ -9,9 +9,11 @@ use anemone_rs::{
         fs::linux::{
             IoVec,
             at::{AT_FDCWD, AT_REMOVEDIR},
+            epoll::{EPOLLET, EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLRDHUP, EpollEvent},
             mode::{S_IFMT, S_IFSOCK},
             open::O_NONBLOCK,
-            poll::{POLLHUP, POLLIN, POLLOUT, PollFd},
+            poll::{POLLHUP, POLLIN, POLLOUT, POLLRDHUP, PollFd},
+            select::FdSet,
         },
         net::linux::{
             AF_INET, AF_UNIX, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, SHUT_RD,
@@ -27,8 +29,9 @@ use anemone_rs::{
     },
     os::linux::{
         fs::{
-            AtFd, Fd, PipeFlags, close, dup, fcntl_getfd, fcntl_getfl, fcntl_setfl, fstatat,
-            linkat, mkdirat, pipe2, ppoll, read, readv, unlinkat, write, writev,
+            AtFd, EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, dup, epoll_create1,
+            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fcntl_setfl, fstatat, linkat, mkdirat,
+            pipe2, ppoll, pselect, read, readv, unlinkat, write, writev,
         },
         net::{
             SocketFlags, accept_unix, accept4_unix_raw, bind_unix_path, connect_unix_path,
@@ -76,6 +79,7 @@ const SIGNAL_PATH: &str = "/mnt/socket-test-2b-signal";
 const PARALLEL_PATH_A: &str = "/mnt/socket-test-2b-parallel-a";
 const PARALLEL_PATH_B: &str = "/mnt/socket-test-2b-parallel-b";
 const STAGE3A_PATH: &str = "/mnt/socket-test-3a-stream";
+const STAGE3B_PATH: &str = "/mnt/socket-test-3b-readiness";
 
 extern "C" fn sigpipe_handler(_signo: i32) {
     SIGPIPE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -92,6 +96,50 @@ fn expect_errno<T>(result: Result<T, Errno>, expected: Errno) -> Result<(), Errn
         Err(actual) if actual == expected => Ok(()),
         _ => Err(EIO),
     }
+}
+
+fn fdset_with(fd: Fd) -> FdSet {
+    let mut set = FdSet::default();
+    set.fds_bits[fd as usize / 64] |= 1u64 << (fd as usize % 64);
+    set
+}
+
+fn fdset_contains(set: &FdSet, fd: Fd) -> bool {
+    set.fds_bits[fd as usize / 64] & (1u64 << (fd as usize % 64)) != 0
+}
+
+fn start_blocked_epoll_waiter(
+    epfd: Fd,
+    expected_data: u64,
+    expected_events: u32,
+) -> Result<u32, Errno> {
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let child = match fork()? {
+        None => {
+            let _ = close(ready_read);
+            let mut events = [EpollEvent::default(); 1];
+            let ok = write(ready_write, b"r")
+                .and_then(|_| epoll_wait(epfd, &mut events, 1_000))
+                .is_ok_and(|count| {
+                    count == 1
+                        && events[0].data == expected_data
+                        && events[0].events == expected_events
+                });
+            let _ = close(epfd);
+            let _ = close(ready_write);
+            exit(if ok { 0 } else { 1 })
+        },
+        Some(pid) => pid,
+    };
+    close(ready_write)?;
+    let mut marker = [0u8; 1];
+    ensure(read(ready_read, &mut marker)? == 1 && marker[0] == b'r')?;
+    nanosleep(TimeSpec {
+        tv_sec: 0,
+        tv_nsec: 10_000_000,
+    })?;
+    close(ready_read)?;
+    Ok(child)
 }
 
 fn wait_child(pid: u32) -> Result<(), Errno> {
@@ -1385,6 +1433,240 @@ fn test_socket_option_queries_and_pathname_stream() -> Result<(), Errno> {
     close(second)
 }
 
+fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
+    unlink_if_present(STAGE3B_PATH, 0)?;
+    let listener = unix_stream_socket(SocketFlags::NONBLOCK)?;
+    bind_unix_path(listener, STAGE3B_PATH.as_bytes())?;
+
+    let mut role_poll = [PollFd {
+        fd: listener as i32,
+        events: POLLIN | POLLOUT | POLLRDHUP,
+        revents: 0,
+    }];
+    ensure(ppoll(&mut role_poll, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(role_poll[0].revents & (POLLOUT | POLLHUP) == (POLLOUT | POLLHUP))?;
+    ensure(role_poll[0].revents & (POLLIN | POLLRDHUP) == 0)?;
+
+    let listener_epfd = epoll_create1(EpollCreateFlags::empty())?;
+    let listener_interest = EpollEvent::new(EPOLLIN | EPOLLET, 0x3b01);
+    epoll_ctl(
+        listener_epfd,
+        EpollCtlOp::Add,
+        listener,
+        Some(&listener_interest),
+    )?;
+    let mut events = [EpollEvent::default(); 1];
+    ensure(epoll_wait(listener_epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].data == 0x3b01 && events[0].events == EPOLLHUP)?;
+
+    listen(listener, 1)?;
+    role_poll[0].revents = 0;
+    ensure(ppoll(&mut role_poll, Some(&ZERO_TIMEOUT))? == 0)?;
+    ensure(epoll_wait(listener_epfd, &mut events, 0)? == 0)?;
+
+    let listener_waiter = start_blocked_epoll_waiter(listener_epfd, 0x3b01, EPOLLIN)?;
+    let client = unix_stream_socket(SocketFlags::NONBLOCK)?;
+    connect_unix_path(client, STAGE3B_PATH.as_bytes())?;
+    wait_child(listener_waiter)?;
+    role_poll[0].revents = 0;
+    ensure(ppoll(&mut role_poll, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(role_poll[0].revents == POLLIN)?;
+    let accepted = accept_unix(listener)?;
+    close(listener_epfd)?;
+    close(accepted)?;
+    close(client)?;
+
+    // A watch installed before connect must move from endpoint-role routes to
+    // the resulting connection owner. Consume the role-change recheck while
+    // IN is still false, then prove that a later peer write wakes a blocked ET
+    // waiter through the transferred connection route.
+    let client = unix_stream_socket(SocketFlags::NONBLOCK)?;
+    let client_epfd = epoll_create1(EpollCreateFlags::empty())?;
+    epoll_ctl(
+        client_epfd,
+        EpollCtlOp::Add,
+        client,
+        Some(&EpollEvent::new(EPOLLIN | EPOLLET, 0x3b02)),
+    )?;
+    ensure(epoll_wait(client_epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].data == 0x3b02 && events[0].events == EPOLLHUP)?;
+    connect_unix_path(client, STAGE3B_PATH.as_bytes())?;
+    ensure(epoll_wait(client_epfd, &mut events, 0)? == 0)?;
+    let accepted = accept_unix(listener)?;
+    let client_waiter = start_blocked_epoll_waiter(client_epfd, 0x3b02, EPOLLIN)?;
+    ensure(write(accepted, b"x")? == 1)?;
+    wait_child(client_waiter)?;
+    close(client_epfd)?;
+    close(accepted)?;
+    close(client)?;
+    close(listener)?;
+    unlink_if_present(STAGE3B_PATH, 0)?;
+
+    // Linux select puts HUP in readfds, not writefds. A closed pipe read end
+    // isolates that grouping from the Unix terminal-send WRITABLE predicate.
+    let (pipe_rx, pipe_tx) = pipe2(PipeFlags::empty())?;
+    close(pipe_tx)?;
+    let mut writefds = fdset_with(pipe_rx);
+    ensure(
+        pselect(
+            pipe_rx as usize + 1,
+            None,
+            Some(&mut writefds),
+            None,
+            Some(&ZERO_TIMEOUT),
+        )? == 0,
+    )?;
+    ensure(!fdset_contains(&writefds, pipe_rx))?;
+    let mut readfds = fdset_with(pipe_rx);
+    ensure(
+        pselect(
+            pipe_rx as usize + 1,
+            Some(&mut readfds),
+            None,
+            None,
+            Some(&ZERO_TIMEOUT),
+        )? == 1,
+    )?;
+    ensure(fdset_contains(&readfds, pipe_rx))?;
+    close(pipe_rx)?;
+
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let mut stream_poll = [PollFd {
+        fd: first as i32,
+        events: POLLIN | POLLOUT | POLLRDHUP,
+        revents: 0,
+    }];
+    ensure(ppoll(&mut stream_poll, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(stream_poll[0].revents == POLLOUT)?;
+    shutdown(second, SHUT_WR)?;
+
+    stream_poll[0].events = POLLIN;
+    stream_poll[0].revents = 0;
+    ensure(ppoll(&mut stream_poll, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(stream_poll[0].revents == POLLIN)?;
+    stream_poll[0].events = POLLIN | POLLOUT | POLLRDHUP;
+    stream_poll[0].revents = 0;
+    ensure(ppoll(&mut stream_poll, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(
+        stream_poll[0].revents & (POLLIN | POLLOUT | POLLRDHUP) == (POLLIN | POLLOUT | POLLRDHUP),
+    )?;
+    ensure(stream_poll[0].revents & POLLHUP == 0)?;
+
+    let mut readfds = fdset_with(first);
+    let mut writefds = fdset_with(first);
+    ensure(
+        pselect(
+            first as usize + 1,
+            Some(&mut readfds),
+            Some(&mut writefds),
+            None,
+            Some(&ZERO_TIMEOUT),
+        )? == 2,
+    )?;
+    ensure(fdset_contains(&readfds, first) && fdset_contains(&writefds, first))?;
+    shutdown(first, SHUT_WR)?;
+    stream_poll[0].revents = 0;
+    ensure(ppoll(&mut stream_poll, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(stream_poll[0].revents & POLLHUP != 0)?;
+    close(first)?;
+    close(second)?;
+
+    // LT keeps deriving RDHUP from the current source predicate. MOD must
+    // re-scan the same current fact without relying on the earlier IN event.
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let epfd = epoll_create1(EpollCreateFlags::empty())?;
+    epoll_ctl(
+        epfd,
+        EpollCtlOp::Add,
+        first,
+        Some(&EpollEvent::new(EPOLLIN, 0x3b10)),
+    )?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    shutdown(second, SHUT_WR)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events == EPOLLIN)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    epoll_ctl(
+        epfd,
+        EpollCtlOp::Modify,
+        first,
+        Some(&EpollEvent::new(EPOLLRDHUP, 0x3b11)),
+    )?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].data == 0x3b11 && events[0].events == EPOLLRDHUP)?;
+    close(epfd)?;
+    close(first)?;
+    close(second)?;
+
+    // ADD observes an already-current half-close through its initial exact
+    // scan; ET consumes only the transition's dirty claim.
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    shutdown(second, SHUT_WR)?;
+    let epfd = epoll_create1(EpollCreateFlags::empty())?;
+    epoll_ctl(
+        epfd,
+        EpollCtlOp::Add,
+        first,
+        Some(&EpollEvent::new(EPOLLRDHUP, 0x3b20)),
+    )?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events == EPOLLRDHUP)?;
+    close(epfd)?;
+    close(first)?;
+    close(second)?;
+
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let epfd = epoll_create1(EpollCreateFlags::empty())?;
+    epoll_ctl(
+        epfd,
+        EpollCtlOp::Add,
+        first,
+        Some(&EpollEvent::new(EPOLLRDHUP | EPOLLET, 0x3b30)),
+    )?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    shutdown(second, SHUT_WR)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events == EPOLLRDHUP)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    close(epfd)?;
+    close(first)?;
+    close(second)?;
+
+    // ONESHOT disables delivery after commit; MOD creates a new generation
+    // whose initial dirty claim rechecks the still-current RDHUP predicate.
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let epfd = epoll_create1(EpollCreateFlags::empty())?;
+    let one_shot = EpollEvent::new(EPOLLRDHUP | EPOLLONESHOT, 0x3b40);
+    epoll_ctl(epfd, EpollCtlOp::Add, first, Some(&one_shot))?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    shutdown(second, SHUT_WR)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events == EPOLLRDHUP)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    epoll_ctl(epfd, EpollCtlOp::Modify, first, Some(&one_shot))?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events == EPOLLRDHUP)?;
+    close(epfd)?;
+    close(first)?;
+    close(second)?;
+
+    // HUP remains mandatory even when no ordinary or RDHUP interest exists.
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let epfd = epoll_create1(EpollCreateFlags::empty())?;
+    epoll_ctl(
+        epfd,
+        EpollCtlOp::Add,
+        first,
+        Some(&EpollEvent::new(0, 0x3b50)),
+    )?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 0)?;
+    close(second)?;
+    ensure(epoll_wait(epfd, &mut events, 0)? == 1)?;
+    ensure(events[0].events == EPOLLHUP)?;
+    close(epfd)?;
+    close(first)
+}
+
 struct Results {
     passed: usize,
     failed: usize,
@@ -1487,6 +1769,10 @@ pub(crate) fn run() -> Result<(), Errno> {
     results.case(
         "socket-option-query-pathname-stream",
         test_socket_option_queries_and_pathname_stream,
+    );
+    results.case(
+        "listener-stream-poll-select-epoll-readiness",
+        test_listener_stream_poll_select_epoll_readiness,
     );
 
     if results.failed == 0 {

@@ -38,6 +38,9 @@ mod args {
             if events.contains(PollEvent::HANG_UP) {
                 linux_events |= LinuxPollEvent::HUP;
             }
+            if events.contains(PollEvent::READ_HANG_UP) {
+                linux_events |= LinuxPollEvent::RDHUP;
+            }
 
             linux_events
         }

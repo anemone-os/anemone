@@ -12,7 +12,7 @@ use super::{
     },
     endpoint::{
         BindingPublication, EndpointAssociation, EndpointSide, UnixConnection, UnixEndpointCore,
-        private_from_core,
+        UnixPollRoute, private_from_core, replacement_poll_routes,
     },
     namespace::{LiveBinding, resolve_live_binding},
 };
@@ -37,20 +37,12 @@ fn normalized_backlog(backlog: i32) -> usize {
     (backlog as u32 as usize).min(UNIX_LISTENER_MAX_BACKLOG)
 }
 
-fn replacement_routes(current: &Arc<Vec<PollRoute>>, route: &PollRoute) -> Arc<Vec<PollRoute>> {
-    let retained = current.iter().filter(|entry| !entry.is_prunable()).count();
-    let mut replacement = Vec::with_capacity(retained + 1);
-    replacement.extend(current.iter().filter(|entry| !entry.is_prunable()).cloned());
-    replacement.push(route.clone());
-    Arc::new(replacement)
-}
-
-pub(super) fn notify_admission_routes(routes: &Arc<Vec<PollRoute>>, reason: &'static str) {
+pub(super) fn notify_admission_routes(routes: &Arc<Vec<UnixPollRoute>>, reason: &'static str) {
     if routes.is_empty() {
         return;
     }
-    for route in routes.iter() {
-        route.notify();
+    for entry in routes.iter() {
+        entry.route.notify();
     }
     kdebugln!(
         "unix socket: issued {} admission route hints reason={}",
@@ -63,8 +55,8 @@ pub(super) fn notify_admission_routes(routes: &Arc<Vec<PollRoute>>, reason: &'st
 struct ListenerState {
     backlog: usize,
     pending: VecDeque<Arc<UnixEndpointCore>>,
-    connect_routes: Arc<Vec<PollRoute>>,
-    accept_routes: Arc<Vec<PollRoute>>,
+    connect_routes: Arc<Vec<UnixPollRoute>>,
+    accept_routes: Arc<Vec<UnixPollRoute>>,
     closed: bool,
 }
 
@@ -92,7 +84,7 @@ impl UnixListener {
         !state.closed && state.pending.len() <= state.backlog
     }
 
-    fn update_backlog(&self, backlog: usize) -> Option<Arc<Vec<PollRoute>>> {
+    fn update_backlog(&self, backlog: usize) -> Option<Arc<Vec<UnixPollRoute>>> {
         let mut state = self.state.lock();
         assert!(
             !state.closed,
@@ -104,7 +96,7 @@ impl UnixListener {
         (!was_ready && is_ready).then(|| state.connect_routes.clone())
     }
 
-    fn try_push(&self, child: Arc<UnixEndpointCore>) -> Result<Arc<Vec<PollRoute>>, ()> {
+    fn try_push(&self, child: Arc<UnixEndpointCore>) -> Result<Arc<Vec<UnixPollRoute>>, ()> {
         let mut state = self.state.lock();
         if !Self::has_connect_capacity(&state) {
             return Err(());
@@ -117,7 +109,15 @@ impl UnixListener {
         Ok(state.accept_routes.clone())
     }
 
-    fn pop(&self) -> Result<(Arc<UnixEndpointCore>, Arc<Vec<PollRoute>>), ()> {
+    #[cfg(feature = "kunit")]
+    pub(super) fn admit_for_validation(
+        &self,
+        child: Arc<UnixEndpointCore>,
+    ) -> Result<Arc<Vec<UnixPollRoute>>, ()> {
+        self.try_push(child)
+    }
+
+    fn pop(&self) -> Result<(Arc<UnixEndpointCore>, Arc<Vec<UnixPollRoute>>), ()> {
         let mut state = self.state.lock();
         let child = state.pending.pop_front().ok_or(())?;
         Ok((child, state.connect_routes.clone()))
@@ -125,8 +125,8 @@ impl UnixListener {
 
     pub(super) fn close(
         &self,
-        empty_connect_routes: Arc<Vec<PollRoute>>,
-        empty_accept_routes: Arc<Vec<PollRoute>>,
+        empty_connect_routes: Arc<Vec<UnixPollRoute>>,
+        empty_accept_routes: Arc<Vec<UnixPollRoute>>,
     ) -> ListenerClose {
         let mut state = self.state.lock();
         assert!(!state.closed, "Unix listener closed twice");
@@ -137,12 +137,21 @@ impl UnixListener {
             accept_routes: core::mem::replace(&mut state.accept_routes, empty_accept_routes),
         }
     }
+
+    fn install_accept_routes(&self, routes: Arc<Vec<UnixPollRoute>>) {
+        let mut state = self.state.lock();
+        assert!(
+            state.accept_routes.is_empty(),
+            "Unix listener routes installed twice"
+        );
+        state.accept_routes = routes;
+    }
 }
 
 pub(super) struct ListenerClose {
     pub(super) pending: VecDeque<Arc<UnixEndpointCore>>,
-    pub(super) connect_routes: Arc<Vec<PollRoute>>,
-    pub(super) accept_routes: Arc<Vec<PollRoute>>,
+    pub(super) connect_routes: Arc<Vec<UnixPollRoute>>,
+    pub(super) accept_routes: Arc<Vec<UnixPollRoute>>,
 }
 
 #[derive(Debug, Opaque)]
@@ -194,8 +203,10 @@ fn poll_connect_wait(
     loop {
         let client_routes = source.client.state.lock().lifecycle_routes.clone();
         let listener_routes = source.listener.state.lock().connect_routes.clone();
-        let client_replacement = replacement_routes(&client_routes, route);
-        let listener_replacement = replacement_routes(&listener_routes, route);
+        let client_replacement =
+            replacement_poll_routes(&client_routes, route, request.interests());
+        let listener_replacement =
+            replacement_poll_routes(&listener_routes, route, request.interests());
 
         let (old_client, old_listener, result, retry) = with_admission_commit(|| {
             let client = source.client.state.lock();
@@ -256,53 +267,50 @@ fn poll_connect_wait(
     }
 }
 
-fn accept_wait_ready(source: &AcceptWaitSource) -> bool {
-    if !listener_is_current(&source.listener_endpoint, &source.listener) {
-        return true;
-    }
-    let state = source.listener.state.lock();
-    state.closed || !state.pending.is_empty()
-}
-
-fn poll_accept_wait(
-    private: &AnyOpaque,
+fn poll_accept_predicate(
+    listener_endpoint: &UnixEndpointCore,
+    listener: &Arc<UnixListener>,
     request: &PollRequest<'_>,
+    terminal: PollEvent,
 ) -> Result<PollRegisterResult, SysError> {
-    let source = private
-        .cast::<AcceptWaitSource>()
-        .expect("Unix accept wait used without its source");
+    let ready = PollEvent::READABLE & request.interests();
     let Some(route) = request.route() else {
-        return Ok(PollRegisterResult::Ready(
-            accept_wait_ready(source)
-                .then_some(PollEvent::READABLE)
-                .unwrap_or_else(PollEvent::empty),
-        ));
+        if !listener_is_current(listener_endpoint, listener) {
+            return Ok(PollRegisterResult::Ready(terminal));
+        }
+        let state = listener.state.lock();
+        let events = if state.closed {
+            terminal
+        } else if !state.pending.is_empty() {
+            ready
+        } else {
+            PollEvent::empty()
+        };
+        return Ok(PollRegisterResult::Ready(events));
     };
 
     loop {
-        let current = source.listener.state.lock().accept_routes.clone();
-        let replacement = replacement_routes(&current, route);
+        let current = listener.state.lock().accept_routes.clone();
+        let replacement = replacement_poll_routes(&current, route, request.interests());
         let (old, result, retry) = with_admission_commit(|| {
-            if !listener_is_current(&source.listener_endpoint, &source.listener) {
-                return (
-                    None,
-                    Some(PollRegisterResult::Ready(PollEvent::READABLE)),
-                    false,
-                );
+            if !listener_is_current(listener_endpoint, listener) {
+                return (None, Some(PollRegisterResult::Ready(terminal)), false);
             }
-            let mut state = source.listener.state.lock();
+            let mut state = listener.state.lock();
             if !Arc::ptr_eq(&state.accept_routes, &current) {
                 return (None, None, true);
             }
-            let ready = state.closed || !state.pending.is_empty();
+            let events = if state.closed {
+                terminal
+            } else if !state.pending.is_empty() {
+                ready
+            } else {
+                PollEvent::empty()
+            };
             let old = core::mem::replace(&mut state.accept_routes, replacement);
             (
                 Some(old),
-                Some(PollRegisterResult::Subscribed(
-                    ready
-                        .then_some(PollEvent::READABLE)
-                        .unwrap_or_else(PollEvent::empty),
-                )),
+                Some(PollRegisterResult::Subscribed(events)),
                 false,
             )
         });
@@ -312,6 +320,32 @@ fn poll_accept_wait(
         }
         return Ok(result.expect("Unix accept registration produced no result"));
     }
+}
+
+fn poll_accept_wait(
+    private: &AnyOpaque,
+    request: &PollRequest<'_>,
+) -> Result<PollRegisterResult, SysError> {
+    let source = private
+        .cast::<AcceptWaitSource>()
+        .expect("Unix accept wait used without its source");
+    // A terminal listener makes the next accept attempt complete with an
+    // error, so the operation-local wait source reports READABLE. Public
+    // listener poll uses the same predicate and routes but projects HANG_UP.
+    poll_accept_predicate(
+        &source.listener_endpoint,
+        &source.listener,
+        request,
+        PollEvent::READABLE,
+    )
+}
+
+pub(super) fn poll_unix_listener(
+    listener_endpoint: &UnixEndpointCore,
+    listener: &Arc<UnixListener>,
+    request: &PollRequest<'_>,
+) -> Result<PollRegisterResult, SysError> {
+    poll_accept_predicate(listener_endpoint, listener, request, PollEvent::HANG_UP)
 }
 
 pub(super) fn listen(
@@ -335,6 +369,7 @@ pub(super) fn listen(
             EndpointAssociation::Unconnected => {
                 let lifecycle_routes =
                     core::mem::replace(&mut state.lifecycle_routes, empty_lifecycle_routes);
+                candidate.install_accept_routes(lifecycle_routes.clone());
                 state.association = EndpointAssociation::Listening(candidate);
                 Ok((None, Some(lifecycle_routes)))
             },
@@ -452,8 +487,8 @@ pub(super) fn connect(
 
 enum ConnectCommit {
     Admitted {
-        accept_routes: Arc<Vec<PollRoute>>,
-        client_routes: Arc<Vec<PollRoute>>,
+        accept_routes: Arc<Vec<UnixPollRoute>>,
+        client_routes: Arc<Vec<UnixPollRoute>>,
     },
     Full(Arc<UnixListener>),
 }
@@ -493,7 +528,7 @@ pub(super) fn accept(
 }
 
 enum AcceptCommit {
-    Consumed(Arc<UnixEndpointCore>, Arc<Vec<PollRoute>>),
+    Consumed(Arc<UnixEndpointCore>, Arc<Vec<UnixPollRoute>>),
     Empty(Arc<UnixListener>),
 }
 
@@ -756,6 +791,60 @@ mod kunits {
         assert_eq!(
             accept_wait_snapshot(&close_source),
             PollRegisterResult::Ready(PollEvent::READABLE)
+        );
+    }
+
+    #[kunit]
+    fn public_listener_poll_reuses_accept_predicate_and_routes() {
+        let listener = UnixListener::new(0);
+        let listener_endpoint = listening_endpoint(&listener);
+        assert_eq!(
+            poll_unix_listener(
+                &listener_endpoint,
+                &listener,
+                &PollRequest::snapshot(PollEvent::READABLE | PollEvent::WRITABLE),
+            )
+            .unwrap(),
+            PollRegisterResult::Ready(PollEvent::empty())
+        );
+
+        let observer = Arc::new(CountingObserver::default());
+        let route = route(&observer);
+        assert_eq!(
+            poll_unix_listener(
+                &listener_endpoint,
+                &listener,
+                &PollRequest::register_with_route(PollEvent::READABLE, &route),
+            )
+            .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+
+        let routes = listener
+            .try_push(UnixEndpointCore::new_unconnected())
+            .unwrap();
+        notify_admission_routes(&routes, "KUnit public listener admission");
+        assert_eq!(observer.notifications(), 1);
+        assert_eq!(
+            poll_unix_listener(
+                &listener_endpoint,
+                &listener,
+                &PollRequest::snapshot(PollEvent::READABLE | PollEvent::WRITABLE),
+            )
+            .unwrap(),
+            PollRegisterResult::Ready(PollEvent::READABLE)
+        );
+
+        super::super::endpoint::retire_endpoint_core(&listener_endpoint);
+        assert_eq!(observer.notifications(), 2);
+        assert_eq!(
+            poll_unix_listener(
+                &listener_endpoint,
+                &listener,
+                &PollRequest::snapshot(PollEvent::empty()),
+            )
+            .unwrap(),
+            PollRegisterResult::Ready(PollEvent::HANG_UP)
         );
     }
 

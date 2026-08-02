@@ -1,10 +1,10 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R1 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Active / Checkpoint 3A Closed / 3B Not Active
+**状态：** R1 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Checkpoint 3A/3B Closed / Stage 4 Not Active
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R1
-**当前实施阶段：** Stage 3 Active；Checkpoint 3A Closed；Checkpoint 3B Ready / Not Active
+**当前实施阶段：** Stage 3 Closed；Checkpoint 3A/3B Closed；Stage 4 Not Active
 （transaction None；contract cutover None）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
@@ -16,8 +16,9 @@ R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint
 contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解析为两个有序 checkpoint；Checkpoint 2A、2B
 随后各自取得独立授权并依次关闭，Stage 2 已关闭并停止在 Stage 3 前。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；
 独立的 Stage 3 resolution 随后读取 Stage 1--2 final source、review、validation、current contracts、register 与 Linux
-6.6.32 oracle，把本 Stage 解析为两个有序 checkpoint，但没有激活任何代码实施。resolution、checkpoint closure 与
-Stage 1--3 closure均不使 pending contract 生效，也不自动进入下一 checkpoint 或 Stage。
+6.6.32 oracle，把本 Stage 解析为两个有序 checkpoint，但没有在 resolution 时激活任何代码实施。Checkpoint 3A、3B
+随后各自取得独立授权并依次关闭，Stage 3 已关闭并停止在 Stage 4 前。resolution、checkpoint closure 与 Stage 1--3
+closure均不使 pending contract 生效，也不自动进入下一 checkpoint 或 Stage。
 
 ## 全局 Implementation Boundary
 
@@ -112,8 +113,8 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
 | Stage 2 | Closed；2A/2B Closed；Cutover None | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已完成并停止；Stage 3随后独立解析为Ready |
-| Stage 3 | Active；3A Closed / 3B Ready / Not Active；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 已在3A关闭后停止；3B未授权 |
-| Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
+| Stage 3 | Closed；3A/3B Closed；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 已完成并停止；Stage 4未激活 |
+| Stage 4 | Not Active / Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态；需独立授权 |
 
 Stage 1--3 已按下文解析到可执行粒度；Stage 4 仍只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。
 不创建逐文件 write set 或 Resolved Write Set Manifest；预计模块只作非穷举提示。同 owner 新文件、模块注册、
@@ -600,12 +601,12 @@ audit，不构成本interlude finding或cutover blocker。
 `MSG_*`、RDHUP/ERR与完整readiness closure未实现或验证。全部pending Socket/Unix/IOMUX/Epoll contract继续Not
 Effective，本interlude不产生register条目，也不自动解析或激活Stage 3。
 
-## Stage 3 Active — Stream operation 与完整 readiness closure
+## Stage 3 Closed — Stream operation 与完整 readiness closure
 
-**Resolution状态：** Completed 2026-08-02；Stage 3 Active / 3A Closed / 3B Ready / Not Active，解析为Checkpoint 3A“directional stream
-operation与message/query ABI”和Checkpoint 3B“listener/stream readiness与iomux/epoll projection”。本resolution只更新
-accepted target内的实施路线、验证与停止边界；未修改R0 target、Contract Impact或current contract，未创建transaction，
-也未授权任何代码实施。
+**当前状态：** Closed 2026-08-02；Checkpoint 3A/3B Closed；Stage 4 Not Active；Cutover None；transaction None。
+Stage 3 resolution 已把本 Stage 解析为Checkpoint 3A“directional stream operation与message/query ABI”和Checkpoint 3B
+“listener/stream readiness与iomux/epoll projection”。resolution本身只更新accepted target内的实施路线、验证与停止边界；
+未修改R0 target、Contract Impact或current contract，未创建transaction，也未在当时授权任何代码实施。
 
 Checkpoint 3A实施期review发现Linux会在没有peer时持久化`sk_shutdown`，而R0禁止endpoint-local shutdown truth。
 2026-08-02 Target Renegotiation已由维护者批准为R1 reduced target：unconnected、bound与listening role返回
@@ -730,7 +731,7 @@ normalization、copy或wait义务留在最低共同owner。
 
 ### Checkpoint 3A Closed — Directional stream operation 与 message/query ABI
 
-**状态：** Closed 2026-08-02；Stage 3保持Active；Checkpoint 3B Ready / Not Active；Cutover None；transaction None。
+**3A关闭时的状态：** Closed 2026-08-02；Stage 3尚未关闭；Checkpoint 3B尚未激活；Cutover None；transaction None。
 
 **Purpose：** 在不改变iomux/epoll consumer policy的前提下，先让direction owner完整表达read/write terminal与shutdown，
 并闭合Unix connected message、flags、query/rejection和prefix/copy语义，为3B提供稳定source facts。
@@ -796,10 +797,12 @@ gate、recheck与锁序source proof，没有同步并发runtime test。最小补
 可控copy barrier race test；本缺口不扩大3A ABI/owner、不进入register，也不授权3B。
 
 **3A closure时的 Not Run / non-claim：** public listener poll、independent RDHUP、poll/select/epoll完整readiness矩阵、完整
-socket/network LTP、final harness、physical hardware与`smp>1`均未运行或未cut over。Stage 3保持Active，3B保持Ready /
-Not Active；transaction与contract cutover均为None，全部pending Socket/Unix/IOMUX/Epoll contract继续Not Effective。
+socket/network LTP、final harness、physical hardware与`smp>1`均未运行或未cut over。当时Stage 3尚未关闭，3B尚未激活；
+transaction与contract cutover均为None，全部pending Socket/Unix/IOMUX/Epoll contract继续Not Effective。
 
-### Checkpoint 3B Ready / Not Active — Listener/stream readiness 与 iomux/epoll projection
+### Checkpoint 3B Closed — Listener/stream readiness 与 iomux/epoll projection
+
+**状态：** Closed 2026-08-02；Stage 3 Closed / Cutover None；transaction None；Stage 4 Not Active。
 
 **Purpose：** 只从3A最终direction truth和Stage 2 listener truth计算current readiness，把listener、connected stream、
 half-close与full HUP接入现有poll/select/epoll consumer protocol，并关闭Stage 3。
@@ -842,6 +845,31 @@ final/exact scan交付，compat-only RDHUP notice和Stage 3 temporary bridge为�
 必须与HUP共用一bit或独立缓存，source必须携带ready payload，或者正确结果要求改变current iomux/epoll wait、ET/ONESHOT、
 copyout或delivery policy，立即停止并回RFC review；不得把consumer policy改动伪装成source接线。3B通过后Stage 3 Closed /
 Cutover None，按授权立即停止，不自动解析或激活Stage 4。
+
+**Closure evidence：** `PollEvent`现以source-neutral独立category表达receive-half-close，ppoll只在caller请求
+`POLLRDHUP`时输出RDHUP；pselect继续按Linux HUP/ERROR fdset分组投影。Unix public readiness只读取endpoint role、listener
+accept-item predicate与connection direction facts：listener public poll与blocking accept共享同一predicate/route owner，
+connected stream的READABLE、WRITABLE、RDHUP与mandatory HUP均不依赖endpoint ready cache或第二份terminal truth。
+epoll已把`EPOLLRDHUP`接入真实interest、route coverage、exact scan与copyout，LT/ET/ONESHOT及mandatory HUP策略保持由既有
+consumer owner裁决。
+
+pre-listen/pre-connect watch使用不携带readiness truth的非owning route。`listen`/`connect`在admission与endpoint owner锁内
+把同一个预分配route原子移交给listener或connection-side route registry，发布role后在guard外发出recheck hint；exact
+predicate scan仍是唯一交付依据。确定性owner-local KUnit分别证明pre-listen与pre-connection route在role transition后收到
+第一次hint，并能从新owner收到后续admission/direction hint，不依赖sleep或调度时序。最终同一独立reviewer复核确认
+Apollyon 0、Keter 0、Euclid 0；早先关于blocked-wait marker不能证明已经parked的Euclid由上述确定性proof闭合。
+
+最终canonical release kernel与`socket-test` app在RV64/LA64均构建通过，`just test xtask`为66/66，`just test net-host`
+全部通过。最终guest wrapper在RV64通过KUnit 373/373、UDP 16/16、Unix 23/23以及glibc/musl `socketpair02`，LA64通过
+KUnit 378/378及相同runtime矩阵；两架构focused glibc/musl oracle均输出
+`TPASS: socket_stage3b_oracle listener ppoll pselect rdhup hup lt et oneshot`，既有epoll product regression在两架构均为
+`EPOLLTEST:SUMMARY:PASS:11`。LA64完成filesystem/network/device orderly shutdown后因平台没有成功power-off handler进入
+既有末尾halt并由QEMU monitor退出；运行副本使用worktree-local磁盘，未修改master image。
+
+**Not Run / non-claim：** full socket/network LTP、final harness、physical hardware与`smp>1`未运行，Stage 4 integrated
+acceptance也未运行。Stage 3 closure的transaction与current-contract cutover均为None；全部pending
+Socket/Unix/IOMUX/Epoll contract继续Not Effective。本checkpoint没有产生新的current defect或accepted limitation，register
+不变；Stage 4没有被解析、激活或授权。
 
 ### Stage 3 Cutover、evidence 与 write-back
 

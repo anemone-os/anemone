@@ -9,7 +9,7 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** Git/PR（Stage 1/2 Closed；Checkpoint 1A/1B/2A/2B/3A Closed；Stage 3 Active；3B Ready / Not Active）；transaction None；contract cutover None
+**执行记录：** Git/PR（Stage 1/2/3 Closed；Checkpoint 1A/1B/2A/2B/3A/3B Closed；Stage 4 Not Active）；transaction None；contract cutover None
 
 ## 文档状态
 
@@ -554,8 +554,8 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
   [retired-bind inert inode](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)、
   [pre-connection shutdown](../../register/current-limitations.md#ane-20260802-unix-preconnection-shutdown)
 - External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`、`net/socket.c`、`net/core/sock.c`与`fs/select.c`
-- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B、Stage 2 Checkpoint 2A/2B与Stage 3 Checkpoint 3A实现、review和
-  验证证据，以及Stage 3 resolution；transaction：None；cutover：None
+- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B、Stage 2 Checkpoint 2A/2B与Stage 3 Checkpoint 3A/3B实现、review和
+  验证证据，以及Stage 3 resolution与closure；transaction：None；cutover：None
 
 ## 修订记录
 
@@ -568,8 +568,7 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 
 ## Closure
 
-Not Cut Over。Checkpoint 1A、1B、2A、2B与Stage 1/2已关闭；UDP与Unix `socketpair`共同证明front vertical slice，
-single Unix Socket、pathname namespace/name与listener/connection admission已形成Stage 2完整vertical slice。Stage 3已
-解析为3A directional stream operation/message-query ABI与3B listener/stream readiness两个checkpoint；3A已关闭，Stage 3
-保持Active，3B Ready / Not Active。Stage 4仍未解析或激活，最终acceptance尚未运行。transaction与contract cutover保持
-None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。
+Not Cut Over。Checkpoint 1A、1B、2A、2B、3A、3B与Stage 1/2/3已关闭；UDP与Unix `socketpair`共同证明front vertical
+slice，single Unix Socket、pathname namespace/name与listener/connection admission已形成Stage 2完整vertical slice，
+directional stream operation/message-query ABI与listener/stream readiness已形成Stage 3完整slice。Stage 4仍未解析或激活，
+最终acceptance尚未运行。transaction与contract cutover保持None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。

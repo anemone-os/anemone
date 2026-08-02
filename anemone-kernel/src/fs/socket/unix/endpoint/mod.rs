@@ -18,16 +18,55 @@ use super::{
         SocketStreamWriteSource, SocketType,
     },
     admission::{
-        UnixListener, accept, connect, listen, notify_admission_routes, with_admission_commit,
+        UnixListener, accept, connect, listen, notify_admission_routes, poll_unix_listener,
+        with_admission_commit,
     },
     namespace::{BindingRegistration, create_socket_pathname, publish_binding, withdraw_binding},
 };
 
 pub(super) use stream::{EndpointSide, UnixConnection};
 use stream::{
-    poll_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream,
+    poll_connected_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream,
     shutdown_unix_stream,
 };
+
+#[derive(Clone, Debug)]
+pub(super) struct UnixPollRoute {
+    /// Non-owning consumer capability; it carries no readiness payload.
+    pub(super) route: PollRoute,
+    /// Notification filter only. Exact readiness is always re-derived from the
+    /// endpoint's current role owner after a hint or role handoff.
+    pub(super) interests: PollEvent,
+}
+
+impl UnixPollRoute {
+    pub(super) fn new(route: &PollRoute, interests: PollEvent) -> Self {
+        Self {
+            route: route.clone(),
+            interests,
+        }
+    }
+}
+
+pub(super) fn replacement_poll_routes(
+    current: &Arc<Vec<UnixPollRoute>>,
+    route: &PollRoute,
+    interests: PollEvent,
+) -> Arc<Vec<UnixPollRoute>> {
+    let retained = current
+        .iter()
+        .filter(|entry| !entry.route.is_prunable())
+        .count();
+    let mut replacement = Vec::with_capacity(retained + 1);
+    replacement.extend(
+        current
+            .iter()
+            .filter(|entry| !entry.route.is_prunable())
+            .cloned(),
+    );
+    replacement.push(UnixPollRoute::new(route, interests));
+    Arc::new(replacement)
+}
 
 #[derive(Debug)]
 pub(super) struct EndpointName(SpinLock<Option<Arc<str>>>);
@@ -75,10 +114,10 @@ pub(super) enum BindingPublication {
 pub(super) struct EndpointState {
     pub(super) association: EndpointAssociation,
     pub(super) binding: BindingPublication,
-    /// Routes interested only in endpoint admission/lifecycle changes. They
-    /// carry no role, readiness, or errno truth and are pruned
-    /// opportunistically.
-    pub(super) lifecycle_routes: Arc<Vec<PollRoute>>,
+    /// Routes interested in endpoint role/lifecycle changes. A role commit
+    /// hands them to the new listener/connection predicate owner; they carry
+    /// no role, readiness, or errno truth and are pruned opportunistically.
+    pub(super) lifecycle_routes: Arc<Vec<UnixPollRoute>>,
 }
 
 #[derive(Debug)]
@@ -139,15 +178,17 @@ impl UnixEndpointCore {
         &self,
         connection: Arc<UnixConnection>,
         side: EndpointSide,
-        empty_lifecycle_routes: Arc<Vec<PollRoute>>,
-    ) -> Arc<Vec<PollRoute>> {
+        empty_lifecycle_routes: Arc<Vec<UnixPollRoute>>,
+    ) -> Arc<Vec<UnixPollRoute>> {
         let mut state = self.state.lock();
         assert!(matches!(
             state.association,
             EndpointAssociation::Unconnected
         ));
+        let routes = core::mem::replace(&mut state.lifecycle_routes, empty_lifecycle_routes);
+        connection.install_routes(side, routes.clone());
         state.association = EndpointAssociation::Connected { connection, side };
-        core::mem::replace(&mut state.lifecycle_routes, empty_lifecycle_routes)
+        routes
     }
 
     fn connected(&self) -> Result<(Arc<UnixConnection>, EndpointSide), EndpointAccessError> {
@@ -344,6 +385,97 @@ fn query_unix_accepting(private: &AnyOpaque) -> Result<bool, SocketQueryError> {
         EndpointAssociation::Listening(_) => Ok(true),
         EndpointAssociation::Retired => Err(SocketQueryError::Retired),
         EndpointAssociation::Unconnected | EndpointAssociation::Connected { .. } => Ok(false),
+    }
+}
+
+fn unconnected_poll_events(request: &PollRequest<'_>) -> PollEvent {
+    PollEvent::HANG_UP | (PollEvent::WRITABLE & request.interests())
+}
+
+fn poll_unconnected_endpoint(
+    endpoint: &UnixEndpointCore,
+    request: &PollRequest<'_>,
+) -> Result<Option<PollRegisterResult>, SysError> {
+    let Some(route) = request.route() else {
+        let state = endpoint.state.lock();
+        return Ok(
+            matches!(state.association, EndpointAssociation::Unconnected)
+                .then(|| PollRegisterResult::Ready(unconnected_poll_events(request))),
+        );
+    };
+
+    loop {
+        let current = {
+            let state = endpoint.state.lock();
+            if !matches!(state.association, EndpointAssociation::Unconnected) {
+                return Ok(None);
+            }
+            state.lifecycle_routes.clone()
+        };
+        let replacement = replacement_poll_routes(&current, route, request.interests());
+        let (previous, result, retry) = with_admission_commit(|| {
+            let mut state = endpoint.state.lock();
+            if !matches!(state.association, EndpointAssociation::Unconnected) {
+                return (None, None, false);
+            }
+            if !Arc::ptr_eq(&state.lifecycle_routes, &current) {
+                return (None, None, true);
+            }
+            let previous = core::mem::replace(&mut state.lifecycle_routes, replacement);
+            (
+                Some(previous),
+                Some(PollRegisterResult::Subscribed(unconnected_poll_events(
+                    request,
+                ))),
+                false,
+            )
+        });
+        drop(previous);
+        if retry {
+            continue;
+        }
+        return Ok(result);
+    }
+}
+
+fn poll_unix_stream(
+    private: &AnyOpaque,
+    request: &PollRequest<'_>,
+) -> Result<PollRegisterResult, SysError> {
+    let endpoint = &endpoint(private).core;
+    loop {
+        enum Dispatch {
+            Unconnected,
+            Listening(Arc<UnixListener>),
+            Connected,
+            Retired,
+        }
+
+        let dispatch = match &endpoint.state.lock().association {
+            EndpointAssociation::Unconnected => Dispatch::Unconnected,
+            EndpointAssociation::Listening(listener) => Dispatch::Listening(listener.clone()),
+            EndpointAssociation::Connected { .. } => Dispatch::Connected,
+            EndpointAssociation::Retired => Dispatch::Retired,
+        };
+        match dispatch {
+            Dispatch::Unconnected => {
+                // Linux AF_UNIX keeps an unconnected/bound stream in its
+                // terminal pre-connection role: HUP is mandatory and a send
+                // attempt can complete immediately with its role error. A
+                // persistent route is still required so listen/connect can
+                // hand the watch into the new predicate owner.
+                if let Some(result) = poll_unconnected_endpoint(endpoint, request)? {
+                    return Ok(result);
+                }
+            },
+            Dispatch::Listening(listener) => {
+                return poll_unix_listener(endpoint, &listener, request);
+            },
+            Dispatch::Connected => return poll_connected_unix_stream(private, request),
+            Dispatch::Retired => {
+                return Ok(PollRegisterResult::Ready(PollEvent::HANG_UP));
+            },
+        }
     }
 }
 
@@ -889,6 +1021,134 @@ mod kunits {
         );
         final_release_unix_stream(&pair.first_private);
         final_release_unix_stream(&pair.second_private);
+    }
+
+    #[kunit]
+    fn role_and_receive_half_close_readiness_are_owner_projections() {
+        let single = prepare_unix_socket().unwrap();
+        let events = poll_unix_stream(
+            &single.private,
+            &PollRequest::snapshot(
+                PollEvent::READABLE | PollEvent::WRITABLE | PollEvent::READ_HANG_UP,
+            ),
+        )
+        .unwrap()
+        .expect_ready("unconnected Unix readiness");
+        assert_eq!(events, PollEvent::WRITABLE | PollEvent::HANG_UP);
+
+        let pair = prepare_unix_pair().unwrap();
+        assert_eq!(
+            send_stream_for_test(&pair.second_private, &mut WriteBytes(b"buffered")),
+            Ok(8)
+        );
+        assert_eq!(
+            shutdown_unix_stream(&pair.second_private, SocketShutdown::Write),
+            Ok(())
+        );
+        let interests = PollEvent::READABLE | PollEvent::WRITABLE | PollEvent::READ_HANG_UP;
+        let events = poll_unix_stream(&pair.first_private, &PollRequest::snapshot(interests))
+            .unwrap()
+            .expect_ready("peer write shutdown readiness");
+        assert!(events.contains(PollEvent::READABLE));
+        assert!(events.contains(PollEvent::WRITABLE));
+        assert!(events.contains(PollEvent::READ_HANG_UP));
+        assert!(!events.contains(PollEvent::HANG_UP));
+
+        let mut buffered = ReadCapture(Vec::new());
+        assert_eq!(
+            receive_stream_for_test(&pair.first_private, &mut buffered),
+            Ok(8)
+        );
+        assert_eq!(buffered.0, b"buffered");
+        let events = poll_unix_stream(&pair.first_private, &PollRequest::snapshot(interests))
+            .unwrap()
+            .expect_ready("drained EOF readiness");
+        assert!(events.contains(PollEvent::READABLE | PollEvent::READ_HANG_UP));
+        assert!(!events.contains(PollEvent::HANG_UP));
+
+        assert_eq!(
+            shutdown_unix_stream(&pair.first_private, SocketShutdown::Write),
+            Ok(())
+        );
+        let events = poll_unix_stream(&pair.first_private, &PollRequest::snapshot(interests))
+            .unwrap()
+            .expect_ready("full terminal readiness");
+        assert!(events.contains(PollEvent::HANG_UP));
+    }
+
+    #[kunit]
+    fn preconnection_poll_route_moves_to_connection_owner() {
+        let prepared = prepare_unix_socket().unwrap();
+        let client = endpoint(&prepared.private).core.clone();
+        let observer = Arc::new(CountingObserver(AtomicUsize::new(0)));
+        let poll_route = route(&observer);
+        assert_eq!(
+            poll_unix_stream(
+                &prepared.private,
+                &PollRequest::register_with_route(PollEvent::READABLE, &poll_route),
+            )
+            .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::HANG_UP)
+        );
+
+        let peer = UnixEndpointCore::new_unconnected();
+        let connection = UnixConnection::new([client.name.clone(), peer.name.clone()]);
+        peer.install_connection(connection.clone(), EndpointSide::Second);
+        let routes =
+            client.commit_connection(connection, EndpointSide::First, Arc::new(Vec::new()));
+        notify_admission_routes(&routes, "KUnit public poll connection commit");
+        assert_eq!(observer.notifications(), 1);
+
+        let peer_private = private_from_core(peer);
+        assert_eq!(
+            send_stream_for_test(&peer_private, &mut WriteBytes(b"x")),
+            Ok(1)
+        );
+        assert_eq!(observer.notifications(), 2);
+        final_release_unix_stream(&peer_private);
+        final_release_unix_stream(&prepared.private);
+    }
+
+    #[kunit]
+    fn prelisten_poll_route_moves_to_listener_owner() {
+        let prepared = prepare_unix_socket().unwrap();
+        let listener_endpoint = endpoint(&prepared.private).core.clone();
+        let pathname: Arc<str> = Arc::from("/kunit/unix-prelisten-poll");
+        listener_endpoint.begin_bind(pathname.clone()).unwrap();
+        let (_file, inode) = anonymous_socket_inode();
+        listener_endpoint.commit_bind(pathname, inode).unwrap();
+
+        let observer = Arc::new(CountingObserver(AtomicUsize::new(0)));
+        let poll_route = route(&observer);
+        assert_eq!(
+            poll_unix_stream(
+                &prepared.private,
+                &PollRequest::register_with_route(PollEvent::READABLE, &poll_route),
+            )
+            .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::HANG_UP)
+        );
+        listen(&listener_endpoint, 0).unwrap();
+        assert_eq!(observer.notifications(), 1);
+
+        let listener = match &listener_endpoint.state.lock().association {
+            EndpointAssociation::Listening(listener) => listener.clone(),
+            association => panic!("listen committed unexpected association {association:?}"),
+        };
+        let routes = listener
+            .admit_for_validation(UnixEndpointCore::new_unconnected())
+            .unwrap();
+        notify_admission_routes(&routes, "KUnit public poll listener admission");
+        assert_eq!(observer.notifications(), 2);
+        assert_eq!(
+            poll_unix_stream(
+                &prepared.private,
+                &PollRequest::snapshot(PollEvent::READABLE),
+            )
+            .unwrap(),
+            PollRegisterResult::Ready(PollEvent::READABLE)
+        );
+        final_release_unix_stream(&prepared.private);
     }
 
     #[kunit]

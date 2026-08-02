@@ -20,7 +20,12 @@ bitflags! {
         const WRITABLE = 0x02;
         const ERROR = 0x04;
         const HANG_UP = 0x08;
-        // TODO
+        /// The read half is terminal while the complete source may remain live.
+        ///
+        /// This source-neutral fact is distinct from `HANG_UP`; Linux poll and
+        /// epoll adapters project it as `POLLRDHUP` / `EPOLLRDHUP` only when
+        /// requested, while ordinary EOF readability remains `READABLE`.
+        const READ_HANG_UP = 0x10;
     }
 }
 
