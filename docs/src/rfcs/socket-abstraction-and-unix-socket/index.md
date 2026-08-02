@@ -9,7 +9,7 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** Git/PR（Stage 1 Closed；Stage 2 Closed；Checkpoint 1A/1B/2A/2B Closed）；transaction None；contract cutover None
+**执行记录：** Git/PR（Stage 1/2 Closed；Checkpoint 1A/1B/2A/2B Closed；Stage 3 Ready / Not Active）；transaction None；contract cutover None
 
 ## 文档状态
 
@@ -531,8 +531,9 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
   [VFS create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)、
   [non-UTF-8 pathname](../../register/current-limitations.md#ane-20260801-vfs-non-utf8-pathname)、
   [retired-bind inert inode](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)
-- External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`
-- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B与Stage 2 Checkpoint 2A/2B实现、review和验证证据；transaction：None；cutover：None
+- External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`、`net/socket.c`、`net/core/sock.c`与`fs/select.c`
+- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B与Stage 2 Checkpoint 2A/2B实现、review和验证证据，以及Stage 3
+  resolution；transaction：None；cutover：None
 
 ## 修订记录
 
@@ -543,5 +544,6 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 ## Closure
 
 Not Cut Over。Checkpoint 1A、1B、2A、2B与Stage 1/2已关闭；UDP与Unix `socketpair`共同证明front vertical slice，
-single Unix Socket、pathname namespace/name与listener/connection admission已形成Stage 2完整vertical slice。Stage 3/4
-仍未解析或激活，最终acceptance尚未运行；transaction保持None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。
+single Unix Socket、pathname namespace/name与listener/connection admission已形成Stage 2完整vertical slice。Stage 3已
+解析为3A directional stream operation/message-query ABI与3B listener/stream readiness两个checkpoint，但均未激活；Stage 4
+仍未解析或激活，最终acceptance尚未运行。transaction保持None，任何pending Socket/Unix/IOMUX/Epoll contract都尚未生效。
