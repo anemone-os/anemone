@@ -1,10 +1,10 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R1 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Checkpoint 3A/3B Closed / Stage 4 Not Active
+**状态：** R1 Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Checkpoint 3A/3B Closed / Stage 4 Ready / Not Active
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R1
-**当前实施阶段：** Stage 3 Closed；Checkpoint 3A/3B Closed；Stage 4 Not Active
+**当前实施阶段：** Stage 4 Ready / Not Active；resolution completed；尚未取得实施或cutover授权
 （transaction None；contract cutover None）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
@@ -19,6 +19,9 @@ contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解�
 6.6.32 oracle，把本 Stage 解析为两个有序 checkpoint，但没有在 resolution 时激活任何代码实施。Checkpoint 3A、3B
 随后各自取得独立授权并依次关闭，Stage 3 已关闭并停止在 Stage 4 前。resolution、checkpoint closure 与 Stage 1--3
 closure均不使 pending contract 生效，也不自动进入下一 checkpoint 或 Stage。
+独立的 Stage 4 resolution 随后读取最终candidate、完整actual diff、review finding、validation provenance、current
+contracts与register，把最终综合验收和原子cutover解析为一个不拆checkpoint的Stage；本次resolution没有激活Stage 4、
+运行验证、修改current contract或执行cutover。
 
 ## 全局 Implementation Boundary
 
@@ -113,10 +116,11 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
 | Stage 2 | Closed；2A/2B Closed；Cutover None | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已完成并停止；Stage 3随后独立解析为Ready |
-| Stage 3 | Closed；3A/3B Closed；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 已完成并停止；Stage 4未激活 |
-| Stage 4 | Not Active / Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态；需独立授权 |
+| Stage 3 | Closed；3A/3B Closed；Cutover None | 先闭合directional stream operation、shutdown与message/query ABI，再接通listener/stream poll/select/epoll readiness | Stage 2 Closed；Stage 3 resolution completed | 已完成并停止；Stage 4随后独立解析为Ready |
+| Stage 4 | Ready / Not Active；Cutover None | 复核最终candidate的综合acceptance并原子执行`SOCKET-UNIX-CUTOVER` | Stage 1-3 Closed；Stage 4 resolution completed | 只能由新的明确授权激活整个Stage 4 |
 
-Stage 1--3 已按下文解析到可执行粒度；Stage 4 仍只固定 Purpose、Prerequisites 与 Protected Boundary 所需的高层路线。
+Stage 1--4 已按下文解析到可执行粒度；Stage 4不拆checkpoint，最终review、validation disposition与contract cutover共同
+构成一个原子closure unit。
 不创建逐文件 write set 或 Resolved Write Set Manifest；预计模块只作非穷举提示。同 owner 新文件、模块注册、
 import/re-export、定向测试和行为保持型拆分可在当前 checkpoint 内自然闭合。若用户只授权当前 Stage 或 checkpoint，
 关闭后必须停止。
@@ -882,36 +886,132 @@ Exit后，implementation页才标记Stage 3 Closed；`SOCKET-FRONT-001`、`SOCKE
 如果实施只采用R1内的owner-local路线修正、module split或focused oracle，不增加修订号，也不更新register。只有实际出现
 新的current defect、采用新的accepted engineering limitation，或现有inert-inode limitation的可见边界发生变化时才维护
 register；target、owner、ABI、Contract Impact、acceptance或validation strength变化必须先回RFC review。Stage 3 closure
-不解析Stage 4，后者仍需基于完整actual diff、finding、validation与register状态取得新的明确授权。
+本身不解析或授权Stage 4；后续独立resolution才基于完整actual diff、finding、validation与register把Stage 4解析为下文
+Ready状态。
 
-## Stage 4 — Integrated acceptance 与 `SOCKET-UNIX-CUTOVER`
+## Stage 4 Ready / Not Active — Integrated acceptance 与 `SOCKET-UNIX-CUTOVER`
 
-**目的：** 不再扩张能力；对Stage 1-3的完整实际实现执行最终owner/source/conformance/regression审计，完成父RFC
-acceptance、文档回写与单一原子contract cutover。
+**Resolution状态：** Completed 2026-08-02；Stage 4 Ready / Not Active；不拆checkpoint。本resolution只更新accepted
+target内的最终审查、证据复用、contract write-back与停止路线；未修改R1 target、Contract Impact、current contract或
+register，未创建transaction，未运行build/KUnit/QEMU/LTP，也未授权Stage 4实施或cutover。
 
-**前置：** Stage 1-3 Closed；所有实际diff、review finding、validation evidence、Not Run边界与register状态可审计；
-Stage 4已独立授权。
+### Live candidate 与解析结论
 
-**受保护边界：** 父RFC target、scoped Linux behavior、两个consumer proof、完整validation floor与Contract Impact
-不得在closure阶段静默收窄。Stage 4默认不修复无关相邻问题，也不以文档声明替代缺失runtime。
+resolution读取的final source candidate为`d027b6c9`。Stage 1--3从`f0378d0f`父RFC进入，依次形成common Socket front、
+Unix socketpair、pathname namespace、listener/admission、directional stream operation和完整readiness；最终candidate没有
+尚未实现的R1 production capability或仍存活的compat-only RDHUP/temporary unsupported bridge。当前register只保留R1已经
+接受的pre-connection shutdown、retired-bind inert inode与继承的VFS pathname/common-create边界，没有新的current defect
+要求Stage 4先扩张target。
 
-**预期交付：**
+`d027b6c9`本身已经取得Stage 3B final release build、owner-local proof和双架构guest evidence：RV64/LA64分别通过
+373/373与378/378项KUnit，两个架构均通过UDP 16/16、Unix 23/23、glibc/musl `socketpair02`、focused readiness oracle与
+`EPOLLTEST:SUMMARY:PASS:11`。这些事实使Stage 4的最小自然形状成为一个最终conformance/cutover unit，而不是新的feature
+checkpoint。Stage 4不为了给相同candidate重新命名证据而机械重跑全部runtime；它先审计candidate、配置、artifact和每项
+proof的相关性，只在证据缺失、provenance不足或candidate变化时重跑受影响类别。
 
-- 按父 RFC [最终 closure 证据](./index.md#最终-closure-证据)完成source/owner audit、owner-local proof、双架构/
-  双libc runtime、pathname实际用途、iomux/epoll与UDP regression；
-- 扫描并清除第二truth、owner穿透、private representation泄漏、caller/test特判、无退出桥、隐含cleanup顺序和无真实
-  consumer抽象；只在有具体证据时按Architecture Friction规则回写；
-- 按实际采用路线维护register；未执行的hardware、`smp>1`、full network/socket LTP与final harness等证据明确记为
-  Not Run，且不冒充父RFC mandatory acceptance；
-- 原子更新父RFC列出的Socket/Unix contract ID以及`IOMUX-POLL-002/003`、`EPOLL-READY-001`，回写RFC closure、
-  public navigation与唯一执行证据入口。
+本结论不预先宣称RFC acceptance已经完成。Stage 3A的临时双libc raw-syscall probe产生于较早candidate，Stage 3B又修改了
+Unix role/readiness owner；该probe只能在final source relevance audit证明后复用，否则必须以final candidate上的focused
+oracle替代。current-contract正文、最终exact-diff review、综合evidence index与原子cutover也仍全部未执行。
 
-**验证类别：** 以父RFC acceptance为唯一完整矩阵；Stage 1-3 evidence可以复用，但必须针对最终实际diff复核其仍然
-有效。共享generated architecture output的build/runtime串行执行。
+### Stage 4 Implementation Boundary
 
-**Cutover：** `SOCKET-UNIX-CUTOVER`。所有pending ID共同达到acceptance后一次生效；任一mandatory owner、ABI、
-lifecycle、architecture或consumer proof缺失时保持Not Cut Over，不做部分current-contract宣传。
+**Target：** 不增加R1能力；在一个最终candidate上把父RFC[最终closure证据](./index.md#最终-closure-证据)逐项映射到
+live source、owner-local proof、architecture/libc/runtime evidence与accepted Not Run边界，完成final change review，随后
+把全部pending Socket/Unix contract以及`IOMUX-POLL-002/003`、`EPOLL-READY-001`一次切换为current truth并关闭RFC。
 
-**停止 / 退出：** 未关闭的validation failure、target内correctness bug、Keter/Apollyon、UDP regression、双consumer
-proof缺失，或需要改变target/Contract Impact/acceptance时立即停止，不声明RFC Closed。全部证据满足、current contracts
-与RFC closure原子回写、实际限制和Not Run范围诚实记录后，Stage 4与父RFC才可关闭。
+**Non-goals：** TCP、Unix datagram/seqpacket/abstract namespace、`SO_ERROR`、pending-error/ERR readiness、成功mutable
+socket option、ancillary data、timeout、async I/O和其它父RFC non-goal均不重开。physical hardware、`smp>1`、full
+network/socket LTP与final harness不是R1 mandatory floor；未运行时保留Not Run，不为取得更宽宣传而临时扩大Stage 4。
+现有VFS common-create issue、non-UTF-8 pathname、retired-bind inert inode和pre-connection shutdown limitation不在本Stage
+修复。
+
+**Owner / handoff / cleanup：** Stage 4不重塑production owner。general Socket继续只拥有immutable descriptor、private
+envelope、共同FileOps/ABI lowering与wait orchestration；UDP Endpoint、Unix endpoint role、listener/backlog、connection
+direction、VFS namespace、opened-description、iomux与epoll分别保持唯一truth。final audit必须沿socket/socketpair/accept的
+fd publication与rollback、bind的VFS-to-Unix publication、connect/accept admission、stream copy/commit、route
+publication/recheck和final release逐条确认handoff前后只有一个cleanup owner。任何修正先形成新的candidate，再重新判断受影响
+证据；不得让closure文档替代代码或测试修复。
+
+**Protected ABI / contract / acceptance：** R1 scoped Linux behavior、两种真实Socket consumer、六组conformance surface、
+双架构/双libc floor与父RFC Contract Impact均保持。UDP的`NET-*`、opened-description、VFS creation/make-node、
+`IOMUX-POLL-001`、`EPOLL-WATCH-001`与`EPOLL-FILE-001`继续作为Dependencies，不登记`Preserve`或顺手改写。contract正文
+必须从final source提取最小current闭包，不能把RFC-local证明、阶段路线、实现类型或Not Run能力写成长期规则。
+
+**允许的route correction：** 若final audit只发现R1内的source bug、缺失comment/assert、owner-local test gap、validation
+asset缺口或同owner行为保持拆分，可以在Stage 4内作最小修正并重冻结candidate；修改后的相关proof、exact-diff review和
+architecture/runtime evidence必须按影响重跑。若需要改变target、owner、handoff、failure/cleanup、public ABI、
+Contract Impact、acceptance或validation strength，则停止并回RFC review / Target Renegotiation，不能在Stage 4自批。
+
+### Final evidence matrix 与复用规则
+
+父RFC acceptance是唯一完整矩阵；下表只定义如何把已有执行事实提升为final-candidate closure evidence，不建立并列target。
+
+| Proof类别 | Final-candidate义务 | 当前可审计基线 | Stage 4 closure动作 |
+| --- | --- | --- | --- |
+| Source / owner / Architecture Friction | 覆盖raw ABI containment、两个consumer、namespace/readiness唯一truth、无socket-local VFS policy、无pending-error、fd/final-release/stale cleanup及iomux/epoll consumer边界 | Stage 1--3各checkpoint review与`d027b6c9` live source | 对完整actual diff执行一次综合owner/protocol audit和final exact-diff review；Apollyon/Keter必须先修复，Euclid按真实影响处置 |
+| Owner-local proof | tuple resolver、fd rollback、VFS production handoff、identity/rebind、DAC lifetime、listener admission、stream prefix/peek/EOF/shutdown/SIGPIPE、per-operation predicate与late hint | final candidate的RV64 373/373、LA64 378/378项KUnit，`just test xtask` 66/66与`just test net-host`通过记录 | 建立contract-ID到真实case/source invariant的evidence index；candidate或test asset未变且provenance完整时复用，否则重跑受影响owner proof |
+| Architecture build | RV64/LA64 canonical release kernel与`socket-test` app | `d027b6c9`两架构final build已通过 | 核验preset、KernelConfig、app export与artifact identity；若需要重跑，两个架构串行，不能共享generated DTB并发 |
+| Guest / real consumer | 两架构覆盖socketpair、pathname server/client、DAC/umask/mode、listen/connect/accept、I/O、nonblocking、dup/fork/final close、rename/unlink/rebind、poll/select/epoll与RDHUP/HUP；UDP保持current语义 | `d027b6c9`两架构Unix 23/23、UDP 16/16与epoll 11项；`socket-test`的pathname stream case是真实guest testcase | 逐项对照父RFC而不是只看summary count；只有缺失mandatory row、artifact provenance不完整或相关source/config变化时才运行对应canonical wrapper |
+| libc / ABI oracle | glibc与musl覆盖tuple/flags/errno、sockaddr/addrlen/copy-fault、R1 pre-connection shutdown以及readiness投影 | final candidate的双libc `socketpair02`与Stage 3B readiness oracle；Stage 3A raw probe来自较早candidate | 对Stage 3A之后相关hunk做relevance audit；无法证明不受影响的ABI row必须在final candidate上重跑focused双libc oracle，不把旧probe文字当作当前runtime |
+| Contract / closure | 八个Introduce ID、两个IOMUX Refine与一个Epoll Refine共同生效，RFC与public navigation同步 | current contract仍保持旧规则，全部ID Pending/Not Effective | 先以final source生成最小current contract diff，再与RFC closure、evidence入口和导航在同一cutover提交中原子回写；任一ID不满足则全部保持Not Cut Over |
+| Non-claim | 不把未运行范围或较窄证据扩大宣传 | hardware、`smp>1`、full network/socket LTP、final harness均Not Run | 在closure/current接受边界中保留Not Run；不以build、单架构或socketpair替代pathname/architecture proof |
+
+证据复用以语义相关性而不是日期或Stage标签决定：必须能够识别candidate、配置、test/rootfs输入、架构、libc和结果；后续只改
+RFC/current-contract文本不会使runtime失效。任何kernel、ABI、test oracle、rootfs composition、Kconfig、platform/preset或
+wrapper变化都要先判断影响面；能证明无关时保留其它证据，不能证明时重跑对应类别。重跑共享generated architecture output
+的build/runtime必须串行，并继续显式选择LOCAL中对应的preliminary master image，由wrapper创建worktree-local运行副本。
+
+### Review finding 与 Architecture Friction disposition
+
+Stage 3A留下的两个Euclid目前都是验证覆盖风险：non-socket fd配合valid/invalid `shutdown how`缺少直接runtime
+lookup-priority cross-check，shutdown/read-write/final-close竞争缺少可控copy barrier runtime。现有source lock-order、operation
+gate、commit recheck和相邻oracle没有显示第二truth、lost wake或错误commit，因此本resolution不把它们预先升级为Stage 4
+blocker，也不为形式闭合引入production probe。
+
+Stage 4 final review必须重新处置这两项：若final source、owner-local proof与父RFC mandatory matrix已经给出足够proof，可以
+保留为closure中的residual Euclid并说明最小补强方向；若审查发现它们掩盖可达correctness failure或mandatory proof缺口，
+则在当前owner内加入最小确定性case并重跑受影响证据。不得通过降低copy-fault/race oracle、静默忽略errno priority或把
+test-only phase/barrier沉淀为production API来消除finding。
+
+综合Architecture Friction Scan还必须检查：`Socket`是否出现第二family/type/readiness truth；Unix endpoint、listener、
+direction与namespace是否发生owner穿透；`UnixPollRoute`等notification carrier是否反向驱动行为；KUnit-only validation入口
+是否仍有真实consumer且未进入production dependency；bind/final-release/accept Drop的cleanup顺序是否显式；以及current
+contract提取是否制造无真实复用的新抽象层。没有具体摩擦或只剩Safe时不写占位结论。
+
+### Contract cutover 与 write-back
+
+`SOCKET-UNIX-CUTOVER`是Stage 4唯一formal gate。cutover建立新的Socket current-contract owner入口，并按共同owner与共同
+证明面组织general front/ABI/wait以及Unix endpoint/namespace/stream/lifecycle最小surface；不按每个ID机械建文件，也不把
+UDP、VFS、opened-description、iomux或epoll Dependencies复制进Socket正文。`IOMUX-POLL-002/003`与`EPOLL-READY-001`
+在各自现有contract页原地Refine，分别记录independent receive-half-close category、final-scan interest projection与
+EPOLLRDHUP exact-scan delivery，保留其现有consumer policy和来源历史。
+
+同一cutover提交必须共同完成：
+
+- 新Socket contract入口和最小surface、既有iomux/epoll Refine、`docs/src/contracts.md`与`SUMMARY.md`导航；
+- 父RFC `index.md`/本页的Closed状态、逐ID old/new/evidence索引、final candidate与Not Run边界；
+- `docs/src/rfcs.md`公共状态，以及只在live evidence要求时维护的register条目；
+- `git diff --check`、残余Pending/Not Effective/Ready状态搜索与`mdbook build docs`。
+
+执行证据默认继续由Git/PR和RFC closure拥有；单一Stage、单一cutover不需要transaction。若实际执行演变成长期probe、多个
+独立cutover或target renegotiation，再按真实需要创建，不得为Stage编号预建日志。
+
+### Activation、执行顺序与停止 / 退出
+
+本resolution不授权Stage 4。只有新的明确授权才能把整个Stage置为Active；激活后按以下顺序闭合，不再建立4A/4B：
+
+1. 重新确认Git根、branch、dirty state、candidate identity、current contracts/register和Stage 1--3 evidence provenance；
+2. 完成final source/owner/Architecture Friction audit与父RFC逐项evidence index，决定旧证据复用或focused rerun；
+3. 只对mandatory gap实施R1内最小source/test/validation修正，若candidate变化则重算影响面并执行对应canonical proof；
+4. 冻结最终diff，完成final change review，确认Apollyon/Keter为零并处置residual Euclid；
+5. 全部mandatory proof满足后，在同一提交中执行current-contract、RFC closure、navigation与真实register/Not Run回写。
+
+以下任一情况立即停止，Stage 4保持Active / Not Cut Over或在未激活时保持Ready：mandatory evidence无法绑定final candidate；
+双架构、双libc、pathname real-consumer或UDP regression proof缺失；存在未关闭validation failure、target内correctness bug、
+Apollyon/Keter、第二truth/owner穿透/无owner cleanup；contract正文无法形成唯一owner的最小闭包；或继续需要改变target、
+Contract Impact、ABI、acceptance与validation strength。不得部分激活ID、先写RFC Closed再补runtime，或以accepted limitation
+吸收R1 target内错误。
+
+退出要求所有pending ID共同满足父RFC acceptance，final review和Architecture Friction disposition完成，current contracts与
+RFC closure原子回写，实际限制和Not Run范围诚实记录，文档验证通过。届时Stage 4与父RFC同时Closed；Stage 4之后没有自动
+进入的下一gate。
