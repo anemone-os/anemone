@@ -1,5 +1,6 @@
 mod abi;
 mod bind;
+mod getpeername;
 mod getsockname;
 mod recvfrom;
 mod sendto;

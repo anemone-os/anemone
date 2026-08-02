@@ -1,10 +1,10 @@
 //! Typed socket wrappers plus narrow raw Linux ABI conformance entries.
 
 use anemone_abi::{
-    errno::Errno,
+    errno::{EINVAL, Errno},
     net::linux::{
         AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
-        SockAddrIn, socklen_t,
+        SockAddrIn, SockAddrUn, UNIX_PATH_MAX, socklen_t,
     },
 };
 use bitflags::bitflags;
@@ -44,6 +44,51 @@ pub fn unix_stream_pair(flags: SocketFlags) -> Result<(Fd, Fd), Errno> {
         pair.as_mut_ptr() as u64,
     )
     .map(|_| (pair[0] as Fd, pair[1] as Fd))
+}
+
+pub fn unix_stream_socket(flags: SocketFlags) -> Result<Fd, Errno> {
+    net::socket(
+        AF_UNIX as u64,
+        (SOCK_STREAM | flags.bits()) as u64,
+        0,
+    )
+    .map(|fd| fd as Fd)
+}
+
+pub fn unix_path_address(pathname: &[u8]) -> Result<(SockAddrUn, socklen_t), Errno> {
+    if pathname.is_empty() || pathname.len() > UNIX_PATH_MAX {
+        return Err(EINVAL);
+    }
+    let mut address = SockAddrUn::default();
+    address.sun_path[..pathname.len()].copy_from_slice(pathname);
+    let len = core::mem::offset_of!(SockAddrUn, sun_path) + pathname.len();
+    Ok((address, len as socklen_t))
+}
+
+pub fn bind_unix_path(fd: Fd, pathname: &[u8]) -> Result<(), Errno> {
+    let (address, len) = unix_path_address(pathname)?;
+    net::bind(
+        fd as u64,
+        &address as *const SockAddrUn as u64,
+        len as u64,
+    )
+    .map(|_| ())
+}
+
+pub fn getsockname_unix_raw(
+    fd: Fd,
+    address: *mut SockAddrUn,
+    len: *mut socklen_t,
+) -> Result<(), Errno> {
+    net::getsockname(fd as u64, address as u64, len as u64).map(|_| ())
+}
+
+pub fn getpeername_unix_raw(
+    fd: Fd,
+    address: *mut SockAddrUn,
+    len: *mut socklen_t,
+) -> Result<(), Errno> {
+    net::getpeername(fd as u64, address as u64, len as u64).map(|_| ())
 }
 
 /// Raw socketpair entry for pointer and tuple conformance tests.

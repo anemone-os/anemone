@@ -18,7 +18,7 @@ struct CreationMetadata {
 /// The current task remains the truth source. The snapshot is deliberately
 /// operation-local so DAC and inode-formation decisions use the same
 /// credentials without carrying `Task` or credential storage into VFS.
-pub(super) struct KernelCreationPolicy {
+pub(in crate::fs) struct KernelCreationPolicy {
     checker: FsPermChecker,
     /// Snapshot of the task filesystem context's umask, represented as the rwx
     /// bits creation may retain. `FsState` remains the truth source; this value
@@ -28,7 +28,7 @@ pub(super) struct KernelCreationPolicy {
 }
 
 impl KernelCreationPolicy {
-    pub(super) fn for_current() -> Self {
+    pub(in crate::fs) fn for_current() -> Self {
         let task = get_current_task();
         Self {
             checker: FsPermChecker::new(task.cred()),
@@ -44,7 +44,7 @@ impl KernelCreationPolicy {
         }
     }
 
-    pub(super) fn checker(&self) -> &FsPermChecker {
+    pub(in crate::fs) fn checker(&self) -> &FsPermChecker {
         &self.checker
     }
 
@@ -154,7 +154,7 @@ pub(super) fn kernel_mkdir_at(
     vfs_mkdir_at(parent, name, metadata.perm, metadata.uid, metadata.gid)
 }
 
-pub(super) fn kernel_make_node_at(
+pub(in crate::fs) fn kernel_make_node_at(
     policy: &KernelCreationPolicy,
     parent: &PathRef,
     name: &str,

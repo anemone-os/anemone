@@ -219,6 +219,7 @@ pub mod linux {
     pub const SYS_SOCKETPAIR: u64 = 199;
     pub const SYS_BIND: u64 = 200;
     pub const SYS_GETSOCKNAME: u64 = 204;
+    pub const SYS_GETPEERNAME: u64 = 205;
     pub const SYS_SENDTO: u64 = 206;
     pub const SYS_RECVFROM: u64 = 207;
 

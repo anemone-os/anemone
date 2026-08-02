@@ -1,5 +1,6 @@
 use core::{
     ffi::c_void,
+    mem::{offset_of, size_of},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -7,19 +8,28 @@ use anemone_rs::{
     abi::{
         fs::linux::{
             IoVec,
+            at::{AT_FDCWD, AT_REMOVEDIR},
+            mode::{S_IFMT, S_IFSOCK},
             open::O_NONBLOCK,
             poll::{POLLHUP, POLLIN, POLLOUT, PollFd},
         },
-        net::linux::{AF_UNIX, SOCK_STREAM},
+        net::linux::{AF_UNIX, SOCK_STREAM, SockAddrUn, socklen_t},
         process::linux::signal::{SigAction, SigSet},
+        syscall::{
+            linux::{SYS_RENAMEAT2, SYS_SETUID, SYS_UMASK},
+            syscall,
+        },
         time::linux::TimeSpec,
     },
     os::linux::{
         fs::{
-            Fd, close, dup, fcntl_getfd, fcntl_getfl, fcntl_setfl, ppoll, read, readv, write,
-            writev,
+            AtFd, Fd, close, dup, fcntl_getfd, fcntl_getfl, fcntl_setfl, fstatat, linkat, mkdirat,
+            ppoll, read, readv, unlinkat, write, writev,
         },
-        net::{SocketFlags, socketpair_raw, unix_stream_pair},
+        net::{
+            SocketFlags, bind_unix_path, getpeername_unix_raw, getsockname_unix_raw,
+            socketpair_raw, unix_stream_pair, unix_stream_socket,
+        },
         process::{
             WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, sched_yield,
             signal::{SigNo, sigaction},
@@ -35,6 +45,15 @@ const ZERO_TIMEOUT: TimeSpec = TimeSpec {
 };
 
 static SIGPIPE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+const SINGLE_PATH: &str = "/mnt/socket-test-2a-single";
+const REPEAT_PATH: &str = "/mnt/socket-test-2a-repeat";
+const LIFECYCLE_PATH: &str = "/mnt/socket-test-2a-lifecycle";
+const LIFECYCLE_ALIAS: &str = "/mnt/socket-test-2a-alias";
+const LIFECYCLE_RENAMED: &str = "/mnt/socket-test-2a-renamed";
+const CONNECTED_PATH: &str = "/mnt/socket-test-2a-connected";
+const DAC_DIR: &str = "/mnt/socket-test-2a-dac";
+const DAC_PATH: &str = "/mnt/socket-test-2a-dac/denied";
 
 extern "C" fn sigpipe_handler(_signo: i32) {
     SIGPIPE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -71,6 +90,188 @@ fn install_sigpipe_handler() -> Result<(), Errno> {
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGPIPE, Some(&action), None)
+}
+
+fn unlink_if_present(path: &str, flags: u32) -> Result<(), Errno> {
+    match unlinkat(AtFd::Cwd, Path::new(path), flags) {
+        Ok(()) | Err(ENOENT) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn set_umask(mask: u32) -> Result<u32, Errno> {
+    unsafe { syscall(SYS_UMASK, mask as u64, 0, 0, 0, 0, 0) }.map(|old| old as u32)
+}
+
+fn setuid(uid: u32) -> Result<(), Errno> {
+    unsafe { syscall(SYS_SETUID, uid as u64, 0, 0, 0, 0, 0) }.map(|_| ())
+}
+
+fn rename(old: &str, new: &str) -> Result<(), Errno> {
+    let mut old_c = old.as_bytes().to_vec();
+    old_c.push(0);
+    let mut new_c = new.as_bytes().to_vec();
+    new_c.push(0);
+    unsafe {
+        syscall(
+            SYS_RENAMEAT2,
+            AT_FDCWD as i64 as u64,
+            old_c.as_ptr() as u64,
+            AT_FDCWD as i64 as u64,
+            new_c.as_ptr() as u64,
+            0,
+            0,
+        )
+    }
+    .map(|_| ())
+}
+
+fn unix_name(fd: Fd, peer: bool) -> Result<(SockAddrUn, socklen_t), Errno> {
+    let mut address = SockAddrUn::default();
+    let mut length = size_of::<SockAddrUn>() as socklen_t;
+    if peer {
+        getpeername_unix_raw(fd, &mut address, &mut length)?;
+    } else {
+        getsockname_unix_raw(fd, &mut address, &mut length)?;
+    }
+    Ok((address, length))
+}
+
+fn ensure_unnamed(address: &SockAddrUn, length: socklen_t) -> Result<(), Errno> {
+    ensure(
+        address.sun_family == AF_UNIX as u16 && length as usize == offset_of!(SockAddrUn, sun_path),
+    )
+}
+
+fn ensure_pathname(address: &SockAddrUn, length: socklen_t, pathname: &str) -> Result<(), Errno> {
+    let path = pathname.as_bytes();
+    ensure(address.sun_family == AF_UNIX as u16)?;
+    ensure(length as usize == offset_of!(SockAddrUn, sun_path) + path.len() + 1)?;
+    ensure(&address.sun_path[..path.len()] == path && address.sun_path[path.len()] == 0)
+}
+
+fn test_single_socket_bind_name_and_mode() -> Result<(), Errno> {
+    unlink_if_present(SINGLE_PATH, 0)?;
+    unlink_if_present(REPEAT_PATH, 0)?;
+
+    let fd = unix_stream_socket(SocketFlags::NONBLOCK | SocketFlags::CLOEXEC)?;
+    ensure(fcntl_getfd(fd)? == 1 && fcntl_getfl(fd)? & O_NONBLOCK != 0)?;
+    let mut byte = [0u8; 1];
+    expect_errno(read(fd, &mut byte), EINVAL)?;
+    expect_errno(write(fd, b"x"), ENOTCONN)?;
+    expect_errno(unix_name(fd, true), ENOTCONN)?;
+    let (unnamed, unnamed_len) = unix_name(fd, false)?;
+    ensure_unnamed(&unnamed, unnamed_len)?;
+
+    let old_umask = set_umask(0o027)?;
+    let bind_result = bind_unix_path(fd, SINGLE_PATH.as_bytes());
+    set_umask(old_umask)?;
+    bind_result?;
+
+    let stat = fstatat(AtFd::Cwd, Path::new(SINGLE_PATH))?;
+    ensure(stat.st_mode & S_IFMT == S_IFSOCK)?;
+    ensure(stat.st_mode & 0o777 == 0o750)?;
+    let (bound, bound_len) = unix_name(fd, false)?;
+    ensure_pathname(&bound, bound_len, SINGLE_PATH)?;
+    expect_errno(bind_unix_path(fd, REPEAT_PATH.as_bytes()), EINVAL)?;
+
+    let competing = unix_stream_socket(SocketFlags::empty())?;
+    expect_errno(
+        bind_unix_path(competing, SINGLE_PATH.as_bytes()),
+        EADDRINUSE,
+    )?;
+    close(competing)?;
+
+    let mut truncated = SockAddrUn::default();
+    let mut truncated_len = 4 as socklen_t;
+    getsockname_unix_raw(fd, &mut truncated, &mut truncated_len)?;
+    ensure(truncated.sun_family == AF_UNIX as u16)?;
+    ensure(&truncated.sun_path[..2] == &SINGLE_PATH.as_bytes()[..2])?;
+    ensure(truncated_len == bound_len)?;
+
+    close(fd)?;
+    let stat_after_close = fstatat(AtFd::Cwd, Path::new(SINGLE_PATH))?;
+    ensure(stat_after_close.st_mode & S_IFMT == S_IFSOCK)?;
+    let rebound = unix_stream_socket(SocketFlags::empty())?;
+    expect_errno(bind_unix_path(rebound, SINGLE_PATH.as_bytes()), EADDRINUSE)?;
+    unlink_if_present(SINGLE_PATH, 0)?;
+    bind_unix_path(rebound, SINGLE_PATH.as_bytes())?;
+    close(rebound)?;
+    unlink_if_present(SINGLE_PATH, 0)
+}
+
+fn test_name_alias_unlink_and_rebind_lifecycle() -> Result<(), Errno> {
+    for path in [LIFECYCLE_PATH, LIFECYCLE_ALIAS, LIFECYCLE_RENAMED] {
+        unlink_if_present(path, 0)?;
+    }
+
+    let original = unix_stream_socket(SocketFlags::empty())?;
+    bind_unix_path(original, LIFECYCLE_PATH.as_bytes())?;
+    linkat(
+        AtFd::Cwd,
+        Path::new(LIFECYCLE_PATH),
+        AtFd::Cwd,
+        Path::new(LIFECYCLE_ALIAS),
+        0,
+    )?;
+    let original_stat = fstatat(AtFd::Cwd, Path::new(LIFECYCLE_PATH))?;
+    let alias_stat = fstatat(AtFd::Cwd, Path::new(LIFECYCLE_ALIAS))?;
+    ensure(original_stat.st_ino == alias_stat.st_ino)?;
+
+    rename(LIFECYCLE_PATH, LIFECYCLE_RENAMED)?;
+    let (after_rename, after_rename_len) = unix_name(original, false)?;
+    ensure_pathname(&after_rename, after_rename_len, LIFECYCLE_PATH)?;
+    unlink_if_present(LIFECYCLE_ALIAS, 0)?;
+    unlink_if_present(LIFECYCLE_RENAMED, 0)?;
+    let (after_unlink, after_unlink_len) = unix_name(original, false)?;
+    ensure_pathname(&after_unlink, after_unlink_len, LIFECYCLE_PATH)?;
+
+    let replacement = unix_stream_socket(SocketFlags::empty())?;
+    bind_unix_path(replacement, LIFECYCLE_PATH.as_bytes())?;
+    close(original)?;
+    let (replacement_name, replacement_len) = unix_name(replacement, false)?;
+    ensure_pathname(&replacement_name, replacement_len, LIFECYCLE_PATH)?;
+    close(replacement)?;
+    ensure(fstatat(AtFd::Cwd, Path::new(LIFECYCLE_PATH)).is_ok())?;
+    unlink_if_present(LIFECYCLE_PATH, 0)
+}
+
+fn test_connected_later_bind_and_peer_name_lifetime() -> Result<(), Errno> {
+    unlink_if_present(CONNECTED_PATH, 0)?;
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    let (unnamed, unnamed_len) = unix_name(first, true)?;
+    ensure_unnamed(&unnamed, unnamed_len)?;
+    bind_unix_path(first, CONNECTED_PATH.as_bytes())?;
+    let (observed, observed_len) = unix_name(second, true)?;
+    ensure_pathname(&observed, observed_len, CONNECTED_PATH)?;
+    close(first)?;
+    let (after_close, after_close_len) = unix_name(second, true)?;
+    ensure_pathname(&after_close, after_close_len, CONNECTED_PATH)?;
+    close(second)?;
+    unlink_if_present(CONNECTED_PATH, 0)
+}
+
+fn test_bind_parent_dac() -> Result<(), Errno> {
+    unlink_if_present(DAC_PATH, 0)?;
+    unlink_if_present(DAC_DIR, AT_REMOVEDIR)?;
+    mkdirat(AtFd::Cwd, Path::new(DAC_DIR), 0o700)?;
+    let child = match fork()? {
+        None => {
+            let ok = setuid(65534)
+                .and_then(|_| unix_stream_socket(SocketFlags::empty()))
+                .and_then(|fd| {
+                    let result = bind_unix_path(fd, DAC_PATH.as_bytes());
+                    let _ = close(fd);
+                    expect_errno(result, EACCES)
+                })
+                .is_ok();
+            exit(if ok { 0 } else { 1 })
+        },
+        Some(pid) => pid,
+    };
+    wait_child(child)?;
+    unlink_if_present(DAC_PATH, 0)?;
+    unlink_if_present(DAC_DIR, AT_REMOVEDIR)
 }
 
 fn test_resolver_flags_and_pair_rollback() -> Result<(), Errno> {
@@ -312,6 +513,19 @@ pub(crate) fn run() -> Result<(), Errno> {
         "resolver-flags-pair-rollback",
         test_resolver_flags_and_pair_rollback,
     );
+    results.case(
+        "single-bind-name-mode",
+        test_single_socket_bind_name_and_mode,
+    );
+    results.case(
+        "name-alias-unlink-rebind",
+        test_name_alias_unlink_and_rebind_lifecycle,
+    );
+    results.case(
+        "connected-later-bind-peer-name",
+        test_connected_later_bind_and_peer_name_lifetime,
+    );
+    results.case("bind-parent-dac", test_bind_parent_dac);
     results.case(
         "bidirectional-vector-nonblocking",
         test_bidirectional_vector_and_nonblocking,

@@ -31,6 +31,10 @@ pub fn getsockname(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_GETSOCKNAME, fd, addr, addrlen, 0, 0, 0) }
 }
 
+pub fn getpeername(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_GETPEERNAME, fd, addr, addrlen, 0, 0, 0) }
+}
+
 pub fn sendto(
     fd: u64,
     buf: u64,

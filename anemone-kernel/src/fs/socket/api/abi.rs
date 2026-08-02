@@ -1,14 +1,15 @@
-//! Byte-level Linux sockaddr handling and UDP outcome projection.
+//! Byte-level Linux sockaddr handling and Socket outcome projection.
 
 use alloc::{vec, vec::Vec};
 use core::mem::size_of;
 
-use anemone_abi::net::linux::{AF_INET, MSG_DONTWAIT, SockAddrIn, socklen_t};
+use anemone_abi::net::linux::{AF_INET, AF_UNIX, MSG_DONTWAIT, SockAddrIn, SockAddrUn, socklen_t};
 use anemone_net_api::Ipv4Address;
 
 use crate::{
     fs::socket::{
         SocketAddress, SocketBindError, SocketQueryError, SocketReceiveError, SocketSendError,
+        SocketType,
     },
     kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
     prelude::*,
@@ -16,6 +17,8 @@ use crate::{
 };
 
 const SOCKADDR_IN_LEN: usize = size_of::<SockAddrIn>();
+const SOCKADDR_UN_LEN: usize = size_of::<SockAddrUn>();
+const SOCKADDR_UN_PATH_OFFSET: usize = 2;
 const MAX_SOCKADDR_INPUT_LEN: usize = 128;
 
 pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
@@ -41,12 +44,59 @@ pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, Sys
     Ok(SocketAddress::Ipv4 { address, port })
 }
 
-fn write_sockaddr_value(
+fn parse_sockaddr_un(bytes: &[u8]) -> Result<SocketAddress, SysError> {
+    let len = bytes.len();
+    // The accepted target excludes Linux's family-only autobind and abstract
+    // namespace. A filesystem pathname therefore needs at least one byte and
+    // must fit the Linux sockaddr_un input object.
+    if !(SOCKADDR_UN_PATH_OFFSET + 1..=SOCKADDR_UN_LEN).contains(&len) {
+        return Err(SysError::InvalidArgument);
+    }
+    let family = u16::from_ne_bytes(bytes[0..2].try_into().unwrap());
+    if family != AF_UNIX as u16 {
+        return Err(SysError::InvalidArgument);
+    }
+
+    let raw_path = &bytes[SOCKADDR_UN_PATH_OFFSET..len];
+    if raw_path[0] == 0 {
+        knoticeln!("unix bind: abstract/autobind address is outside the R0 target");
+        return Err(SysError::NotSupported);
+    }
+    let path_len = raw_path
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(raw_path.len());
+    let pathname =
+        core::str::from_utf8(&raw_path[..path_len]).map_err(|_| SysError::InvalidPath)?;
+    Ok(SocketAddress::UnixPathname(Arc::from(pathname)))
+}
+
+fn read_sockaddr_un(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
+    let len = len as usize;
+    if len > SOCKADDR_UN_LEN {
+        return Err(SysError::InvalidArgument);
+    }
+    let addr = user_addr(addr)?;
+    let task = get_current_task();
+    let uspace = task.clone_uspace_handle();
+    let mut bytes = [0u8; SOCKADDR_UN_LEN];
+    UserReadSlice::<u8>::try_new(addr, len, &mut uspace.lock())?
+        .copy_to_slice(&mut bytes[..len])?;
+    parse_sockaddr_un(&bytes[..len])
+}
+
+pub(super) fn read_bind_address(
+    socket_type: SocketType,
     addr: u64,
-    addrlen: u64,
-    address: Ipv4Address,
-    port: u16,
-) -> Result<(), SysError> {
+    len: u32,
+) -> Result<SocketAddress, SysError> {
+    match socket_type {
+        SocketType::Ipv4Udp => read_sockaddr_in(addr, len),
+        SocketType::UnixStream => read_sockaddr_un(addr, len),
+    }
+}
+
+fn write_sockaddr_bytes(addr: u64, addrlen: u64, bytes: &[u8]) -> Result<(), SysError> {
     let addrlen_addr = user_addr(addrlen)?;
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
@@ -59,12 +109,7 @@ fn write_sockaddr_value(
         return Err(SysError::InvalidArgument);
     }
 
-    let mut bytes = [0u8; SOCKADDR_IN_LEN];
-    bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
-    bytes[2..4].copy_from_slice(&port.to_be_bytes());
-    bytes[4..8].copy_from_slice(&address.octets());
-
-    let copy_len = (user_len as usize).min(SOCKADDR_IN_LEN);
+    let copy_len = (user_len as usize).min(bytes.len());
     if copy_len != 0 {
         let addr = user_addr(addr)?;
         UserWriteSlice::<u8>::try_new(addr, copy_len, &mut uspace.lock())?
@@ -73,27 +118,57 @@ fn write_sockaddr_value(
 
     // Linux move_addr_to_user exposes any successful prefix copy before this
     // actual-length store. A fault here must not roll that copy back.
-    let actual = (SOCKADDR_IN_LEN as socklen_t).to_ne_bytes();
+    let actual = (bytes.len() as socklen_t).to_ne_bytes();
     UserWriteSlice::<u8>::try_new(addrlen_addr, actual.len(), &mut uspace.lock())?
         .copy_from_slice(&actual)?;
     Ok(())
 }
 
-pub(super) fn write_sockaddr_in(
+fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>) -> Vec<u8> {
+    match (socket_type, address) {
+        (SocketType::Ipv4Udp, None) => {
+            let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
+            bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
+            bytes
+        },
+        (SocketType::Ipv4Udp, Some(SocketAddress::Ipv4 { address, port })) => {
+            let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
+            bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
+            bytes[2..4].copy_from_slice(&port.to_be_bytes());
+            bytes[4..8].copy_from_slice(&address.octets());
+            bytes
+        },
+        (SocketType::UnixStream, None) => (AF_UNIX as u16).to_ne_bytes().to_vec(),
+        (SocketType::UnixStream, Some(SocketAddress::UnixPathname(pathname))) => {
+            let mut bytes = Vec::with_capacity(SOCKADDR_UN_PATH_OFFSET + pathname.len() + 1);
+            bytes.extend_from_slice(&(AF_UNIX as u16).to_ne_bytes());
+            bytes.extend_from_slice(pathname.as_bytes());
+            bytes.push(0);
+            bytes
+        },
+        _ => panic!("Socket family returned an address of another semantic type"),
+    }
+}
+
+pub(super) fn write_socket_address(
+    socket_type: SocketType,
     addr: u64,
     addrlen: u64,
     address: Option<SocketAddress>,
 ) -> Result<(), SysError> {
-    let (address, port) = match address {
-        None => (Ipv4Address::UNSPECIFIED, 0),
-        Some(SocketAddress::Ipv4 { address, port }) => (address, port),
-    };
-    write_sockaddr_value(addr, addrlen, address, port)
+    let bytes = socket_address_bytes(socket_type, address);
+    write_sockaddr_bytes(addr, addrlen, &bytes)
 }
 
 pub(super) fn write_peer(addr: u64, addrlen: u64, peer: SocketAddress) -> Result<(), SysError> {
-    let SocketAddress::Ipv4 { address, port } = peer;
-    write_sockaddr_value(addr, addrlen, address, port)
+    let SocketAddress::Ipv4 { address, port } = peer else {
+        unreachable!("datagram receive returned a non-IPv4 peer")
+    };
+    let mut bytes = [0u8; SOCKADDR_IN_LEN];
+    bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
+    bytes[2..4].copy_from_slice(&port.to_be_bytes());
+    bytes[4..8].copy_from_slice(&address.octets());
+    write_sockaddr_bytes(addr, addrlen, &bytes)
 }
 
 pub(super) fn read_payload(addr: u64, len: usize) -> Result<Vec<u8>, SysError> {
@@ -143,6 +218,7 @@ pub(super) fn map_bind_error(error: SocketBindError) -> SysError {
         SocketBindError::AddressInUse => SysError::AddressInUse,
         SocketBindError::AddressUnavailable => SysError::AddressNotAvailable,
         SocketBindError::ResourceExhausted => SysError::Again,
+        SocketBindError::Operation(error) => error,
     }
 }
 
@@ -150,6 +226,7 @@ pub(super) fn map_query_error(error: SocketQueryError) -> SysError {
     match error {
         SocketQueryError::Unsupported => SysError::NotSupported,
         SocketQueryError::Retired => SysError::BadFileDescriptor,
+        SocketQueryError::NotConnected => SysError::NotConnected,
         SocketQueryError::Copy(error) => error,
     }
 }
@@ -158,6 +235,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
     match error {
         SocketSendError::Unsupported => SysError::NotSupported,
         SocketSendError::Retired => SysError::BadFileDescriptor,
+        SocketSendError::NotConnected => SysError::NotConnected,
         SocketSendError::InvalidState => SysError::InvalidArgument,
         SocketSendError::AddressInUse => SysError::AddressInUse,
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
@@ -170,10 +248,75 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
     }
 }
 
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn unix_bytes(path: &[u8]) -> Vec<u8> {
+        let mut bytes = (AF_UNIX as u16).to_ne_bytes().to_vec();
+        bytes.extend_from_slice(path);
+        bytes
+    }
+
+    #[kunit]
+    fn unix_input_checks_length_family_abstract_and_nul_boundary() {
+        assert_eq!(
+            parse_sockaddr_un(&(AF_UNIX as u16).to_ne_bytes()),
+            Err(SysError::InvalidArgument)
+        );
+
+        let mut wrong_family = unix_bytes(b"path");
+        wrong_family[..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
+        assert_eq!(
+            parse_sockaddr_un(&wrong_family),
+            Err(SysError::InvalidArgument)
+        );
+        assert_eq!(
+            parse_sockaddr_un(&unix_bytes(b"\0abstract")),
+            Err(SysError::NotSupported)
+        );
+        assert_eq!(
+            parse_sockaddr_un(&unix_bytes(b"first\0ignored")),
+            Ok(SocketAddress::UnixPathname(Arc::from("first")))
+        );
+
+        let full = unix_bytes(&[b'p'; anemone_abi::net::linux::UNIX_PATH_MAX]);
+        let SocketAddress::UnixPathname(path) = parse_sockaddr_un(&full).unwrap() else {
+            panic!("Unix parser returned another address family")
+        };
+        assert_eq!(path.len(), anemone_abi::net::linux::UNIX_PATH_MAX);
+    }
+
+    #[kunit]
+    fn unix_output_preserves_unnamed_and_linux_terminator_lengths() {
+        assert_eq!(
+            socket_address_bytes(SocketType::UnixStream, None),
+            (AF_UNIX as u16).to_ne_bytes()
+        );
+        let bytes = socket_address_bytes(
+            SocketType::UnixStream,
+            Some(SocketAddress::UnixPathname(Arc::from("path"))),
+        );
+        assert_eq!(&bytes[..2], &(AF_UNIX as u16).to_ne_bytes());
+        assert_eq!(&bytes[2..], b"path\0");
+
+        let full: Arc<str> = Arc::from("p".repeat(anemone_abi::net::linux::UNIX_PATH_MAX));
+        assert_eq!(
+            socket_address_bytes(
+                SocketType::UnixStream,
+                Some(SocketAddress::UnixPathname(full))
+            )
+            .len(),
+            SOCKADDR_UN_LEN + 1,
+        );
+    }
+}
+
 pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
     match error {
         SocketReceiveError::Unsupported => SysError::NotSupported,
         SocketReceiveError::Retired => SysError::BadFileDescriptor,
+        SocketReceiveError::InvalidState => SysError::NotConnected,
         SocketReceiveError::WouldBlock => SysError::Again,
         SocketReceiveError::Copy(error) => error,
     }

@@ -6,6 +6,8 @@ pub mod linux {
     use core::mem::{align_of, offset_of, size_of};
 
     pub const AF_UNIX: i32 = 1;
+    pub const AF_LOCAL: i32 = AF_UNIX;
+    pub const PF_UNIX: i32 = AF_UNIX;
     pub const AF_INET: i32 = 2;
     pub const SOCK_STREAM: i32 = 1;
     pub const SOCK_DGRAM: i32 = 2;
@@ -48,6 +50,24 @@ pub mod linux {
         pub sin_zero: [u8; 8],
     }
 
+    pub const UNIX_PATH_MAX: usize = 108;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[repr(C)]
+    pub struct SockAddrUn {
+        pub sun_family: u16,
+        pub sun_path: [u8; UNIX_PATH_MAX],
+    }
+
+    impl Default for SockAddrUn {
+        fn default() -> Self {
+            Self {
+                sun_family: AF_UNIX as u16,
+                sun_path: [0; UNIX_PATH_MAX],
+            }
+        }
+    }
+
     impl SockAddrIn {
         pub const fn new(address: [u8; 4], port: u16) -> Self {
             Self {
@@ -81,4 +101,8 @@ pub mod linux {
     const _: [(); 2] = [(); offset_of!(SockAddrIn, sin_port)];
     const _: [(); 4] = [(); offset_of!(SockAddrIn, sin_addr)];
     const _: [(); 8] = [(); offset_of!(SockAddrIn, sin_zero)];
+    const _: [(); 110] = [(); size_of::<SockAddrUn>()];
+    const _: [(); 2] = [(); align_of::<SockAddrUn>()];
+    const _: [(); 0] = [(); offset_of!(SockAddrUn, sun_family)];
+    const _: [(); 2] = [(); offset_of!(SockAddrUn, sun_path)];
 }

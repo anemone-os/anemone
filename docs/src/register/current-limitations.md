@@ -2,6 +2,29 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260802-UNIX-BIND-RETIRED-INERT-INODE
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / VFS pathname creation / endpoint lifecycle
+
+**Summary:** AF_UNIX pathname bind先由current-task VFS creation operation创建`S_IFSOCK` inode，再由Unix owner在endpoint
+lock内共同发布exact identity registration与immutable local-name。若endpoint在VFS创建成功后、Unix commit前已经retire，
+实现fail closed并向bind返回`EBADF`；已经创建的pathname inode保持为没有registration和local-name的inert socket inode，
+不能作为live Unix binding恢复。cleanup不会按pathname补偿unlink，也不会让final close删除node；调用者必须显式unlink后
+才能复用该pathname。该失败通过kernel notice记录pathname、inode number与`errno=EBADF`。
+
+**Exit Condition:** 只有VFS common-create与Unix endpoint lifecycle形成不持Unix global lock跨VFS、且不通过pathname
+compensation删除新identity的自然prepare/commit协议，能够在该late-retire窗口安全撤销node或证明窗口不可达时，才可移除
+本限制。修复必须保持exact identity/generation cleanup、并发rename/rebind安全和current VFS owner边界，不能把runtime
+binding挂入generic inode/backend `prv`或扩张pathname-keyed状态。
+
+**Owner:** Unix Socket endpoint/namespace；VFS common-create protocol为跨owner依赖
+**Last Verified:** 2026-08-02
+**Related:** [Socket Abstraction与Unix Socket Checkpoint 2A](../rfcs/socket-abstraction-and-unix-socket/implementation.md#checkpoint-2a-closed--endpointname-与-pathname-namespace),
+[VFS create publication atomicity](./open-issues.md#ane-20260801-vfs-create-publication-atomicity)
+
 ## ANE-20260801-LA64-LSX-STICKY-LAZY-SCOPE
 
 **Type:** Limitation

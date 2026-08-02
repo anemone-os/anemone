@@ -22,9 +22,10 @@ pub(super) enum SocketType {
     UnixStream,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum SocketAddress {
     Ipv4 { address: Ipv4Address, port: u16 },
+    UnixPathname(Arc<str>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,12 +36,14 @@ pub(super) enum SocketBindError {
     AddressInUse,
     AddressUnavailable,
     ResourceExhausted,
+    Operation(SysError),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketQueryError {
     Unsupported,
     Retired,
+    NotConnected,
     Copy(SysError),
 }
 
@@ -48,6 +51,7 @@ pub(super) enum SocketQueryError {
 pub(super) enum SocketSendError {
     Unsupported,
     Retired,
+    NotConnected,
     InvalidState,
     AddressInUse,
     AddressUnavailable,
@@ -64,6 +68,7 @@ pub(super) enum SocketSendError {
 pub(super) enum SocketReceiveError {
     Unsupported,
     Retired,
+    InvalidState,
     WouldBlock,
     Copy(SysError),
 }
@@ -122,6 +127,8 @@ pub(super) struct SocketOps {
     pub(super) bind: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketBindError>>,
     pub(super) local_address:
         Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
+    pub(super) peer_address:
+        Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
     pub(super) send:
         Option<for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>>,
     pub(super) receive: Option<
@@ -164,6 +171,13 @@ impl Socket {
         self.ops
             .local_address
             .ok_or(SocketQueryError::Unsupported)?(&self.private, sink)
+    }
+
+    pub(super) fn copy_peer_address(
+        &self,
+        sink: &mut dyn SocketAddressSink,
+    ) -> Result<(), SocketQueryError> {
+        self.ops.peer_address.ok_or(SocketQueryError::Unsupported)?(&self.private, sink)
     }
 
     pub(super) fn send(&self, request: SocketSendRequest<'_>) -> Result<usize, SocketSendError> {
@@ -356,6 +370,7 @@ fn socket_read_with_ctx(
             Err(SocketReceiveError::WouldBlock) => return Err(SysError::Again),
             Err(SocketReceiveError::Unsupported) => return Err(SysError::NotSupported),
             Err(SocketReceiveError::Retired) => return Err(SysError::BadFileDescriptor),
+            Err(SocketReceiveError::InvalidState) => return Err(SysError::InvalidArgument),
             Err(SocketReceiveError::Copy(error)) => return Err(error),
         }
     }
@@ -399,6 +414,7 @@ fn socket_write_with_ctx(
             },
             Err(SocketSendError::Unsupported) => return Err(SysError::NotSupported),
             Err(SocketSendError::Retired) => return Err(SysError::BadFileDescriptor),
+            Err(SocketSendError::NotConnected) => return Err(SysError::NotConnected),
             Err(SocketSendError::Copy(error)) => return Err(error),
             Err(SocketSendError::InvalidState)
             | Err(SocketSendError::AddressInUse)

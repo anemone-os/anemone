@@ -56,7 +56,7 @@ fn sys_sendto(
 
     loop {
         match socket.send(SocketSendRequest::Datagram {
-            peer,
+            peer: peer.clone(),
             payload: &mut payload,
         }) {
             Ok(sent) => return Ok(sent as u64),

@@ -97,6 +97,8 @@ pub enum SysError {
     ProtocolNotSupported,
     /// The file descriptor does not refer to a socket.
     NotSocket,
+    /// The socket operation requires a connected peer.
+    NotConnected,
     /// The requested local address/port conflicts with an active binding.
     AddressInUse,
     /// The requested local address is not owned by this network domain.
@@ -243,6 +245,7 @@ impl SysError {
             SysError::SocketTypeNotSupported => ESOCKTNOSUPPORT,
             SysError::ProtocolNotSupported => EPROTONOSUPPORT,
             SysError::NotSocket => ENOTSOCK,
+            SysError::NotConnected => ENOTCONN,
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,
             SysError::NoBufferSpace => ENOBUFS,

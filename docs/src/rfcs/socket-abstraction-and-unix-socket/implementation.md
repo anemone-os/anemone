@@ -1,10 +1,10 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Ready
+**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Active / Checkpoint 2A Closed
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R0
-**当前实施阶段：** Stage 2 Ready / Not Active；Checkpoint 2A Ready / Not Active；Checkpoint 2B Not Active
+**当前实施阶段：** Stage 2 Active；Checkpoint 2A Closed；Checkpoint 2B Not Active
 （无 contract cutover）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
@@ -12,9 +12,9 @@
 target、执行状态总表或验证证据副本。
 
 R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint 1A、1B 随后各自取得实施授权并依次
-关闭，Stage 1 因两个真实 consumer 均已落地而关闭。独立的 Stage 2 resolution 现已根据 Stage 1 actual diff、current
-contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解析为两个有序 checkpoint，但没有激活
-Checkpoint 2A。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；resolution、checkpoint closure与Stage 2 closure均不使
+关闭，Stage 1 因两个真实 consumer 均已落地而关闭。独立的 Stage 2 resolution 根据 Stage 1 actual diff、current
+contracts、register、review finding 与 Linux 6.6.32 oracle 把本 Stage 解析为两个有序 checkpoint；Checkpoint 2A
+随后经独立授权实现并关闭，Checkpoint 2B仍为Not Active。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；resolution、checkpoint closure与Stage 2 closure均不使
 pending contract生效，也不自动进入下一 checkpoint或Stage。
 
 ## 全局 Implementation Boundary
@@ -109,7 +109,7 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | --- | --- | --- | --- | --- |
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
 | Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
-| Stage 2 | Ready / Not Active；2A Ready；2B Not Active | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 由新的明确授权激活Checkpoint 2A；2A关闭后停止并独立授权2B |
+| Stage 2 | Active；2A Closed；2B Not Active | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；Stage 2 resolution completed | 已在2A关闭后停止；只有新的明确授权才能激活2B |
 | Stage 3 | Outline | 闭合完整stream operation、shutdown与poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
 
@@ -297,10 +297,10 @@ monitor退出。最终dispatcher-only failure aggregation修正后，双架构ap
 完整socket LTP、final harness、physical hardware与`smp>1`均未运行，保持Not Run / Not Cut Over。任何pending
 Socket/Unix/IOMUX/Epoll contract均未生效。
 
-## Stage 2 Ready / Not Active — Pathname namespace 与 connection admission
+## Stage 2 Active — Pathname namespace 与 connection admission
 
 **Resolution状态：** Completed 2026-08-02。Stage 2已解析为Checkpoint 2A“endpoint/name/namespace”和Checkpoint 2B
-“listener/connection admission”；2A Ready / Not Active，2B依赖2A且Not Active。本resolution只保存accepted target内的
+“listener/connection admission”；2A随后独立激活并关闭，2B依赖2A且仍为Not Active。本resolution只保存accepted target内的
 实施顺序、验证与停止边界，不授权代码、不创建transaction、不修改current contract，也不增加R0修订号。
 
 ### Live baseline 与解析结论
@@ -397,7 +397,11 @@ entry在UDP等不支持的operation上只通过static capability absence或typed
 state或caller特判。`OPENED-DESC-001..003`、`VFS-CREATION-001`、`VFS-MAKE-NODE-001`与current iomux/epoll contract
 保持effective且不修改；Stage 2 Cutover为None。
 
-### Checkpoint 2A Ready / Not Active — Endpoint、name 与 pathname namespace
+### Checkpoint 2A Closed — Endpoint、name 与 pathname namespace
+
+**状态：** Closed。single Socket、endpoint/local-name owner、filesystem pathname bind、exact identity registry和
+`getsockname/getpeername`已形成可独立停止的namespace slice；transaction仍为None，contract cutover仍为None。
+Checkpoint 2B没有激活。
 
 **Purpose：** 把connection-only Unix endpoint提升为能承载single Socket、orthogonal local-name与exact binding cleanup的
 唯一role owner；接通single creation、filesystem pathname bind、getsockname/getpeername和namespace/address lifecycle，
@@ -441,6 +445,32 @@ final cleanup全闭合，Stage 1 regression与focused双架构runtime通过，�
 common-create payload/callback/rollback、通过path compensation unlink，或为了支持新role提前引入Stage 3 readiness/
 shutdown truth，立即停止。若采用inert-inode退路，2A closure必须记录具体failure point、errno、residue、cleanup与
 observability，并按实际当前行为回写register。2A关闭后只标记checkpoint closed并停止；不得自动激活2B。
+
+**Closure evidence：** Unix owner现以单一association表达unconnected/connected/retired，local-name与binding publication
+正交；registry以`ino`只作bucket selector，命中和cleanup均比较完整`InodeRef`并使用exact generation capability。pathname
+bind复用current `KernelCreationPolicy + kernel_make_node_at`，VFS只把该production handoff收窄暴露到`fs` owner，没有新增
+Socket payload/callback、backend `prv`或pathname-keyed runtime map。same-owner拆分把endpoint/stream/lifecycle与namespace
+职责分开，旧双路径为零。
+
+owner-local proof覆盖single preparation abort、未连接typed outcome、一次bind/name commit、retire-during-prepare、exact
+identity与generation-safe removal、connected-later-bind和peer close后name观察；raw sockaddr proof覆盖family/addrlen、NUL、
+108-byte pathname及Linux的111-byte actual length。Linux 6.6.32 runtime oracle另确认unnamed length 2、unconnected
+`read=EINVAL`、`write/getpeername=ENOTCONN`、无输入NUL的输出终止、`umask 0027 -> 0750`、repeat bind、connected-later-bind
+与peer-close name lifetime。
+
+最终RV64/LA64显式release preset build通过；同源pretest wrapper分别通过KUnit 351/351与356/356、UDP 16/16、Unix
+10/10，以及glibc/musl `socketpair02`共2个case/8个TPASS。两架构均完成filesystem/network/device orderly shutdown；RV64
+machine power-off成功，LA64因当前平台无成功power-off handler在末尾halt后由QEMU monitor退出。formatter、双架构
+`socket-test` app build、`git diff --check`与文档build通过。
+
+实现采用了父RFC允许的fail-closed退路：若endpoint在VFS node创建成功后、Unix registry/name commit前已经retire，bind
+返回`EBADF`，留下没有registration/name的inert socket inode；final close不按pathname删除，调用者必须显式unlink，内核
+notice记录pathname、ino与errno。该边界已登记为
+[`ANE-20260802-UNIX-BIND-RETIRED-INERT-INODE`](../../register/current-limitations.md#ane-20260802-unix-bind-retired-inert-inode)。
+
+**Not Run / non-claim：** `listen/connect/accept`、pathname data exchange、shutdown、RDHUP/完整HUP、完整socket LTP、
+final harness、physical hardware与`smp>1`均保持Not Run / Not Cut Over。Checkpoint 2B、Stage 3/4和所有pending
+Socket/Unix/IOMUX/Epoll contract均未激活或生效。
 
 ### Checkpoint 2B — Listener 与 connection admission
 

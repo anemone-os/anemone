@@ -120,9 +120,13 @@ mod kunits {
 
         let unix = resolve_socket(AF_UNIX, SOCK_STREAM, 0).unwrap();
         assert!(core::ptr::eq(unix.ops, &UNIX_STREAM_SOCKET_OPS));
-        assert!(matches!(
-            prepare_socket(unix.ops),
-            Err(SysError::NotSupported)
-        ));
+        let (file, creation) = prepare_socket(unix.ops).unwrap();
+        assert_eq!(
+            crate::fs::socket::socket_from_file(&file)
+                .unwrap()
+                .socket_type(),
+            crate::fs::socket::SocketType::UnixStream
+        );
+        creation.commit();
     }
 }

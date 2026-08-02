@@ -110,7 +110,9 @@ fn commit_udp_socket(creation: &mut AnyOpaque) {
 }
 
 fn bind_udp_socket(private: &AnyOpaque, address: SocketAddress) -> Result<(), SocketBindError> {
-    let SocketAddress::Ipv4 { address, port } = address;
+    let SocketAddress::Ipv4 { address, port } = address else {
+        return Err(SocketBindError::Unsupported);
+    };
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
     socket
@@ -150,7 +152,9 @@ fn send_udp_socket(
     let SocketSendRequest::Datagram { peer, payload } = request else {
         return Err(SocketSendError::Unsupported);
     };
-    let SocketAddress::Ipv4 { address, port } = peer;
+    let SocketAddress::Ipv4 { address, port } = peer else {
+        return Err(SocketSendError::Unsupported);
+    };
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
     let endpoint = socket.endpoint().ok_or(SocketSendError::Retired)?;
@@ -249,6 +253,7 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     create_pair: None,
     bind: Some(bind_udp_socket),
     local_address: Some(query_udp_socket),
+    peer_address: None,
     send: Some(send_udp_socket),
     receive: Some(receive_udp_socket),
     poll: poll_udp_socket,
