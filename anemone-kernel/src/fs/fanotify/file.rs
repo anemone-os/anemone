@@ -61,6 +61,7 @@ pub(super) fn open_group_file(group: Arc<FanGroup>) -> Result<File, SysError> {
 pub(super) fn description_ops() -> FileDescOps {
     FileDescOps {
         read_user_transaction: Some(fanotify_read_user_transaction),
+        write_user_transaction: None,
         notify_read_user_access: false,
         final_release: Some(fanotify_final_release),
         notification_suppressed: false,

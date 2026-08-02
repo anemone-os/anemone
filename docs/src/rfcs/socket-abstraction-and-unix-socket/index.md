@@ -9,7 +9,7 @@
 `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-NAMESPACE-001`、
 `UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`；Refine `IOMUX-POLL-002/003`、
 `EPOLL-READY-001`
-**执行记录：** Git/PR（Checkpoint 1A Closed；Checkpoint 1B Not Active）；transaction None；contract cutover None
+**执行记录：** Git/PR（Stage 1 Closed；Checkpoint 1A/1B Closed）；transaction None；contract cutover None
 
 ## 文档状态
 
@@ -19,13 +19,12 @@
 
 本文不是 current contract，也不表示任何实现 gate 已经 Active。当前 UDP、opened-description、VFS、iomux 与epoll
 语义继续以 `docs/src/contracts/` 下的 Active contract 为准。R0 acceptance 只接受 target；独立 resolution 把
-Stage 1 解析为两个有序 checkpoint，Checkpoint 1A 已取得授权并关闭，Checkpoint 1B 仍为 Not Active。达到
+Stage 1 解析为两个有序 checkpoint，Checkpoint 1A、1B 已分别取得授权并依次关闭；Stage 2 仍为 Outline / Not Active。达到
 `SOCKET-UNIX-CUTOVER` 的全部验收前，不得修改 current contract。
 
 本 RFC 按当前规模保留[目标与不变量](./invariants.md)，并因已经出现真实多阶段实施需要而增加一份
-[实施路线](./implementation.md)。其中 Stage 1 已按 live source 解析为两个有序 checkpoint，1A 已关闭且 1B 保持
-Not Active，Stage 2--4 仍为 Outline；当前不创建 tracking page 或 transaction，也不把前一 checkpoint closure
-当作下一 checkpoint 的实施授权。
+[实施路线](./implementation.md)。其中 Stage 1 已按 live source 解析并关闭两个有序 checkpoint，Stage 2--4 仍为
+Outline；当前不创建 tracking page 或 transaction，也不把 Stage 1 closure 当作下一 Stage 的 resolution 或实施授权。
 
 ## 摘要
 
@@ -532,7 +531,7 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
   [VFS create publication atomicity](../../register/open-issues.md#ane-20260801-vfs-create-publication-atomicity)、
   [non-UTF-8 pathname](../../register/current-limitations.md#ane-20260801-vfs-non-utf8-pathname)
 - External source evidence：`xref:linux-6.6.32:net/unix/af_unix.c`
-- commit / PR：Git/PR 保存 Checkpoint 1A 实现、review 与验证证据；transaction：None；cutover：None
+- commit / PR：Git/PR 保存 Stage 1 Checkpoint 1A/1B 实现、review 与验证证据；transaction：None；cutover：None
 
 ## 修订记录
 
@@ -542,5 +541,6 @@ listener/unlink/lifecycle 和 UDP/Unix共同 Socket boundary。
 
 ## Closure
 
-Not Cut Over。Checkpoint 1A 已关闭，Checkpoint 1B 保持 Not Active，Stage 1 尚未关闭。1A 只证明共同 front 上的 UDP
-等价迁移；Unix 第二 consumer 与后续 acceptance 均未运行，任何 pending Socket/Unix/IOMUX/Epoll contract 都尚未生效。
+Not Cut Over。Checkpoint 1A、1B 与 Stage 1 已关闭；UDP 与 Unix `socketpair` 已作为两个真实 consumer 共同证明本阶段
+front vertical slice。Stage 2--4 仍为 Outline / Not Active，pathname与最终acceptance尚未运行；transaction保持None，
+任何 pending Socket/Unix/IOMUX/Epoll contract 都尚未生效。

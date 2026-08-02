@@ -3,7 +3,10 @@ use anemone_abi::syscall::SYS_RECVFROM;
 use crate::{
     fs::{
         iomux::PollEvent,
-        socket::{SocketAddress, SocketReceiveError, SocketReceiveSink, socket_from_file},
+        socket::{
+            SocketAddress, SocketReceiveError, SocketReceiveRequest, SocketReceiveSink,
+            socket_from_file,
+        },
     },
     prelude::*,
     task::files::{Fd, FileStatusFlags},
@@ -53,7 +56,7 @@ fn sys_recvfrom(
         addrlen,
     };
     loop {
-        match socket.receive(&mut sink) {
+        match socket.receive(SocketReceiveRequest::Datagram(&mut sink)) {
             Ok(copied) => return Ok(copied as u64),
             Err(SocketReceiveError::WouldBlock) if !nonblocking => {},
             Err(error) => return Err(map_receive_error(error)),

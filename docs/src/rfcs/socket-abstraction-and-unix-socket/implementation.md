@@ -1,19 +1,19 @@
 # Socket Abstraction 与 Unix Socket 实施路线
 
-**状态：** R0 Accepted / Stage 1 Active
+**状态：** R0 Accepted / Stage 1 Closed
 **最后更新：** 2026-08-02
 **父 RFC：** [RFC-20260801-socket-abstraction-and-unix-socket](./index.md)
 **当前修订：** R0
-**当前实施阶段：** Stage 1 / Checkpoint 1A Closed；Checkpoint 1B Not Active（无 contract cutover）
+**当前实施阶段：** Stage 1 Closed；Stage 2 Outline / Not Active（无 contract cutover）
 
 本文只保存父 RFC 需要长期引用的多阶段实施路线。target、non-goals、owner、ABI、Contract Impact、acceptance 与
 最终 validation boundary 仍由父 RFC [index](./index.md)和[目标与不变量](./invariants.md)定义；本页不建立并列
 target、执行状态总表或验证证据副本。
 
-R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint 1A 随后取得独立实施授权并已关闭。
-Checkpoint 1B 与最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；1A closure 不关闭 Stage 1、不激活 1B，也不使 pending
-contract 生效。进入后续 Stage 前仍必须根据 live source、前一 Stage 实际 diff、review finding 与验证证据解析当前
-Stage；前一 Stage 关闭后停止，不自动进入下一 Stage。
+R0 acceptance 与 Stage 1 resolution 已于 2026-08-02 分别完成；Checkpoint 1A、1B 随后各自取得实施授权并依次
+关闭，Stage 1 因两个真实 consumer 均已落地而关闭。最终 `SOCKET-UNIX-CUTOVER` 仍是独立动作；Stage 1 closure
+不激活 Stage 2，也不使 pending contract 生效。进入后续 Stage 前仍必须根据 live source、Stage 1 实际 diff、review
+finding 与验证证据解析当前 Stage；前一 Stage 关闭后停止，不自动进入下一 Stage。
 
 ## 全局 Implementation Boundary
 
@@ -106,8 +106,8 @@ pathname runtime、iomux/epoll、UDP regression 与真实 consumer 证据。arch
 | 阶段 | 当前状态 | 概括目的 | 前置依赖 | 下一步解析触发点 |
 | --- | --- | --- | --- | --- |
 | Entry | Completed | 完成 Draft review、R0 acceptance 与 Stage 1 实施解析 | 当前 RFC、current contracts、register、live owner | 已完成；后续 1A 由独立授权激活并关闭 |
-| Stage 1 | Active / 1A Closed / 1B Not Active | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与 1A 已完成；1B 尚待独立实施授权 | 只能由明确 Checkpoint 1B 实施授权继续 |
-| Stage 2 | Outline | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed | 读取 Stage 1 实际 front、Unix endpoint/stream owner 与 validation evidence |
+| Stage 1 | Closed / 1A Closed / 1B Closed | 建立由 UDP 与 Unix `socketpair` 同时消费的 Socket front vertical slice | Entry resolution 与两个独立 checkpoint 授权 | 已完成；未激活后续 Stage |
+| Stage 2 | Outline / Not Active | 闭合 pathname namespace、listener、connection admission 与 address lifecycle | Stage 1 Closed；仍需独立 resolution 与实施授权 | 读取 Stage 1 实际 front、Unix endpoint/stream owner 与 validation evidence |
 | Stage 3 | Outline | 闭合完整stream operation、shutdown与poll/select/epoll readiness | Stage 2 Closed | 读取 Stage 2 实际 listener/connection/direction predicate 与 race evidence |
 | Stage 4 | Outline | 完成综合 conformance、回归、文档和原子 contract cutover | Stage 1-3 Closed | 读取完整实际 diff、全部 finding、validation 与 register 状态 |
 
@@ -135,16 +135,16 @@ checkpoint 只能作为同一 Stage 的 review/恢复边界；任何 checkpoint 
 完整 consumer 证明。
 
 **退出：** R0 已被 owner/reviewer 接受，Stage 1 的语义 deliverable、两个有序 checkpoint、验证、停止与退出条件也已
-按下文解析。Entry 以 Stage 1 Ready / Not Active 状态完成；后续独立授权已激活并关闭 Checkpoint 1A，但未激活
-Checkpoint 1B。
+按下文解析。Entry 以 Stage 1 Ready / Not Active 状态完成；后续两个独立授权已依次激活并关闭 Checkpoint 1A、1B，
+但未激活 Stage 2。
 
-## Stage 1 Active — 双 consumer Socket front vertical slice
+## Stage 1 Closed — 双 consumer Socket front vertical slice
 
 **目的：** 在同一 Stage 中建立最小 general Socket front，并让现有 UDP 与 Unix `socketpair` connected-stream
 vertical slice 都通过该 front 的 creation、ABI/FileOps、opened-description 与 family dispatch 路径运行。
 
-**前置：** Entry resolution 与 Checkpoint 1A 已完成。Checkpoint 1B 仍需另行取得明确实施授权；一个 checkpoint 的
-closure 不激活下一个 checkpoint，Stage 1 继续保持 1A -> review -> 1B 的顺序。
+**前置：** Entry resolution 已完成；Checkpoint 1A、1B 分别取得明确实施授权并按 1A -> review -> 1B 的顺序关闭。
+任何 checkpoint closure 均未自动激活下一 checkpoint 或 Stage。
 
 ### Live baseline 与解析结论
 
@@ -224,8 +224,8 @@ no-op或caller特判。
 ### Checkpoint 1A Closed — Common front 与 UDP migration
 
 **状态：** Closed。共同 front、UDP 等价迁移、完整 diff review 与 focused proof 已闭合；执行证据由 Git/PR 保存。
-当前仍只有 UDP 一个真实 consumer，因此本 checkpoint 不宣称 Stage 1、`SOCKET-FRONT-001` 或任何 current-contract
-cutover 已完成。Checkpoint 1B 保持 Not Active。
+1A closure 当时仍只有 UDP 一个真实 consumer，因此本 checkpoint 本身不宣称 Stage 1、`SOCKET-FRONT-001` 或任何
+current-contract cutover 已完成；Checkpoint 1B 后续由独立授权激活并关闭。
 
 **Deliverable：** 引入最小general Socket front、static ops/type witness、common Socket inode/FileOps与description hooks；
 把`socket/bind/getsockname/sendto/recvfrom`和poll/final release改为只识别common front并经UDP ops分发。现有
@@ -233,7 +233,7 @@ cutover 已完成。Checkpoint 1B 保持 Not Active。
 hook不得再按UDP concrete FileOps/private type分类。旧UDP-only dispatch在1A内删除，不保留双路径。
 
 **Focused proof：** owner-local proof覆盖resolver witness、unsupported capability、single creation abort、common
-final-release到UDP retire的exactly-once handoff；现有UDP host topology与real `udp-test`回归继续证明bind/send/receive、
+final-release到UDP retire的exactly-once handoff；现有UDP host topology与`socket-test` UDP suite继续证明bind/send/receive、
 blocking/readiness、dup/fork/CLOEXEC与retire/reuse。测试不冻结case数量，只要求每个高风险handoff有能够证伪回归的
 oracle；不得为了满足数量复制相同路径。
 
@@ -242,7 +242,10 @@ UDP private state，Network Stack及`anemone-net-api`没有Unix/future-TCP改动
 common层保存第二份family/type/readiness、让UDP ops接收rawLinux ABI，或扩大Network contract，立即停止。1A通过后
 只标记checkpoint closed并review完整diff；不自动激活1B，不做contract cutover。
 
-### Checkpoint 1B — Unix socketpair production vertical slice
+### Checkpoint 1B Closed — Unix socketpair production vertical slice
+
+**状态：** Closed。Unix `socketpair` 已作为第二个真实 consumer 通过同一 Socket front 交付，Stage 1 随之关闭。
+transaction 仍为 None，contract cutover 仍为 None；Stage 2 保持 Outline / Not Active。
 
 **Deliverable：** 增加Unix stream concrete ops、paired endpoint与connection/directional owner；接通
 `socketpair(AF_UNIX, SOCK_STREAM, 0, ...)`及两种creation flag；通过common FileOps/description hook交付basic
@@ -279,6 +282,17 @@ pair transaction、stream predicate、copy progress、wait与final release均有
 blocking只能通过第二套socket wait queue、family隐藏wait loop、ready cache或跨sleep private phase实现，若pair rollback
 需要改变task/files lifecycle/shared contract，或若正确EOF/`EPIPE`必须提前引入Stage 3的第二truth，停止并先修订路线或
 回RFC review。1B通过后Stage 1 Closed；Cutover仍为None，并停止在未解析、未授权的Stage 2之前。
+
+**Closure evidence：** 最终 source review 无剩余 Apollyon/Keter；一项 suite dispatcher Euclid 已在本 checkpoint
+内以“两个 suite 均运行后再汇总返回”关闭。`just test xtask` 为 66/66，`just test net-host` 全部通过，RV64/LA64
+`socket-test` app build与显式 release kernel build通过。最终两架构 canonical wrapper分别运行同源`socket-test`：
+RV64 KUnit 345/345、LA64 KUnit 350/350，两个架构均为 UDP 16/16、Unix 6/6，glibc/musl `socketpair02`各4 TPASS；
+RV64完成machine power-off，LA64完成orderly shutdown后因当前平台无成功power-off handler进入末尾halt，并由QEMU
+monitor退出。最终dispatcher-only failure aggregation修正后，双架构app build与formatter重新通过；成功suite路径未变。
+
+**Not Run / non-claim：** pathname/listener/connect/accept、shutdown与`MSG_*`、RDHUP/ERR、half-close及其HUP矩阵、
+完整socket LTP、final harness、physical hardware与`smp>1`均未运行，保持Not Run / Not Cut Over。任何pending
+Socket/Unix/IOMUX/Epoll contract均未生效。
 
 ## Stage 2 — Pathname namespace 与 connection admission
 

@@ -1,5 +1,5 @@
 use crate::{
-    fs::{FileOps, PollRegisterResult, PollRequest, UserBufferSink},
+    fs::{FileOps, PollRegisterResult, PollRequest, UserBufferSink, UserBufferSource},
     prelude::*,
 };
 
@@ -98,6 +98,10 @@ pub struct FileDescOps {
     /// copyout. This is not an ordinary filesystem direct-user fast path.
     pub read_user_transaction:
         Option<for<'dst, 'buf> fn(OpenedFileReadUserCtx<'dst, 'buf>) -> Result<usize, SysError>>,
+    /// Optional opened-description write transaction for files whose commit
+    /// must be coupled to successful user-copy progress.
+    pub(crate) write_user_transaction:
+        Option<for<'src, 'buf> fn(OpenedFileWriteUserCtx<'src, 'buf>) -> Result<usize, SysError>>,
     /// Whether successful direct read-user dispatch is an ordinary access
     /// event source. Protocol/control fds can use read_user_transaction for
     /// copyout while remaining outside file-content access notification.
@@ -114,6 +118,7 @@ impl Default for FileDescOps {
     fn default() -> Self {
         Self {
             read_user_transaction: None,
+            write_user_transaction: None,
             notify_read_user_access: true,
             final_release: None,
             notification_suppressed: false,
@@ -128,6 +133,10 @@ impl core::fmt::Debug for FileDescOps {
                 "read_user_transaction",
                 &self.read_user_transaction.is_some(),
             )
+            .field(
+                "write_user_transaction",
+                &self.write_user_transaction.is_some(),
+            )
             .field("notify_read_user_access", &self.notify_read_user_access)
             .field("final_release", &self.final_release.is_some())
             .field("notification_suppressed", &self.notification_suppressed)
@@ -139,6 +148,13 @@ pub struct OpenedFileReadUserCtx<'ctx, 'buf> {
     pub file: &'ctx File,
     pub status_flags: FileStatusFlags,
     pub dst: &'ctx mut UserBufferSink<'buf>,
+    pub notification_suppressed: bool,
+}
+
+pub(crate) struct OpenedFileWriteUserCtx<'ctx, 'buf> {
+    pub file: &'ctx File,
+    pub status_flags: FileStatusFlags,
+    pub src: &'ctx mut UserBufferSource<'buf>,
     pub notification_suppressed: bool,
 }
 

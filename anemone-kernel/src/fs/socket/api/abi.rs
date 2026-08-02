@@ -165,6 +165,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,
         SocketSendError::MessageTooLong => SysError::MessageTooLong,
+        SocketSendError::PeerClosed => SysError::BrokenPipe,
         SocketSendError::Copy(error) => error,
     }
 }

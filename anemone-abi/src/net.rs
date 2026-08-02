@@ -1,11 +1,13 @@
 pub mod native {}
 
 pub mod linux {
-    //! Linux IPv4 socket ABI shared by RV64 and LA64.
+    //! Linux socket ABI shared by RV64 and LA64.
 
     use core::mem::{align_of, offset_of, size_of};
 
+    pub const AF_UNIX: i32 = 1;
     pub const AF_INET: i32 = 2;
+    pub const SOCK_STREAM: i32 = 1;
     pub const SOCK_DGRAM: i32 = 2;
     pub const SOCK_NONBLOCK: i32 = 0x0800;
     pub const SOCK_CLOEXEC: i32 = 0x0008_0000;

@@ -1,9 +1,10 @@
-//! Typed IPv4 UDP wrappers plus narrow raw ABI conformance entries.
+//! Typed socket wrappers plus narrow raw Linux ABI conformance entries.
 
 use anemone_abi::{
     errno::Errno,
     net::linux::{
-        AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SockAddrIn, socklen_t,
+        AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
+        SockAddrIn, socklen_t,
     },
 };
 use bitflags::bitflags;
@@ -32,6 +33,33 @@ pub fn udp_socket(flags: SocketFlags) -> Result<Fd, Errno> {
         IPPROTO_UDP as u64,
     )
     .map(|fd| fd as Fd)
+}
+
+pub fn unix_stream_pair(flags: SocketFlags) -> Result<(Fd, Fd), Errno> {
+    let mut pair = [0i32; 2];
+    net::socketpair(
+        AF_UNIX as u64,
+        (SOCK_STREAM | flags.bits()) as u64,
+        0,
+        pair.as_mut_ptr() as u64,
+    )
+    .map(|_| (pair[0] as Fd, pair[1] as Fd))
+}
+
+/// Raw socketpair entry for pointer and tuple conformance tests.
+pub unsafe fn socketpair_raw(
+    family: i32,
+    socket_type: i32,
+    protocol: i32,
+    pair: *mut i32,
+) -> Result<(), Errno> {
+    net::socketpair(
+        family as i64 as u64,
+        socket_type as i64 as u64,
+        protocol as i64 as u64,
+        pair as u64,
+    )
+    .map(|_| ())
 }
 
 pub fn bind_ipv4(fd: Fd, address: SockAddrIn) -> Result<(), Errno> {

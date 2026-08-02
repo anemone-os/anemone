@@ -12,8 +12,8 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketCreation, SocketOps,
-    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveSink, SocketSendError,
-    SocketSendPayload, SocketType,
+    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveRequest, SocketSendError,
+    SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
 
@@ -145,9 +145,11 @@ fn query_udp_socket(
 
 fn send_udp_socket(
     private: &AnyOpaque,
-    peer: SocketAddress,
-    payload: &mut dyn SocketSendPayload,
-) -> Result<(), SocketSendError> {
+    request: SocketSendRequest<'_>,
+) -> Result<usize, SocketSendError> {
+    let SocketSendRequest::Datagram { peer, payload } = request else {
+        return Err(SocketSendError::Unsupported);
+    };
     let SocketAddress::Ipv4 { address, port } = peer;
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
@@ -157,15 +159,20 @@ fn send_udp_socket(
     // cannot bypass that commit or change the existing serialization boundary.
     endpoint.ensure_bound().map_err(map_send_error)?;
     let payload = payload.bytes().map_err(SocketSendError::Copy)?;
+    let len = payload.len();
     endpoint
         .send(UdpPeer::new(address, port), payload)
-        .map_err(map_send_error)
+        .map_err(map_send_error)?;
+    Ok(len)
 }
 
 fn receive_udp_socket(
     private: &AnyOpaque,
-    sink: &mut dyn SocketReceiveSink,
+    request: SocketReceiveRequest<'_>,
 ) -> Result<usize, SocketReceiveError> {
+    let SocketReceiveRequest::Datagram(sink) = request else {
+        return Err(SocketReceiveError::Unsupported);
+    };
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
     let datagram = socket
@@ -239,6 +246,7 @@ fn map_send_error(error: SendError) -> SocketSendError {
 pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::Ipv4Udp,
     create: Some(prepare_udp_socket),
+    create_pair: None,
     bind: Some(bind_udp_socket),
     local_address: Some(query_udp_socket),
     send: Some(send_udp_socket),

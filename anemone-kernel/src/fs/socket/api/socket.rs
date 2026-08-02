@@ -1,10 +1,14 @@
 use anemone_abi::{
-    net::linux::{AF_INET, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK},
+    net::linux::{
+        AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
+    },
     syscall::SYS_SOCKET,
 };
 
 use crate::{
-    fs::socket::{SocketOps, UDP_SOCKET_OPS, prepare_socket, socket_file_desc_ops},
+    fs::socket::{
+        SocketOps, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket, socket_file_desc_ops,
+    },
     prelude::*,
     task::files::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
@@ -23,18 +27,19 @@ fn resolve_socket(
     socket_type: i32,
     protocol: i32,
 ) -> Result<ResolvedSocket, SysError> {
-    if family != AF_INET {
-        return Err(SysError::AddressFamilyNotSupported);
-    }
     if socket_type & !(SOCK_TYPE_MASK | SUPPORTED_FLAGS) != 0 {
         return Err(SysError::InvalidArgument);
     }
-    if socket_type & SOCK_TYPE_MASK != SOCK_DGRAM {
-        return Err(SysError::SocketTypeNotSupported);
-    }
-    if protocol != 0 && protocol != IPPROTO_UDP {
-        return Err(SysError::ProtocolNotSupported);
-    }
+
+    let ops = match (family, socket_type & SOCK_TYPE_MASK) {
+        (AF_INET, SOCK_DGRAM) if protocol == 0 || protocol == IPPROTO_UDP => &UDP_SOCKET_OPS,
+        (AF_INET, SOCK_DGRAM) => return Err(SysError::ProtocolNotSupported),
+        (AF_INET, _) => return Err(SysError::SocketTypeNotSupported),
+        (AF_UNIX, SOCK_STREAM) if protocol == 0 => &UNIX_STREAM_SOCKET_OPS,
+        (AF_UNIX, SOCK_STREAM) => return Err(SysError::ProtocolNotSupported),
+        (AF_UNIX, _) => return Err(SysError::SocketTypeNotSupported),
+        _ => return Err(SysError::AddressFamilyNotSupported),
+    };
 
     let mut status_flags = FileStatusFlags::empty();
     status_flags.set(FileStatusFlags::NONBLOCK, socket_type & SOCK_NONBLOCK != 0);
@@ -44,7 +49,7 @@ fn resolve_socket(
         FdFlags::empty()
     };
     Ok(ResolvedSocket {
-        ops: &UDP_SOCKET_OPS,
+        ops,
         status_flags,
         fd_flags,
     })
@@ -111,6 +116,13 @@ mod kunits {
         assert!(matches!(
             resolve_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP + 1),
             Err(SysError::ProtocolNotSupported)
+        ));
+
+        let unix = resolve_socket(AF_UNIX, SOCK_STREAM, 0).unwrap();
+        assert!(core::ptr::eq(unix.ops, &UNIX_STREAM_SOCKET_OPS));
+        assert!(matches!(
+            prepare_socket(unix.ops),
+            Err(SysError::NotSupported)
         ));
     }
 }

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use crate::{
     fs::{
         iomux::PollEvent,
-        socket::{SocketSendError, SocketSendPayload, socket_from_file},
+        socket::{SocketSendError, SocketSendPayload, SocketSendRequest, socket_from_file},
     },
     prelude::*,
     task::files::{Fd, FileStatusFlags},
@@ -55,8 +55,11 @@ fn sys_sendto(
     let nonblocking = per_call_nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
     loop {
-        match socket.send(peer, &mut payload) {
-            Ok(()) => return Ok(len as u64),
+        match socket.send(SocketSendRequest::Datagram {
+            peer,
+            payload: &mut payload,
+        }) {
+            Ok(sent) => return Ok(sent as u64),
             Err(SocketSendError::WouldBlock) if !nonblocking => {},
             Err(error) => return Err(map_send_error(error)),
         }

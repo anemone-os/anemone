@@ -1,6 +1,3 @@
-#![no_std]
-#![no_main]
-
 use core::{
     str,
     sync::atomic::{AtomicUsize, Ordering},
@@ -20,7 +17,6 @@ use anemone_rs::{
         net::linux::{AF_INET, SOCK_DGRAM, SockAddrIn, socklen_t},
         time::linux::TimeSpec,
     },
-    env::args,
     fs::OpenOptions,
     io::Read,
     os::linux::{
@@ -245,14 +241,19 @@ fn cloexec_child(fd: Fd) -> Result<(), Errno> {
     expect_errno(getsockname_ipv4(fd), EBADF)
 }
 
+pub(crate) fn run_cloexec_child(fd: &str) -> Result<(), Errno> {
+    let fd = fd.parse::<Fd>().map_err(|_| EINVAL)?;
+    cloexec_child(fd)
+}
+
 fn test_cloexec_exec_projection() -> Result<(), Errno> {
     let fd = udp_socket(SocketFlags::CLOEXEC)?;
     let fd_text = format!("{fd}");
     let child = match fork()? {
         None => {
             let result = execve(
-                "/bin/udp-test",
-                &["udp-test", "--cloexec-child", fd_text.as_str()],
+                "/bin/socket-test",
+                &["socket-test", "--udp-cloexec-child", fd_text.as_str()],
                 &[],
             );
             exit(if result.is_err() { 1 } else { 0 })
@@ -750,9 +751,10 @@ fn run_blocking_multi_waiter_and_signal() -> Result<(), Errno> {
 }
 
 fn test_blocking_multi_waiter_and_signal() -> Result<(), Errno> {
-    // udp-test runs before user-test enters and initializes the competition
-    // root, so it owns this focused procfs mount used only to observe that both
-    // child recvfrom calls have actually reached interruptible sleep.
+    // The socket-test UDP suite runs before user-test enters and initializes the
+    // competition root, so it owns this focused procfs mount used only to
+    // observe that both child recvfrom calls have actually reached
+    // interruptible sleep.
     mount(Path::new("proc"), Path::new("/proc"), "proc")?;
     let result = run_blocking_multi_waiter_and_signal();
     let unmount = umount(Path::new("/proc"));
@@ -1031,19 +1033,7 @@ impl Results {
     }
 }
 
-#[anemone_rs::main]
-fn main() -> Result<(), Errno> {
-    let mut argv = args();
-    let _ = argv.next();
-    if argv.next() == Some("--cloexec-child") {
-        let fd = argv
-            .next()
-            .ok_or(EINVAL)?
-            .parse::<Fd>()
-            .map_err(|_| EINVAL)?;
-        return cloexec_child(fd);
-    }
-
+pub(crate) fn run() -> Result<(), Errno> {
     println!("UDPTEST:START");
     let mut results = Results {
         passed: 0,

@@ -216,6 +216,7 @@ pub mod linux {
     pub const SYS_SHMAT: u64 = 196;
     pub const SYS_SHMDT: u64 = 197;
     pub const SYS_SOCKET: u64 = 198;
+    pub const SYS_SOCKETPAIR: u64 = 199;
     pub const SYS_BIND: u64 = 200;
     pub const SYS_GETSOCKNAME: u64 = 204;
     pub const SYS_SENDTO: u64 = 206;

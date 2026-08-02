@@ -4,6 +4,25 @@ pub fn socket(family: u64, socket_type: u64, protocol: u64) -> Result<u64, Errno
     unsafe { syscall(SYS_SOCKET, family, socket_type, protocol, 0, 0, 0) }
 }
 
+pub fn socketpair(
+    family: u64,
+    socket_type: u64,
+    protocol: u64,
+    pair_ptr: u64,
+) -> Result<u64, Errno> {
+    unsafe {
+        syscall(
+            SYS_SOCKETPAIR,
+            family,
+            socket_type,
+            protocol,
+            pair_ptr,
+            0,
+            0,
+        )
+    }
+}
+
 pub fn bind(fd: u64, addr: u64, addrlen: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_BIND, fd, addr, addrlen, 0, 0, 0) }
 }

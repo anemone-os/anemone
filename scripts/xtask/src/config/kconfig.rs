@@ -60,6 +60,7 @@ pub struct Parameters {
     pub epoll_file_max_waiters: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
+    pub unix_stream_direction_capacity_bytes: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -149,6 +150,7 @@ impl Parameters {
         materialize!(epoll_file_max_waiters);
         materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
+        materialize!(unix_stream_direction_capacity_bytes);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -266,6 +268,8 @@ pub const EPOLL_FILE_MAX_WAITERS: usize = {};
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
 /// Fixed pipe backing and default logical capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
+/// Fixed byte capacity of each AF_UNIX stream direction.
+pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -406,6 +410,7 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(epoll_file_max_waiters),
             resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
+            resolved!(unix_stream_direction_capacity_bytes),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),
@@ -527,6 +532,17 @@ mod tests {
             parameters
                 .gen_kconfig_defs()
                 .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
+        );
+    }
+
+    #[test]
+    fn unix_stream_capacity_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = 65536;")
         );
     }
 

@@ -1,4 +1,4 @@
-name = "udp-test"
+name = "socket-test"
 
 [build]
 workdir = "."
@@ -6,4 +6,4 @@ driver = "cargo"
 args = ["build"]
 
 [[artifacts]]
-path = "target/${TARGET_TRIPLE}/debug/udp-test"
+path = "target/${TARGET_TRIPLE}/debug/socket-test"

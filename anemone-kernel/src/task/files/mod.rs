@@ -12,7 +12,9 @@ pub use descriptor::{FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAc
 pub use episode::FdReservation;
 pub(crate) use episode::{FilesState, PosixLockBinding, PosixLockHolder};
 pub use opened_description::{FileDescOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx};
-pub(crate) use opened_description::{OpenedDescriptionCapability, OpenedDescriptionLease};
+pub(crate) use opened_description::{
+    OpenedDescriptionCapability, OpenedDescriptionLease, OpenedFileWriteUserCtx,
+};
 pub use table::Fd;
 pub(crate) use table::FdAllocCeiling;
 use table::FileTable;

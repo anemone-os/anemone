@@ -4,13 +4,14 @@ mod getsockname;
 mod recvfrom;
 mod sendto;
 mod socket;
+mod socketpair;
 
 use crate::{
     fs::iomux::{IomuxScanOutcome, PollEvent, PollRegisterResult, wait_for_iomux_ready},
     prelude::*,
 };
 
-fn wait_for_socket_file(
+pub(super) fn wait_for_socket_file(
     context: &'static str,
     task: &Arc<Task>,
     file: &File,
