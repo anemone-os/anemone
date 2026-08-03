@@ -101,6 +101,10 @@ fn run_local_tests() {
     local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
     println!("user-test: socket test finished.");
 
+    println!("user-test: running pipe capacity test...");
+    local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
+    println!("user-test: pipe capacity test finished.");
+
     // println!("user-test: running POSIX record lock test...");
     // local_run_cmd(
     //     "/bin/fcntl-test",

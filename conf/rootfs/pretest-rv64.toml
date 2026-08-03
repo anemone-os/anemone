@@ -31,9 +31,9 @@ installed_dir = "/bin"
 name = "userptr"
 installed_dir = "/bin"
 
-# [[apps]]
-# name = "fcntl-test"
-# installed_dir = "/bin"
+[[apps]]
+name = "fcntl-test"
+installed_dir = "/bin"
 
 # [[apps]]
 # name = "ioctl-test"

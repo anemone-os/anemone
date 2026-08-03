@@ -382,6 +382,16 @@ pub fn fcntl_setfl(fd: Fd, flags: u32) -> Result<(), Errno> {
     fs::fcntl(fd as u64, fcntl::F_SETFL as u64, flags as u64).map(|_| ())
 }
 
+pub fn fcntl_get_pipe_size(fd: Fd) -> Result<usize, Errno> {
+    fs::fcntl(fd as u64, fcntl::F_GETPIPE_SZ as u64, 0).map(|size| size as usize)
+}
+
+/// The raw unsigned argument is intentional: focused ABI tests must be able to
+/// prove the kernel's rejection of values beyond Linux's signed return domain.
+pub fn fcntl_set_pipe_size(fd: Fd, requested: u64) -> Result<usize, Errno> {
+    fs::fcntl(fd as u64, fcntl::F_SETPIPE_SZ as u64, requested).map(|size| size as usize)
+}
+
 pub fn fcntl_getlk(fd: Fd, lock: &mut Flock) -> Result<(), Errno> {
     unsafe { fcntl_getlk_raw(fd as i32, (lock as *mut Flock).cast()) }
 }
@@ -432,6 +442,16 @@ pub fn ioctl_set_nonblocking(fd: Fd, enabled: bool) -> Result<(), Errno> {
         &enabled as *const i32 as u64,
     )
     .map(|_| ())
+}
+
+pub fn ioctl_readable_bytes(fd: Fd) -> Result<usize, Errno> {
+    let mut readable = 0i32;
+    fs::ioctl(
+        fd as u64,
+        ioctl::FIONREAD as u64,
+        &mut readable as *mut i32 as u64,
+    )?;
+    usize::try_from(readable).map_err(|_| EOVERFLOW)
 }
 
 pub fn ppoll(fds: &mut [PollFd], timeout: Option<&TimeSpec>) -> Result<usize, Errno> {
