@@ -4,7 +4,7 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-use super::{TimerEvent, deadline_after, push_timer_event};
+use super::{TimerHandle, TimerLane, deadline_after, push_timer_event};
 
 const READY_BACKLOG_LOG_THRESHOLD: usize = 1024;
 
@@ -87,13 +87,14 @@ static THREADED_STATS: ThreadedStats = ThreadedStats::new();
 pub fn schedule_threaded_timer_event(
     expire: Duration,
     callback: Box<dyn FnOnce() + Send + 'static>,
-) {
+) -> TimerHandle {
     assert!(
         threaded_worker_ready(),
         "threaded timer event scheduled before local worker initialization"
     );
     THREADED_STATS.submitted.fetch_add(1, Ordering::Relaxed);
-    push_timer_event(TimerEvent::new_threaded(deadline_after(expire), callback));
+    let deadline = deadline_after(expire);
+    push_timer_event(deadline, TimerLane::Threaded(callback))
 }
 
 fn threaded_worker_ready() -> bool {
@@ -244,7 +245,7 @@ mod kunits {
         let callback_completed = completed.clone();
         let callback_done = done.clone();
 
-        schedule_threaded_timer_event(
+        let _request = schedule_threaded_timer_event(
             Duration::from_millis(1),
             Box::new(move || {
                 assert!(

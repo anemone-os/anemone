@@ -13,7 +13,10 @@ use anemone_abi::time::linux::{ITimerSpec, TimeSpec};
 use crate::{
     fs::FileMode,
     prelude::*,
-    time::{clock::get_clock, timer::schedule_threaded_timer_event},
+    time::{
+        clock::get_clock,
+        timer::{TimerHandle, cancel_timer_event, schedule_threaded_timer_event},
+    },
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
@@ -123,6 +126,7 @@ enum TimerFdSchedule {
 struct TimerFdState {
     generation: u64,
     schedule: TimerFdSchedule,
+    request: Option<TimerHandle>,
     expirations: u64,
     read_triggers: Vec<TimerFdIoTrigger>,
     poll_routes: Vec<TimerFdPollRoute>,
@@ -137,6 +141,7 @@ impl TimerFdState {
         Ok(Self {
             generation: 0,
             schedule: TimerFdSchedule::Disarmed,
+            request: None,
             expirations: 0,
             read_triggers: queue_with_capacity()?,
             poll_routes: queue_with_capacity()?,
@@ -149,6 +154,16 @@ impl TimerFdState {
             PollEvent::READABLE
         } else {
             PollEvent::empty()
+        }
+    }
+
+    fn retire_request(&mut self) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("timerfd generation space exhausted");
+        if let Some(request) = self.request.take() {
+            cancel_timer_event(&request);
         }
     }
 
@@ -242,6 +257,19 @@ impl TimerFdCore {
         get_clock(self.clockid as usize)
             .expect("validated timerfd clock disappeared")
             .now_ns()
+    }
+}
+
+impl Drop for TimerFdCore {
+    fn drop(&mut self) {
+        let request = {
+            let mut state = self.state.lock();
+            state.schedule = TimerFdSchedule::Disarmed;
+            state.request.take()
+        };
+        if let Some(request) = request {
+            cancel_timer_event(&request);
+        }
     }
 }
 
@@ -385,7 +413,11 @@ fn notify_waiters_after_unlock(waiters: TimerFdHandoffBatch, reason: &'static st
     }
 }
 
-fn schedule_timerfd_callback(core: &Arc<TimerFdCore>, generation: u64, timeout: Duration) {
+fn schedule_timerfd_callback(
+    core: &Arc<TimerFdCore>,
+    generation: u64,
+    timeout: Duration,
+) -> TimerHandle {
     let weak = Arc::downgrade(core);
     // Timerfd submits a bounded threaded completion, not a background job. The
     // timerfd object still owns generation filtering, missed-tick accounting,
@@ -395,7 +427,7 @@ fn schedule_timerfd_callback(core: &Arc<TimerFdCore>, generation: u64, timeout: 
     schedule_threaded_timer_event(
         timeout,
         Box::new(move || timerfd_expire_callback(weak, generation)),
-    );
+    )
 }
 
 fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
@@ -408,13 +440,17 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
         if state.generation != generation {
             return;
         }
+        assert!(
+            state.request.take().is_some(),
+            "current timerfd callback is missing its dequeued request handle"
+        );
 
         let TimerFdSchedule::Armed {
             next_expire_at_ns,
             interval_ns,
         } = state.schedule
         else {
-            return;
+            panic!("current timerfd callback observed a disarmed owner schedule");
         };
 
         let (detached, timeout) = account_due_expiration_locked(
@@ -427,7 +463,7 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
             // Submit the successor event before publishing the updated armed
             // state by unlocking. This keeps the ordinary path from exposing an
             // armed periodic timer without a matching queued timer-core event.
-            schedule_timerfd_callback(&core, generation, timeout);
+            state.request = Some(schedule_timerfd_callback(&core, generation, timeout));
         }
         detached
     };
@@ -456,12 +492,14 @@ fn refresh_due_expiration_locked(
     // solely from whether the threaded callback has already run. If a reader
     // observes an overdue timer before the queued completion gets CPU time,
     // advance the object state here and make that queued completion stale.
-    state.generation = state.generation.wrapping_add(1);
+    // The queued completion may already be waiting on this state lock. Advance
+    // identity first, then remove the request if it is still queue-owned.
+    state.retire_request();
     let generation = state.generation;
     let (detached, timeout) =
         account_due_expiration_locked(state, now_ns, next_expire_at_ns, interval_ns);
     if let Some(timeout) = timeout {
-        schedule_timerfd_callback(core, generation, timeout);
+        state.request = Some(schedule_timerfd_callback(core, generation, timeout));
     }
     detached
 }
@@ -731,7 +769,7 @@ fn settime(
         let mut state = core.state.lock();
         let old_value = snapshot_itimerspec(core.clockid, &state);
 
-        state.generation = state.generation.wrapping_add(1);
+        state.retire_request();
         state.cancel_on_set_accepted = flags.cancel_on_set;
         if flags.cancel_on_set {
             knoticeln!(
@@ -760,7 +798,7 @@ fn settime(
                 // Normal settime has no recoverable timer-core submit failure:
                 // return from schedule_threaded_timer_event() is the point that
                 // lets this armed generation become visible to readers.
-                schedule_timerfd_callback(&core, state.generation, timeout);
+                state.request = Some(schedule_timerfd_callback(&core, state.generation, timeout));
             }
         }
 
@@ -775,8 +813,100 @@ fn settime(
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::fs::iomux::IomuxWaitRound;
+    use crate::{
+        fs::iomux::IomuxWaitRound,
+        time::timer::{queued_timer_count, timer_event_is_queued},
+    };
     use anemone_abi::time::linux::clock::CLOCK_MONOTONIC;
+
+    fn timer_spec(value_sec: i64, interval_sec: i64) -> ITimerSpec {
+        ITimerSpec {
+            it_interval: TimeSpec {
+                tv_sec: interval_sec,
+                tv_nsec: 0,
+            },
+            it_value: TimeSpec {
+                tv_sec: value_sec,
+                tv_nsec: 0,
+            },
+        }
+    }
+
+    fn relative_flags() -> TimerFdSettimeFlags {
+        TimerFdSettimeFlags {
+            abstime: false,
+            cancel_on_set: false,
+        }
+    }
+
+    #[kunit]
+    fn replace_disarm_and_last_close_remove_queued_requests() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+
+        settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
+        {
+            let timerfd = TimerFdFile::from_file(&file).unwrap();
+            let state = timerfd.core.state.lock();
+            assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
+        }
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+
+        settime(&file, relative_flags(), timer_spec(1800, 0)).unwrap();
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        settime(&file, relative_flags(), timer_spec(0, 0)).unwrap();
+        assert_eq!(queued_timer_count(cpu), baseline);
+
+        settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        drop(file);
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
+
+    #[kunit]
+    fn overdue_refresh_physically_removes_the_queued_completion() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
+
+        let detached = {
+            let timerfd = TimerFdFile::from_file(&file).unwrap();
+            let mut state = timerfd.core.state.lock();
+            state.schedule = TimerFdSchedule::Armed {
+                next_expire_at_ns: 0,
+                interval_ns: None,
+            };
+            refresh_due_expiration_locked(&timerfd.core, &mut state)
+        };
+        assert!(detached.is_empty());
+        assert_eq!(queued_timer_count(cpu), baseline);
+        let timerfd = TimerFdFile::from_file(&file).unwrap();
+        let state = timerfd.core.state.lock();
+        assert_eq!(state.expirations, 1);
+        assert_eq!(state.schedule, TimerFdSchedule::Disarmed);
+        assert!(state.request.is_none());
+    }
+
+    #[kunit]
+    fn periodic_accounting_advances_from_the_previous_target() {
+        let mut state = TimerFdState::new().unwrap();
+        state.schedule = TimerFdSchedule::Armed {
+            next_expire_at_ns: 10,
+            interval_ns: Some(10),
+        };
+        let (_, timeout) = account_due_expiration_locked(&mut state, 35, 10, Some(10));
+        assert_eq!(state.expirations, 3);
+        assert_eq!(
+            state.schedule,
+            TimerFdSchedule::Armed {
+                next_expire_at_ns: 40,
+                interval_ns: Some(10),
+            }
+        );
+        assert_eq!(timeout, Some(Duration::from_nanos(5)));
+    }
 
     #[kunit]
     fn poll_route_notifies_after_unlock_and_reuses_stale_capacity() {

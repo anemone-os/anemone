@@ -107,7 +107,8 @@ realtime mutation、realtime absolute sleep 或 POSIX timer。
 
 ## Gate 2 — 可物理删除的 soft timer
 
-**状态：** Authorized / Next Gate（2026-08-04）；保持独立实现、review、validation 与 commit。
+**状态：** Closed（2026-08-04）；`ST-REQUEST-CUTOVER` 已激活
+[`SOFT-TIMER-REQUEST-001`](../../contracts/time/soft-timer-request.md)。
 
 **Purpose：** 把 soft timer 从“只能等待旧 callback 到期”改成拥有排队句柄、可物理删除、在途处理安全失效
 的一次请求服务；先迁移不依赖 realtime step 的现有请求路径。
@@ -150,6 +151,8 @@ tickless/high-resolution；不把容器类型扩大成 public contract。
 操作数增长，Gate 2 不得关闭。
 
 ## Gate 3 — Realtime mutation 与完整 clock sleep
+
+**状态：** Pending / Not Authorized；Gate 2 收口后停止，不自动进入本 gate。
 
 **Purpose：** 在可物理删除请求已经成立后，开放 `clock_settime(112)`、`clock_adjtime(266)` 和完整
 `clock_nanosleep(115)`，并闭合 timerfd realtime/cancel-on-set 对已生效 timekeeper/soft-timer contract 的消费。

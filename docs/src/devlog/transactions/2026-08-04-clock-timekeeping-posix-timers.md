@@ -1,22 +1,23 @@
 # Clock Timekeeping 与 POSIX Timers 事务日志
 
-**状态：** Active / R0 / Gate 0--1 Closed / Gate 2 Authorized
+**状态：** Active / R0 / Gate 0--2 Closed / Gate 3 Not Authorized
 **日期：** 2026-08-04
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260803-clock-timekeeping-posix-timers R0](../../rfcs/clock-timekeeping-posix-timers/index.md)
 **实施计划：** [Gate 0--6](../../rfcs/clock-timekeeping-posix-timers/implementation.md)
 **适用修订：** R0
-**Contract Cutover：** `TC-CLOCK-CUTOVER` Completed；`TIMEKEEPER-CLOCK-001` Active；其它 R0 contract delta pending
+**Contract Cutover：** `TC-CLOCK-CUTOVER`、`ST-REQUEST-CUTOVER` Completed；`TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001` Active；其它 R0 contract delta pending
 
 ## 边界
 
-本 checkpoint 关闭 Gate 0 与 Gate 1：冻结 native ABI、clock operation、architecture source 和 caller domain
-baseline，并切换统一 architecture counter、integer Hertz conversion、timekeeper clock read truth、八个 get/res
-route 和 calendar consumer。它不实现或声明 realtime mutation、完整 clock sleep、可删除 soft-timer request、
-timerfd cancel-on-set、POSIX timer 或 RTC seed。
+本 transaction 记录两个独立 checkpoint。Gate 0--1 冻结 native ABI、clock operation、architecture source 和
+caller domain baseline，并切换统一 counter、integer Hertz conversion、timekeeper clock read truth、八个
+get/res route 和 calendar consumer。Gate 2 随后建立可物理删除的 soft timer request，并迁移 timerfd、
+`ITIMER_REAL` 和 wait timeout。两个 checkpoint 各自保留 review、validation、contract write-back 和 `clock:`
+commit 边界。
 
-开发者已验收 Gate 1 实现，并授权其关闭后直接进入 Gate 2。Gate 2 仍使用独立 review、validation、contract
-write-back 和 `clock:` commit；该授权不把 Gate 2 代码或 `SOFT-TIMER-REQUEST-001` 混入本 checkpoint。
+本 transaction 不实现或声明 realtime mutation、完整 clock sleep、timerfd cancel-on-set、POSIX timer 或 RTC
+seed。开发者只授权推进到 Gate 2；Gate 3 保持 Pending / Not Authorized，Gate 2 收口后停止。
 
 ## Gate 0 baseline
 
@@ -117,3 +118,49 @@ calendar caller domain。`TIMEKEEPER-STEP-001`、`SOFT-TIMER-REQUEST-001`、`POS
 Architecture Friction Scan未发现第二份 mutable time truth、owner penetration、private ABI leakage、提前 Gate 2
 capability或无真实义务的 abstraction。Gate 2 是下一已授权 gate，但其实现、review、validation与 cutover不属于
 本 Gate 1 commit。
+
+## Gate 2 implementation
+
+- soft timer 使用每 CPU `NoIrqSpinLock<TimerQueue>` 保存单一最小堆；全局 event identity 不回绕，opaque
+  `TimerHandle` 只携带 owner CPU 与 request identity。
+- cancel 只锁本地或一个 remote CPU queue，物理移除仍排队请求；IRQ 到期批量出队、callback 执行和被取消
+  callback 的析构都发生在 queue 锁外。
+- wait-core 保存 timeout handle 并在任意 wait return 后删除请求；已经出队的 callback 继续由 `WakeToken`
+  identity 拒绝旧 round。
+- timerfd 在 replace、disarm、due refresh 和最后引用关闭时删除旧请求；`ITIMER_REAL` 在 replace、disarm 和
+  owner teardown 时执行同一 cleanup。两者的 generation/validness 只拒绝已经出队的旧 completion。
+- timerfd 与 `ITIMER_REAL` 的周期都从原目标推进；timerfd expiry count 与 `ITIMER_REAL` signal commit 继续由
+  各自长期对象拥有。realtime step、absolute clock sleep、cancel-on-set、POSIX timer 与 RTC 均未进入本 gate。
+- 用户态 oracle 反复 replace/disarm timerfd 与 `ITIMER_REAL`，读取周期 timerfd，到期投递 `SIGALRM`，并验证
+  `SIGALRM` 提前中断 nanosleep。
+
+## Gate 2 review 与 validation
+
+- change review 未发现 Apollyon/Keter/Euclid。source audit 确认 queue 锁内无 callback/Drop、remote cancel 不
+  同时持两个 CPU queue lock、production consumer 不以 generation-only 取消，也没有在新增 IRQ/IRQ-off return
+  path 引入 blocking lock、普通日志或新的无界分配。
+- 15 个新增 owner-local KUnit 覆盖 heap identity/order/remove、ID exhaustion、重复删除、IRQ dequeue、锁外
+  callback drop、remote CPU cancel、远期请求有界、wait 提前唤醒、timerfd replace/disarm/refresh/close、
+  `ITIMER_REAL` replace/disarm/teardown 和周期原目标推进。
+- RV64 `log-acceptance.toml` release SMP=2 当前源码运行通过 410/410 KUnit、`All tests passed!` 和
+  `soft-timer: timerfd, ITIMER_REAL, and interrupted nanosleep checks passed`。
+- LA64 release SMP=2 的较早 Gate 2 运行通过 411/411 KUnit、`All tests passed!` 和同一用户 marker。最终源码
+  exact build 通过；clean-rootfs 复跑中全部 15 个 Gate 2 新增 KUnit（包括 remote cancel）通过，随后既有
+  `device::tty::file::kunits::set_modes_commit_after_drain_and_flush_only_for_tcsetsf` 在唤醒 worker 后断言 output
+  仍 pending，因 worker 已消费而中止全局 marker。该 fixture 竞态不读取 timer request 状态，且不修改 TTY
+  属于本 Gate 的明确边界；本记录不把这次全局复跑写成 411/411。
+- 双架构 exact release build均通过；pretest rootfs 由对应 manifest 重新构建。QEMU 在用户 marker 后因没有
+  competition `/dev/vdb` 测试盘停留，外层 timeout 只负责结束 guest，不作为失败归因。
+- `just fmt kernel --check`、`just fmt user-test --check` 与 `git diff --check` 通过。mdBook 检查按开发者明确
+  指示全部跳过，记为 Not Run。
+
+## Gate 2 closure 与 ST-REQUEST-CUTOVER — 2026-08-04
+
+`ST-REQUEST-CUTOVER` 原子激活
+[`SOFT-TIMER-REQUEST-001`](../../contracts/time/soft-timer-request.md#soft-timer-request-001--排队句柄物理删除一次请求)。
+该 current contract 只固定一次请求 owner、排队句柄、物理删除、queue/执行 lane 锁序和已出队 stale
+completion 交接；realtime mutation、absolute clock sleep、timerfd cancel-on-set 与 POSIX timer 仍保持 pending。
+
+Architecture Friction Scan未发现第二份 request/object 状态真相、owner penetration、private queue representation
+泄漏、为局部 consumer 扩大 public API、无退出条件的临时桥、隐含 cleanup 顺序或无真实义务的 abstraction。
+Gate 3 未获授权，本 transaction 在 Gate 2 closure 后停止。

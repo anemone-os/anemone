@@ -558,7 +558,7 @@ pub use kore::*;
 /// Upper-level APIs built upon [kore] functions.
 mod higher_level {
 
-    use crate::time::timer::schedule_local_irq_timer_event;
+    use crate::time::timer::{cancel_timer_event, schedule_local_irq_timer_event};
 
     use super::{
         wait::{WaitOutcome, WaitReason, WakeMode, WakeToken},
@@ -602,7 +602,7 @@ mod higher_level {
         );
         drop(current);
 
-        let start = with_intr_disabled(|| {
+        let (start, timer_request) = with_intr_disabled(|| {
             let wait_id = token.wait_id();
             // `is_armed()` is used here only as the completion-open check: if
             // it is already false, some source/signal/force won before timer
@@ -619,18 +619,17 @@ mod higher_level {
                 unsafe {
                     schedule_wait_sleep(&token);
                 }
-                return start;
+                return (start, None);
             }
 
-            if let Some(timeout) = timeout {
-                // Timer events are not cancellable. Keep only a weak task
-                // target so an early-finished long timeout does not pin the
-                // whole task until expiry; `WakeToken` remains the wait-round
-                // identity for stale/retired checks.
+            let timer_request = if let Some(timeout) = timeout {
+                // Keep only a weak task target for a request that races with
+                // task teardown. `WakeToken` remains the wait-round identity
+                // when the request was already dequeued before cancellation.
                 let timeout_task = Arc::downgrade(task);
                 let timeout_token = token.clone();
                 let diagnostic_tid = task.tid();
-                unsafe {
+                let request = unsafe {
                     schedule_local_irq_timer_event(
                         timeout,
                         Box::new(move || {
@@ -656,31 +655,36 @@ mod higher_level {
                                 result,
                             );
                         }),
-                    );
-                }
+                    )
+                };
                 kdebugln!(
                     "schedule_wait_with_timeout: timeout installed task={} wait={:#x} timeout={:?}",
                     task.tid(),
                     wait_id,
                     timeout,
                 );
+                Some(request)
             } else {
                 kdebugln!(
                     "schedule_wait_with_timeout: no timeout requested task={} wait={:#x}",
                     task.tid(),
                     wait_id,
                 );
-            }
+                None
+            };
 
             let start = Instant::now();
             unsafe {
                 schedule_wait_sleep(&token);
             }
 
-            start
+            (start, timer_request)
         });
 
         let elapsed = start.elapsed();
+        if let Some(request) = timer_request {
+            cancel_timer_event(&request);
+        }
 
         if let Some(timeout) = timeout {
             timeout.saturating_sub(elapsed)

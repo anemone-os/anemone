@@ -115,7 +115,9 @@ pub(super) fn schedule_deadline(control: Arc<PumpControl>, deadline: NetworkInst
     }
     let delay = u64::try_from(deadline.total_micros() - now.total_micros())
         .expect("future network deadline must have a non-negative duration");
-    schedule_threaded_timer_event(
+    // Pump deadlines are one-shot hints; `active` rejects a late callback, so
+    // this owner intentionally has no replacement/cancellation handle.
+    let _request = schedule_threaded_timer_event(
         Duration::from_micros(delay),
         Box::new(move || control.wake_worker()),
     );

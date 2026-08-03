@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{TimerEvent, deadline_after, push_timer_event};
+use super::{TimerHandle, TimerLane, deadline_after, push_timer_event};
 
 /// Schedule a timer event to run in interrupt context on the local CPU after
 /// the given duration.
@@ -12,6 +12,7 @@ use super::{TimerEvent, deadline_after, push_timer_event};
 pub unsafe fn schedule_local_irq_timer_event(
     expire: Duration,
     callback: Box<dyn FnOnce() + Send + 'static>,
-) {
-    push_timer_event(TimerEvent::new_irq(deadline_after(expire), callback));
+) -> TimerHandle {
+    let deadline = deadline_after(expire);
+    push_timer_event(deadline, TimerLane::Irq(callback))
 }

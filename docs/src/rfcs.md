@@ -51,7 +51,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   排队请求的 soft timer；目标是在 RV64/LA64 native 64 位 ABI 上实现五个 clock syscall 和五个 POSIX timer
   syscall，RTC 只作为未来启动时的一次只读时间来源。正确性规则见[目标与不变量](./rfcs/clock-timekeeping-posix-timers/invariants.md)，
   Gate 0--6 的依赖、cutover 和验证见[实施计划](./rfcs/clock-timekeeping-posix-timers/implementation.md)。已生效的
-  clock read规则见[`TIMEKEEPER-CLOCK-001`](./contracts/time/clock-derivation.md)，执行证据见
+  clock read与soft timer request规则分别见[`TIMEKEEPER-CLOCK-001`](./contracts/time/clock-derivation.md)和
+  [`SOFT-TIMER-REQUEST-001`](./contracts/time/soft-timer-request.md)，执行证据见
   [transaction](./devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)。
 - [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
   RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供

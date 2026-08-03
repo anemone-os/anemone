@@ -4,7 +4,10 @@ use crate::{
         SigNo, Signal,
         info::{SiCode, SigInfoFields, SigTimer},
     },
-    time::timer::schedule_threaded_timer_event,
+    time::{
+        duration_to_mono,
+        timer::{TimerHandle, cancel_timer_event, schedule_threaded_timer_event},
+    },
 };
 
 /// Real itimer state still uses a no-IRQ lock because schedule/cancel/snapshot
@@ -25,6 +28,7 @@ pub struct RealITimer {
     /// If false, then a stale timer completion will not send a signal to the
     /// thread group.
     validness: Arc<AtomicBool>,
+    request: Option<TimerHandle>,
 }
 
 impl ITimers {
@@ -34,6 +38,24 @@ impl ITimers {
         }
     }
 }
+
+impl Drop for ITimers {
+    fn drop(&mut self) {
+        let request = {
+            let mut real = self.real.lock();
+            let request = real.as_mut().and_then(|timer| {
+                timer.validness.store(false, Ordering::SeqCst);
+                timer.request.take()
+            });
+            *real = None;
+            request
+        };
+        if let Some(request) = request {
+            cancel_timer_event(&request);
+        }
+    }
+}
+
 impl ThreadGroup {
     /// Set a real itimer. If the thread group already has a real itimer, then
     /// the old one will be cancelled and replaced by the new one.
@@ -47,30 +69,43 @@ impl ThreadGroup {
         let new_validness = Arc::new(AtomicBool::new(true));
         let callback_validness = new_validness.clone();
         let tg = Arc::downgrade(self);
-        let mut real = self.itimers.real.lock();
-        if let Some(real) = real.as_mut() {
-            // prevent stale timer from sending signals.
-            real.validness.store(false, Ordering::SeqCst);
-        }
-        real.replace(RealITimer {
-            expire_at: Instant::now() + timeout,
-            interval,
-            validness: new_validness.clone(),
-        });
+        let old_request = {
+            let mut real = self.itimers.real.lock();
+            let old_request = real.as_mut().and_then(|timer| {
+                timer.validness.store(false, Ordering::SeqCst);
+                timer.request.take()
+            });
 
-        // Submit before unlocking so the armed state is not visible without a
-        // queued timer-core event. The threaded timer API has no recoverable
-        // allocation failure path in this RFC stage.
-        schedule_real_itimer_callback(tg, callback_validness, timeout);
+            // Submit before unlocking so the armed state is not visible without
+            // a matching queued request.
+            let expire_at = Instant::now() + timeout;
+            let request = schedule_real_itimer_callback(tg, callback_validness, timeout);
+            real.replace(RealITimer {
+                expire_at,
+                interval,
+                validness: new_validness,
+                request: Some(request),
+            });
+            old_request
+        };
+        if let Some(request) = old_request {
+            cancel_timer_event(&request);
+        }
     }
 
     pub fn cancel_real_itimer(&self) {
-        let mut real = self.itimers.real.lock();
-        if let Some(real) = real.as_mut() {
-            // prevent stale timer from sending signals.
-            real.validness.store(false, Ordering::SeqCst);
+        let request = {
+            let mut real = self.itimers.real.lock();
+            let request = real.as_mut().and_then(|timer| {
+                timer.validness.store(false, Ordering::SeqCst);
+                timer.request.take()
+            });
+            *real = None;
+            request
+        };
+        if let Some(request) = request {
+            cancel_timer_event(&request);
         }
-        *real = None;
     }
 
     /// Returns (remaining time, optional interval) if the thread group has a
@@ -90,7 +125,7 @@ fn schedule_real_itimer_callback(
     tg: Weak<ThreadGroup>,
     validness: Arc<AtomicBool>,
     timeout: Duration,
-) {
+) -> TimerHandle {
     // ITIMER_REAL submits a bounded threaded completion, not a background job.
     // The thread-group itimer state keeps ownership of stale filtering,
     // interval rearm, and the signal action commit point.
@@ -101,7 +136,28 @@ fn schedule_real_itimer_callback(
                 real_itimer_expire_callback(tg, validness);
             }
         }),
+    )
+}
+
+fn next_periodic_expiration(expire_at: Instant, interval: Duration, now: Instant) -> Instant {
+    assert!(
+        now >= expire_at,
+        "ITIMER_REAL completion ran before its owner deadline"
     );
+    let interval_mono = duration_to_mono(interval)
+        .filter(|interval| *interval != 0)
+        .expect("ITIMER_REAL interval is below the architecture clock resolution");
+    let elapsed = now.mono() - expire_at.mono();
+    let periods = elapsed / interval_mono + 1;
+    let advance = interval_mono
+        .checked_mul(periods)
+        .expect("ITIMER_REAL periodic deadline overflow");
+    Instant::from_mono(
+        expire_at
+            .mono()
+            .checked_add(advance)
+            .expect("ITIMER_REAL periodic deadline overflow"),
+    )
 }
 
 fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>) {
@@ -113,11 +169,21 @@ fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>)
         if !Arc::ptr_eq(&timer.validness, &validness) || !validness.load(Ordering::SeqCst) {
             return;
         }
+        assert!(
+            timer.request.take().is_some(),
+            "current ITIMER_REAL callback is missing its dequeued request handle"
+        );
 
         match timer.interval {
             Some(interval) => {
-                timer.expire_at = Instant::now() + interval;
-                schedule_real_itimer_callback(Arc::downgrade(&tg), validness.clone(), interval);
+                let now = Instant::now();
+                timer.expire_at = next_periodic_expiration(timer.expire_at, interval, now);
+                let timeout = timer.expire_at.saturating_duration_since(now);
+                timer.request = Some(schedule_real_itimer_callback(
+                    Arc::downgrade(&tg),
+                    validness.clone(),
+                    timeout,
+                ));
             },
             None => {
                 timer.validness.store(false, Ordering::SeqCst);
@@ -145,4 +211,80 @@ fn real_itimer_signal() -> Signal {
             sys_private: 0,
         }),
     )
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::time::timer::{queued_timer_count, timer_event_is_queued};
+
+    #[kunit]
+    fn replace_cancel_and_stale_completion_keep_one_live_request() {
+        let tg = get_current_task().get_thread_group();
+        tg.cancel_real_itimer();
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+
+        tg.set_real_itimer(Duration::from_secs(3600), None);
+        let stale_validness = {
+            let real = tg.itimers.real.lock();
+            let timer = real.as_ref().unwrap();
+            assert!(timer_event_is_queued(timer.request.as_ref().unwrap()));
+            timer.validness.clone()
+        };
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+
+        tg.set_real_itimer(Duration::from_secs(1800), Some(Duration::from_secs(2)));
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        real_itimer_expire_callback(tg.clone(), stale_validness);
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+
+        tg.cancel_real_itimer();
+        assert_eq!(queued_timer_count(cpu), baseline);
+        assert!(tg.real_itimer_snapshot().is_none());
+    }
+
+    #[kunit]
+    fn itimer_owner_drop_removes_a_far_future_request() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let request = schedule_threaded_timer_event(Duration::from_secs(3600), Box::new(|| {}));
+        let timers = ITimers {
+            real: NoIrqSpinLock::new(Some(RealITimer {
+                expire_at: Instant::now() + Duration::from_secs(3600),
+                interval: None,
+                validness: Arc::new(AtomicBool::new(true)),
+                request: Some(request),
+            })),
+        };
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        drop(timers);
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
+
+    #[kunit]
+    fn delayed_periodic_completion_advances_from_the_old_target() {
+        let interval = Duration::from_millis(10);
+        let interval_mono = duration_to_mono(interval).unwrap();
+        assert_ne!(interval_mono, 0);
+        let expire_at = Instant::from_mono(100);
+        let now = Instant::from_mono(100 + interval_mono * 3 + interval_mono / 2);
+        let next = next_periodic_expiration(expire_at, interval, now);
+        assert_eq!(next.mono(), 100 + interval_mono * 4);
+        assert!(next > now);
+    }
+
+    #[kunit]
+    fn repeated_itimer_replace_cancel_returns_to_baseline() {
+        let tg = get_current_task().get_thread_group();
+        tg.cancel_real_itimer();
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        for seconds in 1..=64 {
+            tg.set_real_itimer(Duration::from_secs(3600 + seconds), None);
+            assert_eq!(queued_timer_count(cpu), baseline + 1);
+        }
+        tg.cancel_real_itimer();
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
 }

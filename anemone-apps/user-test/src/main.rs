@@ -10,6 +10,7 @@ mod guest;
 mod ltp;
 mod process;
 mod runtime;
+mod soft_timer;
 
 use anemone_rs::{
     abi::system::native::power::SHUTDOWN_MAGIC, os::anemone::power::shutdown, prelude::*,
@@ -24,6 +25,10 @@ fn run_local_tests() {
     println!("user-test: running native clock read test...");
     clock_read::verify_native_clocks();
     println!("user-test: native clock read test finished.");
+
+    println!("user-test: running soft timer consumer test...");
+    soft_timer::verify_soft_timer_consumers();
+    println!("user-test: soft timer consumer test finished.");
 
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
