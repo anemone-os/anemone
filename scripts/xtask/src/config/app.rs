@@ -3,6 +3,12 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+/// Maximum final Command argv length, including the program and CLI extras.
+///
+/// Command is trusted repository build code, but rejecting accidental argv
+/// explosions here gives manifests a stable failure boundary before host exec.
+pub const MAX_COMMAND_ARGUMENTS: usize = 256;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct App {
     pub name: String,
@@ -23,6 +29,8 @@ pub struct Build {
 pub enum BuildDriver {
     #[serde(rename = "cargo")]
     Cargo(CargoBuild),
+    #[serde(rename = "command")]
+    Command(CommandBuild),
     #[serde(rename = "source")]
     Source(SourceBuild),
 }
@@ -30,6 +38,12 @@ pub enum BuildDriver {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoBuild {
     pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandBuild {
+    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +59,18 @@ impl App {
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let manifest: App = toml::from_str(content)
             .with_context(|| "Failed to parse app manifest from string content")?;
+        if let BuildDriver::Command(build) = &manifest.build.driver {
+            anyhow::ensure!(
+                !build.argv.is_empty(),
+                "command driver argv must not be empty"
+            );
+            anyhow::ensure!(
+                build.argv.len() <= MAX_COMMAND_ARGUMENTS,
+                "command driver argv has {} arguments, exceeding the maximum of {}",
+                build.argv.len(),
+                MAX_COMMAND_ARGUMENTS
+            );
+        }
         Ok(manifest)
     }
 }
@@ -63,8 +89,8 @@ mod tests {
     #[test]
     fn source_driver_is_closed_and_has_no_manifest_args() {
         let source = example_app()
-            .replace("driver = \"cargo\"", "driver = \"source\"")
-            .replace("args = [\"build\"]\n", "");
+            .replacen("driver = \"cargo\"", "driver = \"source\"", 1)
+            .replacen("args = [\"build\"]\n", "", 1);
         let app = App::from_str(&source).expect("source manifest should parse");
         assert!(matches!(app.build.driver, BuildDriver::Source(_)));
 
@@ -74,6 +100,38 @@ mod tests {
         );
         let error = format!("{:#}", App::from_str(&source_with_args).unwrap_err());
         assert!(error.contains("unknown field `args`"), "{error}");
+    }
+
+    #[test]
+    fn command_driver_requires_bounded_nonempty_argv() {
+        let command = example_app()
+            .replacen("driver = \"cargo\"", "driver = \"command\"", 1)
+            .replacen("args = [\"build\"]", "argv = [\"./build.sh\"]", 1);
+        let app = App::from_str(&command).expect("command manifest should parse");
+        assert!(matches!(app.build.driver, BuildDriver::Command(_)));
+
+        let empty = command.replacen("argv = [\"./build.sh\"]", "argv = []", 1);
+        let error = format!("{:#}", App::from_str(&empty).unwrap_err());
+        assert!(error.contains("argv must not be empty"), "{error}");
+
+        let arguments = std::iter::repeat_n("\"arg\"", MAX_COMMAND_ARGUMENTS + 1)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let oversized = command.replacen(
+            "argv = [\"./build.sh\"]",
+            &format!("argv = [{arguments}]"),
+            1,
+        );
+        let error = format!("{:#}", App::from_str(&oversized).unwrap_err());
+        assert!(error.contains("exceeding the maximum of 256"), "{error}");
+
+        let unknown = command.replacen(
+            "argv = [\"./build.sh\"]",
+            "argv = [\"./build.sh\"]\nenv = { CC = \"cc\" }",
+            1,
+        );
+        let error = format!("{:#}", App::from_str(&unknown).unwrap_err());
+        assert!(error.contains("unknown field `env`"), "{error}");
     }
 
     fn example_app() -> String {

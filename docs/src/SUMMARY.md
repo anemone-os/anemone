@@ -63,6 +63,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-03 - App Command build driver](./devlog/changes/2026-08-03-app-command-driver.md)
 		- [2026-08-03 - Pipe dynamic capacity](./devlog/changes/2026-08-03-pipe-dynamic-capacity.md)
 		- [2026-08-02 - Kernel backtrace symbolization](./devlog/changes/2026-08-02-kernel-symbolization.md)
 		- [2026-08-02 - Kernel developer logging](./devlog/changes/2026-08-02-kernel-developer-logging.md)

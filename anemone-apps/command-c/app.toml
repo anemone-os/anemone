@@ -1,0 +1,9 @@
+name = "command-c"
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["../command-app-support/build.sh", "c", "main.c", "command-c"]
+
+[[artifacts]]
+path = "out/${ARCH}/command-c"

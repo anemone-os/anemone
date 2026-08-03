@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-03 - App Command build driver](./2026-08-03-app-command-driver.md)
 - [2026-08-03 - Pipe dynamic capacity](./2026-08-03-pipe-dynamic-capacity.md)
 - [2026-08-02 - Kernel backtrace symbolization](./2026-08-02-kernel-symbolization.md)
 - [2026-08-02 - KUnit execution boundary](./2026-08-02-kunit-execution-boundary.md)

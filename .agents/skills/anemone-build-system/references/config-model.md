@@ -42,11 +42,13 @@ artifact selector.
 
 ### App Manifest
 
-`anemone-apps/<app>/app.toml` owns the closed Cargo/Source app driver and artifact export contract.
-Cargo runs its declared architecture-specific command. Source accepts no driver args and runs no
-command; it submits already-existing ordinary files to the same path expansion and export path.
-Neither driver proves runtime compatibility. Keep locator name, manifest identity, driver choice,
-and artifact path coherent.
+`anemone-apps/<app>/app.toml` owns the closed Cargo/Command/Source app driver and artifact export
+contract. Cargo runs its declared architecture-specific command. Command runs a bounded non-empty
+argv directly in workdir, appends caller extras, inherits the process environment, and overrides
+only the resolved `ANEMONE_ARCH` / `ANEMONE_TARGET_TRIPLE` context. Source accepts no driver args
+and runs no command; it submits already-existing ordinary files to the same path expansion and
+export path. No driver proves runtime compatibility. Keep locator name, manifest identity, driver
+choice, and artifact path coherent.
 
 ### Rootfs Manifest
 

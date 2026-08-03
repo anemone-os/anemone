@@ -1,4 +1,5 @@
 pub mod cargo;
+pub mod command;
 
 use std::{path::Path, process::Command};
 
@@ -21,6 +22,7 @@ pub fn build_command(
 ) -> anyhow::Result<Option<Command>> {
     match &ctx.app.build.driver {
         BuildDriver::Cargo(build) => cargo::build_command(build, ctx, extra_args).map(Some),
+        BuildDriver::Command(build) => command::build_command(build, ctx, extra_args).map(Some),
         BuildDriver::Source(_) => {
             if !extra_args.is_empty() {
                 bail!(
