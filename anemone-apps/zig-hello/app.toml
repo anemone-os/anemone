@@ -1,4 +1,4 @@
-name = "command-cpp"
+name = "zig-hello"
 
 [build]
 workdir = "."
@@ -6,4 +6,4 @@ driver = "command"
 argv = ["./build.sh"]
 
 [[artifacts]]
-path = "out/${ARCH}/command-cpp"
+path = "out/${ARCH}/zig-hello"

@@ -1,9 +1,0 @@
-name = "command-driver-test"
-
-[build]
-workdir = "."
-driver = "cargo"
-args = ["build", "--release"]
-
-[[artifacts]]
-path = "target/${TARGET_TRIPLE}/release/command-driver-test"
