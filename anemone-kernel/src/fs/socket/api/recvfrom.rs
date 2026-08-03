@@ -115,5 +115,13 @@ fn sys_recvfrom(
         },
         map_receive_error,
     )
-    .map(|outcome| outcome.copied() as u64)
+    .map(|outcome| {
+        if message_flags.truncate_result {
+            outcome
+                .packet_length()
+                .expect("datagram receive omitted its full packet length") as u64
+        } else {
+            outcome.copied() as u64
+        }
+    })
 }

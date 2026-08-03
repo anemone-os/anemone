@@ -23,9 +23,9 @@ struct SendPayload {
 }
 
 impl SocketSendPayload for SendPayload {
-    fn bytes(&mut self) -> Result<&[u8], SysError> {
+    fn bytes(&mut self, maximum: usize) -> Result<&[u8], SysError> {
         if self.bytes.is_none() {
-            self.bytes = Some(read_payload(self.address, self.len)?);
+            self.bytes = Some(read_payload(self.address, self.len, maximum)?);
         }
         Ok(self.bytes.as_deref().unwrap())
     }

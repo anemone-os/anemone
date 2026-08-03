@@ -54,15 +54,14 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
   `AT_HWCAP*`和Linux full-lazy owner优化保持明确非目标；software unaligned access问题独立登记。
-- [RFC-20260803-icmp-raw-socket](./rfcs/icmp-raw-socket/index.md)：R0已接受，Checkpoint 1已在反馈间章后关闭；提议交付自然闭合的IPv4 ICMP raw
-  Socket，包括`CAP_NET_RAW`创建、bind/connect、send/receive/read/write、blocking/iomux、`IP_TTL`、`IP_TOS`、
-  `ICMP_FILTER`与原始IPv4 RX字节。R0只覆盖unicast、未分片packet；`IP_HDRINCL`、任意protocol、broadcast/
-  multicast、message ABI与error queue保持非目标。Checkpoint 2A已接入仍然syscall不可达的final-shape Socket consumer，
-  并关闭common front、wait与lifecycle独立review；Checkpoint 2B才发布ABI、完成产品验收并执行唯一current-contract
-  cutover，当前保持Not Active并等待单独授权；
-  [目标与不变量](./rfcs/icmp-raw-socket/invariants.md)固定owner、ingress/fanout、transaction与acceptance边界，
-  [实施路线](./rfcs/icmp-raw-socket/implementation.md)以一个stage、三个checkpoint和唯一final cutover隔离protocol proof、
-  Socket consumer review与ABI/产品验收。
+- [RFC-20260803-icmp-raw-socket](./rfcs/icmp-raw-socket/index.md)：R0已实现并关闭；交付privileged
+  `AF_INET + SOCK_RAW + IPPROTO_ICMP`、bind/connect、send/receive/read/write、blocking/iomux、`IP_TTL`、`IP_TOS`、
+  `ICMP_FILTER`与原始IPv4 RX字节。R0只覆盖unicast、未分片packet；`IP_HDRINCL`、任意protocol、broadcast/multicast、
+  message ABI与error queue保持非目标。Checkpoint 1反馈间章、Checkpoint 2A consumer review与Checkpoint 2B ABI/product
+  evidence均已关闭；双架构focused 10/10、BusyBox ping 1/1、glibc/musl curated Socket LTP 6/6及最终独立复审共同完成
+  `ICMP-RAW-CUTOVER`。四项common contract已Refine、三项ICMP raw contract已Introduce；transaction与register无占位变化。
+  [目标与不变量](./rfcs/icmp-raw-socket/invariants.md)与[实施路线](./rfcs/icmp-raw-socket/implementation.md)保留target、
+  owner、evidence和一项非阻断guest saturation/retry组合证明Euclid；Stage 1到此结束，不进入后续gate。
 - [RFC-20260801-socket-abstraction-and-unix-socket](./rfcs/socket-abstraction-and-unix-socket/index.md)：R1 Closed；以现有
   IPv4 UDP与新增filesystem pathname `AF_UNIX + SOCK_STREAM`作为两个真实consumer，定义最小general Socket front、
   family-owned operation predicate、Unix namespace/stream/lifecycle owner边界，以及bind跨VFS publication的诚实工程

@@ -1,0 +1,4 @@
+# Complete stock binaries selected as the common Socket ABI regression floor.
+socketpair02
+bind03
+listen01

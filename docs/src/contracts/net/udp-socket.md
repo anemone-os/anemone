@@ -1,24 +1,22 @@
 # Network UDP Socket 当前契约
 
-**Contract IDs：** `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、
-`NET-UDP-TRANSACTION-001`、`NET-SOCKET-WAIT-001`
+**Contract IDs：** `NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`
 **状态：** Active
 **Owner：** shared protocol vocabulary、kernel UDP Socket/source、initial-domain control plane、domain Stack/Endpoint
 分别拥有各自state；本页只拥有它们之间的协议
 **参与领域：** network control plane / protocol Stack / VFS opened description / socket syscall / iomux / epoll
-**覆盖范围：** narrow UDP capability、Socket/Endpoint association与retire、bind/send/receive transaction、
-readiness/wake/cancellation投影
+**覆盖范围：** UDP Socket/Endpoint association与retire，以及bind/send/receive transaction
 **不覆盖：** connected UDP、IPv6、`SO_REUSE*`、bound-device、async ICMP error/`SO_ERROR`、IPv4 fragment
 reassembly、runtime network reconfiguration/detach、TCP或raw socket
 **实现位置：** `anemone-kernel/crates/anemone-net-api/src/udp.rs`、
 `anemone-kernel/crates/anemone-smoltcp-stack/src/{stack/udp.rs,udp/}`、
 `anemone-kernel/src/net/{udp.rs,domain/stack/udp.rs}`、`anemone-kernel/src/fs/socket/udp/`、
 `anemone-kernel/src/fs/socket/api/`
-**依赖：** `NET-BOUNDARY-001`、`NET-FRAME-OWN-001`、`NET-FRAME-PROGRESS-001`、
+**依赖：** `NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-WAIT-001`、`NET-BOUNDARY-001`、`NET-FRAME-OWN-001`、`NET-FRAME-PROGRESS-001`、
 `NET-STACK-PUMP-001`、`NET-CONTROL-PLANE-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、
 `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`
 **Pending Successor：** None
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-03
 
 ## 状态与能力所有权
 
@@ -34,33 +32,6 @@ reassembly、runtime network reconfiguration/detach、TCP或raw socket
 
 这些owner之间没有共同mutable object或并列truth。opaque identity、selection、snapshot、invalidation和wake edge都只
 服务一次operation或重查，不能反向取得另一个owner的私有state。
-
-## NET-PROTOCOL-BOUNDARY-001 — Cross-owner UDP capability保持窄且非阻塞
-
-**规则：** `anemone-net-api`只定义kernel与concrete Stack共同需要的protocol-domain value、opaque Endpoint
-identity、request/outcome、point-in-time facts与invalidation vocabulary，不拥有registry、queue、waiter或Linux ABI
-policy。concrete Stack独占smoltcp handle、buffer、mapping与representation conversion；kernel独占task、fd、
-opened-description、user pointer、wait和errno映射。Stack operation以owner-local同步mutation/observation完成，不能
-接收task、File、waiter或user pointer，也不能把private object交给kernel。
-
-cross-owner handoff只有三类：non-blocking request在Stack owner内立即commit或返回typed rejection/not-ready；
-invalidation edge只表示owner fact可能改变；snapshot/outcome只供当前operation解释。事件、snapshot或opaque id不得
-缓存为第二份lifecycle/readiness/error/route truth，host-validation facade不得进入kernel production dependency。
-
-**失败与cleanup：** request在owner commit前失败时不发布partial Endpoint/binding/datagram state；kernel只映射明确
-outcome。unknown/stale identity fail closed，不允许fallback到private handle lookup、第二registry或future TCP
-framework。observer注销和晚到edge不改变Endpoint owner state。
-
-**违反表现：** Stack接收fd/task/Linux errno；kernel接收smoltcp handle/private queue；API crate成为第二net core；
-event直接发布poll mask/error；host-only control进入production dependency；为无consumer的协议预建通用框架。
-
-**验证 / Enforcement：** shared API与dependency audit、no-default stack build、host topology/owner tests、kernel
-KUnit与双架构真实Socket runtime。
-
-**最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/invariants.md#net-protocol-boundary-001--cross-crate-protocol-capability保持窄且非阻塞)。
-
-**当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
-`NET-UDP-FINAL-CUTOVER`。
 
 ## NET-SOCKET-ENDPOINT-001 — Socket与Endpoint保持owner fence和单向association
 
@@ -132,42 +103,6 @@ focused UDP runtime。Stage 5 transaction保留loopback、self-external与remote
 validation asset维护见[2026-07-31清理记录](../../devlog/changes/2026-07-31-net-udp-external-peer-retirement.md)。
 
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/invariants.md#net-udp-bind-001--bind-conflictport-allocation与commit属于stack)中的bind/datagram target。
-
-**当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
-`NET-UDP-FINAL-CUTOVER`。
-
-## NET-SOCKET-WAIT-001 — Protocol fact、wake与Linux readiness保持分离
-
-**规则：** Endpoint唯一拥有readable/writable/error所需protocol facts；kernel `UdpSocketSource`结合一次snapshot、
-opened-description status与syscall context投影Linux readiness/error。Socket不缓存RX/TX、provider queue或private
-engine capacity truth；Endpoint invalidation与`PollRoute` notification只是non-owning recheck hint，不是poll mask或
-errno。
-
-UDP source Preserve `IOMUX-POLL-001..003`：snapshot/register gate在source publication临界区发布route并读取当前
-predicate；可能丢失精确覆盖时返回recheck而不park；任意hint、timeout、signal或force后执行final predicate scan。
-default blocking与`O_NONBLOCK`/`SOCK_NONBLOCK`/`MSG_DONTWAIT`读取同一not-ready predicate，per-call flag不修改
-opened-description status，blocking path不得busy-poll。
-
-ordinary writable表示live、未retire Endpoint当前可立即接纳至少一个非空且在第一版范围内的datagram进入自身
-bounded TX admission storage；它不承诺任意destination、length或provider立即发送。route/source/oversize与
-request-specific capacity仍由send transaction裁决。provider backpressure只有在阻塞progression并耗尽Endpoint
-admission时才间接清除writable，恢复由Endpoint owner更新facts再发布invalidation。
-
-**取消与cleanup：** 每个blocking/iomux/epoll consumer各自拥有wait round/watch；signal、timeout、force、close或
-losing waiter只retire其route/round，不撤销其它consumer。Socket retire先撤销source publication和全部route，再在
-锁外发送hint/drop引用；晚到或重复edge对retired generation fail closed，不能命中新association。final release不等待
-waiter，waiter也不拥有Socket/Endpoint lifecycle。
-
-**违反表现：** event payload直接返回用户；register window lost wake；未注册source就sleep；Socket复制queue count；
-route不存在就永久清除writable；`MSG_DONTWAIT`改变status；一个waiter取消撤销其它route；retire未通知empty-interest
-route；old edge命中新association。
-
-**验证 / Enforcement：** initial-unbound writable、route/request failure、Endpoint/provider saturation/recovery、
-snapshot/register/final-scan、multi-waiter/signal、poll/select/epoll coexistence、dup/fork/close/retire及晚到hint
-KUnit/host/real-consumer matrix；双架构focused UDP与11项epoll runtime。Stage 5 transaction保留17项UDP的
-cutover evidence，current wrapper不把focused case数量冻结为长期接口。
-
-**最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/invariants.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离)。
 
 **当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
 `NET-UDP-FINAL-CUTOVER`。

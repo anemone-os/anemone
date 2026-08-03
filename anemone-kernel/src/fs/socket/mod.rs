@@ -15,5 +15,6 @@ use front::{
     prepare_socket, prepare_socket_pair, retry_socket_receive, retry_socket_send,
     socket_file_desc_ops, socket_from_file, wait_for_socket_operation,
 };
+use icmp_raw::ICMP_RAW_SOCKET_OPS;
 use udp::UDP_SOCKET_OPS;
 use unix::UNIX_STREAM_SOCKET_OPS;

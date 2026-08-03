@@ -410,10 +410,10 @@ predicate、snapshot与notification实现不因此冻结。
 
 ### Dependencies
 
-- [`NET-PROTOCOL-BOUNDARY-001`](../../contracts/net/udp-socket.md#net-protocol-boundary-001--cross-owner-udp-capability保持窄且非阻塞)：UDP cross-crate capability与private Stack boundary不变。
+- [`NET-PROTOCOL-BOUNDARY-001`](../../contracts/net/protocol-socket.md#net-protocol-boundary-001--cross-owner-protocol-capability保持窄且非阻塞)：UDP cross-crate capability与private Stack boundary不变。
 - [`NET-SOCKET-ENDPOINT-001`](../../contracts/net/udp-socket.md#net-socket-endpoint-001--socket与endpoint保持owner-fence和单向association)：UDP迁移到general Socket front时保持Endpoint owner、retire与stale isolation语义。
 - [`NET-UDP-TRANSACTION-001`](../../contracts/net/udp-socket.md#net-udp-transaction-001--bindsend与receive各自只有一个commit-boundary)：UDP datagram transaction不被Unix stream统一。
-- [`NET-SOCKET-WAIT-001`](../../contracts/net/udp-socket.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离)：UDP作为新共同wait边界的真实consumer，但其predicate、writability与recheck语义不变。
+- [`NET-SOCKET-WAIT-001`](../../contracts/net/protocol-socket.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离)：UDP作为新共同wait边界的真实consumer，但其predicate、writability与recheck语义不变。
 - [`OPENED-DESC-001..003`](../../contracts/task/opened-description-lifecycle.md)：published-ref、dup/fork与static final-release hook继续有效。
 - [`VFS-FILE-KIND-001`](../../contracts/vfs/file-kind.md#vfs-file-kind-001--inode-kind-是唯一-file-type-truth)：socket-kind只由immutable inode kind决定。
 - [`VFS-CREATION-001`](../../contracts/vfs/make-node.md#vfs-creation-001--current-task-creation-policy-止于-kernel-operation)：pathname bind只提交socket kind与`0777` requested permission，复用task filesystem-context umask、operation-local credential/mask snapshot、create DAC与final metadata formation，不在Socket owner重复状态或策略。

@@ -1,10 +1,7 @@
 //! ICMP raw family-private Socket state and static common-front operations.
 //!
-//! The descriptor is deliberately unreachable from the Socket resolver in
-//! Checkpoint 2A. Checkpoint 2B removes this allowance when it publishes the
-//! Linux tuple; keeping the final-shape consumer compiled now is the review
-//! boundary for common Socket, wait, and opened-description ownership.
-#![allow(dead_code)]
+//! The static descriptor is the only Linux raw-ICMP semantic type witness;
+//! family state stays private behind the common Socket front.
 
 mod source;
 
@@ -35,6 +32,8 @@ use super::{
 use source::IcmpRawSocketSource;
 
 const ICMP_PROTOCOL_NUMBER: u16 = 1;
+// IPv4 total_len is 16-bit and R0 always forms the minimum 20-byte header.
+const ICMP_RAW_MAX_MESSAGE_BYTES: usize = u16::MAX as usize - 20;
 
 static_assert!(NET_ICMP_RAW_DEFAULT_TTL > 0);
 
@@ -214,11 +213,13 @@ fn query_local_address(
     let address = config
         .association()
         .local()
-        .map(|address| SocketAddress::Ipv4 {
-            address,
-            port: ICMP_PROTOCOL_NUMBER,
-        });
-    sink.copy_address(address).map_err(SocketQueryError::Copy)
+        .unwrap_or(Ipv4Address::UNSPECIFIED);
+    // Linux exposes the raw protocol in sin_port even before an explicit bind.
+    sink.copy_address(Some(SocketAddress::Ipv4 {
+        address,
+        port: ICMP_PROTOCOL_NUMBER,
+    }))
+    .map_err(SocketQueryError::Copy)
 }
 
 fn query_peer_address(
@@ -278,7 +279,9 @@ fn send_icmp_raw_socket(
 
     let socket = raw_private(private);
     let snapshot = prepare_icmp_raw_send(socket, explicit_destination, operation)?;
-    let payload = payload.bytes().map_err(SocketSendError::Copy)?;
+    let payload = payload
+        .bytes(ICMP_RAW_MAX_MESSAGE_BYTES)
+        .map_err(SocketSendError::Copy)?;
     let len = payload.len();
     socket
         .endpoint()
@@ -563,7 +566,7 @@ mod kunits {
     struct FaultSendPayload;
 
     impl SocketSendPayload for FaultSendPayload {
-        fn bytes(&mut self) -> Result<&[u8], SysError> {
+        fn bytes(&mut self, _maximum: usize) -> Result<&[u8], SysError> {
             Err(SysError::BadAddress)
         }
     }
@@ -639,7 +642,13 @@ mod kunits {
             .unwrap();
         let mut local = AddressCapture::default();
         socket.copy_local_address(&mut local).unwrap();
-        assert_eq!(local.0, None);
+        assert_eq!(
+            local.0,
+            Some(SocketAddress::Ipv4 {
+                address: Ipv4Address::UNSPECIFIED,
+                port: ICMP_PROTOCOL_NUMBER,
+            })
+        );
         assert!(
             socket
                 .connect(SocketAddress::Ipv4 {

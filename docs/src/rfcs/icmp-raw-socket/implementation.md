@@ -1,16 +1,16 @@
 # IPv4 ICMP Raw Socket 实施路线
 
-**状态：** R0 Accepted / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Closed / Checkpoint 2B Not Active
+**状态：** R0 Closed / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Closed / Checkpoint 2B Closed / `ICMP-RAW-CUTOVER` Complete
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前修订：** R0
-**执行授权：** Checkpoint 1反馈间章与Checkpoint 2A已关闭；Checkpoint 2B与contract cutover均未授权
+**执行授权：** 三个checkpoint与唯一contract cutover均已按各自授权关闭；不得进入后续gate
 
 本文只长期保存跨 Socket、Network Stack 与 interface/IP owner 的实施顺序，不复制父 RFC 的 target、ABI matrix或
-acceptance。R0已接受；Checkpoint 1 closure后的软件工程审查触发Review Hold，本反馈间章只修复该checkpoint内的owner
-与composition偏差，并已通过独立复核。Checkpoint 2A随后按单独授权完成syscall不可达的Socket consumer与shared owner
-review；当前再次停止，Checkpoint 2B仍需单独授权。
+acceptance。R0已实现并关闭；Checkpoint 1 closure后的软件工程审查曾触发Review Hold，反馈间章修复该checkpoint内的
+owner与composition偏差并通过独立复核。Checkpoint 2A随后关闭syscall不可达的Socket consumer与shared owner review；
+Checkpoint 2B完成ABI publication、mandatory product evidence、final review与唯一cutover。当前停止，不进入后续gate。
 
 本路线只有一个implementation stage、三个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
 post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2A在继续
@@ -288,7 +288,7 @@ family若需要复制association/readiness/lifecycle truth，owner-local proof�
 
 ## Checkpoint 2B — ABI Publication、产品验收与 `ICMP-RAW-CUTOVER`
 
-**状态：** Not Active
+**状态：** Closed / `ICMP-RAW-CUTOVER` Complete
 
 **Purpose：** 在Checkpoint 2A已经证明shared Socket consumer形状后，发布完整ICMP raw Socket UAPI，闭合Linux-visible
 matrix、全部mandatory product evidence、最终review和唯一current-contract cutover。
@@ -326,10 +326,28 @@ accepted revision。若Checkpoint 2A证据要求改变target、owner、ABI、Con
 - RV64/LA64 build、source/dependency audit与documentation validation通过；父RFC列出的optional claim只有实际运行时才
   增加独立证据，否则保持Not Run。
 
-**Cutover：** 只有上述证据、停止条件与final review全部满足时，原子执行`ICMP-RAW-CUTOVER`：Refine
+### Closure Evidence
+
+- final source的owner-local/host proof通过：`just test net-host`覆盖raw ingress、fanout、Endpoint、TX/RX、MTU、capacity、
+  provider path及UDP topology；`just test xtask`为74/74；kernel、socket-test、user-test format和`git diff --check`通过。
+- RV64与LA64 canonical wrapper均完成release discovery/final pass及symbol verification；guest KUnit分别输出
+  `All tests passed!`，focused suite均为`RAWICMP:SUMMARY:PASS:10`。
+- 两架构普通BusyBox `ping -c 1 10.0.2.2`均为1 transmitted / 1 received；focused header oracle另外证明TTL/TOS进入真实
+  IPv4 header，并以canonical VirtIO backing推导的2002-byte ICMP message成功、2003-byte `EMSGSIZE`证明live MTU boundary。
+- 两架构的glibc与musl均完整执行tracked `socketpair02`、`bind03`、`listen01`，每架构汇总
+  `attempted=6 passed=6 failed=0 infra_failed=0 skipped=0`；没有修改stock binary、subcase selector或以`TCONF`替代覆盖。
+- 两架构均完成filesystem、network与device orderly shutdown。LA64没有成功的machine poweroff handler，在所有mandatory
+  marker出现后由QEMU monitor退出；该既有platform termination边界不替代或削弱network shutdown evidence。
+- 首轮独立review发现raw copy ceiling、unsupported option fault precedence、`AF_UNSPEC`完整copy与transaction matrix四项
+  blocking finding；修复并重新生成全部双架构证据后，同一reviewer复核为Apollyon 0、Keter 0，允许cutover。
+- 最终Architecture Friction Scan保留一项非阻断Euclid：guest尚未把真实TX saturation、blocking retry与capacity recovery
+  串成单个production-path case。owner-local proof已分别覆盖Stack saturation/recovery与immutable retry snapshot；最小后续
+  增强是在guest观察`EAGAIN`、等待恢复并确认同一snapshot提交，不建立test-only production facade。
+
+**Cutover：** 上述证据、停止条件与final review全部满足后，已原子执行`ICMP-RAW-CUTOVER`：Refine
 `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-WAIT-001`；Introduce
-`NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`。任一mandatory claim缺失时
-全部current contracts保持旧规则并记为Not Cut Over，不做partial cutover。
+`NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`。没有partial或transitional
+contract；register与transaction均无成功占位变化。
 
 **Stop / Exit：** Linux oracle若要求改变父RFC能力/errno/copy policy，ABI publication若暴露Checkpoint 2A owner/front/
 wait/lifecycle边界无法保持，或任一mandatory architecture/validation claim需要降低，必须停止。完成条件是代码、tests、

@@ -9,14 +9,14 @@ use crate::{
     task::files::{Fd, FileStatusFlags},
 };
 
-use super::abi::read_socket_address;
+use super::abi::read_socket_connect_address;
 
 #[syscall(SYS_CONNECT)]
 fn sys_connect(fd: Fd, addr: u64, addrlen: u32) -> Result<u64, SysError> {
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    let address = read_socket_address(socket.socket_type(), addr, addrlen)?;
+    let address = read_socket_connect_address(socket.socket_type(), addr, addrlen)?;
     let nonblocking = desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
     loop {

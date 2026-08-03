@@ -1,6 +1,7 @@
 #[cfg(feature = "kunit")]
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
+    AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
+    SOCK_STREAM,
 };
 use anemone_abi::syscall::SYS_SOCKET;
 
@@ -17,6 +18,12 @@ fn sys_socket(family: i32, socket_type: i32, protocol: i32) -> Result<u64, SysEr
     let resolved = resolve_socket(family, socket_type, protocol)?;
 
     let task = get_current_task();
+    if resolved
+        .required_capability
+        .is_some_and(|capability| !task.has_cap(capability))
+    {
+        return Err(SysError::PermissionDenied);
+    }
     let reservation = task.reserve_fd()?;
     let (file, creation) = prepare_socket(resolved.ops)?;
 
@@ -92,12 +99,19 @@ mod kunits {
     }
 
     #[kunit]
-    fn resolver_keeps_icmp_raw_tuple_unreachable_in_checkpoint_2a() {
-        // Linux SOCK_RAW and IPPROTO_ICMP are intentionally local test values:
-        // Checkpoint 2B owns their public ABI constants and tuple publication.
+    fn resolver_publishes_only_the_privileged_icmp_raw_tuple() {
+        let raw = resolve_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP).unwrap();
+        assert!(core::ptr::eq(
+            raw.ops,
+            &crate::fs::socket::ICMP_RAW_SOCKET_OPS
+        ));
+        assert_eq!(
+            raw.required_capability,
+            Some(crate::task::credentials::cap::Capability::NET_RAW)
+        );
         assert!(matches!(
-            resolve_socket(AF_INET, 3, 1),
-            Err(SysError::SocketTypeNotSupported)
+            resolve_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP + 1),
+            Err(SysError::ProtocolNotSupported)
         ));
     }
 }

@@ -116,7 +116,7 @@ pub(super) enum SocketReceiveError {
 }
 
 pub(super) trait SocketSendPayload {
-    fn bytes(&mut self) -> Result<&[u8], SysError>;
+    fn bytes(&mut self, maximum: usize) -> Result<&[u8], SysError>;
 }
 
 /// Opaque family snapshot retained for one datagram send operation.

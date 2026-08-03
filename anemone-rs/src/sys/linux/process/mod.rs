@@ -1,5 +1,13 @@
 use super::*;
 
+pub fn capget(header_ptr: u64, data_ptr: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_CAPGET, header_ptr, data_ptr, 0, 0, 0, 0) }
+}
+
+pub fn capset(header_ptr: u64, data_ptr: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_CAPSET, header_ptr, data_ptr, 0, 0, 0, 0) }
+}
+
 pub fn brk(addr: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_BRK, addr, 0, 0, 0, 0, 0) }
 }

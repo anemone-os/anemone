@@ -2,14 +2,18 @@ use core::mem::size_of;
 
 use anemone_abi::{
     net::linux::{
-        AF_INET, AF_UNIX, IPPROTO_UDP, SO_ACCEPTCONN, SO_DOMAIN, SO_PROTOCOL, SO_TYPE, SOCK_DGRAM,
-        SOCK_STREAM, SOL_SOCKET,
+        AF_INET, AF_UNIX, ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_ICMP, IPPROTO_IP, IPPROTO_UDP,
+        SO_ACCEPTCONN, SO_DOMAIN, SO_PROTOCOL, SO_TYPE, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM, SOL_RAW,
+        SOL_SOCKET,
     },
     syscall::SYS_GETSOCKOPT,
 };
 
 use crate::{
-    fs::socket::{SocketQueryError, SocketType, front::Socket, socket_from_file},
+    fs::socket::{
+        SocketOptionError, SocketOptionQuery, SocketOptionValue, SocketQueryError, SocketType,
+        front::Socket, socket_from_file,
+    },
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
     task::files::Fd,
@@ -20,23 +24,17 @@ fn query_value(socket: &Socket, option: i32) -> Result<i32, SysError> {
         SO_TYPE => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => SOCK_DGRAM,
             SocketType::UnixStream => SOCK_STREAM,
-            SocketType::Ipv4IcmpRaw => {
-                unreachable!("ICMP raw Socket descriptor is not fd-reachable before Checkpoint 2B")
-            },
+            SocketType::Ipv4IcmpRaw => SOCK_RAW,
         }),
         SO_DOMAIN => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => AF_INET,
             SocketType::UnixStream => AF_UNIX,
-            SocketType::Ipv4IcmpRaw => {
-                unreachable!("ICMP raw Socket descriptor is not fd-reachable before Checkpoint 2B")
-            },
+            SocketType::Ipv4IcmpRaw => AF_INET,
         }),
         SO_PROTOCOL => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => IPPROTO_UDP,
             SocketType::UnixStream => 0,
-            SocketType::Ipv4IcmpRaw => {
-                unreachable!("ICMP raw Socket descriptor is not fd-reachable before Checkpoint 2B")
-            },
+            SocketType::Ipv4IcmpRaw => IPPROTO_ICMP,
         }),
         SO_ACCEPTCONN => socket
             .is_accepting()
@@ -53,6 +51,77 @@ fn query_value(socket: &Socket, option: i32) -> Result<i32, SysError> {
     }
 }
 
+enum GetOption {
+    Descriptor(i32),
+    Ipv4Scalar(i32),
+    Bytes([u8; size_of::<u32>()]),
+}
+
+impl GetOption {
+    fn bytes(&self) -> [u8; size_of::<u32>()] {
+        match self {
+            Self::Descriptor(value) | Self::Ipv4Scalar(value) => value.to_ne_bytes(),
+            Self::Bytes(bytes) => *bytes,
+        }
+    }
+
+    fn copied_len(&self, requested: usize) -> usize {
+        match self {
+            Self::Ipv4Scalar(value)
+                if (1..size_of::<i32>()).contains(&requested)
+                    && (0..=u8::MAX as i32).contains(value) =>
+            {
+                1
+            },
+            _ => requested.min(size_of::<u32>()),
+        }
+    }
+
+    fn writes_len_first(&self) -> bool {
+        !matches!(self, Self::Descriptor(_))
+    }
+}
+
+fn map_option_error(error: SocketOptionError) -> SysError {
+    match error {
+        SocketOptionError::Unsupported => SysError::ProtocolOptionNotSupported,
+        SocketOptionError::Retired => SysError::BadFileDescriptor,
+        SocketOptionError::InvalidValue => SysError::InvalidArgument,
+    }
+}
+
+fn query_option(socket: &Socket, level: i32, option: i32) -> Result<GetOption, SysError> {
+    match (level, option) {
+        (SOL_SOCKET, option) => query_value(socket, option).map(GetOption::Descriptor),
+        (IPPROTO_IP, IP_TTL) => socket
+            .query_option(SocketOptionQuery::Ipv4TimeToLive)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::Ipv4TimeToLive(value) => Ok(GetOption::Ipv4Scalar(value as i32)),
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
+        (IPPROTO_IP, IP_TOS) => socket
+            .query_option(SocketOptionQuery::Ipv4TypeOfService)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::Ipv4TypeOfService(value) => {
+                    Ok(GetOption::Ipv4Scalar(value as i32))
+                },
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
+        (SOL_RAW, ICMP_FILTER) => socket
+            .query_option(SocketOptionQuery::IcmpTypeFilter)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::IcmpTypeFilter(value) => {
+                    Ok(GetOption::Bytes(value.to_ne_bytes()))
+                },
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
+        _ => Err(SysError::ProtocolOptionNotSupported),
+    }
+}
+
 #[syscall(SYS_GETSOCKOPT)]
 fn sys_getsockopt(fd: Fd, level: i32, option: i32, value: u64, len: u64) -> Result<u64, SysError> {
     let desc = get_current_task().get_fd(fd)?;
@@ -61,25 +130,31 @@ fn sys_getsockopt(fd: Fd, level: i32, option: i32, value: u64, len: u64) -> Resu
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
     let mut len_bytes = [0u8; size_of::<i32>()];
-    UserReadSlice::<u8>::try_new(len_address, len_bytes.len(), &mut uspace.lock())?
-        .copy_to_slice(&mut len_bytes)?;
+    {
+        UserReadSlice::<u8>::try_new(len_address, len_bytes.len(), &mut uspace.lock())?
+            .copy_to_slice(&mut len_bytes)?;
+    }
     let requested = i32::from_ne_bytes(len_bytes);
     if requested < 0 {
         return Err(SysError::InvalidArgument);
     }
-    if level != SOL_SOCKET {
-        return Err(SysError::ProtocolOptionNotSupported);
+    let result = query_option(socket, level, option)?;
+    let bytes = result.bytes();
+    let copied = result.copied_len(requested as usize);
+    let actual = (copied as i32).to_ne_bytes();
+    if result.writes_len_first() {
+        UserWriteSlice::<u8>::try_new(len_address, actual.len(), &mut uspace.lock())?
+            .copy_from_slice(&actual)?;
     }
-    let result = query_value(socket, option)?.to_ne_bytes();
-    let copied = (requested as usize).min(result.len());
     if copied != 0 {
         let value = user_addr(value)?;
         UserWriteSlice::<u8>::try_new(value, copied, &mut uspace.lock())?
-            .copy_from_slice(&result[..copied])?;
+            .copy_from_slice(&bytes[..copied])?;
     }
-    let actual = (copied as i32).to_ne_bytes();
-    UserWriteSlice::<u8>::try_new(len_address, actual.len(), &mut uspace.lock())?
-        .copy_from_slice(&actual)?;
+    if !result.writes_len_first() {
+        UserWriteSlice::<u8>::try_new(len_address, actual.len(), &mut uspace.lock())?
+            .copy_from_slice(&actual)?;
+    }
     Ok(0)
 }
 
@@ -87,8 +162,8 @@ fn sys_getsockopt(fd: Fd, level: i32, option: i32, value: u64, len: u64) -> Resu
 mod kunits {
     use super::*;
     use crate::fs::socket::{
-        UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket, prepare_socket_pair,
-        socket_from_file,
+        ICMP_RAW_SOCKET_OPS, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket,
+        prepare_socket_pair, socket_from_file,
     };
 
     #[kunit]
@@ -111,5 +186,13 @@ mod kunits {
         assert_eq!(query_value(unix, SO_DOMAIN), Ok(AF_UNIX));
         assert_eq!(query_value(unix, SO_PROTOCOL), Ok(0));
         assert_eq!(query_value(unix, SO_ACCEPTCONN), Ok(0));
+
+        let (raw_file, raw_creation) = prepare_socket(&ICMP_RAW_SOCKET_OPS).unwrap();
+        let raw = socket_from_file(&raw_file).unwrap();
+        assert_eq!(query_value(raw, SO_TYPE), Ok(SOCK_RAW));
+        assert_eq!(query_value(raw, SO_DOMAIN), Ok(AF_INET));
+        assert_eq!(query_value(raw, SO_PROTOCOL), Ok(IPPROTO_ICMP));
+        assert_eq!(query_value(raw, SO_ACCEPTCONN), Ok(0));
+        drop(raw_creation);
     }
 }

@@ -5,6 +5,7 @@ mod source;
 use anemone_net_api::udp::{UdpBindError, UdpPeer, UdpQueryError, UdpReceiveError, UdpSendError};
 
 use crate::{
+    kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
     net::udp::{BindError, SendError, UdpEndpointPort, create_endpoint},
     prelude::*,
     utils::any_opaque::AnyOpaque,
@@ -175,7 +176,9 @@ fn send_udp_socket(
     // guard across the typed user-copy cursor so later MTU/capacity rejection
     // cannot bypass that commit or change the existing serialization boundary.
     endpoint.ensure_bound().map_err(map_send_error)?;
-    let payload = payload.bytes().map_err(SocketSendError::Copy)?;
+    let payload = payload
+        .bytes(NET_UDP_MAX_PAYLOAD_BYTES)
+        .map_err(SocketSendError::Copy)?;
     let len = payload.len();
     endpoint
         .send(UdpPeer::new(address, port), payload)

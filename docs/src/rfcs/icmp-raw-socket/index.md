@@ -1,6 +1,6 @@
 # RFC-20260803-icmp-raw-socket
 
-**状态：** Accepted for Implementation / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Closed / Checkpoint 2B Not Active
+**状态：** R0 Implemented / Closed / `ICMP-RAW-CUTOVER` Complete
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-03
@@ -8,12 +8,12 @@
 **影响契约：** Refine `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`NET-PROTOCOL-BOUNDARY-001`、
 `NET-SOCKET-WAIT-001`；Introduce `NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、
 `NET-ICMP-RAW-TRANSACTION-001`
-**执行记录：** Git / PR；Checkpoint 1反馈间章与Checkpoint 2A已关闭且未创建transaction；Checkpoint 2B与contract cutover仍未授权
+**执行记录：** Git / PR；三个checkpoint与唯一contract cutover已关闭；未创建transaction
 
 ## 文档状态
 
-本文是 IPv4 ICMP raw Socket 的R0 accepted target，也是该提案唯一的 canonical target source。它不描述当前已经存在的
-能力；当前 effective 规则仍以 [Socket contract](../../contracts/socket/index.md)、
+本文是 IPv4 ICMP raw Socket 的R0 canonical target source。R0已由`ICMP-RAW-CUTOVER`实现并关闭；当前 effective 规则以
+[Socket contract](../../contracts/socket/index.md)、
 [Network contract](../../contracts/net/index.md)、live source 与 register 为准。
 
 R0固定用户可见能力包络、owner/handoff、failure/cleanup、correctness invariants、Contract Impact 与
@@ -25,10 +25,10 @@ Renegotiation，不能在实现中静默漂移。
 本 RFC 因 ingress、fanout、packet ownership 与 opened-description lifecycle 存在非平凡 proof obligations，保留一份
 [目标与不变量](./invariants.md)。实施准备进一步确认post-admission packet seam值得在完整UAPI接入前独立review，因此
 新增一份[实施路线](./implementation.md)，采用一个implementation stage、三个checkpoint与唯一
-`ICMP-RAW-CUTOVER`：Checkpoint 1只关闭syscall不可达的protocol owner/packet path；Checkpoint 2A在继续拒绝raw tuple的
-前提下接入final-shape Socket consumer并独立review common front、wait与lifecycle；Checkpoint 2B才发布Linux ABI、完成
-产品验收并cutover。当前没有独立probe、transitional contract、多个cutover、tracking page或transaction；Checkpoint 1
-反馈间章与Checkpoint 2A已经分别关闭，当前必须停止，不得自动进入Checkpoint 2B或`ICMP-RAW-CUTOVER`。
+`ICMP-RAW-CUTOVER`：Checkpoint 1关闭syscall不可达的protocol owner/packet path；Checkpoint 2A在继续拒绝raw tuple的
+前提下接入final-shape Socket consumer并独立review common front、wait与lifecycle；Checkpoint 2B发布Linux ABI、完成
+产品验收并cutover。三个checkpoint均已按单独授权关闭；当前没有独立probe、transitional contract、多个cutover、
+tracking page或transaction，也不得把本closure视为进入后续gate的授权。
 
 ## 摘要
 
@@ -242,17 +242,17 @@ Endpoint独占delivery，detach后由operation-local kernel transaction独占；
 
 ## Contract Impact
 
-所有变化都只在最终`ICMP-RAW-CUTOVER`满足acceptance后写入current contract；Draft或部分实现不会提前生效。
+下列变化已在`ICMP-RAW-CUTOVER`满足全部mandatory acceptance后原子写入current contract；Draft与此前checkpoint没有提前生效。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `SOCKET-FRONT-001` | Refine | [Active](../../contracts/socket/front-abi-wait.md#socket-front-001--general-front只拥有共同外壳) | 将ICMP raw加入第三个真实consumer，收敛family-neutral datagram/file-I/O与option dispatch；不建立registry、downcast或第二FileOps | `ICMP-RAW-CUTOVER` |
-| `SOCKET-ABI-001` | Refine | [Active](../../contracts/socket/front-abi-wait.md#socket-abi-001--linux-abi止于family-neutral-adapter) | 增加raw tuple、权限、IPv4 sockaddr、flags、selected sockopts与datagram copy/consume投影，Linux representation仍止于adapter | `ICMP-RAW-CUTOVER` |
-| `NET-PROTOCOL-BOUNDARY-001` | Refine | [Active](../../contracts/net/udp-socket.md#net-protocol-boundary-001--cross-owner-udp-capability保持窄且非阻塞) | 从UDP单一consumer扩展为UDP与ICMP raw共同证明的窄、非阻塞protocol capability；不外推generic Stack/Endpoint framework | `ICMP-RAW-CUTOVER` |
-| `NET-SOCKET-WAIT-001` | Refine | [Active](../../contracts/net/udp-socket.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离) | 让UDP与ICMP raw各自读取owner predicate并共享fact/invalidation协议；不共享ready truth | `ICMP-RAW-CUTOVER` |
-| `NET-ICMP-RAW-INGRESS-001` | Introduce | None | local-destination admission先于raw fanout，保留原始未分片IPv4字节且不抑制普通ICMP处理 | `ICMP-RAW-CUTOVER` |
-| `NET-ICMP-RAW-ENDPOINT-001` | Introduce | None | raw Endpoint identity、association/filter、independent bounded fanout、lifecycle/retire与stale isolation | `ICMP-RAW-CUTOVER` |
-| `NET-ICMP-RAW-TRANSACTION-001` | Introduce | None | non-`IP_HDRINCL` TX header/admission commit、detached RX consume、option snapshot、capacity与error boundary | `ICMP-RAW-CUTOVER` |
+| `SOCKET-FRONT-001` | Refine | [Active](../../contracts/socket/front-abi-wait.md#socket-front-001--general-front只拥有共同外壳) | 将ICMP raw加入第三个真实consumer，收敛family-neutral datagram/file-I/O与option dispatch；不建立registry、downcast或第二FileOps | `ICMP-RAW-CUTOVER` Complete |
+| `SOCKET-ABI-001` | Refine | [Active](../../contracts/socket/front-abi-wait.md#socket-abi-001--linux-abi止于family-neutral-adapter) | 增加raw tuple、权限、IPv4 sockaddr、flags、selected sockopts与datagram copy/consume投影，Linux representation仍止于adapter | `ICMP-RAW-CUTOVER` Complete |
+| `NET-PROTOCOL-BOUNDARY-001` | Refine | [Active](../../contracts/net/protocol-socket.md#net-protocol-boundary-001--cross-owner-protocol-capability保持窄且非阻塞) | 从UDP单一consumer扩展为UDP与ICMP raw共同证明的窄、非阻塞protocol capability；不外推generic Stack/Endpoint framework | `ICMP-RAW-CUTOVER` Complete |
+| `NET-SOCKET-WAIT-001` | Refine | [Active](../../contracts/net/protocol-socket.md#net-socket-wait-001--protocol-factwake与linux-readiness保持分离) | 让UDP与ICMP raw各自读取owner predicate并共享fact/invalidation协议；不共享ready truth | `ICMP-RAW-CUTOVER` Complete |
+| `NET-ICMP-RAW-INGRESS-001` | Introduce | [Active](../../contracts/net/icmp-raw-socket.md#net-icmp-raw-ingress-001--local-admission先于非独占raw-delivery) | local-destination admission先于raw fanout，保留原始未分片IPv4字节且不抑制普通ICMP处理 | `ICMP-RAW-CUTOVER` Complete |
+| `NET-ICMP-RAW-ENDPOINT-001` | Introduce | [Active](../../contracts/net/icmp-raw-socket.md#net-icmp-raw-endpoint-001--associationfilterfanout与retire由stack-raw-owner统一拥有) | raw Endpoint identity、association/filter、independent bounded fanout、lifecycle/retire与stale isolation | `ICMP-RAW-CUTOVER` Complete |
+| `NET-ICMP-RAW-TRANSACTION-001` | Introduce | [Active](../../contracts/net/icmp-raw-socket.md#net-icmp-raw-transaction-001--txrx各有唯一packet-handoff与commit-boundary) | non-`IP_HDRINCL` TX header/admission commit、detached RX consume、option snapshot、capacity与error boundary | `ICMP-RAW-CUTOVER` Complete |
 
 ### Dependencies
 
@@ -270,8 +270,7 @@ Endpoint独占delivery，detach后由operation-local kernel transaction独占；
 
 ## Implementation Boundary
 
-本文R0已经接受，并通过分别授权的checkpoint按以下边界实施；当前Checkpoint 1与Checkpoint 2A已关闭，Checkpoint 2B
-保持Not Active：
+本文R0已经接受，并通过分别授权的三个checkpoint按以下边界实施；当前全部checkpoint与唯一cutover均已关闭：
 
 - **允许改变：** Socket resolver/ABI/front中ICMP raw真实consumer所需的最窄surface；kernel raw family；shared
   protocol vocabulary；domain Stack raw owner；local-admission后的raw observation seam；Kconfig资源参数；focused
@@ -367,19 +366,26 @@ harness均为独立optional claim；未运行时记录Not Run，不阻塞R0，�
   [Opened-description](../../contracts/task/opened-description-lifecycle.md)、
   [Poll wait](../../contracts/iomux/poll-wait.md)、[Epoll](../../contracts/epoll/protocol.md)
 - external source registry：[公共引用规则](../../external-source-references.md)与`xref:linux-6.6.32`
-- commit / PR：Checkpoint 1 execution、反馈间章与Checkpoint 2A execution；Checkpoint 2B future execution；optional transaction：None
+- commit / PR：Checkpoint 1 execution、反馈间章、Checkpoint 2A与Checkpoint 2B closure evidence；optional transaction：None
 
 ## 修订记录
 
 | 修订 | 日期 | 状态 | 语义变化 | Review / 执行 |
 | --- | --- | --- | --- | --- |
-| R0 | 2026-08-03 | Accepted for Implementation | 初始accepted target：IPv4 ICMP-only raw Socket、明确owner/handoff、post-admission original-byte fanout、bounded Endpoint transaction与完整产品验收边界 | Checkpoint 1 closure后曾因owner偏差进入Review Hold；反馈间章完成R0-preserving Route Correction并通过独立复核；后续将原Checkpoint 2拆为syscall不可达consumer review与最终ABI/cutover，均不改变target或递增修订 |
+| R0 | 2026-08-03 | Implemented / Closed | 初始accepted target：IPv4 ICMP-only raw Socket、明确owner/handoff、post-admission original-byte fanout、bounded Endpoint transaction与完整产品验收边界 | Checkpoint 1反馈间章完成R0-preserving Route Correction；Checkpoint 2A关闭syscall不可达consumer review；Checkpoint 2B完成ABI、产品证据、独立复审与`ICMP-RAW-CUTOVER`，均未改变target或递增修订 |
 
 ## Closure
 
-R0已经接受；Checkpoint 1反馈间章已完成syscall不可达protocol owner与packet-path的Route Correction。Checkpoint 2A又在
-resolver继续拒绝raw tuple的前提下完成final-shape kernel raw family、family-neutral datagram/FileOps/option front、
-operation-local immutable send snapshot、shared wait/opened-description lifecycle与独立review。最终复核为Apollyon 0、
-Keter 0；真实capacity retry和RX copy/peek完整矩阵仍是组合证明的非阻断Euclid，由Checkpoint 2B focused guest oracle增强，
-不建立test-only facade。raw guest ABI、curated Socket LTP、ping、LA64 runtime、hardware、`smp > 1`与final harness保持
-Not Run；尚无contract cutover、register/current limitation或transaction变化。Checkpoint 2B保持Not Active并等待单独授权。
+R0已经实现并关闭。Checkpoint 2B发布唯一privileged ICMP raw tuple，闭合sockaddr、flag、option、zero/short/fault、
+readiness与fd lifecycle matrix；RV64/LA64 canonical run均取得KUnit全通过、focused guest 10/10、BusyBox gateway ping
+1/1、glibc/musl curated Socket LTP 6/6以及filesystem/network/device orderly shutdown。最终source另通过owner-local
+`net-host`、`xtask` 74/74、双架构release build、format与whitespace gate。
+
+独立复审关闭此前raw copy ceiling、unsupported option fault precedence、`AF_UNSPEC`完整copy和transaction matrix四项
+finding，最终为Apollyon 0、Keter 0。保留一项非阻断Euclid：guest尚未把真实TX saturation、blocking retry与capacity
+recovery串成单个production-path case；owner-local tests已分别证明Stack saturation/recovery与immutable retry snapshot，
+最小后续增强是在guest观察`EAGAIN`、等待恢复并确认同一snapshot提交，不为此建立test-only production facade。
+
+`ICMP-RAW-CUTOVER`已原子Refine四项、Introduce三项current contract；register无真实剩余defect/accepted limitation可写，
+transaction保持None。hardware、`smp > 1`、其它NIC、full network LTP与final harness仍Not Run。Stage 1到此结束，不自动
+进入任何后续gate。

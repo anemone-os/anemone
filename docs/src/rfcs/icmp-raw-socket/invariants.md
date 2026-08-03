@@ -1,13 +1,13 @@
 # IPv4 ICMP Raw Socket 目标与不变量
 
-**状态：** R0 Accepted Target / Not Effective
+**状态：** R0 Implemented / Effective through `ICMP-RAW-CUTOVER`
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **适用修订：** R0
 
-本文定义本 RFC 的target invariants与proof obligations，不是current contract、implementation plan或执行授权。完整
-用户可见包络、Contract Impact、Implementation Boundary与acceptance见父RFC；当前effective规则仍以
-`docs/src/contracts/`与live source为准。R0 acceptance与Checkpoint 1 activation均不使这些target rule提前生效。
+本文定义本 RFC 的target invariants与proof obligations，不替代current contract或implementation evidence。完整
+用户可见包络、Contract Impact、Implementation Boundary与acceptance见父RFC；R0已由`ICMP-RAW-CUTOVER`实现，当前
+effective规则以`docs/src/contracts/`与live source为准。此前R0 acceptance与部分checkpoint没有让target rule提前生效。
 
 Linux 6.6.32 的逐项errno、sockaddr/optlen、copy precedence与重复transition matrix是本文ABI policy的conformance
 surface，不需要在公共Draft前穷举成第二份规范表。实现和focused tests可以继续解析它们；只有解析结果会改变target、
@@ -281,7 +281,7 @@ mandatory floor；未运行不能写成PASS，也不阻塞R0。
 **违反表现：** test-only injection或Socket-to-Socket fast path替代production path；修改上游LTP取得PASS；只运行有利
 subcase；解析BusyBox自然语言作为唯一oracle；一架构替代另一架构；或用build证明runtime。
 
-**Cutover / Proof：** `ICMP-RAW-CUTOVER`引用每类canonical execution evidence；Draft publication本身没有运行证据。
+**Cutover / Proof：** `ICMP-RAW-CUTOVER`已引用owner-local、双架构focused guest、双libc curated LTP与双架构真实ping evidence；Draft publication本身没有运行证据。
 
 ## RFC-local Review 与停止边界
 

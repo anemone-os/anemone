@@ -168,9 +168,12 @@ struct FileDatagramSendPayload<'a> {
 }
 
 impl SocketSendPayload for FileDatagramSendPayload<'_> {
-    fn bytes(&mut self) -> Result<&[u8], SysError> {
+    fn bytes(&mut self, maximum: usize) -> Result<&[u8], SysError> {
         if self.bytes.is_none() {
             let len = self.source.remaining();
+            if len > maximum {
+                return Err(SysError::MessageTooLong);
+            }
             let mut bytes = Vec::new();
             bytes
                 .try_reserve_exact(len)
