@@ -5,11 +5,11 @@
 **Owner：** user-thread kernel creation operations / context-free VFS creation primitives / filesystem-backed special-node identity
 **参与领域：** `openat` / `mkdirat` / `mknodat` / `symlinkat` syscall adapter、task filesystem context、VFS inode creation、ext4、ramfs、stat and mount consumers
 **覆盖范围：** user-thread named-object creation的current-context admission/formation与context-free VFS handoff、filesystem-backed regular/FIFO/character/block/socket node creation、final metadata handoff、ext4/ramfs representation 与 special-node numeric `rdev`
-**不覆盖：** POSIX default ACL、named FIFO/device/socket data plane、device provider resolution、legacy `readdir`、lwext4 任意 I/O failure/crash atomicity、既有 common-create cache/dentry publication window
+**不覆盖：** POSIX default ACL、named FIFO data plane与lifecycle（由`PIPE-FIFO-*`拥有）、device/socket data plane、device provider resolution、legacy `readdir`、lwext4 任意 I/O failure/crash atomicity、既有 common-create cache/dentry publication window
 **实现位置：** `anemone-kernel/src/fs/api/{creation.rs,openat.rs,mkdirat.rs,mknodat.rs,symlinkat.rs}`、`anemone-kernel/src/fs/vfs/ops.rs`、`anemone-kernel/src/fs/{inode,ext4,ramfs}`、`anemone-kernel/src/task/{fs.rs,credentials/cap.rs}`、`anemone-kernel/crates/anemos/lwext4-rust`、`anemone-rs/src/{sys,os}/linux/fs.rs`
 **依赖：** `VFS-FILE-KIND-001`、`DEVICE-NUMBER-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-02
+**最后核验：** 2026-08-03
 
 ## 状态与能力所有权
 
@@ -74,8 +74,9 @@ ext4/ramfs 必须在各自 backend creation boundary 内先形成 final metadata
 分别由已登记 limitation/open issue 拥有，不得用 forced flush、双状态或 validation hook 伪装为本规则的证明。
 
 `mknodat`通过`VFS-CREATION-001`的kernel creation policy读取一次mask snapshot并形成final permission；不得在
-syscall adapter、VFS、inode或backend建立第二份mask state。regular node使用普通文件数据路径；FIFO返回
-`EOPNOTSUPP`，character/block/socket open返回`ENXIO`，本规则不引入这些special node的数据面。
+syscall adapter、VFS、inode或backend建立第二份mask state。regular node使用普通文件数据路径；FIFO在VFS完成
+final open admission后交给[Pipe named-FIFO contract](../pipe/named-fifo.md)，make-node/backend不拥有其session或
+data plane；character/block/socket open返回`ENXIO`，本规则不引入这些special node的数据面。
 
 **违反表现：** backend 解析 raw mode 或查询当前 task/provider；callback 后补写驱动行为的 backend metadata；
 publication 前可判定的失败留下可 lookup node；special open panic或落入 regular fallback；或长期保留 proof-only
@@ -83,14 +84,17 @@ production seam。
 
 **验证 / Enforcement：** R2 closure包括VFS/backend source与lock-order audit、RV64/LA64各293项boot KUnit、两架构
 ext4 remount/reload与ext4/ramfs node-matrix probe，以及两架构glibc/musl各11个`mknod*`/`mknodat*`case。后续
-creation-boundary refinement由`VFS-CREATION-001`所列source、KUnit与双架构runtime matrix共同约束。
+creation-boundary refinement由`VFS-CREATION-001`所列source、KUnit与双架构runtime matrix共同约束。named FIFO
+cutover另以backend不持有session的source audit、398项RV64 KUnit、ext4/ramfs focused runtime与glibc/musl各7个
+LTP case验证open dispatch不反向改变make-node/backend owner。
 
 **最初来源：** Closed [VFS Make Node R2 RFC](../../rfcs/vfs-make-node/index.md) 与
 [implementation transaction](../../devlog/transactions/2026-07-31-vfs-make-node.md)。
 
 **当前来源：** R2 cutover与后续独立的[umask文件创建掩码](../../devlog/changes/2026-07-27-umask-file-creation-mask.md)
 建立最初baseline；[VFS/kernel creation boundary小迭代](../../devlog/changes/2026-08-02-vfs-kernel-creation-boundary.md)
-于2026-08-02 Refine syscall/kernel/VFS handoff并完成runtime复验，不重开已关闭RFC。
+于2026-08-02 Refine syscall/kernel/VFS handoff并完成runtime复验；[Named FIFO小迭代](../../devlog/changes/2026-08-03-named-fifo.md)
+于2026-08-03移除FIFO-open rejection并把runtime handoff交给Pipe owner，不重开已关闭RFC。
 
 ## VFS-SPECIAL-NODE-RDEV-001 — Filesystem-backed special-node `rdev` 是单一 numeric truth
 

@@ -100,6 +100,7 @@ impl InterfaceInner {
         source_hardware_addr: HardwareAddress,
         ipv4_packet: &Ipv4Packet<&'a [u8]>,
         frag: &'a mut FragmentsBuffer,
+        ipv4_observer: Option<Ipv4PacketObserver<'_>>,
     ) -> Option<Packet<'a>> {
         let mut ipv4_repr = check!(Ipv4Repr::parse(ipv4_packet, &self.caps.checksum));
         if !self.is_unicast_v4(ipv4_repr.src_addr) && !ipv4_repr.src_addr.is_unspecified() {
@@ -220,6 +221,18 @@ impl InterfaceInner {
                 source_hardware_addr,
                 self.now,
             );
+        }
+
+        if let Some(observer) = ipv4_observer {
+            let packet = &ipv4_packet.as_ref()[..usize::from(ipv4_packet.total_len())];
+            let destination = if self.is_unicast_v4(ipv4_repr.dst_addr) {
+                AdmittedIpv4Destination::Unicast
+            } else if self.is_broadcast_v4(ipv4_repr.dst_addr) {
+                AdmittedIpv4Destination::Broadcast
+            } else {
+                AdmittedIpv4Destination::Multicast
+            };
+            observer(AdmittedIpv4Packet::new(packet, destination));
         }
 
         match ipv4_repr.next_header {

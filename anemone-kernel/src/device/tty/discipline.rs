@@ -53,12 +53,6 @@ impl TtyDiscipline {
         termios: TtyTermios,
         output: &mut TerminalOutput,
     ) -> ReceiveResult {
-        let byte = if termios.icrnl && byte == b'\r' {
-            b'\n'
-        } else {
-            byte
-        };
-
         if let Some(signal) = termios.signal_control(byte) {
             let echo = termios.signal_echo(byte);
             assert!(
@@ -145,6 +139,34 @@ impl TtyDiscipline {
         self.push_input(byte);
         self.canonical_pending_len += 1;
         assert!(output.enqueue(&echo, termios));
+        ReceiveResult::Consumed
+    }
+
+    /// Admit one condition-generated literal token without interpreting any
+    /// byte as a control character, delimiter, transform, or echo request.
+    /// Capacity is checked for the complete token before the first byte moves,
+    /// so worker retry cannot expose a prefix or duplicate a marker.
+    pub(super) fn receive_literal(&mut self, literal: &[u8], termios: TtyTermios) -> ReceiveResult {
+        if termios.icanon {
+            if self.canonical_pending_len.saturating_add(literal.len())
+                > TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
+            {
+                return ReceiveResult::Backpressured;
+            }
+        } else if self.committed_len().saturating_add(literal.len()) > TTY_INPUT_CAPACITY_BYTES {
+            return ReceiveResult::Backpressured;
+        }
+
+        assert!(
+            self.input.len().saturating_add(literal.len()) <= self.input.capacity(),
+            "TTY literal token exceeds preallocated input storage"
+        );
+        for &byte in literal {
+            self.push_input(byte);
+        }
+        if termios.icanon {
+            self.canonical_pending_len += literal.len();
+        }
         ReceiveResult::Consumed
     }
 

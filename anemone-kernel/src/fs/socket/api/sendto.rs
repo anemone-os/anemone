@@ -1,12 +1,9 @@
 use alloc::vec::Vec;
 
 use crate::{
-    fs::{
-        iomux::PollEvent,
-        socket::{
-            SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
-            SocketType, send_sigpipe, socket_from_file,
-        },
+    fs::socket::{
+        SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
+        SocketType, retry_socket_send, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -14,12 +11,9 @@ use crate::{
 };
 use anemone_abi::syscall::SYS_SENDTO;
 
-use super::{
-    abi::{
-        map_send_error, read_payload, read_sockaddr_in, validate_raw_socket_address,
-        validate_send_message_flags,
-    },
-    wait_for_socket_file,
+use super::abi::{
+    map_send_error, read_payload, read_sockaddr_in, validate_raw_socket_address,
+    validate_send_message_flags,
 };
 
 struct SendPayload {
@@ -29,9 +23,9 @@ struct SendPayload {
 }
 
 impl SocketSendPayload for SendPayload {
-    fn bytes(&mut self) -> Result<&[u8], SysError> {
+    fn bytes(&mut self, maximum: usize) -> Result<&[u8], SysError> {
         if self.bytes.is_none() {
-            self.bytes = Some(read_payload(self.address, self.len)?);
+            self.bytes = Some(read_payload(self.address, self.len, maximum)?);
         }
         Ok(self.bytes.as_deref().unwrap())
     }
@@ -69,47 +63,51 @@ fn sys_sendto(
         let uspace = task.clone_uspace_handle();
         let mut source = UserBufferSource::new(&uspace, segments);
 
-        loop {
-            match socket.send(SocketSendRequest::Stream {
-                source: &mut source,
-                destination,
-            }) {
-                Ok(sent) => return Ok(sent as u64),
-                Err(SocketSendError::WouldBlock) if !nonblocking => {},
-                Err(SocketSendError::PeerClosed) => {
-                    if !message_flags.no_signal {
-                        send_sigpipe();
-                    }
-                    return Err(SysError::BrokenPipe);
-                },
-                Err(error) => return Err(map_send_error(error)),
-            }
-            wait_for_socket_file("sys_sendto", &task, desc.vfs_file(), PollEvent::WRITABLE)?;
-        }
+        return retry_socket_send(
+            "sys_sendto",
+            &task,
+            desc.vfs_file(),
+            nonblocking,
+            !message_flags.no_signal,
+            || {
+                socket.send(SocketSendRequest::Stream {
+                    source: &mut source,
+                    destination,
+                })
+            },
+            map_send_error,
+        )
+        .map(|sent| sent as u64);
     }
 
-    if addr == 0 {
-        return Err(SysError::DestinationAddressRequired);
-    }
-    let peer = read_sockaddr_in(addr, addrlen)?;
+    let destination = if addr == 0 {
+        None
+    } else {
+        Some(read_sockaddr_in(addr, addrlen)?)
+    };
     let mut payload = SendPayload {
         address: buf,
         len,
         bytes: None,
     };
-    loop {
-        match socket.send(SocketSendRequest::Datagram {
-            peer: peer.clone(),
-            payload: &mut payload,
-        }) {
-            Ok(sent) => return Ok(sent as u64),
-            Err(SocketSendError::WouldBlock) if !nonblocking => {},
-            Err(error) => return Err(map_send_error(error)),
-        }
-
-        // The family attempt released its operation guard before the shared
-        // wait owner can register or schedule. The kernel payload remains the
-        // transaction copy across every current selection/admission retry.
-        wait_for_socket_file("sys_sendto", &task, desc.vfs_file(), PollEvent::WRITABLE)?;
-    }
+    let mut operation = SocketDatagramSendOperation::new();
+    // Each family attempt releases its operation guard before the shared retry
+    // owner waits. Payload and the family's opaque destination/policy/selection
+    // snapshot remain operation-local across capacity retries.
+    retry_socket_send(
+        "sys_sendto",
+        &task,
+        desc.vfs_file(),
+        nonblocking,
+        false,
+        || {
+            socket.send(SocketSendRequest::Datagram {
+                destination: destination.clone(),
+                payload: &mut payload,
+                operation: &mut operation,
+            })
+        },
+        map_send_error,
+    )
+    .map(|sent| sent as u64)
 }

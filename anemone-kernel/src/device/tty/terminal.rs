@@ -2,11 +2,19 @@ use crate::{fs::PollRoute, prelude::*, utils::ring_buffer::RingBuffer};
 
 use super::{
     discipline::{InputRead, ReceiveResult, TtyDiscipline, TtySignalControl},
-    port::TtyLineSnapshot,
+    port::{TtyLineSnapshot, TtyRxUnit},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TtyTermios {
+    pub(super) ignbrk: bool,
+    pub(super) brkint: bool,
+    pub(super) ignpar: bool,
+    pub(super) parmrk: bool,
+    pub(super) inpck: bool,
+    pub(super) istrip: bool,
+    pub(super) inlcr: bool,
+    pub(super) igncr: bool,
     pub(super) icrnl: bool,
     pub(super) opost: bool,
     pub(super) onlcr: bool,
@@ -35,6 +43,14 @@ pub(super) struct TtyTermios {
 impl Default for TtyTermios {
     fn default() -> Self {
         Self {
+            ignbrk: false,
+            brkint: false,
+            ignpar: false,
+            parmrk: false,
+            inpck: false,
+            istrip: false,
+            inlcr: false,
+            igncr: false,
             icrnl: true,
             opost: true,
             onlcr: true,
@@ -117,6 +133,35 @@ impl TtyTermios {
             return EchoBytes::empty();
         }
         EchoBytes::three(b'^', byte ^ 0x40, b'\n')
+    }
+}
+
+fn receive_normal_byte(
+    discipline: &mut TtyDiscipline,
+    output: &mut TerminalOutput,
+    termios: TtyTermios,
+    mut byte: u8,
+) -> ReceiveResult {
+    if termios.istrip {
+        byte &= 0x7f;
+    }
+    if byte == b'\r' {
+        if termios.igncr {
+            return ReceiveResult::Consumed;
+        }
+        if termios.icrnl {
+            byte = b'\n';
+        }
+    } else if byte == b'\n' && termios.inlcr {
+        byte = b'\r';
+    }
+
+    // PARMRK quoting is a literal admission token: neither byte may become a
+    // control character, echo, or canonical delimiter on a later retry.
+    if termios.parmrk && byte == 0xff {
+        discipline.receive_literal(&[0xff, 0xff], termios)
+    } else {
+        discipline.receive(byte, termios, output)
     }
 }
 
@@ -336,7 +381,7 @@ struct TerminalCounters {
     /// state transitions.
     input_backpressure: AtomicUsize,
     output_backpressure: AtomicUsize,
-    no_foreground_isig: AtomicUsize,
+    no_foreground_input_signal: AtomicUsize,
     no_foreground_winsize: AtomicUsize,
     background_read_eio: AtomicUsize,
     partial_port_progress: AtomicUsize,
@@ -348,7 +393,7 @@ impl TerminalCounters {
         Self {
             input_backpressure: AtomicUsize::new(0),
             output_backpressure: AtomicUsize::new(0),
-            no_foreground_isig: AtomicUsize::new(0),
+            no_foreground_input_signal: AtomicUsize::new(0),
             no_foreground_winsize: AtomicUsize::new(0),
             background_read_eio: AtomicUsize::new(0),
             partial_port_progress: AtomicUsize::new(0),
@@ -394,13 +439,37 @@ impl Terminal {
         .map_err(|_| SysError::OutOfMemory)
     }
 
-    pub(super) fn receive_rx_byte_effect(&self, byte: u8) -> TtyRxEffect {
+    pub(super) fn receive_rx_unit_effect(&self, unit: TtyRxUnit) -> TtyRxEffect {
         let mut inner = self.inner.lock();
         let termios = inner.termios;
         let TerminalInner {
             discipline, output, ..
         } = &mut *inner;
-        let effect = match discipline.receive(byte, termios, output) {
+        let result = match unit {
+            TtyRxUnit::Break if termios.ignbrk => ReceiveResult::Consumed,
+            TtyRxUnit::Break if termios.brkint => {
+                // BRKINT is a line condition, not an ISIG control character.
+                // Flush is committed locally before the guards-out foreground
+                // signal request; a missing/stale target does not roll it back.
+                discipline.flush_input();
+                output.clear();
+                ReceiveResult::ConsumedSignalControl(TtySignalControl::Interrupt)
+            },
+            TtyRxUnit::Break if termios.parmrk => {
+                discipline.receive_literal(&[0xff, 0x00, 0x00], termios)
+            },
+            TtyRxUnit::Break => discipline.receive_literal(&[0x00], termios),
+            TtyRxUnit::FaultedByte(byte) if !termios.inpck => {
+                receive_normal_byte(discipline, output, termios, byte)
+            },
+            TtyRxUnit::FaultedByte(_) if termios.ignpar => ReceiveResult::Consumed,
+            TtyRxUnit::FaultedByte(byte) if termios.parmrk => {
+                discipline.receive_literal(&[0xff, 0x00, byte], termios)
+            },
+            TtyRxUnit::FaultedByte(_) => discipline.receive_literal(&[0x00], termios),
+            TtyRxUnit::Byte(byte) => receive_normal_byte(discipline, output, termios, byte),
+        };
+        let effect = match result {
             ReceiveResult::Consumed => TtyRxEffect::Consumed,
             ReceiveResult::ConsumedSignalControl(signal) => TtyRxEffect::Signal(signal),
             ReceiveResult::Backpressured => {
@@ -419,7 +488,8 @@ impl Terminal {
 
     #[cfg(feature = "kunit")]
     pub(crate) fn receive_rx_byte(&self, byte: u8) -> bool {
-        self.receive_rx_byte_effect(byte).consumed()
+        self.receive_rx_unit_effect(TtyRxUnit::Byte(byte))
+            .consumed()
     }
 
     /// Queue user bytes through the current output transform.
@@ -554,9 +624,9 @@ impl Terminal {
         true
     }
 
-    pub(super) fn record_no_foreground_isig(&self) {
+    pub(super) fn record_no_foreground_input_signal(&self) {
         self.counters
-            .no_foreground_isig
+            .no_foreground_input_signal
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -811,6 +881,25 @@ mod kunits {
         }
     }
 
+    fn raw_noecho(terminal: &Terminal, update: impl FnOnce(&mut TtyTermios)) {
+        terminal.set_termios_for_test(|termios| {
+            termios.icanon = false;
+            termios.echo = false;
+            update(termios);
+        });
+    }
+
+    fn read_available(terminal: &Terminal) -> Vec<u8> {
+        let mut result = Vec::new();
+        let mut batch = [0_u8; 16];
+        loop {
+            match terminal.read_input(&mut batch) {
+                InputRead::Bytes(0) | InputRead::Empty | InputRead::Eof => return result,
+                InputRead::Bytes(count) => result.extend_from_slice(&batch[..count]),
+            }
+        }
+    }
+
     #[kunit]
     fn canonical_edit_and_short_read_keep_record_boundary() {
         let terminal = terminal();
@@ -852,6 +941,172 @@ mod kunits {
         let mut dst = [0_u8; 8];
         assert_eq!(terminal.read_input(&mut dst), InputRead::Bytes(1));
         assert_eq!(dst[0], b'\n');
+    }
+
+    #[kunit]
+    fn break_conditioning_obeys_priority_and_forms_guards_out_interrupt() {
+        let ignored = terminal();
+        raw_noecho(&ignored, |termios| {
+            termios.ignbrk = true;
+            termios.brkint = true;
+            termios.parmrk = true;
+        });
+        assert_eq!(
+            ignored.receive_rx_unit_effect(TtyRxUnit::Break),
+            TtyRxEffect::Consumed
+        );
+        assert!(read_available(&ignored).is_empty());
+
+        let interrupted = terminal();
+        raw_noecho(&interrupted, |termios| {
+            termios.brkint = true;
+            termios.isig = false;
+        });
+        assert!(interrupted.receive_rx_byte(b'x'));
+        assert_eq!(interrupted.enqueue_output(b"pending"), 7);
+        assert_eq!(
+            interrupted.receive_rx_unit_effect(TtyRxUnit::Break),
+            TtyRxEffect::Signal(TtySignalControl::Interrupt)
+        );
+        assert!(read_available(&interrupted).is_empty());
+        assert!(drain_output(&interrupted).is_empty());
+
+        let marked = terminal();
+        raw_noecho(&marked, |termios| termios.parmrk = true);
+        assert_eq!(
+            marked.receive_rx_unit_effect(TtyRxUnit::Break),
+            TtyRxEffect::Consumed
+        );
+        assert_eq!(read_available(&marked), [0xff, 0x00, 0x00]);
+
+        let nul = terminal();
+        raw_noecho(&nul, |_| {});
+        assert_eq!(
+            nul.receive_rx_unit_effect(TtyRxUnit::Break),
+            TtyRxEffect::Consumed
+        );
+        assert_eq!(read_available(&nul), [0x00]);
+    }
+
+    #[kunit]
+    fn fault_conditioning_obeys_inpck_ignpar_and_parmrk_matrix() {
+        let unchecked = terminal();
+        raw_noecho(&unchecked, |termios| termios.istrip = true);
+        assert_eq!(
+            unchecked.receive_rx_unit_effect(TtyRxUnit::FaultedByte(0xff)),
+            TtyRxEffect::Consumed
+        );
+        assert_eq!(read_available(&unchecked), [0x7f]);
+
+        let ignored = terminal();
+        raw_noecho(&ignored, |termios| {
+            termios.inpck = true;
+            termios.ignpar = true;
+            termios.parmrk = true;
+        });
+        assert_eq!(
+            ignored.receive_rx_unit_effect(TtyRxUnit::FaultedByte(0x41)),
+            TtyRxEffect::Consumed
+        );
+        assert!(read_available(&ignored).is_empty());
+
+        let marked = terminal();
+        raw_noecho(&marked, |termios| {
+            termios.inpck = true;
+            termios.parmrk = true;
+        });
+        assert_eq!(
+            marked.receive_rx_unit_effect(TtyRxUnit::FaultedByte(0x41)),
+            TtyRxEffect::Consumed
+        );
+        assert_eq!(read_available(&marked), [0xff, 0x00, 0x41]);
+
+        let nul = terminal();
+        raw_noecho(&nul, |termios| termios.inpck = true);
+        assert_eq!(
+            nul.receive_rx_unit_effect(TtyRxUnit::FaultedByte(0x41)),
+            TtyRxEffect::Consumed
+        );
+        assert_eq!(read_available(&nul), [0x00]);
+    }
+
+    #[kunit]
+    fn normal_byte_conditioning_orders_strip_crnl_and_literal_ff() {
+        let stripped = terminal();
+        raw_noecho(&stripped, |termios| {
+            termios.istrip = true;
+            termios.igncr = true;
+            termios.icrnl = true;
+            termios.inlcr = true;
+        });
+        for byte in [0xff, b'\r', b'\n'] {
+            assert!(stripped.receive_rx_byte(byte));
+        }
+        assert_eq!(read_available(&stripped), [0x7f, b'\r']);
+
+        let mapped = terminal();
+        raw_noecho(&mapped, |termios| {
+            termios.icrnl = true;
+            termios.inlcr = true;
+        });
+        for byte in [b'\r', b'\n'] {
+            assert!(mapped.receive_rx_byte(byte));
+        }
+        assert_eq!(read_available(&mapped), [b'\n', b'\r']);
+
+        let quoted = terminal();
+        raw_noecho(&quoted, |termios| {
+            termios.parmrk = true;
+            termios.echo = true;
+            termios.intr = 0xff;
+        });
+        assert_eq!(
+            quoted.receive_rx_unit_effect(TtyRxUnit::Byte(0xff)),
+            TtyRxEffect::Consumed
+        );
+        assert_eq!(read_available(&quoted), [0xff, 0xff]);
+        assert!(drain_output(&quoted).is_empty());
+    }
+
+    #[kunit]
+    fn literal_markers_are_atomic_and_do_not_create_canonical_delimiters() {
+        let raw = terminal();
+        raw_noecho(&raw, |termios| {
+            termios.inpck = true;
+            termios.parmrk = true;
+        });
+        for _ in 0..TTY_INPUT_CAPACITY_BYTES - 2 {
+            assert!(raw.receive_rx_byte(b'x'));
+        }
+        assert_eq!(
+            raw.receive_rx_unit_effect(TtyRxUnit::FaultedByte(0x41)),
+            TtyRxEffect::Backpressured
+        );
+        let mut one = [0_u8; 1];
+        assert_eq!(raw.read_input(&mut one), InputRead::Bytes(1));
+        assert_eq!(
+            raw.receive_rx_unit_effect(TtyRxUnit::FaultedByte(0x41)),
+            TtyRxEffect::Consumed
+        );
+        let observed = read_available(&raw);
+        assert_eq!(observed.len(), TTY_INPUT_CAPACITY_BYTES);
+        assert_eq!(&observed[observed.len() - 3..], &[0xff, 0x00, 0x41]);
+
+        let canonical = terminal();
+        canonical.set_termios_for_test(|termios| {
+            termios.echo = false;
+            termios.inpck = true;
+            termios.parmrk = true;
+        });
+        assert_eq!(
+            canonical.receive_rx_unit_effect(TtyRxUnit::FaultedByte(b'\n')),
+            TtyRxEffect::Consumed
+        );
+        assert!(!canonical.readable());
+        assert!(canonical.receive_rx_byte(b'\n'));
+        let mut record = [0_u8; 4];
+        assert_eq!(canonical.read_input(&mut record), InputRead::Bytes(4));
+        assert_eq!(record, [0xff, 0x00, b'\n', b'\n']);
     }
 
     #[kunit]
@@ -905,13 +1160,16 @@ mod kunits {
         let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES];
         assert_eq!(terminal.enqueue_output(&fill), fill.len());
         assert_eq!(
-            terminal.receive_rx_byte_effect(0x03),
+            terminal.receive_rx_unit_effect(TtyRxUnit::Byte(0x03)),
             TtyRxEffect::Signal(TtySignalControl::Interrupt)
         );
         assert!(!terminal.readable());
         assert_eq!(drain_output(&terminal), b"^C\r\n");
         assert_eq!(
-            terminal.counters.no_foreground_isig.load(Ordering::Relaxed),
+            terminal
+                .counters
+                .no_foreground_input_signal
+                .load(Ordering::Relaxed),
             0
         );
     }
@@ -936,7 +1194,10 @@ mod kunits {
         assert_eq!(terminal.read_input(&mut dst), InputRead::Bytes(2));
         assert_eq!(dst, [0, b'\n']);
         assert_eq!(
-            terminal.counters.no_foreground_isig.load(Ordering::Relaxed),
+            terminal
+                .counters
+                .no_foreground_input_signal
+                .load(Ordering::Relaxed),
             0
         );
     }

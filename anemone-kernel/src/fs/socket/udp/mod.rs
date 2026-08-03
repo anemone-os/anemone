@@ -5,6 +5,7 @@ mod source;
 use anemone_net_api::udp::{UdpBindError, UdpPeer, UdpQueryError, UdpReceiveError, UdpSendError};
 
 use crate::{
+    kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
     net::udp::{BindError, SendError, UdpEndpointPort, create_endpoint},
     prelude::*,
     utils::any_opaque::AnyOpaque,
@@ -12,8 +13,8 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketCreation, SocketOps,
-    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveRequest, SocketSendError,
-    SocketSendRequest, SocketType,
+    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveOutcome,
+    SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
 
@@ -153,11 +154,20 @@ fn send_udp_socket(
     private: &AnyOpaque,
     request: SocketSendRequest<'_>,
 ) -> Result<usize, SocketSendError> {
-    let SocketSendRequest::Datagram { peer, payload } = request else {
+    let SocketSendRequest::Datagram {
+        destination,
+        payload,
+        operation: _,
+    } = request
+    else {
         return Err(SocketSendError::Unsupported);
     };
-    let SocketAddress::Ipv4 { address, port } = peer else {
-        return Err(SocketSendError::Unsupported);
+    let (address, port) = match destination {
+        Some(SocketAddress::Ipv4 { address, port }) => (address, port),
+        None => return Err(SocketSendError::DestinationRequired),
+        Some(SocketAddress::Unspecified | SocketAddress::UnixPathname(_)) => {
+            return Err(SocketSendError::Unsupported);
+        },
     };
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
@@ -166,7 +176,9 @@ fn send_udp_socket(
     // guard across the typed user-copy cursor so later MTU/capacity rejection
     // cannot bypass that commit or change the existing serialization boundary.
     endpoint.ensure_bound().map_err(map_send_error)?;
-    let payload = payload.bytes().map_err(SocketSendError::Copy)?;
+    let payload = payload
+        .bytes(NET_UDP_MAX_PAYLOAD_BYTES)
+        .map_err(SocketSendError::Copy)?;
     let len = payload.len();
     endpoint
         .send(UdpPeer::new(address, port), payload)
@@ -177,10 +189,13 @@ fn send_udp_socket(
 fn receive_udp_socket(
     private: &AnyOpaque,
     request: SocketReceiveRequest<'_>,
-) -> Result<usize, SocketReceiveError> {
-    let SocketReceiveRequest::Datagram(sink) = request else {
+) -> Result<SocketReceiveOutcome, SocketReceiveError> {
+    let SocketReceiveRequest::Datagram { sink, flags } = request else {
         return Err(SocketReceiveError::Unsupported);
     };
+    if flags.peek {
+        return Err(SocketReceiveError::Unsupported);
+    }
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
     let datagram = socket
@@ -192,14 +207,17 @@ fn receive_udp_socket(
             UdpReceiveError::WouldBlock => SocketReceiveError::WouldBlock,
         })?;
     let peer = datagram.peer();
-    sink.copy_datagram(
-        datagram.payload(),
-        SocketAddress::Ipv4 {
-            address: peer.address(),
-            port: peer.port(),
-        },
-    )
-    .map_err(SocketReceiveError::Copy)
+    let packet_length = datagram.payload().len();
+    let copied = sink
+        .copy_datagram(
+            datagram.payload(),
+            SocketAddress::Ipv4 {
+                address: peer.address(),
+                port: peer.port(),
+            },
+        )
+        .map_err(SocketReceiveError::Copy)?;
+    Ok(SocketReceiveOutcome::datagram(copied, packet_length))
 }
 
 fn poll_udp_socket(
@@ -253,6 +271,7 @@ fn map_send_error(error: SendError) -> SocketSendError {
 
 pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::Ipv4Udp,
+    file_io: super::SocketFileIo::Unsupported,
     create: Some(prepare_udp_socket),
     create_pair: None,
     bind: Some(bind_udp_socket),
@@ -265,6 +284,8 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     accepting: udp_is_accepting,
     send: Some(send_udp_socket),
     receive: Some(receive_udp_socket),
+    query_option: None,
+    mutate_option: None,
     poll: poll_udp_socket,
     final_release: final_release_udp_socket,
 };

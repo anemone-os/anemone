@@ -1,12 +1,24 @@
 use super::*;
 
 impl InterfaceInner {
+    #[cfg(test)]
     pub(super) fn process_ethernet<'frame>(
         &mut self,
         sockets: &mut SocketSet,
         meta: crate::phy::PacketMeta,
         frame: &'frame [u8],
         fragments: &'frame mut FragmentsBuffer,
+    ) -> Option<EthernetPacket<'frame>> {
+        self.process_ethernet_observed(sockets, meta, frame, fragments, None)
+    }
+
+    pub(super) fn process_ethernet_observed<'frame>(
+        &mut self,
+        sockets: &mut SocketSet,
+        meta: crate::phy::PacketMeta,
+        frame: &'frame [u8],
+        fragments: &'frame mut FragmentsBuffer,
+        ipv4_observer: Option<Ipv4PacketObserver<'_>>,
     ) -> Option<EthernetPacket<'frame>> {
         let eth_frame = check!(EthernetFrame::new_checked(frame));
 
@@ -32,6 +44,7 @@ impl InterfaceInner {
                     eth_frame.src_addr().into(),
                     &ipv4_packet,
                     fragments,
+                    ipv4_observer,
                 )
                 .map(EthernetPacket::Ip)
             },

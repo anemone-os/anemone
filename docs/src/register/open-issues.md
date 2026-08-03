@@ -221,22 +221,22 @@ publication线性化点、post-commit failure/rollback和并发lookup语义，�
 **Status:** Open
 **Area:** fs / syscall ABI / user-test
 
-**Symptom / Trigger:** 老白名单里的 `read03` 需要 `mknod()` 生成 FIFO，而 `readdir21` 还直接依赖 legacy `__NR_readdir` 入口；当前链路里前者返回 `ENOSYS`，后者在该架构上也没有对应 syscall。
+**Symptom / Trigger:** 老白名单里的 `readdir21` 直接依赖 legacy `__NR_readdir` 入口；当前架构没有对应 syscall。
 
-**Impact:** 这两项会继续把旧白名单的通过率卡在 syscall 入口层，和具体文件系统逻辑无关。
+**Impact:** `readdir21` 仍会把旧白名单的一个用例卡在 legacy syscall 入口层，和 filesystem-backed FIFO 数据面无关。
 
 **Owner:** doruche
-**Last Verified:** 2026-08-01
-**Exit Condition:** VFS Make Node R2已完成`VFS-MAKE-NODE-CUTOVER`且只交付node creation；仍需分别补齐
-named FIFO I/O 与 legacy `readdir` 决策，再重新跑 `read03` 和 `readdir21`，才能关闭本合并旧条目。
+**Last Verified:** 2026-08-03
+**Exit Condition:** 补齐或明确拒绝 legacy `readdir` ABI，并重新运行 `readdir21`。VFS Make Node与named FIFO
+已分别完成node creation和data-plane cutover；focused glibc/musl `read03` 均通过，不再属于本条open issue。
 
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md),
 [VFS Make Node R2](../rfcs/vfs-make-node/index.md)及其
-[transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)（只覆盖 node creation；named FIFO I/O 与 legacy
-`readdir` 未随 R2 acceptance、Stage 1 或最终 make-node cutover 自动关闭）
+[transaction](../devlog/transactions/2026-07-31-vfs-make-node.md)、
+[Named FIFO小迭代](../devlog/changes/2026-08-03-named-fifo.md)（已关闭原合并条目的FIFO部分；legacy `readdir`仍独立Open）
 
 **Severity:** Medium
-**Workaround:** 先把这两个用例从当前白名单里隔离出来，或者等 syscall 入口补齐后再回归。
+**Workaround:** 暂时把 `readdir21` 从当前白名单隔离，或在 legacy syscall入口完成后再回归。
 
 ## ANE-20260528-EXEC-ETXTBSY-WRITER-ACCOUNTING
 

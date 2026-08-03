@@ -12,10 +12,10 @@ use super::{
     super::{
         SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
         SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketPairPreparation,
-        SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveFlags,
-        SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketShutdown,
-        SocketShutdownError, SocketStreamDestination, SocketStreamReadSink,
-        SocketStreamWriteSource, SocketType,
+        SocketPreparation, SocketQueryError, SocketReadSink, SocketReceiveError,
+        SocketReceiveFlags, SocketReceiveRequest, SocketSendError, SocketSendRequest,
+        SocketShutdown, SocketShutdownError, SocketStreamDestination, SocketType,
+        SocketWriteSource,
     },
     admission::{
         UnixListener, accept, connect, listen, notify_admission_routes, poll_unix_listener,
@@ -527,6 +527,7 @@ fn final_release_unix_stream(private: &AnyOpaque) {
 
 pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::UnixStream,
+    file_io: super::super::SocketFileIo::ByteStream,
     create: Some(prepare_unix_socket),
     create_pair: Some(prepare_unix_pair),
     bind: Some(bind_unix_stream),
@@ -539,6 +540,8 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     accepting: query_unix_accepting,
     send: Some(send_unix_stream),
     receive: Some(receive_unix_stream),
+    query_option: None,
+    mutate_option: None,
     poll: poll_unix_stream,
     final_release: final_release_unix_stream,
 };
@@ -567,14 +570,14 @@ mod kunits {
 
     fn receive_stream_for_test(
         private: &AnyOpaque,
-        sink: &mut dyn SocketStreamReadSink,
+        sink: &mut dyn SocketReadSink,
     ) -> Result<usize, SocketReceiveError> {
         receive_stream_with_flags_for_test(private, sink, false)
     }
 
     fn receive_stream_with_flags_for_test(
         private: &AnyOpaque,
-        sink: &mut dyn SocketStreamReadSink,
+        sink: &mut dyn SocketReadSink,
         peek: bool,
     ) -> Result<usize, SocketReceiveError> {
         receive_unix_stream(
@@ -584,18 +587,19 @@ mod kunits {
                 flags: SocketReceiveFlags { peek },
             },
         )
+        .map(|outcome| outcome.copied())
     }
 
     fn send_stream_for_test(
         private: &AnyOpaque,
-        source: &mut dyn SocketStreamWriteSource,
+        source: &mut dyn SocketWriteSource,
     ) -> Result<usize, SocketSendError> {
         send_stream_with_destination_for_test(private, source, SocketStreamDestination::Absent)
     }
 
     fn send_stream_with_destination_for_test(
         private: &AnyOpaque,
-        source: &mut dyn SocketStreamWriteSource,
+        source: &mut dyn SocketWriteSource,
         destination: SocketStreamDestination,
     ) -> Result<usize, SocketSendError> {
         send_unix_stream(
@@ -609,7 +613,7 @@ mod kunits {
 
     struct ReadCapture(Vec<u8>);
 
-    impl SocketStreamReadSink for ReadCapture {
+    impl SocketReadSink for ReadCapture {
         fn remaining(&self) -> usize {
             usize::MAX
         }
@@ -622,7 +626,7 @@ mod kunits {
 
     struct WriteBytes<'a>(&'a [u8]);
 
-    impl SocketStreamWriteSource for WriteBytes<'_> {
+    impl SocketWriteSource for WriteBytes<'_> {
         fn remaining(&self) -> usize {
             self.0.len()
         }
@@ -639,7 +643,7 @@ mod kunits {
         limit: usize,
     }
 
-    impl SocketStreamReadSink for PartialReadCapture {
+    impl SocketReadSink for PartialReadCapture {
         fn remaining(&self) -> usize {
             usize::MAX
         }
@@ -656,7 +660,7 @@ mod kunits {
         limit: usize,
     }
 
-    impl SocketStreamWriteSource for PartialWriteBytes<'_> {
+    impl SocketWriteSource for PartialWriteBytes<'_> {
         fn remaining(&self) -> usize {
             self.bytes.len()
         }
@@ -670,7 +674,7 @@ mod kunits {
 
     struct FaultReadSink;
 
-    impl SocketStreamReadSink for FaultReadSink {
+    impl SocketReadSink for FaultReadSink {
         fn remaining(&self) -> usize {
             usize::MAX
         }
@@ -682,7 +686,7 @@ mod kunits {
 
     struct FaultWriteSource;
 
-    impl SocketStreamWriteSource for FaultWriteSource {
+    impl SocketWriteSource for FaultWriteSource {
         fn remaining(&self) -> usize {
             1
         }

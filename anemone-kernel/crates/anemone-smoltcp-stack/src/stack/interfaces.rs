@@ -18,7 +18,7 @@ use crate::{
     local_link::LocalPort,
 };
 
-use super::{Ipv4ConfigError, PumpError, Stack};
+use super::{InterfaceProtocols, Ipv4ConfigError, PumpError, Stack};
 
 #[derive(Clone, Copy)]
 pub(crate) enum PumpOrder {
@@ -42,6 +42,7 @@ pub(crate) struct InterfaceEntry {
     pub(crate) frame_capacity: usize,
     pub(crate) interface: Interface,
     pub(crate) sockets: SocketSet<'static>,
+    pub(crate) protocols: InterfaceProtocols,
     // This owner-local cursor chooses only the next software admission order.
     // It is not queue, link, resource, or deadline truth and never bypasses
     // either direction's finite PumpBudget.
@@ -72,12 +73,13 @@ impl Stack {
         );
 
         let mut sockets = SocketSet::new(Vec::new());
-        self.udp.add_interface(id, &mut sockets);
+        let protocols = self.protocols.attach_interface(id, &mut sockets);
         self.interfaces.push(InterfaceEntry {
             id,
             frame_capacity,
             interface,
             sockets,
+            protocols,
             next_pump_order: PumpOrder::IngressFirst,
         });
         id
@@ -93,7 +95,8 @@ impl Stack {
             return Err(PumpError::UnknownInterface(id));
         };
         let mut entry = self.interfaces.remove(index);
-        self.udp.remove_interface(id, &mut entry.sockets);
+        self.protocols
+            .detach_interface(id, entry.protocols, &mut entry.sockets);
         Ok(())
     }
 
@@ -117,7 +120,13 @@ impl Stack {
             .checked_add(1)
             .expect("InterfaceId namespace exhausted");
         let id = InterfaceId::from_index(raw_id);
-        let mut local = LocalPort::new(id, to_smoltcp_instant(now), packet_capacity, mtu);
+        let mut local = LocalPort::new(
+            id,
+            to_smoltcp_instant(now),
+            packet_capacity,
+            mtu,
+            &mut self.protocols,
+        );
         let cidr = to_smoltcp_cidr(loopback);
         local.interface.update_ip_addrs(|addresses| {
             assert!(
@@ -126,7 +135,6 @@ impl Stack {
             );
         });
         local.interface.set_any_ip(true);
-        self.udp.add_interface(id, &mut local.sockets);
         self.local = Some(local);
         Ok(id)
     }

@@ -5,7 +5,8 @@ mod interfaces;
 mod stack;
 
 pub(super) use control_plane::{
-    ControlPlaneActivationError, ExternalControlInput, Ipv4ControlPlane, SelectionError,
+    ControlPlaneActivationError, ExternalControlInput, Ipv4ControlPlane, Ipv4Selection,
+    SelectionError,
 };
 use interfaces::LogicalInterfaces;
 pub(super) use interfaces::{LogicalInterfaceReservation, LogicalInterfaceSnapshot};
@@ -23,7 +24,10 @@ pub(super) struct InitialDomain {
 
 impl InitialDomain {
     pub(super) fn new() -> Self {
-        let stack = Arc::new(DomainStack::new(crate::net::udp::UDP_NAMESPACE_POLICY));
+        let stack = Arc::new(DomainStack::new(
+            crate::net::udp::UDP_NAMESPACE_POLICY,
+            crate::net::icmp_raw::ICMP_RAW_NAMESPACE_POLICY,
+        ));
         let local_port = stack
             .attach_local(crate::net::worker::network_now())
             .expect("the initial domain must create exactly one local mapping");

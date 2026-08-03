@@ -1,0 +1,9 @@
+name = "command-cpp"
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/command-cpp"

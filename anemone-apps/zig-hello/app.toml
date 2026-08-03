@@ -1,0 +1,9 @@
+name = "zig-hello"
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/zig-hello"

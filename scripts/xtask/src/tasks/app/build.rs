@@ -33,7 +33,11 @@ pub struct BuildArgs {
     )]
     pub disasm: bool,
 
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        help = "Extra driver arguments appended after Cargo args or Command argv; Source rejects them"
+    )]
     pub args: Vec<String>,
 }
 
@@ -61,6 +65,10 @@ impl BuildCtx {
 
     pub fn target_triple(&self) -> TargetTriple {
         self.arch.target_triple()
+    }
+
+    pub fn arch_name(&self) -> &str {
+        self.arch.as_str()
     }
 }
 
@@ -104,16 +112,7 @@ pub fn build_app(
     };
     if let Some(mut cmd) = driver::build_command(&driver_ctx, extra_args)? {
         cmd_echo(&cmd);
-        let status = cmd
-            .status()
-            .with_context(|| format!("failed to execute build command for app '{}'", app.name))?;
-        if !status.success() {
-            bail!(
-                "build command for app '{}' exited with status {}",
-                app.name,
-                status
-            );
-        }
+        execute_build_command(&app.name, &mut cmd)?;
     }
 
     let mut built = Vec::with_capacity(app.artifacts.len());
@@ -126,6 +125,16 @@ pub fn build_app(
     }
 
     Ok(built)
+}
+
+fn execute_build_command(app_name: &str, command: &mut Command) -> anyhow::Result<()> {
+    let status = command
+        .status()
+        .with_context(|| format!("failed to execute build command for app '{app_name}'"))?;
+    if !status.success() {
+        bail!("build command for app '{app_name}' exited with status {status}");
+    }
+    Ok(())
 }
 
 fn validate_app_reference(name: &str, app: &App, manifest_path: &Path) -> anyhow::Result<()> {
@@ -384,5 +393,25 @@ mod tests {
         .to_string();
         assert!(error.contains("reference-name"), "{error}");
         assert!(error.contains("prebuilt"), "{error}");
+    }
+
+    #[test]
+    fn build_command_launch_and_status_failures_are_reported() {
+        let root = TestDirectory::new();
+        let missing = root.0.join("missing-command");
+        let mut command = Command::new(&missing);
+        let error = execute_build_command("command-test", &mut command)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("command-test"), "{error}");
+        assert!(error.contains("failed to execute"), "{error}");
+
+        let mut command = Command::new("sh");
+        command.args(["-c", "exit 23"]);
+        let error = execute_build_command("command-test", &mut command)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("command-test"), "{error}");
+        assert!(error.contains("23"), "{error}");
     }
 }

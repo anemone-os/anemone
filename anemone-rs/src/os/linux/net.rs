@@ -3,8 +3,8 @@
 use anemone_abi::{
     errno::{EINVAL, Errno},
     net::linux::{
-        AF_INET, AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
-        SOL_SOCKET, SockAddrIn, SockAddrUn, UNIX_PATH_MAX, socklen_t,
+        AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
+        SOCK_RAW, SOCK_STREAM, SOL_SOCKET, SockAddrIn, SockAddrUn, UNIX_PATH_MAX, socklen_t,
     },
 };
 use bitflags::bitflags;
@@ -24,6 +24,7 @@ bitflags! {
     pub struct MessageFlags: i32 {
         const DONTWAIT = anemone_abi::net::linux::MSG_DONTWAIT;
         const PEEK = anemone_abi::net::linux::MSG_PEEK;
+        const TRUNC = anemone_abi::net::linux::MSG_TRUNC;
         const NOSIGNAL = anemone_abi::net::linux::MSG_NOSIGNAL;
     }
 }
@@ -33,6 +34,15 @@ pub fn udp_socket(flags: SocketFlags) -> Result<Fd, Errno> {
         AF_INET as u64,
         (SOCK_DGRAM | flags.bits()) as u64,
         IPPROTO_UDP as u64,
+    )
+    .map(|fd| fd as Fd)
+}
+
+pub fn icmp_raw_socket(flags: SocketFlags) -> Result<Fd, Errno> {
+    net::socket(
+        AF_INET as u64,
+        (SOCK_RAW | flags.bits()) as u64,
+        IPPROTO_ICMP as u64,
     )
     .map(|fd| fd as Fd)
 }
@@ -155,10 +165,41 @@ pub fn bind_ipv4(fd: Fd, address: SockAddrIn) -> Result<(), Errno> {
     .map(|_| ())
 }
 
+pub fn connect_ipv4(fd: Fd, address: SockAddrIn) -> Result<(), Errno> {
+    net::connect(
+        fd as u64,
+        &address as *const SockAddrIn as u64,
+        core::mem::size_of::<SockAddrIn>() as u64,
+    )
+    .map(|_| ())
+}
+
+pub fn disconnect_ipv4(fd: Fd) -> Result<(), Errno> {
+    let family = anemone_abi::net::linux::AF_UNSPEC as u16;
+    net::connect(
+        fd as u64,
+        &family as *const u16 as u64,
+        core::mem::size_of::<u16>() as u64,
+    )
+    .map(|_| ())
+}
+
 pub fn getsockname_ipv4(fd: Fd) -> Result<SockAddrIn, Errno> {
     let mut address = SockAddrIn::default();
     let mut len = core::mem::size_of::<SockAddrIn>() as socklen_t;
     net::getsockname(
+        fd as u64,
+        &mut address as *mut SockAddrIn as u64,
+        &mut len as *mut socklen_t as u64,
+    )?;
+    assert_eq!(len as usize, core::mem::size_of::<SockAddrIn>());
+    Ok(address)
+}
+
+pub fn getpeername_ipv4(fd: Fd) -> Result<SockAddrIn, Errno> {
+    let mut address = SockAddrIn::default();
+    let mut len = core::mem::size_of::<SockAddrIn>() as socklen_t;
+    net::getpeername(
         fd as u64,
         &mut address as *mut SockAddrIn as u64,
         &mut len as *mut socklen_t as u64,
@@ -261,6 +302,23 @@ pub unsafe fn getsockopt_raw(
     .map(|_| ())
 }
 
+pub unsafe fn getsockopt_level_raw(
+    fd: i32,
+    level: i32,
+    option: i32,
+    value: *mut u8,
+    len: *mut i32,
+) -> Result<(), Errno> {
+    net::getsockopt(
+        fd as i64 as u64,
+        level as i64 as u64,
+        option as i64 as u64,
+        value as u64,
+        len as u64,
+    )
+    .map(|_| ())
+}
+
 pub unsafe fn setsockopt_raw(
     fd: i32,
     option: i32,
@@ -270,6 +328,23 @@ pub unsafe fn setsockopt_raw(
     net::setsockopt(
         fd as i64 as u64,
         SOL_SOCKET as u64,
+        option as i64 as u64,
+        value as u64,
+        len as i64 as u64,
+    )
+    .map(|_| ())
+}
+
+pub unsafe fn setsockopt_level_raw(
+    fd: i32,
+    level: i32,
+    option: i32,
+    value: *const u8,
+    len: i32,
+) -> Result<(), Errno> {
+    net::setsockopt(
+        fd as i64 as u64,
+        level as i64 as u64,
         option as i64 as u64,
         value as u64,
         len as i64 as u64,
@@ -290,6 +365,11 @@ pub unsafe fn socket_raw(family: i32, socket_type: i32, protocol: i32) -> Result
 /// Raw bind entry. Pointer and length may intentionally be invalid in a test.
 pub unsafe fn bind_raw(fd: i32, address: *const u8, len: u32) -> Result<(), Errno> {
     net::bind(fd as i64 as u64, address as u64, len as u64).map(|_| ())
+}
+
+/// Raw connect entry. Pointer and length may intentionally be invalid in a test.
+pub unsafe fn connect_raw(fd: i32, address: *const u8, len: u32) -> Result<(), Errno> {
+    net::connect(fd as i64 as u64, address as u64, len as u64).map(|_| ())
 }
 
 /// Raw getsockname entry preserving Linux pointer/length copy ordering.

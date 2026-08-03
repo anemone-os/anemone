@@ -6,7 +6,7 @@ mod relation;
 mod terminal;
 
 pub(crate) use endpoint::prepare_system_boot;
-pub(crate) use port::{TtyLineSnapshot, TtyParity, TtyPort, TtyPortId};
+pub(crate) use port::{TtyLineSnapshot, TtyParity, TtyPort, TtyPortId, TtyRxUnit};
 pub(crate) use relation::detach_exiting_session;
 
 use crate::{
@@ -242,7 +242,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
         .cast::<TtyWorker>()
         .expect("TTY worker received invalid private data")
         .endpoint;
-    let mut rx_batch = [0_u8; TTY_WORKER_BATCH_BYTES];
+    let mut rx_batch = [TtyRxUnit::Byte(0); TTY_WORKER_BATCH_BYTES];
     let mut rx_cursor = 0;
     let mut rx_len = 0;
     let mut tx_batch = [0_u8; TTY_WORKER_BATCH_BYTES];
@@ -263,7 +263,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
             rx_cursor = 0;
             assert!(
                 rx_len <= rx_batch.len(),
-                "TTY port returned more RX bytes than the supplied batch"
+                "TTY port returned more RX units than the supplied batch"
             );
             if rx_len == 0 {
                 assert!(
@@ -276,7 +276,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
         while rx_cursor < rx_len {
             let effect = endpoint
                 .terminal
-                .receive_rx_byte_effect(rx_batch[rx_cursor]);
+                .receive_rx_unit_effect(rx_batch[rx_cursor]);
             if !effect.consumed() {
                 break;
             }
@@ -290,7 +290,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
                     TtySignalControl::Suspend => crate::task::jobctl::TtyTerminalSignal::Suspend,
                 };
                 if !relation::signal_foreground(endpoint, signal) {
-                    endpoint.terminal.record_no_foreground_isig();
+                    endpoint.terminal.record_no_foreground_input_signal();
                 }
             }
         }
@@ -336,8 +336,8 @@ mod kunits {
 
     struct FakePort {
         id: TtyPortId,
-        input: SpinLock<RingBuffer<u8, FAKE_PORT_CAPACITY>>,
-        dequeued: SpinLock<RingBuffer<u8, FAKE_PORT_CAPACITY>>,
+        input: SpinLock<RingBuffer<TtyRxUnit, FAKE_PORT_CAPACITY>>,
+        dequeued: SpinLock<RingBuffer<TtyRxUnit, FAKE_PORT_CAPACITY>>,
         output: SpinLock<RingBuffer<u8, FAKE_PORT_CAPACITY>>,
         tx_limit: AtomicUsize,
         tx_idle: AtomicBool,
@@ -360,7 +360,16 @@ mod kunits {
         }
 
         fn enqueue(&self, bytes: &[u8]) {
-            assert_eq!(self.input.lock().try_push_slice(bytes), bytes.len());
+            let mut input = self.input.lock();
+            for &byte in bytes {
+                assert_eq!(input.try_push(TtyRxUnit::Byte(byte)), Ok(()));
+            }
+            drop(input);
+            self.activity.publish(usize::MAX, true);
+        }
+
+        fn enqueue_units(&self, units: &[TtyRxUnit]) {
+            assert_eq!(self.input.lock().try_push_slice(units), units.len());
             self.activity.publish(usize::MAX, true);
         }
 
@@ -386,6 +395,16 @@ mod kunits {
         }
 
         fn assert_dequeued(&self, expected: &[u8]) {
+            let dequeued = self.dequeued.lock();
+            assert_eq!(dequeued.len(), expected.len());
+            assert!(
+                dequeued
+                    .iter()
+                    .eq(expected.iter().copied().map(TtyRxUnit::Byte))
+            );
+        }
+
+        fn assert_dequeued_units(&self, expected: &[TtyRxUnit]) {
             let dequeued = self.dequeued.lock();
             assert_eq!(dequeued.len(), expected.len());
             assert!(dequeued.iter().eq(expected.iter().copied()));
@@ -420,7 +439,7 @@ mod kunits {
             !self.input.lock().is_empty()
         }
 
-        fn dequeue_rx(&self, dst: &mut [u8]) -> usize {
+        fn dequeue_rx(&self, dst: &mut [TtyRxUnit]) -> usize {
             let count = self.input.lock().try_pop_slice(dst);
             assert_eq!(self.dequeued.lock().try_push_slice(&dst[..count]), count);
             self.activity.publish(usize::MAX, true);
@@ -516,6 +535,37 @@ mod kunits {
             discipline::InputRead::Bytes(input.len())
         );
         assert_eq!(observed, input);
+        attachment.abort();
+    }
+
+    #[kunit]
+    fn break_flush_keeps_later_worker_batch_units_and_needs_no_isig() {
+        let port = FakePort::new("/kunit/tty/break-batch-boundary");
+        let (attachment, notifier) = attach(&port);
+        let terminal = attachment.terminal().clone();
+        let (mut termios, generation) = terminal.termios_snapshot();
+        termios.brkint = true;
+        termios.isig = false;
+        termios.echo = false;
+        assert!(terminal.commit_termios_if_generation(generation, None, termios, false));
+
+        let units = [
+            TtyRxUnit::Byte(b'a'),
+            TtyRxUnit::Break,
+            TtyRxUnit::Byte(b'b'),
+            TtyRxUnit::Byte(b'\n'),
+        ];
+        port.enqueue_units(&units);
+        notifier.wake();
+        port.wait_for(|| terminal.readable());
+
+        port.assert_dequeued_units(&units);
+        let mut observed = [0_u8; 2];
+        assert_eq!(
+            terminal.read_input(&mut observed),
+            discipline::InputRead::Bytes(2)
+        );
+        assert_eq!(&observed, b"b\n");
         attachment.abort();
     }
 

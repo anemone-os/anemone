@@ -2,9 +2,10 @@ use alloc::{vec, vec::Vec};
 
 use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
+    Ipv4EgressSelection,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointFacts,
-        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointFacts, UdpEndpointId,
+        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
     },
 };
 use smoltcp::{socket::raw, wire::IpVersion};
@@ -211,7 +212,7 @@ impl Stack {
         let selection = selection.ok_or(HostSendError::MissingSelection)?;
         self.send_udp_endpoint(
             endpoint.0,
-            UdpEgressSelection::new(selection.interface, ApiIpv4Address::new(selection.source)),
+            Ipv4EgressSelection::new(selection.interface, ApiIpv4Address::new(selection.source)),
             UdpPeer::new(ApiIpv4Address::new(destination_address), destination_port),
             payload,
         )
@@ -241,7 +242,7 @@ impl Stack {
         &self,
         endpoint: HostEndpointId,
     ) -> Option<HostEndpointObservation> {
-        let endpoint = self.udp.endpoint(endpoint.0)?;
+        let endpoint = self.protocols.udp.endpoint(endpoint.0)?;
         Some(HostEndpointObservation {
             engine_resources: endpoint.engines().len(),
             pending_tx: endpoint.has_pending_tx(),
@@ -257,7 +258,9 @@ impl Stack {
     }
 
     pub fn take_udp_invalidations_for_host_validation(&mut self) -> Vec<HostEndpointId> {
-        self.take_udp_endpoint_invalidations()
+        self.take_invalidations()
+            .into_parts()
+            .0
             .into_iter()
             .map(|invalidation| HostEndpointId(invalidation.endpoint()))
             .collect()

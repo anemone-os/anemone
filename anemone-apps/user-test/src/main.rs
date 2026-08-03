@@ -101,6 +101,10 @@ fn run_local_tests() {
     local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
     println!("user-test: socket test finished.");
 
+    println!("user-test: running pipe capacity test...");
+    local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
+    println!("user-test: pipe capacity test finished.");
+
     // println!("user-test: running POSIX record lock test...");
     // local_run_cmd(
     //     "/bin/fcntl-test",
@@ -114,6 +118,10 @@ fn run_local_tests() {
 fn run_comp_tests() {
     guest::enter_competition_root();
     guest::init_competition_environment();
+
+    println!("user-test: running BusyBox gateway ping...");
+    local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);
+    println!("user-test: BusyBox gateway ping finished.");
 
     ltp::install_ltp_fixtures();
 

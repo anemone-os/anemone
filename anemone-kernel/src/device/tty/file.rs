@@ -337,7 +337,7 @@ fn set_termios(tty: &TtyFile, candidate: abi::Termios, mode: SetMode) -> Result<
 
 fn project_termios(termios: TtyTermios, line: TtyLineSnapshot) -> Result<abi::Termios, SysError> {
     let mut result = abi::Termios {
-        c_iflag: if termios.icrnl { abi::ICRNL } else { 0 },
+        c_iflag: 0,
         c_oflag: (if termios.opost { abi::OPOST } else { 0 })
             | (if termios.onlcr { abi::ONLCR } else { 0 }),
         c_cflag: baud_flag(line.baud).ok_or(SysError::InvalidArgument)?
@@ -348,6 +348,21 @@ fn project_termios(termios: TtyTermios, line: TtyLineSnapshot) -> Result<abi::Te
         c_line: 0,
         c_cc: [0; abi::NCCS],
     };
+    for (enabled, flag) in [
+        (termios.ignbrk, abi::IGNBRK),
+        (termios.brkint, abi::BRKINT),
+        (termios.ignpar, abi::IGNPAR),
+        (termios.parmrk, abi::PARMRK),
+        (termios.inpck, abi::INPCK),
+        (termios.istrip, abi::ISTRIP),
+        (termios.inlcr, abi::INLCR),
+        (termios.igncr, abi::IGNCR),
+        (termios.icrnl, abi::ICRNL),
+    ] {
+        if enabled {
+            result.c_iflag |= flag;
+        }
+    }
     match line.parity {
         TtyParity::None => {},
         TtyParity::Even => result.c_cflag |= abi::PARENB,
@@ -377,7 +392,15 @@ fn validate_termios(
     line: TtyLineSnapshot,
 ) -> Result<TtyTermios, SysError> {
     let projected = project_termios(current, line)?;
-    let allowed_iflag = abi::ICRNL;
+    let allowed_iflag = abi::IGNBRK
+        | abi::BRKINT
+        | abi::IGNPAR
+        | abi::PARMRK
+        | abi::INPCK
+        | abi::ISTRIP
+        | abi::INLCR
+        | abi::IGNCR
+        | abi::ICRNL;
     let allowed_oflag = abi::OPOST | abi::ONLCR;
     let allowed_lflag = abi::ISIG | abi::ICANON | abi::ECHO | abi::ECHOE | abi::ECHOK | abi::ECHONL;
     if candidate.c_iflag & !allowed_iflag != projected.c_iflag & !allowed_iflag
@@ -414,6 +437,14 @@ fn validate_termios(
         return Err(SysError::InvalidArgument);
     }
     Ok(TtyTermios {
+        ignbrk: candidate.c_iflag & abi::IGNBRK != 0,
+        brkint: candidate.c_iflag & abi::BRKINT != 0,
+        ignpar: candidate.c_iflag & abi::IGNPAR != 0,
+        parmrk: candidate.c_iflag & abi::PARMRK != 0,
+        inpck: candidate.c_iflag & abi::INPCK != 0,
+        istrip: candidate.c_iflag & abi::ISTRIP != 0,
+        inlcr: candidate.c_iflag & abi::INLCR != 0,
+        igncr: candidate.c_iflag & abi::IGNCR != 0,
         icrnl: candidate.c_iflag & abi::ICRNL != 0,
         opost: candidate.c_oflag & abi::OPOST != 0,
         onlcr: candidate.c_oflag & abi::ONLCR != 0,
@@ -526,7 +557,8 @@ mod kunits {
     use super::*;
     use crate::{
         device::tty::{
-            TtyPort, TtyPortAttachment, TtyPortId, TtyWakeSource, attach_unpublished_port,
+            TtyPort, TtyPortAttachment, TtyPortId, TtyRxUnit, TtyWakeSource,
+            attach_unpublished_port,
         },
         fs::anony_open_with,
     };
@@ -558,7 +590,7 @@ mod kunits {
             false
         }
 
-        fn dequeue_rx(&self, _dst: &mut [u8]) -> usize {
+        fn dequeue_rx(&self, _dst: &mut [TtyRxUnit]) -> usize {
             0
         }
 
@@ -672,6 +704,31 @@ mod kunits {
         assert_eq!(raw.c_cflag & abi::CSIZE, abi::CS8);
         assert_eq!(raw.c_cc[abi::VMIN], 1);
         assert_eq!(raw.c_cc[abi::VTIME], 0);
+        assert_eq!(raw.c_iflag, abi::ICRNL);
+
+        let mut input_modes = raw;
+        input_modes.c_iflag = abi::IGNBRK
+            | abi::BRKINT
+            | abi::IGNPAR
+            | abi::PARMRK
+            | abi::INPCK
+            | abi::ISTRIP
+            | abi::INLCR
+            | abi::IGNCR
+            | abi::ICRNL;
+        let input_modes = validate_termios(input_modes, current, line()).unwrap();
+        assert_eq!(
+            project_termios(input_modes, line()).unwrap().c_iflag,
+            abi::IGNBRK
+                | abi::BRKINT
+                | abi::IGNPAR
+                | abi::PARMRK
+                | abi::INPCK
+                | abi::ISTRIP
+                | abi::INLCR
+                | abi::IGNCR
+                | abi::ICRNL
+        );
 
         let mut candidate = raw;
         candidate.c_lflag &= !(abi::ICANON | abi::ECHO);

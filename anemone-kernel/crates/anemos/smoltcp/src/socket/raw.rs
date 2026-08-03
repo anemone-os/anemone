@@ -87,6 +87,7 @@ pub type PacketBuffer<'a> = crate::storage::PacketBuffer<'a, ()>;
 pub struct Socket<'a> {
     ip_version: Option<IpVersion>,
     ip_protocol: Option<IpProtocol>,
+    receive_enabled: bool,
     rx_buffer: PacketBuffer<'a>,
     tx_buffer: PacketBuffer<'a>,
     #[cfg(feature = "async")]
@@ -107,6 +108,7 @@ impl<'a> Socket<'a> {
         Socket {
             ip_version,
             ip_protocol,
+            receive_enabled: true,
             rx_buffer,
             tx_buffer,
             #[cfg(feature = "async")]
@@ -114,6 +116,22 @@ impl<'a> Socket<'a> {
             #[cfg(feature = "async")]
             tx_waker: WakerRegistration::new(),
         }
+    }
+
+    /// Create a raw IP socket that participates only in egress.
+    ///
+    /// The receive buffer remains present to keep the storage shape uniform,
+    /// but this socket never matches ingress. This is useful for a private
+    /// protocol engine whose admission owner lives above smoltcp.
+    pub fn new_egress_only(
+        ip_version: Option<IpVersion>,
+        ip_protocol: Option<IpProtocol>,
+        rx_buffer: PacketBuffer<'a>,
+        tx_buffer: PacketBuffer<'a>,
+    ) -> Socket<'a> {
+        let mut socket = Self::new(ip_version, ip_protocol, rx_buffer, tx_buffer);
+        socket.receive_enabled = false;
+        socket
     }
 
     /// Register a waker for receive operations.
@@ -345,6 +363,9 @@ impl<'a> Socket<'a> {
     }
 
     pub(crate) fn accepts(&self, ip_repr: &IpRepr) -> bool {
+        if !self.receive_enabled {
+            return false;
+        }
         if self
             .ip_version
             .is_some_and(|version| version != ip_repr.version())
@@ -430,7 +451,10 @@ impl<'a> Socket<'a> {
                         },
                     };
                     net_trace!("raw:{:?}:{:?}: sending", ip_version, ip_protocol);
-                    emit(cx, (IpRepr::Ipv4(ipv4_repr), packet.payload()))
+                    // IPv4 raw egress retains the original datagram so the
+                    // interface can preserve header policy omitted by
+                    // `Ipv4Repr`. IPv6 keeps the existing payload-only path.
+                    emit(cx, (IpRepr::Ipv4(ipv4_repr), packet.as_ref()))
                 },
                 #[cfg(feature = "proto-ipv6")]
                 Ok(IpVersion::Ipv6) => {
@@ -563,6 +587,19 @@ mod test {
         ];
 
         pub const PACKET_PAYLOAD: [u8; 4] = [0xaa, 0x00, 0x00, 0xff];
+    }
+
+    #[test]
+    #[cfg(feature = "proto-ipv4")]
+    fn egress_only_socket_never_matches_ingress() {
+        let socket = Socket::new_egress_only(
+            Some(IpVersion::Ipv4),
+            Some(IpProtocol::Unknown(ipv4_locals::IP_PROTO)),
+            buffer(1),
+            buffer(1),
+        );
+        assert!(!socket.accepts(&ipv4_locals::HEADER_REPR));
+        assert!(socket.can_send());
     }
 
     macro_rules! reusable_ip_specific_tests {

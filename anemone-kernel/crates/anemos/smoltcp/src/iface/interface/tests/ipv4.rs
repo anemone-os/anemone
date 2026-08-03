@@ -97,7 +97,8 @@ fn test_no_icmp_no_unicast(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -159,7 +160,8 @@ fn test_icmp_error_no_payload(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         Some(expected_repr)
     );
@@ -445,7 +447,8 @@ fn test_handle_ipv4_broadcast(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         Some(expected_packet)
     );
@@ -886,14 +889,13 @@ fn check_no_reply_raw_socket(medium: Medium, frame: &crate::wire::ipv4::Packet<&
     let (mut iface, mut sockets, _) = setup(medium);
 
     let packets = 1;
-    let rx_buffer =
-        raw::PacketBuffer::new(vec![raw::PacketMetadata::EMPTY; packets], vec![0; 48 * 1]);
+    let rx_buffer = raw::PacketBuffer::new(vec![raw::PacketMetadata::EMPTY; packets], vec![0; 128]);
     let tx_buffer = raw::PacketBuffer::new(
         vec![raw::PacketMetadata::EMPTY; packets],
         vec![0; 48 * packets],
     );
     let raw_socket = raw::Socket::new(Some(IpVersion::Ipv4), None, rx_buffer, tx_buffer);
-    sockets.add(raw_socket);
+    let raw_handle = sockets.add(raw_socket);
 
     assert_eq!(
         iface.inner.process_ipv4(
@@ -901,10 +903,13 @@ fn check_no_reply_raw_socket(medium: Medium, frame: &crate::wire::ipv4::Packet<&
             PacketMeta::default(),
             HardwareAddress::default(),
             frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
+    let raw_socket = sockets.get_mut::<raw::Socket>(raw_handle);
+    assert_eq!(raw_socket.recv(), Ok(frame.as_ref()));
 }
 
 #[rstest]
@@ -1106,7 +1111,8 @@ fn test_raw_socket_with_udp_socket(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -1351,7 +1357,8 @@ fn test_raw_socket_rx_fragmentation(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frag1,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -1367,7 +1374,8 @@ fn test_raw_socket_rx_fragmentation(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frag2,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );

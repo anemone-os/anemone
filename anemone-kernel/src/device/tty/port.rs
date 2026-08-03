@@ -19,6 +19,18 @@ pub(crate) struct TtyLineSnapshot {
     pub(crate) data_bits: u8,
 }
 
+/// One ordered receive condition transferred from a physical port to TTY.
+///
+/// The physical driver owns hardware-status classification, while `Terminal`
+/// owns termios policy. Keeping the condition attached to its byte prevents a
+/// sideband error stream from becoming a second RX truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TtyRxUnit {
+    Byte(u8),
+    Break,
+    FaultedByte(u8),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct TtyPortId(AnyIdentity);
 
@@ -56,11 +68,11 @@ pub(crate) trait TtyPort: Send + Sync {
 
     fn rx_pending(&self) -> bool;
 
-    /// Dequeue up to `dst.len()` bytes in FIFO order.
+    /// Dequeue up to `dst.len()` receive units in FIFO order.
     ///
     /// TTY is the only RX consumer, so a true `rx_pending()` observation must
-    /// make progress here unless another TTY worker already drained the bytes.
-    fn dequeue_rx(&self, dst: &mut [u8]) -> usize;
+    /// make progress here unless another TTY worker already drained the units.
+    fn dequeue_rx(&self, dst: &mut [TtyRxUnit]) -> usize;
 
     /// Submit bytes through the port owner's bounded TX serialization and
     /// return the number accepted before timeout or backpressure.

@@ -5,8 +5,7 @@ use smoltcp::iface::{PollIngressSingleResult, PollResult};
 
 use crate::{
     adapter::{FrameDevice, from_smoltcp_instant, to_smoltcp_instant},
-    stack::{InterfaceEntry, PumpError, PumpOrder, Stack},
-    udp::UdpEndpoints,
+    stack::{InterfaceEntry, Protocols, PumpError, PumpOrder, Stack},
 };
 
 use super::common::{PumpBudget, pump_outcome};
@@ -20,7 +19,9 @@ impl Stack {
         budget: PumpBudget,
     ) -> Result<PumpOutcome, PumpError> {
         let Self {
-            interfaces, udp, ..
+            interfaces,
+            protocols,
+            ..
         } = self;
         let entry = interfaces
             .iter_mut()
@@ -38,13 +39,13 @@ impl Stack {
         let smoltcp_now = to_smoltcp_instant(now);
         let mut device = FrameDevice::new(provider);
         entry.interface.poll_maintenance(smoltcp_now);
-        let active_endpoint = udp.prepare_egress(id, &mut entry.sockets);
+        let active = protocols.prepare_egress(id, &mut entry.protocols, &mut entry.sockets);
 
         let (ingress_may_remain, egress_may_remain) = match entry.next_pump_order {
             PumpOrder::IngressFirst => (
                 poll_ingress(
                     entry,
-                    udp,
+                    protocols,
                     &mut device,
                     smoltcp_now,
                     budget.ingress_frames(),
@@ -56,7 +57,7 @@ impl Stack {
                     poll_egress(entry, &mut device, smoltcp_now, budget.egress_steps());
                 let ingress_may_remain = poll_ingress(
                     entry,
-                    udp,
+                    protocols,
                     &mut device,
                     smoltcp_now,
                     budget.ingress_frames(),
@@ -64,7 +65,8 @@ impl Stack {
                 (ingress_may_remain, egress_may_remain)
             },
         };
-        let udp_egress_may_remain = udp.complete_egress(active_endpoint, id, &entry.sockets);
+        let protocol_egress_may_remain =
+            protocols.complete_egress(active, id, &entry.protocols, &entry.sockets);
         entry.next_pump_order = entry.next_pump_order.next();
 
         let next_deadline = entry
@@ -74,7 +76,7 @@ impl Stack {
         Ok(pump_outcome(
             device.blocked_work(),
             ingress_may_remain,
-            egress_may_remain || udp_egress_may_remain,
+            egress_may_remain || protocol_egress_may_remain,
             now,
             next_deadline,
         ))
@@ -83,23 +85,26 @@ impl Stack {
 
 fn poll_ingress<P: FrameProvider>(
     entry: &mut InterfaceEntry,
-    udp: &mut UdpEndpoints,
+    protocols: &mut Protocols,
     device: &mut FrameDevice<'_, P>,
     now: smoltcp::time::Instant,
     budget: usize,
 ) -> bool {
-    udp.drain_ingress(entry.id, &mut entry.sockets);
+    protocols.drain_engine_ingress(entry.id, &mut entry.sockets);
     let mut processed = 0;
     while processed < budget {
-        match entry
-            .interface
-            .poll_ingress_single(now, device, &mut entry.sockets)
-        {
+        let result = entry.interface.poll_ingress_single_with_ipv4_observer(
+            now,
+            device,
+            &mut entry.sockets,
+            &mut |packet| protocols.observe_admitted_ipv4(packet),
+        );
+        match result {
             PollIngressSingleResult::None => break,
             PollIngressSingleResult::PacketProcessed
             | PollIngressSingleResult::SocketStateChanged => processed += 1,
         }
-        udp.drain_ingress(entry.id, &mut entry.sockets);
+        protocols.drain_engine_ingress(entry.id, &mut entry.sockets);
     }
     processed == budget
 }

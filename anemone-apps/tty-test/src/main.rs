@@ -18,8 +18,8 @@ use anemone_rs::{
         system::native::power::SHUTDOWN_MAGIC,
         time::linux::TimeSpec,
         tty::linux::{
-            ECHO, ICANON, ICRNL, ONLCR, OPOST, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VTIME,
-            Winsize,
+            BRKINT, ECHO, ICANON, ICRNL, IGNBRK, IGNCR, IGNPAR, INLCR, INPCK, ISIG, ISTRIP, ONLCR,
+            OPOST, PARMRK, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VTIME, Winsize,
         },
     },
     os::{
@@ -1289,6 +1289,133 @@ fn test_icrnl(baseline: &Baseline) -> Result<(), Errno> {
     expect(&buffer[..count] == b"q\n")
 }
 
+fn test_input_mode_roundtrip(baseline: &Baseline) -> Result<(), Errno> {
+    expect(baseline.termios.c_iflag == ICRNL)?;
+    let mut changed = baseline.termios;
+    changed.c_iflag = IGNBRK | BRKINT | IGNPAR | PARMRK | INPCK | ISTRIP | INLCR | IGNCR | ICRNL;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Drain, &changed)?;
+    expect(tcgetattr(STDIN_FILENO)? == changed)
+}
+
+fn test_python_raw_termios_candidate(baseline: &Baseline) -> Result<(), Errno> {
+    const IXON: u32 = 0x0000_0400;
+
+    let mut raw = baseline.termios;
+    raw.c_iflag &= !(INPCK | ISTRIP | IXON);
+    raw.c_iflag |= BRKINT;
+    raw.c_lflag &= !(ICANON | ECHO);
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Drain, &raw)?;
+    expect(tcgetattr(STDIN_FILENO)? == raw)
+}
+
+fn test_strip_and_parmrk_literal_ff(baseline: &Baseline) -> Result<(), Errno> {
+    let mut stripped = baseline.raw_vmin1();
+    stripped.c_iflag = ISTRIP;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &stripped)?;
+    ready("input-modes-istrip");
+    let mut stripped_byte = [0_u8; 1];
+    expect(read(STDIN_FILENO, &mut stripped_byte)? == 1)?;
+    expect(stripped_byte == [0x7f])?;
+
+    let mut marked = baseline.raw_vmin1();
+    marked.c_iflag = PARMRK;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &marked)?;
+    ready("input-modes-parmrk-ff");
+    let mut marker = [0_u8; 2];
+    let mut received = 0;
+    while received < marker.len() {
+        received += read(STDIN_FILENO, &mut marker[received..])?;
+    }
+    expect(marker == [0xff, 0xff])
+}
+
+fn test_crnl_input_priority(baseline: &Baseline) -> Result<(), Errno> {
+    let mut ignored = baseline.raw_vmin1();
+    ignored.c_iflag = IGNCR | ICRNL | INLCR;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &ignored)?;
+    ready("input-modes-crnl-ignore");
+    let mut ignored_result = [0_u8; 1];
+    expect(read(STDIN_FILENO, &mut ignored_result)? == 1)?;
+    expect(ignored_result == [b'\r'])?;
+
+    let mut mapped = baseline.raw_vmin1();
+    mapped.c_iflag = ICRNL | INLCR;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &mapped)?;
+    ready("input-modes-crnl-map");
+    let mut mapped_result = [0_u8; 2];
+    let mut received = 0;
+    while received < mapped_result.len() {
+        received += read(STDIN_FILENO, &mut mapped_result[received..])?;
+    }
+    expect(mapped_result == [b'\n', b'\r'])
+}
+
+fn brkint_signal_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    install_terminal_signal_handler(SigNo::SIGINT)?;
+    let mut termios = tcgetattr(fd)?;
+    termios.c_iflag = BRKINT;
+    termios.c_lflag &= !(ICANON | ECHO | ISIG);
+    termios.c_cc[VMIN] = 1;
+    termios.c_cc[VTIME] = 0;
+    tcsetattr(fd, SetTermiosWhen::DrainFlush, &termios)?;
+    ready("brkint-prefix");
+    let mut prefix_ready = false;
+    for _ in 0..CHILD_WAIT_RETRIES {
+        if is_readable(fd)? {
+            prefix_ready = true;
+            break;
+        }
+        nanosleep(CHILD_WAIT_TICK)?;
+    }
+    expect(prefix_ready)?;
+    ready("brkint-break");
+
+    // Do not let the read race ahead of the host's serial-break injection.
+    // SIGINT is published only after the Terminal-local BRKINT flush commits,
+    // so observing the handler is the acceptance boundary for reading the
+    // post-break payload.
+    for _ in 0..CHILD_WAIT_RETRIES {
+        if TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) != 0 {
+            break;
+        }
+        match nanosleep(CHILD_WAIT_TICK) {
+            Ok(()) => {},
+            Err(errno) if errno == EINTR => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+    expect(TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst) != 0)?;
+
+    let mut observed = [0_u8; 5];
+    let mut received = 0;
+    while received < observed.len() {
+        match read(fd, &mut observed[received..]) {
+            Ok(0) => return Err(EIO),
+            Ok(count) => received += count,
+            Err(errno) if errno == EINTR => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+    let signal_count = TERMINAL_SIGNAL_COUNT.load(Ordering::SeqCst);
+    let signal_last = TERMINAL_SIGNAL_LAST.load(Ordering::SeqCst);
+    let valid =
+        observed == *b"keep\n" && signal_count == 1 && signal_last == SigNo::SIGINT.as_usize();
+    if !valid {
+        println!(
+            "TTYTEST:DETAIL:brkint:input={observed:?}:count={signal_count}:last={signal_last}"
+        );
+    }
+    expect(valid)
+}
+
+fn test_brkint_signal(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(brkint_signal_body)
+}
+
 fn test_noncanonical(baseline: &Baseline) -> Result<(), Errno> {
     tcsetattr(
         STDIN_FILENO,
@@ -1363,9 +1490,11 @@ fn test_tcsetsf(baseline: &Baseline) -> Result<(), Errno> {
 }
 
 fn test_unsupported_rollback(baseline: &Baseline) -> Result<(), Errno> {
+    const IXON: u32 = 0x0000_0400;
+
     let before = tcgetattr(STDIN_FILENO)?;
     let mut unsupported = before;
-    unsupported.c_iflag ^= 0x0001;
+    unsupported.c_iflag ^= IXON;
     expect(matches!(
         tcsetattr(STDIN_FILENO, SetTermiosWhen::Now, &unsupported),
         Err(EINVAL)
@@ -1553,6 +1682,18 @@ fn run_auto(baseline: &Baseline) -> Results {
         test_canonical_short_record,
     );
     results.case("icrnl", baseline, test_icrnl);
+    results.case("input-mode-roundtrip", baseline, test_input_mode_roundtrip);
+    results.case(
+        "python-raw-termios-candidate",
+        baseline,
+        test_python_raw_termios_candidate,
+    );
+    results.case(
+        "istrip-parmrk-literal-ff",
+        baseline,
+        test_strip_and_parmrk_literal_ff,
+    );
+    results.case("crnl-input-priority", baseline, test_crnl_input_priority);
     results.case("noncanonical-vmin1-vtime0", baseline, test_noncanonical);
     results.case("nonblock-eagain", baseline, test_nonblock_eagain);
     results.case("binary-write", baseline, test_binary_write);
@@ -1617,6 +1758,7 @@ fn run_auto(baseline: &Baseline) -> Results {
     results.case("isig-vintr-sigint", baseline, test_interrupt_signal);
     results.case("isig-vquit-sigquit", baseline, test_quit_signal);
     results.case("isig-vsusp-sigtstp", baseline, test_suspend_signal);
+    results.case("brkint-sigint", baseline, test_brkint_signal);
     results.case("background-read-sigttin", baseline, test_background_sigttin);
     results.case(
         "background-read-sigttin-handler-no-restart",

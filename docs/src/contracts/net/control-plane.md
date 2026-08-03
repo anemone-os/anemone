@@ -73,6 +73,8 @@ provider ingress/egress与normal UDP demux；两边均保持完整`filesystem ->
 **当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
 `NET-UDP-CONTROL-CUTOVER`。
 
-**当前 consumer closure：** 同一transaction的`NET-UDP-FINAL-CUTOVER`使
-[`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`与
-`NET-SOCKET-WAIT-001`](./udp-socket.md)生效；route/source/interface policy仍由本页owner唯一拥有。
+**当前 consumer closure：** `NET-UDP-FINAL-CUTOVER`使
+[`NET-PROTOCOL-BOUNDARY-001`与`NET-SOCKET-WAIT-001`](./protocol-socket.md)以及
+[`NET-SOCKET-ENDPOINT-001`与`NET-UDP-TRANSACTION-001`](./udp-socket.md)生效；`ICMP-RAW-CUTOVER`随后让
+[ICMP raw Endpoint/transaction](./icmp-raw-socket.md)成为第二个真实protocol consumer。route/source/interface policy仍由
+本页owner唯一拥有。

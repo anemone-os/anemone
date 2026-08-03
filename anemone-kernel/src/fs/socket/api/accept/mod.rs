@@ -6,13 +6,15 @@ use anemone_abi::net::linux::{SOCK_CLOEXEC, SOCK_NONBLOCK};
 use crate::{
     fs::{
         iomux::PollEvent,
-        socket::{SocketAcceptError, socket_file_desc_ops, socket_from_file},
+        socket::{
+            SocketAcceptError, socket_file_desc_ops, socket_from_file, wait_for_socket_operation,
+        },
     },
     prelude::*,
     task::files::{Fd, FdFlags, FileDesc, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
 
-use super::{abi::write_socket_address, wait_for_socket_operation};
+use super::abi::write_socket_address;
 
 const ACCEPT_FLAGS: i32 = SOCK_NONBLOCK | SOCK_CLOEXEC;
 
