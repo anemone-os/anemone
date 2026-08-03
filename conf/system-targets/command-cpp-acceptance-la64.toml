@@ -1,0 +1,9 @@
+platform = "qemu-virt-la64"
+
+[root]
+fstype = "ramfs"
+source = { type = "pseudo" }
+
+[initial-program]
+type = "embedded-app"
+app = "command-cpp"

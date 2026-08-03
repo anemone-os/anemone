@@ -23,6 +23,7 @@ max_processes = 32768
 epoll_file_max_waiters = 64
 getdents64_buffer_bytes = 2097152
 pipe_capacity_pages = 2
+pipe_max_capacity_pages = 16
 tid_alloc_policy = "oneshot"
 system_hz = 100
 sched_default_policy = "fair"

@@ -21,8 +21,9 @@ usage() {
     cat <<'EOF'
 Usage: run-final-test-la64.sh <disk-image> [log-file]
 
-Builds a la64 kernel with the fixed embedded BusyBox shell, stages a writable
-copy of the provided disk image, and launches the generic 8-CPU/8-GiB QEMU VM.
+Builds a la64 kernel with the embedded BusyBox init and respawning shell,
+stages a writable copy of the provided disk image, and launches the generic
+8-CPU/8-GiB QEMU VM.
 EOF
 }
 

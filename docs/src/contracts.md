@@ -117,6 +117,8 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Mount admission](./contracts/vfs/mount-admission.md)
   - [Local whole-file flock](./contracts/vfs/flock.md)
   - [POSIX record lock](./contracts/vfs/posix-record-lock.md)
+- [Pipe 当前契约](./contracts/pipe/index.md)
+  - [Named FIFO open 与 lifecycle](./contracts/pipe/named-fifo.md)
 - [Device 当前契约](./contracts/device/index.md)
   - [Device number namespace](./contracts/device/device-number.md)
 - [Signal 当前契约](./contracts/signal/index.md)

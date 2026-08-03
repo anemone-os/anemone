@@ -53,7 +53,26 @@ pub mod linux {
     pub const VLNEXT: usize = 15;
     pub const VEOL2: usize = 16;
 
+    pub const IGNBRK: TcFlag = 0x0001;
+    pub const BRKINT: TcFlag = 0x0002;
+    pub const IGNPAR: TcFlag = 0x0004;
+    pub const PARMRK: TcFlag = 0x0008;
+    pub const INPCK: TcFlag = 0x0010;
+    pub const ISTRIP: TcFlag = 0x0020;
+    pub const INLCR: TcFlag = 0x0040;
+    pub const IGNCR: TcFlag = 0x0080;
     pub const ICRNL: TcFlag = 0x0100;
+    const _: () = assert!(
+        IGNBRK == 0o000001
+            && BRKINT == 0o000002
+            && IGNPAR == 0o000004
+            && PARMRK == 0o000010
+            && INPCK == 0o000020
+            && ISTRIP == 0o000040
+            && INLCR == 0o000100
+            && IGNCR == 0o000200
+            && ICRNL == 0o000400
+    );
     pub const OPOST: TcFlag = 0x0001;
     pub const ONLCR: TcFlag = 0x0004;
     pub const ISIG: TcFlag = 0x0001;

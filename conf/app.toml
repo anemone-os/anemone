@@ -12,13 +12,22 @@ name = "example"
 # Working directory relative to this app.toml.
 workdir = "."
 # Build driver used by xtask. Cargo runs an architecture-specific Cargo command;
-# Source runs no command and exports already-existing ordinary files.
+# Command runs a manifest-owned direct argv in workdir; Source runs no command
+# and exports already-existing ordinary files.
 # Currently supported drivers:
 # - cargo
+# - command (replace args with a non-empty argv of at most 256 entries)
 # - source (omit args; caller-provided extra args are rejected)
 driver = "cargo"
 # Cargo arguments. User-provided extra args are appended to these defaults.
 args = ["build"]
+
+# Command example (use instead of the Cargo driver/args above):
+# driver = "command"
+# argv = ["./build.sh"]
+# xtask appends caller-provided extra args, executes argv directly without a
+# shell, and overrides ANEMONE_ARCH / ANEMONE_TARGET_TRIPLE for this action.
+# Toolchain selection and all other environment remain command-owned.
 
 # List of artifacts produced by this app. Each artifact should have a unique name.
 [[artifacts]]

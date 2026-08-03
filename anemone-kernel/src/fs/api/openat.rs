@@ -10,6 +10,10 @@ use crate::{
     fs::{
         api::args::{AtFd, LinuxInodePerm},
         fanotify::{FanHookEvent, FanMask, notify_path_event, observed_file_description_ops},
+        pipe::{
+            FifoOpenAccess, FifoOpenContext, open_named_fifo, pipe_file_desc_ops,
+            validate_fifo_open_status,
+        },
     },
     prelude::{user_access::c_readonly_path, *},
     syscall::handler::TryFromSyscallArg,
@@ -205,7 +209,7 @@ impl OpenHow {
         self.lookup.resolve_flags(self.access)
     }
 
-    fn requested_access(self, file: &File, created: bool) -> FsAccess {
+    fn requested_access(self, inode: &InodeRef, created: bool) -> FsAccess {
         if created || self.access.is_path_only() {
             return FsAccess::empty();
         }
@@ -214,7 +218,7 @@ impl OpenHow {
         if self.access.can_read() {
             access |= FsAccess::READ;
         }
-        if self.access.can_write() || self.create.trunc && file.inode().ty() == InodeType::Regular {
+        if self.access.can_write() || self.create.trunc && inode.ty() == InodeType::Regular {
             access |= FsAccess::WRITE;
         }
         access
@@ -238,7 +242,7 @@ fn open_tmpfile_at(
     dir: &PathRef,
     how: OpenHow,
     policy: &KernelCreationPolicy,
-) -> Result<File, SysError> {
+) -> Result<PathRef, SysError> {
     if dir.inode().ty() != InodeType::Dir {
         return Err(SysError::NotDir);
     }
@@ -249,20 +253,12 @@ fn open_tmpfile_at(
         let leaf = Path::new(name.as_str());
 
         match kernel_touch_at(policy, dir, name.as_str(), how.perm) {
-            Ok(_) => {
-                let file = match vfs_open_at(dir, leaf) {
-                    Ok(file) => file,
-                    Err(err) => {
-                        let _ = vfs_unlink_at(dir, leaf);
-                        return Err(err);
-                    },
-                };
-
+            Ok(created) => {
                 if let Err(err) = vfs_unlink_at(dir, leaf) {
                     return Err(err);
                 }
 
-                return Ok(file);
+                return Ok(created);
             },
             Err(SysError::AlreadyExists) => continue,
             Err(err) => return Err(err),
@@ -272,34 +268,62 @@ fn open_tmpfile_at(
 
 fn finish_open(
     reservation: FdReservation,
-    file: File,
+    path: PathRef,
     how: OpenHow,
     checker: &FsPermChecker,
     created: bool,
 ) -> Result<u64, SysError> {
+    let ty = path.inode().ty();
     // Linux encodes `O_TMPFILE` with the `O_DIRECTORY` bit, but the returned
     // object is a regular file rather than a directory fd.
-    if !how.create.tmpfile && file.inode().ty() != InodeType::Dir && how.lookup.directory {
+    if !how.create.tmpfile && ty != InodeType::Dir && how.lookup.directory {
         return Err(SysError::NotDir);
     }
 
-    if how.access.can_write() && file.inode().ty() == InodeType::Dir {
+    if how.access.can_write() && ty == InodeType::Dir {
         return Err(SysError::IsDir);
     }
 
-    let access = how.requested_access(&file, created);
+    let access = how.requested_access(path.inode(), created);
     if !access.is_empty() {
-        checker.check_inode(file.inode(), access)?;
+        checker.check_inode(path.inode(), access)?;
     }
 
-    if how.status.contains(FileStatusFlags::NOATIME) && !checker.owner_or_capable(file.inode()) {
+    if how.status.contains(FileStatusFlags::NOATIME) && !checker.owner_or_capable(path.inode()) {
         return Err(SysError::PermissionDenied);
     }
 
-    file.check_status_flags(how.status.to_file_op_status_flags())?;
+    let activates_fifo = ty == InodeType::Fifo && !how.access.is_path_only();
+    if activates_fifo {
+        // FIFO status admission is deliberately side-effect free and precedes
+        // joining the Pipe session. A rejected open must not create a session,
+        // change participant generations, or wake a partner.
+        validate_fifo_open_status(how.status.to_file_op_status_flags())?;
+    }
 
-    let should_truncate = how.create.trunc && !created && file.inode().ty() == InodeType::Regular;
-    if file.inode().ty() == InodeType::Regular && (how.access.can_write() || should_truncate) {
+    let file = if how.access.is_path_only() {
+        File::path_only(path)
+    } else if activates_fifo {
+        let access = match how.access {
+            OpenAccessMode::Read => FifoOpenAccess::Read,
+            OpenAccessMode::Write => FifoOpenAccess::Write,
+            OpenAccessMode::ReadWrite => FifoOpenAccess::ReadWrite,
+            OpenAccessMode::Path => unreachable!("O_PATH cannot activate a FIFO"),
+        };
+        open_named_fifo(
+            path,
+            FifoOpenContext::new(access, how.status.contains(FileStatusFlags::NONBLOCK)),
+        )?
+    } else {
+        path.open()?
+    };
+
+    if !activates_fifo {
+        file.check_status_flags(how.status.to_file_op_status_flags())?;
+    }
+
+    let should_truncate = how.create.trunc && !created && ty == InodeType::Regular;
+    if ty == InodeType::Regular && (how.access.can_write() || should_truncate) {
         file.path().mount().ensure_writable()?;
     }
 
@@ -309,19 +333,24 @@ fn finish_open(
         notify_path_event(FanHookEvent::new(FanMask::MODIFY, file.path().clone()));
     }
 
-    if how.status.contains(FileStatusFlags::APPEND) {
+    if ty == InodeType::Regular && how.status.contains(FileStatusFlags::APPEND) {
         file.seek_set_checked(file.get_attr()?.size as usize)?;
     }
 
     let reserved_fd = reservation.fd();
     let opened_path = file.path().clone();
+    let description_ops = if activates_fifo {
+        pipe_file_desc_ops(observed_file_description_ops(), how.access.can_read())
+    } else {
+        observed_file_description_ops()
+    };
     let file_desc = FileDesc::new_opened(
         file,
         how.access,
         how.status,
         how.compat,
         how.fd,
-        observed_file_description_ops(),
+        description_ops,
     );
     // FAN_OPEN must be queued before the new fd becomes visible. Once the slot
     // is published, a CLONE_FILES peer can close it and run the final-release
@@ -353,20 +382,12 @@ fn lookup_open_path(
     }
 }
 
-fn file_for_path(pathref: PathRef, access: OpenAccessMode) -> Result<File, SysError> {
-    if access.is_path_only() {
-        Ok(File::path_only(pathref))
-    } else {
-        pathref.open()
-    }
-}
-
 fn create_or_open_path(
     dirfd: AtFd,
     path: &Path,
     how: OpenHow,
     policy: &KernelCreationPolicy,
-) -> Result<(File, bool), SysError> {
+) -> Result<(PathRef, bool), SysError> {
     let checker = policy.checker();
     let task = get_current_task();
     let parent_flags = how.resolve_flags().remove_last_symlink_flags();
@@ -390,14 +411,14 @@ fn create_or_open_path(
             if how.create.excl {
                 return Err(SysError::AlreadyExists);
             }
-            Ok((file_for_path(pathref, how.access)?, false))
+            Ok((pathref, false))
         },
         Err(SysError::NotFound) => match kernel_touch_at(policy, &parent, &name, how.perm) {
-            Ok(created) => Ok((file_for_path(created, how.access)?, true)),
+            Ok(created) => Ok((created, true)),
             Err(SysError::AlreadyExists) if !how.create.excl => {
                 let pathref =
                     task.lookup_path_from_with_checker(&parent, leaf, resolve_flags, checker)?;
-                Ok((file_for_path(pathref, how.access)?, false))
+                Ok((pathref, false))
             },
             Err(err) => Err(err),
         },
@@ -413,17 +434,17 @@ fn kernel_openat(dirfd: AtFd, path: &Path, how: OpenHow) -> Result<u64, SysError
     let policy = KernelCreationPolicy::for_current();
     let checker = policy.checker();
 
-    let (file, created) = if how.create.tmpfile {
+    let (path, created) = if how.create.tmpfile {
         let dir = lookup_open_path(dirfd, path, how, checker)?;
         (open_tmpfile_at(&dir, how, &policy)?, true)
     } else if how.create.creat {
         create_or_open_path(dirfd, path, how, &policy)?
     } else {
         let pathref = lookup_open_path(dirfd, path, how, checker)?;
-        (file_for_path(pathref, how.access)?, false)
+        (pathref, false)
     };
 
-    finish_open(reservation, file, how, checker, created)
+    finish_open(reservation, path, how, checker, created)
 }
 
 #[syscall(SYS_OPENAT)]
@@ -540,12 +561,13 @@ mod kunits {
         let dir = vfs_lookup(dir_path).unwrap();
         let policy = KernelCreationPolicy::for_kunit_root(InodePerm::empty());
 
-        let file = open_tmpfile_at(
+        let path = open_tmpfile_at(
             &dir,
             open_how(O_TMPFILE | O_RDWR, InodePerm::all_rwx()),
             &policy,
         )
         .unwrap();
+        let file = path.open().unwrap();
 
         assert_eq!(file.inode().ty(), InodeType::Regular);
         assert_eq!(file.get_attr().unwrap().nlink, 0);
@@ -612,13 +634,12 @@ mod kunits {
     fn test_finish_open_readonly_trunc_truncates_regular_file() {
         let path = Path::new("/kunit-openat-readonly-trunc");
         let created = vfs_touch_as_root(path, InodePerm::all_rwx()).unwrap();
-        let file = created.open().unwrap();
-        file.write(b"payload").unwrap();
+        created.open().unwrap().write(b"payload").unwrap();
 
         let fd = Fd::new(
             finish_open(
                 get_current_task().reserve_fd().unwrap(),
-                file,
+                created,
                 open_how(O_RDONLY | O_TRUNC, InodePerm::empty()),
                 &FsPermChecker::for_current_fs(),
                 false,

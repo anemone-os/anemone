@@ -60,6 +60,7 @@ pub struct Parameters {
     pub epoll_file_max_waiters: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
+    pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
     pub unix_listener_max_backlog: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
@@ -158,6 +159,7 @@ impl Parameters {
         materialize!(epoll_file_max_waiters);
         materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
+        materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
         materialize!(unix_listener_max_backlog);
         materialize!(tid_alloc_policy);
@@ -282,8 +284,10 @@ pub const MAX_PROCESSES: u64 = {};
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
-/// Fixed pipe backing and default logical capacity in pages.
+/// Default anonymous-pipe capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
+/// Maximum anonymous-pipe capacity in pages.
+pub const PIPE_MAX_CAPACITY_PAGES: usize = {};
 /// Fixed byte capacity of each AF_UNIX stream direction.
 pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
 /// Maximum normalized listen backlog for AF_UNIX stream listeners.
@@ -442,6 +446,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(epoll_file_max_waiters),
             resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
+            resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
             resolved!(unix_listener_max_backlog),
             resolved!(tid_alloc_policy).kernel_variant(),
@@ -594,6 +599,21 @@ mod tests {
                 .gen_kconfig_defs()
                 .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
         );
+    }
+
+    #[test]
+    fn pipe_capacity_semantics_are_deferred_to_kernel_compilation() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        let generated = parameters.gen_kconfig_defs();
+        assert!(generated.contains("pub const PIPE_CAPACITY_PAGES: usize = 2;"));
+        assert!(generated.contains("pub const PIPE_MAX_CAPACITY_PAGES: usize = 16;"));
+
+        parameters.pipe_capacity_pages = Some(3);
+        parameters.pipe_max_capacity_pages = Some(1);
+        let generated = parameters.gen_kconfig_defs();
+        assert!(generated.contains("pub const PIPE_CAPACITY_PAGES: usize = 3;"));
+        assert!(generated.contains("pub const PIPE_MAX_CAPACITY_PAGES: usize = 1;"));
     }
 
     #[test]
