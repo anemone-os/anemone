@@ -119,6 +119,10 @@ fn run_comp_tests() {
     guest::enter_competition_root();
     guest::init_competition_environment();
 
+    println!("user-test: running BusyBox loopback ping...");
+    local_run_cmd("/bin/ping", &["ping", "-c", "1", "127.0.0.1"], &[]);
+    println!("user-test: BusyBox loopback ping finished.");
+
     println!("user-test: running BusyBox gateway ping...");
     local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);
     println!("user-test: BusyBox gateway ping finished.");
