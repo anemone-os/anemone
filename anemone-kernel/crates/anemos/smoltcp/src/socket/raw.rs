@@ -87,6 +87,7 @@ pub type PacketBuffer<'a> = crate::storage::PacketBuffer<'a, ()>;
 pub struct Socket<'a> {
     ip_version: Option<IpVersion>,
     ip_protocol: Option<IpProtocol>,
+    receive_enabled: bool,
     rx_buffer: PacketBuffer<'a>,
     tx_buffer: PacketBuffer<'a>,
     #[cfg(feature = "async")]
@@ -107,6 +108,7 @@ impl<'a> Socket<'a> {
         Socket {
             ip_version,
             ip_protocol,
+            receive_enabled: true,
             rx_buffer,
             tx_buffer,
             #[cfg(feature = "async")]
@@ -114,6 +116,22 @@ impl<'a> Socket<'a> {
             #[cfg(feature = "async")]
             tx_waker: WakerRegistration::new(),
         }
+    }
+
+    /// Create a raw IP socket that participates only in egress.
+    ///
+    /// The receive buffer remains present to keep the storage shape uniform,
+    /// but this socket never matches ingress. This is useful for a private
+    /// protocol engine whose admission owner lives above smoltcp.
+    pub fn new_egress_only(
+        ip_version: Option<IpVersion>,
+        ip_protocol: Option<IpProtocol>,
+        rx_buffer: PacketBuffer<'a>,
+        tx_buffer: PacketBuffer<'a>,
+    ) -> Socket<'a> {
+        let mut socket = Self::new(ip_version, ip_protocol, rx_buffer, tx_buffer);
+        socket.receive_enabled = false;
+        socket
     }
 
     /// Register a waker for receive operations.
@@ -345,6 +363,9 @@ impl<'a> Socket<'a> {
     }
 
     pub(crate) fn accepts(&self, ip_repr: &IpRepr) -> bool {
+        if !self.receive_enabled {
+            return false;
+        }
         if self
             .ip_version
             .is_some_and(|version| version != ip_repr.version())
@@ -362,8 +383,6 @@ impl<'a> Socket<'a> {
         true
     }
 
-    #[cfg(any(test, feature = "proto-ipv6"))]
-    #[cfg_attr(all(test, not(feature = "proto-ipv6")), allow(dead_code))]
     pub(crate) fn process(&mut self, cx: &mut Context, ip_repr: &IpRepr, payload: &[u8]) {
         debug_assert!(self.accepts(ip_repr));
 
@@ -384,36 +403,6 @@ impl<'a> Socket<'a> {
             },
             Err(_) => net_trace!(
                 "raw:{:?}:{:?}: buffer full, dropped incoming packet",
-                self.ip_version,
-                self.ip_protocol
-            ),
-        }
-
-        #[cfg(feature = "async")]
-        self.rx_waker.wake();
-    }
-
-    /// Queue one admitted IPv4 datagram without reconstructing its header.
-    ///
-    /// The interface owner calls this only while the original packet bytes are
-    /// borrowed and after its local-destination decision. Keeping this path
-    /// separate from `process` preserves the ordinary IPv6 representation
-    /// path while allowing an IPv4 observer to retain options and all other
-    /// header fields exactly as received.
-    pub(crate) fn process_admitted_ipv4(&mut self, ip_repr: &IpRepr, packet: &[u8]) {
-        debug_assert!(self.accepts(ip_repr));
-
-        net_trace!(
-            "raw:{:?}:{:?}: receiving {} original IPv4 octets",
-            self.ip_version,
-            self.ip_protocol,
-            packet.len()
-        );
-
-        match self.rx_buffer.enqueue(packet.len(), ()) {
-            Ok(buf) => buf.copy_from_slice(packet),
-            Err(_) => net_trace!(
-                "raw:{:?}:{:?}: buffer full, dropped admitted IPv4 packet",
                 self.ip_version,
                 self.ip_protocol
             ),
@@ -598,6 +587,19 @@ mod test {
         ];
 
         pub const PACKET_PAYLOAD: [u8; 4] = [0xaa, 0x00, 0x00, 0xff];
+    }
+
+    #[test]
+    #[cfg(feature = "proto-ipv4")]
+    fn egress_only_socket_never_matches_ingress() {
+        let socket = Socket::new_egress_only(
+            Some(IpVersion::Ipv4),
+            Some(IpProtocol::Unknown(ipv4_locals::IP_PROTO)),
+            buffer(1),
+            buffer(1),
+        );
+        assert!(!socket.accepts(&ipv4_locals::HEADER_REPR));
+        assert!(socket.can_send());
     }
 
     macro_rules! reusable_ip_specific_tests {

@@ -4,7 +4,7 @@ use anemone_net_api::{
     EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, Ipv4Address, Ipv4Cidr,
     PumpOutcome, icmp_raw::IcmpRawNamespacePolicy, udp::UdpNamespacePolicy,
 };
-use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack};
+use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack, StackPolicy};
 
 use crate::prelude::*;
 
@@ -14,10 +14,64 @@ mod udp;
 use icmp_raw::IcmpRawEndpointEventRoutes;
 use udp::UdpEndpointEventRoutes;
 
+struct RecheckRoute<Id, Observer: ?Sized> {
+    endpoint: Id,
+    observer: Weak<Observer>,
+}
+
+struct RecheckRoutes<Id, Observer: ?Sized> {
+    routes: Vec<RecheckRoute<Id, Observer>>,
+}
+
+impl<Id: Copy + Eq, Observer: ?Sized> RecheckRoutes<Id, Observer> {
+    const fn new() -> Self {
+        Self { routes: Vec::new() }
+    }
+
+    fn register(
+        &mut self,
+        endpoint: Id,
+        observer: &Arc<Observer>,
+    ) -> Result<(), crate::net::EventRegistrationError> {
+        assert!(
+            self.routes.iter().all(|route| route.endpoint != endpoint),
+            "one Endpoint cannot publish two reverse event routes"
+        );
+        self.routes
+            .try_reserve(1)
+            .map_err(|_| crate::net::EventRegistrationError::OutOfMemory)?;
+        self.routes.push(RecheckRoute {
+            endpoint,
+            observer: Arc::downgrade(observer),
+        });
+        Ok(())
+    }
+
+    fn unregister(&mut self, endpoint: Id) {
+        let index = self
+            .routes
+            .iter()
+            .position(|route| route.endpoint == endpoint)
+            .expect("published Endpoint event route disappeared before unregister");
+        self.routes.remove(index);
+    }
+
+    fn observer(&mut self, endpoint: Id) -> Option<Weak<Observer>> {
+        // Pruning is resource hygiene only. Correctness comes from explicit
+        // source unregister plus a fresh facts snapshot after every hint.
+        self.routes
+            .retain(|route| route.observer.strong_count() != 0);
+        self.routes
+            .iter()
+            .find(|route| route.endpoint == endpoint)
+            .map(|route| route.observer.clone())
+    }
+}
+
 pub(in crate::net) struct DomainStack {
     stack: SpinLock<Stack>,
     icmp_raw_event_routes: SpinLock<IcmpRawEndpointEventRoutes>,
-    event_routes: SpinLock<UdpEndpointEventRoutes>,
+    udp_event_routes: SpinLock<UdpEndpointEventRoutes>,
 }
 
 impl DomainStack {
@@ -26,12 +80,12 @@ impl DomainStack {
         icmp_raw_policy: IcmpRawNamespacePolicy,
     ) -> Self {
         Self {
-            stack: SpinLock::new(Stack::new_with_namespace_policies(
+            stack: SpinLock::new(Stack::with_policy(StackPolicy::new(
                 udp_policy,
                 icmp_raw_policy,
-            )),
+            ))),
             icmp_raw_event_routes: SpinLock::new(IcmpRawEndpointEventRoutes::new()),
-            event_routes: SpinLock::new(UdpEndpointEventRoutes::new()),
+            udp_event_routes: SpinLock::new(UdpEndpointEventRoutes::new()),
         }
     }
 
@@ -39,8 +93,8 @@ impl DomainStack {
         let (result, udp_invalidations, icmp_raw_invalidations) = {
             let mut stack = self.stack.lock();
             let result = operation(&mut stack);
-            let udp_invalidations = stack.take_udp_endpoint_invalidations();
-            let icmp_raw_invalidations = stack.take_icmp_raw_endpoint_invalidations();
+            let (udp_invalidations, icmp_raw_invalidations) =
+                stack.take_invalidations().into_parts();
             (result, udp_invalidations, icmp_raw_invalidations)
         };
         // Endpoint owners commit facts under the Stack guard. Recheck-only
@@ -94,6 +148,32 @@ impl DomainStack {
             interface,
             finished: false,
         }
+    }
+
+    pub(super) fn pump_local(
+        &self,
+        interface: InterfaceId,
+        now: NetworkInstant,
+        budget: PumpBudget,
+    ) -> Result<PumpOutcome, PumpError> {
+        self.protocol_transition(|stack| stack.pump_local(interface, now, budget))
+    }
+
+    pub(super) fn pump_external<P: FrameProvider>(
+        &self,
+        interface: InterfaceId,
+        provider: &mut P,
+        now: NetworkInstant,
+        budget: PumpBudget,
+    ) -> Result<PumpOutcome, PumpError> {
+        self.protocol_transition(|stack| stack.pump(interface, provider, now, budget))
+    }
+
+    pub(super) fn rollback_external_mapping(
+        &self,
+        interface: InterfaceId,
+    ) -> Result<(), PumpError> {
+        self.protocol_transition(|stack| stack.remove_interface(interface))
     }
 }
 
@@ -180,5 +260,45 @@ impl ExternalPumpPort {
         // not sleep or re-enter the domain/attach owners.
         self.stack
             .pump_external(self.interface, provider, now, budget)
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use anemone_net_api::{icmp_raw::IcmpRawEndpointId, udp::UdpEndpointId};
+
+    use super::*;
+    use crate::net::{
+        icmp_raw::IcmpRawEndpointInvalidationObserver, udp::UdpEndpointInvalidationObserver,
+    };
+
+    struct Observer;
+
+    impl UdpEndpointInvalidationObserver for Observer {
+        fn invalidate(&self) {}
+    }
+
+    impl IcmpRawEndpointInvalidationObserver for Observer {
+        fn invalidate(&self) {}
+    }
+
+    #[kunit]
+    fn typed_recheck_routes_share_storage_rules_without_sharing_endpoint_truth() {
+        let udp_id = UdpEndpointId::from_owner_raw(11);
+        let udp_observer: Arc<dyn UdpEndpointInvalidationObserver> = Arc::new(Observer);
+        let mut udp_routes =
+            RecheckRoutes::<UdpEndpointId, dyn UdpEndpointInvalidationObserver>::new();
+        udp_routes.register(udp_id, &udp_observer).unwrap();
+        assert!(udp_routes.observer(udp_id).unwrap().upgrade().is_some());
+        udp_routes.unregister(udp_id);
+        assert!(udp_routes.observer(udp_id).is_none());
+
+        let icmp_id = IcmpRawEndpointId::from_owner_raw(12);
+        let icmp_observer: Arc<dyn IcmpRawEndpointInvalidationObserver> = Arc::new(Observer);
+        let mut icmp_routes =
+            RecheckRoutes::<IcmpRawEndpointId, dyn IcmpRawEndpointInvalidationObserver>::new();
+        icmp_routes.register(icmp_id, &icmp_observer).unwrap();
+        drop(icmp_observer);
+        assert!(icmp_routes.observer(icmp_id).is_none());
     }
 }

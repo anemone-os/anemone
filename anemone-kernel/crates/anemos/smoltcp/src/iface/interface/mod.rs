@@ -112,6 +112,46 @@ pub enum PollIngressSingleResult {
     SocketStateChanged,
 }
 
+/// Interface-owned classification attached to one admitted IPv4 datagram.
+///
+/// This is a point-in-time fact, not an admission capability: an observer may
+/// apply stricter protocol policy but must not reinterpret whether the packet
+/// was local to this interface.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum AdmittedIpv4Destination {
+    Unicast,
+    Broadcast,
+    Multicast,
+}
+
+/// Callback-scoped view of an original IPv4 datagram after local admission.
+///
+/// The bytes end at the packet's IPv4 `total_len` and remain borrowed from the
+/// receive token. Observers that retain a delivery must detach it before the
+/// callback returns.
+#[derive(Copy, Clone, Debug)]
+pub struct AdmittedIpv4Packet<'a> {
+    bytes: &'a [u8],
+    destination: AdmittedIpv4Destination,
+}
+
+impl<'a> AdmittedIpv4Packet<'a> {
+    fn new(bytes: &'a [u8], destination: AdmittedIpv4Destination) -> Self {
+        Self { bytes, destination }
+    }
+
+    pub fn bytes(self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub const fn destination(self) -> AdmittedIpv4Destination {
+        self.destination
+    }
+}
+
+type Ipv4PacketObserver<'a> = &'a mut dyn for<'packet> FnMut(AdmittedIpv4Packet<'packet>);
+
 /// A  network interface.
 ///
 /// The network interface logically owns a number of other data structures; to
@@ -488,7 +528,7 @@ impl Interface {
 
         // Process ingress while there's packets available.
         loop {
-            match self.socket_ingress(device, sockets) {
+            match self.socket_ingress(device, sockets, None) {
                 PollIngressSingleResult::None => break,
                 PollIngressSingleResult::PacketProcessed => {},
                 PollIngressSingleResult::SocketStateChanged => res = PollResult::SocketStateChanged,
@@ -564,7 +604,28 @@ impl Interface {
         #[cfg(feature = "_proto-fragmentation")]
         self.fragments.assembler.remove_expired(timestamp);
 
-        self.socket_ingress(device, sockets)
+        self.socket_ingress(device, sockets, None)
+    }
+
+    /// Process one packet and expose any locally admitted original IPv4
+    /// datagram to a non-exclusive observer.
+    ///
+    /// The ordinary protocol path always continues after the callback. This
+    /// seam deliberately carries no socket identity, filtering policy, or
+    /// owned packet storage.
+    pub fn poll_ingress_single_with_ipv4_observer(
+        &mut self,
+        timestamp: Instant,
+        device: &mut (impl Device + ?Sized),
+        sockets: &mut SocketSet<'_>,
+        observer: Ipv4PacketObserver<'_>,
+    ) -> PollIngressSingleResult {
+        self.inner.now = timestamp;
+
+        #[cfg(feature = "_proto-fragmentation")]
+        self.fragments.assembler.remove_expired(timestamp);
+
+        self.socket_ingress(device, sockets, Some(observer))
     }
 
     /// Maintain stateful processing on the device.
@@ -643,6 +704,7 @@ impl Interface {
         &mut self,
         device: &mut (impl Device + ?Sized),
         sockets: &mut SocketSet<'_>,
+        ipv4_observer: Option<Ipv4PacketObserver<'_>>,
     ) -> PollIngressSingleResult {
         let Some((rx_token, tx_token)) = device.receive(self.inner.now) else {
             return PollIngressSingleResult::None;
@@ -657,27 +719,32 @@ impl Interface {
             match self.inner.caps.medium {
                 #[cfg(feature = "medium-ethernet")]
                 Medium::Ethernet => {
-                    if let Some(packet) =
-                        self.inner
-                            .process_ethernet(sockets, rx_meta, frame, &mut self.fragments)
-                        && let Err(err) =
-                            self.inner.dispatch(tx_token, packet, &mut self.fragmenter)
+                    if let Some(packet) = self.inner.process_ethernet_observed(
+                        sockets,
+                        rx_meta,
+                        frame,
+                        &mut self.fragments,
+                        ipv4_observer,
+                    ) && let Err(err) =
+                        self.inner.dispatch(tx_token, packet, &mut self.fragmenter)
                     {
                         net_debug!("Failed to send response: {:?}", err);
                     }
                 },
                 #[cfg(feature = "medium-ip")]
                 Medium::Ip => {
-                    if let Some(packet) =
-                        self.inner
-                            .process_ip(sockets, rx_meta, frame, &mut self.fragments)
-                        && let Err(err) = self.inner.dispatch_ip(
-                            tx_token,
-                            PacketMeta::default(),
-                            packet,
-                            &mut self.fragmenter,
-                        )
-                    {
+                    if let Some(packet) = self.inner.process_ip(
+                        sockets,
+                        rx_meta,
+                        frame,
+                        &mut self.fragments,
+                        ipv4_observer,
+                    ) && let Err(err) = self.inner.dispatch_ip(
+                        tx_token,
+                        PacketMeta::default(),
+                        packet,
+                        &mut self.fragmenter,
+                    ) {
                         net_debug!("Failed to send response: {:?}", err);
                     }
                 },
@@ -937,12 +1004,20 @@ impl InterfaceInner {
         meta: PacketMeta,
         ip_payload: &'frame [u8],
         frag: &'frame mut FragmentsBuffer,
+        ipv4_observer: Option<Ipv4PacketObserver<'_>>,
     ) -> Option<Packet<'frame>> {
         match IpVersion::of_packet(ip_payload) {
             #[cfg(feature = "proto-ipv4")]
             Ok(IpVersion::Ipv4) => {
                 let ipv4_packet = check!(Ipv4Packet::new_checked(ip_payload));
-                self.process_ipv4(sockets, meta, HardwareAddress::Ip, &ipv4_packet, frag)
+                self.process_ipv4(
+                    sockets,
+                    meta,
+                    HardwareAddress::Ip,
+                    &ipv4_packet,
+                    frag,
+                    ipv4_observer,
+                )
             },
             #[cfg(feature = "proto-ipv6")]
             Ok(IpVersion::Ipv6) => {
@@ -954,7 +1029,7 @@ impl InterfaceInner {
         }
     }
 
-    #[cfg(all(feature = "socket-raw", feature = "proto-ipv6"))]
+    #[cfg(feature = "socket-raw")]
     fn raw_socket_filter(
         &mut self,
         sockets: &mut SocketSet,
@@ -970,25 +1045,6 @@ impl InterfaceInner {
         {
             if raw_socket.accepts(ip_repr) {
                 raw_socket.process(self, ip_repr, ip_payload);
-                handled_by_raw_socket = true;
-            }
-        }
-        handled_by_raw_socket
-    }
-
-    #[cfg(all(feature = "socket-raw", feature = "proto-ipv4"))]
-    fn raw_socket_filter_admitted_ipv4(
-        &mut self,
-        sockets: &mut SocketSet,
-        ip_repr: &IpRepr,
-        packet: &[u8],
-    ) -> bool {
-        let mut handled_by_raw_socket = false;
-        for item in sockets.items_mut() {
-            if let Socket::Raw(raw_socket) = &mut item.socket
-                && raw_socket.accepts(ip_repr)
-            {
-                raw_socket.process_admitted_ipv4(ip_repr, packet);
                 handled_by_raw_socket = true;
             }
         }

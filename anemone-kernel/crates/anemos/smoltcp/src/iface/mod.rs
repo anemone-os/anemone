@@ -21,7 +21,8 @@ mod packet;
 #[cfg(feature = "multicast")]
 pub use self::interface::multicast::MulticastError;
 pub use self::interface::{
-    Config, Interface, InterfaceInner as Context, PollIngressSingleResult, PollResult,
+    AdmittedIpv4Destination, AdmittedIpv4Packet, Config, Interface, InterfaceInner as Context,
+    PollIngressSingleResult, PollResult,
 };
 
 #[cfg(feature = "proto-ipv6-slaac")]

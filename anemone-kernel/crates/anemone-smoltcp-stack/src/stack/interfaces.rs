@@ -15,22 +15,15 @@ use smoltcp::{
 
 use crate::{
     adapter::{FrameDevice, to_smoltcp_instant},
-    icmp_raw::namespace::EngineResource as IcmpRawEngineResource,
     local_link::LocalPort,
 };
 
-use super::{Ipv4ConfigError, PumpError, Stack};
+use super::{InterfaceProtocols, Ipv4ConfigError, PumpError, Stack};
 
 #[derive(Clone, Copy)]
 pub(crate) enum PumpOrder {
     IngressFirst,
     EgressFirst,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum EgressProtocol {
-    Udp,
-    IcmpRaw,
 }
 
 impl PumpOrder {
@@ -49,11 +42,7 @@ pub(crate) struct InterfaceEntry {
     pub(crate) frame_capacity: usize,
     pub(crate) interface: Interface,
     pub(crate) sockets: SocketSet<'static>,
-    pub(crate) icmp_raw_engine: IcmpRawEngineResource,
-    // This cursor chooses only between newly admissible protocol work. An
-    // engine-owned packet always finishes first, and queue truth remains in
-    // the corresponding protocol owner.
-    pub(crate) next_egress_protocol: EgressProtocol,
+    pub(crate) protocols: InterfaceProtocols,
     // This owner-local cursor chooses only the next software admission order.
     // It is not queue, link, resource, or deadline truth and never bypasses
     // either direction's finite PumpBudget.
@@ -84,15 +73,13 @@ impl Stack {
         );
 
         let mut sockets = SocketSet::new(Vec::new());
-        let icmp_raw_engine = self.icmp_raw.add_engine(&mut sockets);
-        self.udp.add_interface(id, &mut sockets);
+        let protocols = self.protocols.attach_interface(id, &mut sockets);
         self.interfaces.push(InterfaceEntry {
             id,
             frame_capacity,
             interface,
             sockets,
-            icmp_raw_engine,
-            next_egress_protocol: EgressProtocol::Udp,
+            protocols,
             next_pump_order: PumpOrder::IngressFirst,
         });
         id
@@ -108,9 +95,8 @@ impl Stack {
             return Err(PumpError::UnknownInterface(id));
         };
         let mut entry = self.interfaces.remove(index);
-        self.udp.remove_interface(id, &mut entry.sockets);
-        self.icmp_raw.assert_interface_idle(id);
-        entry.sockets.remove(entry.icmp_raw_engine.handle());
+        self.protocols
+            .detach_interface(id, entry.protocols, &mut entry.sockets);
         Ok(())
     }
 
@@ -139,7 +125,7 @@ impl Stack {
             to_smoltcp_instant(now),
             packet_capacity,
             mtu,
-            &mut self.icmp_raw,
+            &mut self.protocols,
         );
         let cidr = to_smoltcp_cidr(loopback);
         local.interface.update_ip_addrs(|addresses| {
@@ -149,7 +135,6 @@ impl Stack {
             );
         });
         local.interface.set_any_ip(true);
-        self.udp.add_interface(id, &mut local.sockets);
         self.local = Some(local);
         Ok(id)
     }

@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use crate::{InterfaceId, Ipv4Address};
+use crate::Ipv4Address;
 
 /// Opaque boot-local ICMP raw endpoint identity.
 ///
@@ -195,27 +195,6 @@ impl IcmpRawEndpointConfig {
 
     pub const fn filter(self) -> IcmpRawTypeFilter {
         self.filter
-    }
-}
-
-/// Point-in-time route/source selection passed to the Stack for revalidation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct IcmpRawEgressSelection {
-    interface: InterfaceId,
-    source: Ipv4Address,
-}
-
-impl IcmpRawEgressSelection {
-    pub const fn new(interface: InterfaceId, source: Ipv4Address) -> Self {
-        Self { interface, source }
-    }
-
-    pub const fn interface(self) -> InterfaceId {
-        self.interface
-    }
-
-    pub const fn source(self) -> Ipv4Address {
-        self.source
     }
 }
 

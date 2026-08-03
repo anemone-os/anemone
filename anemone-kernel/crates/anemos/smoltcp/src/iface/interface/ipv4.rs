@@ -100,9 +100,9 @@ impl InterfaceInner {
         source_hardware_addr: HardwareAddress,
         ipv4_packet: &Ipv4Packet<&'a [u8]>,
         frag: &'a mut FragmentsBuffer,
+        ipv4_observer: Option<Ipv4PacketObserver<'_>>,
     ) -> Option<Packet<'a>> {
         let mut ipv4_repr = check!(Ipv4Repr::parse(ipv4_packet, &self.caps.checksum));
-        let is_fragment = ipv4_packet.more_frags() || ipv4_packet.frag_offset() != 0;
         if !self.is_unicast_v4(ipv4_repr.src_addr) && !ipv4_repr.src_addr.is_unspecified() {
             // Discard packets with non-unicast source addresses but allow unspecified
             net_debug!("non-unicast or unspecified source address");
@@ -148,6 +148,11 @@ impl InterfaceInner {
         let ip_payload = ipv4_packet.payload();
 
         let ip_repr = IpRepr::Ipv4(ipv4_repr);
+
+        #[cfg(feature = "socket-raw")]
+        let handled_by_raw_socket = self.raw_socket_filter(sockets, &ip_repr, ip_payload);
+        #[cfg(not(feature = "socket-raw"))]
+        let handled_by_raw_socket = false;
 
         #[cfg(feature = "socket-dhcpv4")]
         {
@@ -218,19 +223,17 @@ impl InterfaceInner {
             );
         }
 
-        // The Anemone raw observer is deliberately post-admission and
-        // non-exclusive. R0 observes only original, unfragmented unicast
-        // datagrams; generic reassembly must not turn fragments into a raw
-        // delivery, and the raw result must not suppress ordinary ICMP.
-        #[cfg(feature = "socket-raw")]
-        let handled_by_raw_socket = if !is_fragment && self.is_unicast_v4(ipv4_repr.dst_addr) {
+        if let Some(observer) = ipv4_observer {
             let packet = &ipv4_packet.as_ref()[..usize::from(ipv4_packet.total_len())];
-            self.raw_socket_filter_admitted_ipv4(sockets, &ip_repr, packet)
-        } else {
-            false
-        };
-        #[cfg(not(feature = "socket-raw"))]
-        let handled_by_raw_socket = false;
+            let destination = if self.is_unicast_v4(ipv4_repr.dst_addr) {
+                AdmittedIpv4Destination::Unicast
+            } else if self.is_broadcast_v4(ipv4_repr.dst_addr) {
+                AdmittedIpv4Destination::Broadcast
+            } else {
+                AdmittedIpv4Destination::Multicast
+            };
+            observer(AdmittedIpv4Packet::new(packet, destination));
+        }
 
         match ipv4_repr.next_header {
             IpProtocol::Icmp => self.process_icmpv4(sockets, ipv4_repr, ip_payload),

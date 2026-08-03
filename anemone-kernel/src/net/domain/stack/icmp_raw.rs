@@ -1,9 +1,12 @@
-use anemone_net_api::icmp_raw::{
-    IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
-    IcmpRawEgressSelection, IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId,
-    IcmpRawEndpointInvalidation, IcmpRawEndpointLimits, IcmpRawMutationError, IcmpRawQueryError,
-    IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawSendError,
-    IcmpRawTypeFilter,
+use anemone_net_api::{
+    Ipv4EgressSelection,
+    icmp_raw::{
+        IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
+        IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId,
+        IcmpRawEndpointInvalidation, IcmpRawEndpointLimits, IcmpRawMutationError,
+        IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError,
+        IcmpRawSendError, IcmpRawTypeFilter,
+    },
 };
 
 use crate::{
@@ -11,64 +14,10 @@ use crate::{
     prelude::*,
 };
 
-use super::DomainStack;
+use super::{DomainStack, RecheckRoutes};
 
-struct IcmpRawEndpointEventRoute {
-    endpoint: IcmpRawEndpointId,
-    observer: Weak<dyn IcmpRawEndpointInvalidationObserver>,
-}
-
-pub(super) struct IcmpRawEndpointEventRoutes {
-    routes: Vec<IcmpRawEndpointEventRoute>,
-}
-
-impl IcmpRawEndpointEventRoutes {
-    pub(super) const fn new() -> Self {
-        Self { routes: Vec::new() }
-    }
-
-    fn register(
-        &mut self,
-        endpoint: IcmpRawEndpointId,
-        observer: &Arc<dyn IcmpRawEndpointInvalidationObserver>,
-    ) -> Result<(), EventRegistrationError> {
-        assert!(
-            self.routes.iter().all(|route| route.endpoint != endpoint),
-            "one ICMP raw Endpoint cannot publish two reverse event routes"
-        );
-        self.routes
-            .try_reserve(1)
-            .map_err(|_| EventRegistrationError::OutOfMemory)?;
-        self.routes.push(IcmpRawEndpointEventRoute {
-            endpoint,
-            observer: Arc::downgrade(observer),
-        });
-        Ok(())
-    }
-
-    fn unregister(&mut self, endpoint: IcmpRawEndpointId) {
-        let index = self
-            .routes
-            .iter()
-            .position(|route| route.endpoint == endpoint)
-            .expect("published ICMP raw event route disappeared before unregister");
-        self.routes.remove(index);
-    }
-
-    fn observer(
-        &mut self,
-        endpoint: IcmpRawEndpointId,
-    ) -> Option<Weak<dyn IcmpRawEndpointInvalidationObserver>> {
-        // Pruning is resource hygiene only. Correctness comes from explicit
-        // source unregister plus a fresh facts snapshot after every hint.
-        self.routes
-            .retain(|route| route.observer.strong_count() != 0);
-        self.routes
-            .iter()
-            .find(|route| route.endpoint == endpoint)
-            .map(|route| route.observer.clone())
-    }
-}
+pub(super) type IcmpRawEndpointEventRoutes =
+    RecheckRoutes<IcmpRawEndpointId, dyn IcmpRawEndpointInvalidationObserver>;
 
 impl DomainStack {
     pub(in crate::net) fn register_icmp_raw_endpoint_observer(
@@ -150,7 +99,7 @@ impl DomainStack {
     pub(in crate::net) fn send_icmp_raw_endpoint(
         &self,
         endpoint: IcmpRawEndpointId,
-        selection: IcmpRawEgressSelection,
+        selection: Ipv4EgressSelection,
         destination: anemone_net_api::Ipv4Address,
         policy: IcmpRawEgressPolicy,
         message: &[u8],

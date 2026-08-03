@@ -1,14 +1,15 @@
 # IPv4 ICMP Raw Socket 实施路线
 
-**状态：** R0 Accepted / Checkpoint 1 Closed / Checkpoint 2 Not Active
+**状态：** R0 Accepted / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2 Not Active
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前修订：** R0
-**执行授权：** 本轮只授权Checkpoint 1；Checkpoint 2与contract cutover均未授权
+**执行授权：** Checkpoint 1反馈间章已关闭；Checkpoint 2与contract cutover均未授权
 
 本文只长期保存跨 Socket、Network Stack 与 interface/IP owner 的实施顺序，不复制父 RFC 的 target、ABI matrix或
-acceptance。R0已接受，本轮只关闭Checkpoint 1；当前已停止，Checkpoint 2仍需单独授权。
+acceptance。R0已接受；Checkpoint 1 closure后的软件工程审查触发Review Hold，本反馈间章只修复该checkpoint内的owner
+与composition偏差，现已通过独立复核并停止。Checkpoint 2仍需单独授权。
 
 本路线只有一个implementation stage、两个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
 post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2接入真实
@@ -34,7 +35,7 @@ devlog；Git/PR默认拥有执行证据，只有实际出现长期、多轮probe
 
 | Surface | 确定路线 | 保持开放的实现偏好 |
 | --- | --- | --- |
-| RX ingress | interface/IP owner在IPv4 parse/checksum与local-destination admission后，将`total_len`内original datagram写入每interface的Stack-private raw engine；bounded pump在下一frame前drain并执行独立Endpoint fanout，ordinary ICMP继续处理原packet | 已闭合；不延长driver frame lifetime，不复制destination predicate |
+| RX ingress | interface/IP owner在IPv4 parse/checksum与local-destination admission后，通过callback-scoped `AdmittedIpv4Packet`交付`total_len`内original datagram与interface-owned destination classification；Stack ICMP raw owner执行ICMP/unicast/unfragmented policy与独立Endpoint fanout，ordinary ICMP继续处理原packet | 已闭合；不延长driver frame lifetime，不复制destination predicate；private raw engine仅用于egress |
 | Raw Endpoint | domain Stack raw owner统一拥有monotonic identity、association/filter、bounded RX/TX、fanout/drop、facts、invalidation与retire；kernel只取得syscall不可达的role-scoped operation capability | Checkpoint 2接入真实consumer，或路线撤销时一并删除temporary capability |
 | TX egress | Stack按operation-local selection形成完整无option IPv4 packet并完成Endpoint admission；每interface private raw engine沿normal interface/neighbor/provider path发送，窄header snapshot只补回`Ipv4Repr`遗漏的TOS/ID/flags | per-interface protocol cursor只仲裁新admission，engine-owned packet优先且queue truth仍在各protocol owner |
 | Socket front | static descriptor作为唯一semantic type witness；只扩展raw、UDP与Unix真实需要的family-neutral datagram/file-I/O和option dispatch | enum/function family、request/outcome名称与owner-local模块拆分 |
@@ -96,7 +97,7 @@ assets；这些只是非穷举提示，不冻结内部API或文件布局。
 
 ## Checkpoint 1 — Protocol Owner、Post-admission Seam 与 Packet Transaction
 
-**状态：** Closed
+**状态：** Closed after Feedback Interlude
 
 **Purpose：** 在不发布Linux Socket ABI的前提下，关闭R0最危险的original-byte ingress、independent fanout、TX admission、
 bounded progression与Endpoint lifecycle，使下一checkpoint消费一份已经经过owner-local证明的final-shape capability。
@@ -152,6 +153,39 @@ provider backpressure或current Socket/network contracts；不得提前注册`SO
   owner guard后发布；production dependency没有test-only facade。
 - guest syscall、RV64/LA64 runtime、LTP与BusyBox ping：**Not Run**。这些属于Checkpoint 2 product evidence，不能由本轮
   host test或kernel build替代。
+
+### Post-closure Review Hold 与反馈间章
+
+`f040dfc2`关闭Checkpoint 1后，针对该大commit的软件工程审查发现一项阻止closure的Keter：vendored smoltcp的generic
+raw dispatch被改成post-admission且只接收unicast/unfragmented packet，导致interface/IP owner替ICMP raw owner决定R0
+policy，并回归了generic raw的pre-admission与fragment reassembly语义。与此同时，ICMP raw private engine同时承担RX
+observer与TX、Stack用平行protocol字段和双`Option`表达egress owner、net-api重复定义同构selection、kernel重复维护
+observer route table；这些Euclid形状说明此前围绕UDP单一协议形成的composition还没有自然容纳第二个protocol。
+
+本反馈间章执行R0-preserving Route Correction，不修改accepted target、owner划分、ABI、Contract Impact、acceptance或
+验证强度：
+
+1. interface/IP owner只提供post-admission original-byte observation及其destination classification snapshot；Stack ICMP
+   raw owner重新独占ICMP、unicast、unfragmented、association/filter与fanout policy。generic smoltcp raw恢复原有
+   pre-admission及fragment reassembly行为，ICMP raw private engine改为egress-only。
+2. `StackPolicy`、`Protocols`、`InterfaceProtocols`、`StackInvalidations`与单一`ActiveEgress`集中静态protocol
+   composition、interface attach/detach、ingress drain、egress prepare/complete与invalidation drain；kernel pump/rollback
+   回到domain Stack common owner。没有引入动态registry、manager、trait hierarchy或shared readiness truth。
+3. net-api用owner-neutral `Ipv4EgressSelection`替代UDP/ICMP raw重复类型；ICMP raw owner按
+   `namespace`/`ingress`/`egress`拆分稳定职责；kernel用typed `RecheckRoutes<Id, Observer>`复用reverse-route storage规则，
+   但保留各protocol identity与observer truth。
+4. focused tests新增wrong destination、broadcast、multicast、non-ICMP、original options/TOS/ID/flags、fragment exclusion、
+   ordinary ICMP coexistence与egress-only engine证明，并恢复generic raw receive与fragment reassembly regression。
+
+反馈间章的当前证据为：`just test net-host`全部通过，包括10项ICMP raw tests、33项vendored smoltcp IPv4 tests和既有
+frame/bounded/multi-instance/multi-interface/UDP topology回归；`just fmt kernel --check`与`git diff --check`通过；最终源码
+的RV64/LA64 release build均完成discovery/final pass与symbol table验证。RV64 sandbox build再次在lwext4 C compile触发
+`Bad system call`，完全相同命令在sandbox外通过。两套kernel build编译了新增KUnit case，最终LA64 ELF symbol table可见
+该case，但未执行KUnit runtime；guest syscall、architecture runtime、LTP与BusyBox ping仍为**Not Run**。
+
+独立change review确认没有遗留Apollyon、Keter或有证据的Euclid；dead-weak route pruning与当前两protocol的typed
+invalidation tuple均判定为Safe。`mdbook build docs`通过，因此Review Hold已经释放，Checkpoint 1在本反馈间章后重新关闭；
+不得进入Checkpoint 2。
 
 **Cutover：** None。所有current contracts保持不变；Checkpoint 1 closure只说明protocol capability具备进入真实Socket
 consumer review的条件。

@@ -1,17 +1,19 @@
 //! Kernel-private UDP endpoint capability for the initial network domain.
 
 use anemone_net_api::{
-    Ipv4Address,
+    Ipv4Address, Ipv4EgressSelection,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEgressSelection, UdpEndpointFacts,
-        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeer,
-        UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointFacts, UdpEndpointId,
+        UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeer, UdpQueryError,
+        UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
     },
 };
 
 use crate::{kconfig_defs::*, prelude::*};
 
 use super::{ACTIVE_PATHS, domain::DomainStack};
+
+pub(crate) use super::EventRegistrationError;
 
 pub(in crate::net) const UDP_NAMESPACE_POLICY: UdpNamespacePolicy = UdpNamespacePolicy::new(
     NET_UDP_ENDPOINT_CAPACITY,
@@ -92,11 +94,6 @@ pub(crate) enum SendError {
 
 pub(crate) trait UdpEndpointInvalidationObserver: Send + Sync {
     fn invalidate(&self);
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EventRegistrationError {
-    OutOfMemory,
 }
 
 /// Source-owned proof that the reverse event route is published.
@@ -235,7 +232,7 @@ impl UdpEndpointPort {
                     },
                 })?
         };
-        let stack_selection = UdpEgressSelection::new(selection.interface(), selection.source());
+        let stack_selection = Ipv4EgressSelection::new(selection.interface(), selection.source());
         self.stack
             .send_udp_endpoint(self.endpoint, stack_selection, peer, payload)
             .map_err(SendError::Stack)?;

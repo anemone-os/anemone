@@ -10,8 +10,7 @@ use smoltcp::{
 };
 
 use crate::{
-    icmp_raw::{IcmpRawEndpoints, namespace::EngineResource as IcmpRawEngineResource},
-    stack::{EgressProtocol, PumpOrder},
+    stack::{ActiveEgress, InterfaceProtocols, Protocols, PumpOrder},
     udp::EndpointId,
 };
 
@@ -97,9 +96,8 @@ pub(crate) struct LocalPort {
     pub(crate) id: InterfaceId,
     pub(crate) interface: Interface,
     pub(crate) sockets: SocketSet<'static>,
-    pub(crate) icmp_raw_engine: IcmpRawEngineResource,
+    pub(crate) protocols: InterfaceProtocols,
     pub(crate) link: LocalLink,
-    pub(crate) next_egress_protocol: EgressProtocol,
     pub(crate) next_pump_order: PumpOrder,
 }
 
@@ -109,7 +107,7 @@ impl LocalPort {
         now: smoltcp::time::Instant,
         packet_capacity: usize,
         mtu: usize,
-        icmp_raw: &mut IcmpRawEndpoints,
+        protocols: &mut Protocols,
     ) -> Self {
         let mut link = LocalLink::new(packet_capacity, mtu);
         let interface = Interface::new(
@@ -118,14 +116,13 @@ impl LocalPort {
             now,
         );
         let mut sockets = SocketSet::new(vec![]);
-        let icmp_raw_engine = icmp_raw.add_engine(&mut sockets);
+        let interface_protocols = protocols.attach_interface(id, &mut sockets);
         Self {
             id,
             interface,
             sockets,
-            icmp_raw_engine,
+            protocols: interface_protocols,
             link,
-            next_egress_protocol: EgressProtocol::Udp,
             next_pump_order: PumpOrder::IngressFirst,
         }
     }
@@ -136,6 +133,14 @@ impl LocalPort {
 
     pub(crate) fn local_link_capacity(&self) -> usize {
         self.link.packet_capacity
+    }
+}
+
+pub(crate) fn packet_owner(active: ActiveEgress) -> Option<PacketOwner> {
+    match active {
+        ActiveEgress::None => None,
+        ActiveEgress::Udp(endpoint) => Some(PacketOwner::Udp(endpoint)),
+        ActiveEgress::IcmpRaw(endpoint) => Some(PacketOwner::IcmpRaw(endpoint)),
     }
 }
 

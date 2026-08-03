@@ -97,7 +97,8 @@ fn test_no_icmp_no_unicast(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -159,7 +160,8 @@ fn test_icmp_error_no_payload(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         Some(expected_repr)
     );
@@ -445,7 +447,8 @@ fn test_handle_ipv4_broadcast(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         Some(expected_packet)
     );
@@ -900,7 +903,8 @@ fn check_no_reply_raw_socket(medium: Medium, frame: &crate::wire::ipv4::Packet<&
             PacketMeta::default(),
             HardwareAddress::default(),
             frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -1107,7 +1111,8 @@ fn test_raw_socket_with_udp_socket(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frame,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -1280,7 +1285,7 @@ fn test_raw_socket_tx_fragmentation(#[case] medium: Medium) {
     feature = "proto-ipv4-fragmentation",
     feature = "medium-ethernet"
 ))]
-fn test_raw_socket_rx_excludes_fragments(#[case] medium: Medium) {
+fn test_raw_socket_rx_fragmentation(#[case] medium: Medium) {
     use crate::wire::{IpProtocol, IpVersion, Ipv4Address, Ipv4Packet, Ipv4Repr};
 
     let (mut iface, mut sockets, _device) = setup(medium);
@@ -1352,7 +1357,8 @@ fn test_raw_socket_rx_excludes_fragments(#[case] medium: Medium) {
             PacketMeta::default(),
             HardwareAddress::default(),
             &frag1,
-            &mut iface.fragments
+            &mut iface.fragments,
+            None,
         ),
         None
     );
@@ -1361,22 +1367,35 @@ fn test_raw_socket_rx_excludes_fragments(#[case] medium: Medium) {
         assert!(!socket.can_recv());
     }
 
-    // Reassembly may still serve ordinary protocol handling, but the raw R0
-    // observer must not turn the original fragments into a raw delivery.
-    assert!(
-        iface
-            .inner
-            .process_ipv4(
-                &mut sockets,
-                PacketMeta::default(),
-                HardwareAddress::default(),
-                &frag2,
-                &mut iface.fragments
-            )
-            .is_some()
+    // After the last fragment, the reassembled packet should be delivered.
+    assert_eq!(
+        iface.inner.process_ipv4(
+            &mut sockets,
+            PacketMeta::default(),
+            HardwareAddress::default(),
+            &frag2,
+            &mut iface.fragments,
+            None,
+        ),
+        None
     );
+
+    // Validate the raw socket received one defragmented packet with correct
+    // payload.
     let socket = sockets.get_mut::<raw::Socket>(handle);
-    assert!(!socket.can_recv());
+    assert!(socket.can_recv());
+    let data = socket.recv().expect("raw socket should have a packet");
+    let packet = Ipv4Packet::new_unchecked(data);
+    let repr = Ipv4Repr::parse(&packet, &ChecksumCapabilities::default()).unwrap();
+    assert_eq!(repr.src_addr, src_addr);
+    assert_eq!(repr.dst_addr, dst_addr);
+    assert_eq!(repr.next_header, proto);
+    assert_eq!(repr.payload_len, total_payload_len);
+
+    let payload = packet.payload();
+    assert_eq!(payload.len(), total_payload_len);
+    assert!(payload[..first_payload_len].iter().all(|&b| b == 0xAA));
+    assert!(payload[first_payload_len..].iter().all(|&b| b == 0xBB));
 }
 
 #[rstest]

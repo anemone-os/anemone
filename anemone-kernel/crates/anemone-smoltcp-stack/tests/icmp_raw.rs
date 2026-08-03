@@ -1,11 +1,12 @@
 mod support;
 
 use anemone_net_api::{
-    EthernetAddress, FrameProvider, Instant, Ipv4Address, TransmitOutcome, TxToken,
+    EthernetAddress, FrameProvider, Instant, Ipv4Address, Ipv4EgressSelection, TransmitOutcome,
+    TxToken,
     icmp_raw::{
-        IcmpRawAssociation, IcmpRawEgressPolicy, IcmpRawEgressSelection, IcmpRawEndpointLimits,
-        IcmpRawMutationError, IcmpRawQueryError, IcmpRawReceiveError, IcmpRawRetireError,
-        IcmpRawSendError, IcmpRawTypeFilter,
+        IcmpRawAssociation, IcmpRawEgressPolicy, IcmpRawEndpointLimits, IcmpRawMutationError,
+        IcmpRawQueryError, IcmpRawReceiveError, IcmpRawRetireError, IcmpRawSendError,
+        IcmpRawTypeFilter,
     },
 };
 use anemone_smoltcp_stack::{HostSelection, PumpBudget, Stack};
@@ -131,6 +132,26 @@ fn post_admission_observer_preserves_original_bytes_and_keeps_ordinary_icmp() {
         Err(IcmpRawReceiveError::WouldBlock)
     );
     assert_eq!(provider.submissions(), 0);
+
+    for destination in [[255, 255, 255, 255], [224, 0, 0, 1]] {
+        let non_unicast = icmp_frame(destination, 0, 2, false, false, true);
+        inject_one(&mut stack, &mut provider, interface, &non_unicast);
+        assert_eq!(
+            stack.receive_icmp_raw_endpoint(endpoint, false),
+            Err(IcmpRawReceiveError::WouldBlock)
+        );
+    }
+
+    let mut other_protocol = icmp_frame(LOCAL_IP, 0, 3, false, false, true);
+    let ip_offset = EthernetFrame::<&[u8]>::header_len();
+    let mut ipv4 = Ipv4Packet::new_unchecked(&mut other_protocol[ip_offset..]);
+    ipv4.set_next_header(IpProtocol::Unknown(253));
+    ipv4.fill_checksum();
+    inject_one(&mut stack, &mut provider, interface, &other_protocol);
+    assert_eq!(
+        stack.receive_icmp_raw_endpoint(endpoint, false),
+        Err(IcmpRawReceiveError::WouldBlock)
+    );
 
     let admitted = icmp_frame(LOCAL_IP, 0xb9, 0x4567, true, false, true);
     inject_one(&mut stack, &mut provider, interface, &admitted);
@@ -283,7 +304,7 @@ fn peek_detach_invalidation_retire_and_stale_identity_are_owner_local() {
         .create_icmp_raw_endpoint(limits(1, 128, 1, 128))
         .unwrap();
     assert_eq!(
-        stack.take_icmp_raw_endpoint_invalidations(),
+        stack.take_invalidations().into_parts().1,
         vec![
             anemone_net_api::icmp_raw::IcmpRawEndpointInvalidation::from_owner_transition(endpoint)
         ]
@@ -343,7 +364,7 @@ fn tx_commit_preserves_header_policy_capacity_and_normal_provider_path() {
     let endpoint = stack
         .create_icmp_raw_endpoint(limits(1, 128, 1, 128))
         .unwrap();
-    let selection = IcmpRawEgressSelection::new(interface, Ipv4Address::new(LOCAL_IP));
+    let selection = Ipv4EgressSelection::new(interface, Ipv4Address::new(LOCAL_IP));
     let destination = Ipv4Address::new(PEER_IP);
     let policy = IcmpRawEgressPolicy::new(37, 0xb9).unwrap();
 
@@ -424,7 +445,7 @@ fn tx_commit_preserves_header_policy_capacity_and_normal_provider_path() {
     assert_eq!(
         stack.send_icmp_raw_endpoint(
             endpoint,
-            IcmpRawEgressSelection::new(interface, Ipv4Address::new([10, 0, 1, 2])),
+            Ipv4EgressSelection::new(interface, Ipv4Address::new([10, 0, 1, 2])),
             destination,
             policy,
             &[],
@@ -469,7 +490,7 @@ fn protocol_egress_arbitration_does_not_starve_raw_behind_udp() {
     stack
         .send_icmp_raw_endpoint(
             raw,
-            IcmpRawEgressSelection::new(interface, Ipv4Address::new(LOCAL_IP)),
+            Ipv4EgressSelection::new(interface, Ipv4Address::new(LOCAL_IP)),
             Ipv4Address::new(PEER_IP),
             IcmpRawEgressPolicy::new(64, 0).unwrap(),
             &[],
@@ -551,7 +572,7 @@ fn blocked_raw_provider_does_not_gate_another_interface() {
     stack
         .send_icmp_raw_endpoint(
             endpoint,
-            IcmpRawEgressSelection::new(first_interface, Ipv4Address::new(LOCAL_IP)),
+            Ipv4EgressSelection::new(first_interface, Ipv4Address::new(LOCAL_IP)),
             Ipv4Address::new(PEER_IP),
             IcmpRawEgressPolicy::new(64, 0).unwrap(),
             &[],
@@ -560,7 +581,7 @@ fn blocked_raw_provider_does_not_gate_another_interface() {
     stack
         .send_icmp_raw_endpoint(
             endpoint,
-            IcmpRawEgressSelection::new(second_interface, Ipv4Address::new(SECOND_IP)),
+            Ipv4EgressSelection::new(second_interface, Ipv4Address::new(SECOND_IP)),
             Ipv4Address::new(SECOND_PEER_IP),
             IcmpRawEgressPolicy::new(64, 0).unwrap(),
             &[],
@@ -627,7 +648,7 @@ fn tx_admission_caps_configured_mtu_at_the_ipv4_length_ceiling() {
     assert_eq!(
         stack.send_icmp_raw_endpoint(
             endpoint,
-            IcmpRawEgressSelection::new(interface, Ipv4Address::LOOPBACK),
+            Ipv4EgressSelection::new(interface, Ipv4Address::LOOPBACK),
             Ipv4Address::new([127, 0, 0, 2]),
             IcmpRawEgressPolicy::new(64, 0).unwrap(),
             &vec![0; maximum + 1],
@@ -637,7 +658,7 @@ fn tx_admission_caps_configured_mtu_at_the_ipv4_length_ceiling() {
     stack
         .send_icmp_raw_endpoint(
             endpoint,
-            IcmpRawEgressSelection::new(interface, Ipv4Address::LOOPBACK),
+            Ipv4EgressSelection::new(interface, Ipv4Address::LOOPBACK),
             Ipv4Address::new([127, 0, 0, 2]),
             IcmpRawEgressPolicy::new(64, 0).unwrap(),
             &vec![0; maximum],
@@ -662,7 +683,7 @@ fn tx_endpoint_byte_ceiling_is_permanent_while_occupancy_recovers() {
     let endpoint = stack
         .create_icmp_raw_endpoint(limits(1, 24, 1, 128))
         .unwrap();
-    let selection = IcmpRawEgressSelection::new(interface, Ipv4Address::LOOPBACK);
+    let selection = Ipv4EgressSelection::new(interface, Ipv4Address::LOOPBACK);
     let destination = Ipv4Address::new([127, 0, 0, 2]);
     let policy = IcmpRawEgressPolicy::new(64, 0).unwrap();
     assert_eq!(
@@ -695,7 +716,7 @@ fn local_tx_requires_a_later_bounded_round_before_raw_ingress() {
     stack
         .send_icmp_raw_endpoint(
             endpoint,
-            IcmpRawEgressSelection::new(interface, Ipv4Address::LOOPBACK),
+            Ipv4EgressSelection::new(interface, Ipv4Address::LOOPBACK),
             Ipv4Address::new([127, 0, 0, 2]),
             IcmpRawEgressPolicy::new(64, 0).unwrap(),
             &[],

@@ -8,6 +8,11 @@ pub(crate) mod icmp_raw;
 pub(crate) mod udp;
 mod worker;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EventRegistrationError {
+    OutOfMemory,
+}
+
 use crate::{
     device::net::{
         NetdevFrameProvider, NetdevSnapshot, PendingAttachProvider, PublishedNetdev,

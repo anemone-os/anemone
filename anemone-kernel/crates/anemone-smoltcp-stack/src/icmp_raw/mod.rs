@@ -1,5 +1,8 @@
+mod egress;
 mod endpoint;
-pub(crate) mod namespace;
+mod ingress;
+mod namespace;
 mod packet;
 
+pub(crate) use egress::EgressResource;
 pub(crate) use namespace::IcmpRawEndpoints;

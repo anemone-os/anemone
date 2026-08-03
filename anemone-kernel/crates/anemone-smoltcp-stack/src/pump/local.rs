@@ -5,13 +5,11 @@ use smoltcp::iface::{PollIngressSingleResult, PollResult};
 
 use crate::{
     adapter::{from_smoltcp_instant, to_smoltcp_instant},
-    icmp_raw::IcmpRawEndpoints,
-    local_link::{LocalDevice, PacketOwner},
-    stack::{PumpError, PumpOrder, Stack},
-    udp::UdpEndpoints,
+    local_link::{LocalDevice, packet_owner},
+    stack::{Protocols, PumpError, PumpOrder, Stack},
 };
 
-use super::common::{PumpBudget, prepare_protocol_egress, pump_outcome};
+use super::common::{PumpBudget, pump_outcome};
 
 impl Stack {
     /// Advances the production IP-medium local port with the same exclusive
@@ -31,20 +29,10 @@ impl Stack {
             .ok_or(PumpError::UnknownInterface(id))?;
         let smoltcp_now = to_smoltcp_instant(now);
         local.interface.poll_maintenance(smoltcp_now);
-        let active = prepare_protocol_egress(
-            id,
-            &mut local.sockets,
-            local.icmp_raw_engine,
-            &mut local.next_egress_protocol,
-            &mut self.icmp_raw,
-            &mut self.udp,
-        );
-        local.link.set_tx_owner(
-            active
-                .icmp_raw
-                .map(PacketOwner::IcmpRaw)
-                .or_else(|| active.udp.map(PacketOwner::Udp)),
-        );
+        let active = self
+            .protocols
+            .prepare_egress(id, &mut local.protocols, &mut local.sockets);
+        local.link.set_tx_owner(packet_owner(active));
 
         let mut device = LocalDevice::new(&mut local.link);
         let (ingress_may_remain, egress_may_remain) = match local.next_pump_order {
@@ -53,9 +41,7 @@ impl Stack {
                     id,
                     &mut local.interface,
                     &mut local.sockets,
-                    local.icmp_raw_engine,
-                    &mut self.icmp_raw,
-                    &mut self.udp,
+                    &mut self.protocols,
                     &mut device,
                     smoltcp_now,
                     budget.ingress_frames(),
@@ -80,9 +66,7 @@ impl Stack {
                     id,
                     &mut local.interface,
                     &mut local.sockets,
-                    local.icmp_raw_engine,
-                    &mut self.icmp_raw,
-                    &mut self.udp,
+                    &mut self.protocols,
                     &mut device,
                     smoltcp_now,
                     budget.ingress_frames(),
@@ -100,10 +84,9 @@ impl Stack {
         // without another owner capable of issuing a wake.
         let transferred = local.link.transfer(budget.ingress_frames());
         let owner_blocked = device_blocked && local.link.occupied() >= local.local_link_capacity();
-        let udp_egress_may_remain = self.udp.complete_egress(active.udp, id, &local.sockets);
-        let icmp_raw_egress_may_remain =
-            self.icmp_raw
-                .complete_egress(id, local.icmp_raw_engine, &local.sockets);
+        let protocol_egress_may_remain =
+            self.protocols
+                .complete_egress(active, id, &local.protocols, &local.sockets);
         local.next_pump_order = local.next_pump_order.next();
 
         let next_deadline = local
@@ -113,10 +96,7 @@ impl Stack {
         Ok(pump_outcome(
             owner_blocked,
             ingress_may_remain,
-            egress_may_remain
-                || udp_egress_may_remain
-                || icmp_raw_egress_may_remain
-                || transferred != 0,
+            egress_may_remain || protocol_egress_may_remain || transferred != 0,
             now,
             next_deadline,
         ))
@@ -127,24 +107,24 @@ fn poll_local_ingress(
     id: InterfaceId,
     interface: &mut smoltcp::iface::Interface,
     sockets: &mut smoltcp::iface::SocketSet<'static>,
-    icmp_raw_engine: crate::icmp_raw::namespace::EngineResource,
-    icmp_raw: &mut IcmpRawEndpoints,
-    udp: &mut UdpEndpoints,
+    protocols: &mut Protocols,
     device: &mut LocalDevice<'_>,
     now: smoltcp::time::Instant,
     budget: usize,
 ) -> bool {
-    icmp_raw.drain_ingress(icmp_raw_engine, sockets);
-    udp.drain_ingress(id, sockets);
+    protocols.drain_engine_ingress(id, sockets);
     let mut processed = 0;
     while processed < budget {
-        match interface.poll_ingress_single(now, device, sockets) {
+        let result =
+            interface.poll_ingress_single_with_ipv4_observer(now, device, sockets, &mut |packet| {
+                protocols.observe_admitted_ipv4(packet)
+            });
+        match result {
             PollIngressSingleResult::None => break,
             PollIngressSingleResult::PacketProcessed
             | PollIngressSingleResult::SocketStateChanged => processed += 1,
         }
-        icmp_raw.drain_ingress(icmp_raw_engine, sockets);
-        udp.drain_ingress(id, sockets);
+        protocols.drain_engine_ingress(id, sockets);
     }
     processed == budget
 }

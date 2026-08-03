@@ -7,19 +7,20 @@
 #![allow(dead_code)]
 
 use anemone_net_api::{
-    Ipv4Address,
+    Ipv4Address, Ipv4EgressSelection,
     icmp_raw::{
         IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
-        IcmpRawEgressSelection, IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId,
-        IcmpRawEndpointLimits, IcmpRawMutationError, IcmpRawNamespacePolicy, IcmpRawQueryError,
-        IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawSendError,
-        IcmpRawTypeFilter,
+        IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointLimits,
+        IcmpRawMutationError, IcmpRawNamespacePolicy, IcmpRawQueryError, IcmpRawReceiveError,
+        IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
     },
 };
 
 use crate::{kconfig_defs::*, prelude::*};
 
 use super::{ACTIVE_PATHS, domain::DomainStack};
+
+pub(crate) use super::EventRegistrationError;
 
 pub(in crate::net) const ICMP_RAW_NAMESPACE_POLICY: IcmpRawNamespacePolicy =
     IcmpRawNamespacePolicy::new(NET_ICMP_RAW_ENDPOINT_CAPACITY);
@@ -51,11 +52,6 @@ impl core::fmt::Debug for IcmpRawEndpointPort {
 
 pub(crate) trait IcmpRawEndpointInvalidationObserver: Send + Sync {
     fn invalidate(&self);
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EventRegistrationError {
-    OutOfMemory,
 }
 
 pub(crate) struct IcmpRawEndpointEventRegistration {
@@ -186,7 +182,7 @@ impl IcmpRawEndpointPort {
         self.stack
             .send_icmp_raw_endpoint(
                 self.endpoint,
-                IcmpRawEgressSelection::new(selection.interface(), selection.source()),
+                Ipv4EgressSelection::new(selection.interface(), selection.source()),
                 destination,
                 policy,
                 message,

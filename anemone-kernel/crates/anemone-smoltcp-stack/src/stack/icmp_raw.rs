@@ -1,15 +1,12 @@
 //! Aggregate IPv4 ICMP raw operations owned by the protocol Stack.
 
-use alloc::vec::Vec;
-
 use anemone_net_api::{
-    InterfaceId, Ipv4Address,
+    InterfaceId, Ipv4Address, Ipv4EgressSelection,
     icmp_raw::{
         IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
-        IcmpRawEgressSelection, IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId,
-        IcmpRawEndpointInvalidation, IcmpRawEndpointLimits, IcmpRawMutationError,
-        IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError,
-        IcmpRawSendError, IcmpRawTypeFilter,
+        IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointLimits,
+        IcmpRawMutationError, IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket,
+        IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
     },
 };
 use smoltcp::wire::{IpCidr, Ipv4Address as SmoltcpIpv4Address};
@@ -21,7 +18,7 @@ impl Stack {
         &mut self,
         limits: IcmpRawEndpointLimits,
     ) -> Result<IcmpRawEndpointId, IcmpRawCreateError> {
-        self.icmp_raw.create(limits)
+        self.protocols.icmp_raw.create(limits)
     }
 
     pub fn set_icmp_raw_association(
@@ -29,7 +26,9 @@ impl Stack {
         endpoint: IcmpRawEndpointId,
         association: IcmpRawAssociation,
     ) -> Result<(), IcmpRawMutationError> {
-        self.icmp_raw.set_association(endpoint, association)
+        self.protocols
+            .icmp_raw
+            .set_association(endpoint, association)
     }
 
     pub fn set_icmp_raw_filter(
@@ -37,38 +36,34 @@ impl Stack {
         endpoint: IcmpRawEndpointId,
         filter: IcmpRawTypeFilter,
     ) -> Result<(), IcmpRawMutationError> {
-        self.icmp_raw.set_filter(endpoint, filter)
+        self.protocols.icmp_raw.set_filter(endpoint, filter)
     }
 
     pub fn icmp_raw_endpoint_config(
         &self,
         endpoint: IcmpRawEndpointId,
     ) -> Result<IcmpRawEndpointConfig, IcmpRawQueryError> {
-        self.icmp_raw.config(endpoint)
+        self.protocols.icmp_raw.config(endpoint)
     }
 
     pub fn icmp_raw_endpoint_facts(
         &self,
         endpoint: IcmpRawEndpointId,
     ) -> Result<IcmpRawEndpointFacts, IcmpRawQueryError> {
-        self.icmp_raw.facts(endpoint)
+        self.protocols.icmp_raw.facts(endpoint)
     }
 
     pub fn icmp_raw_endpoint_diagnostics(
         &self,
         endpoint: IcmpRawEndpointId,
     ) -> Result<IcmpRawDropDiagnostics, IcmpRawQueryError> {
-        self.icmp_raw.diagnostics(endpoint)
-    }
-
-    pub fn take_icmp_raw_endpoint_invalidations(&mut self) -> Vec<IcmpRawEndpointInvalidation> {
-        self.icmp_raw.take_invalidations()
+        self.protocols.icmp_raw.diagnostics(endpoint)
     }
 
     pub fn send_icmp_raw_endpoint(
         &mut self,
         endpoint: IcmpRawEndpointId,
-        selection: IcmpRawEgressSelection,
+        selection: Ipv4EgressSelection,
         destination: Ipv4Address,
         policy: IcmpRawEgressPolicy,
         message: &[u8],
@@ -83,7 +78,7 @@ impl Stack {
         if !destination_allowed {
             return Err(IcmpRawSendError::InvalidDestination);
         }
-        self.icmp_raw.queue_send(
+        self.protocols.icmp_raw.queue_send(
             endpoint,
             selection.interface(),
             selection.source(),
@@ -99,14 +94,14 @@ impl Stack {
         endpoint: IcmpRawEndpointId,
         peek: bool,
     ) -> Result<IcmpRawReceivedPacket, IcmpRawReceiveError> {
-        self.icmp_raw.receive(endpoint, peek)
+        self.protocols.icmp_raw.receive(endpoint, peek)
     }
 
     pub fn retire_icmp_raw_endpoint(
         &mut self,
         endpoint: IcmpRawEndpointId,
     ) -> Result<(), IcmpRawRetireError> {
-        let reset_interfaces = self.icmp_raw.retire(endpoint)?;
+        let reset_interfaces = self.protocols.icmp_raw.retire(endpoint)?;
         if let Some(local) = &mut self.local {
             local.link.remove_icmp_raw_owner(endpoint);
         }
@@ -116,11 +111,15 @@ impl Stack {
                 .iter_mut()
                 .find(|entry| entry.id == interface)
             {
-                self.icmp_raw
-                    .replace_engine(&mut entry.icmp_raw_engine, &mut entry.sockets);
+                self.protocols.icmp_raw.replace_egress_engine(
+                    &mut entry.protocols.icmp_raw_egress,
+                    &mut entry.sockets,
+                );
             } else if let Some(local) = self.local.as_mut().filter(|local| local.id == interface) {
-                self.icmp_raw
-                    .replace_engine(&mut local.icmp_raw_engine, &mut local.sockets);
+                self.protocols.icmp_raw.replace_egress_engine(
+                    &mut local.protocols.icmp_raw_egress,
+                    &mut local.sockets,
+                );
             }
         }
         Ok(())

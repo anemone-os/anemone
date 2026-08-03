@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use crate::{InterfaceId, Ipv4Address};
+use crate::Ipv4Address;
 
 /// Opaque boot-local UDP endpoint identity.
 ///
@@ -193,28 +193,6 @@ impl UdpLocalBinding {
 
     pub const fn port(self) -> u16 {
         self.port
-    }
-}
-
-/// Point-in-time route/source selection passed into the protocol owner for
-/// commit-time revalidation. It carries no route-table or wake capability.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct UdpEgressSelection {
-    interface: InterfaceId,
-    source: Ipv4Address,
-}
-
-impl UdpEgressSelection {
-    pub const fn new(interface: InterfaceId, source: Ipv4Address) -> Self {
-        Self { interface, source }
-    }
-
-    pub const fn interface(self) -> InterfaceId {
-        self.interface
-    }
-
-    pub const fn source(self) -> Ipv4Address {
-        self.source
     }
 }
 

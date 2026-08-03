@@ -1,3 +1,5 @@
+use crate::InterfaceId;
+
 /// Protocol-domain IPv4 address shared by the kernel control plane and Stack.
 ///
 /// This value carries no route, interface, socket, or Linux ABI policy.
@@ -40,6 +42,28 @@ impl Ipv4Address {
 
     pub const fn is_unicast(self) -> bool {
         !self.is_unspecified() && !self.is_multicast() && !self.is_limited_broadcast()
+    }
+}
+
+/// Point-in-time route/source selection passed to a protocol owner for
+/// commit-time revalidation. It carries no route-table or wake capability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Ipv4EgressSelection {
+    interface: InterfaceId,
+    source: Ipv4Address,
+}
+
+impl Ipv4EgressSelection {
+    pub const fn new(interface: InterfaceId, source: Ipv4Address) -> Self {
+        Self { interface, source }
+    }
+
+    pub const fn interface(self) -> InterfaceId {
+        self.interface
+    }
+
+    pub const fn source(self) -> Ipv4Address {
+        self.source
     }
 }
 
