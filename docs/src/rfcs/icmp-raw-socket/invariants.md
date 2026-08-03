@@ -1,13 +1,13 @@
 # IPv4 ICMP Raw Socket 目标与不变量
 
-**状态：** Draft Target / Not Effective
+**状态：** R0 Accepted Target / Not Effective
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
 本文定义本 RFC 的target invariants与proof obligations，不是current contract、implementation plan或执行授权。完整
 用户可见包络、Contract Impact、Implementation Boundary与acceptance见父RFC；当前effective规则仍以
-`docs/src/contracts/`与live source为准。
+`docs/src/contracts/`与live source为准。R0 acceptance与Checkpoint 1 activation均不使这些target rule提前生效。
 
 Linux 6.6.32 的逐项errno、sockaddr/optlen、copy precedence与重复transition matrix是本文ABI policy的conformance
 surface，不需要在公共Draft前穷举成第二份规范表。实现和focused tests可以继续解析它们；只有解析结果会改变target、

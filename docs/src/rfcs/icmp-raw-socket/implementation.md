@@ -1,15 +1,14 @@
 # IPv4 ICMP Raw Socket 实施路线
 
-**状态：** Draft Plan / Not Active
+**状态：** R0 Accepted / Checkpoint 1 Active / Checkpoint 2 Not Active
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
-**当前修订：** Draft
-**执行授权：** None；父 RFC 的 Draft publication 不授权任何 checkpoint 或 contract cutover
+**当前修订：** R0
+**执行授权：** 本轮只授权Checkpoint 1；Checkpoint 2与contract cutover均未授权
 
 本文只长期保存跨 Socket、Network Stack 与 interface/IP owner 的实施顺序，不复制父 RFC 的 target、ABI matrix或
-acceptance。R0被接受并取得单独实现授权前，两个checkpoint均保持Not Active；未来若只授权其中一个checkpoint，关闭后
-必须停止，不得自动进入下一checkpoint。
+acceptance。R0已接受，本轮只激活Checkpoint 1；关闭后必须停止，不得自动进入Checkpoint 2。
 
 本路线只有一个implementation stage、两个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
 post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2接入真实
@@ -97,13 +96,13 @@ assets；这些只是非穷举提示，不冻结内部API或文件布局。
 
 ## Checkpoint 1 — Protocol Owner、Post-admission Seam 与 Packet Transaction
 
-**状态：** Not Active
+**状态：** Active
 
 **Purpose：** 在不发布Linux Socket ABI的前提下，关闭R0最危险的original-byte ingress、independent fanout、TX admission、
 bounded progression与Endpoint lifecycle，使下一checkpoint消费一份已经经过owner-local证明的final-shape capability。
 
-**Prerequisites：** 父RFC进入Accepted R0；维护者单独授权Checkpoint 1；current frame path、control plane与UDP contract继续
-作为effective baseline。Draft plan本身不满足这些前置。
+**Prerequisites：** 已满足：父RFC进入Accepted R0，维护者本轮单独授权Checkpoint 1；current frame path、control plane与
+UDP contract继续作为effective baseline。
 
 **Protected Boundary：** 不改变用户可见target/non-goals、control-plane/interface/Stack owner划分、frame ownership、
 provider backpressure或current Socket/network contracts；不得提前注册`SOCK_RAW` tuple、发布fd或更新current contract。

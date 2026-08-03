@@ -1,22 +1,22 @@
 # RFC-20260803-icmp-raw-socket
 
-**状态：** Draft
-**修订：** Draft
+**状态：** Accepted for Implementation / Checkpoint 1 Active
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-03
 **领域：** fs / Socket / IPv4 / ICMP / network Stack / iomux / epoll
 **影响契约：** Refine `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`NET-PROTOCOL-BOUNDARY-001`、
 `NET-SOCKET-WAIT-001`；Introduce `NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、
 `NET-ICMP-RAW-TRANSACTION-001`
-**执行记录：** None；Draft publication不授权实现或contract cutover
+**执行记录：** Git / PR；Checkpoint 1已获本轮单独授权，未创建transaction，contract cutover仍未授权
 
 ## 文档状态
 
-本文是 IPv4 ICMP raw Socket 的公共 Draft，也是该提案唯一的 canonical target source。它不描述当前已经存在的
+本文是 IPv4 ICMP raw Socket 的R0 accepted target，也是该提案唯一的 canonical target source。它不描述当前已经存在的
 能力；当前 effective 规则仍以 [Socket contract](../../contracts/socket/index.md)、
 [Network contract](../../contracts/net/index.md)、live source 与 register 为准。
 
-本 Draft 固定用户可见能力包络、owner/handoff、failure/cleanup、correctness invariants、Contract Impact 与
+R0固定用户可见能力包络、owner/handoff、failure/cleanup、correctness invariants、Contract Impact 与
 acceptance。Linux 6.6.32 的逐项 errno、optlen、copy ordering 和重复状态转换矩阵属于本 target 的 ABI conformance
 surface，可以在 review、实现和 focused oracle 中继续精化；它们不再作为开始撰写公共 Draft 的前置条件。若精化结果
 要求改变本文的能力、owner、failure/cleanup、ABI policy、acceptance 或验证强度，则必须回到 RFC review 或 Target
@@ -26,8 +26,8 @@ Renegotiation，不能在实现中静默漂移。
 [目标与不变量](./invariants.md)。实施准备进一步确认post-admission packet seam值得在完整UAPI接入前独立review，因此
 新增一份[实施路线](./implementation.md)，采用一个implementation stage、两个checkpoint与唯一
 `ICMP-RAW-CUTOVER`：第一个checkpoint只关闭syscall不可达的protocol owner/packet path，第二个checkpoint接入Socket、
-完成产品验收并cutover。当前没有独立probe、transitional contract、多个cutover、tracking page或transaction；Draft
-publication仍不授权任何checkpoint。
+完成产品验收并cutover。当前没有独立probe、transitional contract、多个cutover、tracking page或transaction；本轮只
+授权Checkpoint 1，关闭后必须停止，不得自动进入Checkpoint 2或`ICMP-RAW-CUTOVER`。
 
 ## 摘要
 
@@ -269,7 +269,7 @@ Endpoint独占delivery，detach后由operation-local kernel transaction独占；
 
 ## Implementation Boundary
 
-本文在Draft阶段不授权实现。R0被接受且取得单独实现授权后，边界如下：
+本文R0已经接受，本轮只在取得单独授权的Checkpoint 1内按以下边界实施：
 
 - **允许改变：** Socket resolver/ABI/front中ICMP raw真实consumer所需的最窄surface；kernel raw family；shared
   protocol vocabulary；domain Stack raw owner；local-admission后的raw observation seam；Kconfig资源参数；focused
@@ -362,12 +362,15 @@ harness均为独立optional claim；未运行时记录Not Run，不阻塞R0，�
   [Opened-description](../../contracts/task/opened-description-lifecycle.md)、
   [Poll wait](../../contracts/iomux/poll-wait.md)、[Epoll](../../contracts/epoll/protocol.md)
 - external source registry：[公共引用规则](../../external-source-references.md)与`xref:linux-6.6.32`
-- commit / PR / optional transaction：None
+- commit / PR：Checkpoint 1 execution；optional transaction：None
 
 ## 修订记录
 
-Draft阶段不登记`R0`。第一次接受本文能力、owner、ABI、contract delta与acceptance时再建立R0记录。
+| 修订 | 日期 | 状态 | 语义变化 | Review / 执行 |
+| --- | --- | --- | --- | --- |
+| R0 | 2026-08-03 | Accepted for Implementation | 初始accepted target：IPv4 ICMP-only raw Socket、明确owner/handoff、post-admission original-byte fanout、bounded Endpoint transaction与完整产品验收边界 | 本轮独立接受并只激活Checkpoint 1；Git / PR拥有执行证据 |
 
 ## Closure
 
-Not applicable。本文仍为Draft；没有实现、runtime evidence、contract cutover或current limitation变化。
+R0已经接受，Checkpoint 1处于Active；尚无checkpoint closure、guest/runtime evidence、contract cutover或current
+limitation变化。Checkpoint 1关闭后必须停止，Checkpoint 2保持Not Active。
