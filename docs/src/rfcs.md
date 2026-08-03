@@ -54,14 +54,14 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
   `AT_HWCAP*`和Linux full-lazy owner优化保持明确非目标；software unaligned access问题独立登记。
-- [RFC-20260803-icmp-raw-socket](./rfcs/icmp-raw-socket/index.md)：R0已接受，Checkpoint 1 Active；提议交付自然闭合的IPv4 ICMP raw
+- [RFC-20260803-icmp-raw-socket](./rfcs/icmp-raw-socket/index.md)：R0已接受，Checkpoint 1已在反馈间章后关闭；提议交付自然闭合的IPv4 ICMP raw
   Socket，包括`CAP_NET_RAW`创建、bind/connect、send/receive/read/write、blocking/iomux、`IP_TTL`、`IP_TOS`、
   `ICMP_FILTER`与原始IPv4 RX字节。R0只覆盖unicast、未分片packet；`IP_HDRINCL`、任意protocol、broadcast/
-  multicast、message ABI与error queue保持非目标。本轮只授权syscall不可达的protocol capability Checkpoint 1，
-  Checkpoint 2与current-contract cutover保持Not Active；
+  multicast、message ABI与error queue保持非目标。Checkpoint 2A将接入仍然syscall不可达的final-shape Socket consumer，
+  Checkpoint 2B才发布ABI、完成产品验收并执行唯一current-contract cutover；两者均保持Not Active并等待分别授权；
   [目标与不变量](./rfcs/icmp-raw-socket/invariants.md)固定owner、ingress/fanout、transaction与acceptance边界，
-  [实施路线](./rfcs/icmp-raw-socket/implementation.md)以一个stage、两个checkpoint和唯一final cutover隔离protocol proof与
-  Socket/产品验收。
+  [实施路线](./rfcs/icmp-raw-socket/implementation.md)以一个stage、三个checkpoint和唯一final cutover隔离protocol proof、
+  Socket consumer review与ABI/产品验收。
 - [RFC-20260801-socket-abstraction-and-unix-socket](./rfcs/socket-abstraction-and-unix-socket/index.md)：R1 Closed；以现有
   IPv4 UDP与新增filesystem pathname `AF_UNIX + SOCK_STREAM`作为两个真实consumer，定义最小general Socket front、
   family-owned operation predicate、Unix namespace/stream/lifecycle owner边界，以及bind跨VFS publication的诚实工程

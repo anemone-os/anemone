@@ -1,19 +1,20 @@
 # IPv4 ICMP Raw Socket 实施路线
 
-**状态：** R0 Accepted / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2 Not Active
+**状态：** R0 Accepted / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Not Active / Checkpoint 2B Not Active
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前修订：** R0
-**执行授权：** Checkpoint 1反馈间章已关闭；Checkpoint 2与contract cutover均未授权
+**执行授权：** Checkpoint 1反馈间章已关闭；Checkpoint 2A、Checkpoint 2B与contract cutover均未授权
 
 本文只长期保存跨 Socket、Network Stack 与 interface/IP owner 的实施顺序，不复制父 RFC 的 target、ABI matrix或
 acceptance。R0已接受；Checkpoint 1 closure后的软件工程审查触发Review Hold，本反馈间章只修复该checkpoint内的owner
-与composition偏差，现已通过独立复核并停止。Checkpoint 2仍需单独授权。
+与composition偏差，现已通过独立复核并停止。Checkpoint 2A与Checkpoint 2B仍需分别授权。
 
-本路线只有一个implementation stage、两个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
-post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2接入真实
-Socket consumer、完成全部产品证据并原子执行`ICMP-RAW-CUTOVER`。当前没有独立probe、transitional contract或transaction
+本路线只有一个implementation stage、三个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
+post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2A在继续
+拒绝raw tuple的前提下接入final-shape Socket consumer并独立review common front、wait与lifecycle；Checkpoint 2B才发布
+Linux Socket ABI、完成全部产品证据并原子执行`ICMP-RAW-CUTOVER`。当前没有独立probe、transitional contract或transaction
 devlog；Git/PR默认拥有执行证据，只有实际出现长期、多轮probe/renegotiation或多个独立cutover时才重新分类。
 
 ## Live Source Baseline 与路线选择
@@ -36,7 +37,7 @@ devlog；Git/PR默认拥有执行证据，只有实际出现长期、多轮probe
 | Surface | 确定路线 | 保持开放的实现偏好 |
 | --- | --- | --- |
 | RX ingress | interface/IP owner在IPv4 parse/checksum与local-destination admission后，通过callback-scoped `AdmittedIpv4Packet`交付`total_len`内original datagram与interface-owned destination classification；Stack ICMP raw owner执行ICMP/unicast/unfragmented policy与独立Endpoint fanout，ordinary ICMP继续处理原packet | 已闭合；不延长driver frame lifetime，不复制destination predicate；private raw engine仅用于egress |
-| Raw Endpoint | domain Stack raw owner统一拥有monotonic identity、association/filter、bounded RX/TX、fanout/drop、facts、invalidation与retire；kernel只取得syscall不可达的role-scoped operation capability | Checkpoint 2接入真实consumer，或路线撤销时一并删除temporary capability |
+| Raw Endpoint | domain Stack raw owner统一拥有monotonic identity、association/filter、bounded RX/TX、fanout/drop、facts、invalidation与retire；kernel只取得syscall不可达的role-scoped operation capability | Checkpoint 2A接入final-shape Socket consumer；若该路线撤销则一并删除temporary capability |
 | TX egress | Stack按operation-local selection形成完整无option IPv4 packet并完成Endpoint admission；每interface private raw engine沿normal interface/neighbor/provider path发送，窄header snapshot只补回`Ipv4Repr`遗漏的TOS/ID/flags | per-interface protocol cursor只仲裁新admission，engine-owned packet优先且queue truth仍在各protocol owner |
 | Socket front | static descriptor作为唯一semantic type witness；只扩展raw、UDP与Unix真实需要的family-neutral datagram/file-I/O和option dispatch | enum/function family、request/outcome名称与owner-local模块拆分 |
 
@@ -82,8 +83,11 @@ owner-local并记录选择依据。
   non-blocking retire，late identity/hint fail closed。
 - **Protected ABI / contract：** 父RFC的tuple、sockaddr、flags、copy/consume、option、readiness与errno policy不得由实施
   路线改写；全部current contract在最终cutover前保持effective，不登记partial或transitional rule。
-- **Validation claim：** Checkpoint 1只可声明owner-local/host protocol proof；Checkpoint 2必须取得父RFC要求的owner-local、
-  双架构focused guest、双架构/双libc curated Socket LTP与双架构真实ping证据，证据层不能互相替代。
+- **Validation claim：** Checkpoint 1只可声明owner-local/host protocol proof；Checkpoint 2A只可增加kernel Socket、
+  family-neutral request/outcome normalization、wait/opened-description与既有consumer的owner-local/build proof，raw guest
+  ABI、LTP与ping保持Not Run；
+  Checkpoint 2B必须取得父RFC要求的owner-local、双架构focused guest、双架构/双libc curated Socket LTP与双架构真实ping
+  证据，证据层不能互相替代。
 - **自然闭合：** 同owner import/re-export、module registration、新文件、定向测试、行为保持拆分及Kconfig schema接线可在
   checkpoint内自然完成；由真实raw consumer触发、且保持上述owner/ABI/contract边界的general Socket framework修正也
   属于自然闭合，不因触及common模块单独停顿。路径提示不是穷举write set。
@@ -126,7 +130,8 @@ provider backpressure或current Socket/network contracts；不得提前注册`SO
 6. 由KernelConfig拥有Endpoint count、per-Endpoint RX/TX packet/byte storage与相关pump limit；拒绝散落magic number、
    unbounded queue和以allocator偶然失败代替capacity contract。
 7. 建立kernel `net`侧role-scoped operation capability与observer routing，使后续raw family无需取得global Stack、private
-   engine或lock。该surface在Checkpoint 2前保持syscall不可达，并以Checkpoint 2真实consumer或路线撤销作为明确退出条件。
+   engine或lock。该surface在Checkpoint 2A前保持syscall不可达，并以Checkpoint 2A final-shape Socket consumer或路线撤销
+   作为明确退出条件。
 
 ### Validation
 
@@ -151,8 +156,8 @@ provider backpressure或current Socket/network contracts；不得提前注册`SO
 - source/dependency audit确认shared API不含Linux UAPI、fd/task/waiter、runtime registry、private smoltcp handle或driver
   frame borrow；route/source/interface与local-destination admission仍由既有owner决定；invalidation在Stack commit并释放
   owner guard后发布；production dependency没有test-only facade。
-- guest syscall、RV64/LA64 runtime、LTP与BusyBox ping：**Not Run**。这些属于Checkpoint 2 product evidence，不能由本轮
-  host test或kernel build替代。
+- guest syscall、RV64/LA64 runtime、LTP与BusyBox ping：**Not Run**。这些属于Checkpoint 2B product evidence，不能由
+  Checkpoint 1或Checkpoint 2A的host test、KUnit或kernel build替代。
 
 ### Post-closure Review Hold 与反馈间章
 
@@ -185,57 +190,101 @@ frame/bounded/multi-instance/multi-interface/UDP topology回归；`just fmt kern
 
 独立change review确认没有遗留Apollyon、Keter或有证据的Euclid；dead-weak route pruning与当前两protocol的typed
 invalidation tuple均判定为Safe。`mdbook build docs`通过，因此Review Hold已经释放，Checkpoint 1在本反馈间章后重新关闭；
-不得进入Checkpoint 2。
+不得进入Checkpoint 2A。
 
-**Cutover：** None。所有current contracts保持不变；Checkpoint 1 closure只说明protocol capability具备进入真实Socket
-consumer review的条件。
+**Cutover：** None。所有current contracts保持不变；Checkpoint 1 closure只说明protocol capability具备进入
+Checkpoint 2A Socket consumer review的条件。
 
 **Stop / Exit：** 以下任一事实阻止Checkpoint 1 closure：original bytes只能通过pre-admission delivery、header重建、
 frame lifetime延长或destination truth复制取得；fanout需要shared bottleneck决定所有consumer命运；TX需要绕过selected
 interface/neighbor/provider path或把route/source truth下推；retire需要等待worker或依赖`Drop`；temporary shared surface无法
-给出Checkpoint 2 consumer/撤销条件。Checkpoint 1关闭后必须停止并等待Checkpoint 2单独授权。
+给出Checkpoint 2A consumer/撤销条件。Checkpoint 1关闭后必须停止并等待Checkpoint 2A单独授权。
 
-## Checkpoint 2 — Socket Consumer、产品验收与 `ICMP-RAW-CUTOVER`
+## Checkpoint 2A — Syscall 不可达的 Socket Consumer Integration
 
 **状态：** Not Active
 
-**Purpose：** 用Checkpoint 1 capability交付完整ICMP raw Socket UAPI，收敛general Socket第三个异构consumer，完成全部
-mandatory acceptance、最终review和唯一current-contract cutover。
+**Purpose：** 用Checkpoint 1 capability建立final-shape kernel ICMP raw Socket family，并在不注册raw tuple、不发布用户
+可见fd的前提下收敛general Socket第三个异构consumer所需的共同operation、FileOps、wait与lifecycle形状。该独立安全状态
+用于在Linux ABI publication前完成shared owner review，不形成current capability或contract cutover。
 
-**Prerequisites：** Checkpoint 1已经关闭且review没有遗留Keter/Apollyon；维护者单独授权Checkpoint 2；父RFC仍为同一
+**Prerequisites：** Checkpoint 1已经关闭且review没有遗留Keter/Apollyon；维护者单独授权Checkpoint 2A；父RFC仍为同一
 accepted revision。若Checkpoint 1证据触发target/owner/ABI/acceptance变化，必须先完成RFC review，不能直接进入本段。
 
 **Protected Boundary：** 保持Checkpoint 1 owner/packet transaction、父RFC Linux-visible matrix和mandatory validation
-floor；不得为方便接入复制Endpoint association/filter/facts、建立raw-only FileOps/wait loop或提前切任何contract ID。
+floor；resolver必须继续拒绝`AF_INET + SOCK_RAW + IPPROTO_ICMP`，不得执行`CAP_NET_RAW` admission、用户fd publication或
+raw guest ABI claim；不得为方便接入复制Endpoint association/filter/facts、建立raw-only FileOps/wait loop或提前切任何
+contract ID。
+
+### Deliverable
+
+1. 建立kernel ICMP raw family：持有role-scoped Endpoint capability、source publication与TTL/TOS policy；提供
+   bind/connect/disconnect/query、send/receive、option、facts projection与final-release handoff，不取得Stack-private state。
+2. 让general Socket front只增长三个真实consumer需要的最窄surface：optional datagram destination、datagram receive
+   `PEEK/TRUNC`与完整packet-length outcome、common read/write到family-neutral send/receive、family option query/mutation
+   dispatch。若current common shape无法自然表达这些义务，直接在正确framework owner修正，不在raw family内增加
+   translation/downcast/parallel FileOps；同时不得借机建立`sendmsg/recvmsg`、ancillary、generic option bag或future TCP
+   surface。
+3. 让common front与family之间只交换normalized address、request、outcome、option value与copy cursor；可增加直接调用
+   production descriptor/family path的owner-local test，但不得为缺失public tuple建立test-only production facade或让family
+   解析Linux bit、errno、user pointer、sockaddr/optlen representation。
+4. 将raw facts接入current Socket wait/recheck、poll/select/epoll和opened-description lifecycle。readable/writable各自重读
+   raw owner predicate；notification不携带ready truth；dup/fork/non-final close不retire，final release先撤销source/route再
+   non-blocking移交Endpoint retire。
+5. 完成独立software-engineering review与Architecture Friction Scan，特别审查raw-local workaround、common front是否吸收
+   family truth、opened-description cleanup顺序、wait route撤销与late hint stale isolation。Checkpoint 2A只关闭内部消费和
+   review边界，不更新current contract、不关闭整个RFC，也不写register。
+
+### Validation
+
+- 重跑受影响的Checkpoint 1 owner/path proof，并补齐kernel raw family、common Socket normalized operation、wait/
+  opened-description、creation rollback与final release的KUnit/source proof。
+- UDP、Unix、iomux/epoll与network shutdown mandatory regression通过；source audit证明没有raw-only FileOps/wait loop、
+  concrete downcast、second association/readiness/lifecycle truth或test-only production dependency。
+- resolver/source proof确认raw tuple仍不可达；RV64/LA64 build与documentation validation通过。raw focused guest ABI、
+  curated Socket LTP与BusyBox ping保持**Not Run**，不能由owner-local proof或build替代。
+
+**Cutover：** None。所有current contracts保持effective；syscall不可达的final-shape Socket consumer及其review只构成进入
+Checkpoint 2B ABI publication的前置证据。
+
+**Stop / Exit：** common front若只能通过downcast、第二FileOps、raw-only wait loop或generic message framework接入，raw
+family若需要复制association/readiness/lifecycle truth，owner-local proof若需要test-only production facade，或实现必须提前
+注册tuple、发布fd、改变current contract/ABI/acceptance，必须停止。完成条件是final-shape internal consumer、既有consumer
+回归与独立review共同闭合；关闭后必须停止并等待Checkpoint 2B单独授权。
+
+## Checkpoint 2B — ABI Publication、产品验收与 `ICMP-RAW-CUTOVER`
+
+**状态：** Not Active
+
+**Purpose：** 在Checkpoint 2A已经证明shared Socket consumer形状后，发布完整ICMP raw Socket UAPI，闭合Linux-visible
+matrix、全部mandatory product evidence、最终review和唯一current-contract cutover。
+
+**Prerequisites：** Checkpoint 2A已经关闭且review没有遗留Keter/Apollyon；维护者单独授权Checkpoint 2B；父RFC仍为同一
+accepted revision。若Checkpoint 2A证据要求改变target、owner、ABI、Contract Impact、acceptance或validation claim，必须
+先完成RFC review，不能直接进入本段。
+
+**Protected Boundary：** 保持Checkpoint 1 packet owner/transaction与Checkpoint 2A common front/wait/lifecycle owner边界，
+完整服从父RFC Linux-visible matrix和mandatory validation floor；不得以partial publication、transitional contract或降低
+任一architecture/evidence claim换取cutover。
 
 ### Deliverable
 
 1. 在Socket resolver/credential adapter增加唯一ICMP raw tuple与`SOCK_NONBLOCK|SOCK_CLOEXEC` normalization；读取current
    task effective `CAP_NET_RAW`并在任何Endpoint/source/file/fd publication前稳定拒绝`EPERM`。static descriptor是唯一
    semantic type witness，backend不保存任意protocol number。
-2. 建立kernel ICMP raw family：持有role-scoped Endpoint capability、source publication与TTL/TOS policy；提供
-   bind/connect/disconnect/query、send/receive、option、facts projection与final-release handoff，不取得Stack-private state。
-3. 让general Socket front只增长三个真实consumer需要的最窄surface：optional datagram destination、datagram receive
-   `PEEK/TRUNC`与完整packet-length outcome、common read/write到family-neutral send/receive、family option query/mutation
-   dispatch。若current common shape无法自然表达这些义务，直接在正确framework owner修正，不在raw family内增加
-   translation/downcast/parallel FileOps；同时不得借机建立`sendmsg/recvmsg`、ancillary、generic option bag或future TCP
-   surface。
-4. 在ABI adapter闭合Linux sockaddr、addrlen、flags、zero/short/fault、copy/consume、errno与sockopt optlen/value矩阵；
+2. 在ABI adapter闭合Linux sockaddr、addrlen、flags、zero/short/fault、copy/consume、errno与sockopt optlen/value矩阵；
    `MSG_NOSIGNAL`兼容路径必须有关键注释、低噪声diagnostic、行为边界和移除条件，unsupported options稳定
    `ENOPROTOOPT`。
-5. 将raw facts接入current Socket wait/recheck、poll/select/epoll和opened-description lifecycle。readable/writable各自重读
-   raw owner predicate；notification不携带ready truth；dup/fork/non-final close不retire，final release先撤销source/route再
-   non-blocking移交Endpoint retire。
-6. 新增target-complete `socket-test` ICMP raw suite、tracked curated `socket` LTP group与现有runner的ordinary
+3. 新增target-complete `socket-test` ICMP raw suite、tracked curated `socket` LTP group与现有runner的ordinary
    BusyBox ping入口；validation asset拥有exact case table，RFC/implementation不复制第二份ABI oracle。
-7. mandatory evidence全部满足后，完成final software-engineering review与Architecture Friction Scan，原子更新受影响current
+4. mandatory evidence全部满足后，完成final software-engineering review与Architecture Friction Scan，原子更新受影响current
    contracts、RFC status/revision/closure与必要导航。只有真实剩余defect/accepted gap进入register；不为成功路径创建
    limitation或transaction占位。
 
 ### Validation
 
-- 重跑Checkpoint 1全部proof，并补齐kernel Socket/ABI/wait/opened-description的KUnit与source proof，以及UDP、Unix、
-  iomux/epoll和network shutdown mandatory regression。
+- 重跑Checkpoint 1全部proof与Checkpoint 2A的kernel Socket、request/outcome normalization、wait/opened-description
+  proof，以及UDP、Unix、iomux/epoll和network shutdown mandatory regression。
 - 完整执行父RFC的[双架构focused guest ABI、双架构/双libc curated Socket LTP与真实ping](./index.md#acceptance-与-validation)
   matrix；各evidence owner分别记录实际结果，任一层不能替代另一层。
 - focused oracle独立证明`IP_TTL`改变真实header；stock LTP不修改上游case/oracle、不只运行有利subcase，`TCONF`不记作
@@ -248,10 +297,9 @@ floor；不得为方便接入复制Endpoint association/filter/facts、建立raw
 `NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`。任一mandatory claim缺失时
 全部current contracts保持旧规则并记为Not Cut Over，不做partial cutover。
 
-**Stop / Exit：** Linux oracle若要求改变父RFC能力/errno/copy policy，common front若只能通过downcast/第二FileOps或
-generic message framework接入，wait/final release若需要第二lifecycle truth，或任一mandatory architecture/validation
-claim需要降低，必须停止。完成条件是代码、tests、全部mandatory evidence、contract write-back和RFC closure共同闭合；
-普通build或单次ping不能单独关闭本checkpoint。
+**Stop / Exit：** Linux oracle若要求改变父RFC能力/errno/copy policy，ABI publication若暴露Checkpoint 2A owner/front/
+wait/lifecycle边界无法保持，或任一mandatory architecture/validation claim需要降低，必须停止。完成条件是代码、tests、
+全部mandatory evidence、contract write-back和RFC closure共同闭合；普通build或单次ping不能单独关闭本checkpoint。
 
 ## 证据与实施反馈路由
 
