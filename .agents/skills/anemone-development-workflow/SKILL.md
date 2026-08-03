@@ -41,8 +41,9 @@ input.
    - Patch: behavior is already determined; default to code, tests, validation,
      and Git/PR evidence only.
    - Small iteration: a local decision, non-obvious root cause, compatibility
-     choice, reusable investigation, or atomic local cutover deserves one
-     self-contained change record.
+     choice, reusable investigation, or one final local cutover deserves one
+     self-contained change record. It may use at most two execution checkpoints
+     inside one fully resolved Implementation Boundary.
    - RFC: owner, handoff, failure, cleanup, ABI, shared contract, non-trivial
      correctness proof, probe, multiple cutovers, or target renegotiation is not
      locally closed.
@@ -52,6 +53,8 @@ input.
      need in the canonical workflow.
    - Biweekly devlogs and transactions are optional evidence/navigation layers,
      not activation gates.
+   - A checkpointed small iteration keeps both checkpoints inline in the same
+     change record; it does not create an RFC `implementation.md` or transaction.
    - Update register/current limitations only for a genuinely current defect or
      accepted gap.
 3. State the Implementation Boundary at the semantic level. File and directory
@@ -68,6 +71,17 @@ registration, same-owner files, targeted tests, and behavior-preserving
 same-owner splits to follow the natural implementation. Stop before completion
 or cutover when target, owner, handoff, failure, cleanup, public API, ABI,
 visibility/shared contract, acceptance, or validation claims must change.
+
+A small iteration defaults to one closure checkpoint. Use at most two execution
+checkpoints only for a real review, commit, or authorization stop. CKPT 1 must
+be independently safe and neutral to protected visible semantics and the
+current contract; CKPT 2 closes the same target and owns at most one final
+semantic or contract cutover. Both checkpoints share one target, owner and
+handoff model, failure/cleanup rules, ABI/contract delta, acceptance, validation
+claim, and change record. Ordinary commits do not count toward this limit.
+Escalate to an RFC for a probe, transitional contract, boundary re-resolution,
+multiple independent cutovers, target renegotiation, or more than two formal
+execution checkpoints.
 
 If a user authorizes only one checkpoint or stage, stop after it. Do not infer
 authorization for the next gate from an existing plan.
@@ -97,6 +111,8 @@ Do not create `friction.md` or a global friction ledger.
 ## Documentation Maintenance
 
 - Private drafts are not public canonical sources.
+- Positioning or backgrounds are optional evidence, not prerequisites for an
+  RFC; start directly with `index.md` when the target is already resolved.
 - Git owns RFC text history; do not create per-RFC repositories, versioned
   canonical copies, or default amendment files.
 - Keep historical RFCs, completed transactions, manifests, and old terminology

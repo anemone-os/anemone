@@ -21,7 +21,9 @@ docs/src/rfcs/<short-slug>/
     index.md
 ```
 
-不要默认创建 transaction。只有长期、多 checkpoint、多 cutover、probe/renegotiation 证据确实需要独立执行历史时，才在 `docs/src/devlog/transactions/` 建立记录。
+不要默认创建 transaction。只有长期 RFC、多 checkpoint、多 cutover、probe/renegotiation 证据确实需要独立执行历史时，才在 `docs/src/devlog/transactions/` 建立记录。
+
+RFC 不要求先创建 positioning 或 backgrounds。target 已经闭合时直接编写 `index.md`；只有事实证据、历史上下文或被拒绝方案会妨碍正文扫读时，才增加 `backgrounds/`。
 
 RFC 文本历史由整个仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。
 

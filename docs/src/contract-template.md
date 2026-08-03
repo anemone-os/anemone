@@ -144,7 +144,7 @@ docs/src/contracts/<owner>/
 | SCHED-WAKE-001 | Replace | live owner + Closed RFC / 历史证据 | 新规则摘要 | 当前 change record 的 source / runtime evidence |
 ```
 
-change record 必须链接唯一 current contract 正文，说明代码与 contract 同 checkpoint 生效、失败时保持旧规则，并且不得保存 pending 多阶段 target、独立 invariants / implementation / tracking 文件或 transitional contract。任何这类需求都升级 RFC。
+change record 必须链接唯一 current contract 正文。默认说明代码与 contract 在同一个 closure checkpoint 生效；若使用两个 execution checkpoint，则说明 CKPT 1 对受保护 visible semantics/current contract 中性，代码与 contract 在 CKPT 2 完成唯一原子 cutover，CKPT 2 失败时保持旧规则。记录不得保存 pending 多阶段 target、独立 invariants / implementation / tracking 文件、transitional contract 或多个独立 cutover；任何这类需求都升级 RFC。
 
 ## 拆页检查
 
