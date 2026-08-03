@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-03 - Serial TTY RX conditioning](./2026-08-03-tty-serial-rx-conditioning.md)
 - [2026-08-03 - Named FIFO](./2026-08-03-named-fifo.md)
 - [2026-08-03 - App Command build driver](./2026-08-03-app-command-driver.md)
 - [2026-08-03 - Pipe dynamic capacity](./2026-08-03-pipe-dynamic-capacity.md)

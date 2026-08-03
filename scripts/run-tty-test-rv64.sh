@@ -155,17 +155,23 @@ inputs = {
     b"@@TTY READY canonical-empty-eof@@": b"\x04",
     b"@@TTY READY canonical-short-record@@": b"12345\nsecond\n",
     b"@@TTY READY icrnl@@": b"q\r",
+    b"@@TTY READY input-modes-istrip@@": b"\xff",
+    b"@@TTY READY input-modes-parmrk-ff@@": b"\xff",
+    b"@@TTY READY input-modes-crnl-ignore@@": b"\r\n",
+    b"@@TTY READY input-modes-crnl-map@@": b"\r\n",
     b"@@TTY READY noncanonical-vmin1-vtime0@@": b"\x00A",
     b"@@TTY READY tcsetsf-flush@@": b"dropme\n",
     b"@@TTY READY readiness@@": b"ready\n",
     b"@@TTY READY isig-int@@": b"\x03",
     b"@@TTY READY isig-quit@@": b"\x1c",
     b"@@TTY READY isig-suspend@@": b"\x1a",
+    b"@@TTY READY brkint-prefix@@": b"drop",
     b"@@TTY READY background-sigttin@@": b"background-read\n",
     b"@@TTY READY background-sigttin-handler-no-restart@@": b"background-no-restart\n",
     b"@@TTY READY background-sigttin-handler-restart@@": b"background-restart\n",
     b"@@TTY READY detached-no-effect@@": b"\x03",
 }
+break_marker = b"@@TTY READY brkint-break@@"
 vi_seed = b"TTYVI-SEED-71C4"
 vi_ready = b"@@TTY VI raw-ready@@"
 vi_steps = (
@@ -210,6 +216,15 @@ with open(log_path, "ab", buffering=0) as log:
                             proc.stdin.write(payload)
                             proc.stdin.flush()
                             sent.add(marker)
+                    if break_marker in seen and break_marker not in sent:
+                        # QEMU's mon:stdio Ctrl-A b escape injects a serial
+                        # break; typed Ctrl-C would only exercise VINTR/ISIG.
+                        proc.stdin.write(b"\x01b")
+                        proc.stdin.flush()
+                        time.sleep(0.05)
+                        proc.stdin.write(b"keep\n")
+                        proc.stdin.flush()
+                        sent.add(break_marker)
                     if vi_ready in seen and vi_ready not in sent:
                         # Keep ESC separate from the following command. BusyBox vi
                         # distinguishes a standalone mode switch from an escape
@@ -290,6 +305,8 @@ with open(log_path, "ab", buffering=0) as log:
 
 data = bytes(seen)
 missing = [marker.decode("ascii") for marker in inputs if marker not in sent]
+if break_marker not in sent:
+    missing.append(break_marker.decode("ascii"))
 if vi_ready not in sent:
     missing.append(vi_ready.decode("ascii"))
 if ash_phase != "exit-sent":

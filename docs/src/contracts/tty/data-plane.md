@@ -4,18 +4,18 @@
 **状态：** Active
 **Owner：** `device::tty` data-plane protocol；UART physical state 仍由 serial driver 唯一拥有
 **参与领域：** serial driver / console / TTY / devfs / VFS / boot stdio
-**覆盖范围：** boot-applied serial capability、共享 Terminal truth、canonical/raw input、byte output、readiness、termios/winsize data-plane 与稳定 `/dev/ttyS<N>` publication
+**覆盖范围：** boot-applied serial capability、ordered RX condition handoff、共享 Terminal truth、canonical/raw input、termios input conditioning、byte output、readiness、termios/winsize data-plane 与稳定 `/dev/ttyS<N>` publication
 **不覆盖：** controlling-terminal relation、caller-relative `/dev/tty`、foreground/background access、terminal-generated signal、relation cleanup、runtime line reconfiguration、hangup、hotplug 或 PTY
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{boot_io,console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
 **Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
-**最后核验：** 2026-07-24
+**最后核验：** 2026-08-03
 
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
-| MMIO、IRQ、FIFO、boot-applied line、raw RX handoff、line-error/overflow counter与最终TX serialization | UART physical driver | TTY持窄`TtyPort` capability；console持output-only projection | bounded RX publication与console/TTY TX |
+| MMIO、IRQ、FIFO、boot-applied line、ordered raw RX unit handoff、break/fault/overrun/overflow counter与最终TX serialization | UART physical driver | TTY持窄`TtyPort` capability；console持output-only projection | bounded RX publication与console/TTY TX |
 | committed termios、winsize、discipline、editable/committed input与readiness predicate | endpoint共享的`Terminal` | opened file持Terminal引用；operation ctx提供live flags | read/write/poll/ioctl data plane |
 | worker-local dequeued batch | 单次deferred-consumer invocation | notification只要求predicate重验 | raw handoff到discipline的短命ownership transfer |
 | immutable port identity到`ttyS<N>`映射及published endpoint | TTY endpoint registry | devfs持open provider；boot只消费selected identity | stable node、device number与shared Terminal lookup |
@@ -32,37 +32,43 @@ TTY只能持窄`TtyPort` capability，不复制register、FIFO、applied-line或
 
 NS16550A固定同时提供output-only console projection与`TtyPort`，不实现或注册raw serial `CharDev`。console不消费
 RX、不提交runtime line configuration；pre-publish consumer binding是RX唯一去向。hard IRQ只执行bounded drain、
-raw publication、counter与窄notification，不sleep、不做user copy/line discipline/signal/user-wait wake或递归UART日志。
-raw overflow保持旧数据并可审计；所有普通console/TTY TX经过同一个port-owned IRQ-safe serialization，任意用户
-write不能形成无界IRQ-off临界区。
+hardware-status classification、raw publication、counter与窄notification，不sleep、不做user copy/line discipline/
+signal/user-wait wake或递归UART日志。每个sample规范化为ordered `Byte`、`Break`或`FaultedByte`；break优先于同一
+sample的parity/framing classification，overrun只计数而不制造虚构byte。LSR condition与payload不得拆成sideband
+或第二队列，read-clear LSR/RBR只能在消费对应sample时读取。raw overflow保持旧units并可审计；所有普通console/
+TTY TX经过同一个port-owned IRQ-safe serialization，任意用户write不能形成无界IRQ-off临界区。
 
-**违反表现：** UART与TTY各保存一份raw queue、console与TTY双RX consumer、raw major 234重新出现、TTY访问
-register、overflow静默覆盖旧byte、IRQ执行sleepable/递归效果，或console/TTY绕过同一TX owner。
+**违反表现：** UART与TTY各保存一份raw queue、byte/status sideband失配、console与TTY双RX consumer、raw major
+234重新出现、TTY访问register、batch边界破坏下一sample的read-clear status、overflow静默覆盖旧unit、IRQ执行
+sleepable/递归效果，或console/TTY绕过同一TX owner。
 
-**验证 / Enforcement：** fixed raw ring与port capability source/lock audit；overflow、line error、bounded IRQ drain、
-partial TX与raw FIFO KUnit；RV64 repository build/QEMU自动matrix；raw 234、console RX、direct-register和polling-watchdog
-bypass audit。
+**验证 / Enforcement：** fixed raw-unit ring与port capability source/lock audit；status decoder、break priority、
+fault payload、no-payload break、overrun、whole-unit overflow、bounded IRQ drain、partial TX与raw FIFO KUnit；RV64
+repository build/QEMU自动matrix；raw 234、sideband condition、console RX、direct-register和polling-watchdog bypass audit。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)。
 
 ## TTY-TERM-001 — Endpoint共享唯一terminal semantic truth
 
 **规则：** 同一serial endpoint的所有open file引用同一个`Terminal`。它唯一持有committed termios、winsize、
 concrete discipline、canonical pending edit、committed/noncanonical input和readiness predicate。opened file只保存
-Terminal引用；`O_NONBLOCK`每次来自通用open-file-description flags。用户可见属性只有在完整candidate可提交时
-一次性发布；invalid、不可表示或要求未支持hardware action的update失败并保持旧snapshot，不能success-stub。
+Terminal引用；`O_NONBLOCK`每次来自通用open-file-description flags。`IGNBRK`、`BRKINT`、`IGNPAR`、`PARMRK`、
+`INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`只改变Terminal的input interpretation，不反向修改UART line。
+用户可见属性只有在完整candidate可提交时一次性发布；invalid、不可表示或要求未支持hardware action的update失败
+并保持旧snapshot，不能success-stub。
 
 **违反表现：** 不同fd观察冲突termios/winsize/input、file缓存stale nonblock、port shadow反向驱动Terminal、
 失败update部分可见，或ioctl成功但丢弃用户状态。
 
-**验证 / Enforcement：** shared fd0/1/2与新开`ttyS0`交叉termios/winsize matrix；unsupported rollback、`stty`
-round-trip、`TCSETSW/F`和owner/source audit；setter generation/revalidation assertion与KUnit。
+**验证 / Enforcement：** shared fd0/1/2与新开`ttyS0`交叉termios/winsize matrix；九个input flags与组合round-trip、
+unsupported rollback、`stty`、native Python 3.13 PyREPL、`TCSETSW/F`和owner/source audit；setter generation/
+revalidation assertion与KUnit。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)。
 
 ## TTY-INPUT-001 — Input ownership、record boundary与readiness同源
 
@@ -73,16 +79,23 @@ blocking read、poll/select和deferred consumer都使用durable predicate的publ
 work truth。一次read只消费所选prefix；显式flush、已记录overflow与通用post-validation copy-fault边界之外，普通
 路径不得重复、凭空产生或越界消费input。
 
+每个ordered RX unit取得当次committed termios snapshot后由Terminal解释。normal byte先执行`ISTRIP`，再按
+`IGNCR > ICRNL`处理CR、按`INLCR`处理其余NL；`PARMRK`下有效`0xff`以literal `0xff 0xff`提交。break按
+`IGNBRK > BRKINT > PARMRK > NUL`处理；faulted byte在`INPCK`关闭时重入normal pipeline，开启时按
+`IGNPAR > PARMRK > NUL`处理。break/fault marker与replacement NUL都是literal，不再触发strip、CR/NL、control
+character、delimiter或echo。一个condition扩展的2/3-byte token必须先通过完整容量检查再一次提交；backpressure
+时worker cursor保留同一unit重试，不得暴露prefix、重复marker或丢失后续unit。
+
 **违反表现：** lost work/wake、半行使poll readable、read跨record、wake count成为input truth、concurrent drain
 丢失可读状态，或为copy fault建立第二份rollback queue。
 
-**验证 / Enforcement：** canonical newline/erase/kill/EOF/short-record、ICRNL、raw VMIN1、nonblock EAGAIN和
-poll/pselect RV64 matrix；record/queue accounting、read/poll predicate、register-plus-recheck与worker batch assertion/KUnit；
-人工`VERASE/VKILL/VEOF`边界复验。
+**验证 / Enforcement：** canonical newline/erase/kill/EOF/short-record、input-conditioning matrix、literal marker
+atomic retry、raw VMIN1、nonblock EAGAIN和poll/pselect RV64 matrix；record/queue accounting、read/poll predicate、
+register-plus-recheck与worker batch assertion/KUnit；人工`VERASE/VKILL/VEOF`边界复验。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)。
 
 ## TTY-OUTPUT-001 — 输出按用户byte计量并由port最终序列化
 
@@ -125,7 +138,7 @@ registry/port bypass audit。
 
 | Parent Contract / Obligation | 参与方 | 必须完成的动作 | Handoff / 线性化点 | 失败 / Cleanup责任 |
 | --- | --- | --- | --- | --- |
-| `TTY-PORT-001` / RX | UART / worker / discipline | UART发布bounded raw batch；worker只按predicate取走；discipline一次提交 | raw dequeue -> worker batch -> Terminal commit | overflow由port计数；未发布endpoint只回滚本地对象 |
+| `TTY-PORT-001` / RX | UART / worker / discipline | UART发布bounded ordered units；worker只按predicate取走；discipline一次提交或保留当前cursor | raw dequeue -> worker batch -> Terminal atomic commit | whole-unit overflow由port计数；backpressure不推进cursor；未发布endpoint只回滚本地对象 |
 | `TTY-OUTPUT-001` / TX | Terminal / UART / console | Terminal提交converted batch；UART唯一序列化实际progress | backend accept/progress | partial按用户byte诚实返回；guard外等待drain |
 | `TTY-ENDPOINT-001` / publish | TTY registry / devfs / boot | 完成全部fallible prepare后单向发布，再安装已选Terminal boot files | devfs publication；boot finalize | publish前abort；publish后不unpublish/reuse |
 
@@ -133,7 +146,8 @@ registry/port bypass audit。
 
 - 本页只定义serial TTY data plane；`/dev/tty`、controlling relation和terminal job control由已生效的
   [companion contract](./job-control.md)定义，不能从本页单独推断。
-- build/runtime acceptance只在RV64验证；LA64 compile/runtime与hardware均Not Run，RV64结果不得外推。
+- build/runtime acceptance只在RV64验证；LA64 compile/runtime、实体UART parity/framing injection与hardware均Not Run，
+  classifier/KUnit和RV64 QEMU break结果不得外推。
 - runtime line reconfiguration、hardware hangup/backend fatal、hotplug/unpublish、完整`VMIN/VTIME`、PTY/devpts/ptmx
   与完整Linux termios/ioctl corner不在本页。
 - post-validation user-copy fault不提供TTY-local rollback/replay；普通有效buffer read、record boundary与未选后缀仍受
