@@ -886,14 +886,13 @@ fn check_no_reply_raw_socket(medium: Medium, frame: &crate::wire::ipv4::Packet<&
     let (mut iface, mut sockets, _) = setup(medium);
 
     let packets = 1;
-    let rx_buffer =
-        raw::PacketBuffer::new(vec![raw::PacketMetadata::EMPTY; packets], vec![0; 48 * 1]);
+    let rx_buffer = raw::PacketBuffer::new(vec![raw::PacketMetadata::EMPTY; packets], vec![0; 128]);
     let tx_buffer = raw::PacketBuffer::new(
         vec![raw::PacketMetadata::EMPTY; packets],
         vec![0; 48 * packets],
     );
     let raw_socket = raw::Socket::new(Some(IpVersion::Ipv4), None, rx_buffer, tx_buffer);
-    sockets.add(raw_socket);
+    let raw_handle = sockets.add(raw_socket);
 
     assert_eq!(
         iface.inner.process_ipv4(
@@ -905,6 +904,8 @@ fn check_no_reply_raw_socket(medium: Medium, frame: &crate::wire::ipv4::Packet<&
         ),
         None
     );
+    let raw_socket = sockets.get_mut::<raw::Socket>(raw_handle);
+    assert_eq!(raw_socket.recv(), Ok(frame.as_ref()));
 }
 
 #[rstest]
@@ -1279,7 +1280,7 @@ fn test_raw_socket_tx_fragmentation(#[case] medium: Medium) {
     feature = "proto-ipv4-fragmentation",
     feature = "medium-ethernet"
 ))]
-fn test_raw_socket_rx_fragmentation(#[case] medium: Medium) {
+fn test_raw_socket_rx_excludes_fragments(#[case] medium: Medium) {
     use crate::wire::{IpProtocol, IpVersion, Ipv4Address, Ipv4Packet, Ipv4Repr};
 
     let (mut iface, mut sockets, _device) = setup(medium);
@@ -1360,34 +1361,22 @@ fn test_raw_socket_rx_fragmentation(#[case] medium: Medium) {
         assert!(!socket.can_recv());
     }
 
-    // After the last fragment, the reassembled packet should be delivered.
-    assert_eq!(
-        iface.inner.process_ipv4(
-            &mut sockets,
-            PacketMeta::default(),
-            HardwareAddress::default(),
-            &frag2,
-            &mut iface.fragments
-        ),
-        None
+    // Reassembly may still serve ordinary protocol handling, but the raw R0
+    // observer must not turn the original fragments into a raw delivery.
+    assert!(
+        iface
+            .inner
+            .process_ipv4(
+                &mut sockets,
+                PacketMeta::default(),
+                HardwareAddress::default(),
+                &frag2,
+                &mut iface.fragments
+            )
+            .is_some()
     );
-
-    // Validate the raw socket received one defragmented packet with correct
-    // payload.
     let socket = sockets.get_mut::<raw::Socket>(handle);
-    assert!(socket.can_recv());
-    let data = socket.recv().expect("raw socket should have a packet");
-    let packet = Ipv4Packet::new_unchecked(data);
-    let repr = Ipv4Repr::parse(&packet, &ChecksumCapabilities::default()).unwrap();
-    assert_eq!(repr.src_addr, src_addr);
-    assert_eq!(repr.dst_addr, dst_addr);
-    assert_eq!(repr.next_header, proto);
-    assert_eq!(repr.payload_len, total_payload_len);
-
-    let payload = packet.payload();
-    assert_eq!(payload.len(), total_payload_len);
-    assert!(payload[..first_payload_len].iter().all(|&b| b == 0xAA));
-    assert!(payload[first_payload_len..].iter().all(|&b| b == 0xBB));
+    assert!(!socket.can_recv());
 }
 
 #[rstest]

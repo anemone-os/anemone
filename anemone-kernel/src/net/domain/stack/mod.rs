@@ -2,27 +2,52 @@
 
 use anemone_net_api::{
     EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, Ipv4Address, Ipv4Cidr,
-    PumpOutcome, udp::UdpNamespacePolicy,
+    PumpOutcome, icmp_raw::IcmpRawNamespacePolicy, udp::UdpNamespacePolicy,
 };
 use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack};
 
 use crate::prelude::*;
 
+mod icmp_raw;
 mod udp;
 
+use icmp_raw::IcmpRawEndpointEventRoutes;
 use udp::UdpEndpointEventRoutes;
 
 pub(in crate::net) struct DomainStack {
     stack: SpinLock<Stack>,
+    icmp_raw_event_routes: SpinLock<IcmpRawEndpointEventRoutes>,
     event_routes: SpinLock<UdpEndpointEventRoutes>,
 }
 
 impl DomainStack {
-    pub(super) fn new(udp_policy: UdpNamespacePolicy) -> Self {
+    pub(super) fn new(
+        udp_policy: UdpNamespacePolicy,
+        icmp_raw_policy: IcmpRawNamespacePolicy,
+    ) -> Self {
         Self {
-            stack: SpinLock::new(Stack::new_with_udp_namespace_policy(udp_policy)),
+            stack: SpinLock::new(Stack::new_with_namespace_policies(
+                udp_policy,
+                icmp_raw_policy,
+            )),
+            icmp_raw_event_routes: SpinLock::new(IcmpRawEndpointEventRoutes::new()),
             event_routes: SpinLock::new(UdpEndpointEventRoutes::new()),
         }
+    }
+
+    fn protocol_transition<T>(&self, operation: impl FnOnce(&mut Stack) -> T) -> T {
+        let (result, udp_invalidations, icmp_raw_invalidations) = {
+            let mut stack = self.stack.lock();
+            let result = operation(&mut stack);
+            let udp_invalidations = stack.take_udp_endpoint_invalidations();
+            let icmp_raw_invalidations = stack.take_icmp_raw_endpoint_invalidations();
+            (result, udp_invalidations, icmp_raw_invalidations)
+        };
+        // Endpoint owners commit facts under the Stack guard. Recheck-only
+        // hints cross into kernel observers only after that guard is gone.
+        self.route_udp_invalidations(udp_invalidations);
+        self.route_icmp_raw_invalidations(icmp_raw_invalidations);
+        result
     }
 
     pub(super) fn attach_local(

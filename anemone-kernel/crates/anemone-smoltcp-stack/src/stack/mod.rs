@@ -1,11 +1,12 @@
 use alloc::vec::Vec;
 
-use anemone_net_api::{InterfaceId, udp::UdpNamespacePolicy};
+use anemone_net_api::{InterfaceId, icmp_raw::IcmpRawNamespacePolicy, udp::UdpNamespacePolicy};
 
-use crate::{local_link::LocalPort, udp::UdpEndpoints};
+use crate::{icmp_raw::IcmpRawEndpoints, local_link::LocalPort, udp::UdpEndpoints};
 
 #[cfg(feature = "host-test")]
 mod host_validation;
+mod icmp_raw;
 mod interfaces;
 mod udp;
 
@@ -15,7 +16,7 @@ pub use host_validation::{
     HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
 };
 
-pub(crate) use interfaces::{InterfaceEntry, PumpOrder};
+pub(crate) use interfaces::{EgressProtocol, InterfaceEntry, PumpOrder};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Ipv4ConfigError {
@@ -39,6 +40,7 @@ pub struct Stack {
     // The local link and port remain private protocol projections. Route and
     // wake policy belong to the kernel control-plane and worker owners.
     pub(crate) local: Option<LocalPort>,
+    pub(crate) icmp_raw: IcmpRawEndpoints,
     pub(crate) udp: UdpEndpoints,
     pub(crate) next_interface_id: u32,
 }
@@ -46,11 +48,15 @@ pub struct Stack {
 impl Stack {
     /// Constructs the production protocol owner with one immutable UDP
     /// namespace policy supplied by the kernel configuration owner.
-    pub fn new_with_udp_namespace_policy(policy: UdpNamespacePolicy) -> Self {
+    pub fn new_with_namespace_policies(
+        udp_policy: UdpNamespacePolicy,
+        icmp_raw_policy: IcmpRawNamespacePolicy,
+    ) -> Self {
         Self {
             interfaces: Vec::new(),
             local: None,
-            udp: UdpEndpoints::new(policy),
+            icmp_raw: IcmpRawEndpoints::new(icmp_raw_policy),
+            udp: UdpEndpoints::new(udp_policy),
             next_interface_id: 0,
         }
     }
@@ -59,13 +65,16 @@ impl Stack {
     /// policy. Production kernel code must supply generated policy explicitly.
     #[cfg(any(test, feature = "host-test"))]
     pub fn new() -> Self {
-        Self::new_with_udp_namespace_policy(UdpNamespacePolicy::new(64, 32768, 60999))
+        Self::new_with_namespace_policies(
+            UdpNamespacePolicy::new(64, 32768, 60999),
+            IcmpRawNamespacePolicy::new(64),
+        )
     }
 
     /// Host-only configuration path for deterministic namespace-policy tests.
     #[cfg(feature = "host-test")]
     pub fn new_for_host_validation(policy: UdpNamespacePolicy) -> Self {
-        Self::new_with_udp_namespace_policy(policy)
+        Self::new_with_namespace_policies(policy, IcmpRawNamespacePolicy::new(64))
     }
 }
 

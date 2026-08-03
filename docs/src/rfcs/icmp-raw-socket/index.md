@@ -1,6 +1,6 @@
 # RFC-20260803-icmp-raw-socket
 
-**状态：** Accepted for Implementation / Checkpoint 1 Active
+**状态：** Accepted for Implementation / Checkpoint 1 Closed / Checkpoint 2 Not Active
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-03
@@ -8,7 +8,7 @@
 **影响契约：** Refine `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`NET-PROTOCOL-BOUNDARY-001`、
 `NET-SOCKET-WAIT-001`；Introduce `NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、
 `NET-ICMP-RAW-TRANSACTION-001`
-**执行记录：** Git / PR；Checkpoint 1已获本轮单独授权，未创建transaction，contract cutover仍未授权
+**执行记录：** Git / PR；Checkpoint 1已关闭，未创建transaction，Checkpoint 2与contract cutover仍未授权
 
 ## 文档状态
 
@@ -372,5 +372,5 @@ harness均为独立optional claim；未运行时记录Not Run，不阻塞R0，�
 
 ## Closure
 
-R0已经接受，Checkpoint 1处于Active；尚无checkpoint closure、guest/runtime evidence、contract cutover或current
-limitation变化。Checkpoint 1关闭后必须停止，Checkpoint 2保持Not Active。
+R0已经接受，Checkpoint 1已关闭syscall不可达的protocol owner与packet path；guest syscall、architecture runtime、LTP与
+ping均保持Not Run，尚无contract cutover或current limitation变化。执行已停止，Checkpoint 2保持Not Active并等待单独授权。

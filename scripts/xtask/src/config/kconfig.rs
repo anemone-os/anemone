@@ -115,6 +115,11 @@ pub struct Parameters {
     pub net_udp_max_payload_bytes: Option<usize>,
     pub net_udp_ephemeral_port_first: Option<u16>,
     pub net_udp_ephemeral_port_last: Option<u16>,
+    pub net_icmp_raw_endpoint_capacity: Option<usize>,
+    pub net_icmp_raw_tx_packet_capacity: Option<usize>,
+    pub net_icmp_raw_tx_byte_capacity: Option<usize>,
+    pub net_icmp_raw_rx_packet_capacity: Option<usize>,
+    pub net_icmp_raw_rx_byte_capacity: Option<usize>,
 }
 
 impl Parameters {
@@ -206,6 +211,11 @@ impl Parameters {
         materialize!(net_udp_max_payload_bytes);
         materialize!(net_udp_ephemeral_port_first);
         materialize!(net_udp_ephemeral_port_last);
+        materialize!(net_icmp_raw_endpoint_capacity);
+        materialize!(net_icmp_raw_tx_packet_capacity);
+        materialize!(net_icmp_raw_tx_byte_capacity);
+        materialize!(net_icmp_raw_rx_packet_capacity);
+        materialize!(net_icmp_raw_rx_byte_capacity);
         Ok(())
     }
 
@@ -399,6 +409,16 @@ pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
 pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = {};
 /// Last port in the deterministic UDP ephemeral allocation range.
 pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
+/// Maximum live IPv4 ICMP raw endpoints in the initial domain.
+pub const NET_ICMP_RAW_ENDPOINT_CAPACITY: usize = {};
+/// Per-endpoint committed ICMP raw transmit packet slots.
+pub const NET_ICMP_RAW_TX_PACKET_CAPACITY: usize = {};
+/// Per-endpoint committed ICMP raw transmit packet bytes.
+pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = {};
+/// Per-endpoint detached ICMP raw receive packet slots.
+pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = {};
+/// Per-endpoint detached ICMP raw receive packet bytes.
+pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -469,6 +489,11 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_udp_max_payload_bytes),
             resolved!(net_udp_ephemeral_port_first),
             resolved!(net_udp_ephemeral_port_last),
+            resolved!(net_icmp_raw_endpoint_capacity),
+            resolved!(net_icmp_raw_tx_packet_capacity),
+            resolved!(net_icmp_raw_tx_byte_capacity),
+            resolved!(net_icmp_raw_rx_packet_capacity),
+            resolved!(net_icmp_raw_rx_byte_capacity),
         )
     }
 }
@@ -521,6 +546,25 @@ mod tests {
             "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1472;",
             "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 32768;",
             "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 60999;",
+        ] {
+            assert!(
+                generated.contains(expected),
+                "missing generated constant {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn icmp_raw_defaults_materialize_and_generate_exact_constants() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        let generated = parameters.gen_kconfig_defs();
+        for expected in [
+            "pub const NET_ICMP_RAW_ENDPOINT_CAPACITY: usize = 64;",
+            "pub const NET_ICMP_RAW_TX_PACKET_CAPACITY: usize = 8;",
+            "pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = 65536;",
+            "pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = 64;",
+            "pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = 262144;",
         ] {
             assert!(
                 generated.contains(expected),

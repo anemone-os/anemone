@@ -362,6 +362,8 @@ impl<'a> Socket<'a> {
         true
     }
 
+    #[cfg(any(test, feature = "proto-ipv6"))]
+    #[cfg_attr(all(test, not(feature = "proto-ipv6")), allow(dead_code))]
     pub(crate) fn process(&mut self, cx: &mut Context, ip_repr: &IpRepr, payload: &[u8]) {
         debug_assert!(self.accepts(ip_repr));
 
@@ -382,6 +384,36 @@ impl<'a> Socket<'a> {
             },
             Err(_) => net_trace!(
                 "raw:{:?}:{:?}: buffer full, dropped incoming packet",
+                self.ip_version,
+                self.ip_protocol
+            ),
+        }
+
+        #[cfg(feature = "async")]
+        self.rx_waker.wake();
+    }
+
+    /// Queue one admitted IPv4 datagram without reconstructing its header.
+    ///
+    /// The interface owner calls this only while the original packet bytes are
+    /// borrowed and after its local-destination decision. Keeping this path
+    /// separate from `process` preserves the ordinary IPv6 representation
+    /// path while allowing an IPv4 observer to retain options and all other
+    /// header fields exactly as received.
+    pub(crate) fn process_admitted_ipv4(&mut self, ip_repr: &IpRepr, packet: &[u8]) {
+        debug_assert!(self.accepts(ip_repr));
+
+        net_trace!(
+            "raw:{:?}:{:?}: receiving {} original IPv4 octets",
+            self.ip_version,
+            self.ip_protocol,
+            packet.len()
+        );
+
+        match self.rx_buffer.enqueue(packet.len(), ()) {
+            Ok(buf) => buf.copy_from_slice(packet),
+            Err(_) => net_trace!(
+                "raw:{:?}:{:?}: buffer full, dropped admitted IPv4 packet",
                 self.ip_version,
                 self.ip_protocol
             ),
@@ -430,7 +462,10 @@ impl<'a> Socket<'a> {
                         },
                     };
                     net_trace!("raw:{:?}:{:?}: sending", ip_version, ip_protocol);
-                    emit(cx, (IpRepr::Ipv4(ipv4_repr), packet.payload()))
+                    // IPv4 raw egress retains the original datagram so the
+                    // interface can preserve header policy omitted by
+                    // `Ipv4Repr`. IPv6 keeps the existing payload-only path.
+                    emit(cx, (IpRepr::Ipv4(ipv4_repr), packet.as_ref()))
                 },
                 #[cfg(feature = "proto-ipv6")]
                 Ok(IpVersion::Ipv6) => {

@@ -66,17 +66,6 @@ impl UdpEndpointEventRoutes {
 }
 
 impl DomainStack {
-    fn udp_transition<T>(&self, operation: impl FnOnce(&mut Stack) -> T) -> T {
-        let (result, invalidations) = {
-            let mut stack = self.stack.lock();
-            let result = operation(&mut stack);
-            let invalidations = stack.take_udp_endpoint_invalidations();
-            (result, invalidations)
-        };
-        self.route_udp_invalidations(invalidations);
-        result
-    }
-
     pub(in crate::net) fn register_udp_endpoint_observer(
         &self,
         endpoint: UdpEndpointId,
@@ -89,7 +78,7 @@ impl DomainStack {
         self.event_routes.lock().unregister(endpoint);
     }
 
-    fn route_udp_invalidations(&self, invalidations: Vec<UdpEndpointInvalidation>) {
+    pub(super) fn route_udp_invalidations(&self, invalidations: Vec<UdpEndpointInvalidation>) {
         for invalidation in invalidations {
             let observer = self.event_routes.lock().observer(invalidation.endpoint());
             if let Some(observer) = observer.and_then(|observer| observer.upgrade()) {
@@ -104,7 +93,7 @@ impl DomainStack {
         now: anemone_net_api::Instant,
         budget: PumpBudget,
     ) -> Result<anemone_net_api::PumpOutcome, PumpError> {
-        self.udp_transition(|stack| stack.pump_local(interface, now, budget))
+        self.protocol_transition(|stack| stack.pump_local(interface, now, budget))
     }
 
     pub(super) fn pump_external<P: anemone_net_api::FrameProvider>(
@@ -114,21 +103,21 @@ impl DomainStack {
         now: anemone_net_api::Instant,
         budget: PumpBudget,
     ) -> Result<anemone_net_api::PumpOutcome, PumpError> {
-        self.udp_transition(|stack| stack.pump(interface, provider, now, budget))
+        self.protocol_transition(|stack| stack.pump(interface, provider, now, budget))
     }
 
     pub(super) fn rollback_external_mapping(
         &self,
         interface: anemone_net_api::InterfaceId,
     ) -> Result<(), PumpError> {
-        self.udp_transition(|stack| stack.remove_interface(interface))
+        self.protocol_transition(|stack| stack.remove_interface(interface))
     }
 
     pub(in crate::net) fn create_udp_endpoint(
         &self,
         limits: UdpEndpointLimits,
     ) -> Result<UdpEndpointId, UdpCreateError> {
-        self.udp_transition(|stack| stack.create_udp_endpoint(limits))
+        self.protocol_transition(|stack| stack.create_udp_endpoint(limits))
     }
 
     pub(in crate::net) fn bind_udp_endpoint(
@@ -136,7 +125,7 @@ impl DomainStack {
         endpoint: UdpEndpointId,
         request: UdpBindRequest,
     ) -> Result<UdpLocalBinding, UdpBindError> {
-        self.udp_transition(|stack| stack.bind_udp_endpoint(endpoint, request))
+        self.protocol_transition(|stack| stack.bind_udp_endpoint(endpoint, request))
     }
 
     pub(in crate::net) fn udp_endpoint_binding(
@@ -160,20 +149,22 @@ impl DomainStack {
         peer: UdpPeer,
         payload: &[u8],
     ) -> Result<(), UdpSendError> {
-        self.udp_transition(|stack| stack.send_udp_endpoint(endpoint, selection, peer, payload))
+        self.protocol_transition(|stack| {
+            stack.send_udp_endpoint(endpoint, selection, peer, payload)
+        })
     }
 
     pub(in crate::net) fn receive_udp_endpoint(
         &self,
         endpoint: UdpEndpointId,
     ) -> Result<UdpReceivedDatagram, UdpReceiveError> {
-        self.udp_transition(|stack| stack.receive_udp_endpoint(endpoint))
+        self.protocol_transition(|stack| stack.receive_udp_endpoint(endpoint))
     }
 
     pub(in crate::net) fn retire_udp_endpoint(
         &self,
         endpoint: UdpEndpointId,
     ) -> Result<(), UdpRetireError> {
-        self.udp_transition(|stack| stack.retire_udp_endpoint(endpoint))
+        self.protocol_transition(|stack| stack.retire_udp_endpoint(endpoint))
     }
 }

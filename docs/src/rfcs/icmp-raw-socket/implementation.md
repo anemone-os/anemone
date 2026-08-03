@@ -1,6 +1,6 @@
 # IPv4 ICMP Raw Socket 实施路线
 
-**状态：** R0 Accepted / Checkpoint 1 Active / Checkpoint 2 Not Active
+**状态：** R0 Accepted / Checkpoint 1 Closed / Checkpoint 2 Not Active
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
@@ -8,7 +8,7 @@
 **执行授权：** 本轮只授权Checkpoint 1；Checkpoint 2与contract cutover均未授权
 
 本文只长期保存跨 Socket、Network Stack 与 interface/IP owner 的实施顺序，不复制父 RFC 的 target、ABI matrix或
-acceptance。R0已接受，本轮只激活Checkpoint 1；关闭后必须停止，不得自动进入Checkpoint 2。
+acceptance。R0已接受，本轮只关闭Checkpoint 1；当前已停止，Checkpoint 2仍需单独授权。
 
 本路线只有一个implementation stage、两个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
 post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2接入真实
@@ -34,9 +34,9 @@ devlog；Git/PR默认拥有执行证据，只有实际出现长期、多轮probe
 
 | Surface | 确定路线 | 保持开放的实现偏好 |
 | --- | --- | --- |
-| RX ingress | 在interface/IP owner完成IPv4 parse/checksum与local-destination admission后，以callback-scoped borrowed original datagram调用Stack raw owner；raw fanout不返回handled并继续ordinary ICMP | callback/trait/function形状，copy或shared immutable backing |
-| Raw Endpoint | domain Stack raw owner统一拥有identity、association/filter、bounded RX/TX、fanout/drop、facts与retire；kernel只取得role-scoped operation capability | registry/container、queue、lock、generation与private engine布局 |
-| TX egress | control plane提供operation-local selection，Stack raw owner形成header并在success前完成bounded admission；后续仍走selected smoltcp interface、neighbor与normal provider path | 复用受约束的smoltcp raw mechanism或新增窄private emission capability |
+| RX ingress | interface/IP owner在IPv4 parse/checksum与local-destination admission后，将`total_len`内original datagram写入每interface的Stack-private raw engine；bounded pump在下一frame前drain并执行独立Endpoint fanout，ordinary ICMP继续处理原packet | 已闭合；不延长driver frame lifetime，不复制destination predicate |
+| Raw Endpoint | domain Stack raw owner统一拥有monotonic identity、association/filter、bounded RX/TX、fanout/drop、facts、invalidation与retire；kernel只取得syscall不可达的role-scoped operation capability | Checkpoint 2接入真实consumer，或路线撤销时一并删除temporary capability |
+| TX egress | Stack按operation-local selection形成完整无option IPv4 packet并完成Endpoint admission；每interface private raw engine沿normal interface/neighbor/provider path发送，窄header snapshot只补回`Ipv4Repr`遗漏的TOS/ID/flags | per-interface protocol cursor只仲裁新admission，engine-owned packet优先且queue truth仍在各protocol owner |
 | Socket front | static descriptor作为唯一semantic type witness；只扩展raw、UDP与Unix真实需要的family-neutral datagram/file-I/O和option dispatch | enum/function family、request/outcome名称与owner-local模块拆分 |
 
 TX mechanism只有同时保持TTL/TOS、selected-interface/source、neighbor/provider normal path、Endpoint attribution与bounded
@@ -96,7 +96,7 @@ assets；这些只是非穷举提示，不冻结内部API或文件布局。
 
 ## Checkpoint 1 — Protocol Owner、Post-admission Seam 与 Packet Transaction
 
-**状态：** Active
+**状态：** Closed
 
 **Purpose：** 在不发布Linux Socket ABI的前提下，关闭R0最危险的original-byte ingress、independent fanout、TX admission、
 bounded progression与Endpoint lifecycle，使下一checkpoint消费一份已经经过owner-local证明的final-shape capability。
@@ -138,6 +138,20 @@ provider backpressure或current Socket/network contracts；不得提前注册`SO
   second destination predicate或test-only production dependency越界。
 - 对受影响host/package build与tests以及RV64/LA64 kernel build取得实际结果；本checkpoint不声明guest syscall、任一
   architecture runtime、LTP或ping通过，这些保持Not Run。
+
+### Closure Evidence
+
+- `just test net-host`通过：ICMP raw focused owner/path tests、vendored smoltcp IPv4 interface tests，以及既有frame、bounded
+  progression、multi-instance、multi-interface与UDP topology regression全部通过；no-default-features compile/check通过。
+- `just test xtask`的74项测试、`just defconfig`、`just fmt kernel --check`与`git diff --check`通过；五个ICMP raw Kconfig
+  参数均由generated config生成、静态约束并被kernel policy消费。
+- `qemu-virt-rv64-release`与`qemu-virt-la64-release`在最终source上均完成discovery/final pass与symbol table验证。RV64首次
+  sandbox尝试在lwext4 C build触发`Bad system call`，相同命令在sandbox外通过，因此该次失败只归类为环境限制。
+- source/dependency audit确认shared API不含Linux UAPI、fd/task/waiter、runtime registry、private smoltcp handle或driver
+  frame borrow；route/source/interface与local-destination admission仍由既有owner决定；invalidation在Stack commit并释放
+  owner guard后发布；production dependency没有test-only facade。
+- guest syscall、RV64/LA64 runtime、LTP与BusyBox ping：**Not Run**。这些属于Checkpoint 2 product evidence，不能由本轮
+  host test或kernel build替代。
 
 **Cutover：** None。所有current contracts保持不变；Checkpoint 1 closure只说明protocol capability具备进入真实Socket
 consumer review的条件。

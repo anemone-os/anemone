@@ -35,6 +35,21 @@ pub(super) enum TxPhase {
 }
 
 impl UdpEndpoints {
+    pub(crate) fn active_egress(&self, interface: InterfaceId) -> Option<EndpointId> {
+        self.endpoints.iter().find_map(|endpoint| {
+            matches!(endpoint.tx, TxPhase::EngineOwned { interface: owner } if owner == interface)
+                .then_some(endpoint.id)
+        })
+    }
+
+    fn egress_pending(&self, interface: InterfaceId) -> bool {
+        self.endpoints.iter().any(|endpoint| match &endpoint.tx {
+            TxPhase::Idle => false,
+            TxPhase::Queued(pending) => pending.selected_interface == interface,
+            TxPhase::EngineOwned { interface: owner } => *owner == interface,
+        })
+    }
+
     pub(crate) fn queue_send(
         &mut self,
         endpoint_id: EndpointId,
@@ -96,14 +111,9 @@ impl UdpEndpoints {
         interface: InterfaceId,
         sockets: &mut SocketSet<'static>,
     ) -> Option<EndpointId> {
-        if let Some((index, endpoint)) = self
-            .endpoints
-            .iter()
-            .enumerate()
-            .find(|(_, endpoint)| {
-                matches!(endpoint.tx, TxPhase::EngineOwned { interface: owner } if owner == interface)
-            })
-        {
+        if let Some((index, endpoint)) = self.endpoints.iter().enumerate().find(|(_, endpoint)| {
+            matches!(endpoint.tx, TxPhase::EngineOwned { interface: owner } if owner == interface)
+        }) {
             self.next_egress_endpoint = (index + 1) % self.endpoints.len();
             return Some(endpoint.id);
         }
@@ -155,7 +165,7 @@ impl UdpEndpoints {
         sockets: &SocketSet<'static>,
     ) -> bool {
         let Some(endpoint_id) = endpoint_id else {
-            return false;
+            return self.egress_pending(interface);
         };
         let endpoint = self
             .endpoints
@@ -168,7 +178,7 @@ impl UdpEndpoints {
         if sockets.get::<udp::Socket>(engine.handle).send_queue() == 0 {
             endpoint.tx = TxPhase::Idle;
             self.invalidate(endpoint_id);
-            false
+            self.egress_pending(interface)
         } else {
             true
         }

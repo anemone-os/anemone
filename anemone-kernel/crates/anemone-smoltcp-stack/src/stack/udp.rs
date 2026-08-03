@@ -161,7 +161,7 @@ impl Stack {
             }
         }
         if let Some(local) = &mut self.local {
-            local.link.remove_owner(endpoint.id());
+            local.link.remove_udp_owner(endpoint.id());
         }
         Ok(())
     }

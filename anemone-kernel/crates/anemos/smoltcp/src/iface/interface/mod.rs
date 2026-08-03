@@ -749,11 +749,13 @@ impl Interface {
             let result = match &mut item.socket {
                 #[cfg(feature = "socket-raw")]
                 Socket::Raw(socket) => socket.dispatch(&mut self.inner, |inner, (ip, raw)| {
-                    respond(
-                        inner,
-                        PacketMeta::default(),
-                        Packet::new(ip, IpPayload::Raw(raw)),
-                    )
+                    let packet = match ip {
+                        #[cfg(feature = "proto-ipv4")]
+                        IpRepr::Ipv4(ipv4) => Packet::new_raw_ipv4(ipv4, raw),
+                        #[cfg(feature = "proto-ipv6")]
+                        IpRepr::Ipv6(ipv6) => Packet::new_ipv6(ipv6, IpPayload::Raw(raw)),
+                    };
+                    respond(inner, PacketMeta::default(), packet)
                 }),
                 #[cfg(feature = "socket-icmp")]
                 Socket::Icmp(socket) => {
@@ -952,7 +954,7 @@ impl InterfaceInner {
         }
     }
 
-    #[cfg(feature = "socket-raw")]
+    #[cfg(all(feature = "socket-raw", feature = "proto-ipv6"))]
     fn raw_socket_filter(
         &mut self,
         sockets: &mut SocketSet,
@@ -968,6 +970,25 @@ impl InterfaceInner {
         {
             if raw_socket.accepts(ip_repr) {
                 raw_socket.process(self, ip_repr, ip_payload);
+                handled_by_raw_socket = true;
+            }
+        }
+        handled_by_raw_socket
+    }
+
+    #[cfg(all(feature = "socket-raw", feature = "proto-ipv4"))]
+    fn raw_socket_filter_admitted_ipv4(
+        &mut self,
+        sockets: &mut SocketSet,
+        ip_repr: &IpRepr,
+        packet: &[u8],
+    ) -> bool {
+        let mut handled_by_raw_socket = false;
+        for item in sockets.items_mut() {
+            if let Socket::Raw(raw_socket) = &mut item.socket
+                && raw_socket.accepts(ip_repr)
+            {
+                raw_socket.process_admitted_ipv4(ip_repr, packet);
                 handled_by_raw_socket = true;
             }
         }
@@ -1275,7 +1296,7 @@ impl InterfaceInner {
 
         // Emit function for the IP header and payload.
         let emit_ip = |repr: &IpRepr, tx_buffer: &mut [u8]| {
-            repr.emit(&mut *tx_buffer, &self.caps.checksum);
+            packet.emit_ip_header(repr, tx_buffer, &self.caps.checksum);
 
             let payload = &mut tx_buffer[repr.header_len()..];
             packet.emit_payload(repr, payload, &caps)

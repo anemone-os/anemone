@@ -3,6 +3,7 @@
 extern crate alloc;
 
 mod frame;
+pub mod icmp_raw;
 mod interface;
 mod ipv4;
 mod pump;

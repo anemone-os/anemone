@@ -1,4 +1,7 @@
-use crate::{phy::DeviceCapabilities, wire::*};
+use crate::{
+    phy::{ChecksumCapabilities, DeviceCapabilities},
+    wire::*,
+};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, PartialEq)]
@@ -33,7 +36,25 @@ impl<'p> Packet<'p> {
     pub(crate) fn new_ipv4(ip_repr: Ipv4Repr, payload: IpPayload<'p>) -> Self {
         Self::Ipv4(PacketV4 {
             header: ip_repr,
+            raw_header: None,
             payload,
+        })
+    }
+
+    #[cfg(all(feature = "proto-ipv4", feature = "socket-raw"))]
+    pub(crate) fn new_raw_ipv4(ip_repr: Ipv4Repr, packet: &'p [u8]) -> Self {
+        let packet = Ipv4Packet::new_unchecked(packet);
+        Self::Ipv4(PacketV4 {
+            header: ip_repr,
+            raw_header: Some(RawIpv4Header {
+                dscp: packet.dscp(),
+                ecn: packet.ecn(),
+                ident: packet.ident(),
+                dont_frag: packet.dont_frag(),
+                more_frags: packet.more_frags(),
+                frag_offset: packet.frag_offset(),
+            }),
+            payload: IpPayload::Raw(packet.payload()),
         })
     }
 
@@ -66,6 +87,34 @@ impl<'p> Packet<'p> {
             Packet::Ipv4(p) => &p.payload,
             #[cfg(feature = "proto-ipv6")]
             Packet::Ipv6(p) => &p.payload,
+        }
+    }
+
+    pub(crate) fn emit_ip_header(
+        &self,
+        ip_repr: &IpRepr,
+        buffer: &mut [u8],
+        checksum_caps: &ChecksumCapabilities,
+    ) {
+        ip_repr.emit(&mut *buffer, checksum_caps);
+
+        #[cfg(feature = "proto-ipv4")]
+        if let (Self::Ipv4(packet), IpRepr::Ipv4(_)) = (self, ip_repr)
+            && let Some(raw) = packet.raw_header
+        {
+            let mut header = Ipv4Packet::new_unchecked(buffer);
+            header.set_dscp(raw.dscp);
+            header.set_ecn(raw.ecn);
+            header.set_ident(raw.ident);
+            header.clear_flags();
+            header.set_dont_frag(raw.dont_frag);
+            header.set_more_frags(raw.more_frags);
+            header.set_frag_offset(raw.frag_offset);
+            if checksum_caps.ipv4.tx() {
+                header.fill_checksum();
+            } else {
+                header.set_checksum(0);
+            }
         }
     }
 
@@ -187,7 +236,23 @@ impl<'p> Packet<'p> {
 #[cfg(feature = "proto-ipv4")]
 pub(crate) struct PacketV4<'p> {
     header: Ipv4Repr,
+    // `Ipv4Repr` intentionally omits raw-socket header policy. This snapshot
+    // preserves only fields that the normal emitter would otherwise reset;
+    // routing and payload length remain owned by `header`.
+    raw_header: Option<RawIpv4Header>,
     payload: IpPayload<'p>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg(feature = "proto-ipv4")]
+struct RawIpv4Header {
+    dscp: u8,
+    ecn: u8,
+    ident: u16,
+    dont_frag: bool,
+    more_frags: bool,
+    frag_offset: u16,
 }
 
 #[derive(Debug, PartialEq)]

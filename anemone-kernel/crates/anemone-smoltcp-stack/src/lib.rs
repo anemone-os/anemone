@@ -3,6 +3,7 @@
 extern crate alloc;
 
 mod adapter;
+mod icmp_raw;
 mod local_link;
 mod pump;
 mod stack;
