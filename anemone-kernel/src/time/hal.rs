@@ -4,14 +4,14 @@ pub trait TimeArchTrait {
 }
 
 pub trait LocalClockSourceArch {
-    /// Get current monotonic time in its raw form. Typically, this is just the
-    /// value read from a hardware timer register, without any scaling applied.
+    /// Get current monotonic time in its raw form.
+    ///
+    /// Every online CPU must observe one non-regressing counter domain. Any
+    /// platform-specific offset calibration belongs in the architecture source,
+    /// not in the common timekeeper.
     fn curr_monotonic_time() -> u64;
 
-    /// Get the frequency of the monotonic clock in hertz.
-    ///
-    /// Upper layers will use this to convert the raw timer ticks into actual
-    /// time durations.
+    /// Get the nonzero, boot-stable frequency of the shared counter in hertz.
     fn monotonic_freq_hz() -> u64;
 }
 

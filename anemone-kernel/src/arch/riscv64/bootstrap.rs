@@ -426,11 +426,9 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_pa: PhysAddr) -> ! {
         kinfoln!("anemone kernel booting on {} ({})", bsp_id, bsp_physical_id);
 
         // needed by timer initialization.
-        if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
-            super::time::set_hw_clock_freq(freq_hz);
-        } else {
-            kwarningln!("failed to scan clock frequency from device tree.");
-        };
+        let freq_hz = early_scan_clock_freq(fdt_va)
+            .expect("RISC-V device tree is missing /cpus/timebase-frequency");
+        super::time::set_hw_clock_freq(freq_hz);
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 
         // mark fdt as reserved memory so that it won't be allocated by frame allocator.

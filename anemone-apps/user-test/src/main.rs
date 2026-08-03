@@ -3,6 +3,7 @@
 #![allow(unused)]
 
 mod busybox;
+mod clock_read;
 mod competition;
 mod file;
 mod guest;
@@ -20,6 +21,10 @@ fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
 
 /// local tests for development.
 fn run_local_tests() {
+    println!("user-test: running native clock read test...");
+    clock_read::verify_native_clocks();
+    println!("user-test: native clock read test finished.");
+
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");

@@ -6,13 +6,15 @@ pub use cpucfg::*;
 pub use invtlb::*;
 
 /// Read the current time from the stable time source
-pub fn rdtime(counter_id: usize) -> u64 {
+pub fn rdtime() -> u64 {
     let time: u64;
     unsafe {
         core::arch::asm!(
-            "rdtime.d {0}, {1}",
-            out(reg) time,
-             in(reg) counter_id,
+            "rdtime.d {time}, {counter_id}",
+            time = out(reg) time,
+            // The second architectural output is the constant-counter ID. It
+            // is diagnostic identity, not an input to or owner of the time value.
+            counter_id = out(reg) _,
         );
     }
     time

@@ -1,15 +1,17 @@
 use crate::prelude::*;
+use crate::sync::mono::MonoOnce;
 
 pub struct RiscV64TimeArch;
 
 /// The frequency of the hardware timer in hertz.
-static mut CLOCK_FREQUENCY_HZ: Option<u64> = None;
+static CLOCK_FREQUENCY_HZ: MonoOnce<u64> = unsafe { MonoOnce::new() };
 
 /// Set the frequency of the timer in hertz.
 pub unsafe fn set_hw_clock_freq(freq_hz: u64) {
-    unsafe {
-        CLOCK_FREQUENCY_HZ = Some(freq_hz);
-    }
+    assert!(freq_hz > 0, "RISC-V timebase frequency must be nonzero");
+    CLOCK_FREQUENCY_HZ.init(|slot| {
+        slot.write(freq_hz);
+    });
 }
 
 impl TimeArchTrait for RiscV64TimeArch {
@@ -23,7 +25,7 @@ impl LocalClockSourceArch for RiscV64TimeArch {
     }
 
     fn monotonic_freq_hz() -> u64 {
-        unsafe { CLOCK_FREQUENCY_HZ.expect("clock frequency not set") }
+        *CLOCK_FREQUENCY_HZ.get()
     }
 }
 

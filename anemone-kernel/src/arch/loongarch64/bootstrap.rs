@@ -297,8 +297,12 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
         if let Some(freq_hz) = early_scan_clock_freq(fdt_va) {
             super::time::set_hw_clock_freq(freq_hz);
         } else {
-            kwarningln!("failed to scan clock frequency from device tree.");
+            kwarningln!(
+                "failed to scan clock frequency from device tree; using CPUCFG stable-counter frequency"
+            );
+            TimeArch::init_clock_source_from_cpucfg();
         };
+        TimeArch::init_shared_counter_offset();
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
 

@@ -6,6 +6,8 @@
 
 ## Active
 
+- [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--1已关闭；
+  `TC-CLOCK-CUTOVER`激活`TIMEKEEPER-CLOCK-001`，Gate 2已获授权并保持独立checkpoint。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
