@@ -1,11 +1,10 @@
 use anemone_net_api::{
     Ipv4EgressSelection,
     icmp_raw::{
-        IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
-        IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId,
-        IcmpRawEndpointInvalidation, IcmpRawEndpointLimits, IcmpRawMutationError,
-        IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError,
-        IcmpRawSendError, IcmpRawTypeFilter,
+        IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy, IcmpRawEndpointConfig,
+        IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointInvalidation,
+        IcmpRawEndpointLimits, IcmpRawMutationError, IcmpRawQueryError, IcmpRawReceiveError,
+        IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
     },
 };
 
@@ -59,12 +58,30 @@ impl DomainStack {
         self.protocol_transition(|stack| stack.create_icmp_raw_endpoint(limits))
     }
 
-    pub(in crate::net) fn set_icmp_raw_association(
+    pub(in crate::net) fn bind_icmp_raw_endpoint(
         &self,
         endpoint: IcmpRawEndpointId,
-        association: IcmpRawAssociation,
+        local: Option<anemone_net_api::Ipv4Address>,
     ) -> Result<(), IcmpRawMutationError> {
-        self.protocol_transition(|stack| stack.set_icmp_raw_association(endpoint, association))
+        self.protocol_transition(|stack| stack.bind_icmp_raw_endpoint(endpoint, local))
+    }
+
+    pub(in crate::net) fn connect_icmp_raw_endpoint(
+        &self,
+        endpoint: IcmpRawEndpointId,
+        selected_source: anemone_net_api::Ipv4Address,
+        peer: anemone_net_api::Ipv4Address,
+    ) -> Result<(), IcmpRawMutationError> {
+        self.protocol_transition(|stack| {
+            stack.connect_icmp_raw_endpoint(endpoint, selected_source, peer)
+        })
+    }
+
+    pub(in crate::net) fn disconnect_icmp_raw_endpoint(
+        &self,
+        endpoint: IcmpRawEndpointId,
+    ) -> Result<(), IcmpRawMutationError> {
+        self.protocol_transition(|stack| stack.disconnect_icmp_raw_endpoint(endpoint))
     }
 
     pub(in crate::net) fn set_icmp_raw_filter(

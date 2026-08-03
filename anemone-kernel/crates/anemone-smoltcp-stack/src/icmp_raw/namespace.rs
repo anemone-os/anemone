@@ -3,10 +3,10 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     icmp_raw::{
-        IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEndpointConfig,
-        IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointInvalidation,
-        IcmpRawEndpointLimits, IcmpRawMutationError, IcmpRawNamespacePolicy, IcmpRawQueryError,
-        IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawTypeFilter,
+        IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEndpointConfig, IcmpRawEndpointFacts,
+        IcmpRawEndpointId, IcmpRawEndpointInvalidation, IcmpRawEndpointLimits,
+        IcmpRawMutationError, IcmpRawNamespacePolicy, IcmpRawQueryError, IcmpRawReceiveError,
+        IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawTypeFilter,
     },
 };
 
@@ -54,23 +54,39 @@ impl IcmpRawEndpoints {
         Ok(id)
     }
 
-    pub(crate) fn set_association(
+    pub(crate) fn bind(
         &mut self,
         id: IcmpRawEndpointId,
-        association: IcmpRawAssociation,
+        local: Option<anemone_net_api::Ipv4Address>,
     ) -> Result<(), IcmpRawMutationError> {
-        if association
-            .local()
-            .is_some_and(|address| !address.is_unicast())
-            || association
-                .peer()
-                .is_some_and(|address| !address.is_unicast())
-        {
+        if local.is_some_and(|address| !address.is_unicast()) {
             return Err(IcmpRawMutationError::InvalidAssociation);
         }
         self.endpoint_mut(id)
             .ok_or(IcmpRawMutationError::UnknownEndpoint)?
-            .association = association;
+            .bind(local)
+            .map_err(|()| IcmpRawMutationError::InvalidAssociation)
+    }
+
+    pub(crate) fn connect(
+        &mut self,
+        id: IcmpRawEndpointId,
+        selected_source: anemone_net_api::Ipv4Address,
+        peer: anemone_net_api::Ipv4Address,
+    ) -> Result<(), IcmpRawMutationError> {
+        if !selected_source.is_unicast() || !peer.is_unicast() {
+            return Err(IcmpRawMutationError::InvalidAssociation);
+        }
+        self.endpoint_mut(id)
+            .ok_or(IcmpRawMutationError::UnknownEndpoint)?
+            .connect(selected_source, peer);
+        Ok(())
+    }
+
+    pub(crate) fn disconnect(&mut self, id: IcmpRawEndpointId) -> Result<(), IcmpRawMutationError> {
+        self.endpoint_mut(id)
+            .ok_or(IcmpRawMutationError::UnknownEndpoint)?
+            .disconnect();
         Ok(())
     }
 

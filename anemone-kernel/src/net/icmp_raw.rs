@@ -1,18 +1,15 @@
 //! Kernel-private role capability for the initial-domain ICMP raw owner.
 //!
-//! Checkpoint 1 intentionally has no Socket consumer. Every item in this
-//! module remains crate-private and unreachable from syscalls; Checkpoint 2
-//! must either consume this final-shape capability or remove it.
-
-#![allow(dead_code)]
+//! Checkpoint 2A consumes this role capability through a final-shape Socket
+//! family while the creation tuple remains deliberately unreachable.
 
 use anemone_net_api::{
     Ipv4Address, Ipv4EgressSelection,
     icmp_raw::{
-        IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
-        IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointLimits,
-        IcmpRawMutationError, IcmpRawNamespacePolicy, IcmpRawQueryError, IcmpRawReceiveError,
-        IcmpRawReceivedPacket, IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
+        IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy, IcmpRawEndpointConfig,
+        IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointLimits, IcmpRawMutationError,
+        IcmpRawNamespacePolicy, IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket,
+        IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
     },
 };
 
@@ -114,11 +111,10 @@ impl IcmpRawEndpointPort {
         })
     }
 
-    pub(crate) fn set_association(
-        &self,
-        association: IcmpRawAssociation,
-    ) -> Result<(), IcmpRawMutationError> {
-        if let Some(local) = association.local() {
+    pub(crate) fn bind(&self, local: Ipv4Address) -> Result<(), BindError> {
+        let local = if local.is_unspecified() {
+            None
+        } else {
             let owned = {
                 let authority = ACTIVE_PATHS.lock();
                 authority
@@ -128,11 +124,45 @@ impl IcmpRawEndpointPort {
                     .owns_local_address(local)
             };
             if !owned {
-                return Err(IcmpRawMutationError::InvalidAssociation);
+                return Err(BindError::AddressUnavailable);
             }
-        }
+            Some(local)
+        };
         self.stack
-            .set_icmp_raw_association(self.endpoint, association)
+            .bind_icmp_raw_endpoint(self.endpoint, local)
+            .map_err(BindError::Stack)
+    }
+
+    pub(crate) fn connect(&self, peer: Ipv4Address) -> Result<(), ConnectError> {
+        let association = self.config().map_err(|error| match error {
+            IcmpRawQueryError::UnknownEndpoint => {
+                ConnectError::Stack(IcmpRawMutationError::UnknownEndpoint)
+            },
+        })?;
+        let selection = {
+            let authority = ACTIVE_PATHS.lock();
+            authority
+                .domain
+                .control_plane()
+                .expect("published ICMP raw capability lost its control plane")
+                .select(peer, association.association().local())
+                .map_err(|error| match error {
+                    super::domain::SelectionError::NoRoute => ConnectError::NoRoute,
+                    super::domain::SelectionError::SourceUnavailable => {
+                        ConnectError::SourceUnavailable
+                    },
+                    super::domain::SelectionError::InterfaceUnavailable => {
+                        ConnectError::InterfaceUnavailable
+                    },
+                })?
+        };
+        self.stack
+            .connect_icmp_raw_endpoint(self.endpoint, selection.source(), peer)
+            .map_err(ConnectError::Stack)
+    }
+
+    pub(crate) fn disconnect(&self) -> Result<(), IcmpRawMutationError> {
+        self.stack.disconnect_icmp_raw_endpoint(self.endpoint)
     }
 
     pub(crate) fn set_filter(&self, filter: IcmpRawTypeFilter) -> Result<(), IcmpRawMutationError> {
@@ -151,12 +181,10 @@ impl IcmpRawEndpointPort {
         self.stack.icmp_raw_endpoint_diagnostics(self.endpoint)
     }
 
-    pub(crate) fn send(
+    pub(crate) fn prepare_send(
         &self,
         destination: Ipv4Address,
-        policy: IcmpRawEgressPolicy,
-        message: &[u8],
-    ) -> Result<(), SendError> {
+    ) -> Result<IcmpRawSendSelection, SendError> {
         let association = self.config().map_err(|error| match error {
             IcmpRawQueryError::UnknownEndpoint => {
                 SendError::Stack(IcmpRawSendError::UnknownEndpoint)
@@ -179,16 +207,26 @@ impl IcmpRawEndpointPort {
                     },
                 })?
         };
+        Ok(IcmpRawSendSelection(selection))
+    }
+
+    pub(crate) fn send_prepared(
+        &self,
+        selection: &IcmpRawSendSelection,
+        destination: Ipv4Address,
+        policy: IcmpRawEgressPolicy,
+        message: &[u8],
+    ) -> Result<(), SendError> {
         self.stack
             .send_icmp_raw_endpoint(
                 self.endpoint,
-                Ipv4EgressSelection::new(selection.interface(), selection.source()),
+                Ipv4EgressSelection::new(selection.0.interface(), selection.0.source()),
                 destination,
                 policy,
                 message,
             )
             .map_err(SendError::Stack)?;
-        selection.request_pump();
+        selection.0.request_pump();
         Ok(())
     }
 
@@ -201,10 +239,29 @@ impl IcmpRawEndpointPort {
     }
 }
 
+/// Immutable control-plane handoff retained by one Socket send operation.
+/// It carries the selected route/source/interface and a recheck capability,
+/// but no mutable control-plane, Endpoint, queue, or readiness truth.
+pub(crate) struct IcmpRawSendSelection(super::domain::Ipv4Selection);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SendError {
     NoRoute,
     SourceUnavailable,
     InterfaceUnavailable,
     Stack(IcmpRawSendError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BindError {
+    AddressUnavailable,
+    Stack(IcmpRawMutationError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ConnectError {
+    NoRoute,
+    SourceUnavailable,
+    InterfaceUnavailable,
+    Stack(IcmpRawMutationError),
 }

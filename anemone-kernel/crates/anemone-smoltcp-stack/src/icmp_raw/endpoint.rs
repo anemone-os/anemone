@@ -9,7 +9,8 @@ use super::packet::PendingPacket;
 
 pub(super) struct Endpoint {
     pub(super) id: IcmpRawEndpointId,
-    pub(super) association: IcmpRawAssociation,
+    local: LocalAssociation,
+    peer: Option<anemone_net_api::Ipv4Address>,
     pub(super) filter: IcmpRawTypeFilter,
     pub(super) limits: IcmpRawEndpointLimits,
     pub(super) received: VecDeque<Vec<u8>>,
@@ -28,6 +29,25 @@ pub(super) struct Endpoint {
     pub(super) dropped_rx_bytes: u64,
 }
 
+/// Only connect-selected sources are cleared by disconnect. The Stack must
+/// retain this origin because the public address snapshot alone cannot
+/// distinguish it from an explicit bind to the same address.
+#[derive(Clone, Copy)]
+enum LocalAssociation {
+    Unbound,
+    ConnectSelected(anemone_net_api::Ipv4Address),
+    Explicit(anemone_net_api::Ipv4Address),
+}
+
+impl LocalAssociation {
+    const fn address(self) -> Option<anemone_net_api::Ipv4Address> {
+        match self {
+            Self::Unbound => None,
+            Self::ConnectSelected(address) | Self::Explicit(address) => Some(address),
+        }
+    }
+}
+
 impl Endpoint {
     pub(super) fn new(id: IcmpRawEndpointId, limits: IcmpRawEndpointLimits) -> Self {
         assert!(limits.tx_packet_capacity() > 0);
@@ -36,7 +56,8 @@ impl Endpoint {
         assert!(limits.rx_byte_capacity() >= super::packet::IPV4_HEADER_LEN);
         Self {
             id,
-            association: IcmpRawAssociation::default(),
+            local: LocalAssociation::Unbound,
+            peer: None,
             filter: IcmpRawTypeFilter::default(),
             limits,
             received: VecDeque::with_capacity(limits.rx_packet_capacity()),
@@ -59,7 +80,36 @@ impl Endpoint {
     }
 
     pub(super) fn config(&self) -> IcmpRawEndpointConfig {
-        IcmpRawEndpointConfig::from_owner_snapshot(self.association, self.filter)
+        IcmpRawEndpointConfig::from_owner_snapshot(
+            IcmpRawAssociation::new(self.local.address(), self.peer),
+            self.filter,
+        )
+    }
+
+    pub(super) fn bind(&mut self, local: Option<anemone_net_api::Ipv4Address>) -> Result<(), ()> {
+        if self.peer.is_some() {
+            return Err(());
+        }
+        self.local = local.map_or(LocalAssociation::Unbound, LocalAssociation::Explicit);
+        Ok(())
+    }
+
+    pub(super) fn connect(
+        &mut self,
+        selected_source: anemone_net_api::Ipv4Address,
+        peer: anemone_net_api::Ipv4Address,
+    ) {
+        if !matches!(self.local, LocalAssociation::Explicit(_)) {
+            self.local = LocalAssociation::ConnectSelected(selected_source);
+        }
+        self.peer = Some(peer);
+    }
+
+    pub(super) fn disconnect(&mut self) {
+        if matches!(self.local, LocalAssociation::ConnectSelected(_)) {
+            self.local = LocalAssociation::Unbound;
+        }
+        self.peer = None;
     }
 
     pub(super) fn diagnostics(&self) -> IcmpRawDropDiagnostics {
@@ -72,10 +122,10 @@ impl Endpoint {
         destination: anemone_net_api::Ipv4Address,
         icmp_type: Option<u8>,
     ) -> bool {
-        self.association
-            .local()
+        self.local
+            .address()
             .is_none_or(|local| local == destination)
-            && self.association.peer().is_none_or(|peer| peer == source)
+            && self.peer.is_none_or(|peer| peer == source)
             && icmp_type.is_none_or(|kind| self.filter.allows(kind))
     }
 

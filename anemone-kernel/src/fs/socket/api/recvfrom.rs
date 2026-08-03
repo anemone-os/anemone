@@ -67,7 +67,7 @@ fn sys_recvfrom(
         let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
         let uspace = task.clone_uspace_handle();
         let mut stream_sink = UserBufferSink::new(&uspace, segments);
-        let copied = retry_socket_receive(
+        let outcome = retry_socket_receive(
             "sys_recvfrom",
             &task,
             desc.vfs_file(),
@@ -89,7 +89,7 @@ fn sys_recvfrom(
                 .map_err(map_query_error)?;
             write_socket_address(SocketType::UnixStream, peer, addrlen, peer_address.0)?;
         }
-        return Ok(copied as u64);
+        return Ok(outcome.copied() as u64);
     }
 
     let mut sink = ReceiveSink {
@@ -105,8 +105,15 @@ fn sys_recvfrom(
         &task,
         desc.vfs_file(),
         nonblocking,
-        || socket.receive(SocketReceiveRequest::Datagram(&mut sink)),
+        || {
+            socket.receive(SocketReceiveRequest::Datagram {
+                sink: &mut sink,
+                flags: SocketReceiveFlags {
+                    peek: message_flags.peek,
+                },
+            })
+        },
         map_receive_error,
     )
-    .map(|copied| copied as u64)
+    .map(|outcome| outcome.copied() as u64)
 }

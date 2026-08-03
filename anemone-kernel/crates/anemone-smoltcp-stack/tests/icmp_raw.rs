@@ -4,9 +4,8 @@ use anemone_net_api::{
     EthernetAddress, FrameProvider, Instant, Ipv4Address, Ipv4EgressSelection, TransmitOutcome,
     TxToken,
     icmp_raw::{
-        IcmpRawAssociation, IcmpRawEgressPolicy, IcmpRawEndpointLimits, IcmpRawMutationError,
-        IcmpRawQueryError, IcmpRawReceiveError, IcmpRawRetireError, IcmpRawSendError,
-        IcmpRawTypeFilter,
+        IcmpRawEgressPolicy, IcmpRawEndpointLimits, IcmpRawMutationError, IcmpRawQueryError,
+        IcmpRawReceiveError, IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
     },
 };
 use anemone_smoltcp_stack::{HostSelection, PumpBudget, Stack};
@@ -46,6 +45,62 @@ fn configured_external() -> (Stack, BoundedProvider, anemone_net_api::InterfaceI
         .configure_ipv4_for_host_validation(interface, LOCAL_IP, 24)
         .unwrap();
     (stack, provider, interface)
+}
+
+#[test]
+fn stack_owns_explicit_and_connect_selected_local_transitions() {
+    let mut stack = Stack::new();
+    let explicit = stack
+        .create_icmp_raw_endpoint(limits(1, 128, 1, 128))
+        .unwrap();
+    let selected = stack
+        .create_icmp_raw_endpoint(limits(1, 128, 1, 128))
+        .unwrap();
+    let explicit_local = Ipv4Address::new([10, 0, 0, 9]);
+    let selected_local = Ipv4Address::new(LOCAL_IP);
+    let peer = Ipv4Address::new(PEER_IP);
+
+    stack
+        .bind_icmp_raw_endpoint(explicit, Some(explicit_local))
+        .unwrap();
+    stack
+        .connect_icmp_raw_endpoint(explicit, selected_local, peer)
+        .unwrap();
+    assert_eq!(
+        stack
+            .icmp_raw_endpoint_config(explicit)
+            .unwrap()
+            .association()
+            .local(),
+        Some(explicit_local)
+    );
+    stack.disconnect_icmp_raw_endpoint(explicit).unwrap();
+    assert_eq!(
+        stack
+            .icmp_raw_endpoint_config(explicit)
+            .unwrap()
+            .association(),
+        anemone_net_api::icmp_raw::IcmpRawAssociation::new(Some(explicit_local), None)
+    );
+
+    stack
+        .connect_icmp_raw_endpoint(selected, selected_local, peer)
+        .unwrap();
+    assert_eq!(
+        stack
+            .icmp_raw_endpoint_config(selected)
+            .unwrap()
+            .association(),
+        anemone_net_api::icmp_raw::IcmpRawAssociation::new(Some(selected_local), Some(peer))
+    );
+    stack.disconnect_icmp_raw_endpoint(selected).unwrap();
+    assert_eq!(
+        stack
+            .icmp_raw_endpoint_config(selected)
+            .unwrap()
+            .association(),
+        anemone_net_api::icmp_raw::IcmpRawAssociation::default()
+    );
 }
 
 fn icmp_frame(
@@ -228,22 +283,17 @@ fn fanout_filter_and_full_consumer_are_independently_accounted() {
         .set_icmp_raw_filter(filtered, IcmpRawTypeFilter::from_blocked_types(1 << 8))
         .unwrap();
     stack
-        .set_icmp_raw_association(
+        .connect_icmp_raw_endpoint(
             wrong_peer,
-            IcmpRawAssociation::new(None, Some(Ipv4Address::new([10, 0, 0, 77]))),
+            Ipv4Address::new(LOCAL_IP),
+            Ipv4Address::new([10, 0, 0, 77]),
         )
         .unwrap();
     stack
-        .set_icmp_raw_association(
-            matching_local,
-            IcmpRawAssociation::new(Some(Ipv4Address::new(LOCAL_IP)), None),
-        )
+        .bind_icmp_raw_endpoint(matching_local, Some(Ipv4Address::new(LOCAL_IP)))
         .unwrap();
     stack
-        .set_icmp_raw_association(
-            wrong_local,
-            IcmpRawAssociation::new(Some(Ipv4Address::new([10, 0, 0, 77])), None),
-        )
+        .bind_icmp_raw_endpoint(wrong_local, Some(Ipv4Address::new([10, 0, 0, 77])))
         .unwrap();
 
     let first = icmp_frame(LOCAL_IP, 0, 1, false, false, false);

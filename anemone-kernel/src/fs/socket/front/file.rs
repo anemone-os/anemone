@@ -9,9 +9,10 @@ use crate::{
 };
 
 use super::{
-    Socket, SocketOps, SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest,
-    SocketSendError, SocketSendRequest, SocketStreamDestination, SocketStreamReadSink,
-    SocketStreamWriteSource,
+    Socket, SocketDatagramSendOperation, SocketFileIo, SocketOps, SocketReadSink,
+    SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest, SocketReceiveSink,
+    SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
+    SocketWriteSource,
     operation::{retry_socket_receive, retry_socket_send},
 };
 
@@ -99,7 +100,7 @@ pub(super) struct SliceReadSink<'a> {
     pub(super) bytes: &'a mut [u8],
 }
 
-impl SocketStreamReadSink for SliceReadSink<'_> {
+impl SocketReadSink for SliceReadSink<'_> {
     fn remaining(&self) -> usize {
         self.bytes.len()
     }
@@ -111,7 +112,7 @@ impl SocketStreamReadSink for SliceReadSink<'_> {
     }
 }
 
-impl SocketStreamReadSink for UserBufferSink<'_> {
+impl SocketReadSink for UserBufferSink<'_> {
     fn remaining(&self) -> usize {
         self.remaining()
     }
@@ -125,7 +126,7 @@ pub(super) struct SliceWriteSource<'a> {
     pub(super) bytes: &'a [u8],
 }
 
-impl SocketStreamWriteSource for SliceWriteSource<'_> {
+impl SocketWriteSource for SliceWriteSource<'_> {
     fn remaining(&self) -> usize {
         self.bytes.len()
     }
@@ -137,7 +138,7 @@ impl SocketStreamWriteSource for SliceWriteSource<'_> {
     }
 }
 
-impl SocketStreamWriteSource for UserBufferSource<'_> {
+impl SocketWriteSource for UserBufferSource<'_> {
     fn remaining(&self) -> usize {
         self.remaining()
     }
@@ -147,30 +148,89 @@ impl SocketStreamWriteSource for UserBufferSource<'_> {
     }
 }
 
+struct FileDatagramReceiveSink<'a> {
+    sink: &'a mut dyn SocketReadSink,
+}
+
+impl SocketReceiveSink for FileDatagramReceiveSink<'_> {
+    fn copy_datagram(
+        &mut self,
+        payload: &[u8],
+        _peer: super::SocketAddress,
+    ) -> Result<usize, SysError> {
+        self.sink.copy_bytes(payload)
+    }
+}
+
+struct FileDatagramSendPayload<'a> {
+    source: &'a mut dyn SocketWriteSource,
+    bytes: Option<Vec<u8>>,
+}
+
+impl SocketSendPayload for FileDatagramSendPayload<'_> {
+    fn bytes(&mut self) -> Result<&[u8], SysError> {
+        if self.bytes.is_none() {
+            let len = self.source.remaining();
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(len)
+                .map_err(|_| SysError::OutOfMemory)?;
+            bytes.resize(len, 0);
+            let copied = self.source.copy_bytes(&mut bytes)?;
+            if copied != len {
+                return Err(SysError::BadAddress);
+            }
+            self.bytes = Some(bytes);
+        }
+        Ok(self.bytes.as_deref().unwrap())
+    }
+}
+
 fn socket_read_with_ctx(
     file: &File,
-    sink: &mut dyn SocketStreamReadSink,
+    sink: &mut dyn SocketReadSink,
     flags: FileOpStatusFlags,
 ) -> Result<usize, SysError> {
     let task = get_current_task();
-    retry_socket_receive(
-        "socket read",
-        &task,
-        file,
-        flags.contains(FileOpStatusFlags::NONBLOCK),
-        || {
-            socket_from_file(file)
-                .expect("common Socket read used without Socket private state")
-                .receive(SocketReceiveRequest::Stream {
+    let socket =
+        socket_from_file(file).expect("common Socket read used without Socket private state");
+    let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
+    let outcome = match socket.file_io() {
+        SocketFileIo::Unsupported => return Err(SysError::NotSupported),
+        SocketFileIo::ByteStream => retry_socket_receive(
+            "socket read",
+            &task,
+            file,
+            nonblocking,
+            || {
+                socket.receive(SocketReceiveRequest::Stream {
                     sink,
                     flags: SocketReceiveFlags { peek: false },
                 })
+            },
+            map_file_receive_error,
+        )?,
+        SocketFileIo::Datagram => {
+            let mut datagram_sink = FileDatagramReceiveSink { sink };
+            retry_socket_receive(
+                "socket read",
+                &task,
+                file,
+                nonblocking,
+                || {
+                    socket.receive(SocketReceiveRequest::Datagram {
+                        sink: &mut datagram_sink,
+                        flags: SocketReceiveFlags { peek: false },
+                    })
+                },
+                map_file_receive_error,
+            )?
         },
-        map_stream_file_receive_error,
-    )
+    };
+    Ok(outcome.copied())
 }
 
-fn map_stream_file_receive_error(error: SocketReceiveError) -> SysError {
+fn map_file_receive_error(error: SocketReceiveError) -> SysError {
     match error {
         SocketReceiveError::WouldBlock => SysError::Again,
         SocketReceiveError::Unsupported => SysError::NotSupported,
@@ -182,29 +242,55 @@ fn map_stream_file_receive_error(error: SocketReceiveError) -> SysError {
 
 fn socket_write_with_ctx(
     file: &File,
-    source: &mut dyn SocketStreamWriteSource,
+    source: &mut dyn SocketWriteSource,
     flags: FileOpStatusFlags,
 ) -> Result<usize, SysError> {
     let task = get_current_task();
-    retry_socket_send(
-        "socket write",
-        &task,
-        file,
-        flags.contains(FileOpStatusFlags::NONBLOCK),
-        true,
-        || {
-            socket_from_file(file)
-                .expect("common Socket write used without Socket private state")
-                .send(SocketSendRequest::Stream {
+    let socket =
+        socket_from_file(file).expect("common Socket write used without Socket private state");
+    let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
+    match socket.file_io() {
+        SocketFileIo::Unsupported => Err(SysError::NotSupported),
+        SocketFileIo::ByteStream => retry_socket_send(
+            "socket write",
+            &task,
+            file,
+            nonblocking,
+            true,
+            || {
+                socket.send(SocketSendRequest::Stream {
                     source,
                     destination: SocketStreamDestination::Absent,
                 })
+            },
+            map_file_send_error,
+        ),
+        SocketFileIo::Datagram => {
+            let mut payload = FileDatagramSendPayload {
+                source,
+                bytes: None,
+            };
+            let mut operation = SocketDatagramSendOperation::new();
+            retry_socket_send(
+                "socket write",
+                &task,
+                file,
+                nonblocking,
+                false,
+                || {
+                    socket.send(SocketSendRequest::Datagram {
+                        destination: None,
+                        payload: &mut payload,
+                        operation: &mut operation,
+                    })
+                },
+                map_file_send_error,
+            )
         },
-        map_stream_file_send_error,
-    )
+    }
 }
 
-fn map_stream_file_send_error(error: SocketSendError) -> SysError {
+fn map_file_send_error(error: SocketSendError) -> SysError {
     match error {
         SocketSendError::WouldBlock => SysError::Again,
         SocketSendError::PeerClosed => SysError::BrokenPipe,
@@ -212,16 +298,15 @@ fn map_stream_file_send_error(error: SocketSendError) -> SysError {
         SocketSendError::Retired => SysError::BadFileDescriptor,
         SocketSendError::NotConnected => SysError::NotConnected,
         SocketSendError::AlreadyConnected => SysError::AlreadyConnected,
+        SocketSendError::InvalidState => SysError::InvalidArgument,
+        SocketSendError::AddressInUse => SysError::AddressInUse,
+        SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
+        SocketSendError::ResourceExhausted => SysError::Again,
+        SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
+        SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
+        SocketSendError::InvalidDestination => SysError::InvalidArgument,
+        SocketSendError::MessageTooLong => SysError::MessageTooLong,
         SocketSendError::Copy(error) => error,
-        SocketSendError::InvalidState
-        | SocketSendError::AddressInUse
-        | SocketSendError::AddressUnavailable
-        | SocketSendError::ResourceExhausted
-        | SocketSendError::NetworkUnreachable
-        | SocketSendError::InvalidDestination
-        | SocketSendError::MessageTooLong => {
-            unreachable!("datagram-only send outcome reached stream FileOps")
-        },
     }
 }
 

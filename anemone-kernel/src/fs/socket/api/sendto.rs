@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 
 use crate::{
     fs::socket::{
-        SocketSendPayload, SocketSendRequest, SocketStreamDestination, SocketType,
-        retry_socket_send, socket_from_file,
+        SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
+        SocketType, retry_socket_send, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -80,18 +80,20 @@ fn sys_sendto(
         .map(|sent| sent as u64);
     }
 
-    if addr == 0 {
-        return Err(SysError::DestinationAddressRequired);
-    }
-    let peer = read_sockaddr_in(addr, addrlen)?;
+    let destination = if addr == 0 {
+        None
+    } else {
+        Some(read_sockaddr_in(addr, addrlen)?)
+    };
     let mut payload = SendPayload {
         address: buf,
         len,
         bytes: None,
     };
+    let mut operation = SocketDatagramSendOperation::new();
     // Each family attempt releases its operation guard before the shared retry
-    // owner waits. The kernel payload remains the transaction copy across every
-    // current selection/admission retry.
+    // owner waits. Payload and the family's opaque destination/policy/selection
+    // snapshot remain operation-local across capacity retries.
     retry_socket_send(
         "sys_sendto",
         &task,
@@ -100,8 +102,9 @@ fn sys_sendto(
         false,
         || {
             socket.send(SocketSendRequest::Datagram {
-                peer: peer.clone(),
+                destination: destination.clone(),
                 payload: &mut payload,
+                operation: &mut operation,
             })
         },
         map_send_error,

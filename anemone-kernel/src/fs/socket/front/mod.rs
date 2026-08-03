@@ -5,7 +5,10 @@ mod operation;
 
 use anemone_net_api::Ipv4Address;
 
-use crate::{prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{
+    prelude::*,
+    utils::any_opaque::{AnyOpaque, Opaque},
+};
 
 #[cfg(feature = "kunit")]
 use file::{SliceReadSink, SliceWriteSource};
@@ -16,11 +19,13 @@ pub(super) use operation::{retry_socket_receive, retry_socket_send, wait_for_soc
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketType {
     Ipv4Udp,
+    Ipv4IcmpRaw,
     UnixStream,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum SocketAddress {
+    Unspecified,
     Ipv4 { address: Ipv4Address, port: u16 },
     UnixPathname(Arc<str>),
 }
@@ -93,6 +98,7 @@ pub(super) enum SocketSendError {
     AddressUnavailable,
     ResourceExhausted,
     NetworkUnreachable,
+    DestinationRequired,
     InvalidDestination,
     MessageTooLong,
     PeerClosed,
@@ -113,6 +119,40 @@ pub(super) trait SocketSendPayload {
     fn bytes(&mut self) -> Result<&[u8], SysError>;
 }
 
+/// Opaque family snapshot retained for one datagram send operation.
+///
+/// A blocking retry must reuse operation-local destination, policy, and route
+/// selection without retaining a family lock or exposing those values to the
+/// common front. The family installs at most one immutable snapshot here; the
+/// object is discarded when the syscall or FileOps operation returns.
+pub(super) struct SocketDatagramSendOperation {
+    family_snapshot: Option<AnyOpaque>,
+}
+
+impl SocketDatagramSendOperation {
+    pub(super) const fn new() -> Self {
+        Self {
+            family_snapshot: None,
+        }
+    }
+
+    pub(super) fn family_snapshot<T: Opaque>(&self) -> Option<&T> {
+        self.family_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.cast::<T>())
+    }
+
+    pub(super) fn install_family_snapshot<T: Opaque>(&mut self, snapshot: T) -> &T {
+        assert!(
+            self.family_snapshot.is_none(),
+            "Socket datagram send operation installed two family snapshots"
+        );
+        self.family_snapshot = Some(AnyOpaque::new(snapshot));
+        self.family_snapshot::<T>()
+            .expect("fresh Socket datagram send snapshot changed type")
+    }
+}
+
 pub(super) trait SocketAddressSink {
     fn copy_address(&mut self, address: Option<SocketAddress>) -> Result<(), SysError>;
 }
@@ -121,13 +161,13 @@ pub(super) trait SocketReceiveSink {
     fn copy_datagram(&mut self, payload: &[u8], peer: SocketAddress) -> Result<usize, SysError>;
 }
 
-pub(super) trait SocketStreamReadSink {
+pub(super) trait SocketReadSink {
     fn remaining(&self) -> usize;
 
     fn copy_bytes(&mut self, bytes: &[u8]) -> Result<usize, SysError>;
 }
 
-pub(super) trait SocketStreamWriteSource {
+pub(super) trait SocketWriteSource {
     fn remaining(&self) -> usize;
 
     fn copy_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, SysError>;
@@ -140,25 +180,96 @@ pub(super) enum SocketStreamDestination {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketFileIo {
+    Unsupported,
+    ByteStream,
+    Datagram,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct SocketReceiveFlags {
     pub(super) peek: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketReceiveOutcome {
+    ByteStream { copied: usize },
+    Datagram { copied: usize, packet_length: usize },
+}
+
+impl SocketReceiveOutcome {
+    pub(super) const fn byte_stream(copied: usize) -> Self {
+        Self::ByteStream { copied }
+    }
+
+    pub(super) const fn datagram(copied: usize, packet_length: usize) -> Self {
+        Self::Datagram {
+            copied,
+            packet_length,
+        }
+    }
+
+    pub(super) const fn copied(self) -> usize {
+        match self {
+            Self::ByteStream { copied } | Self::Datagram { copied, .. } => copied,
+        }
+    }
+
+    pub(super) const fn packet_length(self) -> Option<usize> {
+        match self {
+            Self::ByteStream { .. } => None,
+            Self::Datagram { packet_length, .. } => Some(packet_length),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketOptionQuery {
+    Ipv4TimeToLive,
+    Ipv4TypeOfService,
+    IcmpTypeFilter,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketOptionValue {
+    Ipv4TimeToLive(u8),
+    Ipv4TypeOfService(u8),
+    IcmpTypeFilter(u32),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketOptionMutation {
+    Ipv4TimeToLive(u8),
+    Ipv4TypeOfService(u8),
+    IcmpTypeFilter(u32),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketOptionError {
+    Unsupported,
+    Retired,
+    InvalidValue,
+}
+
 pub(super) enum SocketSendRequest<'a> {
     Datagram {
-        peer: SocketAddress,
+        destination: Option<SocketAddress>,
         payload: &'a mut dyn SocketSendPayload,
+        operation: &'a mut SocketDatagramSendOperation,
     },
     Stream {
-        source: &'a mut dyn SocketStreamWriteSource,
+        source: &'a mut dyn SocketWriteSource,
         destination: SocketStreamDestination,
     },
 }
 
 pub(super) enum SocketReceiveRequest<'a> {
-    Datagram(&'a mut dyn SocketReceiveSink),
+    Datagram {
+        sink: &'a mut dyn SocketReceiveSink,
+        flags: SocketReceiveFlags,
+    },
     Stream {
-        sink: &'a mut dyn SocketStreamReadSink,
+        sink: &'a mut dyn SocketReadSink,
         flags: SocketReceiveFlags,
     },
 }
@@ -198,6 +309,7 @@ pub(super) struct SocketAcceptItem {
 
 pub(super) struct SocketOps {
     pub(super) socket_type: SocketType,
+    pub(super) file_io: SocketFileIo,
     pub(super) create: Option<fn() -> Result<SocketPreparation, SysError>>,
     pub(super) create_pair: Option<fn() -> Result<SocketPairPreparation, SysError>>,
     pub(super) bind: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketBindError>>,
@@ -213,8 +325,15 @@ pub(super) struct SocketOps {
     pub(super) send:
         Option<for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>>,
     pub(super) receive: Option<
-        for<'a> fn(&AnyOpaque, SocketReceiveRequest<'a>) -> Result<usize, SocketReceiveError>,
+        for<'a> fn(
+            &AnyOpaque,
+            SocketReceiveRequest<'a>,
+        ) -> Result<SocketReceiveOutcome, SocketReceiveError>,
     >,
+    pub(super) query_option:
+        Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
+    pub(super) mutate_option:
+        Option<fn(&AnyOpaque, SocketOptionMutation) -> Result<(), SocketOptionError>>,
     pub(super) poll:
         for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
     pub(super) final_release: fn(&AnyOpaque),
@@ -239,6 +358,10 @@ impl core::fmt::Debug for Socket {
 impl Socket {
     pub(super) const fn socket_type(&self) -> SocketType {
         self.ops.socket_type
+    }
+
+    pub(super) const fn file_io(&self) -> SocketFileIo {
+        self.ops.file_io
     }
 
     pub(super) fn bind(&self, address: SocketAddress) -> Result<(), SocketBindError> {
@@ -293,8 +416,26 @@ impl Socket {
     pub(super) fn receive(
         &self,
         request: SocketReceiveRequest<'_>,
-    ) -> Result<usize, SocketReceiveError> {
+    ) -> Result<SocketReceiveOutcome, SocketReceiveError> {
         self.ops.receive.ok_or(SocketReceiveError::Unsupported)?(&self.private, request)
+    }
+
+    pub(super) fn query_option(
+        &self,
+        query: SocketOptionQuery,
+    ) -> Result<SocketOptionValue, SocketOptionError> {
+        self.ops
+            .query_option
+            .ok_or(SocketOptionError::Unsupported)?(&self.private, query)
+    }
+
+    pub(super) fn mutate_option(
+        &self,
+        mutation: SocketOptionMutation,
+    ) -> Result<(), SocketOptionError> {
+        self.ops
+            .mutate_option
+            .ok_or(SocketOptionError::Unsupported)?(&self.private, mutation)
     }
 
     fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
@@ -410,7 +551,7 @@ mod kunits {
                 sink: &mut empty,
                 flags: SocketReceiveFlags { peek: false },
             }),
-            Ok(0)
+            Ok(SocketReceiveOutcome::byte_stream(0))
         );
         let mut received = [0u8; 1];
         let mut sink = SliceReadSink {
@@ -421,7 +562,7 @@ mod kunits {
                 sink: &mut sink,
                 flags: SocketReceiveFlags { peek: false },
             }),
-            Ok(1)
+            Ok(SocketReceiveOutcome::byte_stream(1))
         );
         assert_eq!(received, *b"x");
 

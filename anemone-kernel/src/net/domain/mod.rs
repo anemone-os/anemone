@@ -5,7 +5,8 @@ mod interfaces;
 mod stack;
 
 pub(super) use control_plane::{
-    ControlPlaneActivationError, ExternalControlInput, Ipv4ControlPlane, SelectionError,
+    ControlPlaneActivationError, ExternalControlInput, Ipv4ControlPlane, Ipv4Selection,
+    SelectionError,
 };
 use interfaces::LogicalInterfaces;
 pub(super) use interfaces::{LogicalInterfaceReservation, LogicalInterfaceSnapshot};

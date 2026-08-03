@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-use super::{SocketReceiveError, SocketSendError, SocketWait};
+use super::{SocketReceiveError, SocketReceiveOutcome, SocketSendError, SocketWait};
 
 fn wait_for_socket_source(
     context: &'static str,
@@ -86,7 +86,9 @@ fn send_sigpipe(task: &Arc<Task>) {
 
 /// Retries a family-owned send attempt after the file's owner-defined
 /// writability predicate. A `WouldBlock` result must not retain a family
-/// operation guard; this driver carries no family state across the wait.
+/// operation guard. The caller may retain one immutable, family-private send
+/// snapshot in its operation object, but the retry driver carries no mutable
+/// family or readiness state across the wait.
 pub(in crate::fs::socket) fn retry_socket_send(
     context: &'static str,
     task: &Arc<Task>,
@@ -121,9 +123,9 @@ pub(in crate::fs::socket) fn retry_socket_receive(
     task: &Arc<Task>,
     file: &File,
     nonblocking: bool,
-    mut attempt: impl FnMut() -> Result<usize, SocketReceiveError>,
+    mut attempt: impl FnMut() -> Result<SocketReceiveOutcome, SocketReceiveError>,
     map_error: impl Fn(SocketReceiveError) -> SysError,
-) -> Result<usize, SysError> {
+) -> Result<SocketReceiveOutcome, SysError> {
     loop {
         match attempt() {
             Ok(received) => return Ok(received),

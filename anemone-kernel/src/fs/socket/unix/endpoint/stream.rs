@@ -2,8 +2,8 @@
 
 use crate::{
     fs::socket::{
-        SocketReceiveError, SocketReceiveRequest, SocketSendError, SocketSendRequest,
-        SocketShutdown, SocketShutdownError, SocketStreamDestination,
+        SocketReceiveError, SocketReceiveOutcome, SocketReceiveRequest, SocketSendError,
+        SocketSendRequest, SocketShutdown, SocketShutdownError, SocketStreamDestination,
     },
     kconfig_defs::UNIX_STREAM_DIRECTION_CAPACITY_BYTES,
     prelude::*,
@@ -185,12 +185,12 @@ fn validate_connection(
 pub(super) fn receive_unix_stream(
     private: &AnyOpaque,
     request: SocketReceiveRequest<'_>,
-) -> Result<usize, SocketReceiveError> {
+) -> Result<SocketReceiveOutcome, SocketReceiveError> {
     let SocketReceiveRequest::Stream { sink, flags } = request else {
         return Err(SocketReceiveError::Unsupported);
     };
     if sink.remaining() == 0 {
-        return Ok(0);
+        return Ok(SocketReceiveOutcome::byte_stream(0));
     }
     let endpoint = &endpoint(private).core;
     let (connection, side) = endpoint.connected().map_err(|error| match error {
@@ -216,7 +216,7 @@ pub(super) fn receive_unix_stream(
             return if incoming.writer_open && incoming.reader_open {
                 Err(SocketReceiveError::WouldBlock)
             } else {
-                Ok(0)
+                Ok(SocketReceiveOutcome::byte_stream(0))
             };
         }
         sink.remaining().min(incoming.bytes.len())
@@ -248,7 +248,7 @@ pub(super) fn receive_unix_stream(
             },
             EndpointAccessError::Retired => SocketReceiveError::Retired,
         })?;
-        return Ok(copied);
+        return Ok(SocketReceiveOutcome::byte_stream(copied));
     }
 
     let (reader_routes, writer_routes) = {
@@ -278,7 +278,7 @@ pub(super) fn receive_unix_stream(
     };
     notify_routes(&reader_routes, Some(PollEvent::READABLE), "read commit");
     notify_routes(&writer_routes, Some(PollEvent::WRITABLE), "read commit");
-    Ok(copied)
+    Ok(SocketReceiveOutcome::byte_stream(copied))
 }
 
 pub(super) fn send_unix_stream(

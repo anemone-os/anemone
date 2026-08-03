@@ -1,6 +1,6 @@
 # RFC-20260803-icmp-raw-socket
 
-**状态：** Accepted for Implementation / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Not Active / Checkpoint 2B Not Active
+**状态：** Accepted for Implementation / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Closed / Checkpoint 2B Not Active
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-03
@@ -8,7 +8,7 @@
 **影响契约：** Refine `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`NET-PROTOCOL-BOUNDARY-001`、
 `NET-SOCKET-WAIT-001`；Introduce `NET-ICMP-RAW-INGRESS-001`、`NET-ICMP-RAW-ENDPOINT-001`、
 `NET-ICMP-RAW-TRANSACTION-001`
-**执行记录：** Git / PR；Checkpoint 1反馈间章已关闭且未创建transaction；Checkpoint 2A、Checkpoint 2B与contract cutover仍未授权
+**执行记录：** Git / PR；Checkpoint 1反馈间章与Checkpoint 2A已关闭且未创建transaction；Checkpoint 2B与contract cutover仍未授权
 
 ## 文档状态
 
@@ -28,7 +28,7 @@ Renegotiation，不能在实现中静默漂移。
 `ICMP-RAW-CUTOVER`：Checkpoint 1只关闭syscall不可达的protocol owner/packet path；Checkpoint 2A在继续拒绝raw tuple的
 前提下接入final-shape Socket consumer并独立review common front、wait与lifecycle；Checkpoint 2B才发布Linux ABI、完成
 产品验收并cutover。当前没有独立probe、transitional contract、多个cutover、tracking page或transaction；Checkpoint 1
-closure后追加的反馈间章已经关闭，仍必须停止，不得自动进入Checkpoint 2A、Checkpoint 2B或`ICMP-RAW-CUTOVER`。
+反馈间章与Checkpoint 2A已经分别关闭，当前必须停止，不得自动进入Checkpoint 2B或`ICMP-RAW-CUTOVER`。
 
 ## 摘要
 
@@ -270,7 +270,7 @@ Endpoint独占delivery，detach后由operation-local kernel transaction独占；
 
 ## Implementation Boundary
 
-本文R0已经接受，并通过分别授权的checkpoint按以下边界实施；当前Checkpoint 1已关闭，Checkpoint 2A与Checkpoint 2B均
+本文R0已经接受，并通过分别授权的checkpoint按以下边界实施；当前Checkpoint 1与Checkpoint 2A已关闭，Checkpoint 2B
 保持Not Active：
 
 - **允许改变：** Socket resolver/ABI/front中ICMP raw真实consumer所需的最窄surface；kernel raw family；shared
@@ -367,7 +367,7 @@ harness均为独立optional claim；未运行时记录Not Run，不阻塞R0，�
   [Opened-description](../../contracts/task/opened-description-lifecycle.md)、
   [Poll wait](../../contracts/iomux/poll-wait.md)、[Epoll](../../contracts/epoll/protocol.md)
 - external source registry：[公共引用规则](../../external-source-references.md)与`xref:linux-6.6.32`
-- commit / PR：Checkpoint 1 execution与反馈间章；Checkpoint 2A/2B future execution；optional transaction：None
+- commit / PR：Checkpoint 1 execution、反馈间章与Checkpoint 2A execution；Checkpoint 2B future execution；optional transaction：None
 
 ## 修订记录
 
@@ -377,6 +377,9 @@ harness均为独立optional claim；未运行时记录Not Run，不阻塞R0，�
 
 ## Closure
 
-R0已经接受；Checkpoint 1反馈间章已完成syscall不可达protocol owner与packet-path的Route Correction，独立复核无
-Apollyon、Keter或有证据的Euclid，Review Hold已经释放。guest syscall、architecture runtime、LTP与ping均保持Not Run，
-尚无contract cutover或current limitation变化。Checkpoint 2A与Checkpoint 2B均保持Not Active并等待分别授权。
+R0已经接受；Checkpoint 1反馈间章已完成syscall不可达protocol owner与packet-path的Route Correction。Checkpoint 2A又在
+resolver继续拒绝raw tuple的前提下完成final-shape kernel raw family、family-neutral datagram/FileOps/option front、
+operation-local immutable send snapshot、shared wait/opened-description lifecycle与独立review。最终复核为Apollyon 0、
+Keter 0；真实capacity retry和RX copy/peek完整矩阵仍是组合证明的非阻断Euclid，由Checkpoint 2B focused guest oracle增强，
+不建立test-only facade。raw guest ABI、curated Socket LTP、ping、LA64 runtime、hardware、`smp > 1`与final harness保持
+Not Run；尚无contract cutover、register/current limitation或transaction变化。Checkpoint 2B保持Not Active并等待单独授权。

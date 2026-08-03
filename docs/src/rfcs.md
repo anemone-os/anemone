@@ -57,8 +57,9 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 - [RFC-20260803-icmp-raw-socket](./rfcs/icmp-raw-socket/index.md)：R0已接受，Checkpoint 1已在反馈间章后关闭；提议交付自然闭合的IPv4 ICMP raw
   Socket，包括`CAP_NET_RAW`创建、bind/connect、send/receive/read/write、blocking/iomux、`IP_TTL`、`IP_TOS`、
   `ICMP_FILTER`与原始IPv4 RX字节。R0只覆盖unicast、未分片packet；`IP_HDRINCL`、任意protocol、broadcast/
-  multicast、message ABI与error queue保持非目标。Checkpoint 2A将接入仍然syscall不可达的final-shape Socket consumer，
-  Checkpoint 2B才发布ABI、完成产品验收并执行唯一current-contract cutover；两者均保持Not Active并等待分别授权；
+  multicast、message ABI与error queue保持非目标。Checkpoint 2A已接入仍然syscall不可达的final-shape Socket consumer，
+  并关闭common front、wait与lifecycle独立review；Checkpoint 2B才发布ABI、完成产品验收并执行唯一current-contract
+  cutover，当前保持Not Active并等待单独授权；
   [目标与不变量](./rfcs/icmp-raw-socket/invariants.md)固定owner、ingress/fanout、transaction与acceptance边界，
   [实施路线](./rfcs/icmp-raw-socket/implementation.md)以一个stage、三个checkpoint和唯一final cutover隔离protocol proof、
   Socket consumer review与ABI/产品验收。

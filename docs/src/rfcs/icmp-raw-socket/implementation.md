@@ -1,15 +1,16 @@
 # IPv4 ICMP Raw Socket 实施路线
 
-**状态：** R0 Accepted / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Not Active / Checkpoint 2B Not Active
+**状态：** R0 Accepted / Checkpoint 1 Closed after Feedback Interlude / Checkpoint 2A Closed / Checkpoint 2B Not Active
 **最后更新：** 2026-08-03
 **父 RFC：** [RFC-20260803-icmp-raw-socket](./index.md)
 **目标与不变量：** [目标与不变量](./invariants.md)
 **当前修订：** R0
-**执行授权：** Checkpoint 1反馈间章已关闭；Checkpoint 2A、Checkpoint 2B与contract cutover均未授权
+**执行授权：** Checkpoint 1反馈间章与Checkpoint 2A已关闭；Checkpoint 2B与contract cutover均未授权
 
 本文只长期保存跨 Socket、Network Stack 与 interface/IP owner 的实施顺序，不复制父 RFC 的 target、ABI matrix或
 acceptance。R0已接受；Checkpoint 1 closure后的软件工程审查触发Review Hold，本反馈间章只修复该checkpoint内的owner
-与composition偏差，现已通过独立复核并停止。Checkpoint 2A与Checkpoint 2B仍需分别授权。
+与composition偏差，并已通过独立复核。Checkpoint 2A随后按单独授权完成syscall不可达的Socket consumer与shared owner
+review；当前再次停止，Checkpoint 2B仍需单独授权。
 
 本路线只有一个implementation stage、三个checkpoint和一个最终cutover。Checkpoint 1把当前最高风险的
 post-admission packet seam及Stack raw owner闭合为syscall不可达的final-shape protocol capability；Checkpoint 2A在继续
@@ -190,7 +191,7 @@ frame/bounded/multi-instance/multi-interface/UDP topology回归；`just fmt kern
 
 独立change review确认没有遗留Apollyon、Keter或有证据的Euclid；dead-weak route pruning与当前两protocol的typed
 invalidation tuple均判定为Safe。`mdbook build docs`通过，因此Review Hold已经释放，Checkpoint 1在本反馈间章后重新关闭；
-不得进入Checkpoint 2A。
+当时按gate停止，并未自动进入Checkpoint 2A。
 
 **Cutover：** None。所有current contracts保持不变；Checkpoint 1 closure只说明protocol capability具备进入
 Checkpoint 2A Socket consumer review的条件。
@@ -202,7 +203,7 @@ interface/neighbor/provider path或把route/source truth下推；retire需要等
 
 ## Checkpoint 2A — Syscall 不可达的 Socket Consumer Integration
 
-**状态：** Not Active
+**状态：** Closed
 
 **Purpose：** 用Checkpoint 1 capability建立final-shape kernel ICMP raw Socket family，并在不注册raw tuple、不发布用户
 可见fd的前提下收敛general Socket第三个异构consumer所需的共同operation、FileOps、wait与lifecycle形状。该独立安全状态
@@ -243,6 +244,39 @@ contract ID。
   concrete downcast、second association/readiness/lifecycle truth或test-only production dependency。
 - resolver/source proof确认raw tuple仍不可达；RV64/LA64 build与documentation validation通过。raw focused guest ABI、
   curated Socket LTP与BusyBox ping保持**Not Run**，不能由owner-local proof或build替代。
+
+### Closure Evidence
+
+- kernel ICMP raw family已经通过静态descriptor接入common Socket front：Stack继续唯一拥有Endpoint lifecycle、
+  local/peer association、filter、queue与readiness facts；family只保存TTL/TOS和Linux raw peer-port投影，source只保存
+  Endpoint capability、reverse registration与non-owning poll routes。creation rollback与semantic final release都先撤销
+  source publication/route，再non-blocking移交Endpoint retire；late hint在retire后fail closed。
+- common front新增optional datagram destination、peek与完整packet-length receive outcome、静态ByteStream/Datagram
+  FileOps dispatch、normalized option query/mutation以及单次datagram send的opaque family snapshot。raw在第一次attempt固定
+  destination、TTL/TOS与control-plane route/source/interface selection；`WouldBlock`重试只重新执行Stack admission，不跨
+  wait持有mutex、control-plane/Stack借用、user cursor、ready truth或commit authority。UDP仍不开放read/write，Unix仍为
+  byte stream，既有family行为保持。
+- owner-local KUnit覆盖descriptor creation rollback/final release、bind/connect/disconnect与option snapshot、raw peer
+  prefix/完整packet length、common Datagram FileOps、blocking retry期间并发option/reconnect不改变send snapshot，以及
+  production `prepare_send`/`send_prepared`经`DomainStack::protocol_transition`到source reverse route和retire后的late-hint
+  isolation。最终RV64 fresh QEMU执行394/394 KUnit并报告`All tests passed!`；同次既有UDP 16/16、Unix 23/23回归通过。
+- `just test net-host`通过，包括11项ICMP raw Stack tests、33项vendored smoltcp IPv4 tests以及frame、bounded
+  progression、multi-instance、multi-interface和UDP topology回归；no-default-features build/check通过。`just test xtask`
+  74/74通过，`just fmt kernel --check`与`git diff --check`通过。
+- 最终源码的`qemu-virt-rv64-release`与`qemu-virt-la64-release`均完成discovery/final pass和symbol table验证。RV64较早的
+  sandbox build在lwext4 C compile触发`Bad system call`，相同canonical命令在sandbox外通过，因此该次失败只归类为
+  validation environment limitation。
+- 首轮独立software-engineering review发现blocking send重试会重新读取TTL/TOS与default peer的Keter；上述opaque
+  operation snapshot及focused KUnit修复后，同一reviewer复核为Apollyon 0、Keter 0。仍有两项不阻断closure的Euclid：
+  raw retry与真实Stack saturation/recovery分别证明，RX peek/detach owner与copy prefix/length/fault边界也分别证明，尚未由
+  单个production-family case串起完整组合矩阵。当前源码路径和owner model无偏差；最小增强是在Checkpoint 2B focused
+  guest oracle中串起真实capacity retry和peek/non-peek的zero/short/fault矩阵，不为此建立test-only production facade。
+- source audit确认resolver仍拒绝局部测试值`AF_INET + SOCK_RAW + IPPROTO_ICMP`，没有公开raw tuple常量、
+  `CAP_NET_RAW` admission、raw fd publication、raw-only FileOps/wait loop、concrete family downcast、第二份
+  association/readiness/lifecycle truth或test-only production dependency。
+- raw focused guest ABI、curated Socket LTP、BusyBox ping、LA64 runtime、hardware、`smp > 1`与final harness：
+  **Not Run**。RV64 KUnit与build不能替代这些Checkpoint 2B product claims。
+- `mdbook build docs`通过。Cutover为None；未更新current contract、register或transaction，Git commit拥有2A执行证据。
 
 **Cutover：** None。所有current contracts保持effective；syscall不可达的final-shape Socket consumer及其review只构成进入
 Checkpoint 2B ABI publication的前置证据。

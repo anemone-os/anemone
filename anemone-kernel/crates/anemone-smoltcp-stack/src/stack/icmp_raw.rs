@@ -3,10 +3,10 @@
 use anemone_net_api::{
     InterfaceId, Ipv4Address, Ipv4EgressSelection,
     icmp_raw::{
-        IcmpRawAssociation, IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy,
-        IcmpRawEndpointConfig, IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointLimits,
-        IcmpRawMutationError, IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket,
-        IcmpRawRetireError, IcmpRawSendError, IcmpRawTypeFilter,
+        IcmpRawCreateError, IcmpRawDropDiagnostics, IcmpRawEgressPolicy, IcmpRawEndpointConfig,
+        IcmpRawEndpointFacts, IcmpRawEndpointId, IcmpRawEndpointLimits, IcmpRawMutationError,
+        IcmpRawQueryError, IcmpRawReceiveError, IcmpRawReceivedPacket, IcmpRawRetireError,
+        IcmpRawSendError, IcmpRawTypeFilter,
     },
 };
 use smoltcp::wire::{IpCidr, Ipv4Address as SmoltcpIpv4Address};
@@ -21,14 +21,30 @@ impl Stack {
         self.protocols.icmp_raw.create(limits)
     }
 
-    pub fn set_icmp_raw_association(
+    pub fn bind_icmp_raw_endpoint(
         &mut self,
         endpoint: IcmpRawEndpointId,
-        association: IcmpRawAssociation,
+        local: Option<Ipv4Address>,
+    ) -> Result<(), IcmpRawMutationError> {
+        self.protocols.icmp_raw.bind(endpoint, local)
+    }
+
+    pub fn connect_icmp_raw_endpoint(
+        &mut self,
+        endpoint: IcmpRawEndpointId,
+        selected_source: Ipv4Address,
+        peer: Ipv4Address,
     ) -> Result<(), IcmpRawMutationError> {
         self.protocols
             .icmp_raw
-            .set_association(endpoint, association)
+            .connect(endpoint, selected_source, peer)
+    }
+
+    pub fn disconnect_icmp_raw_endpoint(
+        &mut self,
+        endpoint: IcmpRawEndpointId,
+    ) -> Result<(), IcmpRawMutationError> {
+        self.protocols.icmp_raw.disconnect(endpoint)
     }
 
     pub fn set_icmp_raw_filter(

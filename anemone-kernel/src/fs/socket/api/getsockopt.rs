@@ -20,14 +20,23 @@ fn query_value(socket: &Socket, option: i32) -> Result<i32, SysError> {
         SO_TYPE => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => SOCK_DGRAM,
             SocketType::UnixStream => SOCK_STREAM,
+            SocketType::Ipv4IcmpRaw => {
+                unreachable!("ICMP raw Socket descriptor is not fd-reachable before Checkpoint 2B")
+            },
         }),
         SO_DOMAIN => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => AF_INET,
             SocketType::UnixStream => AF_UNIX,
+            SocketType::Ipv4IcmpRaw => {
+                unreachable!("ICMP raw Socket descriptor is not fd-reachable before Checkpoint 2B")
+            },
         }),
         SO_PROTOCOL => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => IPPROTO_UDP,
             SocketType::UnixStream => 0,
+            SocketType::Ipv4IcmpRaw => {
+                unreachable!("ICMP raw Socket descriptor is not fd-reachable before Checkpoint 2B")
+            },
         }),
         SO_ACCEPTCONN => socket
             .is_accepting()

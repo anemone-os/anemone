@@ -90,4 +90,14 @@ mod kunits {
         );
         creation.commit();
     }
+
+    #[kunit]
+    fn resolver_keeps_icmp_raw_tuple_unreachable_in_checkpoint_2a() {
+        // Linux SOCK_RAW and IPPROTO_ICMP are intentionally local test values:
+        // Checkpoint 2B owns their public ABI constants and tuple publication.
+        assert!(matches!(
+            resolve_socket(AF_INET, 3, 1),
+            Err(SysError::SocketTypeNotSupported)
+        ));
+    }
 }

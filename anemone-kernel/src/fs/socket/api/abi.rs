@@ -93,7 +93,7 @@ pub(super) fn read_socket_address(
     len: u32,
 ) -> Result<SocketAddress, SysError> {
     match socket_type {
-        SocketType::Ipv4Udp => read_sockaddr_in(addr, len),
+        SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw => read_sockaddr_in(addr, len),
         SocketType::UnixStream => read_sockaddr_un(addr, len),
     }
 }
@@ -143,12 +143,15 @@ fn write_sockaddr_bytes(addr: u64, addrlen: u64, bytes: &[u8]) -> Result<(), Sys
 
 fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>) -> Vec<u8> {
     match (socket_type, address) {
-        (SocketType::Ipv4Udp, None) => {
+        (SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw, None) => {
             let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes
         },
-        (SocketType::Ipv4Udp, Some(SocketAddress::Ipv4 { address, port })) => {
+        (
+            SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw,
+            Some(SocketAddress::Ipv4 { address, port }),
+        ) => {
             let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes[2..4].copy_from_slice(&port.to_be_bytes());
@@ -162,6 +165,9 @@ fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>)
             bytes.extend_from_slice(pathname.as_bytes());
             bytes.push(0);
             bytes
+        },
+        (_, Some(SocketAddress::Unspecified)) => {
+            panic!("Socket family returned AF_UNSPEC from an address query")
         },
         _ => panic!("Socket family returned an address of another semantic type"),
     }
@@ -231,6 +237,9 @@ pub(super) fn validate_send_message_flags(
     let supported = match socket_type {
         SocketType::Ipv4Udp => MSG_DONTWAIT,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_NOSIGNAL,
+        // Checkpoint 2A descriptors are not fd-reachable. Checkpoint 2B removes
+        // this publication guard when its Linux flag matrix activates.
+        SocketType::Ipv4IcmpRaw => 0,
     };
     if flags & !supported != 0 {
         knoticeln!("socket: unsupported sendto flags {:#x}", flags);
@@ -254,6 +263,8 @@ pub(super) fn validate_receive_message_flags(
     let supported = match socket_type {
         SocketType::Ipv4Udp => MSG_DONTWAIT,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_PEEK,
+        // See the send-side Checkpoint 2A publication guard above.
+        SocketType::Ipv4IcmpRaw => 0,
     };
     if flags & !supported != 0 {
         knoticeln!("socket: unsupported recvfrom flags {:#x}", flags);
@@ -297,6 +308,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
         SocketSendError::ResourceExhausted | SocketSendError::WouldBlock => SysError::Again,
         SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
+        SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,
         SocketSendError::MessageTooLong => SysError::MessageTooLong,
         SocketSendError::PeerClosed => SysError::BrokenPipe,

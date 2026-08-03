@@ -120,6 +120,8 @@ pub struct Parameters {
     pub net_icmp_raw_tx_byte_capacity: Option<usize>,
     pub net_icmp_raw_rx_packet_capacity: Option<usize>,
     pub net_icmp_raw_rx_byte_capacity: Option<usize>,
+    pub net_icmp_raw_default_ttl: Option<u8>,
+    pub net_icmp_raw_default_tos: Option<u8>,
 }
 
 impl Parameters {
@@ -216,6 +218,8 @@ impl Parameters {
         materialize!(net_icmp_raw_tx_byte_capacity);
         materialize!(net_icmp_raw_rx_packet_capacity);
         materialize!(net_icmp_raw_rx_byte_capacity);
+        materialize!(net_icmp_raw_default_ttl);
+        materialize!(net_icmp_raw_default_tos);
         Ok(())
     }
 
@@ -419,6 +423,10 @@ pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = {};
 pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = {};
 /// Per-endpoint detached ICMP raw receive packet bytes.
 pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
+/// Default IPv4 TTL for ICMP raw Socket sends.
+pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = {};
+/// Default IPv4 TOS for ICMP raw Socket sends.
+pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -494,6 +502,8 @@ pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
             resolved!(net_icmp_raw_tx_byte_capacity),
             resolved!(net_icmp_raw_rx_packet_capacity),
             resolved!(net_icmp_raw_rx_byte_capacity),
+            resolved!(net_icmp_raw_default_ttl),
+            resolved!(net_icmp_raw_default_tos),
         )
     }
 }
@@ -565,6 +575,8 @@ mod tests {
             "pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = 65536;",
             "pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = 64;",
             "pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = 262144;",
+            "pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = 64;",
+            "pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = 0;",
         ] {
             assert!(
                 generated.contains(expected),
