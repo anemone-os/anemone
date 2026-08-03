@@ -354,6 +354,25 @@ pub fn linkat(
     .map(|_| ())
 }
 
+pub fn renameat2(
+    olddirfd: AtFd,
+    oldpath: &Path,
+    newdirfd: AtFd,
+    newpath: &Path,
+    flags: u32,
+) -> Result<(), Errno> {
+    let oldpath = CString::new(oldpath.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    let newpath = CString::new(newpath.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    fs::renameat2(
+        olddirfd.to_raw() as u64,
+        oldpath.as_ptr() as u64,
+        newdirfd.to_raw() as u64,
+        newpath.as_ptr() as u64,
+        flags as u64,
+    )
+    .map(|_| ())
+}
+
 pub fn close(fd: Fd) -> Result<(), Errno> {
     fs::close(fd as u64).map(|_| ())
 }

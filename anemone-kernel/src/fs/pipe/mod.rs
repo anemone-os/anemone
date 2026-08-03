@@ -1,7 +1,4 @@
-//! In current implementation this is not a real filesystem. It just leverages
-//! anonymous inodes to create pipes.
-//!
-//! Only anonymous pipes are supported for now.
+//! Pipe data plane and anonymous/named FIFO endpoint lifecycle.
 
 mod capacity;
 mod io;
@@ -18,7 +15,7 @@ use crate::{
 
 use poll::{PipePollRoute, notify_pipe_poll_routes};
 
-pub(crate) use io::pipe_rx_file_desc_ops;
+pub(crate) use io::pipe_file_desc_ops;
 
 const PIPE_ATOMIC_WRITE_BYTES: usize = PagingArch::PAGE_SIZE_BYTES;
 const PIPE_DEFAULT_CAPACITY_BYTES: usize = PIPE_CAPACITY_PAGES
@@ -82,6 +79,10 @@ static PIPE_INODE_OPS: InodeOps = InodeOps {
 #[derive(Opaque)]
 struct Pipe {
     inner: SpinLock<PipeInner>,
+    /// Serializes every reader's kernel-buffer and direct-user consumption in
+    /// this session. Named FIFO opens create distinct endpoints, so this gate
+    /// must live with the shared byte owner rather than any one endpoint.
+    read_operation: Mutex<()>,
     /// Direct read/write waiters only use these events as recheck hints. The
     /// authoritative predicates remain under `inner`, and every publication
     /// happens after releasing that lock.
@@ -96,6 +97,11 @@ struct PipeInner {
     buf: HeapRingBuffer<u8>,
     rx_cnt: usize,
     tx_cnt: usize,
+    /// Monotonic admission generations remember an overlapping partner even if
+    /// it retires before a blocking opener is scheduled. They are session-local
+    /// protocol state and disappear with the Pipe.
+    rx_generation: u64,
+    tx_generation: u64,
 
     /// Copy-on-write registries let predicate transitions clone a snapshot
     /// under the pipe lock without allocating. Subscription builds a fallible
@@ -105,32 +111,129 @@ struct PipeInner {
     tx_poll_routes: Arc<Vec<PipePollRoute>>,
 }
 
+/// The resident FIFO inode's only runtime rendezvous slot.
+///
+/// The weak reference does not own the Pipe session. Endpoints, pending opens,
+/// and in-flight file operations provide the strong capabilities; when they are
+/// gone a later open replaces the stale weak reference with a fresh empty Pipe.
+pub(in crate::fs) struct FifoAnchor {
+    current: SpinLock<Weak<Pipe>>,
+}
+
+impl FifoAnchor {
+    pub(in crate::fs) fn new() -> Self {
+        Self {
+            current: SpinLock::new(Weak::new()),
+        }
+    }
+
+    fn get_or_create(&self) -> Result<Arc<Pipe>, SysError> {
+        if let Some(pipe) = self.current.lock().upgrade() {
+            return Ok(pipe);
+        }
+
+        // Candidate allocation stays outside the anchor lock. A concurrent
+        // winner is reused; the losing empty candidate has no participants,
+        // bytes, routes, or externally visible side effects.
+        let candidate = Pipe::try_new()?;
+        let mut current = self.current.lock();
+        if let Some(pipe) = current.upgrade() {
+            return Ok(pipe);
+        }
+        *current = Arc::downgrade(&candidate);
+        Ok(candidate)
+    }
+
+    fn install(&self, pipe: &Arc<Pipe>) {
+        let mut current = self.current.lock();
+        assert!(
+            current.upgrade().is_none(),
+            "fresh FIFO inode already has a live Pipe session"
+        );
+        *current = Arc::downgrade(pipe);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PipeAccess {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+impl PipeAccess {
+    const fn can_read(self) -> bool {
+        matches!(self, Self::Read | Self::ReadWrite)
+    }
+
+    const fn can_write(self) -> bool {
+        matches!(self, Self::Write | Self::ReadWrite)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::fs) enum FifoOpenAccess {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+impl From<FifoOpenAccess> for PipeAccess {
+    fn from(access: FifoOpenAccess) -> Self {
+        match access {
+            FifoOpenAccess::Read => Self::Read,
+            FifoOpenAccess::Write => Self::Write,
+            FifoOpenAccess::ReadWrite => Self::ReadWrite,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::fs) struct FifoOpenContext {
+    access: FifoOpenAccess,
+    nonblock: bool,
+}
+
+impl FifoOpenContext {
+    pub(in crate::fs) const fn new(access: FifoOpenAccess, nonblock: bool) -> Self {
+        Self { access, nonblock }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PartnerGeneration {
+    rx: u64,
+    tx: u64,
+}
+
 impl Pipe {
-    fn new_anonymous() -> Result<(PipeRx, PipeTx), SysError> {
+    fn try_new() -> Result<Arc<Self>, SysError> {
         let buf = HeapRingBuffer::try_new(PIPE_DEFAULT_CAPACITY_BYTES)
             .map_err(|_| SysError::OutOfMemory)?;
         let rx_poll_routes = Arc::try_new(Vec::new()).map_err(|_| SysError::OutOfMemory)?;
         let tx_poll_routes = Arc::try_new(Vec::new()).map_err(|_| SysError::OutOfMemory)?;
-        let pipe = Arc::try_new(Pipe {
+        Arc::try_new(Pipe {
             inner: SpinLock::new(PipeInner {
                 buf,
-                rx_cnt: 1,
-                tx_cnt: 1,
+                rx_cnt: 0,
+                tx_cnt: 0,
+                rx_generation: 0,
+                tx_generation: 0,
                 rx_poll_routes,
                 tx_poll_routes,
             }),
+            read_operation: Mutex::new(()),
             read_recheck: Event::new(),
             write_recheck: Event::new(),
         })
-        .map_err(|_| SysError::OutOfMemory)?;
+        .map_err(|_| SysError::OutOfMemory)
+    }
 
-        Ok((
-            PipeRx {
-                pipe: pipe.clone(),
-                operation: Mutex::new(()),
-            },
-            PipeTx { pipe },
-        ))
+    fn new_anonymous() -> Result<(PipeEndpoint, PipeEndpoint), SysError> {
+        let pipe = Self::try_new()?;
+        let rx = PipeAdmission::begin(pipe.clone(), PipeAccess::Read).commit();
+        let tx = PipeAdmission::begin(pipe, PipeAccess::Write).commit();
+        Ok((rx, tx))
     }
 
     fn wait_until_read_can_continue(&self) -> bool {
@@ -152,6 +255,27 @@ impl Pipe {
                 }
         })
     }
+
+    fn partner_arrived(&self, access: PipeAccess, observed: PartnerGeneration) -> bool {
+        let pipe = self.inner.lock();
+        match access {
+            PipeAccess::Read => pipe.tx_cnt > 0 || pipe.tx_generation != observed.tx,
+            PipeAccess::Write => pipe.rx_cnt > 0 || pipe.rx_generation != observed.rx,
+            PipeAccess::ReadWrite => true,
+        }
+    }
+
+    fn wait_for_partner(&self, access: PipeAccess, observed: PartnerGeneration) -> bool {
+        match access {
+            PipeAccess::Read => self
+                .read_recheck
+                .listen(false, || self.partner_arrived(access, observed)),
+            PipeAccess::Write => self
+                .write_recheck
+                .listen(false, || self.partner_arrived(access, observed)),
+            PipeAccess::ReadWrite => true,
+        }
+    }
 }
 
 impl PipeInner {
@@ -165,79 +289,231 @@ impl PipeInner {
 }
 
 #[derive(Opaque)]
-struct PipeRx {
+struct PipeEndpoint {
     pipe: Arc<Pipe>,
-    /// Serializes consumption by kernel-buffer reads and direct-user read
-    /// transactions. Pipe bytes remain owned solely by `PipeInner::buf`; this
-    /// gate only keeps a staged prefix stable until copyout commits its exact
-    /// count.
-    operation: Mutex<()>,
+    access: PipeAccess,
+    /// Stable writer-generation snapshot for the Linux named-FIFO exception
+    /// that suppresses HUP on a nonblocking reader opened before any writer.
+    /// `PipeInner::tx_generation` remains the truth source; this snapshot may
+    /// become stale and only gates that endpoint's poll projection.
+    initial_no_writer_generation: Option<u64>,
 }
 
-impl Drop for PipeRx {
+impl Drop for PipeEndpoint {
     fn drop(&mut self) {
-        let routes = {
-            let mut pipe = self.pipe.inner.lock();
-            pipe.rx_cnt -= 1;
-            (pipe.rx_cnt == 0).then(|| pipe.tx_poll_routes.clone())
-        };
-
-        if routes.is_some() {
-            self.pipe.write_recheck.publish(usize::MAX, false);
-        }
-        notify_pipe_poll_routes(routes, None, "tx", "rx_drop");
+        retire_participation(&self.pipe, self.access);
     }
 }
 
-#[derive(Opaque)]
-struct PipeTx {
-    pipe: Arc<Pipe>,
+struct PipeAdmission {
+    pipe: Option<Arc<Pipe>>,
+    access: PipeAccess,
+    observed: PartnerGeneration,
+    initial_no_writer_generation: Option<u64>,
 }
 
-impl Drop for PipeTx {
-    fn drop(&mut self) {
-        let routes = {
-            let mut pipe = self.pipe.inner.lock();
-            pipe.tx_cnt -= 1;
-            (pipe.tx_cnt == 0).then(|| pipe.rx_poll_routes.clone())
-        };
+struct ParticipationStart {
+    observed: PartnerGeneration,
+    partner_present: bool,
+}
 
-        if routes.is_some() {
-            self.pipe.read_recheck.publish(usize::MAX, false);
+impl PipeAdmission {
+    fn begin(pipe: Arc<Pipe>, access: PipeAccess) -> Self {
+        let start = add_participation(&pipe, access);
+        Self {
+            pipe: Some(pipe),
+            access,
+            observed: start.observed,
+            initial_no_writer_generation: None,
         }
-        notify_pipe_poll_routes(routes, None, "rx", "tx_drop");
+    }
+
+    fn begin_nonblocking_reader(pipe: Arc<Pipe>) -> Self {
+        let start = add_participation(&pipe, PipeAccess::Read);
+        Self {
+            pipe: Some(pipe),
+            access: PipeAccess::Read,
+            observed: start.observed,
+            initial_no_writer_generation: (!start.partner_present).then_some(start.observed.tx),
+        }
+    }
+
+    fn begin_nonblocking_writer(pipe: Arc<Pipe>) -> Result<Self, SysError> {
+        let Some(start) = add_participation_if(&pipe, PipeAccess::Write, |inner| inner.rx_cnt > 0)
+        else {
+            return Err(SysError::NoSuchDeviceOrAddress);
+        };
+        Ok(Self {
+            pipe: Some(pipe),
+            access: PipeAccess::Write,
+            observed: start.observed,
+            initial_no_writer_generation: None,
+        })
+    }
+
+    fn partner_arrived(&self) -> bool {
+        self.pipe
+            .as_ref()
+            .expect("active pipe admission lost its Pipe")
+            .partner_arrived(self.access, self.observed)
+    }
+
+    fn wait_for_partner(&self) -> bool {
+        self.pipe
+            .as_ref()
+            .expect("active pipe admission lost its Pipe")
+            .wait_for_partner(self.access, self.observed)
+    }
+
+    fn commit(mut self) -> PipeEndpoint {
+        let pipe = self
+            .pipe
+            .take()
+            .expect("pipe admission committed more than once");
+        PipeEndpoint {
+            pipe,
+            access: self.access,
+            initial_no_writer_generation: self.initial_no_writer_generation,
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PipeEndpointSide {
-    Read,
-    Write,
+impl Drop for PipeAdmission {
+    fn drop(&mut self) {
+        if let Some(pipe) = self.pipe.take() {
+            retire_participation(&pipe, self.access);
+        }
+    }
+}
+
+fn add_participation(pipe: &Arc<Pipe>, access: PipeAccess) -> ParticipationStart {
+    add_participation_if(pipe, access, |_| true)
+        .expect("unconditional pipe participation was rejected")
+}
+
+fn add_participation_if(
+    pipe: &Arc<Pipe>,
+    access: PipeAccess,
+    admit: impl FnOnce(&PipeInner) -> bool,
+) -> Option<ParticipationStart> {
+    let (start, rx_routes, tx_routes) = {
+        let mut inner = pipe.inner.lock();
+        if !admit(&inner) {
+            return None;
+        }
+        let observed = PartnerGeneration {
+            rx: inner.rx_generation,
+            tx: inner.tx_generation,
+        };
+        let partner_present = match access {
+            PipeAccess::Read => inner.tx_cnt > 0,
+            PipeAccess::Write => inner.rx_cnt > 0,
+            PipeAccess::ReadWrite => true,
+        };
+        let mut rx_routes = None;
+        let mut tx_routes = None;
+        if access.can_read() {
+            let was_empty = inner.rx_cnt == 0;
+            inner.rx_cnt = inner
+                .rx_cnt
+                .checked_add(1)
+                .expect("pipe reader participant count overflow");
+            inner.rx_generation = inner
+                .rx_generation
+                .checked_add(1)
+                .expect("pipe reader admission generation overflow");
+            if was_empty {
+                tx_routes = Some(inner.tx_poll_routes.clone());
+            }
+        }
+        if access.can_write() {
+            let was_empty = inner.tx_cnt == 0;
+            inner.tx_cnt = inner
+                .tx_cnt
+                .checked_add(1)
+                .expect("pipe writer participant count overflow");
+            inner.tx_generation = inner
+                .tx_generation
+                .checked_add(1)
+                .expect("pipe writer admission generation overflow");
+            if was_empty {
+                rx_routes = Some(inner.rx_poll_routes.clone());
+            }
+        }
+        (
+            ParticipationStart {
+                observed,
+                partner_present,
+            },
+            rx_routes,
+            tx_routes,
+        )
+    };
+
+    if access.can_read() {
+        pipe.write_recheck.publish(usize::MAX, false);
+    }
+    if access.can_write() {
+        pipe.read_recheck.publish(usize::MAX, false);
+    }
+    notify_pipe_poll_routes(tx_routes, None, "tx", "reader_join");
+    notify_pipe_poll_routes(rx_routes, None, "rx", "writer_join");
+    Some(start)
+}
+
+fn retire_participation(pipe: &Arc<Pipe>, access: PipeAccess) {
+    let (rx_routes, tx_routes) = {
+        let mut inner = pipe.inner.lock();
+        let mut rx_routes = None;
+        let mut tx_routes = None;
+        if access.can_read() {
+            assert!(inner.rx_cnt > 0, "pipe reader participant count underflow");
+            inner.rx_cnt -= 1;
+            if inner.rx_cnt == 0 {
+                tx_routes = Some(inner.tx_poll_routes.clone());
+            }
+        }
+        if access.can_write() {
+            assert!(inner.tx_cnt > 0, "pipe writer participant count underflow");
+            inner.tx_cnt -= 1;
+            if inner.tx_cnt == 0 {
+                rx_routes = Some(inner.rx_poll_routes.clone());
+            }
+        }
+        (rx_routes, tx_routes)
+    };
+
+    if access.can_read() {
+        pipe.write_recheck.publish(usize::MAX, false);
+    }
+    if access.can_write() {
+        pipe.read_recheck.publish(usize::MAX, false);
+    }
+    notify_pipe_poll_routes(tx_routes, None, "tx", "reader_retire");
+    notify_pipe_poll_routes(rx_routes, None, "rx", "writer_retire");
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PipeEndpointInfo {
-    side: PipeEndpointSide,
+    access: PipeAccess,
 }
 
 impl PipeEndpointInfo {
-    pub const fn side(self) -> PipeEndpointSide {
-        self.side
+    pub const fn can_read(self) -> bool {
+        self.access.can_read()
+    }
+
+    pub const fn can_write(self) -> bool {
+        self.access.can_write()
     }
 }
 
 pub fn pipe_endpoint_info(file: &File) -> Option<PipeEndpointInfo> {
-    if file.prv().cast::<PipeRx>().is_some() {
-        Some(PipeEndpointInfo {
-            side: PipeEndpointSide::Read,
+    file.prv()
+        .cast::<PipeEndpoint>()
+        .map(|endpoint| PipeEndpointInfo {
+            access: endpoint.access,
         })
-    } else if file.prv().cast::<PipeTx>().is_some() {
-        Some(PipeEndpointInfo {
-            side: PipeEndpointSide::Write,
-        })
-    } else {
-        None
-    }
 }
 
 pub fn pipe_endpoints_same_pipe(lhs: &File, rhs: &File) -> Result<bool, SysError> {
@@ -250,60 +526,32 @@ pub fn pipe_endpoints_same_pipe(lhs: &File, rhs: &File) -> Result<bool, SysError
     Ok(Arc::ptr_eq(lhs, rhs))
 }
 
-fn with_pipe_endpoint<T>(
-    file: &File,
-    f: impl FnOnce(&Arc<Pipe>, Option<&PipeRx>, Option<&PipeTx>) -> T,
-) -> Option<T> {
-    if let Some(rx) = file.prv().cast::<PipeRx>() {
-        Some(f(&rx.pipe, Some(rx), None))
-    } else {
-        file.prv()
-            .cast::<PipeTx>()
-            .map(|tx| f(&tx.pipe, None, Some(tx)))
-    }
+fn pipe_endpoint(file: &File) -> Option<&PipeEndpoint> {
+    file.prv().cast::<PipeEndpoint>()
 }
 
 fn pipe_state(file: &File) -> Option<&Arc<Pipe>> {
-    if let Some(rx) = file.prv().cast::<PipeRx>() {
-        Some(&rx.pipe)
-    } else {
-        file.prv().cast::<PipeTx>().map(|tx| &tx.pipe)
-    }
+    pipe_endpoint(file).map(|endpoint| &endpoint.pipe)
 }
 
 pub(super) fn display_name(file: &File) -> Option<PathBuf> {
-    with_pipe_endpoint(file, |_, _, _| {
+    pipe_endpoint(file).map(|_| {
         let target = format!("pipe:[{}]", file.inode().ino().get());
         PathBuf::from(target.as_str())
     })
 }
 
-static PIPE_RX_FILE_OPS: FileOps = FileOps {
+static PIPE_FILE_OPS: FileOps = FileOps {
     read: io::pipe_rx_read,
-    write: |_, _, _, _| Err(SysError::NotSupported),
-    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _, _| Err(SysError::NotSupported),
-    read_user_at: None,
-    write_user_at: None,
-    check_status_flags: accept_file_op_status_flags,
-    seek: |_, _, _| Err(SysError::IllegalSeek),
-    read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: poll::pipe_rx_poll,
-    fcntl: Some(capacity::pipe_fcntl),
-    ioctl: io::pipe_ioctl,
-};
-
-static PIPE_TX_FILE_OPS: FileOps = FileOps {
-    read: |_, _, _, _| Err(SysError::NotSupported),
     write: io::pipe_tx_write,
-    read_at: |_, _, _, _| Err(SysError::NotSupported),
+    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
     write_at: |_, _, _, _| Err(SysError::IllegalSeek),
     read_user_at: None,
     write_user_at: None,
     check_status_flags: accept_file_op_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: poll::pipe_tx_poll,
+    poll: poll::pipe_poll,
     fcntl: Some(capacity::pipe_fcntl),
     ioctl: io::pipe_ioctl,
 };
@@ -319,27 +567,177 @@ pub fn create_anonymous_pipe() -> Result<OpenedPipe, SysError> {
     // cannot leave a partially visible anonymous pipe.
     let (rx, tx) = Pipe::new_anonymous()?;
     let inode = anony_new_inode(InodeType::Fifo, &PIPE_INODE_OPS, NilOpaque::new())?;
+    inode.inode().inode().fifo_anchor().install(&rx.pipe);
 
     let rx = anony_open_with(
         &inode,
-        OpenedFile::with_mode(&PIPE_RX_FILE_OPS, FileMode::STREAM, AnyOpaque::new(rx)),
+        OpenedFile::with_mode(&PIPE_FILE_OPS, FileMode::STREAM, AnyOpaque::new(rx)),
     )?;
     let tx = anony_open_with(
         &inode,
-        OpenedFile::with_mode(&PIPE_TX_FILE_OPS, FileMode::STREAM, AnyOpaque::new(tx)),
+        OpenedFile::with_mode(&PIPE_FILE_OPS, FileMode::STREAM, AnyOpaque::new(tx)),
     )?;
 
     Ok(OpenedPipe { rx, tx })
 }
 
-// TODO: named pipes. i.e. fifo. we'll do this after we refactor current inode
-// ops vtable.
+pub(in crate::fs) fn open_named_fifo(
+    path: PathRef,
+    context: FifoOpenContext,
+) -> Result<File, SysError> {
+    assert_eq!(
+        path.inode().ty(),
+        InodeType::Fifo,
+        "named FIFO activation received a non-FIFO path"
+    );
+    let pipe = path.inode().inode().fifo_anchor().get_or_create()?;
+    let admission = if context.access == FifoOpenAccess::Read && context.nonblock {
+        PipeAdmission::begin_nonblocking_reader(pipe)
+    } else if context.access == FifoOpenAccess::Write && context.nonblock {
+        // Reader observation and writer participation are one PipeInner
+        // transaction. A writer that returns ENXIO must never advance a
+        // generation or wake a concurrent blocking reader as a phantom peer.
+        PipeAdmission::begin_nonblocking_writer(pipe)?
+    } else {
+        PipeAdmission::begin(pipe, context.access.into())
+    };
+
+    match context.access {
+        FifoOpenAccess::Read if context.nonblock => {},
+        FifoOpenAccess::Write if context.nonblock => {},
+        FifoOpenAccess::Read | FifoOpenAccess::Write => {
+            if !admission.wait_for_partner() {
+                // Blocking FIFO open has not published an fd and the admission
+                // guard rolls this attempt back exactly, so the whole syscall
+                // is safe for the existing idempotent restart mechanism. A
+                // restarted admission is a new partner round; no generation
+                // from the canceled round is carried across the signal frame.
+                return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
+            }
+        },
+        FifoOpenAccess::ReadWrite => {},
+    }
+
+    let endpoint = admission.commit();
+    Ok(File::new_with_mode(
+        path,
+        &PIPE_FILE_OPS,
+        FileMode::STREAM,
+        AnyOpaque::new(endpoint),
+    ))
+}
+
+pub(in crate::fs) fn validate_fifo_open_status(_status: FileOpStatusFlags) -> Result<(), SysError> {
+    // All status bits reaching this point were normalized and accepted by the
+    // open ABI parser. Pipe I/O reads the opened-description snapshot on each
+    // operation, so validation neither caches flags nor touches session state.
+    Ok(())
+}
 
 #[cfg(feature = "kunit")]
 mod kunits {
     use alloc::{vec, vec::Vec};
 
     use super::*;
+
+    #[kunit]
+    fn fifo_anchor_reuses_live_session_and_replaces_stale_session() {
+        let anchor = FifoAnchor::new();
+        let first = anchor.get_or_create().unwrap();
+        let same = anchor.get_or_create().unwrap();
+        assert!(Arc::ptr_eq(&first, &same));
+
+        let stale = Arc::downgrade(&first);
+        drop(same);
+        drop(first);
+        assert!(stale.upgrade().is_none());
+
+        let fresh = anchor.get_or_create().unwrap();
+        assert_eq!(fresh.inner.lock().capacity(), PIPE_DEFAULT_CAPACITY_BYTES);
+        assert_eq!(fresh.inner.lock().rx_cnt, 0);
+        assert_eq!(fresh.inner.lock().tx_cnt, 0);
+    }
+
+    #[kunit]
+    fn pending_partner_generation_survives_short_overlap_and_cancel_rolls_back() {
+        let pipe = Pipe::try_new().unwrap();
+        let reader = PipeAdmission::begin(pipe.clone(), PipeAccess::Read);
+        assert!(!reader.partner_arrived());
+
+        let writer = PipeAdmission::begin(pipe.clone(), PipeAccess::Write);
+        assert!(writer.partner_arrived());
+        assert!(reader.partner_arrived());
+        drop(writer);
+
+        let inner = pipe.inner.lock();
+        assert_eq!(inner.rx_cnt, 1);
+        assert_eq!(inner.tx_cnt, 0);
+        drop(inner);
+        assert!(
+            reader.partner_arrived(),
+            "overlapping writer generation must commit the waiting reader"
+        );
+
+        drop(reader);
+        let inner = pipe.inner.lock();
+        assert_eq!(inner.rx_cnt, 0);
+        assert_eq!(inner.tx_cnt, 0);
+    }
+
+    #[kunit]
+    fn rejected_nonblocking_writer_never_publishes_a_partner_generation() {
+        let pipe = Pipe::try_new().unwrap();
+        assert!(PipeAdmission::begin_nonblocking_writer(pipe.clone()).is_err());
+        {
+            let inner = pipe.inner.lock();
+            assert_eq!(inner.rx_cnt, 0);
+            assert_eq!(inner.tx_cnt, 0);
+            assert_eq!(inner.rx_generation, 0);
+            assert_eq!(inner.tx_generation, 0);
+        }
+
+        let reader = PipeAdmission::begin(pipe, PipeAccess::Read);
+        assert!(!reader.partner_arrived());
+    }
+
+    #[kunit]
+    fn initial_nonblocking_reader_suppresses_hup_until_a_writer_generation() {
+        let pipe = Pipe::try_new().unwrap();
+        let reader = PipeAdmission::begin_nonblocking_reader(pipe.clone()).commit();
+        assert_eq!(reader.initial_no_writer_generation, Some(0));
+
+        let writer = PipeAdmission::begin(pipe.clone(), PipeAccess::Write).commit();
+        drop(writer);
+        assert_ne!(
+            pipe.inner.lock().tx_generation,
+            reader.initial_no_writer_generation.unwrap()
+        );
+    }
+
+    #[kunit]
+    fn duplex_endpoint_contributes_and_retires_each_side_once() {
+        let pipe = Pipe::try_new().unwrap();
+        let endpoint = PipeAdmission::begin(pipe.clone(), PipeAccess::ReadWrite).commit();
+        {
+            let inner = pipe.inner.lock();
+            assert_eq!(inner.rx_cnt, 1);
+            assert_eq!(inner.tx_cnt, 1);
+            assert_eq!(inner.rx_generation, 1);
+            assert_eq!(inner.tx_generation, 1);
+        }
+
+        drop(endpoint);
+        let inner = pipe.inner.lock();
+        assert_eq!(inner.rx_cnt, 0);
+        assert_eq!(inner.tx_cnt, 0);
+    }
+
+    #[kunit]
+    fn distinct_fifo_anchors_never_share_runtime_session() {
+        let first = FifoAnchor::new().get_or_create().unwrap();
+        let second = FifoAnchor::new().get_or_create().unwrap();
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
 
     #[kunit]
     fn wrapped_bytes_survive_grow_busy_shrink_and_legal_shrink() {

@@ -3,10 +3,7 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/tee.2.html
 
-use crate::{
-    fs::pipe::{PipeEndpointSide, pipe_endpoints_same_pipe},
-    prelude::*,
-};
+use crate::{fs::pipe::pipe_endpoints_same_pipe, prelude::*};
 
 use super::{SpliceFlags, parse_fd, pipe_endpoint_of};
 
@@ -34,14 +31,14 @@ fn sys_tee(raw_fd_in: u64, raw_fd_out: u64, len: usize, raw_flags: u64) -> Resul
     let Some(in_pipe) = pipe_endpoint_of(&in_fd) else {
         return Err(SysError::InvalidArgument);
     };
-    if in_pipe.side() != PipeEndpointSide::Read {
+    if !in_pipe.can_read() {
         return Err(SysError::InvalidArgument);
     }
 
     let Some(out_pipe) = pipe_endpoint_of(&out_fd) else {
         return Err(SysError::InvalidArgument);
     };
-    if out_pipe.side() != PipeEndpointSide::Write {
+    if !out_pipe.can_write() {
         return Err(SysError::InvalidArgument);
     }
 

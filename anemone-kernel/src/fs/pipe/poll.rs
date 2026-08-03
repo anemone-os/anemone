@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{PIPE_ATOMIC_WRITE_BYTES, PipeInner, PipeRx, PipeTx};
+use super::{PIPE_ATOMIC_WRITE_BYTES, PipeEndpoint, PipeInner};
 use crate::fs::iomux::PollRoute;
 
 #[derive(Clone, Debug)]
@@ -18,8 +18,8 @@ impl PipePollRoute {
     }
 }
 
-fn replace_pipe_poll_routes(
-    routes: &mut Arc<Vec<PipePollRoute>>,
+fn prepare_pipe_poll_routes(
+    routes: &Arc<Vec<PipePollRoute>>,
     route: &PollRoute,
     interests: PollEvent,
 ) -> Result<(Arc<Vec<PipePollRoute>>, usize), SysError> {
@@ -42,7 +42,7 @@ fn replace_pipe_poll_routes(
     replacement.push(PipePollRoute::new(route, interests));
 
     let replacement = Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)?;
-    Ok((core::mem::replace(routes, replacement), pruned))
+    Ok((replacement, pruned))
 }
 
 pub(super) fn notify_pipe_poll_routes(
@@ -72,12 +72,18 @@ pub(super) fn notify_pipe_poll_routes(
     }
 }
 
-fn pipe_rx_revents(pipe: &PipeInner, interests: PollEvent) -> PollEvent {
+fn pipe_rx_revents(
+    pipe: &PipeInner,
+    initial_no_writer_generation: Option<u64>,
+    interests: PollEvent,
+) -> PollEvent {
     let mut revents = PollEvent::empty();
-    if interests.contains(PollEvent::READABLE) && (!pipe.buf.is_empty() || pipe.tx_cnt == 0) {
+    let visible_eof = pipe.tx_cnt == 0
+        && initial_no_writer_generation.is_none_or(|initial| pipe.tx_generation != initial);
+    if interests.contains(PollEvent::READABLE) && (!pipe.buf.is_empty() || visible_eof) {
         revents |= PollEvent::READABLE;
     }
-    if pipe.tx_cnt == 0 {
+    if visible_eof {
         revents |= PollEvent::HANG_UP;
     }
     revents
@@ -96,77 +102,75 @@ fn pipe_tx_revents(pipe: &PipeInner, interests: PollEvent) -> PollEvent {
     revents
 }
 
-pub(super) fn pipe_rx_poll(
-    file: &File,
-    request: &PollRequest<'_>,
-) -> Result<PollRegisterResult, SysError> {
-    let rx = file
-        .prv()
-        .cast::<PipeRx>()
-        .expect("internal error: pipe rx file without correct private data");
-    let mut pipe = rx.pipe.inner.lock();
-    if !request.is_register() {
-        return Ok(PollRegisterResult::Ready(pipe_rx_revents(
-            &pipe,
-            request.interests(),
-        )));
+fn pipe_revents(pipe: &PipeInner, endpoint: &PipeEndpoint, interests: PollEvent) -> PollEvent {
+    let mut revents = PollEvent::empty();
+    if endpoint.access.can_read() {
+        revents |= pipe_rx_revents(pipe, endpoint.initial_no_writer_generation, interests);
     }
-    let Some(route) = request.route() else {
-        let revents = pipe_rx_revents(&pipe, request.interests());
-        return Ok(if revents.is_empty() {
-            PollRegisterResult::Unsupported
-        } else {
-            PollRegisterResult::Ready(revents)
-        });
-    };
-    let (previous_routes, pruned) =
-        replace_pipe_poll_routes(&mut pipe.rx_poll_routes, route, request.interests())?;
-    let revents = pipe_rx_revents(&pipe, request.interests());
-    let queue_len = pipe.rx_poll_routes.len();
-    drop(pipe);
-    drop(previous_routes);
-    kdebugln!(
-        "pipe: subscribed rx poll interests={:?} queue_len={} pruned={}",
-        request.interests(),
-        queue_len,
-        pruned,
-    );
-    Ok(PollRegisterResult::Subscribed(revents))
+    if endpoint.access.can_write() {
+        revents |= pipe_tx_revents(pipe, interests);
+    }
+    revents
 }
 
-pub(super) fn pipe_tx_poll(
+pub(super) fn pipe_poll(
     file: &File,
     request: &PollRequest<'_>,
 ) -> Result<PollRegisterResult, SysError> {
-    let tx = file
+    let endpoint = file
         .prv()
-        .cast::<PipeTx>()
-        .expect("internal error: pipe tx file without correct private data");
-    let mut pipe = tx.pipe.inner.lock();
+        .cast::<PipeEndpoint>()
+        .expect("internal error: pipe file without endpoint private data");
+    let mut pipe = endpoint.pipe.inner.lock();
     if !request.is_register() {
-        return Ok(PollRegisterResult::Ready(pipe_tx_revents(
+        return Ok(PollRegisterResult::Ready(pipe_revents(
             &pipe,
+            endpoint,
             request.interests(),
         )));
     }
     let Some(route) = request.route() else {
-        let revents = pipe_tx_revents(&pipe, request.interests());
+        let revents = pipe_revents(&pipe, endpoint, request.interests());
         return Ok(if revents.is_empty() {
             PollRegisterResult::Unsupported
         } else {
             PollRegisterResult::Ready(revents)
         });
     };
-    let (previous_routes, pruned) =
-        replace_pipe_poll_routes(&mut pipe.tx_poll_routes, route, request.interests())?;
-    let revents = pipe_tx_revents(&pipe, request.interests());
-    let queue_len = pipe.tx_poll_routes.len();
+    // Prepare every needed replacement before publishing either one, so a
+    // duplex endpoint cannot leave a half-subscribed route after ENOMEM.
+    let rx_prepared = endpoint
+        .access
+        .can_read()
+        .then(|| prepare_pipe_poll_routes(&pipe.rx_poll_routes, route, request.interests()))
+        .transpose()?;
+    let tx_prepared = endpoint
+        .access
+        .can_write()
+        .then(|| prepare_pipe_poll_routes(&pipe.tx_poll_routes, route, request.interests()))
+        .transpose()?;
+    let mut previous_rx = None;
+    let mut previous_tx = None;
+    let mut pruned = 0usize;
+    if let Some((replacement, removed)) = rx_prepared {
+        previous_rx = Some(core::mem::replace(&mut pipe.rx_poll_routes, replacement));
+        pruned += removed;
+    }
+    if let Some((replacement, removed)) = tx_prepared {
+        previous_tx = Some(core::mem::replace(&mut pipe.tx_poll_routes, replacement));
+        pruned += removed;
+    }
+    let revents = pipe_revents(&pipe, endpoint, request.interests());
+    let rx_queue_len = pipe.rx_poll_routes.len();
+    let tx_queue_len = pipe.tx_poll_routes.len();
     drop(pipe);
-    drop(previous_routes);
+    drop(previous_rx);
+    drop(previous_tx);
     kdebugln!(
-        "pipe: subscribed tx poll interests={:?} queue_len={} pruned={}",
+        "pipe: subscribed poll interests={:?} rx_queue_len={} tx_queue_len={} pruned={}",
         request.interests(),
-        queue_len,
+        rx_queue_len,
+        tx_queue_len,
         pruned,
     );
     Ok(PollRegisterResult::Subscribed(revents))

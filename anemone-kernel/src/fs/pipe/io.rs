@@ -13,8 +13,7 @@ use crate::{
 };
 
 use super::{
-    PIPE_ATOMIC_WRITE_BYTES, PipeInner, PipeRx, PipeTx, poll::notify_pipe_poll_routes,
-    with_pipe_endpoint,
+    PIPE_ATOMIC_WRITE_BYTES, PipeEndpoint, PipeInner, pipe_state, poll::notify_pipe_poll_routes,
 };
 
 fn pipe_read_locked(
@@ -42,19 +41,23 @@ pub(super) fn pipe_rx_read(
     buf: &mut [u8],
     ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
-    let rx = file
+    let endpoint = file
         .prv()
-        .cast::<PipeRx>()
-        .expect("internal error: pipe rx file without correct private data");
+        .cast::<PipeEndpoint>()
+        .expect("internal error: pipe file without endpoint private data");
+    assert!(
+        endpoint.access.can_read(),
+        "pipe read reached a write-only endpoint"
+    );
 
     loop {
-        let pipe = rx.pipe.inner.lock();
+        let pipe = endpoint.pipe.inner.lock();
         if pipe.buf.is_empty() && pipe.tx_cnt > 0 {
             if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
                 return Err(SysError::Again);
             }
             drop(pipe);
-            if !rx.pipe.wait_until_read_can_continue() {
+            if !endpoint.pipe.wait_until_read_can_continue() {
                 return Err(SysError::Interrupted);
             }
             continue;
@@ -67,8 +70,8 @@ pub(super) fn pipe_rx_read(
         // Never hold the uninterruptible operation mutex while waiting for
         // bytes. A competing reader may consume the observed prefix before we
         // acquire it, so admission must be rechecked under both owners.
-        let operation = rx.operation.lock();
-        let mut pipe = rx.pipe.inner.lock();
+        let operation = endpoint.pipe.read_operation.lock();
+        let mut pipe = endpoint.pipe.inner.lock();
         if pipe.buf.is_empty() {
             if pipe.tx_cnt == 0 {
                 return Ok(0);
@@ -82,7 +85,7 @@ pub(super) fn pipe_rx_read(
         drop(pipe);
         drop(operation);
         if routes.is_some() {
-            rx.pipe.write_recheck.publish(usize::MAX, false);
+            endpoint.pipe.write_recheck.publish(usize::MAX, false);
         }
         notify_pipe_poll_routes(routes, Some(PollEvent::WRITABLE), "tx", "rx_read");
         return Ok(read);
@@ -99,19 +102,23 @@ fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<u
         return Ok(0);
     }
 
-    let rx = ctx
+    let endpoint = ctx
         .file
         .prv()
-        .cast::<PipeRx>()
-        .expect("internal error: pipe rx transaction without correct private data");
+        .cast::<PipeEndpoint>()
+        .expect("internal error: pipe transaction without endpoint private data");
+    assert!(
+        endpoint.access.can_read(),
+        "pipe read transaction reached a write-only endpoint"
+    );
     let (operation, staged_len) = loop {
-        let pipe = rx.pipe.inner.lock();
+        let pipe = endpoint.pipe.inner.lock();
         if pipe.buf.is_empty() && pipe.tx_cnt > 0 {
             if ctx.status_flags.contains(FileStatusFlags::NONBLOCK) {
                 return Err(SysError::Again);
             }
             drop(pipe);
-            if !rx.pipe.wait_until_read_can_continue() {
+            if !endpoint.pipe.wait_until_read_can_continue() {
                 return Err(SysError::Interrupted);
             }
             continue;
@@ -121,8 +128,8 @@ fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<u
         }
         drop(pipe);
 
-        let operation = rx.operation.lock();
-        let pipe = rx.pipe.inner.lock();
+        let operation = endpoint.pipe.read_operation.lock();
+        let pipe = endpoint.pipe.inner.lock();
         if pipe.buf.is_empty() {
             if pipe.tx_cnt == 0 {
                 return Ok(0);
@@ -143,7 +150,7 @@ fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<u
     {
         // The RX operation gate excludes every consumer while writers may only
         // append. The selected prefix remains stable without a held spinlock.
-        let pipe = rx.pipe.inner.lock();
+        let pipe = endpoint.pipe.inner.lock();
         assert!(
             pipe.buf.len() >= staged_len,
             "pipe staged prefix was consumed outside the RX operation gate"
@@ -163,7 +170,7 @@ fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<u
     );
 
     let routes = {
-        let mut pipe = rx.pipe.inner.lock();
+        let mut pipe = endpoint.pipe.inner.lock();
         for expected in &staged[..copied] {
             let actual = pipe
                 .buf
@@ -178,7 +185,7 @@ fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<u
     };
 
     drop(operation);
-    rx.pipe.write_recheck.publish(usize::MAX, false);
+    endpoint.pipe.write_recheck.publish(usize::MAX, false);
     notify_pipe_poll_routes(
         routes,
         Some(PollEvent::WRITABLE),
@@ -188,11 +195,11 @@ fn pipe_rx_read_user_transaction(ctx: OpenedFileReadUserCtx<'_, '_>) -> Result<u
     Ok(copied)
 }
 
-pub(crate) fn pipe_rx_file_desc_ops() -> FileDescOps {
-    FileDescOps {
-        read_user_transaction: Some(pipe_rx_read_user_transaction),
-        ..FileDescOps::default()
+pub(crate) fn pipe_file_desc_ops(mut base: FileDescOps, can_read: bool) -> FileDescOps {
+    if can_read {
+        base.read_user_transaction = Some(pipe_rx_read_user_transaction);
     }
+    base
 }
 
 pub(super) fn pipe_tx_write(
@@ -201,11 +208,15 @@ pub(super) fn pipe_tx_write(
     buf: &[u8],
     ctx: FileIoCtx,
 ) -> Result<usize, SysError> {
-    let tx = file
+    let endpoint = file
         .prv()
-        .cast::<PipeTx>()
-        .expect("internal error: pipe tx file without correct private data");
-    let mut pipe = tx.pipe.inner.lock();
+        .cast::<PipeEndpoint>()
+        .expect("internal error: pipe file without endpoint private data");
+    assert!(
+        endpoint.access.can_write(),
+        "pipe write reached a read-only endpoint"
+    );
+    let mut pipe = endpoint.pipe.inner.lock();
 
     if pipe.rx_cnt == 0 {
         send_sigpipe();
@@ -234,10 +245,10 @@ pub(super) fn pipe_tx_write(
             }
         {
             drop(pipe);
-            if !tx.pipe.wait_until_write_can_continue(buf.len()) {
+            if !endpoint.pipe.wait_until_write_can_continue(buf.len()) {
                 return Err(SysError::Interrupted);
             }
-            pipe = tx.pipe.inner.lock();
+            pipe = endpoint.pipe.inner.lock();
         }
 
         if pipe.rx_cnt == 0 {
@@ -256,7 +267,7 @@ pub(super) fn pipe_tx_write(
 
     drop(pipe);
     if routes.is_some() {
-        tx.pipe.read_recheck.publish(usize::MAX, false);
+        endpoint.pipe.read_recheck.publish(usize::MAX, false);
     }
     notify_pipe_poll_routes(routes, Some(PollEvent::READABLE), "rx", "tx_write");
     result
@@ -275,7 +286,8 @@ fn send_sigpipe() {
 }
 
 fn readable_bytes(file: &File) -> Result<usize, SysError> {
-    with_pipe_endpoint(file, |pipe, _, _| pipe.inner.lock().buf.len())
+    pipe_state(file)
+        .map(|pipe| pipe.inner.lock().buf.len())
         .ok_or(SysError::InvalidArgument)
 }
 

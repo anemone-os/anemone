@@ -6,7 +6,7 @@ use super::*;
 /// traditional and less confusing, so let's stick to it.
 pub(in crate::fs) struct Inode {
     ino: Ino,
-    ty: InodeType,
+    kind: InodeKind,
     ops: &'static InodeOps,
     /// Weak to avoid circular reference. This can always be upgraded to strong
     /// when needed, ensured by the invariant of VFS.
@@ -34,11 +34,56 @@ pub(in crate::fs) struct Inode {
     meta: RwLock<InodeMeta>,
 }
 
+/// Immutable resident kind plus the narrowly typed runtime anchor owned by
+/// kinds whose live capability is intrinsic to this inode.
+///
+/// This enum deliberately is neither `Copy` nor `Clone`: inode sharing happens
+/// through `InodeRef`, and duplicating a FIFO anchor would create a second
+/// rendezvous truth for the same apparent inode identity.
+enum InodeKind {
+    Anon,
+    Regular,
+    Dir,
+    Char,
+    Block,
+    Symlink,
+    Fifo(FifoAnchor),
+    Socket,
+}
+
+impl InodeKind {
+    fn new(ty: InodeType) -> Self {
+        match ty {
+            InodeType::Anon => Self::Anon,
+            InodeType::Regular => Self::Regular,
+            InodeType::Dir => Self::Dir,
+            InodeType::Char => Self::Char,
+            InodeType::Block => Self::Block,
+            InodeType::Symlink => Self::Symlink,
+            InodeType::Fifo => Self::Fifo(FifoAnchor::new()),
+            InodeType::Socket => Self::Socket,
+        }
+    }
+
+    const fn ty(&self) -> InodeType {
+        match self {
+            Self::Anon => InodeType::Anon,
+            Self::Regular => InodeType::Regular,
+            Self::Dir => InodeType::Dir,
+            Self::Char => InodeType::Char,
+            Self::Block => InodeType::Block,
+            Self::Symlink => InodeType::Symlink,
+            Self::Fifo(_) => InodeType::Fifo,
+            Self::Socket => InodeType::Socket,
+        }
+    }
+}
+
 impl Debug for Inode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Inode")
             .field("ino", &self.ino)
-            .field("ty", &self.ty)
+            .field("ty", &self.kind.ty())
             .field("rc", &self.rc.load(Ordering::Relaxed))
             .field("indexed", &self.indexed.load(Ordering::Relaxed))
             .finish()
@@ -84,7 +129,7 @@ impl Inode {
         let meta = InodeMeta::ZERO;
         Self {
             ino,
-            ty,
+            kind: InodeKind::new(ty),
             ops,
             sb: Arc::downgrade(&sb),
             prv,
@@ -171,7 +216,15 @@ impl Inode {
     }
 
     pub(in crate::fs) fn ty(&self) -> InodeType {
-        self.ty
+        self.kind.ty()
+    }
+
+    #[track_caller]
+    pub(in crate::fs) fn fifo_anchor(&self) -> &FifoAnchor {
+        let InodeKind::Fifo(anchor) = &self.kind else {
+            panic!("FIFO runtime anchor requested from non-FIFO inode")
+        };
+        anchor
     }
 
     pub(in crate::fs) fn perm(&self) -> InodePerm {
@@ -268,7 +321,7 @@ impl Inode {
     ) {
         let checker = FsPermChecker::new(cred.clone());
         let mut meta = self.meta.write();
-        let remove = Self::setid_drop_mask(self.ty, meta.perm, meta.gid, &checker, modif);
+        let remove = Self::setid_drop_mask(self.ty(), meta.perm, meta.gid, &checker, modif);
 
         if remove.is_empty() {
             return;
@@ -366,7 +419,7 @@ impl InodeRef {
 
     /// Get the inode type.
     pub fn ty(&self) -> InodeType {
-        self.inode().ty
+        self.inode().ty()
     }
 
     pub fn perm(&self) -> InodePerm {

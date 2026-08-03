@@ -185,6 +185,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../../ltp/groups/mount-legacy.txt"),
     },
     LtpGroup {
+        name: "named-fifo",
+        cases: include_str!("../../ltp/groups/named-fifo.txt"),
+    },
+    LtpGroup {
         name: "open",
         cases: include_str!("../../ltp/groups/open.txt"),
     },
