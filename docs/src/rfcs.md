@@ -118,8 +118,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `smp>1`、full network LTP与final harness保持Not Run。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260804-udp-socket-extension](./rfcs/udp-socket-extension/index.md)：IPv4 UDP connected、
-  file/message/vector I/O、flag边界与Endpoint owner/lifecycle target；R0已接受，Stage 1 Checkpoint 1A已关闭，
-  Checkpoint 1B保持Not Active，current contract未改变。
+  file/message/vector I/O、flag边界与Endpoint owner/lifecycle target；R0已接受，Stage 1已关闭、Cutover None，
+  Stage 2保持Outline / Not Active；resolver专项Not Run，current contract未改变。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入

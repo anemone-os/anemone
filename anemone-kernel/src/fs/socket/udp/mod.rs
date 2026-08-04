@@ -6,15 +6,15 @@ use anemone_net_api::udp::{UdpBindError, UdpPeer, UdpQueryError, UdpReceiveError
 
 use crate::{
     kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
-    net::udp::{BindError, SendError, UdpEndpointPort, create_endpoint},
+    net::udp::{BindError, ConnectError, SendError, UdpEndpointPort, create_endpoint},
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
 
 use super::{
-    SocketAddress, SocketAddressSink, SocketBindError, SocketCreation, SocketOps,
-    SocketPreparation, SocketQueryError, SocketReceiveError, SocketReceiveOutcome,
-    SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
+    SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
+    SocketFileIo, SocketOps, SocketPreparation, SocketQueryError, SocketReceiveError,
+    SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
 
@@ -24,6 +24,14 @@ struct UdpSocketFile {
     /// Serializes UDP state-changing operation attempts. It owns no Endpoint
     /// fact and is deliberately absent from final release.
     operation: Mutex<()>,
+}
+
+#[derive(Opaque)]
+struct UdpSendSnapshot {
+    /// Captured from the explicit destination or Endpoint peer on the first
+    /// attempt. It is intentionally stale across wait/retry and reconnect,
+    /// and is discarded when this send operation returns.
+    destination: UdpPeer,
 }
 
 impl core::fmt::Debug for UdpSocketFile {
@@ -146,6 +154,45 @@ fn query_udp_socket(
     sink.copy_address(address).map_err(SocketQueryError::Copy)
 }
 
+fn connect_udp_socket(
+    private: &AnyOpaque,
+    address: SocketAddress,
+) -> Result<(), SocketConnectError> {
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let endpoint = socket.endpoint().ok_or(SocketConnectError::Retired)?;
+    match address {
+        SocketAddress::Unspecified => endpoint.disconnect().map_err(|error| match error {
+            UdpQueryError::UnknownEndpoint => SocketConnectError::Retired,
+        }),
+        SocketAddress::Ipv4 { address, port } => endpoint
+            .connect(UdpPeer::new(address, port))
+            .map_err(map_connect_error),
+        SocketAddress::UnixPathname(_) => Err(SocketConnectError::Unsupported),
+    }
+}
+
+fn query_udp_peer(
+    private: &AnyOpaque,
+    sink: &mut dyn SocketAddressSink,
+) -> Result<(), SocketQueryError> {
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let peer = socket
+        .endpoint()
+        .ok_or(SocketQueryError::Retired)?
+        .peer()
+        .map_err(|error| match error {
+            UdpQueryError::UnknownEndpoint => SocketQueryError::Retired,
+        })?
+        .ok_or(SocketQueryError::NotConnected)?;
+    sink.copy_address(Some(SocketAddress::Ipv4 {
+        address: peer.address(),
+        port: peer.port(),
+    }))
+    .map_err(SocketQueryError::Copy)
+}
+
 fn udp_is_accepting(_private: &AnyOpaque) -> Result<bool, SocketQueryError> {
     Ok(false)
 }
@@ -157,14 +204,14 @@ fn send_udp_socket(
     let SocketSendRequest::Datagram {
         destination,
         payload,
-        operation: _,
+        operation,
     } = request
     else {
         return Err(SocketSendError::Unsupported);
     };
-    let (address, port) = match destination {
-        Some(SocketAddress::Ipv4 { address, port }) => (address, port),
-        None => return Err(SocketSendError::DestinationRequired),
+    let destination = match destination {
+        Some(SocketAddress::Ipv4 { address, port }) => Some(UdpPeer::new(address, port)),
+        None => None,
         Some(SocketAddress::Unspecified | SocketAddress::UnixPathname(_)) => {
             return Err(SocketSendError::Unsupported);
         },
@@ -172,6 +219,7 @@ fn send_udp_socket(
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
     let endpoint = socket.endpoint().ok_or(SocketSendError::Retired)?;
+    let destination = prepare_udp_send_destination(&endpoint, destination, operation)?;
     // Implicit binding is a persistent commit. Keep the family operation
     // guard across the typed user-copy cursor so later MTU/capacity rejection
     // cannot bypass that commit or change the existing serialization boundary.
@@ -181,9 +229,32 @@ fn send_udp_socket(
         .map_err(SocketSendError::Copy)?;
     let len = payload.len();
     endpoint
-        .send(Some(UdpPeer::new(address, port)), payload)
+        .send(Some(destination), payload)
         .map_err(map_send_error)?;
     Ok(len)
+}
+
+fn prepare_udp_send_destination(
+    endpoint: &UdpEndpointPort,
+    explicit: Option<UdpPeer>,
+    operation: &mut super::SocketDatagramSendOperation,
+) -> Result<UdpPeer, SocketSendError> {
+    if operation.family_snapshot::<UdpSendSnapshot>().is_none() {
+        let destination = match explicit {
+            Some(destination) => destination,
+            None => endpoint
+                .peer()
+                .map_err(|error| match error {
+                    UdpQueryError::UnknownEndpoint => SocketSendError::Retired,
+                })?
+                .ok_or(SocketSendError::DestinationRequired)?,
+        };
+        operation.install_family_snapshot(UdpSendSnapshot { destination });
+    }
+    operation
+        .family_snapshot::<UdpSendSnapshot>()
+        .map(|snapshot| snapshot.destination)
+        .ok_or_else(|| panic!("UDP send reused another family's datagram operation snapshot"))
 }
 
 fn receive_udp_socket(
@@ -193,24 +264,27 @@ fn receive_udp_socket(
     let SocketReceiveRequest::Datagram { sink, flags } = request else {
         return Err(SocketReceiveError::Unsupported);
     };
-    if flags.peek {
-        return Err(SocketReceiveError::Unsupported);
-    }
     let socket = udp_private(private);
     let _operation = socket.operation.lock();
-    let datagram = socket
-        .endpoint()
-        .ok_or(SocketReceiveError::Retired)?
-        .receive()
-        .map_err(|error| match error {
-            UdpReceiveError::UnknownEndpoint => SocketReceiveError::Retired,
-            UdpReceiveError::WouldBlock => SocketReceiveError::WouldBlock,
-        })?;
-    let peer = datagram.peer();
-    let packet_length = datagram.payload().len();
+    let endpoint = socket.endpoint().ok_or(SocketReceiveError::Retired)?;
+    if flags.peek {
+        let datagram = endpoint.peek().map_err(map_receive_error)?;
+        copy_udp_datagram(datagram.payload(), datagram.peer(), sink)
+    } else {
+        let datagram = endpoint.receive().map_err(map_receive_error)?;
+        copy_udp_datagram(datagram.payload(), datagram.peer(), sink)
+    }
+}
+
+fn copy_udp_datagram(
+    payload: &[u8],
+    peer: UdpPeer,
+    sink: &mut dyn super::SocketReceiveSink,
+) -> Result<SocketReceiveOutcome, SocketReceiveError> {
+    let packet_length = payload.len();
     let copied = sink
         .copy_datagram(
-            datagram.payload(),
+            payload,
             SocketAddress::Ipv4 {
                 address: peer.address(),
                 port: peer.port(),
@@ -249,6 +323,32 @@ fn map_bind_error(error: BindError) -> SocketBindError {
     }
 }
 
+fn map_connect_error(error: ConnectError) -> SocketConnectError {
+    match error {
+        ConnectError::NoRoute | ConnectError::InterfaceUnavailable => {
+            SocketConnectError::Operation(SysError::NetworkUnreachable)
+        },
+        ConnectError::SourceUnavailable => {
+            SocketConnectError::Operation(SysError::AddressNotAvailable)
+        },
+        ConnectError::Stack(anemone_net_api::udp::UdpConnectError::UnknownEndpoint) => {
+            SocketConnectError::Retired
+        },
+        ConnectError::Stack(anemone_net_api::udp::UdpConnectError::InvalidPeer) => {
+            SocketConnectError::InvalidState
+        },
+        ConnectError::Stack(anemone_net_api::udp::UdpConnectError::UnknownInterface) => {
+            SocketConnectError::Operation(SysError::NetworkUnreachable)
+        },
+        ConnectError::Stack(anemone_net_api::udp::UdpConnectError::UnsupportedSource) => {
+            SocketConnectError::Operation(SysError::AddressNotAvailable)
+        },
+        ConnectError::Stack(anemone_net_api::udp::UdpConnectError::EphemeralPortsExhausted) => {
+            SocketConnectError::Operation(SysError::Again)
+        },
+    }
+}
+
 fn map_send_error(error: SendError) -> SocketSendError {
     match error {
         SendError::Bind(UdpBindError::UnknownEndpoint) => SocketSendError::Retired,
@@ -270,18 +370,25 @@ fn map_send_error(error: SendError) -> SocketSendError {
     }
 }
 
+fn map_receive_error(error: UdpReceiveError) -> SocketReceiveError {
+    match error {
+        UdpReceiveError::UnknownEndpoint => SocketReceiveError::Retired,
+        UdpReceiveError::WouldBlock => SocketReceiveError::WouldBlock,
+    }
+}
+
 pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::Ipv4Udp,
-    file_io: super::SocketFileIo::Unsupported,
+    file_io: SocketFileIo::Datagram,
     create: Some(prepare_udp_socket),
     create_pair: None,
     bind: Some(bind_udp_socket),
     listen: None,
-    connect: None,
+    connect: Some(connect_udp_socket),
     accept: None,
     shutdown: None,
     local_address: Some(query_udp_socket),
-    peer_address: None,
+    peer_address: Some(query_udp_peer),
     accepting: udp_is_accepting,
     send: Some(send_udp_socket),
     receive: Some(receive_udp_socket),
@@ -296,9 +403,13 @@ mod kunits {
     use super::*;
 
     use anemone_abi::fs::linux::{mode, statx};
+    use anemone_net_api::Ipv4Address;
 
     use crate::{
-        fs::socket::{SocketAddressSink, prepare_socket, socket_file_desc_ops, socket_from_file},
+        fs::socket::{
+            SocketAddressSink, SocketDatagramSendOperation, SocketSendPayload, prepare_socket,
+            socket_file_desc_ops, socket_from_file,
+        },
         task::files::{OpenAccessMode, OpenedFileFinalReleaseCtx},
     };
 
@@ -309,6 +420,14 @@ mod kunits {
         fn copy_address(&mut self, address: Option<SocketAddress>) -> Result<(), SysError> {
             self.0 = address;
             Ok(())
+        }
+    }
+
+    struct FaultSendPayload;
+
+    impl SocketSendPayload for FaultSendPayload {
+        fn bytes(&mut self, _maximum: usize) -> Result<&[u8], SysError> {
+            Err(SysError::BadAddress)
         }
     }
 
@@ -338,6 +457,67 @@ mod kunits {
             socket.copy_local_address(&mut AddressCapture::default()),
             Err(SocketQueryError::Retired)
         );
+    }
+
+    #[kunit]
+    fn retry_keeps_connected_destination_snapshot_across_reconnect() {
+        let (file, creation) =
+            prepare_socket(&UDP_SOCKET_OPS).expect("KUnit UDP endpoint must fit");
+        let socket = socket_from_file(&file).expect("prepared UDP file must be a Socket");
+        let first_peer = Ipv4Address::LOOPBACK;
+        let second_peer = Ipv4Address::new([127, 0, 0, 2]);
+        assert!(
+            socket
+                .connect(SocketAddress::Ipv4 {
+                    address: first_peer,
+                    port: 7,
+                })
+                .is_ok()
+        );
+
+        let mut operation = SocketDatagramSendOperation::new();
+        let mut payload = FaultSendPayload;
+        assert_eq!(
+            socket.send(SocketSendRequest::Datagram {
+                destination: None,
+                payload: &mut payload,
+                operation: &mut operation,
+            }),
+            Err(SocketSendError::Copy(SysError::BadAddress))
+        );
+        assert_eq!(
+            operation
+                .family_snapshot::<UdpSendSnapshot>()
+                .expect("first UDP send attempt must install a destination snapshot")
+                .destination,
+            UdpPeer::new(first_peer, 7)
+        );
+
+        assert!(
+            socket
+                .connect(SocketAddress::Ipv4 {
+                    address: second_peer,
+                    port: 9,
+                })
+                .is_ok()
+        );
+        assert_eq!(
+            socket.send(SocketSendRequest::Datagram {
+                destination: None,
+                payload: &mut payload,
+                operation: &mut operation,
+            }),
+            Err(SocketSendError::Copy(SysError::BadAddress))
+        );
+        assert_eq!(
+            operation
+                .family_snapshot::<UdpSendSnapshot>()
+                .expect("retried UDP send must retain its first destination snapshot")
+                .destination,
+            UdpPeer::new(first_peer, 7)
+        );
+
+        drop(creation);
     }
 
     #[kunit]

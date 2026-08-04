@@ -28,6 +28,9 @@ const MAX_SOCKADDR_INPUT_LEN: usize = 128;
 // Diagnostic-only rate limiting. This bit never participates in flag or send
 // behavior.
 static RAW_NOSIGNAL_DIAGNOSTIC_EMITTED: AtomicBool = AtomicBool::new(false);
+// Diagnostic-only rate limiting. This bit never participates in flag or send
+// behavior.
+static UDP_NOSIGNAL_DIAGNOSTIC_EMITTED: AtomicBool = AtomicBool::new(false);
 
 fn copy_sockaddr_input(
     addr: u64,
@@ -125,7 +128,7 @@ pub(super) fn read_socket_connect_address(
     addr: u64,
     len: u32,
 ) -> Result<SocketAddress, SysError> {
-    if socket_type != SocketType::Ipv4IcmpRaw {
+    if !matches!(socket_type, SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw) {
         return read_socket_address(socket_type, addr, len);
     }
 
@@ -275,7 +278,7 @@ pub(super) fn validate_send_message_flags(
     flags: i32,
 ) -> Result<SendMessageFlags, SysError> {
     let supported = match socket_type {
-        SocketType::Ipv4Udp => MSG_DONTWAIT,
+        SocketType::Ipv4Udp => MSG_DONTWAIT | MSG_NOSIGNAL,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_NOSIGNAL,
         SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_NOSIGNAL,
     };
@@ -292,6 +295,16 @@ pub(super) fn validate_send_message_flags(
         // diagnostic only if the family later gains a real SIGPIPE path and
         // routes the flag through the ordinary signal-suppression protocol.
         knoticeln!("ICMP raw send: MSG_NOSIGNAL accepted without a SIGPIPE producer");
+    }
+    if socket_type == SocketType::Ipv4Udp
+        && flags & MSG_NOSIGNAL != 0
+        && !UDP_NOSIGNAL_DIAGNOSTIC_EMITTED.swap(true, Ordering::Relaxed)
+    {
+        // UDP has no peer-close or SIGPIPE producer, so MSG_NOSIGNAL is a
+        // visible no-op accepted for Linux compatibility. Remove this special
+        // diagnostic only if UDP later gains a real SIGPIPE path and routes
+        // the flag through the ordinary signal-suppression protocol.
+        knoticeln!("UDP send: MSG_NOSIGNAL accepted without a SIGPIPE producer");
     }
     Ok(SendMessageFlags {
         nonblocking: flags & MSG_DONTWAIT != 0,
@@ -310,7 +323,7 @@ pub(super) fn validate_receive_message_flags(
     flags: i32,
 ) -> Result<ReceiveMessageFlags, SysError> {
     let supported = match socket_type {
-        SocketType::Ipv4Udp => MSG_DONTWAIT,
+        SocketType::Ipv4Udp => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_PEEK,
         SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
     };

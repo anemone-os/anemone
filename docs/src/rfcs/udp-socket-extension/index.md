@@ -1,13 +1,13 @@
 # RFC-20260804-udp-socket-extension
 
-**状态：** Accepted for Implementation / Stage 1 Checkpoint 1A Closed / Checkpoint 1B Not Active
+**状态：** Accepted for Implementation / Stage 1 Closed / Stage 2 Outline
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-04
 **领域：** network / socket / UDP / userspace ABI
 **影响契约：** R0 target 将 Refine `NET-SOCKET-ENDPOINT-001`、
 `NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`；current contract 未改变
-**执行记录：** Git / PR；Stage 1 Checkpoint 1A已关闭，未创建transaction；Checkpoint 1B、Stage 2与contract cutover均未授权
+**执行记录：** Git / PR；Stage 1已关闭，未创建transaction；Stage 2与contract cutover均未授权
 
 ## 文档状态
 
@@ -20,12 +20,11 @@ effective 行为仍以 `docs/src/contracts/`、live source 与 Git/PR evidence �
 达到 named cutover 前，本文描述的 connected UDP、message ABI 与新 flag 都不是当前事实。
 
 本 RFC 已创建[实施路线](./implementation.md)：路线分为两个 Stage，Stage 1 的Endpoint-owned
-connected scalar/file-I/O vertical slice解析为两个有序checkpoint；本轮只关闭Checkpoint 1A，
-Checkpoint 1B保持Not Active。Stage 2的single-message ABI、综合acceptance与最终cutover只保留
-outline，尚未解析或激活。mandatory
-resolver 的 source-level audit 已闭合：R0 选择落在既定能力包络内的 musl IPv4 resolver path；
-当前 acceptance baseline 的 glibc resolver 因强依赖 `IP_RECVERR` 保持 Not Supported / Not
-Cut Over。本轮没有transaction或contract cutover授权，1A closure后必须停止。
+connected scalar/file-I/O vertical slice解析为两个有序checkpoint；Checkpoint 1A与1B均已关闭。
+Stage 2的single-message ABI、综合acceptance与最终cutover只保留outline，尚未解析或激活。
+按本轮用户决定，RV64/LA64 musl resolver专项保持 Not Run；当前 acceptance baseline 的 glibc
+resolver 因强依赖 `IP_RECVERR` 保持 Not Supported / Not Cut Over。本轮没有transaction或contract
+cutover授权，Stage 1 closure后必须停止。
 
 ## 摘要
 
@@ -146,7 +145,8 @@ single-message vector ABI 使用共享 kernel I/O `max_iovec_count` Kconfig 参�
 私有上限。R0 默认与 acceptance 配置固定为 1024，与公开 `IOV_MAX` 和 Linux 6.6.32
 `UIO_MAXIOV` 一致；`readv/writev/sendmsg/recvmsg` 必须读取同一参数，避免并列真相源。
 低于 1024 的非 acceptance 配置是显式 reduced-capacity profile，不能作为完整 R0 ABI
-cutover evidence；高于公开 `IOV_MAX` 的配置必须在 build/config resolution 时拒绝。
+cutover evidence。xtask 只负责该参数的 deserialize/materialize/generate；合法区间由内核
+`static_assert!(MAX_IOVEC_COUNT > 0 && MAX_IOVEC_COUNT <= IOV_MAX, ...)` 负责。
 
 `sendmsg/recvmsg` 超出上限的 errno、`msghdr` field copyout 顺序、`MSG_TRUNC` 返回值与 fault
 oracle 服从固定 Linux 6.6.32 reference。它们属于共同 Socket ABI adapter 的 focused oracle
@@ -199,7 +199,7 @@ lifecycle。late invalidation、旧 identity 或旧 queue 不得命中新 associ
 
 ## Contract Impact
 
-R0 acceptance与Checkpoint 1A closure都不更新 current contract。live source 与 current contract audit 已确认 R0 target
+R0 acceptance与Stage 1 closure都不更新 current contract。live source 与 current contract audit 已确认 R0 target
 需要以下 delta；它们只有在实现、closure evidence 与 named cutover 完成后才成为 effective：
 
 | Contract ID | Impact | Target delta | Effective gate |
@@ -235,7 +235,7 @@ R0 non-goals、双架构 acceptance floor 与 current contract 在 cutover 前�
 - 为绕过 cross-owner failure/cleanup 而降低 datagram、copy、errno 或 evidence 诚实性；
 - 需要把批量 message、IPv6、broadcast/multicast、TCP 或其它无真实 consumer 的能力带入本 RFC。
 
-本轮只授权并关闭Stage 1 Checkpoint 1A；Checkpoint 1B、Stage 2 resolution/implementation、probe与
+本轮已授权并关闭Stage 1 Checkpoint 1A与1B；Stage 2 resolution/implementation、probe与
 contract cutover均未授权。
 
 ## Acceptance 与 Validation
@@ -319,8 +319,8 @@ ordinary I/O 与 poll error projection、`MSG_ERRQUEUE`/`SO_ERROR` ABI 及双架
 - glibc 2.38：[`res_enable_icmp.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_enable_icmp.c#L23-L37)、
   [`res_send.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_send.c#L799-L864)。
 
-当前没有target-level open item；R0已经接受，Stage 1 Checkpoint 1A按本轮单独授权关闭。
-Checkpoint 1B、Stage 2、probe与cutover不会因1A closure或文档存在而自动激活。
+当前没有target-level open item；R0已经接受，Stage 1 Checkpoint 1A与1B均已关闭。
+Stage 2、probe与cutover不会因Stage 1 closure或文档存在而自动激活。
 
 ### 已收束，不构成设计 blocker
 
@@ -338,12 +338,12 @@ Checkpoint 1B、Stage 2、probe与cutover不会因1A closure或文档存在而�
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)（Stage 1 Checkpoint 1A Closed / Checkpoint 1B Not Active；Stage 2 Outline）
+- [实施路线](./implementation.md)（Stage 1 Closed；Stage 2 Outline）
 - [历史定位共识](./backgrounds/positionings.md)（仅背景材料，非 canonical target）
 - Current baseline：[Network UDP Socket](../../contracts/net/udp-socket.md)、
   [Network Protocol Socket](../../contracts/net/protocol-socket.md)、
   [Socket Front、ABI 与 Wait](../../contracts/socket/front-abi-wait.md)
-- 执行记录：Git / PR（Checkpoint 1A）；transaction None
+- 执行记录：Git / PR（Stage 1）；transaction None；resolver专项 Not Run
 - 外部源码证据：resolver audit 使用上文固定 upstream commit permalink；Linux message ABI
   oracle 使用 `xref:linux-6.6.32:<repo-relative-path>#<locator>`。私人 checkout 不作为 authority。
 
@@ -351,11 +351,13 @@ Checkpoint 1B、Stage 2、probe与cutover不会因1A closure或文档存在而�
 
 | 修订 | 日期 | 语义变化 | Review / Evidence |
 | --- | --- | --- | --- |
-| R0 | 2026-08-04 | 初始accepted target：IPv4 connected UDP、file/message/vector ABI、状态owner、非目标与acceptance boundary，并选择musl mandatory resolver、保持glibc Not Supported / Not Cut Over。 | 本轮独立接受并只关闭Stage 1 Checkpoint 1A；Git / PR拥有执行证据 |
+| R0 | 2026-08-04 | 初始accepted target：IPv4 connected UDP、file/message/vector ABI、状态owner、非目标与acceptance boundary，并保持glibc Not Supported / Not Cut Over。 | 本轮独立接受并关闭Stage 1；resolver专项按用户决定 Not Run；Git / PR拥有执行证据 |
 
 ## Closure
 
-R0尚未closure。Stage 1 Checkpoint 1A已经关闭Endpoint-owned peer、atomic bind+peer transaction、
-ingress admission、default-destination resolution、peek与retire/stale isolation；SocketOps connected/
-file-I/O success path、guest syscall/runtime、KUnit runtime、LTP、resolver与contract cutover均保持Not Run /
-Not Cut Over。Checkpoint 1B保持Not Active，current contract与register均未改变。
+R0尚未closure，Stage 2与最终contract cutover仍未授权。Stage 1已关闭Endpoint-owned peer、atomic
+bind+peer transaction、ingress admission、default-destination resolution、peek与retire/stale isolation，
+以及UDP SocketOps connected/file-I/O、shared vector-I/O bound、flags与wait/lifecycle vertical slice。
+RV64与LA64 guest/KUnit/LTP evidence已写入Git/PR；resolver专项保持Not Run，glibc保持Not Supported /
+Not Cut Over，external networking、physical hardware、`smp > 1`、full network LTP、final harness与
+contract cutover保持Not Run / Not Cut Over。current contract与register均未改变。

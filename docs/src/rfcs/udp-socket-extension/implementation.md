@@ -1,17 +1,17 @@
 # IPv4 UDP Socket 能力扩展实施路线
 
-**状态：** R0 Accepted / Stage 1 Checkpoint 1A Closed / Checkpoint 1B Not Active / Stage 2 Outline
+**状态：** R0 Accepted / Stage 1 Closed / Stage 2 Outline
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260804-udp-socket-extension](./index.md)
 **当前修订：** R0
-**当前实施阶段：** Stage 1 Checkpoint 1A已关闭并停止；Checkpoint 1B未激活；Stage 2未解析；transaction None；cutover None
+**当前实施阶段：** Stage 1已关闭并停止；Stage 2未解析；transaction None；cutover None
 
 本文只保存父 RFC 需要长期引用的两阶段实施路线。target、non-goals、owner、ABI、
 Contract Impact、acceptance 与最终 validation boundary 仍由父 RFC [index](./index.md)和
 [目标与不变量](./invariants.md)定义；本页不建立并列 target、current contract 或执行证据总表。
 
-R0已经接受；本轮只授权并关闭Stage 1 Checkpoint 1A。Checkpoint 1B、Stage 2 resolution /
-implementation、transaction与contract cutover均未授权；1A closure后已经停止。
+R0已经接受；Stage 1 Checkpoint 1A与1B均已关闭。Stage 2 resolution /
+implementation、transaction与contract cutover均未授权；Stage 1 closure后已经停止。
 
 ## Live Source Baseline 与路线选择
 
@@ -24,15 +24,15 @@ final release、blocking retry 与 iomux/epoll recheck：
 - kernel `UdpEndpointPort`保持窄capability，control plane只产生operation-local route/source/interface selection；
   connect由Stack在一个transition中完成必要的implicit bind projection与peer commit，普通explicit send仍保持既有独立
   implicit-bind行为；
-- UDP Socket family 仍以 `connect: None`、`peer_address: None`、`file_io: Unsupported` 发布；send 要求
-  显式 destination，receive 不支持 peek；UDP 只接受 `MSG_DONTWAIT`，尚未接受 `MSG_NOSIGNAL`、
-  `MSG_PEEK` 或 `MSG_TRUNC`；
+- UDP Socket family 已发布 `connect/getpeername`、connected/default destination 与 datagram
+  File-I/O；`MSG_NOSIGNAL`、`MSG_PEEK` 与 `MSG_TRUNC` 均在 Stage 1 范围内实现，unsupported flags
+  仍稳定拒绝；
 - common Socket front 已有 typed connect/query、datagram `read/write`、direct-user scalar/vector cursor、
   datagram packet-length outcome、blocking retry 和 source-driven poll。Stage 1 应让 UDP 消费这些既有
   capability，不重建 UDP-only FileOps、wait loop 或第二个 ABI adapter；
-- ordinary `readv/writev` 的 iovec import 已有共享实现，但数量上限仍是 owner-local hard-coded
-  `MAX_IOVEC_CNT = 1024` 并带 Kconfig TODO。父 RFC 要求它与后续 single-message vector import 共用
-  `max_iovec_count`；Stage 1 先把 ordinary vector I/O 迁到该唯一配置 owner，Stage 2 再直接复用。
+- ordinary `readv/writev` 与 Socket file-I/O 已迁到共享 `max_iovec_count` Kconfig owner；xtask
+  只负责 deserialize/materialize/generate，合法区间由 kernel `static_assert!` 对公开 `IOV_MAX`
+  约束。Stage 2 的 single-message vector import 继续复用该唯一配置。
 
 这些缺口都能落在现有 Endpoint、control-plane、UDP family、common Socket ABI 与 kernel I/O owner
 内，不需要 probe、owner migration、transitional public ABI 或新通用 framework。因此路线分为两个
@@ -119,8 +119,8 @@ Renegotiation；agent 可以提交证据和方案，不能自行批准较弱 tar
 
 ## Activation、checkpoint 与 evidence 规则
 
-- Stage 是默认人工授权边界。父RFC R0 acceptance已经闭合，本轮维护者只授权Checkpoint 1A；1A关闭后必须停止，
-  不能自动进入Checkpoint 1B，Stage 1 closure后也不能自动解析或进入Stage 2；
+- Stage 是默认人工授权边界。父RFC R0 acceptance已经闭合；Checkpoint 1A先独立授权并关闭，随后1B获明确
+  授权并关闭。Stage 1 closure后不能自动解析或进入Stage 2；
 - Stage 内 checkpoint 是独立安全的 commit/review/recovery boundary，不默认增加一次人工 activation。若维护者只
   授权某个 checkpoint，则该更窄授权优先，关闭后必须停止；
 - Checkpoint 1A、1B 按顺序执行。每个 checkpoint 关闭前完成对应 review、Architecture Friction Scan、验证与
@@ -135,21 +135,21 @@ Renegotiation；agent 可以提交证据和方案，不能自行批准较弱 tar
 
 | 阶段 | 当前状态 | 概括目的 | 前置依赖 | 下一步边界 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | 1A Closed；1B Resolved / Not Active | 交付 Endpoint-owned connected association、scalar/file/vector I/O 与既有 wait/lifecycle 的完整 candidate | 父 RFC R0 acceptance；每个更窄checkpoint明确授权 | 1A已关闭并停止；1B需单独授权，之后才可关闭Stage 1 |
+| Stage 1 | Closed；Cutover None | 交付 Endpoint-owned connected association、scalar/file/vector I/O 与既有 wait/lifecycle 的完整 candidate | 父 RFC R0 acceptance；1A与1B均已完成 | 已关闭并停止，等待单独授权Stage 2 |
 | Stage 2 | Outline / Not Resolved / Not Active | 交付 `sendmsg/recvmsg` single-message ABI、musl 1.2.5、最终综合 acceptance 与 `UDP-EXT-R0-CUTOVER` | Stage 1 Closed；读取 actual diff/evidence/review 后单独 resolution 和授权 | 当前不得激活或推断 checkpoint |
 
 ## Stage 1 Resolved — Connected scalar/file-I/O vertical slice
 
-**状态：** Checkpoint 1A Closed / Checkpoint 1B Resolved / Not Active / Cutover None
+**状态：** Checkpoint 1A Closed / Checkpoint 1B Closed / Cutover None
 
 **Purpose：** 在不建立 message ABI 的前提下，让 Stack Endpoint 成为 peer/filter 唯一 owner，并让 UDP
-通过现有 common Socket front 交付 connected association、scalar/file/vector datagram I/O、blocking/iomux、
-opened-description lifecycle 与 musl 1.2.0 resolver 所需能力。Stage 1 关闭时形成安全、可运行、可继续扩展的
-R0 candidate，但不改变 current contract，也不宣称父 RFC closure。
+通过现有 common Socket front 交付 connected association、scalar/file/vector datagram I/O、blocking/iomux 与
+opened-description lifecycle。Stage 1 关闭时形成安全、可运行、可继续扩展的 R0 candidate，但不改变 current
+contract，也不宣称父 RFC closure；musl resolver专项按用户决定保持 Not Run。
 
 **Prerequisites：** 父RFC已经由owner/reviewer接受为R0；current UDP、Socket、control-plane、opened-
 description、iomux/epoll contracts与register未出现改变本Stage边界的新事实；维护者本轮明确授权并关闭1A。
-Checkpoint 1B仍需单独授权。
+Checkpoint 1B已在本轮边界内完成。
 
 **Protected Boundary：** 保持父 RFC 的 IPv4-only scope、Endpoint/control-plane/Socket owner fence、
 datagram atomicity、operation-specific readiness、final-release lifecycle、glibc rejection、Stage 2 message
@@ -276,14 +276,14 @@ KUnit runtime、guest syscall、external networking或resolver；这些在未实
 **Exit / Stop：** 1A只有在 production capability、owner-local proof、两架构build、review和evidence disposition
 闭合后才能关闭。若 peer transition 无法在不发布Socket-side truth或不扭曲control-plane/Stack owner的情况下原子
 实现，停止并回到 RFC review；不得把部分 binding/peer commit 写成 temporary limitation。1A closure为Cutover None；
-若维护者授权的是整个Stage 1，可在review无阻断finding后继续1B；若只授权1A，关闭后停止。
+1A关闭时按当次窄授权停止；后续1B只在维护者明确授权后执行。
 
 ### Checkpoint 1B — Connected Socket/File-I/O publication 与 Stage 1 closure
 
-**状态：** Resolved / Not Active
+**状态：** Closed / Cutover None
 
 **Purpose：** 让 UDP family消费1A capability和现有common Socket front，发布父RFC Stage 1范围内的connected
-scalar/file/vector ABI、flag与wait/lifecycle，并以真实non-DNS consumer和musl 1.2.0 resolver证明vertical slice。
+scalar/file/vector ABI、flag与wait/lifecycle，并以真实non-DNS consumer证明vertical slice；resolver专项保持Not Run。
 该 checkpoint 关闭整个Stage 1，但仍不执行任何contract cutover。
 
 **Prerequisites：** 1A Closed且review没有遗留Apollyon/Keter；父RFC仍是同一accepted revision；实际source没有
@@ -295,14 +295,15 @@ scalar/file/vector ABI、flag与wait/lifecycle，并以真实non-DNS consumer和
    并保持 bind/getsockname、sendto/recvfrom current regression；
 2. 让 UDP descriptor消费common datagram File-I/O，闭合 `read/write/readv/writev`、zero/short/fault、
    `MSG_DONTWAIT | MSG_NOSIGNAL | MSG_PEEK | MSG_TRUNC`与stable unsupported rejection；
-3. 将 ordinary iovec import迁移到唯一 `max_iovec_count` Kconfig owner，补齐default、reduced-capacity、
-   above-`IOV_MAX` config resolution和ordinary vector I/O regression；不触碰Stage 2 `msghdr`/control surface；
+3. 将 ordinary iovec import迁移到唯一 `max_iovec_count` Kconfig owner，补齐default、reduced-capacity与
+   ordinary vector I/O regression；合法区间由 kernel `static_assert!` 约束，xtask不做参数语义校验；不触碰
+   Stage 2 `msghdr`/control surface；
 4. 复用current UDP source的snapshot/register/recheck，验证peer filter queue、capacity retry、immediate request error、
    multi-waiter/signal及poll/select/epoll；不得让connected state或route cache驱动ready mask；
 5. 闭合dup/fork/CLOEXEC/one-alias/final close、connect/send/receive-close race、late hint、port reuse与orderly
    network shutdown；final release仍只由opened-description owner触发；
-6. 增加非DNS connected request/response和未修改musl 1.2.0 IPv4 resolver focused consumer，记录guest实际libc
-   identity/call shape。DNS success只证明该consumer，不替代connected/file/vector/fault/lifecycle matrix；
+6. 增加非DNS connected request/response；musl 1.2.0/1.2.5 resolver专项按用户决定保持 Not Run，不能用普通
+   socket LTP或非DNS case替代 resolver 证据。DNS success只证明该consumer，不替代connected/file/vector/fault/lifecycle matrix；
 7. 完成Stage 1 final source/dependency audit、change review与Architecture Friction Scan；确认没有caller/libc/test/
    architecture branch、第二份peer/readiness truth、无退出条件bridge或为Stage 2预建的generic framework。
 
@@ -331,16 +332,31 @@ Stage 1 mandatory matrix至少包括：
   每个copy segment与address output fault、unsupported flag/option；
 - wait/lifecycle：capacity saturation/recovery、immediate non-wait errors、blocking/nonblocking、poll/select/epoll、
   multi-waiter/signal、dup/fork/CLOEXEC/final release/stale identity；
-- real consumer：两架构non-DNS connected request/response；RV64 acceptance baseline的未修改musl 1.2.0 IPv4 resolver。
+- real consumer：两架构non-DNS connected request/response；RV64/LA64 musl resolver专项按用户决定 Not Run。
 
-LA64 musl 1.2.5 resolver依赖`recvmsg`，在Stage 1明确Not Run / Not Cut Over；single-message ABI、完整external-path
-claim、full network LTP、final harness、physical hardware、`smp > 1`与父RFC最终contract cutover也保持Not Run / Not
-Cut Over。若Stage 1实际运行了更宽证据，可以记录，但不能据此提前进入Stage 2或更新current contract。
+RV64 musl 1.2.0与LA64 musl 1.2.5 resolver专项均为Not Run / Not Cut Over；glibc resolver保持Not Supported /
+Not Cut Over；single-message ABI、完整external-path claim、full network LTP、final harness、physical hardware、
+`smp > 1`与父RFC最终contract cutover也保持Not Run / Not Cut Over。若Stage 1实际运行了更宽证据，可以记录，
+但不能据此提前进入Stage 2或更新current contract。
 
-**Exit / Stop：** 1B只有在两架构Stage 1 focused guest、owner-local proof、config/build、source audit、final review和
-Architecture Friction disposition全部闭合后才能关闭Stage 1。任何必须借助`sendmsg/recvmsg`、glibc option伪成功、
-shared front contract变化或validation降级的事实都触发停止。Stage 1 closure固定为Cutover None；关闭后必须停止，
-等待维护者单独授权Stage 2 resolution，不能自动解析、激活或实现Stage 2。
+#### Closure Evidence
+
+- RV64 canonical wrapper：413 KUnit；UDP extension 10/10，UDP 16/16，Unix 23/23，raw ICMP 10/10；glibc/musl
+  socket LTP 6/6；正常 orderly poweroff。证据：`build/udp-ext-stage1-rv64.log`。
+- LA64 canonical wrapper：418 KUnit；同上 guest suites 与 glibc/musl socket LTP 6/6；wrapper 正常收口，已知
+  无 poweroff handler 导致 terminal halt。证据：`build/udp-ext-stage1-la64.log`。
+- `just test xtask`：83 passed；`just test net-host`通过；`just fmt kernel --check`、`just fmt socket-test --check`
+  与`git diff --check`通过。xtask测试只覆盖参数 materialize/generate；合法区间由 kernel static assertion 负责。
+- 独立 reviewer 的两项 Apollyon 已闭合：blocking retry 使用 operation-local destination snapshot；unconnected
+  missing destination 在 ensure_bound/user-copy 前返回 `EDESTADDRREQ`，不产生隐式 bind 或 `EFAULT`先行。
+- RV64 musl 1.2.0、LA64 musl 1.2.5 resolver专项：**Not Run**（按用户决定）；glibc：**Not Supported / Not Cut Over**。
+  external networking、physical hardware、`smp > 1`、full network LTP、final harness与contract cutover保持
+  Not Run / Not Cut Over。
+
+**Exit / Stop：** 1B已在两架构 focused guest、owner-local proof、config/build、source audit、final review和
+Architecture Friction disposition闭合后关闭Stage 1。任何必须借助`sendmsg/recvmsg`、glibc option伪成功、shared
+front contract变化或validation降级的事实仍触发停止。Stage 1 closure固定为Cutover None；关闭后必须停止，等待
+维护者单独授权Stage 2 resolution，不能自动解析、激活或实现Stage 2。
 
 ## Stage 2 Outline — Single-message ABI、综合 acceptance 与 R0 cutover
 

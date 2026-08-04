@@ -58,6 +58,7 @@ pub struct Parameters {
     pub max_path_len_bytes: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
+    pub max_iovec_count: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub pipe_max_capacity_pages: Option<usize>,
@@ -157,6 +158,7 @@ impl Parameters {
         materialize!(max_path_len_bytes);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
+        materialize!(max_iovec_count);
         materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
         materialize!(pipe_max_capacity_pages);
@@ -282,6 +284,8 @@ pub const MAX_PATH_LEN_BYTES: usize = {};
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Maximum number of vectors imported by one ordinary vector I/O request.
+pub const MAX_IOVEC_COUNT: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
 /// Default anonymous-pipe capacity in pages.
@@ -444,6 +448,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(max_path_len_bytes),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
+            resolved!(max_iovec_count),
             resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
             resolved!(pipe_max_capacity_pages),
@@ -598,6 +603,30 @@ mod tests {
             parameters
                 .gen_kconfig_defs()
                 .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
+        );
+    }
+
+    #[test]
+    fn max_iovec_count_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert_eq!(parameters.max_iovec_count, Some(1024));
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const MAX_IOVEC_COUNT: usize = 1024;")
+        );
+    }
+
+    #[test]
+    fn reduced_max_iovec_count_materializes() {
+        let mut parameters = defaults();
+        parameters.max_iovec_count = Some(16);
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const MAX_IOVEC_COUNT: usize = 16;")
         );
     }
 

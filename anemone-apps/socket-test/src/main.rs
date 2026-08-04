@@ -3,6 +3,7 @@
 
 mod icmp_raw;
 mod udp;
+mod udp_extension;
 mod unix;
 
 use anemone_rs::{env, prelude::*};
@@ -28,9 +29,13 @@ fn main() -> Result<(), Errno> {
         },
         None => {
             let udp_result = udp::run();
+            let udp_extension_result = udp_extension::run();
             let unix_result = unix::run();
             let icmp_raw_result = icmp_raw::run();
-            udp_result.and(unix_result).and(icmp_raw_result)
+            udp_result
+                .and(udp_extension_result)
+                .and(unix_result)
+                .and(icmp_raw_result)
         },
         Some(_) => Err(EINVAL),
     }

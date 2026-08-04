@@ -1,17 +1,23 @@
 use alloc::vec::Vec;
 
-use anemone_abi::fs::linux::IoVec;
+use anemone_abi::fs::linux::{IOV_MAX, IoVec};
 
-use crate::prelude::{user_access::UserReadSlice, *};
+use crate::{
+    kconfig_defs::MAX_IOVEC_COUNT,
+    prelude::{user_access::UserReadSlice, *},
+};
 
 mod read;
 mod write;
 
 pub(super) use self::{read::ReadRequest, write::WriteRequest};
 
-// TODO: make this a kconfig item.
-const MAX_IOVEC_CNT: usize = 1024;
 const MAX_RW_COUNT: usize = i32::MAX as usize & !(PagingArch::PAGE_SIZE_BYTES - 1);
+
+static_assert!(
+    MAX_IOVEC_COUNT > 0 && MAX_IOVEC_COUNT <= IOV_MAX,
+    "max_iovec_count must be in 1..=IOV_MAX"
+);
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CheckedIoVec {
@@ -90,7 +96,7 @@ pub(super) fn load_iovecs(
     if iovcnt == 0 {
         return Ok(Vec::new());
     }
-    if iovcnt > MAX_IOVEC_CNT {
+    if iovcnt > MAX_IOVEC_COUNT {
         return Err(SysError::InvalidArgument);
     }
 
