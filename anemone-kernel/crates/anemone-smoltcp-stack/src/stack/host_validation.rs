@@ -4,8 +4,8 @@ use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
     Ipv4EgressSelection,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointFacts, UdpEndpointId,
-        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
+        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
     },
 };
 use smoltcp::{socket::raw, wire::IpVersion};
@@ -35,6 +35,7 @@ pub enum HostEndpointCreateError {
 pub enum HostSendError {
     UnknownEndpoint,
     UnboundEndpoint,
+    MissingDestination,
     MissingSelection,
     UnknownInterface,
     UnsupportedSource,
@@ -53,6 +54,12 @@ pub struct HostReceivedDatagram {
     pub payload: Vec<u8>,
     pub source_address: [u8; 4],
     pub source_port: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostPeer {
+    pub address: [u8; 4],
+    pub port: u16,
 }
 
 /// Test-only observation. These fields never participate in owner decisions.
@@ -201,6 +208,54 @@ impl Stack {
         self.udp_endpoint_binding(endpoint.0)
     }
 
+    pub fn connect_udp_endpoint_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+        selection: HostSelection,
+        destination_address: [u8; 4],
+        destination_port: u16,
+    ) -> Result<(), UdpConnectError> {
+        self.connect_udp_endpoint(
+            endpoint.0,
+            anemone_net_api::Ipv4EgressSelection::new(
+                selection.interface,
+                ApiIpv4Address::new(selection.source),
+            ),
+            UdpPeer::new(ApiIpv4Address::new(destination_address), destination_port),
+        )
+    }
+
+    pub fn udp_peer_for_host_validation(
+        &self,
+        endpoint: HostEndpointId,
+    ) -> Result<Option<HostPeer>, UdpQueryError> {
+        self.udp_endpoint_peer(endpoint.0).map(|peer| {
+            peer.map(|peer| HostPeer {
+                address: peer.address().octets(),
+                port: peer.port(),
+            })
+        })
+    }
+
+    pub fn disconnect_udp_endpoint_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+    ) -> Result<(), UdpQueryError> {
+        self.disconnect_udp_endpoint(endpoint.0)
+    }
+
+    pub fn peek_udp_for_host_validation(
+        &self,
+        endpoint: HostEndpointId,
+    ) -> Option<HostReceivedDatagram> {
+        let datagram = self.peek_udp_endpoint(endpoint.0).ok()?;
+        Some(HostReceivedDatagram {
+            payload: datagram.payload().to_vec(),
+            source_address: datagram.peer().address().octets(),
+            source_port: datagram.peer().port(),
+        })
+    }
+
     pub fn send_udp_for_host_validation(
         &mut self,
         endpoint: HostEndpointId,
@@ -210,13 +265,38 @@ impl Stack {
         payload: &[u8],
     ) -> Result<(), HostSendError> {
         let selection = selection.ok_or(HostSendError::MissingSelection)?;
+        let peer = self.resolve_udp_endpoint_destination(
+            endpoint.0,
+            Some(UdpPeer::new(
+                ApiIpv4Address::new(destination_address),
+                destination_port,
+            )),
+        )?;
         self.send_udp_endpoint(
             endpoint.0,
             Ipv4EgressSelection::new(selection.interface, ApiIpv4Address::new(selection.source)),
-            UdpPeer::new(ApiIpv4Address::new(destination_address), destination_port),
+            peer,
             payload,
         )
         .map_err(Into::into)
+    }
+
+    pub fn send_udp_default_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+        selection: Option<HostSelection>,
+        payload: &[u8],
+    ) -> Result<(), HostSendError> {
+        let peer = self
+            .resolve_udp_endpoint_destination(endpoint.0, None)
+            .map_err(HostSendError::from)?;
+        self.send_udp_for_host_validation(
+            endpoint,
+            selection,
+            peer.address().octets(),
+            peer.port(),
+            payload,
+        )
     }
 
     pub fn receive_udp_for_host_validation(
@@ -297,6 +377,7 @@ impl From<UdpSendError> for HostSendError {
         match error {
             UdpSendError::UnknownEndpoint => Self::UnknownEndpoint,
             UdpSendError::UnboundEndpoint => Self::UnboundEndpoint,
+            UdpSendError::DestinationRequired => Self::MissingDestination,
             UdpSendError::UnknownInterface => Self::UnknownInterface,
             UdpSendError::UnsupportedSource => Self::UnsupportedSource,
             UdpSendError::InvalidDestination => Self::InvalidDestination,

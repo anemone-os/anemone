@@ -239,6 +239,30 @@ impl UdpReceivedDatagram {
     }
 }
 
+/// Point-in-time copy of the queue head. Peeking never transfers ownership or
+/// consumes receive capacity; callers must issue a fresh observation after any
+/// invalidation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UdpPeekedDatagram {
+    payload: Vec<u8>,
+    peer: UdpPeer,
+}
+
+impl UdpPeekedDatagram {
+    #[doc(hidden)]
+    pub fn from_owner_observation(payload: Vec<u8>, peer: UdpPeer) -> Self {
+        Self { payload, peer }
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    pub const fn peer(&self) -> UdpPeer {
+        self.peer
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UdpCreateError {
     EndpointCapacity,
@@ -253,6 +277,15 @@ pub enum UdpBindError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UdpConnectError {
+    UnknownEndpoint,
+    InvalidPeer,
+    UnknownInterface,
+    UnsupportedSource,
+    EphemeralPortsExhausted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UdpQueryError {
     UnknownEndpoint,
 }
@@ -261,6 +294,7 @@ pub enum UdpQueryError {
 pub enum UdpSendError {
     UnknownEndpoint,
     UnboundEndpoint,
+    DestinationRequired,
     UnknownInterface,
     UnsupportedSource,
     InvalidDestination,

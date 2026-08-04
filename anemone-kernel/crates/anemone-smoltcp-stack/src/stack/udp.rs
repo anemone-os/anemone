@@ -3,9 +3,9 @@
 use anemone_net_api::{
     InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4EgressSelection,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointFacts, UdpEndpointId,
-        UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpReceiveError,
-        UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
+        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeekedDatagram, UdpPeer,
+        UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
     },
 };
 use smoltcp::wire::{EthernetFrame, IpAddress, IpEndpoint, Ipv4Address};
@@ -77,6 +77,70 @@ impl Stack {
         self.protocols.udp.binding(id)
     }
 
+    pub fn connect_udp_endpoint(
+        &mut self,
+        id: UdpEndpointId,
+        selection: Ipv4EgressSelection,
+        peer: UdpPeer,
+    ) -> Result<(), UdpConnectError> {
+        let api_source = selection.source();
+        let source = Ipv4Address::from_octets(api_source.octets());
+        let (source_supported, _) = self
+            .interface_ipv4_and_mtu(selection.interface(), source)
+            .ok_or(UdpConnectError::UnknownInterface)?;
+        if !source_supported {
+            return Err(UdpConnectError::UnsupportedSource);
+        }
+        let existing_binding = self
+            .protocols
+            .udp
+            .binding(id)
+            .map_err(|error| match error {
+                UdpQueryError::UnknownEndpoint => UdpConnectError::UnknownEndpoint,
+            })?;
+        if let Some(binding) = existing_binding {
+            if !binding.address().is_unspecified() && binding.address() != api_source {
+                return Err(UdpConnectError::UnsupportedSource);
+            }
+        }
+        let plan = self.protocols.udp.prepare_connect(id, api_source, peer)?;
+        if let Some(binding) = plan.binding() {
+            self.project_udp_binding(id, binding);
+        }
+        self.protocols.udp.commit_connect(id, plan);
+        Ok(())
+    }
+
+    fn project_udp_binding(&mut self, id: UdpEndpointId, binding: UdpLocalBinding) {
+        let endpoint = self
+            .protocols
+            .udp
+            .endpoint(id)
+            .expect("prepared UDP endpoint disappeared before bind projection");
+        for entry in &mut self.interfaces {
+            endpoint.bind_engine_projection(entry.id, &mut entry.sockets, binding);
+        }
+        if let Some(local) = &mut self.local {
+            endpoint.bind_engine_projection(local.id, &mut local.sockets, binding);
+        }
+    }
+
+    pub fn udp_endpoint_peer(&self, id: UdpEndpointId) -> Result<Option<UdpPeer>, UdpQueryError> {
+        self.protocols.udp.peer(id)
+    }
+
+    pub fn resolve_udp_endpoint_destination(
+        &self,
+        id: UdpEndpointId,
+        explicit: Option<UdpPeer>,
+    ) -> Result<UdpPeer, UdpSendError> {
+        self.protocols.udp.resolve_destination(id, explicit)
+    }
+
+    pub fn disconnect_udp_endpoint(&mut self, id: UdpEndpointId) -> Result<(), UdpQueryError> {
+        self.protocols.udp.disconnect(id)
+    }
+
     pub fn udp_endpoint_facts(&self, id: UdpEndpointId) -> Result<UdpEndpointFacts, UdpQueryError> {
         self.protocols
             .udp
@@ -136,6 +200,13 @@ impl Stack {
             datagram.payload,
             UdpPeer::new(ApiIpv4Address::new(source.octets()), datagram.source.port),
         ))
+    }
+
+    pub fn peek_udp_endpoint(
+        &self,
+        endpoint: UdpEndpointId,
+    ) -> Result<UdpPeekedDatagram, UdpReceiveError> {
+        self.protocols.udp.peek(endpoint)
     }
 
     pub fn retire_udp_endpoint(&mut self, id: UdpEndpointId) -> Result<(), UdpRetireError> {

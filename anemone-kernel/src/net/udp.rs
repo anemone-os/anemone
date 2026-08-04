@@ -3,9 +3,9 @@
 use anemone_net_api::{
     Ipv4Address, Ipv4EgressSelection,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointFacts, UdpEndpointId,
-        UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeer, UdpQueryError,
-        UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
+        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeekedDatagram,
+        UdpPeer, UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
     },
 };
 
@@ -90,6 +90,14 @@ pub(crate) enum SendError {
     SourceUnavailable,
     InterfaceUnavailable,
     Stack(UdpSendError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ConnectError {
+    NoRoute,
+    SourceUnavailable,
+    InterfaceUnavailable,
+    Stack(UdpConnectError),
 }
 
 pub(crate) trait UdpEndpointInvalidationObserver: Send + Sync {
@@ -193,6 +201,49 @@ impl UdpEndpointPort {
         self.stack.udp_endpoint_binding(self.endpoint)
     }
 
+    pub(crate) fn peer(&self) -> Result<Option<UdpPeer>, UdpQueryError> {
+        self.stack.udp_endpoint_peer(self.endpoint)
+    }
+
+    pub(crate) fn connect(&self, peer: UdpPeer) -> Result<(), ConnectError> {
+        let binding = self.binding().map_err(|error| match error {
+            UdpQueryError::UnknownEndpoint => ConnectError::Stack(UdpConnectError::UnknownEndpoint),
+        })?;
+        let selection = {
+            let authority = ACTIVE_PATHS.lock();
+            authority
+                .domain
+                .control_plane()
+                .expect("published UDP capability lost its control plane")
+                .select(
+                    peer.address(),
+                    binding.and_then(|binding| {
+                        (!binding.address().is_unspecified()).then_some(binding.address())
+                    }),
+                )
+                .map_err(|error| match error {
+                    super::domain::SelectionError::NoRoute => ConnectError::NoRoute,
+                    super::domain::SelectionError::SourceUnavailable => {
+                        ConnectError::SourceUnavailable
+                    },
+                    super::domain::SelectionError::InterfaceUnavailable => {
+                        ConnectError::InterfaceUnavailable
+                    },
+                })?
+        };
+        self.stack
+            .connect_udp_endpoint(
+                self.endpoint,
+                Ipv4EgressSelection::new(selection.interface(), selection.source()),
+                peer,
+            )
+            .map_err(ConnectError::Stack)
+    }
+
+    pub(crate) fn disconnect(&self) -> Result<(), UdpQueryError> {
+        self.stack.disconnect_udp_endpoint(self.endpoint)
+    }
+
     pub(crate) fn ensure_bound(&self) -> Result<UdpLocalBinding, SendError> {
         let binding = match self.binding().map_err(|error| match error {
             UdpQueryError::UnknownEndpoint => SendError::Stack(UdpSendError::UnknownEndpoint),
@@ -209,7 +260,11 @@ impl UdpEndpointPort {
         Ok(binding)
     }
 
-    pub(crate) fn send(&self, peer: UdpPeer, payload: &[u8]) -> Result<(), SendError> {
+    pub(crate) fn send(&self, explicit: Option<UdpPeer>, payload: &[u8]) -> Result<(), SendError> {
+        let peer = self
+            .stack
+            .resolve_udp_endpoint_destination(self.endpoint, explicit)
+            .map_err(SendError::Stack)?;
         let binding = self.ensure_bound()?;
 
         let selection = {
@@ -242,6 +297,10 @@ impl UdpEndpointPort {
 
     pub(crate) fn receive(&self) -> Result<UdpReceivedDatagram, UdpReceiveError> {
         self.stack.receive_udp_endpoint(self.endpoint)
+    }
+
+    pub(crate) fn peek(&self) -> Result<UdpPeekedDatagram, UdpReceiveError> {
+        self.stack.peek_udp_endpoint(self.endpoint)
     }
 
     pub(crate) fn retire(&self) -> Result<(), UdpRetireError> {

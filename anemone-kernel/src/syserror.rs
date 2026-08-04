@@ -103,6 +103,9 @@ pub enum SysError {
     NotConnected,
     /// The socket is already connected.
     AlreadyConnected,
+    /// A Unix pathname listener has a different connection profile than the
+    /// client (Linux EPROTOTYPE).
+    ProtocolTypeMismatch,
     /// A pathname resolved, but no live listening socket admitted the
     /// connection.
     ConnectionRefused,
@@ -255,6 +258,7 @@ impl SysError {
             SysError::NotSocket => ENOTSOCK,
             SysError::NotConnected => ENOTCONN,
             SysError::AlreadyConnected => EISCONN,
+            SysError::ProtocolTypeMismatch => EPROTOTYPE,
             SysError::ConnectionRefused => ECONNREFUSED,
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,

@@ -14,7 +14,7 @@ mod udp;
 #[cfg(feature = "host-test")]
 pub use host_validation::{
     HostEndpointCreateError, HostEndpointId, HostEndpointObservation, HostLocalLinkObservation,
-    HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
+    HostPeer, HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
 };
 
 pub(crate) use interfaces::{InterfaceEntry, PumpOrder};

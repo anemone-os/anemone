@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    Socket, SocketDatagramSendOperation, SocketFileIo, SocketOps, SocketReadSink,
+    Socket, SocketDatagramSendOperation, SocketIoOps, SocketOps, SocketReadSink,
     SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest, SocketReceiveSink,
     SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
     SocketWriteSource,
@@ -120,6 +120,10 @@ impl SocketReadSink for UserBufferSink<'_> {
     fn copy_bytes(&mut self, bytes: &[u8]) -> Result<usize, SysError> {
         self.write_from_slice(bytes)
     }
+
+    fn copy_exact(&mut self, bytes: &[u8]) -> Result<(), SysError> {
+        self.exact_record().write_exact(bytes)
+    }
 }
 
 pub(super) struct SliceWriteSource<'a> {
@@ -198,9 +202,8 @@ fn socket_read_with_ctx(
     let socket =
         socket_from_file(file).expect("common Socket read used without Socket private state");
     let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
-    let outcome = match socket.file_io() {
-        SocketFileIo::Unsupported => return Err(SysError::NotSupported),
-        SocketFileIo::ByteStream => retry_socket_receive(
+    let outcome = match socket.io() {
+        SocketIoOps::ByteStream { .. } => retry_socket_receive(
             "socket read",
             &task,
             file,
@@ -213,7 +216,7 @@ fn socket_read_with_ctx(
             },
             map_file_receive_error,
         )?,
-        SocketFileIo::Datagram => {
+        SocketIoOps::Datagram { .. } => {
             let mut datagram_sink = FileDatagramReceiveSink { sink };
             retry_socket_receive(
                 "socket read",
@@ -229,6 +232,19 @@ fn socket_read_with_ctx(
                 map_file_receive_error,
             )?
         },
+        SocketIoOps::Seqpacket { .. } => retry_socket_receive(
+            "socket read",
+            &task,
+            file,
+            nonblocking,
+            || {
+                socket.receive(SocketReceiveRequest::Seqpacket {
+                    sink,
+                    flags: SocketReceiveFlags { peek: false },
+                })
+            },
+            map_file_receive_error,
+        )?,
     };
     Ok(outcome.copied())
 }
@@ -252,12 +268,12 @@ fn socket_write_with_ctx(
     let socket =
         socket_from_file(file).expect("common Socket write used without Socket private state");
     let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
-    match socket.file_io() {
-        SocketFileIo::Unsupported => Err(SysError::NotSupported),
-        SocketFileIo::ByteStream => retry_socket_send(
+    match socket.io() {
+        SocketIoOps::ByteStream { .. } => retry_socket_send(
             "socket write",
             &task,
             file,
+            None,
             nonblocking,
             true,
             || {
@@ -268,7 +284,7 @@ fn socket_write_with_ctx(
             },
             map_file_send_error,
         ),
-        SocketFileIo::Datagram => {
+        SocketIoOps::Datagram { .. } => {
             let mut payload = FileDatagramSendPayload {
                 source,
                 bytes: None,
@@ -278,6 +294,7 @@ fn socket_write_with_ctx(
                 "socket write",
                 &task,
                 file,
+                None,
                 nonblocking,
                 false,
                 || {
@@ -285,6 +302,24 @@ fn socket_write_with_ctx(
                         destination: None,
                         payload: &mut payload,
                         operation: &mut operation,
+                    })
+                },
+                map_file_send_error,
+            )
+        },
+        SocketIoOps::Seqpacket { .. } => {
+            let operation_wait = socket.seqpacket_send_wait(source.remaining());
+            retry_socket_send(
+                "socket write",
+                &task,
+                file,
+                Some(&operation_wait),
+                nonblocking,
+                true,
+                || {
+                    socket.send(SocketSendRequest::Seqpacket {
+                        source,
+                        destination: SocketStreamDestination::Absent,
                     })
                 },
                 map_file_send_error,

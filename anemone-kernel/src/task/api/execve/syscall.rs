@@ -15,8 +15,19 @@ use crate::{
 // arbitrary limit. we should make this a kconfig item later.
 const MAX_ARG_BYTES_LEN: usize = MAX_PATH_LEN_BYTES * 2;
 
-// the same as above.
-const MAX_ARG_COUNT: usize = 128;
+static_assert!(
+    EXECVE_MAX_STRING_COUNT > 0,
+    "execve_max_string_count must be non-zero"
+);
+
+fn execve_string_array_error(error: SysError) -> SysError {
+    match error {
+        // Linux reports E2BIG when either an argument vector or one of its
+        // strings exceeds the exec admission limit.
+        SysError::ListTooLong => SysError::ArgumentTooLarge,
+        other => other,
+    }
+}
 
 fn nullable_string_array<const MAX_ARRAY_LEN: usize, const MAX_BYTES_EACH_STRING: usize>(
     raw: u64,
@@ -25,6 +36,7 @@ fn nullable_string_array<const MAX_ARRAY_LEN: usize, const MAX_BYTES_EACH_STRING
         Ok(Vec::new())
     } else {
         c_readonly_string_array::<MAX_ARRAY_LEN, MAX_BYTES_EACH_STRING>(raw)
+            .map_err(execve_string_array_error)
     }
 }
 
@@ -96,8 +108,12 @@ fn resolve_execveat_path(
 })]
 pub fn execve(
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] path: Box<str>,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<Box<str>>,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<Box<str>>,
+    #[validate_with(nullable_string_array::<EXECVE_MAX_STRING_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
+        Box<str>,
+    >,
+    #[validate_with(nullable_string_array::<EXECVE_MAX_STRING_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<
+        Box<str>,
+    >,
 ) -> Result<u64, SysError> {
     let path = Path::new(path.as_ref());
     let argv = if argv.is_empty() {
@@ -120,8 +136,12 @@ pub fn execve(
 fn execveat(
     dirfd: i32,
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<Box<str>>,
-    #[validate_with(nullable_string_array::<MAX_ARG_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<Box<str>>,
+    #[validate_with(nullable_string_array::<EXECVE_MAX_STRING_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
+        Box<str>,
+    >,
+    #[validate_with(nullable_string_array::<EXECVE_MAX_STRING_COUNT, MAX_ARG_BYTES_LEN>)] envp: Vec<
+        Box<str>,
+    >,
     flags: ExecveAtFlags,
 ) -> Result<u64, SysError> {
     let exec_path = resolve_execveat_path(dirfd, pathname.as_ref(), flags)?;
@@ -143,4 +163,21 @@ fn execveat(
         envp.as_slice(),
     )?;
     unreachable!();
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn execve_string_array_overflow_reports_argument_too_large() {
+        assert_eq!(
+            execve_string_array_error(SysError::ListTooLong),
+            SysError::ArgumentTooLarge
+        );
+        assert_eq!(
+            execve_string_array_error(SysError::BadAddress),
+            SysError::BadAddress
+        );
+    }
 }

@@ -21,6 +21,7 @@ pub(super) enum SocketType {
     Ipv4Udp,
     Ipv4IcmpRaw,
     UnixStream,
+    UnixSeqpacket,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,6 +77,7 @@ pub(super) enum SocketConnectError {
     InvalidState,
     AlreadyConnected,
     ConnectionRefused,
+    ProtocolTypeMismatch,
     WouldBlock(SocketWait),
     Operation(SysError),
 }
@@ -165,25 +167,39 @@ pub(super) trait SocketReadSink {
     fn remaining(&self) -> usize;
 
     fn copy_bytes(&mut self, bytes: &[u8]) -> Result<usize, SysError>;
+
+    /// Seqpacket copyout must distinguish a short destination from a fault
+    /// after a selected prefix. Stream I/O keeps partial-progress semantics.
+    fn copy_exact(&mut self, bytes: &[u8]) -> Result<(), SysError> {
+        let copied = self.copy_bytes(bytes)?;
+        if copied == bytes.len() {
+            Ok(())
+        } else {
+            Err(SysError::BadAddress)
+        }
+    }
 }
 
 pub(super) trait SocketWriteSource {
     fn remaining(&self) -> usize;
 
     fn copy_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, SysError>;
+
+    /// Stage one complete seqpacket payload before the owner-local commit.
+    fn copy_exact(&mut self, bytes: &mut [u8]) -> Result<(), SysError> {
+        let copied = self.copy_bytes(bytes)?;
+        if copied == bytes.len() {
+            Ok(())
+        } else {
+            Err(SysError::BadAddress)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketStreamDestination {
     Absent,
     Present,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SocketFileIo {
-    Unsupported,
-    ByteStream,
-    Datagram,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,6 +211,7 @@ pub(super) struct SocketReceiveFlags {
 pub(super) enum SocketReceiveOutcome {
     ByteStream { copied: usize },
     Datagram { copied: usize, packet_length: usize },
+    Seqpacket { copied: usize, record_length: usize },
 }
 
 impl SocketReceiveOutcome {
@@ -209,9 +226,18 @@ impl SocketReceiveOutcome {
         }
     }
 
+    pub(super) const fn seqpacket(copied: usize, record_length: usize) -> Self {
+        Self::Seqpacket {
+            copied,
+            record_length,
+        }
+    }
+
     pub(super) const fn copied(self) -> usize {
         match self {
-            Self::ByteStream { copied } | Self::Datagram { copied, .. } => copied,
+            Self::ByteStream { copied }
+            | Self::Datagram { copied, .. }
+            | Self::Seqpacket { copied, .. } => copied,
         }
     }
 
@@ -219,6 +245,7 @@ impl SocketReceiveOutcome {
         match self {
             Self::ByteStream { .. } => None,
             Self::Datagram { packet_length, .. } => Some(packet_length),
+            Self::Seqpacket { record_length, .. } => Some(record_length),
         }
     }
 }
@@ -261,6 +288,10 @@ pub(super) enum SocketSendRequest<'a> {
         source: &'a mut dyn SocketWriteSource,
         destination: SocketStreamDestination,
     },
+    Seqpacket {
+        source: &'a mut dyn SocketWriteSource,
+        destination: SocketStreamDestination,
+    },
 }
 
 pub(super) enum SocketReceiveRequest<'a> {
@@ -269,6 +300,10 @@ pub(super) enum SocketReceiveRequest<'a> {
         flags: SocketReceiveFlags,
     },
     Stream {
+        sink: &'a mut dyn SocketReadSink,
+        flags: SocketReceiveFlags,
+    },
+    Seqpacket {
         sink: &'a mut dyn SocketReadSink,
         flags: SocketReceiveFlags,
     },
@@ -307,9 +342,66 @@ pub(super) struct SocketAcceptItem {
     pub(super) peer_address: Option<SocketAddress>,
 }
 
+pub(super) type SocketSendOp =
+    for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>;
+pub(super) type SocketSendWaitOp = fn(&AnyOpaque, usize) -> SocketWait;
+pub(super) type SocketReceiveOp = for<'a> fn(
+    &AnyOpaque,
+    SocketReceiveRequest<'a>,
+) -> Result<SocketReceiveOutcome, SocketReceiveError>;
+
+/// Complete type/data-plane capability bundle for one static Socket descriptor.
+///
+/// Every variant carries the handlers required by that operation shape, and
+/// seqpacket additionally requires its payload-specific send predicate.
+#[derive(Clone, Copy)]
+pub(super) enum SocketIoOps {
+    ByteStream {
+        socket_type: SocketType,
+        send: SocketSendOp,
+        receive: SocketReceiveOp,
+    },
+    Datagram {
+        socket_type: SocketType,
+        send: SocketSendOp,
+        receive: SocketReceiveOp,
+    },
+    Seqpacket {
+        socket_type: SocketType,
+        send: SocketSendOp,
+        send_wait: SocketSendWaitOp,
+        receive: SocketReceiveOp,
+    },
+}
+
+impl SocketIoOps {
+    const fn socket_type(self) -> SocketType {
+        match self {
+            Self::ByteStream { socket_type, .. }
+            | Self::Datagram { socket_type, .. }
+            | Self::Seqpacket { socket_type, .. } => socket_type,
+        }
+    }
+
+    const fn send(self) -> SocketSendOp {
+        match self {
+            Self::ByteStream { send, .. }
+            | Self::Datagram { send, .. }
+            | Self::Seqpacket { send, .. } => send,
+        }
+    }
+
+    const fn receive(self) -> SocketReceiveOp {
+        match self {
+            Self::ByteStream { receive, .. }
+            | Self::Datagram { receive, .. }
+            | Self::Seqpacket { receive, .. } => receive,
+        }
+    }
+}
+
 pub(super) struct SocketOps {
-    pub(super) socket_type: SocketType,
-    pub(super) file_io: SocketFileIo,
+    pub(super) io: SocketIoOps,
     pub(super) create: Option<fn() -> Result<SocketPreparation, SysError>>,
     pub(super) create_pair: Option<fn() -> Result<SocketPairPreparation, SysError>>,
     pub(super) bind: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketBindError>>,
@@ -322,14 +414,6 @@ pub(super) struct SocketOps {
     pub(super) peer_address:
         Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
     pub(super) accepting: fn(&AnyOpaque) -> Result<bool, SocketQueryError>,
-    pub(super) send:
-        Option<for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>>,
-    pub(super) receive: Option<
-        for<'a> fn(
-            &AnyOpaque,
-            SocketReceiveRequest<'a>,
-        ) -> Result<SocketReceiveOutcome, SocketReceiveError>,
-    >,
     pub(super) query_option:
         Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
     pub(super) mutate_option:
@@ -337,6 +421,15 @@ pub(super) struct SocketOps {
     pub(super) poll:
         for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
     pub(super) final_release: fn(&AnyOpaque),
+}
+
+impl SocketOps {
+    /// The descriptor remains the sole semantic type witness. ABI publication
+    /// profiles query it through this narrow surface instead of duplicating a
+    /// family tag beside the data-plane capability bundle.
+    pub(super) const fn socket_type(&self) -> SocketType {
+        self.io.socket_type()
+    }
 }
 
 #[derive(Opaque)]
@@ -350,18 +443,18 @@ pub(super) struct Socket {
 impl core::fmt::Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Socket")
-            .field("socket_type", &self.ops.socket_type)
+            .field("socket_type", &self.socket_type())
             .finish_non_exhaustive()
     }
 }
 
 impl Socket {
     pub(super) const fn socket_type(&self) -> SocketType {
-        self.ops.socket_type
+        self.ops.socket_type()
     }
 
-    pub(super) const fn file_io(&self) -> SocketFileIo {
-        self.ops.file_io
+    pub(super) const fn io(&self) -> SocketIoOps {
+        self.ops.io
     }
 
     pub(super) fn bind(&self, address: SocketAddress) -> Result<(), SocketBindError> {
@@ -410,14 +503,21 @@ impl Socket {
     }
 
     pub(super) fn send(&self, request: SocketSendRequest<'_>) -> Result<usize, SocketSendError> {
-        self.ops.send.ok_or(SocketSendError::Unsupported)?(&self.private, request)
+        (self.ops.io.send())(&self.private, request)
+    }
+
+    pub(super) fn seqpacket_send_wait(&self, payload_len: usize) -> SocketWait {
+        let SocketIoOps::Seqpacket { send_wait, .. } = self.ops.io else {
+            panic!("seqpacket send wait requested from a non-seqpacket I/O bundle")
+        };
+        send_wait(&self.private, payload_len)
     }
 
     pub(super) fn receive(
         &self,
         request: SocketReceiveRequest<'_>,
     ) -> Result<SocketReceiveOutcome, SocketReceiveError> {
-        self.ops.receive.ok_or(SocketReceiveError::Unsupported)?(&self.private, request)
+        (self.ops.io.receive())(&self.private, request)
     }
 
     pub(super) fn query_option(

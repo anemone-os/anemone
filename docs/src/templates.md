@@ -39,6 +39,24 @@
 
 实际行为或结构变化；必要时列出 Implementation Boundary、commit 或受影响 surface。
 
+## Checkpoints（仅 checkpointed small iteration）
+
+### CKPT 1 - 准备性闭包
+
+**Purpose:** 为什么需要独立 review、commit 或授权停止点。
+**Deliverable:** 独立安全且直接服务本轮 target 的内部能力、测试或结构变化。
+**Validation:** 本 checkpoint 的实际证据。
+**Cutover:** `None`；不得改变受保护 visible semantics 或 current contract。
+**Stop / Result:** 停止条件与实际结果；未获 CKPT 2 授权时在此停止。
+
+### CKPT 2 - Target closure
+
+**Purpose:** 完成同一个已解析 target。
+**Deliverable:** 最终交付。
+**Validation:** 本 checkpoint 与整体 acceptance 的实际证据。
+**Cutover:** 至多一次最终 semantic / contract cutover，或 `None`。
+**Stop / Result:** 整体收口条件与实际结果。
+
 ## Validation
 
 实际运行的命令、测试或复现；区分 agent 运行、用户运行和 Not Run。
@@ -66,11 +84,11 @@
 - 路由：当前边界内修正、Patch/小迭代、RFC review 或停止。
 ```
 
-`Tracking Issues` 只在当前小迭代确有尚待关闭的局部 concern 时增加；修复后把结论折回正文。不要拆出独立 `tracking-issues.md`、`invariants.md` 或 `implementation.md`。需要 probe、transitional contract、多个语义 checkpoint、target renegotiation 或本轮无法关闭的 Apollyon/Keter 时升级 RFC。
+`Checkpoints` 只在确需 review、commit 或授权停止点时增加；默认小迭代仍使用一个 closure checkpoint。两个 execution checkpoint 必须共享同一个已完整解析的 Implementation Boundary，且只有 CKPT 2 可以承担至多一次最终 semantic/contract cutover。普通 commit 不计入该上限。`Tracking Issues` 只在当前小迭代确有尚待关闭的局部 concern 时增加；修复后把结论折回正文。不要拆出独立 `tracking-issues.md`、`invariants.md` 或 `implementation.md`。需要 probe、transitional contract、跨 checkpoint 重新解析边界、多个独立 cutover、超过两个正式 execution checkpoint、target renegotiation 或本轮无法关闭的 Apollyon/Keter 时升级 RFC。
 
 ## 事务日志（按需）
 
-只有长期、多 checkpoint、多 cutover、probe/renegotiation 或 handoff 需要独立执行历史时才使用。
+只有长期 RFC、多 checkpoint、多 cutover、probe/renegotiation 或 handoff 需要独立执行历史时才使用；checkpointed small iteration 不因此创建 transaction。
 
 ```md
 # 2026-05-22 - 简短事务标题

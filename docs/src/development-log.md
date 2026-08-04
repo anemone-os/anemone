@@ -28,17 +28,19 @@ Patch 默认不写双周日志、小迭代记录或 transaction。文件数、co
 - Validation：实际运行、用户运行和 Not Run；
 - Remaining Risk / Links：仍有意义的风险和来源。
 
-`Contract Impact / Cutover`、`Tracking Issues`、`Architecture Friction` 和 `backgrounds/` 都是按需内容。不要为了填模板保留空章节。
+`Checkpoints`、`Contract Impact / Cutover`、`Tracking Issues`、`Architecture Friction` 和 `backgrounds/` 都是按需内容。不要为了填模板保留空章节。
 
 小迭代不再强制同步双周日志。新增记录只需加入[小迭代索引](./devlog/changes/index.md)和必要的 mdBook 导航；register、current limitations、RFC 或 issue 可以按需链接它。
 
-contract-bearing small change 只允许一个已完整解析的原子 cutover。protocol/state owner、handoff、failure、cleanup、Implementation Boundary 和验证必须明确；effective 正文仍只位于 current contract。需要 probe、transitional contract、多个语义 checkpoint、target renegotiation 或未关闭 Apollyon/Keter 时升级 RFC。
+小迭代默认使用一个 closure checkpoint；需要明确 review、commit 或授权停止点时，可以在同一份记录中使用至多两个 execution checkpoint。二者必须共享同一个已完整解析的 target、owner/handoff/failure/cleanup、public API/ABI/visible semantics、contract delta、acceptance、validation claim 与 Implementation Boundary。CKPT 1 只能是独立安全、对受保护 visible semantics/current contract 中性的准备性闭包；CKPT 2 完成整个 target，并承担至多一次最终 semantic/contract cutover。用户只授权 CKPT 1 时，完成后停止。
+
+`Checkpoints` 只需记录 Purpose、Deliverable、Validation、Cutover 和 Stop / Result，不建立 `implementation.md` 或 transaction。普通 commit 不计入两个 checkpoint 的上限。需要 probe、transitional contract、跨 checkpoint 重新解析上述边界、多个独立 cutover、target renegotiation、超过两个正式 execution checkpoint 或未关闭 Apollyon/Keter 时升级 RFC；effective contract 正文仍只位于 current contract。
 
 如果记录后来升级 RFC、被证明有误或被 supersede，追加简短来源/更正链接；不要扩张为第二套 RFC，也不要为本地 issue 拆出独立 `implementation.md`、`invariants.md` 或 `tracking-issues.md`。
 
 ## 事务日志（按需）
 
-transaction 只用于长期、多 checkpoint、多 cutover、probe/renegotiation 或需要独立 handoff 的执行历史。RFC 进入实现不自动触发 transaction。
+transaction 只用于长期 RFC、多 checkpoint、多 cutover、probe/renegotiation 或需要独立 handoff 的执行历史。RFC 进入实现和 checkpointed small iteration 都不自动触发 transaction。
 
 使用 transaction 时：
 
@@ -78,6 +80,6 @@ register/current limitations 只保存当前开放问题和接受限制。事项
 - 查当前行为：代码、测试和 current contracts。
 - 查局部决策或调查：小迭代记录。
 - 查 accepted target、contract delta 和 acceptance：RFC。
-- 查长期多 checkpoint 执行证据：按需 transaction。
+- 查长期 RFC 的多 checkpoint 执行证据：按需 transaction。
 - 查当前缺陷或接受限制：register/current limitations。
 - 查时间线：可选双周 devlog 或 Git 历史。

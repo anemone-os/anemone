@@ -5,7 +5,7 @@ edition = "2024"
 
 [features]
 default = ["host-test"]
-host-test = ["std", "smoltcp/auto-icmp-echo-reply"]
+host-test = ["std"]
 std = ["smoltcp/std"]
 
 [dependencies]
@@ -15,6 +15,9 @@ smoltcp = { path = "../anemos/smoltcp", default-features = false, features = [
     "medium-ethernet",
     "medium-ip",
     "proto-ipv4",
+    # Ordinary ICMP owns Echo Reply generation on both production interfaces
+    # and host validation paths; keeping this host-test-only breaks loopback.
+    "auto-icmp-echo-reply",
     # The Stack-private ICMP raw engine observes admitted IPv4 datagrams and
     # submits endpoint-owned egress through the normal smoltcp provider path.
     # This feature does not publish smoltcp's socket object outside the Stack.

@@ -1,8 +1,8 @@
 pub(super) use anemone_net_api::{
     Instant, InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4Cidr as ApiIpv4Cidr,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointLimits, UdpNamespacePolicy,
-        UdpQueryError,
+        UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointLimits,
+        UdpNamespacePolicy, UdpQueryError,
     },
 };
 pub(super) use anemone_smoltcp_stack::{

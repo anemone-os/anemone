@@ -63,21 +63,26 @@ impl Dentry {
         self.parent.as_ref().map(Arc::clone)
     }
 
-    /// Try to insert a child dentry with the given name.
-    pub fn insert_child(&self, name: String, dentry: &Arc<Dentry>) -> Result<(), SysError> {
-        if let Some(children) = self.inner.write().children.as_mut() {
-            if let Some(record) = children.get(&name) {
-                if record.upgrade().is_some() {
-                    return Err(SysError::AlreadyExists);
-                } else {
-                    children.remove(&name);
-                }
-            }
-            children.insert(name, Arc::downgrade(dentry));
-            Ok(())
-        } else {
-            Err(SysError::NotDir)
+    /// Reuse a live child or publish `dentry` under the given name.
+    pub fn lookup_or_insert_child(
+        &self,
+        name: String,
+        dentry: &Arc<Dentry>,
+    ) -> Result<Arc<Dentry>, SysError> {
+        let mut inner = self.inner.write();
+        let children = inner.children.as_mut().ok_or(SysError::NotDir)?;
+
+        // Upgrade while holding the publication lock so a successful lookup
+        // also returns the strong lifetime capability to the caller.
+        if let Some(existing) = children.get(&name).and_then(Weak::upgrade) {
+            return Ok(existing);
         }
+
+        // Replacing a stale weak reference and publishing a new child are one
+        // operation; the candidate is borrowed so its Drop cannot run under
+        // this parent lock on the reuse path.
+        children.insert(name, Arc::downgrade(dentry));
+        Ok(Arc::clone(dentry))
     }
 
     /// Remove a child dentry with the given name.

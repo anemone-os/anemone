@@ -11,15 +11,39 @@ mod process;
 mod runtime;
 
 use anemone_rs::{
-    abi::system::native::power::SHUTDOWN_MAGIC, os::anemone::power::shutdown, prelude::*,
+    abi::{fs::linux::open::O_RDONLY, system::native::power::SHUTDOWN_MAGIC},
+    os::{
+        anemone::power::shutdown,
+        linux::fs::{self, AtFd},
+    },
+    prelude::*,
 };
 
 fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
     process::run_execve(cmd, args, envs, cmd);
 }
 
+fn path_exists(path: &str) -> bool {
+    let Ok(fd) = fs::openat(AtFd::Cwd, Path::new(path), O_RDONLY, 0) else {
+        return false;
+    };
+    let _ = fs::close(fd);
+    true
+}
+
+fn run_udp_extension_c_consumer() {
+    if !path_exists("/bin/udp-extension-c") {
+        return;
+    }
+    println!("user-test: running UDP extension C consumer local matrix...");
+    local_run_cmd("/bin/udp-extension-c", &["udp-extension-c", "--local"], &[]);
+    println!("user-test: UDP extension C consumer local matrix finished.");
+}
+
 /// local tests for development.
 fn run_local_tests() {
+    run_udp_extension_c_consumer();
+
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");
@@ -101,6 +125,10 @@ fn run_local_tests() {
     local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
     println!("user-test: socket test finished.");
 
+    println!("user-test: running Rust Command seqpacket consumer...");
+    local_run_cmd("/bin/rust-command-test", &["rust-command-test"], &[]);
+    println!("user-test: Rust Command seqpacket consumer finished.");
+
     println!("user-test: running pipe capacity test...");
     local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
     println!("user-test: pipe capacity test finished.");
@@ -118,6 +146,10 @@ fn run_local_tests() {
 fn run_comp_tests() {
     guest::enter_competition_root();
     guest::init_competition_environment();
+
+    println!("user-test: running BusyBox loopback ping...");
+    local_run_cmd("/bin/ping", &["ping", "-c", "1", "127.0.0.1"], &[]);
+    println!("user-test: BusyBox loopback ping finished.");
 
     println!("user-test: running BusyBox gateway ping...");
     local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);

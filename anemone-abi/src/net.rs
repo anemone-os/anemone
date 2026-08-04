@@ -3,7 +3,12 @@ pub mod native {}
 pub mod linux {
     //! Linux socket ABI shared by RV64 and LA64.
 
-    use core::mem::{align_of, offset_of, size_of};
+    use core::{
+        ffi::c_void,
+        mem::{align_of, offset_of, size_of},
+    };
+
+    use crate::fs::linux::IoVec;
 
     pub const AF_UNSPEC: i32 = 0;
     pub const AF_UNIX: i32 = 1;
@@ -13,6 +18,7 @@ pub mod linux {
     pub const SOCK_STREAM: i32 = 1;
     pub const SOCK_DGRAM: i32 = 2;
     pub const SOCK_RAW: i32 = 3;
+    pub const SOCK_SEQPACKET: i32 = 5;
     pub const SOCK_NONBLOCK: i32 = 0x0800;
     pub const SOCK_CLOEXEC: i32 = 0x0008_0000;
     pub const IPPROTO_IP: i32 = 0;
@@ -79,6 +85,23 @@ pub mod linux {
         pub sun_path: [u8; UNIX_PATH_MAX],
     }
 
+    /// 64-bit asm-generic Linux `struct user_msghdr` layout.
+    ///
+    /// RV64 and LA64 share this representation. Kernel-internal Socket and
+    /// family APIs must translate it at the syscall boundary rather than carry
+    /// raw pointers or Linux field ordering into their operation types.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    #[repr(C)]
+    pub struct MsgHdr {
+        pub msg_name: *mut c_void,
+        pub msg_namelen: i32,
+        pub msg_iov: *mut IoVec,
+        pub msg_iovlen: u64,
+        pub msg_control: *mut c_void,
+        pub msg_controllen: u64,
+        pub msg_flags: u32,
+    }
+
     impl Default for SockAddrUn {
         fn default() -> Self {
             Self {
@@ -125,4 +148,13 @@ pub mod linux {
     const _: [(); 2] = [(); align_of::<SockAddrUn>()];
     const _: [(); 0] = [(); offset_of!(SockAddrUn, sun_family)];
     const _: [(); 2] = [(); offset_of!(SockAddrUn, sun_path)];
+    const _: [(); 56] = [(); size_of::<MsgHdr>()];
+    const _: [(); 8] = [(); align_of::<MsgHdr>()];
+    const _: [(); 0] = [(); offset_of!(MsgHdr, msg_name)];
+    const _: [(); 8] = [(); offset_of!(MsgHdr, msg_namelen)];
+    const _: [(); 16] = [(); offset_of!(MsgHdr, msg_iov)];
+    const _: [(); 24] = [(); offset_of!(MsgHdr, msg_iovlen)];
+    const _: [(); 32] = [(); offset_of!(MsgHdr, msg_control)];
+    const _: [(); 40] = [(); offset_of!(MsgHdr, msg_controllen)];
+    const _: [(); 48] = [(); offset_of!(MsgHdr, msg_flags)];
 }

@@ -2,7 +2,7 @@ use core::mem::size_of;
 
 #[cfg(feature = "kunit")]
 use anemone_abi::net::linux::{
-    AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM,
+    AF_UNIX, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_SEQPACKET, SOCK_STREAM,
 };
 use anemone_abi::{net::linux::AF_INET, syscall::SYS_SOCKETPAIR};
 
@@ -117,6 +117,12 @@ mod kunits {
         assert!(matches!(
             prepare_socket_pair(udp.ops),
             Err(SysError::NotSupported)
+        ));
+
+        let seqpacket = resolve_socket_pair(AF_UNIX, SOCK_SEQPACKET, 0).unwrap();
+        assert!(core::ptr::eq(
+            seqpacket.ops,
+            &crate::fs::socket::UNIX_SEQPACKET_SOCKET_OPS
         ));
     }
 }
