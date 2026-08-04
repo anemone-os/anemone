@@ -5,7 +5,8 @@
 **不覆盖：** RTC 接入、CPU-time timer 和 CPU usage 累计生命周期
 **最后核验：** 2026-08-04
 
-本目录只登记已经 cut over 的共享时间规则；RTC seed 与 RFC 最终消费者审计仍未 cut over。
+本目录只登记已经 cut over 的共享时间规则。R0 最终消费者审计已经关闭；RTC seed 仍是该 revision 的明确
+non-goal，不属于当前时间 contract。
 
 ## Owner Boundary
 
@@ -32,6 +33,6 @@
 
 ## 邻接边界
 
-- [Clock Timekeeping 与 POSIX Timers RFC](../../rfcs/clock-timekeeping-posix-timers/index.md)：尚未完成的RTC与
-  最终消费者审计target。
+- [Clock Timekeeping 与 POSIX Timers RFC](../../rfcs/clock-timekeeping-posix-timers/index.md)：已关闭的 R0 target、
+  owner boundary 与 non-goal。
 - [ThreadGroup lifecycle](../task/thread-group-lifecycle.md)：CPU usage与POSIX timer cleanup的task owner边界。

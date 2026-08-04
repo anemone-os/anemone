@@ -31,9 +31,10 @@ standard signal仍按`SIGNAL-PENDING-001`合并。
 延后；`callback_now + interval`漂移；generation-only取消；timer读取signal私有pending；fork继承timer；exec/exit
 只清表不取消request；不同timer的同号`SI_TIMER`互相覆盖。
 
-**验证 / Enforcement：** POSIX timer owner-local KUnit；signal pending slot/identity/flush KUnit；RV64/LA64 native
-user oracle覆盖五syscall、rollback/fail-forward、relative/absolute realtime step、periodic overrun、同号多timer、
-fork与unmaskable signal；source audit覆盖exec/exit与lock/callback顺序。
+**验证 / Enforcement：** POSIX timer owner-local KUnit覆盖ID、周期/overrun及反复replace/disarm/delete/bulk cleanup；
+signal pending slot/identity/flush KUnit；2026-08-04 R0最终源码在RV64/LA64 release SMP=2分别通过469/469与
+470/470 KUnit。双架构native user oracle覆盖五syscall、rollback/fail-forward、relative/absolute realtime step、
+periodic overrun、同号多timer、fork与unmaskable signal；source audit覆盖exec/exit与lock/callback顺序。
 
 **最初来源：** [RFC-20260803 Clock Timekeeping与POSIX Timers](../../rfcs/clock-timekeeping-posix-timers/index.md)；
 [Gate 5 PT-SIGNAL-CUTOVER](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md#gate-5-closure-与-pt-signal-cutover--2026-08-04)。

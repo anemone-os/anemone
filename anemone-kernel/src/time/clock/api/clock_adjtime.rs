@@ -96,7 +96,7 @@ fn decode_operation(tx: Timex) -> Result<AdjOperation, SysError> {
 }
 
 fn query_result(modes: u32) -> Timex {
-    // Gate 3 has no NTP/PLL discipline. Report the real source precision and
+    // R0 has no NTP/PLL discipline. Report the real source precision and
     // calendar value, but keep STA_UNSYNC/TIME_ERROR honest instead of filling
     // Linux discipline fields with invented state.
     Timex {

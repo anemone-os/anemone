@@ -53,8 +53,8 @@ absolute realtime timerfd 进入 realtime queue；只有 realtime + absolute 请
 
 **验证 / Enforcement：** owner-local KUnit 覆盖 mutation no-side-effect/overflow、native timex layout、realtime
 heap 双向判断、cancel sequence、旧 scanner、insert-side recheck、remote CPU recheck、timerfd 非法 flags、
-relative realtime 固化、物理 cancel、一次 `ECANCELED` 和 stale replacement。2026-08-04 最终源码在 RV64/LA64
-release SMP=2 分别通过 425/425 与 426/426 KUnit；同源用户 oracle 覆盖 set/adj 权限与错误、相对/绝对三种
+relative realtime 固化、物理 cancel、一次 `ECANCELED` 和 stale replacement。2026-08-04 R0 最终源码在 RV64/LA64
+release SMP=2 分别通过 469/469 与 470/470 KUnit；同源用户 oracle 覆盖 set/adj 权限与错误、相对/绝对三种
 sleep clock、signal/remaining、realtime 双向 step、relative/absolute realtime timerfd 和 cancel-on-set。
 source audit确认 timekeeper 锁内没有 queue/wait/timerfd callback，两个架构的 pretest rootfs 均从对应 manifest
 重新生成。完整证据见 cutover transaction；mdBook 按开发者指示 Not Run。

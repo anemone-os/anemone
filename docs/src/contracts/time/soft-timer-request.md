@@ -45,9 +45,9 @@ itimer/wait 的第二份长期状态；周期从 callback 实际运行时间重�
 
 **验证 / Enforcement：** owner-local KUnit 覆盖同 deadline identity 顺序、任意 heap 删除、ID exhaustion、
 重复删除、IRQ 出队后 cancel、锁外 callback drop、remote CPU cancel、远期反复 schedule/cancel、wait 提前唤醒、
-timerfd replace/disarm/refresh/last-close、`ITIMER_REAL` replace/disarm/teardown 和周期原目标推进。RV64 当前
-release SMP=2 运行通过 410/410 KUnit 与真实 timerfd/`ITIMER_REAL`/nanosleep 用户态 oracle；LA64 当前
-release SMP=2 运行通过全部 15 个 Gate 2 新增 KUnit，双架构完整证据和 LA64 既有 TTY fixture 竞态边界记录在
+timerfd replace/disarm/refresh/last-close、`ITIMER_REAL` replace/disarm/teardown、POSIX timer反复
+replace/disarm/delete/bulk cleanup和周期原目标推进。2026-08-04 R0最终源码在RV64/LA64 release SMP=2分别通过
+469/469与470/470 KUnit；真实wait、timerfd、`ITIMER_REAL`与POSIX timer用户态oracle通过。双架构完整证据记录在
 cutover transaction。
 
 **最初来源：** [Clock Timekeeping 与 POSIX Timers RFC R0](../../rfcs/clock-timekeeping-posix-timers/index.md)

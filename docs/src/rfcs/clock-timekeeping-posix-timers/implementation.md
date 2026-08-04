@@ -1,6 +1,6 @@
 # Clock Timekeeping 与 POSIX Timers 实施计划
 
-**状态：** Accepted / Gate 0--5 Closed / Gate 6 Awaiting Authorization
+**状态：** Closed / Gate 0--6 Closed
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260803-clock-timekeeping-posix-timers](./index.md)
 **当前修订：** R0
@@ -287,7 +287,7 @@ generation-only cleanup、timer 自建 signal queue、fork 继承、ID 跨线程
 
 ## Gate 6 — 最终消费者审计与 RFC 收口
 
-**状态：** Awaiting Authorization / Not Started。
+**状态：** Closed（2026-08-04）。
 
 **Purpose：** 证明 10 个 syscall 和现有时间消费者共同使用一套时间/请求/signal 事实，完成最终 contract
 与文档收口。
@@ -318,8 +318,16 @@ target 内 bug 降格成 limitation。
 **Cutover：** 确认 Gate 1/2/3/5 已完成五项 Contract Impact，没有遗漏或提前生效的 current rule；本 gate 本身
 不引入新 contract ID。
 
-**Stop / Exit：** 证据、current contract、RFC closure 和 register/current limitation 一致后关闭 RFC。
-双架构或 SMP 必需证据缺失时保持 Not Cut Over；不得用“能启动 Vim”替代 timer 生命周期和 ABI 证明。
+**Closure Evidence：** 最终 consumer/source audit 未发现旧 boot-relative realtime、不可删除的 production timer
+路径、第二份 POSIX pending 或 CPU-time owner 迁移。RV64/LA64 release SMP=2 exact-source build 与 QEMU 分别
+通过 469/469、470/470 KUnit；队列压力 KUnit 和全部 clock、soft timer、futex、timerfd、`ITIMER_REAL`、
+`SI_TIMER`、POSIX timer 用户态 oracle 通过。两次运行只在全部 marker 后因测试盘缺少 static BusyBox 停止；
+Gate 6 没有 userspace source 变化，因此不重建 rootfs。两项 repository formatter check 与 `git diff --check`
+通过；所有 mdBook 检查按开发者指示 Not Run。Architecture Friction Scan 没有发现 residual
+Apollyon/Keter/Euclid。
+
+**Stop / Exit：** 证据、current contract 与 RFC closure 已一致，R0 关闭。明确 non-goal 没有降格登记为 current
+limitation；双架构 SMP、timer 生命周期和 ABI oracle 提供 closure evidence，没有用集成 smoke 替代语义证明。
 
 ## 跨 Gate 验证矩阵
 

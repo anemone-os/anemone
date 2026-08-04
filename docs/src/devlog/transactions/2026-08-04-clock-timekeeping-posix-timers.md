@@ -1,25 +1,24 @@
 # Clock Timekeeping 与 POSIX Timers 事务日志
 
-**状态：** Active / R0 / Gate 0--5 Closed / Gate 6 Awaiting Authorization
+**状态：** Completed / R0 / Gate 0--6 Closed
 **日期：** 2026-08-04
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260803-clock-timekeeping-posix-timers R0](../../rfcs/clock-timekeeping-posix-timers/index.md)
 **实施计划：** [Gate 0--6](../../rfcs/clock-timekeeping-posix-timers/implementation.md)
 **适用修订：** R0
-**Contract Cutover：** `TC-CLOCK-CUTOVER`、`ST-REQUEST-CUTOVER`、`TC-STEP-CUTOVER` Completed；`TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001`、`TIMEKEEPER-STEP-001` Active；其它 R0 contract delta pending
+**Contract Cutover：** `TC-CLOCK-CUTOVER`、`ST-REQUEST-CUTOVER`、`TC-STEP-CUTOVER`、`PT-SIGNAL-CUTOVER` Completed；`TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001`、`TIMEKEEPER-STEP-001`、`POSIX-TIMER-001`与refined `SIGNAL-PENDING-001` Active
 
 ## 边界
 
-本 transaction 记录四个独立 checkpoint。Gate 0--1 冻结 native ABI、clock operation、architecture source 和
-caller domain baseline，并切换统一 counter、integer Hertz conversion、timekeeper clock read truth、八个
-get/res route 和 calendar consumer。Gate 2 随后建立可物理删除的 soft timer request，并迁移 timerfd、
-`ITIMER_REAL` 和 wait timeout。Gate 3 开放 realtime mutation、完整 clock sleep 与 timerfd realtime/
-cancel-on-set。Gate 4 在不创建 timer 对象或注册 syscall 的前提下建立 signal-owned `SI_TIMER` pending、预分配
-slot、锁外 handoff 和双架构 frame oracle。四个 checkpoint 各自保留 review、validation 和 commit 边界；
-Gate 4 没有 contract cutover。
+本 transaction 记录 Gate 0 baseline 与 Gate 1--6 的独立实现、review、validation 和 commit 边界。Gate 0--1
+冻结 native ABI、clock operation、architecture source 与 caller domain baseline，并切换统一 counter、integer
+Hertz conversion、timekeeper clock read truth、八个 get/res route 和 calendar consumer。Gate 2 建立可物理删除的
+soft timer request并迁移timerfd、`ITIMER_REAL`与wait timeout；Gate 3开放realtime mutation、完整clock sleep与
+timerfd realtime/cancel-on-set；Gate 4建立signal-owned `SI_TIMER` pending与锁外handoff；Gate 5接入
+`ThreadGroup` POSIX timer、107--111 syscall并完成`PT-SIGNAL-CUTOVER`；Gate 6完成最终consumer审计和RFC closure。
 
-本 transaction 尚不实现或声明 POSIX timer 对象、107--111 syscall 或 RTC seed。Gate 4 内部能力只有在 Gate 5
-接入真实 timer consumer 并完成 `PT-SIGNAL-CUTOVER` 后才成为 current contract；开发者已授权继续 Gate 5。
+R0四个cutover已使五项contract delta全部生效。RTC seed、CPU-time timer/sleep、high-resolution/tickless timer、
+32位ABI与新增clock ID保持明确non-goal，没有被写成已实现能力或新增current limitation。
 
 ## Gate 0 baseline
 
@@ -299,5 +298,42 @@ Gate 4 只关闭内部 `SI_TIMER` signal protocol，没有创建 POSIX timer 对
 并 Refine
 [`SIGNAL-PENDING-001`](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner)：
 ordinary standard signal继续使用单slot，`SI_TIMER`按timer registration保留独立pending identity；timer owner
-只消费typed enqueue结果与锁外delivery callback，不读取signal私有容器。Gate 6尚未授权，本transaction保持
-Active且不声明RFC最终收口。
+只消费typed enqueue结果与锁外delivery callback，不读取signal私有容器。Gate 5关闭时尚未声明RFC最终收口；
+后续开发者另行授权Gate 6完成最终审计。
+
+## Gate 6 final audit
+
+- calendar consumer继续统一读取`realtime()`；scheduler、driver timeout、uptime与network elapsed consumer使用
+  monotonic，process/thread CPU clock继续读取task/thread-group owner，没有旧boot-relative calendar读取或第二份
+  CPU usage/time truth。
+- wait-core、timerfd、`ITIMER_REAL`与POSIX timer在replace、disarm、delete或teardown时物理删除仍排队request；
+  已经出队的completion只由各长期owner的generation、validness或round identity拒绝。POSIX timer压力KUnit反复
+  替换64个远期arm并验证队列始终只有一个live request，随后覆盖disarm/delete与两个timer的bulk cleanup。
+- POSIX timer表/对象继续独占ID、schedule、period、generation与overrun；signal-owned per-registration slot是
+  `SI_TIMER` pending的唯一真相，typed identity handoff没有让timer读取signal私有容器。
+- `net::worker`的一次fire-and-forget timeout只提供重新poll提示，late callback由worker-owned active guard拒绝，
+  不承载可取消的长期schedule，因此没有被错误迁移成第二个timer owner。
+- 关键ABI取舍、unsupported能力与owner/cleanup顺序的源内注释完成最终审计；删除了仍把已完成实现描述为
+  future gate或TODO的陈旧注释，没有新增临时bridge。
+
+## Gate 6 validation
+
+- RV64 exact-source release build通过；SMP=2 QEMU通过469/469 KUnit、全部Gate 6 POSIX timer压力KUnit以及完整
+  clock、soft timer、futex、timerfd、`ITIMER_REAL`、`SI_TIMER`与POSIX timer用户态oracle。
+- LA64 exact-source release build通过；SMP=2 QEMU通过470/470 KUnit和同一完整用户态oracle集合。
+- RV64磁盘绑定为`disk-x0=build/runtime/clock-timekeeping/rv64-test.img`、
+  `disk-x1=build/rootfs/pretest-rv64/rootfs.img`；LA64为`disk-x0=build/rootfs/pretest-la64/rootfs.img`、
+  `disk-x1=build/runtime/clock-timekeeping/la64-test.img`并使用`net-user-options=restrict=off`。
+- 两次QEMU都只在全部Gate 6 marker通过后停于已知的competition环境static BusyBox缺失；该边界不归因于R0。
+  Gate 6没有userspace source变化，因此没有重建rootfs。
+- `just fmt kernel --check`、`just fmt user-test --check`与`git diff --check`通过。所有mdBook检查按开发者明确
+  指示跳过，记为Not Run；LTP不是本Gate的定向语义oracle，本次Not Run。
+
+## Gate 6 closure 与 RFC closure — 2026-08-04
+
+Gate 6不引入新contract ID。最终审计确认Gate 1/2/3/5的四个cutover已经完整激活五项Contract Impact，current
+contract、live owner/lifecycle模型与R0 target一致。RFC保持R0并关闭，不创建revision或register limitation。
+
+Architecture Friction Scan未发现第二份realtime/request/POSIX pending真相、owner穿透、private representation
+泄漏、为局部需求扩大public API、调用者/架构/测试特判、无退出条件的临时bridge、隐含failure/cleanup顺序、无
+真实义务的抽象层，或通过降低oracle/ABI诚实性换取通过。没有residual Apollyon、Keter或Euclid。

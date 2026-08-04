@@ -46,13 +46,13 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
-- [RFC-20260803-clock-timekeeping-posix-timers](./rfcs/clock-timekeeping-posix-timers/index.md)：R0 Accepted；建立从硬件计数和
+- [RFC-20260803-clock-timekeeping-posix-timers](./rfcs/clock-timekeeping-posix-timers/index.md)：R0 已实现并关闭；建立从硬件计数和
   Hertz 计算的 monotonic/raw、由内存偏移得到的 realtime、按真实更新周期计算的 coarse clock，以及可物理删除
   排队请求的 soft timer；目标是在 RV64/LA64 native 64 位 ABI 上实现五个 clock syscall 和五个 POSIX timer
   syscall，RTC 只作为未来启动时的一次只读时间来源。正确性规则见[目标与不变量](./rfcs/clock-timekeeping-posix-timers/invariants.md)，
   Gate 0--6 的依赖、cutover 和验证见[实施计划](./rfcs/clock-timekeeping-posix-timers/implementation.md)。已生效的
-  clock read与soft timer request规则分别见[`TIMEKEEPER-CLOCK-001`](./contracts/time/clock-derivation.md)和
-  [`SOFT-TIMER-REQUEST-001`](./contracts/time/soft-timer-request.md)，执行证据见
+  clock read、realtime step、soft timer request与POSIX timer规则见[Time当前契约](./contracts/time/index.md)，
+  `SI_TIMER` pending refine见[Signal当前契约](./contracts/signal/pending-routing.md)，执行证据见
   [transaction](./devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)。
 - [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
   RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供

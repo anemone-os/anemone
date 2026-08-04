@@ -6,8 +6,6 @@
 
 ## Active
 
-- [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--1已关闭；
-  `TC-CLOCK-CUTOVER`激活`TIMEKEEPER-CLOCK-001`，Gate 2已获授权并保持独立checkpoint。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
@@ -26,6 +24,9 @@
 
 ## Completed
 
+- [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--6全部关闭；
+  四个cutover使五项clock/time/signal contract delta生效，RV64/LA64 release SMP=2最终通过469/469与
+  470/470 KUnit以及完整定向用户态oracle。
 - [Exception-backed User Pointer Access](./2026-08-01-exception-userptr-access.md)：R0已完成RV64/LA64
   page-bounded bytewise copy、per-CPU exact-PC recovery、一次page-fault retry和typed/VFS partial边界；用户
   确认既有实现已验收。早于R0的remote fence锁边界保持follow-up。

@@ -20,8 +20,6 @@ pub trait Clock: Sync {
     /// We use nanoseconds as the unit of time, which should be sufficient for
     /// all kinds of clocks.
     fn now_ns(&self) -> u64;
-
-    // TODO: create timer, etc.
 }
 
 mod boottime;
@@ -51,8 +49,8 @@ static STATIC_CLOCKS: &[&dyn Clock] = &[
     &BoottimeClock,
 ];
 
-// TODO: dynamic registration of clocks. e.g. for those dynamically-created rtc
-// clocks.
+// Native clock IDs are a fixed ABI table. Dynamic device clocks would need a
+// separate registration owner and are outside the current clock contract.
 
 /// Get a clock by its ID.
 pub fn get_clock(clock_id: usize) -> Option<&'static dyn Clock> {
@@ -73,7 +71,7 @@ pub(crate) fn get_sleep_clock(clock_id: i32) -> Result<SleepClock, SysError> {
         CLOCK_MONOTONIC | CLOCK_BOOTTIME => Ok(SleepClock::Monotonic),
         CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID => {
             // These IDs are valid clocks, but sleeping on CPU consumption needs
-            // scheduler-driven timers that this stage deliberately lacks.
+            // scheduler-driven timers that R0 deliberately excludes.
             if !CPU_SLEEP_UNSUPPORTED_LOGGED.swap(true, Ordering::Relaxed) {
                 knoticeln!(
                     "clock_nanosleep: CPU-time clocks are unsupported without scheduler-driven timers"

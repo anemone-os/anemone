@@ -677,6 +677,7 @@ fn ns_to_duration(ns: u64) -> Duration {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::time::timer::queued_timer_count;
 
     #[kunit]
     fn timer_id_reservation_is_invisible_and_reusable() {
@@ -712,6 +713,61 @@ mod kunits {
             table.publish(id, stale_token, stale_timer),
             Err(SysError::NoSuchProcess)
         );
+    }
+
+    #[kunit]
+    fn replace_disarm_delete_and_bulk_cleanup_return_queue_to_baseline() {
+        let owner = get_current_task().get_thread_group();
+        owner.delete_all_posix_timers();
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+
+        let prepared = owner
+            .prepare_posix_timer(PosixTimerClock::Monotonic, PosixTimerNotification::None)
+            .unwrap();
+        let id = prepared.id();
+        prepared.publish().unwrap();
+        for seconds in 1..=64 {
+            owner
+                .posix_timer_settime(
+                    id,
+                    PosixTimerSetting {
+                        value_ns: (3600 + seconds) * NSEC_PER_SEC,
+                        interval_ns: 0,
+                    },
+                    false,
+                )
+                .unwrap();
+            assert_eq!(queued_timer_count(cpu), baseline + 1);
+        }
+        owner
+            .posix_timer_settime(id, PosixTimerSetting::default(), false)
+            .unwrap();
+        assert_eq!(queued_timer_count(cpu), baseline);
+        owner.delete_posix_timer(id).unwrap();
+
+        for _ in 0..2 {
+            let prepared = owner
+                .prepare_posix_timer(PosixTimerClock::Monotonic, PosixTimerNotification::None)
+                .unwrap();
+            let id = prepared.id();
+            prepared.publish().unwrap();
+            owner
+                .posix_timer_settime(
+                    id,
+                    PosixTimerSetting {
+                        value_ns: 3600 * NSEC_PER_SEC,
+                        interval_ns: 0,
+                    },
+                    false,
+                )
+                .unwrap();
+        }
+        assert_eq!(queued_timer_count(cpu), baseline + 2);
+        owner.delete_all_posix_timers();
+        assert_eq!(queued_timer_count(cpu), baseline);
+        assert!(owner.posix_timer_gettime(0).is_err());
+        assert!(owner.posix_timer_gettime(1).is_err());
     }
 
     #[kunit]

@@ -29,7 +29,7 @@
 
 **违反表现：** 同一个 group-directed occurrence 被复制到多个 member、private / shared 同时持有同一 occurrence，或 notification 结果反向决定 pending truth。
 
-**验证 / Enforcement：** `Task::recv_signal()`、`ThreadGroup::recv_signal()`、owner-private `ThreadGroup::recv_job_control_signal()`、`PendingSignals::{push_signal,enqueue_timer_signal,fetch_any,flush_specific}`源码审计；task/group-directed stop signal、同号多timer、timer overrun/flush/slot reuse与signal回归。
+**验证 / Enforcement：** `Task::recv_signal()`、`ThreadGroup::recv_signal()`、owner-private `ThreadGroup::recv_job_control_signal()`、`PendingSignals::{push_signal,enqueue_timer_signal,fetch_any,flush_specific}`源码审计；task/group-directed stop signal、同号多timer、timer overrun/flush/slot reuse与signal回归。2026-08-04 R0最终源码在RV64/LA64 release SMP=2分别通过469/469与470/470 KUnit，并通过双架构`SI_TIMER` frame及普通signal用户态oracle。
 
 **最初来源：** 现有 Signal 实现；[Signal temporary-mask restore 事务](../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)记录了 pending 与 deferred delivery 的后续演进。
 

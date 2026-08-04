@@ -17,7 +17,8 @@ use crate::{
 #[derive(Debug)]
 pub struct ITimers {
     real: NoIrqSpinLock<Option<RealITimer>>,
-    // TODO: virtual, prof.
+    // VIRTUAL/PROF require scheduler-driven CPU timers and remain outside the
+    // wall-clock request protocol owned here.
 }
 
 #[derive(Debug)]

@@ -3,7 +3,7 @@
 //! A registration reserves one slot in the target thread group's shared
 //! pending owner. Timer expiry fills that slot without allocating. Signal owns
 //! admission, masking, target notification, pending selection, and siginfo
-//! serialization; the future POSIX timer owner receives only typed enqueue
+//! serialization; the POSIX timer owner receives only typed enqueue
 //! outcomes and a dequeue callback carrying immutable timer identity.
 
 use core::fmt::{Debug, Formatter};
@@ -238,7 +238,7 @@ impl ThreadGroup {
     /// Complete every notification retired by a signal-owned flush.
     ///
     /// Each iteration extracts one immutable occurrence under the shared
-    /// pending lock, releases it, then calls the future timer owner. This keeps
+    /// pending lock, releases it, then calls the timer owner. This keeps
     /// the lock direction from becoming Signal -> POSIX timer object.
     pub(super) fn finish_retired_timer_signal_handoffs(&self) {
         loop {

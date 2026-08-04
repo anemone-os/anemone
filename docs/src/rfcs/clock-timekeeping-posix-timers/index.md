@@ -1,6 +1,6 @@
 # RFC-20260803-clock-timekeeping-posix-timers
 
-**状态：** Accepted
+**状态：** Closed
 **修订：** R0
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-04
@@ -466,15 +466,15 @@ Linux UAPI struct。
 
 ## Contract Impact
 
-以下是 R0 contract delta。Gate 1--3 已完成三项 cutover；其它条目在对应 gate 前仍不覆盖当前契约：
+以下是 R0 contract delta。Gate 1--5 已完成全部五项 cutover：
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
 | `TIMEKEEPER-CLOCK-001` | Introduce | [Active current rule](../../contracts/time/clock-derivation.md#timekeeper-clock-001--所有-clock-读取来自一条整数推导链) | 架构计数/Hertz 是 monotonic/raw 来源；timekeeper 唯一保存零点、realtime offset 和 coarse 快照 | Gate 1 `TC-CLOCK-CUTOVER` Completed |
 | `SOFT-TIMER-REQUEST-001` | Introduce | [Active current rule](../../contracts/time/soft-timer-request.md#soft-timer-request-001--排队句柄物理删除一次请求) | soft timer 只拥有一次排队请求，支持按句柄物理删除；长期对象状态仍由提交者拥有 | Gate 2 `ST-REQUEST-CUTOVER` Completed |
 | `TIMEKEEPER-STEP-001` | Introduce | [Active current rule](../../contracts/time/realtime-step.md#timekeeper-step-001--realtime-step-不能漏掉或误用旧-timeline) | realtime offset/change seq 在 timekeeper 内原子提交，锁外无丢失通知所有 realtime consumer | Gate 3 `TC-STEP-CUTOVER` Completed |
-| `POSIX-TIMER-001` | Introduce | None（尚未生效） | `ThreadGroup` 拥有 timer ID、到期安排、overrun 与清理；soft timer 和 signal 只执行窄交接 | Gate 5 `PT-SIGNAL-CUTOVER` |
-| `SIGNAL-PENDING-001` | Refine | [standard signal 单 slot，realtime signal FIFO](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner) | 普通 signal 保持现有合并；`SI_TIMER` 按 timer 身份保存独立 pending 项 | Gate 5 `PT-SIGNAL-CUTOVER` |
+| `POSIX-TIMER-001` | Introduce | [Active current rule](../../contracts/time/posix-timer.md#posix-timer-001--threadgroup唯一拥有timer对象id与通知episode) | `ThreadGroup` 拥有 timer ID、到期安排、overrun 与清理；soft timer 和 signal 只执行窄交接 | Gate 5 `PT-SIGNAL-CUTOVER` Completed |
+| `SIGNAL-PENDING-001` | Refine | [ordinary signal 与 `SI_TIMER` 当前规则](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner) | 普通 signal 保持现有合并；`SI_TIMER` 按 timer 身份保存独立 pending 项 | Gate 5 `PT-SIGNAL-CUTOVER` Completed |
 
 Dependencies：
 
@@ -497,8 +497,9 @@ Dependencies：
 
 ## Acceptance 与 Validation
 
-接受本 RFC 表示同意上述 target、owner 和 ABI，不表示当前内核已经实现。四个 contract cutover 分别按
-[实施计划](./implementation.md)的 Gate 1、2、3、5 执行；RFC 最终收口至少需要：
+R0 target、owner 和 ABI 已按[实施计划](./implementation.md)的 Gate 0--6 实现并关闭；四个 cutover gate
+已经使五项 contract delta 生效。最终 closure evidence 见对应
+[transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)，其证明范围包括：
 
 - source/KUnit 证明全部时间换算只使用检查过的整数运算；用多个测试 Hertz 验证普通/coarse
   `clock_getres()`、向上取整、边界和溢出，确认没有浮点路径和固定 1ns/10ms 返回值；
@@ -510,8 +511,8 @@ Dependencies：
 - POSIX timer ID 隔离、默认 sigevent、两种支持通知、周期推进、overrun、同 signal 不同 timer、
   fork/exec/exit 和晚到通知验证；
 - timerfd `CANCEL_ON_SET`、`ITIMER_REAL`、`gettimeofday()`、文件日期和 uptime 消费者回归；
-- `git diff --check`、mdBook 构建，以及面向 Linux man-pages/6.6.32 可见语义的用户态验证。LTP 可以作为
-  回归证据，但不是语义定义。
+- `git diff --check` 以及面向 Linux man-pages/6.6.32 可见语义的用户态验证；mdBook 检查按开发者明确指示
+  Not Run。LTP 可以作为回归证据，但不是语义定义。
 
 ## 备选方案
 
@@ -552,11 +553,16 @@ Dependencies：
 
 ## 收口
 
-R0 已接受 target、owner、ABI 与 validation boundary。Gate 0--3 已关闭，`TC-CLOCK-CUTOVER`、
-`ST-REQUEST-CUTOVER` 与 `TC-STEP-CUTOVER` 已分别激活 `TIMEKEEPER-CLOCK-001`、
-`SOFT-TIMER-REQUEST-001` 和 `TIMEKEEPER-STEP-001`；Gate 4 保持 Pending / Not Authorized，其余 contract
-delta 保持 pending。RFC 最终
-closure 必须记录双架构验证、五项 contract delta 的实际
-cutover、仍未实现的 CPU-time/high-resolution/RTC 能力，以及架构摩擦扫描中发现的具体剩余问题。没有证据的
-能力不得写成已完成。详细 proof obligations 与 cutover gate 分别由[目标与不变量](./invariants.md)和
-[实施计划](./implementation.md)维护；不得在本文复制第二份阶段状态或验证流水。
+R0 在不修改 target 的前提下关闭。Gate 0--6 全部完成；`TC-CLOCK-CUTOVER`、`ST-REQUEST-CUTOVER`、
+`TC-STEP-CUTOVER` 与 `PT-SIGNAL-CUTOVER` 已使本 RFC 的五项 contract delta 全部生效。
+
+Gate 6 最终审计确认 calendar consumer 统一读取 realtime，scheduler、driver、network 与 uptime consumer 保持
+monotonic，CPU clock 继续由 task/thread-group owner 累计；wait-core、timerfd、`ITIMER_REAL` 与 POSIX timer 都会
+物理取消仍排队请求，`SI_TIMER` pending 继续由 signal owner 按 timer identity 持有。RV64/LA64 release SMP=2
+分别通过 469/469 与 470/470 KUnit，10 个 syscall 及既有 clock、soft timer、futex、timerfd、itimer、signal
+用户态 oracle 全部通过。Architecture Friction Scan 未发现第二份状态真相、owner 穿透、私有表示泄漏、隐含
+cleanup 顺序或无真实义务的抽象层。
+
+CPU-time timer/sleep、high-resolution/tickless timer、RTC seed/writeback、32 位 ABI 与新增 clock ID 仍是 R0
+明确 non-goal，不是本 target 内缺陷，因此不新增 register limitation。详细执行证据由
+[transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)保存。

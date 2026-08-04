@@ -19,7 +19,6 @@ pub fn sys_getitimer(
 
     match which {
         ITimerWhich::Real => {
-            // TODO
             let itimerval = match tg.real_itimer_snapshot() {
                 Some((rem, interval)) => {
                     let rem = TimeVal {

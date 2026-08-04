@@ -8,7 +8,7 @@
 **不覆盖：** `clock_settime()`、`clock_adjtime()`、完整 `clock_nanosleep()`、realtime step notification、soft timer、timerfd cancellation、POSIX timer、RTC seed/writeback 和 suspend accounting
 **实现位置：** `anemone-kernel/src/{arch/riscv64/time.rs,arch/loongarch64/time.rs,time/timekeeper.rs,time/clock}`
 **依赖：** None
-**Pending Successor：** RFC-20260803 Gate 5 引入独立 POSIX timer contract，不替换本规则
+**Pending Successor：** None
 **最后核验：** 2026-08-04
 
 ## 状态与能力所有权
@@ -81,7 +81,7 @@ time；calendar consumer 继续使用 boot-relative `Instant`；coarse realtime 
 
 **验证 / Enforcement：** owner-local KUnit 覆盖多个 Hertz、不可整除 ceil、`F == SYSTEM_HZ`、`F > 1GHz`、
 overflow、negative-offset 拒绝、BSP coarse publication、八个独立 route 和双 CPU ordered reads。2026-08-04
-RV64/LA64 SMP QEMU 分别通过 395/395 与 396/396 KUnit；同源 user oracle 覆盖八个 ID、resolution class、
+R0 最终源码 RV64/LA64 release SMP=2 分别通过 469/469 与 470/470 KUnit；同源 user oracle 覆盖八个 ID、resolution class、
 non-regression、derivation、blocked CPU time、invalid ID 与 `clock_getres(NULL)`。LA64 QEMU 的 stable counter 本身
 跨 CPU shared 且不应用 CNTC，因此 CNTC correction 的符号与 AP write ordering由 RFC-pinned Linux 6.6.32
 source audit证明，不把 QEMU结果扩大为物理 CNTC runtime evidence。
