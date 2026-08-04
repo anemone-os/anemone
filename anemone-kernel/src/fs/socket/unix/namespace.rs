@@ -5,7 +5,7 @@ use crate::{
     prelude::*,
 };
 
-use super::endpoint::UnixEndpointCore;
+use super::endpoint::{StreamAdmission, UnixEndpointCore};
 
 #[derive(Debug)]
 struct BindingRecord {
@@ -87,6 +87,12 @@ pub(super) struct BindingRegistration {
     generation: u64,
 }
 
+impl BindingRegistration {
+    pub(super) fn matches(&self, inode: &InodeRef, generation: u64) -> bool {
+        self.inode == *inode && self.generation == generation
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct LiveBinding {
     inode: InodeRef,
@@ -95,16 +101,16 @@ pub(super) struct LiveBinding {
 }
 
 impl LiveBinding {
-    pub(super) fn endpoint(&self) -> Option<Arc<UnixEndpointCore>> {
-        self.endpoint.upgrade()
-    }
-
-    pub(super) fn matches(&self, inode: &InodeRef, generation: u64) -> bool {
-        self.inode == *inode && self.generation == generation
-    }
-
-    pub(super) fn matches_registration(&self, registration: &BindingRegistration) -> bool {
-        self.matches(&registration.inode, registration.generation)
+    /// Narrow connection-admission capability for the only current Unix
+    /// connection profile. The namespace keeps inode identity and generation
+    /// attached to the capability so admission cannot validate a stale
+    /// pathname binding by endpoint pointer alone.
+    pub(super) fn stream_admission(&self) -> Option<StreamAdmission> {
+        Some(StreamAdmission::new(
+            self.endpoint.upgrade()?,
+            self.inode.clone(),
+            self.generation,
+        ))
     }
 }
 
@@ -195,8 +201,10 @@ mod kunits {
 
         let registration = registry.insert(first.clone(), &endpoint);
         let live = registry.lookup(&first).unwrap();
-        assert!(live.matches(&first, registration.generation));
-        assert!(Arc::ptr_eq(&live.endpoint().unwrap(), &endpoint));
+        let admission = live.stream_admission().unwrap();
+        assert!(Arc::ptr_eq(&admission.local_name(), &endpoint.name));
+        assert!(registration.matches(&first, registration.generation));
+        assert!(!registration.matches(&first, registration.generation + 1));
 
         let stale = BindingRegistration {
             inode: first.clone(),

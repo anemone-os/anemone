@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-04 - Unix seqpacket CKPT 1 control preparation](./2026-08-04-unix-seqpacket.md)
 - [2026-08-03 - Serial TTY RX conditioning](./2026-08-03-tty-serial-rx-conditioning.md)
 - [2026-08-03 - Named FIFO](./2026-08-03-named-fifo.md)
 - [2026-08-03 - App Command build driver](./2026-08-03-app-command-driver.md)

@@ -129,6 +129,56 @@ pub(super) struct UnixEndpointCore {
     pub(super) name: Arc<EndpointName>,
 }
 
+/// Stream-only pathname admission capability for the current checkpoint.
+///
+/// It intentionally exposes only the name and listener revalidation needed by
+/// connection admission. The endpoint Arc remains private here, so namespace
+/// lookup cannot become a general role/state access path. A later connection
+/// profile must extend this typed handoff rather than recover the endpoint.
+#[derive(Clone, Debug)]
+pub(super) struct StreamAdmission {
+    endpoint: Arc<UnixEndpointCore>,
+    inode: InodeRef,
+    generation: u64,
+}
+
+impl StreamAdmission {
+    pub(super) fn new(endpoint: Arc<UnixEndpointCore>, inode: InodeRef, generation: u64) -> Self {
+        Self {
+            endpoint,
+            inode,
+            generation,
+        }
+    }
+
+    pub(super) fn local_name(&self) -> Arc<EndpointName> {
+        self.endpoint.name.clone()
+    }
+
+    pub(super) fn current_listener(&self) -> Option<Arc<UnixListener>> {
+        let state = self.endpoint.state.lock();
+        let binding_matches = matches!(
+            &state.binding,
+            BindingPublication::Live(registration)
+                if registration.matches(&self.inode, self.generation)
+        );
+        if !binding_matches {
+            return None;
+        }
+        match &state.association {
+            EndpointAssociation::Listening(listener) => Some(listener.clone()),
+            EndpointAssociation::Unconnected
+            | EndpointAssociation::Connected { .. }
+            | EndpointAssociation::Retired => None,
+        }
+    }
+
+    pub(super) fn listener_is_current(&self, expected: &Arc<UnixListener>) -> bool {
+        self.current_listener()
+            .is_some_and(|listener| Arc::ptr_eq(&listener, expected))
+    }
+}
+
 impl UnixEndpointCore {
     pub(super) fn new_unconnected() -> Arc<Self> {
         Arc::new(Self {
