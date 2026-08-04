@@ -17,6 +17,11 @@ struct WorkerSlot {
     handle: KThreadHandle,
 }
 
+/// Per-CPU handoff from timer dequeue to process-context completion.
+///
+/// The queue owns each callback after timer-core dispatch. Producers publish
+/// under the no-IRQ lock, then wake the pinned worker; the worker removes one
+/// callback under the lock and executes it only after unlocking.
 struct ThreadedReadyQueue {
     queue: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
 }
@@ -44,6 +49,9 @@ impl ThreadedReadyQueue {
 
 #[derive(Debug)]
 struct ThreadedStats {
+    // Diagnostic only: none of these counters decides queue ownership,
+    // callback eligibility, or worker scheduling. `ready_high_water` drives
+    // only the bounded-backlog warning below.
     submitted: AtomicUsize,
     dispatched: AtomicUsize,
     worker_wakes: AtomicUsize,
@@ -136,6 +144,8 @@ pub(super) fn enqueue_expired_threaded_on(
     cpu: CpuId,
     callback: Box<dyn FnOnce() + Send + 'static>,
 ) {
+    // Publish the callback before looking up and waking the worker. A worker
+    // that observes the wake must therefore also be able to observe its work.
     let ready_len = if cpu == cur_cpu_id() {
         THREADED_READY_QUEUE.with(|queue| queue.lock().push_back(callback))
     } else {
@@ -255,6 +265,8 @@ fn ready_queue_not_empty() -> bool {
 
 fn drain_ready_queue(ctx: &KThreadCtx) {
     loop {
+        // Transfer ownership out of the no-IRQ queue before invoking arbitrary
+        // owner code. Timerfd/itimer callbacks may acquire their own locks.
         let Some(callback) = THREADED_READY_QUEUE.with(|queue| queue.lock().pop_front()) else {
             break;
         };

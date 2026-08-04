@@ -19,14 +19,28 @@ pub use threaded::schedule_threaded_timer_event;
 
 static NEXT_EVENT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Opaque capability naming one request while it remains in a per-CPU queue.
+/// Opaque cancellation capability naming one queue-owned request.
+///
+/// Dropping this value deliberately does not cancel the request: some callers
+/// submit fire-and-forget callbacks and discard the capability immediately.
+/// Long-lived owners retain it only so their own replace/disarm/teardown
+/// protocol can first invalidate stale completion identity and then request a
+/// physical queue removal. `TimerHandle` therefore is not an RAII owner of the
+/// callback lifetime.
 #[must_use = "retain the handle for cancellation or explicitly discard a fire-and-forget request"]
 #[derive(Debug)]
 pub struct TimerHandle {
+    /// Queue location fixed at submission, not callback execution affinity.
     owner_cpu: CpuId,
+    /// Boot-unique queue identity. This is behavioral protocol state, not a
+    /// diagnostic label, because cancellation matches on it.
     event_id: u64,
 }
 
+/// Completion context selected by the submitting owner.
+///
+/// Realtime requests carry two mutually exclusive completions because a
+/// calendar step can consume a cancel-on-set request without expiring it.
 enum TimerLane {
     Irq(Box<dyn FnOnce() + Send + 'static>),
     Threaded(Box<dyn FnOnce() + Send + 'static>),
@@ -48,9 +62,13 @@ impl Debug for TimerLane {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TimerDeadline {
+    /// Fixed at submission; later realtime steps cannot move this deadline.
     Monotonic(Instant),
     Realtime {
+        /// Absolute point on the mutable calendar timeline.
         deadline_ns: u64,
+        /// When present, a newer timekeeper sequence consumes the request via
+        /// its clock-change completion instead of its expiry completion.
         cancel_on_change_seq: Option<u64>,
     },
 }
@@ -121,7 +139,10 @@ impl Debug for TimerEvent {
 
 #[derive(Debug)]
 struct TimerQueue {
+    /// Min-heap ordered in the immutable monotonic counter domain.
     events: Vec<TimerEvent>,
+    /// Separate min-heap ordered in realtime nanoseconds. Mixing both domains
+    /// would make one heap order invalid after a calendar step.
     realtime_events: Vec<TimerEvent>,
     /// Performance/protocol snapshot of the timekeeper sequence already
     /// scanned by this queue. It never determines calendar time. Insert-side
@@ -172,6 +193,9 @@ impl TimerQueue {
             return None;
         }
         if self.observed_realtime_change_seq < change_seq {
+            // Deadline heap order cannot find requests by armed sequence. Drain
+            // one affected cancel-on-set request per call; only after none
+            // remain may this queue claim the new sequence as fully observed.
             if let Some(index) = self.realtime_events.iter().position(|event| {
                 matches!(
                     event.deadline,
@@ -204,6 +228,9 @@ impl TimerQueue {
         now_ns: u64,
         change_seq: u64,
     ) -> Option<(TimerEvent, RealtimeReadyCause)> {
+        // This named lookup is the insert-side half of registration. It checks
+        // only the just-published request and therefore must not advance the
+        // queue-wide observed sequence on behalf of unrelated requests.
         if change_seq < self.observed_realtime_change_seq {
             return None;
         }
@@ -256,6 +283,9 @@ impl TimerQueue {
             return removed;
         }
 
+        // The tail moved into `index` can violate the heap only toward its
+        // parent or toward its children. Comparing with the parent determines
+        // which single repair direction is sufficient.
         if index > 0 && events[index].precedes(&events[(index - 1) / 2]) {
             Self::sift_up(events, index);
         } else {
@@ -324,6 +354,9 @@ fn deadline_after(expire: Duration) -> Instant {
 }
 
 fn try_allocate_event_id(allocator: &AtomicU64) -> Option<u64> {
+    // Return the pre-increment identity. Once u64::MAX is reached the atomic is
+    // intentionally left there, permanently failing closed instead of wrapping
+    // an old cancellation handle onto a new request.
     allocator
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |event_id| {
             event_id.checked_add(1)
@@ -397,6 +430,11 @@ pub fn cancel_timer_event(handle: &TimerHandle) -> bool {
     event.is_some()
 }
 
+/// Dequeue ready local requests in bounded batches and dispatch them unlocked.
+///
+/// Monotonic and realtime heaps share the hardware interrupt, but each is
+/// evaluated in its own clock domain. No callback or callback destructor runs
+/// while the per-CPU queue lock is held.
 pub fn on_timer_interrupt() {
     assert!(IntrArch::local_intr_disabled());
 
@@ -495,6 +533,9 @@ fn dispatch_ready_event(owner_cpu: CpuId, event: TimerEvent, cause: Option<Realt
             expired,
             clock_changed,
         } => {
+            // The queue chose exactly one terminal cause. Drop the losing
+            // closure here, after queue unlock, before handing the winner to
+            // the request owner's threaded lane.
             let callback = match cause.expect("realtime callback is missing its completion cause") {
                 RealtimeReadyCause::Expired => {
                     drop(clock_changed);

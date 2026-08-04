@@ -1,3 +1,9 @@
+//! Userspace regression for cancellable soft-timer consumers.
+//!
+//! Far-future replacement loops exercise physical request retirement; short
+//! periodic and signal cases then prove live completion still reaches timerfd,
+//! ITIMER_REAL, and an interruptible sleep.
+
 use core::{
     mem::size_of,
     sync::atomic::{AtomicUsize, Ordering},
@@ -98,6 +104,8 @@ fn verify_timerfd_replace_periodic_and_close() {
         syscall(SYS_TIMERFD_CREATE, CLOCK_MONOTONIC as u64, 0, 0, 0, 0, 0).unwrap() as u32
     };
 
+    // Every replacement names a far-future request. Implementations that keep
+    // stale requests queued accumulate all 64 instead of retaining one live arm.
     for seconds in 3600..3664 {
         timerfd_settime(
             fd,
@@ -134,6 +142,7 @@ fn verify_timerfd_replace_periodic_and_close() {
 }
 
 fn verify_itimer_signal_interrupts_nanosleep() {
+    // Mirror the timerfd replacement pressure through the thread-group owner.
     for seconds in 3600..3664 {
         set_real_itimer(OldITimerVal {
             it_interval: TimeVal::default(),
@@ -147,6 +156,8 @@ fn verify_itimer_signal_interrupts_nanosleep() {
     set_real_itimer(OldITimerVal::default());
     assert_eq!(get_real_itimer(), OldITimerVal::default());
 
+    // The short one-shot proves the surviving request commits SIGALRM outside
+    // the itimer lock and interrupts the ordinary nanosleep wait round.
     SIGALRM_DELIVERIES.store(0, Ordering::Relaxed);
     let action = SigAction {
         sighandler: sigalrm_handler as *const (),

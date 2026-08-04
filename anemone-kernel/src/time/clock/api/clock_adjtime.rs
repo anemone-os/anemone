@@ -21,6 +21,9 @@ use crate::{
 use super::{ns_to_timeval, publish_realtime_step};
 
 const ADJ_SINGLESHOT: u32 = 0x8000;
+// Keep the Linux distinction between malformed input and a recognized feature
+// outside this stage. Unknown or contradictory bits are EINVAL; a known but
+// unimplemented discipline operation is observable as EOPNOTSUPP.
 const KNOWN_MODE_BITS: u32 = ADJ_OFFSET
     | ADJ_FREQUENCY
     | ADJ_MAXERROR
@@ -78,6 +81,9 @@ fn decode_operation(tx: Timex) -> Result<AdjOperation, SysError> {
     } else {
         1_000_i128
     };
+    // Linux ADJ_SETOFFSET represents a signed delta as signed seconds plus a
+    // nonnegative fractional field. Thus {-1, 500ms} means -500ms, not -1.5s.
+    // i128 keeps every native time64 input representable during normalization.
     let delta = i128::from(tx.time.tv_sec)
         .checked_mul(1_000_000_000)
         .and_then(|seconds| {
@@ -90,6 +96,9 @@ fn decode_operation(tx: Timex) -> Result<AdjOperation, SysError> {
 }
 
 fn query_result(modes: u32) -> Timex {
+    // Gate 3 has no NTP/PLL discipline. Report the real source precision and
+    // calendar value, but keep STA_UNSYNC/TIME_ERROR honest instead of filling
+    // Linux discipline fields with invented state.
     Timex {
         modes,
         _padding0: 0,
@@ -134,6 +143,9 @@ fn sys_clock_adjtime(
         UserReadPtr::<Timex>::try_new(txp, &mut usp)?.read()?
     };
     let operation = decode_operation(tx)?;
+    // A successful mutation must not be followed by EFAULT while returning the
+    // mandatory timex snapshot. Fault the output mapping before checking
+    // privilege and before committing any realtime side effect.
     {
         let mut usp = uspace.lock();
         UserWritePtr::<Timex>::try_new(txp, &mut usp)?.fault_in()?;
@@ -148,6 +160,8 @@ fn sys_clock_adjtime(
     let output = query_result(tx.modes);
     let mut usp = uspace.lock();
     UserWritePtr::<Timex>::try_new(txp, &mut usp)?.write(output)?;
+    // TIME_ERROR is the Linux clock state corresponding to STA_UNSYNC. It is a
+    // successful syscall result, not an errno.
     Ok(TIME_ERROR as u64)
 }
 

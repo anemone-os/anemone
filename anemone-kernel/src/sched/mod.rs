@@ -718,6 +718,9 @@ mod higher_level {
 
         let elapsed = start.elapsed();
         if let Some(request) = timer_request {
+            // The wait outcome is already authoritative. Remove a still-queued
+            // timeout to bound resources; if dequeue won, WakeToken identity
+            // makes its later callback a harmless stale completion.
             cancel_timer_event(&request);
         }
 
@@ -833,6 +836,9 @@ mod higher_level {
         });
 
         if let Some(request) = request {
+            // `TimerHandle` is a detachable cancellation capability rather than
+            // a cancel-on-drop guard, so wait-core closes this request explicitly
+            // after every terminal outcome.
             cancel_timer_event(&request);
         }
         CurrentWaitOutcome::from(active_wait.finish())

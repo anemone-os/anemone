@@ -28,6 +28,9 @@ fn sys_clock_settime(
         let mut usp = uspace.lock();
         timespec_to_ns(UserReadPtr::<TimeSpec>::try_new(tp, &mut usp)?.read()?)?
     };
+    // Validate and copy user input before the capability check, but do not
+    // mutate until both have succeeded. `set_realtime_ns` then validates the
+    // monotonic-relative internal range with no partial update.
     if !task.has_cap(Capability::SYS_TIME) {
         return Err(SysError::PermissionDenied);
     }

@@ -118,6 +118,11 @@ impl TimerFdHandoffBatch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Authoritative long-lived timerfd schedule.
+///
+/// The soft-timer queue owns only the next one-shot request. Periodicity and
+/// deadline advancement remain here so replacing or cancelling that request
+/// cannot create a second schedule truth.
 enum TimerFdSchedule {
     Disarmed,
     Armed {
@@ -161,12 +166,23 @@ impl TimerFdDeadline {
 
 #[derive(Debug)]
 struct TimerFdState {
+    /// Identity of the currently published schedule. Advance it before
+    /// cancelling an old request so an already-dequeued callback is harmless.
     generation: u64,
+    /// Sole truth for armed/disarmed state and the next logical deadline.
     schedule: TimerFdSchedule,
+    /// Cancellation capability for the one queue-owned request corresponding
+    /// to `schedule`; dropping the handle alone does not cancel that request.
     request: Option<TimerHandle>,
+    /// Unread expirations, saturated because Linux timerfd reports cumulative
+    /// expirations and cannot represent more than u64 in one read.
     expirations: u64,
+    /// One-shot blocking-read registrations owned while the wait is live.
     read_triggers: Vec<TimerFdIoTrigger>,
+    /// Persistent poll subscriptions; prunable entries are detached lazily.
     poll_routes: Vec<TimerFdPollRoute>,
+    /// One-shot `ECANCELED` readiness for `TFD_TIMER_CANCEL_ON_SET`. A read
+    /// consumes it; a successful settime starts a fresh uncancelled schedule.
     cancelled: bool,
 }
 
@@ -192,6 +208,10 @@ impl TimerFdState {
     }
 
     fn retire_request(&mut self) {
+        // `TimerHandle` is intentionally detachable rather than cancel-on-drop.
+        // Invalidate the owner generation first, then attempt physical removal.
+        // If the request already reached the threaded lane, its generation
+        // check below is the remaining stale-completion barrier.
         self.generation = self
             .generation
             .checked_add(1)
@@ -290,6 +310,10 @@ impl TimerFdCore {
 
 impl Drop for TimerFdCore {
     fn drop(&mut self) {
+        // Withdraw owner state before touching the queue, and move the handle
+        // out so callback destruction/cross-CPU queue locking happens without
+        // the timerfd lock. An already-dequeued callback holds only a Weak core
+        // and therefore cannot resurrect the object.
         let request = {
             let mut state = self.state.lock();
             state.schedule = TimerFdSchedule::Disarmed;
@@ -374,6 +398,8 @@ fn deadline_read(deadline: TimerFdDeadline) -> (u64, Option<u64>) {
     match deadline {
         TimerFdDeadline::Monotonic(_) => (monotonic_ns(), None),
         TimerFdDeadline::Realtime { .. } => {
+            // Calendar value and change identity must come from one timekeeper
+            // snapshot or cancel-on-set could miss a step between two reads.
             let realtime = realtime_read();
             (realtime.now_ns(), Some(realtime.change_seq()))
         },
@@ -381,6 +407,8 @@ fn deadline_read(deadline: TimerFdDeadline) -> (u64, Option<u64>) {
 }
 
 fn snapshot_itimerspec(state: &TimerFdState) -> ITimerSpec {
+    // Remaining time is a projection of the authoritative absolute deadline;
+    // it is never cached because realtime steps can change it immediately.
     let interval_ns = match state.schedule {
         TimerFdSchedule::Disarmed => 0,
         TimerFdSchedule::Armed { interval_ns, .. } => interval_ns.unwrap_or(0),
@@ -560,6 +588,9 @@ fn timerfd_clock_changed_callback(core: Weak<TimerFdCore>, generation: u64) {
             ),
             "clock-change callback observed a non-cancellable timerfd schedule"
         );
+        // Logical cancellation belongs to timerfd, not the timer queue. Publish
+        // the one-shot read error and readiness only after generation proves
+        // this completion still names the current arm.
         state.schedule = TimerFdSchedule::Disarmed;
         state.expirations = 0;
         state.cancelled = true;
@@ -582,6 +613,8 @@ fn refresh_cancel_on_change_snapshot(schedule: &mut TimerFdSchedule) {
         return;
     };
     if cancel_on_change_seq.is_some() {
+        // A periodic successor is a new cancel-on-set registration. Steps that
+        // preceded this rearm must not cancel the successor retroactively.
         *cancel_on_change_seq = Some(realtime_read().change_seq());
     }
 }
@@ -653,6 +686,9 @@ fn account_due_expiration_locked(
     }
 
     if let Some(interval_ns) = interval_ns {
+        // Advance from the previous target, not callback execution time. This
+        // both counts missed periods and prevents worker latency from drifting
+        // the periodic schedule.
         let elapsed = now_ns.saturating_sub(next_expire_at_ns);
         let ticks = (elapsed / interval_ns).saturating_add(1);
         state.expirations = state.expirations.saturating_add(ticks);
@@ -677,6 +713,9 @@ fn timerfd_wait_for_readable(timerfd: &TimerFdFile) -> Result<(), SysError> {
             return Err(SysError::Interrupted);
         }
 
+        // Publish the wait round before checking/registering under timerfd's
+        // lock. An expiry can then either observe readiness here or trigger the
+        // registered round; it cannot fall into a lost-wakeup window.
         let latch = Latch::begin_current(true);
         let trigger = latch.make_trigger();
 
@@ -746,6 +785,8 @@ fn timerfd_read(
         let (cancelled, value, due) = {
             let mut state = timerfd.core.state.lock();
             let due = refresh_due_expiration_locked(&timerfd.core, &mut state);
+            // Linux exposes cancel-on-set as exactly one ECANCELED read. Do not
+            // consume the expiration counter on that same read.
             let cancelled = core::mem::take(&mut state.cancelled);
             let value = if cancelled || state.expirations == 0 {
                 None
@@ -911,6 +952,9 @@ fn settime(
     let prepared = if value_ns == 0 {
         None
     } else if flags.abstime && core.clockid == CLOCK_REALTIME {
+        // Capture the calendar value and sequence together. The timer queue's
+        // insert-side recheck closes a concurrent step between this snapshot
+        // and publication of the request.
         let realtime = realtime_read();
         Some((
             TimerFdDeadline::Realtime {
@@ -920,6 +964,9 @@ fn settime(
             realtime.now_ns(),
         ))
     } else {
+        // Relative requests, including relative CLOCK_REALTIME, are frozen onto
+        // the monotonic timeline at settime. BOOTTIME also maps here because
+        // Anemone does not yet account for suspend.
         let now_ns = monotonic_ns();
         let deadline_ns = if flags.abstime {
             value_ns
@@ -936,6 +983,8 @@ fn settime(
         let mut state = core.state.lock();
         let old_value = snapshot_itimerspec(&state);
 
+        // Retire the previous generation before publishing any replacement.
+        // This orders an already-dequeued old callback behind stale identity.
         state.retire_request();
         state.cancelled = false;
         state.expirations = 0;

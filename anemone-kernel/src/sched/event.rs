@@ -582,6 +582,8 @@ mod kunits {
     };
 
     #[derive(Opaque)]
+    /// Cross-task handshake that waits until both the Event listener and its
+    /// far-future timeout are visible before forcing the non-timeout wake.
     struct EarlyWake {
         event: Arc<Event>,
         ready: Arc<AtomicBool>,
@@ -594,6 +596,9 @@ mod kunits {
             .cast::<EarlyWake>()
             .expect("invalid early event wake KUnit context");
         loop {
+            // Checking both publications makes the assertion below specifically
+            // cover timeout removal, rather than an early-wake path that never
+            // installed a timer request.
             let listener_registered = {
                 let inner = wake.event.inner.lock();
                 !inner.non_exclusive.is_empty()

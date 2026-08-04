@@ -47,6 +47,9 @@ impl LocalClockSourceArch for LA64TimeArch {
 
 impl LocalClockEventArch for LA64TimeArch {
     fn program_next_timer(deadline: u64) {
+        // TCFG stores its initial value in bits 63:2. `Tcfg::new` accepts that
+        // field value and shifts it into place, so convert the shared raw-counter
+        // delta to the register field before constructing the CSR value.
         let countdown = deadline.saturating_sub(Self::curr_monotonic_time()) >> 2;
 
         unsafe {
@@ -96,6 +99,8 @@ impl LA64TimeArch {
 
         let base_freq = rd_cpucfg(4);
         let ratio = rd_cpucfg(5);
+        // CPUCFG.5 packs multiplier in the low half and divisor in the high
+        // half. Compute in u64 so the u32 base times u16 multiplier cannot wrap.
         let multiplier = ratio & 0xffff;
         let divisor = (ratio >> 16) & 0xffff;
         assert!(divisor != 0, "LoongArch stable counter divisor is zero");

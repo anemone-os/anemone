@@ -28,6 +28,10 @@ pub mod linux {
     }
 
     /// Native 64-bit Linux `struct __kernel_timex` used by `clock_adjtime`.
+    ///
+    /// Field order and explicit padding are UAPI, not Rust implementation
+    /// details. They match asm-generic time64's 208-byte layout on RV64 and
+    /// LA64; removing apparently unused fields would corrupt userspace copies.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     #[repr(C)]
     pub struct Timex {
@@ -83,6 +87,9 @@ pub mod linux {
     }
 
     pub mod timex {
+        // Numeric values are Linux UAPI. The kernel syscall layer decides which
+        // recognized operations are implemented; this ABI module only names
+        // the wire representation.
         pub const ADJ_OFFSET: u32 = 0x0001;
         pub const ADJ_FREQUENCY: u32 = 0x0002;
         pub const ADJ_MAXERROR: u32 = 0x0004;

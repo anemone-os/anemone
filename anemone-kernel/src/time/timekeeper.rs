@@ -6,7 +6,16 @@ const NANOS_PER_SEC: u128 = 1_000_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RealtimeSnapshot {
+    /// The sole mutable input to `realtime = monotonic + offset`.
+    ///
+    /// Keeping the offset nonnegative lets every public clock value stay in the
+    /// kernel's unsigned nanosecond domain. Calendar consumers must derive from
+    /// this field instead of storing another realtime value.
     offset_ns: u64,
+    /// Nonwrapping identity for an actual offset change.
+    ///
+    /// This is protocol state for absolute realtime requests; it says only that
+    /// a step happened and never participates in the clock-value formula.
     change_seq: u64,
 }
 
@@ -34,6 +43,8 @@ impl RealtimeSnapshot {
     }
 
     fn set_offset(&mut self, monotonic_ns: u64, new_offset: u64) -> Result<bool, SysError> {
+        // Complete every fallible check before changing either field. Callers
+        // use `false` to avoid publishing a spurious realtime-step scan.
         monotonic_ns
             .checked_add(new_offset)
             .ok_or(SysError::InvalidArgument)?;
@@ -79,10 +90,16 @@ pub(crate) struct RealtimeStep;
 struct Timekeeper {
     /// The architecture counter sample that defines `CLOCK_MONOTONIC == 0`.
     boot_counter: u64,
+    /// Immutable architecture-source frequency. Counter conversion and both
+    /// resolution classes derive from this one value.
     frequency_hz: u64,
     /// Hot-path cache derived from the immutable `frequency_hz`; it cannot
-    /// become stale after timekeeper initialization.
+    /// become stale after timekeeper initialization. Integer division rounds
+    /// down, so clock-event delivery may be slightly more frequent than
+    /// `SYSTEM_HZ`, while the reported coarse resolution uses the same count.
     counts_per_tick: u64,
+    /// Serializes the calendar offset with its step identity. The lock does not
+    /// protect monotonic time, which remains derived directly from hardware.
     realtime: SpinLock<RealtimeSnapshot>,
     /// A deliberately stale performance snapshot, never a second monotonic
     /// truth.
@@ -111,6 +128,8 @@ impl Timekeeper {
     }
 
     fn counts_to_nanos(&self, counts: u64) -> u128 {
+        // Promote before multiplication: a valid counter delta may overflow u64
+        // even when the final quotient still fits the public time range.
         counts as u128 * NANOS_PER_SEC / self.frequency_hz as u128
     }
 
@@ -249,6 +268,8 @@ pub fn realtime_ns() -> u64 {
 }
 
 pub(crate) fn realtime_read() -> RealtimeRead {
+    // Hold one lock across the offset and sequence snapshot. Registration code
+    // must never pair a pre-step time with a post-step sequence (or vice versa).
     let realtime = TIMEKEEPER.get().realtime.lock();
     let now_ns = monotonic_ns()
         .checked_add(realtime.offset_ns)

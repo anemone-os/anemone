@@ -1,3 +1,9 @@
+//! Userspace oracle for realtime mutation and step-sensitive waits.
+//!
+//! The cases deliberately mix direct clock syscalls, forked sleepers, timerfd,
+//! and ITIMER_REAL so the test observes both ABI results and cross-owner wakeup
+//! behavior rather than only checking the timekeeper value.
+
 use core::{
     mem::size_of,
     sync::atomic::{AtomicUsize, Ordering},
@@ -151,6 +157,8 @@ fn wait_child_ready(fd: u32) {
 }
 
 fn verify_set_and_adjust_abi() {
+    // Keep input-shape, pointer-fault, supported-operation, and returned clock
+    // state checks together: they define the externally visible Gate 3 subset.
     let valid = ns_to_timespec(clock_ns(CLOCK_REALTIME).checked_add(NSEC_PER_SEC).unwrap());
     assert_eq!(
         unsafe {
@@ -269,6 +277,9 @@ fn verify_set_and_adjust_abi() {
 }
 
 fn verify_sleep_matrix() {
+    // Relative and absolute forms share clock admission but differ in remaining
+    // time and realtime-step behavior. Unsupported CPU clocks must remain
+    // distinguishable from invalid clock IDs.
     for clock_id in [CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_BOOTTIME] {
         let before = clock_ns(CLOCK_MONOTONIC);
         sleep_relative(clock_id, 20_000_000);
@@ -302,6 +313,8 @@ fn verify_sleep_matrix() {
 }
 
 fn verify_relative_sleep_remaining() {
+    // ITIMER_REAL supplies a real asynchronous signal so EINTR and `rmtp` are
+    // validated through the production signal/wait path.
     SIGALRM_DELIVERIES.store(0, Ordering::Relaxed);
     let action = SigAction {
         sighandler: sigalrm_handler as *const (),
@@ -357,6 +370,9 @@ fn clock_ns_from_timespec(value: TimeSpec) -> u64 {
 }
 
 fn verify_absolute_realtime_step(direction: i64) {
+    // The pipe prevents the parent from stepping before the child reaches the
+    // sleep branch. A short monotonic pause then gives the child a registration
+    // window without making the tested elapsed bound depend on that pause.
     let (read_fd, write_fd) = pipe2(PipeFlags::empty()).unwrap();
     let deadline_ns = clock_ns(CLOCK_REALTIME).checked_add(500_000_000).unwrap();
     match fork().unwrap() {
@@ -434,6 +450,7 @@ fn read_expirations(fd: u32) -> Result<u64, Errno> {
 }
 
 fn verify_timerfd_realtime_steps() {
+    // Relative CLOCK_REALTIME is frozen to monotonic and must ignore a step.
     let relative = timerfd_create(CLOCK_REALTIME);
     timerfd_settime(
         relative,
@@ -449,6 +466,7 @@ fn verify_timerfd_realtime_steps() {
     assert_eq!(read_expirations(relative).unwrap(), 1);
     close(relative).unwrap();
 
+    // Absolute CLOCK_REALTIME follows the mutable calendar in both directions.
     let absolute = timerfd_create(CLOCK_REALTIME);
     let target = clock_ns(CLOCK_REALTIME).checked_add(500_000_000).unwrap();
     timerfd_settime(
@@ -466,6 +484,8 @@ fn verify_timerfd_realtime_steps() {
     assert_eq!(read_expirations(absolute).unwrap(), 1);
     close(absolute).unwrap();
 
+    // CANCEL_ON_SET consumes the current arm as one ECANCELED read instead of
+    // reporting an expiration on either the old or replacement timeline.
     let cancelled = timerfd_create(CLOCK_REALTIME);
     let target = clock_ns(CLOCK_REALTIME)
         .checked_add(5 * NSEC_PER_SEC)
@@ -499,6 +519,8 @@ fn verify_timerfd_realtime_steps() {
 }
 
 fn verify_settime_permission() {
+    // Isolate credential loss in a child; the main test process must retain
+    // SYS_TIME to restore realtime for later user-test modules.
     match fork().unwrap() {
         Some(pid) => wait_child_ok(pid, "clock_settime permission"),
         None => {
@@ -532,6 +554,8 @@ pub(crate) fn verify_clock_steps() {
     verify_timerfd_realtime_steps();
     verify_settime_permission();
 
+    // Leave later tests near the boot-relative calendar baseline instead of
+    // leaking this module's accumulated forward/backward steps.
     set_realtime(clock_ns(CLOCK_MONOTONIC) + NSEC_PER_SEC).unwrap();
     println!("clock-step: realtime mutation, sleep, and timerfd checks passed");
 }

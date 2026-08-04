@@ -21,6 +21,8 @@ impl TimeArchTrait for RiscV64TimeArch {
 
 impl LocalClockSourceArch for RiscV64TimeArch {
     fn curr_monotonic_time() -> u64 {
+        // The SBI platform exposes `time` as the shared clock-source domain;
+        // common timekeeping must not add a second per-hart correction.
         riscv::register::time::read64()
     }
 
@@ -31,6 +33,7 @@ impl LocalClockSourceArch for RiscV64TimeArch {
 
 impl LocalClockEventArch for RiscV64TimeArch {
     fn program_next_timer(deadline: u64) {
+        // SBI accepts an absolute value in the same `time` counter domain.
         sbi_rt::set_timer(deadline).expect("Sbi set_timer failed");
     }
 }

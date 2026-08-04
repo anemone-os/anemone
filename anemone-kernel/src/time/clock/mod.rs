@@ -38,7 +38,9 @@ mod api;
 pub use api::*;
 
 static STATIC_CLOCKS: &[&dyn Clock] = &[
-    // note the index.
+    // The array index is the native Linux clock ID. Keep independent objects for
+    // clocks that currently share a value so later semantics cannot silently
+    // change ABI routing through object aliases.
     &RealtimeClock,
     &MonotonicClock,
     &ProcessCpuTimeClock,
@@ -70,6 +72,8 @@ pub(crate) fn get_sleep_clock(clock_id: i32) -> Result<SleepClock, SysError> {
         CLOCK_REALTIME => Ok(SleepClock::Realtime),
         CLOCK_MONOTONIC | CLOCK_BOOTTIME => Ok(SleepClock::Monotonic),
         CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID => {
+            // These IDs are valid clocks, but sleeping on CPU consumption needs
+            // scheduler-driven timers that this stage deliberately lacks.
             if !CPU_SLEEP_UNSUPPORTED_LOGGED.swap(true, Ordering::Relaxed) {
                 knoticeln!(
                     "clock_nanosleep: CPU-time clocks are unsupported without scheduler-driven timers"

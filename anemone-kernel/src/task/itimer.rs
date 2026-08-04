@@ -22,12 +22,16 @@ pub struct ITimers {
 
 #[derive(Debug)]
 pub struct RealITimer {
+    /// Authoritative target for getitimer and periodic advancement. Callback
+    /// execution time must not replace it or periodic delivery would drift.
     expire_at: Instant,
     /// If [Some], then this is a periodic timer.
     interval: Option<Duration>,
     /// If false, then a stale timer completion will not send a signal to the
-    /// thread group.
+    /// thread group. Pointer identity also distinguishes replacement arms.
     validness: Arc<AtomicBool>,
+    /// Cancellation capability for the current one-shot queue request. The
+    /// handle is not the owner of the long-lived itimer schedule.
     request: Option<TimerHandle>,
 }
 
@@ -41,6 +45,9 @@ impl ITimers {
 
 impl Drop for ITimers {
     fn drop(&mut self) {
+        // `TimerHandle` cannot cancel on Drop because fire-and-forget requests
+        // are valid timer-core users. The itimer owner must first close callback
+        // eligibility, withdraw its state, and only then cancel outside its lock.
         let request = {
             let mut real = self.real.lock();
             let request = real.as_mut().and_then(|timer| {
@@ -71,6 +78,9 @@ impl ThreadGroup {
         let tg = Arc::downgrade(self);
         let old_request = {
             let mut real = self.itimers.real.lock();
+            // Replacement is a two-part protocol: reject any completion that
+            // already left the queue, then physically remove what is still
+            // queue-owned after the new arm has been committed.
             let old_request = real.as_mut().and_then(|timer| {
                 timer.validness.store(false, Ordering::SeqCst);
                 timer.request.take()
@@ -148,6 +158,8 @@ fn next_periodic_expiration(expire_at: Instant, interval: Duration, now: Instant
         .filter(|interval| *interval != 0)
         .expect("ITIMER_REAL interval is below the architecture clock resolution");
     let elapsed = now.mono() - expire_at.mono();
+    // Skip every elapsed period in one step. Rearming from `now` would turn
+    // timer-worker delay into permanent phase drift.
     let periods = elapsed / interval_mono + 1;
     let advance = interval_mono
         .checked_mul(periods)
@@ -166,6 +178,8 @@ fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>)
         let Some(timer) = real.as_mut() else {
             return;
         };
+        // Value alone is insufficient: a replacement owns a distinct Arc so a
+        // stale callback can never match a newly-valid arm accidentally.
         if !Arc::ptr_eq(&timer.validness, &validness) || !validness.load(Ordering::SeqCst) {
             return;
         }
@@ -191,6 +205,8 @@ fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>)
             },
         }
 
+        // Commit signal eligibility while the itimer state is stable, but send
+        // after unlock because signal delivery crosses into another owner.
         true
     };
 

@@ -1,3 +1,8 @@
+//! Userspace oracle for the eight native Linux clock IDs.
+//!
+//! This intentionally uses raw syscalls so libc policy cannot hide clock-ID,
+//! layout, resolution, or errno mistakes in the kernel ABI.
+
 use anemone_rs::{
     abi::{
         syscall::{SYS_CLOCK_GETRES, SYS_CLOCK_GETTIME, SYS_NANOSLEEP, syscall},
@@ -102,6 +107,8 @@ pub(crate) fn verify_native_clocks() {
         println!("clock-read: {name} time_ns={second} resolution_ns={resolution}");
     }
 
+    // Ordinary and CPU clocks share source-counter precision in Gate 1; coarse
+    // clocks form a separate resolution class based on BSP tick publication.
     for clock_id in [
         CLOCK_REALTIME,
         CLOCK_MONOTONIC,
@@ -121,6 +128,8 @@ pub(crate) fn verify_native_clocks() {
     );
     assert!(resolutions[CLOCK_MONOTONIC_COARSE as usize] >= resolutions[CLOCK_MONOTONIC as usize]);
 
+    // With no RTC seed, correction, or suspend accounting, these projections
+    // must land inside one bracketing monotonic read interval.
     let monotonic_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC).unwrap();
     let realtime = clock_value(SYS_CLOCK_GETTIME, CLOCK_REALTIME).unwrap();
     let raw = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC_RAW).unwrap();
@@ -141,6 +150,8 @@ pub(crate) fn verify_native_clocks() {
         "realtime-coarse did not use the Gate 1 coarse monotonic snapshot"
     );
 
+    // Busy work must advance task-owned CPU clocks, while blocked wall time must
+    // not be charged as CPU consumption.
     let process_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_PROCESS_CPUTIME_ID).unwrap();
     let thread_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_THREAD_CPUTIME_ID).unwrap();
     for _ in 0..100_000 {

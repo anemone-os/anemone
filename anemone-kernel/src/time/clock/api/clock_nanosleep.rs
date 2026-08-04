@@ -52,6 +52,9 @@ pub(crate) fn clock_nanosleep(
     let absolute = flags & TIMER_ABSTIME != 0;
 
     if !absolute {
+        // Linux relative sleeps measure an elapsed duration even when the
+        // selected ABI clock is REALTIME. Freeze every supported relative
+        // request onto monotonic so calendar steps cannot shorten or extend it.
         return sleep_relative(&task, ns_to_duration(requested_ns), rmtp);
     }
     match clock {
@@ -70,6 +73,9 @@ fn sleep_relative(
         .checked_add(duration_ns)
         .ok_or(SysError::InvalidArgument)?;
     loop {
+        // Recompute against the fixed deadline after every timeout wake. Timer
+        // delivery is tick-bounded and the wait core may complete at a nearby
+        // representable counter value; only the clock value is the final oracle.
         let now_ns = monotonic_ns();
         if now_ns >= deadline_ns {
             return Ok(0);
@@ -95,6 +101,8 @@ fn sleep_relative(
 
 fn sleep_absolute_monotonic(task: &Arc<Task>, deadline_ns: u64) -> Result<u64, SysError> {
     loop {
+        // Absolute sleeps never report remaining time. Rechecking the original
+        // deadline also makes harmless early/spurious timeout completions retry.
         let now_ns = monotonic_ns();
         if now_ns >= deadline_ns {
             return Ok(0);
@@ -118,6 +126,9 @@ fn sleep_absolute_realtime(task: &Arc<Task>, deadline_ns: u64) -> Result<u64, Sy
     if realtime_ns() >= deadline_ns {
         return Ok(0);
     }
+    // A duration-based scheduler timeout cannot follow a mutable calendar.
+    // Install an absolute realtime request instead; the timer service rechecks
+    // it after every step and the wait token rejects a completion after signal.
     let outcome = wait_current_with_timer_request(
         task,
         true,
@@ -145,6 +156,8 @@ fn write_remaining_time(rmtp: Option<VirtAddr>, rem: Duration) -> Result<(), Sys
     let Some(rmtp) = rmtp else {
         return Ok(());
     };
+    // POSIX defines `rmtp` only for interrupted relative sleeps. Absolute paths
+    // return EINTR without touching it and never call this helper.
     let task = get_current_task();
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();
