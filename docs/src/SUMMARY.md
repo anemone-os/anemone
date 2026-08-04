@@ -5,6 +5,7 @@
 	- [当前契约模板](./contract-template.md)
 	- [Time 当前契约](./contracts/time/index.md)
 		- [Clock derivation](./contracts/time/clock-derivation.md)
+		- [Realtime step](./contracts/time/realtime-step.md)
 		- [Soft timer request](./contracts/time/soft-timer-request.md)
 	- [VFS 当前契约](./contracts/vfs/index.md)
 		- [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)

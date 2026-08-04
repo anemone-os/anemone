@@ -15,7 +15,11 @@ use crate::{
     prelude::*,
     time::{
         clock::get_clock,
-        timer::{TimerHandle, cancel_timer_event, schedule_threaded_timer_event},
+        monotonic_ns, realtime_read,
+        timer::{
+            TimerHandle, cancel_timer_event, schedule_realtime_threaded_timer_event,
+            schedule_threaded_timer_event,
+        },
     },
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
@@ -117,9 +121,42 @@ impl TimerFdHandoffBatch {
 enum TimerFdSchedule {
     Disarmed,
     Armed {
-        next_expire_at_ns: u64,
+        deadline: TimerFdDeadline,
         interval_ns: Option<u64>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimerFdDeadline {
+    Monotonic(u64),
+    Realtime {
+        deadline_ns: u64,
+        // Protocol snapshot retained by TimerFdCore for direct read/poll
+        // refresh and copied into the one queued soft-timer request.
+        cancel_on_change_seq: Option<u64>,
+    },
+}
+
+impl TimerFdDeadline {
+    fn deadline_ns(self) -> u64 {
+        match self {
+            Self::Monotonic(deadline_ns) | Self::Realtime { deadline_ns, .. } => deadline_ns,
+        }
+    }
+
+    fn advance(self, delta_ns: u64) -> Self {
+        let deadline_ns = self.deadline_ns().saturating_add(delta_ns);
+        match self {
+            Self::Monotonic(_) => Self::Monotonic(deadline_ns),
+            Self::Realtime {
+                cancel_on_change_seq,
+                ..
+            } => Self::Realtime {
+                deadline_ns,
+                cancel_on_change_seq,
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -130,10 +167,7 @@ struct TimerFdState {
     expirations: u64,
     read_triggers: Vec<TimerFdIoTrigger>,
     poll_routes: Vec<TimerFdPollRoute>,
-    // Diagnostic only: accepted no-op state for the stage-1
-    // TFD_TIMER_CANCEL_ON_SET compatibility bridge. It must not drive read
-    // errors until clock-set cancellation is implemented.
-    cancel_on_set_accepted: bool,
+    cancelled: bool,
 }
 
 impl TimerFdState {
@@ -145,12 +179,12 @@ impl TimerFdState {
             expirations: 0,
             read_triggers: queue_with_capacity()?,
             poll_routes: queue_with_capacity()?,
-            cancel_on_set_accepted: false,
+            cancelled: false,
         })
     }
 
     fn revents(&self, interests: PollEvent) -> PollEvent {
-        if interests.contains(PollEvent::READABLE) && self.expirations > 0 {
+        if interests.contains(PollEvent::READABLE) && (self.cancelled || self.expirations > 0) {
             PollEvent::READABLE
         } else {
             PollEvent::empty()
@@ -252,12 +286,6 @@ impl TimerFdCore {
             clockid,
         })
     }
-
-    fn now_ns(&self) -> u64 {
-        get_clock(self.clockid as usize)
-            .expect("validated timerfd clock disappeared")
-            .now_ns()
-    }
 }
 
 impl Drop for TimerFdCore {
@@ -342,20 +370,26 @@ fn validate_settime_value(spec: ITimerSpec) -> Result<(), SysError> {
     validate_itimerspec(spec).map(|_| ())
 }
 
-fn snapshot_itimerspec(clockid: i32, state: &TimerFdState) -> ITimerSpec {
+fn deadline_read(deadline: TimerFdDeadline) -> (u64, Option<u64>) {
+    match deadline {
+        TimerFdDeadline::Monotonic(_) => (monotonic_ns(), None),
+        TimerFdDeadline::Realtime { .. } => {
+            let realtime = realtime_read();
+            (realtime.now_ns(), Some(realtime.change_seq()))
+        },
+    }
+}
+
+fn snapshot_itimerspec(state: &TimerFdState) -> ITimerSpec {
     let interval_ns = match state.schedule {
         TimerFdSchedule::Disarmed => 0,
         TimerFdSchedule::Armed { interval_ns, .. } => interval_ns.unwrap_or(0),
     };
     let value_ns = match state.schedule {
         TimerFdSchedule::Disarmed => 0,
-        TimerFdSchedule::Armed {
-            next_expire_at_ns, ..
-        } => {
-            let now_ns = get_clock(clockid as usize)
-                .expect("validated timerfd clock disappeared")
-                .now_ns();
-            next_expire_at_ns.saturating_sub(now_ns)
+        TimerFdSchedule::Armed { deadline, .. } => {
+            let (now_ns, _) = deadline_read(deadline);
+            deadline.deadline_ns().saturating_sub(now_ns)
         },
     };
     ITimerSpec {
@@ -416,18 +450,39 @@ fn notify_waiters_after_unlock(waiters: TimerFdHandoffBatch, reason: &'static st
 fn schedule_timerfd_callback(
     core: &Arc<TimerFdCore>,
     generation: u64,
-    timeout: Duration,
+    deadline: TimerFdDeadline,
 ) -> TimerHandle {
-    let weak = Arc::downgrade(core);
     // Timerfd submits a bounded threaded completion, not a background job. The
     // timerfd object still owns generation filtering, missed-tick accounting,
     // trigger handoff and periodic rearm under its state lock. Callers may use
     // this before unlocking because this RFC's threaded timer submit has no
     // recoverable failure path; normal return is the queued-event publish point.
-    schedule_threaded_timer_event(
-        timeout,
-        Box::new(move || timerfd_expire_callback(weak, generation)),
-    )
+    match deadline {
+        TimerFdDeadline::Monotonic(deadline_ns) => {
+            let weak = Arc::downgrade(core);
+            schedule_threaded_timer_event(
+                deadline_timeout(monotonic_ns(), deadline_ns),
+                Box::new(move || timerfd_expire_callback(weak, generation)),
+            )
+        },
+        TimerFdDeadline::Realtime {
+            deadline_ns,
+            cancel_on_change_seq,
+        } => {
+            let expire_core = Arc::downgrade(core);
+            let clock_changed = cancel_on_change_seq.map(|_| {
+                let changed_core = Arc::downgrade(core);
+                Box::new(move || timerfd_clock_changed_callback(changed_core, generation))
+                    as Box<dyn FnOnce() + Send + 'static>
+            });
+            schedule_realtime_threaded_timer_event(
+                deadline_ns,
+                cancel_on_change_seq,
+                Box::new(move || timerfd_expire_callback(expire_core, generation)),
+                clock_changed,
+            )
+        },
+    }
 }
 
 fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
@@ -446,24 +501,31 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
         );
 
         let TimerFdSchedule::Armed {
-            next_expire_at_ns,
+            deadline,
             interval_ns,
         } = state.schedule
         else {
             panic!("current timerfd callback observed a disarmed owner schedule");
         };
 
-        let (detached, timeout) = account_due_expiration_locked(
+        // The queue already linearized this request as expired. A realtime
+        // backward step after dequeue must not revoke that expiration.
+        let (now_ns, _) = deadline_read(deadline);
+        let (detached, rearm) = account_due_expiration_locked(
             &mut state,
-            core.now_ns(),
-            next_expire_at_ns,
+            now_ns.max(deadline.deadline_ns()),
+            deadline,
             interval_ns,
         );
-        if let Some(timeout) = timeout {
+        if rearm.is_some() {
+            refresh_cancel_on_change_snapshot(&mut state.schedule);
+            let TimerFdSchedule::Armed { deadline, .. } = state.schedule else {
+                unreachable!("periodic timerfd lost its armed schedule")
+            };
             // Submit the successor event before publishing the updated armed
             // state by unlocking. This keeps the ordinary path from exposing an
             // armed periodic timer without a matching queued timer-core event.
-            state.request = Some(schedule_timerfd_callback(&core, generation, timeout));
+            state.request = Some(schedule_timerfd_callback(&core, generation, deadline));
         }
         detached
     };
@@ -471,20 +533,89 @@ fn timerfd_expire_callback(core: Weak<TimerFdCore>, generation: u64) {
     notify_waiters_after_unlock(detached, "expire");
 }
 
+fn timerfd_clock_changed_callback(core: Weak<TimerFdCore>, generation: u64) {
+    let Some(core) = core.upgrade() else {
+        return;
+    };
+
+    let detached = {
+        let mut state = core.state.lock();
+        if state.generation != generation {
+            return;
+        }
+        assert!(
+            state.request.take().is_some(),
+            "current timerfd clock-change callback is missing its request handle"
+        );
+        assert!(
+            matches!(
+                state.schedule,
+                TimerFdSchedule::Armed {
+                    deadline: TimerFdDeadline::Realtime {
+                        cancel_on_change_seq: Some(_),
+                        ..
+                    },
+                    ..
+                }
+            ),
+            "clock-change callback observed a non-cancellable timerfd schedule"
+        );
+        state.schedule = TimerFdSchedule::Disarmed;
+        state.expirations = 0;
+        state.cancelled = true;
+        state.collect_readable_waiters()
+    };
+
+    notify_waiters_after_unlock(detached, "clock_changed");
+}
+
+fn refresh_cancel_on_change_snapshot(schedule: &mut TimerFdSchedule) {
+    let TimerFdSchedule::Armed {
+        deadline:
+            TimerFdDeadline::Realtime {
+                cancel_on_change_seq,
+                ..
+            },
+        ..
+    } = schedule
+    else {
+        return;
+    };
+    if cancel_on_change_seq.is_some() {
+        *cancel_on_change_seq = Some(realtime_read().change_seq());
+    }
+}
+
 fn refresh_due_expiration_locked(
     core: &Arc<TimerFdCore>,
     state: &mut TimerFdState,
 ) -> TimerFdHandoffBatch {
     let TimerFdSchedule::Armed {
-        next_expire_at_ns,
+        deadline,
         interval_ns,
     } = state.schedule
     else {
         return TimerFdHandoffBatch::empty();
     };
 
-    let now_ns = core.now_ns();
-    if now_ns < next_expire_at_ns {
+    let (now_ns, change_seq) = deadline_read(deadline);
+    if matches!(
+        deadline,
+        TimerFdDeadline::Realtime {
+            cancel_on_change_seq: Some(armed_seq),
+            ..
+        } if change_seq.is_some_and(|current_seq| armed_seq < current_seq)
+    ) {
+        // A direct read/poll may reach the timerfd owner before the threaded
+        // clock-change completion. Retire the same request by generation and
+        // publish the owner state here so cancellation remains observable once.
+        state.retire_request();
+        state.schedule = TimerFdSchedule::Disarmed;
+        state.expirations = 0;
+        state.cancelled = true;
+        return state.collect_readable_waiters();
+    }
+    if now_ns < deadline.deadline_ns() {
         return TimerFdHandoffBatch::empty();
     }
 
@@ -496,10 +627,13 @@ fn refresh_due_expiration_locked(
     // identity first, then remove the request if it is still queue-owned.
     state.retire_request();
     let generation = state.generation;
-    let (detached, timeout) =
-        account_due_expiration_locked(state, now_ns, next_expire_at_ns, interval_ns);
-    if let Some(timeout) = timeout {
-        state.request = Some(schedule_timerfd_callback(core, generation, timeout));
+    let (detached, rearm) = account_due_expiration_locked(state, now_ns, deadline, interval_ns);
+    if rearm.is_some() {
+        refresh_cancel_on_change_snapshot(&mut state.schedule);
+        let TimerFdSchedule::Armed { deadline, .. } = state.schedule else {
+            unreachable!("periodic timerfd lost its armed schedule")
+        };
+        state.request = Some(schedule_timerfd_callback(core, generation, deadline));
     }
     detached
 }
@@ -507,9 +641,10 @@ fn refresh_due_expiration_locked(
 fn account_due_expiration_locked(
     state: &mut TimerFdState,
     now_ns: u64,
-    next_expire_at_ns: u64,
+    deadline: TimerFdDeadline,
     interval_ns: Option<u64>,
 ) -> (TimerFdHandoffBatch, Option<Duration>) {
+    let next_expire_at_ns = deadline.deadline_ns();
     if now_ns < next_expire_at_ns {
         return (
             TimerFdHandoffBatch::empty(),
@@ -522,12 +657,12 @@ fn account_due_expiration_locked(
         let ticks = (elapsed / interval_ns).saturating_add(1);
         state.expirations = state.expirations.saturating_add(ticks);
         let advanced = interval_ns.saturating_mul(ticks);
-        let next_expire_at_ns = next_expire_at_ns.saturating_add(advanced);
+        let deadline = deadline.advance(advanced);
         state.schedule = TimerFdSchedule::Armed {
-            next_expire_at_ns,
+            deadline,
             interval_ns: Some(interval_ns),
         };
-        let timeout = deadline_timeout(now_ns, next_expire_at_ns);
+        let timeout = deadline_timeout(now_ns, deadline.deadline_ns());
         (state.collect_readable_waiters(), Some(timeout))
     } else {
         state.expirations = state.expirations.saturating_add(1);
@@ -549,7 +684,7 @@ fn timerfd_wait_for_readable(timerfd: &TimerFdFile) -> Result<(), SysError> {
         let (register_result, due, ready) = {
             let mut state = timerfd.core.state.lock();
             let due = refresh_due_expiration_locked(&timerfd.core, &mut state);
-            if state.expirations > 0 {
+            if state.cancelled || state.expirations > 0 {
                 (Ok(()), due, true)
             } else {
                 (state.register_read_wait(&trigger, &mut stale), due, false)
@@ -608,20 +743,24 @@ fn timerfd_read(
 
     let timerfd = TimerFdFile::from_file(file).expect("timerfd file without timerfd private data");
     loop {
-        let (value, due) = {
+        let (cancelled, value, due) = {
             let mut state = timerfd.core.state.lock();
             let due = refresh_due_expiration_locked(&timerfd.core, &mut state);
-            let value = if state.expirations == 0 {
+            let cancelled = core::mem::take(&mut state.cancelled);
+            let value = if cancelled || state.expirations == 0 {
                 None
             } else {
                 let value = state.expirations;
                 state.expirations = 0;
                 Some(value)
             };
-            (value, due)
+            (cancelled, value, due)
         };
         notify_waiters_after_unlock(due, "read_refresh");
 
+        if cancelled {
+            return Err(SysError::OperationCancelled);
+        }
         if let Some(value) = value {
             buf[..size_of::<u64>()].copy_from_slice(&value.to_le_bytes());
             return Ok(size_of::<u64>());
@@ -753,7 +892,7 @@ fn create_timerfd(clockid: i32) -> Result<File, SysError> {
 fn gettime(file: &File) -> Result<ITimerSpec, SysError> {
     let core = TimerFdFile::core_from_file(file)?;
     let state = core.state.lock();
-    Ok(snapshot_itimerspec(core.clockid, &state))
+    Ok(snapshot_itimerspec(&state))
 }
 
 fn settime(
@@ -761,45 +900,65 @@ fn settime(
     flags: TimerFdSettimeFlags,
     new_value: ITimerSpec,
 ) -> Result<ITimerSpec, SysError> {
+    use anemone_abi::time::linux::clock::CLOCK_REALTIME;
+
     let (value_ns, interval_ns) = validate_itimerspec(new_value)?;
     let core = TimerFdFile::core_from_file(file)?;
+    if flags.cancel_on_set && (!flags.abstime || core.clockid != CLOCK_REALTIME) {
+        return Err(SysError::InvalidArgument);
+    }
+
+    let prepared = if value_ns == 0 {
+        None
+    } else if flags.abstime && core.clockid == CLOCK_REALTIME {
+        let realtime = realtime_read();
+        Some((
+            TimerFdDeadline::Realtime {
+                deadline_ns: value_ns,
+                cancel_on_change_seq: flags.cancel_on_set.then_some(realtime.change_seq()),
+            },
+            realtime.now_ns(),
+        ))
+    } else {
+        let now_ns = monotonic_ns();
+        let deadline_ns = if flags.abstime {
+            value_ns
+        } else {
+            now_ns
+                .checked_add(value_ns)
+                .ok_or(SysError::InvalidArgument)?
+        };
+        Some((TimerFdDeadline::Monotonic(deadline_ns), now_ns))
+    };
     let mut detached = TimerFdHandoffBatch::empty();
 
     let old_value = {
         let mut state = core.state.lock();
-        let old_value = snapshot_itimerspec(core.clockid, &state);
+        let old_value = snapshot_itimerspec(&state);
 
         state.retire_request();
-        state.cancel_on_set_accepted = flags.cancel_on_set;
-        if flags.cancel_on_set {
-            knoticeln!(
-                "timerfd: TFD_TIMER_CANCEL_ON_SET accepted as stage-1 no-op; read ECANCELED is not implemented"
-            );
-        }
+        state.cancelled = false;
         state.expirations = 0;
 
-        if value_ns == 0 {
-            state.schedule = TimerFdSchedule::Disarmed;
-        } else {
-            let now_ns = core.now_ns();
-            let next_expire_at_ns = if flags.abstime {
-                value_ns
-            } else {
-                now_ns.saturating_add(value_ns)
-            };
+        if let Some((deadline, now_ns)) = prepared {
             state.schedule = TimerFdSchedule::Armed {
-                next_expire_at_ns,
+                deadline,
                 interval_ns,
             };
-            let (new_detached, timeout) =
-                account_due_expiration_locked(&mut state, now_ns, next_expire_at_ns, interval_ns);
+            let (new_detached, rearm) =
+                account_due_expiration_locked(&mut state, now_ns, deadline, interval_ns);
             detached = new_detached;
-            if let Some(timeout) = timeout {
+            if rearm.is_some() {
                 // Normal settime has no recoverable timer-core submit failure:
-                // return from schedule_threaded_timer_event() is the point that
-                // lets this armed generation become visible to readers.
-                state.request = Some(schedule_timerfd_callback(&core, state.generation, timeout));
+                // return from the timer submit is the point that lets this armed
+                // generation become visible to readers.
+                let TimerFdSchedule::Armed { deadline, .. } = state.schedule else {
+                    unreachable!("timerfd rearm lost its schedule")
+                };
+                state.request = Some(schedule_timerfd_callback(&core, state.generation, deadline));
             }
+        } else {
+            state.schedule = TimerFdSchedule::Disarmed;
         }
 
         old_value
@@ -817,7 +976,7 @@ mod kunits {
         fs::iomux::IomuxWaitRound,
         time::timer::{queued_timer_count, timer_event_is_queued},
     };
-    use anemone_abi::time::linux::clock::CLOCK_MONOTONIC;
+    use anemone_abi::time::linux::clock::{CLOCK_MONOTONIC, CLOCK_REALTIME};
 
     fn timer_spec(value_sec: i64, interval_sec: i64) -> ITimerSpec {
         ITimerSpec {
@@ -836,6 +995,13 @@ mod kunits {
         TimerFdSettimeFlags {
             abstime: false,
             cancel_on_set: false,
+        }
+    }
+
+    fn realtime_absolute_flags(cancel_on_set: bool) -> TimerFdSettimeFlags {
+        TimerFdSettimeFlags {
+            abstime: true,
+            cancel_on_set,
         }
     }
 
@@ -875,7 +1041,7 @@ mod kunits {
             let timerfd = TimerFdFile::from_file(&file).unwrap();
             let mut state = timerfd.core.state.lock();
             state.schedule = TimerFdSchedule::Armed {
-                next_expire_at_ns: 0,
+                deadline: TimerFdDeadline::Monotonic(0),
                 interval_ns: None,
             };
             refresh_due_expiration_locked(&timerfd.core, &mut state)
@@ -893,15 +1059,16 @@ mod kunits {
     fn periodic_accounting_advances_from_the_previous_target() {
         let mut state = TimerFdState::new().unwrap();
         state.schedule = TimerFdSchedule::Armed {
-            next_expire_at_ns: 10,
+            deadline: TimerFdDeadline::Monotonic(10),
             interval_ns: Some(10),
         };
-        let (_, timeout) = account_due_expiration_locked(&mut state, 35, 10, Some(10));
+        let (_, timeout) =
+            account_due_expiration_locked(&mut state, 35, TimerFdDeadline::Monotonic(10), Some(10));
         assert_eq!(state.expirations, 3);
         assert_eq!(
             state.schedule,
             TimerFdSchedule::Armed {
-                next_expire_at_ns: 40,
+                deadline: TimerFdDeadline::Monotonic(40),
                 interval_ns: Some(10),
             }
         );
@@ -950,7 +1117,7 @@ mod kunits {
 
         let detached = {
             let mut state = core.state.lock();
-            account_due_expiration_locked(&mut state, 1, 1, None).0
+            account_due_expiration_locked(&mut state, 1, TimerFdDeadline::Monotonic(1), None).0
         };
         assert_eq!(detached.poll_notify.len(), TIMERFD_TRIGGER_QUEUE_CAPACITY);
         assert!(detached.poll_stale.is_empty());
@@ -973,5 +1140,150 @@ mod kunits {
         assert_eq!(core.state.lock().poll_routes.len(), 1);
         reused_round.cancel(LatchCancelReason::PredicateReady);
         let _ = reused_round.finish();
+    }
+
+    #[kunit]
+    fn cancel_on_set_requires_absolute_realtime_without_mutating_existing_request() {
+        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+        let generation = core.state.lock().generation;
+
+        assert_eq!(
+            settime(
+                &file,
+                TimerFdSettimeFlags {
+                    abstime: true,
+                    cancel_on_set: true,
+                },
+                timer_spec(3600, 0),
+            ),
+            Err(SysError::InvalidArgument)
+        );
+        let state = core.state.lock();
+        assert_eq!(state.generation, generation);
+        assert!(matches!(
+            state.schedule,
+            TimerFdSchedule::Armed {
+                deadline: TimerFdDeadline::Monotonic(_),
+                ..
+            }
+        ));
+        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
+        drop(state);
+
+        let realtime_file = create_timerfd(CLOCK_REALTIME).unwrap();
+        assert_eq!(
+            settime(
+                &realtime_file,
+                TimerFdSettimeFlags {
+                    abstime: false,
+                    cancel_on_set: true,
+                },
+                timer_spec(3600, 0),
+            ),
+            Err(SysError::InvalidArgument)
+        );
+    }
+
+    #[kunit]
+    fn relative_realtime_timer_is_fixed_to_monotonic_domain() {
+        let file = create_timerfd(CLOCK_REALTIME).unwrap();
+        settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+        let state = core.state.lock();
+        assert!(matches!(
+            state.schedule,
+            TimerFdSchedule::Armed {
+                deadline: TimerFdDeadline::Monotonic(_),
+                ..
+            }
+        ));
+        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
+    }
+
+    #[kunit]
+    fn absolute_realtime_cancel_is_physical_and_read_reports_ecanceled_once() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let file = create_timerfd(CLOCK_REALTIME).unwrap();
+        let target_ns = realtime_read()
+            .now_ns()
+            .checked_add(3600 * NSEC_PER_SEC)
+            .unwrap();
+        settime(
+            &file,
+            realtime_absolute_flags(true),
+            ITimerSpec {
+                it_interval: TimeSpec::default(),
+                it_value: ns_to_timespec(target_ns),
+            },
+        )
+        .unwrap();
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+        let generation = core.state.lock().generation;
+        {
+            let state = core.state.lock();
+            assert!(matches!(
+                state.schedule,
+                TimerFdSchedule::Armed {
+                    deadline: TimerFdDeadline::Realtime {
+                        cancel_on_change_seq: Some(_),
+                        ..
+                    },
+                    ..
+                }
+            ));
+            assert!(cancel_timer_event(state.request.as_ref().unwrap()));
+        }
+        assert_eq!(queued_timer_count(cpu), baseline);
+
+        timerfd_clock_changed_callback(Arc::downgrade(&core), generation);
+        {
+            let state = core.state.lock();
+            assert!(state.cancelled);
+            assert!(state.request.is_none());
+            assert_eq!(state.schedule, TimerFdSchedule::Disarmed);
+            assert_eq!(state.revents(PollEvent::READABLE), PollEvent::READABLE);
+        }
+        let mut value = [0_u8; size_of::<u64>()];
+        assert_eq!(file.read(&mut value), Err(SysError::OperationCancelled));
+        assert!(!core.state.lock().cancelled);
+    }
+
+    #[kunit]
+    fn stale_clock_change_completion_cannot_cancel_a_replacement() {
+        let file = create_timerfd(CLOCK_REALTIME).unwrap();
+        let target_ns = realtime_read()
+            .now_ns()
+            .checked_add(3600 * NSEC_PER_SEC)
+            .unwrap();
+        let spec = ITimerSpec {
+            it_interval: TimeSpec::default(),
+            it_value: ns_to_timespec(target_ns),
+        };
+        settime(&file, realtime_absolute_flags(true), spec).unwrap();
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+        let stale_generation = core.state.lock().generation;
+        {
+            let state = core.state.lock();
+            assert!(cancel_timer_event(state.request.as_ref().unwrap()));
+        }
+
+        settime(&file, realtime_absolute_flags(false), spec).unwrap();
+        timerfd_clock_changed_callback(Arc::downgrade(&core), stale_generation);
+        let state = core.state.lock();
+        assert!(!state.cancelled);
+        assert!(matches!(
+            state.schedule,
+            TimerFdSchedule::Armed {
+                deadline: TimerFdDeadline::Realtime {
+                    cancel_on_change_seq: None,
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
     }
 }

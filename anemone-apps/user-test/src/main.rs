@@ -4,6 +4,7 @@
 
 mod busybox;
 mod clock_read;
+mod clock_step;
 mod competition;
 mod file;
 mod guest;
@@ -29,6 +30,10 @@ fn run_local_tests() {
     println!("user-test: running soft timer consumer test...");
     soft_timer::verify_soft_timer_consumers();
     println!("user-test: soft timer consumer test finished.");
+
+    println!("user-test: running realtime clock step test...");
+    clock_step::verify_clock_steps();
+    println!("user-test: realtime clock step test finished.");
 
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);

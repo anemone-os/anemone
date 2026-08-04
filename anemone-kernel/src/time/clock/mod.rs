@@ -6,6 +6,12 @@ use crate::time::clock::{
     realtime::RealtimeClock, realtime_coarse::RealtimeCoarseClock,
     thread_cputime::ThreadCpuTimeClock,
 };
+use anemone_abi::time::linux::clock::{
+    CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
+    CLOCK_THREAD_CPUTIME_ID,
+};
+
+use crate::prelude::*;
 
 pub trait Clock: Sync {
     /// The resolution of the clock in nanoseconds.
@@ -51,10 +57,33 @@ pub fn get_clock(clock_id: usize) -> Option<&'static dyn Clock> {
     STATIC_CLOCKS.get(clock_id).copied()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SleepClock {
+    Monotonic,
+    Realtime,
+}
+
+static CPU_SLEEP_UNSUPPORTED_LOGGED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn get_sleep_clock(clock_id: i32) -> Result<SleepClock, SysError> {
+    match clock_id {
+        CLOCK_REALTIME => Ok(SleepClock::Realtime),
+        CLOCK_MONOTONIC | CLOCK_BOOTTIME => Ok(SleepClock::Monotonic),
+        CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID => {
+            if !CPU_SLEEP_UNSUPPORTED_LOGGED.swap(true, Ordering::Relaxed) {
+                knoticeln!(
+                    "clock_nanosleep: CPU-time clocks are unsupported without scheduler-driven timers"
+                );
+            }
+            Err(SysError::NotSupported)
+        },
+        _ => Err(SysError::InvalidArgument),
+    }
+}
+
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::prelude::*;
 
     #[kunit]
     fn all_native_clock_ids_have_explicit_read_routes() {

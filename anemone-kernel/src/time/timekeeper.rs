@@ -4,12 +4,9 @@ use crate::{prelude::*, sync::mono::MonoOnce};
 
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RealtimeSnapshot {
     offset_ns: u64,
-    /// Reserved protocol state for realtime mutation in Gate 3. It is dormant
-    /// in Gate 1 and does not participate in clock reads yet.
-    #[allow(dead_code)]
     change_seq: u64,
 }
 
@@ -20,7 +17,64 @@ impl RealtimeSnapshot {
             change_seq: 0,
         })
     }
+
+    fn set_target(&mut self, monotonic_ns: u64, target_ns: u64) -> Result<bool, SysError> {
+        let new_offset = target_ns
+            .checked_sub(monotonic_ns)
+            .ok_or(SysError::InvalidArgument)?;
+        self.set_offset(monotonic_ns, new_offset)
+    }
+
+    fn adjust(&mut self, monotonic_ns: u64, delta_ns: i128) -> Result<bool, SysError> {
+        let new_offset = i128::from(self.offset_ns)
+            .checked_add(delta_ns)
+            .and_then(|offset| u64::try_from(offset).ok())
+            .ok_or(SysError::InvalidArgument)?;
+        self.set_offset(monotonic_ns, new_offset)
+    }
+
+    fn set_offset(&mut self, monotonic_ns: u64, new_offset: u64) -> Result<bool, SysError> {
+        monotonic_ns
+            .checked_add(new_offset)
+            .ok_or(SysError::InvalidArgument)?;
+        if self.offset_ns == new_offset {
+            return Ok(false);
+        }
+
+        let change_seq = self
+            .change_seq
+            .checked_add(1)
+            .expect("realtime change sequence exhausted");
+        self.offset_ns = new_offset;
+        self.change_seq = change_seq;
+        Ok(true)
+    }
 }
+
+/// Consistent calendar read used by absolute realtime request registration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RealtimeRead {
+    now_ns: u64,
+    change_seq: u64,
+}
+
+impl RealtimeRead {
+    pub(crate) const fn now_ns(self) -> u64 {
+        self.now_ns
+    }
+
+    pub(crate) const fn change_seq(self) -> u64 {
+        self.change_seq
+    }
+}
+
+/// Token proving that a timekeeper mutation changed the calendar timeline.
+///
+/// It carries no offset or timer state. The syscall adapter consumes it only
+/// after the timekeeper lock is released to publish the step to request owners.
+#[must_use = "publish a committed realtime step after releasing the timekeeper lock"]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RealtimeStep;
 
 struct Timekeeper {
     /// The architecture counter sample that defines `CLOCK_MONOTONIC == 0`.
@@ -191,10 +245,44 @@ pub fn monotonic_ns() -> u64 {
 }
 
 pub fn realtime_ns() -> u64 {
-    let realtime = *TIMEKEEPER.get().realtime.lock();
-    monotonic_ns()
+    realtime_read().now_ns
+}
+
+pub(crate) fn realtime_read() -> RealtimeRead {
+    let realtime = TIMEKEEPER.get().realtime.lock();
+    let now_ns = monotonic_ns()
         .checked_add(realtime.offset_ns)
-        .expect("realtime clock value exceeded its internal nanosecond range")
+        .expect("realtime clock value exceeded its internal nanosecond range");
+    RealtimeRead {
+        now_ns,
+        change_seq: realtime.change_seq,
+    }
+}
+
+/// Set the realtime calendar value and atomically advance its change identity.
+///
+/// Notification is deliberately not performed here. The caller must publish a
+/// returned step only after this function has released the timekeeper lock.
+pub(crate) fn set_realtime_ns(target_ns: u64) -> Result<Option<RealtimeStep>, SysError> {
+    let timekeeper = TIMEKEEPER.get();
+    let mut realtime = timekeeper.realtime.lock();
+    let monotonic_ns = monotonic_ns();
+    realtime
+        .set_target(monotonic_ns, target_ns)
+        .map(|changed| changed.then_some(RealtimeStep))
+}
+
+/// Apply an immediate signed adjustment to the realtime offset.
+///
+/// As with [`set_realtime_ns`], the returned step must be published after the
+/// timekeeper lock is released.
+pub(crate) fn adjust_realtime_ns(delta_ns: i128) -> Result<Option<RealtimeStep>, SysError> {
+    let timekeeper = TIMEKEEPER.get();
+    let mut realtime = timekeeper.realtime.lock();
+    let monotonic_ns = monotonic_ns();
+    realtime
+        .adjust(monotonic_ns, delta_ns)
+        .map(|changed| changed.then_some(RealtimeStep))
 }
 
 pub fn coarse_monotonic_ns() -> u64 {
@@ -216,8 +304,7 @@ pub fn coarse_resolution_ns() -> u64 {
     TIMEKEEPER.get().coarse_resolution_ns()
 }
 
-/// Return the current calendar timeline. With no RTC seed or mutation support
-/// in Gate 1, its offset is zero and it initially matches monotonic.
+/// Return the current calendar timeline.
 pub fn realtime() -> Duration {
     Duration::from_nanos(realtime_ns())
 }
@@ -320,6 +407,24 @@ mod kunits {
         assert!(Timekeeper::new(0, SYSTEM_HZ as u64 - 1).is_none());
         assert!(u64::try_from(one_tick.counts_to_nanos(u64::MAX)).is_err());
         assert!(RealtimeSnapshot::new(1, 0).is_none());
+    }
+
+    #[kunit]
+    fn realtime_mutation_is_atomic_nonnegative_and_nonwrapping() {
+        let mut realtime = RealtimeSnapshot::new(10, 20).unwrap();
+        assert_eq!(realtime.set_target(15, 25), Ok(false));
+        assert_eq!(realtime.change_seq, 0);
+
+        assert_eq!(realtime.set_target(15, 30), Ok(true));
+        assert_eq!(realtime.offset_ns, 15);
+        assert_eq!(realtime.adjust(20, -5), Ok(true));
+        assert_eq!(realtime.offset_ns, 10);
+
+        let before = realtime;
+        assert_eq!(realtime.set_target(20, 19), Err(SysError::InvalidArgument));
+        assert_eq!(realtime, before);
+        assert_eq!(realtime.adjust(u64::MAX, 1), Err(SysError::InvalidArgument));
+        assert_eq!(realtime, before);
     }
 
     #[kunit]

@@ -8,7 +8,7 @@
 **不覆盖：** `clock_settime()`、`clock_adjtime()`、完整 `clock_nanosleep()`、realtime step notification、soft timer、timerfd cancellation、POSIX timer、RTC seed/writeback 和 suspend accounting
 **实现位置：** `anemone-kernel/src/{arch/riscv64/time.rs,arch/loongarch64/time.rs,time/timekeeper.rs,time/clock}`
 **依赖：** None
-**Pending Successor：** RFC-20260803 Gate 2/3/5 分别引入独立 contract，不替换本规则
+**Pending Successor：** RFC-20260803 Gate 5 引入独立 POSIX timer contract，不替换本规则
 **最后核验：** 2026-08-04
 
 ## 状态与能力所有权
@@ -20,8 +20,9 @@
 | process/thread CPU counter accumulation | task / thread group | CPU clock 读取 snapshot | 保持 CPU time 与 wall time 分离 |
 | clock ID 到 read/resolution 的投影 | clock route | syscall adapter 取得 narrow `Clock` capability | 拒绝未知 ID，避免不同 clock 偶然 alias |
 
-`realtime_change_seq` 在本 contract 下是 Gate 3 预留且 dormant 的协议字段；它不参与 Gate 1 读值，也不能反向
-决定 offset。`coarse_mono_ns` 是明确允许陈旧的性能 snapshot，不是第二份 monotonic truth。
+`realtime_change_seq` 不参与读值公式，也不能反向决定 offset；其 active mutation/notification 规则由
+[`TIMEKEEPER-STEP-001`](./realtime-step.md#timekeeper-step-001--realtime-step-不能漏掉或误用旧-timeline)定义。
+`coarse_mono_ns` 是明确允许陈旧的性能 snapshot，不是第二份 monotonic truth。
 
 ## TIMEKEEPER-CLOCK-001 — 所有 clock 读取来自一条整数推导链
 
@@ -40,9 +41,8 @@ realtime_ns = monotonic_ns + realtime_offset_ns
 boottime_ns = monotonic_ns
 ```
 
-当前没有 RTC seed 或 mutation，`realtime_offset_ns == 0`。offset 必须非负；以后 Gate 3 改变 offset 时必须
-通过独立 `TIMEKEEPER-STEP-001` cutover，不能只修改本读值 contract。`raw` 与 `monotonic`、`boottime` 当前
-同值但保留独立 clock route，不通过对象 alias 表达 ABI identity。
+当前没有 RTC seed，offset 从零开始；运行期只能按 `TIMEKEEPER-STEP-001` 修改并始终保持非负。`raw` 与
+`monotonic`、`boottime` 当前同值但保留独立 clock route，不通过对象 alias 表达 ABI identity。
 
 BSP 的每个 system tick 更新一次 `coarse_mono_ns`；其它 CPU 不发布 coarse snapshot。`MONOTONIC_COARSE`
 直接读取该 snapshot，`REALTIME_COARSE` 在读取时加同一个 realtime offset；不得保存 `coarse_real_ns`。

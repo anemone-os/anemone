@@ -5,8 +5,8 @@
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-04
 **领域：** time / timer / task / signal / syscall ABI / RTC
-**影响契约：** Gate 1--2 已 Introduce `TIMEKEEPER-CLOCK-001` 与 `SOFT-TIMER-REQUEST-001`；R0 其余 target
-仍提议 Introduce `TIMEKEEPER-STEP-001`、`POSIX-TIMER-001`，并 Refine
+**影响契约：** Gate 1--3 已 Introduce `TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001` 与
+`TIMEKEEPER-STEP-001`；R0 其余 target 仍提议 Introduce `POSIX-TIMER-001`，并 Refine
 `SIGNAL-PENDING-001`
 **执行记录：** [2026-08-04 Clock Timekeeping 与 POSIX Timers transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)
 
@@ -467,13 +467,13 @@ Linux UAPI struct。
 
 ## Contract Impact
 
-以下是 R0 contract delta。Gate 1--2 已完成两项 cutover；其它条目在对应 gate 前仍不覆盖当前契约：
+以下是 R0 contract delta。Gate 1--3 已完成三项 cutover；其它条目在对应 gate 前仍不覆盖当前契约：
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
 | `TIMEKEEPER-CLOCK-001` | Introduce | [Active current rule](../../contracts/time/clock-derivation.md#timekeeper-clock-001--所有-clock-读取来自一条整数推导链) | 架构计数/Hertz 是 monotonic/raw 来源；timekeeper 唯一保存零点、realtime offset 和 coarse 快照 | Gate 1 `TC-CLOCK-CUTOVER` Completed |
 | `SOFT-TIMER-REQUEST-001` | Introduce | [Active current rule](../../contracts/time/soft-timer-request.md#soft-timer-request-001--排队句柄物理删除一次请求) | soft timer 只拥有一次排队请求，支持按句柄物理删除；长期对象状态仍由提交者拥有 | Gate 2 `ST-REQUEST-CUTOVER` Completed |
-| `TIMEKEEPER-STEP-001` | Introduce | None（尚未生效） | realtime offset/change seq 在 timekeeper 内原子提交，锁外无丢失通知所有 realtime consumer | Gate 3 `TC-STEP-CUTOVER` |
+| `TIMEKEEPER-STEP-001` | Introduce | [Active current rule](../../contracts/time/realtime-step.md#timekeeper-step-001--realtime-step-不能漏掉或误用旧-timeline) | realtime offset/change seq 在 timekeeper 内原子提交，锁外无丢失通知所有 realtime consumer | Gate 3 `TC-STEP-CUTOVER` Completed |
 | `POSIX-TIMER-001` | Introduce | None（尚未生效） | `ThreadGroup` 拥有 timer ID、到期安排、overrun 与清理；soft timer 和 signal 只执行窄交接 | Gate 5 `PT-SIGNAL-CUTOVER` |
 | `SIGNAL-PENDING-001` | Refine | [standard signal 单 slot，realtime signal FIFO](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner) | 普通 signal 保持现有合并；`SI_TIMER` 按 timer 身份保存独立 pending 项 | Gate 5 `PT-SIGNAL-CUTOVER` |
 
@@ -553,9 +553,10 @@ Dependencies：
 
 ## 收口
 
-R0 已接受 target、owner、ABI 与 validation boundary。Gate 0--2 已关闭，`TC-CLOCK-CUTOVER` 与
-`ST-REQUEST-CUTOVER` 已分别激活 `TIMEKEEPER-CLOCK-001` 和 `SOFT-TIMER-REQUEST-001`；Gate 3 保持
-Pending / Not Authorized，其余 contract delta 保持 pending。RFC 最终
+R0 已接受 target、owner、ABI 与 validation boundary。Gate 0--3 已关闭，`TC-CLOCK-CUTOVER`、
+`ST-REQUEST-CUTOVER` 与 `TC-STEP-CUTOVER` 已分别激活 `TIMEKEEPER-CLOCK-001`、
+`SOFT-TIMER-REQUEST-001` 和 `TIMEKEEPER-STEP-001`；Gate 4 保持 Pending / Not Authorized，其余 contract
+delta 保持 pending。RFC 最终
 closure 必须记录双架构验证、五项 contract delta 的实际
 cutover、仍未实现的 CPU-time/high-resolution/RTC 能力，以及架构摩擦扫描中发现的具体剩余问题。没有证据的
 能力不得写成已完成。详细 proof obligations 与 cutover gate 分别由[目标与不变量](./invariants.md)和

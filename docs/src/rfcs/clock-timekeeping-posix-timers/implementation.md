@@ -1,6 +1,6 @@
 # Clock Timekeeping 与 POSIX Timers 实施计划
 
-**状态：** Accepted / Gate 0--1 Closed / Gate 2 Authorized
+**状态：** Accepted / Gate 0--3 Closed / Gate 4 Not Authorized
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260803-clock-timekeeping-posix-timers](./index.md)
 **当前修订：** R0
@@ -152,7 +152,7 @@ tickless/high-resolution；不把容器类型扩大成 public contract。
 
 ## Gate 3 — Realtime mutation 与完整 clock sleep
 
-**状态：** Pending / Not Authorized；Gate 2 收口后停止，不自动进入本 gate。
+**状态：** Closed；`TC-STEP-CUTOVER` Completed。
 
 **Purpose：** 在可物理删除请求已经成立后，开放 `clock_settime(112)`、`clock_adjtime(266)` 和完整
 `clock_nanosleep(115)`，并闭合 timerfd realtime/cancel-on-set 对已生效 timekeeper/soft-timer contract 的消费。
@@ -193,6 +193,8 @@ generation-only 重新成为取消路径。
 成立后关闭。任何漏掉跨 CPU step、无法物理删除请求或相对 sleep 受日期修改影响都阻止 cutover。
 
 ## Gate 4 — `SI_TIMER` signal 协议
+
+**状态：** Pending / Not Authorized；Gate 3 收口后停止，不自动进入本 gate。
 
 **Purpose：** 在创建 POSIX timer 对象前，先让通用 signal owner 能保存每个 timer 的独立 pending identity，
 并提供锁外入队结果和交付回告。

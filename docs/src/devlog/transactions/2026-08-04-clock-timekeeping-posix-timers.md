@@ -1,23 +1,23 @@
 # Clock Timekeeping 与 POSIX Timers 事务日志
 
-**状态：** Active / R0 / Gate 0--2 Closed / Gate 3 Not Authorized
+**状态：** Active / R0 / Gate 0--3 Closed / Gate 4 Not Authorized
 **日期：** 2026-08-04
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260803-clock-timekeeping-posix-timers R0](../../rfcs/clock-timekeeping-posix-timers/index.md)
 **实施计划：** [Gate 0--6](../../rfcs/clock-timekeeping-posix-timers/implementation.md)
 **适用修订：** R0
-**Contract Cutover：** `TC-CLOCK-CUTOVER`、`ST-REQUEST-CUTOVER` Completed；`TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001` Active；其它 R0 contract delta pending
+**Contract Cutover：** `TC-CLOCK-CUTOVER`、`ST-REQUEST-CUTOVER`、`TC-STEP-CUTOVER` Completed；`TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001`、`TIMEKEEPER-STEP-001` Active；其它 R0 contract delta pending
 
 ## 边界
 
-本 transaction 记录两个独立 checkpoint。Gate 0--1 冻结 native ABI、clock operation、architecture source 和
+本 transaction 记录三个独立 checkpoint。Gate 0--1 冻结 native ABI、clock operation、architecture source 和
 caller domain baseline，并切换统一 counter、integer Hertz conversion、timekeeper clock read truth、八个
 get/res route 和 calendar consumer。Gate 2 随后建立可物理删除的 soft timer request，并迁移 timerfd、
-`ITIMER_REAL` 和 wait timeout。两个 checkpoint 各自保留 review、validation、contract write-back 和 `clock:`
-commit 边界。
+`ITIMER_REAL` 和 wait timeout。Gate 3 开放 realtime mutation、完整 clock sleep 与 timerfd realtime/
+cancel-on-set。三个 checkpoint 各自保留 review、validation、contract write-back 和 `clock:` commit 边界。
 
-本 transaction 不实现或声明 realtime mutation、完整 clock sleep、timerfd cancel-on-set、POSIX timer 或 RTC
-seed。开发者只授权推进到 Gate 2；Gate 3 保持 Pending / Not Authorized，Gate 2 收口后停止。
+本 transaction 不实现或声明 POSIX timer、`SI_TIMER` signal 协议或 RTC seed。开发者只授权推进到 Gate 3；
+Gate 4 保持 Pending / Not Authorized，Gate 3 收口后停止。
 
 ## Gate 0 baseline
 
@@ -163,4 +163,50 @@ completion 交接；realtime mutation、absolute clock sleep、timerfd cancel-on
 
 Architecture Friction Scan未发现第二份 request/object 状态真相、owner penetration、private queue representation
 泄漏、为局部 consumer 扩大 public API、无退出条件的临时桥、隐含 cleanup 顺序或无真实义务的 abstraction。
-Gate 3 未获授权，本 transaction 在 Gate 2 closure 后停止。
+在该次 Gate 2 closure 时 Gate 3 尚未获授权；后续开发者验收 Gate 2 并单独授权 Gate 3。
+
+## Gate 3 implementation
+
+- RV64/LA64 native ABI 注册 `clock_settime(112)` 与 `clock_adjtime(266)`，增加显式 padding 的 208-byte
+  `Timex` 和 `ECANCELED` 映射；root capability effective 集合开放 `CAP_SYS_TIME`。
+- timekeeper 在唯一锁内提交 nonnegative realtime offset 与 nonwrapping change sequence，返回 crate-local
+  must-use step token；publisher 只在锁外逐 CPU、一次一个 queue lock 重检 absolute realtime request。
+- soft timer 保留原 monotonic heap并增加 private realtime heap。request 保存 absolute deadline 与可选
+  cancel sequence；insert-side named recheck关闭 snapshot/登记窗口，observed sequence 单调前进，旧 scanner
+  不能取消新 request 或用 stale calendar 值提前到期。
+- `clock_nanosleep()` 显式路由 realtime/monotonic/boottime，CPU clock 返回 `EOPNOTSUPP`，raw/coarse/unknown
+  返回 `EINVAL`。相对请求固定到 monotonic 纳秒 deadline；absolute realtime 使用窄 wait-core timeout trigger
+  和可物理删除 request。legacy unknown flag bits按 Linux ABI 静默忽略并只记录一次日志。
+- timerfd 继续由 `TimerFdCore` 独占 schedule、generation、expiry count 与 cancelled 状态。relative realtime
+  固定为 monotonic；absolute realtime进入 realtime heap；cancel-on-set只接受 realtime + absolute，step物理
+  移除请求并唤醒 read/poll，下一次 read 返回一次 `ECANCELED`，replacement拒绝旧 completion。
+- 用户 oracle 覆盖 set/adj mode、permission、bad pointer、unsupported/invalid 错误，三种 clock 的相对/绝对
+  sleep、signal remaining、realtime forward/backward 并发，以及 relative/absolute/cancel-on-set timerfd。
+
+## Gate 3 review 与 validation
+
+- change review 在 cutover 前修复两项 correctness finding：旧 step scanner 在 newer backward step 后不能用
+  stale realtime 提前到期；`clock_adjtime(ADJ_SETOFFSET)` 在 mutation 前 fault-in 完整 copyout 范围，避免
+  read-only/bad output pointer产生副作用。最终未发现 residual Apollyon/Keter/Euclid。
+- owner-local KUnit新增 mutation no-side-effect、timex layout、realtime heap双向判断、cancel sequence、旧
+  scanner、insert-side recheck、remote CPU recheck、timerfd invalid flags、relative fixation、physical cancel、
+  一次 `ECANCELED` 与 stale replacement；既有 Gate 1/2 KUnit继续运行。
+- RV64最终源码 release SMP=2通过425/425 KUnit、`All tests passed!`、soft-timer marker与
+  `clock-step: realtime mutation, sleep, and timerfd checks passed`。
+- LA64最终源码 release SMP=2通过426/426 KUnit、同一全量与用户 marker。两份 QEMU日志均在 marker后进入
+  非 Gate 3 socket回归并通过，随后因未提供competition `/dev/vdb`按预期停止；该缺盘不归因于本 Gate。
+- 双架构 pretest rootfs 通过 Docker `gallant_lamarr` 从 tracked manifest重新生成；双架构 exact release build
+  通过。source audit确认timekeeper锁内没有queue/wait/timerfd callback、任一时刻只持一个CPU queue lock、
+  relative sleep/timerfd/`ITIMER_REAL` 不消费 realtime offset。
+- `just fmt kernel --check`、`just fmt user-test --check` 与 `git diff --check` 作为最终机械检查执行。所有 mdBook
+  检查按开发者明确要求跳过，记为 Not Run；LTP不是本 Gate语义 oracle，本次 Not Run。
+
+## Gate 3 closure 与 TC-STEP-CUTOVER — 2026-08-04
+
+`TC-STEP-CUTOVER` 原子激活
+[`TIMEKEEPER-STEP-001`](../../contracts/time/realtime-step.md#timekeeper-step-001--realtime-step-不能漏掉或误用旧-timeline)。
+该 current contract 固定 offset/change-seq 原子提交、timekeeper锁外发布、全CPU realtime request重检、
+snapshot/登记无丢失、旧scanner拒绝、relative monotonic fixation与timerfd cancel-on-set owner交接；Gate 1/2
+current contract继续满足。
+
+Gate 4 未获授权，本 transaction 在 Gate 3 closure 后停止。

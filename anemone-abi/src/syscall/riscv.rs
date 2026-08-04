@@ -139,6 +139,7 @@ pub mod linux {
     pub const SYS_NANOSLEEP: u64 = 101;
     pub const SYS_GETITIMER: u64 = 102;
     pub const SYS_SETITIMER: u64 = 103;
+    pub const SYS_CLOCK_SETTIME: u64 = 112;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
     pub const SYS_CLOCK_GETRES: u64 = 114;
     pub const SYS_CLOCK_NANOSLEEP: u64 = 115;
@@ -254,6 +255,7 @@ pub mod linux {
 
     pub const SYS_FANOTIFY_INIT: u64 = 262;
     pub const SYS_FANOTIFY_MARK: u64 = 263;
+    pub const SYS_CLOCK_ADJTIME: u64 = 266;
 
     pub const SYS_SCHED_SETATTR: u64 = 274;
     pub const SYS_SCHED_GETATTR: u64 = 275;
