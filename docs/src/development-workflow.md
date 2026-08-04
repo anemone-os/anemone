@@ -9,7 +9,7 @@
 - 一个事实只有一个权威落点：代码和测试表达实际行为，current contract 表达已生效共享规则，RFC 表达 accepted target 与 delta，执行证据放在最接近实现的记录或 Git/PR 中，register 只表达当前开放问题和接受限制。
 - 文档成本与不可逆性、跨 owner 风险和长期复用价值成比例，不按改动天数、文件数或 commit 数升级流程。
 - 编码前先闭合用户可见 target、非目标、owner、handoff、failure、cleanup、ABI 和接受边界；类型、helper、文件布局和内部 API 在这些边界内由实现自然决定。
-- 只有 contract cutover、ABI 发布、owner 迁移、高风险 probe、不安全中间态或明确人工授权点才需要正式 gate。普通 commit 不需要 resolution、activation、closure 三套动作。
+- checkpoint 数量本身不是语义风险。`execution checkpoint` 只是在同一已闭合边界内设置 review、commit 或授权停止点；`semantic gate` 才承担独立 cutover、ABI 发布、owner 迁移、高风险 probe 或不安全中间态。普通 commit 和 execution checkpoint 都不需要 resolution、activation、closure 三套动作。
 - 验证证据只记录一次，并区分 agent 运行、用户运行和 Not Run；其它页面只链接，不复制整套矩阵。
 - Git 保存文本和实现历史。Closed RFC、Completed transaction 与历史 change record 不因新规则批量改写。
 
@@ -29,11 +29,13 @@ Patch 默认只产生代码、测试、验证和 Git/PR 证据，不建立 devlo
 
 小迭代用于保存值得长期追溯、但不需要 RFC 的局部决策或事实，例如不明显的根因、兼容取舍、局部 ABI 判断、可复用调查结论、小功能或一次原子 contract cutover。
 
-默认产物只有一份自描述 change record：Problem/Context、Decision、Change、Validation、Remaining Risk/Links。`Tracking Issues`、`Architecture Friction`、背景目录和 `Contract Impact / Cutover` 都只在确有内容时出现。小迭代不再强制同步双周日志。
+默认产物只有一份自描述 change record：Problem/Context、Decision、Change、Validation、Remaining Risk/Links。`Checkpoints`、`Tracking Issues`、`Architecture Friction`、背景目录和 `Contract Impact / Cutover` 都只在确有内容时出现。小迭代不再强制同步双周日志。
 
-contract-bearing small change 只适用于 target 已完整解析、protocol/state owner、handoff、failure、cleanup 与验证明确，且代码和 contract 只有一个原子 cutover 的局部变化。它不需要逐文件清单；只要求 [Implementation Boundary](#implementation-boundary) 能在同一 checkpoint 闭合，失败时保持旧 contract。
+小迭代默认在一个 closure checkpoint 内完成。若同一局部决策确实需要独立 review、commit 或授权停止点，可以使用 `checkpointed small iteration`，但至多包含两个 execution checkpoint。两个 checkpoint 必须共享同一个已完整解析的 [Implementation Boundary](#implementation-boundary)：target/non-goals、protocol/state owner、handoff、failure、cleanup、public API/ABI/visible semantics、contract delta、acceptance 与 validation claim 均不得在两者之间重新解析。
 
-如果需要 probe、transitional contract、多个语义 checkpoint、target renegotiation，或存在本轮无法关闭的 Apollyon/Keter，应升级 RFC。
+CKPT 1 只能形成独立安全、对受保护 visible semantics 与 current contract 中性的准备性闭包；可以包含本轮必需的内部能力、测试和结构变化，但不得发布部分用户能力、transitional contract、第二份状态真相、无退出条件的临时桥、dormant production path 或无真实 consumer 的 probe。CKPT 2 完成整个 target，并承担至多一次最终 visible semantics / contract cutover；小迭代只在 CKPT 2 后整体收口。用户只授权 CKPT 1 时，完成后停止，不自动进入 CKPT 2。
+
+两个 checkpoint 仍写在同一 change record 中，只需按需记录各自 Purpose、Deliverable、Validation、Cutover 和 Stop / Result；不为此建立 `implementation.md` 或 transaction。普通 commit 数量不受此上限约束。如果实际需要 probe、transitional contract、跨 checkpoint 重新解析语义边界、多个独立 semantic/contract cutover、target renegotiation、超过两个正式 execution checkpoint，或存在本轮无法关闭的 Apollyon/Keter，应升级 RFC；若所谓第三个 checkpoint 只是普通提交顺序，应去掉形式化 checkpoint，而不是机械升级。
 
 ### RFC
 
@@ -94,13 +96,15 @@ docs/src/rfcs/<short-slug>/
 
 `index.md` 负责 target、non-goals、owner/handoff/failure/cleanup、ABI/visible semantics、contract delta、acceptance、validation、风险和停止边界。
 
+RFC 不要求先创建 positioning 文档。早期定位可以留在私有草案中，也可以在确有长期证据价值时归档到 `backgrounds/`；target 已经闭合时应直接编写 `index.md`，不得把 positioning/backgrounds 变成固定晋级前置。
+
 只在出现真实需要时增加：
 
 - `invariants.md`：非平凡 protocol、contract proof、锁序、生命周期或状态机；
 - `implementation.md`：多阶段、不安全中间态、probe、多个 cutover 或需要长期保存的实施路线；
 - `tracking-issues.md`：仍未解决且会影响实现、停止边界或 acceptance 的设计问题；
 - `backgrounds/`：正文无法扫读的事实证据包、历史材料或被拒绝方案；
-- transaction devlog：长期、多 checkpoint、多 cutover、probe/renegotiation 证据需要独立执行历史时。
+- transaction devlog：长期 RFC、多 checkpoint、多 cutover、probe/renegotiation 证据需要独立执行历史时；checkpointed small iteration 不因此创建 transaction。
 
 resolved finding 折回 canonical target/implementation；普通 neutralized finding 的历史交给 Git/review，不要求永久保留在 tracker。Supporting pages 通过 RFC `index.md` 导航，不建立第二份状态总表。
 
@@ -123,7 +127,7 @@ accepted RFC替代则使用`Superseded`，不能用`Terminated`伪装`Closed`。
 
 ### 私有草案
 
-早期探索可以放在 gitignored 私有区域，允许快速重写或丢弃。公共文档、register 和 devlog 不把私人路径作为稳定引用。
+早期探索可以放在 gitignored 私有区域，允许快速重写或丢弃。公共文档、register 和 devlog 不把私人路径作为稳定引用。私有 positioning 是可选思考材料，不是公开 RFC 或小迭代的必经生命周期。
 
 ### 公共 RFC 与 review
 
@@ -134,6 +138,8 @@ accepted RFC替代则使用`Superseded`，不能用`Terminated`伪装`Closed`。
 文档层 review 检查 target 自洽、owner、ABI、并发、failure、cleanup、observability、acceptance 和 contract delta。Apollyon/Keter 在接受前必须 neutralize，或明确成为实施中的硬停止条件。Euclid 可以带入实现并在收口摩擦扫描中复核；Safe 默认不记录。
 
 ### 实现、checkpoint 与 stage
+
+checkpointed small iteration 的 execution checkpoint 只使用上文定义的轻量记录，不维护 Ready/Active/Closed，也不形成两套独立 target、acceptance 或 cutover；唯一最终 cutover 属于整个小迭代，只在 CKPT 2 记录。以下正式 gate 规则只适用于 RFC 的 semantic checkpoint/stage。
 
 普通 RFC 实现不必建立 transaction，也不必给每个 commit 维护 Ready/Active/Closed。Git/PR 与 RFC 的最终 closure 足以保存单次实现证据。
 
@@ -196,13 +202,13 @@ Patch 中发现需要长期保留的摩擦，是升级为小迭代的信号；�
 | Artifact | 职责 | 默认性 |
 | --- | --- | --- |
 | Patch | 已确定语义的实现、测试和验证 | 默认最小单位；无过程文档 |
-| Small change record | 局部决策、调查结论、原子 cutover 与证据 | 仅有长期追溯价值时 |
+| Small change record | 局部决策、调查结论、至多两个 execution checkpoint、至多一次最终 cutover 与证据 | 仅有长期追溯价值时 |
 | Current contract | 已生效的跨 RFC/模块共享规则 | 按真实复用/变化提取 |
 | RFC `index.md` | accepted target、delta、边界、acceptance 与 closure | RFC 唯一默认文件 |
 | `invariants.md` | 非平凡 target/contract proof obligations | 按需 |
 | `implementation.md` | 多阶段/probe/cutover 实施路线 | 按需 |
 | `tracking-issues.md` | 仍影响实现或 acceptance 的设计问题 | 按需；不保存普通历史 |
-| Transaction devlog | 长期、多 checkpoint/cutover 的执行证据 | 按需 |
+| Transaction devlog | 长期 RFC、多 checkpoint/cutover 的执行证据 | 按需 |
 | 双周 devlog | 人工选择的时间线摘要 | 可选；不是 workflow gate |
 | Register/limitations | 当前开放问题和接受限制 | 只维护当前项 |
 

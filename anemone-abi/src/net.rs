@@ -18,6 +18,7 @@ pub mod linux {
     pub const SOCK_STREAM: i32 = 1;
     pub const SOCK_DGRAM: i32 = 2;
     pub const SOCK_RAW: i32 = 3;
+    pub const SOCK_SEQPACKET: i32 = 5;
     pub const SOCK_NONBLOCK: i32 = 0x0800;
     pub const SOCK_CLOEXEC: i32 = 0x0008_0000;
     pub const IPPROTO_IP: i32 = 0;

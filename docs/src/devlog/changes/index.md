@@ -10,7 +10,7 @@
 - 验证到什么程度；
 - 还有哪些风险、延期项、架构摩擦或 register / current limitations 链接。
 
-小迭代记录不是 backlog，也不是小型 RFC。默认正文只需要 `Problem / Context`、`Decision`、`Change`、`Validation` 和 `Remaining Risk / Links`；`Tracking Issues`、`Architecture Friction`、`Contract Impact / Cutover` 和背景材料只在确有内容时增加。严格的 contract-bearing small change 可以在一个已完整解析的原子 checkpoint 中记录 cutover，effective 正文仍只位于 current contract。未决 owner、ABI、shared contract、生命周期/并发协议、probe、多个语义 cutover 或 target renegotiation 应升级 RFC。
+小迭代记录不是 backlog，也不是小型 RFC。默认正文只需要 `Problem / Context`、`Decision`、`Change`、`Validation` 和 `Remaining Risk / Links`；`Checkpoints`、`Tracking Issues`、`Architecture Friction`、`Contract Impact / Cutover` 和背景材料只在确有内容时增加。默认使用一个 closure checkpoint；确需 review、commit 或授权停止点时，可以在同一个已完整解析的 Implementation Boundary 内使用至多两个 execution checkpoint。CKPT 1 必须独立安全且不改变受保护 visible semantics/current contract，CKPT 2 完成整个 target 并承担至多一次最终 cutover；effective 正文仍只位于 current contract。未决 owner、ABI、shared contract、生命周期/并发协议、probe、transitional contract、跨 checkpoint 重新解析边界、多个独立 cutover、超过两个正式 execution checkpoint 或 target renegotiation 应升级 RFC。
 
 ## 命名与链接
 
@@ -27,10 +27,11 @@
 
 目录版记录仍以 `index.md` 为记录本体。`backgrounds/` 只保存事实材料，不定义计划、不变量、阶段 gate 或独立 review issue。
 
-除单一原子 contract cutover 外，如果一个小迭代开始需要仓库级 accepted target、非平凡不变量、跨阶段计划、probe、target renegotiation 或无法在本轮关闭的 Apollyon/Keter，它应升级 RFC，而不是继续扩张 `changes/` 目录。升级时，原记录保留为事实历史并链接新的 RFC；transaction 仍按需创建。
+至多两个 execution checkpoint 仍属于同一份记录，不拆 `implementation.md` 或 transaction。除此之外，如果一个小迭代开始需要仓库级 accepted target、非平凡不变量、跨阶段计划、probe、多个独立 cutover、target renegotiation 或无法在本轮关闭的 Apollyon/Keter，它应升级 RFC，而不是继续扩张 `changes/` 目录。升级时，原记录保留为事实历史并链接新的 RFC；transaction 仍按需创建。
 
 ## 当前记录
 
+- [2026-08-04 - Unix seqpacket](./2026-08-04-unix-seqpacket.md)
 - [2026-08-03 - Serial TTY RX conditioning](./2026-08-03-tty-serial-rx-conditioning.md)
 - [2026-08-03 - Named FIFO](./2026-08-03-named-fifo.md)
 - [2026-08-03 - App Command build driver](./2026-08-03-app-command-driver.md)

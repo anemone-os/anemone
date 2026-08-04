@@ -58,24 +58,15 @@ pub(super) fn materialize_child_dentry(
     let expected_inode = inode.clone();
     let dentry = Arc::new(Dentry::new(child_name.clone(), Some(parent.clone()), inode));
 
-    // TODO: a lock?
-    match parent.insert_child(child_name.clone(), &dentry) {
-        Ok(()) => Ok(dentry),
-        Err(SysError::AlreadyExists) => {
-            let child = parent
-                .lookup_child(&child_name)
-                .expect("insert_child reported AlreadyExists but child lookup failed");
-            assert!(
-                child.inode() == &expected_inode,
-                "dentry for existing child {} already exists but has different inode ({} vs {})",
-                child_name,
-                expected_inode.ino(),
-                child.inode().ino()
-            );
-            Ok(child)
-        },
-        Err(err) => Err(err),
-    }
+    let child = parent.lookup_or_insert_child(child_name.clone(), &dentry)?;
+    assert!(
+        child.inode() == &expected_inode,
+        "dentry for existing child {} already exists but has different inode ({} vs {})",
+        child_name,
+        expected_inode.ino(),
+        child.inode().ino()
+    );
+    Ok(child)
 }
 
 #[derive(Debug, Clone)]

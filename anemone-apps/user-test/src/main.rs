@@ -125,6 +125,10 @@ fn run_local_tests() {
     local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
     println!("user-test: socket test finished.");
 
+    println!("user-test: running Rust Command seqpacket consumer...");
+    local_run_cmd("/bin/rust-command-test", &["rust-command-test"], &[]);
+    println!("user-test: Rust Command seqpacket consumer finished.");
+
     println!("user-test: running pipe capacity test...");
     local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
     println!("user-test: pipe capacity test finished.");

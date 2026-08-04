@@ -4,12 +4,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use anemone_abi::net::linux::{
     AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC,
-    SOCK_DGRAM, SOCK_RAW, SOCK_STREAM,
+    SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
 };
 
 use crate::{
     fs::socket::{
-        ICMP_RAW_SOCKET_OPS, SocketOps, SocketType, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS,
+        ICMP_RAW_SOCKET_OPS, SocketOps, SocketType, UDP_SOCKET_OPS, UNIX_SEQPACKET_SOCKET_OPS,
+        UNIX_STREAM_SOCKET_OPS,
     },
     prelude::*,
     task::credentials::cap::Capability,
@@ -87,7 +88,7 @@ impl SocketAbiProfile {
     }
 
     pub(super) const fn socket_type(&self) -> SocketType {
-        self.ops.socket_type
+        self.ops.socket_type()
     }
 
     pub(super) const fn domain(&self) -> i32 {
@@ -138,7 +139,7 @@ impl SocketAbiProfile {
     }
 }
 
-static SOCKET_ABI_PROFILES: [SocketAbiProfile; 3] = [
+static SOCKET_ABI_PROFILES: [SocketAbiProfile; 4] = [
     SocketAbiProfile {
         ops: &UDP_SOCKET_OPS,
         domain: AF_INET,
@@ -178,6 +179,21 @@ static SOCKET_ABI_PROFILES: [SocketAbiProfile; 3] = [
         required_capability: None,
         no_signal_compatibility: None,
     },
+    SocketAbiProfile {
+        ops: &UNIX_SEQPACKET_SOCKET_OPS,
+        domain: AF_UNIX,
+        socket_kind: SOCK_SEQPACKET,
+        protocol: 0,
+        protocol_admission: ProtocolAdmission::Canonical,
+        address: SocketAddressAbi::UnixPathname,
+        send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
+        receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+        // Record send/receive is an internal data-plane capability. The
+        // accepted seqpacket target does not publish sendmsg/recvmsg.
+        message_io: SocketMessageIo::Unsupported,
+        required_capability: None,
+        no_signal_compatibility: None,
+    },
 ];
 
 pub(super) fn resolve_socket_profile(
@@ -209,6 +225,7 @@ pub(super) fn socket_abi_profile(socket_type: SocketType) -> &'static SocketAbiP
         SocketType::Ipv4Udp => &SOCKET_ABI_PROFILES[0],
         SocketType::Ipv4IcmpRaw => &SOCKET_ABI_PROFILES[1],
         SocketType::UnixStream => &SOCKET_ABI_PROFILES[2],
+        SocketType::UnixSeqpacket => &SOCKET_ABI_PROFILES[3],
     };
     assert_eq!(
         profile.socket_type(),
@@ -245,6 +262,10 @@ mod kunits {
         );
         assert_eq!(
             socket_abi_profile(SocketType::Ipv4IcmpRaw).message_io(),
+            SocketMessageIo::Unsupported
+        );
+        assert_eq!(
+            socket_abi_profile(SocketType::UnixSeqpacket).message_io(),
             SocketMessageIo::Unsupported
         );
     }

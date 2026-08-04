@@ -56,6 +56,7 @@ pub struct Parameters {
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
+    pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
     pub max_iovec_count: Option<usize>,
@@ -64,6 +65,9 @@ pub struct Parameters {
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
     pub unix_listener_max_backlog: Option<usize>,
+    pub unix_seqpacket_max_payload_bytes: Option<usize>,
+    pub unix_seqpacket_direction_capacity_bytes: Option<usize>,
+    pub unix_seqpacket_direction_max_records: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -156,6 +160,7 @@ impl Parameters {
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
+        materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
         materialize!(max_iovec_count);
@@ -164,6 +169,9 @@ impl Parameters {
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
         materialize!(unix_listener_max_backlog);
+        materialize!(unix_seqpacket_max_payload_bytes);
+        materialize!(unix_seqpacket_direction_capacity_bytes);
+        materialize!(unix_seqpacket_direction_max_records);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -280,6 +288,8 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
+/// Maximum number of strings accepted in each execve argv or envp vector.
+pub const EXECVE_MAX_STRING_COUNT: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
@@ -294,8 +304,14 @@ pub const PIPE_CAPACITY_PAGES: usize = {};
 pub const PIPE_MAX_CAPACITY_PAGES: usize = {};
 /// Fixed byte capacity of each AF_UNIX stream direction.
 pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
-/// Maximum normalized listen backlog for AF_UNIX stream listeners.
+/// Maximum normalized listen backlog for AF_UNIX connection-oriented listeners.
 pub const UNIX_LISTENER_MAX_BACKLOG: usize = {};
+/// Maximum payload bytes in one AF_UNIX seqpacket record.
+pub const UNIX_SEQPACKET_MAX_PAYLOAD_BYTES: usize = {};
+/// Fixed byte capacity of each AF_UNIX seqpacket direction.
+pub const UNIX_SEQPACKET_DIRECTION_CAPACITY_BYTES: usize = {};
+/// Maximum committed records in each AF_UNIX seqpacket direction.
+pub const UNIX_SEQPACKET_DIRECTION_MAX_RECORDS: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -446,6 +462,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
+            resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
             resolved!(max_iovec_count),
@@ -454,6 +471,9 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
             resolved!(unix_listener_max_backlog),
+            resolved!(unix_seqpacket_max_payload_bytes),
+            resolved!(unix_seqpacket_direction_capacity_bytes),
+            resolved!(unix_seqpacket_direction_max_records),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),
@@ -627,6 +647,17 @@ mod tests {
             parameters
                 .gen_kconfig_defs()
                 .contains("pub const MAX_IOVEC_COUNT: usize = 16;")
+        );
+    }
+
+    #[test]
+    fn execve_string_count_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const EXECVE_MAX_STRING_COUNT: usize = 256;")
         );
     }
 

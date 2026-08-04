@@ -31,11 +31,12 @@ An audit authorizes findings, not an automatic refactor. Keep proposed repairs i
 Review only the artifacts and gates the work actually needs:
 
 - An RFC defaults to `index.md`. Do not require `implementation.md`, `invariants.md`, `tracking-issues.md`, backgrounds, or a transaction unless a concrete proof, staging, evidence, or open-decision need justifies it.
+- A checkpointed small iteration may use at most two execution checkpoints inside one fully resolved Implementation Boundary. Review CKPT 1 for independent safety and neutrality to protected visible semantics/current contract, and CKPT 2 for closure of the same target and at most one final semantic/contract cutover. Do not require RFC supporting pages or a transaction for this lightweight stop structure.
 - A future planned stage needs a coherent purpose, prerequisites, protected target / contract / correctness boundaries, and a resolution trigger. Do not emit a finding merely because it omits concrete types, signatures, algorithms, per-file paths, a complete corner-case matrix, or exact commands.
 - An executable checkpoint or stage must have enough definition to preserve its target, dependencies, Implementation Boundary, acceptance, validation, exit, and stop conditions. Internal route and file choices may remain implementation decisions when they do not change those semantics.
 - A future stage becomes a finding only when a missing dependency or protected boundary breaks target reachability, or when a possible protocol/state owner, public API, shared-contract, ABI, visible-semantics, acceptance, or validation change is deferred without an explicit review or renegotiation point.
 
-Formal gates are appropriate for contract cutover, ABI publication, owner migration, high-risk probes, unsafe intermediate states, or explicit human authorization. Ordinary commits do not need separate resolution, activation, and closure states. An existing implementation plan does not authorize entering a later gate when the user authorized only the current one.
+Formal semantic gates are appropriate for independent contract cutover, ABI publication, owner migration, high-risk probes, unsafe intermediate states, or an explicitly requested semantic gate. A small-iteration execution checkpoint may instead be a lightweight review, commit, or authorization stop under the rule above. Ordinary commits do not need separate resolution, activation, and closure states. An existing implementation plan does not authorize entering a later checkpoint or gate when the user authorized only the current one.
 
 ## Engineering Compromise
 

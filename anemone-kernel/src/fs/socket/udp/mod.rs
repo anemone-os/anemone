@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
-    SocketOps, SocketPayloadIo, SocketPreparation, SocketQueryError, SocketReceiveError,
+    SocketIoOps, SocketOps, SocketPreparation, SocketQueryError, SocketReceiveError,
     SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
@@ -378,8 +378,11 @@ fn map_receive_error(error: UdpReceiveError) -> SocketReceiveError {
 }
 
 pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
-    socket_type: SocketType::Ipv4Udp,
-    payload_io: SocketPayloadIo::Datagram,
+    io: SocketIoOps::Datagram {
+        socket_type: SocketType::Ipv4Udp,
+        send: send_udp_socket,
+        receive: receive_udp_socket,
+    },
     create: Some(prepare_udp_socket),
     create_pair: None,
     bind: Some(bind_udp_socket),
@@ -390,8 +393,6 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     local_address: Some(query_udp_socket),
     peer_address: Some(query_udp_peer),
     accepting: udp_is_accepting,
-    send: Some(send_udp_socket),
-    receive: Some(receive_udp_socket),
     query_option: None,
     mutate_option: None,
     poll: poll_udp_socket,

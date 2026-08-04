@@ -51,6 +51,10 @@ installed_dir = "/bin"
 name = "socket-test"
 installed_dir = "/bin"
 
+[[apps]]
+name = "rust-command-test"
+installed_dir = "/bin"
+
 # [[apps]]
 # name = "fair-test"
 # installed_dir = "/bin"

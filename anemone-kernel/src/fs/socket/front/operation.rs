@@ -84,15 +84,17 @@ fn send_sigpipe(task: &Arc<Task>) {
     ));
 }
 
-/// Retries a family-owned send attempt after the file's owner-defined
-/// writability predicate. A `WouldBlock` result must not retain a family
-/// operation guard. The caller may retain one immutable, family-private send
-/// snapshot in its operation object, but the retry driver carries no mutable
-/// family or readiness state across the wait.
+/// Retries a family-owned send attempt after its owner-defined predicate.
+/// Record-oriented families may provide an operation-specific wait whose
+/// predicate includes the complete payload admission requirement; otherwise
+/// the file's public writability predicate is used. A `WouldBlock` result must
+/// not retain a family operation guard, and neither wait carries readiness
+/// truth across the recheck.
 pub(in crate::fs::socket) fn retry_socket_send(
     context: &'static str,
     task: &Arc<Task>,
     file: &File,
+    operation_wait: Option<&SocketWait>,
     nonblocking: bool,
     raise_sigpipe_on_peer_close: bool,
     mut attempt: impl FnMut() -> Result<usize, SocketSendError>,
@@ -102,7 +104,11 @@ pub(in crate::fs::socket) fn retry_socket_send(
         match attempt() {
             Ok(sent) => return Ok(sent),
             Err(SocketSendError::WouldBlock) if !nonblocking => {
-                wait_for_socket_file(context, task, file, PollEvent::WRITABLE)?;
+                if let Some(wait) = operation_wait {
+                    wait_for_socket_operation(context, task, wait, PollEvent::WRITABLE)?;
+                } else {
+                    wait_for_socket_file(context, task, file, PollEvent::WRITABLE)?;
+                }
             },
             Err(SocketSendError::PeerClosed) => {
                 if raise_sigpipe_on_peer_close {

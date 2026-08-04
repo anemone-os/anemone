@@ -139,13 +139,15 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 ### 开发工作流与实现反馈
 
-完整规则见 `docs/src/development-workflow.md`。开发按风险分为三档：Patch 默认只产生代码、测试和 Git/PR 证据；值得长期追溯的局部决策使用一份自描述 small change record，不强制同步双周日志；owner、ABI、shared contract、非平凡并发/生命周期、probe、多 cutover 或 target renegotiation 未闭合时使用 RFC。RFC 默认只有 `index.md`，其它 supporting pages 与 transaction devlog 按真实需要创建。
+完整规则见 `docs/src/development-workflow.md`。开发按风险分为三档：Patch 默认只产生代码、测试和 Git/PR 证据；值得长期追溯的局部决策使用一份自描述 small change record，不强制同步双周日志；owner、ABI、shared contract、非平凡并发/生命周期、probe、多 cutover 或 target renegotiation 未闭合时使用 RFC。RFC 默认只有 `index.md`，其它 supporting pages 与 transaction devlog 按真实需要创建；positioning/backgrounds 不是晋级 RFC 的前置步骤。
+
+小迭代默认使用一个 closure checkpoint；确需独立 review、commit 或授权停止点时，可以在同一个已完整解析的 Implementation Boundary 内使用至多两个 execution checkpoint。CKPT 1 必须独立安全，并对受保护 public API/ABI/visible semantics/current contract 保持中性；CKPT 2 完成整个 target，并承担至多一次最终 semantic/contract cutover。两个 checkpoint 共用一份 change record，不拆 `implementation.md` 或 transaction。普通 commit 不计入上限。需要跨 checkpoint 重新解析 target、owner、handoff、failure、cleanup、ABI、contract、acceptance 或验证，或者需要 probe、transitional contract、多个独立 cutover、超过两个正式 execution checkpoint 时，升级 RFC。用户只授权 CKPT 1 时，完成后停止。
 
 默认使用语义级 `Implementation Boundary`，不维护逐文件 write set。边界必须说明 target/non-goals、owning subsystem、protocol/state owner、handoff、failure、cleanup、受保护的 public API/ABI/visible semantics/current contract、acceptance、验证 claim 和停止条件。预计文件或目录只能作为非穷举提示；边界内的 import/re-export、模块注册、同 owner 新文件、定向测试和行为保持型拆分可由 agent 自然闭合。用户显式给出的严格文件限制仍是本次任务的附加约束。
 
 如果实现需要改变 target、owner、handoff、failure、cleanup、public API、ABI、visibility/shared contract、acceptance 或验证强度，或者要把无关问题纳入当前迭代，必须在完成声明或 cutover 前停止并上报。不得为了适配旧文件提示制造不自然的 adapter、重复状态或绕过路径。用户只授权某个 checkpoint/stage 时，完成后停止，不自动进入下一 gate。
 
-正式 gate 只用于 contract cutover、ABI 发布、owner 迁移、高风险 probe、不安全中间态或明确人工授权点。未来 stage 只需保留目的、依赖和受保护边界；不得仅因缺少具体类型、算法、逐文件路径或精确命令形成 finding。probe 计划放在按需 `implementation.md`，说明 hypothesis、protected boundary、failure signal、write-back 和退出条件；probe 代码不能因“已经能跑”自然沉淀为长期抽象。
+正式 semantic gate 只用于独立 contract cutover、ABI 发布、owner 迁移、高风险 probe、不安全中间态或用户明确要求的 semantic gate；小迭代 execution checkpoint 仅按上文形成轻量停止点。未来 stage 只需保留目的、依赖和受保护边界；不得仅因缺少具体类型、算法、逐文件路径或精确命令形成 finding。probe 计划放在按需 `implementation.md`，说明 hypothesis、protected boundary、failure signal、write-back 和退出条件；probe 代码不能因“已经能跑”自然沉淀为长期抽象。
 
 实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。真实证据表明原目标代价过高或只能形成较弱能力时，review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC 或保持 Not Cut Over。agent 可以提交证据和 reduced-target 提案，不能自行批准；新 target 接受并完成对应 cutover 前，不得把更弱实现写成当前事实、accepted limitation 或原 target closure。
 

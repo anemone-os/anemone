@@ -6,9 +6,9 @@ mod unix;
 
 use front::{
     SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
-    SocketConnectError, SocketCreation, SocketDatagramSendOperation, SocketListenError, SocketOps,
-    SocketOptionError, SocketOptionMutation, SocketOptionQuery, SocketOptionValue,
-    SocketPairPreparation, SocketPayloadIo, SocketPreparation, SocketQueryError, SocketReadSink,
+    SocketConnectError, SocketCreation, SocketDatagramSendOperation, SocketIoOps,
+    SocketListenError, SocketOps, SocketOptionError, SocketOptionMutation, SocketOptionQuery,
+    SocketOptionValue, SocketPairPreparation, SocketPreparation, SocketQueryError, SocketReadSink,
     SocketReceiveError, SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest,
     SocketReceiveSink, SocketSendError, SocketSendPayload, SocketSendRequest, SocketShutdown,
     SocketShutdownError, SocketStreamDestination, SocketType, SocketWait, SocketWriteSource,
@@ -17,4 +17,4 @@ use front::{
 };
 use icmp_raw::ICMP_RAW_SOCKET_OPS;
 use udp::UDP_SOCKET_OPS;
-use unix::UNIX_STREAM_SOCKET_OPS;
+use unix::{UNIX_SEQPACKET_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS};

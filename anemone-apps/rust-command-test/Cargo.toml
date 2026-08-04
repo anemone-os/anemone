@@ -1,0 +1,12 @@
+cargo-features = ["panic-immediate-abort"]
+
+[package]
+name = "rust-command-test"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+panic = "immediate-abort"
+
+[workspace]
+members = ["."]

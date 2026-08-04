@@ -40,6 +40,9 @@ fn sys_connect(fd: Fd, addr: u64, addrlen: u32) -> Result<u64, SysError> {
             Err(SocketConnectError::ConnectionRefused) => {
                 return Err(SysError::ConnectionRefused);
             },
+            Err(SocketConnectError::ProtocolTypeMismatch) => {
+                return Err(SysError::ProtocolTypeMismatch);
+            },
             Err(SocketConnectError::Operation(error)) => return Err(error),
         }
     }
