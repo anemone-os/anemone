@@ -2,17 +2,18 @@ use core::mem::size_of;
 
 use anemone_abi::{
     net::linux::{
-        AF_INET, AF_UNIX, ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_ICMP, IPPROTO_IP, IPPROTO_UDP,
-        SO_ACCEPTCONN, SO_DOMAIN, SO_PROTOCOL, SO_TYPE, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM, SOL_RAW,
-        SOL_SOCKET,
+        ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, SO_ACCEPTCONN, SO_DOMAIN, SO_PROTOCOL, SO_TYPE,
+        SOL_RAW, SOL_SOCKET,
     },
     syscall::SYS_GETSOCKOPT,
 };
 
+use super::profile::socket_abi_profile;
+
 use crate::{
     fs::socket::{
-        SocketOptionError, SocketOptionQuery, SocketOptionValue, SocketQueryError, SocketType,
-        front::Socket, socket_from_file,
+        SocketOptionError, SocketOptionQuery, SocketOptionValue, SocketQueryError, front::Socket,
+        socket_from_file,
     },
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
@@ -20,22 +21,11 @@ use crate::{
 };
 
 fn query_value(socket: &Socket, option: i32) -> Result<i32, SysError> {
+    let profile = socket_abi_profile(socket.socket_type());
     match option {
-        SO_TYPE => Ok(match socket.socket_type() {
-            SocketType::Ipv4Udp => SOCK_DGRAM,
-            SocketType::UnixStream => SOCK_STREAM,
-            SocketType::Ipv4IcmpRaw => SOCK_RAW,
-        }),
-        SO_DOMAIN => Ok(match socket.socket_type() {
-            SocketType::Ipv4Udp => AF_INET,
-            SocketType::UnixStream => AF_UNIX,
-            SocketType::Ipv4IcmpRaw => AF_INET,
-        }),
-        SO_PROTOCOL => Ok(match socket.socket_type() {
-            SocketType::Ipv4Udp => IPPROTO_UDP,
-            SocketType::UnixStream => 0,
-            SocketType::Ipv4IcmpRaw => IPPROTO_ICMP,
-        }),
+        SO_TYPE => Ok(profile.socket_kind()),
+        SO_DOMAIN => Ok(profile.domain()),
+        SO_PROTOCOL => Ok(profile.protocol()),
         SO_ACCEPTCONN => socket
             .is_accepting()
             .map(i32::from)
@@ -164,6 +154,9 @@ mod kunits {
     use crate::fs::socket::{
         ICMP_RAW_SOCKET_OPS, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket,
         prepare_socket_pair, socket_from_file,
+    };
+    use anemone_abi::net::linux::{
+        AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM,
     };
 
     #[kunit]

@@ -527,7 +527,7 @@ fn final_release_unix_stream(private: &AnyOpaque) {
 
 pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::UnixStream,
-    file_io: super::super::SocketFileIo::ByteStream,
+    payload_io: super::super::SocketPayloadIo::ByteStream,
     create: Some(prepare_unix_socket),
     create_pair: Some(prepare_unix_pair),
     bind: Some(bind_unix_stream),

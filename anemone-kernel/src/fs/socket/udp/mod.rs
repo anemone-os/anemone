@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
-    SocketFileIo, SocketOps, SocketPreparation, SocketQueryError, SocketReceiveError,
+    SocketOps, SocketPayloadIo, SocketPreparation, SocketQueryError, SocketReceiveError,
     SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
@@ -379,7 +379,7 @@ fn map_receive_error(error: UdpReceiveError) -> SocketReceiveError {
 
 pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::Ipv4Udp,
-    file_io: SocketFileIo::Datagram,
+    payload_io: SocketPayloadIo::Datagram,
     create: Some(prepare_udp_socket),
     create_pair: None,
     bind: Some(bind_udp_socket),

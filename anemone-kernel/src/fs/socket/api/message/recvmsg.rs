@@ -10,7 +10,7 @@ use crate::{
         api::read_write::request::{CheckedIoVec, IoVecDirection},
         socket::{
             SocketAddress, SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest,
-            SocketReceiveSink, SocketType, retry_socket_receive, socket_from_file,
+            SocketReceiveSink, retry_socket_receive, socket_from_file,
         },
     },
     prelude::*,
@@ -19,7 +19,10 @@ use crate::{
 };
 
 use super::{message_iovecs, normalized_name_len, read_message_header};
-use crate::fs::socket::api::abi::{map_receive_error, validate_receive_message_flags, write_peer};
+use crate::fs::socket::api::{
+    abi::{map_receive_error, validate_receive_message_flags, write_socket_address},
+    profile::{SocketMessageIo, socket_abi_profile},
+};
 
 struct MessageReceiveSink<'a> {
     uspace: &'a UserSpaceHandle,
@@ -88,7 +91,7 @@ fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    if socket.socket_type() != SocketType::Ipv4Udp {
+    if socket_abi_profile(socket.socket_type()).message_io() != SocketMessageIo::Datagram {
         return Err(SysError::NotSupported);
     }
 
@@ -132,7 +135,12 @@ fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
         let name_len = message
             .checked_add(offset_of!(MsgHdr, msg_namelen) as u64)
             .ok_or(SysError::BadAddress)?;
-        write_peer(header.msg_name as u64, name_len, peer)?;
+        write_socket_address(
+            socket.socket_type(),
+            header.msg_name as u64,
+            name_len,
+            Some(peer),
+        )?;
     }
     let output_flags = if outcome.packet_length().unwrap() > outcome.copied() {
         MSG_TRUNC as u32

@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    Socket, SocketDatagramSendOperation, SocketFileIo, SocketOps, SocketReadSink,
+    Socket, SocketDatagramSendOperation, SocketOps, SocketPayloadIo, SocketReadSink,
     SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest, SocketReceiveSink,
     SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
     SocketWriteSource,
@@ -198,9 +198,9 @@ fn socket_read_with_ctx(
     let socket =
         socket_from_file(file).expect("common Socket read used without Socket private state");
     let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
-    let outcome = match socket.file_io() {
-        SocketFileIo::Unsupported => return Err(SysError::NotSupported),
-        SocketFileIo::ByteStream => retry_socket_receive(
+    let outcome = match socket.payload_io() {
+        SocketPayloadIo::Unsupported => return Err(SysError::NotSupported),
+        SocketPayloadIo::ByteStream => retry_socket_receive(
             "socket read",
             &task,
             file,
@@ -213,7 +213,7 @@ fn socket_read_with_ctx(
             },
             map_file_receive_error,
         )?,
-        SocketFileIo::Datagram => {
+        SocketPayloadIo::Datagram => {
             let mut datagram_sink = FileDatagramReceiveSink { sink };
             retry_socket_receive(
                 "socket read",
@@ -252,9 +252,9 @@ fn socket_write_with_ctx(
     let socket =
         socket_from_file(file).expect("common Socket write used without Socket private state");
     let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
-    match socket.file_io() {
-        SocketFileIo::Unsupported => Err(SysError::NotSupported),
-        SocketFileIo::ByteStream => retry_socket_send(
+    match socket.payload_io() {
+        SocketPayloadIo::Unsupported => Err(SysError::NotSupported),
+        SocketPayloadIo::ByteStream => retry_socket_send(
             "socket write",
             &task,
             file,
@@ -268,7 +268,7 @@ fn socket_write_with_ctx(
             },
             map_file_send_error,
         ),
-        SocketFileIo::Datagram => {
+        SocketPayloadIo::Datagram => {
             let mut payload = FileDatagramSendPayload {
                 source,
                 bytes: None,

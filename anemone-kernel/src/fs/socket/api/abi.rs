@@ -1,10 +1,7 @@
 //! Byte-level Linux sockaddr handling and Socket outcome projection.
 
 use alloc::{vec, vec::Vec};
-use core::{
-    mem::size_of,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::mem::size_of;
 
 use anemone_abi::net::linux::{
     AF_INET, AF_UNIX, AF_UNSPEC, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SockAddrIn,
@@ -21,16 +18,12 @@ use crate::{
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
 };
 
+use super::profile::{SocketAddressAbi, socket_abi_profile};
+
 const SOCKADDR_IN_LEN: usize = size_of::<SockAddrIn>();
 const SOCKADDR_UN_LEN: usize = size_of::<SockAddrUn>();
 const SOCKADDR_UN_PATH_OFFSET: usize = 2;
 pub(super) const MAX_SOCKADDR_INPUT_LEN: usize = 128;
-// Diagnostic-only rate limiting. This bit never participates in flag or send
-// behavior.
-static RAW_NOSIGNAL_DIAGNOSTIC_EMITTED: AtomicBool = AtomicBool::new(false);
-// Diagnostic-only rate limiting. This bit never participates in flag or send
-// behavior.
-static UDP_NOSIGNAL_DIAGNOSTIC_EMITTED: AtomicBool = AtomicBool::new(false);
 
 fn copy_sockaddr_input(
     addr: u64,
@@ -66,7 +59,7 @@ fn parse_sockaddr_in(bytes: &[u8]) -> Result<SocketAddress, SysError> {
     Ok(SocketAddress::Ipv4 { address, port })
 }
 
-pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
+fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
     let (bytes, len) = copy_sockaddr_input(addr, len, SOCKADDR_IN_LEN)?;
     parse_sockaddr_in(&bytes[..len])
 }
@@ -117,9 +110,9 @@ pub(super) fn read_socket_address(
     addr: u64,
     len: u32,
 ) -> Result<SocketAddress, SysError> {
-    match socket_type {
-        SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw => read_sockaddr_in(addr, len),
-        SocketType::UnixStream => read_sockaddr_un(addr, len),
+    match socket_abi_profile(socket_type).address() {
+        SocketAddressAbi::Ipv4 => read_sockaddr_in(addr, len),
+        SocketAddressAbi::UnixPathname => read_sockaddr_un(addr, len),
     }
 }
 
@@ -128,7 +121,7 @@ pub(super) fn read_socket_connect_address(
     addr: u64,
     len: u32,
 ) -> Result<SocketAddress, SysError> {
-    if !matches!(socket_type, SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw) {
+    if socket_abi_profile(socket_type).address() != SocketAddressAbi::Ipv4 {
         return read_socket_address(socket_type, addr, len);
     }
 
@@ -186,24 +179,21 @@ fn write_sockaddr_bytes(addr: u64, addrlen: u64, bytes: &[u8]) -> Result<(), Sys
 }
 
 fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>) -> Vec<u8> {
-    match (socket_type, address) {
-        (SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw, None) => {
+    match (socket_abi_profile(socket_type).address(), address) {
+        (SocketAddressAbi::Ipv4, None) => {
             let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes
         },
-        (
-            SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw,
-            Some(SocketAddress::Ipv4 { address, port }),
-        ) => {
+        (SocketAddressAbi::Ipv4, Some(SocketAddress::Ipv4 { address, port })) => {
             let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes[2..4].copy_from_slice(&port.to_be_bytes());
             bytes[4..8].copy_from_slice(&address.octets());
             bytes
         },
-        (SocketType::UnixStream, None) => (AF_UNIX as u16).to_ne_bytes().to_vec(),
-        (SocketType::UnixStream, Some(SocketAddress::UnixPathname(pathname))) => {
+        (SocketAddressAbi::UnixPathname, None) => (AF_UNIX as u16).to_ne_bytes().to_vec(),
+        (SocketAddressAbi::UnixPathname, Some(SocketAddress::UnixPathname(pathname))) => {
             let mut bytes = Vec::with_capacity(SOCKADDR_UN_PATH_OFFSET + pathname.len() + 1);
             bytes.extend_from_slice(&(AF_UNIX as u16).to_ne_bytes());
             bytes.extend_from_slice(pathname.as_bytes());
@@ -224,17 +214,6 @@ pub(super) fn write_socket_address(
     address: Option<SocketAddress>,
 ) -> Result<(), SysError> {
     let bytes = socket_address_bytes(socket_type, address);
-    write_sockaddr_bytes(addr, addrlen, &bytes)
-}
-
-pub(super) fn write_peer(addr: u64, addrlen: u64, peer: SocketAddress) -> Result<(), SysError> {
-    let SocketAddress::Ipv4 { address, port } = peer else {
-        unreachable!("datagram receive returned a non-IPv4 peer")
-    };
-    let mut bytes = [0u8; SOCKADDR_IN_LEN];
-    bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
-    bytes[2..4].copy_from_slice(&port.to_be_bytes());
-    bytes[4..8].copy_from_slice(&address.octets());
     write_sockaddr_bytes(addr, addrlen, &bytes)
 }
 
@@ -277,35 +256,15 @@ pub(super) fn validate_send_message_flags(
     socket_type: SocketType,
     flags: i32,
 ) -> Result<SendMessageFlags, SysError> {
-    let supported = match socket_type {
-        SocketType::Ipv4Udp => MSG_DONTWAIT | MSG_NOSIGNAL,
-        SocketType::UnixStream => MSG_DONTWAIT | MSG_NOSIGNAL,
-        SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_NOSIGNAL,
-    };
+    let profile = socket_abi_profile(socket_type);
+    let supported = profile.send_flags();
     if flags & !supported != 0 {
         knoticeln!("socket: unsupported sendto flags {:#x}", flags);
         return Err(SysError::NotSupported);
     }
-    if socket_type == SocketType::Ipv4IcmpRaw
-        && flags & MSG_NOSIGNAL != 0
-        && !RAW_NOSIGNAL_DIAGNOSTIC_EMITTED.swap(true, Ordering::Relaxed)
-    {
-        // Raw ICMP has no peer-close or SIGPIPE producer, so MSG_NOSIGNAL is a
-        // visible no-op accepted for Linux compatibility. Remove this special
-        // diagnostic only if the family later gains a real SIGPIPE path and
-        // routes the flag through the ordinary signal-suppression protocol.
-        knoticeln!("ICMP raw send: MSG_NOSIGNAL accepted without a SIGPIPE producer");
-    }
-    if socket_type == SocketType::Ipv4Udp
-        && flags & MSG_NOSIGNAL != 0
-        && !UDP_NOSIGNAL_DIAGNOSTIC_EMITTED.swap(true, Ordering::Relaxed)
-    {
-        // UDP has no peer-close or SIGPIPE producer, so MSG_NOSIGNAL is a
-        // visible no-op accepted for Linux compatibility. Remove this special
-        // diagnostic only if UDP later gains a real SIGPIPE path and routes
-        // the flag through the ordinary signal-suppression protocol.
-        knoticeln!("UDP send: MSG_NOSIGNAL accepted without a SIGPIPE producer");
-    }
+    // Datagram families have no SIGPIPE producer today, so their profile owns
+    // the required one-shot compatibility diagnostic and its removal boundary.
+    profile.observe_no_signal_compatibility(flags);
     Ok(SendMessageFlags {
         nonblocking: flags & MSG_DONTWAIT != 0,
         no_signal: flags & MSG_NOSIGNAL != 0,
@@ -322,11 +281,7 @@ pub(super) fn validate_receive_message_flags(
     socket_type: SocketType,
     flags: i32,
 ) -> Result<ReceiveMessageFlags, SysError> {
-    let supported = match socket_type {
-        SocketType::Ipv4Udp => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
-        SocketType::UnixStream => MSG_DONTWAIT | MSG_PEEK,
-        SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
-    };
+    let supported = socket_abi_profile(socket_type).receive_flags();
     if flags & !supported != 0 {
         knoticeln!("socket: unsupported recvfrom flags {:#x}", flags);
         return Err(SysError::NotSupported);

@@ -7,8 +7,8 @@ use crate::{
         UserBufferSegment, UserBufferSource,
         api::read_write::request::{CheckedIoVec, IoVecDirection},
         socket::{
-            SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, SocketType,
-            retry_socket_send, socket_from_file,
+            SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, retry_socket_send,
+            socket_from_file,
         },
     },
     prelude::*,
@@ -16,7 +16,10 @@ use crate::{
 };
 
 use super::{message_iovecs, normalized_name_len, read_message_header};
-use crate::fs::socket::api::abi::{map_send_error, read_sockaddr_in, validate_send_message_flags};
+use crate::fs::socket::api::{
+    abi::{map_send_error, read_socket_address, validate_send_message_flags},
+    profile::{SocketMessageIo, socket_abi_profile},
+};
 
 struct MessagePayload<'a> {
     uspace: &'a UserSpaceHandle,
@@ -69,7 +72,7 @@ fn sys_sendmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    if socket.socket_type() != SocketType::Ipv4Udp {
+    if socket_abi_profile(socket.socket_type()).message_io() != SocketMessageIo::Datagram {
         return Err(SysError::NotSupported);
     }
 
@@ -78,7 +81,11 @@ fn sys_sendmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     let destination = if name_len == 0 {
         None
     } else {
-        Some(read_sockaddr_in(header.msg_name as u64, name_len as u32)?)
+        Some(read_socket_address(
+            socket.socket_type(),
+            header.msg_name as u64,
+            name_len as u32,
+        )?)
     };
     let uspace = task.clone_uspace_handle();
     let iovecs = message_iovecs(&uspace, header, IoVecDirection::Source)?;

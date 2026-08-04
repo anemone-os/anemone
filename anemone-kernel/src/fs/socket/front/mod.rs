@@ -180,7 +180,7 @@ pub(super) enum SocketStreamDestination {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SocketFileIo {
+pub(super) enum SocketPayloadIo {
     Unsupported,
     ByteStream,
     Datagram,
@@ -309,7 +309,7 @@ pub(super) struct SocketAcceptItem {
 
 pub(super) struct SocketOps {
     pub(super) socket_type: SocketType,
-    pub(super) file_io: SocketFileIo,
+    pub(super) payload_io: SocketPayloadIo,
     pub(super) create: Option<fn() -> Result<SocketPreparation, SysError>>,
     pub(super) create_pair: Option<fn() -> Result<SocketPairPreparation, SysError>>,
     pub(super) bind: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketBindError>>,
@@ -360,8 +360,8 @@ impl Socket {
         self.ops.socket_type
     }
 
-    pub(super) const fn file_io(&self) -> SocketFileIo {
-        self.ops.file_io
+    pub(super) const fn payload_io(&self) -> SocketPayloadIo {
+        self.ops.payload_io
     }
 
     pub(super) fn bind(&self, address: SocketAddress) -> Result<(), SocketBindError> {

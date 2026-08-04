@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 
 use crate::{
     fs::socket::{
-        SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
-        SocketType, retry_socket_send, socket_from_file,
+        SocketDatagramSendOperation, SocketPayloadIo, SocketSendPayload, SocketSendRequest,
+        SocketStreamDestination, retry_socket_send, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -12,7 +12,7 @@ use crate::{
 use anemone_abi::syscall::SYS_SENDTO;
 
 use super::abi::{
-    map_send_error, read_payload, read_sockaddr_in, validate_raw_socket_address,
+    map_send_error, read_payload, read_socket_address, validate_raw_socket_address,
     validate_send_message_flags,
 };
 
@@ -47,67 +47,71 @@ fn sys_sendto(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
-    if socket.socket_type() == SocketType::UnixStream {
-        let destination = if addr == 0 || addrlen == 0 {
-            SocketStreamDestination::Absent
-        } else {
-            validate_raw_socket_address(addr, addrlen)?;
-            SocketStreamDestination::Present
-        };
-        let segment = if len == 0 {
-            None
-        } else {
-            Some(UserBufferSegment::new(user_addr(buf)?, len))
-        };
-        let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
-        let uspace = task.clone_uspace_handle();
-        let mut source = UserBufferSource::new(&uspace, segments);
+    match socket.payload_io() {
+        SocketPayloadIo::Unsupported => Err(SysError::NotSupported),
+        SocketPayloadIo::ByteStream => {
+            let destination = if addr == 0 || addrlen == 0 {
+                SocketStreamDestination::Absent
+            } else {
+                validate_raw_socket_address(addr, addrlen)?;
+                SocketStreamDestination::Present
+            };
+            let segment = if len == 0 {
+                None
+            } else {
+                Some(UserBufferSegment::new(user_addr(buf)?, len))
+            };
+            let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
+            let uspace = task.clone_uspace_handle();
+            let mut source = UserBufferSource::new(&uspace, segments);
 
-        return retry_socket_send(
-            "sys_sendto",
-            &task,
-            desc.vfs_file(),
-            nonblocking,
-            !message_flags.no_signal,
-            || {
-                socket.send(SocketSendRequest::Stream {
-                    source: &mut source,
-                    destination,
-                })
-            },
-            map_send_error,
-        )
-        .map(|sent| sent as u64);
-    }
-
-    let destination = if addr == 0 {
-        None
-    } else {
-        Some(read_sockaddr_in(addr, addrlen)?)
-    };
-    let mut payload = SendPayload {
-        address: buf,
-        len,
-        bytes: None,
-    };
-    let mut operation = SocketDatagramSendOperation::new();
-    // Each family attempt releases its operation guard before the shared retry
-    // owner waits. Payload and the family's opaque destination/policy/selection
-    // snapshot remain operation-local across capacity retries.
-    retry_socket_send(
-        "sys_sendto",
-        &task,
-        desc.vfs_file(),
-        nonblocking,
-        false,
-        || {
-            socket.send(SocketSendRequest::Datagram {
-                destination: destination.clone(),
-                payload: &mut payload,
-                operation: &mut operation,
-            })
+            retry_socket_send(
+                "sys_sendto",
+                &task,
+                desc.vfs_file(),
+                nonblocking,
+                !message_flags.no_signal,
+                || {
+                    socket.send(SocketSendRequest::Stream {
+                        source: &mut source,
+                        destination,
+                    })
+                },
+                map_send_error,
+            )
+            .map(|sent| sent as u64)
         },
-        map_send_error,
-    )
-    .map(|sent| sent as u64)
+        SocketPayloadIo::Datagram => {
+            let destination = if addr == 0 {
+                None
+            } else {
+                Some(read_socket_address(socket.socket_type(), addr, addrlen)?)
+            };
+            let mut payload = SendPayload {
+                address: buf,
+                len,
+                bytes: None,
+            };
+            let mut operation = SocketDatagramSendOperation::new();
+            // Each family attempt releases its operation guard before the shared retry
+            // owner waits. Payload and the family's opaque destination/policy/selection
+            // snapshot remain operation-local across capacity retries.
+            retry_socket_send(
+                "sys_sendto",
+                &task,
+                desc.vfs_file(),
+                nonblocking,
+                false,
+                || {
+                    socket.send(SocketSendRequest::Datagram {
+                        destination: destination.clone(),
+                        payload: &mut payload,
+                        operation: &mut operation,
+                    })
+                },
+                map_send_error,
+            )
+            .map(|sent| sent as u64)
+        },
+    }
 }

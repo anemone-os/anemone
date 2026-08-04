@@ -25,9 +25,10 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
-    SocketDatagramSendOperation, SocketFileIo, SocketOps, SocketOptionError, SocketOptionMutation,
-    SocketOptionQuery, SocketOptionValue, SocketPreparation, SocketQueryError, SocketReceiveError,
-    SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
+    SocketDatagramSendOperation, SocketOps, SocketOptionError, SocketOptionMutation,
+    SocketOptionQuery, SocketOptionValue, SocketPayloadIo, SocketPreparation, SocketQueryError,
+    SocketReceiveError, SocketReceiveOutcome, SocketReceiveRequest, SocketSendError,
+    SocketSendRequest, SocketType,
 };
 use source::IcmpRawSocketSource;
 
@@ -507,7 +508,7 @@ fn map_option_mutation_error(error: IcmpRawMutationError) -> SocketOptionError {
 
 pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::Ipv4IcmpRaw,
-    file_io: SocketFileIo::Datagram,
+    payload_io: SocketPayloadIo::Datagram,
     create: Some(prepare_icmp_raw_socket),
     create_pair: None,
     bind: Some(bind_icmp_raw_socket),
@@ -675,11 +676,11 @@ mod kunits {
     }
 
     #[kunit]
-    fn common_file_io_dispatches_raw_as_a_datagram_family() {
+    fn common_payload_io_dispatches_raw_as_a_datagram_family() {
         let (file, creation) =
             prepare_socket(&ICMP_RAW_SOCKET_OPS).expect("KUnit raw endpoint must fit");
         let socket = socket_from_file(&file).unwrap();
-        assert_eq!(socket.file_io(), SocketFileIo::Datagram);
+        assert_eq!(socket.payload_io(), SocketPayloadIo::Datagram);
 
         let mut byte = [0u8; 1];
         assert_eq!(

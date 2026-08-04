@@ -2,8 +2,9 @@ use anemone_abi::syscall::SYS_RECVFROM;
 
 use crate::{
     fs::socket::{
-        SocketAddress, SocketAddressSink, SocketReceiveFlags, SocketReceiveRequest,
-        SocketReceiveSink, SocketType, retry_socket_receive, socket_from_file,
+        SocketAddress, SocketAddressSink, SocketPayloadIo, SocketReceiveFlags,
+        SocketReceiveRequest, SocketReceiveSink, SocketType, retry_socket_receive,
+        socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -11,11 +12,12 @@ use crate::{
 };
 
 use super::abi::{
-    map_query_error, map_receive_error, validate_receive_message_flags, write_payload, write_peer,
+    map_query_error, map_receive_error, validate_receive_message_flags, write_payload,
     write_socket_address,
 };
 
 struct ReceiveSink {
+    socket_type: SocketType,
     buf: u64,
     len: usize,
     peer: u64,
@@ -36,7 +38,7 @@ impl SocketReceiveSink for ReceiveSink {
     fn copy_datagram(&mut self, payload: &[u8], peer: SocketAddress) -> Result<usize, SysError> {
         let copied = write_payload(self.buf, payload, self.len)?;
         if self.peer != 0 {
-            write_peer(self.peer, self.addrlen, peer)?;
+            write_socket_address(self.socket_type, self.peer, self.addrlen, Some(peer))?;
         }
         Ok(copied)
     }
@@ -58,70 +60,76 @@ fn sys_recvfrom(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
-    if socket.socket_type() == SocketType::UnixStream {
-        let segment = if len == 0 {
-            None
-        } else {
-            Some(UserBufferSegment::new(user_addr(buf)?, len))
-        };
-        let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
-        let uspace = task.clone_uspace_handle();
-        let mut stream_sink = UserBufferSink::new(&uspace, segments);
-        let outcome = retry_socket_receive(
-            "sys_recvfrom",
-            &task,
-            desc.vfs_file(),
-            nonblocking,
-            || {
-                socket.receive(SocketReceiveRequest::Stream {
-                    sink: &mut stream_sink,
-                    flags: SocketReceiveFlags {
-                        peek: message_flags.peek,
-                    },
-                })
-            },
-            map_receive_error,
-        )?;
-        if peer != 0 {
-            let mut peer_address = PeerCapture::default();
-            socket
-                .copy_peer_address(&mut peer_address)
-                .map_err(map_query_error)?;
-            write_socket_address(SocketType::UnixStream, peer, addrlen, peer_address.0)?;
-        }
-        return Ok(outcome.copied() as u64);
-    }
-
-    let mut sink = ReceiveSink {
-        buf,
-        len,
-        peer,
-        addrlen,
-    };
-    // Each family attempt releases its operation guard on WouldBlock; the
-    // shared retry owner schedules with only the source route alive.
-    retry_socket_receive(
-        "sys_recvfrom",
-        &task,
-        desc.vfs_file(),
-        nonblocking,
-        || {
-            socket.receive(SocketReceiveRequest::Datagram {
-                sink: &mut sink,
-                flags: SocketReceiveFlags {
-                    peek: message_flags.peek,
+    match socket.payload_io() {
+        SocketPayloadIo::Unsupported => Err(SysError::NotSupported),
+        SocketPayloadIo::ByteStream => {
+            let segment = if len == 0 {
+                None
+            } else {
+                Some(UserBufferSegment::new(user_addr(buf)?, len))
+            };
+            let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
+            let uspace = task.clone_uspace_handle();
+            let mut stream_sink = UserBufferSink::new(&uspace, segments);
+            let outcome = retry_socket_receive(
+                "sys_recvfrom",
+                &task,
+                desc.vfs_file(),
+                nonblocking,
+                || {
+                    socket.receive(SocketReceiveRequest::Stream {
+                        sink: &mut stream_sink,
+                        flags: SocketReceiveFlags {
+                            peek: message_flags.peek,
+                        },
+                    })
                 },
+                map_receive_error,
+            )?;
+            if peer != 0 {
+                let mut peer_address = PeerCapture::default();
+                socket
+                    .copy_peer_address(&mut peer_address)
+                    .map_err(map_query_error)?;
+                write_socket_address(socket.socket_type(), peer, addrlen, peer_address.0)?;
+            }
+            Ok(outcome.copied() as u64)
+        },
+        SocketPayloadIo::Datagram => {
+            let mut sink = ReceiveSink {
+                socket_type: socket.socket_type(),
+                buf,
+                len,
+                peer,
+                addrlen,
+            };
+            // Each family attempt releases its operation guard on WouldBlock; the
+            // shared retry owner schedules with only the source route alive.
+            retry_socket_receive(
+                "sys_recvfrom",
+                &task,
+                desc.vfs_file(),
+                nonblocking,
+                || {
+                    socket.receive(SocketReceiveRequest::Datagram {
+                        sink: &mut sink,
+                        flags: SocketReceiveFlags {
+                            peek: message_flags.peek,
+                        },
+                    })
+                },
+                map_receive_error,
+            )
+            .map(|outcome| {
+                if message_flags.truncate_result {
+                    outcome
+                        .packet_length()
+                        .expect("datagram receive omitted its full packet length")
+                        as u64
+                } else {
+                    outcome.copied() as u64
+                }
             })
         },
-        map_receive_error,
-    )
-    .map(|outcome| {
-        if message_flags.truncate_result {
-            outcome
-                .packet_length()
-                .expect("datagram receive omitted its full packet length") as u64
-        } else {
-            outcome.copied() as u64
-        }
-    })
+    }
 }

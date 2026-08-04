@@ -7,6 +7,7 @@ mod getsockname;
 mod getsockopt;
 mod listen;
 mod message;
+mod profile;
 mod recvfrom;
 mod resolve;
 mod sendto;
