@@ -17,4 +17,4 @@ use front::{
 };
 use icmp_raw::ICMP_RAW_SOCKET_OPS;
 use udp::UDP_SOCKET_OPS;
-use unix::UNIX_STREAM_SOCKET_OPS;
+use unix::{UNIX_SEQPACKET_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS};

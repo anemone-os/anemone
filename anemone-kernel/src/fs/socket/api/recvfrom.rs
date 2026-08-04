@@ -58,7 +58,10 @@ fn sys_recvfrom(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
-    if socket.socket_type() == SocketType::UnixStream {
+    if matches!(
+        socket.socket_type(),
+        SocketType::UnixStream | SocketType::UnixSeqpacket
+    ) {
         let segment = if len == 0 {
             None
         } else {
@@ -73,11 +76,20 @@ fn sys_recvfrom(
             desc.vfs_file(),
             nonblocking,
             || {
-                socket.receive(SocketReceiveRequest::Stream {
-                    sink: &mut stream_sink,
-                    flags: SocketReceiveFlags {
-                        peek: message_flags.peek,
+                socket.receive(match socket.socket_type() {
+                    SocketType::UnixStream => SocketReceiveRequest::Stream {
+                        sink: &mut stream_sink,
+                        flags: SocketReceiveFlags {
+                            peek: message_flags.peek,
+                        },
                     },
+                    SocketType::UnixSeqpacket => SocketReceiveRequest::Seqpacket {
+                        sink: &mut stream_sink,
+                        flags: SocketReceiveFlags {
+                            peek: message_flags.peek,
+                        },
+                    },
+                    _ => unreachable!("Unix receive branch selected a non-Unix socket"),
                 })
             },
             map_receive_error,
@@ -87,9 +99,15 @@ fn sys_recvfrom(
             socket
                 .copy_peer_address(&mut peer_address)
                 .map_err(map_query_error)?;
-            write_socket_address(SocketType::UnixStream, peer, addrlen, peer_address.0)?;
+            write_socket_address(socket.socket_type(), peer, addrlen, peer_address.0)?;
         }
-        return Ok(outcome.copied() as u64);
+        return Ok(if message_flags.truncate_result {
+            outcome
+                .packet_length()
+                .expect("seqpacket truncation omitted record length") as u64
+        } else {
+            outcome.copied() as u64
+        });
     }
 
     let mut sink = ReceiveSink {

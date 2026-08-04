@@ -21,6 +21,7 @@ pub(super) enum SocketType {
     Ipv4Udp,
     Ipv4IcmpRaw,
     UnixStream,
+    UnixSeqpacket,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,6 +77,7 @@ pub(super) enum SocketConnectError {
     InvalidState,
     AlreadyConnected,
     ConnectionRefused,
+    ProtocolTypeMismatch,
     WouldBlock(SocketWait),
     Operation(SysError),
 }
@@ -165,12 +167,33 @@ pub(super) trait SocketReadSink {
     fn remaining(&self) -> usize;
 
     fn copy_bytes(&mut self, bytes: &[u8]) -> Result<usize, SysError>;
+
+    /// Seqpacket copyout must distinguish a short destination from a fault
+    /// after a selected prefix. Stream I/O keeps partial-progress semantics.
+    fn copy_exact(&mut self, bytes: &[u8]) -> Result<(), SysError> {
+        let copied = self.copy_bytes(bytes)?;
+        if copied == bytes.len() {
+            Ok(())
+        } else {
+            Err(SysError::BadAddress)
+        }
+    }
 }
 
 pub(super) trait SocketWriteSource {
     fn remaining(&self) -> usize;
 
     fn copy_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, SysError>;
+
+    /// Stage one complete seqpacket payload before the owner-local commit.
+    fn copy_exact(&mut self, bytes: &mut [u8]) -> Result<(), SysError> {
+        let copied = self.copy_bytes(bytes)?;
+        if copied == bytes.len() {
+            Ok(())
+        } else {
+            Err(SysError::BadAddress)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -184,6 +207,7 @@ pub(super) enum SocketFileIo {
     Unsupported,
     ByteStream,
     Datagram,
+    Seqpacket,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,6 +219,7 @@ pub(super) struct SocketReceiveFlags {
 pub(super) enum SocketReceiveOutcome {
     ByteStream { copied: usize },
     Datagram { copied: usize, packet_length: usize },
+    Seqpacket { copied: usize, record_length: usize },
 }
 
 impl SocketReceiveOutcome {
@@ -209,9 +234,18 @@ impl SocketReceiveOutcome {
         }
     }
 
+    pub(super) const fn seqpacket(copied: usize, record_length: usize) -> Self {
+        Self::Seqpacket {
+            copied,
+            record_length,
+        }
+    }
+
     pub(super) const fn copied(self) -> usize {
         match self {
-            Self::ByteStream { copied } | Self::Datagram { copied, .. } => copied,
+            Self::ByteStream { copied }
+            | Self::Datagram { copied, .. }
+            | Self::Seqpacket { copied, .. } => copied,
         }
     }
 
@@ -219,6 +253,7 @@ impl SocketReceiveOutcome {
         match self {
             Self::ByteStream { .. } => None,
             Self::Datagram { packet_length, .. } => Some(packet_length),
+            Self::Seqpacket { record_length, .. } => Some(record_length),
         }
     }
 }
@@ -261,6 +296,10 @@ pub(super) enum SocketSendRequest<'a> {
         source: &'a mut dyn SocketWriteSource,
         destination: SocketStreamDestination,
     },
+    Seqpacket {
+        source: &'a mut dyn SocketWriteSource,
+        destination: SocketStreamDestination,
+    },
 }
 
 pub(super) enum SocketReceiveRequest<'a> {
@@ -269,6 +308,10 @@ pub(super) enum SocketReceiveRequest<'a> {
         flags: SocketReceiveFlags,
     },
     Stream {
+        sink: &'a mut dyn SocketReadSink,
+        flags: SocketReceiveFlags,
+    },
+    Seqpacket {
         sink: &'a mut dyn SocketReadSink,
         flags: SocketReceiveFlags,
     },
@@ -324,6 +367,9 @@ pub(super) struct SocketOps {
     pub(super) accepting: fn(&AnyOpaque) -> Result<bool, SocketQueryError>,
     pub(super) send:
         Option<for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>>,
+    /// Optional operation-specific send wait. It carries only a family-owned
+    /// predicate and recheck route; public `POLLOUT` remains descriptor-wide.
+    pub(super) send_wait: Option<fn(&AnyOpaque, usize) -> SocketWait>,
     pub(super) receive: Option<
         for<'a> fn(
             &AnyOpaque,
@@ -411,6 +457,12 @@ impl Socket {
 
     pub(super) fn send(&self, request: SocketSendRequest<'_>) -> Result<usize, SocketSendError> {
         self.ops.send.ok_or(SocketSendError::Unsupported)?(&self.private, request)
+    }
+
+    pub(super) fn send_wait(&self, payload_len: usize) -> Option<SocketWait> {
+        self.ops
+            .send_wait
+            .map(|prepare| prepare(&self.private, payload_len))
     }
 
     pub(super) fn receive(

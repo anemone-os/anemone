@@ -139,6 +139,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Front、ABI 与 wait](./contracts/socket/front-abi-wait.md)
   - [Unix state、stream、address 与 lifecycle](./contracts/socket/unix-stream-lifecycle.md)
   - [Unix pathname namespace](./contracts/socket/unix-namespace.md)
+  - [Unix seqpacket](./contracts/socket/unix-seqpacket.md)
 - [Build Configuration 当前契约](./contracts/configuration/index.md)
   - [System target 与 resolved selection](./contracts/configuration/system-target.md)
 - [System Power 当前契约](./contracts/power/index.md)

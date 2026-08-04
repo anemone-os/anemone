@@ -4,6 +4,7 @@
 mod icmp_raw;
 mod udp;
 mod unix;
+mod unix_seqpacket;
 
 use anemone_rs::{env, prelude::*};
 
@@ -29,8 +30,12 @@ fn main() -> Result<(), Errno> {
         None => {
             let udp_result = udp::run();
             let unix_result = unix::run();
+            let seqpacket_result = unix_seqpacket::run();
             let icmp_raw_result = icmp_raw::run();
-            udp_result.and(unix_result).and(icmp_raw_result)
+            udp_result
+                .and(unix_result)
+                .and(seqpacket_result)
+                .and(icmp_raw_result)
         },
         Some(_) => Err(EINVAL),
     }

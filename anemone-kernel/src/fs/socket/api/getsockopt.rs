@@ -3,8 +3,8 @@ use core::mem::size_of;
 use anemone_abi::{
     net::linux::{
         AF_INET, AF_UNIX, ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_ICMP, IPPROTO_IP, IPPROTO_UDP,
-        SO_ACCEPTCONN, SO_DOMAIN, SO_PROTOCOL, SO_TYPE, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM, SOL_RAW,
-        SOL_SOCKET,
+        SO_ACCEPTCONN, SO_DOMAIN, SO_PROTOCOL, SO_TYPE, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET,
+        SOCK_STREAM, SOL_RAW, SOL_SOCKET,
     },
     syscall::SYS_GETSOCKOPT,
 };
@@ -24,16 +24,17 @@ fn query_value(socket: &Socket, option: i32) -> Result<i32, SysError> {
         SO_TYPE => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => SOCK_DGRAM,
             SocketType::UnixStream => SOCK_STREAM,
+            SocketType::UnixSeqpacket => SOCK_SEQPACKET,
             SocketType::Ipv4IcmpRaw => SOCK_RAW,
         }),
         SO_DOMAIN => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => AF_INET,
-            SocketType::UnixStream => AF_UNIX,
+            SocketType::UnixStream | SocketType::UnixSeqpacket => AF_UNIX,
             SocketType::Ipv4IcmpRaw => AF_INET,
         }),
         SO_PROTOCOL => Ok(match socket.socket_type() {
             SocketType::Ipv4Udp => IPPROTO_UDP,
-            SocketType::UnixStream => 0,
+            SocketType::UnixStream | SocketType::UnixSeqpacket => 0,
             SocketType::Ipv4IcmpRaw => IPPROTO_ICMP,
         }),
         SO_ACCEPTCONN => socket

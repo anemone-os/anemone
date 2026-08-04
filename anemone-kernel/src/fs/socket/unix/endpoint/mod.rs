@@ -1,5 +1,6 @@
 //! Unix endpoint role, local name, binding publication, and family composition.
 
+mod record;
 mod stream;
 
 use crate::{
@@ -12,10 +13,8 @@ use super::{
     super::{
         SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
         SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketPairPreparation,
-        SocketPreparation, SocketQueryError, SocketReadSink, SocketReceiveError,
-        SocketReceiveFlags, SocketReceiveRequest, SocketSendError, SocketSendRequest,
-        SocketShutdown, SocketShutdownError, SocketStreamDestination, SocketType,
-        SocketWriteSource,
+        SocketPreparation, SocketQueryError, SocketReceiveError, SocketSendError, SocketShutdown,
+        SocketShutdownError, SocketType,
     },
     admission::{
         UnixListener, accept, connect, listen, notify_admission_routes, poll_unix_listener,
@@ -24,11 +23,63 @@ use super::{
     namespace::{BindingRegistration, create_socket_pathname, publish_binding, withdraw_binding},
 };
 
-pub(super) use stream::{EndpointSide, UnixConnection};
+#[cfg(feature = "kunit")]
+use super::super::{
+    SocketReadSink, SocketReceiveFlags, SocketReceiveRequest, SocketSendRequest,
+    SocketStreamDestination, SocketWriteSource,
+};
+
+use record::{
+    UnixSeqpacketConnection, poll_connected_unix_seqpacket, receive_unix_seqpacket,
+    send_unix_seqpacket, shutdown_unix_seqpacket,
+};
+pub(super) use stream::{EndpointSide, UnixStreamConnection};
 use stream::{
     poll_connected_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream,
     shutdown_unix_stream,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum UnixProfile {
+    Stream,
+    Seqpacket,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum UnixConnection {
+    Stream(Arc<UnixStreamConnection>),
+    Seqpacket(Arc<UnixSeqpacketConnection>),
+}
+
+impl UnixConnection {
+    pub(super) fn new(profile: UnixProfile, names: [Arc<EndpointName>; 2]) -> Self {
+        match profile {
+            UnixProfile::Stream => Self::Stream(UnixStreamConnection::new(names)),
+            UnixProfile::Seqpacket => Self::Seqpacket(UnixSeqpacketConnection::new(names)),
+        }
+    }
+
+    fn install_routes(&self, side: EndpointSide, routes: Arc<Vec<UnixPollRoute>>) {
+        match self {
+            Self::Stream(connection) => connection.install_routes(side, routes),
+            Self::Seqpacket(connection) => connection.install_routes(side, routes),
+        }
+    }
+
+    fn peer_name(&self, side: EndpointSide) -> Option<Arc<str>> {
+        match self {
+            Self::Stream(connection) => connection.names[side.peer().index()].snapshot(),
+            Self::Seqpacket(connection) => connection.names[side.peer().index()].snapshot(),
+        }
+    }
+
+    fn retire(&self, side: EndpointSide) {
+        match self {
+            Self::Stream(connection) => retire_connection_endpoint(connection, side),
+            Self::Seqpacket(connection) => record::retire_connection_endpoint(connection, side),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct UnixPollRoute {
@@ -95,7 +146,7 @@ pub(super) enum EndpointAssociation {
     Unconnected,
     Listening(Arc<UnixListener>),
     Connected {
-        connection: Arc<UnixConnection>,
+        connection: UnixConnection,
         side: EndpointSide,
     },
     Retired,
@@ -127,22 +178,25 @@ pub(super) struct UnixEndpointCore {
     /// a commit must validate both owners.
     pub(super) state: SpinLock<EndpointState>,
     pub(super) name: Arc<EndpointName>,
+    /// Immutable Unix profile used only for owner-local admission and
+    /// connection construction. The front descriptor remains the sole UAPI
+    /// type witness.
+    pub(super) profile: UnixProfile,
 }
 
-/// Stream-only pathname admission capability for the current checkpoint.
+/// Typed pathname admission capability for one Unix connection profile.
 ///
 /// It intentionally exposes only the name and listener revalidation needed by
 /// connection admission. The endpoint Arc remains private here, so namespace
-/// lookup cannot become a general role/state access path. A later connection
-/// profile must extend this typed handoff rather than recover the endpoint.
+/// lookup cannot become a general role/state access path.
 #[derive(Clone, Debug)]
-pub(super) struct StreamAdmission {
+pub(super) struct ConnectionAdmission {
     endpoint: Arc<UnixEndpointCore>,
     inode: InodeRef,
     generation: u64,
 }
 
-impl StreamAdmission {
+impl ConnectionAdmission {
     pub(super) fn new(endpoint: Arc<UnixEndpointCore>, inode: InodeRef, generation: u64) -> Self {
         Self {
             endpoint,
@@ -181,6 +235,14 @@ impl StreamAdmission {
 
 impl UnixEndpointCore {
     pub(super) fn new_unconnected() -> Arc<Self> {
+        Self::new_with_profile(UnixProfile::Stream)
+    }
+
+    pub(super) fn new_seqpacket() -> Arc<Self> {
+        Self::new_with_profile(UnixProfile::Seqpacket)
+    }
+
+    fn new_with_profile(profile: UnixProfile) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(EndpointState {
                 association: EndpointAssociation::Unconnected,
@@ -188,10 +250,18 @@ impl UnixEndpointCore {
                 lifecycle_routes: Arc::new(Vec::new()),
             }),
             name: EndpointName::new(),
+            profile,
         })
     }
 
     pub(super) fn new_with_name(name: Arc<EndpointName>) -> Arc<Self> {
+        Self::new_with_profile_and_name(UnixProfile::Stream, name)
+    }
+
+    pub(super) fn new_with_profile_and_name(
+        profile: UnixProfile,
+        name: Arc<EndpointName>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(EndpointState {
                 association: EndpointAssociation::Unconnected,
@@ -199,6 +269,7 @@ impl UnixEndpointCore {
                 lifecycle_routes: Arc::new(Vec::new()),
             }),
             name,
+            profile,
         })
     }
 
@@ -206,12 +277,10 @@ impl UnixEndpointCore {
         let (connection, side) = self
             .connected()
             .expect("queued Unix child lost its connected association");
-        connection.names[side.peer().index()]
-            .snapshot()
-            .map(SocketAddress::UnixPathname)
+        connection.peer_name(side).map(SocketAddress::UnixPathname)
     }
 
-    pub(super) fn install_connection(&self, connection: Arc<UnixConnection>, side: EndpointSide) {
+    pub(super) fn install_connection(&self, connection: UnixConnection, side: EndpointSide) {
         let mut state = self.state.lock();
         assert!(matches!(
             state.association,
@@ -226,7 +295,7 @@ impl UnixEndpointCore {
 
     pub(super) fn commit_connection(
         &self,
-        connection: Arc<UnixConnection>,
+        connection: UnixConnection,
         side: EndpointSide,
         empty_lifecycle_routes: Arc<Vec<UnixPollRoute>>,
     ) -> Arc<Vec<UnixPollRoute>> {
@@ -241,12 +310,32 @@ impl UnixEndpointCore {
         routes
     }
 
-    fn connected(&self) -> Result<(Arc<UnixConnection>, EndpointSide), EndpointAccessError> {
+    fn connected(&self) -> Result<(UnixConnection, EndpointSide), EndpointAccessError> {
         match &self.state.lock().association {
             EndpointAssociation::Unconnected => Err(EndpointAccessError::Unconnected),
             EndpointAssociation::Listening(_) => Err(EndpointAccessError::InvalidState),
             EndpointAssociation::Connected { connection, side } => Ok((connection.clone(), *side)),
             EndpointAssociation::Retired => Err(EndpointAccessError::Retired),
+        }
+    }
+
+    pub(super) fn connected_stream(
+        &self,
+    ) -> Result<(Arc<UnixStreamConnection>, EndpointSide), EndpointAccessError> {
+        let (connection, side) = self.connected()?;
+        match connection {
+            UnixConnection::Stream(connection) => Ok((connection, side)),
+            UnixConnection::Seqpacket(_) => Err(EndpointAccessError::InvalidState),
+        }
+    }
+
+    pub(super) fn connected_seqpacket(
+        &self,
+    ) -> Result<(Arc<UnixSeqpacketConnection>, EndpointSide), EndpointAccessError> {
+        let (connection, side) = self.connected()?;
+        match connection {
+            UnixConnection::Seqpacket(connection) => Ok((connection, side)),
+            UnixConnection::Stream(_) => Err(EndpointAccessError::InvalidState),
         }
     }
 
@@ -305,7 +394,7 @@ impl UnixEndpointCore {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EndpointAccessError {
+pub(super) enum EndpointAccessError {
     Unconnected,
     InvalidState,
     Retired,
@@ -326,10 +415,16 @@ fn endpoint(private: &AnyOpaque) -> &UnixEndpoint {
         .expect("Unix SocketOps used without Unix endpoint private state")
 }
 
-fn prepare_unix_pair() -> Result<SocketPairPreparation, SysError> {
-    let first = UnixEndpointCore::new_unconnected();
-    let second = UnixEndpointCore::new_unconnected();
-    let connection = UnixConnection::new([first.name.clone(), second.name.clone()]);
+fn prepare_unix_pair_profile(profile: UnixProfile) -> Result<SocketPairPreparation, SysError> {
+    let first = match profile {
+        UnixProfile::Stream => UnixEndpointCore::new_unconnected(),
+        UnixProfile::Seqpacket => UnixEndpointCore::new_seqpacket(),
+    };
+    let second = match profile {
+        UnixProfile::Stream => UnixEndpointCore::new_unconnected(),
+        UnixProfile::Seqpacket => UnixEndpointCore::new_seqpacket(),
+    };
+    let connection = UnixConnection::new(profile, [first.name.clone(), second.name.clone()]);
     first.install_connection(connection.clone(), EndpointSide::First);
     second.install_connection(connection, EndpointSide::Second);
     Ok(SocketPairPreparation {
@@ -340,14 +435,43 @@ fn prepare_unix_pair() -> Result<SocketPairPreparation, SysError> {
 
 fn commit_unix_socket(_creation: &mut AnyOpaque) {}
 
-fn prepare_unix_socket() -> Result<SocketPreparation, SysError> {
+fn prepare_unix_socket_profile(profile: UnixProfile) -> Result<SocketPreparation, SysError> {
     Ok(SocketPreparation {
-        private: private_from_core(UnixEndpointCore::new_unconnected()),
+        private: private_from_core(match profile {
+            UnixProfile::Stream => UnixEndpointCore::new_unconnected(),
+            UnixProfile::Seqpacket => UnixEndpointCore::new_seqpacket(),
+        }),
         creation: SocketCreation {
             commit: commit_unix_socket,
             authority: NilOpaque::new(),
         },
     })
+}
+
+fn prepare_unix_stream_pair() -> Result<SocketPairPreparation, SysError> {
+    prepare_unix_pair_profile(UnixProfile::Stream)
+}
+
+fn prepare_unix_seqpacket_pair() -> Result<SocketPairPreparation, SysError> {
+    prepare_unix_pair_profile(UnixProfile::Seqpacket)
+}
+
+fn prepare_unix_stream_socket() -> Result<SocketPreparation, SysError> {
+    prepare_unix_socket_profile(UnixProfile::Stream)
+}
+
+fn prepare_unix_seqpacket_socket() -> Result<SocketPreparation, SysError> {
+    prepare_unix_socket_profile(UnixProfile::Seqpacket)
+}
+
+#[cfg(feature = "kunit")]
+fn prepare_unix_pair() -> Result<SocketPairPreparation, SysError> {
+    prepare_unix_pair_profile(UnixProfile::Stream)
+}
+
+#[cfg(feature = "kunit")]
+fn prepare_unix_socket() -> Result<SocketPreparation, SysError> {
+    prepare_unix_socket_profile(UnixProfile::Stream)
 }
 
 fn bind_unix_stream(private: &AnyOpaque, address: SocketAddress) -> Result<(), SocketBindError> {
@@ -381,8 +505,16 @@ fn bind_unix_stream(private: &AnyOpaque, address: SocketAddress) -> Result<(), S
     Ok(())
 }
 
+fn bind_unix_seqpacket(private: &AnyOpaque, address: SocketAddress) -> Result<(), SocketBindError> {
+    bind_unix_stream(private, address)
+}
+
 fn listen_unix_stream(private: &AnyOpaque, backlog: i32) -> Result<(), SocketListenError> {
     listen(&endpoint(private).core, backlog)
+}
+
+fn listen_unix_seqpacket(private: &AnyOpaque, backlog: i32) -> Result<(), SocketListenError> {
+    listen_unix_stream(private, backlog)
 }
 
 fn connect_unix_stream(
@@ -392,7 +524,18 @@ fn connect_unix_stream(
     connect(&endpoint(private).core, address)
 }
 
+fn connect_unix_seqpacket(
+    private: &AnyOpaque,
+    address: SocketAddress,
+) -> Result<(), SocketConnectError> {
+    connect(&endpoint(private).core, address)
+}
+
 fn accept_unix_stream(private: &AnyOpaque) -> Result<SocketAcceptItem, SocketAcceptError> {
+    accept(&endpoint(private).core)
+}
+
+fn accept_unix_seqpacket(private: &AnyOpaque) -> Result<SocketAcceptItem, SocketAcceptError> {
     accept(&endpoint(private).core)
 }
 
@@ -422,12 +565,8 @@ fn query_unix_peer_address(
         },
         EndpointAccessError::Retired => SocketQueryError::Retired,
     })?;
-    sink.copy_address(
-        connection.names[side.peer().index()]
-            .snapshot()
-            .map(SocketAddress::UnixPathname),
-    )
-    .map_err(SocketQueryError::Copy)
+    sink.copy_address(connection.peer_name(side).map(SocketAddress::UnixPathname))
+        .map_err(SocketQueryError::Copy)
 }
 
 fn query_unix_accepting(private: &AnyOpaque) -> Result<bool, SocketQueryError> {
@@ -488,9 +627,13 @@ fn poll_unconnected_endpoint(
     }
 }
 
-fn poll_unix_stream(
+fn poll_unix(
     private: &AnyOpaque,
     request: &PollRequest<'_>,
+    connected_poll: for<'a> fn(
+        &AnyOpaque,
+        &PollRequest<'a>,
+    ) -> Result<PollRegisterResult, SysError>,
 ) -> Result<PollRegisterResult, SysError> {
     let endpoint = &endpoint(private).core;
     loop {
@@ -521,12 +664,26 @@ fn poll_unix_stream(
             Dispatch::Listening(listener) => {
                 return poll_unix_listener(endpoint, &listener, request);
             },
-            Dispatch::Connected => return poll_connected_unix_stream(private, request),
+            Dispatch::Connected => return connected_poll(private, request),
             Dispatch::Retired => {
                 return Ok(PollRegisterResult::Ready(PollEvent::HANG_UP));
             },
         }
     }
+}
+
+fn poll_unix_stream(
+    private: &AnyOpaque,
+    request: &PollRequest<'_>,
+) -> Result<PollRegisterResult, SysError> {
+    poll_unix(private, request, poll_connected_unix_stream)
+}
+
+fn poll_unix_seqpacket(
+    private: &AnyOpaque,
+    request: &PollRequest<'_>,
+) -> Result<PollRegisterResult, SysError> {
+    poll_unix(private, request, poll_connected_unix_seqpacket)
 }
 
 pub(super) fn retire_endpoint_core(endpoint: &Arc<UnixEndpointCore>) {
@@ -568,18 +725,18 @@ pub(super) fn retire_endpoint_core(endpoint: &Arc<UnixEndpointCore>) {
     let EndpointAssociation::Connected { connection, side } = association else {
         return;
     };
-    retire_connection_endpoint(&connection, side);
+    connection.retire(side);
 }
 
-fn final_release_unix_stream(private: &AnyOpaque) {
+fn final_release_unix_endpoint(private: &AnyOpaque) {
     retire_endpoint_core(&endpoint(private).core);
 }
 
 pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     socket_type: SocketType::UnixStream,
     file_io: super::super::SocketFileIo::ByteStream,
-    create: Some(prepare_unix_socket),
-    create_pair: Some(prepare_unix_pair),
+    create: Some(prepare_unix_stream_socket),
+    create_pair: Some(prepare_unix_stream_pair),
     bind: Some(bind_unix_stream),
     listen: Some(listen_unix_stream),
     connect: Some(connect_unix_stream),
@@ -589,11 +746,34 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     peer_address: Some(query_unix_peer_address),
     accepting: query_unix_accepting,
     send: Some(send_unix_stream),
+    send_wait: None,
     receive: Some(receive_unix_stream),
     query_option: None,
     mutate_option: None,
     poll: poll_unix_stream,
-    final_release: final_release_unix_stream,
+    final_release: final_release_unix_endpoint,
+};
+
+pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOps {
+    socket_type: SocketType::UnixSeqpacket,
+    file_io: super::super::SocketFileIo::Seqpacket,
+    create: Some(prepare_unix_seqpacket_socket),
+    create_pair: Some(prepare_unix_seqpacket_pair),
+    bind: Some(bind_unix_seqpacket),
+    listen: Some(listen_unix_seqpacket),
+    connect: Some(connect_unix_seqpacket),
+    accept: Some(accept_unix_seqpacket),
+    shutdown: Some(shutdown_unix_seqpacket),
+    local_address: Some(query_unix_local_address),
+    peer_address: Some(query_unix_peer_address),
+    accepting: query_unix_accepting,
+    send: Some(send_unix_seqpacket),
+    send_wait: Some(record::prepare_seqpacket_send_wait),
+    receive: Some(receive_unix_seqpacket),
+    query_option: None,
+    mutate_option: None,
+    poll: poll_unix_seqpacket,
+    final_release: final_release_unix_endpoint,
 };
 
 #[cfg(feature = "kunit")]
@@ -800,7 +980,7 @@ mod kunits {
         let core = endpoint(&prepared.private).core.clone();
         let pathname: Arc<str> = Arc::from("/kunit/unix-retired-bind");
         core.begin_bind(pathname.clone()).unwrap();
-        final_release_unix_stream(&prepared.private);
+        final_release_unix_endpoint(&prepared.private);
 
         let (_file, inode) = anonymous_socket_inode();
         assert_eq!(
@@ -834,7 +1014,7 @@ mod kunits {
         query_unix_peer_address(&pair.second_private, &mut peer).unwrap();
         assert_eq!(peer.0, Some(SocketAddress::UnixPathname(pathname.clone())));
 
-        final_release_unix_stream(&pair.first_private);
+        final_release_unix_endpoint(&pair.first_private);
         assert!(super::super::namespace::lookup_binding(&inode).is_none());
         let mut peer_after_close = AddressCapture::default();
         query_unix_peer_address(&pair.second_private, &mut peer_after_close).unwrap();
@@ -842,7 +1022,7 @@ mod kunits {
             peer_after_close.0,
             Some(SocketAddress::UnixPathname(pathname))
         );
-        final_release_unix_stream(&pair.second_private);
+        final_release_unix_endpoint(&pair.second_private);
     }
 
     #[kunit]
@@ -902,7 +1082,7 @@ mod kunits {
             Err(SocketSendError::WouldBlock)
         );
 
-        final_release_unix_stream(&pair.second_private);
+        final_release_unix_endpoint(&pair.second_private);
         assert_eq!(
             send_stream_for_test(&pair.first_private, &mut WriteBytes(b"x")),
             Err(SocketSendError::PeerClosed)
@@ -1073,8 +1253,8 @@ mod kunits {
             shutdown_unix_stream(&pair.first_private, SocketShutdown::ReadWrite),
             Ok(())
         );
-        final_release_unix_stream(&pair.first_private);
-        final_release_unix_stream(&pair.second_private);
+        final_release_unix_endpoint(&pair.first_private);
+        final_release_unix_endpoint(&pair.second_private);
     }
 
     #[kunit]
@@ -1146,7 +1326,10 @@ mod kunits {
         );
 
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new([client.name.clone(), peer.name.clone()]);
+        let connection = UnixConnection::new(
+            UnixProfile::Stream,
+            [client.name.clone(), peer.name.clone()],
+        );
         peer.install_connection(connection.clone(), EndpointSide::Second);
         let routes =
             client.commit_connection(connection, EndpointSide::First, Arc::new(Vec::new()));
@@ -1159,8 +1342,8 @@ mod kunits {
             Ok(1)
         );
         assert_eq!(observer.notifications(), 2);
-        final_release_unix_stream(&peer_private);
-        final_release_unix_stream(&prepared.private);
+        final_release_unix_endpoint(&peer_private);
+        final_release_unix_endpoint(&prepared.private);
     }
 
     #[kunit]
@@ -1202,7 +1385,7 @@ mod kunits {
             .unwrap(),
             PollRegisterResult::Ready(PollEvent::READABLE)
         );
-        final_release_unix_stream(&prepared.private);
+        final_release_unix_endpoint(&prepared.private);
     }
 
     #[kunit]
@@ -1288,7 +1471,10 @@ mod kunits {
     fn retired_endpoint_poll_does_not_publish_route() {
         let pair = prepare_unix_pair().unwrap();
         let (connection, _) = endpoint(&pair.first_private).core.connected().unwrap();
-        final_release_unix_stream(&pair.first_private);
+        let UnixConnection::Stream(connection) = connection else {
+            panic!("stream KUnit pair returned a non-stream connection");
+        };
+        final_release_unix_endpoint(&pair.first_private);
         let observer = Arc::new(CountingObserver(AtomicUsize::new(0)));
         let poll_route = route(&observer);
 
@@ -1311,6 +1497,9 @@ mod kunits {
     fn dropping_unpublished_pair_aborts_both_endpoints() {
         let pair = prepare_unix_pair().unwrap();
         let (strong, _) = endpoint(&pair.first_private).core.connected().unwrap();
+        let UnixConnection::Stream(strong) = strong else {
+            panic!("stream KUnit pair returned a non-stream connection");
+        };
         let connection = Arc::downgrade(&strong);
         assert!(connection.upgrade().is_some());
         drop(strong);

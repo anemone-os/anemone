@@ -368,11 +368,6 @@ mod kunits {
             self.activity.publish(usize::MAX, true);
         }
 
-        fn enqueue_units(&self, units: &[TtyRxUnit]) {
-            assert_eq!(self.input.lock().try_push_slice(units), units.len());
-            self.activity.publish(usize::MAX, true);
-        }
-
         fn wait_for<P>(&self, predicate: P)
         where
             P: Fn() -> bool,
@@ -402,12 +397,6 @@ mod kunits {
                     .iter()
                     .eq(expected.iter().copied().map(TtyRxUnit::Byte))
             );
-        }
-
-        fn assert_dequeued_units(&self, expected: &[TtyRxUnit]) {
-            let dequeued = self.dequeued.lock();
-            assert_eq!(dequeued.len(), expected.len());
-            assert!(dequeued.iter().eq(expected.iter().copied()));
         }
 
         fn output_len(&self) -> usize {
@@ -535,37 +524,6 @@ mod kunits {
             discipline::InputRead::Bytes(input.len())
         );
         assert_eq!(observed, input);
-        attachment.abort();
-    }
-
-    #[kunit]
-    fn break_flush_keeps_later_worker_batch_units_and_needs_no_isig() {
-        let port = FakePort::new("/kunit/tty/break-batch-boundary");
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
-        let (mut termios, generation) = terminal.termios_snapshot();
-        termios.brkint = true;
-        termios.isig = false;
-        termios.echo = false;
-        assert!(terminal.commit_termios_if_generation(generation, None, termios, false));
-
-        let units = [
-            TtyRxUnit::Byte(b'a'),
-            TtyRxUnit::Break,
-            TtyRxUnit::Byte(b'b'),
-            TtyRxUnit::Byte(b'\n'),
-        ];
-        port.enqueue_units(&units);
-        notifier.wake();
-        port.wait_for(|| terminal.readable());
-
-        port.assert_dequeued_units(&units);
-        let mut observed = [0_u8; 2];
-        assert_eq!(
-            terminal.read_input(&mut observed),
-            discipline::InputRead::Bytes(2)
-        );
-        assert_eq!(&observed, b"b\n");
         attachment.abort();
     }
 

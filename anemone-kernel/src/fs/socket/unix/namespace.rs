@@ -5,7 +5,7 @@ use crate::{
     prelude::*,
 };
 
-use super::endpoint::{StreamAdmission, UnixEndpointCore};
+use super::endpoint::{ConnectionAdmission, UnixEndpointCore, UnixProfile};
 
 #[derive(Debug)]
 struct BindingRecord {
@@ -101,17 +101,36 @@ pub(super) struct LiveBinding {
 }
 
 impl LiveBinding {
-    /// Narrow connection-admission capability for the only current Unix
-    /// connection profile. The namespace keeps inode identity and generation
-    /// attached to the capability so admission cannot validate a stale
-    /// pathname binding by endpoint pointer alone.
-    pub(super) fn stream_admission(&self) -> Option<StreamAdmission> {
-        Some(StreamAdmission::new(
-            self.endpoint.upgrade()?,
+    #[cfg(feature = "kunit")]
+    pub(super) fn stream_admission(&self) -> Option<ConnectionAdmission> {
+        self.admission(UnixProfile::Stream).ok()
+    }
+
+    pub(super) fn admission(
+        &self,
+        profile: UnixProfile,
+    ) -> Result<ConnectionAdmission, BindingAdmissionError> {
+        let endpoint = self
+            .endpoint
+            .upgrade()
+            .ok_or(BindingAdmissionError::Expired)?;
+        if endpoint.profile != profile {
+            return Err(BindingAdmissionError::TypeMismatch);
+        }
+        // The profile remains an immutable endpoint-owned fact. The narrow
+        // capability carries only identity needed to revalidate this attempt.
+        Ok(ConnectionAdmission::new(
+            endpoint,
             self.inode.clone(),
             self.generation,
         ))
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum BindingAdmissionError {
+    Expired,
+    TypeMismatch,
 }
 
 pub(super) fn publish_binding(
@@ -226,5 +245,26 @@ mod kunits {
             }],
         );
         assert!(registry.lookup(&second).is_none());
+    }
+
+    #[kunit]
+    fn admission_rejects_cross_profile_before_exposing_listener_capability() {
+        let endpoint = UnixEndpointCore::new_seqpacket();
+        let (_file, inode) = socket_inode();
+        let mut registry = BindingRegistry::new();
+        registry.insert(inode.clone(), &endpoint);
+        let live = registry.lookup(&inode).unwrap();
+
+        assert!(matches!(
+            live.admission(UnixProfile::Stream),
+            Err(BindingAdmissionError::TypeMismatch)
+        ));
+        assert!(live.admission(UnixProfile::Seqpacket).is_ok());
+
+        drop(endpoint);
+        assert!(matches!(
+            live.admission(UnixProfile::Seqpacket),
+            Err(BindingAdmissionError::Expired)
+        ));
     }
 }

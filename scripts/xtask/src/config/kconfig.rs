@@ -63,6 +63,9 @@ pub struct Parameters {
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
     pub unix_listener_max_backlog: Option<usize>,
+    pub unix_seqpacket_max_payload_bytes: Option<usize>,
+    pub unix_seqpacket_direction_capacity_bytes: Option<usize>,
+    pub unix_seqpacket_direction_max_records: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
     pub system_hz: Option<u16>,
     pub sched_default_policy: Option<SchedDefaultPolicy>,
@@ -162,6 +165,9 @@ impl Parameters {
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
         materialize!(unix_listener_max_backlog);
+        materialize!(unix_seqpacket_max_payload_bytes);
+        materialize!(unix_seqpacket_direction_capacity_bytes);
+        materialize!(unix_seqpacket_direction_max_records);
         materialize!(tid_alloc_policy);
         materialize!(system_hz);
         materialize!(sched_default_policy);
@@ -290,8 +296,14 @@ pub const PIPE_CAPACITY_PAGES: usize = {};
 pub const PIPE_MAX_CAPACITY_PAGES: usize = {};
 /// Fixed byte capacity of each AF_UNIX stream direction.
 pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
-/// Maximum normalized listen backlog for AF_UNIX stream listeners.
+/// Maximum normalized listen backlog for AF_UNIX connection-oriented listeners.
 pub const UNIX_LISTENER_MAX_BACKLOG: usize = {};
+/// Maximum payload bytes in one AF_UNIX seqpacket record.
+pub const UNIX_SEQPACKET_MAX_PAYLOAD_BYTES: usize = {};
+/// Fixed byte capacity of each AF_UNIX seqpacket direction.
+pub const UNIX_SEQPACKET_DIRECTION_CAPACITY_BYTES: usize = {};
+/// Maximum committed records in each AF_UNIX seqpacket direction.
+pub const UNIX_SEQPACKET_DIRECTION_MAX_RECORDS: usize = {};
 /// Allocation policy for ordinary task IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TidAllocPolicy {{
@@ -449,6 +461,9 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
             resolved!(unix_listener_max_backlog),
+            resolved!(unix_seqpacket_max_payload_bytes),
+            resolved!(unix_seqpacket_direction_capacity_bytes),
+            resolved!(unix_seqpacket_direction_max_records),
             resolved!(tid_alloc_policy).kernel_variant(),
             resolved!(system_hz),
             resolved!(sched_default_policy).kernel_variant(),

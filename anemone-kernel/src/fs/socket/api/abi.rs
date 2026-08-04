@@ -116,7 +116,7 @@ pub(super) fn read_socket_address(
 ) -> Result<SocketAddress, SysError> {
     match socket_type {
         SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw => read_sockaddr_in(addr, len),
-        SocketType::UnixStream => read_sockaddr_un(addr, len),
+        SocketType::UnixStream | SocketType::UnixSeqpacket => read_sockaddr_un(addr, len),
     }
 }
 
@@ -199,8 +199,13 @@ fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>)
             bytes[4..8].copy_from_slice(&address.octets());
             bytes
         },
-        (SocketType::UnixStream, None) => (AF_UNIX as u16).to_ne_bytes().to_vec(),
-        (SocketType::UnixStream, Some(SocketAddress::UnixPathname(pathname))) => {
+        (SocketType::UnixStream | SocketType::UnixSeqpacket, None) => {
+            (AF_UNIX as u16).to_ne_bytes().to_vec()
+        },
+        (
+            SocketType::UnixStream | SocketType::UnixSeqpacket,
+            Some(SocketAddress::UnixPathname(pathname)),
+        ) => {
             let mut bytes = Vec::with_capacity(SOCKADDR_UN_PATH_OFFSET + pathname.len() + 1);
             bytes.extend_from_slice(&(AF_UNIX as u16).to_ne_bytes());
             bytes.extend_from_slice(pathname.as_bytes());
@@ -276,7 +281,7 @@ pub(super) fn validate_send_message_flags(
 ) -> Result<SendMessageFlags, SysError> {
     let supported = match socket_type {
         SocketType::Ipv4Udp => MSG_DONTWAIT,
-        SocketType::UnixStream => MSG_DONTWAIT | MSG_NOSIGNAL,
+        SocketType::UnixStream | SocketType::UnixSeqpacket => MSG_DONTWAIT | MSG_NOSIGNAL,
         SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_NOSIGNAL,
     };
     if flags & !supported != 0 {
@@ -312,6 +317,7 @@ pub(super) fn validate_receive_message_flags(
     let supported = match socket_type {
         SocketType::Ipv4Udp => MSG_DONTWAIT,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_PEEK,
+        SocketType::UnixSeqpacket => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
         SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
     };
     if flags & !supported != 0 {

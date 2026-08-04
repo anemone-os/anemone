@@ -283,6 +283,7 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     peer_address: None,
     accepting: udp_is_accepting,
     send: Some(send_udp_socket),
+    send_wait: None,
     receive: Some(receive_udp_socket),
     query_option: None,
     mutate_option: None,

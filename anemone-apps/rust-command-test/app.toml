@@ -1,0 +1,9 @@
+name = "rust-command-test"
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/rust-command-test"

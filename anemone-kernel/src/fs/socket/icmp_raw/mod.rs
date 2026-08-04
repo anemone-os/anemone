@@ -519,6 +519,7 @@ pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     peer_address: Some(query_peer_address),
     accepting: raw_is_accepting,
     send: Some(send_icmp_raw_socket),
+    send_wait: None,
     receive: Some(receive_icmp_raw_socket),
     query_option: Some(query_icmp_raw_option),
     mutate_option: Some(mutate_icmp_raw_option),
@@ -721,6 +722,7 @@ mod kunits {
                 "ICMP raw KUnit snapshot retry",
                 &task,
                 &file,
+                None,
                 false,
                 false,
                 || {

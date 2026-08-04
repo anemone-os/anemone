@@ -2,38 +2,39 @@
 
 **Contract IDs：** `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`
 **状态：** Active
-**Owner：** Unix endpoint role/association、listener/backlog、connection directional stream与immutable address snapshot各自拥有对应state；本页拥有它们之间的handoff协议
+**Owner：** Unix endpoint role/profile/association、listener/backlog、connection-specific directional data plane与immutable address snapshot各自拥有对应state；本页拥有它们之间的handoff协议
 **参与领域：** Unix IPC / Socket front / VFS namespace / opened description / iomux / epoll
-**覆盖范围：** socketpair与pathname stream的role、listen/connect/accept、byte stream、shutdown/EOF/readiness、address snapshot及final-release lifecycle
-**不覆盖：** Unix datagram/seqpacket/abstract namespace、credentials/fd passing、ancillary data、autobind、pre-connection shutdown persistence、pending error/`SO_ERROR`
-**实现位置：** `anemone-kernel/src/fs/socket/unix/{admission.rs,endpoint/}`、`anemone-kernel/src/fs/socket/unix/endpoint/stream.rs`、`anemone-kernel/src/fs/socket/api/`
+**覆盖范围：** socketpair与pathname stream/seqpacket共享的role、listen/connect/accept、address snapshot与final-release lifecycle，以及stream byte data plane、shutdown/EOF/readiness
+**不覆盖：** Unix datagram/abstract namespace、credentials/fd passing、ancillary data、autobind、pre-connection shutdown persistence、pending error/`SO_ERROR`；seqpacket record transaction见`UNIX-SOCKET-SEQPACKET-001`
+**实现位置：** `anemone-kernel/src/fs/socket/unix/{admission.rs,endpoint/,namespace.rs}`、`anemone-kernel/src/fs/socket/unix/endpoint/{stream.rs,record.rs}`、`anemone-kernel/src/fs/socket/api/`
 **依赖：** `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`SOCKET-WAIT-001`、`UNIX-SOCKET-NAMESPACE-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-02
+**最后核验：** 2026-08-04
 
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
-| endpoint role与active association | `UnixEndpointCore` | operation取得role-scoped capability/snapshot | bind/listen/connect/accept dispatch与retirement |
+| endpoint role、immutable profile与active association | `UnixEndpointCore` | operation取得role-scoped capability/snapshot；namespace取得窄的profile-compatible admission | bind/listen/connect/accept dispatch与retirement |
 | backlog、queued accepted child与connect/accept predicate | `UnixListener` | endpoint持listener association；waiter持non-owning route | admission、capacity与listener close |
-| peer relation与两条direction | `UnixConnection` | endpoint只持side | connected stream routing |
+| peer relation与两条typed direction | 对应stream或seqpacket connection | endpoint只持typed connection与side | connected operation routing |
 | bytes、capacity、writer/reader terminal与routes | 对应directional stream | send/receive/poll取得operation-local access | prefix commit、EOF、RDHUP/HUP与wake |
+| records、byte/count capacity、terminal与routes | 对应seqpacket record direction | send/receive/poll取得operation-local access | record commit/consume、EOF、RDHUP/HUP与wake |
 | Linux-visible local/peer pathname | endpoint的immutable address snapshot | namespace只拥有live inode-to-binding association | name query与close/unlink后的visibility |
 
 ## UNIX-SOCKET-STATE-001 — Role、listener与direction各有唯一truth
 
-**规则：** endpoint唯一拥有当前unconnected/bound/listening/connected/retired role与对应association。listener唯一拥有backlog、pending accepted child queue及connect/accept capacity；connection唯一配对两个endpoint side；每条direction唯一拥有bytes、capacity与writer/reader terminal facts。endpoint不得复制listener count、direction terminal或ready mask。
+**规则：** endpoint唯一拥有当前unconnected/bound/listening/connected/retired role、immutable connection profile与对应association。profile只决定Unix owner内的pathname admission和stream/seqpacket connection construction；general Socket的immutable descriptor仍是front/UAPI semantic type的唯一witness。listener唯一拥有backlog、pending accepted child queue及connect/accept capacity；对应connection唯一配对两个endpoint side；每条stream或seqpacket direction唯一拥有自己的payload、capacity与writer/reader terminal facts。endpoint不得复制listener count、direction terminal或ready mask。
 
-role transition在旧owner撤销publication后才把能力交给新owner；pre-listen与pre-connect route随handoff迁移到listener或connection predicate。route只携带recheck capability，不反向驱动role、admission或stream state。
+role transition在旧owner撤销publication后才把能力交给新owner；pre-listen与pre-connect route随handoff迁移到listener或connection predicate。route只携带recheck capability，不反向驱动role、admission或data-plane state。
 
-**违反表现：** endpoint和direction双写shutdown/terminal；两份backlog count或admission queue；role tag与optional state可形成不一致组合；notification carrier成为behavior truth；retired endpoint仍发布route或接受operation。
+**违反表现：** endpoint和direction双写shutdown/terminal；stream与seqpacket共用一份可切换queue；profile成为front query的第二份type truth；两份backlog count或admission queue；role tag与optional state可形成不一致组合；notification carrier成为behavior truth；retired endpoint仍发布route或接受operation。
 
 **验证 / Enforcement：** role transition、backlog resize/close、admission、route handoff、direction combination与retirement KUnit；source/lock-order audit；两架构listen/connect/accept/readiness runtime。
 
 **最初来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)。
 
-**当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`与Git/PR closure evidence。
+**当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`建立baseline；[Unix seqpacket小迭代](../../devlog/changes/2026-08-04-unix-seqpacket.md)的`SOCKET-UNIX-SEQPACKET-CUTOVER`加入immutable Unix profile及分离的typed connection/direction ownership。
 
 ## UNIX-SOCKET-STREAM-001 — Direction owner提交stream与shutdown结果
 
@@ -69,7 +70,7 @@ connected unnamed Socket允许在首版范围内随后pathname bind一次；acce
 
 ## UNIX-SOCKET-LIFECYCLE-001 — Publication、handoff与retirement只有一个cleanup owner
 
-**规则：** socketpair先保留两个fd slot；fd-pair copyout后再准备两端unpublished state，任一pre-publication failure撤销reservation及已准备state；两次infallible commit后不再返回失败。connect只在listener capacity、current binding/DAC和client role recheck后把paired child交给listener queue；accept先detach一个child，再完成accepted fd preparation/copyout/publication，失败由当前transaction清理且不重复入队。
+**规则：** stream或seqpacket socketpair先保留两个fd slot；fd-pair copyout后再准备两端unpublished state，任一pre-publication failure撤销reservation及已准备state；两次infallible commit后不再返回失败。connect只在profile-compatible binding、listener capacity、current binding/DAC和client role recheck后把paired child交给listener queue；accept先detach一个child，再完成accepted fd preparation/copyout/publication，失败由当前transaction清理且不重复入队。
 
 semantic final release先撤销endpoint operation/route/binding publication，再由listener或connection/direction owner提交queued-child withdrawal、EOF/write failure和route snapshot，最后在guard外notify/drop。关闭非最后alias不推进这些事实。unlink只撤销VFS link，live binding与既有connection可继续；binding retirement按exact inode identity和generation撤销，旧registration或late route不得命中新generation。
 
@@ -81,10 +82,10 @@ listener close撤销新admission并drain未接受child；unpublished preparation
 
 **最初来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)。
 
-**当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`与Git/PR closure evidence。
+**当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`建立baseline；[Unix seqpacket小迭代](../../devlog/changes/2026-08-04-unix-seqpacket.md)的`SOCKET-UNIX-SEQPACKET-CUTOVER`把同一publication/retirement协议扩展到seqpacket connection与record direction。
 
 ## 当前接受边界
 
-- 当前成功面是pathname `AF_UNIX + SOCK_STREAM`及connected unnamed socketpair；abstract namespace、autobind、datagram/seqpacket、credentials/fd passing与ancillary data均不由本页推出。
+- 当前成功面包括pathname `AF_UNIX + SOCK_STREAM/SOCK_SEQPACKET`及对应connected unnamed socketpair；abstract namespace、autobind、datagram、credentials/fd passing与ancillary data均不由本页推出。seqpacket data-plane细节由`UNIX-SOCKET-SEQPACKET-001`拥有。
 - non-UTF-8 pathname、retired bind留下inert inode及pre-connection shutdown差异由register记录；VFS common-create publication问题仍由VFS owner拥有。
-- closure evidence覆盖RV64/LA64真实guest和focused libc/owner proof。physical hardware、`smp>1`、full socket/network LTP与final harness Not Run。
+- closure evidence覆盖RV64/LA64真实guest、focused libc/owner proof与RV64 `smp=4` focused runtime。physical hardware、LA64 `smp>1`、其它SMP拓扑、full socket/network LTP与final harness Not Run。

@@ -47,7 +47,10 @@ fn sys_sendto(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
-    if socket.socket_type() == SocketType::UnixStream {
+    if matches!(
+        socket.socket_type(),
+        SocketType::UnixStream | SocketType::UnixSeqpacket
+    ) {
         let destination = if addr == 0 || addrlen == 0 {
             SocketStreamDestination::Absent
         } else {
@@ -62,17 +65,30 @@ fn sys_sendto(
         let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
         let uspace = task.clone_uspace_handle();
         let mut source = UserBufferSource::new(&uspace, segments);
+        let operation_wait = (socket.socket_type() == SocketType::UnixSeqpacket).then(|| {
+            socket
+                .send_wait(source.remaining())
+                .expect("seqpacket descriptor omitted its payload-specific send wait")
+        });
 
         return retry_socket_send(
             "sys_sendto",
             &task,
             desc.vfs_file(),
+            operation_wait.as_ref(),
             nonblocking,
             !message_flags.no_signal,
             || {
-                socket.send(SocketSendRequest::Stream {
-                    source: &mut source,
-                    destination,
+                socket.send(match socket.socket_type() {
+                    SocketType::UnixStream => SocketSendRequest::Stream {
+                        source: &mut source,
+                        destination,
+                    },
+                    SocketType::UnixSeqpacket => SocketSendRequest::Seqpacket {
+                        source: &mut source,
+                        destination,
+                    },
+                    _ => unreachable!("Unix send branch selected a non-Unix socket"),
                 })
             },
             map_send_error,
@@ -98,6 +114,7 @@ fn sys_sendto(
         "sys_sendto",
         &task,
         desc.vfs_file(),
+        None,
         nonblocking,
         false,
         || {

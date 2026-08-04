@@ -11,11 +11,14 @@ use super::{
         SocketWait,
     },
     endpoint::{
-        BindingPublication, EndpointAssociation, EndpointSide, StreamAdmission, UnixConnection,
+        BindingPublication, ConnectionAdmission, EndpointAssociation, EndpointSide, UnixConnection,
         UnixEndpointCore, UnixPollRoute, private_from_core, replacement_poll_routes,
     },
-    namespace::resolve_live_binding,
+    namespace::{BindingAdmissionError, resolve_live_binding},
 };
+
+#[cfg(feature = "kunit")]
+use super::endpoint::UnixProfile;
 
 static_assert!(
     UNIX_LISTENER_MAX_BACKLOG < usize::MAX,
@@ -157,7 +160,7 @@ pub(super) struct ListenerClose {
 #[derive(Debug, Opaque)]
 struct ConnectWaitSource {
     client: Arc<UnixEndpointCore>,
-    listener_admission: StreamAdmission,
+    listener_admission: ConnectionAdmission,
     listener: Arc<UnixListener>,
 }
 
@@ -406,13 +409,18 @@ pub(super) fn connect(
         error => SocketConnectError::Operation(error),
     })?;
     let admission = binding
-        .stream_admission()
-        .ok_or(SocketConnectError::ConnectionRefused)?;
+        .admission(client.profile)
+        .map_err(|error| match error {
+            BindingAdmissionError::Expired => SocketConnectError::ConnectionRefused,
+            BindingAdmissionError::TypeMismatch => SocketConnectError::ProtocolTypeMismatch,
+        })?;
 
     // Prepare every object before the commit gate. The accepted endpoint
     // shares only the listener's immutable name capability, never registration.
-    let accepted = UnixEndpointCore::new_with_name(admission.local_name());
-    let connection = UnixConnection::new([client.name.clone(), accepted.name.clone()]);
+    let accepted =
+        UnixEndpointCore::new_with_profile_and_name(client.profile, admission.local_name());
+    let connection =
+        UnixConnection::new(client.profile, [client.name.clone(), accepted.name.clone()]);
     let empty_client_routes = Arc::new(Vec::new());
 
     let result = with_admission_commit(|| {
@@ -556,7 +564,7 @@ mod kunits {
         endpoint
     }
 
-    fn stream_admission(endpoint: &Arc<UnixEndpointCore>) -> StreamAdmission {
+    fn stream_admission(endpoint: &Arc<UnixEndpointCore>) -> ConnectionAdmission {
         let (file, creation) = prepare_socket(&UNIX_STREAM_SOCKET_OPS).unwrap();
         creation.commit();
         let inode = file.inode().clone();
@@ -567,7 +575,7 @@ mod kunits {
 
     fn register_connect_wait(
         client: &Arc<UnixEndpointCore>,
-        listener_admission: &StreamAdmission,
+        listener_admission: &ConnectionAdmission,
         listener: &Arc<UnixListener>,
         route: &PollRoute,
     ) -> (AnyOpaque, PollRegisterResult) {
@@ -696,7 +704,10 @@ mod kunits {
         );
 
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new([client.name.clone(), peer.name.clone()]);
+        let connection = UnixConnection::new(
+            UnixProfile::Stream,
+            [client.name.clone(), peer.name.clone()],
+        );
         let routes =
             client.commit_connection(connection, EndpointSide::First, Arc::new(Vec::new()));
         notify_admission_routes(&routes, "KUnit client connection commit");
@@ -858,7 +869,10 @@ mod kunits {
         let listener_admission = stream_admission(&listener_endpoint);
         let client = UnixEndpointCore::new_unconnected();
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new([client.name.clone(), peer.name.clone()]);
+        let connection = UnixConnection::new(
+            UnixProfile::Stream,
+            [client.name.clone(), peer.name.clone()],
+        );
         client.commit_connection(connection, EndpointSide::First, Arc::new(Vec::new()));
         let connect_observer = Arc::new(CountingObserver::default());
         let connect_route = route(&connect_observer);

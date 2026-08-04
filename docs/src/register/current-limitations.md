@@ -2,6 +2,31 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260804-UNIX-SEQPACKET-EDGE-ABI
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / seqpacket / zero-length record / receive copy fault
+
+**Summary:** 当前`AF_UNIX + SOCK_SEQPACKET`不发布可与EOF区分的zero-length record：zero-length
+send/write成功返回0但不入队，zero-length receive成功返回0且不观察或消费已有head record。receive在payload
+prefix copyout发生`EFAULT`时保留head record及其byte/count capacity，调用者修正buffer后可以重试同一record。
+
+Linux 6.6.32 host characterization表明：zero-length send会发布readable record，zero-length receive会消费head，
+payload copyout `EFAULT`也会消费该record。因此当前Anemone在这些edge ABI上与Linux不同。普通非空record、short
+receive、`MSG_PEEK`、`MSG_TRUNC`、shutdown/EOF及Rust `std::process::Command` error channel不依赖这些差异。
+
+**Exit Condition:** follow-up工作在不把EOF与empty record混为一谈的前提下，为zero-length record建立明确表示、
+capacity/readiness/peek/truncation规则，并决定及验证copy-fault consume语义；随后用owner-local transaction proof、
+Linux/Anemone focused characterization和双架构guest回归更新`UNIX-SOCKET-SEQPACKET-001`。不能只在syscall adapter
+伪造readability或对fault执行出队后再插回。
+
+**Owner:** Unix seqpacket record direction / Socket receive ABI adapter
+**Last Verified:** 2026-08-04
+**Related:** [Unix seqpacket当前契约](../contracts/socket/unix-seqpacket.md),
+[Unix seqpacket小迭代](../devlog/changes/2026-08-04-unix-seqpacket.md)
+
 ## ANE-20260802-UNIX-PRECONNECTION-SHUTDOWN
 
 **Type:** Limitation

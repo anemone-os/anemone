@@ -109,7 +109,7 @@ impl ConnectionState {
 }
 
 #[derive(Debug)]
-pub(in crate::fs::socket::unix) struct UnixConnection {
+pub(in crate::fs::socket::unix) struct UnixStreamConnection {
     /// One lock linearizes endpoint retirement, both directional facts, and
     /// route publication. The two direction entries remain the unique owners
     /// of their byte and terminal facts; this lock is not another truth source.
@@ -124,7 +124,7 @@ pub(in crate::fs::socket::unix) struct UnixConnection {
     pub(super) names: [Arc<EndpointName>; 2],
 }
 
-impl UnixConnection {
+impl UnixStreamConnection {
     pub(in crate::fs::socket::unix) fn new(names: [Arc<EndpointName>; 2]) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(ConnectionState::new()),
@@ -165,12 +165,12 @@ fn notify_routes(
 
 fn validate_connection(
     state: &EndpointState,
-    connection: &Arc<UnixConnection>,
+    connection: &Arc<UnixStreamConnection>,
     side: EndpointSide,
 ) -> Result<(), EndpointAccessError> {
     match &state.association {
         EndpointAssociation::Connected {
-            connection: current,
+            connection: super::UnixConnection::Stream(current),
             side: current_side,
         } if Arc::ptr_eq(current, connection) && *current_side == side => Ok(()),
         EndpointAssociation::Unconnected => Err(EndpointAccessError::Unconnected),
@@ -193,7 +193,7 @@ pub(super) fn receive_unix_stream(
         return Ok(SocketReceiveOutcome::byte_stream(0));
     }
     let endpoint = &endpoint(private).core;
-    let (connection, side) = endpoint.connected().map_err(|error| match error {
+    let (connection, side) = endpoint.connected_stream().map_err(|error| match error {
         EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
             SocketReceiveError::InvalidState
         },
@@ -301,7 +301,7 @@ pub(super) fn send_unix_stream(
             Err(EndpointAccessError::Retired) => Err(SocketSendError::Retired),
         };
     }
-    let (connection, side) = endpoint.connected().map_err(|error| match error {
+    let (connection, side) = endpoint.connected_stream().map_err(|error| match error {
         EndpointAccessError::Unconnected => SocketSendError::NotConnected,
         EndpointAccessError::InvalidState => SocketSendError::InvalidState,
         EndpointAccessError::Retired => SocketSendError::Retired,
@@ -374,7 +374,7 @@ pub(super) fn shutdown_unix_stream(
     how: SocketShutdown,
 ) -> Result<(), SocketShutdownError> {
     let endpoint = &endpoint(private).core;
-    let (connection, side) = endpoint.connected().map_err(|error| match error {
+    let (connection, side) = endpoint.connected_stream().map_err(|error| match error {
         EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
             SocketShutdownError::NotConnected
         },
@@ -427,7 +427,7 @@ pub(super) fn poll_connected_unix_stream(
     request: &PollRequest<'_>,
 ) -> Result<PollRegisterResult, SysError> {
     let endpoint = &endpoint(private).core;
-    let (connection, side) = match endpoint.connected() {
+    let (connection, side) = match endpoint.connected_stream() {
         Ok(association) => association,
         Err(EndpointAccessError::Unconnected | EndpointAccessError::InvalidState) => {
             return Ok(PollRegisterResult::Unsupported);
@@ -474,7 +474,10 @@ pub(super) fn poll_connected_unix_stream(
     }
 }
 
-pub(super) fn retire_connection_endpoint(connection: &Arc<UnixConnection>, side: EndpointSide) {
+pub(super) fn retire_connection_endpoint(
+    connection: &Arc<UnixStreamConnection>,
+    side: EndpointSide,
+) {
     let index = side.index();
     let peer_index = side.peer().index();
     let empty_routes = Arc::new(Vec::new());

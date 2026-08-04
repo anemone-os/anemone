@@ -2,11 +2,14 @@
 
 use anemone_abi::net::linux::{
     AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
-    SOCK_STREAM,
+    SOCK_SEQPACKET, SOCK_STREAM,
 };
 
 use crate::{
-    fs::socket::{ICMP_RAW_SOCKET_OPS, SocketOps, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS},
+    fs::socket::{
+        ICMP_RAW_SOCKET_OPS, SocketOps, UDP_SOCKET_OPS, UNIX_SEQPACKET_SOCKET_OPS,
+        UNIX_STREAM_SOCKET_OPS,
+    },
     prelude::*,
     task::{
         credentials::cap::Capability,
@@ -45,6 +48,8 @@ pub(super) fn resolve_socket(
         (AF_INET, _) => return Err(SysError::SocketTypeNotSupported),
         (AF_UNIX, SOCK_STREAM) if protocol == 0 => (&UNIX_STREAM_SOCKET_OPS, None),
         (AF_UNIX, SOCK_STREAM) => return Err(SysError::ProtocolNotSupported),
+        (AF_UNIX, SOCK_SEQPACKET) if protocol == 0 => (&UNIX_SEQPACKET_SOCKET_OPS, None),
+        (AF_UNIX, SOCK_SEQPACKET) => return Err(SysError::ProtocolNotSupported),
         (AF_UNIX, _) => return Err(SysError::SocketTypeNotSupported),
         _ => return Err(SysError::AddressFamilyNotSupported),
     };

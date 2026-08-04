@@ -120,6 +120,10 @@ impl SocketReadSink for UserBufferSink<'_> {
     fn copy_bytes(&mut self, bytes: &[u8]) -> Result<usize, SysError> {
         self.write_from_slice(bytes)
     }
+
+    fn copy_exact(&mut self, bytes: &[u8]) -> Result<(), SysError> {
+        self.exact_record().write_exact(bytes)
+    }
 }
 
 pub(super) struct SliceWriteSource<'a> {
@@ -229,6 +233,19 @@ fn socket_read_with_ctx(
                 map_file_receive_error,
             )?
         },
+        SocketFileIo::Seqpacket => retry_socket_receive(
+            "socket read",
+            &task,
+            file,
+            nonblocking,
+            || {
+                socket.receive(SocketReceiveRequest::Seqpacket {
+                    sink,
+                    flags: SocketReceiveFlags { peek: false },
+                })
+            },
+            map_file_receive_error,
+        )?,
     };
     Ok(outcome.copied())
 }
@@ -258,6 +275,7 @@ fn socket_write_with_ctx(
             "socket write",
             &task,
             file,
+            None,
             nonblocking,
             true,
             || {
@@ -278,6 +296,7 @@ fn socket_write_with_ctx(
                 "socket write",
                 &task,
                 file,
+                None,
                 nonblocking,
                 false,
                 || {
@@ -285,6 +304,26 @@ fn socket_write_with_ctx(
                         destination: None,
                         payload: &mut payload,
                         operation: &mut operation,
+                    })
+                },
+                map_file_send_error,
+            )
+        },
+        SocketFileIo::Seqpacket => {
+            let operation_wait = socket
+                .send_wait(source.remaining())
+                .expect("seqpacket descriptor omitted its payload-specific send wait");
+            retry_socket_send(
+                "socket write",
+                &task,
+                file,
+                Some(&operation_wait),
+                nonblocking,
+                true,
+                || {
+                    socket.send(SocketSendRequest::Seqpacket {
+                        source,
+                        destination: SocketStreamDestination::Absent,
                     })
                 },
                 map_file_send_error,
