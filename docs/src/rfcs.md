@@ -118,10 +118,10 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `smp>1`、full network LTP与final harness保持Not Run。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
 - [RFC-20260804-udp-socket-extension](./rfcs/udp-socket-extension/index.md)：IPv4 UDP connected、
-  file/message/vector I/O、flag边界与Endpoint owner/lifecycle target；R1已接受，Stage 1已关闭、Cutover None，
-  Stage 2已解析为两个checkpoint并保持Ready / Not Active。mandatory userspace proof由两架构当前musl工具链
-  构建的repository-owned C consumer承担；未修改musl resolver必须尝试但按version compatibility条件性验收，
-  current contract未改变。
+  file/message/vector I/O、flag边界与Endpoint owner/lifecycle；R1与Stage 1/2均已关闭，
+  `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
+  未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
+  Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入

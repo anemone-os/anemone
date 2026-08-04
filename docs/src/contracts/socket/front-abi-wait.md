@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/fs/socket/{front,api,udp,icmp_raw,unix}/`、`anemone-abi/src/net.rs`、`anemone-rs/src/{os,sys}/linux/net.rs`
 **依赖：** `OPENED-DESC-001..003`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`、`NET-SOCKET-WAIT-001`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-03
+**最后核验：** 2026-08-04
 
 ## 状态与能力所有权
 
@@ -39,9 +39,25 @@ descriptor只表达UDP、ICMP raw或Unix至少一个真实consumer当前需要�
 
 ## SOCKET-ABI-001 — Linux ABI止于family-neutral adapter
 
-**规则：** raw family/type/protocol tuple、creation/per-call flags、sockaddr/addrlen、user pointer与Linux errno止于Socket ABI adapter。resolver选择已关联semantic type的static descriptor；family ops只接收normalized address/request/cursor并返回typed success、not-ready或rejection。共同copy cursor和family commit只报告、消费或提交已成功复制的prefix。
+**规则：** raw family/type/protocol tuple、creation/per-call flags、sockaddr/addrlen、file/vector/message header、user pointer与Linux errno止于Socket ABI adapter。resolver选择已关联semantic type的static descriptor；family ops只接收normalized address/request/cursor并返回typed success、not-ready或rejection。共同copy cursor和family commit只报告、消费或提交已成功复制的prefix。
+
+UDP adapter接受IPv4 connect/reconnect、`AF_UNSPEC` disconnect与peer query，并让connected scalar/file/vector I/O和
+`sendmsg/recvmsg`复用同一typed datagram operation。explicit message name优先于Endpoint current peer；两者都不存在
+返回`EDESTADDRREQ`。message iovec与ordinary `readv/writev`共同读取kernel I/O `max_iovec_count`，R1 acceptance
+configuration为1024且不高于公开`IOV_MAX`；UDP family不保存第二份limit。超限、range/total overflow与payload fault在
+datagram commit前完成验证。
 
 `SOCK_NONBLOCK`进入shared opened-description status，`SOCK_CLOEXEC`进入fd-local flags。descriptor直接回答`SO_DOMAIN`、`SO_TYPE`、`SO_PROTOCOL`，family role回答`SO_ACCEPTCONN`。ICMP raw额外支持`IP_TTL`、`IP_TOS`与`ICMP_FILTER`的Linux optlen/value/copy policy；common adapter只分发normalized mutation/query，不建立mutable option bag。`SO_ERROR`和其它未支持option返回`ENOPROTOOPT`，不得以恒零值或pending-error bag冒充支持。
+
+UDP send flags支持`MSG_DONTWAIT | MSG_NOSIGNAL`，receive支持`MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC`；
+`MSG_NOSIGNAL`在没有SIGPIPE producer时是带诊断和退出条件的compatibility no-op，其它flag稳定返回
+`EOPNOTSUPP`。nonzero send control length返回`EOPNOTSUPP`且不提交payload；receive没有ancillary producer时不读取
+control buffer并输出`msg_controllen = 0`。`msghdr.msg_flags`不作为send input flag；short receive输出
+`MSG_TRUNC`，syscall input `MSG_TRUNC`只决定返回full packet length还是copied length。
+
+`recvmsg`先完成payload transaction，再按peer name、`msg_flags`、`msg_controllen`顺序写回header字段；non-peek已经
+detach的datagram在后续name/header fault后不requeue，peek路径不改变queue。raw header和user pointer不得进入family
+state或跨blocking retry保留。
 
 ICMP raw tuple只接受`AF_INET + SOCK_RAW + IPPROTO_ICMP`，并在任何fd reservation、Endpoint或source preparation前检查current task effective `CAP_NET_RAW`。IPv4 raw bind/connect/disconnect/query、`MSG_PEEK`/`MSG_TRUNC`/`MSG_DONTWAIT`/`MSG_NOSIGNAL`、zero/short/fault与datagram consume均止于adapter；`MSG_NOSIGNAL`只在没有`SIGPIPE` producer的raw family作为有诊断的兼容no-op。
 
@@ -49,11 +65,15 @@ Unix pathname输入按首版UTF-8/NUL/length边界归一化；output由immutable
 
 **违反表现：** family ops解析Linux bit或返回Linux errno；raw user pointer越过adapter；descriptor与另存type不一致；copy fault提交未复制bytes；`SO_ERROR`恒零成功或建立无producer的error state。
 
-**验证 / Enforcement：** tuple/permission/flag、IPv4与Unix sockaddr input/output、option/query、zero/short/fault与fd rollback KUnit/focused oracle；glibc/musl curated Socket LTP；两架构guest Socket suite与BusyBox ping。
+**验证 / Enforcement：** tuple/permission/flag、IPv4 connected/unconnected与Unix sockaddr input/output、file/vector/
+message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault与fd rollback KUnit/focused oracle；
+repository-owned C/libc consumer、musl resolver、glibc/musl curated Socket LTP；两架构guest Socket suite与BusyBox ping。
 
 **最初来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)。
 
-**当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`，并由[IPv4 ICMP Raw Socket RFC R0](../../rfcs/icmp-raw-socket/index.md)的`ICMP-RAW-CUTOVER` Refine。
+**当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`，并由[IPv4 ICMP Raw Socket RFC R0](../../rfcs/icmp-raw-socket/index.md)的
+`ICMP-RAW-CUTOVER`和[UDP Socket Extension RFC R1](../../rfcs/udp-socket-extension/index.md)的
+`UDP-EXT-R1-CUTOVER` Refine。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 
@@ -73,5 +93,9 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
 
 ## 当前接受边界
 
-- 当前三个真实consumer是IPv4 unconnected UDP、`AF_INET + SOCK_RAW + IPPROTO_ICMP`与`AF_UNIX + SOCK_STREAM + protocol 0`；本页不外推TCP或通用BSD Socket framework。
-- closure evidence覆盖RV64/LA64 release与guest runtime、raw focused ABI、glibc/musl curated Socket LTP、owner-local proof以及UDP/Unix regression。physical hardware、`smp>1`、full socket/network LTP与final harness Not Run。
+- 当前三个真实consumer是IPv4 connected/unconnected UDP、`AF_INET + SOCK_RAW + IPPROTO_ICMP`与
+  `AF_UNIX + SOCK_STREAM + protocol 0`；message-style success surface当前只发布给IPv4 UDP，本页不外推TCP或通用
+  BSD Socket framework。
+- closure evidence覆盖RV64/LA64 release与guest runtime、UDP C/libc和musl resolver、raw focused ABI、glibc/musl
+  curated Socket LTP、owner-local proof以及UDP/Unix regression。glibc resolver保持Not Supported / Not Cut Over；
+  physical hardware、`smp>1`、full socket/network LTP与final harness Not Run。

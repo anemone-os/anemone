@@ -1,32 +1,28 @@
 # RFC-20260804-udp-socket-extension
 
-**状态：** Accepted for Implementation / Stage 1 Closed / Stage 2 Active / Checkpoint 2A Closed
+**状态：** Closed / `UDP-EXT-R1-CUTOVER` Effective
 **修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-04
 **领域：** network / socket / UDP / userspace ABI
-**影响契约：** R1 target 将 Refine `NET-SOCKET-ENDPOINT-001`、
-`NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`；current contract 未改变
-**执行记录：** Git / PR；Stage 1与Checkpoint 2A已关闭，未创建transaction；Checkpoint 2B与
-contract cutover均未授权
+**影响契约：** `UDP-EXT-R1-CUTOVER`已Refine `NET-SOCKET-ENDPOINT-001`、
+`NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`
+**执行记录：** Git / PR；Stage 1、Stage 2与Checkpoint 2A/2B均已关闭；transaction None
 
 ## 文档状态
 
-本文是 IPv4 UDP Socket 能力扩展的R1 accepted target，也是该提案唯一的canonical target
-source。它固定target、owner、ABI、failure/cleanup、acceptance与validation boundary，但在
-named cutover前不覆盖current contract。
+本文是 IPv4 UDP Socket 能力扩展的R1 closed RFC，也是该提案唯一的canonical target source。
+它固定target、owner、ABI、failure/cleanup、acceptance与validation boundary；
+`UDP-EXT-R1-CUTOVER`已经把三个Contract Impact原子写入current contract。
 
-本文替代此前的私有定位讨论，公共 RFC 是唯一 canonical target source。current
-effective 行为仍以 `docs/src/contracts/`、live source 与 Git/PR evidence 为准；在
-达到 named cutover 前，本文描述的 connected UDP、message ABI 与新 flag 都不是当前事实。
+本文替代此前的私有定位讨论，公共 RFC 是唯一 canonical target source。current effective行为以
+`docs/src/contracts/`、live source与Git/PR evidence为准；connected UDP、message ABI与R1 flag现已成为
+current capability。
 
-本 RFC 已创建[实施路线](./implementation.md)：路线分为两个 Stage，Stage 1 的Endpoint-owned
-connected scalar/file-I/O vertical slice解析为两个有序checkpoint；Checkpoint 1A与1B均已关闭。
-Stage 2的single-message ABI、综合acceptance与最终cutover已经解析为两个有序checkpoint；Checkpoint 2A
-已关闭，Checkpoint 2B仍为Ready / Not Active。R1取消对特定musl版本的验收绑定：两架构必须
-使用各自当前可用工具链构建并尝试未修改resolver；compatibility若越出R1 envelope则如实分类为
-Not Supported / Not Cut Over而不阻塞总体cutover。glibc resolver因强依赖`IP_RECVERR`继续保持
-Not Supported / Not Cut Over。本轮没有transaction或contract cutover授权，并按2A checkpoint边界停止。
+本 RFC 的[实施路线](./implementation.md)分为两个Stage和四个有序checkpoint，现已全部关闭。R1取消对特定
+musl版本的验收绑定；两架构当前工具链构建的repository-owned C consumer、未修改musl resolver、focused guest与
+临时external acceptance均通过。glibc resolver因强依赖`IP_RECVERR`继续保持Not Supported / Not Cut Over。
+临时focused host peer、runner、rootfs与marker已经在closure前删除；普通guest-local C app保留。未创建transaction。
 
 ## 摘要
 
@@ -204,8 +200,8 @@ lifecycle。late invalidation、旧 identity 或旧 queue 不得命中新 associ
 
 ## Contract Impact
 
-R1 acceptance与Stage 1 closure都不更新 current contract。live source 与 current contract audit 已确认 R1 target
-需要以下 delta；它们只有在实现、closure evidence 与 named cutover 完成后才成为 effective：
+live source与current contract audit确认R1需要以下delta；它们已在implementation、closure evidence与
+`UDP-EXT-R1-CUTOVER`完成后成为effective：
 
 | Contract ID | Impact | Target delta | Effective gate |
 | --- | --- | --- | --- |
@@ -240,8 +236,7 @@ R1 non-goals、双架构 acceptance floor 与 current contract 在 cutover 前�
 - 为绕过 cross-owner failure/cleanup 而降低 datagram、copy、errno 或 evidence 诚实性；
 - 需要把批量 message、IPv6、broadcast/multicast、TCP 或其它无真实 consumer 的能力带入本 RFC。
 
-本轮已授权并关闭Checkpoint 2A；Checkpoint 2B仍为Ready / Not Active。2B implementation、probe与
-contract cutover均未授权。
+Checkpoint 2B已关闭并执行`UDP-EXT-R1-CUTOVER`。本RFC没有后续自动gate。
 
 ## Acceptance 与 Validation
 
@@ -266,7 +261,7 @@ runtime 或 final run 已经 PASS。本轮已经闭合：
 
 ### Implementation closure 与 contract cutover
 
-实现完成后，R1 closure/cutover 至少需要：
+R1 closure/cutover已满足以下要求：
 
 - owner-local state/transaction/readiness proof，以及 [目标与不变量](./invariants.md) 中
   的 correctness obligations；
@@ -337,8 +332,8 @@ ordinary I/O 与 poll error projection、`MSG_ERRQUEUE`/`SO_ERROR` ABI 及双架
 - glibc 2.38：[`res_enable_icmp.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_enable_icmp.c#L23-L37)、
   [`res_send.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_send.c#L799-L864)。
 
-当前没有target-level open item；R1已经接受，Stage 1 Checkpoint 1A与1B、Stage 2 Checkpoint 2A均已关闭。
-Checkpoint 2B仍为Ready / Not Active；2B implementation、probe与cutover不会因2A关闭或文档存在而自动激活。
+当前没有target-level open item；R1已经关闭，Stage 1 Checkpoint 1A/1B与Stage 2 Checkpoint 2A/2B均已关闭，
+`UDP-EXT-R1-CUTOVER`已经生效。没有后续自动gate。
 
 ### 已收束，不构成设计 blocker
 
@@ -356,13 +351,13 @@ Checkpoint 2B仍为Ready / Not Active；2B implementation、probe与cutover不�
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)（Stage 1 Closed；Checkpoint 2A Closed；2B Ready / Not Active）
+- [实施路线](./implementation.md)（Stage 1/2与全部checkpoint Closed）
 - [历史定位共识](./backgrounds/positionings.md)（仅背景材料，非 canonical target）
 - Current baseline：[Network UDP Socket](../../contracts/net/udp-socket.md)、
   [Network Protocol Socket](../../contracts/net/protocol-socket.md)、
   [Socket Front、ABI 与 Wait](../../contracts/socket/front-abi-wait.md)
-- 执行记录：Git / PR（Stage 1、Stage 2 resolution与Checkpoint 2A）；transaction None；C consumer、
-  resolver与external peer均为Checkpoint 2B Not Run
+- 执行记录：Git / PR（Stage 1/2、Checkpoint 1A/1B/2A/2B与`UDP-EXT-R1-CUTOVER`）；transaction None；
+  register未出现新的current issue或accepted limitation，保持不变
 - 外部源码证据：resolver audit 使用上文固定 upstream commit permalink；Linux message ABI
   oracle 使用 `xref:linux-6.6.32:<repo-relative-path>#<locator>`。私人 checkout 不作为 authority。
 
@@ -375,10 +370,17 @@ Checkpoint 2B仍为Ready / Not Active；2B implementation、probe与cutover不�
 
 ## Closure
 
-R1尚未closure；Checkpoint 2A已关闭，Checkpoint 2B与最终contract cutover仍未授权。Stage 1已关闭Endpoint-owned peer、atomic
-bind+peer transaction、ingress admission、default-destination resolution、peek与retire/stale isolation，
-以及UDP SocketOps connected/file-I/O、shared vector-I/O bound、flags与wait/lifecycle vertical slice；Checkpoint 2A
-进一步关闭common single-message ABI与UDP `sendmsg/recvmsg` pending candidate。RV64与LA64 focused guest/KUnit/LTP
-evidence已写入Git/PR；C consumer、current-toolchain resolver与external peer保持Not Run，glibc保持Not Supported /
-Not Cut Over，physical hardware、`smp > 1`、full network LTP、final harness与
-contract cutover保持Not Run / Not Cut Over。current contract与register均未改变。
+R1已完成Endpoint-owned peer、atomic bind+peer transaction、ingress admission、default-destination resolution、peek与
+retire/stale isolation，以及UDP connected scalar/file/vector/message ABI、shared iovec bound、R1 flags与wait/lifecycle。
+Checkpoint 2B以两架构当前musl工具链构建并运行普通C/libc consumer；guest-local matrix均为7/7，未修改musl
+`getaddrinfo` fixture均PASS，临时remote-external guest/host token/reply均PASS。RV64为415 KUnit，LA64为420 KUnit；
+两架构UDP 16/16、UDP extension 10/10、message 7/7、Unix 23/23、raw 10/10、curated Socket LTP 6/6均通过。
+
+运行证据来自带guest-local与临时external mode的2B candidate；随后删除external-only mode、focused host peer、runner、
+rootfs与marker，未改变guest-local matrix或kernel ABI，并完成两架构C app build、83项xtask、net-host、kernel/
+socket-test format与diff检查。final review发现并修复C app resolver SIGPIPE/child-reap与partial socket cleanup失败路径；
+按维护者停止运行的要求，该最终失败路径修复未再build或runtime验证。证据日志为
+`build/udp-ext-stage2b-{rv64,la64}.log`及对应peer/build日志；transaction None，register不变。
+
+`UDP-EXT-R1-CUTOVER`已原子Refine三个current contract。glibc resolver保持Not Supported / Not Cut Over；physical
+hardware、`smp > 1`、full network LTP与final harness保持Not Run。没有后续自动gate。

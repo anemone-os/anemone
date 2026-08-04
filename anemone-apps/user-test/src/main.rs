@@ -11,15 +11,39 @@ mod process;
 mod runtime;
 
 use anemone_rs::{
-    abi::system::native::power::SHUTDOWN_MAGIC, os::anemone::power::shutdown, prelude::*,
+    abi::{fs::linux::open::O_RDONLY, system::native::power::SHUTDOWN_MAGIC},
+    os::{
+        anemone::power::shutdown,
+        linux::fs::{self, AtFd},
+    },
+    prelude::*,
 };
 
 fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
     process::run_execve(cmd, args, envs, cmd);
 }
 
+fn path_exists(path: &str) -> bool {
+    let Ok(fd) = fs::openat(AtFd::Cwd, Path::new(path), O_RDONLY, 0) else {
+        return false;
+    };
+    let _ = fs::close(fd);
+    true
+}
+
+fn run_udp_extension_c_consumer() {
+    if !path_exists("/bin/udp-extension-c") {
+        return;
+    }
+    println!("user-test: running UDP extension C consumer local matrix...");
+    local_run_cmd("/bin/udp-extension-c", &["udp-extension-c", "--local"], &[]);
+    println!("user-test: UDP extension C consumer local matrix finished.");
+}
+
 /// local tests for development.
 fn run_local_tests() {
+    run_udp_extension_c_consumer();
+
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");
