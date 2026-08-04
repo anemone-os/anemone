@@ -1,9 +1,9 @@
 # IPv4 UDP Socket 能力扩展目标与不变量
 
-**状态：** R0 Accepted
+**状态：** R1 Accepted
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260804-udp-socket-extension](./index.md)
-**适用修订：** R0
+**适用修订：** R1
 
 本文只定义本 RFC 的 target/contract proof obligations。当前 effective UDP、Socket、
 Network、Opened-description、IOMUX 与 Epoll 规则仍以 `docs/src/contracts/` 为准；本文
@@ -13,14 +13,14 @@ Network、Opened-description、IOMUX 与 Epoll 规则仍以 `docs/src/contracts/
 
 - Correctness Invariant：唯一 owner、并发、lifecycle、cleanup、内存安全和 ABI 诚实性；
   不得通过 target reduction 或实现便利降低。
-- Target Guarantee / Capability：R0 承诺的 connected UDP 与单消息/vector ABI；只有
+- Target Guarantee / Capability：R1 承诺的 connected UDP 与单消息/vector ABI；只有
   Target Renegotiation 可以改变。
 - Implementation Preference：类型、字段、锁、helper、队列算法、模块布局、内部 phase、
   capability 物理签名与测试命令；本文不冻结。
 
 ## 状态所有权
 
-R0 需要的 protocol facts 保持正交，不建立一份由 Socket front 共同拥有的
+R1 需要的 protocol facts 保持正交，不建立一份由 Socket front 共同拥有的
 “connection state”：
 
 | Fact | Target-level state | 唯一 Owner | 非 owner 持有内容 |
@@ -57,7 +57,7 @@ control plane 的 route/source/interface selection 只服务当前 connect/send 
 association；stale route/peer 让旧 operation 命中新 Endpoint generation。
 
 **Proof：** source audit、peer query/transition tests、late invalidation 与 endpoint reuse
-isolation；R0 review 必须确认 cross-crate surface 没有暴露 Stack-private object。
+isolation；R1 review 必须确认 cross-crate surface 没有暴露 Stack-private object。
 
 ### UDP-EXT-CONNECT-001 — Connect/reconnect只有一个Endpoint commit
 
@@ -133,7 +133,7 @@ oversize、multi-iovec、fault at each segment、capacity saturation/retry 与 r
 **规则：** ordinary receive 的线性化点仍是 Endpoint 将队首完整 datagram 原子 detach 给
 operation-local kernel transaction。detach 前 Endpoint 独占 payload；detach 后 kernel
 transaction 独占。short scalar/vector buffer 只复制 prefix 但消费整个 datagram；
-`MSG_TRUNC` 的 returned length 与 output flag 服从 R0 Linux ABI oracle。
+`MSG_TRUNC` 的 returned length 与 output flag 服从 R1 Linux ABI oracle。
 
 `MSG_PEEK` 只观察 current queue item，不转移 ownership、不消费 queue/capacity；success、
 short 或 user-copy fault 后都保持该 datagram 可再次读取。ordinary non-peek receive 在
@@ -160,7 +160,7 @@ Linux errno 止于 Socket ABI adapter。family-neutral layer形成 normalized de
 bounded vector cursor、receive sink 与 flags；UDP family只返回 typed success/not-ready/
 rejection，不解析 Linux bits、struct layout 或 raw pointer。
 
-R0 send flags只包括`MSG_DONTWAIT | MSG_NOSIGNAL`；receive flags只包括
+R1 send flags只包括`MSG_DONTWAIT | MSG_NOSIGNAL`；receive flags只包括
 `MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC`。UDP没有SIGPIPE producer时，`MSG_NOSIGNAL`
 可以作为带一次性诊断的 compatibility no-op；该桥必须有注释说明producer假设与退出条件。
 其它flag返回`EOPNOTSUPP`。
@@ -170,18 +170,23 @@ buffer capacity，但在没有 ancillary producer 时返回空 control region；
 control-message registry 或 future producer slot。unsupported option 返回 `ENOPROTOOPT`；
 `SO_ERROR` 不返回永久零值。
 
+R1 只为 IPv4 UDP 发布 single-message success surface。现有 Unix 与 ICMP raw family
+不得仅因共同 adapter 复用而获得 `sendmsg/recvmsg`；未获得独立 target 授权时稳定返回
+`EOPNOTSUPP`，也不反向要求 message-specific family op 或第二个 consumer。
+
 single-message vector import 与普通 `readv/writev` 共用 kernel I/O
-`max_iovec_count` Kconfig 参数，不允许 UDP family 保存或解释另一份 limit。R0 默认与
+`max_iovec_count` Kconfig 参数，不允许 UDP family 保存或解释另一份 limit。R1 默认与
 acceptance 配置为 1024，并与公开 `IOV_MAX` 一致；配置不得高于公开上限，低于 1024 的
-reduced-capacity profile 不构成完整 R0 ABI evidence。超限 errno、overflow、field copyout、
+reduced-capacity profile 不构成完整 R1 ABI evidence。超限 errno、overflow、field copyout、
 output flags 与 fault ordering 由共同 Socket ABI adapter 按固定 Linux 6.6.32 oracle 投影。
 
 **违反表现：** UDP family解析 `MSG_*`；adapter按 resolver/app 分支；unknown cmsg 被静默
 忽略并成功；`SO_ERROR` 恒零；iovec fault 已提交 datagram；为 message ABI 建立 future
 family registry 或通用 option bag。
 
-**Proof：** layout/length/overflow/fault oracle、unsupported flags/control/options、mandatory
-musl wrapper calls、glibc `IP_RECVERR` rejection boundary 与固定 source audit。
+**Proof：** layout/length/overflow/fault oracle、unsupported flags/control/options、两架构当前
+musl工具链构建的mandatory C wrapper calls、条件性musl resolver attempt、glibc `IP_RECVERR`
+rejection boundary与固定source audit。
 
 ### UDP-EXT-WAIT-001 — 各operation只等待自己的EAGAIN predicate
 
@@ -190,7 +195,7 @@ musl wrapper calls、glibc `IP_RECVERR` rejection boundary 与固定 source audi
 **规则：** receive/read 等待 Endpoint receive queue nonempty；send/write 只在当前 Endpoint
 bounded admission capacity 返回 would-block 时等待。缺少 destination、invalid address、
 无 route/source/interface、message too long 与 unsupported flag/option 都是立即结果，不能
-转成 wait。connect/disconnect 本 R0 不进入 wait protocol。
+转成 wait。connect/disconnect 本 R1 不进入 wait protocol。
 
 blocking、`O_NONBLOCK`、`SOCK_NONBLOCK` 与 `MSG_DONTWAIT` 读取相同 owner predicate，
 只改变 would-block 的 Linux projection。poll/select/epoll 复用 source 的 snapshot/register/
@@ -225,26 +230,29 @@ reuse、late hint、duplicate retire 与 orderly network shutdown matrix。
 
 ## RFC-local Proof Obligations
 
-- R0 Contract Impact 已固定为 Refine `NET-SOCKET-ENDPOINT-001`、
+- R1 Contract Impact 已固定为 Refine `NET-SOCKET-ENDPOINT-001`、
   `NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`；front、wait 与其它未变化 contract 只列
   Dependencies。实现若要求改变 shared front/wait rule，必须回到 RFC review。
 - `sendmsg/recvmsg` 复用 shared iovec bound；overflow、field copy ordering、output
   `msg_flags`、name/control length 与 zero-capacity behavior 必须形成可重复 Linux 6.6.32
   focused oracle，但这些是 ABI adapter implementation/proof obligation，不是开放 target。
-- mandatory resolver 已固定为 musl IPv4 `getaddrinfo` path：musl 1.2.0 的
-  `socket/bind/sendto/poll/recvfrom`、musl 1.2.5 的
-  `socket/bind/sendto/poll/recvmsg`，以及两版结果排序使用的
-  `socket/connect/getsockname/close` 都落在 R0。acceptance 只接受未设置 TC 的 IPv4 A
-  response；1.2.5 TCP fallback 不在 R0。
+- mandatory userspace proof由repository-owned C consumer承担：两架构分别使用当前可用musl
+  compiler/sysroot和标准Socket wrapper，不要求版本一致；consumer必须覆盖single-message ABI、
+  non-DNS request/response与fault/output，而不能按libc、resolver或architecture建立kernel分支。
+- 未修改musl IPv4 `getaddrinfo`必须在两架构使用当前工具链尝试；musl 1.2.0的
+  `socket/bind/sendto/poll/recvfrom`、musl 1.2.5的`socket/bind/sendto/poll/recvmsg`及两版
+  `socket/connect/getsockname/close`只作为已知source reference。observed call shape在R1内却失败
+  时阻塞；version compatibility需要R1非目标能力时如实记为Not Supported / Not Cut Over且不阻塞
+  总体cutover。只尝试未设置TC的IPv4 A response；TCP fallback不在R1。
 - glibc 2.35/2.38 在 UDP resolver 建立时强依赖 `IP_RECVERR`，因此明确 Not Supported /
   Not Cut Over。不得以 option success-no-op 宣称 glibc resolver PASS；要改变该结论必须回到
   RFC review 并扩展 error owner、queue/pending state、poll/ordinary I/O error projection 与
   `MSG_ERRQUEUE`/`SO_ERROR` ABI proof。
 - owner-local proof、host oracle、RV64 guest、LA64 guest 与 external path claim 必须分开；
-  DNS success 不替代 non-DNS UDP ABI coverage；final harness 与其它 Not Run 范围不是 R0
-  closure 前置。
+  resolver success或compatibility skip都不替代mandatory C/non-DNS UDP ABI coverage；final
+  harness与其它Not Run范围不是R1 closure前置。
 - 如果后续实现需要 probe、多个独立 cutover 或不安全中间态，先在 `implementation.md`
-  写明 hypothesis/protected boundary/failure signal/exit并取得单独授权；R0 acceptance本身不授权该动作。
+  写明 hypothesis/protected boundary/failure signal/exit并取得单独授权；R1 acceptance本身不授权该动作。
 
 ## 禁止退化项
 

@@ -1,17 +1,18 @@
 # RFC-20260804-udp-socket-extension
 
-**状态：** Accepted for Implementation / Stage 1 Closed / Stage 2 Outline
-**修订：** R0
+**状态：** Accepted for Implementation / Stage 1 Closed / Stage 2 Ready / Not Active
+**修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-04
 **领域：** network / socket / UDP / userspace ABI
-**影响契约：** R0 target 将 Refine `NET-SOCKET-ENDPOINT-001`、
+**影响契约：** R1 target 将 Refine `NET-SOCKET-ENDPOINT-001`、
 `NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`；current contract 未改变
-**执行记录：** Git / PR；Stage 1已关闭，未创建transaction；Stage 2与contract cutover均未授权
+**执行记录：** Git / PR；Stage 1已关闭，Stage 2 resolution已完成，未创建transaction；Stage 2
+implementation与contract cutover均未授权
 
 ## 文档状态
 
-本文是 IPv4 UDP Socket 能力扩展的R0 accepted target，也是该提案唯一的canonical target
+本文是 IPv4 UDP Socket 能力扩展的R1 accepted target，也是该提案唯一的canonical target
 source。它固定target、owner、ABI、failure/cleanup、acceptance与validation boundary，但在
 named cutover前不覆盖current contract。
 
@@ -21,10 +22,11 @@ effective 行为仍以 `docs/src/contracts/`、live source 与 Git/PR evidence �
 
 本 RFC 已创建[实施路线](./implementation.md)：路线分为两个 Stage，Stage 1 的Endpoint-owned
 connected scalar/file-I/O vertical slice解析为两个有序checkpoint；Checkpoint 1A与1B均已关闭。
-Stage 2的single-message ABI、综合acceptance与最终cutover只保留outline，尚未解析或激活。
-按本轮用户决定，RV64/LA64 musl resolver专项保持 Not Run；当前 acceptance baseline 的 glibc
-resolver 因强依赖 `IP_RECVERR` 保持 Not Supported / Not Cut Over。本轮没有transaction或contract
-cutover授权，Stage 1 closure后必须停止。
+Stage 2的single-message ABI、综合acceptance与最终cutover已经解析为两个有序checkpoint并达到
+Ready / Not Active，但尚未获得implementation授权。R1取消对特定musl版本的验收绑定：两架构必须
+使用各自当前可用工具链构建并尝试未修改resolver；compatibility若越出R1 envelope则如实分类为
+Not Supported / Not Cut Over而不阻塞总体cutover。glibc resolver因强依赖`IP_RECVERR`继续保持
+Not Supported / Not Cut Over。本轮没有transaction、Stage 2 implementation或contract cutover授权。
 
 ## 摘要
 
@@ -38,7 +40,7 @@ Socket ABI。
 reconnect/disconnect、单消息与向量数据面、file-style I/O、blocking/nonblocking 与
 poll/select/epoll，以及与现有 bind、implicit bind、route/source selection、dup/fork
 和 final release 一致的 owner/lifecycle 语义。批量 message syscall、通用 ancillary
-data、mutable option policy 与异步 error queue 不进入 R0。
+data、mutable option policy 与异步 error queue 不进入 R1。
 
 ## 背景与 Current Baseline
 
@@ -78,9 +80,10 @@ query policy 继续属于 userspace/rootfs；kernel 只提供普通 UDP/Socket o
   不建立 shared readiness truth；
 - 将 local binding、peer association、queued datagram、route/source selection、opened
   description 与 final release 组合在现有 owner/handoff 协议内；
-- 以未修改 musl userspace resolver、非 DNS connected request/response 和 focused ABI
-  consumers 证明这组能力，而不是以固定 applet 特判证明成功；glibc resolver 不属于 R0
-  mandatory consumer。
+- 以链接当前musl标准库的repository-owned C ABI consumer、非DNS connected request/response与
+  focused ABI consumers强制证明这组能力，并按两架构当前工具链条件性尝试未修改musl userspace
+  resolver；不以固定applet、libc版本或caller特判证明成功，glibc resolver不属于R1 mandatory
+  consumer。
 
 ## 非目标
 
@@ -98,9 +101,9 @@ query policy 继续属于 userspace/rootfs；kernel 只提供普通 UDP/Socket o
 - 为某一个 resolver、libc、BusyBox applet、测试或固定 syscall trace 建立成功特判或
   success-no-op compatibility。
 
-## R0 用户可见 ABI
+## R1 用户可见 ABI
 
-以下是本 R0 的 target envelope。它在 cutover 前不是 effective API；不支持项必须
+以下是本 R1 的 target envelope。它在 cutover 前不是 effective API；不支持项必须
 稳定拒绝，不能以恒零、永久成功或隐藏错误模拟支持。
 
 ### 创建、地址与关联
@@ -125,6 +128,8 @@ query policy 继续属于 userspace/rootfs；kernel 只提供普通 UDP/Socket o
 - message-style：`sendmsg` / `recvmsg` 的单消息向量形式，支持 `msg_name` 与 `iovec`；
   `sendmsg` 携带非空 ancillary/control message 返回 `EOPNOTSUPP`；`recvmsg` 可以提供
   control buffer，但没有 ancillary producer 时返回空 control region；
+- 本 RFC 只为 IPv4 UDP 发布上述 message-style success surface；现有 Unix 与 ICMP raw
+  family 不因共同 adapter 复用而获得 `sendmsg` / `recvmsg`，并稳定返回 `EOPNOTSUPP`；
 - 一次 datagram send 必须在 user-copy、size、route/source 与 bounded admission 全部
   成功后才提交，不返回“已发送半个 datagram”；
 - short receive 复制 prefix 但消费整个 datagram；zero-length datagram 合法；`MSG_PEEK`
@@ -142,9 +147,9 @@ query policy 继续属于 userspace/rootfs；kernel 只提供普通 UDP/Socket o
   `SO_ERROR` 建立 pending-error 或恒零成功路径。
 
 single-message vector ABI 使用共享 kernel I/O `max_iovec_count` Kconfig 参数，不建立 UDP
-私有上限。R0 默认与 acceptance 配置固定为 1024，与公开 `IOV_MAX` 和 Linux 6.6.32
+私有上限。R1 默认与 acceptance 配置固定为 1024，与公开 `IOV_MAX` 和 Linux 6.6.32
 `UIO_MAXIOV` 一致；`readv/writev/sendmsg/recvmsg` 必须读取同一参数，避免并列真相源。
-低于 1024 的非 acceptance 配置是显式 reduced-capacity profile，不能作为完整 R0 ABI
+低于 1024 的非 acceptance 配置是显式 reduced-capacity profile，不能作为完整 R1 ABI
 cutover evidence。xtask 只负责该参数的 deserialize/materialize/generate；合法区间由内核
 `static_assert!(MAX_IOVEC_COUNT > 0 && MAX_IOVEC_COUNT <= IOV_MAX, ...)` 负责。
 
@@ -199,65 +204,69 @@ lifecycle。late invalidation、旧 identity 或旧 queue 不得命中新 associ
 
 ## Contract Impact
 
-R0 acceptance与Stage 1 closure都不更新 current contract。live source 与 current contract audit 已确认 R0 target
+R1 acceptance与Stage 1 closure都不更新 current contract。live source 与 current contract audit 已确认 R1 target
 需要以下 delta；它们只有在实现、closure evidence 与 named cutover 完成后才成为 effective：
 
 | Contract ID | Impact | Target delta | Effective gate |
 | --- | --- | --- | --- |
-| `NET-SOCKET-ENDPOINT-001` | Refine | Endpoint 增加唯一 peer association truth；reconnect/disconnect、ingress admission 与 queued datagram 不回溯规则进入 lifecycle protocol | R0 contract cutover |
-| `NET-UDP-TRANSACTION-001` | Refine | 增加 connect/implicit-bind/peer atomic commit、connected destination selection 与 single-message vector datagram transaction | R0 contract cutover |
-| `SOCKET-ABI-001` | Refine | 增加 connected address behavior、file/message/vector ABI、R0 flags、shared iovec bound 与 stable rejection | R0 contract cutover |
+| `NET-SOCKET-ENDPOINT-001` | Refine | Endpoint 增加唯一 peer association truth；reconnect/disconnect、ingress admission 与 queued datagram 不回溯规则进入 lifecycle protocol | `UDP-EXT-R1-CUTOVER` |
+| `NET-UDP-TRANSACTION-001` | Refine | 增加 connect/implicit-bind/peer atomic commit、connected destination selection 与 single-message vector datagram transaction | `UDP-EXT-R1-CUTOVER` |
+| `SOCKET-ABI-001` | Refine | 增加 connected address behavior、file/message/vector ABI、R1 flags、shared iovec bound 与 stable rejection | `UDP-EXT-R1-CUTOVER` |
 
 `SOCKET-FRONT-001`、`SOCKET-WAIT-001`、`NET-SOCKET-WAIT-001` 与其它 current Network、
 Opened-description、IOMUX、Epoll、control-plane contracts 作为 Dependencies。当前 static
-descriptor、typed operation/cursor 和 operation-specific wait/recheck 已能承载 R0；普通
+descriptor、typed operation/cursor 和 operation-specific wait/recheck 已能承载 R1；普通
 capability 接线不构成 contract delta。若实现反而要求改变这些 shared rule，必须停止并回到
 RFC review。未发生的语义不登记 `Preserve`。
 
 ## Implementation Boundary
 
-本 R0 允许后续实现改变与本 target 直接对应的 Socket ABI adapter、general front capability
+本 R1 允许后续实现改变与本 target 直接对应的 Socket ABI adapter、general front capability
 dispatch、UDP family/Stack Endpoint protocol surface、anemone ABI constants/wrappers、
 focused tests 与同 owner 的自然模块拆分。
 
 必须保持：IPv4-only scope、Endpoint/Stack 与 control-plane owner fence、opened-description
 final release、operation-specific readiness、datagram atomicity、copy/fault/cleanup 语义、
-R0 non-goals、双架构 acceptance floor 与 current contract 在 cutover 前的 unchanged 状态。
+R1 non-goals、双架构 acceptance floor 与 current contract 在 cutover 前的 unchanged 状态。
 
 以下发现必须停止并回到 RFC review：
 
 - 需要改变 target、non-goals、state owner、handoff、failure/cleanup、ABI、Contract Impact、
   acceptance 或 validation claim；
-- chosen mandatory musl resolver path 需要本 RFC 明确排除的 option、ancillary、error queue、
-  IPv6 或 TCP semantics，或要把 glibc resolver 提升为 R0 mandatory consumer；
+- repository-owned mandatory C consumer无法在R1 envelope内闭合，或要把glibc resolver提升为
+  R1 mandatory consumer；current musl resolver越出envelope本身按条件性分类处理，不触发target扩张；
 - 实现需要在 Socket 与 Endpoint 之间复制 peer/filter/queue/readiness truth，或需要新的
   generic registry、option bag、通用 connection state machine；
 - 为绕过 cross-owner failure/cleanup 而降低 datagram、copy、errno 或 evidence 诚实性；
 - 需要把批量 message、IPv6、broadcast/multicast、TCP 或其它无真实 consumer 的能力带入本 RFC。
 
-本轮已授权并关闭Stage 1 Checkpoint 1A与1B；Stage 2 resolution/implementation、probe与
-contract cutover均未授权。
+本轮已授权并完成Stage 2 resolution；Checkpoint 2A/2B均为Ready / Not Active。Stage 2
+implementation、probe与contract cutover均未授权。
 
 ## Acceptance 与 Validation
 
-### R0 target acceptance
+### R1 target acceptance
 
-R0 acceptance 接受的是 target 与未来 closure boundary，不要求尚未实现的 syscall、guest
+R1 acceptance 接受的是 target 与未来 closure boundary，不要求尚未实现的 syscall、guest
 runtime 或 final run 已经 PASS。本轮已经闭合：
 
-- 本文的 target/non-goals、owner/handoff/failure/cleanup、R0 ABI 与三个 Contract Impact；
+- 本文的 target/non-goals、owner/handoff/failure/cleanup、R1 ABI 与三个 Contract Impact；
 - Linux 6.6.32 message ABI reference、共享 iovec Kconfig boundary 与后续 focused oracle 的
   claim 边界；具体 adapter、cursor、copy loop 和测试命令留给实施路线；
-- mandatory resolver 固定为下文 source audit 已确认落在 R0 内的 musl IPv4
-  `getaddrinfo` path；glibc 2.35/2.38 因 `IP_RECVERR` 依赖明确保持 Not Supported /
-  Not Cut Over，不能由实现者以 option success-no-op、caller 特判或降低 error semantics
-  静默改写该决定；
+- mandatory userspace proof由repository-owned C consumer承担；它使用两架构当前可用musl工具链、
+  标准Socket头与libc wrapper构建，不绑定或要求两个sysroot具有相同版本；
+- 未修改musl IPv4 `getaddrinfo`在两架构均必须以当前工具链尝试并记录实际compiler、sysroot、
+  libc/binary identity与observed call shape。若call shape仍在R1 envelope内却失败，属于实现缺陷；
+  若version compatibility需要R1明确排除的option、IPv6、TCP、ancillary或error queue，则该resolver
+  如实保持Not Supported / Not Cut Over，但不阻塞R1总体cutover；
+- glibc 2.35/2.38 source reference因`IP_RECVERR`依赖明确保持Not Supported / Not Cut Over，
+  不能由实现者以option success-no-op、caller特判或降低error semantics静默改写该决定；
 - implementation closure、contract cutover 与 Not Run 范围按下节分层记录，不把预期验证
   写成已有执行证据。
 
 ### Implementation closure 与 contract cutover
 
-实现完成后，R0 closure/cutover 至少需要：
+实现完成后，R1 closure/cutover 至少需要：
 
 - owner-local state/transaction/readiness proof，以及 [目标与不变量](./invariants.md) 中
   的 correctness obligations；
@@ -266,43 +275,52 @@ runtime 或 final run 已经 PASS。本轮已经闭合：
 - `sendto/recvfrom`、`read/write`、`readv/writev`、`sendmsg/recvmsg` 的 datagram boundary、
   short/zero/peek/truncate、copy fault、blocking/nonblocking 与 partial completion；
 - poll/select/epoll、dup/fork、CLOEXEC、final release、stale identity 与 late hint isolation；
-- 未修改 musl resolver 的 IPv4 `getaddrinfo` path；当前 RV64 musl 1.2.0 与 LA64 musl
-  1.2.5 acceptance baseline 都必须运行，执行证据还须记录实际部署 libc identity；名称
-  解析成功只能证明 resolver path，不能替代 non-DNS UDP ABI coverage；
+- 两架构repository-owned C consumer使用各自当前musl工具链完成single-message ABI、fault、
+  non-DNS request/response与libc wrapper proof；C++标准库consumer不是本RFC重复验收前置；
+- 两架构均尝试未修改musl resolver的IPv4 `getaddrinfo` path并按上述规则分类；名称解析成功
+  只证明resolver path，compatibility skip也不能替代mandatory C与non-DNS UDP ABI coverage；
 - RV64 与 LA64 guest runtime；external networking 需要单独 evidence，不以 loopback 替代。
 
 physical hardware、`smp > 1`、full network LTP、final harness、IPv6 与其它未运行范围明确
-标记 Not Run，并且不是本 R0 的 closure 前置。若后续 review 要求把 final run 提升为 mandatory
+标记 Not Run，并且不是本 R1 的 closure 前置。若后续 review 要求把 final run 提升为 mandatory
 closure evidence，该变化属于 acceptance/validation claim 变更，必须先回到 RFC review。
 owner-local proof 不能替代真实 guest userspace evidence。
 
 ## Resolver 决定与实施输入
 
-### Mandatory consumer 与 exact call shape
+### Mandatory C consumer、条件性resolver与observed call shape
 
-R0 mandatory resolver 是未修改 musl `getaddrinfo` 的 IPv4 path。acceptance consumer 传入
+repository-owned C consumer是R1 mandatory userspace oracle；它使用标准`sys/socket.h`、
+`sys/uio.h`与libc wrapper覆盖`sendmsg/recvmsg`、connected/unconnected destination、vector/
+fault/output与non-DNS request/response。它必须由RV64/LA64各自当前可用Linux-musl compiler和
+sysroot静态链接；工具链版本只作为evidence identity，不是跨架构对齐条件。C++工具链能力可作
+环境smoke，但不重复承担同一C Socket ABI proof。
+
+未修改musl `getaddrinfo`的IPv4 path是条件性compatibility consumer。attempt传入
 `AF_INET`、`SOCK_DGRAM`、`IPPROTO_UDP` hints，不设置 `AI_ADDRCONFIG`，查询非 numeric
 hostname；resolver 配置只含 IPv4 nameserver，成功响应包含普通、未设置 TC 的 IPv4 A
 answer。hostname、answer address 与 nameserver 由 fixture 决定，但 kernel 不识别这些值。
 
-当前两种 acceptance baseline 的 source shape 都落在既定 R0 envelope：
+以下固定source snapshot只提供已知call-shape reference，不冻结当前工具链版本：
 
 - musl 1.2.0 创建 `SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK` IPv4 Socket，绑定 wildcard
   ephemeral endpoint，以 `sendto(MSG_NOSIGNAL)` 发送单个 A query，通过 `poll(POLLIN)` 等待并
   用 `recvfrom` 接收；解析结果排序另行创建 `SOCK_DGRAM | SOCK_CLOEXEC` Socket，对每个 IPv4
   answer 执行 `connect`、`getsockname` 和 `close`；
 - musl 1.2.5 的同一路径把 UDP receive 改为单 iovec `recvmsg`，并在 TC / `MSG_TRUNC` 时转入
-  TCP fallback。R0 只接受未截断 UDP answer；TCP fallback 继续 Not Supported / Not Cut Over，
+  TCP fallback。R1 只接受未截断 UDP answer；TCP fallback 继续 Not Supported / Not Cut Over，
   不能把 TC case 写成 resolver PASS。
 
-RV64/LA64 implementation evidence 必须以实际部署 binary identity 和 guest trace 重新确认
-上述 source shape；libc patch/version drift 若仍保持同一 R0 obligation 只更新实施证据，若新增
-option、IPv6、TCP、ancillary 或 error-queue dependency 则停止并回到 RFC review。
+RV64/LA64 implementation evidence必须以实际部署binary identity及可复核的source/binary audit或
+focused trace确认observed call shape。libc patch/version drift若仍保持R1 obligation，则成功属于
+resolver evidence；若新增option、IPv6、TCP、ancillary或error-queue dependency，则明确记录触发
+syscall/feature并把该架构resolver分类为Not Supported / Not Cut Over。只有实现者试图扩大R1 target
+来迎合该版本时，才停止并回到RFC review。
 
-glibc 2.35 与 2.38 不属于 R0 mandatory resolver。两版 UDP resolver 都在 `connect` 前无条件
+glibc 2.35 与 2.38 不属于 R1 mandatory resolver。两版 UDP resolver 都在 `connect` 前无条件
 调用 `setsockopt(SOL_IP, IP_RECVERR, 1)`，失败会关闭 Socket 并终止该 nameserver attempt；
 这不是可忽略的探测。`IP_RECVERR`、pending error、`MSG_ERRQUEUE` 与完整 ICMP asynchronous
-error semantics 仍是 R0 非目标，因此不得为 glibc 返回伪成功。未来要把 glibc resolver 提升为
+error semantics 仍是 R1 非目标，因此不得为 glibc 返回伪成功。未来要把 glibc resolver 提升为
 mandatory consumer，必须由 follow-up target review 定义 error owner、queue/pending state、
 ordinary I/O 与 poll error projection、`MSG_ERRQUEUE`/`SO_ERROR` ABI 及双架构 proof。
 
@@ -319,12 +337,13 @@ ordinary I/O 与 poll error projection、`MSG_ERRQUEUE`/`SO_ERROR` ABI 及双架
 - glibc 2.38：[`res_enable_icmp.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_enable_icmp.c#L23-L37)、
   [`res_send.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_send.c#L799-L864)。
 
-当前没有target-level open item；R0已经接受，Stage 1 Checkpoint 1A与1B均已关闭。
-Stage 2、probe与cutover不会因Stage 1 closure或文档存在而自动激活。
+当前没有target-level open item；R1已经接受，Stage 1 Checkpoint 1A与1B均已关闭，Stage 2
+resolution已把Checkpoint 2A/2B解析为Ready / Not Active。Stage 2 implementation、probe与
+cutover不会因resolution完成或文档存在而自动激活。
 
 ### 已收束，不构成设计 blocker
 
-- iovec 数量复用共享 `max_iovec_count` Kconfig；R0 acceptance 配置为 1024，不建立 UDP
+- iovec 数量复用共享 `max_iovec_count` Kconfig；R1 acceptance 配置为 1024，不建立 UDP
   私有 limit。超限 errno、header copyout、fault、zero-capacity 与 partial oracle 在共同
   message-ABI 实施 slice 中按 Linux 6.6.32 固化。
 - connected queue 使用 Endpoint admission-time peer truth；transition 不回溯重分类已入队
@@ -338,12 +357,12 @@ Stage 2、probe与cutover不会因Stage 1 closure或文档存在而自动激活�
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)（Stage 1 Closed；Stage 2 Outline）
+- [实施路线](./implementation.md)（Stage 1 Closed；Stage 2 Ready / Not Active）
 - [历史定位共识](./backgrounds/positionings.md)（仅背景材料，非 canonical target）
 - Current baseline：[Network UDP Socket](../../contracts/net/udp-socket.md)、
   [Network Protocol Socket](../../contracts/net/protocol-socket.md)、
   [Socket Front、ABI 与 Wait](../../contracts/socket/front-abi-wait.md)
-- 执行记录：Git / PR（Stage 1）；transaction None；resolver专项 Not Run
+- 执行记录：Git / PR（Stage 1与Stage 2 resolution）；transaction None；resolver Stage 2 attempt Not Run
 - 外部源码证据：resolver audit 使用上文固定 upstream commit permalink；Linux message ABI
   oracle 使用 `xref:linux-6.6.32:<repo-relative-path>#<locator>`。私人 checkout 不作为 authority。
 
@@ -352,12 +371,13 @@ Stage 2、probe与cutover不会因Stage 1 closure或文档存在而自动激活�
 | 修订 | 日期 | 语义变化 | Review / Evidence |
 | --- | --- | --- | --- |
 | R0 | 2026-08-04 | 初始accepted target：IPv4 connected UDP、file/message/vector ABI、状态owner、非目标与acceptance boundary，并保持glibc Not Supported / Not Cut Over。 | 本轮独立接受并关闭Stage 1；resolver专项按用户决定 Not Run；Git / PR拥有执行证据 |
+| R1 | 2026-08-04 | 功能、owner、ABI与Contract Impact不变；mandatory userspace proof改由当前musl工具链构建的repository-owned C consumer承担，未修改musl resolver改为两架构必须尝试、按实际compatibility条件性验收，不再绑定特定版本。 | 维护者接受该acceptance修订；Stage 2 resolution读取Stage 1 final source与现有C/C++ app toolchain能力 |
 
 ## Closure
 
-R0尚未closure，Stage 2与最终contract cutover仍未授权。Stage 1已关闭Endpoint-owned peer、atomic
+R1尚未closure；Stage 2已Ready / Not Active，implementation与最终contract cutover仍未授权。Stage 1已关闭Endpoint-owned peer、atomic
 bind+peer transaction、ingress admission、default-destination resolution、peek与retire/stale isolation，
 以及UDP SocketOps connected/file-I/O、shared vector-I/O bound、flags与wait/lifecycle vertical slice。
-RV64与LA64 guest/KUnit/LTP evidence已写入Git/PR；resolver专项保持Not Run，glibc保持Not Supported /
+RV64与LA64 guest/KUnit/LTP evidence已写入Git/PR；current-toolchain resolver attempt保持Not Run，glibc保持Not Supported /
 Not Cut Over，external networking、physical hardware、`smp > 1`、full network LTP、final harness与
 contract cutover保持Not Run / Not Cut Over。current contract与register均未改变。
