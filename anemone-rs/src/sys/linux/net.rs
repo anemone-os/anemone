@@ -73,6 +73,14 @@ pub fn recvfrom(
     unsafe { syscall(SYS_RECVFROM, fd, buf, len, flags, addr, addrlen) }
 }
 
+pub fn sendmsg(fd: u64, msg: u64, flags: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_SENDMSG, fd, msg, flags, 0, 0, 0) }
+}
+
+pub fn recvmsg(fd: u64, msg: u64, flags: u64) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_RECVMSG, fd, msg, flags, 0, 0, 0) }
+}
+
 pub fn setsockopt(
     fd: u64,
     level: u64,

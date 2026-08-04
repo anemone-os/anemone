@@ -5,6 +5,7 @@ use anemone_abi::fs::linux::{IOV_MAX, IoVec};
 use crate::{
     kconfig_defs::MAX_IOVEC_COUNT,
     prelude::{user_access::UserReadSlice, *},
+    syscall::user_access::UserWriteSlice,
 };
 
 mod read;
@@ -20,9 +21,15 @@ static_assert!(
 );
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct CheckedIoVec {
-    pub(super) base: VirtAddr,
-    pub(super) len: usize,
+pub(in crate::fs) struct CheckedIoVec {
+    pub(in crate::fs) base: VirtAddr,
+    pub(in crate::fs) len: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::fs) enum IoVecDirection {
+    Source,
+    Destination,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,14 +100,37 @@ pub(super) fn load_iovecs(
     iov: VirtAddr,
     iovcnt: usize,
 ) -> Result<Vec<CheckedIoVec>, SysError> {
+    let raw_iovecs = load_raw_iovecs(uspace, iov, iovcnt, SysError::InvalidArgument)?;
+    checked_iovecs(raw_iovecs)
+}
+
+/// Imports a Socket message vector through the same configured count owner as
+/// ordinary vector I/O while preserving Linux's message-specific count and
+/// `MAX_RW_COUNT` clipping rules.
+pub(in crate::fs) fn load_message_iovecs(
+    uspace: &UserSpaceHandle,
+    iov: VirtAddr,
+    iovcnt: usize,
+    direction: IoVecDirection,
+) -> Result<Vec<CheckedIoVec>, SysError> {
+    let raw_iovecs = load_raw_iovecs(uspace, iov, iovcnt, SysError::MessageTooLong)?;
+    import_message_iovecs(uspace, raw_iovecs, direction)
+}
+
+fn load_raw_iovecs(
+    uspace: &UserSpaceHandle,
+    iov: VirtAddr,
+    iovcnt: usize,
+    count_error: SysError,
+) -> Result<Vec<IoVec>, SysError> {
     if iovcnt == 0 {
         return Ok(Vec::new());
     }
     if iovcnt > MAX_IOVEC_COUNT {
-        return Err(SysError::InvalidArgument);
+        return Err(count_error);
     }
 
-    let mut raw_iovecs = vec![
+    let mut iovecs = vec![
         IoVec {
             iov_base: core::ptr::null_mut(),
             iov_len: 0,
@@ -110,14 +140,17 @@ pub(super) fn load_iovecs(
     {
         let mut guard = uspace.lock();
         let mut ptr_slice = UserReadSlice::try_new(iov, iovcnt, &mut guard)?;
-        ptr_slice.copy_to_slice(&mut raw_iovecs)?;
+        ptr_slice.copy_to_slice(&mut iovecs)?;
     }
 
+    Ok(iovecs)
+}
+
+fn checked_iovecs(raw_iovecs: Vec<IoVec>) -> Result<Vec<CheckedIoVec>, SysError> {
     let mut iovecs = Vec::new();
     iovecs
-        .try_reserve_exact(iovcnt)
+        .try_reserve_exact(raw_iovecs.len())
         .map_err(|_| SysError::OutOfMemory)?;
-
     let mut total = 0usize;
 
     for raw_iovec in raw_iovecs {
@@ -131,6 +164,44 @@ pub(super) fn load_iovecs(
 
         iovecs.push(CheckedIoVec { base, len });
         total = new_total;
+    }
+
+    Ok(iovecs)
+}
+
+fn import_message_iovecs(
+    uspace: &UserSpaceHandle,
+    raw_iovecs: Vec<IoVec>,
+    direction: IoVecDirection,
+) -> Result<Vec<CheckedIoVec>, SysError> {
+    let single = raw_iovecs.len() == 1;
+    let mut iovecs = Vec::new();
+    iovecs
+        .try_reserve_exact(raw_iovecs.len())
+        .map_err(|_| SysError::OutOfMemory)?;
+    let mut total = 0usize;
+    let mut guard = uspace.lock();
+
+    for raw_iovec in raw_iovecs {
+        let original_len = usize::try_from(raw_iovec.iov_len).map_err(|_| SysError::BadAddress)?;
+        let base = VirtAddr::new(raw_iovec.iov_base as u64);
+        let checked_len = if single {
+            original_len.min(MAX_RW_COUNT)
+        } else {
+            original_len
+        };
+        match direction {
+            IoVecDirection::Source => {
+                let _ = UserReadSlice::<u8>::try_new(base, checked_len, &mut guard)?;
+            },
+            IoVecDirection::Destination => {
+                let _ = UserWriteSlice::<u8>::try_new(base, checked_len, &mut guard)?;
+            },
+        }
+
+        let len = original_len.min(MAX_RW_COUNT - total);
+        iovecs.push(CheckedIoVec { base, len });
+        total += len;
     }
 
     Ok(iovecs)

@@ -24,7 +24,7 @@ use crate::{
 const SOCKADDR_IN_LEN: usize = size_of::<SockAddrIn>();
 const SOCKADDR_UN_LEN: usize = size_of::<SockAddrUn>();
 const SOCKADDR_UN_PATH_OFFSET: usize = 2;
-const MAX_SOCKADDR_INPUT_LEN: usize = 128;
+pub(super) const MAX_SOCKADDR_INPUT_LEN: usize = 128;
 // Diagnostic-only rate limiting. This bit never participates in flag or send
 // behavior.
 static RAW_NOSIGNAL_DIAGNOSTIC_EMITTED: AtomicBool = AtomicBool::new(false);

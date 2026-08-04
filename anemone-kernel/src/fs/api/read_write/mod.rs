@@ -5,7 +5,7 @@ use crate::{
     task::files::{Fd, FileDesc},
 };
 
-mod request;
+pub(in crate::fs) mod request;
 
 pub mod pread64;
 pub mod preadv;

@@ -228,6 +228,8 @@ pub mod linux {
     pub const SYS_SETSOCKOPT: u64 = 208;
     pub const SYS_GETSOCKOPT: u64 = 209;
     pub const SYS_SHUTDOWN: u64 = 210;
+    pub const SYS_SENDMSG: u64 = 211;
+    pub const SYS_RECVMSG: u64 = 212;
     pub const SYS_ACCEPT4: u64 = 242;
 
     pub const SYS_READAHEAD: u64 = 213;

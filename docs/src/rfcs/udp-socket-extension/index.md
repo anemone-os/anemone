@@ -1,14 +1,14 @@
 # RFC-20260804-udp-socket-extension
 
-**状态：** Accepted for Implementation / Stage 1 Closed / Stage 2 Ready / Not Active
+**状态：** Accepted for Implementation / Stage 1 Closed / Stage 2 Active / Checkpoint 2A Closed
 **修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-04
 **领域：** network / socket / UDP / userspace ABI
 **影响契约：** R1 target 将 Refine `NET-SOCKET-ENDPOINT-001`、
 `NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`；current contract 未改变
-**执行记录：** Git / PR；Stage 1已关闭，Stage 2 resolution已完成，未创建transaction；Stage 2
-implementation与contract cutover均未授权
+**执行记录：** Git / PR；Stage 1与Checkpoint 2A已关闭，未创建transaction；Checkpoint 2B与
+contract cutover均未授权
 
 ## 文档状态
 
@@ -22,11 +22,11 @@ effective 行为仍以 `docs/src/contracts/`、live source 与 Git/PR evidence �
 
 本 RFC 已创建[实施路线](./implementation.md)：路线分为两个 Stage，Stage 1 的Endpoint-owned
 connected scalar/file-I/O vertical slice解析为两个有序checkpoint；Checkpoint 1A与1B均已关闭。
-Stage 2的single-message ABI、综合acceptance与最终cutover已经解析为两个有序checkpoint并达到
-Ready / Not Active，但尚未获得implementation授权。R1取消对特定musl版本的验收绑定：两架构必须
+Stage 2的single-message ABI、综合acceptance与最终cutover已经解析为两个有序checkpoint；Checkpoint 2A
+已关闭，Checkpoint 2B仍为Ready / Not Active。R1取消对特定musl版本的验收绑定：两架构必须
 使用各自当前可用工具链构建并尝试未修改resolver；compatibility若越出R1 envelope则如实分类为
 Not Supported / Not Cut Over而不阻塞总体cutover。glibc resolver因强依赖`IP_RECVERR`继续保持
-Not Supported / Not Cut Over。本轮没有transaction、Stage 2 implementation或contract cutover授权。
+Not Supported / Not Cut Over。本轮没有transaction或contract cutover授权，并按2A checkpoint边界停止。
 
 ## 摘要
 
@@ -240,8 +240,8 @@ R1 non-goals、双架构 acceptance floor 与 current contract 在 cutover 前�
 - 为绕过 cross-owner failure/cleanup 而降低 datagram、copy、errno 或 evidence 诚实性；
 - 需要把批量 message、IPv6、broadcast/multicast、TCP 或其它无真实 consumer 的能力带入本 RFC。
 
-本轮已授权并完成Stage 2 resolution；Checkpoint 2A/2B均为Ready / Not Active。Stage 2
-implementation、probe与contract cutover均未授权。
+本轮已授权并关闭Checkpoint 2A；Checkpoint 2B仍为Ready / Not Active。2B implementation、probe与
+contract cutover均未授权。
 
 ## Acceptance 与 Validation
 
@@ -337,9 +337,8 @@ ordinary I/O 与 poll error projection、`MSG_ERRQUEUE`/`SO_ERROR` ABI 及双架
 - glibc 2.38：[`res_enable_icmp.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_enable_icmp.c#L23-L37)、
   [`res_send.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_send.c#L799-L864)。
 
-当前没有target-level open item；R1已经接受，Stage 1 Checkpoint 1A与1B均已关闭，Stage 2
-resolution已把Checkpoint 2A/2B解析为Ready / Not Active。Stage 2 implementation、probe与
-cutover不会因resolution完成或文档存在而自动激活。
+当前没有target-level open item；R1已经接受，Stage 1 Checkpoint 1A与1B、Stage 2 Checkpoint 2A均已关闭。
+Checkpoint 2B仍为Ready / Not Active；2B implementation、probe与cutover不会因2A关闭或文档存在而自动激活。
 
 ### 已收束，不构成设计 blocker
 
@@ -357,12 +356,13 @@ cutover不会因resolution完成或文档存在而自动激活。
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)（Stage 1 Closed；Stage 2 Ready / Not Active）
+- [实施路线](./implementation.md)（Stage 1 Closed；Checkpoint 2A Closed；2B Ready / Not Active）
 - [历史定位共识](./backgrounds/positionings.md)（仅背景材料，非 canonical target）
 - Current baseline：[Network UDP Socket](../../contracts/net/udp-socket.md)、
   [Network Protocol Socket](../../contracts/net/protocol-socket.md)、
   [Socket Front、ABI 与 Wait](../../contracts/socket/front-abi-wait.md)
-- 执行记录：Git / PR（Stage 1与Stage 2 resolution）；transaction None；resolver Stage 2 attempt Not Run
+- 执行记录：Git / PR（Stage 1、Stage 2 resolution与Checkpoint 2A）；transaction None；C consumer、
+  resolver与external peer均为Checkpoint 2B Not Run
 - 外部源码证据：resolver audit 使用上文固定 upstream commit permalink；Linux message ABI
   oracle 使用 `xref:linux-6.6.32:<repo-relative-path>#<locator>`。私人 checkout 不作为 authority。
 
@@ -375,9 +375,10 @@ cutover不会因resolution完成或文档存在而自动激活。
 
 ## Closure
 
-R1尚未closure；Stage 2已Ready / Not Active，implementation与最终contract cutover仍未授权。Stage 1已关闭Endpoint-owned peer、atomic
+R1尚未closure；Checkpoint 2A已关闭，Checkpoint 2B与最终contract cutover仍未授权。Stage 1已关闭Endpoint-owned peer、atomic
 bind+peer transaction、ingress admission、default-destination resolution、peek与retire/stale isolation，
-以及UDP SocketOps connected/file-I/O、shared vector-I/O bound、flags与wait/lifecycle vertical slice。
-RV64与LA64 guest/KUnit/LTP evidence已写入Git/PR；current-toolchain resolver attempt保持Not Run，glibc保持Not Supported /
-Not Cut Over，external networking、physical hardware、`smp > 1`、full network LTP、final harness与
+以及UDP SocketOps connected/file-I/O、shared vector-I/O bound、flags与wait/lifecycle vertical slice；Checkpoint 2A
+进一步关闭common single-message ABI与UDP `sendmsg/recvmsg` pending candidate。RV64与LA64 focused guest/KUnit/LTP
+evidence已写入Git/PR；C consumer、current-toolchain resolver与external peer保持Not Run，glibc保持Not Supported /
+Not Cut Over，physical hardware、`smp > 1`、full network LTP、final harness与
 contract cutover保持Not Run / Not Cut Over。current contract与register均未改变。
