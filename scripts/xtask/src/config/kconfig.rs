@@ -56,6 +56,7 @@ pub struct Parameters {
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
+    pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
@@ -158,6 +159,7 @@ impl Parameters {
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
+        materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
         materialize!(getdents64_buffer_bytes);
@@ -284,6 +286,8 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
+/// Maximum number of strings accepted in each execve argv or envp vector.
+pub const EXECVE_MAX_STRING_COUNT: usize = {};
 /// Maximum number of processes
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
@@ -454,6 +458,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
+            resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
             resolved!(getdents64_buffer_bytes),
@@ -613,6 +618,17 @@ mod tests {
             parameters
                 .gen_kconfig_defs()
                 .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
+        );
+    }
+
+    #[test]
+    fn execve_string_count_default_materializes_and_generates() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        assert!(
+            parameters
+                .gen_kconfig_defs()
+                .contains("pub const EXECVE_MAX_STRING_COUNT: usize = 256;")
         );
     }
 

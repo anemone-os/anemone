@@ -26,6 +26,7 @@ remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_logical_cpus = 1 # Maximum number of logical CPUs enabled by this kernel
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
 max_path_len_bytes = 4096 # Maximum length of file paths in bytes
+execve_max_string_count = 256 # Maximum strings accepted in each execve argv or envp vector; the initial stack remains the total byte budget.
 max_processes = 32768 # Maximum number of processes
 epoll_file_max_waiters = 64 # Fixed waiter-route capacity per epoll instance.
 getdents64_buffer_bytes = 2097152 # Maximum kernel staging buffer used by one getdents64 call.
