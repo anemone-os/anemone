@@ -34,6 +34,7 @@
 		- [Unix seqpacket](./contracts/socket/unix-seqpacket.md)
 	- [Build Configuration 当前契约](./contracts/configuration/index.md)
 		- [System target 与 resolved selection](./contracts/configuration/system-target.md)
+		- [Kernel 参数合法性](./contracts/configuration/kernel-parameter-validation.md)
 	- [System Power 当前契约](./contracts/power/index.md)
 		- [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
 	- [Membarrier 当前契约](./contracts/membarrier/index.md)
