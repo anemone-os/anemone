@@ -3,6 +3,7 @@
 extern crate alloc;
 
 mod frame;
+pub mod icmp_raw;
 mod interface;
 mod ipv4;
 mod pump;
@@ -14,6 +15,6 @@ pub use frame::{
     TxToken,
 };
 pub use interface::{EthernetAddress, InterfaceFacts, InterfaceId, LinkState};
-pub use ipv4::{Ipv4Address, Ipv4Cidr};
+pub use ipv4::{Ipv4Address, Ipv4Cidr, Ipv4EgressSelection};
 pub use pump::{PumpOutcome, Recheck};
 pub use time::{Duration, Instant};

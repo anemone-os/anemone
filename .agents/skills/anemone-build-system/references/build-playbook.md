@@ -55,7 +55,10 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### App Build
 
 - Confirm the CLI app name locates the intended manifest.
-- Confirm requested architecture, closed Cargo/Source driver, and declared artifact path agree.
+- Confirm requested architecture, closed Cargo/Command/Source driver, and declared artifact path agree.
+- Treat Command as trusted repository build code: execute its non-empty bounded argv directly in
+  workdir, append caller extras, override only `ANEMONE_ARCH` / `ANEMONE_TARGET_TRIPLE`, and retain
+  the common status, artifact validation, export, and diagnostics path.
 - Treat Source as a command no-op only: reject manifest or caller driver args, then retain the same
   path expansion, ordinary-file check, export, and explicit post-export diagnostics as Cargo.
 - Inspect exported artifacts under `build/`; use app-local target output only for diagnosis.

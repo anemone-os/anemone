@@ -690,13 +690,13 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Severity:** Low
 **Area:** pipe / fcntl / procfs / user-test
 
-**Summary:** 当前匿名 pipe 的基础语义已覆盖 `SIGPIPE`、`O_NONBLOCK`、`F_GETPIPE_SZ`、`F_SETPIPE_SZ(0)` 与 `FIONREAD`。固定 backing 与默认逻辑容量由 `pipe_capacity_pages` 配置（当前为两页），`F_SETPIPE_SZ` 可以在一页到该固定上界之间调整逻辑容量；它仍不提供超出 backing 的动态增长、per-user 资源账本或 Linux 全量容量策略。`O_DIRECT` 只保留可观察 flag 而未实现 packet-mode pipe。LTP `pipe15` 还依赖 `/proc/sys/fs/pipe-user-pages-soft`，`pipe2_04` 的阻塞状态检查依赖 `/proc/<pid>/stat`，这些 procfs knobs/process stat 入口尚未提供。
+**Summary:** 当前匿名 pipe 的基础语义已覆盖 `SIGPIPE`、`O_NONBLOCK`、`F_GETPIPE_SZ`、`F_SETPIPE_SZ(0)` 与 `FIONREAD`。`pipe_capacity_pages` 配置两页默认值，`pipe_max_capacity_pages` 配置 16 页 hard maximum；`F_SETPIPE_SZ` 可以在一页到该上界之间真实增长或收缩 heap backing，并保持 FIFO 与失败不变性。当前仍没有 per-user soft/hard page accounting、`CAP_SYS_RESOURCE` override、`/proc/sys/fs/pipe-max-size` / `pipe-user-pages-*` 或 Linux 全量容量策略。`O_DIRECT` 只保留可观察 flag 而未实现 packet-mode pipe。LTP `pipe15` 仍依赖 `/proc/sys/fs/pipe-user-pages-soft`，`pipe2_04` 的阻塞状态检查依赖 `/proc/<pid>/stat`，这些 procfs knobs/process stat 入口尚未提供。
 
-**Exit Condition:** 为 pipe 容量引入超出固定 backing 的可增长/可收缩存储和资源限制账本，补齐 `/proc/sys/fs/pipe-*` 与 `/proc/<pid>/stat` 中测试所需的最小可观察语义，并重新验证 `pipe15`、`pipe2_04` 及更大范围的 `fcntl(F_SETPIPE_SZ)` 边界测例。
+**Exit Condition:** 为 pipe 容量补齐 per-user 资源限制账本、privileged override、`/proc/sys/fs/pipe-*` 与 `/proc/<pid>/stat` 中测试所需的最小可观察语义，并重新验证 `pipe15`、`pipe2_04` 及依赖 procfs controls 的 `fcntl(F_SETPIPE_SZ)` 边界测例。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-27
-**Related:** [Epoll Stage 2D transaction](../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
+**Last Verified:** 2026-08-03
+**Related:** [Pipe dynamic capacity 小迭代记录](../devlog/changes/2026-08-03-pipe-dynamic-capacity.md), [Epoll Stage 2D transaction](../devlog/transactions/2026-07-26-epoll.md#stage-2-checkpoint-2d-closure-and-epoll-cutover---2026-07-27), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260617-SPLICE-FAMILY-COPY-BACKED-STAGE1
 

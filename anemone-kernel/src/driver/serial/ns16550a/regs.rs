@@ -39,9 +39,6 @@ const LSR_FRAMING_ERROR: u8 = 1 << 3;
 const LSR_BREAK_INTERRUPT: u8 = 1 << 4;
 const LSR_THRE: u8 = 1 << 5;
 const LSR_TRANSMITTER_EMPTY: u8 = 1 << 6;
-const LSR_RX_ERROR_MASK: u8 =
-    LSR_OVERRUN_ERROR | LSR_PARITY_ERROR | LSR_FRAMING_ERROR | LSR_BREAK_INTERRUPT;
-
 const LCR_WORD_SIZE_7: u8 = 0b10;
 const LCR_WORD_SIZE_8: u8 = 0b11;
 const LCR_PARITY_ENABLE: u8 = 1 << 3;
@@ -85,13 +82,17 @@ pub(super) enum InterruptReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct RxStatus {
     pub(super) data_ready: bool,
-    pub(super) line_error: bool,
+    pub(super) break_received: bool,
+    pub(super) parity_or_framing: bool,
+    pub(super) overrun: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct RxSample {
     pub(super) byte: Option<u8>,
-    pub(super) line_error: bool,
+    pub(super) break_received: bool,
+    pub(super) parity_or_framing: bool,
+    pub(super) overrun: bool,
 }
 
 impl Ns16550ARegisters {
@@ -295,24 +296,34 @@ impl Ns16550ARegisters {
     }
 
     pub(super) fn rx_status(&self) -> RxStatus {
-        let lsr = self.read_reg(REG_LSR);
-        RxStatus {
-            data_ready: lsr & LSR_DR != 0,
-            line_error: lsr & LSR_RX_ERROR_MASK != 0,
-        }
+        decode_rx_status(self.read_reg(REG_LSR))
     }
 
     pub(super) fn read_rx_sample(&self) -> RxSample {
         let status = self.rx_status();
+        // BI can represent an RX condition even when DR is not asserted. Only
+        // DR authorizes an RBR read; an empty read could consume a later byte
+        // that does not belong to this break condition.
         let byte = status.data_ready.then(|| self.read_reg(REG_RBR_THR_DLL));
         RxSample {
             byte,
-            line_error: status.line_error,
+            break_received: status.break_received,
+            parity_or_framing: status.parity_or_framing,
+            overrun: status.overrun,
         }
     }
 
     pub(super) fn clear_modem_status(&self) {
         let _ = self.read_reg(REG_MSR);
+    }
+}
+
+fn decode_rx_status(lsr: u8) -> RxStatus {
+    RxStatus {
+        data_ready: lsr & LSR_DR != 0,
+        break_received: lsr & LSR_BREAK_INTERRUPT != 0,
+        parity_or_framing: lsr & (LSR_PARITY_ERROR | LSR_FRAMING_ERROR) != 0,
+        overrun: lsr & LSR_OVERRUN_ERROR != 0,
     }
 }
 
@@ -387,6 +398,49 @@ fn interrupt_decoder_preserves_standard_rx_causes() {
             InterruptReason::None
         );
     }
+}
+
+#[kunit]
+fn rx_status_preserves_break_fault_and_overrun_dimensions() {
+    assert_eq!(
+        decode_rx_status(LSR_DR),
+        RxStatus {
+            data_ready: true,
+            break_received: false,
+            parity_or_framing: false,
+            overrun: false,
+        }
+    );
+    assert_eq!(
+        decode_rx_status(
+            LSR_DR | LSR_OVERRUN_ERROR | LSR_PARITY_ERROR | LSR_FRAMING_ERROR | LSR_BREAK_INTERRUPT,
+        ),
+        RxStatus {
+            data_ready: true,
+            break_received: true,
+            parity_or_framing: true,
+            overrun: true,
+        }
+    );
+    assert_eq!(
+        decode_rx_status(LSR_PARITY_ERROR | LSR_FRAMING_ERROR),
+        RxStatus {
+            data_ready: false,
+            break_received: false,
+            parity_or_framing: true,
+            overrun: false,
+        }
+    );
+    assert_eq!(
+        decode_rx_status(LSR_BREAK_INTERRUPT),
+        RxStatus {
+            data_ready: false,
+            break_received: true,
+            parity_or_framing: false,
+            overrun: false,
+        },
+        "a break condition does not imply an RBR payload",
+    );
 }
 
 #[kunit]

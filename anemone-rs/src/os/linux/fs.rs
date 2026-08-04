@@ -354,6 +354,25 @@ pub fn linkat(
     .map(|_| ())
 }
 
+pub fn renameat2(
+    olddirfd: AtFd,
+    oldpath: &Path,
+    newdirfd: AtFd,
+    newpath: &Path,
+    flags: u32,
+) -> Result<(), Errno> {
+    let oldpath = CString::new(oldpath.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    let newpath = CString::new(newpath.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
+    fs::renameat2(
+        olddirfd.to_raw() as u64,
+        oldpath.as_ptr() as u64,
+        newdirfd.to_raw() as u64,
+        newpath.as_ptr() as u64,
+        flags as u64,
+    )
+    .map(|_| ())
+}
+
 pub fn close(fd: Fd) -> Result<(), Errno> {
     fs::close(fd as u64).map(|_| ())
 }
@@ -380,6 +399,16 @@ pub fn fcntl_getfd(fd: Fd) -> Result<u32, Errno> {
 
 pub fn fcntl_setfl(fd: Fd, flags: u32) -> Result<(), Errno> {
     fs::fcntl(fd as u64, fcntl::F_SETFL as u64, flags as u64).map(|_| ())
+}
+
+pub fn fcntl_get_pipe_size(fd: Fd) -> Result<usize, Errno> {
+    fs::fcntl(fd as u64, fcntl::F_GETPIPE_SZ as u64, 0).map(|size| size as usize)
+}
+
+/// The raw unsigned argument is intentional: focused ABI tests must be able to
+/// prove the kernel's rejection of values beyond Linux's signed return domain.
+pub fn fcntl_set_pipe_size(fd: Fd, requested: u64) -> Result<usize, Errno> {
+    fs::fcntl(fd as u64, fcntl::F_SETPIPE_SZ as u64, requested).map(|size| size as usize)
 }
 
 pub fn fcntl_getlk(fd: Fd, lock: &mut Flock) -> Result<(), Errno> {
@@ -432,6 +461,16 @@ pub fn ioctl_set_nonblocking(fd: Fd, enabled: bool) -> Result<(), Errno> {
         &enabled as *const i32 as u64,
     )
     .map(|_| ())
+}
+
+pub fn ioctl_readable_bytes(fd: Fd) -> Result<usize, Errno> {
+    let mut readable = 0i32;
+    fs::ioctl(
+        fd as u64,
+        ioctl::FIONREAD as u64,
+        &mut readable as *mut i32 as u64,
+    )?;
+    usize::try_from(readable).map_err(|_| EOVERFLOW)
 }
 
 pub fn ppoll(fds: &mut [PollFd], timeout: Option<&TimeSpec>) -> Result<usize, Errno> {

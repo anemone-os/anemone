@@ -1,8 +1,17 @@
 //! Kernel-side network attach authority.
 
 mod domain;
+// Checkpoint 1 deliberately keeps this capability syscall-unreachable. The
+// next authorized checkpoint must connect its real Socket consumer or remove
+// the route; it is not a permanent probe facade.
+pub(crate) mod icmp_raw;
 pub(crate) mod udp;
 mod worker;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EventRegistrationError {
+    OutOfMemory,
+}
 
 use crate::{
     device::net::{

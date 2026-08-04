@@ -1,7 +1,6 @@
 //! Pump budget, fair-order outcome, and shared recheck computation.
 
 use anemone_net_api::{Instant, PumpOutcome, Recheck};
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PumpBudget {
     ingress_frames: usize,

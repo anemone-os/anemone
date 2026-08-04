@@ -60,6 +60,7 @@ pub struct Parameters {
     pub epoll_file_max_waiters: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
+    pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
     pub unix_listener_max_backlog: Option<usize>,
     pub tid_alloc_policy: Option<TidAllocPolicy>,
@@ -115,6 +116,13 @@ pub struct Parameters {
     pub net_udp_max_payload_bytes: Option<usize>,
     pub net_udp_ephemeral_port_first: Option<u16>,
     pub net_udp_ephemeral_port_last: Option<u16>,
+    pub net_icmp_raw_endpoint_capacity: Option<usize>,
+    pub net_icmp_raw_tx_packet_capacity: Option<usize>,
+    pub net_icmp_raw_tx_byte_capacity: Option<usize>,
+    pub net_icmp_raw_rx_packet_capacity: Option<usize>,
+    pub net_icmp_raw_rx_byte_capacity: Option<usize>,
+    pub net_icmp_raw_default_ttl: Option<u8>,
+    pub net_icmp_raw_default_tos: Option<u8>,
 }
 
 impl Parameters {
@@ -151,6 +159,7 @@ impl Parameters {
         materialize!(epoll_file_max_waiters);
         materialize!(getdents64_buffer_bytes);
         materialize!(pipe_capacity_pages);
+        materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
         materialize!(unix_listener_max_backlog);
         materialize!(tid_alloc_policy);
@@ -206,6 +215,13 @@ impl Parameters {
         materialize!(net_udp_max_payload_bytes);
         materialize!(net_udp_ephemeral_port_first);
         materialize!(net_udp_ephemeral_port_last);
+        materialize!(net_icmp_raw_endpoint_capacity);
+        materialize!(net_icmp_raw_tx_packet_capacity);
+        materialize!(net_icmp_raw_tx_byte_capacity);
+        materialize!(net_icmp_raw_rx_packet_capacity);
+        materialize!(net_icmp_raw_rx_byte_capacity);
+        materialize!(net_icmp_raw_default_ttl);
+        materialize!(net_icmp_raw_default_tos);
         Ok(())
     }
 
@@ -268,8 +284,10 @@ pub const MAX_PROCESSES: u64 = {};
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
-/// Fixed pipe backing and default logical capacity in pages.
+/// Default anonymous-pipe capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
+/// Maximum anonymous-pipe capacity in pages.
+pub const PIPE_MAX_CAPACITY_PAGES: usize = {};
 /// Fixed byte capacity of each AF_UNIX stream direction.
 pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
 /// Maximum normalized listen backlog for AF_UNIX stream listeners.
@@ -399,6 +417,20 @@ pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
 pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = {};
 /// Last port in the deterministic UDP ephemeral allocation range.
 pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
+/// Maximum live IPv4 ICMP raw endpoints in the initial domain.
+pub const NET_ICMP_RAW_ENDPOINT_CAPACITY: usize = {};
+/// Per-endpoint committed ICMP raw transmit packet slots.
+pub const NET_ICMP_RAW_TX_PACKET_CAPACITY: usize = {};
+/// Per-endpoint committed ICMP raw transmit packet bytes.
+pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = {};
+/// Per-endpoint detached ICMP raw receive packet slots.
+pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = {};
+/// Per-endpoint detached ICMP raw receive packet bytes.
+pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
+/// Default IPv4 TTL for ICMP raw Socket sends.
+pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = {};
+/// Default IPv4 TOS for ICMP raw Socket sends.
+pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -414,6 +446,7 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(epoll_file_max_waiters),
             resolved!(getdents64_buffer_bytes),
             resolved!(pipe_capacity_pages),
+            resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
             resolved!(unix_listener_max_backlog),
             resolved!(tid_alloc_policy).kernel_variant(),
@@ -469,6 +502,13 @@ pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_udp_max_payload_bytes),
             resolved!(net_udp_ephemeral_port_first),
             resolved!(net_udp_ephemeral_port_last),
+            resolved!(net_icmp_raw_endpoint_capacity),
+            resolved!(net_icmp_raw_tx_packet_capacity),
+            resolved!(net_icmp_raw_tx_byte_capacity),
+            resolved!(net_icmp_raw_rx_packet_capacity),
+            resolved!(net_icmp_raw_rx_byte_capacity),
+            resolved!(net_icmp_raw_default_ttl),
+            resolved!(net_icmp_raw_default_tos),
         )
     }
 }
@@ -530,6 +570,27 @@ mod tests {
     }
 
     #[test]
+    fn icmp_raw_defaults_materialize_and_generate_exact_constants() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        let generated = parameters.gen_kconfig_defs();
+        for expected in [
+            "pub const NET_ICMP_RAW_ENDPOINT_CAPACITY: usize = 64;",
+            "pub const NET_ICMP_RAW_TX_PACKET_CAPACITY: usize = 8;",
+            "pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = 65536;",
+            "pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = 64;",
+            "pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = 262144;",
+            "pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = 64;",
+            "pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = 0;",
+        ] {
+            assert!(
+                generated.contains(expected),
+                "missing generated constant {expected}"
+            );
+        }
+    }
+
+    #[test]
     fn getdents64_buffer_default_materializes_and_generates() {
         let mut parameters = defaults();
         parameters.materialize_defaults(None).unwrap();
@@ -538,6 +599,21 @@ mod tests {
                 .gen_kconfig_defs()
                 .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
         );
+    }
+
+    #[test]
+    fn pipe_capacity_semantics_are_deferred_to_kernel_compilation() {
+        let mut parameters = defaults();
+        parameters.materialize_defaults(None).unwrap();
+        let generated = parameters.gen_kconfig_defs();
+        assert!(generated.contains("pub const PIPE_CAPACITY_PAGES: usize = 2;"));
+        assert!(generated.contains("pub const PIPE_MAX_CAPACITY_PAGES: usize = 16;"));
+
+        parameters.pipe_capacity_pages = Some(3);
+        parameters.pipe_max_capacity_pages = Some(1);
+        let generated = parameters.gen_kconfig_defs();
+        assert!(generated.contains("pub const PIPE_CAPACITY_PAGES: usize = 3;"));
+        assert!(generated.contains("pub const PIPE_MAX_CAPACITY_PAGES: usize = 1;"));
     }
 
     #[test]

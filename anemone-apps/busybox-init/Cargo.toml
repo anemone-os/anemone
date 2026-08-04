@@ -1,5 +1,5 @@
 [package]
-name = "busybox"
+name = "busybox-init"
 version = "0.1.0"
 edition = "2024"
 

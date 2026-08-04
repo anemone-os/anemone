@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod icmp_raw;
 mod udp;
 mod unix;
 
@@ -18,10 +19,18 @@ fn main() -> Result<(), Errno> {
             }
             udp::run_cloexec_child(fd)
         },
+        Some("--icmp-raw-cloexec-child") => {
+            let fd = args.next().ok_or(EINVAL)?;
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            icmp_raw::run_cloexec_child(fd)
+        },
         None => {
             let udp_result = udp::run();
             let unix_result = unix::run();
-            udp_result.and(unix_result)
+            let icmp_raw_result = icmp_raw::run();
+            udp_result.and(unix_result).and(icmp_raw_result)
         },
         Some(_) => Err(EINVAL),
     }

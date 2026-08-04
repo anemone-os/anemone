@@ -1,10 +1,14 @@
 //! Byte-level Linux sockaddr handling and Socket outcome projection.
 
 use alloc::{vec, vec::Vec};
-use core::mem::size_of;
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, SockAddrIn, SockAddrUn, socklen_t,
+    AF_INET, AF_UNIX, AF_UNSPEC, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SockAddrIn,
+    SockAddrUn, socklen_t,
 };
 use anemone_net_api::Ipv4Address;
 
@@ -13,7 +17,6 @@ use crate::{
         SocketAddress, SocketBindError, SocketQueryError, SocketReceiveError, SocketSendError,
         SocketType,
     },
-    kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
 };
@@ -22,18 +25,32 @@ const SOCKADDR_IN_LEN: usize = size_of::<SockAddrIn>();
 const SOCKADDR_UN_LEN: usize = size_of::<SockAddrUn>();
 const SOCKADDR_UN_PATH_OFFSET: usize = 2;
 const MAX_SOCKADDR_INPUT_LEN: usize = 128;
+// Diagnostic-only rate limiting. This bit never participates in flag or send
+// behavior.
+static RAW_NOSIGNAL_DIAGNOSTIC_EMITTED: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
+fn copy_sockaddr_input(
+    addr: u64,
+    len: u32,
+    minimum: usize,
+) -> Result<([u8; MAX_SOCKADDR_INPUT_LEN], usize), SysError> {
     let len = len as usize;
-    if !(SOCKADDR_IN_LEN..=MAX_SOCKADDR_INPUT_LEN).contains(&len) {
+    if !(minimum..=MAX_SOCKADDR_INPUT_LEN).contains(&len) {
         return Err(SysError::InvalidArgument);
     }
     let addr = user_addr(addr)?;
     let task = get_current_task();
     let uspace = task.clone_uspace_handle();
-    let mut bytes = [0u8; SOCKADDR_IN_LEN];
-    UserReadSlice::<u8>::try_new(addr, SOCKADDR_IN_LEN, &mut uspace.lock())?
-        .copy_to_slice(&mut bytes)?;
+    let mut bytes = [0u8; MAX_SOCKADDR_INPUT_LEN];
+    UserReadSlice::<u8>::try_new(addr, len, &mut uspace.lock())?
+        .copy_to_slice(&mut bytes[..len])?;
+    Ok((bytes, len))
+}
+
+fn parse_sockaddr_in(bytes: &[u8]) -> Result<SocketAddress, SysError> {
+    if bytes.len() < SOCKADDR_IN_LEN {
+        return Err(SysError::InvalidArgument);
+    }
     let family = u16::from_ne_bytes(bytes[0..2].try_into().unwrap());
     if family != AF_INET as u16 {
         return Err(SysError::AddressFamilyNotSupported);
@@ -44,6 +61,11 @@ pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, Sys
         return Err(SysError::InvalidArgument);
     }
     Ok(SocketAddress::Ipv4 { address, port })
+}
+
+pub(super) fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
+    let (bytes, len) = copy_sockaddr_input(addr, len, SOCKADDR_IN_LEN)?;
+    parse_sockaddr_in(&bytes[..len])
 }
 
 fn parse_sockaddr_un(bytes: &[u8]) -> Result<SocketAddress, SysError> {
@@ -93,9 +115,28 @@ pub(super) fn read_socket_address(
     len: u32,
 ) -> Result<SocketAddress, SysError> {
     match socket_type {
-        SocketType::Ipv4Udp => read_sockaddr_in(addr, len),
+        SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw => read_sockaddr_in(addr, len),
         SocketType::UnixStream => read_sockaddr_un(addr, len),
     }
+}
+
+pub(super) fn read_socket_connect_address(
+    socket_type: SocketType,
+    addr: u64,
+    len: u32,
+) -> Result<SocketAddress, SysError> {
+    if socket_type != SocketType::Ipv4IcmpRaw {
+        return read_socket_address(socket_type, addr, len);
+    }
+
+    // Linux move_addr_to_kernel validates and copies the complete caller range
+    // before inet_dgram_connect interprets AF_UNSPEC. Keep tail faults and the
+    // sockaddr_storage bound visible even though disconnect only reads family.
+    let (bytes, len) = copy_sockaddr_input(addr, len, size_of::<u16>())?;
+    if u16::from_ne_bytes(bytes[..size_of::<u16>()].try_into().unwrap()) == AF_UNSPEC as u16 {
+        return Ok(SocketAddress::Unspecified);
+    }
+    parse_sockaddr_in(&bytes[..len])
 }
 
 pub(super) fn validate_raw_socket_address(addr: u64, len: u32) -> Result<(), SysError> {
@@ -143,12 +184,15 @@ fn write_sockaddr_bytes(addr: u64, addrlen: u64, bytes: &[u8]) -> Result<(), Sys
 
 fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>) -> Vec<u8> {
     match (socket_type, address) {
-        (SocketType::Ipv4Udp, None) => {
+        (SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw, None) => {
             let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes
         },
-        (SocketType::Ipv4Udp, Some(SocketAddress::Ipv4 { address, port })) => {
+        (
+            SocketType::Ipv4Udp | SocketType::Ipv4IcmpRaw,
+            Some(SocketAddress::Ipv4 { address, port }),
+        ) => {
             let mut bytes = vec![0u8; SOCKADDR_IN_LEN];
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes[2..4].copy_from_slice(&port.to_be_bytes());
@@ -162,6 +206,9 @@ fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>)
             bytes.extend_from_slice(pathname.as_bytes());
             bytes.push(0);
             bytes
+        },
+        (_, Some(SocketAddress::Unspecified)) => {
+            panic!("Socket family returned AF_UNSPEC from an address query")
         },
         _ => panic!("Socket family returned an address of another semantic type"),
     }
@@ -188,11 +235,10 @@ pub(super) fn write_peer(addr: u64, addrlen: u64, peer: SocketAddress) -> Result
     write_sockaddr_bytes(addr, addrlen, &bytes)
 }
 
-pub(super) fn read_payload(addr: u64, len: usize) -> Result<Vec<u8>, SysError> {
-    // sendto commits any implicit binding before reaching this allocation
-    // guard. Stack admission still rechecks the same configured Endpoint limit
-    // together with the selected interface MTU before reporting success.
-    if len > NET_UDP_MAX_PAYLOAD_BYTES {
+pub(super) fn read_payload(addr: u64, len: usize, maximum: usize) -> Result<Vec<u8>, SysError> {
+    // The family supplies its absolute semantic ceiling. Request-specific MTU
+    // and Endpoint capacity remain owner checks after the bounded user copy.
+    if len > maximum {
         return Err(SysError::MessageTooLong);
     }
     if len == 0 {
@@ -231,10 +277,21 @@ pub(super) fn validate_send_message_flags(
     let supported = match socket_type {
         SocketType::Ipv4Udp => MSG_DONTWAIT,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_NOSIGNAL,
+        SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_NOSIGNAL,
     };
     if flags & !supported != 0 {
         knoticeln!("socket: unsupported sendto flags {:#x}", flags);
         return Err(SysError::NotSupported);
+    }
+    if socket_type == SocketType::Ipv4IcmpRaw
+        && flags & MSG_NOSIGNAL != 0
+        && !RAW_NOSIGNAL_DIAGNOSTIC_EMITTED.swap(true, Ordering::Relaxed)
+    {
+        // Raw ICMP has no peer-close or SIGPIPE producer, so MSG_NOSIGNAL is a
+        // visible no-op accepted for Linux compatibility. Remove this special
+        // diagnostic only if the family later gains a real SIGPIPE path and
+        // routes the flag through the ordinary signal-suppression protocol.
+        knoticeln!("ICMP raw send: MSG_NOSIGNAL accepted without a SIGPIPE producer");
     }
     Ok(SendMessageFlags {
         nonblocking: flags & MSG_DONTWAIT != 0,
@@ -245,6 +302,7 @@ pub(super) fn validate_send_message_flags(
 pub(super) struct ReceiveMessageFlags {
     pub(super) nonblocking: bool,
     pub(super) peek: bool,
+    pub(super) truncate_result: bool,
 }
 
 pub(super) fn validate_receive_message_flags(
@@ -254,6 +312,7 @@ pub(super) fn validate_receive_message_flags(
     let supported = match socket_type {
         SocketType::Ipv4Udp => MSG_DONTWAIT,
         SocketType::UnixStream => MSG_DONTWAIT | MSG_PEEK,
+        SocketType::Ipv4IcmpRaw => MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
     };
     if flags & !supported != 0 {
         knoticeln!("socket: unsupported recvfrom flags {:#x}", flags);
@@ -262,6 +321,7 @@ pub(super) fn validate_receive_message_flags(
     Ok(ReceiveMessageFlags {
         nonblocking: flags & MSG_DONTWAIT != 0,
         peek: flags & MSG_PEEK != 0,
+        truncate_result: flags & MSG_TRUNC != 0,
     })
 }
 
@@ -297,6 +357,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
         SocketSendError::ResourceExhausted | SocketSendError::WouldBlock => SysError::Again,
         SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
+        SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,
         SocketSendError::MessageTooLong => SysError::MessageTooLong,
         SocketSendError::PeerClosed => SysError::BrokenPipe,

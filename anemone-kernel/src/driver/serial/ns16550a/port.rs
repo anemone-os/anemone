@@ -3,7 +3,7 @@ use crate::{
         console::Console,
         tty::{
             TtyLineSnapshot, TtyParity, TtyPort, TtyPortAttachment, TtyPortId, TtyRxNotifier,
-            attach_unpublished_port,
+            TtyRxUnit, attach_unpublished_port,
         },
     },
     mm::remap::IoRemap,
@@ -60,7 +60,7 @@ impl AppliedLine {
 }
 
 struct RawRx {
-    fifo: RingBuffer<u8, TTY_RAW_RX_CAPACITY_BYTES>,
+    fifo: RingBuffer<TtyRxUnit, TTY_RAW_RX_CAPACITY_BYTES>,
 }
 
 impl RawRx {
@@ -70,17 +70,17 @@ impl RawRx {
         }
     }
 
-    fn publish(&mut self, bytes: &[u8]) -> RawPublication {
+    fn publish(&mut self, units: &[TtyRxUnit]) -> RawPublication {
         let was_empty = self.fifo.is_empty();
-        let accepted = self.fifo.try_push_slice(bytes);
+        let accepted = self.fifo.try_push_slice(units);
         RawPublication {
             accepted,
-            dropped: bytes.len() - accepted,
+            dropped: units.len() - accepted,
             became_nonempty: was_empty && accepted != 0,
         }
     }
 
-    fn dequeue(&mut self, dst: &mut [u8]) -> usize {
+    fn dequeue(&mut self, dst: &mut [TtyRxUnit]) -> usize {
         self.fifo.try_pop_slice(dst)
     }
 }
@@ -97,7 +97,9 @@ struct PortCounters {
     /// lifecycle transition.
     rx_accepted: AtomicUsize,
     rx_dropped: AtomicUsize,
-    line_errors: AtomicUsize,
+    rx_breaks: AtomicUsize,
+    rx_faults: AtomicUsize,
+    rx_overruns: AtomicUsize,
     irq_budget_exhaustions: AtomicUsize,
     notifications: AtomicUsize,
     tx_accepted: AtomicUsize,
@@ -110,7 +112,9 @@ impl PortCounters {
         Self {
             rx_accepted: AtomicUsize::new(0),
             rx_dropped: AtomicUsize::new(0),
-            line_errors: AtomicUsize::new(0),
+            rx_breaks: AtomicUsize::new(0),
+            rx_faults: AtomicUsize::new(0),
+            rx_overruns: AtomicUsize::new(0),
             irq_budget_exhaustions: AtomicUsize::new(0),
             notifications: AtomicUsize::new(0),
             tx_accepted: AtomicUsize::new(0),
@@ -208,37 +212,47 @@ impl Uart16550Port {
 
     fn handle_irq(&self, notifier: &TtyRxNotifier) {
         let regs = self.regs();
-        let mut batch = [0_u8; NS16550A_IRQ_RX_BUDGET_BYTES];
-        let mut bytes = 0;
-        let mut line_errors = 0;
+        let mut batch = [TtyRxUnit::Byte(0); NS16550A_IRQ_RX_BUDGET_BYTES];
+        let mut units = 0;
+        let mut breaks = 0;
+        let mut faults = 0;
+        let mut overruns = 0;
         let mut causes = 0;
         let mut budget_exhausted = false;
 
-        while causes < NS16550A_IRQ_RX_BUDGET_BYTES && bytes < batch.len() {
+        while causes < NS16550A_IRQ_RX_BUDGET_BYTES && units < batch.len() {
             match regs.interrupt_reason() {
                 InterruptReason::None => break,
                 InterruptReason::RxAvailable | InterruptReason::RxLineStatus => {
                     causes += 1;
-                    let drained = drain_samples(&mut batch[bytes..], || regs.read_rx_sample());
-                    bytes += drained.bytes;
-                    line_errors += drained.line_errors;
-                    if bytes == batch.len() {
-                        // The next FIFO entry's line status belongs to the next
-                        // drain. Count it only when that byte is consumed.
-                        budget_exhausted = regs.rx_status().data_ready;
+                    let drained = drain_samples(&mut batch[units..], || regs.read_rx_sample());
+                    units += drained.units;
+                    breaks += drained.breaks;
+                    faults += drained.faults;
+                    overruns += drained.overruns;
+                    if units == batch.len() {
+                        // LSR error/condition bits are read-clear and belong to
+                        // the next FIFO sample. A full software batch already
+                        // proves more IRQ work may remain, so do not inspect and
+                        // destroy the next sample's classification here.
+                        budget_exhausted = true;
                         break;
                     }
                 },
                 InterruptReason::RxTimeout => {
                     causes += 1;
-                    let drained = drain_samples(&mut batch[bytes..], || regs.read_rx_sample());
-                    bytes += drained.bytes;
-                    line_errors += drained.line_errors;
-                    if drained.bytes == 0 {
+                    let drained = drain_samples(&mut batch[units..], || regs.read_rx_sample());
+                    units += drained.units;
+                    breaks += drained.breaks;
+                    faults += drained.faults;
+                    overruns += drained.overruns;
+                    if drained.units == 0 {
                         let _ = regs.clear_spurious_rx_timeout();
                     }
-                    if bytes == batch.len() {
-                        budget_exhausted = regs.rx_status().data_ready;
+                    if units == batch.len() {
+                        // As above, leave the next sample's read-clear LSR bits
+                        // for the drain that will also consume its payload.
+                        budget_exhausted = true;
                         break;
                     }
                 },
@@ -260,9 +274,11 @@ impl Uart16550Port {
             budget_exhausted = true;
         }
 
+        self.counters.rx_breaks.fetch_add(breaks, Ordering::Relaxed);
+        self.counters.rx_faults.fetch_add(faults, Ordering::Relaxed);
         self.counters
-            .line_errors
-            .fetch_add(line_errors, Ordering::Relaxed);
+            .rx_overruns
+            .fetch_add(overruns, Ordering::Relaxed);
         if budget_exhausted {
             self.counters
                 .irq_budget_exhaustions
@@ -271,7 +287,7 @@ impl Uart16550Port {
 
         let publication = {
             let mut raw_rx = self.raw_rx.lock_irqsave();
-            raw_rx.publish(&batch[..bytes])
+            raw_rx.publish(&batch[..units])
         };
         self.counters
             .rx_accepted
@@ -304,7 +320,7 @@ impl TtyPort for Uart16550TtyPort {
         !self.port.raw_rx.lock_irqsave().fifo.is_empty()
     }
 
-    fn dequeue_rx(&self, dst: &mut [u8]) -> usize {
+    fn dequeue_rx(&self, dst: &mut [TtyRxUnit]) -> usize {
         self.port.raw_rx.lock_irqsave().dequeue(dst)
     }
 
@@ -428,23 +444,52 @@ fn handle_irq(private: &AnyOpaque) {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SampleDrain {
-    bytes: usize,
-    line_errors: usize,
+    units: usize,
+    breaks: usize,
+    faults: usize,
+    overruns: usize,
 }
 
-fn drain_samples(dst: &mut [u8], mut read_sample: impl FnMut() -> RxSample) -> SampleDrain {
-    let mut bytes = 0;
-    let mut line_errors = 0;
-    while bytes < dst.len() {
+fn drain_samples(dst: &mut [TtyRxUnit], mut read_sample: impl FnMut() -> RxSample) -> SampleDrain {
+    let mut units = 0;
+    let mut breaks = 0;
+    let mut faults = 0;
+    let mut overruns = 0;
+    while units < dst.len() {
         let sample = read_sample();
-        line_errors += usize::from(sample.line_error);
-        let Some(byte) = sample.byte else {
+        let stop_after_sample = sample.byte.is_none();
+        overruns += usize::from(sample.overrun);
+        breaks += usize::from(sample.break_received);
+        faults += usize::from(!sample.break_received && sample.parity_or_framing);
+        let unit = if sample.break_received {
+            Some(TtyRxUnit::Break)
+        } else {
+            sample.byte.map(|byte| {
+                if sample.parity_or_framing {
+                    TtyRxUnit::FaultedByte(byte)
+                } else {
+                    TtyRxUnit::Byte(byte)
+                }
+            })
+        };
+        let Some(unit) = unit else {
             break;
         };
-        dst[bytes] = byte;
-        bytes += 1;
+        dst[units] = unit;
+        units += 1;
+        if stop_after_sample {
+            // A synthetic/no-payload break is one ordered condition. Stop the
+            // drain so a source that cannot advance without payload cannot
+            // duplicate that condition in the same IRQ batch.
+            break;
+        }
     }
-    SampleDrain { bytes, line_errors }
+    SampleDrain {
+        units,
+        breaks,
+        faults,
+        overruns,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -490,7 +535,11 @@ mod kunits {
     fn raw_rx_preserves_fifo_and_notifies_only_on_empty_transition() {
         let mut raw = RawRx::new();
         assert_eq!(
-            raw.publish(&[1, 2, 3]),
+            raw.publish(&[
+                TtyRxUnit::Byte(1),
+                TtyRxUnit::Break,
+                TtyRxUnit::FaultedByte(3),
+            ]),
             RawPublication {
                 accepted: 3,
                 dropped: 0,
@@ -498,7 +547,7 @@ mod kunits {
             }
         );
         assert_eq!(
-            raw.publish(&[4, 5]),
+            raw.publish(&[TtyRxUnit::Byte(4), TtyRxUnit::Byte(5)]),
             RawPublication {
                 accepted: 2,
                 dropped: 0,
@@ -506,23 +555,32 @@ mod kunits {
             }
         );
 
-        let mut observed = [0_u8; 5];
+        let mut observed = [TtyRxUnit::Byte(0); 5];
         assert_eq!(raw.dequeue(&mut observed), observed.len());
-        assert_eq!(observed, [1, 2, 3, 4, 5]);
+        assert_eq!(
+            observed,
+            [
+                TtyRxUnit::Byte(1),
+                TtyRxUnit::Break,
+                TtyRxUnit::FaultedByte(3),
+                TtyRxUnit::Byte(4),
+                TtyRxUnit::Byte(5),
+            ]
+        );
         assert!(raw.fifo.is_empty());
     }
 
     #[kunit]
-    fn raw_rx_full_queue_drops_new_bytes() {
+    fn raw_rx_full_queue_drops_new_units() {
         let mut raw = RawRx::new();
-        let chunk = [0x5a_u8; 64];
+        let chunk = [TtyRxUnit::Byte(0x5a); 64];
         while !raw.fifo.is_full() {
             let available = raw.fifo.available().min(chunk.len());
             let publication = raw.publish(&chunk[..available]);
             assert_eq!(publication.dropped, 0);
         }
         assert_eq!(
-            raw.publish(&[0xa5]),
+            raw.publish(&[TtyRxUnit::Break]),
             RawPublication {
                 accepted: 0,
                 dropped: 1,
@@ -532,44 +590,67 @@ mod kunits {
     }
 
     #[kunit]
-    fn rx_sample_drain_obeys_budget_and_counts_line_errors() {
+    fn rx_sample_drain_classifies_ordered_conditions_and_counts_diagnostics() {
         let samples = [
             RxSample {
                 byte: Some(0x11),
-                line_error: true,
+                break_received: false,
+                parity_or_framing: false,
+                overrun: false,
             },
             RxSample {
                 byte: Some(0x22),
-                line_error: false,
+                break_received: false,
+                parity_or_framing: true,
+                overrun: true,
             },
             RxSample {
                 byte: Some(0x33),
-                line_error: true,
+                break_received: true,
+                parity_or_framing: true,
+                overrun: true,
             },
         ];
         let mut next = 0;
-        let mut dst = [0_u8; 2];
+        let mut dst = [TtyRxUnit::Byte(0); 2];
         let drained = drain_samples(&mut dst, || {
             let sample = samples[next];
             next += 1;
             sample
         });
-        assert_eq!(drained.bytes, 2);
-        assert_eq!(drained.line_errors, 1);
-        assert_eq!(dst, [0x11, 0x22]);
+        assert_eq!(drained.units, 2);
+        assert_eq!(drained.breaks, 0);
+        assert_eq!(drained.faults, 1);
+        assert_eq!(drained.overruns, 1);
+        assert_eq!(dst, [TtyRxUnit::Byte(0x11), TtyRxUnit::FaultedByte(0x22)]);
         assert_eq!(next, 2, "the third sample must remain for later IRQ work");
 
-        let mut no_data = false;
-        let drained = drain_samples(&mut [0_u8; 1], || {
-            assert!(!no_data);
-            no_data = true;
+        let mut break_without_data = false;
+        let mut units = [TtyRxUnit::Byte(0); 2];
+        let drained = drain_samples(&mut units, || {
+            assert!(!break_without_data);
+            break_without_data = true;
             RxSample {
                 byte: None,
-                line_error: true,
+                break_received: true,
+                parity_or_framing: true,
+                overrun: true,
             }
         });
-        assert_eq!(drained.bytes, 0);
-        assert_eq!(drained.line_errors, 1);
+        assert_eq!(drained.units, 1);
+        assert_eq!(drained.breaks, 1);
+        assert_eq!(drained.faults, 0, "break classification has priority");
+        assert_eq!(drained.overruns, 1);
+        assert_eq!(units, [TtyRxUnit::Break, TtyRxUnit::Byte(0)]);
+
+        let drained = drain_samples(&mut [TtyRxUnit::Byte(0); 1], || RxSample {
+            byte: None,
+            break_received: false,
+            parity_or_framing: false,
+            overrun: true,
+        });
+        assert_eq!(drained.units, 0);
+        assert_eq!(drained.overruns, 1);
     }
 
     #[kunit]

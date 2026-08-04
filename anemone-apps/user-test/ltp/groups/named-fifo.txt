@@ -1,0 +1,7 @@
+open06
+read03
+write04
+select01
+fcntl07
+dup05
+unlink05

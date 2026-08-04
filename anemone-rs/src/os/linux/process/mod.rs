@@ -5,10 +5,40 @@ use core::arch::naked_asm;
 use core::ptr::NonNull;
 
 use alloc::ffi::CString;
-use anemone_abi::process::linux::{clone, mmap, resource::RLimit, signal::SIGCHLD, wait};
+use anemone_abi::{
+    capability::linux::{
+        _KERNEL_CAPABILITY_U32S, _KERNEL_CAPABILITY_VERSION, UserCapData, UserCapHeader,
+    },
+    process::linux::{clone, mmap, resource::RLimit, signal::SIGCHLD, wait},
+};
 use bitflags::bitflags;
 
 use crate::{prelude::*, sys::linux::process};
+
+pub fn capget_current() -> Result<[UserCapData; _KERNEL_CAPABILITY_U32S], Errno> {
+    let mut header = UserCapHeader {
+        version: _KERNEL_CAPABILITY_VERSION,
+        pid: 0,
+    };
+    let mut data = [UserCapData::default(); _KERNEL_CAPABILITY_U32S];
+    process::capget(
+        &mut header as *mut UserCapHeader as u64,
+        data.as_mut_ptr() as u64,
+    )?;
+    Ok(data)
+}
+
+pub fn capset_current(data: &[UserCapData; _KERNEL_CAPABILITY_U32S]) -> Result<(), Errno> {
+    let mut header = UserCapHeader {
+        version: _KERNEL_CAPABILITY_VERSION,
+        pid: 0,
+    };
+    process::capset(
+        &mut header as *mut UserCapHeader as u64,
+        data.as_ptr() as u64,
+    )
+    .map(|_| ())
+}
 
 pub fn brk(addr: usize) -> Result<usize, Errno> {
     process::brk(addr as u64).map(|value| value as usize)

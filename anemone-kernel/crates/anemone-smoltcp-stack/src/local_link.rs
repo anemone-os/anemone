@@ -1,6 +1,6 @@
 use alloc::{collections::VecDeque, vec, vec::Vec};
 
-use anemone_net_api::InterfaceId;
+use anemone_net_api::{InterfaceId, icmp_raw::IcmpRawEndpointId};
 use smoltcp::{
     iface::{Config, Interface, SocketSet},
     phy::{
@@ -9,10 +9,19 @@ use smoltcp::{
     wire::HardwareAddress,
 };
 
-use crate::{stack::PumpOrder, udp::EndpointId};
+use crate::{
+    stack::{ActiveEgress, InterfaceProtocols, Protocols, PumpOrder},
+    udp::EndpointId,
+};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum PacketOwner {
+    Udp(EndpointId),
+    IcmpRaw(IcmpRawEndpointId),
+}
 
 struct LocalPacket {
-    owner: Option<EndpointId>,
+    owner: Option<PacketOwner>,
     bytes: Vec<u8>,
 }
 
@@ -26,7 +35,7 @@ pub(crate) struct LocalLink {
     egress: VecDeque<LocalPacket>,
     packet_capacity: usize,
     mtu: usize,
-    tx_owner: Option<EndpointId>,
+    tx_owner: Option<PacketOwner>,
 }
 
 impl LocalLink {
@@ -50,7 +59,7 @@ impl LocalLink {
         self.occupied() >= self.packet_capacity
     }
 
-    pub(crate) fn set_tx_owner(&mut self, owner: Option<EndpointId>) {
+    pub(crate) fn set_tx_owner(&mut self, owner: Option<PacketOwner>) {
         self.tx_owner = owner;
     }
 
@@ -66,7 +75,15 @@ impl LocalLink {
         transferred
     }
 
-    pub(crate) fn remove_owner(&mut self, owner: EndpointId) {
+    pub(crate) fn remove_udp_owner(&mut self, owner: EndpointId) {
+        self.remove_owner(PacketOwner::Udp(owner));
+    }
+
+    pub(crate) fn remove_icmp_raw_owner(&mut self, owner: IcmpRawEndpointId) {
+        self.remove_owner(PacketOwner::IcmpRaw(owner));
+    }
+
+    fn remove_owner(&mut self, owner: PacketOwner) {
         self.ingress.retain(|packet| packet.owner != Some(owner));
         self.egress.retain(|packet| packet.owner != Some(owner));
         if self.tx_owner == Some(owner) {
@@ -79,6 +96,7 @@ pub(crate) struct LocalPort {
     pub(crate) id: InterfaceId,
     pub(crate) interface: Interface,
     pub(crate) sockets: SocketSet<'static>,
+    pub(crate) protocols: InterfaceProtocols,
     pub(crate) link: LocalLink,
     pub(crate) next_pump_order: PumpOrder,
 }
@@ -89,6 +107,7 @@ impl LocalPort {
         now: smoltcp::time::Instant,
         packet_capacity: usize,
         mtu: usize,
+        protocols: &mut Protocols,
     ) -> Self {
         let mut link = LocalLink::new(packet_capacity, mtu);
         let interface = Interface::new(
@@ -96,10 +115,13 @@ impl LocalPort {
             &mut LocalDevice::new(&mut link),
             now,
         );
+        let mut sockets = SocketSet::new(vec![]);
+        let interface_protocols = protocols.attach_interface(id, &mut sockets);
         Self {
             id,
             interface,
-            sockets: SocketSet::new(vec![]),
+            sockets,
+            protocols: interface_protocols,
             link,
             next_pump_order: PumpOrder::IngressFirst,
         }
@@ -111,6 +133,14 @@ impl LocalPort {
 
     pub(crate) fn local_link_capacity(&self) -> usize {
         self.link.packet_capacity
+    }
+}
+
+pub(crate) fn packet_owner(active: ActiveEgress) -> Option<PacketOwner> {
+    match active {
+        ActiveEgress::None => None,
+        ActiveEgress::Udp(endpoint) => Some(PacketOwner::Udp(endpoint)),
+        ActiveEgress::IcmpRaw(endpoint) => Some(PacketOwner::IcmpRaw(endpoint)),
     }
 }
 
@@ -160,7 +190,7 @@ impl Drop for LocalRxToken<'_> {
 
 pub(crate) struct LocalTxToken<'a> {
     queue: &'a mut VecDeque<LocalPacket>,
-    owner: Option<EndpointId>,
+    owner: Option<PacketOwner>,
     mtu: usize,
 }
 

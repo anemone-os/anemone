@@ -13,6 +13,7 @@ use crate::{
         file::FileMode,
         lock::{FlockDomain, PosixLockDomain},
         permission::FsPermChecker,
+        pipe::FifoAnchor,
     },
     prelude::{vmo::VmObject, *},
     task::credentials::cap::{Capability, FileCapabilities},

@@ -4,12 +4,12 @@
 **状态：** Active
 **Owner：** `device::tty` controlling-relation 与 terminal-access protocol；task topology、Signal 与 ThreadGroup job control 继续分别拥有 membership、occurrence/action 与 stop/continue/report truth
 **参与领域：** TTY / VFS / task topology / process group / Signal / ThreadGroup job control / task lifecycle
-**覆盖范围：** controlling-terminal relation、caller-relative `/dev/tty`、foreground selector、terminal-generated signal、ordinary background read、relation cleanup 与首版 BusyBox ash job-control ABI
+**覆盖范围：** controlling-terminal relation、caller-relative `/dev/tty`、foreground selector、control-character与serial-break terminal signal、ordinary background read、relation cleanup 与首版 BusyBox ash job-control ABI
 **不覆盖：** PTY/devpts/ptmx、orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、relation-disassociation `SIGHUP`/`SIGCONT`、hardware hangup、runtime line reconfiguration或procfs TTY字段
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/task/{jobctl,sig}/`
 **依赖：** [TTY data plane](./data-plane.md)、[process-group signaling](../task/process-group-signaling.md)、[Signal pending/action](../signal/pending-routing.md)、[Unix job control](../task/job-control.md)、[task lifecycle](../task/thread-group-lifecycle.md)、[user entry](../task/user-entry.md)
-**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)
-**最后核验：** 2026-07-24
+**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)
+**最后核验：** 2026-08-03
 
 ## 状态与能力所有权
 
@@ -58,7 +58,10 @@ guard后进入topology/Signal owner重验caller与target membership。`TIOCSPGRP
 允许；background且`SIGTTOU` blocked/ignored允许；background且actionable时先向caller process group生成`SIGTTOU`
 并返回restart，不提交foreground mutation。mutation还必须返回relation owner重验generation后才commit。
 
-`VINTR/VQUIT/VSUSP`只向live foreground process group生成`SIGINT/SIGQUIT/SIGTSTP`；changed winsize只生成一次
+`VINTR/VQUIT/VSUSP`只向live foreground process group生成`SIGINT/SIGQUIT/SIGTSTP`。`BRKINT`不受`ISIG`控制：
+Terminal先按ordered stream位置清除已经condition的input与尚未提交port的pending output，再形成foreground
+`SIGINT` effect；break之后仍在worker/raw handoff中的units继续处理。local flush不因relation缺失、target stale或
+Signal publication失败而回滚，也不得回退到current task、最近reader或global PGID。changed winsize只生成一次
 `SIGWINCH`。普通background read在每次可能消费input前及blocking wait后重验：actionable `SIGTTIN`向caller process
 group生成signal并返回idempotent restart，本次不消费input；blocked/ignored或没有live foreground selector时返回
 `EIO`。relation失效或target revalidation失败必须retry/fail-close，不能回退到current task、opener或global PGID。
@@ -69,9 +72,9 @@ Terminal、relation、port与topology guard外才允许Signal publication、Even
 **违反表现：** session外group收到terminal signal、TTY保存或推进jobctl phase、background policy使用opener/global
 PGID、持TTY guard进入Signal/topology、background read提前消费input，或signal result反向改写relation。
 
-**验证 / Enforcement：** foreground/background `TIOCSPGRP`三分支、`VINTR/VQUIT/VSUSP`、changed-only winsize、
-actionable/blocked/ignored background read、detach-no-effect与BusyBox ash RV64 matrix；19项Unix job-control focused
-回归；guard/identity/restart capability source audit。
+**验证 / Enforcement：** foreground/background `TIOCSPGRP`三分支、`VINTR/VQUIT/VSUSP`、QEMU serial break在
+`ISIG=0`下的flush与foreground `SIGINT`、changed-only winsize、actionable/blocked/ignored background read、
+detach-no-effect与BusyBox ash RV64 matrix；19项Unix job-control focused回归；guard/identity/restart capability source audit。
 
 ## TTY-LIFE-001 — Relation cleanup先撤销可发现性再执行外部效果
 
@@ -97,7 +100,9 @@ clear与endpoint persistence RV64 matrix；eager/lazy cleanup、generation与gua
 **规则：** 首版同时交付稳定`/dev/ttyS0`、caller-relative`/dev/tty`、real Terminal boot fd 0/1/2、canonical与
 noncanonical `VMIN=1,VTIME=0` input、blocking/nonblocking read、byte-stream write、poll/select、目标termios/control
 chars/winsize/ioctl、显式`setsid + TIOCSCTTY(arg=0)`、`TIOCGPGRP/TIOCSPGRP/TIOCGSID`、foreground control
-signals、changed winsize `SIGWINCH`、普通background read `SIGTTIN`以及session-leader detach/exit cleanup。
+signals、serial `BRKINT` foreground `SIGINT`、changed winsize `SIGWINCH`、普通background read `SIGTTIN`以及
+session-leader detach/exit cleanup。termios input envelope还真实round-trip并执行`IGNBRK`、`BRKINT`、`IGNPAR`、
+`PARMRK`、`INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`；其它changed unsupported bits继续原子`EINVAL`。
 
 BusyBox ash必须取得真实controlling TTY；`jobs`、Ctrl-Z、`fg`、`bg`、foreground Ctrl-C、background read与shell
 reclaim都必须经过本页的relation/Signal/job-control handoff。BusyBox vi依赖真实raw/canonical切换、readiness与byte
@@ -110,8 +115,8 @@ read或foreground signal重新归入延期范围，也不得成功后丢弃状�
 **违反表现：** ash降级运行、foreground job结束后shell不能reclaim、`TIOCSPGRP`无条件放行或错误拒绝
 blocked/ignored路径、vi依赖fake ioctl、unsupported设置成功无效果，或background read绕过foreground policy。
 
-**验证 / Enforcement：** RV64自动TTY matrix `45/45`、BusyBox vi与ash host oracle、用户人工ash checklist、239项
-KUnit、19项Unix job-control focused回归、ABI/source/bypass audit与final review。
+**验证 / Enforcement：** RV64自动TTY matrix `50/50`、BusyBox vi与ash host oracle、native Python 3.13 basic REPL与
+PyREPL、用户人工ash checklist、404项KUnit、19项Unix job-control focused回归、ABI/source/bypass audit与final review。
 
 ## 跨领域handoff义务
 
@@ -124,12 +129,13 @@ KUnit、19项Unix job-control focused回归、ABI/source/bypass audit与final re
 
 ## 验证范围与当前接受边界
 
-- agent-run RV64证据：239项KUnit、TTY `45/45`、BusyBox vi/ash与host byte oracle、19项focused
-  `jobctl-test`、source/lock/bypass audit，最终0 Apollyon / 0 Keter / 0 Euclid。
-- user-run RV64证据：同一base/candidate、platform、BusyBox与kernel hash上的ash checklist完成Ctrl-C、
+- 本轮agent-run RV64证据：404项KUnit、TTY `50/50`、QEMU serial break、BusyBox vi/ash、host byte oracle、
+  native Python 3.13 `-c`/basic REPL/PyREPL、source/lock/bypass audit，独立review最终0 Apollyon / 0 Keter / 0 Euclid。
+- 既有user-run RV64 job-control证据仍为同一contract的历史验证，本轮未重新运行：同一base/candidate、platform、
+  BusyBox与kernel hash上的ash checklist完成Ctrl-C、
   `Ctrl-Z -> jobs -> fg -> Ctrl-Z -> bg -> jobs -> fg -> Ctrl-C`、background `cat`的`SIGTTIN` stop、foreground
   input与clean exit，launcher与wrapper均PASS。
-- build/runtime acceptance只覆盖RV64。LA64 compile/runtime、hardware与LTP为Not Run；focused pretest中的
+- 本轮build/runtime acceptance只覆盖RV64。LA64 compile/runtime、实体UART parity/framing injection、hardware与LTP为Not Run；focused pretest中的
   signal/wait profile为`attempted=0`，不是LTP通过证据。
 - relation-disassociation `SIGHUP`/`SIGCONT`、newly orphaned stopped-group policy、orphaned-pgrp errno/effect、
   `TOSTOP`与其它terminal-modifying background access、PTY/devpts/ptmx、hardware hangup/runtime line change和
