@@ -477,6 +477,35 @@ mod kunits {
     }
 
     #[kunit]
+    fn test_vfs_ramfs_directory_rename_and_cycle_guard() {
+        let base_path = Path::new("/kunit-vfs-ramfs-rename");
+        let source_path = Path::new("/kunit-vfs-ramfs-rename/source");
+        let moved_path = Path::new("/kunit-vfs-ramfs-rename/moved");
+        let child_path = Path::new("/kunit-vfs-ramfs-rename/moved/child");
+
+        let base = vfs_mkdir_as_root(base_path, InodePerm::all_rwx()).unwrap();
+        let source =
+            vfs_mkdir_at(&base, "source", InodePerm::all_rwx(), Uid::ROOT, Gid::ROOT).unwrap();
+        vfs_mkdir_at(&source, "child", InodePerm::all_rwx(), Uid::ROOT, Gid::ROOT).unwrap();
+
+        let source_ref = vfs_lookup(source_path).unwrap();
+        let base_ref = vfs_lookup(base_path).unwrap();
+        vfs_rename_at(&source_ref, &base_ref, "moved", RenameFlags::empty()).unwrap();
+
+        let moved_ref = vfs_lookup(moved_path).unwrap();
+        assert_eq!(moved_ref.inode(), source.inode());
+        let child_ref = vfs_lookup(child_path).unwrap();
+        assert_eq!(
+            vfs_rename_at(&moved_ref, &child_ref, "nested", RenameFlags::empty()),
+            Err(SysError::InvalidArgument)
+        );
+
+        vfs_rmdir(child_path).unwrap();
+        vfs_rmdir(moved_path).unwrap();
+        vfs_rmdir(base_path).unwrap();
+    }
+
+    #[kunit]
     fn test_vfs_creation_uses_explicit_owner_and_permission() {
         let base_path = Path::new("/kunit-vfs-explicit-create");
         let base = vfs_mkdir_as_root(base_path, InodePerm::all_rwx()).unwrap();

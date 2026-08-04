@@ -735,12 +735,14 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Low
 **Area:** ramfs / rename
 
-**Summary:** 当前 `ramfs` 的 `rename` 是为了收口 LTP `getcwd04` regular-file 链式改名而加入的 stage-1 实现，只支持同一 superblock 内非目录项改名、普通覆盖和 `RENAME_NOREPLACE`。目录 rename、循环检测、跨目录目录树移动以及更完整的 Linux rename flag 组合仍未实现。
+**Summary:** 当前 `ramfs` 的 `rename` 已达到现有 `ext4` backend 的能力：支持同一 superblock 内的 regular-file 与 directory 改名、跨父目录移动、普通覆盖、`RENAME_NOREPLACE`、目录类型匹配以及空目录/非空目录覆盖规则。generic VFS 仍只在 backend 提交后按名称移除旧 dentry 和目标 dentry，不迁移已经返回给调用者的 live `PathRef`/dentry；因此 ext4 与 ramfs 共同保留这一 namespace-cache 限制。更完整的 Linux rename flag 组合也不在当前范围。
 
-**Exit Condition:** 为 `ramfs` 补齐 directory rename 的父子关系维护、空目录/非空目录覆盖规则、循环防护和需要支持的额外 rename flags，并增加覆盖 cross-directory、directory 与 overwrite 场景的回归测试。
+**Decision:** 本 patch 只补齐 ramfs 与当前 ext4 backend 的 parity。generic VFS 的 live `PathRef`/dentry relocation、额外 rename flags 以及超出现有 ext4 能力的语义，记录为后续独立 VFS/filesystem 工作，不在本轮扩展。
+
+**Exit Condition:** 只有在后续 VFS pathname/dentry 工作明确建立 relocation/invalidation 协议，并分别验证 ext4 与 ramfs 的 live handle、覆盖和跨目录场景后，才移除本限制或拆分为更窄条目。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-28
+**Last Verified:** 2026-08-04
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260528-ROFS-DIRECT-WRITE-STAGE1

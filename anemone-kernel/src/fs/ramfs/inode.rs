@@ -150,7 +150,12 @@ fn ramfs_remove_locked(dir: &InodeRef, name: &str, is_dir: bool) -> Result<(), S
         dir.inode().dec_nlink();
     }
 
-    if is_dir || inode.nlink() == 0 {
+    if is_dir {
+        // A removed directory has no remaining namespace link, even though an
+        // open handle may still keep the inode alive.
+        inode.inode().set_nlink(0);
+        sb.unindex_inode(inode.inode());
+    } else if inode.nlink() == 0 {
         sb.unindex_inode(inode.inode());
     }
 
@@ -409,11 +414,7 @@ fn ramfs_rename(
         let src_ino = old_data.get_by_name(old_name).ok_or(SysError::NotFound)?;
         let src_inode = sb.iget(src_ino).expect("ino exists but failed to load");
 
-        if src_inode.ty() == InodeType::Dir {
-            return Err(SysError::NotSupported);
-        }
-
-        if let Some(dst_ino) = new_data.get_by_name(new_name) {
+        let dst_inode = if let Some(dst_ino) = new_data.get_by_name(new_name) {
             if flags.contains(RenameFlags::NO_REPLACE) {
                 return Err(SysError::AlreadyExists);
             }
@@ -422,19 +423,51 @@ fn ramfs_rename(
             }
 
             let dst_inode = sb.iget(dst_ino).expect("ino exists but failed to load");
-            if dst_inode.ty() == InodeType::Dir {
-                return Err(SysError::IsDir);
+            match (src_inode.ty(), dst_inode.ty()) {
+                (InodeType::Dir, InodeType::Dir) => {
+                    if !ramfs_dir(&dst_inode)?.is_empty() {
+                        return Err(SysError::DirNotEmpty);
+                    }
+                },
+                (InodeType::Dir, _) => return Err(SysError::NotDir),
+                (_, InodeType::Dir) => return Err(SysError::IsDir),
+                _ => {},
             }
 
-            assert!(new_data.remove(new_name).is_some());
-            dst_inode.inode().dec_nlink();
-            if dst_inode.nlink() == 0 {
+            Some(dst_inode)
+        } else {
+            None
+        };
+
+        if let Some(dst_inode) = dst_inode {
+            assert_eq!(new_data.remove(new_name), Some(dst_inode.ino()));
+            if dst_inode.ty() == InodeType::Dir {
+                new_dir.inode().dec_nlink();
+                dst_inode.inode().set_nlink(0);
                 sb.unindex_inode(dst_inode.inode());
+            } else {
+                dst_inode.inode().dec_nlink();
+                if dst_inode.nlink() == 0 {
+                    sb.unindex_inode(dst_inode.inode());
+                }
             }
         }
 
         assert_eq!(old_data.remove(old_name), Some(src_ino));
-        new_data.insert(new_name.to_string(), src_ino)
+        assert!(new_data.insert(new_name.to_string(), src_ino).is_ok());
+
+        if src_inode.ty() == InodeType::Dir && old_dir != new_dir {
+            // The VFS rename preflight owns descendant-cycle admission. This
+            // backend commit only moves the authoritative ramfs `..` entry and
+            // its parent link counts under the same namespace transaction.
+            let src_data = ramfs_dir(&src_inode)?;
+            assert_eq!(src_data.remove(".."), Some(old_dir.ino()));
+            assert!(src_data.insert("..".to_string(), new_dir.ino()).is_ok());
+            old_dir.inode().dec_nlink();
+            new_dir.inode().inc_nlink();
+        }
+
+        Ok(())
     })
 }
 
@@ -591,5 +624,130 @@ mod kunits {
             assert_eq!(node.get_attr().unwrap().rdev, DeviceId::None);
             assert!(matches!(node.open(), Err(err) if err == expected));
         }
+    }
+
+    #[kunit]
+    fn directory_rename_moves_across_parents_and_updates_dotdot_and_links() {
+        let sb = ramfs_mount(MountData::Null).unwrap();
+        let root = sb.root_inode();
+        let old_parent = ramfs_mkdir(&root, "old", InodePerm::all_rwx()).unwrap();
+        let new_parent = ramfs_mkdir(&root, "new", InodePerm::all_rwx()).unwrap();
+        let source = ramfs_mkdir(&old_parent, "source", InodePerm::all_rwx()).unwrap();
+        let child = ramfs_touch(&source, "child", InodePerm::all_rwx()).unwrap();
+
+        assert_eq!(old_parent.nlink(), 3);
+        assert_eq!(new_parent.nlink(), 2);
+
+        ramfs_rename(
+            &old_parent,
+            "source",
+            &new_parent,
+            "moved",
+            RenameFlags::empty(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            ramfs_lookup(&old_parent, "source"),
+            Err(err) if err == SysError::NotFound
+        ));
+        assert_eq!(
+            ramfs_lookup(&new_parent, "moved").unwrap().ino(),
+            source.ino()
+        );
+        assert_eq!(ramfs_lookup(&source, "child").unwrap().ino(), child.ino());
+        assert_eq!(ramfs_lookup(&source, "..").unwrap().ino(), new_parent.ino());
+        assert_eq!(old_parent.nlink(), 2);
+        assert_eq!(new_parent.nlink(), 3);
+    }
+
+    #[kunit]
+    fn directory_rename_replaces_empty_directory_and_rejects_nonempty() {
+        let sb = ramfs_mount(MountData::Null).unwrap();
+        let root = sb.root_inode();
+        let source = ramfs_mkdir(&root, "source", InodePerm::all_rwx()).unwrap();
+        let empty = ramfs_mkdir(&root, "empty", InodePerm::all_rwx()).unwrap();
+
+        ramfs_rename(&root, "source", &root, "empty", RenameFlags::empty()).unwrap();
+
+        assert!(matches!(
+            ramfs_lookup(&root, "source"),
+            Err(err) if err == SysError::NotFound
+        ));
+        assert_eq!(ramfs_lookup(&root, "empty").unwrap().ino(), source.ino());
+        assert_eq!(empty.nlink(), 0);
+        assert!(sb.try_iget(empty.ino()).is_none());
+        assert_eq!(root.nlink(), 3);
+
+        let source = ramfs_mkdir(&root, "source2", InodePerm::all_rwx()).unwrap();
+        let nonempty = ramfs_mkdir(&root, "nonempty", InodePerm::all_rwx()).unwrap();
+        ramfs_touch(&nonempty, "child", InodePerm::all_rwx()).unwrap();
+
+        assert!(matches!(
+            ramfs_rename(&root, "source2", &root, "nonempty", RenameFlags::empty()),
+            Err(err) if err == SysError::DirNotEmpty
+        ));
+        assert_eq!(ramfs_lookup(&root, "source2").unwrap().ino(), source.ino());
+        assert_eq!(
+            ramfs_lookup(&root, "nonempty").unwrap().ino(),
+            nonempty.ino()
+        );
+    }
+
+    #[kunit]
+    fn directory_rename_preserves_type_and_noreplace_errors() {
+        let sb = ramfs_mount(MountData::Null).unwrap();
+        let root = sb.root_inode();
+        let source_dir = ramfs_mkdir(&root, "source-dir", InodePerm::all_rwx()).unwrap();
+        let target_file = ramfs_touch(&root, "target-file", InodePerm::all_rwx()).unwrap();
+        let source_file = ramfs_touch(&root, "source-file", InodePerm::all_rwx()).unwrap();
+        let target_dir = ramfs_mkdir(&root, "target-dir", InodePerm::all_rwx()).unwrap();
+
+        assert_eq!(
+            ramfs_rename(
+                &root,
+                "source-dir",
+                &root,
+                "target-file",
+                RenameFlags::empty(),
+            ),
+            Err(SysError::NotDir)
+        );
+        assert_eq!(
+            ramfs_rename(
+                &root,
+                "source-file",
+                &root,
+                "target-dir",
+                RenameFlags::empty(),
+            ),
+            Err(SysError::IsDir)
+        );
+        assert_eq!(
+            ramfs_rename(
+                &root,
+                "source-dir",
+                &root,
+                "target-dir",
+                RenameFlags::NO_REPLACE,
+            ),
+            Err(SysError::AlreadyExists)
+        );
+        assert_eq!(
+            ramfs_lookup(&root, "source-dir").unwrap().ino(),
+            source_dir.ino()
+        );
+        assert_eq!(
+            ramfs_lookup(&root, "target-file").unwrap().ino(),
+            target_file.ino()
+        );
+        assert_eq!(
+            ramfs_lookup(&root, "source-file").unwrap().ino(),
+            source_file.ino()
+        );
+        assert_eq!(
+            ramfs_lookup(&root, "target-dir").unwrap().ino(),
+            target_dir.ino()
+        );
     }
 }
