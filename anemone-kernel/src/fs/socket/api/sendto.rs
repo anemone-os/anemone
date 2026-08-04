@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use crate::{
     fs::socket::{
         SocketDatagramSendOperation, SocketIoOps, SocketSendPayload, SocketSendRequest,
-        SocketStreamDestination, SocketType, retry_socket_send, socket_from_file,
+        SocketStreamDestination, retry_socket_send, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -47,9 +47,10 @@ fn sys_sendto(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
+    let io = socket.io();
     if matches!(
-        socket.socket_type(),
-        SocketType::UnixStream | SocketType::UnixSeqpacket
+        io,
+        SocketIoOps::ByteStream { .. } | SocketIoOps::Seqpacket { .. }
     ) {
         let destination = if addr == 0 || addrlen == 0 {
             SocketStreamDestination::Absent
@@ -65,7 +66,7 @@ fn sys_sendto(
         let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
         let uspace = task.clone_uspace_handle();
         let mut source = UserBufferSource::new(&uspace, segments);
-        let operation_wait = match socket.io() {
+        let operation_wait = match io {
             SocketIoOps::ByteStream { .. } => None,
             SocketIoOps::Seqpacket { .. } => Some(socket.seqpacket_send_wait(source.remaining())),
             SocketIoOps::Datagram { .. } => {
@@ -81,16 +82,18 @@ fn sys_sendto(
             nonblocking,
             !message_flags.no_signal,
             || {
-                socket.send(match socket.socket_type() {
-                    SocketType::UnixStream => SocketSendRequest::Stream {
+                socket.send(match io {
+                    SocketIoOps::ByteStream { .. } => SocketSendRequest::Stream {
                         source: &mut source,
                         destination,
                     },
-                    SocketType::UnixSeqpacket => SocketSendRequest::Seqpacket {
+                    SocketIoOps::Seqpacket { .. } => SocketSendRequest::Seqpacket {
                         source: &mut source,
                         destination,
                     },
-                    _ => unreachable!("Unix send branch selected a non-Unix socket"),
+                    SocketIoOps::Datagram { .. } => {
+                        unreachable!("connection-oriented send branch used datagram I/O")
+                    },
                 })
             },
             map_send_error,

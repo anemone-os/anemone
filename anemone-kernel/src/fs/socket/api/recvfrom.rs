@@ -2,7 +2,7 @@ use anemone_abi::syscall::SYS_RECVFROM;
 
 use crate::{
     fs::socket::{
-        SocketAddress, SocketAddressSink, SocketReceiveFlags, SocketReceiveRequest,
+        SocketAddress, SocketAddressSink, SocketIoOps, SocketReceiveFlags, SocketReceiveRequest,
         SocketReceiveSink, SocketType, retry_socket_receive, socket_from_file,
     },
     prelude::*,
@@ -59,9 +59,10 @@ fn sys_recvfrom(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
+    let io = socket.io();
     if matches!(
-        socket.socket_type(),
-        SocketType::UnixStream | SocketType::UnixSeqpacket
+        io,
+        SocketIoOps::ByteStream { .. } | SocketIoOps::Seqpacket { .. }
     ) {
         let segment = if len == 0 {
             None
@@ -77,20 +78,22 @@ fn sys_recvfrom(
             desc.vfs_file(),
             nonblocking,
             || {
-                socket.receive(match socket.socket_type() {
-                    SocketType::UnixStream => SocketReceiveRequest::Stream {
+                socket.receive(match io {
+                    SocketIoOps::ByteStream { .. } => SocketReceiveRequest::Stream {
                         sink: &mut stream_sink,
                         flags: SocketReceiveFlags {
                             peek: message_flags.peek,
                         },
                     },
-                    SocketType::UnixSeqpacket => SocketReceiveRequest::Seqpacket {
+                    SocketIoOps::Seqpacket { .. } => SocketReceiveRequest::Seqpacket {
                         sink: &mut stream_sink,
                         flags: SocketReceiveFlags {
                             peek: message_flags.peek,
                         },
                     },
-                    _ => unreachable!("Unix receive branch selected a non-Unix socket"),
+                    SocketIoOps::Datagram { .. } => {
+                        unreachable!("connection-oriented receive branch used datagram I/O")
+                    },
                 })
             },
             map_receive_error,
