@@ -1,31 +1,31 @@
 # RFC-20260804-udp-socket-extension
 
-**状态：** Draft
-**修订：** Draft
+**状态：** Accepted for Implementation / Stage 1 Checkpoint 1A Closed / Checkpoint 1B Not Active
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-04
 **领域：** network / socket / UDP / userspace ABI
-**影响契约：** Draft target 将 Refine `NET-SOCKET-ENDPOINT-001`、
+**影响契约：** R0 target 将 Refine `NET-SOCKET-ENDPOINT-001`、
 `NET-UDP-TRANSACTION-001`、`SOCKET-ABI-001`；current contract 未改变
-**执行记录：** None
+**执行记录：** Git / PR；Stage 1 Checkpoint 1A已关闭，未创建transaction；Checkpoint 1B、Stage 2与contract cutover均未授权
 
 ## 文档状态
 
-本文是 IPv4 UDP Socket 能力扩展的公共 Draft。它把前期定位收敛为可审查的
-target、owner、ABI、failure/cleanup、acceptance 与 validation boundary，但不覆盖
-current contract，不授权实现、probe、checkpoint、transaction 或 contract cutover。
+本文是 IPv4 UDP Socket 能力扩展的R0 accepted target，也是该提案唯一的canonical target
+source。它固定target、owner、ABI、failure/cleanup、acceptance与validation boundary，但在
+named cutover前不覆盖current contract。
 
 本文替代此前的私有定位讨论，公共 RFC 是唯一 canonical target source。current
 effective 行为仍以 `docs/src/contracts/`、live source 与 Git/PR evidence 为准；在
 达到 named cutover 前，本文描述的 connected UDP、message ABI 与新 flag 都不是当前事实。
 
-本 RFC 已创建[实施路线](./implementation.md)：路线分为两个 Stage，当前只把 Stage 1 的
-Endpoint-owned connected scalar/file-I/O vertical slice 解析为两个有序 checkpoint；Stage 2 的
-single-message ABI、综合 acceptance 与最终 cutover 只保留 outline，尚未解析或激活。mandatory
+本 RFC 已创建[实施路线](./implementation.md)：路线分为两个 Stage，Stage 1 的Endpoint-owned
+connected scalar/file-I/O vertical slice解析为两个有序checkpoint；本轮只关闭Checkpoint 1A，
+Checkpoint 1B保持Not Active。Stage 2的single-message ABI、综合acceptance与最终cutover只保留
+outline，尚未解析或激活。mandatory
 resolver 的 source-level audit 已闭合：R0 选择落在既定能力包络内的 musl IPv4 resolver path；
 当前 acceptance baseline 的 glibc resolver 因强依赖 `IP_RECVERR` 保持 Not Supported / Not
-Cut Over。implementation route publication 不接受 Draft 为 R0，也不授权代码、checkpoint、
-transaction 或 contract cutover。
+Cut Over。本轮没有transaction或contract cutover授权，1A closure后必须停止。
 
 ## 摘要
 
@@ -101,7 +101,7 @@ query policy 继续属于 userspace/rootfs；kernel 只提供普通 UDP/Socket o
 
 ## R0 用户可见 ABI
 
-以下是本 Draft 的 target envelope。它在 cutover 前不是 effective API；不支持项必须
+以下是本 R0 的 target envelope。它在 cutover 前不是 effective API；不支持项必须
 稳定拒绝，不能以恒零、永久成功或隐藏错误模拟支持。
 
 ### 创建、地址与关联
@@ -199,7 +199,7 @@ lifecycle。late invalidation、旧 identity 或旧 queue 不得命中新 associ
 
 ## Contract Impact
 
-Draft 阶段不更新 current contract。live source 与 current contract audit 已确认 R0 target
+R0 acceptance与Checkpoint 1A closure都不更新 current contract。live source 与 current contract audit 已确认 R0 target
 需要以下 delta；它们只有在实现、closure evidence 与 named cutover 完成后才成为 effective：
 
 | Contract ID | Impact | Target delta | Effective gate |
@@ -216,7 +216,7 @@ RFC review。未发生的语义不登记 `Preserve`。
 
 ## Implementation Boundary
 
-本 Draft 允许后续实现改变与本 target 直接对应的 Socket ABI adapter、general front capability
+本 R0 允许后续实现改变与本 target 直接对应的 Socket ABI adapter、general front capability
 dispatch、UDP family/Stack Endpoint protocol surface、anemone ABI constants/wrappers、
 focused tests 与同 owner 的自然模块拆分。
 
@@ -235,15 +235,15 @@ R0 non-goals、双架构 acceptance floor 与 current contract 在 cutover 前�
 - 为绕过 cross-owner failure/cleanup 而降低 datagram、copy、errno 或 evidence 诚实性；
 - 需要把批量 message、IPv6、broadcast/multicast、TCP 或其它无真实 consumer 的能力带入本 RFC。
 
-当前没有 implementation authorization、active checkpoint、probe 或 cutover gate；
-[实施路线](./implementation.md)只把 Stage 1 / Checkpoint 1A--1B 解析为 Not Active。
+本轮只授权并关闭Stage 1 Checkpoint 1A；Checkpoint 1B、Stage 2 resolution/implementation、probe与
+contract cutover均未授权。
 
 ## Acceptance 与 Validation
 
-### Draft -> R0 target acceptance
+### R0 target acceptance
 
 R0 acceptance 接受的是 target 与未来 closure boundary，不要求尚未实现的 syscall、guest
-runtime 或 final run 已经 PASS。接受前只需闭合：
+runtime 或 final run 已经 PASS。本轮已经闭合：
 
 - 本文的 target/non-goals、owner/handoff/failure/cleanup、R0 ABI 与三个 Contract Impact；
 - Linux 6.6.32 message ABI reference、共享 iovec Kconfig boundary 与后续 focused oracle 的
@@ -253,7 +253,7 @@ runtime 或 final run 已经 PASS。接受前只需闭合：
   Not Cut Over，不能由实现者以 option success-no-op、caller 特判或降低 error semantics
   静默改写该决定；
 - implementation closure、contract cutover 与 Not Run 范围按下节分层记录，不把预期验证
-  写成 Draft 已有执行证据。
+  写成已有执行证据。
 
 ### Implementation closure 与 contract cutover
 
@@ -319,9 +319,8 @@ ordinary I/O 与 poll error projection、`MSG_ERRQUEUE`/`SO_ERROR` ABI 及双架
 - glibc 2.38：[`res_enable_icmp.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_enable_icmp.c#L23-L37)、
   [`res_send.c`](https://github.com/bminor/glibc/blob/36f2487f13e3540be9ee0fb51876b1da72176d3f/resolv/res_send.c#L799-L864)。
 
-当前没有 target-level open item；Draft 仍需正常 RFC review，且没有 implementation
-authorization、active checkpoint、probe 或 cutover gate。已解析的 Stage 1 checkpoint 不因文档
-存在而自动激活。
+当前没有target-level open item；R0已经接受，Stage 1 Checkpoint 1A按本轮单独授权关闭。
+Checkpoint 1B、Stage 2、probe与cutover不会因1A closure或文档存在而自动激活。
 
 ### 已收束，不构成设计 blocker
 
@@ -339,12 +338,12 @@ authorization、active checkpoint、probe 或 cutover gate。已解析的 Stage 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)（Stage 1 Resolved / Not Active；Stage 2 Outline）
+- [实施路线](./implementation.md)（Stage 1 Checkpoint 1A Closed / Checkpoint 1B Not Active；Stage 2 Outline）
 - [历史定位共识](./backgrounds/positionings.md)（仅背景材料，非 canonical target）
 - Current baseline：[Network UDP Socket](../../contracts/net/udp-socket.md)、
   [Network Protocol Socket](../../contracts/net/protocol-socket.md)、
   [Socket Front、ABI 与 Wait](../../contracts/socket/front-abi-wait.md)
-- 执行记录：None（Draft）
+- 执行记录：Git / PR（Checkpoint 1A）；transaction None
 - 外部源码证据：resolver audit 使用上文固定 upstream commit permalink；Linux message ABI
   oracle 使用 `xref:linux-6.6.32:<repo-relative-path>#<locator>`。私人 checkout 不作为 authority。
 
@@ -352,10 +351,11 @@ authorization、active checkpoint、probe 或 cutover gate。已解析的 Stage 
 
 | 修订 | 日期 | 语义变化 | Review / Evidence |
 | --- | --- | --- | --- |
-| Draft | 2026-08-04 | 首次公开 Draft；固定 IPv4 connected UDP、file/message/vector ABI、状态 owner、非目标与 acceptance boundary，并选择 musl mandatory resolver、保持 glibc Not Supported / Not Cut Over。 | live libc identity 与固定 upstream source audit；无实现证据 |
+| R0 | 2026-08-04 | 初始accepted target：IPv4 connected UDP、file/message/vector ABI、状态owner、非目标与acceptance boundary，并选择musl mandatory resolver、保持glibc Not Supported / Not Cut Over。 | 本轮独立接受并只关闭Stage 1 Checkpoint 1A；Git / PR拥有执行证据 |
 
 ## Closure
 
-本文尚未 closure。后续 closure 必须记录实际交付、验证、三个既定 contract delta 的
-cutover 或 Not Cut Over、仍开放问题/限制，以及有证据的 Architecture Friction；Draft
-publication 本身不改变 current contract。
+R0尚未closure。Stage 1 Checkpoint 1A已经关闭Endpoint-owned peer、atomic bind+peer transaction、
+ingress admission、default-destination resolution、peek与retire/stale isolation；SocketOps connected/
+file-I/O success path、guest syscall/runtime、KUnit runtime、LTP、resolver与contract cutover均保持Not Run /
+Not Cut Over。Checkpoint 1B保持Not Active，current contract与register均未改变。

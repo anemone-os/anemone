@@ -1,9 +1,9 @@
 # IPv4 UDP Socket 能力扩展目标与不变量
 
-**状态：** Draft
+**状态：** R0 Accepted
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260804-udp-socket-extension](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
 本文只定义本 RFC 的 target/contract proof obligations。当前 effective UDP、Socket、
 Network、Opened-description、IOMUX 与 Epoll 规则仍以 `docs/src/contracts/` 为准；本文
@@ -243,8 +243,8 @@ reuse、late hint、duplicate retire 与 orderly network shutdown matrix。
 - owner-local proof、host oracle、RV64 guest、LA64 guest 与 external path claim 必须分开；
   DNS success 不替代 non-DNS UDP ABI coverage；final harness 与其它 Not Run 范围不是 R0
   closure 前置。
-- 如果实现需要 probe、多个独立 cutover 或不安全中间态，先创建 `implementation.md`
-  并写明 hypothesis/protected boundary/failure signal/exit；Draft 本身不授权该动作。
+- 如果后续实现需要 probe、多个独立 cutover 或不安全中间态，先在 `implementation.md`
+  写明 hypothesis/protected boundary/failure signal/exit并取得单独授权；R0 acceptance本身不授权该动作。
 
 ## 禁止退化项
 

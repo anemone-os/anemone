@@ -15,5 +15,5 @@ pub use stack::{Ipv4ConfigError, PumpError, Stack, StackInvalidations, StackPoli
 #[cfg(feature = "host-test")]
 pub use stack::{
     HostEndpointCreateError, HostEndpointId, HostEndpointObservation, HostLocalLinkObservation,
-    HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
+    HostPeer, HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
 };

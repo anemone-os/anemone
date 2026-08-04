@@ -181,7 +181,7 @@ fn send_udp_socket(
         .map_err(SocketSendError::Copy)?;
     let len = payload.len();
     endpoint
-        .send(UdpPeer::new(address, port), payload)
+        .send(Some(UdpPeer::new(address, port)), payload)
         .map_err(map_send_error)?;
     Ok(len)
 }
@@ -261,6 +261,7 @@ fn map_send_error(error: SendError) -> SocketSendError {
         SendError::SourceUnavailable => SocketSendError::AddressUnavailable,
         SendError::Stack(UdpSendError::UnknownEndpoint) => SocketSendError::Retired,
         SendError::Stack(UdpSendError::UnboundEndpoint) => SocketSendError::InvalidState,
+        SendError::Stack(UdpSendError::DestinationRequired) => SocketSendError::DestinationRequired,
         SendError::Stack(UdpSendError::UnknownInterface) => SocketSendError::NetworkUnreachable,
         SendError::Stack(UdpSendError::UnsupportedSource) => SocketSendError::AddressUnavailable,
         SendError::Stack(UdpSendError::InvalidDestination) => SocketSendError::InvalidDestination,

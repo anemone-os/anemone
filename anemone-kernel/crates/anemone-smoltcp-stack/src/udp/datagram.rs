@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use anemone_net_api::{
     InterfaceId,
-    udp::{UdpReceiveError, UdpSendError},
+    udp::{UdpPeekedDatagram, UdpPeer, UdpReceiveError, UdpSendError},
 };
 use smoltcp::{
     iface::SocketSet,
@@ -202,6 +202,17 @@ impl UdpEndpoints {
                 let (payload, metadata) = socket
                     .recv()
                     .expect("can_recv must imply one engine-owned datagram");
+                let IpAddress::Ipv4(source) = metadata.endpoint.addr;
+                let peer = UdpPeer::new(
+                    anemone_net_api::Ipv4Address::new(source.octets()),
+                    metadata.endpoint.port,
+                );
+                if endpoint.peer.is_some_and(|expected| expected != peer) {
+                    // Connected admission consumes wrong-peer engine packets
+                    // before they enter the authoritative queue. They do not
+                    // consume aggregate RX credit or create readable hints.
+                    continue;
+                }
                 endpoint.received.push_back(ReceivedDatagram {
                     payload: payload.to_vec(),
                     source: metadata.endpoint,
@@ -232,5 +243,24 @@ impl UdpEndpoints {
             .ok_or(UdpReceiveError::WouldBlock)?;
         self.invalidate(id);
         Ok(datagram)
+    }
+
+    pub(crate) fn peek(&self, id: EndpointId) -> Result<UdpPeekedDatagram, UdpReceiveError> {
+        let datagram = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == id)
+            .ok_or(UdpReceiveError::UnknownEndpoint)?
+            .received
+            .front()
+            .ok_or(UdpReceiveError::WouldBlock)?;
+        let IpAddress::Ipv4(source) = datagram.source.addr;
+        Ok(UdpPeekedDatagram::from_owner_observation(
+            datagram.payload.clone(),
+            UdpPeer::new(
+                anemone_net_api::Ipv4Address::new(source.octets()),
+                datagram.source.port,
+            ),
+        ))
     }
 }

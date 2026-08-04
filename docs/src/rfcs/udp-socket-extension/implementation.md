@@ -1,29 +1,29 @@
 # IPv4 UDP Socket 能力扩展实施路线
 
-**状态：** Draft Route / Stage 1 Resolved / Not Active / Stage 2 Outline
+**状态：** R0 Accepted / Stage 1 Checkpoint 1A Closed / Checkpoint 1B Not Active / Stage 2 Outline
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260804-udp-socket-extension](./index.md)
-**当前修订：** Draft
-**当前实施阶段：** Stage 1 已解析但未激活；Stage 2 未解析；transaction None；cutover None
+**当前修订：** R0
+**当前实施阶段：** Stage 1 Checkpoint 1A已关闭并停止；Checkpoint 1B未激活；Stage 2未解析；transaction None；cutover None
 
 本文只保存父 RFC 需要长期引用的两阶段实施路线。target、non-goals、owner、ABI、
 Contract Impact、acceptance 与最终 validation boundary 仍由父 RFC [index](./index.md)和
 [目标与不变量](./invariants.md)定义；本页不建立并列 target、current contract 或执行证据总表。
 
-本文的创建与 Stage 1 resolution 不接受 Draft 为 R0，不授权代码实现、checkpoint activation、
-transaction 或 contract cutover。Stage 1 只有在父 RFC 完成 R0 acceptance 且维护者明确授权后
-才能激活；Stage 1 closure 也不自动授权 Stage 2 resolution 或 implementation。
+R0已经接受；本轮只授权并关闭Stage 1 Checkpoint 1A。Checkpoint 1B、Stage 2 resolution /
+implementation、transaction与contract cutover均未授权；1A closure后已经停止。
 
 ## Live Source Baseline 与路线选择
 
 当前 effective baseline 已经提供 IPv4 unconnected UDP、共同 Socket front、opened-description
 final release、blocking retry 与 iomux/epoll recheck：
 
-- Stack UDP Endpoint 已唯一拥有 binding、queue/capacity、private engine、TX phase 与 stale identity；
-  `anemone-net-api` 已提供 opaque Endpoint identity、`UdpPeer`、typed outcome 和 point-in-time facts，
-  但 Endpoint 尚无 persistent peer，ingress drain 也尚不按 peer admission；
-- kernel `UdpEndpointPort` 已是窄 capability，control plane 只在 send operation 中选择 route/source/
-  interface；current implicit bind 会先独立 commit，不能直接作为 connect 所需的 bind+peer 原子事务；
+- Checkpoint 1A后，Stack UDP Endpoint唯一拥有binding、persistent peer、queue/capacity、private engine、TX phase与
+  stale identity；`anemone-net-api`只暴露opaque Endpoint identity、normalized peer/peek、typed outcome与point-in-time
+  facts，ingress drain在aggregate queue admission前读取owner peer；
+- kernel `UdpEndpointPort`保持窄capability，control plane只产生operation-local route/source/interface selection；
+  connect由Stack在一个transition中完成必要的implicit bind projection与peer commit，普通explicit send仍保持既有独立
+  implicit-bind行为；
 - UDP Socket family 仍以 `connect: None`、`peer_address: None`、`file_io: Unsupported` 发布；send 要求
   显式 destination，receive 不支持 peek；UDP 只接受 `MSG_DONTWAIT`，尚未接受 `MSG_NOSIGNAL`、
   `MSG_PEEK` 或 `MSG_TRUNC`；
@@ -119,8 +119,8 @@ Renegotiation；agent 可以提交证据和方案，不能自行批准较弱 tar
 
 ## Activation、checkpoint 与 evidence 规则
 
-- Stage 是默认人工授权边界。本文发布后两个 Stage 都是 Not Active；Stage 1 activation 必须同时满足父 RFC
-  R0 acceptance 和维护者明确授权；Stage 1 closure 后必须停止，不能自动解析或进入 Stage 2；
+- Stage 是默认人工授权边界。父RFC R0 acceptance已经闭合，本轮维护者只授权Checkpoint 1A；1A关闭后必须停止，
+  不能自动进入Checkpoint 1B，Stage 1 closure后也不能自动解析或进入Stage 2；
 - Stage 内 checkpoint 是独立安全的 commit/review/recovery boundary，不默认增加一次人工 activation。若维护者只
   授权某个 checkpoint，则该更窄授权优先，关闭后必须停止；
 - Checkpoint 1A、1B 按顺序执行。每个 checkpoint 关闭前完成对应 review、Architecture Friction Scan、验证与
@@ -135,21 +135,21 @@ Renegotiation；agent 可以提交证据和方案，不能自行批准较弱 tar
 
 | 阶段 | 当前状态 | 概括目的 | 前置依赖 | 下一步边界 |
 | --- | --- | --- | --- | --- |
-| Stage 1 | Resolved / Not Active；1A/1B Resolved | 交付 Endpoint-owned connected association、scalar/file/vector I/O 与既有 wait/lifecycle 的完整 candidate | 父 RFC R0 acceptance；明确 Stage 1 或更窄 checkpoint 授权 | 1A -> review -> 1B -> Stage 1 closure；停止在 Stage 2 resolution 前 |
+| Stage 1 | 1A Closed；1B Resolved / Not Active | 交付 Endpoint-owned connected association、scalar/file/vector I/O 与既有 wait/lifecycle 的完整 candidate | 父 RFC R0 acceptance；每个更窄checkpoint明确授权 | 1A已关闭并停止；1B需单独授权，之后才可关闭Stage 1 |
 | Stage 2 | Outline / Not Resolved / Not Active | 交付 `sendmsg/recvmsg` single-message ABI、musl 1.2.5、最终综合 acceptance 与 `UDP-EXT-R0-CUTOVER` | Stage 1 Closed；读取 actual diff/evidence/review 后单独 resolution 和授权 | 当前不得激活或推断 checkpoint |
 
 ## Stage 1 Resolved — Connected scalar/file-I/O vertical slice
 
-**状态：** Resolved / Not Active / Checkpoint 1A--1B Resolved / Cutover None
+**状态：** Checkpoint 1A Closed / Checkpoint 1B Resolved / Not Active / Cutover None
 
 **Purpose：** 在不建立 message ABI 的前提下，让 Stack Endpoint 成为 peer/filter 唯一 owner，并让 UDP
 通过现有 common Socket front 交付 connected association、scalar/file/vector datagram I/O、blocking/iomux、
 opened-description lifecycle 与 musl 1.2.0 resolver 所需能力。Stage 1 关闭时形成安全、可运行、可继续扩展的
 R0 candidate，但不改变 current contract，也不宣称父 RFC closure。
 
-**Prerequisites：** 父 RFC 已经由 owner/reviewer 接受为 R0；current UDP、Socket、control-plane、opened-
-description、iomux/epoll contracts 与 register 未出现改变本 Stage 边界的新事实；维护者明确授权 Stage 1 或
-当前 checkpoint。本文现在只完成 resolution，不满足这些 activation prerequisites。
+**Prerequisites：** 父RFC已经由owner/reviewer接受为R0；current UDP、Socket、control-plane、opened-
+description、iomux/epoll contracts与register未出现改变本Stage边界的新事实；维护者本轮明确授权并关闭1A。
+Checkpoint 1B仍需单独授权。
 
 **Protected Boundary：** 保持父 RFC 的 IPv4-only scope、Endpoint/control-plane/Socket owner fence、
 datagram atomicity、operation-specific readiness、final-release lifecycle、glibc rejection、Stage 2 message
@@ -215,7 +215,7 @@ ABI non-goal 与双架构最终 validation floor。Checkpoint 1A 不发布新 Li
 
 ### Checkpoint 1A — Endpoint peer、admission 与 owner capability
 
-**状态：** Resolved / Not Active
+**状态：** Closed
 
 **Purpose：** 在不接通 UDP `SocketOps` connected/file-I/O success path 的情况下，先关闭 persistent peer、
 bind+peer connect transaction、ingress admission、default-destination resolution、peek 与 retire/stale isolation
@@ -248,6 +248,30 @@ git diff --check
 两条 architecture build 串行执行，避免共享 generated DTB。build只证明对应source的compile/link/export，不替代
 KUnit runtime、guest syscall、external networking或resolver；这些在未实际运行时明确保持 Not Run。若新增KUnit
 只被build编译而没有guest boot执行，不得写成KUnit PASS。
+
+#### Closure Evidence
+
+- shared `anemone-net-api`只增加normalized peer transition/query、peek snapshot与typed failure；不含Linux
+  sockaddr/errno、task/fd/waiter、persistent route或Stack-private engine。kernel-private `ConnectError`继续区分
+  control-plane route/source/interface failure与Stack transaction failure。
+- Stack `Endpoint`唯一拥有persistent peer；unbound connect在同一Stack transition内完成source-specific ephemeral
+  bind projection与peer commit，reconnect替换peer，disconnect只清peer。ingress在authoritative aggregate queue前丢弃
+  wrong-peer datagram；既有queued datagram不回溯；peek复制queue-head observation但不detach或释放RX credit。
+- production `UdpEndpointPort`提供connect/query/disconnect/peek与explicit-or-current-peer send resolution；默认
+  destination形成operation-local snapshot，无peer返回typed destination-required，显式destination不修改persistent peer。
+  UDP `SocketOps`的connected/file-I/O success path仍未接通。
+- `just test net-host`通过：新增atomic connect/reconnect/disconnect/failure-preserves-old-state/stale identity与
+  connected admission/queue non-retroactivity/peek/default destination/explicit override focused tests；全部既有
+  frame、bounded progression、ICMP raw、multi-instance、multi-interface、UDP topology与vendored smoltcp IPv4 regression
+  通过，no-default-features compile/check也通过。
+- `just fmt kernel --check`与`git diff --check`通过；`qemu-virt-rv64-release`、
+  `qemu-virt-la64-release`在最终source上均完成discovery/final pass与symbol table验证。RV64首次sandbox尝试在lwext4
+  C compile触发`Bad system call`，相同canonical命令在sandbox外通过，因此该次失败只归类为环境限制。
+- reviewer首轮发现control-plane failure被压入Stack taxonomy和default-destination可被拆成caller两步协议；前者由
+  kernel-private `ConnectError`修复，后者由owner capability内的typed resolution修复。最终独立复核与Architecture
+  Friction disposition见本checkpoint Git / PR evidence。
+- KUnit runtime、guest syscall、external networking、resolver、LTP、physical hardware、`smp > 1`与final harness：
+  **Not Run**。architecture build只证明compile/link/export，不能替代这些证据。
 
 **Exit / Stop：** 1A只有在 production capability、owner-local proof、两架构build、review和evidence disposition
 闭合后才能关闭。若 peer transition 无法在不发布Socket-side truth或不扭曲control-plane/Stack owner的情况下原子
