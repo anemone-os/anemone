@@ -5,6 +5,10 @@ use crate::{
         handler::TryFromSyscallArg,
         user_access::{SyscallArgValidatorExt as _, UserReadPtr, user_addr},
     },
+    time::{
+        realtime_ns,
+        timer::{cancel_timer_event, schedule_realtime_threaded_timer_event},
+    },
 };
 use anemone_abi::{process::linux::futex::*, time::linux::TimeSpec};
 
@@ -31,6 +35,19 @@ enum FutexCmd {
     WakeOp,
     WaitBitset,
     WakeBitset,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FutexTimeout {
+    Monotonic(Duration),
+    RealtimeAbsolute(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FutexWaitCompletion {
+    Woken,
+    Signaled,
+    TimedOut,
 }
 
 bitflags! {
@@ -81,9 +98,14 @@ impl TryFromSyscallArg for FutexOp {
             flags |= FutexCmdFlags::PRIVATE;
         }
         if raw & FUTEX_CLOCK_REALTIME != 0 {
+            // Linux 6.6 accepts CLOCK_REALTIME only for WAIT_BITSET and two PI
+            // commands that Anemone does not implement. In particular, WAIT's
+            // relative timeout cannot be silently reinterpreted as calendar
+            // time; unsupported flag/command combinations return ENOSYS.
+            if !matches!(cmd, FutexCmd::WaitBitset) {
+                return Err(SysError::NoSys);
+            }
             flags |= FutexCmdFlags::CLOCK_REALTIME;
-            kwarningln!("futex: FUTEX_CLOCK_REALTIME is not yet implemented");
-            // return Err(SysError::NotYetImplemented);
         }
 
         Ok(Self { cmd, flags })
@@ -153,7 +175,7 @@ fn sys_futex(
                     return Err(SysError::InvalidArgument);
                 }
                 let duration = Duration::new(tv_sec as u64, tv_nsec as u32);
-                Some(duration)
+                Some(FutexTimeout::Monotonic(duration))
             } else {
                 None
             };
@@ -182,10 +204,20 @@ fn sys_futex(
                     );
                     return Err(SysError::InvalidArgument);
                 }
-                // for waitbitset, timeout is a absolute time.
-                let duration = Duration::new(tv_sec as u64, tv_nsec as u32)
-                    .saturating_sub(Instant::now().to_duration());
-                Some(duration)
+                let deadline_ns = (tv_sec as u64)
+                    .checked_mul(1_000_000_000)
+                    .and_then(|seconds| seconds.checked_add(tv_nsec as u64))
+                    .ok_or(SysError::InvalidArgument)?;
+                if op.flags.contains(FutexCmdFlags::CLOCK_REALTIME) {
+                    Some(FutexTimeout::RealtimeAbsolute(deadline_ns))
+                } else {
+                    // FUTEX_WAIT_BITSET uses an absolute monotonic timeout when
+                    // CLOCK_REALTIME is absent.
+                    Some(FutexTimeout::Monotonic(
+                        Duration::new(tv_sec as u64, tv_nsec as u32)
+                            .saturating_sub(Instant::now().to_duration()),
+                    ))
+                }
             } else {
                 None
             };
@@ -243,12 +275,13 @@ fn sys_futex(
     }
 }
 
-/// `timeout` is relative.
+/// Monotonic timeouts are relative. Realtime timeouts retain their absolute
+/// calendar deadline so a concurrent clock step can re-evaluate them.
 fn futex_wait(
     word_addr: VirtAddr,
     key: FutexKey,
     val: u32,
-    timeout: Option<Duration>,
+    timeout: Option<FutexTimeout>,
     bitset: Option<u32>,
 ) -> Result<(), SysError> {
     let task = get_current_task();
@@ -368,28 +401,19 @@ fn futex_wait(
         key,
         timeout,
     );
-    if let Some(timeout) = timeout {
-        match waiter.futex_available.listen_with_timeout(
-            true,
-            || waiter.woken.load(Ordering::SeqCst),
-            timeout,
-        ) {
-            None => {
-                kdebugln!(
-                    "futex: wait completed waiter={:#x} task={} event={:#x} via wake",
-                    futex_waiter_id(&waiter),
-                    waiter.task.tid(),
-                    futex_event_id(&waiter),
-                );
-                Ok(())
+    let completion = if let Some(timeout) = timeout {
+        match timeout {
+            FutexTimeout::Monotonic(timeout) => match waiter.futex_available.listen_with_timeout(
+                true,
+                || waiter.woken.load(Ordering::SeqCst),
+                timeout,
+            ) {
+                None => FutexWaitCompletion::Woken,
+                Some(TimeoutListenException::Signaled) => FutexWaitCompletion::Signaled,
+                Some(TimeoutListenException::Timeout) => FutexWaitCompletion::TimedOut,
             },
-            Some(TimeoutListenException::Signaled) => {
-                kdebugln!("futex: wait interrupted by signal");
-                handle_wait_exception(&waiter).map_err(|()| SysError::Interrupted)
-            },
-            Some(TimeoutListenException::Timeout) => {
-                kdebugln!("futex: wait timed out");
-                handle_wait_exception(&waiter).map_err(|()| SysError::Timeout)
+            FutexTimeout::RealtimeAbsolute(deadline_ns) => {
+                wait_with_realtime_timeout(&waiter, deadline_ns)
             },
         }
     } else {
@@ -397,17 +421,95 @@ fn futex_wait(
             .futex_available
             .listen(true, || waiter.woken.load(Ordering::SeqCst))
         {
-            true => {
-                kdebugln!(
-                    "futex: wait completed waiter={:#x} task={} event={:#x} via wake",
-                    futex_waiter_id(&waiter),
-                    waiter.task.tid(),
-                    futex_event_id(&waiter),
-                );
-                Ok(())
-            },
-            false => handle_wait_exception(&waiter).map_err(|()| SysError::Interrupted),
+            true => FutexWaitCompletion::Woken,
+            false => FutexWaitCompletion::Signaled,
         }
+    };
+
+    match completion {
+        FutexWaitCompletion::Woken => {
+            kdebugln!(
+                "futex: wait completed waiter={:#x} task={} event={:#x} via wake",
+                futex_waiter_id(&waiter),
+                waiter.task.tid(),
+                futex_event_id(&waiter),
+            );
+            Ok(())
+        },
+        FutexWaitCompletion::Signaled => {
+            kdebugln!("futex: wait interrupted by signal");
+            handle_wait_exception(&waiter).map_err(|()| SysError::Interrupted)
+        },
+        FutexWaitCompletion::TimedOut => {
+            kdebugln!("futex: wait timed out");
+            handle_wait_exception(&waiter).map_err(|()| SysError::Timeout)
+        },
+    }
+}
+
+fn wait_with_realtime_timeout(waiter: &Arc<FutexWaiter>, deadline_ns: u64) -> FutexWaitCompletion {
+    if realtime_ns() >= deadline_ns {
+        return FutexWaitCompletion::TimedOut;
+    }
+
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let request = schedule_realtime_threaded_timer_event(
+        deadline_ns,
+        None,
+        Box::new({
+            let waiter = waiter.clone();
+            let timed_out = timed_out.clone();
+            move || {
+                // Publish the terminal fact before the event wake. The event
+                // predicate then distinguishes timeout from a futex wake while
+                // the futex-set lock remains the final race arbiter.
+                timed_out.store(true, Ordering::Release);
+                waiter.futex_available.publish(1, true);
+            }
+        }),
+        None,
+    );
+    let predicate_satisfied = waiter.futex_available.listen(true, || {
+        waiter.woken.load(Ordering::SeqCst) || timed_out.load(Ordering::Acquire)
+    });
+
+    // Withdraw a still-queued request before the waiter can leave this syscall.
+    // A callback already handed to the threaded lane owns its Arc references
+    // and is harmless after futex cleanup.
+    cancel_timer_event(&request);
+    if !predicate_satisfied {
+        FutexWaitCompletion::Signaled
+    } else if waiter.woken.load(Ordering::SeqCst) {
+        FutexWaitCompletion::Woken
+    } else {
+        assert!(
+            timed_out.load(Ordering::Acquire),
+            "futex realtime event woke without a terminal cause"
+        );
+        FutexWaitCompletion::TimedOut
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn realtime_flag_is_limited_to_wait_bitset() {
+        let wait_bitset =
+            FutexOp::try_from_syscall_arg((FUTEX_WAIT_BITSET | FUTEX_CLOCK_REALTIME) as u64)
+                .unwrap();
+        assert!(matches!(wait_bitset.cmd, FutexCmd::WaitBitset));
+        assert!(wait_bitset.flags.contains(FutexCmdFlags::CLOCK_REALTIME));
+
+        assert!(matches!(
+            FutexOp::try_from_syscall_arg((FUTEX_WAIT | FUTEX_CLOCK_REALTIME) as u64),
+            Err(SysError::NoSys)
+        ));
+        assert!(matches!(
+            FutexOp::try_from_syscall_arg((FUTEX_WAKE_BITSET | FUTEX_CLOCK_REALTIME) as u64),
+            Err(SysError::NoSys)
+        ));
     }
 }
 

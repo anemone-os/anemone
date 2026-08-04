@@ -11,10 +11,16 @@ use core::{
 
 use anemone_rs::{
     abi::{
-        process::linux::signal::{SigAction, SigSet},
+        process::linux::{
+            futex::{
+                FUTEX_BITSET_MATCH_ANY, FUTEX_CLOCK_REALTIME, FUTEX_PRIVATE_FLAG, FUTEX_WAIT,
+                FUTEX_WAIT_BITSET,
+            },
+            signal::{SigAction, SigSet},
+        },
         syscall::{
             SYS_CLOCK_ADJTIME, SYS_CLOCK_GETTIME, SYS_CLOCK_NANOSLEEP, SYS_CLOCK_SETTIME,
-            SYS_SETITIMER, SYS_SETUID, SYS_TIMERFD_CREATE, SYS_TIMERFD_GETTIME,
+            SYS_FUTEX, SYS_SETITIMER, SYS_SETUID, SYS_TIMERFD_CREATE, SYS_TIMERFD_GETTIME,
             SYS_TIMERFD_SETTIME, syscall,
         },
         time::linux::{
@@ -407,6 +413,74 @@ fn verify_absolute_realtime_step(direction: i64) {
     }
 }
 
+fn verify_futex_realtime_step(direction: i64) {
+    // WAIT_BITSET keeps the userspace absolute deadline. The pipe and short
+    // monotonic pause ensure the parent step races with an installed waiter,
+    // not with child startup.
+    let (read_fd, write_fd) = pipe2(PipeFlags::empty()).unwrap();
+    let deadline_ns = clock_ns(CLOCK_REALTIME).checked_add(500_000_000).unwrap();
+    match fork().unwrap() {
+        Some(pid) => {
+            close(write_fd).unwrap();
+            wait_child_ready(read_fd);
+            sleep_relative(CLOCK_MONOTONIC, 20_000_000);
+            step_realtime(direction);
+            wait_child_ok(pid, "futex realtime step");
+            close(read_fd).unwrap();
+        },
+        None => {
+            close(read_fd).unwrap();
+            let word = 0_u32;
+            let deadline = ns_to_timespec(deadline_ns);
+            notify_parent(write_fd);
+            let start = clock_ns(CLOCK_MONOTONIC);
+            assert_eq!(
+                unsafe {
+                    syscall(
+                        SYS_FUTEX,
+                        (&word as *const u32) as u64,
+                        (FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) as u64,
+                        0,
+                        (&deadline as *const TimeSpec) as u64,
+                        0,
+                        FUTEX_BITSET_MATCH_ANY as u64,
+                    )
+                },
+                Err(ETIMEDOUT)
+            );
+            let elapsed = clock_ns(CLOCK_MONOTONIC) - start;
+            if direction > 0 {
+                assert!(elapsed < 300_000_000);
+            } else {
+                assert!(elapsed >= 700_000_000);
+            }
+            close(write_fd).unwrap();
+            exit(0);
+        },
+    }
+}
+
+fn verify_futex_realtime_abi() {
+    let word = 0_u32;
+    let timeout = ns_to_timespec(1);
+    assert_eq!(
+        unsafe {
+            syscall(
+                SYS_FUTEX,
+                (&word as *const u32) as u64,
+                (FUTEX_WAIT | FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) as u64,
+                0,
+                (&timeout as *const TimeSpec) as u64,
+                0,
+                0,
+            )
+        },
+        Err(ENOSYS)
+    );
+    verify_futex_realtime_step(1_000_000_000);
+    verify_futex_realtime_step(-300_000_000);
+}
+
 fn timerfd_create(clock_id: i32) -> u32 {
     unsafe { syscall(SYS_TIMERFD_CREATE, clock_id as u64, 0, 0, 0, 0, 0).unwrap() as u32 }
 }
@@ -551,11 +625,12 @@ pub(crate) fn verify_clock_steps() {
     verify_sleep_matrix();
     verify_absolute_realtime_step(1_000_000_000);
     verify_absolute_realtime_step(-500_000_000);
+    verify_futex_realtime_abi();
     verify_timerfd_realtime_steps();
     verify_settime_permission();
 
     // Leave later tests near the boot-relative calendar baseline instead of
     // leaking this module's accumulated forward/backward steps.
     set_realtime(clock_ns(CLOCK_MONOTONIC) + NSEC_PER_SEC).unwrap();
-    println!("clock-step: realtime mutation, sleep, and timerfd checks passed");
+    println!("clock-step: realtime mutation, sleep, futex, and timerfd checks passed");
 }
