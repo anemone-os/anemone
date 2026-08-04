@@ -1,9 +1,8 @@
-//! Socket-owned ICMP raw readiness source and Endpoint invalidation handoff.
+//! Socket-owned ICMP raw readiness projection and Endpoint invalidation bridge.
 
 use anemone_net_api::icmp_raw::{IcmpRawEndpointFacts, IcmpRawQueryError, IcmpRawRetireError};
 
 use crate::{
-    fs::iomux::PollRoute,
     net::icmp_raw::{
         EventRegistrationError, IcmpRawEndpointEventRegistration,
         IcmpRawEndpointInvalidationObserver, IcmpRawEndpointPort,
@@ -11,51 +10,23 @@ use crate::{
     prelude::*,
 };
 
-#[derive(Clone, Debug)]
-struct IcmpRawPollRoute {
-    route: PollRoute,
-    interests: PollEvent,
-}
-
-impl IcmpRawPollRoute {
-    fn new(route: &PollRoute, interests: PollEvent) -> Self {
-        Self {
-            route: route.clone(),
-            interests,
-        }
-    }
-}
+use super::super::source::SocketPollSource;
 
 struct IcmpRawAssociation {
     endpoint: IcmpRawEndpointPort,
     event_registration: IcmpRawEndpointEventRegistration,
 }
 
-enum IcmpRawSourcePublication {
-    Unpublished,
-    Live {
-        /// Sole Socket publication of the Endpoint capability and reverse
-        /// route. Endpoint association and readiness remain Stack-owned.
-        association: IcmpRawAssociation,
-        routes: Arc<Vec<IcmpRawPollRoute>>,
-    },
-    Retired,
-}
-
 pub(super) struct IcmpRawSocketSource {
-    /// Registration builds a replacement before publication. Invalidation
-    /// clones this snapshot while locked; notification and final drop happen
-    /// only after the source lock is released.
-    publication: SpinLock<IcmpRawSourcePublication>,
+    source: SocketPollSource<IcmpRawAssociation>,
 }
 
 impl IcmpRawSocketSource {
     pub(super) fn try_new(endpoint: IcmpRawEndpointPort) -> Result<Arc<Self>, SysError> {
         let source = Arc::try_new(Self {
-            publication: SpinLock::new(IcmpRawSourcePublication::Unpublished),
+            source: SocketPollSource::try_new()?,
         })
         .map_err(|_| SysError::OutOfMemory)?;
-        let routes = Arc::try_new(Vec::new()).map_err(|_| SysError::OutOfMemory)?;
         let observer: Arc<dyn IcmpRawEndpointInvalidationObserver> = source.clone();
         let event_registration =
             endpoint
@@ -65,114 +36,39 @@ impl IcmpRawSocketSource {
                 })?;
         drop(observer);
 
-        let previous = core::mem::replace(
-            &mut *source.publication.lock(),
-            IcmpRawSourcePublication::Live {
-                association: IcmpRawAssociation {
-                    endpoint,
-                    event_registration,
-                },
-                routes,
-            },
-        );
-        assert!(
-            matches!(previous, IcmpRawSourcePublication::Unpublished),
-            "fresh ICMP raw source did not begin unpublished"
-        );
+        source.source.publish(IcmpRawAssociation {
+            endpoint,
+            event_registration,
+        });
         Ok(source)
     }
 
     pub(super) fn endpoint(&self) -> Option<IcmpRawEndpointPort> {
-        let publication = self.publication.lock();
-        let IcmpRawSourcePublication::Live { association, .. } = &*publication else {
-            return None;
-        };
-        Some(association.endpoint.clone())
+        self.source
+            .with_live(|association| association.endpoint.clone())
     }
 
     pub(super) fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
-        let Some(route) = request.route() else {
-            let publication = self.publication.lock();
-            let IcmpRawSourcePublication::Live { association, .. } = &*publication else {
-                return Err(SysError::IdentifierRemoved);
-            };
-            let facts = current_facts(association)?;
-            return Ok(PollRegisterResult::Ready(project_facts(
-                facts,
-                request.interests(),
-            )));
-        };
-
-        loop {
-            let expected = {
-                let publication = self.publication.lock();
-                let IcmpRawSourcePublication::Live { routes, .. } = &*publication else {
-                    return Err(SysError::IdentifierRemoved);
-                };
-                routes.clone()
-            };
-            let replacement = prepare_route_replacement(&expected, route, request.interests())?;
-
-            let (previous, facts) = {
-                let mut publication = self.publication.lock();
-                let IcmpRawSourcePublication::Live {
-                    association,
-                    routes,
-                } = &mut *publication
-                else {
-                    return Err(SysError::IdentifierRemoved);
-                };
-                if !Arc::ptr_eq(routes, &expected) {
-                    continue;
-                }
-                let previous = core::mem::replace(routes, replacement);
-                // This is the only permitted nested order: source publication
-                // to a short Stack facts snapshot. Stack routes invalidations
-                // only after releasing its owner lock.
-                let facts = current_facts(association)?;
-                (previous, facts)
-            };
-            drop(previous);
-            return Ok(PollRegisterResult::Subscribed(project_facts(
-                facts,
-                request.interests(),
-            )));
-        }
+        self.source.poll(request, |association, interests| {
+            Ok(project_facts(current_facts(association)?, interests))
+        })
     }
 
     pub(super) fn retire(&self) -> Result<(), IcmpRawRetireError> {
-        let (association, routes) = {
-            let mut publication = self.publication.lock();
-            let previous = core::mem::replace(&mut *publication, IcmpRawSourcePublication::Retired);
-            match previous {
-                IcmpRawSourcePublication::Live {
-                    association,
-                    routes,
-                } => (association, routes),
-                IcmpRawSourcePublication::Unpublished | IcmpRawSourcePublication::Retired => {
-                    return Err(IcmpRawRetireError::UnknownEndpoint);
-                },
-            }
-        };
-
-        // Withdraw publication and reverse lookup before wake delivery. Every
-        // consumer then observes retirement in its final predicate scan.
-        association.event_registration.unregister();
-        notify_all_routes(&routes);
-        drop(routes);
-        association.endpoint.retire()
+        let endpoint = self
+            .source
+            .retire(|association| {
+                association.event_registration.unregister();
+                association.endpoint
+            })
+            .ok_or(IcmpRawRetireError::UnknownEndpoint)?;
+        endpoint.retire()
     }
 }
 
 impl IcmpRawEndpointInvalidationObserver for IcmpRawSocketSource {
     fn invalidate(&self) {
-        let publication = self.publication.lock();
-        let IcmpRawSourcePublication::Live { routes, .. } = &*publication else {
-            return;
-        };
-        let routes = routes.clone();
-        drop(publication);
-        notify_interested_routes(&routes);
+        self.source.invalidate();
     }
 }
 
@@ -199,47 +95,6 @@ fn project_facts(facts: IcmpRawEndpointFacts, interests: PollEvent) -> PollEvent
     events
 }
 
-fn prepare_route_replacement(
-    routes: &Arc<Vec<IcmpRawPollRoute>>,
-    route: &PollRoute,
-    interests: PollEvent,
-) -> Result<Arc<Vec<IcmpRawPollRoute>>, SysError> {
-    let retained = routes
-        .iter()
-        .filter(|entry| !entry.route.is_prunable())
-        .count();
-    let capacity = retained.checked_add(1).ok_or(SysError::OutOfMemory)?;
-    let mut replacement = Vec::new();
-    replacement
-        .try_reserve(capacity)
-        .map_err(|_| SysError::OutOfMemory)?;
-    replacement.extend(
-        routes
-            .iter()
-            .filter(|entry| !entry.route.is_prunable())
-            .cloned(),
-    );
-    replacement.push(IcmpRawPollRoute::new(route, interests));
-    Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)
-}
-
-fn notify_interested_routes(routes: &Arc<Vec<IcmpRawPollRoute>>) {
-    for entry in routes.iter() {
-        if entry
-            .interests
-            .intersects(PollEvent::READABLE | PollEvent::WRITABLE)
-        {
-            entry.route.notify();
-        }
-    }
-}
-
-fn notify_all_routes(routes: &Arc<Vec<IcmpRawPollRoute>>) {
-    for entry in routes.iter() {
-        entry.route.notify();
-    }
-}
-
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
@@ -247,7 +102,8 @@ mod kunits {
     use anemone_net_api::{Ipv4Address, icmp_raw::IcmpRawEgressPolicy};
 
     use crate::{
-        fs::iomux::PollObserver, kconfig_defs::NET_ICMP_RAW_DEFAULT_TTL,
+        fs::iomux::{PollObserver, PollRoute},
+        kconfig_defs::NET_ICMP_RAW_DEFAULT_TTL,
         net::icmp_raw::create_endpoint,
     };
 

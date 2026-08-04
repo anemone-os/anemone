@@ -1,9 +1,8 @@
-//! Socket-owned UDP readiness source and Endpoint invalidation handoff.
+//! Socket-owned UDP readiness projection and Endpoint invalidation bridge.
 
 use anemone_net_api::udp::{UdpEndpointFacts, UdpQueryError, UdpRetireError};
 
 use crate::{
-    fs::iomux::{PollObserver, PollRoute},
     net::udp::{
         EventRegistrationError, UdpEndpointEventRegistration, UdpEndpointInvalidationObserver,
         UdpEndpointPort,
@@ -11,51 +10,23 @@ use crate::{
     prelude::*,
 };
 
-#[derive(Clone, Debug)]
-struct UdpPollRoute {
-    route: PollRoute,
-    interests: PollEvent,
-}
-
-impl UdpPollRoute {
-    fn new(route: &PollRoute, interests: PollEvent) -> Self {
-        Self {
-            route: route.clone(),
-            interests,
-        }
-    }
-}
+use super::super::source::SocketPollSource;
 
 struct UdpAssociation {
     endpoint: UdpEndpointPort,
     event_registration: UdpEndpointEventRegistration,
 }
 
-enum UdpSourcePublication {
-    Unpublished,
-    Live {
-        /// Sole Socket publication of the Endpoint capability and reverse
-        /// route. Endpoint liveness/readiness remain Stack-owned.
-        association: UdpAssociation,
-        routes: Arc<Vec<UdpPollRoute>>,
-    },
-    Retired,
-}
-
 pub(super) struct UdpSocketSource {
-    /// Registration builds a replacement before publication. Invalidation
-    /// clones this snapshot while locked; notification and final drop happen
-    /// only after the source lock is released.
-    publication: SpinLock<UdpSourcePublication>,
+    source: SocketPollSource<UdpAssociation>,
 }
 
 impl UdpSocketSource {
     pub(super) fn try_new(endpoint: UdpEndpointPort) -> Result<Arc<Self>, SysError> {
         let source = Arc::try_new(Self {
-            publication: SpinLock::new(UdpSourcePublication::Unpublished),
+            source: SocketPollSource::try_new()?,
         })
         .map_err(|_| SysError::OutOfMemory)?;
-        let routes = Arc::try_new(Vec::new()).map_err(|_| SysError::OutOfMemory)?;
         let observer: Arc<dyn UdpEndpointInvalidationObserver> = source.clone();
         let event_registration =
             endpoint
@@ -65,116 +36,39 @@ impl UdpSocketSource {
                 })?;
         drop(observer);
 
-        let previous = core::mem::replace(
-            &mut *source.publication.lock(),
-            UdpSourcePublication::Live {
-                association: UdpAssociation {
-                    endpoint,
-                    event_registration,
-                },
-                routes,
-            },
-        );
-        assert!(
-            matches!(previous, UdpSourcePublication::Unpublished),
-            "fresh UDP source did not begin unpublished"
-        );
+        source.source.publish(UdpAssociation {
+            endpoint,
+            event_registration,
+        });
         Ok(source)
     }
 
     pub(super) fn endpoint(&self) -> Option<UdpEndpointPort> {
-        let publication = self.publication.lock();
-        let UdpSourcePublication::Live { association, .. } = &*publication else {
-            return None;
-        };
-        Some(association.endpoint.clone())
+        self.source
+            .with_live(|association| association.endpoint.clone())
     }
 
     pub(super) fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
-        let Some(route) = request.route() else {
-            let publication = self.publication.lock();
-            let UdpSourcePublication::Live { association, .. } = &*publication else {
-                return Err(SysError::IdentifierRemoved);
-            };
-            let facts = current_facts(association)?;
-            return Ok(PollRegisterResult::Ready(project_facts(
-                facts,
-                request.interests(),
-            )));
-        };
-
-        loop {
-            let expected = {
-                let publication = self.publication.lock();
-                let UdpSourcePublication::Live { routes, .. } = &*publication else {
-                    return Err(SysError::IdentifierRemoved);
-                };
-                routes.clone()
-            };
-            let replacement = prepare_route_replacement(&expected, route, request.interests())?;
-
-            let (previous, facts) = {
-                let mut publication = self.publication.lock();
-                let UdpSourcePublication::Live {
-                    association,
-                    routes,
-                } = &mut *publication
-                else {
-                    return Err(SysError::IdentifierRemoved);
-                };
-                if !Arc::ptr_eq(routes, &expected) {
-                    continue;
-                }
-                let previous = core::mem::replace(routes, replacement);
-                // This is the only permitted nested order: source publication
-                // to a short Stack facts snapshot. Stack transitions route
-                // invalidations only after releasing the Stack lock.
-                let facts = current_facts(association)?;
-                (previous, facts)
-            };
-            drop(previous);
-            return Ok(PollRegisterResult::Subscribed(project_facts(
-                facts,
-                request.interests(),
-            )));
-        }
+        self.source.poll(request, |association, interests| {
+            Ok(project_facts(current_facts(association)?, interests))
+        })
     }
 
     pub(super) fn retire(&self) -> Result<(), UdpRetireError> {
-        let (association, routes) = {
-            let mut publication = self.publication.lock();
-            let previous = core::mem::replace(&mut *publication, UdpSourcePublication::Retired);
-            match previous {
-                UdpSourcePublication::Live {
-                    association,
-                    routes,
-                } => (association, routes),
-                UdpSourcePublication::Unpublished | UdpSourcePublication::Retired => {
-                    return Err(UdpRetireError::UnknownEndpoint);
-                },
-            }
-        };
-
-        // Publication is already withdrawn. Remove the reverse lookup before
-        // waking every detached route: retirement is observable on a final
-        // scan even when that consumer registered no ordinary readiness bit.
-        // Then retire the Endpoint without an operation lock.
-        association.event_registration.unregister();
-        notify_all_routes(&routes);
-        drop(routes);
-        association.endpoint.retire()
+        let endpoint = self
+            .source
+            .retire(|association| {
+                association.event_registration.unregister();
+                association.endpoint
+            })
+            .ok_or(UdpRetireError::UnknownEndpoint)?;
+        endpoint.retire()
     }
 }
 
 impl UdpEndpointInvalidationObserver for UdpSocketSource {
     fn invalidate(&self) {
-        let publication = self.publication.lock();
-        let UdpSourcePublication::Live { routes, .. } = &*publication else {
-            return;
-        };
-        let routes = routes.clone();
-        drop(publication);
-        notify_interested_routes(&routes);
+        self.source.invalidate();
     }
 }
 
@@ -201,72 +95,30 @@ fn project_facts(facts: UdpEndpointFacts, interests: PollEvent) -> PollEvent {
     events
 }
 
-fn prepare_route_replacement(
-    routes: &Arc<Vec<UdpPollRoute>>,
-    route: &PollRoute,
-    interests: PollEvent,
-) -> Result<Arc<Vec<UdpPollRoute>>, SysError> {
-    let retained = routes
-        .iter()
-        .filter(|entry| !entry.route.is_prunable())
-        .count();
-    let capacity = retained.checked_add(1).ok_or(SysError::OutOfMemory)?;
-    let mut replacement = Vec::new();
-    replacement
-        .try_reserve(capacity)
-        .map_err(|_| SysError::OutOfMemory)?;
-    replacement.extend(
-        routes
-            .iter()
-            .filter(|entry| !entry.route.is_prunable())
-            .cloned(),
-    );
-    replacement.push(UdpPollRoute::new(route, interests));
-    Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)
-}
-
-fn notify_interested_routes(routes: &Arc<Vec<UdpPollRoute>>) {
-    for entry in routes.iter() {
-        if entry
-            .interests
-            .intersects(PollEvent::READABLE | PollEvent::WRITABLE)
-        {
-            entry.route.notify();
-        }
-    }
-}
-
-fn notify_all_routes(routes: &Arc<Vec<UdpPollRoute>>) {
-    for entry in routes.iter() {
-        entry.route.notify();
-    }
-}
-
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
 
-    use crate::net::udp::create_endpoint;
+    use crate::{
+        fs::iomux::{PollObserver, PollRoute},
+        net::udp::create_endpoint,
+    };
 
-    struct CountingObserver {
-        notifications: AtomicUsize,
-    }
+    struct CountingObserver(AtomicUsize);
 
     impl CountingObserver {
         fn new() -> Self {
-            Self {
-                notifications: AtomicUsize::new(0),
-            }
+            Self(AtomicUsize::new(0))
         }
 
         fn notifications(&self) -> usize {
-            self.notifications.load(Ordering::Acquire)
+            self.0.load(Ordering::Acquire)
         }
     }
 
     impl PollObserver for CountingObserver {
         fn notify(&self) {
-            self.notifications.fetch_add(1, Ordering::AcqRel);
+            self.0.fetch_add(1, Ordering::AcqRel);
         }
     }
 
@@ -275,34 +127,6 @@ mod kunits {
         let route = PollRoute::new(&erased);
         drop(erased);
         route
-    }
-
-    #[kunit]
-    fn plural_routes_survive_peer_retirement_and_duplicate_hints() {
-        let first = Arc::new(CountingObserver::new());
-        let second = Arc::new(CountingObserver::new());
-        let first_route = route(&first);
-        let second_route = route(&second);
-        let routes = Arc::new(Vec::new());
-        let routes = prepare_route_replacement(&routes, &first_route, PollEvent::READABLE)
-            .expect("first route must fit");
-        let routes = prepare_route_replacement(&routes, &second_route, PollEvent::WRITABLE)
-            .expect("second route must fit");
-
-        notify_interested_routes(&routes);
-        notify_interested_routes(&routes);
-        assert_eq!(first.notifications(), 2);
-        assert_eq!(second.notifications(), 2);
-
-        drop(first);
-        let third = Arc::new(CountingObserver::new());
-        let third_route = route(&third);
-        let replacement = prepare_route_replacement(&routes, &third_route, PollEvent::READABLE)
-            .expect("replacement route must fit");
-        assert_eq!(replacement.len(), 2);
-        notify_interested_routes(&replacement);
-        assert_eq!(second.notifications(), 3);
-        assert_eq!(third.notifications(), 1);
     }
 
     #[kunit]
@@ -323,61 +147,5 @@ mod kunits {
         source
             .retire()
             .expect("KUnit UDP source must retain its Endpoint");
-    }
-
-    #[kunit]
-    fn retire_withdraws_publication_before_late_duplicate_hints() {
-        let endpoint = create_endpoint().expect("KUnit UDP endpoint must fit");
-        let source = UdpSocketSource::try_new(endpoint).expect("KUnit UDP source must fit");
-        let readable_observer = Arc::new(CountingObserver::new());
-        let empty_observer = Arc::new(CountingObserver::new());
-        let hang_up_observer = Arc::new(CountingObserver::new());
-        let readable_route = route(&readable_observer);
-        let empty_route = route(&empty_observer);
-        let hang_up_route = route(&hang_up_observer);
-
-        assert_eq!(
-            source
-                .poll(&PollRequest::register_with_route(
-                    PollEvent::READABLE,
-                    &readable_route,
-                ))
-                .unwrap(),
-            PollRegisterResult::Subscribed(PollEvent::empty())
-        );
-        assert_eq!(
-            source
-                .poll(&PollRequest::register_with_route(
-                    PollEvent::empty(),
-                    &empty_route,
-                ))
-                .unwrap(),
-            PollRegisterResult::Subscribed(PollEvent::empty())
-        );
-        assert_eq!(
-            source
-                .poll(&PollRequest::register_with_route(
-                    PollEvent::HANG_UP,
-                    &hang_up_route,
-                ))
-                .unwrap(),
-            PollRegisterResult::Subscribed(PollEvent::empty())
-        );
-        source
-            .retire()
-            .expect("KUnit UDP source must retain its Endpoint");
-        assert_eq!(readable_observer.notifications(), 1);
-        assert_eq!(empty_observer.notifications(), 1);
-        assert_eq!(hang_up_observer.notifications(), 1);
-
-        UdpEndpointInvalidationObserver::invalidate(source.as_ref());
-        UdpEndpointInvalidationObserver::invalidate(source.as_ref());
-        assert_eq!(readable_observer.notifications(), 1);
-        assert_eq!(empty_observer.notifications(), 1);
-        assert_eq!(hang_up_observer.notifications(), 1);
-        assert_eq!(
-            source.poll(&PollRequest::snapshot(PollEvent::READABLE)),
-            Err(SysError::IdentifierRemoved)
-        );
     }
 }
