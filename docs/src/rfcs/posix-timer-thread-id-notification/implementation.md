@@ -22,12 +22,12 @@
   private/shared双重pending、Signal私有表示外泄、锁内owner callback，或需要降低双架构runtime强度时，
   停止并回到RFC review/Target Renegotiation。
 
-RFC接受或完成前一Gate都不会自动授权下一Gate。用户已在2026-08-05另行授权Gate 0；Gate 1--3仍为
-**Not Authorized / Not Started**，Gate 0关闭后必须停在Gate 1前等待授权。
+用户已在2026-08-05授权依次完成Gate 0--3。后续Gate虽然已获授权，但只能在前一Gate完成验证、review与
+独立commit后进入；不得跳跃或并行推进。
 
 ## Gate 0 — ABI、source 与 oracle baseline
 
-**状态：** Authorized / Not Started
+**状态：** Closed — 2026-08-05
 **Purpose：** 在不改变 production `timer_create()` 可见行为的前提下，冻结 native `_tid` ABI、Linux
 same-thread-group/exact-delivery/lifecycle语义与可重复的raw测试入口。
 **Prerequisites：** RFC target 已接受；旧 Clock/POSIX Timer RFC 保持 Closed；读取 live current contracts、
@@ -55,9 +55,25 @@ unsupported notice和raw errno。按用户指令不运行mdBook。
 positive target/lifecycle语义只标记Ready for Gate 2，不在Gate 0宣称已运行。
 若两架构布局不同、Linux源码不能支持冻结语义或测试只能依赖未固定host状态，停止并回到RFC review。
 
+### Gate 0 Closure — 2026-08-05
+
+- `SigEvent`增加只读取native `_tid` union member的ABI accessor；layout checks固定size/alignment与
+  0/8/12/16 offsets，raw union不进入timer core。
+- raw user oracle使用当前线程真实TID构造notification type 4，明确断言Gate 0仍返回`EOPNOTSUPP`；
+  Gate 2以exact-delivery/lifecycle cases替换该临时expectation。
+- local Linux 6.6.32 source audit冻结strict create validation、exact private route、queued/dequeue/ignored/
+  flush/target-exited rearm矩阵、target-exit三阶段、`timer_gettime()`投影与delete-after-queue语义。
+- `just fmt all --check`通过；RV64/LA64 release app与kernel build通过。RV64 469/469、LA64 472/472 KUnit
+  全通过，两个架构的raw oracle均打印`SIGEV_THREAD_ID baseline errno=EOPNOTSUPP`并完成既有POSIX timer
+  checks。default QEMU console policy过滤Notice，notice路径由source/KUnit与`etc/log-board-rv-6.log`的实际
+  type-4记录证明。
+- 两个测试盘均在Gate 0 marker之后因缺少`/musl`/`/glibc` static BusyBox退出；该外部fixture不参与Gate 0
+  acceptance，未把其后环境/LTP阶段写成已运行。全部mdBook检查均按用户指令跳过。
+- production仍不接受`SIGEV_THREAD_ID`，Signal/timer core与current contract未变。
+
 ## Gate 1 — Task-private timer signal protocol
 
-**状态：** Not Authorized / Not Started
+**状态：** Authorized / Not Started
 **Purpose：** 在Signal owner内建立per-registration task-private `SI_TIMER` slot、exact-target enqueue/wake
 与task-exit cleanup，但不让`timer_create()`提前接受新ABI。
 **Prerequisites：** Gate 0关闭；PT-TID-002/003/004/006/007可从live task/signal锁序闭合；现有shared timer
@@ -94,7 +110,7 @@ source/lock-order audit证明无Signal -> timer -> Signal回环。按用户指�
 
 ## Gate 2 — POSIX timer integration 与 PT-THREAD-ID-CUTOVER
 
-**状态：** Not Authorized / Not Started
+**状态：** Authorized / Waiting for Gate 1
 **Purpose：** 解码target TID，把Gate 1 capability接入`timer_create()`和timer lifecycle，并以双架构
 raw/Vim证据原子切换两项current contract。
 **Prerequisites：** Gate 0/1关闭；PT-TID-001--007均有source/KUnit证据；raw oracle已能在两架构
@@ -139,7 +155,7 @@ delivery/cleanup，或Vim仅因隐藏错误继续运行，保持Not Cut Over并�
 
 ## Gate 3 — Final audit 与 RFC closure
 
-**状态：** Not Authorized / Not Started
+**状态：** Authorized / Waiting for Gate 2
 **Purpose：** 对cutover后的live实现做最终架构摩擦、lifecycle与双架构回归审计，并在无blocking finding时
 关闭RFC。
 **Prerequisites：** Gate 2关闭且`PT-THREAD-ID-CUTOVER`真实生效。

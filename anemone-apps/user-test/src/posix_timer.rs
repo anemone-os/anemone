@@ -18,11 +18,11 @@ use anemone_rs::{
                 CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
                 TIMER_ABSTIME,
             },
-            posix_timer::{SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD},
+            posix_timer::{SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD, SIGEV_THREAD_ID},
         },
     },
     os::linux::process::{
-        WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork,
+        WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, gettid,
         signal::{self, SigNo, SigProcMaskHow, kill},
         wait4,
     },
@@ -227,6 +227,18 @@ fn signal_event(no: SigNo, sigval: u64) -> SigEvent {
     }
 }
 
+fn thread_id_event(no: SigNo, sigval: u64, tid: i32) -> SigEvent {
+    let mut event = SigEvent {
+        sigev_value: sigval,
+        sigev_signo: no.as_usize() as i32,
+        sigev_notify: SIGEV_THREAD_ID,
+        _sigev_un: [0; 12],
+    };
+    event._sigev_un[0] = tid;
+    assert_eq!(event.sigev_notify_thread_id(), tid);
+    event
+}
+
 fn one_shot(ns: u64) -> ITimerSpec {
     ITimerSpec {
         it_interval: TimeSpec::default(),
@@ -257,6 +269,15 @@ fn verify_abi_and_fail_forward() {
         create_timer(CLOCK_MONOTONIC, Some(&unsupported)),
         Err(EOPNOTSUPP)
     );
+    // Gate 0 freezes the raw type-4 ABI while production remains unsupported.
+    // Gate 2 replaces this assertion with exact-task delivery and lifecycle cases.
+    let tid = i32::try_from(gettid().unwrap()).unwrap();
+    let thread_id = thread_id_event(SigNo::SIGUSR1, 0x5449_4400, tid);
+    assert_eq!(
+        create_timer(CLOCK_MONOTONIC, Some(&thread_id)),
+        Err(EOPNOTSUPP)
+    );
+    println!("posix-timer: SIGEV_THREAD_ID baseline errno=EOPNOTSUPP");
     let bad_signal = SigEvent {
         sigev_notify: SIGEV_SIGNAL,
         sigev_signo: 0,

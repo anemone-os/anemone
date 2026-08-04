@@ -39,6 +39,14 @@ pub mod linux {
         pub _sigev_un: [i32; 12],
     }
 
+    impl SigEvent {
+        /// Reads Linux's native `_tid` union member for `SIGEV_THREAD_ID`.
+        /// Other union interpretations remain opaque at the syscall boundary.
+        pub const fn sigev_notify_thread_id(&self) -> i32 {
+            self._sigev_un[0]
+        }
+    }
+
     /// Native 64-bit Linux `struct __kernel_timex` used by `clock_adjtime`.
     ///
     /// Field order and explicit padding are UAPI, not Rust implementation
@@ -169,5 +177,13 @@ mod tests {
     fn native_sigevent_layout_matches_asm_generic() {
         assert_eq!(core::mem::size_of::<SigEvent>(), 64);
         assert_eq!(core::mem::align_of::<SigEvent>(), 8);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_value), 0);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_signo), 8);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_notify), 12);
+        assert_eq!(core::mem::offset_of!(SigEvent, _sigev_un), 16);
+
+        let mut event = SigEvent::default();
+        event._sigev_un[0] = 0x1234_5678;
+        assert_eq!(event.sigev_notify_thread_id(), 0x1234_5678);
     }
 }

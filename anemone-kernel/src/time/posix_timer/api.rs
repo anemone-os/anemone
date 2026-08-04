@@ -4,7 +4,7 @@ use anemone_abi::time::linux::{
         CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
         CLOCK_THREAD_CPUTIME_ID, TIMER_ABSTIME,
     },
-    posix_timer::{SIGEV_NONE, SIGEV_SIGNAL},
+    posix_timer::{SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD, SIGEV_THREAD_ID},
 };
 
 use crate::{
@@ -21,7 +21,6 @@ use crate::{
 
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 static CPU_TIMER_UNSUPPORTED_LOGGED: AtomicBool = AtomicBool::new(false);
-static NOTIFICATION_UNSUPPORTED_LOGGED: AtomicBool = AtomicBool::new(false);
 static IGNORED_SETTIME_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[syscall(SYS_TIMER_CREATE)]
@@ -154,12 +153,17 @@ fn notification_from_uapi(event: SigEvent) -> Result<PosixTimerNotification, Sys
             sigval: event.sigev_value,
         }),
         unsupported => {
-            if !NOTIFICATION_UNSUPPORTED_LOGGED.swap(true, Ordering::Relaxed) {
-                knoticeln!(
-                    "timer_create: sigev_notify={} is unsupported; only SIGEV_NONE and SIGEV_SIGNAL are available",
-                    unsupported
-                );
-            }
+            // Keep each rejection visible: an earlier type 2 request must not hide type 4.
+            let notification = match unsupported {
+                SIGEV_THREAD => "SIGEV_THREAD",
+                SIGEV_THREAD_ID => "SIGEV_THREAD_ID",
+                _ => "unknown",
+            };
+            knoticeln!(
+                "timer_create: sigev_notify={} ({}) is unsupported; only SIGEV_NONE and SIGEV_SIGNAL are available; errno=EOPNOTSUPP",
+                unsupported,
+                notification
+            );
             Err(SysError::NotSupported)
         },
     }
@@ -203,6 +207,14 @@ mod kunits {
     #[kunit]
     fn native_timer_uapi_layout_and_timespec_validation_are_fixed() {
         assert_eq!(core::mem::size_of::<SigEvent>(), 64);
+        assert_eq!(core::mem::align_of::<SigEvent>(), 8);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_value), 0);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_signo), 8);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_notify), 12);
+        assert_eq!(core::mem::offset_of!(SigEvent, _sigev_un), 16);
+        let mut thread_event = SigEvent::default();
+        thread_event._sigev_un[0] = 0x1234_5678;
+        assert_eq!(thread_event.sigev_notify_thread_id(), 0x1234_5678);
         assert_eq!(core::mem::size_of::<ITimerSpec>(), 32);
         assert_eq!(
             timespec_to_ns(TimeSpec {
@@ -241,5 +253,14 @@ mod kunits {
             }),
             Ok(PosixTimerNotification::None)
         );
+        for sigev_notify in [SIGEV_THREAD, SIGEV_THREAD_ID] {
+            assert_eq!(
+                notification_from_uapi(SigEvent {
+                    sigev_notify,
+                    ..SigEvent::default()
+                }),
+                Err(SysError::NotSupported)
+            );
+        }
     }
 }
