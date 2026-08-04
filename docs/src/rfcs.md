@@ -117,6 +117,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `NET-UDP-FINAL-CUTOVER`已原子使四项[UDP Socket contract](./contracts/net/udp-socket.md) Active；hardware、
   `smp>1`、full network LTP与final harness保持Not Run。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
+- [RFC-20260804-udp-socket-extension](./rfcs/udp-socket-extension/index.md)：IPv4 UDP connected、
+  file/message/vector I/O、flag 边界与 Endpoint owner/lifecycle target；当前仍为 Draft、未改变 current contract。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
