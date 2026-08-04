@@ -357,6 +357,14 @@ mod tests {
             Some(1)
         );
         assert_eq!(action.system.kernel_config.parameters.system_hz, Some(100));
+        assert_eq!(
+            action
+                .system
+                .kernel_config
+                .parameters
+                .oom_kill_sample_interval_ms,
+            Some(50)
+        );
     }
 
     #[test]
@@ -400,6 +408,9 @@ mod tests {
                 .filter(|line| {
                     !line.trim_start().starts_with("max_logical_cpus")
                         && !line.trim_start().starts_with("ns16550a_default_baud")
+                        && !line
+                            .trim_start()
+                            .starts_with("oom_kill_sample_interval_ms")
                 })
                 .collect::<Vec<_>>()
                 .join("\n");

@@ -97,6 +97,36 @@ mod allocator_stats {
                 > self.total_pages.saturating_mul(threshold_percent as u64)
         }
     }
+
+    #[cfg(feature = "kunit")]
+    mod kunits {
+        use super::*;
+
+        #[kunit]
+        fn usage_threshold_is_strictly_greater_and_zero_total_is_inert() {
+            assert!(
+                !FrameAllocatorStats {
+                    total_pages: 0,
+                    free_pages: 0,
+                }
+                .used_pages_exceeds_percent(90)
+            );
+            assert!(
+                !FrameAllocatorStats {
+                    total_pages: 100,
+                    free_pages: 10,
+                }
+                .used_pages_exceeds_percent(90)
+            );
+            assert!(
+                FrameAllocatorStats {
+                    total_pages: 100,
+                    free_pages: 9,
+                }
+                .used_pages_exceeds_percent(90)
+            );
+        }
+    }
 }
 pub use allocator_stats::*;
 

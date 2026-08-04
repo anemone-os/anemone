@@ -373,14 +373,14 @@ publication线性化点、post-commit failure/rollback和并发lookup语义，�
 **Status:** Open
 **Area:** irq / scheduler / task lifecycle / timer / mm allocator
 
-**Symptom / Trigger:** 单核、关抢占的 LTP 长 profile 仍可能在 case summary 或 `PASS/FAIL LTP CASE ...` 附近卡死。2026-06-22 审查中发现若干 hard IRQ 或 IRQ-off return-tail 路径仍会执行可能扩容的堆分配或 allocator side effect：例如 trap interrupt return 在重新开中断前调用 deferred task disposal，disposal 扫描时用 `Vec` 临时收集 task 并可能在日志中 clone task name；threaded timer 的 IRQ 到 worker ready queue 交接使用 `VecDeque::push_back()`；kmalloc OOM handler 还可能向 frame allocator 要页，而 frame allocation 后会检查水位并唤醒 OOM killer。
+**Symptom / Trigger:** 单核、关抢占的 LTP 长 profile 仍可能在 case summary 或 `PASS/FAIL LTP CASE ...` 附近卡死。2026-06-22 审查中发现若干 hard IRQ 或 IRQ-off return-tail 路径仍会执行可能扩容的堆分配或 allocator side effect：例如 trap interrupt return 在重新开中断前调用 deferred task disposal，disposal 扫描时用 `Vec` 临时收集 task 并可能在日志中 clone task name；threaded timer 的 IRQ 到 worker ready queue 交接使用 `VecDeque::push_back()`。当时还存在frame allocation后的OOM threshold/wake反向调用；2026-08-05 periodic-sampling小迭代已删除该hook和global OOM wake handle，因此这条递归OOM side effect已消除。
 
-**Impact:** 当前工程阶段允许简单、适度且有界的 IRQ-safe allocation；allocation 本身不再是禁止项，也不应为了消除它引入侵入式对象、镜像状态或额外 owner。未收敛风险是 allocation 周围的 blocking/reclaim protocol、普通锁或 remote placement、日志格式化、复杂对象析构和递归 OOM side effect，它们可能把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；allocator 内部使用 noirq lock 或开启 `spin_lock_irqsave` 仍不能单独证明这些副作用安全。
+**Impact:** 当前工程阶段允许简单、适度且有界的 IRQ-safe allocation；allocation 本身不再是禁止项，也不应为了消除它引入侵入式对象、镜像状态或额外 owner。递归OOM wake已不再是当前风险，但allocation周围仍可能存在blocking/reclaim protocol、普通锁或remote placement、日志格式化和复杂对象析构，把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；allocator内部使用noirq lock或开启`spin_lock_irqsave`仍不能单独证明这些剩余副作用安全。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-26
-**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；允许与一次有界操作绑定、同时存活数量受现有 credit/capacity 约束且不制造第二套状态 truth 的简单 IRQ-safe allocation，但必须移除或隔离 blocking/synchronous reclaim、普通锁、remote placement、task Drop、普通日志/name clone、复杂 callback 和递归 OOM handling 等副作用。随后用定向 source audit 和长 LTP profile 复跑，确认 post-summary hang 不再由 IRQ/off-tail 的复杂 allocator side effect 或重入路径解释。
-**Related:** [LTP post-summary hang](#ane-20260616-ltp-post-summary-hang), [fanotify tracking issues](../rfcs/fanotify/tracking-issues.md)
+**Last Verified:** 2026-08-05
+**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；允许与一次有界操作绑定、同时存活数量受现有 credit/capacity 约束且不制造第二套状态 truth 的简单 IRQ-safe allocation，但必须移除或隔离 blocking/synchronous reclaim、普通锁、remote placement、task Drop、普通日志/name clone和复杂callback等剩余副作用。随后用定向source audit和长LTP profile复跑，确认post-summary hang不再由IRQ/off-tail的复杂allocator side effect或重入路径解释。
+**Related:** [LTP post-summary hang](#ane-20260616-ltp-post-summary-hang), [fanotify tracking issues](../rfcs/fanotify/tracking-issues.md), [OOM periodic sampling](../devlog/changes/2026-08-05-oom-periodic-sampling.md)
 
 **Severity:** High
-**Workaround:** 当前把复杂 allocator side effect 与重入路径视为未收敛风险，不把所有 IRQ/off-tail allocation 一概禁止。保持对象模型直接，分配量和 live count 有界；避免 blocking/reclaim、普通锁、remote placement、日志格式化、complex drop/callback 与递归 OOM 路径。不要用 noirq allocator、`spin_lock_irqsave` 或偶然通过的 LTP case 作为关闭依据。
+**Workaround:** 当前把复杂allocator side effect与重入路径视为未收敛风险，不把所有IRQ/off-tail allocation一概禁止。保持对象模型直接，分配量和live count有界；避免blocking/reclaim、普通锁、remote placement、日志格式化和complex drop/callback。不要用noirq allocator、`spin_lock_irqsave`或偶然通过的LTP case作为关闭依据。

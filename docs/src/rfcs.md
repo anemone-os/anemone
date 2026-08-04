@@ -157,7 +157,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 - [RFC-20260616-kthread-core](./rfcs/kthread-core/index.md)：已接受、阶段 6 implementation gate 已关闭；纠偏 kthread core，定义 procfs-visible singleton thread group、固定 `kthreadd` TID 2、strong handle、专用 exit、user-facing API fail-closed，以及移除 service/park 的迁移 gate。
 - [RFC-20260614-kthread](./rfcs/kthread/index.md)：历史基线；记录已落地的轻量 kthread 创建代理、typed entry、stop/park 生命周期和 `KThreadService` 后台 worker 合同，已由 `kthread-core` supersede。
 - [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：自循环 `io_shrink_threshold` gate 的 inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
-- [RFC-20260615-oom-killer](./rfcs/oom-killer/index.md)：物理页阈值触发的 OOM killer、按独占物理页选择用户进程和 clone 内存压力 user-app-test 计划。
+- [RFC-20260615-oom-killer](./rfcs/oom-killer/index.md)：Terminated历史proposal；allocation-success wake target未闭合runtime acceptance，当前OOM trigger与policy由[`MM-OOM-001`](./contracts/mm/oom-policy.md#mm-oom-001--oom-worker自有fixed-delay采样与victim-round)定义。
 - [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
 - [RFC-20260606-signal-temp-mask-restore](./rfcs/signal-temp-mask-restore/index.md)：`rt_sigsuspend`、`ppoll`、`pselect6` 临时 signal mask delayed restore 协议、trap-return delivery handoff 和 staged 实施计划。
 - [RFC-20260605-fileops-seek-char-ioctl](./rfcs/fileops-seek-char-ioctl/index.md)：`FileOps::seek`、positioned I/O 分层和字符设备 ioctl 默认分发计划。

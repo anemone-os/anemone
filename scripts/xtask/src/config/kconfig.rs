@@ -84,6 +84,7 @@ pub struct Parameters {
     pub shmmni: Option<usize>,
     pub io_shrink_threshold: Option<u8>,
     pub oom_kill_threshold: Option<u8>,
+    pub oom_kill_sample_interval_ms: Option<u64>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
     pub initial_umask: Option<u16>,
@@ -188,6 +189,7 @@ impl Parameters {
         materialize!(shmmni);
         materialize!(io_shrink_threshold);
         materialize!(oom_kill_threshold);
+        materialize!(oom_kill_sample_interval_ms);
         materialize!(symlink_resolve_limit);
         materialize!(max_fd_per_process);
         materialize!(initial_umask);
@@ -357,8 +359,10 @@ pub const SHMMNI: usize = {};
 /// runs a scan.
 pub const IO_SHRINK_THRESHOLD: u8 = {};
 /// Physical memory usage percentage above which the OOM killer worker
-/// is woken.
+/// runs one victim-selection round.
 pub const OOM_KILL_THRESHOLD: u8 = {};
+/// Fixed delay between OOM killer frame-usage samples, in milliseconds.
+pub const OOM_KILL_SAMPLE_INTERVAL_MS: u64 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Build-time file-table capacity and system-wide fd-number ceiling.
@@ -490,6 +494,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(shmmni),
             resolved!(io_shrink_threshold),
             resolved!(oom_kill_threshold),
+            resolved!(oom_kill_sample_interval_ms),
             resolved!(symlink_resolve_limit),
             resolved!(max_fd_per_process),
             resolved!(initial_umask),

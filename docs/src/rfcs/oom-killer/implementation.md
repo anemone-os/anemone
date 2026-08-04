@@ -1,9 +1,11 @@
 # OOM Killer 迁移实施计划
 
-**状态：** Active implementation
-**最后更新：** 2026-06-15
+**状态：** Historical（父RFC已Terminated）
+**最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260615-oom-killer](./index.md)
 **不变量：** [OOM Killer 不变量需求](./invariants.md)
+
+本页只保留已终止target的历史阶段，不得作为active plan恢复执行。
 
 本文定义第一版 OOM killer 的实现阶段。该实现以物理页使用率为触发源，以用户地址空间独占物理页 snapshot 为 victim 排序依据，以 `SIGKILL` 作为终止动作。
 

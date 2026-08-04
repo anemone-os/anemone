@@ -1,10 +1,18 @@
 # 2026-06-15 - OOM Killer
 
-**Status:** Active
+**Status:** Terminated
 **Owners:** EDGW, Codex
 **Area:** mm / frame allocator / user-space VMO / task / signal / kthread
 **Canonical Plan:** [RFC-20260615-oom-killer](../../rfcs/oom-killer/index.md), [Invariants](../../rfcs/oom-killer/invariants.md), [Implementation Plan](../../rfcs/oom-killer/implementation.md)
-**Current Phase:** runtime validation pending
+**Current Phase:** Terminated；原runtime validation为Not Run
+
+## Termination
+
+维护者于2026-08-05永久停止本transaction。已有source/build/rootfs证据继续作为历史保留；原计划的VMO专项KUnit、
+QEMU user-app runtime与最终validation gate在本transaction中保持Not Run，后来的独立小迭代证据不追溯为
+Completed。本transaction没有active Next且不得重开；current behavior见
+[`MM-OOM-001`](../../contracts/mm/oom-policy.md#mm-oom-001--oom-worker自有fixed-delay采样与victim-round)和
+[replacement change record](../changes/2026-08-05-oom-periodic-sampling.md)。
 
 ## Scope
 
@@ -74,7 +82,9 @@
 
 **Validation:** Docker `gallant_lamarr` 内以 `root` 用户运行 `just rootfs mkfs -c rootfsconfig-rv` 通过；日志确认 staging/build 了 `oom-killer-test` 并生成 `build/rootfs/minimal-rv/rootfs.img`。
 
-## Open Items
+## Historical Open Items（termination时Not Run）
+
+以下条目只记录终止时尚未运行的原计划，不是active backlog或恢复入口：
 
 - 运行 `git diff --check` 和需要时的 format check。
 - 补独占物理页 snapshot 的 KUnit，尤其是 `ShadowObject` parent shared/独占递归边界。

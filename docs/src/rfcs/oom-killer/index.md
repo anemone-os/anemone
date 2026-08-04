@@ -1,12 +1,19 @@
 # RFC-20260615-oom-killer
 
-**状态：** Active implementation
+**状态：** Terminated
 **负责人：** EDGW, Codex
-**最后更新：** 2026-06-16
+**最后更新：** 2026-08-05
 **领域：** mm / frame allocator / task / signal / user-test
 **事务日志：** [OOM Killer 事务日志](../../devlog/transactions/2026-06-15-oom-killer.md)
-**开放问题：** None；第一轮实现事务已启动，运行验证状态以事务日志为准。
-**下一步：** 完成 [迁移实施计划](./implementation.md) 的 validation gate，补 user-app-test 或等价 runtime 验证。
+**开放问题：** None；本RFC已永久终止，原validation gate的Not Run由事务历史保留。
+**下一步：** None；不得从本RFC或原transaction恢复执行，未来相关工作必须独立分类并授权。
+
+## Termination
+
+维护者于2026-08-05永久终止本RFC。allocation-success wake target从未满足原runtime acceptance，因此本状态不是
+`Closed`，也不把后来的验证追溯成原target closure。下文、invariants与implementation只保留历史proposal；当前
+effective OOM规则见[`MM-OOM-001`](../../contracts/mm/oom-policy.md#mm-oom-001--oom-worker自有fixed-delay采样与victim-round)，
+replacement来源见[OOM periodic sampling小迭代](../../devlog/changes/2026-08-05-oom-periodic-sampling.md)。
 
 ## 摘要
 

@@ -58,6 +58,11 @@ impl KThreadControl {
             .listen_uninterruptible(false, || self.should_stop() || predicate());
     }
 
+    pub(super) fn wait_for(&self, timeout: Duration) {
+        self.wake
+            .listen_uninterruptible_with_timeout(false, || self.should_stop(), timeout);
+    }
+
     pub(in crate::task) fn complete_returned_entry(&self, code: i32) {
         {
             let mut phase = self.phase.lock();
