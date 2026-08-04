@@ -15,7 +15,7 @@ pub mod empty;
 pub mod fixed;
 pub mod shadow;
 
-use core::fmt::Debug;
+use core::{fmt::Debug, ops::Range};
 
 use crate::{prelude::*, utils::data::DataSource};
 
@@ -37,6 +37,40 @@ pub struct ResolvedFrame {
     pub frame: FrameHandle,
     /// Whether this frame can be mapped writable if the VMA allows write.
     pub writable: bool,
+}
+
+/// Frames removed from a VMO but kept alive until the owning address space
+/// completes the required TLB invalidation.
+#[derive(Debug, Default)]
+pub struct RetiredFrames {
+    frames: Vec<FrameHandle>,
+}
+
+impl RetiredFrames {
+    pub(super) fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+}
+
+fn retire_frame_range(
+    frames: &mut BTreeMap<usize, FrameHandle>,
+    range: Range<usize>,
+) -> RetiredFrames {
+    if range.is_empty() {
+        return RetiredFrames::default();
+    }
+
+    let mut selected_and_after = frames.split_off(&range.start);
+    let mut after = selected_and_after.split_off(&range.end);
+    frames.append(&mut after);
+
+    RetiredFrames {
+        frames: selected_and_after.into_values().collect(),
+    }
 }
 
 /// Interior mutability should be used to implement some methods.
@@ -61,6 +95,13 @@ pub trait VmObject: Send + Sync {
         // dedicated discard path can safely ignore it and let the caller drop
         // the current PTEs.
         Ok(())
+    }
+
+    /// Remove resident frames and return their ownership to the address-space
+    /// retirement protocol. Unlike `discard_range`, this operation must also
+    /// prevent a COW backing from exposing parent contents on a later fault.
+    fn decommit_range(&self, _range: Range<usize>) -> Result<RetiredFrames, SysError> {
+        Err(SysError::NotSupported)
     }
 
     fn exclusive_physical_pages(&self, _range: core::ops::Range<usize>) -> usize {

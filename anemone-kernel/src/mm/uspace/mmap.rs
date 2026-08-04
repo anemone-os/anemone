@@ -346,7 +346,7 @@ impl UserSpace {
                 range,
                 prot
             );
-            return Ok(RemoteUspFenceGuard { vpn: Some(range) });
+            return Ok(RemoteUspFenceGuard::new(Some(range)));
         }
 
         let tx = self.compose_protect_range(range, prot)?;
@@ -624,7 +624,7 @@ impl UserSpace {
 
         PagingArch::tlb_shootdown_all();
 
-        Ok(RemoteUspFenceGuard { vpn: Some(range) })
+        Ok(RemoteUspFenceGuard::new(Some(range)))
     }
 }
 
@@ -993,7 +993,7 @@ impl UserSpace {
             PagingArch::tlb_shootdown_all();
         }
 
-        RemoteUspFenceGuard { vpn: None }
+        RemoteUspFenceGuard::new(None)
     }
 }
 
