@@ -121,6 +121,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Clock derivation](./contracts/time/clock-derivation.md)
   - [Realtime step](./contracts/time/realtime-step.md)
   - [Soft timer request](./contracts/time/soft-timer-request.md)
+  - [POSIX timer](./contracts/time/posix-timer.md)
 - [Pipe 当前契约](./contracts/pipe/index.md)
   - [Named FIFO open 与 lifecycle](./contracts/pipe/named-fifo.md)
 - [Device 当前契约](./contracts/device/index.md)

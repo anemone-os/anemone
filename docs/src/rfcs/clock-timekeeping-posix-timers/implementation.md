@@ -1,6 +1,6 @@
 # Clock Timekeeping 与 POSIX Timers 实施计划
 
-**状态：** Accepted / Gate 0--4 Closed / Gate 5 Authorized
+**状态：** Accepted / Gate 0--5 Closed / Gate 6 Awaiting Authorization
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260803-clock-timekeeping-posix-timers](./index.md)
 **当前修订：** R0
@@ -236,7 +236,8 @@ timer 子系统自建 signal queue、signal 私有容器外泄或普通 kill 改
 
 ## Gate 5 — POSIX timer 对象与五个 syscall
 
-**状态：** Authorized / Not Started。
+**状态：** Closed（2026-08-04）；实现、review、双架构验证与 `PT-SIGNAL-CUTOVER` 证据见
+[transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md#gate-5-implementation)。
 
 **Purpose：** 建立 `ThreadGroup` timer ID 表、对象生命周期、周期/overrun 和五个 syscall，消费 Gate 2/4
 已经完成的 soft timer 与 signal 能力。
@@ -285,6 +286,8 @@ generation-only cleanup、timer 自建 signal queue、fork 继承、ID 跨线程
 阻止 cutover。
 
 ## Gate 6 — 最终消费者审计与 RFC 收口
+
+**状态：** Awaiting Authorization / Not Started。
 
 **Purpose：** 证明 10 个 syscall 和现有时间消费者共同使用一套时间/请求/signal 事实，完成最终 contract
 与文档收口。

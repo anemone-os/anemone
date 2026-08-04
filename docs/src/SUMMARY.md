@@ -7,6 +7,7 @@
 		- [Clock derivation](./contracts/time/clock-derivation.md)
 		- [Realtime step](./contracts/time/realtime-step.md)
 		- [Soft timer request](./contracts/time/soft-timer-request.md)
+		- [POSIX timer](./contracts/time/posix-timer.md)
 	- [VFS 当前契约](./contracts/vfs/index.md)
 		- [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)
 		- [Make node 与 filesystem-backed rdev](./contracts/vfs/make-node.md)

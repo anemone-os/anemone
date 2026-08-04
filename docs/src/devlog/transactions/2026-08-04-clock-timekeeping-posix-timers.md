@@ -1,6 +1,6 @@
 # Clock Timekeeping 与 POSIX Timers 事务日志
 
-**状态：** Active / R0 / Gate 0--4 Closed / Gate 5 Authorized
+**状态：** Active / R0 / Gate 0--5 Closed / Gate 6 Awaiting Authorization
 **日期：** 2026-08-04
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260803-clock-timekeeping-posix-timers R0](../../rfcs/clock-timekeeping-posix-timers/index.md)
@@ -254,3 +254,50 @@ Gate 4 只关闭内部 `SI_TIMER` signal protocol，没有创建 POSIX timer 对
 `SIGNAL-PENDING-001` 的 `SI_TIMER` refine 与 `POSIX-TIMER-001` 继续等待 Gate 5 真实 consumer、完整五 syscall 和
 双架构生命周期/ABI matrix后原子 cut over。开发者授权 Gate 4 验收后继续 Gate 5，并要求开始前先同步合并
 `origin/main`。
+
+## Gate 5 implementation
+
+- `ThreadGroup` timer 表成为 ID publication/removal 的唯一 syscall-visible truth。create reservation 带
+  owner-local identity，copyout 失败回滚；旧 reservation 不能在 exec 清表和 ID 复用后发布或释放新 create。
+- timer object 在一个锁内拥有 generation、实际 timeline、原目标、interval、queued request、pending episode
+  和 overrun。相对 realtime 固定到 monotonic；只有 absolute realtime 进入 mutable calendar queue。周期从原
+  目标推进，overrun 在交付时固化并按 `INT_MAX` 钳位。
+- 107--111 native syscall 在 RV64/LA64 注册；403--409 保持未注册。ABI 支持 realtime/monotonic/boottime、
+  default event、`SIGEV_NONE` 与 `SIGEV_SIGNAL`；CPU-time timer 和 thread notification 明确返回
+  `EOPNOTSUPP`。`timer_settime` unknown bits 按 Linux legacy 行为限频记录后忽略，old-value copyout `EFAULT`
+  保留已提交的新 arm。
+- soft timer 只持一次 queued request；signal 继续拥有 pending、disposition、mask、selection、wake 与 frame。
+  每个 timer registration 有独立 pending slot；同 signum 的不同 standard timer 不合并。`SIGKILL` 使用强制
+  notification，`SIGSTOP` 在 ThreadGroup job-control generation transaction 内消费而不制造不可交付 pending。
+- fork 构造空表；成功 exec 在 dethread 后、最后 member exit 在发布 Exited 前走同一批量删除协议。delete 先
+  移除 ID，再推进 generation、取消 queued request、撤销 registration；在途 signal identity 只能完成自身
+  handoff，不能 rearm 已删除对象。
+
+## Gate 5 review 与 validation
+
+- change review 在 cutover 前修复两项 correctness finding：relative `CLOCK_REALTIME` 不能进入 mutable
+  realtime timeline；unpublished ID reservation 必须带 identity，防止清表/复用 ABA。最终 source audit确认
+  timer object锁内不取得 signal pending lock，signal回告只在 pending/ThreadGroup guard外进入 timer owner，
+  ID removal先于queue/object cleanup，未发现 residual Apollyon/Keter/Euclid。
+- RV64 release SMP=2通过468/468 KUnit；LA64通过469/469。新增 KUnit固定 reservation不可见/复用、stale token
+  不能影响 reused ID、周期原目标推进、overrun clamp和snapshot派生；既有 signal/soft-timer/timekeeper覆盖继续
+  运行。
+- 双架构用户 oracle 都通过 `posix-timer: five syscalls, lifecycle, signal, and overrun checks passed`，覆盖五
+  syscall、pointer fault、invalid ID/clock/notification/timespec、unknown flags、create rollback、settime
+  fail-forward、default `SIGALRM`、`SIGEV_NONE`、同 standard signal多timer、periodic overrun、fork不继承、
+  `SIGKILL/SIGSTOP`、403 `ENOSYS`，以及 relative realtime忽略step、absolute realtime随前后step变化。
+- 双架构 tracked pretest rootfs均重建，exact release build与QEMU运行通过；clock、futex、timerfd、
+  `ITIMER_REAL`、signal、socket和pipe本地回归继续通过。两架构只在所有上述marker之后因测试盘缺static
+  BusyBox停在competition初始化，该环境缺口不归因于Gate 5。
+- `just fmt kernel --check`、`just fmt user-test --check` 与 `git diff --check` 通过。按开发者明确要求所有
+  mdBook检查跳过，记为Not Run；LTP不是本Gate的定向语义oracle，本次Not Run。
+
+## Gate 5 closure 与 PT-SIGNAL-CUTOVER — 2026-08-04
+
+`PT-SIGNAL-CUTOVER` 原子激活
+[`POSIX-TIMER-001`](../../contracts/time/posix-timer.md#posix-timer-001--threadgroup唯一拥有timer对象id与通知episode)，
+并 Refine
+[`SIGNAL-PENDING-001`](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner)：
+ordinary standard signal继续使用单slot，`SI_TIMER`按timer registration保留独立pending identity；timer owner
+只消费typed enqueue结果与锁外delivery callback，不读取signal私有容器。Gate 6尚未授权，本transaction保持
+Active且不声明RFC最终收口。

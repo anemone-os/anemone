@@ -139,6 +139,11 @@ pub mod linux {
     pub const SYS_NANOSLEEP: u64 = 101;
     pub const SYS_GETITIMER: u64 = 102;
     pub const SYS_SETITIMER: u64 = 103;
+    pub const SYS_TIMER_CREATE: u64 = 107;
+    pub const SYS_TIMER_GETTIME: u64 = 108;
+    pub const SYS_TIMER_GETOVERRUN: u64 = 109;
+    pub const SYS_TIMER_SETTIME: u64 = 110;
+    pub const SYS_TIMER_DELETE: u64 = 111;
     pub const SYS_CLOCK_SETTIME: u64 = 112;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
     pub const SYS_CLOCK_GETRES: u64 = 114;

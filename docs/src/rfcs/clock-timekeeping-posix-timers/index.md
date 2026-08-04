@@ -6,8 +6,7 @@
 **最后更新：** 2026-08-04
 **领域：** time / timer / task / signal / syscall ABI / RTC
 **影响契约：** Gate 1--3 已 Introduce `TIMEKEEPER-CLOCK-001`、`SOFT-TIMER-REQUEST-001` 与
-`TIMEKEEPER-STEP-001`；R0 其余 target 仍提议 Introduce `POSIX-TIMER-001`，并 Refine
-`SIGNAL-PENDING-001`
+`TIMEKEEPER-STEP-001`；Gate 5 已 Introduce `POSIX-TIMER-001` 并 Refine `SIGNAL-PENDING-001`
 **执行记录：** [2026-08-04 Clock Timekeeping 与 POSIX Timers transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)
 
 ## 本 RFC 包括哪些系统调用

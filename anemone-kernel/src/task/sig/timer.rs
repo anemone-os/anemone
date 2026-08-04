@@ -55,6 +55,9 @@ pub(crate) enum PosixTimerSignalEnqueue {
     Queued,
     AlreadyPending,
     Ignored,
+    /// The signal owner applied an uncatchable control occurrence without
+    /// publishing a userspace-deliverable pending item.
+    Consumed,
     TargetExited,
 }
 
@@ -120,16 +123,6 @@ impl PosixTimerSignalRegistration {
         sigval: u64,
         callback: Arc<PosixTimerSignalCallback>,
     ) -> Result<Self, SysError> {
-        // Gate 4 has no public timer ABI and only establishes the ordinary
-        // pending protocol. Linux accepts these two signs for SIGEV_SIGNAL, but
-        // Anemone routes SIGSTOP through the job-control generation transaction
-        // rather than ordinary pending. Gate 5 must integrate that route and
-        // remove this guard before publishing timer_create(); exposing EINVAL
-        // for either signum would not be a valid final ABI.
-        if matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
-            return Err(SysError::InvalidArgument);
-        }
-
         let slot = {
             let inner = target.inner.read();
             if !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive)
@@ -161,6 +154,15 @@ impl PosixTimerSignalRegistration {
         let Some(target) = self.target.upgrade() else {
             return PosixTimerSignalEnqueue::TargetExited;
         };
+
+        let no = {
+            let inner = target.inner.read();
+            inner.sig_pending.lock().timer_signal_no(self.slot)
+        };
+        if super::generation::is_job_control_signal(no) {
+            return target
+                .enqueue_timer_job_control_signal(self.slot, generation, episode, overrun);
+        }
 
         // Snapshot Arc targets before entering the signal leaf. The snapshot is
         // revalidated against ThreadGroup membership below and used for wakeups
@@ -194,8 +196,8 @@ impl PosixTimerSignalRegistration {
 
         if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
             for member in members {
-                if !member.is_current_sig_mask_blocking(no) {
-                    notify(&member, false);
+                if no == SigNo::SIGKILL || !member.is_current_sig_mask_blocking(no) {
+                    notify(&member, no == SigNo::SIGKILL);
                 }
             }
         }

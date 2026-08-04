@@ -134,6 +134,10 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             if let Some(leader) = tty_session_leader {
                 crate::device::tty::detach_exiting_session(leader);
             }
+            // Last-member detach is the point at which no further syscall can
+            // publish a timer in this namespace. Withdraw IDs and physically
+            // cancel requests before publishing the Exited lifecycle.
+            tg.delete_all_posix_timers();
             let mut tg_inner = tg.inner.write();
 
             let xcode = match tg_inner.status.life_cycle {

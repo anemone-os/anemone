@@ -226,6 +226,19 @@ impl PendingSignals {
             .no
     }
 
+    pub(super) fn set_timer_signal_default_stop_epoch(
+        &mut self,
+        id: TimerSignalSlotId,
+        epoch: crate::task::jobctl::group::ContinueEpoch,
+    ) {
+        self.timer_slot_mut(id)
+            .pending
+            .as_mut()
+            .expect("conditional timer signal is not pending")
+            .signal
+            .set_default_stop_epoch(epoch);
+    }
+
     pub(super) fn unregister_timer_signal(
         &mut self,
         id: TimerSignalSlotId,
@@ -437,6 +450,14 @@ impl PendingSignals {
                         reserved: false,
                     });
             }
+            if let Some(index) = self.earliest_timer_signal_index(no)
+                && allowed(&self.timer_signal_at(index).signal, false)
+            {
+                return Some(FetchedSignal {
+                    signal: self.take_timer_signal_at(index),
+                    reserved: false,
+                });
+            }
         }
 
         for idx in 0..self.realtime.len() {
@@ -518,8 +539,14 @@ impl PendingSignals {
         if let Some(kill) = self.unreliable[SigNo::SIGKILL.as_usize()].take() {
             return Some(kill);
         }
+        if let Some(index) = self.earliest_timer_signal_index(SigNo::SIGKILL) {
+            return Some(self.take_timer_signal_at(index));
+        }
         if let Some(stop) = self.unreliable[SigNo::SIGSTOP.as_usize()].take() {
             return Some(stop);
+        }
+        if let Some(index) = self.earliest_timer_signal_index(SigNo::SIGSTOP) {
+            return Some(self.take_timer_signal_at(index));
         }
 
         // Realtime signals first. Merge ordinary and POSIX timer occurrences by

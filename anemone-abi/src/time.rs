@@ -27,6 +27,18 @@ pub mod linux {
         pub it_value: TimeSpec,
     }
 
+    /// Native asm-generic `struct sigevent`. The trailing union is kept as raw
+    /// padding because Anemone supports only `SIGEV_NONE` and `SIGEV_SIGNAL`,
+    /// but its size and offsets remain user ABI.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[repr(C)]
+    pub struct SigEvent {
+        pub sigev_value: u64,
+        pub sigev_signo: i32,
+        pub sigev_notify: i32,
+        pub _sigev_un: [i32; 12],
+    }
+
     /// Native 64-bit Linux `struct __kernel_timex` used by `clock_adjtime`.
     ///
     /// Field order and explicit padding are UAPI, not Rust implementation
@@ -118,6 +130,13 @@ pub mod linux {
         pub const TFD_NONBLOCK: u32 = O_NONBLOCK;
     }
 
+    pub mod posix_timer {
+        pub const SIGEV_SIGNAL: i32 = 0;
+        pub const SIGEV_NONE: i32 = 1;
+        pub const SIGEV_THREAD: i32 = 2;
+        pub const SIGEV_THREAD_ID: i32 = 4;
+    }
+
     pub mod itimer {
         use crate::time::linux::TimeVal;
 
@@ -138,11 +157,17 @@ pub mod native {}
 
 #[cfg(test)]
 mod tests {
-    use super::linux::Timex;
+    use super::linux::{SigEvent, Timex};
 
     #[test]
     fn native_timex_layout_matches_asm_generic_time64() {
         assert_eq!(core::mem::size_of::<Timex>(), 208);
         assert_eq!(core::mem::align_of::<Timex>(), 8);
+    }
+
+    #[test]
+    fn native_sigevent_layout_matches_asm_generic() {
+        assert_eq!(core::mem::size_of::<SigEvent>(), 64);
+        assert_eq!(core::mem::align_of::<SigEvent>(), 8);
     }
 }

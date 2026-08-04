@@ -9,6 +9,7 @@ mod competition;
 mod file;
 mod guest;
 mod ltp;
+mod posix_timer;
 mod process;
 mod runtime;
 mod soft_timer;
@@ -39,6 +40,10 @@ fn run_local_tests() {
     println!("user-test: running SI_TIMER signal frame test...");
     timer_signal::verify_timer_signal_frame();
     println!("user-test: SI_TIMER signal frame test finished.");
+
+    println!("user-test: running POSIX timer test...");
+    posix_timer::verify_posix_timers();
+    println!("user-test: POSIX timer test finished.");
 
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
