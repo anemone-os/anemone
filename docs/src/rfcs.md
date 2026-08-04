@@ -54,6 +54,12 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   clock read、realtime step、soft timer request与POSIX timer规则见[Time当前契约](./contracts/time/index.md)，
   `SI_TIMER` pending refine见[Signal当前契约](./contracts/signal/pending-routing.md)，执行证据见
   [transaction](./devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)。
+- [RFC-20260804-posix-timer-thread-id-notification](./rfcs/posix-timer-thread-id-notification/index.md)：Accepted R0；
+  作为已关闭 Clock/POSIX Timer R0 的独立 follow-up，为 native `timer_create()` 增加同 `ThreadGroup`
+  exact-task `SIGEV_THREAD_ID` notification。timer owner 保持不变，Signal owner 增加 task-private
+  per-registration `SI_TIMER` slot；raw `SIGEV_THREAD` 与 kernel-side callback execution 仍明确排除。
+  [目标与不变量](./rfcs/posix-timer-thread-id-notification/invariants.md)定义 target/exit/delete/lock proof，
+  [实施路线](./rfcs/posix-timer-thread-id-notification/implementation.md)包含当前已授权Gate 0与三个后续Gate。
 - [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
   RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供
   fallible copyin/copyout，typed exact access与VFS partial progress边界已经固化。早于本RFC的
