@@ -178,8 +178,7 @@ impl Drop for FrameHandle {
     fn drop(&mut self) {
         unsafe {
             let frame = get_frame_raw(self.ppn);
-            frame.dec_ref();
-            if frame.is_free() {
+            if frame.dec_ref() == 1 {
                 FRAME_ALLOCATOR.dealloc(PhysPageRange::new(self.ppn, 1));
             }
         }
@@ -381,9 +380,7 @@ impl Drop for Folio {
     fn drop(&mut self) {
         unsafe {
             let frame = get_frame_raw(self.range.start());
-            let rc = frame.rc();
-            frame.dec_ref();
-            if rc == 1 {
+            if frame.dec_ref() == 1 {
                 FRAME_ALLOCATOR.dealloc(self.range);
             }
         }

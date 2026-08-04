@@ -366,13 +366,18 @@ impl Frame {
         self.rc.fetch_add(1, Ordering::AcqRel);
     }
 
-    /// Decrease the reference count of this frame by 1.
-    pub unsafe fn dec_ref(&self) {
-        if self.is_free() {
-            panic!("Internal error: trying to decrease reference count of a free frame");
-        }
-
-        self.rc.fetch_sub(1, Ordering::AcqRel);
+    /// Decrease the reference count of this frame by 1 and return the old
+    /// count.
+    ///
+    /// The caller that observes an old count of 1 exclusively owns the final
+    /// reference transition and is the only caller allowed to deallocate the
+    /// backing frame allocation.
+    pub unsafe fn dec_ref(&self) -> usize {
+        self.rc
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |rc| rc.checked_sub(1))
+            .unwrap_or_else(|_| {
+                panic!("Internal error: trying to decrease reference count of a free frame")
+            })
     }
 
     /// Returns the current reference count of this frame.
