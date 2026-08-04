@@ -1,6 +1,6 @@
 # Clock Timekeeping 与 POSIX Timers 实施计划
 
-**状态：** Accepted / Gate 0--3 Closed / Gate 4 Not Authorized
+**状态：** Accepted / Gate 0--4 Closed / Gate 5 Authorized
 **最后更新：** 2026-08-04
 **父 RFC：** [RFC-20260803-clock-timekeeping-posix-timers](./index.md)
 **当前修订：** R0
@@ -194,7 +194,8 @@ generation-only 重新成为取消路径。
 
 ## Gate 4 — `SI_TIMER` signal 协议
 
-**状态：** Pending / Not Authorized；Gate 3 收口后停止，不自动进入本 gate。
+**状态：** Closed（2026-08-04）；实现、review 与双架构证据见
+[transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md#gate-4-implementation)。
 
 **Purpose：** 在创建 POSIX timer 对象前，先让通用 signal owner 能保存每个 timer 的独立 pending identity，
 并提供锁外入队结果和交付回告。
@@ -234,6 +235,8 @@ consumer 在 Gate 5 原子切换。
 timer 子系统自建 signal queue、signal 私有容器外泄或普通 kill 改成按来源排队，停止并回到 RFC review。
 
 ## Gate 5 — POSIX timer 对象与五个 syscall
+
+**状态：** Authorized / Not Started。
 
 **Purpose：** 建立 `ThreadGroup` timer ID 表、对象生命周期、周期/overrun 和五个 syscall，消费 Gate 2/4
 已经完成的 soft timer 与 signal 能力。

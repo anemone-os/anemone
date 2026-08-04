@@ -1,6 +1,6 @@
 # Clock Timekeeping 与 POSIX Timers 事务日志
 
-**状态：** Active / R0 / Gate 0--3 Closed / Gate 4 Not Authorized
+**状态：** Active / R0 / Gate 0--4 Closed / Gate 5 Authorized
 **日期：** 2026-08-04
 **负责人：** doruche, Codex
 **RFC：** [RFC-20260803-clock-timekeeping-posix-timers R0](../../rfcs/clock-timekeeping-posix-timers/index.md)
@@ -10,14 +10,16 @@
 
 ## 边界
 
-本 transaction 记录三个独立 checkpoint。Gate 0--1 冻结 native ABI、clock operation、architecture source 和
+本 transaction 记录四个独立 checkpoint。Gate 0--1 冻结 native ABI、clock operation、architecture source 和
 caller domain baseline，并切换统一 counter、integer Hertz conversion、timekeeper clock read truth、八个
 get/res route 和 calendar consumer。Gate 2 随后建立可物理删除的 soft timer request，并迁移 timerfd、
 `ITIMER_REAL` 和 wait timeout。Gate 3 开放 realtime mutation、完整 clock sleep 与 timerfd realtime/
-cancel-on-set。三个 checkpoint 各自保留 review、validation、contract write-back 和 `clock:` commit 边界。
+cancel-on-set。Gate 4 在不创建 timer 对象或注册 syscall 的前提下建立 signal-owned `SI_TIMER` pending、预分配
+slot、锁外 handoff 和双架构 frame oracle。四个 checkpoint 各自保留 review、validation 和 commit 边界；
+Gate 4 没有 contract cutover。
 
-本 transaction 不实现或声明 POSIX timer、`SI_TIMER` signal 协议或 RTC seed。开发者只授权推进到 Gate 3；
-Gate 4 保持 Pending / Not Authorized，Gate 3 收口后停止。
+本 transaction 尚不实现或声明 POSIX timer 对象、107--111 syscall 或 RTC seed。Gate 4 内部能力只有在 Gate 5
+接入真实 timer consumer 并完成 `PT-SIGNAL-CUTOVER` 后才成为 current contract；开发者已授权继续 Gate 5。
 
 ## Gate 0 baseline
 
@@ -209,4 +211,46 @@ Architecture Friction Scan未发现第二份 request/object 状态真相、owner
 snapshot/登记无丢失、旧scanner拒绝、relative monotonic fixation与timerfd cancel-on-set owner交接；Gate 1/2
 current contract继续满足。
 
-Gate 4 未获授权，本 transaction 在 Gate 3 closure 后停止。
+## Gate 4 implementation
+
+- Signal shared pending 为每个未来 POSIX timer 预分配独立 slot；standard signal 不复用 ordinary 单 slot，
+  realtime timer occurrence 与普通 realtime queue 共用 arrival identity，保持同 signum FIFO。
+- registration 在创建时完成 fallible slot allocation；expiry 只提交 timer ID、generation、episode、overrun 和
+  `sigval`，得到 `Queued / AlreadyPending / Ignored / TargetExited`，不读取 pending 私有容器。
+- pending episode 可在仍排队时原子更新为最新 generation/overrun；dequeue 后用计数跟踪 immutable in-flight
+  handoff，使新 generation 可以复用已释放的预分配 pending resource，同时阻止所有 callback 完成前复用 slot。
+- 正常 delivery、同步 wait、disposition/job-control flush 和 task-private reservation exit 都先释放 pending 与
+  ThreadGroup guard，再清 slot 并回告 timer owner。registration 删除只撤销未来 enqueue，已 pending identity
+  继续按 signal 生命周期完成；stale generation callback 不取得 rearm authority。
+- `Signal` 的 timer handoff 不可 clone；`rt_sigqueueinfo(SI_TIMER)` 只在 syscall copy 边界解析 timer union，并把
+  `si_sys_private` 清零。Gate 4 用户态 oracle 暂用 Linux 允许的负 `si_code` 注入 frame；Gate 5 真实 expiry
+  成为 primary oracle 后移除该测试桥的 primary 地位。
+- 107--111 仍未注册。Gate 4 registration 暂时 fail closed 拒绝 `SIGKILL/SIGSTOP`；Gate 5 必须先把两者接入
+  unmaskable/job-control generation 语义并删除 guard，不能把该内部阶段边界发布成 `timer_create()` 的 `EINVAL`。
+
+## Gate 4 review 与 validation
+
+- change review 修复一项 correctness finding：旧 bool `in_flight` 会把新 generation expiry 合并到已 dequeue 的
+  stale episode，随后 stale callback 按 invariant 不 rearm，导致新 timer 停止。最终协议允许 dequeue 后立即
+  queue 新 episode，并以 in-flight count 延迟 slot reuse；无 residual Apollyon/Keter/Euclid。
+- 10 项新增 signal owner-local KUnit 覆盖同号不同 timer、pending episode/overrun 更新、ignored、删除/stale
+  handoff、ordinary standard merge、ordinary/timer realtime FIFO、flush 锁外 callback、slot reuse、reserved
+  task exit，以及 stale handoff 在途时新 generation 重新排队。
+- RV64 release SMP=2 最终源码通过 435/435 KUnit、`All tests passed!`、
+  `timer-signal: SI_TIMER frame and ordinary standard merge checks passed`；LA64 release SMP=2 通过 436/436 和同一
+  marker。两架构 frame 均检查 `SI_TIMER`、非零 timer ID/overrun/`sigval` 和清零的 kernel-private 字段。
+- 双架构 rootfs 由 Docker `gallant_lamarr` 从 tracked manifest重建，kernel 与 QEMU 由宿主 repository入口执行；
+  一次把完整 wrapper 放进容器的尝试因 `lwext4` build script 无法访问宿主 Docker control plane而在 QEMU 前停止，
+  不作为验证证据。最终两份 guest 均通过既有 clock、soft-timer 和 socket regression，随后只因测试盘缺 static
+  BusyBox 停在 competition 初始化，该环境缺口不归因于 Gate 4。
+- source audit确认 callback 只在 pending/ThreadGroup guard 外执行，slot reuse_generation与 in-flight count共同
+  阻止 stale registration 访问新资源，普通 standard signal storage未改成按来源排队。`just fmt kernel --check`、
+  `just fmt user-test --check`、双架构 exact release build与`git diff --check`通过；按开发者要求所有 mdBook检查
+  跳过，记为 Not Run。LTP不是本 gate的语义 oracle，本次 Not Run。
+
+## Gate 4 closure — 2026-08-04
+
+Gate 4 只关闭内部 `SI_TIMER` signal protocol，没有创建 POSIX timer 对象、注册 107--111 或修改 current contract。
+`SIGNAL-PENDING-001` 的 `SI_TIMER` refine 与 `POSIX-TIMER-001` 继续等待 Gate 5 真实 consumer、完整五 syscall 和
+双架构生命周期/ABI matrix后原子 cut over。开发者授权 Gate 4 验收后继续 Gate 5，并要求开始前先同步合并
+`origin/main`。

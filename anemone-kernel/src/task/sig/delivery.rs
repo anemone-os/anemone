@@ -181,21 +181,29 @@ impl Task {
     /// See [PendingSignals::fetch_specific] for more details.
     pub fn fetch_specific_signal(&self, set: SigSet) -> Option<Signal> {
         // first private pending
-        {
+        let private = {
             let mut pending = self.sig_pending.lock();
-            if let Some(signal) = pending.fetch_specific(set) {
-                return Some(signal);
-            }
+            pending.fetch_specific(set)
+        };
+        if let Some(mut signal) = private {
+            // Synchronous signal consumption owns the same dequeue handoff as
+            // trap-return delivery. The private pending guard is gone here.
+            signal.finish_timer_signal_handoff();
+            return Some(signal);
         }
 
         // no private signals satisfied the criteria. check shared pending signals.
-        {
+        let shared = {
             let tg = self.get_thread_group();
             let tg_inner = tg.inner.read();
             let mut pending = tg_inner.sig_pending.lock();
-            if let Some(signal) = pending.fetch_specific(set) {
-                return Some(signal);
-            }
+            pending.fetch_specific(set)
+        };
+        if let Some(mut signal) = shared {
+            // Both the ThreadGroup guard and shared pending guard have been
+            // released before the callback can acquire a timer-object lock.
+            signal.finish_timer_signal_handoff();
+            return Some(signal);
         }
 
         None
@@ -447,7 +455,15 @@ pub fn handle_signals(
             let task = get_current_task();
             task.fetch_signal()
         };
-        if let Some(FetchedSignal { signal, reserved }) = fetched {
+        if let Some(FetchedSignal {
+            mut signal,
+            reserved,
+        }) = fetched
+        {
+            // `fetch_signal()` returned only after private/shared pending and
+            // ThreadGroup guards were released. Freeze the timer owner episode
+            // here before live disposition/action selection consumes siginfo.
+            signal.finish_timer_signal_handoff();
             match perform_signal_action(signal, trapframe, restart_syscall) {
                 SignalActionResult::Continue => {
                     if reserved {

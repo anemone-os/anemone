@@ -159,6 +159,7 @@ impl ThreadGroup {
         for member in self.get_members() {
             member.sig_pending.lock().flush_specific(set);
         }
+        self.finish_retired_timer_signal_handoffs();
     }
 
     /// Deliver a process-directed occurrence after revalidating the exact task
@@ -335,6 +336,10 @@ impl ThreadGroup {
             return;
         };
         self.finish_job_control_transition(transition);
+        // Opposite-class cleanup may retire POSIX timer occurrences sharing a
+        // control signal number. Complete their owner callbacks only after the
+        // ThreadGroup generation transaction has released every guard.
+        self.finish_retired_timer_signal_handoffs();
 
         for member in notify_targets {
             if !member.is_current_sig_mask_blocking(no) {

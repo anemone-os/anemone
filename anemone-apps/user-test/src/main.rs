@@ -12,6 +12,7 @@ mod ltp;
 mod process;
 mod runtime;
 mod soft_timer;
+mod timer_signal;
 
 use anemone_rs::{
     abi::system::native::power::SHUTDOWN_MAGIC, os::anemone::power::shutdown, prelude::*,
@@ -34,6 +35,10 @@ fn run_local_tests() {
     println!("user-test: running realtime clock step test...");
     clock_step::verify_clock_steps();
     println!("user-test: realtime clock step test finished.");
+
+    println!("user-test: running SI_TIMER signal frame test...");
+    timer_signal::verify_timer_signal_frame();
+    println!("user-test: SI_TIMER signal frame test finished.");
 
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
