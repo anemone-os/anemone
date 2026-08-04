@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    Socket, SocketDatagramSendOperation, SocketFileIo, SocketOps, SocketReadSink,
+    Socket, SocketDatagramSendOperation, SocketIoOps, SocketOps, SocketReadSink,
     SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest, SocketReceiveSink,
     SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
     SocketWriteSource,
@@ -202,9 +202,9 @@ fn socket_read_with_ctx(
     let socket =
         socket_from_file(file).expect("common Socket read used without Socket private state");
     let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
-    let outcome = match socket.file_io() {
-        SocketFileIo::Unsupported => return Err(SysError::NotSupported),
-        SocketFileIo::ByteStream => retry_socket_receive(
+    let outcome = match socket.io() {
+        SocketIoOps::FileUnsupported { .. } => return Err(SysError::NotSupported),
+        SocketIoOps::ByteStream { .. } => retry_socket_receive(
             "socket read",
             &task,
             file,
@@ -217,7 +217,7 @@ fn socket_read_with_ctx(
             },
             map_file_receive_error,
         )?,
-        SocketFileIo::Datagram => {
+        SocketIoOps::Datagram { .. } => {
             let mut datagram_sink = FileDatagramReceiveSink { sink };
             retry_socket_receive(
                 "socket read",
@@ -233,7 +233,7 @@ fn socket_read_with_ctx(
                 map_file_receive_error,
             )?
         },
-        SocketFileIo::Seqpacket => retry_socket_receive(
+        SocketIoOps::Seqpacket { .. } => retry_socket_receive(
             "socket read",
             &task,
             file,
@@ -269,9 +269,9 @@ fn socket_write_with_ctx(
     let socket =
         socket_from_file(file).expect("common Socket write used without Socket private state");
     let nonblocking = flags.contains(FileOpStatusFlags::NONBLOCK);
-    match socket.file_io() {
-        SocketFileIo::Unsupported => Err(SysError::NotSupported),
-        SocketFileIo::ByteStream => retry_socket_send(
+    match socket.io() {
+        SocketIoOps::FileUnsupported { .. } => Err(SysError::NotSupported),
+        SocketIoOps::ByteStream { .. } => retry_socket_send(
             "socket write",
             &task,
             file,
@@ -286,7 +286,7 @@ fn socket_write_with_ctx(
             },
             map_file_send_error,
         ),
-        SocketFileIo::Datagram => {
+        SocketIoOps::Datagram { .. } => {
             let mut payload = FileDatagramSendPayload {
                 source,
                 bytes: None,
@@ -309,10 +309,8 @@ fn socket_write_with_ctx(
                 map_file_send_error,
             )
         },
-        SocketFileIo::Seqpacket => {
-            let operation_wait = socket
-                .send_wait(source.remaining())
-                .expect("seqpacket descriptor omitted its payload-specific send wait");
+        SocketIoOps::Seqpacket { .. } => {
+            let operation_wait = socket.seqpacket_send_wait(source.remaining());
             retry_socket_send(
                 "socket write",
                 &task,

@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 
 use crate::{
     fs::socket::{
-        SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
-        SocketType, retry_socket_send, socket_from_file,
+        SocketDatagramSendOperation, SocketIoOps, SocketSendPayload, SocketSendRequest,
+        SocketStreamDestination, SocketType, retry_socket_send, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -65,11 +65,13 @@ fn sys_sendto(
         let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
         let uspace = task.clone_uspace_handle();
         let mut source = UserBufferSource::new(&uspace, segments);
-        let operation_wait = (socket.socket_type() == SocketType::UnixSeqpacket).then(|| {
-            socket
-                .send_wait(source.remaining())
-                .expect("seqpacket descriptor omitted its payload-specific send wait")
-        });
+        let operation_wait = match socket.io() {
+            SocketIoOps::ByteStream { .. } => None,
+            SocketIoOps::Seqpacket { .. } => Some(socket.seqpacket_send_wait(source.remaining())),
+            SocketIoOps::FileUnsupported { .. } | SocketIoOps::Datagram { .. } => {
+                unreachable!("connection-oriented Socket type used a non-stream I/O bundle")
+            },
+        };
 
         return retry_socket_send(
             "sys_sendto",

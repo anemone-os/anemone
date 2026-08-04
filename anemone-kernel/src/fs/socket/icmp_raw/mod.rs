@@ -25,7 +25,7 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
-    SocketDatagramSendOperation, SocketFileIo, SocketOps, SocketOptionError, SocketOptionMutation,
+    SocketDatagramSendOperation, SocketIoOps, SocketOps, SocketOptionError, SocketOptionMutation,
     SocketOptionQuery, SocketOptionValue, SocketPreparation, SocketQueryError, SocketReceiveError,
     SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
 };
@@ -506,8 +506,11 @@ fn map_option_mutation_error(error: IcmpRawMutationError) -> SocketOptionError {
 }
 
 pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
-    socket_type: SocketType::Ipv4IcmpRaw,
-    file_io: SocketFileIo::Datagram,
+    io: SocketIoOps::Datagram {
+        socket_type: SocketType::Ipv4IcmpRaw,
+        send: send_icmp_raw_socket,
+        receive: receive_icmp_raw_socket,
+    },
     create: Some(prepare_icmp_raw_socket),
     create_pair: None,
     bind: Some(bind_icmp_raw_socket),
@@ -518,9 +521,6 @@ pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     local_address: Some(query_local_address),
     peer_address: Some(query_peer_address),
     accepting: raw_is_accepting,
-    send: Some(send_icmp_raw_socket),
-    send_wait: None,
-    receive: Some(receive_icmp_raw_socket),
     query_option: Some(query_icmp_raw_option),
     mutate_option: Some(mutate_icmp_raw_option),
     poll: poll_icmp_raw_socket,
@@ -680,7 +680,7 @@ mod kunits {
         let (file, creation) =
             prepare_socket(&ICMP_RAW_SOCKET_OPS).expect("KUnit raw endpoint must fit");
         let socket = socket_from_file(&file).unwrap();
-        assert_eq!(socket.file_io(), SocketFileIo::Datagram);
+        assert!(matches!(socket.io(), SocketIoOps::Datagram { .. }));
 
         let mut byte = [0u8; 1];
         assert_eq!(

@@ -203,14 +203,6 @@ pub(super) enum SocketStreamDestination {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SocketFileIo {
-    Unsupported,
-    ByteStream,
-    Datagram,
-    Seqpacket,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct SocketReceiveFlags {
     pub(super) peek: bool,
 }
@@ -350,9 +342,76 @@ pub(super) struct SocketAcceptItem {
     pub(super) peer_address: Option<SocketAddress>,
 }
 
+pub(super) type SocketSendOp =
+    for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>;
+pub(super) type SocketSendWaitOp = fn(&AnyOpaque, usize) -> SocketWait;
+pub(super) type SocketReceiveOp = for<'a> fn(
+    &AnyOpaque,
+    SocketReceiveRequest<'a>,
+) -> Result<SocketReceiveOutcome, SocketReceiveError>;
+
+/// Complete type/data-plane capability bundle for one static Socket descriptor.
+///
+/// `FileUnsupported` means only common FileOps read/write are unavailable; a
+/// family may still expose send/receive syscalls. Every file-I/O-capable
+/// variant carries the handlers required by that operation shape, and
+/// seqpacket additionally requires its payload-specific send predicate.
+#[derive(Clone, Copy)]
+pub(super) enum SocketIoOps {
+    FileUnsupported {
+        socket_type: SocketType,
+        send: Option<SocketSendOp>,
+        receive: Option<SocketReceiveOp>,
+    },
+    ByteStream {
+        socket_type: SocketType,
+        send: SocketSendOp,
+        receive: SocketReceiveOp,
+    },
+    Datagram {
+        socket_type: SocketType,
+        send: SocketSendOp,
+        receive: SocketReceiveOp,
+    },
+    Seqpacket {
+        socket_type: SocketType,
+        send: SocketSendOp,
+        send_wait: SocketSendWaitOp,
+        receive: SocketReceiveOp,
+    },
+}
+
+impl SocketIoOps {
+    const fn socket_type(self) -> SocketType {
+        match self {
+            Self::FileUnsupported { socket_type, .. }
+            | Self::ByteStream { socket_type, .. }
+            | Self::Datagram { socket_type, .. }
+            | Self::Seqpacket { socket_type, .. } => socket_type,
+        }
+    }
+
+    const fn send(self) -> Option<SocketSendOp> {
+        match self {
+            Self::FileUnsupported { send, .. } => send,
+            Self::ByteStream { send, .. }
+            | Self::Datagram { send, .. }
+            | Self::Seqpacket { send, .. } => Some(send),
+        }
+    }
+
+    const fn receive(self) -> Option<SocketReceiveOp> {
+        match self {
+            Self::FileUnsupported { receive, .. } => receive,
+            Self::ByteStream { receive, .. }
+            | Self::Datagram { receive, .. }
+            | Self::Seqpacket { receive, .. } => Some(receive),
+        }
+    }
+}
+
 pub(super) struct SocketOps {
-    pub(super) socket_type: SocketType,
-    pub(super) file_io: SocketFileIo,
+    pub(super) io: SocketIoOps,
     pub(super) create: Option<fn() -> Result<SocketPreparation, SysError>>,
     pub(super) create_pair: Option<fn() -> Result<SocketPairPreparation, SysError>>,
     pub(super) bind: Option<fn(&AnyOpaque, SocketAddress) -> Result<(), SocketBindError>>,
@@ -365,17 +424,6 @@ pub(super) struct SocketOps {
     pub(super) peer_address:
         Option<fn(&AnyOpaque, &mut dyn SocketAddressSink) -> Result<(), SocketQueryError>>,
     pub(super) accepting: fn(&AnyOpaque) -> Result<bool, SocketQueryError>,
-    pub(super) send:
-        Option<for<'a> fn(&AnyOpaque, SocketSendRequest<'a>) -> Result<usize, SocketSendError>>,
-    /// Optional operation-specific send wait. It carries only a family-owned
-    /// predicate and recheck route; public `POLLOUT` remains descriptor-wide.
-    pub(super) send_wait: Option<fn(&AnyOpaque, usize) -> SocketWait>,
-    pub(super) receive: Option<
-        for<'a> fn(
-            &AnyOpaque,
-            SocketReceiveRequest<'a>,
-        ) -> Result<SocketReceiveOutcome, SocketReceiveError>,
-    >,
     pub(super) query_option:
         Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
     pub(super) mutate_option:
@@ -396,18 +444,18 @@ pub(super) struct Socket {
 impl core::fmt::Debug for Socket {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Socket")
-            .field("socket_type", &self.ops.socket_type)
+            .field("socket_type", &self.socket_type())
             .finish_non_exhaustive()
     }
 }
 
 impl Socket {
     pub(super) const fn socket_type(&self) -> SocketType {
-        self.ops.socket_type
+        self.ops.io.socket_type()
     }
 
-    pub(super) const fn file_io(&self) -> SocketFileIo {
-        self.ops.file_io
+    pub(super) const fn io(&self) -> SocketIoOps {
+        self.ops.io
     }
 
     pub(super) fn bind(&self, address: SocketAddress) -> Result<(), SocketBindError> {
@@ -456,20 +504,24 @@ impl Socket {
     }
 
     pub(super) fn send(&self, request: SocketSendRequest<'_>) -> Result<usize, SocketSendError> {
-        self.ops.send.ok_or(SocketSendError::Unsupported)?(&self.private, request)
+        self.ops.io.send().ok_or(SocketSendError::Unsupported)?(&self.private, request)
     }
 
-    pub(super) fn send_wait(&self, payload_len: usize) -> Option<SocketWait> {
-        self.ops
-            .send_wait
-            .map(|prepare| prepare(&self.private, payload_len))
+    pub(super) fn seqpacket_send_wait(&self, payload_len: usize) -> SocketWait {
+        let SocketIoOps::Seqpacket { send_wait, .. } = self.ops.io else {
+            panic!("seqpacket send wait requested from a non-seqpacket I/O bundle")
+        };
+        send_wait(&self.private, payload_len)
     }
 
     pub(super) fn receive(
         &self,
         request: SocketReceiveRequest<'_>,
     ) -> Result<SocketReceiveOutcome, SocketReceiveError> {
-        self.ops.receive.ok_or(SocketReceiveError::Unsupported)?(&self.private, request)
+        self.ops
+            .io
+            .receive()
+            .ok_or(SocketReceiveError::Unsupported)?(&self.private, request)
     }
 
     pub(super) fn query_option(

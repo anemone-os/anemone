@@ -270,8 +270,11 @@ fn map_send_error(error: SendError) -> SocketSendError {
 }
 
 pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
-    socket_type: SocketType::Ipv4Udp,
-    file_io: super::SocketFileIo::Unsupported,
+    io: super::SocketIoOps::FileUnsupported {
+        socket_type: SocketType::Ipv4Udp,
+        send: Some(send_udp_socket),
+        receive: Some(receive_udp_socket),
+    },
     create: Some(prepare_udp_socket),
     create_pair: None,
     bind: Some(bind_udp_socket),
@@ -282,9 +285,6 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     local_address: Some(query_udp_socket),
     peer_address: None,
     accepting: udp_is_accepting,
-    send: Some(send_udp_socket),
-    send_wait: None,
-    receive: Some(receive_udp_socket),
     query_option: None,
     mutate_option: None,
     poll: poll_udp_socket,

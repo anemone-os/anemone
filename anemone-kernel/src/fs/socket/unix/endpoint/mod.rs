@@ -33,11 +33,33 @@ use record::{
     UnixSeqpacketConnection, poll_connected_unix_seqpacket, receive_unix_seqpacket,
     send_unix_seqpacket, shutdown_unix_seqpacket,
 };
-pub(super) use stream::{EndpointSide, UnixStreamConnection};
+pub(super) use stream::UnixStreamConnection;
 use stream::{
     poll_connected_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream,
     shutdown_unix_stream,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::fs::socket::unix) enum EndpointSide {
+    First,
+    Second,
+}
+
+impl EndpointSide {
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::First => 0,
+            Self::Second => 1,
+        }
+    }
+
+    pub(super) const fn peer(self) -> Self {
+        match self {
+            Self::First => Self::Second,
+            Self::Second => Self::First,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum UnixProfile {
@@ -56,6 +78,13 @@ impl UnixConnection {
         match profile {
             UnixProfile::Stream => Self::Stream(UnixStreamConnection::new(names)),
             UnixProfile::Seqpacket => Self::Seqpacket(UnixSeqpacketConnection::new(names)),
+        }
+    }
+
+    pub(super) const fn profile(&self) -> UnixProfile {
+        match self {
+            Self::Stream(_) => UnixProfile::Stream,
+            Self::Seqpacket(_) => UnixProfile::Seqpacket,
         }
     }
 
@@ -290,6 +319,11 @@ impl UnixEndpointCore {
             state.lifecycle_routes.is_empty(),
             "unpublished Unix endpoint unexpectedly carried lifecycle routes"
         );
+        assert_eq!(
+            self.profile,
+            connection.profile(),
+            "Unix endpoint profile and installed connection type diverged"
+        );
         state.association = EndpointAssociation::Connected { connection, side };
     }
 
@@ -304,6 +338,11 @@ impl UnixEndpointCore {
             state.association,
             EndpointAssociation::Unconnected
         ));
+        assert_eq!(
+            self.profile,
+            connection.profile(),
+            "Unix endpoint profile and committed connection type diverged"
+        );
         let routes = core::mem::replace(&mut state.lifecycle_routes, empty_lifecycle_routes);
         connection.install_routes(side, routes.clone());
         state.association = EndpointAssociation::Connected { connection, side };
@@ -733,8 +772,11 @@ fn final_release_unix_endpoint(private: &AnyOpaque) {
 }
 
 pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
-    socket_type: SocketType::UnixStream,
-    file_io: super::super::SocketFileIo::ByteStream,
+    io: super::super::SocketIoOps::ByteStream {
+        socket_type: SocketType::UnixStream,
+        send: send_unix_stream,
+        receive: receive_unix_stream,
+    },
     create: Some(prepare_unix_stream_socket),
     create_pair: Some(prepare_unix_stream_pair),
     bind: Some(bind_unix_stream),
@@ -745,9 +787,6 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     local_address: Some(query_unix_local_address),
     peer_address: Some(query_unix_peer_address),
     accepting: query_unix_accepting,
-    send: Some(send_unix_stream),
-    send_wait: None,
-    receive: Some(receive_unix_stream),
     query_option: None,
     mutate_option: None,
     poll: poll_unix_stream,
@@ -755,8 +794,12 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
 };
 
 pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOps {
-    socket_type: SocketType::UnixSeqpacket,
-    file_io: super::super::SocketFileIo::Seqpacket,
+    io: super::super::SocketIoOps::Seqpacket {
+        socket_type: SocketType::UnixSeqpacket,
+        send: send_unix_seqpacket,
+        send_wait: record::prepare_seqpacket_send_wait,
+        receive: receive_unix_seqpacket,
+    },
     create: Some(prepare_unix_seqpacket_socket),
     create_pair: Some(prepare_unix_seqpacket_pair),
     bind: Some(bind_unix_seqpacket),
@@ -767,9 +810,6 @@ pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOp
     local_address: Some(query_unix_local_address),
     peer_address: Some(query_unix_peer_address),
     accepting: query_unix_accepting,
-    send: Some(send_unix_seqpacket),
-    send_wait: Some(record::prepare_seqpacket_send_wait),
-    receive: Some(receive_unix_seqpacket),
     query_option: None,
     mutate_option: None,
     poll: poll_unix_seqpacket,

@@ -11,36 +11,14 @@ use crate::{
 };
 
 use super::{
-    EndpointAccessError, EndpointAssociation, EndpointName, EndpointState, UnixPollRoute, endpoint,
-    replacement_poll_routes,
+    EndpointAccessError, EndpointAssociation, EndpointName, EndpointSide, EndpointState,
+    UnixPollRoute, endpoint, replacement_poll_routes,
 };
 
 static_assert!(
     UNIX_STREAM_DIRECTION_CAPACITY_BYTES > 0,
     "unix_stream_direction_capacity_bytes must be non-zero"
 );
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::fs::socket::unix) enum EndpointSide {
-    First,
-    Second,
-}
-
-impl EndpointSide {
-    pub(super) const fn index(self) -> usize {
-        match self {
-            Self::First => 0,
-            Self::Second => 1,
-        }
-    }
-
-    pub(super) const fn peer(self) -> Self {
-        match self {
-            Self::First => Self::Second,
-            Self::Second => Self::First,
-        }
-    }
-}
 
 #[derive(Debug)]
 struct StreamDirection {
@@ -223,7 +201,10 @@ pub(super) fn receive_unix_stream(
     };
     assert!(staged_len > 0, "nonempty Unix read selected no bytes");
 
-    let mut staged = Vec::with_capacity(staged_len);
+    let mut staged = Vec::new();
+    staged
+        .try_reserve_exact(staged_len)
+        .map_err(|_| SocketReceiveError::Copy(SysError::OutOfMemory))?;
     {
         let state = connection.state.lock();
         let incoming = &state.directions[incoming_index];
@@ -332,7 +313,10 @@ pub(super) fn send_unix_stream(
     };
     assert!(staged_len > 0, "writable Unix direction selected no bytes");
 
-    let mut staged = Vec::with_capacity(staged_len);
+    let mut staged = Vec::new();
+    staged
+        .try_reserve_exact(staged_len)
+        .map_err(|_| SocketSendError::Copy(SysError::OutOfMemory))?;
     staged.resize(staged_len, 0);
     let copied = source
         .copy_bytes(&mut staged)

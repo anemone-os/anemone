@@ -6,7 +6,7 @@ mod unix;
 
 use front::{
     SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
-    SocketConnectError, SocketCreation, SocketDatagramSendOperation, SocketFileIo,
+    SocketConnectError, SocketCreation, SocketDatagramSendOperation, SocketIoOps,
     SocketListenError, SocketOps, SocketOptionError, SocketOptionMutation, SocketOptionQuery,
     SocketOptionValue, SocketPairPreparation, SocketPreparation, SocketQueryError, SocketReadSink,
     SocketReceiveError, SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest,
