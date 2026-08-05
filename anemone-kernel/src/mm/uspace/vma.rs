@@ -98,8 +98,8 @@ pub enum VmReservation {
 ///
 /// [VmArea] is tied to a specific [UserSpace], but current design does not
 /// force that. For example, you could pass a [Mapper] from another [UserSpace]
-/// to [VmArea::handle_page_fault]. We should refactor some APIs to forbid those
-/// invalid usage later.
+/// to [VmArea::resolve_page_access]. We should refactor some APIs to forbid
+/// that invalid use later.
 #[derive(Debug, Clone)]
 pub struct VmArea {
     /// `range` along with `poffset` determines where this VMA views into the
@@ -253,21 +253,22 @@ impl VmArea {
         unsafe { mapper.map_one(vpn, resolved.frame.ppn(), flags, 0, true) }
     }
 
-    /// Handle a page fault in this VMA.
+    /// Resolve one page access in this VMA.
     ///
-    /// Address of faulting page is guaranteed to be in the range of this VMA.
+    /// `addr` is guaranteed to be in the range of this VMA.
     ///
     /// A local TLB shootdown will be performed.
-    pub(super) fn handle_page_fault(
+    pub(super) fn resolve_page_access(
         &mut self,
         mapper: &mut Mapper,
-        fault_info: &PageFaultInfo,
+        addr: VirtAddr,
+        access: PageFaultType,
     ) -> Result<(), SysError> {
-        let vpn = fault_info.fault_addr().page_down();
+        let vpn = addr.page_down();
         debug_assert!(self.range.contains(vpn));
 
-        self.map_page(mapper, vpn, fault_info.fault_type())?;
-        PagingArch::tlb_shootdown(fault_info.fault_addr().page_down());
+        self.map_page(mapper, vpn, access)?;
+        PagingArch::tlb_shootdown(vpn);
 
         Ok(())
     }

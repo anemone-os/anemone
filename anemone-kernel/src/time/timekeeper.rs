@@ -120,6 +120,16 @@ pub fn monotonic_uptime() -> u64 {
     elapsed_mono_since_boot(LocalClockSource::curr_monotonic_time())
 }
 
+/// Narrow raw-clock capability for diagnostic performance observation.
+/// Timekeeping remains the sole owner of the counter timeline and frequency.
+pub(crate) fn perf_clock_ticks() -> u64 {
+    monotonic_uptime()
+}
+
+pub(crate) fn perf_clock_frequency_hz() -> u64 {
+    LocalClockSource::monotonic_freq_hz()
+}
+
 /// Return a non-panicking timestamp for early diagnostic consumers.
 ///
 /// `None` is returned before every boot CPU has published its local baseline.

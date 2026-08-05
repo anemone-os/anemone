@@ -1,0 +1,9 @@
+name = "perf-test"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build", "--release"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/release/perf-test"

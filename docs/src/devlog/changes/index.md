@@ -31,6 +31,8 @@
 
 ## 当前记录
 
+- [2026-08-05 - Kernel performance observation](./2026-08-05-kernel-performance-observation.md)
+- [2026-08-05 - Kworker](./2026-08-05-kworker.md)
 - [2026-08-05 - OOM periodic sampling](./2026-08-05-oom-periodic-sampling.md)
 - [2026-08-04 - Unix seqpacket](./2026-08-04-unix-seqpacket.md)
 - [2026-08-03 - Serial TTY RX conditioning](./2026-08-03-tty-serial-rx-conditioning.md)

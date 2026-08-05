@@ -228,12 +228,13 @@ LTP 的评分依据主要基于测试用例的执行结果，旨在评估系统�
 提供的测试盘 master 复制为当前 worktree 根目录下的运行副本、构建内核、启动 QEMU，
 再由 init 启动 user-test 完成测试并自动关机。
 
-脚本本身不加 `sudo` 执行；rootfs 构建阶段可能通过仓库入口请求交互式 sudo 授权。
+脚本本身不加 `sudo` 执行；rootfs 默认直接构建。开发环境中的 libguestfs 需要提权时，
+调用者通过 `--rootfs-sudo` 让 rootfs 构建阶段使用 sudo。
 
 rootfs 配置由仓库跟踪的 `conf/rootfs/pretest-rv64.toml` 和
 `conf/rootfs/pretest-la64.toml` 拥有，不再使用根目录下的 `rootfsconfig-*`。
 
-调用形式为 `./scripts/run-user-test-rv(la)64.sh <sdcard-image> [log-file]`。测试盘必须由
+调用形式为 `./scripts/run-user-test-rv(la)64.sh [--rootfs-sudo] <sdcard-image> [log-file]`。测试盘必须由
 调用者显式选择，不能依赖无阶段含义的默认路径；个人环境中的初赛/决赛资源位置以
 `LOCAL.md` 为准。日志参数可省略，默认写入 `build/user-test-rv(la)64.log`。
 

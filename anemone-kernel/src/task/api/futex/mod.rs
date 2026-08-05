@@ -425,7 +425,7 @@ pub fn exit_robust_list() -> Result<(), SysError> {
 
         // note we use `true` here.
         let Some(ret) = with_futex(key, true, |futex| {
-            usp.inject_page_fault(word_addr, PageFaultType::Write)?;
+            usp.fault_in_page(word_addr, PageFaultType::Write)?;
             let atomic_view =
                 unsafe { (word_addr.as_ptr_mut() as *mut AtomicU32).as_ref().unwrap() };
 
