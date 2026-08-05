@@ -1,14 +1,14 @@
 # IPv4 TCP Socket 与网络架构封顶目标与不变量
 
-**状态：** Accepted Target / Not Effective
+**状态：** Accepted Target / TCP Not Effective / Network Refine Effective
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 
 本文只定义父RFC的target、shared-contract delta与correctness proof obligations。当前effective
 Network、Socket、Opened-description、IOMUX与Epoll规则仍以`docs/src/contracts/`为准；本文始终是
-target文档，不直接成为current contract。Stage 1只在`NET-PROTOCOL-PROGRESSION-CUTOVER`时把两项
-Network Refine回写到对应current contract页面；TCP条款在`NET-TCP-CUTOVER`前均不生效。本文不授权实现。
+target文档，不直接成为current contract。Stage 1已经通过`NET-PROTOCOL-PROGRESSION-CUTOVER`把两项Network
+Refine回写到对应current contract页面；TCP条款在`NET-TCP-CUTOVER`前均不生效。本文不授权后续实现。
 
 ## 规则分类
 
@@ -199,7 +199,7 @@ signal/cancel、poll/select/epoll coexistence、final close与late hint proof。
 
 ### NET-PROTOCOL-PROGRESSION-HANDOFF-001 — 各protocol owner可靠移交pump外progression obligation
 
-**分类：** Correctness Invariant / Shared Contract Refine。
+**分类：** Correctness Invariant / Stage 1 Shared Contract Refine Effective；TCP producer matrix仍为Target。
 
 **规则：** UDP、ICMP raw与TCP各自的domain Stack protocol owner必须判断一次pump外transition是否产生了
 相关interface/path可观察的immediate protocol work，或让worker当前已知的next deadline提前。该effect判断
@@ -244,11 +244,11 @@ commit被worker消费；wake edge成为protocol work truth；domain stop后late 
 
 **Cutover / Proof：** 分层关闭，不把完整TCP producer matrix提前归入Stage 1：
 
-- Stage 1建立production handoff与Stack TCP foundation，原子迁移UDP/ICMP raw真实producer，并覆盖
+- Stage 1已经建立production handoff与Stack TCP foundation，原子迁移UDP/ICMP raw真实producer，并覆盖
   commit/request/park race、in-flight pump、coalescing、earlier deadline、local/external progression domain、
-  late stop request及source/host/双架构回归。只有这些义务整体成立时，才通过
-  `NET-PROTOCOL-PROGRESSION-CUTOVER`原子Refine current `NET-CONTROL-PLANE-001`与
-  `NET-STACK-PUMP-001`；失败时两项规则都保持旧语义。
+  late stop request及source/host/双架构回归。这些义务整体成立后，`NET-PROTOCOL-PROGRESSION-CUTOVER`已经
+  原子Refine current `NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`；proof与Not Run边界见
+  [Stage 1 execution result](./implementation.md#639-stage-1-execution-result--closed)。
 - 后续Stage随真实TCP能力逐步接入connect、successful send、receive-window reopening、shutdown/abort/
   final release与listener/accepted-child cleanup producer，并证明每个producer使用同一owner-driven handoff，
   不恢复caller-driven wake或第二套progression truth。

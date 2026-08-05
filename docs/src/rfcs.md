@@ -122,18 +122,20 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
-- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Ready / Not Authorized / Not Effective；目标为
+- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Closed / TCP Not Effective；目标为
   initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
   TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
   current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
-  R0 Pending Refine `NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`，把UDP、ICMP raw与TCP统一到
-  各protocol owner驱动、既有worker承接的progression handoff，但不共享effect policy，也不冻结
-  effect/wake表示、存储、锁或worker拓扑；两项仍等待独立implementation授权，并只在Stage 1 closure时原子cutover。
-  crate-only P0已证明窄async cause与bounded listener composition路线，临时probe与feature启用均已删除，
-  production source无diff，transaction None。Stage 1现已解析production handoff、UDP/ICMP raw原子迁移、
-  Stack-private TCP foundation、验证和唯一cutover，但仍为Ready / Not Authorized；Stage 2--5保持Outline。
+  Stage 1已通过`NET-PROTOCOL-PROGRESSION-CUTOVER` Refine `NET-CONTROL-PLANE-001`与
+  `NET-STACK-PUMP-001`，把UDP、ICMP raw及future TCP统一到各protocol owner驱动、既有worker承接的
+  progression handoff，但不共享effect policy，也不冻结effect/wake表示、存储、锁或worker拓扑。
+  crate-only P0已证明窄async cause与bounded listener composition路线，临时probe与feature启用均已删除。
+  Stage 1已交付production handoff、UDP/ICMP raw原子迁移与Stack-private TCP foundation；双架构focused回归通过，
+  LA64只证明完整shutdown顺序、不宣称wrapper exit 0。三项TCP Introduce与`SOCKET-ABI-001` Refine仍Pending，
+  transaction None；Stage 2--5保持Outline / Not Resolved / Not Authorized。
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
-  [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current contracts与register保持不变。
+  [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Stage 1只更新上述两项Network current contract，
+  register没有新增当前问题。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入

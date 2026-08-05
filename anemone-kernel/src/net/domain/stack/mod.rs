@@ -4,7 +4,9 @@ use anemone_net_api::{
     EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, Ipv4Address, Ipv4Cidr,
     PumpOutcome, icmp_raw::IcmpRawNamespacePolicy, udp::UdpNamespacePolicy,
 };
-use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack, StackPolicy};
+use anemone_smoltcp_stack::{
+    Ipv4ConfigError, PumpBudget, PumpError, Stack, StackPolicy, TcpPolicy,
+};
 
 use crate::prelude::*;
 
@@ -78,11 +80,13 @@ impl DomainStack {
     pub(super) fn new(
         udp_policy: UdpNamespacePolicy,
         icmp_raw_policy: IcmpRawNamespacePolicy,
+        tcp_policy: TcpPolicy,
     ) -> Self {
         Self {
             stack: SpinLock::new(Stack::with_policy(StackPolicy::new(
                 udp_policy,
                 icmp_raw_policy,
+                tcp_policy,
             ))),
             icmp_raw_event_routes: SpinLock::new(IcmpRawEndpointEventRoutes::new()),
             udp_event_routes: SpinLock::new(UdpEndpointEventRoutes::new()),

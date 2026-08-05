@@ -87,6 +87,7 @@ impl Stack {
         let protocol_egress_may_remain =
             self.protocols
                 .complete_egress(active, id, &local.protocols, &local.sockets);
+        self.protocols.reclaim_tcp(id, &mut local.sockets);
         local.next_pump_order = local.next_pump_order.next();
 
         let next_deadline = local

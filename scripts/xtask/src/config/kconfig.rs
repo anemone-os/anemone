@@ -132,6 +132,12 @@ pub struct Parameters {
     pub net_icmp_raw_rx_byte_capacity: Option<usize>,
     pub net_icmp_raw_default_ttl: Option<u8>,
     pub net_icmp_raw_default_tos: Option<u8>,
+    pub net_tcp_endpoint_capacity: Option<usize>,
+    pub net_tcp_engine_timer_capacity: Option<usize>,
+    pub net_tcp_listener_completed_capacity: Option<usize>,
+    pub net_tcp_rx_buffer_bytes: Option<usize>,
+    pub net_tcp_tx_buffer_bytes: Option<usize>,
+    pub net_tcp_deferred_reclaim_capacity: Option<usize>,
 }
 
 impl Parameters {
@@ -237,6 +243,12 @@ impl Parameters {
         materialize!(net_icmp_raw_rx_byte_capacity);
         materialize!(net_icmp_raw_default_ttl);
         materialize!(net_icmp_raw_default_tos);
+        materialize!(net_tcp_endpoint_capacity);
+        materialize!(net_tcp_engine_timer_capacity);
+        materialize!(net_tcp_listener_completed_capacity);
+        materialize!(net_tcp_rx_buffer_bytes);
+        materialize!(net_tcp_tx_buffer_bytes);
+        materialize!(net_tcp_deferred_reclaim_capacity);
         Ok(())
     }
 
@@ -458,6 +470,18 @@ pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
 pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = {};
 /// Default IPv4 TOS for ICMP raw Socket sends.
 pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
+/// Maximum live private TCP endpoints in the initial domain.
+pub const NET_TCP_ENDPOINT_CAPACITY: usize = {};
+/// Shared upper bound for TCP engines and their embedded protocol timers.
+pub const NET_TCP_ENGINE_TIMER_CAPACITY: usize = {};
+/// Completed-child engine slots retained by one private TCP listener.
+pub const NET_TCP_LISTENER_COMPLETED_CAPACITY: usize = {};
+/// Receive bytes owned by each private TCP engine.
+pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
+/// Transmit bytes owned by each private TCP engine.
+pub const NET_TCP_TX_BUFFER_BYTES: usize = {};
+/// TCP engines awaiting final protocol cleanup after retirement.
+pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -542,6 +566,12 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(net_icmp_raw_rx_byte_capacity),
             resolved!(net_icmp_raw_default_ttl),
             resolved!(net_icmp_raw_default_tos),
+            resolved!(net_tcp_endpoint_capacity),
+            resolved!(net_tcp_engine_timer_capacity),
+            resolved!(net_tcp_listener_completed_capacity),
+            resolved!(net_tcp_rx_buffer_bytes),
+            resolved!(net_tcp_tx_buffer_bytes),
+            resolved!(net_tcp_deferred_reclaim_capacity),
         )
     }
 }

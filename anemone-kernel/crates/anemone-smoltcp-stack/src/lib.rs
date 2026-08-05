@@ -10,7 +10,10 @@ mod stack;
 mod udp;
 
 pub use pump::PumpBudget;
-pub use stack::{Ipv4ConfigError, PumpError, Stack, StackInvalidations, StackPolicy};
+pub use stack::{
+    Ipv4ConfigError, ProtocolProgression, PumpError, Stack, StackInvalidations, StackPolicy,
+    TcpPolicy,
+};
 
 #[cfg(feature = "host-test")]
 pub use stack::{

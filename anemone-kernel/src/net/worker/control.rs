@@ -21,17 +21,6 @@ pub(in crate::net) struct PumpControl {
     explicit_work: AtomicBool,
 }
 
-/// Narrow control-plane capability that may only request a bounded recheck.
-/// It carries no lifecycle, route, capacity, or work-completion truth.
-#[derive(Clone)]
-pub(in crate::net) struct PumpWake(Arc<PumpControl>);
-
-impl PumpWake {
-    pub(in crate::net) fn request_work(&self) {
-        self.0.request_work();
-    }
-}
-
 impl PumpControl {
     pub(in crate::net) fn new() -> Self {
         Self {
@@ -49,17 +38,13 @@ impl PumpControl {
         self.worker.call_once(|| worker);
     }
 
-    pub(in crate::net) fn pump_wake(self: &Arc<Self>) -> PumpWake {
-        PumpWake(self.clone())
-    }
-
     pub(super) fn wake_worker(&self) {
         if let Some(worker) = self.worker.get() {
             worker.wake();
         }
     }
 
-    pub(super) fn request_work(&self) {
+    pub(in crate::net) fn request_work(&self) {
         if !self.active.load(Ordering::Acquire) {
             return;
         }
@@ -126,17 +111,32 @@ mod kunits {
     use super::*;
 
     #[kunit]
-    fn inactive_and_late_pump_wake_cannot_restore_admission() {
+    fn explicit_work_is_coalesced_and_late_requests_cannot_restore_admission() {
         let control = Arc::new(PumpControl::new());
-        let wake = control.pump_wake();
-        wake.request_work();
+        control.request_work();
         assert!(!control.work_requested());
 
         control.active.store(true, Ordering::Release);
-        wake.request_work();
+        control.request_work();
+        control.request_work();
         assert!(control.take_work_request());
+        assert!(!control.take_work_request());
         control.active.store(false, Ordering::Release);
-        wake.request_work();
+        control.request_work();
         assert!(!control.work_requested());
+    }
+
+    #[kunit]
+    fn request_after_a_worker_take_survives_for_the_next_bounded_round() {
+        let control = PumpControl::new();
+        control.active.store(true, Ordering::Release);
+        control.request_work();
+        assert!(control.take_work_request());
+
+        // Models a producer committing while the worker is already inside the
+        // round admitted by the request above. The next wait predicate must
+        // still observe this later obligation.
+        control.request_work();
+        assert!(control.take_work_request());
     }
 }

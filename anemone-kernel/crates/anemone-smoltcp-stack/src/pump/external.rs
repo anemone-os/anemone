@@ -67,6 +67,9 @@ impl Stack {
         };
         let protocol_egress_may_remain =
             protocols.complete_egress(active, id, &entry.protocols, &entry.sockets);
+        // Deferred TCP resources stay engine-owned until a pump has emitted
+        // their final protocol work; only then may the old generation detach.
+        protocols.reclaim_tcp(id, &mut entry.sockets);
         entry.next_pump_order = entry.next_pump_order.next();
 
         let next_deadline = entry

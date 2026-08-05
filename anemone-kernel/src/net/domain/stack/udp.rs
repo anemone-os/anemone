@@ -109,9 +109,11 @@ impl DomainStack {
         peer: UdpPeer,
         payload: &[u8],
     ) -> Result<(), UdpSendError> {
-        self.protocol_transition(|stack| {
+        let progression = self.protocol_transition(|stack| {
             stack.send_udp_endpoint(endpoint, selection, peer, payload)
-        })
+        })?;
+        crate::net::submit_protocol_progression(progression);
+        Ok(())
     }
 
     pub(in crate::net) fn receive_udp_endpoint(

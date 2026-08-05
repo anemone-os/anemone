@@ -5,6 +5,7 @@ mod domain;
 // next authorized checkpoint must connect its real Socket consumer or remove
 // the route; it is not a permanent probe facade.
 pub(crate) mod icmp_raw;
+mod tcp;
 pub(crate) mod udp;
 mod worker;
 
@@ -188,13 +189,7 @@ fn activate_initial_control_plane() {
     let external = authority
         .active_paths
         .iter()
-        .map(|path| {
-            ExternalControlInput::new(
-                path.logical.clone(),
-                path.interface,
-                path.control.pump_wake(),
-            )
-        })
+        .map(|path| ExternalControlInput::new(path.logical.clone(), path.interface))
         .collect::<Vec<_>>();
     let deployment = crate::network_defs::STATIC_IPV4_DEPLOYMENT;
     if let Err(error) = authority
@@ -244,6 +239,39 @@ fn activate_initial_control_plane() {
         );
     } else {
         kinfoln!("IPv4 control plane active: loopback-only local path ready");
+    }
+}
+
+/// Consume a Stack-owner progression obligation through the existing attach
+/// authority. Association is resolved under the authority guard, while the
+/// stateless worker request is submitted only after that guard is released.
+fn submit_protocol_progression(progression: anemone_smoltcp_stack::ProtocolProgression) {
+    let interface = progression.into_interface();
+    let control = {
+        let authority = ACTIVE_PATHS.lock();
+        if authority.shutdown_started {
+            None
+        } else if let Some(control) = authority.domain.local_progression_control(interface) {
+            Some(control)
+        } else {
+            Some(
+                authority
+                    .active_paths
+                    .iter()
+                    .find(|path| path.interface == interface)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "committed protocol work references inactive interface {:?}",
+                            interface
+                        )
+                    })
+                    .control
+                    .clone(),
+            )
+        }
+    };
+    if let Some(control) = control {
+        control.request_work();
     }
 }
 

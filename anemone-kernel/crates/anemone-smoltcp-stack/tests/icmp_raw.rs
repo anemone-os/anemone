@@ -418,9 +418,10 @@ fn tx_commit_preserves_header_policy_capacity_and_normal_provider_path() {
     let destination = Ipv4Address::new(PEER_IP);
     let policy = IcmpRawEgressPolicy::new(37, 0xb9).unwrap();
 
-    stack
+    let progression = stack
         .send_icmp_raw_endpoint(endpoint, selection, destination, policy, &[])
         .unwrap();
+    assert_eq!(progression.into_interface(), interface);
     assert!(
         !stack
             .icmp_raw_endpoint_facts(endpoint)
@@ -537,7 +538,7 @@ fn protocol_egress_arbitration_does_not_starve_raw_behind_udp() {
     let raw = stack
         .create_icmp_raw_endpoint(limits(1, 128, 1, 128))
         .unwrap();
-    stack
+    let progression = stack
         .send_icmp_raw_endpoint(
             raw,
             Ipv4EgressSelection::new(interface, Ipv4Address::new(LOCAL_IP)),
@@ -546,6 +547,7 @@ fn protocol_egress_arbitration_does_not_starve_raw_behind_udp() {
             &[],
         )
         .unwrap();
+    assert_eq!(progression.into_interface(), interface);
 
     let first_outcome = stack
         .pump(
@@ -619,7 +621,7 @@ fn blocked_raw_provider_does_not_gate_another_interface() {
     let endpoint = stack
         .create_icmp_raw_endpoint(limits(2, 256, 1, 128))
         .unwrap();
-    stack
+    let first_progression = stack
         .send_icmp_raw_endpoint(
             endpoint,
             Ipv4EgressSelection::new(first_interface, Ipv4Address::new(LOCAL_IP)),
@@ -628,7 +630,8 @@ fn blocked_raw_provider_does_not_gate_another_interface() {
             &[],
         )
         .unwrap();
-    stack
+    assert_eq!(first_progression.into_interface(), first_interface);
+    let second_progression = stack
         .send_icmp_raw_endpoint(
             endpoint,
             Ipv4EgressSelection::new(second_interface, Ipv4Address::new(SECOND_IP)),
@@ -637,6 +640,7 @@ fn blocked_raw_provider_does_not_gate_another_interface() {
             &[],
         )
         .unwrap();
+    assert_eq!(second_progression.into_interface(), second_interface);
 
     let TransmitOutcome::Ready(blocker) = first_provider.transmit(Instant::ZERO) else {
         panic!("fresh first provider must expose one TX credit")
@@ -705,7 +709,7 @@ fn tx_admission_caps_configured_mtu_at_the_ipv4_length_ceiling() {
         ),
         Err(IcmpRawSendError::MessageTooLong { maximum })
     );
-    stack
+    let progression = stack
         .send_icmp_raw_endpoint(
             endpoint,
             Ipv4EgressSelection::new(interface, Ipv4Address::LOOPBACK),
@@ -714,6 +718,7 @@ fn tx_admission_caps_configured_mtu_at_the_ipv4_length_ceiling() {
             &vec![0; maximum],
         )
         .unwrap();
+    assert_eq!(progression.into_interface(), interface);
     stack
         .pump_local_for_host_validation(interface, Instant::ZERO, PumpBudget::new(1, 1))
         .unwrap();
@@ -740,9 +745,10 @@ fn tx_endpoint_byte_ceiling_is_permanent_while_occupancy_recovers() {
         stack.send_icmp_raw_endpoint(endpoint, selection, destination, policy, &[0; 5]),
         Err(IcmpRawSendError::MessageTooLong { maximum: 4 })
     );
-    stack
+    let full_progression = stack
         .send_icmp_raw_endpoint(endpoint, selection, destination, policy, &[0; 4])
         .unwrap();
+    assert_eq!(full_progression.into_interface(), interface);
     assert_eq!(
         stack.send_icmp_raw_endpoint(endpoint, selection, destination, policy, &[]),
         Err(IcmpRawSendError::WouldBlock)
@@ -750,9 +756,10 @@ fn tx_endpoint_byte_ceiling_is_permanent_while_occupancy_recovers() {
     stack
         .pump_local_for_host_validation(interface, Instant::ZERO, PumpBudget::new(1, 1))
         .unwrap();
-    stack
+    let empty_progression = stack
         .send_icmp_raw_endpoint(endpoint, selection, destination, policy, &[])
         .unwrap();
+    assert_eq!(empty_progression.into_interface(), interface);
 }
 
 #[test]
@@ -763,7 +770,7 @@ fn local_tx_requires_a_later_bounded_round_before_raw_ingress() {
     let endpoint = stack
         .create_icmp_raw_endpoint(limits(1, 128, 1, 128))
         .unwrap();
-    stack
+    let progression = stack
         .send_icmp_raw_endpoint(
             endpoint,
             Ipv4EgressSelection::new(interface, Ipv4Address::LOOPBACK),
@@ -772,6 +779,7 @@ fn local_tx_requires_a_later_bounded_round_before_raw_ingress() {
             &[],
         )
         .unwrap();
+    assert_eq!(progression.into_interface(), interface);
 
     let first = stack
         .pump_local_for_host_validation(interface, Instant::ZERO, PumpBudget::new(1, 1))

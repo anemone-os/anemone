@@ -11,7 +11,7 @@ use anemone_net_api::{
 };
 use smoltcp::wire::{IpCidr, Ipv4Address as SmoltcpIpv4Address};
 
-use super::Stack;
+use super::{ProtocolProgression, Stack};
 
 impl Stack {
     pub fn create_icmp_raw_endpoint(
@@ -83,7 +83,7 @@ impl Stack {
         destination: Ipv4Address,
         policy: IcmpRawEgressPolicy,
         message: &[u8],
-    ) -> Result<(), IcmpRawSendError> {
+    ) -> Result<ProtocolProgression, IcmpRawSendError> {
         let source = SmoltcpIpv4Address::from_octets(selection.source().octets());
         let (source_supported, destination_allowed, ip_mtu) = self
             .icmp_raw_interface_facts(selection.interface(), source, destination)
@@ -102,7 +102,10 @@ impl Stack {
             policy,
             message,
             ip_mtu,
-        )
+        )?;
+        // ICMP raw owns the successful queue transition and therefore the
+        // decision that this interface now has protocol progression work.
+        Ok(ProtocolProgression::committed(selection.interface()))
     }
 
     pub fn receive_icmp_raw_endpoint(

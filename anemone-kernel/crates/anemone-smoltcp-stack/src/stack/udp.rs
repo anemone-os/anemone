@@ -10,7 +10,7 @@ use anemone_net_api::{
 };
 use smoltcp::wire::{EthernetFrame, IpAddress, IpEndpoint, Ipv4Address};
 
-use super::Stack;
+use super::{ProtocolProgression, Stack};
 
 impl Stack {
     #[allow(dead_code)]
@@ -155,7 +155,7 @@ impl Stack {
         selection: Ipv4EgressSelection,
         peer: UdpPeer,
         payload: &[u8],
-    ) -> Result<(), UdpSendError> {
+    ) -> Result<ProtocolProgression, UdpSendError> {
         let selected = selection.interface();
         let source = Ipv4Address::from_octets(selection.source().octets());
         let (source_supported, ip_mtu) = self
@@ -174,7 +174,11 @@ impl Stack {
             ),
             payload,
             ip_mtu,
-        )
+        )?;
+        // Only the UDP owner can decide that queue admission committed new
+        // egress work. The carrier identifies where the Stack must be reread;
+        // it does not export queue or deadline truth.
+        Ok(ProtocolProgression::committed(selected))
     }
 
     pub fn receive_udp_endpoint(

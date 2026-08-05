@@ -278,6 +278,7 @@ impl Stack {
             peer,
             payload,
         )
+        .map(|_progression| ())
         .map_err(Into::into)
     }
 

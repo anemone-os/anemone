@@ -554,8 +554,15 @@ fn install_usr1_handler() -> Result<(), Errno> {
 }
 
 fn interrupt_receiver(pid: u32, result_rx: Fd, result: &mut [u8; 2]) -> Result<(), Errno> {
+    let mut signal_delivered = false;
     for _ in 0..DELIVERY_RETRIES {
-        kill(pid as i32, SigNo::SIGUSR1)?;
+        match kill(pid as i32, SigNo::SIGUSR1) {
+            Ok(()) => signal_delivered = true,
+            // The preceding signal may have interrupted recv and let the child
+            // exit before its pipe result becomes visible to this parent.
+            Err(ESRCH) if signal_delivered => return read_result_bounded(result_rx, result),
+            Err(errno) => return Err(errno),
+        }
         let mut pollfd = [PollFd {
             fd: result_rx as i32,
             events: POLLIN,

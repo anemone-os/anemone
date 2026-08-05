@@ -291,7 +291,6 @@ impl UdpEndpointPort {
         self.stack
             .send_udp_endpoint(self.endpoint, stack_selection, peer, payload)
             .map_err(SendError::Stack)?;
-        selection.request_pump();
         Ok(())
     }
 

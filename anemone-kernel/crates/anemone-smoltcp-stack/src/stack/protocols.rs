@@ -11,6 +11,7 @@ use smoltcp::iface::{AdmittedIpv4Packet, SocketSet};
 
 use crate::{
     icmp_raw::{EgressResource as IcmpRawEgressResource, IcmpRawEndpoints},
+    stack::tcp::{TcpEndpoints, TcpPolicy},
     udp::UdpEndpoints,
 };
 
@@ -25,6 +26,27 @@ pub(crate) enum ActiveEgress {
     None,
     Udp(UdpEndpointId),
     IcmpRaw(IcmpRawEndpointId),
+}
+
+/// Move-only proof that a protocol owner committed work for one interface.
+///
+/// It carries no packet, deadline, readiness, capacity, or completion truth.
+/// The kernel composition consumes it only to request that the existing worker
+/// reread the authoritative Stack state.
+#[must_use = "a committed protocol progression obligation must be handed to the worker owner"]
+#[derive(Debug, Eq, PartialEq)]
+pub struct ProtocolProgression {
+    interface: InterfaceId,
+}
+
+impl ProtocolProgression {
+    pub(crate) const fn committed(interface: InterfaceId) -> Self {
+        Self { interface }
+    }
+
+    pub fn into_interface(self) -> InterfaceId {
+        self.interface
+    }
 }
 
 pub(crate) struct InterfaceProtocols {
@@ -54,16 +76,19 @@ impl StackInvalidations {
 pub(crate) struct Protocols {
     pub(crate) udp: UdpEndpoints,
     pub(crate) icmp_raw: IcmpRawEndpoints,
+    pub(crate) tcp: TcpEndpoints,
 }
 
 impl Protocols {
     pub(crate) fn new(
         udp_policy: UdpNamespacePolicy,
         icmp_raw_policy: IcmpRawNamespacePolicy,
+        tcp_policy: TcpPolicy,
     ) -> Self {
         Self {
             udp: UdpEndpoints::new(udp_policy),
             icmp_raw: IcmpRawEndpoints::new(icmp_raw_policy),
+            tcp: TcpEndpoints::new(tcp_policy),
         }
     }
 
@@ -180,5 +205,9 @@ impl Protocols {
             udp: self.udp.take_invalidations(),
             icmp_raw: self.icmp_raw.take_invalidations(),
         }
+    }
+
+    pub(crate) fn reclaim_tcp(&mut self, interface: InterfaceId, sockets: &mut SocketSet<'static>) {
+        self.tcp.reclaim_interface(interface, sockets);
     }
 }
