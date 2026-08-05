@@ -29,6 +29,12 @@ fn main() -> Result<(), Errno> {
             }
             icmp_raw::run_cloexec_child(fd)
         },
+        Some("--limitations") => {
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            unix::run_limitations().and(unix_seqpacket::run_limitations())
+        },
         None => {
             let udp_result = udp::run();
             let udp_extension_result = udp_extension::run();

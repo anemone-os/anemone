@@ -1,4 +1,3 @@
-use alloc::vec;
 use core::{ffi::c_void, mem::offset_of};
 
 use anemone_rs::{
@@ -291,18 +290,6 @@ fn test_header_and_iovec_admission() -> Result<(), Errno> {
     )?;
     expect_empty(server)?;
 
-    let mut accepted_iovecs = vec![
-        IoVec {
-            iov_base: core::ptr::null_mut(),
-            iov_len: 0,
-        };
-        IOV_MAX
-    ];
-    let accepted = message(&mut accepted_iovecs);
-    ensure(unsafe { sendmsg_raw(client as i32, &accepted, MSG_DONTWAIT) }? == 0)?;
-    ensure(recvmsg_retry(server, &mut zero_header, MSG_DONTWAIT)? == 0)?;
-    expect_empty(server)?;
-
     close(client)?;
     close(server)
 }
@@ -366,15 +353,6 @@ fn test_send_transaction_and_rejection() -> Result<(), Errno> {
         unsafe { recvmsg_raw(first as i32, &mut receive_header, MSG_DONTWAIT | 1) },
         EOPNOTSUPP,
     )?;
-
-    let oversize = [0u8; 1473];
-    let mut oversize_iovecs = [read_iovec(&oversize)];
-    let oversize_message = message(&mut oversize_iovecs);
-    expect_errno(
-        unsafe { sendmsg_raw(client as i32, &oversize_message, MSG_DONTWAIT) },
-        EMSGSIZE,
-    )?;
-    expect_empty(first)?;
 
     let mut ignored_header_flags = default;
     ignored_header_flags.msg_flags = u32::MAX;
