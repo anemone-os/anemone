@@ -122,6 +122,16 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
+- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Draft / Not Implemented / Not Effective；提议
+  initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
+  TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
+  current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
+  Draft还提议Refine `NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`，把UDP、ICMP raw与TCP统一到
+  各protocol owner驱动、既有worker承接的progression handoff，但不共享effect policy，也不冻结
+  effect/wake表示、存储、锁或worker拓扑；两项只在Probe positive时原子cutover。
+  当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、P0为Draft / Not Active且Stage 1--5为Outline的
+  [实施计划](./rfcs/net-tcp/implementation.md)及冻结的
+  [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Probe失败时Stage 1保持Outline。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
