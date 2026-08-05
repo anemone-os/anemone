@@ -5,8 +5,8 @@ use crate::{
     task::{
         Task, ThreadGroup,
         sig::{
-            PosixTimerSignalCallback, PosixTimerSignalEnqueue, PosixTimerSignalIdentity, SigNo,
-            Signal, set::SigSet,
+            PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
+            PosixTimerSignalIdentity, SigNo, Signal, set::SigSet, timer::TimerSignalPendingOwner,
         },
     },
 };
@@ -18,7 +18,7 @@ struct SequencedSignal {
 }
 
 pub(super) struct TimerSignalRegistration {
-    target: Weak<ThreadGroup>,
+    owner: TimerSignalPendingOwner,
     no: SigNo,
     timer_id: i32,
     sigval: u64,
@@ -39,9 +39,6 @@ impl core::fmt::Debug for TimerSignalRegistration {
 struct PendingTimerSignal {
     arrival: u64,
     signal: Signal,
-    /// A flush removes the occurrence from fetch eligibility while leaving the
-    /// preallocated slot in place until its unlocked owner handoff completes.
-    retired: bool,
 }
 
 #[derive(Debug)]
@@ -90,6 +87,12 @@ pub struct PendingSignals {
     /// Preallocated per-timer notification resources. Slot allocation happens
     /// at future timer_create, never when the timer expires.
     timer_slots: Vec<TimerSignalSlot>,
+    /// Registration and expiry publication admission for this pending owner.
+    ///
+    /// Task exit closes the private owner's copy before topology detach. Shared
+    /// owners never close this flag; their ThreadGroup lifecycle remains the
+    /// admission authority used by the established SIGEV_SIGNAL route.
+    timer_registration_admission_open: bool,
     /// Shared arrival order for realtime occurrences and per-timer slots. It is
     /// pending-owner protocol state, not a timestamp.
     next_arrival: u64,
@@ -107,6 +110,7 @@ impl PendingSignals {
             unreliable: [const { None }; NUNRELIABLESIG + 1],
             realtime: [const { VecDeque::new() }; NRTSIG],
             timer_slots: Vec::new(),
+            timer_registration_admission_open: true,
             next_arrival: 1,
         }
     }
@@ -147,14 +151,17 @@ impl PendingSignals {
 
     pub(super) fn try_register_timer_signal(
         &mut self,
-        target: Weak<ThreadGroup>,
+        owner: TimerSignalPendingOwner,
         no: SigNo,
         timer_id: i32,
         sigval: u64,
         callback: Arc<PosixTimerSignalCallback>,
     ) -> Result<TimerSignalSlotId, SysError> {
+        if !self.timer_registration_admission_open {
+            return Err(SysError::NoSuchProcess);
+        }
         let registration = TimerSignalRegistration {
-            target,
+            owner,
             no,
             timer_id,
             sigval,
@@ -226,6 +233,12 @@ impl PendingSignals {
             .no
     }
 
+    /// Read a registration only while this owner still admits expiry.
+    pub(super) fn admitted_timer_signal_no(&self, id: TimerSignalSlotId) -> Option<SigNo> {
+        self.timer_registration_admission_open
+            .then(|| self.timer_signal_no(id))
+    }
+
     pub(super) fn set_timer_signal_default_stop_epoch(
         &mut self,
         id: TimerSignalSlotId,
@@ -254,6 +267,9 @@ impl PendingSignals {
         overrun: i32,
         ignored: bool,
     ) -> PosixTimerSignalEnqueue {
+        if !self.timer_registration_admission_open {
+            return PosixTimerSignalEnqueue::TargetExited;
+        }
         let slot = self.timer_slot_mut(id);
         let registration = slot
             .registration
@@ -273,7 +289,7 @@ impl PendingSignals {
             return PosixTimerSignalEnqueue::AlreadyPending;
         }
 
-        let target = registration.target.clone();
+        let owner = registration.owner.clone();
         let no = registration.no;
         let timer_id = registration.timer_id;
         let sigval = registration.sigval;
@@ -282,9 +298,8 @@ impl PendingSignals {
         self.timer_slot_mut(id).pending = Some(PendingTimerSignal {
             arrival,
             signal: Signal::new_posix_timer(
-                no, timer_id, overrun, sigval, identity, callback, target, id,
+                no, timer_id, overrun, sigval, identity, callback, owner, id,
             ),
-            retired: false,
         });
         PosixTimerSignalEnqueue::Queued
     }
@@ -295,7 +310,7 @@ impl PendingSignals {
             .enumerate()
             .filter_map(|(index, slot)| {
                 let pending = slot.pending.as_ref()?;
-                (!pending.retired && pending.signal.no == no).then_some((index, pending.arrival))
+                (pending.signal.no == no).then_some((index, pending.arrival))
             })
             .min_by_key(|(_, arrival)| *arrival)
             .map(|(index, _)| index)
@@ -314,7 +329,6 @@ impl PendingSignals {
             .pending
             .take()
             .expect("selected POSIX timer signal slot is empty");
-        assert!(!pending.retired, "retired POSIX timer signal was fetched");
         slot.in_flight = slot
             .in_flight
             .checked_add(1)
@@ -322,18 +336,48 @@ impl PendingSignals {
         pending.signal
     }
 
-    pub(super) fn take_retired_timer_signal(&mut self) -> Option<Signal> {
-        let index = self
-            .timer_slots
-            .iter()
-            .position(|slot| slot.pending.as_ref().is_some_and(|pending| pending.retired))?;
-        let slot = &mut self.timer_slots[index];
-        let pending = slot.pending.take()?;
-        slot.in_flight = slot
-            .in_flight
-            .checked_add(1)
-            .expect("POSIX timer signal in-flight count exhausted");
-        Some(pending.signal)
+    /// Stop private registration/enqueue admission and detach every occurrence.
+    ///
+    /// Every still-pending timer occurrence becomes fetch-invisible in this
+    /// same critical section. Callers drain the occurrence and registration
+    /// payloads later so callbacks and destructors never run under this lock.
+    pub(super) fn close_timer_admission_for_exit(&mut self) -> Vec<Signal> {
+        assert!(
+            self.timer_registration_admission_open,
+            "POSIX timer signal admission closed twice"
+        );
+        self.timer_registration_admission_open = false;
+
+        // Cleanup may allocate, unlike expiry, but its capacity is bounded by
+        // the registration slots plus the one task-private reservation. Moving
+        // occurrences out now prevents a later generation from updating an old
+        // retired slot before its unlocked callback runs.
+        let mut retired = Vec::with_capacity(self.timer_slots.len().saturating_add(1));
+        if let Some(signal) = self.take_reserved_timer_signal_for_exit() {
+            retired.push(signal);
+        }
+        for slot in &mut self.timer_slots {
+            if let Some(pending) = slot.pending.take() {
+                slot.in_flight = slot
+                    .in_flight
+                    .checked_add(1)
+                    .expect("POSIX timer signal in-flight count exhausted");
+                retired.push(pending.signal);
+            }
+        }
+        retired
+    }
+
+    pub(super) fn take_exiting_timer_signal_registration(
+        &mut self,
+    ) -> Option<TimerSignalRegistration> {
+        assert!(
+            !self.timer_registration_admission_open,
+            "POSIX timer registration drained before admission closure"
+        );
+        self.timer_slots
+            .iter_mut()
+            .find_map(|slot| slot.registration.take())
     }
 
     pub(super) fn finish_timer_signal(&mut self, id: TimerSignalSlotId) {
@@ -344,15 +388,34 @@ impl PendingSignals {
             .expect("POSIX timer signal handoff is not in flight");
     }
 
-    fn retire_timer_signals(&mut self, set: SigSet) {
+    fn retire_timer_signals(&mut self, set: SigSet) -> Vec<Signal> {
+        let retire_count = self
+            .timer_slots
+            .iter()
+            .filter(|slot| {
+                slot.pending
+                    .as_ref()
+                    .is_some_and(|pending| set.get(pending.signal.no))
+            })
+            .count();
+        let mut retired = Vec::with_capacity(retire_count);
         for slot in &mut self.timer_slots {
-            let Some(pending) = slot.pending.as_mut() else {
+            let Some(pending) = slot.pending.as_ref() else {
                 continue;
             };
             if set.get(pending.signal.no) {
-                pending.retired = true;
+                let pending = slot
+                    .pending
+                    .take()
+                    .expect("selected POSIX timer signal slot is empty");
+                slot.in_flight = slot
+                    .in_flight
+                    .checked_add(1)
+                    .expect("POSIX timer signal in-flight count exhausted");
+                retired.push(pending.signal);
             }
         }
+        retired
     }
 
     pub(super) fn take_ordinary_sigkill(&mut self) -> bool {
@@ -389,9 +452,7 @@ impl PendingSignals {
         }
 
         for slot in &self.timer_slots {
-            if let Some(pending) = &slot.pending
-                && !pending.retired
-            {
+            if let Some(pending) = &slot.pending {
                 set.set(pending.signal.no);
             }
         }
@@ -724,7 +785,7 @@ impl PendingSignals {
         if self.timer_slots.iter().any(|slot| {
             slot.pending
                 .as_ref()
-                .is_some_and(|pending| !pending.retired && !mask.get(pending.signal.no))
+                .is_some_and(|pending| !mask.get(pending.signal.no))
         }) {
             return true;
         }
@@ -752,7 +813,7 @@ impl PendingSignals {
         if self.timer_slots.iter().any(|slot| {
             slot.pending
                 .as_ref()
-                .is_some_and(|pending| !pending.retired && set.get(pending.signal.no))
+                .is_some_and(|pending| set.get(pending.signal.no))
         }) {
             return true;
         }
@@ -763,7 +824,7 @@ impl PendingSignals {
     ///
     /// Mainly used when a disposition is set to ignore, to flush all pending
     /// signals that are now ignored.
-    pub fn flush_specific(&mut self, set: SigSet) {
+    pub fn flush_specific(&mut self, set: SigSet) -> Vec<Signal> {
         for signo in set {
             if signo.is_realtime() {
                 let idx = signo.realtime_index().unwrap();
@@ -774,10 +835,7 @@ impl PendingSignals {
                 self.unreliable[signo.as_usize()] = None;
             }
         }
-        // Do not invoke the timer owner under this pending lock. Retired slots
-        // are immediately invisible to fetch/snapshots and are drained by the
-        // ThreadGroup signal facade after releasing its locks.
-        self.retire_timer_signals(set);
+        self.retire_timer_signals(set)
     }
 }
 
@@ -826,13 +884,13 @@ mod kunits {
     }
 
     fn callback_log() -> (
-        Arc<SpinLock<Vec<PosixTimerSignalIdentity>>>,
+        Arc<SpinLock<Vec<(PosixTimerSignalIdentity, PosixTimerSignalCompletion)>>>,
         Arc<PosixTimerSignalCallback>,
     ) {
         let log = Arc::new(SpinLock::new(Vec::new()));
         let callback_log = log.clone();
-        let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity| {
-            callback_log.lock().push(identity);
+        let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, reason| {
+            callback_log.lock().push((identity, reason));
         });
         (log, callback)
     }
@@ -845,7 +903,13 @@ mod kunits {
         callback: Arc<PosixTimerSignalCallback>,
     ) -> TimerSignalSlotId {
         pending
-            .try_register_timer_signal(Weak::new(), no, timer_id, sigval, callback)
+            .try_register_timer_signal(
+                TimerSignalPendingOwner::Shared(Weak::new()),
+                no,
+                timer_id,
+                sigval,
+                callback,
+            )
             .unwrap()
     }
 
@@ -857,7 +921,7 @@ mod kunits {
         // Unit tests use an empty target Weak, so mirror the production
         // delivery order explicitly: make the slot reusable, then call owner.
         pending.finish_timer_signal(slot);
-        signal.finish_timer_signal_handoff();
+        signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Dequeued);
     }
 
     fn timer_overrun(signal: &Signal) -> i32 {
@@ -967,8 +1031,14 @@ mod kunits {
         assert_eq!(
             log.lock().as_slice(),
             &[
-                PosixTimerSignalIdentity::new(13, 1, 1),
-                PosixTimerSignalIdentity::new(13, 2, 2),
+                (
+                    PosixTimerSignalIdentity::new(13, 1, 1),
+                    PosixTimerSignalCompletion::Dequeued,
+                ),
+                (
+                    PosixTimerSignalIdentity::new(13, 2, 2),
+                    PosixTimerSignalCompletion::Dequeued,
+                ),
             ]
         );
 
@@ -999,7 +1069,7 @@ mod kunits {
         let stale_callbacks = Arc::new(AtomicUsize::new(0));
         let callback_generation = live_generation.clone();
         let callback_count = stale_callbacks.clone();
-        let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity| {
+        let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, _reason| {
             if identity.generation() as usize != callback_generation.load(Ordering::SeqCst) {
                 callback_count.fetch_add(1, Ordering::SeqCst);
             }
@@ -1067,15 +1137,33 @@ mod kunits {
         );
 
         let set = SigSet::new_with_signos(&[SigNo::SIGUSR1]);
-        pending.flush_specific(set);
+        let mut retired = pending.flush_specific(set);
         assert!(pending.fetch_specific(set).is_none());
         assert!(log.lock().is_empty());
 
-        let retired = pending.take_retired_timer_signal().unwrap();
-        complete_timer_signal(&mut pending, slot, retired);
+        // A new generation can publish before the old flush callback runs;
+        // detaching the old occurrence must keep the new episode fetchable.
+        assert_eq!(
+            pending.enqueue_timer_signal(slot, 8, 9, 0, false),
+            PosixTimerSignalEnqueue::Queued
+        );
+        let mut retired = retired.pop().unwrap();
+        pending.finish_timer_signal(slot);
+        retired.finish_timer_signal_handoff(PosixTimerSignalCompletion::Flushed);
+        let current = pending.fetch_specific(set).unwrap();
+        complete_timer_signal(&mut pending, slot, current);
         assert_eq!(
             log.lock().as_slice(),
-            &[PosixTimerSignalIdentity::new(29, 7, 8)]
+            &[
+                (
+                    PosixTimerSignalIdentity::new(29, 7, 8),
+                    PosixTimerSignalCompletion::Flushed,
+                ),
+                (
+                    PosixTimerSignalIdentity::new(29, 8, 9),
+                    PosixTimerSignalCompletion::Dequeued,
+                ),
+            ]
         );
     }
 
@@ -1106,11 +1194,63 @@ mod kunits {
             .unwrap();
         pending.reserve_delivery_target(signal);
 
-        let retired = pending.take_reserved_timer_signal_for_exit().unwrap();
-        complete_timer_signal(&mut pending, slot, retired);
+        let mut retired = pending.take_reserved_timer_signal_for_exit().unwrap();
+        pending.finish_timer_signal(slot);
+        retired.finish_timer_signal_handoff(PosixTimerSignalCompletion::Flushed);
         assert_eq!(
             log.lock().as_slice(),
-            &[PosixTimerSignalIdentity::new(37, 3, 5)]
+            &[(
+                PosixTimerSignalIdentity::new(37, 3, 5),
+                PosixTimerSignalCompletion::Flushed,
+            )]
+        );
+    }
+
+    #[kunit]
+    fn test_exit_closes_admission_and_flushes_private_timer_state() {
+        let mut pending = PendingSignals::new();
+        let (log, callback) = callback_log();
+        let slot = pending
+            .try_register_timer_signal(
+                TimerSignalPendingOwner::Private(Weak::new()),
+                SigNo::SIGUSR1,
+                41,
+                0,
+                callback.clone(),
+            )
+            .unwrap();
+        assert_eq!(
+            pending.enqueue_timer_signal(slot, 5, 7, 0, false),
+            PosixTimerSignalEnqueue::Queued
+        );
+
+        let mut retired = pending.close_timer_admission_for_exit();
+        assert_eq!(retired.len(), 1);
+        assert_eq!(
+            pending.enqueue_timer_signal(slot, 5, 8, 0, false),
+            PosixTimerSignalEnqueue::TargetExited
+        );
+        assert_eq!(
+            pending.try_register_timer_signal(
+                TimerSignalPendingOwner::Private(Weak::new()),
+                SigNo::SIGUSR2,
+                42,
+                0,
+                callback,
+            ),
+            Err(SysError::NoSuchProcess)
+        );
+
+        let mut retired = retired.pop().unwrap();
+        pending.finish_timer_signal(slot);
+        retired.finish_timer_signal_handoff(PosixTimerSignalCompletion::Flushed);
+        drop(pending.take_exiting_timer_signal_registration());
+        assert_eq!(
+            log.lock().as_slice(),
+            &[(
+                PosixTimerSignalIdentity::new(41, 5, 7),
+                PosixTimerSignalCompletion::Flushed,
+            )]
         );
     }
 
@@ -1121,7 +1261,11 @@ mod kunits {
         assert!(pending.reserve_any_for_delivery(SigSet::new()));
         pending.push_signal(user_signal(SigNo::SIGCONT));
 
-        pending.flush_specific(SigSet::new_with_signos(&[SigNo::SIGCONT]));
+        assert!(
+            pending
+                .flush_specific(SigSet::new_with_signos(&[SigNo::SIGCONT]))
+                .is_empty()
+        );
         assert_eq!(pending.reserved_delivery_signo(), Some(SigNo::SIGCONT));
 
         let fetched = pending

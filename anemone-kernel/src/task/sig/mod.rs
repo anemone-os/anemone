@@ -47,13 +47,9 @@ mod pending;
 pub use pending::PendingSignals;
 pub mod set;
 mod timer;
-// Gate 4 establishes the allocation-fallible notification capability before
-// Gate 5 creates the first POSIX timer object. The temporary unused export
-// becomes that object's only signal-pending entry point in Gate 5.
-#[allow(unused_imports)]
 pub(crate) use timer::{
-    PosixTimerSignalCallback, PosixTimerSignalEnqueue, PosixTimerSignalIdentity,
-    PosixTimerSignalRegistration,
+    PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
+    PosixTimerSignalIdentity, PosixTimerSignalRegistration,
 };
 mod terminal;
 pub(crate) use terminal::TtyJobControlDisposition;

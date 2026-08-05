@@ -94,11 +94,11 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // later with no topology or ThreadGroup guard held.
         let tty_session_leader = crate::task::jobctl::TtySessionLeader::from_thread_group(&tg);
 
-        // A temporary-mask wait may already have claimed a shared timer signal
-        // into this task's private delivery reservation. It can no longer reach
-        // trap return once exit starts, so Signal must retire the slot and call
-        // the timer owner before deferred task disposal drops the reservation.
-        task.finish_reserved_timer_signal_handoff_for_exit();
+        // This private pending lock is the exact-task timer registration/exit
+        // linearization point. Close admission and retire pending or reserved
+        // occurrences before topology detach; owner callbacks and registration
+        // destructors run only after the Signal guard is released.
+        task.retire_private_timer_signals_for_exit(&tg);
 
         defer_to_dispose(task.clone());
 

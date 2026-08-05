@@ -555,8 +555,12 @@ impl ThreadGroup {
         let timer = Arc::new(PosixTimer::new(id, clock, kind));
         if let Some((no, sigval)) = signal {
             let weak_timer = Arc::downgrade(&timer);
-            let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity| {
+            let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, _reason| {
                 if let Some(timer) = weak_timer.upgrade() {
+                    // The current shared SIGEV_SIGNAL route predates typed
+                    // completion and preserves its existing dequeue/flush
+                    // behavior in Gate 1. Gate 2 consumes the reason only for
+                    // the new exact-task notification mode.
                     timer.signal_delivered(identity);
                 }
             });

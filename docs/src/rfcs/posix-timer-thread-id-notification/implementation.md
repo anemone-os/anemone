@@ -73,7 +73,7 @@ positive target/lifecycle语义只标记Ready for Gate 2，不在Gate 0宣称已
 
 ## Gate 1 — Task-private timer signal protocol
 
-**状态：** Authorized / Not Started
+**状态：** Closed — 2026-08-06
 **Purpose：** 在Signal owner内建立per-registration task-private `SI_TIMER` slot、exact-target enqueue/wake
 与task-exit cleanup，但不让`timer_create()`提前接受新ABI。
 **Prerequisites：** Gate 0关闭；PT-TID-002/003/004/006/007可从live task/signal锁序闭合；现有shared timer
@@ -107,6 +107,23 @@ source/lock-order audit证明无Signal -> timer -> Signal回环。按用户指�
 **Stop / Exit：** internal capability能fail closed且不改变现有route后关闭。它必须由Gate 2消费；若Gate 2
 不cut over，删除capability与任何临时probe/test facade。若需要维持`Task`生命周期的强引用、shared fallback、pending容器外泄
 或改变job-control/temporary-mask contract，立即停止并review。
+
+### Gate 1 Closure — 2026-08-06
+
+- Signal owner新增weak shared/private pending capability；private registration、occurrence、arrival identity与
+  admission都由exact task的`sig_pending`唯一拥有，expiry不重新解析TID，也不为首个notification分配。
+- private普通/同步fetch与temporary-mask reservation消费同一slot；job-control generation在同一ThreadGroup
+  transaction内清理opposite-class shared/private occurrence，锁外以typed `Dequeued`/`Flushed`完成owner handoff。
+- task exit在membership detach前关闭private admission并摘除pending/reserved occurrence；callback与registration
+  destructor均在Signal/ThreadGroup guard外运行。未到期arm与dequeue后的后续arm仍留给Gate 2 timer consumer处理。
+- owner-local KUnit补齐同registration ignored后恢复、private `SIGCONT`经stop-class cleanup后旧episode
+  `Flushed`且新episode `Dequeued`、三阶段target exit、callback re-entry、reserved delivery、slot reuse与
+  private realtime ordering。`just fmt kernel --check`通过；RV64 release build与477/477 KUnit通过，LA64
+  release build与478/478 KUnit通过，两个新增case双架构均为`ok`。
+- 两次QEMU均在完整KUnit与既有clock/timer/signal用户检查通过后，因本轮只挂载pretest rootfs、未提供第二块
+  test disk而在`/dev/vdb` mount处退出；该fixture边界不属于Gate 1 acceptance。按用户指令未运行mdBook。
+- 本Gate没有ABI或current contract cutover；`SIGEV_THREAD_ID`仍保持unsupported，internal capability必须由
+  Gate 2真实POSIX timer consumer接入，否则按既定退出条件删除。
 
 ## Gate 2 — POSIX timer integration 与 PT-THREAD-ID-CUTOVER
 
