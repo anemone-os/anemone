@@ -63,8 +63,6 @@ pub(crate) enum SleepClock {
     Realtime,
 }
 
-static CPU_SLEEP_UNSUPPORTED_LOGGED: AtomicBool = AtomicBool::new(false);
-
 pub(crate) fn get_sleep_clock(clock_id: i32) -> Result<SleepClock, SysError> {
     match clock_id {
         CLOCK_REALTIME => Ok(SleepClock::Realtime),
@@ -72,11 +70,12 @@ pub(crate) fn get_sleep_clock(clock_id: i32) -> Result<SleepClock, SysError> {
         CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID => {
             // These IDs are valid clocks, but sleeping on CPU consumption needs
             // scheduler-driven timers that R0 deliberately excludes.
-            if !CPU_SLEEP_UNSUPPORTED_LOGGED.swap(true, Ordering::Relaxed) {
-                knoticeln!(
-                    "clock_nanosleep: CPU-time clocks are unsupported without scheduler-driven timers"
-                );
-            }
+            // Log every rejected call: unlike ignored legacy flags, the syscall
+            // fails, and the log must remain correlatable with userspace errno.
+            knoticeln!(
+                "clock_nanosleep: clock_id={} requires scheduler-driven CPU timers; errno=EOPNOTSUPP",
+                clock_id
+            );
             Err(SysError::NotSupported)
         },
         _ => Err(SysError::InvalidArgument),

@@ -56,7 +56,9 @@ pub fn sys_getitimer(
             Ok(0)
         },
         _ => {
-            knoticeln!("[NYI] sys_getitimer: which={which:?}");
+            knoticeln!(
+                "getitimer: which={which:?} requires scheduler-driven CPU timers; errno=ENOSYS"
+            );
             Err(SysError::NotYetImplemented)
         },
     }

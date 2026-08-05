@@ -20,8 +20,6 @@ use crate::{
 };
 
 const NSEC_PER_SEC: u64 = 1_000_000_000;
-static CPU_TIMER_UNSUPPORTED_LOGGED: AtomicBool = AtomicBool::new(false);
-static IGNORED_SETTIME_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[syscall(SYS_TIMER_CREATE)]
 fn sys_timer_create(
@@ -61,6 +59,10 @@ fn sys_timer_gettime(
     timer_id: i32,
     #[validate_with(user_addr)] current_ptr: VirtAddr,
 ) -> Result<u64, SysError> {
+    // Linux accepts every non-TIMER_ABSTIME bit, so record this compatibility
+    // choice once without turning normal legacy use into a persistent warning.
+    static IGNORED_SETTIME_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
+
     let task = get_current_task();
     let setting = task.get_thread_group().posix_timer_gettime(timer_id)?;
     let current = setting_to_uapi(setting);
@@ -134,11 +136,10 @@ fn timer_clock(clock_id: i32) -> Result<PosixTimerClock, SysError> {
         CLOCK_MONOTONIC => Ok(PosixTimerClock::Monotonic),
         CLOCK_BOOTTIME => Ok(PosixTimerClock::Boottime),
         CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID => {
-            if !CPU_TIMER_UNSUPPORTED_LOGGED.swap(true, Ordering::Relaxed) {
-                knoticeln!(
-                    "timer_create: CPU-time clocks require scheduler-driven timers and are unsupported"
-                );
-            }
+            knoticeln!(
+                "timer_create: clock_id={} requires scheduler-driven CPU timers; errno=EOPNOTSUPP",
+                clock_id
+            );
             Err(SysError::NotSupported)
         },
         _ => Err(SysError::InvalidArgument),
@@ -244,6 +245,10 @@ mod kunits {
         assert_eq!(timer_clock(CLOCK_REALTIME), Ok(PosixTimerClock::Realtime));
         assert_eq!(timer_clock(CLOCK_MONOTONIC), Ok(PosixTimerClock::Monotonic));
         assert_eq!(timer_clock(CLOCK_BOOTTIME), Ok(PosixTimerClock::Boottime));
+        assert_eq!(
+            timer_clock(CLOCK_PROCESS_CPUTIME_ID),
+            Err(SysError::NotSupported)
+        );
         assert_eq!(timer_clock(4), Err(SysError::InvalidArgument));
         assert_eq!(
             notification_from_uapi(SigEvent {

@@ -13,8 +13,6 @@ use crate::{
 
 use super::{ns_to_duration, ns_to_timespec, timespec_to_ns};
 
-static IGNORED_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
-
 #[syscall(SYS_CLOCK_NANOSLEEP)]
 fn sys_clock_nanosleep(
     which_clock: i32,
@@ -31,6 +29,8 @@ pub(crate) fn clock_nanosleep(
     rqtp: VirtAddr,
     rmtp: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
+    static IGNORED_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
+
     let clock = get_sleep_clock(which_clock)?;
     let ignored_flags = flags & !TIMER_ABSTIME;
     if ignored_flags != 0 && !IGNORED_FLAGS_LOGGED.swap(true, Ordering::Relaxed) {

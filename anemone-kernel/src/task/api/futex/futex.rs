@@ -103,6 +103,9 @@ impl TryFromSyscallArg for FutexOp {
             // relative timeout cannot be silently reinterpreted as calendar
             // time; unsupported flag/command combinations return ENOSYS.
             if !matches!(cmd, FutexCmd::WaitBitset) {
+                knoticeln!(
+                    "futex: FUTEX_CLOCK_REALTIME is unsupported for cmd={cmd:?}, raw={raw:#x}; only FUTEX_WAIT_BITSET is implemented; errno=ENOSYS"
+                );
                 return Err(SysError::NoSys);
             }
             flags |= FutexCmdFlags::CLOCK_REALTIME;

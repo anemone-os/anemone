@@ -59,7 +59,7 @@ fn decode_operation(tx: Timex) -> Result<AdjOperation, SysError> {
     }
     if modes & !SUPPORTED_MODE_BITS != 0 {
         knoticeln!(
-            "clock_adjtime: rejecting unsupported adjustment modes {:#x}",
+            "clock_adjtime: adjustment modes {:#x} require unsupported clock discipline; errno=EOPNOTSUPP",
             modes,
         );
         return Err(SysError::NotSupported);
