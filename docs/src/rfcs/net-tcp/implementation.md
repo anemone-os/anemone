@@ -1,17 +1,17 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / P0 Positive / Closed
+**状态：** R0 / Stage 1 Ready / Not Authorized
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
-**执行授权：** 用户于 2026-08-05 明确接受 R0 并授权 P0
-**当前 Gate：** Probe Gate P0；Positive / Closed；STOP
+**执行授权：** 用户于 2026-08-05 明确接受 R0、授权并关闭 P0，随后只授权 Stage 1 解析与文档更新；
+Stage 1 implementation与contract cutover均未授权
+**当前 Gate：** Stage 1；Resolved / Ready / Not Authorized
 
-本文只把父RFC在进入任何TCP production stage前必须关闭的TCP engine feasibility Probe Gate解析到可执行
-语义；P0全部限制在kernel外的vendored/Stack crate，不修改`anemone-kernel`、不迁移production consumer、
-不改变current contract，也不交付TCP Socket capability。Stage 1--5在本文保留Outline，只固定目的、依赖、
-受保护边界与解析触发点，不给出可执行步骤。P0无论positive、negative或inconclusive都形成一个授权停止点；
-后续工作必须重新review与授权。
+本文保存已经Positive / Closed的TCP engine feasibility Probe Gate，并把Stage 1解析为一个完整execution gate。
+Stage 1建立production owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为
+Stack-private TCP owner foundation；它不交付TCP Socket capability。Stage 2--5仍为Outline，只固定目的、依赖、
+受保护边界与解析触发点。Stage 1解析不等于implementation授权，也不更新current contract；执行仍需用户单独授权。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -134,7 +134,8 @@ P0 hypothesis与全部protected boundary成立时：
   no-default production crate、由Stage 1真实consumer需要且经review确认为最小substrate的cause seam或owner-local
   primitive才可保留，不能仅因host test能跑而沉淀；
 - current contracts、kernel source、`NET-PROTOCOL-PROGRESSION-CUTOVER`与`NET-TCP-CUTOVER`全部保持不变；
-- P0标记Positive / Closed后立即停止。Stage 1保持Outline；是否解析并实施Stage 1需要独立review与用户授权。
+- P0标记Positive / Closed后立即停止；在P0授权范围内Stage 1保持Outline。是否解析并实施Stage 1需要独立review与
+  用户授权。
 
 ### 4.2 Negative or inconclusive
 
@@ -144,7 +145,7 @@ P0 hypothesis失败、证据不足或必须越过crate-only protected boundary�
 - 删除probe-only code；review先区分probe route/实现缺陷、环境证据不足与真实target infeasibility。保持target的
   route correction可以重新解析P0；只有证据要求改变target、owner、contract、acceptance或validation claim时才
   进入Target Renegotiation，agent不能自行批准reduced target；
-- Stage 1保持Outline / Not Resolved / Not Authorized，kernel source、current contracts、
+- P0 negative/inconclusive exit时Stage 1保持Outline / Not Resolved / Not Authorized，kernel source、current contracts、
   `NET-PROTOCOL-PROGRESSION-CUTOVER`与`NET-TCP-CUTOVER`全部保持不变。
 
 ### 4.3 Evidence placement
@@ -197,7 +198,7 @@ evidence不外推这些轨道。
 
 **Boundary and stop：** hypothesis四项与protected boundary均成立；没有target、owner、handoff、failure/cleanup、
 ABI、Contract Impact、acceptance或validation claim变化，没有register/current-contract write-back。P0为Positive /
-Closed并在此耗尽授权；Stage 1仍为Outline / Not Resolved / Not Authorized，不得自动进入。
+Closed并在此耗尽授权；Stage 1在P0 closure时仍为Outline / Not Resolved / Not Authorized，不得自动进入。
 
 ## 5. RFC-wide engineering principles
 
@@ -232,9 +233,11 @@ TCP不是只能适配current Socket framework的孤立family。本RFC的每个ga
 
 - **P0 Positive / Closed：** crate-only cause与bounded listener hypothesis、protected boundary、validation、
   probe代码处置与write-back均已满足；
+- **Ready / Not Authorized：** Implementation Boundary、唯一execution gate、ordering、validation、cutover、exit与
+  stop condition已经解析完整，但没有代码、运行或contract生效主张；
 - **Outline：** 只固定目的、前置依赖、受保护边界与解析触发点，不冻结checkpoint、具体步骤、类型、算法、
   文件、命令或transaction；
-- future Stage只有在前一gate独立Closed、live source/current contracts/register重新核验，并完成单独的
+- Stage 2及后续future Stage只有在前一gate独立Closed、live source/current contracts/register重新核验，并完成单独的
   Implementation Resolution与用户授权后才能进入Active；
 - 前一gate关闭不自动解析、授权或启动后一Stage。任何future Outline若需改变target、owner、handoff、
   failure/cleanup、ABI、Contract Impact、acceptance或validation claim，先回到父RFC review。
@@ -249,44 +252,190 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | Gate / Stage | 当前成熟度 | 概括目的 | Contract 状态 | 解析触发点 |
 | --- | --- | --- | --- | --- |
 | P0 — TCP engine feasibility probe | Positive / Closed | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | 已满足；本gate停止 |
-| Stage 1 — Stack TCP owner与protocol progression foundation | Outline / Not Resolved / Not Authorized | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | positive时原子执行`NET-PROTOCOL-PROGRESSION-CUTOVER`；TCP target contracts继续Pending | P0 Positive / Closed并完成probe代码处置 |
+| Stage 1 — Stack TCP owner与protocol progression foundation | Ready / Not Authorized | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | closure时原子执行`NET-PROTOCOL-PROGRESSION-CUTOVER`；TCP target contracts继续Pending | 已解析；等待独立implementation授权 |
 | Stage 2 — Nonblocking TCP vertical slice | Outline / Not Resolved / Not Authorized | 经既有Socket front接通create/bind/connect/listen/accept与最小nonblocking scalar stream纵切 | None；TCP target contracts继续Pending | Stage 1 Closed并证明Stack owner surface可由kernel窄消费 |
 | Stage 3 — Stream、ABI与lifecycle completion | Outline / Not Resolved / Not Authorized | 闭合partial stream、FIN/RST/shutdown、async error/options、message/vector projection与final-release/reclaim | None；TCP target contracts继续Pending | Stage 2 Closed并取得纵切failure/cleanup证据 |
 | Stage 4 — Blocking、readiness与concurrency hardening | Outline / Not Resolved / Not Authorized | 以各operation owner predicate接入blocking/poll/select/epoll，并关闭race、fault、signal与capacity recovery | None；TCP target contracts继续Pending | Stage 3 Closed且完整operation/lifecycle surface可供wait proof |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 完成mandatory双架构、remote-external、shared regression与架构封顶，原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、acceptance assets与独立final review可用 |
 
-### 6.3 Stage 1 Outline — Stack TCP owner与protocol progression foundation
+### 6.3 Stage 1 Resolved Gate — Stack TCP owner与protocol progression foundation
 
-**目的：** 第一次进入kernel时直接形成最终production owner形状：让UDP、ICMP raw与TCP各自的Stack-side
-protocol owner判断pump外committed effect并向既有worker可靠移交stateless progression obligation，原子删除
-UDP/ICMP raw caller/control-plane手工wake路径；同时把P0证明过的cause与bounded listener/resource路线收敛为
-production Stack TCP owner，使其唯一拥有Endpoint identity、binding/role、engine composition、pending child、
-connect/terminal outcome、timer与deferred reclaim。Stage 1不发布kernel TCP Socket UAPI。
+#### 6.3.1 成熟度、授权与前置基线
 
-**前置依赖：** P0 Positive / Closed，probe-only代码已按第4节删除或确认成为no-default production crate的最小
-substrate；父RFC R0、current Network contracts、live `DomainStack`/control-plane/worker source与register未漂移。
+Stage 1是一个formal execution gate，只在exit执行一次`NET-PROTOCOL-PROGRESSION-CUTOVER`。实现可以形成若干普通
+Git commit，但这些commit不是额外checkpoint、semantic gate或partial cutover；本Stage不需要transaction，默认
+evidence placement保持Git/PR加本页closure write-back。2026-08-05的授权只覆盖本次解析和文档更新，Stage 1仍为
+Ready / Not Authorized。
 
-**受保护边界：** Stack TCP owner不得泄漏smoltcp handle、ring borrow或Linux errno；listener/pending-child/
-engine/cause只能有一份truth，全部资源有界且owner capacity exhaustion可恢复；global allocator OOM按第5.2节
-允许panic。三类protocol effect decision保持各自owner-local，共同composition只处理affected progression domain
-与stateless request；Stack state/deadline、worker admission/coalescing/stop与control-plane selection各只有一个owner。
-commit先对后续pump可见，request在operation success/release completion前完成handoff；park、in-flight pump、
-earlier deadline、coalesced producer与late stop不能丢失或恢复admission。UDP/ICMP raw迁移必须保持selection、
-transaction、failure、readiness、retire、local/external与双架构visible semantics，且不保留旧/新双路径或fallback。
-Stage 1不得建立Socket、fd、wait/readiness、第二registry、新worker、shared effect policy或长期validation facade。
+进入implementation前必须重新确认以下live baseline没有语义漂移：
 
-**Contract与证明边界：** Stage 1只在production handoff、UDP/ICMP raw迁移、Stack TCP foundation、owner/race
-proof、host/build验证和RV64/LA64 focused UDP/ICMP raw local/external回归全部成立后，以
-`NET-PROTOCOL-PROGRESSION-CUTOVER`原子Refine current `NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`。
-该cutover只记录当前UDP/ICMP raw真实consumer与shared production substrate；TCP target contracts继续Pending，
-Stage 1只证明当前foundation mutation能够产生obligation，不提前声称尚未实现的send、receive-window reopening、
-shutdown或final-release producer已经通过。任一迁移、验证、review或文档项失败时两项Network ID都保持旧规则。
+- P0为Positive / Closed，probe-only cause/listener fixture与临时`socket-tcp` feature均已删除，production source无
+  TCP diff；
+- `DomainStack::protocol_transition()`在Stack guard内提交mutation并取出owner invalidation，在guard外路由
+  recheck-only hint；这条commit-before-notification顺序继续复用；
+- `Ipv4Selection`仍携带`PumpWake`，UDP `send()`与ICMP raw `send_prepared()`仍在Stack mutation成功后由caller
+  `request_pump()`；Stage 1必须同时移除这三处control-plane/caller wake职责；
+- external `ActivePath`已经唯一保存boot-lifetime `InterfaceId -> PumpControl` association，local association由
+  `InitialDomain.local_path`拥有；Stage 1复用这两个attach-owned association，不建立第二registry；
+- `PumpControl::request_work()`已经以active check、explicit-work release store、active recheck和worker wake表达
+  stateless/coalesced request，terminal stop先关闭admission再清除request；Stage 1先证明这套既有协议足够，不能在
+  没有具体race反例时预建新的permit、锁或lifecycle protocol；
+- current `NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`仍为旧Active规则，register中的typed user-copy
+  Apollyon仍Open。Stage 1不发布UAPI、不新增typed copy，因此该issue不阻塞本gate；任何syscall/user-copy接线都
+  越过本Stage并触发停止。
 
-**解析触发点：** P0独立关闭后重新读取retained crate code与live Stack/control-plane/worker owner，解析Stage 1的
-单一production交付、implementation ordering、validation、cutover、退出条件和必要checkpoint。普通commit不形成
-新gate；handoff不得先以kernel probe、旧/新双路径或临时caller adapter落地。若自然实现需要新的worker、shared
-effect truth、第二route/deadline truth、public API扩张，或需要改变父RFC target/owner/Contract Impact，停止并进入
-RFC review / Target Renegotiation。
+若上述source/current contract/register事实变化已经影响target、owner、handoff、failure/cleanup或validation，先
+回到Implementation Resolution或RFC review，不能按过期manifest执行。
+
+#### 6.3.2 Implementation Boundary
+
+**Target：** 在initial-domain既有Stack与worker topology内形成最终production progression handoff：UDP、ICMP raw
+与TCP各自的Stack-side protocol owner判断自己的typed committed mutation是否产生progression obligation；共同
+composition只接收affected progression interface/domain并向对应既有worker提交stateless request。Stage 1同时原子
+迁移UDP/ICMP raw真实consumer，并建立Stack-private TCP Endpoint/listener/connection/resource owner foundation。
+
+**Non-goals：** 本Stage不发布`AF_INET + SOCK_STREAM`、kernel TCP family/source、Socket operation、fd、syscall、
+Linux errno、user copy、blocking、poll/select/epoll、readiness、`SO_ERROR`或其它TCP UAPI；不运行TCP guest、CAgent、
+deployment probe或最终`NET-TCP-CUTOVER`；不建立新worker、第二route/deadline/association registry、shared effect
+policy、通用ready/error bus、TCP专用wait loop、kernel probe或长期validation facade，也不扩张`anemone-net-api`
+来承载TCP-private object或operation。kernel只可通过窄construction-time policy把owner-local capacity注入Stack；
+该seam不得提供Endpoint/engine handle或runtime TCP operation。
+
+**Protected boundary：** control plane只决定route/source/interface，不再携带或选择protocol wake policy；
+`anemone-smoltcp-stack::Stack`继续唯一拥有smoltcp object、protocol state与deadline，attach/worker owner继续唯一
+拥有association、admission、coalescing与stop。TCP engine handle、ring borrow、buffer、cause、generation和
+listener/child representation不得越过Stack fence。UDP/ICMP raw selection、transaction、failure、readiness、retire、
+local/external与双架构visible semantics保持不变。exact Rust carrier、method、module、lock与effect表示仍是
+implementation preference；边界只要求它们不能形成新的truth或public contract。
+
+#### 6.3.3 Owner 与 handoff model
+
+每个protocol mutation由对应Stack-side owner在Stack guard内同时决定operation result与是否形成obligation；共同层
+不得通过operation名称、payload、queue delta或deadline猜测effect，也不得建立跨protocol shared effect policy。
+没有committed protocol effect或operation失败时不请求progression；一旦effect提交，后续pump必须先能观察该effect，
+然后共同层才处理其affected interface/domain。operation只有在共同层完成这次non-blocking request提交后才能向上返回
+成功；它不等待worker实际运行或等待protocol progress完成。
+
+共同composition在attach authority guard内只解析既有local/external association并取得窄request capability，随后在
+guard外提交request；它不持attach guard进入worker、Stack或wake路径，也不把`PumpControl`、worker identity、route、
+deadline或stop truth存回Endpoint/Socket。active path找不到一个已选择且已提交的interface属于owner invariant
+violation，不允许silent drop、fallback到其它path或动态创建association；terminal stop已关闭admission时，既有
+stop语义获胜且late request不能重开worker。
+
+UDP与ICMP raw切换必须是同一source-level migration：`Ipv4Selection`和control-plane input/storage删除`PumpWake`，
+两个caller `request_pump()`路径同时删除，成功mutation改由owner-driven handoff提交request。不得先长期保留旧/新
+双路径、compat fallback或caller adapter；中间commit若不能保持完整production语义，只能与切换commit合并或留在
+未发布分支，不能形成独立checkpoint。
+
+#### 6.3.4 TCP private foundation
+
+Stage 1永久启用vendored smoltcp `socket-tcp`，并把P0证明的最小cause seam收敛为production substrate：engine只
+保存并一次性交付异步protocol-domain `Reset`与`Timeout`；local close/abort继续由Stack TCP owner command与
+connection phase拥有，不能伪装成async cause。cause在consume或对应generation安全reclaim前不丢失、不重复，也不
+携带Linux errno、Socket state、ready mask或caller phase。
+
+Stack-private TCP owner唯一拥有Endpoint identity、binding/role、active/passive connection phase、bounded engine
+composition、logical listener admission、half-open/completed pending child、connect/terminal outcome、generation、
+timer与deferred reclaim。listener/engine/pending queue不能出现第二份admission truth；cancel、take、timeout或reclaim
+必须在旧generation完全detach后才允许slot复用。Stage 1不向kernel发布可消费的TCP operation surface；private
+production owner method由owner-local tests直接覆盖，Stage 2才解析kernel的窄consumer API。
+
+Endpoint、engine/listener slot、completed child、RX/TX storage、timer与deferred-reclaim等重要capacity进入
+`conf/.defconfig`中的owner-local Kconfig/build policy。xtask只忠实materialize配置，不clamp、补默认或重新解释
+semantic value；kernel以`static_assert!`拒绝零值、overflow或不自洽组合。具体常量名和值仍由实现选择，但Stage 1
+acceptance配置必须能让
+一个logical listener同时保留至少十个completed pending child，从foundation层证明未来`listen(10)`不是被固定更小
+结构上限阻断；该证明不提前发布Linux backlog ABI。
+
+#### 6.3.5 Progression race、failure 与 cleanup
+
+handoff必须覆盖worker已经park、正处于pump、刚清除旧request、多个producer合并以及mutation制造比已armed timer
+更早工作的交错。stateless request只表达“重读Stack truth”，不复制deadline；worker醒来后仍从Stack pump outcome
+刷新`next_deadline`。当path保持active时，任何已提交obligation都必须导致当前或后续bounded round观察它，不能依赖
+无关IRQ、旧timer、later traffic或busy-poll。多个request可以合并，但合并不能把最后一个commit吞掉。
+
+terminal shutdown继续沿用既有线性化：stop关闭`active`并清除explicit work后优先于并发late request，late request
+不得恢复admission；本Stage不承诺terminal stop之后继续推进protocol，也不为此扩大System Power contract。若真实
+race证明现有atomic/wait协议不足，且修复需要新permit、lock order、worker lifecycle或System Power语义，立即停止并
+提交具体counterexample与最小contract delta，不能静默加入第二admission truth。
+
+UDP/ICMP raw operation在mutation失败时保持原typed failure且不request；mutation成功后handoff本身不得allocation、
+同步等待worker或引入新的user-visible failure。TCP capacity full是owner-local可恢复typed rejection/drop/backpressure，
+不得依赖allocator偶然失败；在合法显式上界内的global allocation OOM继续按第5.2节允许kernel-fatal。listener child、
+cause、timer与deferred-reclaim cleanup由同一TCP owner完成，stale generation不能cancel、consume或唤醒replacement；
+Stage 1没有fd publication/final release，因此不得为尚不存在的Socket lifecycle建立rollback或桥。
+
+#### 6.3.6 Implementation ordering
+
+本Stage按以下语义顺序形成一个closure unit：
+
+1. 永久启用`socket-tcp`，落地窄cause seam、owner-local capacity policy与Stack-private TCP owner；先用host tests证明
+   bounded listener/resource/cause/generation路线，不发布kernel operation；
+2. 在既有`DomainStack::protocol_transition()` commit/invalidations结构上加入protocol-owner progression outcome，
+   并让attach composition可按affected interface解析既有local/external request capability；
+3. 用确定性KUnit/source proof关闭park、in-flight、coalescing、earlier-work与late-stop交错；如果现有协议不足，按
+   6.3.5停止，不以caller fallback继续；
+4. 在一次迁移中删除control-plane `PumpWake`与UDP/ICMP raw两个caller wake，把两者切换到owner-driven handoff；
+5. 完成host/config/双架构build与focused guest regression、Architecture Friction Scan和独立engineering review；全部
+   满足后才写回current contracts并原子执行唯一cutover。
+
+步骤顺序不冻结具体文件或commit。1可以作为不改变visible semantics的普通foundation commit，2--4必须保持最终
+source没有旧/新双路径；任何普通commit都不授权下一Stage或contract生效。
+
+#### 6.3.7 Validation、review 与 observability
+
+Stage 1 closure必须同时给出以下证据：
+
+- `just test net-host`：在既有suite中永久覆盖TCP `Reset`/`Timeout` one-shot、local abort exclusion、至少十个
+  completed pending child、full/recovery、cancel/take、generation reuse、resource cleanup与no-default production
+  build；不得新建第二个net-host wrapper；
+- owner-local KUnit/source proof：三类protocol effect decision各自owner-local，Stack guard内commit/guard外handoff，
+  association只来自`ActivePath`/`InitialDomain.local_path`，request在attach guard外提交，control plane与caller不再
+  持有wake，以及park/in-flight/coalesced/earlier-work/late-stop matrix；
+- `just test xtask`与source audit：Kconfig materialization faithful，重要capacity由kernel `static_assert!`执行语义
+  检查，没有xtask clamp、第二配置truth或`anemone-net-api` TCP扩张；
+- `just fmt kernel --check`，以及
+  `just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`和
+  `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`；
+- `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-tcp-stage1-rv64.log`与
+  `./scripts/run-user-test-la64.sh etc/preliminary/images/sdcard-la.img build/net-tcp-stage1-la64.log`：两架构都必须
+  证明UDP与ICMP raw的local及external路径。现有`socket-test` local UDP/RAWICMP与
+  BusyBox loopback/gateway ping只覆盖其中一部分；缺失的external UDP proof使用bounded、stage-scoped validation
+  input/host orchestration，明确peer/guest双marker，并在closure前删除临时asset。不得恢复长期generic-wrapper peer、
+  留下validation facade，或把单架构/loopback/source audit替代external execution；
+- `git diff --check`、`mdbook build docs`、Stage 1 Architecture Friction Scan与独立engineering review。review必须
+  明确检查第二状态truth、owner penetration、private representation leakage、public API expansion、caller/arch/test
+  special case、无退出条件bridge、failure/cleanup顺序和降低validation诚实性的做法。
+
+production不增加per-request log、diagnostic mirror或驱动admission的counter。host/KUnit marker和guest现有suite marker
+提供执行证据；若为定位race临时增加trace/counter，必须标注纯诊断且在closure前删除，除非review证明其有长期
+observability owner与不参与行为的边界。
+
+TCP Socket/UAPI、TCP guest、CAgent、deployment probe、full network LTP、final harness、physical hardware、`smp>1`
+与其它NIC/platform在Stage 1均Not Run；不得从TCP foundation host proof或UDP/ICMP guest回归外推这些轨道。
+
+#### 6.3.8 Cutover、exit 与 stop conditions
+
+只有6.3.7全部PASS、临时validation asset已删除、最终source没有caller fallback/第二truth、Architecture Friction
+Scan没有本Stage引入或恶化的未处理Keter/Apollyon，且独立review接受时，Stage 1才可在同一closure write-back中：
+
+1. 原子Refine current `NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`并标记
+   `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；
+2. 把本页、父RFC与RFC导航更新为Stage 1 Closed，记录Git/PR、实际命令、结果、proof scope与Not Run；
+3. 保持三项TCP Introduce与`SOCKET-ABI-001` Refine Pending，transaction仍为None，并立即停止，不解析或进入Stage 2。
+
+任何一项迁移、验证、asset cleanup、friction scan、review或文档write-back失败时，Stage 1保持In Progress / Review
+Hold，两个Network current contract继续旧规则，不允许partial cutover。需要长期时间线的真实执行跨度只能经review
+再建立transaction；transaction不是activation或closure前置。
+
+以下事实要求在implementation或cutover前立即停止并回到RFC review / Target Renegotiation：target/non-goal、owner/
+handoff、failure/cleanup、超出上述construction policy seam的public API/visibility/shared contract、ABI、acceptance或
+validation claim需要变化；需要新worker、
+第二association/route/deadline/admission truth、shared effect policy或无退出条件bridge；需要把TCP object/operation加入
+`anemone-net-api`、让kernel取得smoltcp private object、或让Stack取得Task/File/fd/waiter；需要新增syscall/typed user
+copy、Socket/fd/wait/readiness或改变System Power shutdown语义；只能保留caller wake fallback、降低UDP/ICMP raw
+oracle或永久validation facade才能通过。具体private type、module、method、lock、capacity数值、test fixture与普通
+commit拆分只要满足本边界，属于implementation preference，不形成新的resolution gate。
 
 ### 6.4 Stage 2 Outline — Nonblocking TCP vertical slice
 
