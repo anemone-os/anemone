@@ -6,9 +6,12 @@
 use anemone_net_api::{
     Ipv4Address, Ipv4EgressSelection,
     tcp::{
-        TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectionObservation,
-        TcpCreateError, TcpEndpointId, TcpListenError, TcpLocalBinding, TcpPeer, TcpQueryError,
-        TcpReceiveError, TcpReceiveReservation, TcpReceiveResolveError, TcpSendError,
+        TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
+        TcpConnectionObservation, TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError,
+        TcpLocalBinding, TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
+        TcpReceiveReservation, TcpReceiveResolveError, TcpReleaseReason, TcpSendError,
+        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
+        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use anemone_smoltcp_stack::TcpPolicy;
@@ -27,6 +30,8 @@ pub(in crate::net) const TCP_POLICY: TcpPolicy = TcpPolicy::new(
     NET_TCP_RX_BUFFER_BYTES,
     NET_TCP_TX_BUFFER_BYTES,
     NET_TCP_DEFERRED_RECLAIM_CAPACITY,
+    NET_TCP_CONNECT_TIMEOUT_MS,
+    NET_TCP_ORPHAN_TIMEOUT_MS,
     NET_TCP_EPHEMERAL_PORT_FIRST,
     NET_TCP_EPHEMERAL_PORT_LAST,
 );
@@ -67,6 +72,14 @@ static_assert!(
     "TCP reclaim storage must reserve one infallible slot for every engine"
 );
 static_assert!(
+    NET_TCP_CONNECT_TIMEOUT_MS > 0 && NET_TCP_CONNECT_TIMEOUT_MS <= (i64::MAX as usize) / 1_000,
+    "net_tcp_connect_timeout_ms must form a positive signed-microsecond duration"
+);
+static_assert!(
+    NET_TCP_ORPHAN_TIMEOUT_MS > 0 && NET_TCP_ORPHAN_TIMEOUT_MS <= (i64::MAX as usize) / 1_000,
+    "net_tcp_orphan_timeout_ms must form a positive signed-microsecond duration"
+);
+static_assert!(
     NET_TCP_EPHEMERAL_PORT_FIRST > 0 && NET_TCP_EPHEMERAL_PORT_FIRST <= NET_TCP_EPHEMERAL_PORT_LAST,
     "TCP ephemeral port range must be nonempty and nonzero"
 );
@@ -94,6 +107,11 @@ pub(crate) struct TcpPendingChildPort {
 pub(crate) struct TcpReceivePort {
     stack: Arc<DomainStack>,
     reservation: Option<TcpReceiveReservation>,
+}
+
+pub(crate) enum TcpReceiveOutcome {
+    Data(TcpReceivePort),
+    EndOfStream,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -159,6 +177,22 @@ impl TcpEndpointPort {
         self.stack.tcp_endpoint_binding(self.id())
     }
 
+    pub(crate) fn reuse_address(&self) -> Result<bool, TcpBindError> {
+        self.stack.tcp_reuse_address(self.id())
+    }
+
+    pub(crate) fn set_reuse_address(&self, enabled: bool) -> Result<(), TcpBindError> {
+        self.stack.set_tcp_reuse_address(self.id(), enabled)
+    }
+
+    pub(crate) fn no_delay(&self) -> Result<bool, TcpQueryError> {
+        self.stack.tcp_no_delay(self.id())
+    }
+
+    pub(crate) fn set_no_delay(&self, enabled: bool) -> Result<(), TcpQueryError> {
+        self.stack.set_tcp_no_delay(self.id(), enabled)
+    }
+
     pub(crate) fn connect(&self, peer: TcpPeer) -> Result<(), ConnectError> {
         let binding = self.binding().map_err(|error| match error {
             TcpQueryError::UnknownEndpoint | TcpQueryError::WrongRole => {
@@ -184,7 +218,23 @@ impl TcpEndpointPort {
         self.stack.observe_tcp_connection(self.id())
     }
 
+    pub(crate) fn connect_result(&self) -> Result<TcpConnectResult, TcpQueryError> {
+        self.stack.tcp_connect_result(self.id())
+    }
+
+    pub(crate) fn consume_pending_error(&self) -> Result<Option<TcpPendingError>, TcpQueryError> {
+        self.stack.consume_tcp_pending_error(self.id())
+    }
+
+    pub(crate) fn stream_observation(&self) -> Result<TcpStreamObservation, TcpQueryError> {
+        self.stack.observe_tcp_stream(self.id())
+    }
+
     pub(crate) fn listen(&self) -> Result<(), ListenError> {
+        self.listen_with_backlog(TcpListenBacklog::new(NET_TCP_LISTENER_COMPLETED_CAPACITY))
+    }
+
+    pub(crate) fn listen_with_backlog(&self, backlog: TcpListenBacklog) -> Result<(), ListenError> {
         let binding = self.binding().map_err(|error| match error {
             TcpQueryError::UnknownEndpoint | TcpQueryError::WrongRole => {
                 ListenError::Stack(TcpListenError::UnknownEndpoint)
@@ -206,7 +256,12 @@ impl TcpEndpointPort {
             | ConnectError::Stack(_) => ListenError::AddressUnavailable,
         })?;
         self.stack
-            .listen_tcp_endpoint(self.id(), selection.interface, Ipv4Address::UNSPECIFIED)
+            .listen_tcp_endpoint_with_backlog(
+                self.id(),
+                selection.interface,
+                Ipv4Address::UNSPECIFIED,
+                backlog,
+            )
             .map_err(ListenError::Stack)
     }
 
@@ -224,6 +279,10 @@ impl TcpEndpointPort {
         self.stack.send_tcp_endpoint(self.id(), bytes)
     }
 
+    pub(crate) fn send_stream(&self, bytes: &[u8]) -> Result<usize, TcpStreamSendError> {
+        self.stack.send_tcp_stream(self.id(), bytes)
+    }
+
     pub(crate) fn receive(&self, maximum: usize) -> Result<TcpReceivePort, TcpReceiveError> {
         let reservation = self.stack.reserve_tcp_receive(self.id(), maximum)?;
         Ok(TcpReceivePort {
@@ -232,13 +291,53 @@ impl TcpEndpointPort {
         })
     }
 
+    pub(crate) fn receive_stream(
+        &self,
+        maximum: usize,
+        mode: TcpReceiveMode,
+    ) -> Result<TcpReceiveOutcome, TcpStreamReceiveError> {
+        match self.stack.receive_tcp_stream(self.id(), maximum, mode)? {
+            TcpStreamReceiveOutcome::Data(reservation) => {
+                Ok(TcpReceiveOutcome::Data(TcpReceivePort {
+                    stack: self.stack.clone(),
+                    reservation: Some(reservation),
+                }))
+            },
+            TcpStreamReceiveOutcome::EndOfStream => Ok(TcpReceiveOutcome::EndOfStream),
+        }
+    }
+
+    pub(crate) fn shutdown(
+        &self,
+        direction: TcpShutdownDirection,
+    ) -> Result<TcpShutdownOutcome, TcpShutdownError> {
+        self.stack.shutdown_tcp_endpoint(self.id(), direction)
+    }
+
     pub(crate) fn retire(mut self) {
         let endpoint = self
             .endpoint
             .take()
             .expect("TCP capability retired more than once");
+        // Stage 2 uses this legacy capability for rollback and final release.
+        // CKPT 3B must replace each call site with an explicit lifecycle reason
+        // before semantic final release may select graceful FIN.
         self.stack
             .retire_tcp_endpoint(endpoint)
+            .expect("live TCP capability lost its owner before retirement");
+    }
+
+    pub(crate) fn release(mut self, reason: TcpReleaseReason) {
+        self.release_inner(reason);
+    }
+
+    fn release_inner(&mut self, reason: TcpReleaseReason) {
+        let endpoint = self
+            .endpoint
+            .take()
+            .expect("TCP capability retired more than once");
+        self.stack
+            .release_tcp_endpoint(endpoint, reason)
             .expect("live TCP capability lost its owner before retirement");
     }
 }
@@ -252,7 +351,7 @@ impl Drop for TcpEndpointPort {
         // construction. The move-only capability makes a stale identity an
         // owner invariant violation, not a recoverable cleanup outcome.
         self.stack
-            .retire_tcp_endpoint(endpoint)
+            .release_tcp_endpoint(endpoint, TcpReleaseReason::CreationRollback)
             .expect("dropped TCP capability lost its owner before retirement");
     }
 }

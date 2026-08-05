@@ -132,7 +132,8 @@ pub enum State {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum DisconnectReason {
-    Reset,
+    ResetBeforeEstablished,
+    ResetAfterEstablished,
     Timeout,
 }
 
@@ -822,6 +823,12 @@ impl<'a> Socket<'a> {
     ///     endpoint exceeds the specified duration between any two packets it
     ///     sends.
     pub fn set_timeout(&mut self, duration: Option<Duration>) {
+        if self.timeout != duration {
+            // A newly installed policy starts a new inactivity episode. Using
+            // the previous policy's receive timestamp could otherwise expire
+            // the connection retroactively before its next local transmit.
+            self.remote_last_ts = None;
+        }
         self.timeout = duration
     }
 
@@ -1920,7 +1927,13 @@ impl<'a> Socket<'a> {
             (_, TcpControl::Rst) => {
                 tcp_trace!("received RST");
                 assert!(self.disconnect_reason.is_none());
-                self.disconnect_reason = Some(DisconnectReason::Reset);
+                self.disconnect_reason = Some(
+                    if matches!(self.state, State::SynSent | State::SynReceived) {
+                        DisconnectReason::ResetBeforeEstablished
+                    } else {
+                        DisconnectReason::ResetAfterEstablished
+                    },
+                );
                 self.set_state(State::Closed);
                 self.tuple = None;
                 return None;
@@ -4012,6 +4025,10 @@ mod test {
             }
         );
         assert_eq!(s.state, State::Closed);
+        assert_eq!(
+            s.take_disconnect_reason(),
+            Some(DisconnectReason::ResetBeforeEstablished)
+        );
     }
 
     #[test]
@@ -4027,7 +4044,10 @@ mod test {
             }
         );
         assert_eq!(s.state, State::Closed);
-        assert_eq!(s.take_disconnect_reason(), Some(DisconnectReason::Reset));
+        assert_eq!(
+            s.take_disconnect_reason(),
+            Some(DisconnectReason::ResetBeforeEstablished)
+        );
         assert_eq!(s.take_disconnect_reason(), None);
     }
 
@@ -5023,7 +5043,10 @@ mod test {
             }
         );
         assert_eq!(s.state, State::Closed);
-        assert_eq!(s.take_disconnect_reason(), Some(DisconnectReason::Reset));
+        assert_eq!(
+            s.take_disconnect_reason(),
+            Some(DisconnectReason::ResetAfterEstablished)
+        );
         assert_eq!(s.take_disconnect_reason(), None);
     }
 

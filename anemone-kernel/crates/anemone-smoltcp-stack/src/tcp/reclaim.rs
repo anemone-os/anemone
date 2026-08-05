@@ -4,11 +4,11 @@ use alloc::vec::Vec;
 
 use anemone_net_api::{
     InterfaceId,
-    tcp::{TcpEndpointId, TcpRetireError},
+    tcp::{TcpEndpointId, TcpReleaseReason, TcpRetireError},
 };
-use smoltcp::{iface::SocketSet, socket::tcp};
+use smoltcp::{iface::SocketSet, socket::tcp, time::Duration};
 
-use super::{DeferredReclaim, EndpointRole, ReclaimAction, TcpEndpoints};
+use super::{DeferredReclaim, EndpointRole, ReclaimAction, TcpEndpoints, engine_connection_tuple};
 
 impl TcpEndpoints {
     pub(crate) fn retire_without_engine(
@@ -25,10 +25,11 @@ impl TcpEndpoints {
         Ok(())
     }
 
-    pub(crate) fn retire_endpoint(
+    pub(crate) fn begin_release(
         &mut self,
         sockets: &mut SocketSet<'static>,
         id: TcpEndpointId,
+        reason: TcpReleaseReason,
     ) -> Result<Option<InterfaceId>, TcpRetireError> {
         let Some(index) = self.endpoint_index(id) else {
             return Err(TcpRetireError::UnknownEndpoint);
@@ -40,25 +41,34 @@ impl TcpEndpoints {
             },
             EndpointRole::Connection(connection) => {
                 let interface = connection.interface;
-                if connection.reservation.is_some() {
-                    let handle = connection.handle;
-                    let has_remote = sockets
-                        .get::<tcp::Socket>(handle)
-                        .remote_endpoint()
-                        .is_some();
-                    if has_remote {
-                        sockets.get_mut::<tcp::Socket>(handle).abort();
-                    }
-                    self.connection_mut(id)
-                        .expect("retiring TCP connection disappeared")
-                        .retire_requested = true;
-                    return Ok(has_remote.then_some(interface));
-                }
+                let handle = connection.handle;
                 let has_remote = sockets
-                    .get::<tcp::Socket>(connection.handle)
+                    .get::<tcp::Socket>(handle)
                     .remote_endpoint()
                     .is_some();
-                self.queue_connection_reclaim(sockets, id);
+                match reason {
+                    TcpReleaseReason::FinalRelease => {
+                        let socket = sockets.get_mut::<tcp::Socket>(handle);
+                        socket.set_timeout(Some(Duration::from_millis(
+                            self.policy.orphan_timeout_ms as u64,
+                        )));
+                        socket.close();
+                    },
+                    TcpReleaseReason::CreationRollback
+                    | TcpReleaseReason::AcceptedChildRollback
+                    | TcpReleaseReason::ListenerWithdrawal => {
+                        if has_remote {
+                            sockets.get_mut::<tcp::Socket>(handle).abort();
+                        }
+                    },
+                }
+                if connection.reservation.is_some() {
+                    self.connection_mut(id)
+                        .expect("retiring TCP connection disappeared")
+                        .release_requested = Some(reason);
+                    return Ok(has_remote.then_some(interface));
+                }
+                self.queue_connection_reclaim(sockets, id, reason);
                 Ok(has_remote.then_some(interface))
             },
             EndpointRole::Listener(listener) => {
@@ -94,6 +104,7 @@ impl TcpEndpoints {
                     EndpointRole::Reclaiming {
                         remaining: deferred_needed,
                         binding: Some(binding),
+                        tuple: None,
                     },
                 );
                 let EndpointRole::Listener(listener) = role else {
@@ -105,15 +116,14 @@ impl TcpEndpoints {
                     let Some(handle) = slot.handle else {
                         continue;
                     };
-                    if sockets
-                        .get::<tcp::Socket>(handle)
-                        .remote_endpoint()
-                        .is_some()
-                    {
+                    let tuple = engine_connection_tuple(sockets.get::<tcp::Socket>(handle));
+                    assert_eq!(slot.tuple, tuple);
+                    if tuple.is_some() {
                         sockets.get_mut::<tcp::Socket>(handle).abort();
                         self.queue_reclaim(DeferredReclaim {
                             interface,
                             handle,
+                            tuple,
                             action: ReclaimAction::ReleaseEndpoint(id),
                         });
                     } else {
@@ -135,6 +145,7 @@ impl TcpEndpoints {
         &mut self,
         sockets: &mut SocketSet<'static>,
         id: TcpEndpointId,
+        reason: TcpReleaseReason,
     ) {
         let connection = self
             .connection(id)
@@ -142,6 +153,10 @@ impl TcpEndpoints {
         assert!(connection.reservation.is_none());
         let interface = connection.interface;
         let handle = connection.handle;
+        let tuple = super::ConnectionTuple {
+            local: connection.local,
+            peer: connection.peer,
+        };
         if sockets
             .get::<tcp::Socket>(handle)
             .remote_endpoint()
@@ -151,16 +166,34 @@ impl TcpEndpoints {
             self.release_endpoint(id);
             return;
         }
-        sockets.get_mut::<tcp::Socket>(handle).abort();
+        match reason {
+            TcpReleaseReason::FinalRelease => {
+                let socket = sockets.get_mut::<tcp::Socket>(handle);
+                socket.set_timeout(Some(Duration::from_millis(
+                    self.policy.orphan_timeout_ms as u64,
+                )));
+                socket.close();
+            },
+            TcpReleaseReason::CreationRollback
+            | TcpReleaseReason::AcceptedChildRollback
+            | TcpReleaseReason::ListenerWithdrawal => {
+                sockets.get_mut::<tcp::Socket>(handle).abort()
+            },
+        }
         self.endpoint_mut(id)
             .expect("retiring TCP connection disappeared before publication")
             .role = EndpointRole::Reclaiming {
             remaining: 1,
             binding: Some(connection.binding),
+            // The active Connection role has ended. Preserve its exact tuple
+            // here as the sole reservation truth until protocol reclaim, so
+            // SO_REUSEADDR cannot admit the same 4-tuple through TIME_WAIT.
+            tuple: Some(tuple),
         };
         self.queue_reclaim(DeferredReclaim {
             interface,
             handle,
+            tuple: None,
             action: ReclaimAction::ReleaseEndpoint(id),
         });
     }
@@ -170,6 +203,22 @@ impl TcpEndpoints {
         interface: InterfaceId,
         sockets: &mut SocketSet<'static>,
     ) {
+        self.refresh_listener_tuples(interface, sockets);
+        for index in 0..self.endpoints.len() {
+            let endpoint = match &self.endpoints[index] {
+                super::EndpointSlot {
+                    id: Some(id),
+                    role: EndpointRole::Connection(connection),
+                    ..
+                } if connection.interface == interface => Some(*id),
+                _ => None,
+            };
+            if let Some(endpoint) = endpoint {
+                self.refresh_connection(sockets, endpoint)
+                    .expect("live TCP connection disappeared during pump refresh");
+            }
+        }
+
         let mut index = 0;
         while index < self.deferred.len() {
             if self.deferred[index].interface != interface
@@ -213,6 +262,14 @@ impl TcpEndpoints {
         if slot.generation != generation || slot.handle.is_some() {
             return;
         }
+        let active = listener
+            .slots
+            .iter()
+            .filter(|slot| slot.handle.is_some())
+            .count();
+        if active >= listener.backlog {
+            return;
+        }
         let binding = listener.binding;
         assert!(self.ensure_engine_capacity(1));
         let handle = self.add_listener_engine(sockets, binding);
@@ -224,6 +281,7 @@ impl TcpEndpoints {
         assert!(slot.handle.is_none());
         slot.handle = Some(handle);
         slot.claimed = false;
+        slot.tuple = None;
     }
 
     fn rearm_closed_listener_engines(
@@ -262,8 +320,15 @@ impl TcpEndpoints {
             let slot = &listener.slots[slot_index];
             assert_eq!(slot.generation, generation);
             assert_eq!(slot.handle, Some(handle));
+            let replace = listener
+                .slots
+                .iter()
+                .filter(|slot| slot.handle.is_some())
+                .count()
+                .saturating_sub(1)
+                < listener.backlog;
             self.remove_engine(sockets, handle);
-            let replacement = self.add_listener_engine(sockets, binding);
+            let replacement = replace.then(|| self.add_listener_engine(sockets, binding));
             let listener = self
                 .listener_mut(listener_id)
                 .expect("TCP listener changed during one reclaim window");
@@ -272,8 +337,25 @@ impl TcpEndpoints {
                 .generation
                 .checked_add(1)
                 .expect("TCP listener slot generation exhausted");
-            slot.handle = Some(replacement);
+            slot.handle = replacement;
             slot.claimed = false;
+            slot.tuple = None;
+        }
+    }
+
+    fn refresh_listener_tuples(&mut self, interface: InterfaceId, sockets: &SocketSet<'static>) {
+        for endpoint in &mut self.endpoints {
+            let EndpointRole::Listener(listener) = &mut endpoint.role else {
+                continue;
+            };
+            if listener.interface != interface {
+                continue;
+            }
+            for slot in &mut listener.slots {
+                slot.tuple = slot
+                    .handle
+                    .and_then(|handle| engine_connection_tuple(sockets.get::<tcp::Socket>(handle)));
+            }
         }
     }
 
@@ -297,5 +379,7 @@ impl TcpEndpoints {
             .expect("TCP Endpoint disappeared before owner release");
         slot.role = EndpointRole::Vacant;
         slot.id = None;
+        slot.reuse_address = false;
+        slot.no_delay = false;
     }
 }

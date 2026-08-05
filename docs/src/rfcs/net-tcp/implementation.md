@@ -1,14 +1,14 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / TCP Not Effective
+**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 In Progress / CKPT 3A Closed / TCP Not Effective
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 **执行授权：** 用户于 2026-08-05 明确接受 R0、授权并关闭 P0，随后授权Stage 1解析并单独授权其implementation；
 Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
-用户于2026-08-06只授权Stage 3 Implementation Resolution；Stage 3 implementation与Stage 4--5均未授权
-**当前 Gate：** Stage 3 Resolved / Ready / Not Active / Not Authorized；Stage 4--5 Outline / Not Resolved /
-Not Authorized
+用户于2026-08-06先授权Stage 3 Implementation Resolution，随后单独授权并关闭CKPT 3A；CKPT 3B与Stage 4--5均未授权
+**当前 Gate：** Stage 3 In Progress / CKPT 3A Closed / CKPT 3B Resolved / Ready / Not Active / Not Authorized；
+Stage 4--5 Outline / Not Resolved / Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
@@ -17,7 +17,7 @@ owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收�
 `AF_INET + SOCK_STREAM` creation tuple、不发布handler或部分UAPI，也不执行contract cutover。
 Stage 3已经解析为两个分别授权、分别review的execution checkpoint：CKPT 3A完成Stack TCP owner fact与lifecycle，
 CKPT 3B完成仍不可由syscall到达的Socket/ABI projection；整个Stage 3仍不注册TCP creation tuple、不发布handler、
-fd或部分UAPI，也不执行contract cutover。Stage 4--5仍为Outline；本次resolution不授权进入CKPT 3A。
+fd或部分UAPI，也不执行contract cutover。CKPT 3A已经关闭，Stage 3保持In Progress；CKPT 3B与Stage 4--5仍未授权。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -262,7 +262,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | P0 — TCP engine feasibility probe | Positive / Closed | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | 已满足；本gate停止 |
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
 | Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
-| Stage 3 — Stream、ABI与lifecycle completion | Resolved / Ready / Not Active / Not Authorized | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | 已满足；等待CKPT 3A独立授权 |
+| Stage 3 — Stream、ABI与lifecycle completion | In Progress / CKPT 3A Closed / CKPT 3B Ready / Not Active / Not Authorized | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | CKPT 3A已满足并停止；等待CKPT 3B独立授权 |
 | Stage 4 — Blocking、readiness与concurrency hardening | Outline / Not Resolved / Not Authorized | 以各operation owner predicate接入blocking/poll/select/epoll，并关闭race、fault、signal与capacity recovery | None；TCP target contracts继续Pending | Stage 3 Closed且完整operation/lifecycle surface可供wait proof |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 完成mandatory双架构、remote-external、shared regression与架构封顶，原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、acceptance assets与独立final review可用 |
 
@@ -748,9 +748,9 @@ checkpoint。CKPT 3A先完成Stack TCP owner的stream、option、error与lifecyc
 capability投影到仍不可由syscall到达的general Socket front。CKPT 3A必须独立安全且对current visible semantics
 中性；CKPT 3B关闭整个Stage 3，但仍不注册TCP creation tuple或发布部分UAPI。
 
-用户于2026-08-06只授权本节Implementation Resolution。本文据此达到Resolved / Ready / Not Active /
-Not Authorized；没有Stage 3代码、运行、review或closure主张，也没有CKPT 3A implementation授权。进入CKPT 3A前
-必须重新确认以下live baseline没有语义漂移：
+用户于2026-08-06先授权本节Implementation Resolution，随后单独授权CKPT 3A implementation；CKPT 3A现已按
+第6.5.5节边界关闭。Stage 3保持In Progress，CKPT 3B仍为Resolved / Ready / Not Active / Not Authorized。
+进入CKPT 3A前重新确认了以下live baseline没有语义漂移；closure后受保护边界仍保持不变：
 
 - Stage 2保持Closed，四项TCP target contract保持Pending，current Network、Socket、Opened-description、IOMUX与
   Epoll contracts不变；`resolve_socket_profile(AF_INET, SOCK_STREAM, 0/IPPROTO_TCP)`仍拒绝，TCP syscall、fd、
@@ -890,6 +890,36 @@ CKPT 3B仍Not Authorized，四项TCP target contract继续Pending，并立即停
 kernel缓存pending error/phase、用同一retire action近似所有lifecycle原因、让final release等待或失败、或需要
 general Socket contract变化才能形成owner capability，保持Review Hold并回RFC review，不能进入CKPT 3B。
 
+#### 6.5.5.1 CKPT 3A execution result — Closed
+
+CKPT 3A在同一Implementation Boundary内关闭，不执行semantic或contract cutover：
+
+- Stack TCP owner实现normalized backlog与re-listen grow/shrink，Endpoint-owned `SO_REUSEADDR`与
+  `TCP_NODELAY`，双方opt-in reuse、duplicate-listener拒绝和避开exact 4-tuple冲突的peer-aware ephemeral scan；
+  binding、listener、peer tuple与engine reservation继续只有一份owner truth。
+- typed pending connect/error result由Stack owner消费；engine区分establishment前后Reset并覆盖simultaneous open，
+  production active-connect timeout由Kconfig拥有且在establishment后清除。partial send、peek、buffered bytes先于
+  FIN/RST、EOF、direction shutdown与broken-send fact均由同一stream owner提供，不在kernel缓存phase/error truth。
+- explicit final release与rollback abort reason分离，graceful FIN、engine-owned orphan timeout和outstanding receive
+  reservation的最终释放由owner闭合。Stage 2 `retire()`只保留为CKPT 3B前的legacy rollback/abort bridge；explicit
+  `FinalRelease`是唯一graceful FIN路径，non-consuming connection observation同样带CKPT 3B删除条件。
+- `just test net-host` PASS：TCP owner `18/18`、focused smoltcp TCP `178/178`，UDP、ICMP raw、frame path与
+  no-default production checks继续通过。`just test xtask`为`75/75` PASS；RV64/LA64 release build通过，最终
+  verified symbol分别为`6516`与`6160`。
+- exact-source RV64 wrapper
+  `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-tcp-stage3-ckpt3a-rv64.log`
+  完成orderly shutdown：KUnit `448/448`，UDP `16/16`、UDP extended `10/10`、UDP message `7/7`、Unix stream
+  `23/23`、Unix seqpacket `4/4`、raw ICMP `10/10`、Rust command `2/2`，glibc与musl LTP合计`6/6`。
+- `just fmt kernel`与双架构build在最终source上通过；closure write-back后再以`just fmt kernel --check`、
+  `mdbook build docs`和`git diff --check`确认最终提交源。独立engineering review最终结论为
+  `0 Apollyon / 0 Keter / 0 Euclid`，只读review没有修改文件；Architecture Friction Scan没有未处理finding。
+
+据此CKPT 3A标记Closed，Stage 3保持In Progress。四项TCP target contract继续Pending，current Network、Socket、
+Opened-description、IOMUX与Epoll contracts不变，transaction保持None。published resolver/profile、TCP Socket front、
+userspace ABI、blocking/readiness与test profile均未修改。TCP syscall/runtime因resolver/profile仍未发布而Not Run；
+blocking/readiness、TCP guest、CAgent、deployment probe、full network LTP、final harness、physical hardware、`smp>1`
+与其它NIC/platform同样Not Run。CKPT 3A授权在此耗尽，CKPT 3B保持Not Active / Not Authorized，不进入下一checkpoint。
+
 #### 6.5.6 CKPT 3B — Syscall-unreachable Socket/ABI completion
 
 **Purpose / Deliverable：** 在review接受的CKPT 3A capability上先完成第6.5.4节目录化，再通过general Socket
@@ -965,9 +995,10 @@ Stage 3按以下顺序形成两个独立授权的closure unit：
 production不增加驱动行为的diagnostic error mirror、close counter或ready mask。若为race定位临时增加trace/counter，
 必须明确纯诊断、不参与state machine并在checkpoint closure前删除，除非review确认长期owner和观测需求。
 
-本次Implementation Resolution只运行文档检查。TCP syscall/guest/CAgent/deployment、poll/select/epoll、blocking/
-signal-cancel runtime、full network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform在整个Stage 3
-都保持Not Run；host/KUnit/build不外推这些轨道，也不以激活临时profile取得本Stage不拥有的runtime证据。
+CKPT 3A只记录第6.5.5.1节实际执行的owner/engine/config/build与既有共享回归证据。TCP syscall/guest/CAgent/
+deployment、poll/select/epoll、blocking/signal-cancel runtime、full network LTP、final harness、physical hardware、
+`smp>1`与其它NIC/platform在CKPT 3A保持Not Run；host/KUnit/build不外推这些轨道，也不以激活临时profile取得本Stage
+不拥有的runtime证据。
 
 #### 6.5.9 Stage 3 exit、cutover与stop conditions
 

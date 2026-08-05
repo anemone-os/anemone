@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Ready / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 In Progress / CKPT 3A Closed / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-06
@@ -8,8 +8,8 @@
 **影响契约：** R0仍Pending Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
-**执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Resolved / Ready / Not Active /
-Not Authorized；`NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
+**执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 In Progress / CKPT 3A Closed / CKPT 3B
+Resolved / Ready / Not Active / Not Authorized；`NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
 
@@ -29,8 +29,8 @@ Stage 2先建立kernel窄TCP owner capability，再接入syscall-unreachable的g
 creation tuple、不发布handler、fd或部分UAPI，也不执行contract cutover。Stage 3已经解析为两个需分别授权、分别
 review的execution checkpoint：CKPT 3A完成Stack TCP owner fact与lifecycle，CKPT 3B完成仍不可达的Socket/ABI
 projection；`fs/socket/tcp.rs`的行为保持型目录化属于Stage 3必要implementation ordering，不单列semantic gate。
-Stage 3当前Ready / Not Active / Not Authorized，Stage 4--5仍为Outline；本次resolution不授权任何实现、contract
-cutover或后续Stage。
+CKPT 3A已经关闭，Stage 3保持In Progress；CKPT 3B Ready / Not Active / Not Authorized，Stage 4--5仍为Outline。
+本次closure不执行contract cutover，也不授权下一checkpoint或后续Stage。
 
 ## 摘要
 
@@ -473,14 +473,14 @@ cause与bounded multi-engine listener composition路线；Stage 1将其收敛为
 迁移UDP/ICMP raw progression并执行唯一Network cutover。Stage 2建立cross-crate TCP vocabulary、完整Stack owner
 operation与kernel-private capability，并接入syscall-unreachable general Socket descriptor；TCP tuple、handler、fd、
 readiness与contract均未发布。Stage 3已经解析为CKPT 3A Stack owner fact/lifecycle completion与CKPT 3B
-syscall-unreachable Socket/ABI completion，当前Ready / Not Active / Not Authorized；Stage 4--5继续只表达future
-Outline / Not Resolved / Not Authorized。
+syscall-unreachable Socket/ABI completion；CKPT 3A已经关闭，Stage 3保持In Progress，CKPT 3B Ready / Not Active /
+Not Authorized。Stage 4--5继续只表达future Outline / Not Resolved / Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Resolved /
-  Ready / Not Active / Not Authorized；Stage 4--5 Outline / Not Authorized）
+- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 In Progress /
+  CKPT 3A Closed / CKPT 3B Ready / Not Active / Not Authorized；Stage 4--5 Outline / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
   [Socket](../../contracts/socket/index.md)、
@@ -491,8 +491,8 @@ Outline / Not Resolved / Not Authorized。
   [`simple_llm_server.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/simple_llm_server.c)、
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
-- implementation：[实施计划](./implementation.md)；P0、Stage 1与Stage 2 checkpoint focused Git commit；Stage 3
-  docs-only Implementation Resolution；transaction None
+- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2与Stage 3 CKPT 3A focused Git commit；
+  transaction None
 
 ## 修订记录
 
@@ -505,7 +505,8 @@ descriptor；这些implementation与execution write-back均不改变R0 target语
 2026-08-06把Stage 3解析为分别授权的CKPT 3A Stack owner fact/lifecycle completion与CKPT 3B
 syscall-unreachable Socket/ABI completion，并把`fs/socket/tcp.rs`目录化固定为Stage内行为保持型implementation
 ordering；本次只改变implementation route、validation placement与stop condition，不改变R0 target、owner、ABI、
-Contract Impact或acceptance，因此修订号继续保持R0。Stage 3 implementation未授权。
+Contract Impact或acceptance，因此修订号继续保持R0。随后单独授权并关闭CKPT 3A，只完成Stack owner fact与lifecycle，
+不进入Socket/ABI projection；该implementation write-back同样不改变R0 target语义，修订号继续保持R0。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -534,7 +535,11 @@ Stage 2 acceptance，review发现的capacity classification Euclid已在收口�
 [execution result](./implementation.md#649-ckpt-2b与stage-2-execution-result--closed)。四项TCP target contract继续
 Pending，current contracts不变，transaction仍为None。TCP syscall/raw user-copy/fd runtime、blocking、iomux、TCP
 guest、CAgent、deployment probe、full network LTP、final harness、hardware、`smp>1`与其它NIC/platform均Not Run。
-Stage 2授权已经耗尽。Stage 3现已完成docs-only Implementation Resolution：CKPT 3A先闭合normalized backlog、
-reuse/error、stream terminal/shutdown与graceful lifecycle owner fact，CKPT 3B再完成仍不可达的message/vector、
-option/signal、copy precedence与final-release Socket/ABI projection。两个checkpoint均未授权，TCP tuple、handler、
-fd、blocking/readiness与current contracts保持不变；TCP仍Not Effective，不进入Stage 4。
+Stage 2授权已经耗尽。Stage 3 CKPT 3A Closed / Not Cut Over：Stack TCP owner闭合normalized backlog、reuse/error、
+stream terminal/shutdown、graceful final release与bounded deferred lifecycle，kernel-private capability不缓存owner
+fact。owner host tests为`18/18`，focused smoltcp TCP为`178/178`，xtask为`75/75`，RV64 KUnit为`448/448`；RV64/LA64
+release build、exact-source RV64既有共享回归、格式与独立review通过，review结论为`0 Apollyon / 0 Keter / 0 Euclid`。
+四项TCP target contract继续Pending，current contracts不变，transaction仍为None。TCP syscall/runtime、blocking/
+readiness、TCP guest、CAgent、full network LTP、final harness、hardware、`smp>1`与其它NIC/platform均Not Run。
+Stage 3保持In Progress；CKPT 3B Ready / Not Active / Not Authorized，TCP tuple、handler、fd与部分UAPI仍不可达，
+TCP仍Not Effective，不进入CKPT 3B或Stage 4。

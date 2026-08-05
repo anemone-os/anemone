@@ -9,7 +9,10 @@ use alloc::{vec, vec::Vec};
 
 use anemone_net_api::{
     InterfaceId,
-    tcp::{TcpDisconnectCause, TcpEndpointId, TcpLocalBinding, TcpPeer, TcpReceiveReservationId},
+    tcp::{
+        TcpDisconnectCause, TcpEndpointId, TcpLocalBinding, TcpPeer, TcpPendingError,
+        TcpReceiveMode, TcpReceiveReservationId, TcpReleaseReason,
+    },
 };
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
@@ -26,6 +29,8 @@ pub struct TcpPolicy {
     rx_buffer_bytes: usize,
     tx_buffer_bytes: usize,
     deferred_reclaim_capacity: usize,
+    connect_timeout_ms: usize,
+    orphan_timeout_ms: usize,
     ephemeral_port_first: u16,
     ephemeral_port_last: u16,
 }
@@ -39,6 +44,8 @@ impl TcpPolicy {
         rx_buffer_bytes: usize,
         tx_buffer_bytes: usize,
         deferred_reclaim_capacity: usize,
+        connect_timeout_ms: usize,
+        orphan_timeout_ms: usize,
         ephemeral_port_first: u16,
         ephemeral_port_last: u16,
     ) -> Self {
@@ -49,14 +56,26 @@ impl TcpPolicy {
             rx_buffer_bytes,
             tx_buffer_bytes,
             deferred_reclaim_capacity,
+            connect_timeout_ms,
+            orphan_timeout_ms,
             ephemeral_port_first,
             ephemeral_port_last,
         }
+    }
+
+    pub(crate) const fn listener_completed_capacity(self) -> usize {
+        self.listener_completed_capacity
+    }
+
+    pub(crate) const fn connect_timeout_ms(self) -> usize {
+        self.connect_timeout_ms
     }
 }
 
 pub(crate) struct EndpointSlot {
     id: Option<TcpEndpointId>,
+    pub(crate) reuse_address: bool,
+    pub(crate) no_delay: bool,
     pub(crate) role: EndpointRole,
 }
 
@@ -69,12 +88,14 @@ pub(crate) enum EndpointRole {
     Reclaiming {
         remaining: usize,
         binding: Option<TcpLocalBinding>,
+        tuple: Option<ConnectionTuple>,
     },
 }
 
 pub(crate) struct Listener {
     pub(crate) interface: InterfaceId,
     pub(crate) binding: TcpLocalBinding,
+    pub(crate) backlog: usize,
     pub(crate) slots: Vec<ListenerSlot>,
 }
 
@@ -82,6 +103,9 @@ pub(crate) struct ListenerSlot {
     pub(crate) generation: u64,
     pub(crate) handle: Option<SocketHandle>,
     pub(crate) claimed: bool,
+    /// Engine-derived protocol reservation used only while this slot owns the
+    /// engine. Stack progression refreshes it before another admission can run.
+    pub(crate) tuple: Option<ConnectionTuple>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,20 +123,44 @@ pub(crate) struct Connection {
     pub(crate) binding: TcpLocalBinding,
     pub(crate) local: TcpLocalBinding,
     pub(crate) peer: TcpPeer,
+    /// Normalized phase retained for the temporary Stage 2 observation bridge.
+    /// CKPT 3B removes that non-consuming consumer; pending-error delivery is
+    /// driven only by `pending_error`, never by this snapshot.
     pub(crate) phase: ConnectionPhase,
+    /// Sticky protocol history used to distinguish connect failure from an
+    /// established-stream reset after the engine has entered `Closed`.
+    pub(crate) was_connected: bool,
+    /// The sole consumable asynchronous error truth for every operation.
+    pub(crate) pending_error: Option<TcpPendingError>,
+    pub(crate) read_shutdown: bool,
+    pub(crate) write_shutdown: bool,
     pub(crate) reservation: Option<OutstandingReceive>,
-    pub(crate) retire_requested: bool,
+    /// Deferred lifecycle action while the exactly-once receive capability is
+    /// outstanding. It is consumed when that reservation resolves.
+    pub(crate) release_requested: Option<TcpReleaseReason>,
+}
+
+/// Exact connection reservation moved from `Connection` into reclaim state.
+/// The tuple exists in only one role at a time and disappears with the engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ConnectionTuple {
+    pub(crate) local: TcpLocalBinding,
+    pub(crate) peer: TcpPeer,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct OutstandingReceive {
     pub(crate) id: TcpReceiveReservationId,
     pub(crate) offered: usize,
+    pub(crate) mode: TcpReceiveMode,
 }
 
 pub(crate) struct DeferredReclaim {
     pub(crate) interface: InterfaceId,
     pub(crate) handle: SocketHandle,
+    /// Exact reservation moved from a listener slot while its engine emits
+    /// final protocol work. It disappears with this deferred engine.
+    pub(crate) tuple: Option<ConnectionTuple>,
     pub(crate) action: ReclaimAction,
 }
 
@@ -145,6 +193,8 @@ impl TcpEndpoints {
         for _ in 0..policy.endpoint_capacity {
             endpoints.push(EndpointSlot {
                 id: None,
+                reuse_address: false,
+                no_delay: false,
                 role: EndpointRole::Vacant,
             });
         }
@@ -274,6 +324,23 @@ pub(crate) fn completed_child_state(state: tcp::State) -> bool {
     matches!(state, tcp::State::Established | tcp::State::CloseWait)
 }
 
+pub(crate) fn engine_connection_tuple(socket: &tcp::Socket<'_>) -> Option<ConnectionTuple> {
+    let local = socket.local_endpoint()?;
+    let remote = socket.remote_endpoint()?;
+    let smoltcp::wire::IpAddress::Ipv4(local_address) = local.addr;
+    let smoltcp::wire::IpAddress::Ipv4(remote_address) = remote.addr;
+    Some(ConnectionTuple {
+        local: TcpLocalBinding::from_owner_commit(
+            anemone_net_api::Ipv4Address::new(local_address.octets()),
+            local.port,
+        ),
+        peer: TcpPeer::new(
+            anemone_net_api::Ipv4Address::new(remote_address.octets()),
+            remote.port,
+        ),
+    })
+}
+
 pub(crate) fn to_smoltcp_listen(binding: TcpLocalBinding) -> IpListenEndpoint {
     let address = (!binding.address().is_unspecified())
         .then(|| smoltcp::wire::IpAddress::Ipv4(binding.address().octets().into()));
@@ -285,7 +352,8 @@ pub(crate) fn to_smoltcp_listen(binding: TcpLocalBinding) -> IpListenEndpoint {
 
 pub(crate) fn map_disconnect(reason: tcp::DisconnectReason) -> TcpDisconnectCause {
     match reason {
-        tcp::DisconnectReason::Reset => TcpDisconnectCause::Reset,
+        tcp::DisconnectReason::ResetBeforeEstablished
+        | tcp::DisconnectReason::ResetAfterEstablished => TcpDisconnectCause::Reset,
         tcp::DisconnectReason::Timeout => TcpDisconnectCause::Timeout,
     }
 }
@@ -298,16 +366,18 @@ mod tests {
         Instant, Ipv4Address, Ipv4Cidr, Ipv4EgressSelection,
         icmp_raw::IcmpRawNamespacePolicy,
         tcp::{
-            TcpBindRequest, TcpConnectionObservation, TcpDisconnectCause, TcpPeer, TcpQueryError,
-            TcpReceiveResolveError,
+            TcpBindError, TcpBindRequest, TcpConnectResult, TcpConnectionObservation,
+            TcpDisconnectCause, TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError,
+            TcpQueryError, TcpReceiveMode, TcpReceiveResolveError, TcpReleaseReason,
+            TcpShutdownDirection, TcpShutdownOutcome, TcpStreamReceiveError,
+            TcpStreamReceiveOutcome, TcpStreamSendError,
         },
         udp::UdpNamespacePolicy,
     };
     use smoltcp::{
-        iface::{Config, Interface, SocketSet},
+        iface::PollResult,
         phy::{FaultInjector, Loopback, Medium},
         time::{Duration as SmoltcpDuration, Instant as SmoltcpInstant},
-        wire::{HardwareAddress, IpAddress, IpCidr, IpEndpoint, IpListenEndpoint},
     };
 
     use crate::{
@@ -319,7 +389,7 @@ mod tests {
 
     const LOCAL: Ipv4Address = Ipv4Address::new([127, 0, 0, 1]);
     const LISTEN_PORT: u16 = 2345;
-    const POLICY: TcpPolicy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 40000, 40063);
+    const POLICY: TcpPolicy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 60_000, 60_000, 40000, 40063);
 
     fn test_stack(policy: TcpPolicy) -> (Stack, InterfaceId) {
         let mut stack = Stack::with_policy(StackPolicy::new(
@@ -343,6 +413,41 @@ mod tests {
                 )
                 .unwrap();
         }
+    }
+
+    fn connected_pair(
+        stack: &mut Stack,
+        interface: InterfaceId,
+        port: u16,
+        first_tick: i64,
+    ) -> (TcpEndpointId, TcpEndpointId, TcpEndpointId) {
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, port))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        let client = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, port),
+            )
+            .unwrap();
+        drive(stack, interface, first_tick);
+        let child = stack
+            .claim_tcp_pending_child(listener)
+            .unwrap()
+            .expect("connected pair must publish one completed child");
+        let accepted = stack.take_tcp_child(child).unwrap();
+        (listener, client, accepted)
     }
 
     #[test]
@@ -446,10 +551,32 @@ mod tests {
         let outstanding = stack.reserve_tcp_receive(clients[0], 5).unwrap();
         assert_eq!(outstanding.bytes(), b"final");
         let (outstanding_id, _) = outstanding.into_owner_parts();
-        stack.retire_tcp_endpoint(clients[0]).unwrap();
+        let retiring_handle = stack.protocols.tcp.connection(clients[0]).unwrap().handle;
+        stack
+            .release_tcp_endpoint(clients[0], TcpReleaseReason::FinalRelease)
+            .unwrap();
         assert!(matches!(
             stack.observe_tcp_connection(clients[0]).unwrap(),
             TcpConnectionObservation::Connected { .. }
+        ));
+        assert_eq!(
+            stack
+                .protocols
+                .tcp
+                .connection(clients[0])
+                .unwrap()
+                .release_requested,
+            Some(TcpReleaseReason::FinalRelease)
+        );
+        assert!(matches!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(retiring_handle)
+                .state(),
+            tcp::State::FinWait1 | tcp::State::LastAck
         ));
         stack.resolve_tcp_receive(outstanding_id, 3).unwrap();
         drive(&mut stack, interface, 512);
@@ -470,7 +597,9 @@ mod tests {
     #[test]
     fn every_engine_can_enter_preallocated_reclaim_without_cleanup_failure() {
         const CAPACITY: usize = 12;
-        let policy = TcpPolicy::new(16, CAPACITY, 10, 16, 16, CAPACITY, 41000, 41015);
+        let policy = TcpPolicy::new(
+            16, CAPACITY, 10, 16, 16, CAPACITY, 60_000, 60_000, 41000, 41015,
+        );
         let (mut stack, interface) = test_stack(policy);
         let mut endpoints = Vec::new();
         for port in 42000..42000 + CAPACITY as u16 {
@@ -512,7 +641,7 @@ mod tests {
 
     #[test]
     fn endpoint_engine_and_ephemeral_capacity_fail_typed_and_recover() {
-        let policy = TcpPolicy::new(2, 1, 1, 16, 16, 1, 43000, 43000);
+        let policy = TcpPolicy::new(2, 1, 1, 16, 16, 1, 60_000, 60_000, 43000, 43000);
         let (mut stack, interface) = test_stack(policy);
         let first = stack.create_tcp_endpoint().unwrap();
         let second = stack.create_tcp_endpoint().unwrap();
@@ -591,7 +720,12 @@ mod tests {
             .expect("completed child must be claimable");
         assert!(stack.cancel_tcp_child(child).unwrap().is_some());
         assert_eq!(stack.protocols.tcp.deferred.len(), 1);
-        assert!(stack.retire_tcp_endpoint(listener).unwrap().is_none());
+        assert!(
+            stack
+                .release_tcp_endpoint(listener, TcpReleaseReason::ListenerWithdrawal)
+                .unwrap()
+                .is_none()
+        );
 
         let contender = stack.create_tcp_endpoint().unwrap();
         assert!(matches!(
@@ -651,60 +785,730 @@ mod tests {
 
     #[test]
     fn connecting_timeout_is_preserved_as_a_typed_owner_observation() {
-        let mut device = FaultInjector::new(Loopback::new(Medium::Ip), 1);
-        device.set_drop_chance(100);
-        let mut interface = Interface::new(
-            Config::new(HardwareAddress::Ip),
-            &mut device,
-            SmoltcpInstant::ZERO,
-        );
-        interface.update_ip_addrs(|addresses| {
-            addresses
-                .push(IpCidr::new(IpAddress::v4(10, 0, 0, 1), 24))
-                .unwrap();
-        });
-        let mut sockets = SocketSet::new(Vec::new());
-        let mut owner = TcpEndpoints::new(POLICY);
-        let endpoint = owner.create_endpoint().unwrap();
-        let binding = owner
-            .prepare_binding(endpoint, Ipv4Address::new([10, 0, 0, 1]))
-            .unwrap();
-        let local =
-            TcpLocalBinding::from_owner_commit(Ipv4Address::new([10, 0, 0, 1]), binding.port());
-        let peer = TcpPeer::new(Ipv4Address::new([10, 0, 0, 2]), 80);
-        owner.prepare_connect(endpoint, binding, peer).unwrap();
-        let mut socket = tcp_socket(POLICY);
-        socket.set_timeout(Some(SmoltcpDuration::from_millis(100)));
-        socket
-            .connect(
-                interface.context(),
-                IpEndpoint::new(IpAddress::v4(10, 0, 0, 2), 80),
-                IpListenEndpoint {
-                    addr: Some(IpAddress::v4(10, 0, 0, 1)),
-                    port: local.port(),
-                },
+        let policy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 1, 60_000, 40000, 40063);
+        let (mut stack, interface) = test_stack(policy);
+        let endpoint = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                endpoint,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(Ipv4Address::new([127, 0, 0, 2]), 80),
             )
             .unwrap();
-        let handle = sockets.add(socket);
-        owner.commit_connect(
-            endpoint,
-            InterfaceId::from_index(0),
-            handle,
-            binding,
-            local,
-            peer,
+        let handle = stack.protocols.tcp.connection(endpoint).unwrap().handle;
+        assert_eq!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(handle)
+                .timeout(),
+            Some(SmoltcpDuration::from_millis(1))
         );
 
-        interface.poll(SmoltcpInstant::from_millis(0), &mut device, &mut sockets);
-        interface.poll(SmoltcpInstant::from_millis(101), &mut device, &mut sockets);
+        let mut device = FaultInjector::new(Loopback::new(Medium::Ip), 1);
+        device.set_drop_chance(100);
+        let local = stack.local.as_mut().unwrap();
+        local.interface.poll(
+            SmoltcpInstant::from_millis(0),
+            &mut device,
+            &mut local.sockets,
+        );
+        local.interface.poll(
+            SmoltcpInstant::from_millis(2),
+            &mut device,
+            &mut local.sockets,
+        );
+        assert_eq!(
+            stack.tcp_connect_result(endpoint).unwrap(),
+            TcpConnectResult::Failed(TcpPendingError::TimedOut)
+        );
+        assert_eq!(stack.consume_tcp_pending_error(endpoint).unwrap(), None);
+    }
+
+    #[test]
+    fn normalized_backlog_is_the_only_listener_admission_limit() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, LISTEN_PORT))
+            .unwrap();
+
+        for expected in [0, 1, 10, 1, 10] {
+            stack
+                .listen_tcp_endpoint_with_backlog(
+                    listener,
+                    interface,
+                    Ipv4Address::UNSPECIFIED,
+                    TcpListenBacklog::new(expected),
+                )
+                .unwrap();
+            let owner = stack.protocols.tcp.listener(listener).unwrap();
+            assert_eq!(owner.backlog, expected);
+            assert_eq!(
+                owner
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.handle.is_some())
+                    .count(),
+                expected
+            );
+        }
+        assert_eq!(
+            stack.listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(11),
+            ),
+            Err(TcpListenError::EngineCapacity)
+        );
+        assert_eq!(stack.protocols.tcp.listener(listener).unwrap().backlog, 10);
+    }
+
+    #[test]
+    fn reuse_requires_both_owners_and_never_allows_duplicate_listener() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let wildcard = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_reuse_address(wildcard, true).unwrap();
+        stack
+            .bind_tcp_endpoint(
+                wildcard,
+                TcpBindRequest::new(Ipv4Address::UNSPECIFIED, LISTEN_PORT),
+            )
+            .unwrap();
+
+        let specific = stack.create_tcp_endpoint().unwrap();
+        assert_eq!(
+            stack.bind_tcp_endpoint(specific, TcpBindRequest::new(LOCAL, LISTEN_PORT)),
+            Err(TcpBindError::PortInUse)
+        );
+        stack.set_tcp_reuse_address(specific, true).unwrap();
+        stack
+            .bind_tcp_endpoint(specific, TcpBindRequest::new(LOCAL, LISTEN_PORT))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                wildcard,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        assert_eq!(
+            stack.listen_tcp_endpoint_with_backlog(
+                specific,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            ),
+            Err(TcpListenError::PortInUse)
+        );
+    }
+
+    #[test]
+    fn implicit_connect_skips_an_exact_reused_tuple() {
+        let policy = TcpPolicy::new(8, 8, 1, 32, 32, 8, 60_000, 60_000, 40000, 40001);
+        let (mut stack, interface) = test_stack(policy);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, 25020))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        let peer = TcpPeer::new(LOCAL, 25020);
+
+        let first = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_reuse_address(first, true).unwrap();
+        let _ = stack
+            .start_tcp_connect(first, Ipv4EgressSelection::new(interface, LOCAL), peer)
+            .unwrap();
+        drive(&mut stack, interface, 0);
+        assert_eq!(
+            stack.tcp_endpoint_binding(first).unwrap().unwrap().port(),
+            40000
+        );
+
+        let second = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_reuse_address(second, true).unwrap();
+        let _ = stack
+            .start_tcp_connect(second, Ipv4EgressSelection::new(interface, LOCAL), peer)
+            .unwrap();
+        assert_eq!(
+            stack.tcp_endpoint_binding(second).unwrap().unwrap().port(),
+            40001
+        );
+    }
+
+    #[test]
+    fn listener_and_deferred_child_reserve_their_complete_tuple() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        let contender = stack.create_tcp_endpoint().unwrap();
+        for endpoint in [listener, contender] {
+            stack.set_tcp_reuse_address(endpoint, true).unwrap();
+            stack
+                .bind_tcp_endpoint(endpoint, TcpBindRequest::new(LOCAL, 25012))
+                .unwrap();
+        }
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+
+        let inbound = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(inbound, TcpBindRequest::new(LOCAL, 25013))
+            .unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                inbound,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25012),
+            )
+            .unwrap();
+        drive(&mut stack, interface, 0);
+
+        let exact_peer = TcpPeer::new(LOCAL, 25013);
+        assert_eq!(
+            stack.start_tcp_connect(
+                contender,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                exact_peer,
+            ),
+            Err(anemone_net_api::tcp::TcpConnectError::PortInUse)
+        );
+
+        stack
+            .release_tcp_endpoint(listener, TcpReleaseReason::ListenerWithdrawal)
+            .unwrap();
+        assert!(stack.protocols.tcp.deferred.iter().any(|entry| {
+            entry
+                .tuple
+                .is_some_and(|tuple| tuple.local.port() == 25012 && tuple.peer == exact_peer)
+        }));
+        assert_eq!(
+            stack.start_tcp_connect(
+                contender,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                exact_peer,
+            ),
+            Err(anemone_net_api::tcp::TcpConnectError::PortInUse)
+        );
+    }
+
+    #[test]
+    fn pending_error_has_one_consumer_across_query_and_stream_operation() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let (_, client, accepted) = connected_pair(&mut stack, interface, 25001, 0);
+        stack
+            .release_tcp_endpoint(accepted, TcpReleaseReason::AcceptedChildRollback)
+            .unwrap();
+        drive(&mut stack, interface, 128);
+        assert_eq!(
+            stack.send_tcp_stream(client, b"x"),
+            Err(TcpStreamSendError::ConnectionReset)
+        );
+        assert_eq!(
+            stack.shutdown_tcp_endpoint(client, TcpShutdownDirection::Write),
+            Err(anemone_net_api::tcp::TcpShutdownError::NotConnected)
+        );
+        assert_eq!(stack.consume_tcp_pending_error(client).unwrap(), None);
+
+        let (_, client, accepted) = connected_pair(&mut stack, interface, 25002, 256);
+        stack
+            .release_tcp_endpoint(accepted, TcpReleaseReason::AcceptedChildRollback)
+            .unwrap();
+        drive(&mut stack, interface, 384);
+        assert_eq!(
+            stack.consume_tcp_pending_error(client).unwrap(),
+            Some(TcpPendingError::ConnectionReset)
+        );
+        assert_eq!(stack.consume_tcp_pending_error(client).unwrap(), None);
+        assert_eq!(
+            stack.send_tcp_stream(client, b"x"),
+            Err(TcpStreamSendError::BrokenStream)
+        );
+
+        let (_, client, accepted) = connected_pair(&mut stack, interface, 25009, 512);
+        stack
+            .release_tcp_endpoint(accepted, TcpReleaseReason::AcceptedChildRollback)
+            .unwrap();
+        drive(&mut stack, interface, 640);
+        assert_eq!(
+            stack.tcp_connect_result(client).unwrap(),
+            TcpConnectResult::Failed(TcpPendingError::ConnectionReset)
+        );
+        assert_eq!(stack.consume_tcp_pending_error(client).unwrap(), None);
+        assert_eq!(
+            stack.tcp_connect_result(client).unwrap(),
+            TcpConnectResult::Terminal
+        );
+
+        let refused = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                refused,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25999),
+            )
+            .unwrap();
+        drive(&mut stack, interface, 768);
+        assert_eq!(
+            stack.consume_tcp_pending_error(refused).unwrap(),
+            Some(TcpPendingError::ConnectionRefused)
+        );
+    }
+
+    #[test]
+    fn engine_phase_distinguishes_a_same_round_established_reset() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, 25021))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        let client = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25021),
+            )
+            .unwrap();
+        let listener_handle = stack.protocols.tcp.listener(listener).unwrap().slots[0]
+            .handle
+            .unwrap();
+        let client_handle = stack.protocols.tcp.connection(client).unwrap().handle;
+
+        let mut device = Loopback::new(Medium::Ip);
+        let local = stack.local.as_mut().unwrap();
+        for tick in 0..8 {
+            local.interface.poll(
+                SmoltcpInstant::from_millis(tick),
+                &mut device,
+                &mut local.sockets,
+            );
+        }
+        assert_eq!(
+            local.sockets.get::<tcp::Socket>(client_handle).state(),
+            tcp::State::Established
+        );
+        local
+            .sockets
+            .get_mut::<tcp::Socket>(listener_handle)
+            .abort();
+        for tick in 8..16 {
+            local.interface.poll(
+                SmoltcpInstant::from_millis(tick),
+                &mut device,
+                &mut local.sockets,
+            );
+        }
+        assert_eq!(
+            local.sockets.get::<tcp::Socket>(client_handle).state(),
+            tcp::State::Closed
+        );
+        assert!(
+            !stack
+                .protocols
+                .tcp
+                .connection(client)
+                .unwrap()
+                .was_connected
+        );
+        assert_eq!(
+            stack.tcp_connect_result(client).unwrap(),
+            TcpConnectResult::Failed(TcpPendingError::ConnectionReset)
+        );
+        assert_eq!(
+            stack.shutdown_tcp_endpoint(client, TcpShutdownDirection::Write),
+            Err(anemone_net_api::tcp::TcpShutdownError::NotConnected)
+        );
+    }
+
+    #[test]
+    fn peek_fin_reset_and_shutdown_share_one_receive_truth() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let (_, client, accepted) = connected_pair(&mut stack, interface, 25003, 0);
+        stack.send_tcp_stream(client, b"hello").unwrap();
+        stack
+            .shutdown_tcp_endpoint(client, TcpShutdownDirection::Write)
+            .unwrap();
+        drive(&mut stack, interface, 128);
+
+        let peek = match stack
+            .receive_tcp_stream(accepted, 5, TcpReceiveMode::Peek)
+            .unwrap()
+        {
+            TcpStreamReceiveOutcome::Data(reservation) => reservation,
+            TcpStreamReceiveOutcome::EndOfStream => panic!("buffered bytes precede FIN"),
+        };
+        assert_eq!(peek.bytes(), b"hello");
+        let (peek_id, _) = peek.into_owner_parts();
+        stack.resolve_tcp_receive(peek_id, 5).unwrap();
+
+        let received = match stack
+            .receive_tcp_stream(accepted, 5, TcpReceiveMode::Consume)
+            .unwrap()
+        {
+            TcpStreamReceiveOutcome::Data(reservation) => reservation,
+            TcpStreamReceiveOutcome::EndOfStream => panic!("peek must not consume"),
+        };
+        assert_eq!(received.bytes(), b"hello");
+        let (received_id, _) = received.into_owner_parts();
+        stack.resolve_tcp_receive(received_id, 5).unwrap();
+        let eof = stack.receive_tcp_stream(accepted, 5, TcpReceiveMode::Consume);
+        assert!(
+            matches!(eof, Ok(TcpStreamReceiveOutcome::EndOfStream)),
+            "buffered FIN must become EOF after consume, got {eof:?}"
+        );
+
+        let (_, client, accepted) = connected_pair(&mut stack, interface, 25004, 256);
+        stack.send_tcp_stream(client, b"bytes").unwrap();
+        drive(&mut stack, interface, 384);
+        stack
+            .release_tcp_endpoint(client, TcpReleaseReason::AcceptedChildRollback)
+            .unwrap();
+        drive(&mut stack, interface, 512);
+        let observation = stack.observe_tcp_stream(accepted).unwrap();
+        assert!(observation.has_received_bytes());
+        assert!(observation.has_pending_error());
+        assert!(!observation.end_of_stream());
+        let received = match stack
+            .receive_tcp_stream(accepted, 5, TcpReceiveMode::Consume)
+            .unwrap()
+        {
+            TcpStreamReceiveOutcome::Data(reservation) => reservation,
+            TcpStreamReceiveOutcome::EndOfStream => panic!("buffered bytes precede reset"),
+        };
+        let (received_id, _) = received.into_owner_parts();
+        stack.resolve_tcp_receive(received_id, 5).unwrap();
+        let observation = stack.observe_tcp_stream(accepted).unwrap();
+        assert!(!observation.has_received_bytes());
+        assert!(observation.has_pending_error());
+        assert!(!observation.end_of_stream());
+        assert_eq!(
+            stack.receive_tcp_stream(accepted, 5, TcpReceiveMode::Consume),
+            Err(TcpStreamReceiveError::ConnectionReset)
+        );
+        assert!(stack.observe_tcp_stream(accepted).unwrap().end_of_stream());
+
+        let (_, client, accepted) = connected_pair(&mut stack, interface, 25005, 640);
+        stack.send_tcp_stream(client, b"r").unwrap();
+        drive(&mut stack, interface, 768);
+        assert_eq!(
+            stack
+                .shutdown_tcp_endpoint(accepted, TcpShutdownDirection::Read)
+                .unwrap()
+                .0,
+            TcpShutdownOutcome::Changed
+        );
+        let observation = stack.observe_tcp_stream(accepted).unwrap();
+        assert!(observation.has_received_bytes());
+        assert!(!observation.end_of_stream());
+        let received = match stack
+            .receive_tcp_stream(accepted, 1, TcpReceiveMode::Consume)
+            .unwrap()
+        {
+            TcpStreamReceiveOutcome::Data(reservation) => reservation,
+            TcpStreamReceiveOutcome::EndOfStream => panic!("buffered bytes precede SHUT_RD EOF"),
+        };
+        let (received_id, _) = received.into_owner_parts();
+        stack.resolve_tcp_receive(received_id, 1).unwrap();
+        assert!(stack.observe_tcp_stream(accepted).unwrap().end_of_stream());
+        assert_eq!(
+            stack
+                .shutdown_tcp_endpoint(accepted, TcpShutdownDirection::Read)
+                .unwrap()
+                .0,
+            TcpShutdownOutcome::Unchanged
+        );
         assert!(matches!(
-            owner
-                .connection_observation(&mut sockets, endpoint)
-                .unwrap(),
-            TcpConnectionObservation::Failed {
-                cause: TcpDisconnectCause::Timeout,
-                ..
-            }
+            stack.receive_tcp_stream(accepted, 1, TcpReceiveMode::Consume),
+            Ok(TcpStreamReceiveOutcome::EndOfStream)
         ));
+        assert_eq!(
+            stack
+                .shutdown_tcp_endpoint(accepted, TcpShutdownDirection::ReadWrite)
+                .unwrap()
+                .0,
+            TcpShutdownOutcome::Changed
+        );
+        assert_eq!(
+            stack
+                .shutdown_tcp_endpoint(accepted, TcpShutdownDirection::Write)
+                .unwrap()
+                .0,
+            TcpShutdownOutcome::Unchanged
+        );
+        assert_eq!(
+            stack.send_tcp_stream(accepted, b"x"),
+            Err(TcpStreamSendError::BrokenStream)
+        );
+        // The peer remains owner-live until its own release.
+        assert!(stack.observe_tcp_connection(client).is_ok());
+    }
+
+    #[test]
+    fn nodelay_and_release_reason_drive_engine_policy_and_cleanup() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_no_delay(listener, true).unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, 25006))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        let client = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_no_delay(client, true).unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25006),
+            )
+            .unwrap();
+        drive(&mut stack, interface, 0);
+        let child = stack.claim_tcp_pending_child(listener).unwrap().unwrap();
+        let accepted = stack.take_tcp_child(child).unwrap();
+        assert!(stack.tcp_no_delay(accepted).unwrap());
+        let handle = stack.protocols.tcp.connection(client).unwrap().handle;
+        assert_eq!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(handle)
+                .timeout(),
+            None
+        );
+        assert!(
+            !stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(handle)
+                .nagle_enabled()
+        );
+        assert!(stack.set_tcp_no_delay(client, false).unwrap().is_some());
+        assert!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(handle)
+                .nagle_enabled()
+        );
+
+        let graceful_handle = stack.protocols.tcp.connection(client).unwrap().handle;
+        assert!(
+            stack
+                .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
+                .unwrap()
+                .is_some()
+        );
+        assert!(matches!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(graceful_handle)
+                .state(),
+            tcp::State::FinWait1 | tcp::State::LastAck
+        ));
+
+        let rollback_handle = stack.protocols.tcp.connection(accepted).unwrap().handle;
+        assert!(stack.retire_tcp_endpoint(accepted).unwrap().is_some());
+        assert_eq!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(rollback_handle)
+                .state(),
+            tcp::State::Closed
+        );
+    }
+
+    #[test]
+    fn final_release_timeout_is_engine_owned_and_reclaims_an_orphan() {
+        let policy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 60_000, 1, 40000, 40063);
+        let (mut stack, interface) = test_stack(policy);
+        let (_, client, _accepted) = connected_pair(&mut stack, interface, 25010, 0);
+        let handle = stack.protocols.tcp.connection(client).unwrap().handle;
+
+        // Move the interface clock far beyond the last peer activity while no
+        // timeout policy is installed. Final release must start a fresh orphan
+        // interval rather than inherit that old receive timestamp.
+        stack
+            .pump_local(
+                interface,
+                Instant::from_micros(10_000_000),
+                PumpBudget::new(32, 32),
+            )
+            .unwrap();
+
+        assert!(
+            stack
+                .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            stack
+                .local
+                .as_ref()
+                .unwrap()
+                .sockets
+                .get::<tcp::Socket>(handle)
+                .timeout(),
+            Some(SmoltcpDuration::from_millis(1))
+        );
+
+        let mut device = FaultInjector::new(Loopback::new(Medium::Ip), 1);
+        device.set_drop_chance(100);
+        {
+            let local = stack.local.as_mut().unwrap();
+            let release_time = SmoltcpInstant::from_millis(10_000);
+            local.interface.poll_maintenance(release_time);
+            for _ in 0..64 {
+                if local
+                    .interface
+                    .poll_egress(release_time, &mut device, &mut local.sockets)
+                    == PollResult::None
+                {
+                    break;
+                }
+            }
+            assert_eq!(
+                local.sockets.get::<tcp::Socket>(handle).state(),
+                tcp::State::FinWait1
+            );
+
+            let expired = SmoltcpInstant::from_millis(10_001);
+            local.interface.poll_maintenance(expired);
+            for _ in 0..64 {
+                if local
+                    .interface
+                    .poll_egress(expired, &mut device, &mut local.sockets)
+                    == PollResult::None
+                {
+                    break;
+                }
+            }
+        }
+        {
+            let (protocols, local) = (&mut stack.protocols, stack.local.as_mut().unwrap());
+            protocols
+                .tcp
+                .reclaim_interface(interface, &mut local.sockets);
+        }
+        assert!(stack.protocols.tcp.endpoint(client).is_none());
+        assert!(stack.protocols.tcp.deferred.is_empty());
+    }
+
+    #[test]
+    fn time_wait_reservation_rebind_requires_both_reuse_intents() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, 25007))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        let client = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_reuse_address(client, true).unwrap();
+        stack
+            .bind_tcp_endpoint(client, TcpBindRequest::new(LOCAL, 25008))
+            .unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25007),
+            )
+            .unwrap();
+        drive(&mut stack, interface, 0);
+
+        let duplicate = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_reuse_address(duplicate, true).unwrap();
+        stack
+            .bind_tcp_endpoint(duplicate, TcpBindRequest::new(LOCAL, 25008))
+            .unwrap();
+        assert_eq!(
+            stack.start_tcp_connect(
+                duplicate,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25007),
+            ),
+            Err(anemone_net_api::tcp::TcpConnectError::PortInUse)
+        );
+        stack.retire_tcp_endpoint(duplicate).unwrap();
+        stack
+            .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
+            .unwrap();
+
+        let contender = stack.create_tcp_endpoint().unwrap();
+        assert_eq!(
+            stack.bind_tcp_endpoint(contender, TcpBindRequest::new(LOCAL, 25008)),
+            Err(TcpBindError::PortInUse)
+        );
+        stack.set_tcp_reuse_address(contender, true).unwrap();
+        stack
+            .bind_tcp_endpoint(contender, TcpBindRequest::new(LOCAL, 25008))
+            .unwrap();
+        assert_eq!(
+            stack.start_tcp_connect(
+                contender,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25007),
+            ),
+            Err(anemone_net_api::tcp::TcpConnectError::PortInUse)
+        );
+        assert!(
+            stack
+                .start_tcp_connect(
+                    contender,
+                    Ipv4EgressSelection::new(interface, LOCAL),
+                    TcpPeer::new(LOCAL, 25011),
+                )
+                .is_ok()
+        );
     }
 }

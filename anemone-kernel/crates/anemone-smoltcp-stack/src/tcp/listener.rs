@@ -5,14 +5,15 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     tcp::{
-        TcpChildError, TcpEndpointId, TcpListenError, TcpLocalBinding, TcpPeer, TcpPendingChild,
+        TcpChildError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
+        TcpPendingChild,
     },
 };
 use smoltcp::{iface::SocketSet, socket::tcp};
 
 use super::{
-    Connection, ConnectionPhase, DeferredReclaim, EndpointRole, Listener, ListenerSlot,
-    ReclaimAction, TcpEndpoints, completed_child_state,
+    Connection, ConnectionPhase, ConnectionTuple, DeferredReclaim, EndpointRole, Listener,
+    ListenerSlot, ReclaimAction, TcpEndpoints, completed_child_state,
 };
 
 impl TcpEndpoints {
@@ -20,16 +21,30 @@ impl TcpEndpoints {
         &self,
         id: TcpEndpointId,
         binding: TcpLocalBinding,
+        backlog: TcpListenBacklog,
     ) -> Result<(), TcpListenError> {
+        if backlog.get() > self.policy.listener_completed_capacity {
+            return Err(TcpListenError::EngineCapacity);
+        }
         match &self
             .endpoint(id)
             .ok_or(TcpListenError::UnknownEndpoint)?
             .role
         {
-            EndpointRole::Idle | EndpointRole::Bound(_) => {},
+            EndpointRole::Idle | EndpointRole::Bound(_) | EndpointRole::Listener(_) => {},
             _ => return Err(TcpListenError::WrongRole),
         }
-        if !self.ensure_engine_capacity(self.policy.listener_completed_capacity) {
+        if self.listener_binding_conflicts(id, binding) {
+            return Err(TcpListenError::PortInUse);
+        }
+        let current = self.listener(id).map_or(0, |listener| {
+            listener
+                .slots
+                .iter()
+                .filter(|slot| slot.handle.is_some())
+                .count()
+        });
+        if !self.ensure_engine_capacity(backlog.get().saturating_sub(current)) {
             return Err(TcpListenError::EngineCapacity);
         }
         assert_eq!(self.current_binding(id).unwrap_or(binding), binding);
@@ -42,13 +57,19 @@ impl TcpEndpoints {
         id: TcpEndpointId,
         interface: InterfaceId,
         binding: TcpLocalBinding,
+        backlog: TcpListenBacklog,
     ) {
+        if self.listener(id).is_some() {
+            self.resize_listener(sockets, id, backlog.get());
+            return;
+        }
         let mut slots = Vec::with_capacity(self.policy.listener_completed_capacity);
-        for _ in 0..self.policy.listener_completed_capacity {
+        for _ in 0..backlog.get() {
             slots.push(ListenerSlot {
                 generation: 0,
                 handle: Some(self.add_listener_engine(sockets, binding)),
                 claimed: false,
+                tuple: None,
             });
         }
         self.endpoint_mut(id)
@@ -56,8 +77,95 @@ impl TcpEndpoints {
             .role = EndpointRole::Listener(Listener {
             interface,
             binding,
+            backlog: backlog.get(),
             slots,
         });
+    }
+
+    fn resize_listener(
+        &mut self,
+        sockets: &mut SocketSet<'static>,
+        id: TcpEndpointId,
+        backlog: usize,
+    ) {
+        self.listener_mut(id)
+            .expect("re-listen owner disappeared")
+            .backlog = backlog;
+
+        let mut active = self
+            .listener(id)
+            .expect("re-listen owner disappeared")
+            .slots
+            .iter()
+            .filter(|slot| slot.handle.is_some())
+            .count();
+        while active > backlog {
+            let removable = self
+                .listener(id)
+                .expect("re-listen owner disappeared")
+                .slots
+                .iter()
+                .enumerate()
+                .find_map(|(index, slot)| {
+                    let handle = slot.handle?;
+                    (!slot.claimed
+                        && sockets
+                            .get::<tcp::Socket>(handle)
+                            .remote_endpoint()
+                            .is_none())
+                    .then_some((index, handle))
+                });
+            let Some((index, handle)) = removable else {
+                break;
+            };
+            self.remove_engine(sockets, handle);
+            let slot = &mut self
+                .listener_mut(id)
+                .expect("re-listen owner disappeared")
+                .slots[index];
+            assert_eq!(slot.handle, Some(handle));
+            assert!(slot.tuple.is_none());
+            slot.handle = None;
+            slot.generation = slot
+                .generation
+                .checked_add(1)
+                .expect("TCP listener slot generation exhausted");
+            active -= 1;
+        }
+
+        while active < backlog {
+            let binding = self
+                .listener(id)
+                .expect("re-listen owner disappeared")
+                .binding;
+            let replacement = self.add_listener_engine(sockets, binding);
+            if let Some(index) = self
+                .listener(id)
+                .expect("re-listen owner disappeared")
+                .slots
+                .iter()
+                .position(|slot| slot.handle.is_none())
+            {
+                let slot = &mut self
+                    .listener_mut(id)
+                    .expect("re-listen owner disappeared")
+                    .slots[index];
+                slot.handle = Some(replacement);
+                slot.claimed = false;
+                slot.tuple = None;
+            } else {
+                self.listener_mut(id)
+                    .expect("re-listen owner disappeared")
+                    .slots
+                    .push(ListenerSlot {
+                        generation: 0,
+                        handle: Some(replacement),
+                        claimed: false,
+                        tuple: None,
+                    });
+            }
+            active += 1;
+        }
     }
 
     pub(crate) fn claim_pending_child(
@@ -95,9 +203,6 @@ impl TcpEndpoints {
         sockets: &mut SocketSet<'static>,
         child: TcpPendingChild,
     ) -> Result<TcpEndpointId, TcpChildError> {
-        if !self.ensure_engine_capacity(1) {
-            return Err(TcpChildError::EngineCapacity);
-        }
         let connection_index = self
             .endpoints
             .iter()
@@ -106,14 +211,39 @@ impl TcpEndpoints {
         let (listener_id, slot_index, generation) = child.owner_parts();
         let (interface, binding, local, handle, peer) =
             self.completed_child(sockets, listener_id, slot_index, generation)?;
+        let listener_reuse = self
+            .endpoint(listener_id)
+            .expect("completed TCP child lost its listener owner")
+            .reuse_address;
+        let listener_no_delay = self
+            .endpoint(listener_id)
+            .expect("completed TCP child lost its listener owner")
+            .no_delay;
 
-        let replacement = self.add_listener_engine(sockets, binding);
+        let active = self
+            .listener(listener_id)
+            .expect("completed TCP child lost its listener before handoff")
+            .slots
+            .iter()
+            .filter(|slot| slot.handle.is_some())
+            .count();
+        let backlog = self
+            .listener(listener_id)
+            .expect("completed TCP child lost its listener before handoff")
+            .backlog;
+        let replace = active.saturating_sub(1) < backlog;
+        if replace && !self.ensure_engine_capacity(1) {
+            return Err(TcpChildError::EngineCapacity);
+        }
+        let replacement = replace.then(|| self.add_listener_engine(sockets, binding));
         let listener = self
             .listener_mut(listener_id)
             .expect("completed TCP child lost its listener before handoff");
         let slot = &mut listener.slots[slot_index];
-        slot.handle = Some(replacement);
+        assert_eq!(slot.tuple, Some(ConnectionTuple { local, peer }));
+        slot.handle = replacement;
         slot.claimed = false;
+        slot.tuple = None;
         slot.generation = slot
             .generation
             .checked_add(1)
@@ -127,6 +257,11 @@ impl TcpEndpoints {
         let endpoint = &mut self.endpoints[connection_index];
         assert!(matches!(endpoint.role, EndpointRole::Vacant));
         endpoint.id = Some(id);
+        endpoint.reuse_address = listener_reuse;
+        endpoint.no_delay = listener_no_delay;
+        sockets
+            .get_mut::<tcp::Socket>(handle)
+            .set_nagle_enabled(!listener_no_delay);
         endpoint.role = EndpointRole::Connection(Connection {
             interface,
             handle,
@@ -134,8 +269,12 @@ impl TcpEndpoints {
             local,
             peer,
             phase: ConnectionPhase::Connected,
+            was_connected: true,
+            pending_error: None,
+            read_shutdown: false,
+            write_shutdown: false,
             reservation: None,
-            retire_requested: false,
+            release_requested: None,
         });
         Ok(id)
     }
@@ -147,6 +286,11 @@ impl TcpEndpoints {
     ) -> Result<Option<InterfaceId>, TcpChildError> {
         let (listener_id, slot_index, generation) = child.owner_parts();
         let (interface, _, handle) = self.claimed_child(listener_id, slot_index, generation)?;
+        let tuple = self
+            .listener(listener_id)
+            .expect("claimed TCP child lost its listener before cancellation")
+            .slots[slot_index]
+            .tuple;
         let has_remote = sockets
             .get::<tcp::Socket>(handle)
             .remote_endpoint()
@@ -161,6 +305,7 @@ impl TcpEndpoints {
             let slot = &mut listener.slots[slot_index];
             slot.handle = None;
             slot.claimed = false;
+            slot.tuple = None;
             slot.generation = slot
                 .generation
                 .checked_add(1)
@@ -175,6 +320,7 @@ impl TcpEndpoints {
         self.queue_reclaim(DeferredReclaim {
             interface,
             handle,
+            tuple,
             action: ReclaimAction::RearmListener {
                 listener: listener_id,
                 slot: slot_index,
