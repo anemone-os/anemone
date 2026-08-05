@@ -1,9 +1,9 @@
 # IPv4 TCP Socket 与网络架构封顶目标与不变量
 
-**状态：** Draft
+**状态：** Accepted Target / Not Effective
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
-**适用修订：** Draft
+**适用修订：** R0
 
 本文只定义父RFC的target、shared-contract delta与correctness proof obligations。当前effective
 Network、Socket、Opened-description、IOMUX与Epoll规则仍以`docs/src/contracts/`为准；本文始终是

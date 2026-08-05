@@ -1,11 +1,11 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** Draft / Not Active
+**状态：** R0 / P0 Positive / Closed
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
-**适用修订：** Draft
-**执行授权：** None
-**当前 Gate：** Probe Gate P0；尚未执行
+**适用修订：** R0
+**执行授权：** 用户于 2026-08-05 明确接受 R0 并授权 P0
+**当前 Gate：** Probe Gate P0；Positive / Closed；STOP
 
 本文只把父RFC在进入任何TCP production stage前必须关闭的TCP engine feasibility Probe Gate解析到可执行
 语义；P0全部限制在kernel外的vendored/Stack crate，不修改`anemone-kernel`、不迁移production consumer、
@@ -14,11 +14,11 @@
 后续工作必须重新review与授权。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
-Not Active转为Active。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
+Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
 
-## 1. Live baseline
+## 1. P0 entry baseline
 
-当前source提供了足以启动crate-only probe、但不足以宣称target可实现的事实边界：
+P0进入时的source提供了足以启动crate-only probe、但不足以宣称target可实现的事实边界：
 
 - `anemone-smoltcp-stack`尚未启用vendored smoltcp TCP feature；vendored TCP public `State::Closed`
   不能独自区分handshake RST、established RST、transport timeout与local abort；
@@ -152,6 +152,53 @@ P0 hypothesis失败、证据不足或必须越过crate-only protected boundary�
 P0默认由本页保存长期结论、由Git/PR保存diff与validation evidence，不预建transaction。只有执行跨度真实需要
 独立长期时间线时才另行review是否建立transaction；它不是P0 activation或closure前置。
 
+### 4.4 P0 execution result — Positive / Closed
+
+2026-08-05在`dev/drc/alpha@00c897c3`进入P0；worktree起始clean。用户明确接受当前target与Contract
+Impact为R0并独立授权P0。重新读取AGENTS/LOCAL、R0正文/invariants/implementation、register、current
+Network contracts与live vendored/Stack/kernel feature owner后，baseline与第1节一致；net-tcp transaction不存在，
+且本次短probe无需建立独立长期时间线，因此transaction保持None。
+
+**Cause experiment：** 临时vendored seam在TCP engine进入`Closed`前分别保存protocol-domain `Reset`与
+`Timeout`，只提供一次consuming handoff，不携带Linux errno、Socket/wait/readiness或caller phase。active-open
+RST、established RST、connect timeout与established timeout分别命中该seam；local `abort`不产生async cause。
+Stack-side consumer可以把同一`Reset`与自己唯一拥有的connecting/established phase组合为不同operation outcome，
+无需从merged `Closed`、elapsed timer或Linux caller path猜测。
+
+**Listener experiment：** 临时`tcp_engine_probe`使用真实smoltcp `Interface + Loopback + SocketSet + tcp::Socket`，
+由一个test-local logical listener owner持有可配置数量的engine slot与generation；pending child直接来自owner持有
+socket的`Established` state，没有第二queue或test-harness admission truth。capacity=3时三个并发child完成；full后
+第四个connect收到真实RST；take一个child并rearm后capacity恢复，旧generation不能cancel replacement child；
+cancel另一child并rearm后再次完成新连接。slot/buffer数量显式有界，operation不等待peer/worker，也没有固定为二
+的结构形状。
+
+**Exit disposition：** 按4.1删除临时listener owner/fixture、test target、vendored cause field/type/method/test
+assertion与Stack manifest中的临时`socket-tcp`启用；final vendored/Stack/kernel production source均无diff。
+Stage 1只有在独立授权并建立真实Stack TCP owner时才启用正式feature。没有新增kernel feature forwarding、runtime
+TCP path、host facade、diagnostic switch、cross-crate Anemone API、smoltcp handle export或current contract。
+
+**Validation evidence：**
+
+- 带临时fixture的`just test net-host` PASS：`tcp_engine_probe` 1/1，同时net-api/Stack unit、全部既有Stack
+  integration、doctest、vendored focused IPv4与no-default build/check均通过；
+- 临时cause seam上的精确vendored命令
+  `cargo test -p smoltcp --lib --no-default-features --features std,medium-ip,proto-ipv4,socket-tcp socket::tcp::test::`
+  PASS，177/177；一次错误filter运行0项，未计入证据；
+- 删除全部probe-only code后的`just test net-host` PASS：net-api unit 4、Stack unit 2、Stack integration 45、
+  compile-fail doctest 2与vendored focused IPv4 33全部通过；no-default Stack test build与check均通过；
+- 临时feature存在时的`cargo tree -p anemone-kernel -e features -i smoltcp`确认它只经Stack进入production graph，
+  没有`host-test`或probe-only feature；最终source删除该feature后再次确认production graph不含`socket-tcp`；
+- 最终source上的`just fmt kernel --check`、`mdbook build docs`与`git diff --check`均PASS；mdBook仅报告
+  search index较大的既有warning。
+
+**Not Run：** kernel TCP、kernel build、rootfs、QEMU、RV64/LA64 guest、syscall/ABI、progression handoff、
+UDP/ICMP raw迁移、CAgent、deployment probe、physical hardware、LTP与final harness均Not Run。P0 host/source
+evidence不外推这些轨道。
+
+**Boundary and stop：** hypothesis四项与protected boundary均成立；没有target、owner、handoff、failure/cleanup、
+ABI、Contract Impact、acceptance或validation claim变化，没有register/current-contract write-back。P0为Positive /
+Closed并在此耗尽授权；Stage 1仍为Outline / Not Resolved / Not Authorized，不得自动进入。
+
 ## 5. RFC-wide engineering principles
 
 ### 5.1 Socket framework feedback
@@ -183,8 +230,8 @@ TCP不是只能适配current Socket framework的孤立family。本RFC的每个ga
 
 ### 6.1 成熟度规则
 
-- **P0 Draft / Not Active：** hypothesis、protected boundary、validation、failure signal、write-back与exit已经
-  解析，但尚无执行授权；
+- **P0 Positive / Closed：** crate-only cause与bounded listener hypothesis、protected boundary、validation、
+  probe代码处置与write-back均已满足；
 - **Outline：** 只固定目的、前置依赖、受保护边界与解析触发点，不冻结checkpoint、具体步骤、类型、算法、
   文件、命令或transaction；
 - future Stage只有在前一gate独立Closed、live source/current contracts/register重新核验，并完成单独的
@@ -201,7 +248,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 
 | Gate / Stage | 当前成熟度 | 概括目的 | Contract 状态 | 解析触发点 |
 | --- | --- | --- | --- | --- |
-| P0 — TCP engine feasibility probe | Draft / Not Active | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | R0接受、baseline复核与P0独立授权 |
+| P0 — TCP engine feasibility probe | Positive / Closed | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | 已满足；本gate停止 |
 | Stage 1 — Stack TCP owner与protocol progression foundation | Outline / Not Resolved / Not Authorized | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | positive时原子执行`NET-PROTOCOL-PROGRESSION-CUTOVER`；TCP target contracts继续Pending | P0 Positive / Closed并完成probe代码处置 |
 | Stage 2 — Nonblocking TCP vertical slice | Outline / Not Resolved / Not Authorized | 经既有Socket front接通create/bind/connect/listen/accept与最小nonblocking scalar stream纵切 | None；TCP target contracts继续Pending | Stage 1 Closed并证明Stack owner surface可由kernel窄消费 |
 | Stage 3 — Stream、ABI与lifecycle completion | Outline / Not Resolved / Not Authorized | 闭合partial stream、FIN/RST/shutdown、async error/options、message/vector projection与final-release/reclaim | None；TCP target contracts继续Pending | Stage 2 Closed并取得纵切failure/cleanup证据 |

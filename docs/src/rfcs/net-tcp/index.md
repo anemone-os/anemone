@@ -1,26 +1,26 @@
 # RFC-20260805-net-tcp
 
-**状态：** Draft / Not Implemented / Not Effective
-**修订：** Draft
+**状态：** Accepted / P0 Positive / Closed / Not Effective
+**修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-05
 **领域：** network / socket / TCP / userspace ABI
-**影响契约：** Draft 提议 Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
+**影响契约：** R0 Pending Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001`，并 Refine `SOCKET-ABI-001`、`NET-CONTROL-PLANE-001`、
 `NET-STACK-PUMP-001`；各自cutover前均未生效
-**执行记录：** None
+**执行记录：** P0 Positive / Closed；checkpoint Git commit；transaction None
 
 ## 文档状态
 
-本文是 IPv4 TCP Socket capability 与现有网络架构封顶验证的公共 Draft，也是本提案
-唯一 canonical target source。本文固定待 review 的 target、non-goals、owner/handoff、
+本文是 IPv4 TCP Socket capability 与现有网络架构封顶验证的公共 R0，也是本提案
+唯一 canonical target source。本文固定已经接受的 target、non-goals、owner/handoff、
 failure/cleanup、ABI、Contract Impact、acceptance 与 validation boundary；它不覆盖
 [Network current contracts](../../contracts/net/index.md)或
 [Socket current contracts](../../contracts/socket/index.md)，也不因发布实施计划而授权执行probe、
 后续stage、checkpoint 或 contract cutover。
 
 本 RFC 的规范性页面是正文、[目标与不变量](./invariants.md)与
-[实施计划](./implementation.md)；公共 Draft 形成前的
+[实施计划](./implementation.md)；公共 R0 形成前的
 [定位共识](./backgrounds/positionings.md)仅作为冻结历史背景，不再维护。具体类型、模块、锁、
 buffer、smoltcp mapping、progression effect/wake表示、worker拓扑和验证命令仍属于实施选择。
 当前实施计划只把一个kernel外crate-only TCP engine Probe Gate解析到可执行语义；Stage 1--5均为只含目的、
@@ -77,7 +77,7 @@ smoltcp 的现有 TCP public state 会把 handshake RST、established RST、time
 
 live UDP与ICMP raw TX当前在Stack commit返回后由kernel family caller经control-plane selection携带的
 `PumpWake`手工请求推进。该路径能推进当前send，但让control plane携带mutation wake policy，并使新增TCP
-面临另一套策略。本Draft把三类协议迁入同一owner-driven handoff；迁移必须保持既有UDP/ICMP raw的selection、
+面临另一套策略。本R0把三类协议迁入同一owner-driven handoff；迁移必须保持既有UDP/ICMP raw的selection、
 transaction、failure、readiness与runtime语义，不能把shared handoff扩张为shared protocol effect policy。
 
 本 RFC 的 Linux 6.6.32 ABI 比较基线固定在
@@ -170,7 +170,7 @@ transaction、failure、readiness与runtime语义，不能把shared handoff扩�
 
 ## R0 用户可见 ABI
 
-以下是 Draft 提议的 R0 envelope。它在 accepted target、实现、validation 与
+以下是已经接受的 R0 envelope。它在实现、validation 与
 `NET-TCP-CUTOVER`完成前不是 effective API；未选择的 option/flag 必须稳定拒绝。
 
 ### 创建、地址与本地端点
@@ -301,7 +301,7 @@ prefix/state已完全detach且无法再触及复用对象后才能安全复用�
 
 ## Contract Impact
 
-本 Draft 的 Contract Impact 上界来自current contract与live source audit。每项target rule在本表指定的
+本 R0 的 Contract Impact 上界来自current contract与live source audit。每项target rule在本表指定的
 cutover前都不是effective。实现反馈可以在review中收窄本表；若具体Socket framework证据要求新增或Refine
 其它shared ID，必须先停止、修订并接受本文Contract Impact，再重新授权实现，不能静默扩大。
 
@@ -338,7 +338,7 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 
 ## Implementation Boundary
 
-本文只定义未来实现授权必须遵守的语义边界；当前Draft本身不授权实现。
+本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现，P0由独立用户授权激活。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -462,14 +462,15 @@ loopback也不能替代repository-owned remote-external TCP evidence；条件性
   kernel allocation的global OOM在当前阶段可以panic。实现与验证不得把这三类失败互相替代。
 
 当前只有[实施计划](./implementation.md)中的crate-only TCP engine Probe Gate解析到可执行语义，状态为
-Draft / Not Active。它不进入`anemone-kernel`、不迁移UDP/ICMP raw且不执行contract cutover；失败、越界或
-证据不足分别按Negative / Inconclusive与route review处理，只有真实target/owner/contract变化才进入Target
+Positive / Closed。它没有进入`anemone-kernel`、没有迁移UDP/ICMP raw且没有执行contract cutover；
+probe证明了窄async cause与bounded multi-engine listener composition路线，临时fixture和experimental API均已删除。
+失败、越界或证据不足分别按Negative / Inconclusive与route review处理，只有真实target/owner/contract变化才进入Target
 Renegotiation。Stage 1--5只表达后续路线，不构成解析或执行授权。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施计划](./implementation.md)（P0 Draft / Not Active；Stage 1--5 Outline）
+- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1--5 Outline / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
   [Socket](../../contracts/socket/index.md)、
@@ -480,15 +481,18 @@ Renegotiation。Stage 1--5只表达后续路线，不构成解析或执行授权
   [`simple_llm_server.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/simple_llm_server.c)、
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
-- implementation：[实施计划](./implementation.md)；commit / PR / transaction：None
+- implementation：[实施计划](./implementation.md)；P0 checkpoint commit；transaction None
 
 ## 修订记录
 
-当前没有已接受target revision。Draft文本历史由仓库Git保存；第一次接受才形成R0。
+2026-08-05接受初始target与Contract Impact为R0。文本历史由仓库Git保存。
 
 ## Closure
 
-Not Implemented / Not Cut Over。本轮只有用于撰写Draft与crate-only Probe计划的baseline source review；P0、
-implementation-closure source audit、build/host/guest/CAgent、双架构与architecture-capstone evidence均
-Not Run。条件性deployment probe也Not Run，但不属于closure前置。current contracts与register保持不变。
-P0尚未Active，且无论结果如何都不自动进入Stage 1。
+P0 Positive / Closed / Not Cut Over。crate-only experiment证明：engine可在`Closed`合流前保存并单次交付
+RST/timeout protocol cause，由Stack-side owner结合权威connection phase解释；多个真实TCP engine slot可形成
+有界logical listener，并在full、take/cancel recovery与generation reuse下保持单一pending truth和stale isolation。
+临时cause API、listener fixture、test target与`socket-tcp` feature启用均在exit删除；最终production source
+无diff，没有新增kernel path、probe feature或public Anemone surface。kernel TCP、guest TCP、CAgent、双架构与
+architecture-capstone evidence均Not Run。条件性deployment probe也Not Run，但不属于closure前置。current
+contracts与register保持不变；transaction未创建。P0在此停止，Stage 1保持Outline / Not Authorized。
