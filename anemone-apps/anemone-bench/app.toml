@@ -1,0 +1,9 @@
+name = "anemone-bench"
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/anemone-bench"
