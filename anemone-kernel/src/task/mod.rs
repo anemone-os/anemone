@@ -18,6 +18,7 @@ pub use credentials::{
 pub mod files;
 pub mod jobctl;
 pub mod kthread;
+pub mod kworker;
 pub mod sig;
 #[path = "fs.rs"]
 pub mod task_fs;

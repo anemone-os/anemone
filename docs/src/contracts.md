@@ -161,6 +161,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Unix job control](./contracts/task/job-control.md)
   - [Child wait](./contracts/task/child-wait.md)
   - [Kthread timed wait](./contracts/task/kthread-wait.md)
+  - [Kworker](./contracts/task/kworker.md)
   - [Opened-description lifecycle](./contracts/task/opened-description-lifecycle.md)
   - [File-table POSIX lock](./contracts/task/file-table-posix-lock.md)
   - [Anemone Boot Protocol](./contracts/task/boot-protocol.md)

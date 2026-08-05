@@ -152,6 +152,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // Ordinary kthreads may round-robin onto any CPU, so wait until every CPU
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
+        task::kworker::activate_system_workers();
         run_initcalls(InitCallLevel::Late);
         // `Late` is a shared provider window and deliberately gives consumers
         // no relative ordering. Network activation may arm threaded deadlines,
