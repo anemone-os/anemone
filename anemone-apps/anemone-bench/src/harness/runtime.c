@@ -1,4 +1,4 @@
-#include "bench.h"
+#include "runtime.h"
 
 #include <errno.h>
 #include <stdio.h>

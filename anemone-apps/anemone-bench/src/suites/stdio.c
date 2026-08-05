@@ -1,4 +1,5 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -14,7 +15,7 @@ static FILE *open_temporary_file(void)
     return file;
 }
 
-size_t b_stdio_putcgetc(void *argument)
+size_t b_stdio_putcgetc(const void *argument)
 {
     FILE *file = open_temporary_file();
     size_t checksum = 0;
@@ -39,7 +40,7 @@ size_t b_stdio_putcgetc(void *argument)
     return checksum;
 }
 
-size_t b_stdio_putcgetc_unlocked(void *argument)
+size_t b_stdio_putcgetc_unlocked(const void *argument)
 {
     FILE *file = open_temporary_file();
     size_t checksum = 0;

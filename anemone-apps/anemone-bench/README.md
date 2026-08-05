@@ -11,6 +11,12 @@ pthread creation count, explicit CPU-only baselines, monotonic timing, strict
 child/error handling, and one-line result records. The imported benchmark
 payloads otherwise retain the upstream workload shapes.
 
+The source tree keeps CLI and case composition in `src/main.c`, process and
+measurement support in `src/harness/`, and imported workload families in
+`src/suites/`. Interactive runs add ANSI-colored session and case headings when
+stdout is a terminal. `ANEMONE_BENCH` and `BENCH` records remain plain text for
+result collection, and redirected output contains no ANSI escapes.
+
 Build and export a static binary for the current Linux host, then list its
 cases with:
 

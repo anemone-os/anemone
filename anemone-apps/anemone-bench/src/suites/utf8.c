@@ -1,4 +1,5 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <errno.h>
 #include <langinfo.h>
@@ -65,7 +66,7 @@ static size_t fill_utf8_buffer(char *buffer)
     return length;
 }
 
-size_t b_utf8_bigbuf(void *argument)
+size_t b_utf8_bigbuf(const void *argument)
 {
     char *buffer = bench_malloc(UTF8_BUFFER_SIZE);
     wchar_t *wide_buffer = bench_malloc(UTF8_BUFFER_SIZE * sizeof(*wide_buffer));
@@ -87,7 +88,7 @@ size_t b_utf8_bigbuf(void *argument)
     return checksum;
 }
 
-size_t b_utf8_onebyone(void *argument)
+size_t b_utf8_onebyone(const void *argument)
 {
     char *buffer = bench_malloc(UTF8_BUFFER_SIZE);
     size_t checksum = 0;

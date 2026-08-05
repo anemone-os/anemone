@@ -1,4 +1,5 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <errno.h>
 #include <locale.h>
@@ -23,7 +24,7 @@ static void select_environment_locale(void)
         bench_fail("setlocale", errno ? errno : EINVAL);
 }
 
-size_t b_regex_compile(void *argument)
+size_t b_regex_compile(const void *argument)
 {
     const char *pattern = argument;
     size_t checksum = 0;
@@ -42,7 +43,7 @@ size_t b_regex_compile(void *argument)
     return checksum;
 }
 
-size_t b_regex_search(void *argument)
+size_t b_regex_search(const void *argument)
 {
     const char *pattern = argument;
     char buffer[260000];

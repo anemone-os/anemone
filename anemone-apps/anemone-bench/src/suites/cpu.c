@@ -1,4 +1,5 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -6,7 +7,7 @@
 _Static_assert(sizeof(double) == sizeof(uint64_t),
     "CPU floating-point checksum requires a 64-bit double");
 
-size_t b_cpu_integer(void *argument)
+size_t b_cpu_integer(const void *argument)
 {
     const struct cpu_bench_config *config = argument;
     uint64_t first = UINT64_C(0x243f6a8885a308d3);
@@ -23,7 +24,7 @@ size_t b_cpu_integer(void *argument)
     return (size_t)(first ^ second);
 }
 
-size_t b_cpu_floating_point(void *argument)
+size_t b_cpu_floating_point(const void *argument)
 {
     const struct cpu_bench_config *config = argument;
     double first = 0.75;

@@ -1,11 +1,12 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #define BUFFER_LENGTH 500000
 
-size_t b_string_strstr(void *argument)
+size_t b_string_strstr(const void *argument)
 {
     const char *needle = argument;
     size_t needle_length = strlen(needle);
@@ -35,7 +36,7 @@ size_t b_string_strstr(void *argument)
     return checksum;
 }
 
-size_t b_string_memset(void *argument)
+size_t b_string_memset(const void *argument)
 {
     unsigned char *buffer = bench_malloc(BUFFER_LENGTH);
     size_t i;
@@ -51,7 +52,7 @@ size_t b_string_memset(void *argument)
     return checksum;
 }
 
-size_t b_string_strchr(void *argument)
+size_t b_string_strchr(const void *argument)
 {
     char *buffer = bench_malloc(BUFFER_LENGTH);
     size_t checksum = 0;
@@ -74,7 +75,7 @@ size_t b_string_strchr(void *argument)
     return checksum;
 }
 
-size_t b_string_strlen(void *argument)
+size_t b_string_strlen(const void *argument)
 {
     char *buffer = bench_malloc(BUFFER_LENGTH);
     size_t checksum = 0;

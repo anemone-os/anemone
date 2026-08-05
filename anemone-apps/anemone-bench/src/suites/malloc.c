@@ -1,4 +1,5 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -16,7 +17,7 @@ static void pthread_check(const char *operation, int error)
         bench_fail(operation, error);
 }
 
-size_t b_malloc_sparse(void *argument)
+size_t b_malloc_sparse(const void *argument)
 {
     void *allocations[10000];
     size_t i;
@@ -34,7 +35,7 @@ size_t b_malloc_sparse(void *argument)
     return (ARRAY_SIZE(allocations) + 149) / 150;
 }
 
-size_t b_malloc_bubble(void *argument)
+size_t b_malloc_bubble(const void *argument)
 {
     void *allocations[10000];
     size_t i;
@@ -68,13 +69,13 @@ static size_t malloc_tiny(bool permuted)
     return ARRAY_SIZE(allocations);
 }
 
-size_t b_malloc_tiny1(void *argument)
+size_t b_malloc_tiny1(const void *argument)
 {
     (void)argument;
     return malloc_tiny(false);
 }
 
-size_t b_malloc_tiny2(void *argument)
+size_t b_malloc_tiny2(const void *argument)
 {
     (void)argument;
     return malloc_tiny(true);
@@ -98,13 +99,13 @@ static size_t malloc_big(bool permuted)
     return ARRAY_SIZE(allocations);
 }
 
-size_t b_malloc_big1(void *argument)
+size_t b_malloc_big1(const void *argument)
 {
     (void)argument;
     return malloc_big(false);
 }
 
-size_t b_malloc_big2(void *argument)
+size_t b_malloc_big2(const void *argument)
 {
     (void)argument;
     return malloc_big(true);
@@ -200,7 +201,7 @@ static size_t run_thread_stress(struct allocation_slot *first_slots,
     return LOOPS * 2;
 }
 
-size_t b_malloc_thread_stress(void *argument)
+size_t b_malloc_thread_stress(const void *argument)
 {
     struct allocation_slot slots[SHARED_COUNT];
     size_t checksum;
@@ -212,7 +213,7 @@ size_t b_malloc_thread_stress(void *argument)
     return checksum;
 }
 
-size_t b_malloc_thread_local(void *argument)
+size_t b_malloc_thread_local(const void *argument)
 {
     struct allocation_slot first_slots[SHARED_COUNT];
     struct allocation_slot second_slots[SHARED_COUNT];

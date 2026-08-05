@@ -1,4 +1,5 @@
-#include "bench.h"
+#include "harness/runtime.h"
+#include "suites.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -57,17 +58,17 @@ static size_t createjoin_batched(const struct pthread_bench_config *config,
     return completed;
 }
 
-size_t b_pthread_createjoin_serial1(void *argument)
+size_t b_pthread_createjoin_serial1(const void *argument)
 {
     return createjoin_serial(argument, NULL);
 }
 
-size_t b_pthread_createjoin_serial2(void *argument)
+size_t b_pthread_createjoin_serial2(const void *argument)
 {
     return createjoin_batched(argument, NULL);
 }
 
-size_t b_pthread_create_serial1(void *argument)
+size_t b_pthread_create_serial1(const void *argument)
 {
     const struct pthread_bench_config *config = argument;
     pthread_attr_t attributes;
@@ -98,7 +99,7 @@ static void *lockunlock(void *argument)
     return NULL;
 }
 
-size_t b_pthread_uselesslock(void *argument)
+size_t b_pthread_uselesslock(const void *argument)
 {
     pthread_t thread;
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -129,7 +130,7 @@ static void minimal_attributes(pthread_attr_t *attributes)
         pthread_attr_setguardsize(attributes, 0));
 }
 
-size_t b_pthread_createjoin_minimal1(void *argument)
+size_t b_pthread_createjoin_minimal1(const void *argument)
 {
     pthread_attr_t attributes;
     size_t completed;
@@ -140,7 +141,7 @@ size_t b_pthread_createjoin_minimal1(void *argument)
     return completed;
 }
 
-size_t b_pthread_createjoin_minimal2(void *argument)
+size_t b_pthread_createjoin_minimal2(const void *argument)
 {
     pthread_attr_t attributes;
     size_t completed;

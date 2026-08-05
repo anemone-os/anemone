@@ -45,7 +45,9 @@ mkdir -p "$output_dir"
     -Wextra \
     -Werror \
     -pthread \
-    -Iinclude \
+    -Isrc \
     "$@" \
     src/*.c \
+    src/harness/*.c \
+    src/suites/*.c \
     -o "$output_dir/anemone-bench"
