@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 Ready / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-05
@@ -8,7 +8,8 @@
 **影响契约：** R0仍Pending Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
-**执行记录：** P0 Positive / Closed；Stage 1 Closed；`NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
+**执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Resolved / Ready / Not Authorized；
+`NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
 
@@ -23,10 +24,11 @@ Stage 1 implementation、后续stage、checkpoint或contract cutover；各gate�
 [实施计划](./implementation.md)；公共 R0 形成前的
 [定位共识](./backgrounds/positionings.md)仅作为冻结历史背景，不再维护。具体类型、模块、锁、
 buffer、smoltcp mapping、progression effect/wake表示、worker拓扑和验证命令仍属于实施选择。
-当前实施计划已经关闭kernel外crate-only TCP engine Probe Gate与Stage 1 execution gate；Stage 2--5仍为只含
-目的、依赖、受保护边界与解析触发点的Outline，不创建tracking page或transaction。Stage 1建立production
-progression handoff、原子迁移UDP/ICMP raw并完成两项Network contract Refine，但没有发布TCP Socket capability；
-其closure不解析或授权Stage 2。
+当前实施计划已经关闭kernel外crate-only TCP engine Probe Gate与Stage 1 execution gate，并把Stage 2解析为两个
+分别授权的execution checkpoint。Stage 2先建立kernel窄TCP owner capability，再接入syscall-unreachable的general
+Socket front；本Stage不注册TCP creation tuple、不发布handler、fd或部分UAPI，也不执行contract cutover。Stage 3--5
+仍为只含目的、依赖、受保护边界与解析触发点的Outline，不创建tracking page或transaction。解析Stage 2不授权
+CKPT 2A、CKPT 2B或后续Stage。
 
 ## 摘要
 
@@ -340,7 +342,7 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 ## Implementation Boundary
 
 本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0与Stage 1都曾取得各自独立授权并已关闭；
-Stage 2--5仍需分别解析和授权。
+Stage 2已经解析为CKPT 2A/2B但尚未授权，Stage 3--5仍需分别解析和授权。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -465,13 +467,15 @@ loopback也不能替代repository-owned remote-external TCP evidence；条件性
 
 当前[实施计划](./implementation.md)中的crate-only TCP engine Probe Gate与Stage 1均已Closed。P0证明窄async
 cause与bounded multi-engine listener composition路线；Stage 1将其收敛为Stack-private production foundation，
-迁移UDP/ICMP raw progression并执行唯一Network cutover。临时fixture与external validation asset已经删除，Stage 2--5
-继续只表达future Outline / Not Resolved / Not Authorized。
+迁移UDP/ICMP raw progression并执行唯一Network cutover。临时fixture与external validation asset已经删除。Stage 2
+已解析为两个syscall-unreachable execution checkpoint并保持Ready / Not Authorized；Stage 3--5继续只表达future
+Outline / Not Resolved / Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2--5 Outline / Not Authorized）
+- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Ready / Not Authorized；
+  Stage 3--5 Outline / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
   [Socket](../../contracts/socket/index.md)、
@@ -487,8 +491,10 @@ cause与bounded multi-engine listener composition路线；Stage 1将其收敛为
 ## 修订记录
 
 2026-08-05接受初始target与Contract Impact为R0；同日P0 Positive / Closed，并在不改变R0 target、Contract Impact或
-validation claim的前提下解析和关闭Stage 1 implementation gate。Stage 1仅执行R0已经接受的两项Network Refine，
-修订号保持R0。文本历史由仓库Git保存。
+validation claim的前提下解析和关闭Stage 1 implementation gate。Stage 1仅执行R0已经接受的两项Network Refine。
+同日把Stage 2解析为不发布syscall的CKPT 2A/2B internal integration gate；这只调整implementation route、stage
+职责与validation placement，不改变R0 target、owner、ABI、Contract Impact或acceptance，因此修订号保持R0。
+文本历史由仓库Git保存。
 
 ## Closure
 
@@ -505,4 +511,6 @@ local/external regression、asset cleanup与独立review满足Stage 1 acceptance
 [execution result](./implementation.md#639-stage-1-execution-result--closed)。`NET-PROTOCOL-PROGRESSION-CUTOVER`
 已Effective；三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending。TCP UAPI/guest/CAgent/final harness、hardware、
 `smp>1`与其它NIC/platform保持Not Run；LA64只证明完整shutdown顺序，不宣称wrapper exit 0。transaction未创建，
-register没有新增当前问题。Stage 2--5保持Outline / Not Resolved / Not Authorized，本轮到此停止。
+register没有新增当前问题。Stage 2已Resolved / Ready，但CKPT 2A/2B均Not Authorized；Stage 3--5保持Outline /
+Not Resolved / Not Authorized。Stage 2不发布syscall，production TCP UAPI route留给Stage 5最终activation；本轮只完成
+resolution并到此停止。

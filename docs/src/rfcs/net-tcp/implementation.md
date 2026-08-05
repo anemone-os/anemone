@@ -1,17 +1,20 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Outline / Not Authorized
+**状态：** R0 / Stage 1 Closed / Stage 2 Ready / Not Authorized
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 **执行授权：** 用户于 2026-08-05 明确接受 R0、授权并关闭 P0，随后授权Stage 1解析并单独授权其implementation；
-Stage 1已经关闭，Stage 2--5均未授权
-**当前 Gate：** None；Stage 1 Closed，Stage 2 Outline / Not Resolved / Not Authorized
+Stage 1已经关闭。用户同日只授权解析Stage 2，并明确Stage 2不发布syscall；Stage 2的CKPT 2A/2B与Stage 3--5
+implementation均未授权
+**当前 Gate：** None；Stage 2 Resolved / Ready，CKPT 2A Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
-它没有交付TCP Socket capability。Stage 2--5仍为Outline，只固定目的、依赖、受保护边界与解析触发点，Stage 1
-closure不解析或授权下一gate。
+它没有交付TCP Socket capability。Stage 2已经解析为两个独立授权的execution checkpoint：CKPT 2A建立可由kernel
+窄消费的TCP owner capability，CKPT 2B接入syscall-unreachable的general Socket front；整个Stage 2不注册
+`AF_INET + SOCK_STREAM` creation tuple、不发布handler或部分UAPI，也不执行contract cutover。Stage 3--5仍为
+Outline；解析Stage 2不授权任一checkpoint或下一Stage。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -235,7 +238,7 @@ TCP不是只能适配current Socket framework的孤立family。本RFC的每个ga
   probe代码处置与write-back均已满足；
 - **Stage 1 Closed：** production handoff、UDP/ICMP raw迁移、Stack-private TCP foundation、mandatory evidence与
   `NET-PROTOCOL-PROGRESSION-CUTOVER`已经整体关闭；
-- **Ready / Not Authorized：** Implementation Boundary、唯一execution gate、ordering、validation、cutover、exit与
+- **Ready / Not Authorized：** Implementation Boundary、execution checkpoint、ordering、validation、cutover、exit与
   stop condition已经解析完整，但没有代码、运行或contract生效主张；
 - **Outline：** 只固定目的、前置依赖、受保护边界与解析触发点，不冻结checkpoint、具体步骤、类型、算法、
   文件、命令或transaction；
@@ -255,8 +258,8 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | --- | --- | --- | --- | --- |
 | P0 — TCP engine feasibility probe | Positive / Closed | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | 已满足；本gate停止 |
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
-| Stage 2 — Nonblocking TCP vertical slice | Outline / Not Resolved / Not Authorized | 经既有Socket front接通create/bind/connect/listen/accept与最小nonblocking scalar stream纵切 | None；TCP target contracts继续Pending | Stage 1 Closed并证明Stack owner surface可由kernel窄消费 |
-| Stage 3 — Stream、ABI与lifecycle completion | Outline / Not Resolved / Not Authorized | 闭合partial stream、FIN/RST/shutdown、async error/options、message/vector projection与final-release/reclaim | None；TCP target contracts继续Pending | Stage 2 Closed并取得纵切failure/cleanup证据 |
+| Stage 2 — TCP owner与Socket-front integration | Ready / Not Authorized | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已解析；等待CKPT 2A独立授权 |
+| Stage 3 — Stream、ABI与lifecycle completion | Outline / Not Resolved / Not Authorized | 在仍未发布syscall route的candidate上闭合partial stream、FIN/RST/shutdown、async error/options、message/vector projection与final-release/reclaim | None；TCP target contracts继续Pending | Stage 2 Closed并取得internal integration的failure/cleanup证据 |
 | Stage 4 — Blocking、readiness与concurrency hardening | Outline / Not Resolved / Not Authorized | 以各operation owner predicate接入blocking/poll/select/epoll，并关闭race、fault、signal与capacity recovery | None；TCP target contracts继续Pending | Stage 3 Closed且完整operation/lifecycle surface可供wait proof |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 完成mandatory双架构、remote-external、shared regression与架构封顶，原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、acceptance assets与独立final review可用 |
 
@@ -472,42 +475,216 @@ Stage 1在不改变R0 target、non-goals、owner、failure/cleanup、ABI、Contr
 `NET-STACK-PUMP-001`并标记Effective。`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001` Introduce和`SOCKET-ABI-001` Refine仍Pending。TCP Socket/UAPI、TCP guest、CAgent、
 deployment probe、full network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run。
-Stage 2--5保持Outline / Not Resolved / Not Authorized；Stage 1在此耗尽授权，不进入下一gate。
+Stage 1 closure当时Stage 2--5保持Outline / Not Resolved / Not Authorized；Stage 1在此耗尽授权，不进入下一gate。
 
-### 6.4 Stage 2 Outline — Nonblocking TCP vertical slice
+### 6.4 Stage 2 Resolved Gate — TCP owner与Socket-front integration
 
-**目的：** 通过既有general Socket front、control plane与opened-description路径，建立第一条端到端nonblocking
-IPv4 TCP纵切：创建与地址、active connect、listen/accept、基础completion/error observation及最小scalar
-send/receive共同命中Stage 1的唯一TCP owner。它不以blocking或iomux旁路补齐缺口。
+#### 6.4.1 成熟度、授权与前置基线
 
-**前置依赖：** Stage 1 Closed，`NET-PROTOCOL-PROGRESSION-CUTOVER`已经Effective，Stack TCP owner的identity、
-listener/child handoff、connect outcome、stream admission与release capability已经稳定到可被kernel窄消费；
-Stage 1 review没有遗留会改变Socket owner surface的Apollyon/Keter。
+Stage 2是一个不执行semantic/contract cutover的formal execution gate，包含两个分别授权、分别review的execution
+checkpoint。CKPT 2A必须形成独立安全且对current visible semantics中性的TCP owner capability；CKPT 2B在同一
+Implementation Boundary内接入真实general Socket front，但保持TCP creation tuple与所有syscall handler不可达。
+Stage 2默认不创建transaction，执行证据由各checkpoint的Git/PR与本页closure write-back拥有。
 
-**受保护边界：** Linux tuple/sockaddr/copy/errno与fd publication留在Socket ABI/opened-description owner；route/
-source/interface selection仍只归control plane；Stack不接收Task/File/fd/user pointer，Socket不缓存binding、role、
-connection、pending child、buffer或error truth。fd/copy publication失败必须由当前handoff owner清理，nonblocking
-路径不得形成第二connect或listener状态机；TCP target contracts仍Pending，不执行partial cutover。
+本次只完成Implementation Resolution。用户明确决定Stage 2不做syscall，但没有授权CKPT 2A、CKPT 2B、代码、运行、
+contract cutover或Stage 3解析。进入CKPT 2A前必须重新确认以下live baseline：
 
-**解析触发点：** Stage 1 closure后根据live Socket front与真实Stack capability，选择能够同时证明active/passive
-connection及最小byte path的最小vertical slice，并解析其ABI floor、rollback、validation与停止条件。若只能发布
-不诚实的partial UAPI或自然方案需要调整general Socket owner/public surface，按第5.1节把它作为framework feedback
-回到RFC review；不得用TCP-local wrapper绕过。
+- Stage 1保持Closed，`NET-PROTOCOL-PROGRESSION-CUTOVER`保持Effective，三项TCP Introduce与
+  `SOCKET-ABI-001` Refine仍Pending；register没有新增会改变本Stage owner/cleanup/validation的TCP问题；
+- production `TcpEndpoints`仍是Stack-private唯一TCP owner，已经拥有bounded Endpoint/listener/engine/generation/
+  cause/deferred-reclaim foundation，但kernel没有TCP Endpoint operation capability，`anemone-net-api`也没有TCP
+  vocabulary；
+- `DomainStack::protocol_transition()`继续在Stack guard内commit并取出invalidations/progression，在guard外路由
+  recheck/request；control plane继续唯一选择route/source/interface；
+- general Socket front已经有immutable `SocketOps`、`ByteStream` I/O bundle、`SocketCreation` rollback、
+  `AcceptedSocket` cleanup与opened-description static final-release hook；现有四个Socket consumer及其ABI profile
+  是current effective surface；
+- `SocketAbiProfile`当前同时承载per-type ABI metadata与creation tuple admission，`resolve_socket_profile()`会遍历
+  整张published profile表。Stage 2可以在general Socket owner内部行为保持地分离这两个职责，但任何
+  `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`解析成功、syscall handler可达或现有tuple结果变化都越过本Stage；
+- private TCP retire/cancel目前可能以`DeferredReclaimFull`失败。任何交给kernel或Socket rollback guard的capability
+  在Stage 2都必须先取得不可失败、非阻塞的退役路线；不能把该failure丢给`Drop`/final-release hook、panic、leak或
+  user-visible errno。
+
+若baseline漂移要求改变R0 target、owner/handoff、failure/cleanup、ABI、Contract Impact、acceptance或validation
+claim，先回到RFC review；不得把过期outline直接解释为implementation授权。
+
+#### 6.4.2 Stage 2 Implementation Boundary
+
+**Target：** 在Stage 1唯一Stack TCP owner上形成第一条真实kernel consumer路线，并以两个checkpoint完成
+syscall-unreachable的Socket integration。CKPT 2A交付cross-crate TCP protocol vocabulary、kernel-private
+Endpoint capability、active/passive connection、typed completion/cause observation、最小bounded scalar
+send/receive transaction与不可失败retirement；CKPT 2B让general Socket front的create/address/connect/listen/
+accept/scalar I/O/rollback/final-release hooks共同消费该capability。两者只证明owner、handoff、failure和cleanup
+路线可以闭合，不把internal integration写成userspace vertical slice或TCP capability发布。
+
+**Non-goals：** Stage 2不注册TCP creation tuple、不使`socket/bind/connect/listen/accept/read/write/send/recv`等
+syscall到达TCP descriptor，不接收raw user pointer、不发布fd、不运行blocking或poll/select/epoll，不实现
+`SO_ERROR`、`SO_REUSEADDR`、`TCP_NODELAY`、shutdown、SIGPIPE/`MSG_NOSIGNAL`、vector/message projection、完整
+EOF/RST precedence、graceful final close、orphan/TIME_WAIT或用户侧fault oracle。它不运行TCP guest、CAgent、
+deployment probe、network LTP或`NET-TCP-CUTOVER`，也不建立test-only syscall profile、Kconfig activation switch、
+临时handler table、TCP-private wait loop、第二Socket front或长期validation facade。
+
+**Protected boundary：** TCP Endpoint identity、binding namespace、role、connect/terminal outcome、listener/pending
+child、stream capacity/reservation与reclaim继续只有Stack TCP owner一份truth；kernel只持opaque capability和一次
+operation需要的typed value。route/source/interface继续只由control plane选择，Stack不接收Task/File/fd/user
+pointer/errno/waiter，Socket不缓存binding、role、peer、pending child、buffer、cause、error或readiness。Stage 1
+owner-driven progression handoff不能回退为caller wake。existing Socket tuple、UDP/ICMP raw/Unix visible semantics、
+current contracts与R0最终acceptance保持不变，四项TCP target contract继续Pending。
+
+#### 6.4.3 Owner、handoff、transaction与cleanup model
+
+`anemone-net-api`只保存kernel与concrete Stack共同需要的opaque identity、normalized address/binding/peer、typed
+request/outcome、operation-local reservation identity与point-in-time observation；它不拥有registry、queue、Arc、
+callback、waiter、Linux errno或runtime state。kernel `net::tcp` capability持有initial-domain `DomainStack`的窄引用与
+opaque Endpoint identity，不取得smoltcp handle、SocketSet、ring borrow、engine generation或owner lock。
+
+bind/connect按“kernel向control plane验证local或取得selection -> DomainStack串行进入Stack TCP owner -> owner完成
+namespace/engine commit -> 返回typed outcome/progression obligation”推进。TCP owner唯一分配nonzero ephemeral port、
+判断default no-reuse下的wildcard/specific conflict、保存local binding与active connect phase；kernel不得为
+`getsockname`、重试或errno mapping复制这些事实。影响外部行为的重要ephemeral range、Endpoint/engine/listener/
+buffer/reclaim上界进入owner-local Kconfig；xtask只materialize，kernel consumer用`static_assert!`拒绝非法组合。
+
+listen/accept只有一份pending-child truth。owner先把completed child作为generation-scoped capability交给kernel；
+take成功后它成为新的Endpoint owner identity并原子rearm/reaccount listener slot，take前取消或take后Socket/file
+preparation失败都由当前capability owner进入不可失败retirement。旧child、late cause或deferred cleanup不能命中
+replacement generation；listener full、Endpoint/engine full与backlog admission full是typed recoverable结果。
+
+scalar send先在kernel侧取得有界operation-local bytes，再由Stack owner一次提交真实可接纳prefix；未提交suffix
+保持caller状态。receive由TCP owner发出exactly-once resolve的operation-local reservation：成功copy的prefix由同一
+owner commit，未copy或copy失败部分rollback；reservation不得持有Stack guard、smoltcp ring borrow或允许Socket直接
+消费engine。Stage 2虽然没有raw user copy，仍必须用general Socket source/sink fixture证明partial prefix与
+copy-error rollback形状，不能把正确性推迟到syscall publication后再重写owner协议。
+
+create、connect start、successful send admission、receive consume/window reopening、child cancel/release与任何使
+protocol立即有work或提前deadline的retirement，都由Stack TCP owner在commit后返回Stage 1既有
+`ProtocolProgression`；kernel composition必须在Stack guard外把它交给对应worker。普通observation、not-ready、
+capacity rejection或receive rollback不制造虚假progression。
+
+所有交给kernel的Endpoint、pending child和receive reservation必须有exactly-once cleanup owner。create/accept
+rollback与Socket final-release hook是不可失败、不可阻塞的；owner必须在handoff前预留cleanup authority，或采用
+即使外部reclaim queue饱和也能保留retiring truth并由worker后续推进的表示。具体credit、slot、scan或detach形状是
+implementation preference，但`DeferredReclaimFull`不能越过handoff，cleanup不能等待worker/peer/timer，也不能释放
+仍可被device/protocol/operation访问的generation。
+
+#### 6.4.4 Module 与 visibility boundary
+
+当前`stack/tcp.rs`已经同时包含policy、Endpoint/role、listener/child、connection、engine与reclaim职责；Stage 2再
+加入namespace、active connect与stream transaction前先做同owner目录化。预期形状是让private TCP owner进入
+`anemone-smoltcp-stack/src/tcp/`，按namespace、listener、stream与reclaim等稳定角色拆分，并让
+`stack/tcp.rs`只保留`impl Stack`的aggregate operation/object-fence composition。具体文件名不是strict write set；
+实现可以合并没有独立证明价值的薄文件，但不得继续把kernel-facing facade、owner state、smoltcp engine操作和全部
+lifecycle塞回一个增长中的单文件。
+
+目录化不拆semantic owner：`TcpEndpoints`或等价聚合owner仍唯一决定Endpoint identity、binding、role、listener、
+connection、capacity与reclaim；子模块只实现该owner的稳定职责或保存participant-local value，不建立可独立推进的
+`ListenerManager`、`StreamManager`、binding index truth或第二generation registry。跨子模块composition test放在最低
+共同owner的`mod.rs` inline `#[cfg(test)] mod tests`，局部test留在对应语义文件末尾；不新建无独立编译/consumer/
+lifecycle的`tests.rs`或validation facade。re-export保持最窄，smoltcp handle与private representation不能因拆分扩大
+visibility。
+
+#### 6.4.5 CKPT 2A — TCP owner capability
+
+**Purpose / Deliverable：** 完成上述同owner目录化与cross-crate protocol vocabulary；把Stage 1 private foundation
+扩展为create/bind/connect/listen/pending-child/scalar stream/release的完整Stack operation，并建立kernel-private
+`net::tcp`/`DomainStack`窄capability。CKPT 2A必须用该kernel capability作为真实production consumer，不保留仅供
+test调用的probe facade；它不进入`fs::socket`或任何ABI/profile/syscall路径。
+
+**Acceptance：**
+
+- active connect保留idle/bound/connecting/connected/terminal的owner distinction，首次start、重复in-progress、
+  success、RST与timeout可由typed observation区分；没有kernel-sideshadow phase或elapsed-time guess；
+- explicit/implicit bind、ephemeral allocation、default no-reuse conflict、logical listener至少十个completed child、
+  take/cancel/rearm、active/passive child后续scalar bytes、capacity full/recovery与generation reuse共享唯一owner；
+- send只commit owner实际接纳prefix；receive reservation在success、short copy、copy failure与Drop/cancel下exactly-once
+  resolve，未提交bytes不丢失、不重复；
+- create、child handoff、connection/listener retire与reservation cleanup在reclaim saturation下仍非阻塞、不可失败，
+  engine/Endpoint/port最终恢复；每个产生effect的commit可靠提交`ProtocolProgression`；
+- kernel capability不缓存Stack fact，不暴露smoltcp/private lock，不让`anemone-net-api`成为第二net core。
+
+**Validation / Review：** `just test net-host`永久覆盖active/passive、cause、至少十个child、scalar partial/rollback、
+capacity/reclaim saturation与stale generation；owner-local inline KUnit/source proof覆盖control-plane selection、
+DomainStack guard内commit/guard外progression与kernel capability fence。若增加Kconfig policy，运行`just test xtask`
+并审计xtask只materialize、kernel `static_assert!`拥有语义检查。完成`just fmt kernel --check`、RV64/LA64 release build、
+`git diff --check`、Architecture Friction Scan与独立engineering review。TCP Socket、fd、syscall、guest、CAgent、
+deployment probe、iomux与最终ABI evidence全部Not Run。
+
+**Exit / Stop：** 全部acceptance/validation通过且review没有未处理Apollyon/Keter时，CKPT 2A才可标记Closed；Stage 2
+保持In Progress / CKPT 2B Not Authorized，四项TCP target contract继续Pending，并立即停止。若owner surface只能通过
+暴露private handle、复制binding/connect/child/error truth、保留fallible cleanup或改变shared Socket/public contract
+成立，CKPT 2A保持Review Hold并回RFC review，不能进入CKPT 2B。
+
+#### 6.4.6 CKPT 2B — Syscall-unreachable Socket integration
+
+**Purpose / Deliverable：** 在CKPT 2A已经review接受的capability上增加kernel TCP family-private Socket state与static
+`TCP_SOCKET_OPS`或等价immutable descriptor，让general Socket front直接覆盖create/address/connect/listen/accept、
+nonblocking scalar send/receive、creation/accepted-child rollback和static final-release hook。TCP private Socket只持
+Endpoint capability与operation-local guard，不保存owner fact；CKPT 2B不重开CKPT 2A的owner/handoff设计。
+
+Stage 2可以为TCP semantic type提供syscall-unreachable的internal ABI metadata，并在general Socket owner内把
+per-type metadata与published creation admission行为保持地分离；现有四个profile的tuple、flags、capability与message
+policy必须逐项不变。TCP不得进入`resolve_socket_profile()`可达集合、syscall handler registration或任何test-only
+activation switch，focused regression必须显式证明`AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`仍按Stage 1 baseline
+拒绝。descriptor为满足现有static capability bundle而保留的poll入口在Stage 2只能明确返回`Unsupported`，旁注它是
+syscall-unreachable且由Stage 4真实source替换的temporary bridge；它不得被写成readiness proof或驱动operation结果。
+
+connect adapter保留started、still-in-progress、connected与typed terminal cause的internal distinction；不得把它们
+压成一份`WouldBlock/EAGAIN`或在Socket缓存pending error。address与scalar I/O只接收general front已经normalize的
+value/source/sink，不能读取raw user pointer。`SocketCreation` authority、`AcceptedSocket` guard和opened-description
+static final-release hook必须通过CKPT 2A不可失败retirement关闭所有未发布或最终释放的Endpoint；Stage 2不据此宣称
+fd publication、dup/fork或真实semantic final close已经获得runtime proof。
+
+**Validation / Review：** owner/host proof继续通过；kernel inline KUnit直接经general front准备TCP Socket，覆盖create
+commit/drop、explicit/implicit bind、active connect repeated observation、listen/accept、accepted child在address/file
+preparation失败时rollback、scalar partial/receive rollback、final-release exactly once与retired Endpoint拒绝。profile/
+resolver KUnit必须证明现有四个consumer round-trip不变且TCP tuple不可达。完成`just test net-host`、受影响KUnit、
+`just test xtask`（仅在config输入变化时）、`just fmt kernel --check`、RV64/LA64 release build、existing Socket/UDP/
+ICMP raw/Unix source regression、`git diff --check`、Architecture Friction Scan与独立engineering review。
+
+TCP syscall、raw user-copy、fd publication runtime、blocking、poll/select/epoll、TCP guest/CAgent/deployment probe、full
+network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform在CKPT 2B均Not Run；host/KUnit/build
+不能外推这些轨道。
+
+#### 6.4.7 Stage 2 exit、cutover与stop conditions
+
+CKPT 2A与2B都Closed、temporary validation asset已删除、最终source没有test-only activation、第二truth、fallible
+cleanup或private representation leakage，Architecture Friction Scan没有未处理Keter/Apollyon且final review接受时，
+Stage 2才可在同一closure write-back中：
+
+1. 标记Stage 2 Closed并记录两个checkpoint的Git/PR、实际命令、结果、proof scope与Not Run；
+2. 明确`resolve_socket(AF_INET, SOCK_STREAM, 0/IPPROTO_TCP)`与全部TCP syscall route仍不可达，current Socket/
+   Network/Opened-description/IOMUX/Epoll contracts不变；
+3. 保持`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`与`SOCKET-ABI-001` Refine Pending，
+   transaction默认None，并立即停止，不解析或进入Stage 3。
+
+Stage 2不执行partial cutover。任何checkpoint验证或review失败时，保留已经独立安全的前一checkpoint evidence，Stage 2
+保持In Progress / Review Hold；不得把internal test PASS写成TCP capability、ABI或guest事实。
+
+以下事实要求立即停止并回到RFC review / Target Renegotiation：需要发布TCP tuple/handler、raw user pointer、fd或
+任何userspace-visible partial UAPI；需要改变现有Socket tuple/consumer行为、shared Socket public contract、
+opened-description final-release规则或current contract；需要Stack取得Task/File/fd/waiter、kernel取得smoltcp handle/
+ring borrow/owner lock，或Socket保存第二份binding/connect/child/error/readiness truth；receive只能lossy copy、重复
+consume或无owner reservation，final release/rollback只能失败、阻塞、panic或leak；RST/timeout只能从merged closed
+state猜测；progression只能依赖caller wake、unrelated IRQ/timer/traffic；或必须使用test-only profile、长期bridge、
+validation facade、lowered oracle才能关闭。具体type、method、module文件名、锁、reservation/reclaim表示、普通commit
+数量与行为保持型general Socket内部拆分，只要满足本边界，不形成新的resolution gate。
 
 ### 6.5 Stage 3 Outline — Stream、ABI与lifecycle completion
 
-**目的：** 在Stage 2同一owner topology上完成父RFC的stream与lifecycle语义：partial scalar/vector/message I/O、
+**目的：** 在Stage 2同一owner topology和syscall-unreachable Socket integration上完成父RFC的stream与lifecycle语义：
+partial scalar/vector/message I/O、
 peek、buffer-before-EOF/error、FIN/RST/shutdown、`SO_ERROR` consume、`SO_REUSEADDR`、`TCP_NODELAY`、SIGPIPE/
 `MSG_NOSIGNAL`、final release、orphan/TIME_WAIT与bounded reclaim。
 
-**前置依赖：** Stage 2 Closed，nonblocking active/passive纵切、fd rollback、cause mapping与基础byte transaction已经
-形成可重复证据；未遗留第二connection/error truth或不可回收child/engine slot。
+**前置依赖：** Stage 2 Closed，internal active/passive integration、Socket rollback、cause mapping与基础byte
+transaction已经形成可重复证据；未遗留第二connection/error truth或不可回收child/engine slot。
 
 **受保护边界：** user copy与smoltcp storage保持object fence；每次send/receive只提交真实prefix，receive
 reservation/resolve exactly once；buffered bytes先于EOF/error，RST不得伪装EOF，final release不等待worker、peer、
 timer或receive operation。option/error不进入general mutable bag，Linux unsupported surface继续稳定拒绝；Stage 3
-不创建family-private wait loop或提前执行contract cutover。用户控制的length/count/iovec在allocation前完成边界
-校验；valid bounded internal allocation的global OOM不要求转成可恢复Socket errno。send admission、receive consume/
+不创建family-private wait loop、不注册TCP creation tuple或提前执行contract cutover。用户控制的
+length/count/iovec在allocation前完成边界校验；valid bounded internal allocation的global OOM不要求转成可恢复
+Socket errno。send admission、receive consume/
 window reopening、shutdown/abort/final release与listener/child cleanup必须逐项接入Stage 1的owner-driven handoff，
 不得回退caller手工wake或把缺失producer留到final closure临时补齐。
 
@@ -519,7 +696,8 @@ Stage 3的最小implementation slices、资源上界、race proof与focused ABI 
 
 **目的：** 让connect、accept、send与receive/EOF分别读取各自owner-defined predicate，复用existing
 snapshot/register/recheck/final-scan接入blocking、poll、select与epoll；同时关闭multi-waiter、signal/cancel、
-copy fault、receive/final-close、capacity saturation/recovery及late hint/stop交错。
+copy fault、receive/final-close、capacity saturation/recovery及late hint/stop交错。Stage 4先在未发布candidate上完成
+source/wait proof，production syscall route仍留给Stage 5最终activation。
 
 **前置依赖：** Stage 3 Closed，全部operation outcome、stream/lifecycle fact与resource transition已经由唯一owner
 表达，blocking wait不会被迫发明缺失的protocol fact。
@@ -527,7 +705,8 @@ copy fault、receive/final-close、capacity saturation/recovery及late hint/stop
 **受保护边界：** 不建立shared `tcp_ready`、ready-mask cache、第二wait loop或event-carried outcome；notification
 只提示重查，public writable只作最低admission hint，operation-specific retry重读对应owner fact。wait cancellation
 不推进protocol或lifecycle，final release先withdraw source且不等待waiter；UDP、ICMP raw、Unix、iomux与epoll
-existing consumer必须保持同一current contract。
+existing consumer必须保持同一current contract。Stage 4关闭时TCP creation tuple与handler仍不可达，不执行partial
+UAPI或contract cutover。
 
 **解析触发点：** Stage 3关闭后逐项核验predicate producer、source publication与current iomux/epoll consumer，
 再解析wait matrix、并发validation、guest coverage与停止条件。若existing wait contract不能自然承载TCP而需要
@@ -536,14 +715,16 @@ TCP-private wait/readiness hack。
 
 ### 6.7 Stage 5 Outline — Dual-architecture与architecture-capstone closure
 
-**目的：** 对完整candidate执行父RFC规定的TCP capability与architecture capstone合取验收：repository-owned
-focused consumer、RV64/LA64 loopback/self-external/remote-external、CAgent transport marker、shared consumer
-regression、source architecture audit与final independent review；全部满足后原子执行`NET-TCP-CUTOVER`。
+**目的：** 原子激活完整candidate的TCP creation tuple与syscall route，并执行父RFC规定的TCP capability与
+architecture capstone合取验收：repository-owned focused consumer、RV64/LA64 loopback/self-external/
+remote-external、CAgent transport marker、shared consumer regression、source architecture audit与final
+independent review；全部满足后原子执行`NET-TCP-CUTOVER`。
 
 **前置依赖：** Stage 1--4全部独立Closed，Stage 1的两项Network Refine保持Effective，父RFC mandatory acceptance
 assets可用，所有target内Apollyon/Keter已关闭；实际Not Run范围与条件性deployment probe边界已经可诚实记录。
 
-**受保护边界：** 两组closure claim缺一不可；HTTP或条件性`wget/curl/git`成功不能替代repository-owned TCP、
+**受保护边界：** route activation与最终cutover属于同一Stage 5 closure unit，不能在更早Stage或独立commit形成
+长期可见partial UAPI。两组closure claim缺一不可；HTTP或条件性`wget/curl/git`成功不能替代repository-owned TCP、
 双架构与architecture proof，`ss -tan`/procfs/diag失败也不能扩大target。final cutover只使父RFC表中仍Pending的
 三项TCP Introduce与`SOCKET-ABI-001` Refine生效；不得重复cut over Stage 1已经Effective的Network规则，也不得把
 TCP-local machinery提升为无第二consumer的generic framework，或为维持旧framework而保留本应shared的TCP hack。

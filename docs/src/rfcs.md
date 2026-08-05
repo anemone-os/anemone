@@ -122,7 +122,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
-- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Closed / TCP Not Effective；目标为
+- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Closed / Stage 2 Ready /
+  TCP Not Effective；目标为
   initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
   TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
   current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
@@ -131,8 +132,10 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   progression handoff，但不共享effect policy，也不冻结effect/wake表示、存储、锁或worker拓扑。
   crate-only P0已证明窄async cause与bounded listener composition路线，临时probe与feature启用均已删除。
   Stage 1已交付production handoff、UDP/ICMP raw原子迁移与Stack-private TCP foundation；双架构focused回归通过，
-  LA64只证明完整shutdown顺序、不宣称wrapper exit 0。三项TCP Introduce与`SOCKET-ABI-001` Refine仍Pending，
-  transaction None；Stage 2--5保持Outline / Not Resolved / Not Authorized。
+  LA64只证明完整shutdown顺序、不宣称wrapper exit 0。Stage 2已解析为两个分别授权的execution checkpoint：先建立
+  kernel窄TCP owner capability，再接入syscall-unreachable Socket front；本Stage不注册TCP creation tuple或发布
+  partial UAPI。三项TCP Introduce与`SOCKET-ABI-001` Refine仍Pending，transaction None；Stage 2 Ready / Not
+  Authorized，Stage 3--5保持Outline / Not Resolved / Not Authorized。
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Stage 1只更新上述两项Network current contract，
   register没有新增当前问题。
