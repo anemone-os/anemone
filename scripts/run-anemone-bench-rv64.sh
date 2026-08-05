@@ -30,7 +30,7 @@ fi
 
 log_file=${1:-build/anemone-bench-rv64.log}
 rootfs_image=build/rootfs/anemone-bench-rv64/rootfs.img
-preset=qemu-virt-rv64-release
+preset=qemu-virt-rv64-bench-release
 provider_bindings=(--bind smp=1 --bind memory=1G)
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

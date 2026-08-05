@@ -10,10 +10,12 @@ use anemone_rs::{
         },
         syscall::{linux::SYS_FCHMODAT, syscall},
     },
+    env::args,
     os::linux::{
         fs::{AtFd, Fd, PipeFlags, chdir, close, mkdirat, mount, openat, pipe2, read, write},
         process::{
-            Tid, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, setsid, wait4,
+            Tid, WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, setsid,
+            wait4,
         },
         tty::tiocsctty,
     },
@@ -21,11 +23,17 @@ use anemone_rs::{
 };
 
 const BUSYBOX_PATH: &str = "/.anemone/busybox";
+const APPLET_DIR: &str = "/.anemone/bin";
 const SHELL_HOME: &str = "/root";
 const SHELL_ARGS: &[&str] = &["busybox", "sh", "-i"];
 const SHELL_ENV: &[&str] = &[
     "HOME=/root",
     "PATH=/bin:/sbin:/usr/bin:/usr/sbin",
+    "TERM=linux",
+];
+const INSTALLED_SHELL_ENV: &[&str] = &[
+    "HOME=/root",
+    "PATH=/.anemone/bin:/bin:/sbin:/usr/bin:/usr/sbin",
     "TERM=linux",
 ];
 const SHELL_START_FAILURE: i8 = 127;
@@ -59,6 +67,19 @@ fn materialize_busybox() -> Result<(), Errno> {
         }
     }
     close(fd)
+}
+
+fn parse_install_option() -> Result<bool, Errno> {
+    let mut argv = args();
+    let _program = argv.next();
+    match (argv.next(), argv.next()) {
+        (None, None) => Ok(false),
+        (Some("--install"), None) => Ok(true),
+        _ => {
+            eprintln!("usage: busybox-init [--install]");
+            Err(EINVAL)
+        },
+    }
 }
 
 fn ensure_dir(path: &str, mode: u32) -> Result<(), Errno> {
@@ -120,7 +141,46 @@ fn prepare_filesystems() -> Result<(), Errno> {
     Ok(())
 }
 
-fn prepare_shell() -> Result<(), Errno> {
+fn install_busybox_applets() -> Result<(), Errno> {
+    ensure_dir(APPLET_DIR, 0o755)?;
+    match fork()? {
+        Some(child) => {
+            let mut status = WStatusRaw::EMPTY;
+            loop {
+                match wait4(
+                    WaitFor::ChildWithTgid(child),
+                    Some(&mut status),
+                    WaitOptions::empty(),
+                ) {
+                    Ok(Some(waited)) if waited == child => break,
+                    Ok(Some(_)) => return Err(ECHILD),
+                    Ok(None) => unreachable!("blocking wait4 returned no child"),
+                    Err(EINTR) => {},
+                    Err(errno) => return Err(errno),
+                }
+            }
+            match status.read() {
+                WStatus::Exited(0) => Ok(()),
+                status => {
+                    eprintln!("busybox-init: applet installation failed with {status:?}");
+                    Err(EIO)
+                },
+            }
+        },
+        None => {
+            // Keep applet names independent from the materialized executable's
+            // hard-link count so rebooting a reused test image cannot inflate
+            // that inode through BusyBox's replacement install path.
+            let argv = &["busybox", "--install", "-s", APPLET_DIR];
+            if let Err(errno) = execve(BUSYBOX_PATH, argv, &[]) {
+                eprintln!("busybox-init: exec {BUSYBOX_PATH} --install failed: {errno}");
+            }
+            exit(SHELL_START_FAILURE)
+        },
+    }
+}
+
+fn prepare_shell(install: bool) -> Result<(), Errno> {
     // PID 1 remains outside the controlling-terminal relation so it can reap
     // and replace the shell. Each shell generation owns a fresh session and
     // releases that relation through the ordinary session-leader exit path.
@@ -136,7 +196,12 @@ fn prepare_shell() -> Result<(), Errno> {
         eprintln!("busybox-init: chdir to {SHELL_HOME} failed: {errno}");
         errno
     })?;
-    execve(BUSYBOX_PATH, SHELL_ARGS, SHELL_ENV).map_err(|errno| {
+    let env = if install {
+        INSTALLED_SHELL_ENV
+    } else {
+        SHELL_ENV
+    };
+    execve(BUSYBOX_PATH, SHELL_ARGS, env).map_err(|errno| {
         eprintln!("busybox-init: exec {BUSYBOX_PATH} failed: {errno}");
         errno
     })?;
@@ -194,7 +259,7 @@ fn reap_child(child: Tid) {
     }
 }
 
-fn spawn_shell() -> Result<Tid, Errno> {
+fn spawn_shell(install: bool) -> Result<Tid, Errno> {
     // EOF means exec closed the write end. A pre-exec failure sends errno so
     // PID 1 can fail once instead of entering an unbounded respawn storm.
     let (status_reader, status_writer) = pipe2(PipeFlags::CLOEXEC)?;
@@ -216,7 +281,7 @@ fn spawn_shell() -> Result<Tid, Errno> {
         },
         Ok(None) => {
             let _ = close(status_reader);
-            if let Err(errno) = prepare_shell() {
+            if let Err(errno) = prepare_shell(install) {
                 report_shell_start_failure(status_writer, errno);
             }
             let _ = close(status_writer);
@@ -236,10 +301,14 @@ fn main() -> Result<(), Errno> {
         eprintln!("busybox-init: must run as PID 1");
         return Err(EPERM);
     }
+    let install = parse_install_option()?;
 
     prepare_filesystems()?;
     materialize_busybox()?;
-    let mut shell = spawn_shell()?;
+    if install {
+        install_busybox_applets()?;
+    }
+    let mut shell = spawn_shell(install)?;
 
     loop {
         let mut status = WStatusRaw::EMPTY;
@@ -249,7 +318,7 @@ fn main() -> Result<(), Errno> {
                     "busybox-init: shell {child} terminated with {:?}; respawning",
                     status.read()
                 );
-                shell = spawn_shell()?;
+                shell = spawn_shell(install)?;
             },
             Ok(Some(child)) => {
                 println!(
