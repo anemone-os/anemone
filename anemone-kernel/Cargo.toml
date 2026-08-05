@@ -10,6 +10,7 @@ kernel_preempt = []
 spin_lock_irqsave = []
 soft_unaligned_access = []
 kernel_symbols = ["dep:symtab"]
+perf_observe = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }

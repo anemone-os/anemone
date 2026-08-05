@@ -10,6 +10,7 @@ kernel_preempt = false # Enable trap-exit kernel preemption
 spin_lock_irqsave = true # Make ordinary spin locks disable local interrupts
 soft_unaligned_access = true # Emulate supported unaligned user-memory accesses in architecture trap handlers
 kernel_symbols = true # Embed checked text/function symbols for kernel backtraces
+perf_observe = true # Enable native kernel performance observation; runtime recording starts disabled
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
 # intr_stack = true # Enable Interrupt Stack support

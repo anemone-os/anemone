@@ -6,6 +6,8 @@ use anemone_abi::syscall::{
 use super::*;
 use sys::anemone::debug;
 
+pub mod perf;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LogLevels {
     pub record: u8,

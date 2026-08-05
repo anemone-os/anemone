@@ -20,6 +20,53 @@ pub mod linux {
 }
 
 pub mod native {
+    pub mod perf {
+        pub const PERF_OBSERVE_QUERY: u64 = 0;
+        pub const PERF_OBSERVE_GET_ENABLED: u64 = 1;
+        pub const PERF_OBSERVE_SET_ENABLED: u64 = 2;
+        pub const PERF_OBSERVE_SNAPSHOT: u64 = 3;
+
+        pub const PERF_CLOCK_MONOTONIC_RAW: u32 = 1;
+
+        pub const PERF_METRIC_COUNTER: u16 = 1;
+        pub const PERF_METRIC_HISTOGRAM: u16 = 2;
+
+        pub const PERF_UNIT_EVENTS: u16 = 1;
+        pub const PERF_UNIT_MONOTONIC_TICKS: u16 = 2;
+
+        pub const PERF_HISTOGRAM_BUCKET_COUNT: usize = 65;
+
+        pub const PERF_CATALOG_HEADER_SIZE: usize = 32;
+        pub const PERF_CATALOG_CLOCK_KIND_OFFSET: usize = 0;
+        pub const PERF_CATALOG_METRIC_COUNT_OFFSET: usize = 4;
+        pub const PERF_CATALOG_VALUE_COUNT_OFFSET: usize = 8;
+        pub const PERF_CATALOG_HISTOGRAM_BUCKET_COUNT_OFFSET: usize = 12;
+        pub const PERF_CATALOG_CLOCK_FREQUENCY_HZ_OFFSET: usize = 16;
+        pub const PERF_CATALOG_NAME_BYTES_OFFSET: usize = 24;
+        pub const PERF_CATALOG_RESERVED_OFFSET: usize = 28;
+
+        pub const PERF_METRIC_DESCRIPTOR_SIZE: usize = 24;
+        pub const PERF_METRIC_ID_OFFSET: usize = 0;
+        pub const PERF_METRIC_KIND_OFFSET: usize = 4;
+        pub const PERF_METRIC_UNIT_OFFSET: usize = 6;
+        pub const PERF_METRIC_VALUE_OFFSET_OFFSET: usize = 8;
+        pub const PERF_METRIC_VALUE_COUNT_OFFSET: usize = 12;
+        pub const PERF_METRIC_NAME_LEN_OFFSET: usize = 14;
+        pub const PERF_METRIC_NAME_OFFSET_OFFSET: usize = 16;
+        pub const PERF_METRIC_RESERVED_OFFSET: usize = 20;
+
+        pub const PERF_SNAPSHOT_HEADER_SIZE: usize = 24;
+        pub const PERF_SNAPSHOT_BEGIN_TICKS_OFFSET: usize = 0;
+        pub const PERF_SNAPSHOT_END_TICKS_OFFSET: usize = 8;
+        pub const PERF_SNAPSHOT_VALUE_COUNT_OFFSET: usize = 16;
+        pub const PERF_SNAPSHOT_ENABLED_OFFSET: usize = 20;
+        pub const PERF_SNAPSHOT_RESERVED_OFFSET: usize = 21;
+
+        const _: () = assert!(PERF_CATALOG_RESERVED_OFFSET + size_of::<u32>() == 32);
+        const _: () = assert!(PERF_METRIC_RESERVED_OFFSET + size_of::<u32>() == 24);
+        const _: () = assert!(PERF_SNAPSHOT_RESERVED_OFFSET + 3 == 24);
+    }
+
     pub mod power {
         /// Dead Cell.
         pub const SHUTDOWN_MAGIC: u64 = 0xdeadce11;

@@ -21,6 +21,17 @@ use ring::KernelLog;
 
 static KERNEL_LOG: KernelLog = KernelLog::new();
 
+declare_perf_metrics! {
+    counter PRINTK_RECORDS {
+        name: "debug.printk.records",
+        unit: Events,
+    }
+    histogram PRINTK_RECORD_LATENCY {
+        name: "debug.printk.record_latency",
+        unit: MonotonicTicks,
+    }
+}
+
 pub(crate) fn validate_policy(levels: u64) -> Result<LogPolicy, SysError> {
     LogPolicy::from_packed(levels)
 }
@@ -51,12 +62,15 @@ pub(crate) fn __klog(
     noprint: bool,
 ) {
     assert!(policy.records(callsite.level));
+    let timer = perf_timer!(PRINTK_RECORD_LATENCY);
 
     let timestamp = try_monotonic_uptime()
         .map(BootTimestamp::Monotonic)
         .unwrap_or(BootTimestamp::Unavailable);
     let record = LogRecord::from_args(callsite, timestamp, msg);
     let sequence = KERNEL_LOG.append(record);
+    perf_counter_inc!(PRINTK_RECORDS);
+    timer.finish();
 
     if !noprint && policy.prints(callsite.level) {
         output_record(sequence, &record);

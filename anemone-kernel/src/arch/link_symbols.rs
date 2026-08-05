@@ -81,6 +81,11 @@ unsafe extern "C" {
     /// memory.
     pub fn __esyscall();
 
+    /// The start of the static performance metric registry.
+    pub fn __sperf_metrics();
+    /// The end of the static performance metric registry.
+    pub fn __eperf_metrics();
+
     /// The start of the initcall section for filesystem driver initcalls.
     pub fn __sinitcall_fs();
     /// The end of the initcall section for filesystem driver initcalls.

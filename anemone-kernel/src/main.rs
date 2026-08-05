@@ -129,6 +129,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     let init_stdio = unsafe {
         kinfoln!("BSP {} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
+        #[cfg(feature = "perf_observe")]
+        debug::perf::validate_registry();
         fs::register_filesystem_drivers();
         driver::register_builtin_drivers();
         unflatten_device_tree(fdt_va);
