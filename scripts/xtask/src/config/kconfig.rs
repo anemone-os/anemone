@@ -138,6 +138,8 @@ pub struct Parameters {
     pub net_tcp_rx_buffer_bytes: Option<usize>,
     pub net_tcp_tx_buffer_bytes: Option<usize>,
     pub net_tcp_deferred_reclaim_capacity: Option<usize>,
+    pub net_tcp_ephemeral_port_first: Option<u16>,
+    pub net_tcp_ephemeral_port_last: Option<u16>,
 }
 
 impl Parameters {
@@ -249,6 +251,8 @@ impl Parameters {
         materialize!(net_tcp_rx_buffer_bytes);
         materialize!(net_tcp_tx_buffer_bytes);
         materialize!(net_tcp_deferred_reclaim_capacity);
+        materialize!(net_tcp_ephemeral_port_first);
+        materialize!(net_tcp_ephemeral_port_last);
         Ok(())
     }
 
@@ -482,6 +486,10 @@ pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
 pub const NET_TCP_TX_BUFFER_BYTES: usize = {};
 /// TCP engines awaiting final protocol cleanup after retirement.
 pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
+/// First port in the deterministic TCP ephemeral allocation range.
+pub const NET_TCP_EPHEMERAL_PORT_FIRST: u16 = {};
+/// Last port in the deterministic TCP ephemeral allocation range.
+pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -572,6 +580,8 @@ pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
             resolved!(net_tcp_rx_buffer_bytes),
             resolved!(net_tcp_tx_buffer_bytes),
             resolved!(net_tcp_deferred_reclaim_capacity),
+            resolved!(net_tcp_ephemeral_port_first),
+            resolved!(net_tcp_ephemeral_port_last),
         )
     }
 }

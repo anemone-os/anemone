@@ -105,4 +105,6 @@ net_tcp_engine_timer_capacity = 128 # Shared upper bound for TCP protocol engine
 net_tcp_listener_completed_capacity = 16 # Completed-child engine slots retained by one private listener.
 net_tcp_rx_buffer_bytes = 16384 # Receive bytes owned by each private TCP engine.
 net_tcp_tx_buffer_bytes = 16384 # Transmit bytes owned by each private TCP engine.
-net_tcp_deferred_reclaim_capacity = 64 # TCP engines that may await final protocol cleanup after retirement.
+net_tcp_deferred_reclaim_capacity = 128 # Pre-reserved cleanup entries; must cover every TCP engine.
+net_tcp_ephemeral_port_first = 32768 # First deterministic ephemeral TCP port.
+net_tcp_ephemeral_port_last = 60999 # Last deterministic ephemeral TCP port.

@@ -1,20 +1,20 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Ready / Not Authorized
+**状态：** R0 / Stage 1 Closed / Stage 2 In Progress / CKPT 2A Closed / CKPT 2B Not Authorized
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 **执行授权：** 用户于 2026-08-05 明确接受 R0、授权并关闭 P0，随后授权Stage 1解析并单独授权其implementation；
-Stage 1已经关闭。用户同日只授权解析Stage 2，并明确Stage 2不发布syscall；Stage 2的CKPT 2A/2B与Stage 3--5
-implementation均未授权
-**当前 Gate：** None；Stage 2 Resolved / Ready，CKPT 2A Not Authorized
+Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后单独授权并关闭CKPT 2A；CKPT 2B与
+Stage 3--5均未授权
+**当前 Gate：** None；Stage 2 In Progress，CKPT 2A Closed，CKPT 2B Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
 它没有交付TCP Socket capability。Stage 2已经解析为两个独立授权的execution checkpoint：CKPT 2A建立可由kernel
 窄消费的TCP owner capability，CKPT 2B接入syscall-unreachable的general Socket front；整个Stage 2不注册
 `AF_INET + SOCK_STREAM` creation tuple、不发布handler或部分UAPI，也不执行contract cutover。Stage 3--5仍为
-Outline；解析Stage 2不授权任一checkpoint或下一Stage。
+Outline；CKPT 2A closure不授权下一checkpoint或下一Stage。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -258,7 +258,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | --- | --- | --- | --- | --- |
 | P0 — TCP engine feasibility probe | Positive / Closed | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | 已满足；本gate停止 |
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
-| Stage 2 — TCP owner与Socket-front integration | Ready / Not Authorized | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已解析；等待CKPT 2A独立授权 |
+| Stage 2 — TCP owner与Socket-front integration | In Progress / CKPT 2A Closed / CKPT 2B Not Authorized | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | CKPT 2A已关闭；等待CKPT 2B独立授权 |
 | Stage 3 — Stream、ABI与lifecycle completion | Outline / Not Resolved / Not Authorized | 在仍未发布syscall route的candidate上闭合partial stream、FIN/RST/shutdown、async error/options、message/vector projection与final-release/reclaim | None；TCP target contracts继续Pending | Stage 2 Closed并取得internal integration的failure/cleanup证据 |
 | Stage 4 — Blocking、readiness与concurrency hardening | Outline / Not Resolved / Not Authorized | 以各operation owner predicate接入blocking/poll/select/epoll，并关闭race、fault、signal与capacity recovery | None；TCP target contracts继续Pending | Stage 3 Closed且完整operation/lifecycle surface可供wait proof |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 完成mandatory双架构、remote-external、shared regression与架构封顶，原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、acceptance assets与独立final review可用 |
@@ -486,8 +486,8 @@ checkpoint。CKPT 2A必须形成独立安全且对current visible semantics中�
 Implementation Boundary内接入真实general Socket front，但保持TCP creation tuple与所有syscall handler不可达。
 Stage 2默认不创建transaction，执行证据由各checkpoint的Git/PR与本页closure write-back拥有。
 
-本次只完成Implementation Resolution。用户明确决定Stage 2不做syscall，但没有授权CKPT 2A、CKPT 2B、代码、运行、
-contract cutover或Stage 3解析。进入CKPT 2A前必须重新确认以下live baseline：
+Implementation Resolution之后，用户明确决定Stage 2不做syscall，并单独授权CKPT 2A；没有授权CKPT 2B、contract
+cutover或Stage 3解析。进入CKPT 2A前重新确认了以下live baseline：
 
 - Stage 1保持Closed，`NET-PROTOCOL-PROGRESSION-CUTOVER`保持Effective，三项TCP Introduce与
   `SOCKET-ABI-001` Refine仍Pending；register没有新增会改变本Stage owner/cleanup/validation的TCP问题；
@@ -614,7 +614,38 @@ deployment probe、iomux与最终ABI evidence全部Not Run。
 暴露private handle、复制binding/connect/child/error truth、保留fallible cleanup或改变shared Socket/public contract
 成立，CKPT 2A保持Review Hold并回RFC review，不能进入CKPT 2B。
 
-#### 6.4.6 CKPT 2B — Syscall-unreachable Socket integration
+#### 6.4.6 CKPT 2A execution result — Closed
+
+CKPT 2A在不改变R0 target、non-goals、owner/handoff、failure/cleanup、ABI、Contract Impact、acceptance或validation
+claim的前提下关闭：
+
+- `anemone-net-api`增加opaque Endpoint/pending-child/reservation identity与typed bind/connect/listen/stream/release
+  vocabulary，但不拥有runtime state或发布kernel/smoltcp representation。Stack TCP owner按namespace、listener、
+  stream与reclaim目录化；唯一聚合owner继续拥有Endpoint、binding、role、engine generation、pending child、stream
+  capacity与reclaim truth。
+- `DomainStack`在既有串行guard内进入TCP owner并在guard外提交`ProtocolProgression`，kernel-private
+  `net::tcp` capability以opaque identity形成真实production consumer；kernel没有缓存Stack fact，也没有取得smoltcp
+  handle、ring borrow、owner lock或Linux errno。`fs::socket`、profile、ABI、fd、wait、handler和syscall均未接入。
+- explicit/implicit bind、nonzero ephemeral allocation、default no-reuse conflict、active connect typed observation、
+  至少十个completed child的listen/take/cancel/rearm、scalar partial send与exactly-once receive reservation由同一owner
+  覆盖。listener retirement会接管既有child-cancel deferred debt，generation-scoped cancel在child状态变化后仍保持
+  authority；reclaim storage覆盖全部engine，因此Endpoint、child、listener与reservation cleanup不向kernel返回
+  `DeferredReclaimFull`，也不等待worker、peer或timer。
+- `conf/.defconfig`拥有ephemeral-port policy，xtask只materialize，kernel `static_assert!`拥有非法范围与capacity组合
+  拒绝。`just test net-host` PASS：TCP owner `8/8`、focused smoltcp TCP `178/178`，no-default production
+  build/check通过；`just test xtask`为`75/75` PASS。`just fmt kernel --check`、`git diff --check`与RV64/LA64
+  release build通过，最终symbol entry分别为`6425`与`6018`。
+- 独立engineering review检查owner、identity、listener/child retirement、receive reservation、reclaim saturation、
+  progression与kernel fence，没有Apollyon、Keter或Euclid finding；未修改文件、未提交且未用额外运行替代主线证据。
+  transaction保持None，执行证据由本页所在focused Git commit拥有。
+
+据此CKPT 2A标记Closed，但不执行contract cutover。`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
+`NET-TCP-LIFECYCLE-001` Introduce和`SOCKET-ABI-001` Refine继续Pending；current Network、Socket、
+Opened-description、IOMUX与Epoll contracts不变。TCP guest、CAgent、deployment probe、syscall、raw user-copy、fd、
+blocking、poll/select/epoll、ABI/final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run，source/host/build
+proof不外推这些轨道。Stage 2保持In Progress，CKPT 2B Not Authorized；CKPT 2A在此耗尽授权，不进入下一checkpoint。
+
+#### 6.4.7 CKPT 2B — Syscall-unreachable Socket integration
 
 **Purpose / Deliverable：** 在CKPT 2A已经review接受的capability上增加kernel TCP family-private Socket state与static
 `TCP_SOCKET_OPS`或等价immutable descriptor，让general Socket front直接覆盖create/address/connect/listen/accept、
@@ -645,7 +676,7 @@ TCP syscall、raw user-copy、fd publication runtime、blocking、poll/select/ep
 network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform在CKPT 2B均Not Run；host/KUnit/build
 不能外推这些轨道。
 
-#### 6.4.7 Stage 2 exit、cutover与stop conditions
+#### 6.4.8 Stage 2 exit、cutover与stop conditions
 
 CKPT 2A与2B都Closed、temporary validation asset已删除、最终source没有test-only activation、第二truth、fallible
 cleanup或private representation leakage，Architecture Friction Scan没有未处理Keter/Apollyon且final review接受时，

@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Ready / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 In Progress / CKPT 2A Closed / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-05
@@ -8,7 +8,7 @@
 **影响契约：** R0仍Pending Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
-**执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Resolved / Ready / Not Authorized；
+**执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 In Progress / CKPT 2A Closed / CKPT 2B Not Authorized；
 `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
@@ -24,11 +24,12 @@ Stage 1 implementation、后续stage、checkpoint或contract cutover；各gate�
 [实施计划](./implementation.md)；公共 R0 形成前的
 [定位共识](./backgrounds/positionings.md)仅作为冻结历史背景，不再维护。具体类型、模块、锁、
 buffer、smoltcp mapping、progression effect/wake表示、worker拓扑和验证命令仍属于实施选择。
-当前实施计划已经关闭kernel外crate-only TCP engine Probe Gate与Stage 1 execution gate，并把Stage 2解析为两个
-分别授权的execution checkpoint。Stage 2先建立kernel窄TCP owner capability，再接入syscall-unreachable的general
+当前实施计划已经关闭kernel外crate-only TCP engine Probe Gate、Stage 1 execution gate与Stage 2 CKPT 2A，并把
+Stage 2保持为两个分别授权的execution checkpoint。Stage 2先建立kernel窄TCP owner capability，再接入
+syscall-unreachable的general
 Socket front；本Stage不注册TCP creation tuple、不发布handler、fd或部分UAPI，也不执行contract cutover。Stage 3--5
-仍为只含目的、依赖、受保护边界与解析触发点的Outline，不创建tracking page或transaction。解析Stage 2不授权
-CKPT 2A、CKPT 2B或后续Stage。
+仍为只含目的、依赖、受保护边界与解析触发点的Outline，不创建tracking page或transaction。CKPT 2A closure不授权
+CKPT 2B或后续Stage。
 
 ## 摘要
 
@@ -342,7 +343,7 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 ## Implementation Boundary
 
 本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0与Stage 1都曾取得各自独立授权并已关闭；
-Stage 2已经解析为CKPT 2A/2B但尚未授权，Stage 3--5仍需分别解析和授权。
+Stage 2已经解析为CKPT 2A/2B，其中CKPT 2A已经单独关闭、CKPT 2B仍未授权；Stage 3--5仍需分别解析和授权。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -465,16 +466,17 @@ loopback也不能替代repository-owned remote-external TCP evidence；条件性
 - **Allocation boundary：** owner capacity full与oversized/untrusted syscall input必须typed处理；valid bounded
   kernel allocation的global OOM在当前阶段可以panic。实现与验证不得把这三类失败互相替代。
 
-当前[实施计划](./implementation.md)中的crate-only TCP engine Probe Gate与Stage 1均已Closed。P0证明窄async
+当前[实施计划](./implementation.md)中的crate-only TCP engine Probe Gate、Stage 1与CKPT 2A均已Closed。P0证明窄async
 cause与bounded multi-engine listener composition路线；Stage 1将其收敛为Stack-private production foundation，
-迁移UDP/ICMP raw progression并执行唯一Network cutover。临时fixture与external validation asset已经删除。Stage 2
-已解析为两个syscall-unreachable execution checkpoint并保持Ready / Not Authorized；Stage 3--5继续只表达future
-Outline / Not Resolved / Not Authorized。
+迁移UDP/ICMP raw progression并执行唯一Network cutover。CKPT 2A建立cross-crate TCP vocabulary、完整Stack owner
+operation与kernel-private capability，但不进入general Socket或ABI/profile/syscall路径。Stage 2保持In Progress，
+CKPT 2B Not Authorized；Stage 3--5继续只表达future Outline / Not Resolved / Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Ready / Not Authorized；
+- [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 In Progress / CKPT 2A Closed /
+  CKPT 2B Not Authorized；
   Stage 3--5 Outline / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
@@ -486,14 +488,16 @@ Outline / Not Resolved / Not Authorized。
   [`simple_llm_server.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/simple_llm_server.c)、
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
-- implementation：[实施计划](./implementation.md)；P0 checkpoint commit；Stage 1 focused Git commit；transaction None
+- implementation：[实施计划](./implementation.md)；P0、Stage 1与CKPT 2A focused Git commit；transaction None
 
 ## 修订记录
 
 2026-08-05接受初始target与Contract Impact为R0；同日P0 Positive / Closed，并在不改变R0 target、Contract Impact或
 validation claim的前提下解析和关闭Stage 1 implementation gate。Stage 1仅执行R0已经接受的两项Network Refine。
 同日把Stage 2解析为不发布syscall的CKPT 2A/2B internal integration gate；这只调整implementation route、stage
-职责与validation placement，不改变R0 target、owner、ABI、Contract Impact或acceptance，因此修订号保持R0。
+职责与validation placement，不改变R0 target、owner、ABI、Contract Impact或acceptance。随后单独关闭CKPT 2A，
+只交付Stack TCP owner operation与kernel-private capability；这些implementation与execution write-back均不改变R0
+target语义，因此修订号保持R0。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -511,6 +515,13 @@ local/external regression、asset cleanup与独立review满足Stage 1 acceptance
 [execution result](./implementation.md#639-stage-1-execution-result--closed)。`NET-PROTOCOL-PROGRESSION-CUTOVER`
 已Effective；三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending。TCP UAPI/guest/CAgent/final harness、hardware、
 `smp>1`与其它NIC/platform保持Not Run；LA64只证明完整shutdown顺序，不宣称wrapper exit 0。transaction未创建，
-register没有新增当前问题。Stage 2已Resolved / Ready，但CKPT 2A/2B均Not Authorized；Stage 3--5保持Outline /
-Not Resolved / Not Authorized。Stage 2不发布syscall，production TCP UAPI route留给Stage 5最终activation；本轮只完成
-resolution并到此停止。
+register没有新增当前问题。
+
+Stage 2 CKPT 2A Closed / Not Cut Over。cross-crate opaque identity、typed request/outcome与receive reservation由
+`anemone-net-api`表达，Stack TCP owner完成同owner目录化并统一拥有namespace、active/passive connection、scalar
+stream transaction与bounded reclaim；`DomainStack`和kernel-private `net::tcp` capability形成真实production
+consumer，但没有接入general Socket、profile、ABI、fd、wait或syscall。owner/config/host、双架构release build与独立
+review满足本checkpoint acceptance，详情见
+[execution result](./implementation.md#646-ckpt-2a-execution-result--closed)。四项TCP target contract继续Pending，
+transaction仍为None。Stage 2保持In Progress，CKPT 2B Not Authorized；TCP guest、CAgent、deployment probe、
+syscall、iomux、ABI、final harness、hardware与`smp>1`均Not Run。本轮在CKPT 2A closure耗尽授权，不进入CKPT 2B。

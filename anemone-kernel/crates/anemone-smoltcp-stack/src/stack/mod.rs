@@ -18,10 +18,10 @@ pub use host_validation::{
     HostPeer, HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
 };
 
+pub use crate::tcp::TcpPolicy;
 pub(crate) use interfaces::{InterfaceEntry, PumpOrder};
 pub(crate) use protocols::{ActiveEgress, InterfaceProtocols, Protocols};
 pub use protocols::{ProtocolProgression, StackInvalidations};
-pub use tcp::TcpPolicy;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Ipv4ConfigError {
@@ -90,7 +90,7 @@ impl Stack {
         Self::with_policy(StackPolicy::new(
             UdpNamespacePolicy::new(64, 32768, 60999),
             IcmpRawNamespacePolicy::new(64),
-            TcpPolicy::new(64, 128, 16, 16384, 16384, 64),
+            TcpPolicy::new(64, 128, 16, 16384, 16384, 128, 32768, 60999),
         ))
     }
 
@@ -100,7 +100,7 @@ impl Stack {
         Self::with_policy(StackPolicy::new(
             policy,
             IcmpRawNamespacePolicy::new(64),
-            TcpPolicy::new(64, 128, 16, 16384, 16384, 64),
+            TcpPolicy::new(64, 128, 16, 16384, 16384, 128, 32768, 60999),
         ))
     }
 }

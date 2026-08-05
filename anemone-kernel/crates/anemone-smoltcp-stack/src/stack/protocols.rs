@@ -11,7 +11,7 @@ use smoltcp::iface::{AdmittedIpv4Packet, SocketSet};
 
 use crate::{
     icmp_raw::{EgressResource as IcmpRawEgressResource, IcmpRawEndpoints},
-    stack::tcp::{TcpEndpoints, TcpPolicy},
+    tcp::{TcpEndpoints, TcpPolicy},
     udp::UdpEndpoints,
 };
 

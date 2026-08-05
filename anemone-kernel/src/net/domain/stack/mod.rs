@@ -11,6 +11,7 @@ use anemone_smoltcp_stack::{
 use crate::prelude::*;
 
 mod icmp_raw;
+mod tcp;
 mod udp;
 
 use icmp_raw::IcmpRawEndpointEventRoutes;
