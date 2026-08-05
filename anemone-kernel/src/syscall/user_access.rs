@@ -193,7 +193,9 @@ mod ptrs {
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
         /// explicitly check the buffer size.
         pub fn copy_to_slice(&mut self, dst: &mut [T]) -> Result<(), SysError> {
-            debug_assert!(self.ptr.len() <= dst.len(), "kernel buffer is too small");
+            let dst = dst
+                .get_mut(..self.ptr.len())
+                .expect("kernel buffer is too small");
 
             let byte_len = self.ptr.len() * size_of::<T>();
             let bytes =
@@ -212,12 +214,10 @@ mod ptrs {
             &mut self,
             dst: &mut [u8],
         ) -> Result<usize, UserPtrAccessError> {
-            debug_assert!(self.ptr.len() <= dst.len(), "kernel buffer is too small");
-            read_user_bytes(
-                self.usp,
-                &mut dst[..self.ptr.len()],
-                VirtAddr::new(self.ptr.cast::<u8>() as u64),
-            )
+            let dst = dst
+                .get_mut(..self.ptr.len())
+                .expect("kernel buffer is too small");
+            read_user_bytes(self.usp, dst, VirtAddr::new(self.ptr.cast::<u8>() as u64))
         }
     }
 
@@ -244,7 +244,7 @@ mod ptrs {
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
         /// explicitly check the buffer size.
         pub fn copy_from_slice(&mut self, src: &[T]) -> Result<(), SysError> {
-            debug_assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
+            assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
 
             let byte_len = src.len() * size_of::<T>();
             let bytes = unsafe { core::slice::from_raw_parts(src.as_ptr().cast::<u8>(), byte_len) };
@@ -277,7 +277,7 @@ mod ptrs {
             &mut self,
             src: &[u8],
         ) -> Result<usize, UserPtrAccessError> {
-            debug_assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
+            assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
             write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<u8>() as u64), src)
         }
 
@@ -286,10 +286,10 @@ mod ptrs {
         ///
         /// A null-terminator will be appended after the string automatically.
         pub fn write_utf8_str(&mut self, s: &str) -> Result<(), SysError> {
-            debug_assert!(
-                s.as_bytes().len() + 1 <= self.ptr.len(),
+            assert!(
+                s.len() < self.ptr.len(),
                 "string too long for user slice: {} bytes, but slice length is {}",
-                s.as_bytes().len(),
+                s.len(),
                 self.ptr.len()
             );
             self.copy_from_slice(s.as_bytes())?;
@@ -304,8 +304,8 @@ mod ptrs {
         /// A null-terminator will be appended after the bytes automatically. So
         /// passed-in `bytes` don't need to have a null terminator.
         pub fn write_bytes_with_null_terminator(&mut self, bytes: &[u8]) -> Result<(), SysError> {
-            debug_assert!(
-                bytes.len() + 1 <= self.ptr.len(),
+            assert!(
+                bytes.len() < self.ptr.len(),
                 "bytes too long for user slice: {} bytes, but slice length is {}",
                 bytes.len(),
                 self.ptr.len()

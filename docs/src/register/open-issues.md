@@ -1,5 +1,31 @@
 # 开放问题
 
+## ANE-20260805-USER-ACCESS-TYPED-COPY-SOUNDNESS
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Apollyon
+**Area:** syscall / user access / typed copy / ABI representation
+
+**Symptom / Trigger:** `UserReadPtr<T>::read()`当前只要求`T: Copy`，随后把任意用户字节写入
+`MaybeUninit<T>`并`assume_init()`；`Copy`不保证所有bit pattern都是合法`T`。反向的
+`UserWritePtr<T>::write()`同样只要求`T: Copy`，却把整个`T`表示作为字节读取；`Copy`不保证结构没有
+未初始化padding。具体可达路径中，`anemone_abi::system::linux::SysInfo`在`pad`与`totalhigh`之间有
+4字节隐式padding，结构末尾还有4字节padding，`sys_sysinfo()`会通过typed copy直接将该表示写给用户态。
+
+**Impact:** copyin可能形成无效Rust值并触发undefined behavior；copyout可能读取未初始化padding并把
+内核栈内容泄漏给用户态。只清零某个具体调用点或只修补`SysInfo`不能恢复generic safe API的健全性，
+也不能证明其它ABI struct的bit validity与padding边界。
+
+**Owner:** syscall user-access typed-copy boundary；ABI wire representation由`anemone-abi`共同参与
+**Last Verified:** 2026-08-05
+**Exit Condition:** typed copy按方向建立可由编译器检查的能力边界：copyin只接受任意输入bit pattern均为
+合法值的类型，copyout只接受完整表示均已初始化且无隐式padding的类型；补齐受影响ABI struct的显式
+padding或等价byte codec，并完成全部typed caller审计、双架构layout assertion与build/runtime验证。
+
+**Workaround:** 新代码避免为带受限bit pattern或隐式padding的类型新增generic typed copy调用；已有调用点
+可在owner-local边界使用显式byte codec降低单一路径风险，但这不关闭本问题。
+
 ## ANE-20260801-LA64-SOFT-UNALIGNED-USER-MEMORY-CORRUPTION
 
 **Type:** Issue
