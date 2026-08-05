@@ -20,6 +20,7 @@ pub(super) use operation::{retry_socket_receive, retry_socket_send, wait_for_soc
 pub(super) enum SocketType {
     Ipv4Udp,
     Ipv4IcmpRaw,
+    Ipv4Tcp,
     UnixStream,
     UnixSeqpacket,
 }
@@ -55,6 +56,7 @@ pub(super) enum SocketListenError {
     Unsupported,
     Retired,
     InvalidState,
+    ResourceExhausted,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,8 +77,11 @@ pub(super) enum SocketConnectError {
     Unsupported,
     Retired,
     InvalidState,
+    Started,
+    InProgress,
     AlreadyConnected,
     ConnectionRefused,
+    ConnectionTimedOut,
     ProtocolTypeMismatch,
     WouldBlock(SocketWait),
     Operation(SysError),
@@ -86,6 +91,7 @@ pub(super) enum SocketAcceptError {
     Unsupported,
     Retired,
     InvalidState,
+    ResourceExhausted,
     WouldBlock(SocketWait),
 }
 

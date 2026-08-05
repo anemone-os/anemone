@@ -5,7 +5,7 @@ mod domain;
 // next authorized checkpoint must connect its real Socket consumer or remove
 // the route; it is not a permanent probe facade.
 pub(crate) mod icmp_raw;
-mod tcp;
+pub(crate) mod tcp;
 pub(crate) mod udp;
 mod worker;
 

@@ -9,12 +9,16 @@ use anemone_abi::net::linux::{
 
 use crate::{
     fs::socket::{
-        ICMP_RAW_SOCKET_OPS, SocketOps, SocketType, UDP_SOCKET_OPS, UNIX_SEQPACKET_SOCKET_OPS,
-        UNIX_STREAM_SOCKET_OPS,
+        ICMP_RAW_SOCKET_OPS, SocketOps, SocketType, TCP_SOCKET_OPS, UDP_SOCKET_OPS,
+        UNIX_SEQPACKET_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS,
     },
     prelude::*,
     task::credentials::cap::Capability,
 };
+
+// Stage 2 keeps TCP ABI metadata private to the unpublished Socket profile;
+// the public ABI constant belongs with the later creation-tuple cutover.
+const IPPROTO_TCP: i32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketAddressAbi {
@@ -139,61 +143,90 @@ impl SocketAbiProfile {
     }
 }
 
-static SOCKET_ABI_PROFILES: [SocketAbiProfile; 4] = [
-    SocketAbiProfile {
-        ops: &UDP_SOCKET_OPS,
-        domain: AF_INET,
-        socket_kind: SOCK_DGRAM,
-        protocol: IPPROTO_UDP,
-        protocol_admission: ProtocolAdmission::CanonicalOrZero,
-        address: SocketAddressAbi::Ipv4,
-        send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-        receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
-        message_io: SocketMessageIo::Datagram,
-        required_capability: None,
-        no_signal_compatibility: Some(&UDP_NOSIGNAL_COMPATIBILITY),
-    },
-    SocketAbiProfile {
-        ops: &ICMP_RAW_SOCKET_OPS,
-        domain: AF_INET,
-        socket_kind: SOCK_RAW,
-        protocol: IPPROTO_ICMP,
-        protocol_admission: ProtocolAdmission::Canonical,
-        address: SocketAddressAbi::Ipv4,
-        send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-        receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
-        message_io: SocketMessageIo::Unsupported,
-        required_capability: Some(Capability::NET_RAW),
-        no_signal_compatibility: Some(&ICMP_RAW_NOSIGNAL_COMPATIBILITY),
-    },
-    SocketAbiProfile {
-        ops: &UNIX_STREAM_SOCKET_OPS,
-        domain: AF_UNIX,
-        socket_kind: SOCK_STREAM,
-        protocol: 0,
-        protocol_admission: ProtocolAdmission::Canonical,
-        address: SocketAddressAbi::UnixPathname,
-        send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-        receive_flags: MSG_DONTWAIT | MSG_PEEK,
-        message_io: SocketMessageIo::Unsupported,
-        required_capability: None,
-        no_signal_compatibility: None,
-    },
-    SocketAbiProfile {
-        ops: &UNIX_SEQPACKET_SOCKET_OPS,
-        domain: AF_UNIX,
-        socket_kind: SOCK_SEQPACKET,
-        protocol: 0,
-        protocol_admission: ProtocolAdmission::Canonical,
-        address: SocketAddressAbi::UnixPathname,
-        send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-        receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
-        // Record send/receive is an internal data-plane capability. The
-        // accepted seqpacket target does not publish sendmsg/recvmsg.
-        message_io: SocketMessageIo::Unsupported,
-        required_capability: None,
-        no_signal_compatibility: None,
-    },
+static UDP_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
+    ops: &UDP_SOCKET_OPS,
+    domain: AF_INET,
+    socket_kind: SOCK_DGRAM,
+    protocol: IPPROTO_UDP,
+    protocol_admission: ProtocolAdmission::CanonicalOrZero,
+    address: SocketAddressAbi::Ipv4,
+    send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
+    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    message_io: SocketMessageIo::Datagram,
+    required_capability: None,
+    no_signal_compatibility: Some(&UDP_NOSIGNAL_COMPATIBILITY),
+};
+static ICMP_RAW_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
+    ops: &ICMP_RAW_SOCKET_OPS,
+    domain: AF_INET,
+    socket_kind: SOCK_RAW,
+    protocol: IPPROTO_ICMP,
+    protocol_admission: ProtocolAdmission::Canonical,
+    address: SocketAddressAbi::Ipv4,
+    send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
+    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    message_io: SocketMessageIo::Unsupported,
+    required_capability: Some(Capability::NET_RAW),
+    no_signal_compatibility: Some(&ICMP_RAW_NOSIGNAL_COMPATIBILITY),
+};
+static UNIX_STREAM_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
+    ops: &UNIX_STREAM_SOCKET_OPS,
+    domain: AF_UNIX,
+    socket_kind: SOCK_STREAM,
+    protocol: 0,
+    protocol_admission: ProtocolAdmission::Canonical,
+    address: SocketAddressAbi::UnixPathname,
+    send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
+    receive_flags: MSG_DONTWAIT | MSG_PEEK,
+    message_io: SocketMessageIo::Unsupported,
+    required_capability: None,
+    no_signal_compatibility: None,
+};
+static UNIX_SEQPACKET_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
+    ops: &UNIX_SEQPACKET_SOCKET_OPS,
+    domain: AF_UNIX,
+    socket_kind: SOCK_SEQPACKET,
+    protocol: 0,
+    protocol_admission: ProtocolAdmission::Canonical,
+    address: SocketAddressAbi::UnixPathname,
+    send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
+    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    // Record send/receive is an internal data-plane capability. The
+    // accepted seqpacket target does not publish sendmsg/recvmsg.
+    message_io: SocketMessageIo::Unsupported,
+    required_capability: None,
+    no_signal_compatibility: None,
+};
+static TCP_ABI_METADATA: SocketAbiProfile = SocketAbiProfile {
+    ops: &TCP_SOCKET_OPS,
+    domain: AF_INET,
+    socket_kind: SOCK_STREAM,
+    protocol: IPPROTO_TCP,
+    protocol_admission: ProtocolAdmission::CanonicalOrZero,
+    address: SocketAddressAbi::Ipv4,
+    send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
+    receive_flags: MSG_DONTWAIT,
+    message_io: SocketMessageIo::Unsupported,
+    required_capability: None,
+    no_signal_compatibility: None,
+};
+
+/// Metadata exists for every static semantic descriptor. This table does not
+/// publish creation tuples; the resolver below consults the separate admitted
+/// set so the Stage 2 TCP descriptor remains syscall-unreachable.
+static SOCKET_ABI_PROFILES: [&SocketAbiProfile; 5] = [
+    &UDP_ABI_PROFILE,
+    &ICMP_RAW_ABI_PROFILE,
+    &UNIX_STREAM_ABI_PROFILE,
+    &UNIX_SEQPACKET_ABI_PROFILE,
+    &TCP_ABI_METADATA,
+];
+
+static PUBLISHED_SOCKET_ABI_PROFILES: [&SocketAbiProfile; 4] = [
+    &UDP_ABI_PROFILE,
+    &ICMP_RAW_ABI_PROFILE,
+    &UNIX_STREAM_ABI_PROFILE,
+    &UNIX_SEQPACKET_ABI_PROFILE,
 ];
 
 pub(super) fn resolve_socket_profile(
@@ -201,11 +234,12 @@ pub(super) fn resolve_socket_profile(
     socket_kind: i32,
     protocol: i32,
 ) -> Result<&'static SocketAbiProfile, SysError> {
-    let profile = SOCKET_ABI_PROFILES
+    let profile = PUBLISHED_SOCKET_ABI_PROFILES
         .iter()
+        .copied()
         .find(|profile| profile.domain == family && profile.socket_kind == socket_kind)
         .ok_or_else(|| {
-            if SOCKET_ABI_PROFILES
+            if PUBLISHED_SOCKET_ABI_PROFILES
                 .iter()
                 .any(|profile| profile.domain == family)
             {
@@ -222,10 +256,11 @@ pub(super) fn resolve_socket_profile(
 
 pub(super) fn socket_abi_profile(socket_type: SocketType) -> &'static SocketAbiProfile {
     let profile = match socket_type {
-        SocketType::Ipv4Udp => &SOCKET_ABI_PROFILES[0],
-        SocketType::Ipv4IcmpRaw => &SOCKET_ABI_PROFILES[1],
-        SocketType::UnixStream => &SOCKET_ABI_PROFILES[2],
-        SocketType::UnixSeqpacket => &SOCKET_ABI_PROFILES[3],
+        SocketType::Ipv4Udp => &UDP_ABI_PROFILE,
+        SocketType::Ipv4IcmpRaw => &ICMP_RAW_ABI_PROFILE,
+        SocketType::Ipv4Tcp => &TCP_ABI_METADATA,
+        SocketType::UnixStream => &UNIX_STREAM_ABI_PROFILE,
+        SocketType::UnixSeqpacket => &UNIX_SEQPACKET_ABI_PROFILE,
     };
     assert_eq!(
         profile.socket_type(),
@@ -244,14 +279,32 @@ mod kunits {
         for profile in &SOCKET_ABI_PROFILES {
             assert!(core::ptr::eq(
                 socket_abi_profile(profile.socket_type()),
-                profile
+                *profile
             ));
+        }
+        for profile in &PUBLISHED_SOCKET_ABI_PROFILES {
             assert!(core::ptr::eq(
                 resolve_socket_profile(profile.domain(), profile.socket_kind(), profile.protocol())
                     .unwrap(),
-                profile
+                *profile
             ));
         }
+    }
+
+    #[kunit]
+    fn tcp_metadata_does_not_publish_a_creation_tuple() {
+        assert!(core::ptr::eq(
+            socket_abi_profile(SocketType::Ipv4Tcp),
+            &TCP_ABI_METADATA
+        ));
+        assert!(matches!(
+            resolve_socket_profile(AF_INET, SOCK_STREAM, 0),
+            Err(SysError::SocketTypeNotSupported)
+        ));
+        assert!(matches!(
+            resolve_socket_profile(AF_INET, SOCK_STREAM, IPPROTO_TCP),
+            Err(SysError::SocketTypeNotSupported)
+        ));
     }
 
     #[kunit]

@@ -1,20 +1,20 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 In Progress / CKPT 2A Closed / CKPT 2B Not Authorized
+**状态：** R0 / Stage 1 Closed / Stage 2 Closed / TCP Not Effective
 **最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 **执行授权：** 用户于 2026-08-05 明确接受 R0、授权并关闭 P0，随后授权Stage 1解析并单独授权其implementation；
-Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后单独授权并关闭CKPT 2A；CKPT 2B与
+Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
 Stage 3--5均未授权
-**当前 Gate：** None；Stage 2 In Progress，CKPT 2A Closed，CKPT 2B Not Authorized
+**当前 Gate：** None；Stage 2 Closed；Stage 3--5 Outline / Not Resolved / Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
 它没有交付TCP Socket capability。Stage 2已经解析为两个独立授权的execution checkpoint：CKPT 2A建立可由kernel
 窄消费的TCP owner capability，CKPT 2B接入syscall-unreachable的general Socket front；整个Stage 2不注册
 `AF_INET + SOCK_STREAM` creation tuple、不发布handler或部分UAPI，也不执行contract cutover。Stage 3--5仍为
-Outline；CKPT 2A closure不授权下一checkpoint或下一Stage。
+Outline；Stage 2 closure不授权解析或进入下一Stage。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -258,7 +258,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | --- | --- | --- | --- | --- |
 | P0 — TCP engine feasibility probe | Positive / Closed | 在kernel外crate验证async cause与bounded listener composition路线 | None；current contracts不变 | 已满足；本gate停止 |
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
-| Stage 2 — TCP owner与Socket-front integration | In Progress / CKPT 2A Closed / CKPT 2B Not Authorized | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | CKPT 2A已关闭；等待CKPT 2B独立授权 |
+| Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 3 — Stream、ABI与lifecycle completion | Outline / Not Resolved / Not Authorized | 在仍未发布syscall route的candidate上闭合partial stream、FIN/RST/shutdown、async error/options、message/vector projection与final-release/reclaim | None；TCP target contracts继续Pending | Stage 2 Closed并取得internal integration的failure/cleanup证据 |
 | Stage 4 — Blocking、readiness与concurrency hardening | Outline / Not Resolved / Not Authorized | 以各operation owner predicate接入blocking/poll/select/epoll，并关闭race、fault、signal与capacity recovery | None；TCP target contracts继续Pending | Stage 3 Closed且完整operation/lifecycle surface可供wait proof |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 完成mandatory双架构、remote-external、shared regression与架构封顶，原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、acceptance assets与独立final review可用 |
@@ -486,8 +486,8 @@ checkpoint。CKPT 2A必须形成独立安全且对current visible semantics中�
 Implementation Boundary内接入真实general Socket front，但保持TCP creation tuple与所有syscall handler不可达。
 Stage 2默认不创建transaction，执行证据由各checkpoint的Git/PR与本页closure write-back拥有。
 
-Implementation Resolution之后，用户明确决定Stage 2不做syscall，并单独授权CKPT 2A；没有授权CKPT 2B、contract
-cutover或Stage 3解析。进入CKPT 2A前重新确认了以下live baseline：
+Implementation Resolution之后，用户明确决定Stage 2不做syscall，并先后分别授权CKPT 2A与CKPT 2B；没有授权
+contract cutover或Stage 3解析。进入CKPT 2A前重新确认了以下live baseline，并在CKPT 2B开始前再次核验未漂移：
 
 - Stage 1保持Closed，`NET-PROTOCOL-PROGRESSION-CUTOVER`保持Effective，三项TCP Introduce与
   `SOCKET-ABI-001` Refine仍Pending；register没有新增会改变本Stage owner/cleanup/validation的TCP问题；
@@ -699,6 +699,42 @@ consume或无owner reservation，final release/rollback只能失败、阻塞、p
 state猜测；progression只能依赖caller wake、unrelated IRQ/timer/traffic；或必须使用test-only profile、长期bridge、
 validation facade、lowered oracle才能关闭。具体type、method、module文件名、锁、reservation/reclaim表示、普通commit
 数量与行为保持型general Socket内部拆分，只要满足本边界，不形成新的resolution gate。
+
+#### 6.4.9 CKPT 2B与Stage 2 execution result — Closed
+
+CKPT 2B在同一Implementation Boundary内关闭，Stage 2据此整体关闭但不执行semantic或contract cutover：
+
+- kernel TCP family-private `TcpSocketFile`只保存move-only Endpoint association与operation-local guard；binding、role、
+  peer、connect outcome、stream与readiness仍由Stack TCP owner逐次提供。immutable `TCP_SOCKET_OPS`经general Socket
+  front覆盖create/address/connect/listen/accept、nonblocking scalar send/receive、creation/accepted-child rollback与
+  opened-description final-release；没有smoltcp handle、owner lock、raw user pointer、fd或第二份Socket truth越过fence。
+- connect adapter保留started、in-progress、connected、reset/refused与timeout distinction；receive继续用owner
+  reservation完成short-prefix commit与copy-fault rollback。creation authority、`AcceptedSocket` guard和final-release
+  先撤销唯一association，再走CKPT 2A不可失败retirement。独立review指出listen/accept capacity一度被压成
+  `InvalidState`的Euclid；收口前已改为internal `ResourceExhausted`并在不可达syscall adapter稳定映射`ENOBUFS`，
+  KUnit固定该typed boundary，owner host test继续证明实际capacity fail/recover。
+- general Socket owner把semantic metadata与published creation admission分成两张静态表；现有UDP、ICMP raw、Unix
+  stream与Unix seqpacket四项tuple、flags、capability与message policy逐项不变。TCP metadata只服务internal
+  descriptor，`resolve_socket_profile(AF_INET, SOCK_STREAM, 0/IPPROTO_TCP)`仍返回`SocketTypeNotSupported`；没有
+  handler registration、test-only activation或Kconfig switch。temporary poll与accept wait bridge只返回
+  `NotSupported`，并明确由Stage 4 owner-predicate source替换，未形成readiness claim。
+- `just test net-host` PASS，其中TCP owner `8/8`、focused smoltcp TCP `178/178`，UDP、ICMP raw、frame path与
+  no-default production checks继续通过。RV64 `smp=1` KUnit为`448/448` PASS，包括general-front active/passive、
+  rollback/final-release、profile/resolver与capacity classification；KUnit结束后的旧Stage 1 UDP rootfs workload退出
+  110，不属于本checkpoint TCP guest evidence。
+- `just fmt kernel --check`、`git diff --check`与RV64/LA64 release build通过，最终symbol entry分别为`6456`与
+  `6151`。existing Socket/UDP/ICMP raw/Unix source regression确认family implementation未改，四项published profile
+  round-trip KUnit通过。config输入未变化，故`just test xtask`按本gate规则Not Run；没有创建temporary validation
+  asset。
+- 独立engineering review复核owner/capability、rollback/final-release、reservation、unpublished resolver fence、
+  temporary bridge与Architecture Friction，未发现Apollyon或Keter；上述唯一Euclid已在收口前修复。最终scan没有
+  第二truth、owner穿透、private representation泄漏、无退出条件bridge或降低oracle。review只读，未编辑或提交。
+
+据此Stage 2标记Closed。`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001` Introduce与
+`SOCKET-ABI-001` Refine仍Pending；current Network、Socket、Opened-description、IOMUX与Epoll contracts不变，
+transaction保持None。TCP syscall、raw user-copy、fd publication runtime、blocking、poll/select/epoll、TCP guest、
+CAgent、deployment probe、full network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run；
+host/KUnit/build不外推这些轨道。Stage 2授权在此耗尽，立即停止，不解析或进入Stage 3。
 
 ### 6.5 Stage 3 Outline — Stream、ABI与lifecycle completion
 
