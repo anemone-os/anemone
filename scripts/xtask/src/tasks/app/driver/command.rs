@@ -33,11 +33,14 @@ pub fn build_command(
     command.args(args);
     command.args(extra_args);
     command.current_dir(ctx.workdir);
-    command.env("ANEMONE_ARCH", ctx.context.arch_name());
-    command.env(
-        "ANEMONE_TARGET_TRIPLE",
-        ctx.context.target_triple().as_str(),
-    );
+    command.env("ANEMONE_ARCH", ctx.context.target_name());
+    if let Some(target_triple) = ctx.context.target_triple() {
+        command.env("ANEMONE_TARGET_TRIPLE", target_triple.as_str());
+    } else {
+        // Host is an app-local execution target, not an Anemone compiler
+        // target. Remove inherited values so they cannot drive the recipe.
+        command.env_remove("ANEMONE_TARGET_TRIPLE");
+    }
     Ok(command)
 }
 
@@ -46,7 +49,7 @@ mod tests {
     use super::*;
     use crate::{
         config::{
-            app::{App, Artifact, Build, BuildDriver},
+            app::{App, AppTarget, Artifact, Build, BuildDriver},
             platform::Arch,
         },
         tasks::app::build::BuildCtx,
@@ -56,6 +59,10 @@ mod tests {
     fn command_app(argv: &[&str]) -> App {
         App {
             name: "command-test".to_string(),
+            targets: vec![
+                AppTarget::Anemone(Arch::RiscV64),
+                AppTarget::Host,
+            ],
             build: Build {
                 workdir: ".".to_string(),
                 driver: BuildDriver::Command(CommandBuild {
@@ -93,6 +100,22 @@ mod tests {
             OsStr::new("ANEMONE_TARGET_TRIPLE"),
             Some(OsStr::new("riscv64-unknown-anemone-elf"))
         )));
+    }
+
+    #[test]
+    fn command_driver_marks_host_without_inventing_a_target_triple() {
+        let app = command_app(&["tool"]);
+        let context = BuildCtx::for_target(AppTarget::Host);
+        let driver = DriverContext {
+            app: &app,
+            workdir: Path::new("."),
+            context: &context,
+        };
+
+        let command = build_command(&app_command(&app), &driver, &[]).unwrap();
+        let environment = command.get_envs().collect::<Vec<_>>();
+        assert!(environment.contains(&(OsStr::new("ANEMONE_ARCH"), Some(OsStr::new("host")))));
+        assert!(environment.contains(&(OsStr::new("ANEMONE_TARGET_TRIPLE"), None)));
     }
 
     #[test]

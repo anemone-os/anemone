@@ -1,4 +1,5 @@
 name = "anemone-bench"
+targets = ["riscv64", "loongarch64", "host"]
 
 [build]
 workdir = "."

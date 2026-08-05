@@ -11,14 +11,15 @@ pthread creation count, explicit CPU-only baselines, monotonic timing, strict
 child/error handling, and one-line result records. The imported benchmark
 payloads otherwise retain the upstream workload shapes.
 
-Build a static binary for the current Linux host and list its cases with:
+Build and export a static binary for the current Linux host, then list its
+cases with:
 
-    ./anemone-apps/anemone-bench/build.sh --host
-    ./anemone-apps/anemone-bench/out/host/anemone-bench --list
+    just app build --arch host anemone-bench
+    ./build/apps/anemone-bench/anemone-bench --list
 
-Set `HOST_CC` to select a different host compiler. This direct host path is an
-app-local convenience; target builds continue to use the repository's existing
-app driver.
+Set `HOST_CC` to select a different host compiler. Xtask selects the declared
+host target and exports the artifact, while the app-owned command remains
+responsible for compiler and standard-library availability.
 
 Use --list to discover case names. A focused pthread run looks like:
 
