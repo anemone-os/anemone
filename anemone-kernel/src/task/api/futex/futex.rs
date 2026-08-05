@@ -261,7 +261,7 @@ fn futex_wait(
     let waiter = with_futex(key, true, |futex| {
         // this operation ensures we can safely access the futex word directly through
         // user pointer.
-        usp.inject_page_fault(word_addr, PageFaultType::Read)?;
+        usp.fault_in_page(word_addr, PageFaultType::Read)?;
 
         let atomic_view = unsafe { (word_addr.as_ptr_mut() as *mut AtomicU32).as_ref().unwrap() };
         if atomic_view.load(Ordering::SeqCst) != val {
@@ -472,7 +472,7 @@ fn futex_cmp_requeue(
     // again, usp is locked before FUTEX_SET is locked.
     let mut usp = usp_handle.lock();
     match with_2_futex(key1, key2, true, |futex1, futex2| {
-        usp.inject_page_fault(word1_addr, PageFaultType::Read)?;
+        usp.fault_in_page(word1_addr, PageFaultType::Read)?;
 
         let atomic_view = unsafe {
             (word1_addr.as_ptr_mut() as *mut AtomicU32)

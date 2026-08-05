@@ -63,7 +63,7 @@ fn fault_in_user_range(
     let evpn = end.page_up();
     for vpn in VirtPageRange::new(svpn, evpn - svpn).iter() {
         let fence = usp
-            .inject_page_fault(vpn.to_virt_addr(), access)
+            .fault_in_page(vpn.to_virt_addr(), access)
             .map_err(user_memory_error)?;
         drop(fence);
     }

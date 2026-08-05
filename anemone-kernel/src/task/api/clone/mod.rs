@@ -345,7 +345,7 @@ pub fn kernel_clone(
         if let Some(child_tid) = child_tid {
             let new_uspace = new_task.clone_uspace_handle();
             let mut usp_guard = new_uspace.lock();
-            match usp_guard.inject_page_fault(child_tid, PageFaultType::Write) {
+            match usp_guard.fault_in_page(child_tid, PageFaultType::Write) {
                 Ok(fence) => drop(fence),
                 Err(e) => {
                     drop(usp_guard);
