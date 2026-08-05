@@ -109,6 +109,8 @@ pub enum SysError {
     /// A pathname resolved, but no live listening socket admitted the
     /// connection.
     ConnectionRefused,
+    /// A connected stream was reset by its peer.
+    ConnectionReset,
     /// The requested local address/port conflicts with an active binding.
     AddressInUse,
     /// The requested local address is not owned by this network domain.
@@ -260,6 +262,7 @@ impl SysError {
             SysError::AlreadyConnected => EISCONN,
             SysError::ProtocolTypeMismatch => EPROTOTYPE,
             SysError::ConnectionRefused => ECONNREFUSED,
+            SysError::ConnectionReset => ECONNRESET,
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,
             SysError::NoBufferSpace => ENOBUFS,

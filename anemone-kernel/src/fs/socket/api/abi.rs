@@ -217,6 +217,12 @@ pub(super) fn write_socket_address(
     write_sockaddr_bytes(addr, addrlen, &bytes)
 }
 
+pub(super) fn write_empty_socket_address(addr: u64, addrlen: u64) -> Result<(), SysError> {
+    // Linux TCP receive paths report msg_namelen zero. move_addr_to_user still
+    // reads and updates the caller's length pointer, but copies no peer bytes.
+    write_sockaddr_bytes(addr, addrlen, &[])
+}
+
 pub(super) fn read_payload(addr: u64, len: usize, maximum: usize) -> Result<Vec<u8>, SysError> {
     // The family supplies its absolute semantic ceiling. Request-specific MTU
     // and Endpoint capacity remain owner checks after the bounded user copy.
@@ -328,6 +334,9 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,
         SocketSendError::MessageTooLong => SysError::MessageTooLong,
+        SocketSendError::ConnectionRefused => SysError::ConnectionRefused,
+        SocketSendError::ConnectionReset => SysError::ConnectionReset,
+        SocketSendError::ConnectionTimedOut => SysError::Timeout,
         SocketSendError::PeerClosed => SysError::BrokenPipe,
         SocketSendError::Copy(error) => error,
     }
@@ -337,7 +346,11 @@ pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
     match error {
         SocketReceiveError::Unsupported => SysError::NotSupported,
         SocketReceiveError::Retired => SysError::BadFileDescriptor,
+        SocketReceiveError::NotConnected => SysError::NotConnected,
         SocketReceiveError::InvalidState => SysError::NotConnected,
+        SocketReceiveError::ConnectionRefused => SysError::ConnectionRefused,
+        SocketReceiveError::ConnectionReset => SysError::ConnectionReset,
+        SocketReceiveError::ConnectionTimedOut => SysError::Timeout,
         SocketReceiveError::WouldBlock => SysError::Again,
         SocketReceiveError::Copy(error) => error,
     }

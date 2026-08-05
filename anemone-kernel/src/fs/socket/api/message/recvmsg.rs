@@ -7,10 +7,12 @@ use anemone_abi::{
 
 use crate::{
     fs::{
+        UserBufferSegment, UserBufferSink,
         api::read_write::request::{CheckedIoVec, IoVecDirection},
         socket::{
-            SocketAddress, SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest,
-            SocketReceiveSink, retry_socket_receive, socket_from_file,
+            SocketAddress, SocketAddressSink, SocketReadSink, SocketReceiveFlags,
+            SocketReceiveOutcome, SocketReceiveRequest, SocketReceiveSink, front::Socket,
+            retry_socket_receive, socket_from_file,
         },
     },
     prelude::*,
@@ -28,6 +30,16 @@ struct MessageReceiveSink<'a> {
     uspace: &'a UserSpaceHandle,
     iovecs: &'a [CheckedIoVec],
     peer: Option<SocketAddress>,
+}
+
+#[derive(Default)]
+struct PeerCapture(Option<SocketAddress>);
+
+impl SocketAddressSink for PeerCapture {
+    fn copy_address(&mut self, address: Option<SocketAddress>) -> Result<(), SysError> {
+        self.0 = address;
+        Ok(())
+    }
 }
 
 impl SocketReceiveSink for MessageReceiveSink<'_> {
@@ -86,12 +98,75 @@ fn receive_return(outcome: SocketReceiveOutcome, truncate_result: bool) -> usize
     }
 }
 
-#[syscall(SYS_RECVMSG)]
-fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
+pub(super) trait StreamMessageOutput {
+    fn write_name_len_zero(&mut self) -> Result<(), SysError>;
+    fn write_flags_zero(&mut self) -> Result<(), SysError>;
+    fn write_control_len_zero(&mut self) -> Result<(), SysError>;
+}
+
+struct UserStreamMessageOutput {
+    message: u64,
+}
+
+impl StreamMessageOutput for UserStreamMessageOutput {
+    fn write_name_len_zero(&mut self) -> Result<(), SysError> {
+        write_message_field(self.message, offset_of!(MsgHdr, msg_namelen), 0i32)
+    }
+
+    fn write_flags_zero(&mut self) -> Result<(), SysError> {
+        write_message_field(self.message, offset_of!(MsgHdr, msg_flags), 0u32)
+    }
+
+    fn write_control_len_zero(&mut self) -> Result<(), SysError> {
+        write_message_field(self.message, offset_of!(MsgHdr, msg_controllen), 0u64)
+    }
+}
+
+pub(super) fn write_stream_message_output(
+    output: &mut dyn StreamMessageOutput,
+    has_name: bool,
+) -> Result<(), SysError> {
+    if has_name {
+        // Linux tcp_recvmsg does not project getpeername semantics through
+        // recvmsg; inet_recvmsg reports an empty name instead.
+        output.write_name_len_zero()?;
+    }
+    output.write_flags_zero()?;
+    output.write_control_len_zero()
+}
+
+pub(super) fn receive_stream_message(
+    task: &Arc<Task>,
+    file: &File,
+    socket: &Socket,
+    sink: &mut dyn SocketReadSink,
+    flags: i32,
+    file_nonblocking: bool,
+) -> Result<SocketReceiveOutcome, SysError> {
+    let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
+    retry_socket_receive(
+        "sys_recvmsg",
+        task,
+        file,
+        message_flags.nonblocking || file_nonblocking,
+        || {
+            socket.receive(SocketReceiveRequest::Stream {
+                sink,
+                flags: SocketReceiveFlags {
+                    peek: message_flags.peek,
+                },
+            })
+        },
+        map_receive_error,
+    )
+}
+
+pub(super) fn receive_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    if socket_abi_profile(socket.socket_type()).message_io() != SocketMessageIo::Datagram {
+    let message_io = socket_abi_profile(socket.socket_type()).message_io();
+    if message_io == SocketMessageIo::Unsupported {
         return Err(SysError::NotSupported);
     }
 
@@ -99,6 +174,31 @@ fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     let _name_len = normalized_name_len(header)?;
     let uspace = task.clone_uspace_handle();
     let iovecs = message_iovecs(&uspace, header, IoVecDirection::Destination)?;
+    if message_io == SocketMessageIo::ByteStream {
+        let mut segments = Vec::new();
+        segments
+            .try_reserve_exact(iovecs.len())
+            .map_err(|_| SysError::OutOfMemory)?;
+        segments.extend(
+            iovecs
+                .iter()
+                .map(|iovec| UserBufferSegment::new(iovec.base, iovec.len)),
+        );
+        let mut stream_sink = UserBufferSink::new(&uspace, &segments);
+        let outcome = receive_stream_message(
+            &task,
+            desc.vfs_file(),
+            socket,
+            &mut stream_sink,
+            flags,
+            desc.file_flags().contains(FileStatusFlags::NONBLOCK),
+        )?;
+        write_stream_message_output(
+            &mut UserStreamMessageOutput { message },
+            !header.msg_name.is_null(),
+        )?;
+        return Ok(outcome.copied() as u64);
+    }
     let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
@@ -151,6 +251,11 @@ fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     write_message_field(message, offset_of!(MsgHdr, msg_controllen), 0u64)?;
 
     Ok(receive_return(outcome, message_flags.truncate_result) as u64)
+}
+
+#[syscall(SYS_RECVMSG)]
+fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
+    receive_message(fd, message, flags)
 }
 
 #[cfg(feature = "kunit")]

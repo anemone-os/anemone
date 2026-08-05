@@ -181,35 +181,10 @@ impl TcpPeer {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TcpDisconnectCause {
-    Reset,
-    Timeout,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TcpPendingError {
     ConnectionRefused,
     ConnectionReset,
     TimedOut,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TcpConnectionObservation {
-    Idle,
-    Bound(TcpLocalBinding),
-    Connecting {
-        local: TcpLocalBinding,
-        peer: TcpPeer,
-    },
-    Connected {
-        local: TcpLocalBinding,
-        peer: TcpPeer,
-    },
-    Failed {
-        local: TcpLocalBinding,
-        peer: TcpPeer,
-        cause: TcpDisconnectCause,
-    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

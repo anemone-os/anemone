@@ -4,12 +4,11 @@ use anemone_net_api::{
     InterfaceId, Ipv4Address, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpConnectionObservation, TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError,
-        TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError,
-        TcpReceiveMode, TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError,
-        TcpReleaseReason, TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError,
-        TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome,
-        TcpStreamSendError,
+        TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
+        TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
+        TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason,
+        TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome,
+        TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use smoltcp::{
@@ -123,33 +122,32 @@ impl Stack {
         Ok(ProtocolProgression::committed(selection.interface()))
     }
 
-    pub fn observe_tcp_connection(
-        &mut self,
-        id: TcpEndpointId,
-    ) -> Result<TcpConnectionObservation, TcpQueryError> {
-        let interface = match self.protocols.tcp.connection(id) {
-            Some(connection) => Some(connection.interface),
-            None => None,
-        };
-        let Some(interface_id) = interface else {
-            return match self.protocols.tcp.endpoint(id) {
-                Some(endpoint) => match endpoint.role {
-                    crate::tcp::EndpointRole::Idle => Ok(TcpConnectionObservation::Idle),
-                    crate::tcp::EndpointRole::Bound(binding) => {
-                        Ok(TcpConnectionObservation::Bound(binding))
-                    },
-                    crate::tcp::EndpointRole::Reclaiming { .. } => {
-                        Err(TcpQueryError::UnknownEndpoint)
-                    },
-                    _ => Err(TcpQueryError::WrongRole),
-                },
-                None => Err(TcpQueryError::UnknownEndpoint),
-            };
-        };
-        let (tcp_owner, _, sockets) = self
-            .tcp_owner_interface_mut(interface_id)
-            .expect("live TCP connection references an attached interface");
-        tcp_owner.connection_observation(sockets, id)
+    pub fn tcp_endpoint_is_listening(&self, id: TcpEndpointId) -> Result<bool, TcpQueryError> {
+        let endpoint = self
+            .protocols
+            .tcp
+            .endpoint(id)
+            .ok_or(TcpQueryError::UnknownEndpoint)?;
+        if matches!(endpoint.role, crate::tcp::EndpointRole::Reclaiming { .. }) {
+            return Err(TcpQueryError::UnknownEndpoint);
+        }
+        Ok(matches!(
+            endpoint.role,
+            crate::tcp::EndpointRole::Listener(_)
+        ))
+    }
+
+    pub fn tcp_endpoint_peer(&self, id: TcpEndpointId) -> Result<Option<TcpPeer>, TcpQueryError> {
+        let endpoint = self
+            .protocols
+            .tcp
+            .endpoint(id)
+            .ok_or(TcpQueryError::UnknownEndpoint)?;
+        match &endpoint.role {
+            crate::tcp::EndpointRole::Connection(connection) => Ok(Some(connection.peer)),
+            crate::tcp::EndpointRole::Reclaiming { .. } => Err(TcpQueryError::UnknownEndpoint),
+            _ => Ok(None),
+        }
     }
 
     pub fn tcp_connect_result(
@@ -186,18 +184,21 @@ impl Stack {
         &mut self,
         id: TcpEndpointId,
     ) -> Result<Option<TcpPendingError>, TcpQueryError> {
-        let interface = self
-            .protocols
-            .tcp
-            .connection(id)
-            .ok_or_else(|| {
-                if self.protocols.tcp.endpoint(id).is_some() {
-                    TcpQueryError::WrongRole
+        let interface = match self.protocols.tcp.connection(id) {
+            Some(connection) => connection.interface,
+            None => {
+                let endpoint = self
+                    .protocols
+                    .tcp
+                    .endpoint(id)
+                    .ok_or(TcpQueryError::UnknownEndpoint)?;
+                return if matches!(endpoint.role, crate::tcp::EndpointRole::Reclaiming { .. }) {
+                    Err(TcpQueryError::UnknownEndpoint)
                 } else {
-                    TcpQueryError::UnknownEndpoint
-                }
-            })?
-            .interface;
+                    Ok(None)
+                };
+            },
+        };
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
@@ -457,17 +458,6 @@ impl Stack {
             .expect("live TCP reservation references an attached interface");
         let progression = tcp_owner.resolve_receive(sockets, reservation, committed)?;
         Ok(progression.map(ProtocolProgression::committed))
-    }
-
-    pub fn retire_tcp_endpoint(
-        &mut self,
-        id: TcpEndpointId,
-    ) -> Result<Option<ProtocolProgression>, TcpRetireError> {
-        // Stage 2's syscall-unreachable adapter uses this legacy operation for
-        // both unpublished and accepted-child rollback. CKPT 3B must replace
-        // those call sites with explicit reasons before wiring semantic final
-        // release; until then this compatibility bridge must remain aborting.
-        self.release_tcp_endpoint(id, TcpReleaseReason::CreationRollback)
     }
 
     pub fn release_tcp_endpoint(

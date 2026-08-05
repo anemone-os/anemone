@@ -109,6 +109,9 @@ pub(super) enum SocketSendError {
     DestinationRequired,
     InvalidDestination,
     MessageTooLong,
+    ConnectionRefused,
+    ConnectionReset,
+    ConnectionTimedOut,
     PeerClosed,
     WouldBlock,
     Copy(SysError),
@@ -118,7 +121,11 @@ pub(super) enum SocketSendError {
 pub(super) enum SocketReceiveError {
     Unsupported,
     Retired,
+    NotConnected,
     InvalidState,
+    ConnectionRefused,
+    ConnectionReset,
+    ConnectionTimedOut,
     WouldBlock,
     Copy(SysError),
 }
@@ -258,6 +265,9 @@ impl SocketReceiveOutcome {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionQuery {
+    ReuseAddress,
+    PendingError,
+    TcpNoDelay,
     Ipv4TimeToLive,
     Ipv4TypeOfService,
     IcmpTypeFilter,
@@ -265,6 +275,8 @@ pub(super) enum SocketOptionQuery {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionValue {
+    Boolean(bool),
+    PendingError(Option<SocketPendingError>),
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
@@ -272,6 +284,8 @@ pub(super) enum SocketOptionValue {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionMutation {
+    ReuseAddress(bool),
+    TcpNoDelay(bool),
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
@@ -282,6 +296,19 @@ pub(super) enum SocketOptionError {
     Unsupported,
     Retired,
     InvalidValue,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketPendingError {
+    ConnectionRefused,
+    ConnectionReset,
+    TimedOut,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketReleaseReason {
+    AcceptedChildRollback,
+    FinalRelease,
 }
 
 pub(super) enum SocketSendRequest<'a> {
@@ -426,7 +453,7 @@ pub(super) struct SocketOps {
         Option<fn(&AnyOpaque, SocketOptionMutation) -> Result<(), SocketOptionError>>,
     pub(super) poll:
         for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
-    pub(super) final_release: fn(&AnyOpaque),
+    pub(super) final_release: fn(&AnyOpaque, SocketReleaseReason),
 }
 
 impl SocketOps {
@@ -549,7 +576,7 @@ impl Socket {
     }
 
     fn final_release(&self) {
-        (self.ops.final_release)(&self.private);
+        (self.ops.final_release)(&self.private, SocketReleaseReason::FinalRelease);
     }
 }
 
@@ -583,7 +610,7 @@ impl AcceptedSocket {
 impl Drop for AcceptedSocket {
     fn drop(&mut self) {
         if let Some(private) = self.private.as_ref() {
-            (self.ops.final_release)(private);
+            (self.ops.final_release)(private, SocketReleaseReason::AcceptedChildRollback);
         }
     }
 }

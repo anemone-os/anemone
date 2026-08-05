@@ -14,7 +14,8 @@ use crate::{
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
     SocketIoOps, SocketOps, SocketPreparation, SocketQueryError, SocketReceiveError,
-    SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
+    SocketReceiveOutcome, SocketReceiveRequest, SocketReleaseReason, SocketSendError,
+    SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
 
@@ -301,7 +302,7 @@ fn poll_udp_socket(
     udp_private(private).source.poll(request)
 }
 
-fn final_release_udp_socket(private: &AnyOpaque) {
+fn final_release_udp_socket(private: &AnyOpaque, _reason: SocketReleaseReason) {
     // Source retirement first withdraws association, reverse publication and
     // routes. No sleeping operation mutex or fd-table lock participates.
     let result = udp_private(private).source.retire();

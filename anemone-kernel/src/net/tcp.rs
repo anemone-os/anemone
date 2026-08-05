@@ -1,17 +1,18 @@
 //! Kernel-private capability for the initial-domain TCP owner.
 //!
-//! Stage 2 CKPT 2A deliberately stops at this module. No Socket profile,
-//! descriptor, fd, syscall, user pointer, or wait route can reach it.
+//! No Socket profile, descriptor, fd, syscall, user pointer, or wait route
+//! crosses this fence; callers use only normalized operations and lifecycle
+//! reasons.
 
 use anemone_net_api::{
     Ipv4Address, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpConnectionObservation, TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError,
-        TcpLocalBinding, TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
-        TcpReceiveReservation, TcpReceiveResolveError, TcpReleaseReason, TcpSendError,
-        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
-        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
+        TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode, TcpReceiveReservation,
+        TcpReceiveResolveError, TcpReleaseReason, TcpSendError, TcpShutdownDirection,
+        TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError,
+        TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use anemone_smoltcp_stack::TcpPolicy;
@@ -214,8 +215,12 @@ impl TcpEndpointPort {
             .map_err(ConnectError::Stack)
     }
 
-    pub(crate) fn connection(&self) -> Result<TcpConnectionObservation, TcpQueryError> {
-        self.stack.observe_tcp_connection(self.id())
+    pub(crate) fn is_listening(&self) -> Result<bool, TcpQueryError> {
+        self.stack.tcp_endpoint_is_listening(self.id())
+    }
+
+    pub(crate) fn peer(&self) -> Result<Option<TcpPeer>, TcpQueryError> {
+        self.stack.tcp_endpoint_peer(self.id())
     }
 
     pub(crate) fn connect_result(&self) -> Result<TcpConnectResult, TcpQueryError> {
@@ -312,19 +317,6 @@ impl TcpEndpointPort {
         direction: TcpShutdownDirection,
     ) -> Result<TcpShutdownOutcome, TcpShutdownError> {
         self.stack.shutdown_tcp_endpoint(self.id(), direction)
-    }
-
-    pub(crate) fn retire(mut self) {
-        let endpoint = self
-            .endpoint
-            .take()
-            .expect("TCP capability retired more than once");
-        // Stage 2 uses this legacy capability for rollback and final release.
-        // CKPT 3B must replace each call site with an explicit lifecycle reason
-        // before semantic final release may select graceful FIN.
-        self.stack
-            .retire_tcp_endpoint(endpoint)
-            .expect("live TCP capability lost its owner before retirement");
     }
 
     pub(crate) fn release(mut self, reason: TcpReleaseReason) {

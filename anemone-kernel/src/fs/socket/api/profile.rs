@@ -16,8 +16,8 @@ use crate::{
     task::credentials::cap::Capability,
 };
 
-// Stage 2 keeps TCP ABI metadata private to the unpublished Socket profile;
-// the public ABI constant belongs with the later creation-tuple cutover.
+// TCP ABI metadata stays private to the unpublished Socket profile; the public
+// ABI constant belongs with the later creation-tuple cutover.
 const IPPROTO_TCP: i32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,6 +29,7 @@ pub(super) enum SocketAddressAbi {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketMessageIo {
     Unsupported,
+    ByteStream,
     Datagram,
 }
 
@@ -205,15 +206,15 @@ static TCP_ABI_METADATA: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::CanonicalOrZero,
     address: SocketAddressAbi::Ipv4,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT,
-    message_io: SocketMessageIo::Unsupported,
+    receive_flags: MSG_DONTWAIT | MSG_PEEK,
+    message_io: SocketMessageIo::ByteStream,
     required_capability: None,
     no_signal_compatibility: None,
 };
 
 /// Metadata exists for every static semantic descriptor. This table does not
 /// publish creation tuples; the resolver below consults the separate admitted
-/// set so the Stage 2 TCP descriptor remains syscall-unreachable.
+/// set so the TCP descriptor remains syscall-unreachable.
 static SOCKET_ABI_PROFILES: [&SocketAbiProfile; 5] = [
     &UDP_ABI_PROFILE,
     &ICMP_RAW_ABI_PROFILE,
@@ -293,10 +294,12 @@ mod kunits {
 
     #[kunit]
     fn tcp_metadata_does_not_publish_a_creation_tuple() {
-        assert!(core::ptr::eq(
-            socket_abi_profile(SocketType::Ipv4Tcp),
-            &TCP_ABI_METADATA
-        ));
+        let metadata = socket_abi_profile(SocketType::Ipv4Tcp);
+        assert!(core::ptr::eq(metadata, &TCP_ABI_METADATA));
+        assert!(core::ptr::eq(metadata.ops(), &TCP_SOCKET_OPS));
+        assert_eq!(metadata.send_flags(), MSG_DONTWAIT | MSG_NOSIGNAL);
+        assert_eq!(metadata.receive_flags(), MSG_DONTWAIT | MSG_PEEK);
+        assert_eq!(metadata.message_io(), SocketMessageIo::ByteStream);
         assert!(matches!(
             resolve_socket_profile(AF_INET, SOCK_STREAM, 0),
             Err(SysError::SocketTypeNotSupported)
@@ -315,6 +318,10 @@ mod kunits {
         );
         assert_eq!(
             socket_abi_profile(SocketType::Ipv4IcmpRaw).message_io(),
+            SocketMessageIo::Unsupported
+        );
+        assert_eq!(
+            socket_abi_profile(SocketType::UnixStream).message_io(),
             SocketMessageIo::Unsupported
         );
         assert_eq!(

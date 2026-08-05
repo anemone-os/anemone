@@ -5,18 +5,16 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     tcp::{
-        TcpConnectError, TcpConnectResult, TcpConnectionObservation, TcpEndpointId,
-        TcpLocalBinding, TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
-        TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError, TcpSendError,
-        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
-        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpConnectError, TcpConnectResult, TcpEndpointId, TcpLocalBinding, TcpPeer,
+        TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode, TcpReceiveReservation,
+        TcpReceiveReservationId, TcpReceiveResolveError, TcpSendError, TcpShutdownDirection,
+        TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError,
+        TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use smoltcp::{iface::SocketSet, socket::tcp};
 
-use super::{
-    Connection, ConnectionPhase, EndpointRole, OutstandingReceive, TcpEndpoints, map_disconnect,
-};
+use super::{Connection, ConnectionPhase, EndpointRole, OutstandingReceive, TcpEndpoints};
 
 impl TcpEndpoints {
     pub(crate) fn prepare_connect(
@@ -118,49 +116,6 @@ impl TcpEndpoints {
         });
     }
 
-    pub(crate) fn connection_observation(
-        &mut self,
-        sockets: &mut SocketSet<'static>,
-        id: TcpEndpointId,
-    ) -> Result<TcpConnectionObservation, TcpQueryError> {
-        // Stage 2's syscall-unreachable scalar adapter still consumes this
-        // non-consuming snapshot. Stage 3 CKPT 3B must move that adapter to
-        // `connection_result`, after which ordinary connect and SO_ERROR share
-        // the consuming owner path below.
-        let Some(endpoint) = self.endpoint(id) else {
-            return Err(TcpQueryError::UnknownEndpoint);
-        };
-        match &endpoint.role {
-            EndpointRole::Idle => return Ok(TcpConnectionObservation::Idle),
-            EndpointRole::Bound(binding) => {
-                return Ok(TcpConnectionObservation::Bound(*binding));
-            },
-            EndpointRole::Connection(_) => {},
-            _ => return Err(TcpQueryError::WrongRole),
-        }
-
-        self.refresh_connection(sockets, id)?;
-        let connection = self
-            .connection(id)
-            .expect("checked TCP connection role disappeared before observation");
-
-        Ok(match connection.phase {
-            ConnectionPhase::Connecting => TcpConnectionObservation::Connecting {
-                local: connection.local,
-                peer: connection.peer,
-            },
-            ConnectionPhase::Connected => TcpConnectionObservation::Connected {
-                local: connection.local,
-                peer: connection.peer,
-            },
-            ConnectionPhase::Failed(cause) => TcpConnectionObservation::Failed {
-                local: connection.local,
-                peer: connection.peer,
-                cause,
-            },
-        })
-    }
-
     pub(crate) fn connection_result(
         &mut self,
         sockets: &mut SocketSet<'static>,
@@ -179,7 +134,7 @@ impl TcpEndpoints {
                 local: connection.local,
                 peer: connection.peer,
             },
-            ConnectionPhase::Failed(_) => match connection.pending_error.take() {
+            ConnectionPhase::Failed => match connection.pending_error.take() {
                 Some(error) => TcpConnectResult::Failed(error),
                 None => TcpConnectResult::Terminal,
             },
@@ -552,7 +507,7 @@ impl TcpEndpoints {
                 tcp::DisconnectReason::Timeout => TcpPendingError::TimedOut,
             };
             connection.pending_error.get_or_insert(pending);
-            connection.phase = ConnectionPhase::Failed(map_disconnect(reason));
+            connection.phase = ConnectionPhase::Failed;
         } else if matches!(
             state,
             tcp::State::Established

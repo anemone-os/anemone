@@ -123,7 +123,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
 - [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Closed / Stage 2 Closed /
-  Stage 3 Ready / TCP Not Effective；目标为
+  Stage 3 Closed / Not Cut Over / TCP Not Effective；目标为
   initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
   TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
   current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
@@ -133,11 +133,11 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   crate-only P0已证明窄async cause与bounded listener composition路线，临时probe与feature启用均已删除。
   Stage 1已交付production handoff、UDP/ICMP raw原子迁移与Stack-private TCP foundation；双架构focused回归通过，
   LA64只证明完整shutdown顺序、不宣称wrapper exit 0。Stage 2的CKPT 2A/2B已分别关闭：先建立kernel窄TCP owner
-  capability，再接入syscall-unreachable Socket front。Stage 3已解析为仍需分别授权、分别review的CKPT 3A Stack
-  owner fact/lifecycle completion与CKPT 3B syscall-unreachable Socket/ABI completion；`fs/socket/tcp.rs`目录化属于
-  Stage内行为保持型implementation ordering，不单列semantic gate。三项TCP Introduce与`SOCKET-ABI-001` Refine仍
-  Pending，transaction None；Stage 3 Ready / Not Active / Not Authorized，Stage 4--5保持Outline / Not Resolved /
-  Not Authorized。
+  capability，再接入syscall-unreachable Socket front。Stage 3的CKPT 3A已闭合Stack owner fact/lifecycle，CKPT 3B
+  已完成仍不可达的Socket/ABI completion与同owner TCP family目录化；RV64/LA64 release build、RV64 KUnit `459/459`、
+  既有Socket consumer回归与独立review通过。TCP creation tuple、handler、fd/runtime与readiness仍未发布，temporary
+  poll bridge保持`NotSupported`。三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending，current contracts不变，
+  transaction None；Stage 3 Closed / Not Cut Over，Stage 4--5保持Outline / Not Resolved / Not Authorized。
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Stage 1只更新上述两项Network current contract，
   register没有新增当前问题。

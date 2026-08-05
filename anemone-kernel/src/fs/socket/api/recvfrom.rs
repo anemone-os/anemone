@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::abi::{
-    map_query_error, map_receive_error, validate_receive_message_flags, write_payload,
-    write_socket_address,
+    map_query_error, map_receive_error, validate_receive_message_flags, write_empty_socket_address,
+    write_payload, write_socket_address,
 };
 
 struct ReceiveSink {
@@ -99,11 +99,15 @@ fn sys_recvfrom(
             map_receive_error,
         )?;
         if peer != 0 {
-            let mut peer_address = PeerCapture::default();
-            socket
-                .copy_peer_address(&mut peer_address)
-                .map_err(map_query_error)?;
-            write_socket_address(socket.socket_type(), peer, addrlen, peer_address.0)?;
+            if socket.socket_type() == SocketType::Ipv4Tcp {
+                write_empty_socket_address(peer, addrlen)?;
+            } else {
+                let mut peer_address = PeerCapture::default();
+                socket
+                    .copy_peer_address(&mut peer_address)
+                    .map_err(map_query_error)?;
+                write_socket_address(socket.socket_type(), peer, addrlen, peer_address.0)?;
+            }
         }
         return Ok(if message_flags.truncate_result {
             outcome

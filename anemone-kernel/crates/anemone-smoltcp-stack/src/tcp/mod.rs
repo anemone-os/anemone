@@ -10,8 +10,8 @@ use alloc::{vec, vec::Vec};
 use anemone_net_api::{
     InterfaceId,
     tcp::{
-        TcpDisconnectCause, TcpEndpointId, TcpLocalBinding, TcpPeer, TcpPendingError,
-        TcpReceiveMode, TcpReceiveReservationId, TcpReleaseReason,
+        TcpEndpointId, TcpLocalBinding, TcpPeer, TcpPendingError, TcpReceiveMode,
+        TcpReceiveReservationId, TcpReleaseReason,
     },
 };
 use smoltcp::{
@@ -112,7 +112,7 @@ pub(crate) struct ListenerSlot {
 pub(crate) enum ConnectionPhase {
     Connecting,
     Connected,
-    Failed(TcpDisconnectCause),
+    Failed,
 }
 
 pub(crate) struct Connection {
@@ -123,9 +123,9 @@ pub(crate) struct Connection {
     pub(crate) binding: TcpLocalBinding,
     pub(crate) local: TcpLocalBinding,
     pub(crate) peer: TcpPeer,
-    /// Normalized phase retained for the temporary Stage 2 observation bridge.
-    /// CKPT 3B removes that non-consuming consumer; pending-error delivery is
-    /// driven only by `pending_error`, never by this snapshot.
+    /// Protocol phase drives connection operations and terminal classification.
+    /// Consumable asynchronous delivery is owned separately by `pending_error`;
+    /// callers cannot use this field as a second error source.
     pub(crate) phase: ConnectionPhase,
     /// Sticky protocol history used to distinguish connect failure from an
     /// established-stream reset after the engine has entered `Closed`.
@@ -350,14 +350,6 @@ pub(crate) fn to_smoltcp_listen(binding: TcpLocalBinding) -> IpListenEndpoint {
     }
 }
 
-pub(crate) fn map_disconnect(reason: tcp::DisconnectReason) -> TcpDisconnectCause {
-    match reason {
-        tcp::DisconnectReason::ResetBeforeEstablished
-        | tcp::DisconnectReason::ResetAfterEstablished => TcpDisconnectCause::Reset,
-        tcp::DisconnectReason::Timeout => TcpDisconnectCause::Timeout,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
@@ -366,10 +358,9 @@ mod tests {
         Instant, Ipv4Address, Ipv4Cidr, Ipv4EgressSelection,
         icmp_raw::IcmpRawNamespacePolicy,
         tcp::{
-            TcpBindError, TcpBindRequest, TcpConnectResult, TcpConnectionObservation,
-            TcpDisconnectCause, TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError,
-            TcpQueryError, TcpReceiveMode, TcpReceiveResolveError, TcpReleaseReason,
-            TcpShutdownDirection, TcpShutdownOutcome, TcpStreamReceiveError,
+            TcpBindError, TcpBindRequest, TcpConnectResult, TcpListenBacklog, TcpListenError,
+            TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveMode, TcpReceiveResolveError,
+            TcpReleaseReason, TcpShutdownDirection, TcpShutdownOutcome, TcpStreamReceiveError,
             TcpStreamReceiveOutcome, TcpStreamSendError,
         },
         udp::UdpNamespacePolicy,
@@ -479,16 +470,16 @@ mod tests {
                 )
                 .unwrap();
             assert!(matches!(
-                stack.observe_tcp_connection(client).unwrap(),
-                TcpConnectionObservation::Connecting { .. }
+                stack.tcp_connect_result(client).unwrap(),
+                TcpConnectResult::Connecting { .. }
             ));
             clients.push(client);
         }
         drive(&mut stack, interface, 0);
         for client in &clients {
             assert!(matches!(
-                stack.observe_tcp_connection(*client).unwrap(),
-                TcpConnectionObservation::Connected { .. }
+                stack.tcp_connect_result(*client).unwrap(),
+                TcpConnectResult::Connected { .. }
             ));
         }
 
@@ -502,13 +493,12 @@ mod tests {
             .unwrap();
         drive(&mut stack, interface, 128);
         assert!(matches!(
-            stack.observe_tcp_connection(overflow).unwrap(),
-            TcpConnectionObservation::Failed {
-                cause: TcpDisconnectCause::Reset,
-                ..
-            }
+            stack.tcp_connect_result(overflow).unwrap(),
+            TcpConnectResult::Failed(TcpPendingError::ConnectionRefused)
         ));
-        stack.retire_tcp_endpoint(overflow).unwrap();
+        stack
+            .release_tcp_endpoint(overflow, TcpReleaseReason::CreationRollback)
+            .unwrap();
 
         let child = stack
             .claim_tcp_pending_child(listener)
@@ -516,8 +506,8 @@ mod tests {
             .expect("one completed child must be claimable");
         let accepted = stack.take_tcp_child(child).unwrap();
         assert!(matches!(
-            stack.observe_tcp_connection(accepted).unwrap(),
-            TcpConnectionObservation::Connected { .. }
+            stack.tcp_connect_result(accepted).unwrap(),
+            TcpConnectResult::Connected { .. }
         ));
         assert!(matches!(
             stack.cancel_tcp_child(child),
@@ -556,8 +546,8 @@ mod tests {
             .release_tcp_endpoint(clients[0], TcpReleaseReason::FinalRelease)
             .unwrap();
         assert!(matches!(
-            stack.observe_tcp_connection(clients[0]).unwrap(),
-            TcpConnectionObservation::Connected { .. }
+            stack.tcp_connect_result(clients[0]).unwrap(),
+            TcpConnectResult::Connected { .. }
         ));
         assert_eq!(
             stack
@@ -581,7 +571,7 @@ mod tests {
         stack.resolve_tcp_receive(outstanding_id, 3).unwrap();
         drive(&mut stack, interface, 512);
         assert_eq!(
-            stack.observe_tcp_connection(clients[0]),
+            stack.tcp_connect_result(clients[0]),
             Err(TcpQueryError::UnknownEndpoint)
         );
 
@@ -615,7 +605,12 @@ mod tests {
         }
         assert_eq!(stack.protocols.tcp.engine_count, CAPACITY);
         for endpoint in endpoints {
-            assert!(stack.retire_tcp_endpoint(endpoint).unwrap().is_some());
+            assert!(
+                stack
+                    .release_tcp_endpoint(endpoint, TcpReleaseReason::CreationRollback)
+                    .unwrap()
+                    .is_some()
+            );
         }
         assert_eq!(stack.protocols.tcp.deferred.len(), CAPACITY);
         let while_reclaiming = stack.create_tcp_endpoint().unwrap();
@@ -657,7 +652,9 @@ mod tests {
             stack.bind_tcp_endpoint(second, TcpBindRequest::new(LOCAL, 0)),
             Err(anemone_net_api::tcp::TcpBindError::EphemeralPortsExhausted)
         );
-        stack.retire_tcp_endpoint(first).unwrap();
+        stack
+            .release_tcp_endpoint(first, TcpReleaseReason::CreationRollback)
+            .unwrap();
         stack
             .bind_tcp_endpoint(second, TcpBindRequest::new(LOCAL, 0))
             .unwrap();
@@ -681,7 +678,9 @@ mod tests {
             ),
             Err(anemone_net_api::tcp::TcpConnectError::EngineCapacity)
         );
-        stack.retire_tcp_endpoint(second).unwrap();
+        stack
+            .release_tcp_endpoint(second, TcpReleaseReason::CreationRollback)
+            .unwrap();
         drive(&mut stack, interface, 0);
         assert!(
             stack
@@ -1265,7 +1264,7 @@ mod tests {
             Err(TcpStreamSendError::BrokenStream)
         );
         // The peer remains owner-live until its own release.
-        assert!(stack.observe_tcp_connection(client).is_ok());
+        assert!(stack.tcp_connect_result(client).is_ok());
     }
 
     #[test]
@@ -1347,7 +1346,12 @@ mod tests {
         ));
 
         let rollback_handle = stack.protocols.tcp.connection(accepted).unwrap().handle;
-        assert!(stack.retire_tcp_endpoint(accepted).unwrap().is_some());
+        assert!(
+            stack
+                .release_tcp_endpoint(accepted, TcpReleaseReason::CreationRollback)
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(
             stack
                 .local
@@ -1479,7 +1483,9 @@ mod tests {
             ),
             Err(anemone_net_api::tcp::TcpConnectError::PortInUse)
         );
-        stack.retire_tcp_endpoint(duplicate).unwrap();
+        stack
+            .release_tcp_endpoint(duplicate, TcpReleaseReason::CreationRollback)
+            .unwrap();
         stack
             .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
             .unwrap();

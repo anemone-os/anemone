@@ -4,12 +4,11 @@ use anemone_net_api::{
     InterfaceId, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpConnectionObservation, TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError,
-        TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError,
-        TcpReceiveMode, TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError,
-        TcpReleaseReason, TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError,
-        TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome,
-        TcpStreamSendError,
+        TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
+        TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
+        TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason,
+        TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome,
+        TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 
@@ -82,11 +81,18 @@ impl DomainStack {
         Ok(())
     }
 
-    pub(in crate::net) fn observe_tcp_connection(
+    pub(in crate::net) fn tcp_endpoint_is_listening(
         &self,
         endpoint: TcpEndpointId,
-    ) -> Result<TcpConnectionObservation, TcpQueryError> {
-        self.protocol_transition(|stack| stack.observe_tcp_connection(endpoint))
+    ) -> Result<bool, TcpQueryError> {
+        self.stack.lock().tcp_endpoint_is_listening(endpoint)
+    }
+
+    pub(in crate::net) fn tcp_endpoint_peer(
+        &self,
+        endpoint: TcpEndpointId,
+    ) -> Result<Option<TcpPeer>, TcpQueryError> {
+        self.stack.lock().tcp_endpoint_peer(endpoint)
     }
 
     pub(in crate::net) fn tcp_connect_result(
@@ -221,17 +227,6 @@ impl DomainStack {
     ) -> Result<(), TcpReceiveResolveError> {
         let progression =
             self.protocol_transition(|stack| stack.resolve_tcp_receive(reservation, committed))?;
-        if let Some(progression) = progression {
-            crate::net::submit_protocol_progression(progression);
-        }
-        Ok(())
-    }
-
-    pub(in crate::net) fn retire_tcp_endpoint(
-        &self,
-        endpoint: TcpEndpointId,
-    ) -> Result<(), TcpRetireError> {
-        let progression = self.protocol_transition(|stack| stack.retire_tcp_endpoint(endpoint))?;
         if let Some(progression) = progression {
             crate::net::submit_protocol_progression(progression);
         }

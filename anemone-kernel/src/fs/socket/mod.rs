@@ -10,12 +10,13 @@ use front::{
     SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
     SocketConnectError, SocketCreation, SocketDatagramSendOperation, SocketIoOps,
     SocketListenError, SocketOps, SocketOptionError, SocketOptionMutation, SocketOptionQuery,
-    SocketOptionValue, SocketPairPreparation, SocketPreparation, SocketQueryError, SocketReadSink,
-    SocketReceiveError, SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest,
-    SocketReceiveSink, SocketSendError, SocketSendPayload, SocketSendRequest, SocketShutdown,
-    SocketShutdownError, SocketStreamDestination, SocketType, SocketWait, SocketWriteSource,
-    prepare_socket, prepare_socket_pair, retry_socket_receive, retry_socket_send,
-    socket_file_desc_ops, socket_from_file, wait_for_socket_operation,
+    SocketOptionValue, SocketPairPreparation, SocketPendingError, SocketPreparation,
+    SocketQueryError, SocketReadSink, SocketReceiveError, SocketReceiveFlags, SocketReceiveOutcome,
+    SocketReceiveRequest, SocketReceiveSink, SocketReleaseReason, SocketSendError,
+    SocketSendPayload, SocketSendRequest, SocketShutdown, SocketShutdownError,
+    SocketStreamDestination, SocketType, SocketWait, SocketWriteSource, prepare_socket,
+    prepare_socket_pair, retry_socket_receive, retry_socket_send, socket_file_desc_ops,
+    socket_from_file, wait_for_socket_operation,
 };
 use icmp_raw::ICMP_RAW_SOCKET_OPS;
 use tcp::TCP_SOCKET_OPS;
@@ -37,6 +38,7 @@ mod kunits {
     };
 
     const LISTEN_PORT: u16 = 46_211;
+    const RELEASE_RACE_PORT: u16 = 46_311;
     const PEER: SocketAddress = SocketAddress::Ipv4 {
         address: Ipv4Address::LOOPBACK,
         port: LISTEN_PORT,
@@ -95,6 +97,31 @@ mod kunits {
         }
     }
 
+    struct ReleaseDuringCopySink<'a> {
+        file: &'a File,
+        bytes: &'a mut [u8],
+        fault: bool,
+        released: bool,
+    }
+
+    impl SocketReadSink for ReleaseDuringCopySink<'_> {
+        fn remaining(&self) -> usize {
+            self.bytes.len()
+        }
+
+        fn copy_bytes(&mut self, bytes: &[u8]) -> Result<usize, SysError> {
+            assert!(!self.released, "TCP receive sink released the file twice");
+            release(self.file);
+            self.released = true;
+            if self.fault {
+                return Err(SysError::BadAddress);
+            }
+            let copied = self.bytes.len().min(bytes.len());
+            self.bytes[..copied].copy_from_slice(&bytes[..copied]);
+            Ok(copied)
+        }
+    }
+
     fn release(file: &File) {
         (socket_file_desc_ops().final_release.unwrap())(OpenedFileFinalReleaseCtx {
             file,
@@ -111,21 +138,29 @@ mod kunits {
     }
 
     fn start_connect(socket: &Socket) {
+        start_connect_to(socket, PEER.clone());
+    }
+
+    fn start_connect_to(socket: &Socket, peer: SocketAddress) {
         assert!(matches!(
-            socket.connect(PEER.clone()),
+            socket.connect(peer.clone()),
             Err(SocketConnectError::Started)
         ));
         // No scheduling point exists between these attempts, so the owner must
         // still expose the distinct in-progress observation.
         assert!(matches!(
-            socket.connect(PEER.clone()),
+            socket.connect(peer),
             Err(SocketConnectError::InProgress)
         ));
     }
 
     fn wait_connected(socket: &Socket) {
+        wait_connected_to(socket, PEER.clone());
+    }
+
+    fn wait_connected_to(socket: &Socket, peer: SocketAddress) {
         for _ in 0..20_000 {
-            match socket.connect(PEER.clone()) {
+            match socket.connect(peer.clone()) {
                 Err(SocketConnectError::InProgress) => yield_now(),
                 Err(SocketConnectError::AlreadyConnected) => return,
                 Err(SocketConnectError::ConnectionRefused) => {
@@ -165,10 +200,18 @@ mod kunits {
         socket: &Socket,
         sink: &mut dyn SocketReadSink,
     ) -> Result<SocketReceiveOutcome, SocketReceiveError> {
+        receive_eventually_with_flags(socket, sink, false)
+    }
+
+    fn receive_eventually_with_flags(
+        socket: &Socket,
+        sink: &mut dyn SocketReadSink,
+        peek: bool,
+    ) -> Result<SocketReceiveOutcome, SocketReceiveError> {
         for _ in 0..20_000 {
             match socket.receive(SocketReceiveRequest::Stream {
                 sink,
-                flags: SocketReceiveFlags { peek: false },
+                flags: SocketReceiveFlags { peek },
             }) {
                 Err(SocketReceiveError::WouldBlock) => yield_now(),
                 result => return result,
@@ -286,8 +329,180 @@ mod kunits {
         );
         assert_eq!(recovered, fault_payload);
 
+        assert_eq!(
+            client.mutate_option(SocketOptionMutation::TcpNoDelay(true)),
+            Ok(())
+        );
+        assert_eq!(
+            client.query_option(SocketOptionQuery::TcpNoDelay),
+            Ok(SocketOptionValue::Boolean(true))
+        );
+        assert_eq!(
+            client.query_option(SocketOptionQuery::PendingError),
+            Ok(SocketOptionValue::PendingError(None))
+        );
+
+        let peek_payload = b"peek-before-fin";
+        assert_eq!(send(client, peek_payload), peek_payload.len());
+        let mut peeked = vec![0; peek_payload.len()];
+        let mut peek_sink = ShortSink {
+            bytes: &mut peeked,
+            offered: peek_payload.len(),
+        };
+        assert_eq!(
+            receive_eventually_with_flags(accepted_socket, &mut peek_sink, true),
+            Ok(SocketReceiveOutcome::byte_stream(peek_payload.len()))
+        );
+        assert_eq!(peeked, peek_payload);
+        let mut consumed = vec![0; peek_payload.len()];
+        let mut consume_sink = ShortSink {
+            bytes: &mut consumed,
+            offered: peek_payload.len(),
+        };
+        assert_eq!(
+            receive_eventually(accepted_socket, &mut consume_sink),
+            Ok(SocketReceiveOutcome::byte_stream(peek_payload.len()))
+        );
+        assert_eq!(consumed, peek_payload);
+
+        assert_eq!(accepted_socket.shutdown(SocketShutdown::Write), Ok(()));
+        assert_eq!(accepted_socket.shutdown(SocketShutdown::Write), Ok(()));
+        let mut broken = BytesSource(b"broken");
+        assert_eq!(
+            accepted_socket.send(SocketSendRequest::Stream {
+                source: &mut broken,
+                destination: SocketStreamDestination::Absent,
+            }),
+            Err(SocketSendError::PeerClosed)
+        );
+
         release(&accepted_file);
         release(&client_file);
         release(&listener_file);
+    }
+
+    #[kunit]
+    fn tcp_static_final_release_defers_outstanding_consume_peek_and_fault() {
+        let peer = SocketAddress::Ipv4 {
+            address: Ipv4Address::LOOPBACK,
+            port: RELEASE_RACE_PORT,
+        };
+        let listener_file = prepare_committed_tcp();
+        let listener = socket_from_file(&listener_file).unwrap();
+        listener.bind(peer.clone()).unwrap();
+        listener.listen(10).unwrap();
+
+        for (payload, peek, fault) in [
+            (&b"consume"[..], false, false),
+            (&b"peek"[..], true, false),
+            (&b"fault"[..], false, true),
+        ] {
+            let client_file = prepare_committed_tcp();
+            let client = socket_from_file(&client_file).unwrap();
+            start_connect_to(client, peer.clone());
+            wait_connected_to(client, peer.clone());
+            let accepted_file = accept_eventually(listener).prepare_file().unwrap();
+            let accepted_socket = socket_from_file(&accepted_file).unwrap();
+
+            assert_eq!(send(client, payload), payload.len());
+            let mut copied = vec![0; payload.len()];
+            let mut sink = ReleaseDuringCopySink {
+                file: &accepted_file,
+                bytes: &mut copied,
+                fault,
+                released: false,
+            };
+            let result = receive_eventually_with_flags(accepted_socket, &mut sink, peek);
+            assert!(sink.released);
+            if fault {
+                assert_eq!(result, Err(SocketReceiveError::Copy(SysError::BadAddress)));
+            } else {
+                assert_eq!(result, Ok(SocketReceiveOutcome::byte_stream(payload.len())));
+                assert_eq!(copied, payload);
+            }
+
+            let mut retired = [0; 1];
+            let mut retired_sink = ShortSink {
+                bytes: &mut retired,
+                offered: 1,
+            };
+            assert_eq!(
+                accepted_socket.receive(SocketReceiveRequest::Stream {
+                    sink: &mut retired_sink,
+                    flags: SocketReceiveFlags { peek: false },
+                }),
+                Err(SocketReceiveError::Retired)
+            );
+            release(&client_file);
+        }
+
+        release(&listener_file);
+    }
+
+    #[kunit]
+    fn tcp_pending_error_has_one_consumer_at_the_general_front() {
+        let refused = SocketAddress::Ipv4 {
+            address: Ipv4Address::LOOPBACK,
+            port: LISTEN_PORT + 1,
+        };
+        let option_file = prepare_committed_tcp();
+        let option_socket = socket_from_file(&option_file).unwrap();
+        assert!(matches!(
+            option_socket.connect(refused.clone()),
+            Err(SocketConnectError::Started)
+        ));
+        let mut consumed = false;
+        for _ in 0..20_000 {
+            match option_socket.query_option(SocketOptionQuery::PendingError) {
+                Ok(SocketOptionValue::PendingError(Some(
+                    SocketPendingError::ConnectionRefused,
+                ))) => {
+                    consumed = true;
+                    break;
+                },
+                Ok(SocketOptionValue::PendingError(None)) => yield_now(),
+                outcome => panic!("TCP SO_ERROR projection changed unexpectedly: {outcome:?}"),
+            }
+        }
+        assert!(
+            consumed,
+            "TCP SO_ERROR did not observe the refused connection"
+        );
+        assert_eq!(
+            option_socket.query_option(SocketOptionQuery::PendingError),
+            Ok(SocketOptionValue::PendingError(None))
+        );
+        release(&option_file);
+
+        let operation_file = prepare_committed_tcp();
+        let operation_socket = socket_from_file(&operation_file).unwrap();
+        assert!(matches!(
+            operation_socket.connect(refused),
+            Err(SocketConnectError::Started)
+        ));
+        let mut operation_consumed = false;
+        for _ in 0..20_000 {
+            let mut source = BytesSource(b"x");
+            match operation_socket.send(SocketSendRequest::Stream {
+                source: &mut source,
+                destination: SocketStreamDestination::Absent,
+            }) {
+                Err(SocketSendError::ConnectionRefused) => {
+                    operation_consumed = true;
+                    break;
+                },
+                Err(SocketSendError::NotConnected | SocketSendError::WouldBlock) => yield_now(),
+                outcome => panic!("TCP send error projection changed unexpectedly: {outcome:?}"),
+            }
+        }
+        assert!(
+            operation_consumed,
+            "ordinary TCP send did not consume the refused connection"
+        );
+        assert_eq!(
+            operation_socket.query_option(SocketOptionQuery::PendingError),
+            Ok(SocketOptionValue::PendingError(None))
+        );
+        release(&operation_file);
     }
 }
