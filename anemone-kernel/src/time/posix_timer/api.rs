@@ -59,10 +59,6 @@ fn sys_timer_gettime(
     timer_id: i32,
     #[validate_with(user_addr)] current_ptr: VirtAddr,
 ) -> Result<u64, SysError> {
-    // Linux accepts every non-TIMER_ABSTIME bit, so record this compatibility
-    // choice once without turning normal legacy use into a persistent warning.
-    static IGNORED_SETTIME_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
-
     let task = get_current_task();
     let setting = task.get_thread_group().posix_timer_gettime(timer_id)?;
     let current = setting_to_uapi(setting);
@@ -87,6 +83,10 @@ fn sys_timer_settime(
     #[validate_with(user_addr)] new_ptr: VirtAddr,
     old_ptr: u64,
 ) -> Result<u64, SysError> {
+    // Linux accepts every non-TIMER_ABSTIME bit, so record this compatibility
+    // choice once without turning normal legacy use into a persistent warning.
+    static IGNORED_SETTIME_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
+
     let task = get_current_task();
     let new_setting = {
         let usp_handle = task.clone_uspace_handle();

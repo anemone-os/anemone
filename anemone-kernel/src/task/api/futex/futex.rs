@@ -150,6 +150,17 @@ fn sys_futex(
     let task = get_current_task();
     let usp_handle = task.clone_uspace_handle();
 
+    if op.flags.contains(FutexCmdFlags::PRIVATE) {
+        // Linux forces a process-private futex key for this flag. Anemone still
+        // derives private versus shared identity from the mapping's fork policy,
+        // so keep every potentially non-isolated operation observable.
+        knoticeln!(
+            "futex: FUTEX_PRIVATE_FLAG key isolation is not implemented; cmd={:?}, uaddr={}; using mapping-derived key semantics",
+            op.cmd,
+            uaddr,
+        );
+    }
+
     let futex1_key = {
         if !uaddr.get().is_multiple_of(4) {
             knoticeln!("futex: uaddr {} is not 4-byte aligned", uaddr);
@@ -157,8 +168,6 @@ fn sys_futex(
         }
         calc_futex_key(&usp_handle, uaddr)?
     };
-
-    // for now we ignore flags.
 
     match op.cmd {
         FutexCmd::Wait => {

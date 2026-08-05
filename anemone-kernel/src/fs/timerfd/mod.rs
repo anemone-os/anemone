@@ -946,7 +946,23 @@ fn settime(
     let (value_ns, interval_ns) = validate_itimerspec(new_value)?;
     let core = TimerFdFile::core_from_file(file)?;
     if flags.cancel_on_set && (!flags.abstime || core.clockid != CLOCK_REALTIME) {
+        // Linux accepts this combination and simply leaves cancel-on-set
+        // disabled. Keep Anemone's current EINVAL behavior visible until that
+        // compatibility gap is implemented.
+        knoticeln!(
+            "timerfd_settime: TFD_TIMER_CANCEL_ON_SET without absolute CLOCK_REALTIME is not implemented as a Linux-compatible no-op; clock_id={}, abstime={}; errno=EINVAL",
+            core.clockid,
+            flags.abstime,
+        );
         return Err(SysError::InvalidArgument);
+    }
+    if flags.cancel_on_set {
+        // Linux keeps the cancellation enrollment until a later settime drops
+        // the flag, including while disarmed and after expiration or a consumed
+        // ECANCELED. Anemone currently watches only this armed generation.
+        knoticeln!(
+            "timerfd_settime: TFD_TIMER_CANCEL_ON_SET enrollment is incomplete; cancellation is observed only while the current timer generation remains armed"
+        );
     }
 
     let prepared = if value_ns == 0 {
