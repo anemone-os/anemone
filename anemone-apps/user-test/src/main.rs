@@ -9,7 +9,6 @@ mod competition;
 mod file;
 mod guest;
 mod ltp;
-mod posix_timer;
 mod process;
 mod runtime;
 mod soft_timer;
@@ -49,6 +48,10 @@ fn run_udp_extension_c_consumer() {
 fn run_local_tests() {
     run_udp_extension_c_consumer();
 
+    println!("user-test: running local POSIX timer test...");
+    local_run_cmd("/bin/local-test", &["local-test"], &[]);
+    println!("user-test: local POSIX timer test finished.");
+
     // println!("user-test: running native clock read test...");
     // clock_read::verify_native_clocks();
     // println!("user-test: native clock read test finished.");
@@ -65,10 +68,6 @@ fn run_local_tests() {
     // timer_signal::verify_timer_signal_frame();
     // println!("user-test: SI_TIMER signal frame test finished.");
     //
-    // println!("user-test: running POSIX timer test...");
-    // posix_timer::verify_posix_timers();
-    // println!("user-test: POSIX timer test finished.");
-
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");

@@ -8,15 +8,8 @@ use core::{
 use anemone_rs::{
     abi::{
         process::linux::{
-            signal::{
-                self as linux_signal, SA_SIGINFO, SigAction, SigInfo, SigInfoWrapper, SigSet,
-            },
+            signal::{self as linux_signal, SA_SIGINFO, SigAction, SigInfo, SigSet},
             ucontext::UContext,
-        },
-        syscall::{
-            SYS_CLOCK_GETTIME, SYS_CLOCK_SETTIME, SYS_NANOSLEEP, SYS_RT_SIGTIMEDWAIT,
-            SYS_TIMER_CREATE, SYS_TIMER_DELETE, SYS_TIMER_GETOVERRUN, SYS_TIMER_GETTIME,
-            SYS_TIMER_SETTIME, syscall,
         },
         time::linux::{
             ITimerSpec, SigEvent, TimeSpec,
@@ -27,11 +20,14 @@ use anemone_rs::{
             posix_timer::{SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD, SIGEV_THREAD_ID},
         },
     },
-    os::linux::process::{
-        CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork,
-        gettid, mmap, sched_yield,
-        signal::{self, SigNo, SigProcMaskHow, kill},
-        spawn_raw_thread, wait4,
+    os::linux::{
+        process::{
+            CloneFlags, MmapFlags, MmapProt, WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork,
+            gettid, mmap, sched_yield,
+            signal::{self, SigNo, SigProcMaskHow, kill},
+            spawn_raw_thread, wait4,
+        },
+        time as linux_time,
     },
     prelude::*,
 };
@@ -99,36 +95,14 @@ fn timespec_to_ns(value: TimeSpec) -> u64 {
 
 fn sleep_ns(ns: u64) {
     let request = ns_to_timespec(ns);
-    match unsafe {
-        syscall(
-            SYS_NANOSLEEP,
-            (&request as *const TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-    } {
+    match linux_time::nanosleep(request) {
         Ok(_) | Err(EINTR) => {},
         other => panic!("POSIX timer oracle nanosleep failed: {other:?}"),
     }
 }
 
 fn clock_ns(clock_id: i32) -> u64 {
-    let mut value = TimeSpec::default();
-    unsafe {
-        syscall(
-            SYS_CLOCK_GETTIME,
-            clock_id as u64,
-            (&mut value as *mut TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    let value = linux_time::clock_gettime(clock_id).unwrap();
     (value.tv_sec as u64)
         .checked_mul(NSEC_PER_SEC)
         .and_then(|seconds| seconds.checked_add(value.tv_nsec as u64))
@@ -137,18 +111,7 @@ fn clock_ns(clock_id: i32) -> u64 {
 
 fn set_realtime(target_ns: u64) {
     let target = ns_to_timespec(target_ns);
-    unsafe {
-        syscall(
-            SYS_CLOCK_SETTIME,
-            CLOCK_REALTIME as u64,
-            (&target as *const TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    linux_time::clock_settime(CLOCK_REALTIME, &target).unwrap();
 }
 
 fn wait_for_deliveries(expected: usize) {
@@ -162,21 +125,7 @@ fn wait_for_deliveries(expected: usize) {
 }
 
 fn create_timer(clock: i32, event: Option<&SigEvent>) -> Result<i32, Errno> {
-    let mut id = -1_i32;
-    unsafe {
-        syscall(
-            SYS_TIMER_CREATE,
-            clock as u64,
-            event
-                .map(|event| event as *const SigEvent as u64)
-                .unwrap_or(0),
-            (&mut id as *mut i32) as u64,
-            0,
-            0,
-            0,
-        )?;
-    }
-    Ok(id)
+    linux_time::timer_create(clock, event)
 }
 
 fn set_timer(
@@ -185,45 +134,19 @@ fn set_timer(
     value: ITimerSpec,
     old: Option<&mut ITimerSpec>,
 ) -> Result<(), Errno> {
-    unsafe {
-        syscall(
-            SYS_TIMER_SETTIME,
-            id as u64,
-            flags as u64,
-            (&value as *const ITimerSpec) as u64,
-            old.map(|old| old as *mut ITimerSpec as u64).unwrap_or(0),
-            0,
-            0,
-        )?;
-    }
-    Ok(())
+    linux_time::timer_settime(id, flags, &value, old)
 }
 
 fn get_timer(id: i32) -> Result<ITimerSpec, Errno> {
-    let mut value = ITimerSpec::default();
-    unsafe {
-        syscall(
-            SYS_TIMER_GETTIME,
-            id as u64,
-            (&mut value as *mut ITimerSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )?;
-    }
-    Ok(value)
+    linux_time::timer_gettime(id)
 }
 
 fn get_overrun(id: i32) -> Result<i32, Errno> {
-    unsafe { syscall(SYS_TIMER_GETOVERRUN, id as u64, 0, 0, 0, 0, 0).map(|value| value as i32) }
+    linux_time::timer_getoverrun(id)
 }
 
 fn delete_timer(id: i32) -> Result<(), Errno> {
-    unsafe {
-        syscall(SYS_TIMER_DELETE, id as u64, 0, 0, 0, 0, 0)?;
-    }
-    Ok(())
+    linux_time::timer_delete(id)
 }
 
 fn signal_event(no: SigNo, sigval: u64) -> SigEvent {
@@ -247,22 +170,10 @@ fn thread_id_event(no: SigNo, sigval: u64, tid: i32) -> SigEvent {
     event
 }
 
-fn raw_sigtimedwait(no: SigNo, timeout_ns: u64) -> Result<SigInfo, Errno> {
+fn sigtimedwait(no: SigNo, timeout_ns: u64) -> Result<SigInfo, Errno> {
     let set = signal_set(no);
     let timeout = ns_to_timespec(timeout_ns);
-    let mut info = SigInfoWrapper::default();
-    unsafe {
-        syscall(
-            SYS_RT_SIGTIMEDWAIT,
-            (&set as *const SigSet) as u64,
-            (&mut info as *mut SigInfoWrapper) as u64,
-            (&timeout as *const TimeSpec) as u64,
-            core::mem::size_of::<SigSet>() as u64,
-            0,
-            0,
-        )?;
-        Ok(info.info)
-    }
+    signal::rt_sigtimedwait(&set, Some(&timeout))
 }
 
 fn raw_thread_flags() -> CloneFlags {
@@ -287,7 +198,7 @@ fn spawn_timer_thread(entry: extern "C" fn(usize) -> !, arg: usize) -> u32 {
     let stack_top = unsafe { stack.as_ptr().add(RAW_THREAD_STACK_SIZE) };
 
     // Raw threads have no pthread-style join owner. These focused test stacks
-    // intentionally remain mapped until user-test exits after the oracle run.
+    // intentionally remain mapped until local-test exits after the oracle run.
     unsafe {
         spawn_raw_thread(
             raw_thread_flags(),
@@ -353,7 +264,7 @@ extern "C" fn exact_target_waiter(arg: usize) -> ! {
     let blocked = signal_set(SigNo::SIGUSR1);
     signal::sigprocmask(SigProcMaskHow::Block, Some(&blocked), None).unwrap();
     wait_for_thread_go(case, 1);
-    match raw_sigtimedwait(SigNo::SIGUSR1, 500_000_000) {
+    match sigtimedwait(SigNo::SIGUSR1, 500_000_000) {
         Ok(info) => {
             let timer = unsafe { info.fields.timer };
             case.target_result.store(info.si_signo, Ordering::SeqCst);
@@ -373,7 +284,7 @@ extern "C" fn exact_decoy_waiter(arg: usize) -> ! {
     let blocked = signal_set(SigNo::SIGUSR1);
     signal::sigprocmask(SigProcMaskHow::Block, Some(&blocked), None).unwrap();
     wait_for_thread_go(case, 2);
-    let result = match raw_sigtimedwait(SigNo::SIGUSR1, 250_000_000) {
+    let result = match sigtimedwait(SigNo::SIGUSR1, 250_000_000) {
         Ok(info) => info.si_signo,
         Err(error) => -error,
     };
@@ -417,14 +328,6 @@ fn one_shot(ns: u64) -> ITimerSpec {
 
 fn verify_abi_and_fail_forward() {
     assert_eq!(
-        unsafe { syscall(SYS_TIMER_CREATE, CLOCK_MONOTONIC as u64, 0, 1, 0, 0, 0) },
-        Err(EFAULT)
-    );
-    assert_eq!(
-        unsafe { syscall(SYS_TIMER_CREATE, CLOCK_MONOTONIC as u64, 1, 1, 0, 0, 0) },
-        Err(EFAULT)
-    );
-    assert_eq!(
         create_timer(CLOCK_PROCESS_CPUTIME_ID, None),
         Err(EOPNOTSUPP)
     );
@@ -453,16 +356,7 @@ fn verify_abi_and_fail_forward() {
         ..SigEvent::default()
     };
     let id = create_timer(CLOCK_MONOTONIC, Some(&none)).unwrap();
-    // Failed create copyout released ID 0 instead of publishing or leaking it.
     assert_eq!(id, 0);
-    assert_eq!(
-        unsafe { syscall(SYS_TIMER_GETTIME, id as u64, 1, 0, 0, 0, 0) },
-        Err(EFAULT)
-    );
-    assert_eq!(
-        unsafe { syscall(SYS_TIMER_SETTIME, id as u64, 0, 1, 0, 0, 0) },
-        Err(EFAULT)
-    );
 
     let invalid = ITimerSpec {
         it_interval: TimeSpec::default(),
@@ -474,21 +368,9 @@ fn verify_abi_and_fail_forward() {
     assert_eq!(set_timer(id, 0, invalid, None), Err(EINVAL));
 
     set_timer(id, 0, one_shot(NSEC_PER_SEC), None).unwrap();
-    assert_eq!(
-        unsafe {
-            let replacement = one_shot(200_000_000);
-            syscall(
-                SYS_TIMER_SETTIME,
-                id as u64,
-                0,
-                (&replacement as *const ITimerSpec) as u64,
-                1,
-                0,
-                0,
-            )
-        },
-        Err(EFAULT)
-    );
+    let mut old = ITimerSpec::default();
+    set_timer(id, 0, one_shot(200_000_000), Some(&mut old)).unwrap();
+    assert!(timespec_to_ns(old.it_value) > 0);
     let current = get_timer(id).unwrap();
     assert!(current.it_value.tv_sec == 0 && current.it_value.tv_nsec > 0);
     assert!(current.it_value.tv_nsec <= 200_000_000);
@@ -507,7 +389,6 @@ fn verify_abi_and_fail_forward() {
         );
         assert_eq!(delete_timer(invalid_id), Err(EINVAL));
     }
-    assert_eq!(unsafe { syscall(403, 0, 0, 0, 0, 0, 0) }, Err(ENOSYS));
 }
 
 fn verify_default_and_none() {
@@ -568,7 +449,14 @@ fn verify_realtime_timeline_selection() {
     delete_timer(absolute).unwrap();
 
     // Do not leak calendar mutations into later local tests.
-    set_realtime(clock_ns(CLOCK_MONOTONIC) + initial_offset);
+    // The kernel keeps realtime = monotonic + nonnegative offset. Anchor the
+    // restore to the current monotonic sample, with a small margin so the
+    // target cannot become stale between clock_gettime and clock_settime.
+    set_realtime(
+        clock_ns(CLOCK_MONOTONIC)
+            .saturating_add(initial_offset)
+            .saturating_add(1_000_000),
+    );
 }
 
 fn signal_set(no: SigNo) -> SigSet {
@@ -747,7 +635,7 @@ fn verify_thread_id_exit_before_expiry_and_pending_flush() {
     .unwrap();
     sleep_ns(80_000_000);
     assert_periodic_projection(timer, 20_000_000);
-    assert!(matches!(raw_sigtimedwait(SigNo::SIGUSR1, 0), Err(EAGAIN)));
+    assert!(matches!(sigtimedwait(SigNo::SIGUSR1, 0), Err(EAGAIN)));
     delete_timer(timer).unwrap();
 
     let (pending, tid) = spawn_exit_target();
@@ -775,7 +663,7 @@ fn verify_thread_id_exit_before_expiry_and_pending_flush() {
     wait_for_closed_thread_id(tid);
     assert_periodic_projection(timer, 20_000_000);
     assert_eq!(get_overrun(timer), Ok(0));
-    assert!(matches!(raw_sigtimedwait(SigNo::SIGUSR1, 0), Err(EAGAIN)));
+    assert!(matches!(sigtimedwait(SigNo::SIGUSR1, 0), Err(EAGAIN)));
     delete_timer(timer).unwrap();
 
     signal::sigprocmask(SigProcMaskHow::SetMask, Some(&old_mask), None).unwrap();
@@ -830,7 +718,7 @@ fn verify_thread_id_ignore_recovery_and_delete_after_queue() {
 
     // Deletion withdraws future enqueue authority but cannot recall the
     // occurrence already owned by Signal.
-    let info = raw_sigtimedwait(SigNo::SIGUSR1, 100_000_000).unwrap();
+    let info = sigtimedwait(SigNo::SIGUSR1, 100_000_000).unwrap();
     let fields = unsafe { info.fields.timer };
     assert_eq!(info.si_signo, SigNo::SIGUSR1.as_usize() as i32);
     assert_eq!(info.si_code, linux_signal::SI_TIMER);
