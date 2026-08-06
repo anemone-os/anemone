@@ -7,7 +7,7 @@ kernel_preempt = false
 spin_lock_irqsave = true
 soft_unaligned_access = true
 kernel_symbols = true
-perf_observe = true
+perf_observe = false
 
 [parameters]
-max_logical_cpus = 8
+max_logical_cpus = 1
