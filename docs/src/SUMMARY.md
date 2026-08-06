@@ -74,6 +74,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-06 - Inode address space](./devlog/changes/2026-08-06-inode-address-space.md)
 		- [2026-08-05 - Kernel performance observation](./devlog/changes/2026-08-05-kernel-performance-observation.md)
 		- [2026-08-05 - Kworker](./devlog/changes/2026-08-05-kworker.md)
 		- [2026-08-05 - OOM periodic sampling](./devlog/changes/2026-08-05-oom-periodic-sampling.md)

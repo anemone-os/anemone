@@ -214,8 +214,8 @@ impl SuperBlock {
     fn inode_is_busy(inode: &Arc<Inode>) -> bool {
         inode.rc() > 0
             || inode
-                .mapping()
-                .is_some_and(|mapping| Arc::strong_count(mapping) > 1)
+                .address_space()
+                .is_some_and(|address_space| Arc::strong_count(address_space) > 1)
     }
 
     /// Get or load an inode by inode number. This is the canonical way to

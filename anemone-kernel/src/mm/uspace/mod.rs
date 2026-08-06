@@ -602,7 +602,7 @@ impl UserSpace {
 
         let stack_base = self.stack_vma().range().start().to_virt_addr();
         let stack_offset = (sp - stack_base) as usize;
-        self.stack_vma().backing().write(stack_offset, data)?;
+        self.stack_vma().backing().write_bytes(stack_offset, data)?;
         self.stack.init_sp = sp;
         Ok(sp)
     }
