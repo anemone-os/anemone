@@ -30,7 +30,7 @@ Read [references/build-playbook.md](references/build-playbook.md) for task routi
 
 Keep each concern in its owning layer:
 
-- root `kconfig` and `conf/.defconfig`: kernel features, policy, and capacity only;
+- root `kconfig` and `conf/kconfs/default.toml`: kernel features, policy, and capacity only;
 - `conf/build-presets/`: reusable explicit target, KernelConfig, and kernel Cargo-profile tuples;
 - `conf/system-targets/`: selected Platform reference, root mount/source, and initial-program source;
 - `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, tracked QEMU argv/bind templates, DTB, linker inputs, and Platform-required kernel outputs;

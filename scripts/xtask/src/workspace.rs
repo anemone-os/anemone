@@ -1,7 +1,7 @@
 //! Here we defines some workspace properties,
 //! on which we rely to perform various tasks.
 
-pub const DEF_KCONFIG_PATH: &str = "conf/.defconfig";
+pub const DEF_KCONFIG_PATH: &str = "conf/kconfs/default.toml";
 pub const PLATFORM_CONFIGS_PATH: &str = "conf/platforms";
 pub const SYSTEM_TARGET_CONFIGS_PATH: &str = "conf/system-targets";
 pub const BUILD_PRESET_CONFIGS_PATH: &str = "conf/build-presets";

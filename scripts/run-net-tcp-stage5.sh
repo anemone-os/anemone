@@ -66,7 +66,7 @@ echo "TCPSTAGE5:RUNNER:SOURCE:$(git rev-parse HEAD)"
 echo "TCPSTAGE5:RUNNER:DISK:$(sha256sum "$validation_disk" | cut -d' ' -f1)"
 just rootfs mkfs -c "$rootfs_config"
 cp --remove-destination -- "$validation_disk" "$runtime_disk"
-just build --target "$target" --kernel-config conf/.defconfig --profile release \
+just build --target "$target" --kernel-config conf/kconfs/default.toml --profile release \
     --bind smp=1 --bind memory=1G
 
 python3 scripts/net-tcp-stage5-peer.py \
@@ -88,7 +88,7 @@ disk_bind=(--bind "$rootfs_slot=$rootfs_image" --bind "$validation_slot=$runtime
 
 set +e
 timeout --foreground 600 just qemu \
-    --target "$target" --kernel-config conf/.defconfig --profile release \
+    --target "$target" --kernel-config conf/kconfs/default.toml --profile release \
     --bind smp=1 --bind memory=1G \
     "${net_bind[@]}" \
     --bind kernel-image=build/anemone.elf \

@@ -1,6 +1,5 @@
-#! kconfig configuration for Anemone OS
-#! This file specifies how the kernel is configured and built.
-#! This is an example configuration file.
+#! Default KernelConfig for Anemone OS.
+#! This file owns default kernel features, policy, and capacity.
 
 # Kernel tailoring options
 [features]
@@ -88,7 +87,7 @@ net_pump_ingress_budget_frames = 32 # Maximum ingress frames advanced by one sta
 net_pump_egress_budget_steps = 32 # Maximum egress steps advanced by one stack pump.
 net_worker_repoll_rounds = 8 # Maximum immediate repoll rounds before the network worker yields.
 net_local_link_packet_capacity = 64 # Shared ingress+egress packet slots owned by the local software link.
-net_local_link_mtu_bytes = 1500 # Maximum IP-medium packet size owned by the local software link.
+net_local_link_mtu_bytes = 2048 # Maximum IP-medium packet size owned by the local software link.
 net_udp_endpoint_capacity = 64 # Maximum live UDP endpoints in the initial domain.
 net_udp_tx_datagram_capacity = 8 # Per-endpoint transmit datagram slots.
 net_udp_rx_datagram_capacity = 64 # Per-endpoint receive datagram slots.

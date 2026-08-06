@@ -38,7 +38,7 @@ runtime_dir=build/runtime/final-la64
 disk_target=$runtime_dir/disk-x0.img
 selection=(
     --target qemu-virt-la64-final
-    --kernel-config conf/.defconfig
+    --kernel-config conf/kconfs/default.toml
     --profile release
 )
 provider_bindings=(--bind smp=8 --bind memory=8G)

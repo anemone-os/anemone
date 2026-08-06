@@ -150,7 +150,7 @@ pub struct Parameters {
 impl Parameters {
     /// Materialize the optional parameter syntax into the complete value owned
     /// by a resolved KernelConfig. Build consumers must not consult
-    /// `.defconfig` after this boundary.
+    /// the default KernelConfig after this boundary.
     pub(super) fn materialize_defaults(&mut self, defaults: Option<&Self>) -> anyhow::Result<()> {
         macro_rules! materialize {
             ($field:ident) => {

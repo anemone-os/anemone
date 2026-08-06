@@ -493,7 +493,7 @@ mod tests {
         let tuple = loader
             .resolve_selection(SelectionRequest::explicit_tuple(
                 SystemTargetRef::new("qemu-virt-rv64").unwrap(),
-                KernelConfigRef::new("conf/.defconfig").unwrap(),
+                KernelConfigRef::new("conf/kconfs/default.toml").unwrap(),
                 CargoProfile::Release,
             ))
             .unwrap();

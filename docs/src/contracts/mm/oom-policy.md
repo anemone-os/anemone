@@ -6,7 +6,7 @@
 **参与领域：** frame allocator / Kconfig / task kthread / UserSpace/VMO snapshot / Signal / ThreadGroup lifecycle
 **覆盖范围：** global frame-usage sampling、strict threshold、active victim、eligible victim selection与kernel-origin `SIGKILL` handoff
 **不覆盖：** synchronous allocation-failure recovery、reclaim、swap、OOM reaper、memcg、badness score、panic policy、用户RSS ABI或hard realtime response
-**实现位置：** `anemone-kernel/src/mm/{oom.rs,frame/}`、`anemone-kernel/src/task/kthread/`、`conf/.defconfig`、`scripts/xtask/src/config/`
+**实现位置：** `anemone-kernel/src/mm/{oom.rs,frame/}`、`anemone-kernel/src/task/kthread/`、`conf/kconfs/default.toml`、`scripts/xtask/src/config/`
 **依赖：** `KTHREAD-WAIT-001`、`KCONFIG-VALIDATION-001`、`TASK-LIFE-001..003`、`SIGNAL-PENDING-001/002`、`SIGNAL-ACTION-002`
 **Pending Successor：** None
 **最后核验：** 2026-08-05

@@ -17,7 +17,7 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 
 | Task | Preferred entrypoint | Inspect before use |
 | --- | --- | --- |
-| Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
+| Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/kconfs/default.toml`, existing root `kconfig` |
 | List targets | `just conf ...` | target and Platform files |
 | Build the kernel | `just build --preset ...` or the complete low-level tuple | selected KernelConfig, target, Platform, build task |
 | Format Rust | `just fmt <scope> ...` | explicit `all`, `kernel`, or app scope; fmt help and task |
