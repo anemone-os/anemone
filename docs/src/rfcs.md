@@ -141,8 +141,9 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   resolver发布完整TCP creation tuple，闭合connect errno、`SO_ERROR` single-consumer/rearm与binding/local分离；
   exact-source RV64 KUnit `466/466`、双libc TCP oracle、socket LTP `8/8`、shared regression、LA64 release build与
   最终独立review通过。三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending，current contracts不变，transaction
-  None。Stage 5继续保持Outline / Not Resolved / Not Authorized，并拥有剩余双架构userspace、external/capstone与
-  最终cutover；本closure不进入Stage 5。
+  None。Stage 5已解析为单一Checkpoint 5A，负责长期`socket-test` TCP suite、双架构双libc focused consumer、
+  self/remote-external、CAgent、shared regression、architecture capstone与最终cutover；本次只完成Implementation
+  Resolution，Checkpoint 5A仍Not Active / Not Authorized，current contracts不变。
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Stage 1只更新上述两项Network current contract，
   register没有新增当前问题。

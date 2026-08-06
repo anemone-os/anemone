@@ -1,6 +1,6 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over / TCP Not Effective
+**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Stage 5 Resolved / Not Active / Not Authorized / Not Cut Over / TCP Not Effective
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
@@ -8,9 +8,9 @@
 Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
 用户于2026-08-06先授权Stage 3 Implementation Resolution，随后分别授权并关闭CKPT 3A与CKPT 3B；同日接受
 Stage 4提前接通真实userspace syscall candidate的Route Correction，并只授权Stage 4 Implementation Resolution；
-随后分别授权并关闭CKPT 4A与CKPT 4B；Stage 5未授权
+随后分别授权并关闭CKPT 4A与CKPT 4B；同日只授权Stage 5 Implementation Resolution，Checkpoint 5A implementation未授权
 **当前 Gate：** Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over；
-Stage 5 Outline / Not Resolved / Not Authorized
+Stage 5 Resolved / Not Active / Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
@@ -25,8 +25,9 @@ invalidation、Socket source与wait capability；CKPT 4B先闭合剩余Linux sys
 发布完整syscall-reachable candidate并开始repository-owned RV64 userspace纵向验证。Stage 5不再拥有首次route
 activation，只拥有剩余双架构/external/capstone证据与最终`NET-TCP-CUTOVER`。这项Route Correction与Stage 4
 Implementation Resolution不改变R0 target、owner、ABI、Contract Impact、acceptance或validation claim；Stage 4
-现已由CKPT 4A/4B关闭并形成Syscall-Reachable Candidate / Not Cut Over；Stage 5仍为Outline / Not Resolved /
-Not Authorized，未执行`NET-TCP-CUTOVER`。
+现已由CKPT 4A/4B关闭并形成Syscall-Reachable Candidate / Not Cut Over；Stage 5现已解析为一个拥有完整双架构、
+external、CAgent、shared regression与architecture-capstone evidence并在exit执行唯一`NET-TCP-CUTOVER`的Checkpoint
+5A。该checkpoint仍Not Active / Not Authorized，current contracts保持不变。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -273,7 +274,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 3 — Stream、ABI与lifecycle completion | Closed / Not Cut Over | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | Closed / Syscall-Reachable Candidate / Not Cut Over | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；candidate syscall-reachable但TCP target contracts继续Pending | 已满足；本Stage停止，不进入Stage 5 |
-| Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 在Stage 4已可达candidate上完成mandatory双架构、remote-external、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、candidate保持可达、acceptance assets与独立final review可用 |
+| Stage 5 — Dual-architecture与architecture-capstone closure | Resolved / Not Active / Not Authorized | 以单一Checkpoint 5A在Stage 4已可达candidate上完成mandatory双架构、remote-external、CAgent、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Implementation Resolution已完成；需单独implementation授权 |
 
 ### 6.3 Stage 1 Resolved Gate — Stack TCP owner与protocol progression foundation
 
@@ -1418,27 +1419,218 @@ Socket、Opened-description、IOMUX与Epoll contracts不变，transaction保持N
 TCP、CAgent、deployment probe、full network/final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run。
 Stage 5保持Outline / Not Resolved / Not Authorized；Stage 4授权在此耗尽，不进入下一Stage。
 
-### 6.7 Stage 5 Outline — Dual-architecture与architecture-capstone closure
+### 6.7 Stage 5 Resolved Gate — Dual-architecture与architecture-capstone closure
 
-**目的：** 在Stage 4已经由正常resolver发布、可被真实userspace持续回归的完整candidate上，补齐父RFC仍要求的
-TCP capability与architecture capstone合取验收：repository-owned focused C/libc consumer、RV64/LA64
-loopback/self-external/remote-external、CAgent transport marker、shared consumer regression、source architecture
-audit与final independent review；全部满足后原子执行`NET-TCP-CUTOVER`。Stage 5不再拥有首次route activation，也
-不通过第二开关把同一candidate重新发布一次。
+#### 6.7.1 成熟度、授权与live baseline
 
-**前置依赖：** Stage 1--4全部独立Closed，Stage 1的两项Network Refine保持Effective，父RFC mandatory acceptance
-assets可用，所有target内Apollyon/Keter已关闭；实际Not Run范围与条件性deployment probe边界已经可诚实记录。
+Stage 5是本RFC最后一个formal execution gate，只包含一个Checkpoint 5A。它不再发布TCP tuple或建立第二activation
+point，而是在Stage 4已经通过唯一normal resolver可达的candidate上，补齐父RFC要求的TCP capability与architecture
+capstone合取证明；两组证据、final independent review与current-contract write-back作为同一个closure unit完成。
+普通实现、测试与修正可以形成多个commit，但不再人为拆分新的execution checkpoint或partial contract cutover。
 
-**受保护边界：** Stage 4 candidate reachability不是contract cutover、accepted limitation或较弱TCP target；Stage 5
-必须沿同一normal production route完成剩余证据，不能以test-only profile、第二activation switch、parallel handler或
-缩小validation掩盖Stage 4暴露的问题。两组closure claim缺一不可；HTTP或条件性`wget/curl/git`成功不能替代
-repository-owned TCP、双架构与architecture proof，`ss -tan`/procfs/diag失败也不能扩大target。final cutover只使
-父RFC表中仍Pending的三项TCP Introduce与`SOCKET-ABI-001` Refine生效；不得重复cut over Stage 1已经Effective的
-Network规则，也不得把TCP-local machinery提升为无第二consumer的generic framework，或为维持旧framework而保留
-本应shared的TCP hack。
+用户于2026-08-06只授权本节Implementation Resolution。Checkpoint 5A implementation、runtime validation、
+`NET-TCP-CUTOVER`与RFC closure均未授权。解析时核验的live baseline为clean `dev/drc/alpha@5d6ce709`：
 
-**解析触发点：** Stage 4以`Syscall-Reachable Candidate / Not Cut Over`关闭后，重新核验完整diff、current contracts、
-register、Stage 4真实userspace证据、双架构环境与external peer资产，把父RFC尚未满足的mandatory matrix解析成最终
-validation/cutover unit，不机械重跑已经由exact-source Stage 4证据充分覆盖且未受后续修改影响的同一轨道。任一
-mandatory evidence失败、candidate存在未关闭target defect或architecture capstone出现第二truth/旁路时保持
-Not Cut Over并进入Review Hold / Target Renegotiation，不得以缩小validation收口。
+- Stage 1--4全部Closed，Stage 1的`NET-PROTOCOL-PROGRESSION-CUTOVER`继续Effective；Stage 4已经通过唯一
+  `PUBLISHED_SOCKET_ABI_PROFILES`发布完整TCP tuple，三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending；
+- Stage 4 closure commit后的`5d6ce709` feedback interlude删除了冗余TCP send/receive capability和隐式`Deref`，
+  收窄cross-layer surface并调整source registration取得access capability的顺序。它没有改变R0 target或current
+  contract，但触及production TCP source，因此Stage 4旧日志不能直接作为final exact-source runtime/host proof；
+- boot-root `socket-test`当前覆盖UDP、UDP extension/message、ICMP raw与Unix stream/seqpacket，但没有TCP suite；
+  competition-root `tcp-r0.c`当前只有RV64 glibc/musl staged binary，LA64 fixture与installation尚未建立；
+- 两架构canonical user-test wrapper、固定SystemTarget `10.0.2.15/24 -> 10.0.2.2`、caller-selected validation disk与
+  父RFC固定来源的CAgent server/client资产可用于本Stage。当前仓库没有TCP external peer或长期TCP test wrapper；
+- current Network、Socket、Opened-description、IOMUX与Epoll contracts仍明确不覆盖TCP，register/current
+  limitations没有允许缩减R0 target或绕过mandatory evidence的TCP条目，transaction保持None。
+
+#### 6.7.2 Stage 5 Implementation Boundary
+
+**Target：** 在Stage 4同一normal production route上完成R0最终证据闭包：建立长期`socket-test` TCP direct-syscall
+suite，把同一repository-owned `tcp-r0.c`扩展并构建为RV64/LA64各自的glibc与musl consumer，完成两架构
+loopback/self-external/remote-external、CAgent transport marker与existing consumer regression；在final exact source上
+完成owner/source audit、Architecture Friction Scan和独立engineering review。全部mandatory evidence同时成立后，
+Checkpoint 5A原子执行唯一`NET-TCP-CUTOVER`并关闭Stage 5与R0。
+
+**Non-goals：** 本Stage不重新发布TCP tuple，不增加Kconfig/test-only activation、parallel handler、private syscall、
+第二Socket/wait/control-plane/progression path或新的production validation facade；不实现IPv6、`SO_REUSEPORT`、
+keepalive、linger、socket timeout、OOB、error queue、ancillary、zero-copy、sock-diag、`/proc/net/tcp`、`ss -tan`或其它
+R0 non-goal。physical hardware、`smp > 1`、其它NIC/platform、full network LTP与完整final harness默认Not Run；
+BusyBox `wget`及可能存在的`curl/git`仍只是条件性deployment probe。
+
+**Protected owner / handoff boundary：** domain Stack TCP owner继续唯一拥有Endpoint identity、binding/listener/
+connection/stream/error/resource/deferred-reclaim fact；control plane只提供operation-local route/source/interface
+selection；kernel TCP Socket/source只持opaque Endpoint capability、point-in-time fact与recheck route；general Socket
+front继续唯一拥有Linux representation、family-neutral dispatch、blocking orchestration与fd preparation；
+opened-description、iomux/epoll、worker/provider与test harness各自保留既有owner。test marker、host port、peer PID、
+binary identity或expected result都只是validation truth，不得进入production state machine或反向决定route/readiness。
+
+**Failure / cleanup：** target-preserving correctness fix沿原owner完成，不建立补偿truth或caller special case。guest
+case拥有自己的fd、child与payload判断；host peer/CAgent runner拥有process、fixed port、READY/PASS marker、deadline、
+log与cleanup trap，任何early failure、QEMU退出或signal都必须按精确PID回收child并关闭socket。accept/copy/fd
+publication失败、signal取消、final close、RST/FIN/TIME_WAIT与deferred reclaim继续由Stage 1--4既有production owner
+处理，validation不能用kill、unbounded retry或进程退出替代kernel cleanup proof。
+
+**允许自然闭合：** 同一acceptance下的target-preserving TCP修正、owner-local test/KUnit、`socket-test` TCP module、
+`tcp-r0.c` case与两架构fixture、focused CAgent runner、stage-scoped external peer/orchestration、rootfs fixture registration、
+format/import/module registration和最终current-contract页面。预计路径只是提示，不是穷举write set；若需要新增或扩大
+production public API、shared visibility或current contract语义，必须按本节stop condition停止。
+
+#### 6.7.3 Mandatory validation asset与责任分工
+
+Checkpoint 5A保留四层互补oracle，不让任一smoke替代另一层的proof：
+
+1. **`socket-test::tcp`：** 在boot-root长期默认suite中使用normal published tuple和direct syscall/wrapper path，覆盖
+   family tuple/descriptor metadata与稳定拒绝、bind/listen/connect/accept/accept4 rollback、scalar/vector/message
+   stream projection、poll/pselect/epoll、dup/fork/CLOEXEC/final-close及共同fault/copy边界。它与既有UDP、UDP
+   extension/message、ICMP raw、Unix stream/seqpacket suite在同一进程顺序运行并输出独立TCP summary；两架构都必须
+   通过。该suite证明TCP作为general Socket front真实consumer的长期回归，不复制Stack private state，也不替代libc、
+   remote-external或protocol-owner race proof。
+2. **`tcp-r0.c`：** 同一source以RV64/LA64各自glibc与musl toolchain静态构建，记录source/compiler/binary identity，
+   四份binary都执行父RFC要求的blocking/nonblocking connect、`SO_ERROR`、bind/listen/accept/accept4、partial/EOF/
+   RST/shutdown、SIGPIPE/`MSG_NOSIGNAL`、`SO_REUSEADDR`、`TCP_NODELAY`、poll/select/epoll、dup/fork/CLOEXEC/
+   final-close、receive/final-close race与failure cleanup。source可以按可读性拆内部case或增加显式stage mode，但不得形成
+   architecture/libc-specific判断、test-only kernel route或第二套TCP协议。
+3. **owner host/KUnit：** Stack owner、focused vendored TCP与kernel owner-local proof继续负责deterministic cause、
+   capacity saturation/recovery、generation reuse、pending-child/receive reservation、commit-to-request、park/deadline、
+   late invalidation与cleanup race。userspace TPASS不能替代这些proof，host PASS也不能外推guest ABI。
+4. **topology/workload evidence：** 双架构loopback/self-external/remote-external和CAgent分别证明local software link、
+   external selection/provider round trip与真实并发HTTP consumer。existing Socket/UDP/ICMP raw/Unix/iomux/epoll
+   regression证明shared boundary没有因TCP退化，但它们不替代TCP-specific oracle。
+
+长期保留的test API必须有上述真实consumer。只为Stage 5搭建的peer、runner、marker或wrapper wiring必须说明validation
+owner与退出条件；若closure后没有持续consumer，应在最终source中删除，并由Git保存其执行身份与证据，不能因已能运行
+自然沉淀为通用network-test framework。
+
+#### 6.7.4 Topology、external peer与CAgent boundary
+
+- **Loopback：** `127/8`连接必须经production local route与同一TCP owner完成listen/connect/stream/wait/lifecycle；
+  既有Stage 4 loopback evidence在current exact source上重跑，不用direct Socket-to-Socket injection。
+- **Self-external：** client连接initial-domain自身configured external address，server也使用normal published Socket；
+  selection必须进入既有local software link，不经host peer、packet injection或loopback address fallback。两架构使用同一
+  source/case与判断逻辑。
+- **Remote-external：** guest从configured external address经normal route、Stack pump和VirtIO provider连接QEMU
+  host alias上的bounded TCP peer，交换固定request/reply token并验证peer tuple、双向byte stream、FIN/close与deadline。
+  peer只绑定host loopback fixed port，先flush READY再启动QEMU，按每架构预期session数有界accept，并对unexpected
+  payload/peer、timeout、partial protocol或cleanup failure返回非零。guest PASS与peer PASS缺一不可；不得fallback到
+  loopback/self-external、外部互联网服务、host packet injection或无限retry。
+- **CAgent：** 使用父RFC固定来源对应的unmodified `simple_llm_server`与`agent_lite` binary/source identity，在每个架构
+  至少运行一套明确记录libc与binary identity的本地IPv4 server/client。mandatory marker要求真实`SO_REUSEADDR`、
+  `listen(10)`、两个以上并发client、request/response、send/recv/close与server/child cleanup；仅出现group-end、进程
+  启动或HTTP字符串不算PASS。`ss -tan`、procfs/diag及其它agent shell workload结果单独记录，不参与TCP closure。
+
+CAgent和external peer使用caller-selected validation asset，公共RFC不把developer-private路径写成项目接口；wrapper
+必须复制master image后运行并记录image/binary identity，不得直接修改或写挂载master。若mandatory CAgent asset在某
+架构缺失，诚实记Not Run并保持Not Cut Over，不能用自制HTTP smoke、另一架构结果或deployment probe替代。
+
+#### 6.7.5 Implementation ordering、validation与evidence reuse
+
+1. 先在current source上补齐`socket-test::tcp`、最终`tcp-r0.c`与LA64 fixture；四份C binary以`-static -O2 -Wall
+   -Wextra -Werror`构建并记录compiler/source/binary hash。若test暴露R0内correctness defect，在原owner内修正并补最窄
+   regression；若要求改变target/owner/ABI/contract/acceptance则停止。
+2. 建立bounded self/remote-external与CAgent orchestration，先用host syntax/source检查和binary identity audit确认
+   marker、deadline、PID cleanup、fixed-port conflict与master-image只读边界，再进入guest runtime。
+3. 在final exact source上运行`just test net-host`、受影响owner KUnit/host target和两架构canonical user-test wrapper。
+   每个wrapper必须从显式caller-selected validation disk重建rootfs/kernel/app并执行默认`socket-test`、两套libc TCP
+   oracle、existing Socket LTP/shared regression、三类topology与CAgent transport marker；RV64与LA64都必须完整取得
+   mandatory marker和orderly terminal boundary。
+4. `just test xtask`只在Kconfig/config input变化时运行；否则保持Stage 4通过结果并明确未重跑原因。完成受影响app/
+   kernel format check、C `-Werror` build、`git diff --check`与`mdbook build docs`。条件性deployment probe按实际资产
+   记录PASS/FAIL/Not Run，不影响mandatory result。
+
+canonical validation floor至少包含：
+
+```text
+just test net-host
+just fmt kernel --check
+just fmt socket-test --check
+just fmt user-test --check
+./scripts/run-user-test-rv64.sh <caller-selected-rv64-validation-disk> build/net-tcp-stage5-rv64.log
+./scripts/run-user-test-la64.sh <caller-selected-la64-validation-disk> build/net-tcp-stage5-la64.log
+mdbook build docs
+git diff --check
+```
+
+若本Stage没有修改kernel或某个app，final evidence可以用source audit说明对应format命令为何无需重复；但两架构wrapper、
+四份C binary build与`just test net-host`不能因`5d6ce709`后的旧结果而省略。若LA64 terminal在全部mandatory marker与
+orderly shutdown后需要launcher通过既有monitor边界结束QEMU，必须记录该runner事实，不能把guest halt写成kernel
+failure或把缺失shutdown marker写成成功。
+
+`5d6ce709`触及cross-layer TCP production source，所以本Stage不直接复用Stage 4的`just test net-host`、RV64 KUnit/
+TCP oracle或LA64 build结果作为final evidence；它们必须在Checkpoint 5A exact source上刷新。固定Linux 6.6.32 oracle、
+父RFC target/current-contract baseline与未受改动的历史设计证据可以引用，但source/build/host不能替代双架构guest，
+CAgent不能替代repository-owned oracle，loopback/self-external不能替代remote-external。
+
+mandatory runtime至少分别记录：branch/HEAD与final diff、architecture、kernel config、compiler/libc/binary identity、
+validation disk identity、main/peer/CAgent log、agent或用户运行归属、每组marker、exit/terminal边界和明确Not Run。执行
+证据写入本节未来的Checkpoint 5A result与focused Git/PR一次；不为同一matrix创建transaction或复制到多个状态页。
+mandatory runtime之后不得再修改production kernel、长期oracle或参与claim的fixture而继续复用旧结果；仅删除已完成
+使命且不进入guest/production dependency的stage-scoped host orchestration时，必须由final diff与dependency audit证明
+production exact source未变，并保留其Git/source/log identity，否则重跑受影响证据。
+
+#### 6.7.6 Architecture capstone、review与observability
+
+Checkpoint 5A final exact diff必须完成source/dependency/consumer audit与独立engineering review，至少证明：
+
+- raw smoltcp handle、ring/buffer、engine slot、cause与generation没有越过Stack fence；kernel Socket没有复制binding、
+  role、connect outcome、pending child、stream/error/capacity/EOF/ready truth，test expected state没有进入production；
+- TCP与UDP/ICMP raw各自protocol owner仍通过同一owner-driven progression handoff请求既有worker，effect policy保持
+  protocol-local；没有caller逐路径补wake、periodic/busy poll、第二deadline/route/worker truth或test-only re-drive；
+- general Socket front、opened-description、iomux与epoll只承担owner-neutral共同义务；TCP-local listener/option/error/
+  resource machinery没有因入口相似提升为generic framework，自然shared obligation也没有为保持旧形状塞入TCP bypass；
+- source registration、accept rollback、copy/fd publication、dup/fork/final close、observer withdrawal、deferred reclaim、
+  host peer/CAgent child与QEMU failure均有唯一cleanup owner和可审计顺序；notification/marker/log不驱动behavior；
+- RV64/LA64、glibc/musl、loopback/self-external/remote-external走同一production source，没有architecture/libc/test/caller
+  special branch、无退出条件bridge、较弱oracle或Not Run-as-PASS。
+
+review必须在全部target-preserving fix和test wiring收敛后的final diff上进行，并按Apollyon/Keter/Euclid/Safe报告。
+Apollyon/Keter必须为0；会影响两组closure claim或contract honesty的Euclid必须在本checkpoint修复或由开发者明确处置。
+Architecture Friction Scan使用同一final source；没有具体摩擦时不写占位记录。可观测性只保留case summary、peer/CAgent
+READY/PASS/FAIL、owner boundary error与必要cleanup日志，不增加per-packet/per-wake hot-path log或behavioral counter。
+
+#### 6.7.7 `NET-TCP-CUTOVER`与write-back
+
+只有第6.7.3--6.7.6的mandatory evidence、final review与stop condition全部满足时，Checkpoint 5A才在同一原子
+closure执行：
+
+1. 在Network current contracts建立按共同owner与共同proof组织的TCP Socket surface，原子Introduce
+   `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`与`NET-TCP-LIFECYCLE-001`；正文固定Stack TCP owner、opaque
+   association、listener/accepted-child handoff、stream transaction、progression、publication/final release与deferred
+   reclaim义务，引用而不复制control-plane、frame、opened-description与wait contracts；
+2. 在Socket front current contract原子Refine `SOCKET-ABI-001`，加入IPv4 TCP tuple、stream message projection、真实
+   `SO_ERROR`/`SO_REUSEADDR`/`TCP_NODELAY`、SIGPIPE/`MSG_NOSIGNAL`与typed async errno；保持general front不拥有
+   mutable option/error bag，并同步Network/Socket contract index和公共导航；
+3. 更新父RFC、`invariants.md`、本页与RFC导航为Closed / TCP Effective，记录唯一cutover source、实际evidence与Not
+   Run。Stage 1已经Effective的`NET-CONTROL-PLANE-001`与`NET-STACK-PUMP-001`不得重复cut over；Dependencies不登记
+   `Preserve`；
+4. register/current limitations只在final evidence暴露真实当前缺陷或accepted target外限制时更新；否则保持只读。
+   transaction继续None，执行事实由Checkpoint 5A result、Git/PR与current contract source拥有，不同步双周日志。
+
+current contract更新与TCP Effective claim必须跟全部source、runtime、review证据处于同一closure；不得先把部分ID标记
+Active、先宣称TCP Effective或先关闭RFC，再补LA64、remote-external、CAgent或architecture-capstone proof。
+
+#### 6.7.8 Exit、stop conditions与本次resolution结果
+
+Checkpoint 5A只有在以下条件同时满足时才能Closed：四份C/libc consumer与双架构`socket-test::tcp`通过；两架构
+loopback/self-external/remote-external guest/peer marker和CAgent transport marker完整；existing consumer regression、
+current-source host/KUnit、format/build/docs gate通过；所有stage-scoped asset已删除或有明确长期consumer；final review
+没有未处理Apollyon/Keter；architecture capstone与三项Introduce加一项Refine可以由同一source/evidence诚实证明。
+
+以下任一事实要求立即停止、保持Not Cut Over，并按影响进入Review Hold / RFC review / Target Renegotiation：
+
+- 需要改变R0 target/non-goal、owner/handoff、failure/cleanup、public ABI、Contract Impact、acceptance或validation claim；
+- mandatory RV64/LA64、任一libc oracle、remote-external、CAgent或shared regression缺失/失败，或只能通过降低case、
+  改写oracle、Not Run-as-PASS、另一架构结果、HTTP/deployment smoke、旧Stage 4日志或source audit替代；
+- TCP只能通过Stack取得Linux/Task/File/fd/waiter、Socket缓存第二份protocol fact、caller/test/architecture branch、private
+  wait/syscall/source、periodic poll、unbounded retry、packet injection或长期bridge继续工作；
+- natural shared Socket/opened-description/iomux义务需要semantic Refine，或TCP-local machinery被迫提升为无第二consumer
+  generic API；必须先提交最小shared delta与existing-consumer迁移方案，不能在本Stage静默实现；
+- host peer/CAgent/master-image lifecycle不能可靠清理，stage-scoped validation asset没有退出条件，或fixed source/
+  binary/log identity不足以支持claim；
+- 任一TCP contract只能在弱于父RFCtarget的语义上成立，或architecture capstone存在未处置Apollyon/Keter。
+
+`ss -tan`/procfs/diag失败、条件性`wget/curl/git`因resolver/TLS/rootfs缺失而Not Run、physical hardware、`smp > 1`、
+其它NIC/platform、full network LTP与完整final harness未执行，不单独触发Review Hold，也不允许扩大target或写成PASS。
+
+本次Implementation Resolution只更新RFC计划与状态，实际运行仅限文档检查。Checkpoint 5A保持Not Active / Not
+Authorized，四项TCP contract继续Pending，current contracts、source、tests、rootfs、wrapper、register与transaction
+均不在本次resolution中修改；授权在此耗尽，不进入implementation。

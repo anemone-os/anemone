@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Stage 5 Resolved / Not Active / Not Authorized / Not Cut Over / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-06
@@ -10,6 +10,7 @@
 `NET-STACK-PUMP-001`
 **执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed / CKPT 3A-3B Closed / Not Cut Over；
 Stage 4 Closed / CKPT 4A-4B Closed / Syscall-Reachable Candidate / Not Cut Over；
+Stage 5 Resolved / Checkpoint 5A Not Active / Not Authorized；
 `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
@@ -34,8 +35,10 @@ CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over。随后接受的R
 activation与真实userspace纵向验证从Stage 5提前到Stage 4；Stage 4现已解析为两个需分别授权、分别review的execution
 checkpoint：CKPT 4A完成仍不可达的owner predicate/source/wait closure，CKPT 4B完成syscall projection、唯一normal
 resolver activation与RV64双libc vertical slice。两个checkpoint均已独立授权、review并关闭；Stage 4现为Closed /
-Syscall-Reachable Candidate / Not Cut Over。四项target contract仍Pending，Stage 5仍为Outline / Not Resolved /
-Not Authorized。
+Syscall-Reachable Candidate / Not Cut Over。Stage 5已经解析为单一Checkpoint 5A，负责长期`socket-test` TCP suite、
+双架构双libc focused consumer、loopback/self-external/remote-external、CAgent、shared regression、architecture capstone与
+唯一`NET-TCP-CUTOVER`；本次只完成Implementation Resolution，Checkpoint 5A仍Not Active / Not Authorized，四项
+target contract继续Pending。
 
 ## 摘要
 
@@ -348,9 +351,9 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 
 ## Implementation Boundary
 
-本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0、Stage 1、Stage 2与Stage 3都曾取得各自所需
-授权并已关闭；Stage 2的CKPT 2A/2B与Stage 3的CKPT 3A/3B均分别授权、分别review。Stage 4已经解析为需分别授权、
-分别review的CKPT 4A/4B；CKPT 4A已经单独授权并关闭，CKPT 4B未获得implementation授权；Stage 5仍需独立解析和授权。
+本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0与Stage 1--4都曾取得各自所需授权并已关闭；
+Stage 2的CKPT 2A/2B、Stage 3的CKPT 3A/3B与Stage 4的CKPT 4A/4B均分别授权、分别review。Stage 5现已完成
+Implementation Resolution并收敛为单一Checkpoint 5A，但该checkpoint仍需独立implementation授权，尚未运行或cut over。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -481,14 +484,14 @@ readiness与contract均未发布。Stage 3以CKPT 3A闭合Stack owner fact/lifec
 syscall-unreachable Socket/ABI completion；两个checkpoint均已关闭，Stage 3 Closed / Not Cut Over。
 Stage 4已经解析为CKPT 4A internal owner predicate/source/wait closure与CKPT 4B normal syscall activation/RV64
 userspace vertical slice；两个checkpoint均已关闭，Stage 4为Closed / Syscall-Reachable Candidate / Not Cut Over；
-Stage 5继续只表达future Outline / Not Resolved / Not Authorized。
+Stage 5已经解析为单一Checkpoint 5A final evidence/capstone/cutover unit，仍Not Active / Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
 - [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed /
   CKPT 3A-3B Closed / Not Cut Over；Stage 4 Closed / CKPT 4A-4B Closed / Syscall-Reachable Candidate / Not Cut Over；
-  Stage 5 Outline / Not Resolved / Not Authorized）
+  Stage 5 Resolved / Checkpoint 5A Not Active / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
   [Socket](../../contracts/socket/index.md)、
@@ -500,6 +503,7 @@ Stage 5继续只表达future Outline / Not Resolved / Not Authorized。
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
 - implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2、Stage 3与Stage 4 focused Git commit；
+  Stage 5 Implementation Resolution由本次文档diff拥有；
   transaction None
 
 ## 修订记录
@@ -527,7 +531,13 @@ validation claim，因此修订号继续保持R0；当时两个checkpoint implem
 connect/accept wait与lifecycle closure；该execution write-back不改变R0 target、owner、ABI、Contract Impact或
 current contracts，因此修订号保持R0。随后单独授权并关闭CKPT 4B，完成normal resolver activation、Linux syscall
 mapping与RV64双libc vertical slice，使Stage 4成为Syscall-Reachable Candidate / Not Cut Over；该execution
-write-back仍不改变R0 target、Contract Impact或current contracts，修订号保持R0。Stage 5仍未解析、未授权。
+write-back仍不改变R0 target、Contract Impact或current contracts，修订号保持R0。随后只授权Stage 5 Implementation
+Resolution，把最终stage解析为单一Checkpoint 5A：长期`socket-test` TCP direct-syscall suite与双架构双libc
+`tcp-r0.c`共同承担userspace proof，stage-scoped peer与固定CAgent asset承担remote/workload proof，current-source
+host/KUnit、existing consumer regression、source architecture audit与独立final review共同承担capstone；全部合取后
+才原子执行三项TCP Introduce与`SOCKET-ABI-001` Refine。该解析只改变implementation route、validation placement、
+evidence reuse与stop condition，不改变R0 target、owner、ABI、Contract Impact或acceptance，因此修订号保持R0；
+Checkpoint 5A implementation仍未授权，current contracts不变。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -577,4 +587,6 @@ Architecture Friction Scan与独立review通过；final review为`0 Apollyon / 0
 [CKPT 4B / Stage 4 result](./implementation.md#6611-ckpt-4b-execution-result--closed--syscall-reachable-candidate--not-cut-over)。
 四项TCP target contract继续Pending，current contracts不变，transaction仍为None。LA64 userspace、self/remote-
 external TCP、CAgent、deployment probe、full network/final harness、hardware、`smp>1`与其它NIC/platform均Not Run。
-Stage 4授权已经耗尽；Stage 5保持Outline / Not Resolved / Not Authorized。
+Stage 4授权已经耗尽；Stage 5已完成Implementation Resolution并保持Not Active / Not Authorized。由于Stage 4后
+`5d6ce709`触及cross-layer TCP production source，Checkpoint 5A必须在current exact source上刷新host与双架构证据，
+不能直接把Stage 4日志外推为final cutover proof。
