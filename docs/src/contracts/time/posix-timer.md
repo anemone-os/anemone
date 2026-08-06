@@ -42,3 +42,5 @@ projection和delete-after-queue；source/lock-order audit覆盖exec/exit与callb
 
 **最初来源：** [RFC-20260803 Clock Timekeeping与POSIX Timers](../../rfcs/clock-timekeeping-posix-timers/index.md)；
 [Gate 5 PT-SIGNAL-CUTOVER](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md#gate-5-closure-与-pt-signal-cutover--2026-08-04)。
+
+**当前来源：** [POSIX Timer Thread-ID RFC Gate 2/3 closure](../../rfcs/posix-timer-thread-id-notification/implementation.md#gate-3-closure--2026-08-06)。

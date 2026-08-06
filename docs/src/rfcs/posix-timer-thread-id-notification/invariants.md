@@ -1,11 +1,11 @@
 # POSIX Timer Thread-ID Notification 目标与不变量
 
-**状态：** Accepted
+**状态：** Closed
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260804-posix-timer-thread-id-notification](./index.md)
 **适用修订：** R0
 
-本文只定义本 RFC 的 target 与 contract proof obligations。Gate 2 cutover 后，effective 规则以
+本文只定义本 RFC 的 target 与 contract proof obligations。Gate 2/3 closure 后，effective 规则以
 [`POSIX-TIMER-001`](../../contracts/time/posix-timer.md) 和
 [`SIGNAL-PENDING-001`](../../contracts/signal/pending-routing.md) 为准。
 

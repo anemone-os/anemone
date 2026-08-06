@@ -45,7 +45,7 @@
 
 **最初来源：** 现有 Signal 与 ThreadGroup 实现。
 
-**当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。
+**当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)；[POSIX Timer Thread-ID RFC Gate 2/3 closure](../../rfcs/posix-timer-thread-id-notification/implementation.md#gate-3-closure--2026-08-06)。
 
 ## SIGNAL-ACTION-001 — Ignored disposition 在 pending publication 前生效
 

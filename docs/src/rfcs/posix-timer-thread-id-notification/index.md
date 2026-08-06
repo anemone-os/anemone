@@ -1,6 +1,6 @@
 # RFC-20260804-posix-timer-thread-id-notification
 
-**状态：** Accepted
+**状态：** Closed
 **修订：** R0
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-06
@@ -258,4 +258,6 @@ failure errno、cleanup 或 cutover 强度，必须先回写 RFC review，不能
 
 ## Closure
 
-Not started。Gate 2 与 `PT-THREAD-ID-CUTOVER` 已完成；Gate 3 final audit 明确保持未完成，RFC 暂不关闭。
+Closed — 2026-08-06。Gate 2 已完成 `PT-THREAD-ID-CUTOVER`；Gate 3 已完成基于 `etc/linux-6.6.32` 的
+THREAD_ID 语义与架构静态审计。RV64 板上证据沿用 Gate 2；LA64 runtime 按维护者授权为 `Not Run / waived`，
+不影响本次静态 closure。未运行 mdBook。

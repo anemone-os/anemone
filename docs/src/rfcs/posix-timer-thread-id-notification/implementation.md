@@ -1,6 +1,6 @@
 # POSIX Timer Thread-ID Notification 实施路线
 
-**状态：** Accepted
+**状态：** Closed
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260804-posix-timer-thread-id-notification](./index.md)
 **当前修订：** R0
@@ -200,7 +200,7 @@ LA64 runtime按维护者授权记为`Not Run / waived`。按用户指令不运�
   `SYS_exit`前，固定20ms不能证明registration admission已经关闭；必须改用type-4 create稳定`EINVAL`的
   lifecycle probe。
 以上为 pre-cutover review 历史记录；前三项已由当前代码和 RFC 专属 RV64 oracle 修复，通用
-通用 LTP 与外围清理路径不属于本 RFC，未写入本 RFC closure。
+LTP 与外围清理路径不属于本 RFC，未写入本 RFC closure。
 
 ### Gate 2 Closure — 2026-08-06
 
@@ -214,7 +214,7 @@ LA64 runtime按维护者授权记为`Not Run / waived`。按用户指令不运�
 
 ## Gate 3 — Final audit 与 RFC closure
 
-**状态：** Incomplete / Not Run — explicitly deferred
+**状态：** Closed — 2026-08-06
 **Purpose：** 对cutover后的live实现做最终架构摩擦、lifecycle与双架构回归审计，并在无blocking finding时
 关闭RFC。
 **Prerequisites：** Gate 2关闭且`PT-THREAD-ID-CUTOVER`真实生效。
@@ -229,12 +229,29 @@ Signal重构；发现target/owner/ABI/acceptance变化必须停止，不能借cl
 - 审计create/exit admission、membership detach、target-exit三阶段、periodic `timer_gettime()`投影、timer delete后queued
   delivery、ordinary/同步fetch、typed dequeue/flush、dequeue-finalized siginfo/snapshot、ignored accrual、
   pending/reserved retirement与generation callback顺序，确认cleanup不依赖`Task::Drop`偶然发生。
-- 复跑双架构raw/Vim与普通signal/POSIX timer回归；将实际验证、Not Run边界、仍开放问题和有证据的
-  Architecture Friction写回唯一closure证据。
+- 对照 `etc/linux-6.6.32` 固定源码完成 THREAD_ID 语义、owner、锁序和生命周期静态审计；将实际验证、
+  Not Run边界、仍开放问题和有证据的 Architecture Friction写回唯一closure证据。
 - 更新RFC为Closed；若发现当前target内缺陷则保持打开并修复，不登记为accepted limitation。
 
-**Validation：** bounded periodic engineering audit、source/lock-order review、RV64/LA64最终runtime matrix、
-`git diff --check`；按用户指令不运行mdBook。
+**Validation：** bounded static engineering audit、Linux 6.6.32 source review、Anemone source/lock-order
+review、Gate 2 RV64 板上证据复核与 `git diff --check`；本 Gate 不新增 runtime 测试，按用户指令不运行mdBook。
 **Cutover：** None；本Gate只核验Gate 2已经生效的contract，不重复cutover。
-**Stop / Exit：** 本 Gate 未执行；RFC 不因 Gate 2 cutover 自动标记为最终 closure。需要新的维护者授权后，
-完成 final audit、architecture-friction scan 和最终 closure write-back。
+**Stop / Exit：** Gate 3 static audit、closure write-back 和 architecture-friction scan 已完成；RFC 可关闭并停止。
+
+### Gate 3 Closure — 2026-08-06
+
+- Linux 6.6.32 `kernel/time/posix-timers.c` 静态核对：`good_sigevent()`（377--399）对
+  `SIGEV_THREAD_ID` 走精确 notify 分支并要求同组 target；`posix_timer_event()`（280--300）以
+  `PIDTYPE_PID` exact 投递且 failed send 不 rearm；`posix_timer_fn()`（310--374）保留 ignored 周期的
+  overrun accrual 并立即 rearm；`common_timer_get()`（637--690）保留 requeue-pending 的未来投影。
+- Linux `kernel/signal.c` 静态核对：`dequeue_signal()`（635--710）在 siglock 外调用 `posixtimer_rearm()`；
+  `send_sigqueue()`（1978--2039）将 `PIDTYPE_PID` occurrence 放入目标 task private pending；
+  `kernel/exit.c::__exit_signal()`（143--215）在 siglock 下 flush task-private queue 后再释放锁。
+- Anemone 对应 owner 路径：`time/posix_timer/api.rs` 只在 syscall ABI 边界解码 `_tid`；
+  `task/posix_timer.rs` 只保存 weak exact identity、timer-owned overrun/arm state 和 typed completion；
+  `task/sig/{pending,timer,delivery}.rs` 由 private pending owner 独占 occurrence，并在 Signal/ThreadGroup
+  guard 外完成 timer callback；`task/api/exit/mod.rs` 在 topology detach 前关闭 admission 并 flush。
+- Architecture Friction Scan 未发现第二份 pending truth、owner 穿透、expiry TID lookup、强 `Task` 生命周期、
+  shared fallback 或锁内 callback；syscall 中的 `Arc<Task>` 仅是 registration 建立期间的 transient snapshot，
+  已发布 registration 只持 non-rebinding weak capability。未运行 LA64 runtime，不把它写成通过；Gate 2 的维护者
+  waiver 继续有效。
