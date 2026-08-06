@@ -194,10 +194,7 @@ pub unsafe fn activate_kernel_mapping() {
 pub unsafe fn kmap(mapping: Mapping) -> Result<TlbShootdownGuard, SysError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
-        PagingArch::tlb_shootdown_range(VirtPageRange::new(
-            mapping.vpn,
-            mapping.npages as u64,
-        ));
+        PagingArch::tlb_shootdown_range(VirtPageRange::new(mapping.vpn, mapping.npages as u64));
     }
     Ok(TlbShootdownGuard::new(None))
 }
