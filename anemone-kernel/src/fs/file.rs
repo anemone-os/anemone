@@ -835,7 +835,7 @@ impl File {
         };
         if written > 0 {
             self.inode()
-                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, realtime());
         }
 
         Ok(written)
@@ -862,7 +862,7 @@ impl File {
         if written > 0 {
             let cred = get_current_task().cred();
             self.inode()
-                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, realtime());
         }
     }
 
@@ -912,7 +912,7 @@ impl File {
         let written = (self.ops.write_at)(self, pos, buf, ctx)?;
         if written > 0 {
             self.inode()
-                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, realtime());
         }
 
         Ok(written)
@@ -960,7 +960,7 @@ impl File {
         };
         if written > 0 {
             self.inode()
-                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, realtime());
         }
         Ok(written)
     }
@@ -1016,7 +1016,7 @@ impl File {
         };
         if written > 0 {
             self.inode()
-                .after_modified(&cred, ModifType::Modify, Instant::now().to_duration());
+                .after_modified(&cred, ModifType::Modify, realtime());
         }
         Ok(written)
     }

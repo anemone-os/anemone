@@ -1,0 +1,9 @@
+name = "clock_tests"
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build", "--release"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/release/clock_tests"

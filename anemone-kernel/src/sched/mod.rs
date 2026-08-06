@@ -558,7 +558,7 @@ pub use kore::*;
 /// Upper-level APIs built upon [kore] functions.
 mod higher_level {
 
-    use crate::time::timer::schedule_local_irq_timer_event;
+    use crate::time::timer::{TimerHandle, cancel_timer_event, schedule_local_irq_timer_event};
 
     use super::{
         wait::{WaitOutcome, WaitReason, WakeMode, WakeToken},
@@ -584,6 +584,41 @@ mod higher_level {
         Unexpected,
     }
 
+    /// One-shot wake capability for a caller-installed timer request.
+    ///
+    /// The scheduler keeps the wait identity private. Request owners may only
+    /// consume this trigger when their timer expires; stale and retired checks
+    /// remain in wait-core.
+    #[derive(Debug)]
+    pub struct CurrentWaitTimeoutTrigger {
+        task: Weak<Task>,
+        token: WakeToken,
+        /// Diagnostic only; it does not participate in wake eligibility.
+        diagnostic_tid: Tid,
+    }
+
+    impl CurrentWaitTimeoutTrigger {
+        pub fn expire(self) {
+            let wait_id = self.token.wait_id();
+            let Some(task) = self.task.upgrade() else {
+                kdebugln!(
+                    "current wait timer: task={} wait={:#x} result=task_gone",
+                    self.diagnostic_tid,
+                    wait_id,
+                );
+                return;
+            };
+            let result =
+                wait::wake_wait(&task, &self.token, WaitReason::Timeout, WakeMode::AnyWait);
+            kdebugln!(
+                "current wait timer: task={} wait={:#x} result={:?}",
+                self.diagnostic_tid,
+                wait_id,
+                result,
+            );
+        }
+    }
+
     /// Schedule the current wait-core round with an optional timeout.
     ///
     /// `token` names the wait round already published through
@@ -602,7 +637,7 @@ mod higher_level {
         );
         drop(current);
 
-        let start = with_intr_disabled(|| {
+        let (start, timer_request) = with_intr_disabled(|| {
             let wait_id = token.wait_id();
             // `is_armed()` is used here only as the completion-open check: if
             // it is already false, some source/signal/force won before timer
@@ -619,18 +654,17 @@ mod higher_level {
                 unsafe {
                     schedule_wait_sleep(&token);
                 }
-                return start;
+                return (start, None);
             }
 
-            if let Some(timeout) = timeout {
-                // Timer events are not cancellable. Keep only a weak task
-                // target so an early-finished long timeout does not pin the
-                // whole task until expiry; `WakeToken` remains the wait-round
-                // identity for stale/retired checks.
+            let timer_request = if let Some(timeout) = timeout {
+                // Keep only a weak task target for a request that races with
+                // task teardown. `WakeToken` remains the wait-round identity
+                // when the request was already dequeued before cancellation.
                 let timeout_task = Arc::downgrade(task);
                 let timeout_token = token.clone();
                 let diagnostic_tid = task.tid();
-                unsafe {
+                let request = unsafe {
                     schedule_local_irq_timer_event(
                         timeout,
                         Box::new(move || {
@@ -656,31 +690,39 @@ mod higher_level {
                                 result,
                             );
                         }),
-                    );
-                }
+                    )
+                };
                 kdebugln!(
                     "schedule_wait_with_timeout: timeout installed task={} wait={:#x} timeout={:?}",
                     task.tid(),
                     wait_id,
                     timeout,
                 );
+                Some(request)
             } else {
                 kdebugln!(
                     "schedule_wait_with_timeout: no timeout requested task={} wait={:#x}",
                     task.tid(),
                     wait_id,
                 );
-            }
+                None
+            };
 
             let start = Instant::now();
             unsafe {
                 schedule_wait_sleep(&token);
             }
 
-            start
+            (start, timer_request)
         });
 
         let elapsed = start.elapsed();
+        if let Some(request) = timer_request {
+            // The wait outcome is already authoritative. Remove a still-queued
+            // timeout to bound resources; if dequeue won, WakeToken identity
+            // makes its later callback a harmless stale completion.
+            cancel_timer_event(&request);
+        }
 
         if let Some(timeout) = timeout {
             timeout.saturating_sub(elapsed)
@@ -734,6 +776,72 @@ mod higher_level {
             rem,
         );
         (outcome, rem)
+    }
+
+    /// Run one wait round whose one-shot timeout request is installed by the
+    /// caller through a restricted trigger.
+    ///
+    /// `install` runs with local interrupts disabled and must only enqueue one
+    /// nonblocking timer request. The returned handle is physically cancelled
+    /// after every wait outcome.
+    #[track_caller]
+    pub fn wait_current_with_timer_request<I, P>(
+        task: &Arc<Task>,
+        interruptible: bool,
+        install: I,
+        precheck: P,
+    ) -> CurrentWaitOutcome
+    where
+        I: FnOnce(CurrentWaitTimeoutTrigger) -> TimerHandle,
+        P: FnOnce() -> Option<CurrentWaitPrecheck>,
+    {
+        let active_wait = wait::ActiveWait::begin(task, interruptible);
+        let token = active_wait.token();
+
+        if let Some(precheck) = precheck() {
+            let reason = match precheck {
+                CurrentWaitPrecheck::PredicateReady => WaitReason::PredicateReady,
+                CurrentWaitPrecheck::Signal => WaitReason::Signal,
+                CurrentWaitPrecheck::Timeout => WaitReason::Timeout,
+            };
+            active_wait.cancel(reason);
+            let _ = active_wait.finish();
+            return precheck.into();
+        }
+
+        let current = get_current_task();
+        assert!(
+            Arc::ptr_eq(task, &current),
+            "wait_current_with_timer_request only schedules the current task"
+        );
+        drop(current);
+
+        let request = with_intr_disabled(|| {
+            if !token.is_armed() {
+                unsafe {
+                    schedule_wait_sleep(&token);
+                }
+                return None;
+            }
+
+            let request = install(CurrentWaitTimeoutTrigger {
+                task: Arc::downgrade(task),
+                token: token.clone(),
+                diagnostic_tid: task.tid(),
+            });
+            unsafe {
+                schedule_wait_sleep(&token);
+            }
+            Some(request)
+        });
+
+        if let Some(request) = request {
+            // `TimerHandle` is a detachable cancellation capability rather than
+            // a cancel-on-drop guard, so wait-core closes this request explicitly
+            // after every terminal outcome.
+            cancel_timer_event(&request);
+        }
+        CurrentWaitOutcome::from(active_wait.finish())
     }
 
     impl From<CurrentWaitPrecheck> for CurrentWaitOutcome {

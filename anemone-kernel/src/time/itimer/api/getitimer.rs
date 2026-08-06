@@ -19,7 +19,6 @@ pub fn sys_getitimer(
 
     match which {
         ITimerWhich::Real => {
-            // TODO
             let itimerval = match tg.real_itimer_snapshot() {
                 Some((rem, interval)) => {
                     let rem = TimeVal {
@@ -57,7 +56,9 @@ pub fn sys_getitimer(
             Ok(0)
         },
         _ => {
-            knoticeln!("[NYI] sys_getitimer: which={which:?}");
+            knoticeln!(
+                "getitimer: which={which:?} requires scheduler-driven CPU timers; errno=ENOSYS"
+            );
             Err(SysError::NotYetImplemented)
         },
     }

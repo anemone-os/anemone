@@ -23,6 +23,8 @@ pub mod sig;
 pub mod task_fs;
 #[path = "itimer.rs"]
 pub mod task_itimer;
+#[path = "posix_timer.rs"]
+pub(crate) mod task_posix_timer;
 #[path = "resource/mod.rs"]
 pub mod task_resource;
 #[path = "sched.rs"]
@@ -48,6 +50,7 @@ use crate::{
             disposition::SignalDisposition,
         },
         task_itimer::ITimers,
+        task_posix_timer::PosixTimers,
     },
 };
 
@@ -269,6 +272,9 @@ pub struct ThreadGroup {
     terminate_signal: Option<SigNo>,
     /// POSIX interval timers. Shared by all member threads.
     itimers: ITimers,
+    /// POSIX timer ID namespace and objects. Fork constructs a fresh empty
+    /// owner; exec and final exit withdraw it through one bulk-delete path.
+    posix_timers: PosixTimers,
     /// User-process rlimit policy. Presence follows `ty`; it is absent for
     /// kthreads and never acts as a second thread-group type discriminator.
     resource_limits: Option<NoIrqRwLock<task_resource::UserResourceLimits>>,

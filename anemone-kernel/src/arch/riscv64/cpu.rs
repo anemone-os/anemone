@@ -5,6 +5,8 @@ use crate::{
     prelude::*,
 };
 
+use anemone_abi::hwprobe::linux::{IMA_C, IMA_FD};
+
 pub struct RiscV64CpuArch;
 
 impl CpuArchTrait for RiscV64CpuArch {
@@ -24,6 +26,21 @@ impl CpuArchTrait for RiscV64CpuArch {
 }
 
 static MINIMUM_REQUIRED_ISA_EXTENSIONS: &[&str] = &["i", "m", "a", "c", "f", "d"];
+
+// This behavioral projection is derived once from the immutable CPU admission
+// policy above; it must change together with that policy and never goes stale.
+pub(super) static IMA_EXT_FLAGS: Lazy<u64> = Lazy::new(|| {
+    let mut flags = 0;
+    if MINIMUM_REQUIRED_ISA_EXTENSIONS.contains(&"f")
+        && MINIMUM_REQUIRED_ISA_EXTENSIONS.contains(&"d")
+    {
+        flags |= IMA_FD;
+    }
+    if MINIMUM_REQUIRED_ISA_EXTENSIONS.contains(&"c") {
+        flags |= IMA_C;
+    }
+    flags
+});
 
 /// Get the list of ISA extensions from the `riscv,isa` property of a CPU node
 /// in the device tree. Returns `None` if the property is missing or malformed.

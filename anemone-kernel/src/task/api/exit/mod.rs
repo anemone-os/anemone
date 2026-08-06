@@ -94,6 +94,12 @@ pub fn kernel_exit(code: ExitCode) -> ! {
         // later with no topology or ThreadGroup guard held.
         let tty_session_leader = crate::task::jobctl::TtySessionLeader::from_thread_group(&tg);
 
+        // This private pending lock is the exact-task timer registration/exit
+        // linearization point. Close admission and retire pending or reserved
+        // occurrences before topology detach; owner callbacks and registration
+        // destructors run only after the Signal guard is released.
+        task.retire_private_timer_signals_for_exit(&tg);
+
         defer_to_dispose(task.clone());
 
         // Opened-description final-release can run fanotify mark cleanup and
@@ -128,6 +134,10 @@ pub fn kernel_exit(code: ExitCode) -> ! {
             if let Some(leader) = tty_session_leader {
                 crate::device::tty::detach_exiting_session(leader);
             }
+            // Last-member detach is the point at which no further syscall can
+            // publish a timer in this namespace. Withdraw IDs and physically
+            // cancel requests before publishing the Exited lifecycle.
+            tg.delete_all_posix_timers();
             let mut tg_inner = tg.inner.write();
 
             let xcode = match tg_inner.status.life_cycle {

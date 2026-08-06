@@ -19,6 +19,8 @@ echo "Skipping /dev/shm: devfs does not support directory creation."
 "$BUSYBOX" mount -n -t ramfs none /run
 "$BUSYBOX" mount -n -t ramfs none /tmp
 "$BUSYBOX" mount -n -t proc proc /proc
+"$BUSYBOX" mount -n -t tmpfs tmpfs /dev/shm
+"$BUSYBOX" mknod  -m 666 /dev/null c 1 3
 "$BUSYBOX" chmod 1777 /tmp
 
 echo "Anemone userspace is ready."

@@ -637,7 +637,7 @@ mod kunits {
         // second round explicitly avoids relying on timer duration as a
         // scheduler synchronization boundary.
         unsafe {
-            crate::time::timer::schedule_local_irq_timer_event(
+            let _request = crate::time::timer::schedule_local_irq_timer_event(
                 Duration::from_millis(1),
                 Box::new(move || {
                     sender

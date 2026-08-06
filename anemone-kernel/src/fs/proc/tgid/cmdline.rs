@@ -16,7 +16,7 @@ fn tgid_cmdline_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
 fn tgid_cmdline_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let _binding = validate_tgid_sub_inode(inode)?;
     let meta = inode.inode().meta_snapshot();
-    let now = Instant::now().to_duration();
+    let now = realtime();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,

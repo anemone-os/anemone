@@ -572,6 +572,76 @@ impl Debug for WaitTarget {
     }
 }
 
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::{
+        task::kthread::{KThreadBuilder, KThreadCtx},
+        time::timer::queued_timer_count,
+        utils::any_opaque::AnyOpaque,
+    };
+
+    #[derive(Opaque)]
+    /// Cross-task handshake that waits until both the Event listener and its
+    /// far-future timeout are visible before forcing the non-timeout wake.
+    struct EarlyWake {
+        event: Arc<Event>,
+        ready: Arc<AtomicBool>,
+        owner_cpu: CpuId,
+        baseline: usize,
+    }
+
+    fn publish_after_timeout_is_queued(_: KThreadCtx, opaque: AnyOpaque) -> i32 {
+        let wake = opaque
+            .cast::<EarlyWake>()
+            .expect("invalid early event wake KUnit context");
+        loop {
+            // Checking both publications makes the assertion below specifically
+            // cover timeout removal, rather than an early-wake path that never
+            // installed a timer request.
+            let listener_registered = {
+                let inner = wake.event.inner.lock();
+                !inner.non_exclusive.is_empty()
+            };
+            if listener_registered && queued_timer_count(wake.owner_cpu) > wake.baseline {
+                break;
+            }
+            yield_now();
+        }
+        wake.ready.store(true, Ordering::Release);
+        wake.event.publish(usize::MAX, true);
+        0
+    }
+
+    #[kunit]
+    fn early_event_wake_removes_the_wait_timeout_request() {
+        let event = Arc::new(Event::new());
+        let ready = Arc::new(AtomicBool::new(false));
+        let owner_cpu = cur_cpu_id();
+        let baseline = queued_timer_count(owner_cpu);
+        let publisher = KThreadBuilder::new("kunit:event-early-timeout-cancel")
+            .spawn(
+                publish_after_timeout_is_queued,
+                AnyOpaque::new(EarlyWake {
+                    event: event.clone(),
+                    ready: ready.clone(),
+                    owner_cpu,
+                    baseline,
+                }),
+            )
+            .expect("failed to spawn early event publisher");
+
+        let outcome = event.listen_with_timeout(
+            false,
+            || ready.load(Ordering::Acquire),
+            Duration::from_secs(3600),
+        );
+        assert!(outcome.is_none());
+        assert_eq!(queued_timer_count(owner_cpu), baseline);
+        assert_eq!(publisher.wait_exited(), 0);
+    }
+}
+
 #[derive(Clone)]
 struct Listener {
     target: WaitTarget,

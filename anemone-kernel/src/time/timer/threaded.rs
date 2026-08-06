@@ -4,7 +4,7 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-use super::{TimerEvent, deadline_after, push_timer_event};
+use super::{TimerHandle, TimerLane, deadline_after, push_realtime_timer_event, push_timer_event};
 
 const READY_BACKLOG_LOG_THRESHOLD: usize = 1024;
 
@@ -17,6 +17,11 @@ struct WorkerSlot {
     handle: KThreadHandle,
 }
 
+/// Per-CPU handoff from timer dequeue to process-context completion.
+///
+/// The queue owns each callback after timer-core dispatch. Producers publish
+/// under the no-IRQ lock, then wake the pinned worker; the worker removes one
+/// callback under the lock and executes it only after unlocking.
 struct ThreadedReadyQueue {
     queue: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
 }
@@ -44,6 +49,9 @@ impl ThreadedReadyQueue {
 
 #[derive(Debug)]
 struct ThreadedStats {
+    // Diagnostic only: none of these counters decides queue ownership,
+    // callback eligibility, or worker scheduling. `ready_high_water` drives
+    // only the bounded-backlog warning below.
     submitted: AtomicUsize,
     dispatched: AtomicUsize,
     worker_wakes: AtomicUsize,
@@ -87,46 +95,88 @@ static THREADED_STATS: ThreadedStats = ThreadedStats::new();
 pub fn schedule_threaded_timer_event(
     expire: Duration,
     callback: Box<dyn FnOnce() + Send + 'static>,
-) {
+) -> TimerHandle {
     assert!(
         threaded_worker_ready(),
         "threaded timer event scheduled before local worker initialization"
     );
     THREADED_STATS.submitted.fetch_add(1, Ordering::Relaxed);
-    push_timer_event(TimerEvent::new_threaded(deadline_after(expire), callback));
+    let deadline = deadline_after(expire);
+    push_timer_event(deadline, TimerLane::Threaded(callback))
+}
+
+/// Schedule an absolute realtime request on the local CPU's timer queue.
+///
+/// `cancel_on_change_seq` is the timekeeper snapshot taken before registration.
+/// When present, any later sequence consumes the request through
+/// `clock_changed`; otherwise calendar steps only re-evaluate `deadline_ns`.
+pub(crate) fn schedule_realtime_threaded_timer_event(
+    deadline_ns: u64,
+    cancel_on_change_seq: Option<u64>,
+    expired: Box<dyn FnOnce() + Send + 'static>,
+    clock_changed: Option<Box<dyn FnOnce() + Send + 'static>>,
+) -> TimerHandle {
+    assert!(
+        threaded_worker_ready(),
+        "realtime timer event scheduled before local worker initialization"
+    );
+    assert_eq!(
+        cancel_on_change_seq.is_some(),
+        clock_changed.is_some(),
+        "cancel-on-set identity and callback must be installed together"
+    );
+    THREADED_STATS.submitted.fetch_add(1, Ordering::Relaxed);
+    push_realtime_timer_event(
+        deadline_ns,
+        cancel_on_change_seq,
+        TimerLane::RealtimeThreaded {
+            expired,
+            clock_changed,
+        },
+    )
 }
 
 fn threaded_worker_ready() -> bool {
     THREADED_WORKER.with(|slot| slot.lock().is_some())
 }
 
-pub(super) fn enqueue_expired_threaded(callback: Box<dyn FnOnce() + Send + 'static>) {
-    debug_assert!(IntrArch::local_intr_disabled());
+pub(super) fn enqueue_expired_threaded_on(
+    cpu: CpuId,
+    callback: Box<dyn FnOnce() + Send + 'static>,
+) {
+    // Publish the callback before looking up and waking the worker. A worker
+    // that observes the wake must therefore also be able to observe its work.
+    let ready_len = if cpu == cur_cpu_id() {
+        THREADED_READY_QUEUE.with(|queue| queue.lock().push_back(callback))
+    } else {
+        unsafe { THREADED_READY_QUEUE.with_remote(cpu, |queue| queue.lock().push_back(callback)) }
+    };
 
-    let ready_len = THREADED_READY_QUEUE.with(|queue| {
-        let mut queue = queue.lock();
-        queue.push_back(callback)
-    });
     THREADED_STATS.dispatched.fetch_add(1, Ordering::Relaxed);
-    update_ready_high_water(ready_len);
+    update_ready_high_water(cpu, ready_len);
 
-    let cpu = cur_cpu_id();
-    let handle = THREADED_WORKER.with(|slot| {
-        let slot = slot.lock();
-        let slot = slot
-            .as_ref()
-            .expect("threaded timer event dispatched before worker initialization");
-        assert_eq!(
-            slot.cpu, cpu,
-            "threaded timer worker slot does not belong to current CPU"
-        );
-        slot.handle.clone()
-    });
+    let handle = if cpu == cur_cpu_id() {
+        THREADED_WORKER.with(|slot| timer_worker_handle(cpu, slot))
+    } else {
+        unsafe { THREADED_WORKER.with_remote(cpu, |slot| timer_worker_handle(cpu, slot)) }
+    };
     THREADED_STATS.worker_wakes.fetch_add(1, Ordering::Relaxed);
     handle.wake();
 }
 
-fn update_ready_high_water(ready_len: usize) {
+fn timer_worker_handle(cpu: CpuId, slot: &NoIrqSpinLock<Option<WorkerSlot>>) -> KThreadHandle {
+    let slot = slot.lock();
+    let slot = slot
+        .as_ref()
+        .expect("threaded timer event dispatched before worker initialization");
+    assert_eq!(
+        slot.cpu, cpu,
+        "threaded timer worker slot does not belong to target CPU"
+    );
+    slot.handle.clone()
+}
+
+fn update_ready_high_water(cpu: CpuId, ready_len: usize) {
     let mut current = THREADED_STATS.ready_high_water.load(Ordering::Relaxed);
     while ready_len > current {
         match THREADED_STATS.ready_high_water.compare_exchange_weak(
@@ -140,7 +190,7 @@ fn update_ready_high_water(ready_len: usize) {
                     kwarningln!(
                         "threaded timer: ready backlog high-water {} on {}",
                         ready_len,
-                        cur_cpu_id()
+                        cpu
                     );
                 }
                 break;
@@ -215,6 +265,8 @@ fn ready_queue_not_empty() -> bool {
 
 fn drain_ready_queue(ctx: &KThreadCtx) {
     loop {
+        // Transfer ownership out of the no-IRQ queue before invoking arbitrary
+        // owner code. Timerfd/itimer callbacks may acquire their own locks.
         let Some(callback) = THREADED_READY_QUEUE.with(|queue| queue.lock().pop_front()) else {
             break;
         };
@@ -244,7 +296,7 @@ mod kunits {
         let callback_completed = completed.clone();
         let callback_done = done.clone();
 
-        schedule_threaded_timer_event(
+        let _request = schedule_threaded_timer_event(
             Duration::from_millis(1),
             Box::new(move || {
                 assert!(

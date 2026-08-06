@@ -9,6 +9,7 @@ pub(super) mod exception;
 pub(super) mod mm;
 pub(super) mod time;
 
+mod api;
 mod backtrace;
 mod bootstrap;
 mod machine;

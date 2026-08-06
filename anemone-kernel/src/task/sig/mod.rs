@@ -46,6 +46,11 @@ pub use mask::{TaskSigMaskState, TemporarySigMaskToken};
 mod pending;
 pub use pending::PendingSignals;
 pub mod set;
+mod timer;
+pub(crate) use timer::{
+    PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
+    PosixTimerSignalIdentity, PosixTimerSignalRegistration,
+};
 mod terminal;
 pub(crate) use terminal::TtyJobControlDisposition;
 
@@ -109,7 +114,7 @@ impl TryFromSyscallArg for SigNo {
 }
 
 /// A sent/sending signal.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Signal {
     /// Signal number.
     no: SigNo,
@@ -128,6 +133,9 @@ pub struct Signal {
     /// Kernel-private delivery purpose. It never changes siginfo serialization
     /// or userspace-visible disposition semantics.
     purpose: SignalPurpose,
+    /// One-shot POSIX timer owner handoff. It is consumed only after Signal has
+    /// removed the occurrence from pending and released every pending lock.
+    timer_delivery: Option<timer::TimerSignalDelivery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +160,7 @@ impl Signal {
             fields,
             default_stop_epoch: None,
             purpose: SignalPurpose::Ordinary,
+            timer_delivery: None,
         }
     }
 
@@ -163,6 +172,7 @@ impl Signal {
             fields: SigInfoFields::Kill(info::SigKill { pid, uid }),
             default_stop_epoch: None,
             purpose: SignalPurpose::DethreadVictim,
+            timer_delivery: None,
         }
     }
 
@@ -182,6 +192,7 @@ impl Signal {
             fields,
             default_stop_epoch: None,
             purpose: SignalPurpose::Ordinary,
+            timer_delivery: None,
         }
     }
 
@@ -223,6 +234,27 @@ impl Signal {
                 si_code: self.code.to_linux_code(),
                 fields: kbuf,
             },
+        }
+    }
+}
+
+impl Clone for Signal {
+    fn clone(&self) -> Self {
+        // Process-group fanout clones ordinary occurrences before selecting a
+        // target owner. A POSIX timer occurrence already belongs to one shared
+        // pending slot and cloning it would duplicate the dequeue callback.
+        assert!(
+            self.timer_delivery.is_none(),
+            "POSIX timer signal delivery identity cannot be cloned"
+        );
+        Self {
+            no: self.no,
+            errno: self.errno,
+            code: self.code,
+            fields: self.fields,
+            default_stop_epoch: self.default_stop_epoch,
+            purpose: self.purpose,
+            timer_delivery: None,
         }
     }
 }

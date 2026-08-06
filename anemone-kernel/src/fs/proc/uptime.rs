@@ -13,7 +13,7 @@ fn proc_uptime_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
 
 fn proc_uptime_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
-    let now = Instant::now().to_duration();
+    let now = realtime();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,

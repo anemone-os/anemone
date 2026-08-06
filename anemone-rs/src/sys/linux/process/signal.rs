@@ -38,6 +38,25 @@ pub fn rt_sigqueueinfo(pid: u64, sig: u64, siginfo_ptr: u64) -> Result<u64, Errn
     unsafe { syscall(SYS_RT_SIGQUEUEINFO, pid, sig, siginfo_ptr, 0, 0, 0) }
 }
 
+pub fn rt_sigtimedwait(
+    set_ptr: u64,
+    info_ptr: u64,
+    timeout_ptr: u64,
+    sigsetsize: u64,
+) -> Result<u64, Errno> {
+    unsafe {
+        syscall(
+            SYS_RT_SIGTIMEDWAIT,
+            set_ptr,
+            info_ptr,
+            timeout_ptr,
+            sigsetsize,
+            0,
+            0,
+        )
+    }
+}
+
 pub fn tkill(tid: u64, sig: u64) -> Result<u64, Errno> {
     unsafe { syscall(SYS_TKILL, tid, sig, 0, 0, 0, 0) }
 }

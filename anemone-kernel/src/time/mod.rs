@@ -1,5 +1,6 @@
 pub mod clock;
 pub mod itimer;
+pub mod posix_timer;
 pub mod timer;
 
 mod hal;

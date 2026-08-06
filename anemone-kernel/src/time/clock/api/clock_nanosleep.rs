@@ -1,29 +1,17 @@
-//! clock_nanosleep system call.
-//!
-//! Reference:
-//! - https://www.man7.org/linux/man-pages/man2/clock_nanosleep.2.html
+//! `clock_nanosleep` system call.
 
-use anemone_abi::time::linux::TimeSpec;
+use anemone_abi::time::linux::{TimeSpec, clock::TIMER_ABSTIME};
 
 use crate::{
     prelude::*,
     syscall::user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
+    time::{
+        clock::{SleepClock, get_sleep_clock},
+        timer::schedule_realtime_threaded_timer_event,
+    },
 };
 
-fn timespec_to_duration(ts: TimeSpec) -> Result<Duration, SysError> {
-    if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1_000_000_000 {
-        return Err(SysError::InvalidArgument);
-    }
-
-    Ok(Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32))
-}
-
-fn duration_to_timespec(duration: Duration) -> TimeSpec {
-    TimeSpec {
-        tv_sec: duration.as_secs() as i64,
-        tv_nsec: duration.subsec_nanos() as i64,
-    }
-}
+use super::{ns_to_duration, ns_to_timespec, timespec_to_ns};
 
 #[syscall(SYS_CLOCK_NANOSLEEP)]
 fn sys_clock_nanosleep(
@@ -32,84 +20,164 @@ fn sys_clock_nanosleep(
     #[validate_with(user_addr)] rqtp: VirtAddr,
     #[validate_with(user_addr.nullable())] rmtp: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
-    kdebugln!(
-        "clock_nanosleep: which_clock={:#x}, flags={:#x}, rmtp={:?}",
-        which_clock,
-        flags,
-        rmtp
-    );
-
     clock_nanosleep(which_clock, flags, rqtp, rmtp)
 }
 
 pub(crate) fn clock_nanosleep(
-    _which_clock: i32,
-    _flags: i32,
+    which_clock: i32,
+    flags: i32,
     rqtp: VirtAddr,
     rmtp: Option<VirtAddr>,
 ) -> Result<u64, SysError> {
+    static IGNORED_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
+
+    let clock = get_sleep_clock(which_clock)?;
+    let ignored_flags = flags & !TIMER_ABSTIME;
+    if ignored_flags != 0 && !IGNORED_FLAGS_LOGGED.swap(true, Ordering::Relaxed) {
+        // Linux's legacy clock_nanosleep ABI ignores every flag except
+        // TIMER_ABSTIME. Keep this compatibility behavior observable without
+        // turning unknown bits into EINVAL.
+        knoticeln!(
+            "clock_nanosleep: ignoring legacy flag bits {:#x}",
+            ignored_flags,
+        );
+    }
+
     let task = get_current_task();
     let usp_handle = task.clone_uspace_handle();
-    let duration = {
+    let requested_ns = {
         let mut usp = usp_handle.lock();
-        timespec_to_duration(UserReadPtr::<TimeSpec>::try_new(rqtp, &mut usp)?.read()?)?
+        timespec_to_ns(UserReadPtr::<TimeSpec>::try_new(rqtp, &mut usp)?.read()?)?
     };
+    let absolute = flags & TIMER_ABSTIME != 0;
 
-    let mut rem = duration;
-    while rem > Duration::ZERO {
-        let (outcome, next_rem) = wait_current_with_timeout(&task, true, Some(rem), || {
+    if !absolute {
+        // Linux relative sleeps measure an elapsed duration even when the
+        // selected ABI clock is REALTIME. Freeze every supported relative
+        // request onto monotonic so calendar steps cannot shorten or extend it.
+        return sleep_relative(&task, ns_to_duration(requested_ns), rmtp);
+    }
+    match clock {
+        SleepClock::Monotonic => sleep_absolute_monotonic(&task, requested_ns),
+        SleepClock::Realtime => sleep_absolute_realtime(&task, requested_ns),
+    }
+}
+
+fn sleep_relative(
+    task: &Arc<Task>,
+    duration: Duration,
+    rmtp: Option<VirtAddr>,
+) -> Result<u64, SysError> {
+    let duration_ns = u64::try_from(duration.as_nanos()).map_err(|_| SysError::InvalidArgument)?;
+    let deadline_ns = monotonic_ns()
+        .checked_add(duration_ns)
+        .ok_or(SysError::InvalidArgument)?;
+    loop {
+        // Recompute against the fixed deadline after every timeout wake. Timer
+        // delivery is tick-bounded and the wait core may complete at a nearby
+        // representable counter value; only the clock value is the final oracle.
+        let now_ns = monotonic_ns();
+        if now_ns >= deadline_ns {
+            return Ok(0);
+        }
+        let rem = ns_to_duration(deadline_ns - now_ns);
+        let (outcome, _) = wait_current_with_timeout(task, true, Some(rem), || {
             task.has_unmasked_signal()
                 .then_some(CurrentWaitPrecheck::Signal)
         });
-        rem = next_rem;
-        kdebugln!(
-            "clock_nanosleep: wait finished task={} outcome={:?} rem={:?}",
-            task.tid(),
-            outcome,
-            rem,
-        );
-
         match outcome {
-            CurrentWaitOutcome::Timeout => {
-                if task.has_unmasked_signal() {
-                    write_remaining_time(rmtp, rem)?;
-                    return Err(SysError::Interrupted);
-                }
-                break;
-            },
+            CurrentWaitOutcome::Timeout => continue,
             CurrentWaitOutcome::Signal | CurrentWaitOutcome::Force => {
-                write_remaining_time(rmtp, rem)?;
+                write_remaining_time(
+                    rmtp,
+                    ns_to_duration(deadline_ns.saturating_sub(monotonic_ns())),
+                )?;
                 return Err(SysError::Interrupted);
             },
-            other => {
-                if task.has_unmasked_signal() {
-                    write_remaining_time(rmtp, rem)?;
-                    return Err(SysError::Interrupted);
-                }
-                kwarningln!(
-                    "clock_nanosleep: unexpected wait outcome task={} outcome={:?} rem={:?}",
-                    task.tid(),
-                    other,
-                    rem,
-                );
-                assert!(false, "clock_nanosleep saw unexpected wait outcome");
-                write_remaining_time(rmtp, rem)?;
-                return Err(SysError::Interrupted);
-            },
+            other => panic!("relative clock_nanosleep saw unexpected wait outcome {other:?}"),
         }
     }
+}
 
-    Ok(0)
+fn sleep_absolute_monotonic(task: &Arc<Task>, deadline_ns: u64) -> Result<u64, SysError> {
+    loop {
+        // Absolute sleeps never report remaining time. Rechecking the original
+        // deadline also makes harmless early/spurious timeout completions retry.
+        let now_ns = monotonic_ns();
+        if now_ns >= deadline_ns {
+            return Ok(0);
+        }
+        let timeout = ns_to_duration(deadline_ns - now_ns);
+        let (outcome, _) = wait_current_with_timeout(task, true, Some(timeout), || {
+            task.has_unmasked_signal()
+                .then_some(CurrentWaitPrecheck::Signal)
+        });
+        match outcome {
+            CurrentWaitOutcome::Timeout => continue,
+            CurrentWaitOutcome::Signal | CurrentWaitOutcome::Force => {
+                return Err(SysError::Interrupted);
+            },
+            other => panic!("absolute monotonic sleep saw unexpected wait outcome {other:?}"),
+        }
+    }
+}
+
+fn sleep_absolute_realtime(task: &Arc<Task>, deadline_ns: u64) -> Result<u64, SysError> {
+    if realtime_ns() >= deadline_ns {
+        return Ok(0);
+    }
+    // A duration-based scheduler timeout cannot follow a mutable calendar.
+    // Install an absolute realtime request instead; the timer service rechecks
+    // it after every step and the wait token rejects a completion after signal.
+    let outcome = wait_current_with_timer_request(
+        task,
+        true,
+        |trigger| {
+            schedule_realtime_threaded_timer_event(
+                deadline_ns,
+                None,
+                Box::new(move || trigger.expire()),
+                None,
+            )
+        },
+        || {
+            task.has_unmasked_signal()
+                .then_some(CurrentWaitPrecheck::Signal)
+        },
+    );
+    match outcome {
+        CurrentWaitOutcome::Timeout => Ok(0),
+        CurrentWaitOutcome::Signal | CurrentWaitOutcome::Force => Err(SysError::Interrupted),
+        other => panic!("absolute realtime sleep saw unexpected wait outcome {other:?}"),
+    }
 }
 
 fn write_remaining_time(rmtp: Option<VirtAddr>, rem: Duration) -> Result<(), SysError> {
     let Some(rmtp) = rmtp else {
         return Ok(());
     };
-
+    // POSIX defines `rmtp` only for interrupted relative sleeps. Absolute paths
+    // return EINTR without touching it and never call this helper.
     let task = get_current_task();
     let usp_handle = task.clone_uspace_handle();
     let mut usp = usp_handle.lock();
-    UserWritePtr::<TimeSpec>::try_new(rmtp, &mut usp)?.write(duration_to_timespec(rem))?;
+    UserWritePtr::<TimeSpec>::try_new(rmtp, &mut usp)?.write(ns_to_timespec(
+        u64::try_from(rem.as_nanos()).expect("remaining sleep exceeds native timespec range"),
+    ))?;
     Ok(())
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn sleep_clock_operation_matrix_is_explicit() {
+        assert_eq!(get_sleep_clock(0), Ok(SleepClock::Realtime));
+        assert_eq!(get_sleep_clock(1), Ok(SleepClock::Monotonic));
+        assert_eq!(get_sleep_clock(7), Ok(SleepClock::Monotonic));
+        assert_eq!(get_sleep_clock(2), Err(SysError::NotSupported));
+        assert_eq!(get_sleep_clock(4), Err(SysError::InvalidArgument));
+        assert_eq!(get_sleep_clock(8), Err(SysError::InvalidArgument));
+    }
 }

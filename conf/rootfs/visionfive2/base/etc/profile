@@ -1,8 +1,8 @@
 # System-wide login environment for BusyBox ash.
-export PATH="/bin:/sbin:/usr/bin:/usr/sbin"
+export PATH="/bin:/sbin:/usr/bin:/usr/sbin:/opt/qemu-rv64/bin"
 export SHELL="${SHELL:-/bin/sh}"
 export TERM="${TERM:-linux}"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/lib:/usr/lib}"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/lib:/usr/lib:/opt/qemu-rv64/lib}"
 
 # BusyBox init supplies HOME=/ for its actions. Until getty/login owns session
 # setup, make the directly spawned root shell match root's passwd entry.
@@ -32,3 +32,5 @@ case "$-" in
         export PS1
         ;;
 esac
+
+bash /home/init_sys.sh

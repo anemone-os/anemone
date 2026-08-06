@@ -139,6 +139,12 @@ pub mod linux {
     pub const SYS_NANOSLEEP: u64 = 101;
     pub const SYS_GETITIMER: u64 = 102;
     pub const SYS_SETITIMER: u64 = 103;
+    pub const SYS_TIMER_CREATE: u64 = 107;
+    pub const SYS_TIMER_GETTIME: u64 = 108;
+    pub const SYS_TIMER_GETOVERRUN: u64 = 109;
+    pub const SYS_TIMER_SETTIME: u64 = 110;
+    pub const SYS_TIMER_DELETE: u64 = 111;
+    pub const SYS_CLOCK_SETTIME: u64 = 112;
     pub const SYS_CLOCK_GETTIME: u64 = 113;
     pub const SYS_CLOCK_GETRES: u64 = 114;
     pub const SYS_CLOCK_NANOSLEEP: u64 = 115;
@@ -247,12 +253,16 @@ pub mod linux {
     pub const SYS_MUNLOCK: u64 = 229;
     pub const SYS_MADVISE: u64 = 233;
 
+    pub const SYS_RISCV_HWPROBE: u64 = 258;
+    pub const SYS_RISCV_FLUSH_ICACHE: u64 = 259;
+
     pub const SYS_WAIT4: u64 = 260;
 
     pub const SYS_PRLIMIT64: u64 = 261;
 
     pub const SYS_FANOTIFY_INIT: u64 = 262;
     pub const SYS_FANOTIFY_MARK: u64 = 263;
+    pub const SYS_CLOCK_ADJTIME: u64 = 266;
 
     pub const SYS_SCHED_SETATTR: u64 = 274;
     pub const SYS_SCHED_GETATTR: u64 = 275;
@@ -268,6 +278,7 @@ pub mod linux {
     pub const SYS_PWRITEV2: u64 = 287;
 
     pub const SYS_STATX: u64 = 291;
+    pub const SYS_RSEQ: u64 = 293;
 
     pub const SYS_CLONE3: u64 = 435;
 

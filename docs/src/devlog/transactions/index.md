@@ -24,6 +24,9 @@
 
 ## Completed
 
+- [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--6全部关闭；
+  四个cutover使五项clock/time/signal contract delta生效，RV64/LA64 release SMP=2最终通过469/469与
+  470/470 KUnit以及完整定向用户态oracle。
 - [Exception-backed User Pointer Access](./2026-08-01-exception-userptr-access.md)：R0已完成RV64/LA64
   page-bounded bytewise copy、per-CPU exact-PC recovery、一次page-fault retry和typed/VFS partial边界；用户
   确认既有实现已验收。早于R0的remote fence锁边界保持follow-up。
