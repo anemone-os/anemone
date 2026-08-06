@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{reference::validate_slug, system_target::Root};
 
-#[derive(Deserialize, Debug, Serialize, Clone)]
+#[derive(Deserialize, Debug, Serialize, Clone, PartialEq, Eq)]
 pub enum Arch {
     #[serde(rename = "riscv64")]
     RiscV64,

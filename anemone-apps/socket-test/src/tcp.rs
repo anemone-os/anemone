@@ -311,11 +311,11 @@ fn test_scalar_vector_message_and_readiness() -> Result<(), Errno> {
     let right = b"cd";
     let send_iov = [
         IoVec {
-            iov_base: left.as_ptr() as *mut c_void,
+            iov_base: (left.as_ptr() as *mut c_void).into(),
             iov_len: left.len() as u64,
         },
         IoVec {
-            iov_base: right.as_ptr() as *mut c_void,
+            iov_base: (right.as_ptr() as *mut c_void).into(),
             iov_len: right.len() as u64,
         },
     ];
@@ -346,11 +346,11 @@ fn test_scalar_vector_message_and_readiness() -> Result<(), Errno> {
 
     let mut peek = [0u8; 4];
     let mut peek_iov = [IoVec {
-        iov_base: peek.as_mut_ptr().cast(),
+        iov_base: peek.as_mut_ptr().cast::<c_void>().into(),
         iov_len: peek.len() as u64,
     }];
     let mut peek_header = MsgHdr {
-        msg_iov: peek_iov.as_mut_ptr(),
+        msg_iov: peek_iov.as_mut_ptr().into(),
         msg_iovlen: 1,
         ..MsgHdr::default()
     };
@@ -361,11 +361,11 @@ fn test_scalar_vector_message_and_readiness() -> Result<(), Errno> {
     let mut second = [0u8; 2];
     let mut recv_iov = [
         IoVec {
-            iov_base: first.as_mut_ptr().cast(),
+            iov_base: first.as_mut_ptr().cast::<c_void>().into(),
             iov_len: first.len() as u64,
         },
         IoVec {
-            iov_base: second.as_mut_ptr().cast(),
+            iov_base: second.as_mut_ptr().cast::<c_void>().into(),
             iov_len: second.len() as u64,
         },
     ];
@@ -374,11 +374,11 @@ fn test_scalar_vector_message_and_readiness() -> Result<(), Errno> {
 
     let reply = b"xyz";
     let mut reply_iov = [IoVec {
-        iov_base: reply.as_ptr() as *mut c_void,
+        iov_base: (reply.as_ptr() as *mut c_void).into(),
         iov_len: reply.len() as u64,
     }];
     let reply_header = MsgHdr {
-        msg_iov: reply_iov.as_mut_ptr(),
+        msg_iov: reply_iov.as_mut_ptr().into(),
         msg_iovlen: 1,
         ..MsgHdr::default()
     };
@@ -388,7 +388,7 @@ fn test_scalar_vector_message_and_readiness() -> Result<(), Errno> {
 
     let mut control = [0u8; 4];
     let unsupported = MsgHdr {
-        msg_control: control.as_mut_ptr().cast(),
+        msg_control: control.as_mut_ptr().cast::<c_void>().into(),
         msg_controllen: 1,
         ..MsgHdr::default()
     };
@@ -608,9 +608,9 @@ impl Results {
 
 pub(crate) fn run() -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: sigpipe_handler as *const (),
+        sighandler: (sigpipe_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: core::ptr::null::<()>().into(),
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGPIPE, Some(&action), None)?;

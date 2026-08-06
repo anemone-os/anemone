@@ -270,8 +270,7 @@ fn sys_ppoll(
         let mut usp = usp_handle.lock();
 
         for (poll_fd, revent_ptr) in poll_fds.iter().zip(revent_ptrs.iter()) {
-            UserWritePtr::<LinuxPollEvent>::try_new(*revent_ptr, &mut usp)?
-                .write(poll_fd.revents)?;
+            UserWritePtr::<i16>::try_new(*revent_ptr, &mut usp)?.write(poll_fd.revents.bits())?;
         }
     }
 

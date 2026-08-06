@@ -31,7 +31,7 @@ pub(super) fn message_iovecs(
     let count = message_iovec_count(header)?;
     load_message_iovecs(
         uspace,
-        VirtAddr::new(header.msg_iov as u64),
+        VirtAddr::new(header.msg_iov.bits()),
         count,
         direction,
     )
@@ -58,8 +58,6 @@ pub(super) fn normalized_name_len(header: MsgHdr) -> Result<usize, SysError> {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-
-    use core::ffi::c_void;
 
     use anemone_abi::net::linux::{MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK};
     use anemone_net_api::Ipv4Address;
@@ -323,7 +321,7 @@ mod kunits {
             ..MsgHdr::default()
         };
         assert_eq!(normalized_name_len(header), Ok(0));
-        header.msg_name = 1usize as *mut c_void;
+        header.msg_name = anemone_abi::RawUserAddr64::from_bits(1);
         assert_eq!(normalized_name_len(header), Err(SysError::InvalidArgument));
 
         header.msg_iovlen = (MAX_IOVEC_COUNT + 1) as u64;

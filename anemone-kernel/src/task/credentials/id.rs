@@ -7,7 +7,18 @@ pub trait UserId: Copy + Eq {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    zerocopy::FromBytes,
+    zerocopy::Immutable,
+    zerocopy::IntoBytes,
+)]
 pub struct Uid(u32);
 
 impl Uid {
@@ -45,7 +56,18 @@ impl Display for Uid {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    zerocopy::FromBytes,
+    zerocopy::Immutable,
+    zerocopy::IntoBytes,
+)]
 pub struct Gid(u32);
 
 impl Gid {

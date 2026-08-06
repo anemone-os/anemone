@@ -221,6 +221,7 @@ impl Signal {
                 si_signo: self.no.as_usize() as i32,
                 si_errno: self.errno,
                 si_code: self.code.to_linux_code(),
+                __pad0: 0,
                 fields: kbuf,
             },
         }

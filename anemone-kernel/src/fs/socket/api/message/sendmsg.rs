@@ -136,12 +136,12 @@ pub(super) fn send_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysE
         // Linux copies and range-checks a TCP msg_name but inet_sendmsg and
         // tcp_sendmsg do not interpret its family or address. Preserve those
         // raw-copy faults without turning the bytes into a destination.
-        validate_raw_socket_address(header.msg_name as u64, name_len as u32)?;
+        validate_raw_socket_address(header.msg_name.bits(), name_len as u32)?;
         None
     } else {
         Some(read_socket_address(
             socket.socket_type(),
-            header.msg_name as u64,
+            header.msg_name.bits(),
             name_len as u32,
         )?)
     };

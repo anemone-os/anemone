@@ -21,7 +21,7 @@ bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
-record_log_level = 7 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
+record_log_level = 0 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_logical_cpus = 1 # Maximum number of logical CPUs enabled by this kernel
@@ -45,7 +45,7 @@ sched_default_policy = "fair" # Default policy for fresh non-idle tasks: "fair",
 rt_rr_timeslice_ms = 100 # RT/RR timeslice target in milliseconds; converted to ticks using system_hz.
 backtrace_depth = 16 # Maximum depth of captured backtrace
 user_stack_shift_kb = 13 # Max user stack size as a power of 2 in KB
-user_init_stack_shift_kb = 4 # Initial user stack size as a power of 2 in KB
+user_init_stack_shift_kb = 7 # Initial user stack size as a power of 2 in KB
 user_heap_shift_mb = 12 # Max user heap size as a power of 2 in MB
 shmmax_bytes = 9223372036837998591 # Default max bytes for a single SysV shm segment, within TOML's signed integer range.
 shmall_pages = 9223372036837998591 # Default max pages for SysV shm accounting, within TOML's signed integer range.

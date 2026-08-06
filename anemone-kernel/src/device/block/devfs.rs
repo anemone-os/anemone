@@ -234,7 +234,10 @@ fn block_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<()
     check_block_status_flags(flags)
 }
 
-fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
+fn write_ioctl_value<T: zerocopy::IntoBytes + zerocopy::Immutable>(
+    ctx: &IoctlCtx<'_>,
+    value: T,
+) -> Result<(), SysError> {
     ctx.uspace().with_usp(|usp| {
         UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value)?;
         Ok(())

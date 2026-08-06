@@ -1,5 +1,15 @@
 pub mod linux {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct SysInfo {
         pub uptime: i64,
@@ -12,11 +22,17 @@ pub mod linux {
         pub freeswap: u64,
         pub procs: u16,
         pub pad: u16,
+        pub __reserved0: u32,
         pub totalhigh: u64,
         pub freehigh: u64,
         pub mem_unit: u32,
         pub _f: [u8; 20 - 2 * size_of::<u64>() - size_of::<u32>()],
+        pub __reserved1: u32,
     }
+
+    const _: () = assert!(size_of::<SysInfo>() == 112);
+    const _: () = assert!(core::mem::offset_of!(SysInfo, totalhigh) == 88);
+    const _: () = assert!(core::mem::offset_of!(SysInfo, mem_unit) == 104);
 }
 
 pub mod native {

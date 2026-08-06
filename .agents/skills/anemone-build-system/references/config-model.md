@@ -42,12 +42,18 @@ artifact selector.
 
 ### App Manifest
 
-`anemone-apps/<app>/app.toml` owns the closed Cargo/Command/Source app driver and artifact export
-contract. Cargo runs its declared architecture-specific command. Command runs a bounded non-empty
-argv directly in workdir, appends caller extras, inherits the process environment, and overrides
-only the resolved `ANEMONE_ARCH` / `ANEMONE_TARGET_TRIPLE` context. Source accepts no driver args
-and runs no command; it submits already-existing ordinary files to the same path expansion and
-export path. No driver proves runtime compatibility. Keep locator name, manifest identity, driver
+`anemone-apps/<app>/app.toml` owns its explicit app build targets, closed Cargo/Command/Source driver,
+and artifact export contract. `riscv64` and `loongarch64` reference Platform architecture/compiler
+targets; `host` is an app-local build target and must not enter the Platform, rootfs, kernel, or QEMU
+architecture model. Cargo is Anemone-target-only and runs its declared command with repository
+bare-metal parameters and target JSON. A host Cargo invocation therefore uses Command and remains
+app-owned. Command runs a bounded non-empty argv directly in workdir, appends caller extras, and
+inherits the process environment. Anemone targets override `ANEMONE_ARCH` and
+`ANEMONE_TARGET_TRIPLE`; host overrides `ANEMONE_ARCH=host` and removes inherited
+`ANEMONE_TARGET_TRIPLE`. Source accepts no driver args and runs no command; it submits
+already-existing ordinary files to the same path expansion and export path. Host-capable manifests
+cannot use `${TARGET_TRIPLE}` because host has no Anemone target triple. No driver proves toolchain
+availability or runtime compatibility. Keep locator name, manifest identity, target list, driver
 choice, and artifact path coherent.
 
 ### Rootfs Manifest
@@ -69,7 +75,7 @@ Before executing or accepting a configuration change, verify:
   and partial input fails rather than merging with hidden state;
 - platform architecture agrees with target, linker, DTB, firmware, and QEMU choices;
 - the build produces every kernel output required by the selected Platform;
-- app architecture, driver output, and declared export agree;
+- app build target, declared target support, driver output, and declared export agree;
 - an embedded initial app reference matches its manifest identity and resolves to one executable regular export;
 - rootfs architecture and installed apps agree with the intended kernel;
 - every build/QEMU bind value is consumed by a selected Platform placeholder and matches the intended wrapper mapping;

@@ -61,14 +61,33 @@ pub mod linux {
     pub const CAP_LAST_CAP: u32 = CAP_CHECKPOINT_RESTORE;
     pub const CAP_VALID_MASK: u64 = (1u64 << (CAP_LAST_CAP + 1)) - 1;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct UserCapHeader {
         pub version: u32,
         pub pid: i32,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct UserCapData {
         pub effective: u32,

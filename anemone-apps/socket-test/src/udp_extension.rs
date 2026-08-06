@@ -89,7 +89,7 @@ fn test_connect_destination_and_disconnect() -> Result<(), Errno> {
     let unbound_name = getsockname_ipv4(client)?;
     ensure(unbound_name.port() == 0)?;
     let faulting = [IoVec {
-        iov_base: 1usize as *mut _,
+        iov_base: anemone_rs::abi::RawUserAddr64::from_bits(1),
         iov_len: 1,
     }];
     expect_errno(writev(client, &faulting), EDESTADDRREQ)?;
@@ -167,7 +167,7 @@ fn test_peer_filter_and_queued_nonretroactivity() -> Result<(), Errno> {
 
 fn iovec(bytes: &mut [u8]) -> IoVec {
     IoVec {
-        iov_base: bytes.as_mut_ptr().cast(),
+        iov_base: bytes.as_mut_ptr().into(),
         iov_len: bytes.len() as u64,
     }
 }
@@ -249,7 +249,7 @@ fn test_iovec_uapi_ceiling() -> Result<(), Errno> {
     let (server, client) = connected_pair()?;
     let rejected = vec![
         IoVec {
-            iov_base: core::ptr::null_mut(),
+            iov_base: anemone_rs::abi::RawUserAddr64::NULL,
             iov_len: 0,
         };
         IOV_MAX + 1
@@ -266,7 +266,7 @@ fn test_writev_fault_is_atomic() -> Result<(), Errno> {
     let faulting_write = [
         iovec(&mut visible),
         IoVec {
-            iov_base: 1usize as *mut _,
+            iov_base: anemone_rs::abi::RawUserAddr64::from_bits(1),
             iov_len: 1,
         },
     ];
@@ -284,7 +284,7 @@ fn test_readv_fault_returns_visible_prefix() -> Result<(), Errno> {
     let mut faulting_read = [
         iovec(&mut prefix),
         IoVec {
-            iov_base: 1usize as *mut _,
+            iov_base: anemone_rs::abi::RawUserAddr64::from_bits(1),
             iov_len: 6,
         },
     ];

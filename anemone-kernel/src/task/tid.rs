@@ -73,7 +73,18 @@ static INIT_TID_CONSUMED: AtomicBool = AtomicBool::new(false);
 static KTHREADD_TID_CONSUMED: AtomicBool = AtomicBool::new(false);
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    zerocopy::FromBytes,
+    zerocopy::Immutable,
+    zerocopy::IntoBytes,
+)]
 pub struct Tid(u32);
 
 impl Tid {

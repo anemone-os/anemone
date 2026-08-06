@@ -25,10 +25,15 @@ pub fn build_command(
     cmd.arg("json-target-spec");
     cmd.arg("--target");
 
+    let target_triple = ctx
+        .context
+        .target_triple()
+        .context("cargo driver is Anemone-only and cannot build the host target")?;
+
     // note that we are now in app's workdir, but the target spec path is relative
     // to workspace root, so we need to canonicalize it first and then pass the
     // absolute path to cargo.
-    let rel_path = ctx.context.target_triple().spec_json_path().to_path_buf();
+    let rel_path = target_triple.spec_json_path().to_path_buf();
     let abs_path = rel_path
         .canonicalize()
         .with_context(|| format!("Failed to canonicalize target spec path: {:?}", rel_path))?;

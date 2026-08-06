@@ -132,7 +132,7 @@ fn load_raw_iovecs(
 
     let mut iovecs = vec![
         IoVec {
-            iov_base: core::ptr::null_mut(),
+            iov_base: anemone_abi::RawUserAddr64::NULL,
             iov_len: 0,
         };
         iovcnt
@@ -160,7 +160,7 @@ fn checked_iovecs(raw_iovecs: Vec<IoVec>) -> Result<Vec<CheckedIoVec>, SysError>
             return Err(SysError::InvalidArgument);
         }
 
-        let base = VirtAddr::new(raw_iovec.iov_base as u64);
+        let base = VirtAddr::new(raw_iovec.iov_base.bits());
 
         iovecs.push(CheckedIoVec { base, len });
         total = new_total;
@@ -184,7 +184,7 @@ fn import_message_iovecs(
 
     for raw_iovec in raw_iovecs {
         let original_len = usize::try_from(raw_iovec.iov_len).map_err(|_| SysError::BadAddress)?;
-        let base = VirtAddr::new(raw_iovec.iov_base as u64);
+        let base = VirtAddr::new(raw_iovec.iov_base.bits());
         let checked_len = if single {
             original_len.min(MAX_RW_COUNT)
         } else {

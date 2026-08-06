@@ -7,6 +7,9 @@
 # Stable logical app name used by rootfs manifests.
 # This name must match the folder name of the app, e.g., anemone-apps/<app>.
 name = "example"
+# Closed app build targets supported by this manifest. Every app declares this
+# list explicitly. `host` is app-local and is not a Platform architecture.
+targets = ["riscv64", "loongarch64"]
 
 [build]
 # Working directory relative to this app.toml.
@@ -15,7 +18,7 @@ workdir = "."
 # Command runs a manifest-owned direct argv in workdir; Source runs no command
 # and exports already-existing ordinary files.
 # Currently supported drivers:
-# - cargo
+# - cargo (Anemone targets only; uses build-std and conf/arch target JSON)
 # - command (replace args with a non-empty argv of at most 256 entries)
 # - source (omit args; caller-provided extra args are rejected)
 driver = "cargo"
@@ -26,13 +29,16 @@ args = ["build"]
 # driver = "command"
 # argv = ["./build.sh"]
 # xtask appends caller-provided extra args, executes argv directly without a
-# shell, and overrides ANEMONE_ARCH / ANEMONE_TARGET_TRIPLE for this action.
+# shell, and sets the target context for this action. Anemone targets receive
+# ANEMONE_ARCH / ANEMONE_TARGET_TRIPLE. For host, ANEMONE_ARCH is `host` and
+# ANEMONE_TARGET_TRIPLE is removed because there is no Anemone compiler target.
 # Toolchain selection and all other environment remain command-owned.
 
 # List of artifacts produced by this app. Each artifact should have a unique name.
 [[artifacts]]
 # Path to the built artifact relative to workdir.
 # Xtask will expand following variables in the path:
-# - ${ARCH}: replaced by the architecture of the target platform, e.g., "riscv64".
-# - ${TARGET_TRIPLE}: replaced by the Rust target triple for the target platform, e.g., "riscv64-unknown-anemone-elf".
+# - ${ARCH}: replaced by the app build target, e.g., "riscv64" or "host".
+# - ${TARGET_TRIPLE}: replaced by the Anemone target triple, e.g.,
+#   "riscv64-unknown-anemone-elf". Host-capable manifests cannot use it.
 path = "target/${TARGET_TRIPLE}/debug/example"

@@ -48,12 +48,12 @@ fn sys_rt_sigaction(
 
         let kbuf = linux_signal::SigAction {
             sighandler: match action {
-                SignalAction::Default(_) => linux_signal::SIG_DFL as *const (),
-                SignalAction::Ignore => linux_signal::SIG_IGN as *const (),
-                SignalAction::Custom(addr) => addr.get() as *const (),
+                SignalAction::Default(_) => anemone_abi::RawUserAddr64::from_bits(0),
+                SignalAction::Ignore => anemone_abi::RawUserAddr64::from_bits(1),
+                SignalAction::Custom(addr) => anemone_abi::RawUserAddr64::from_bits(addr.get()),
             },
             sa_flags: flags.bits(),
-            sa_restorer: restorer.as_ptr(),
+            sa_restorer: anemone_abi::RawUserAddr64::from_bits(restorer.get()),
             sa_mask: linux_signal::SigSet {
                 bits: mask.as_u64(),
             },
@@ -80,10 +80,10 @@ fn sys_rt_sigaction(
             uact
         };
 
-        let action = match sighandler {
-            linux_signal::SIG_DFL => SignalAction::Default(sig.default_action()),
-            linux_signal::SIG_IGN => SignalAction::Ignore,
-            addr => SignalAction::Custom(VirtAddr::new(addr as u64)),
+        let action = match sighandler.bits() {
+            0 => SignalAction::Default(sig.default_action()),
+            1 => SignalAction::Ignore,
+            addr => SignalAction::Custom(VirtAddr::new(addr)),
         };
         // truncate upper bits.
         let sa_flags = SaFlags::from_bits(sa_flags as u32 as u64).ok_or_else(|| {
@@ -99,7 +99,7 @@ fn sys_rt_sigaction(
         let kaction = KSigAction {
             action,
             flags: sa_flags,
-            restorer: VirtAddr::new(sa_restorer as u64),
+            restorer: VirtAddr::new(sa_restorer.bits()),
             mask: sa_mask,
         };
         kdebugln!(

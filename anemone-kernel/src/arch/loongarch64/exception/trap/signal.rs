@@ -26,7 +26,7 @@ impl SignalArchTrait for LA64SignalArch {
         // unused fields.
         {
             buf.uc_flags = 0;
-            buf.uc_link = 0 as _;
+            buf.uc_link = anemone_abi::RawUserAddr64::NULL;
         }
         buf.uc_stack = altstack;
         buf.uc_sigmask = linux_signal::SigSet {
@@ -45,32 +45,24 @@ impl SignalArchTrait for LA64SignalArch {
                     size: (size_of::<SctxInfo>() + size_of::<LsxContext>()) as u32,
                     padding: 0,
                 };
-                buf.uc_extcontext.payload.lsx = LsxContext {
+                buf.uc_extcontext.payload.set_lsx(LsxContext {
                     regs: fp.regs,
                     fcc: fp.fcc,
                     fcsr: fp.fcsr,
                     reserved: 0,
-                };
+                });
             } else {
                 buf.uc_extcontext.info = SctxInfo {
                     magic: FPU_CTX_MAGIC,
                     size: (size_of::<SctxInfo>() + size_of::<FpuContext>()) as u32,
                     padding: 0,
                 };
-                // The FPU member is smaller than the union. Clear through its
-                // largest member first so no union tail reaches userspace.
-                buf.uc_extcontext.payload.lsx = LsxContext {
-                    regs: [[0; 2]; 32],
-                    fcc: 0,
-                    fcsr: 0,
-                    reserved: 0,
-                };
-                buf.uc_extcontext.payload.fpu = FpuContext {
+                buf.uc_extcontext.payload.set_fpu(FpuContext {
                     regs: fp.regs.map(|lanes| lanes[0]),
                     fcc: fp.fcc,
                     fcsr: fp.fcsr,
                     reserved: 0,
-                };
+                });
             }
         }
     }
@@ -91,9 +83,7 @@ impl SignalArchTrait for LA64SignalArch {
                 (LSX_CTX_MAGIC, size)
                     if size >= size_of::<SctxInfo>() + size_of::<LsxContext>() =>
                 {
-                    // SAFETY: The active union member is selected by the Linux
-                    // signal context magic and its checked minimum size.
-                    let lsx = unsafe { ucontext.uc_extcontext.payload.lsx };
+                    let lsx = ucontext.uc_extcontext.payload.lsx();
                     trapframe.fpu_regs_mut().regs = lsx.regs;
                     trapframe.fpu_regs_mut().fcc = lsx.fcc;
                     trapframe.fpu_regs_mut().fcsr = lsx.fcsr;
@@ -103,7 +93,7 @@ impl SignalArchTrait for LA64SignalArch {
                 {
                     // A signal handler may be the task's first LSX user. Clear
                     // its upper lanes before restoring the interrupted scalar state.
-                    let fp = unsafe { ucontext.uc_extcontext.payload.fpu };
+                    let fp = ucontext.uc_extcontext.payload.fpu();
                     *trapframe.fpu_regs_mut() = FpuTaskContext::ZEROED;
                     for (reg, value) in trapframe.fpu_regs_mut().regs.iter_mut().zip(fp.regs) {
                         reg[0] = value;

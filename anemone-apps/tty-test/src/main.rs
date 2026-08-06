@@ -337,9 +337,9 @@ fn install_signal_ignore(signo: SigNo) -> Result<(), Errno> {
     sigaction(
         signo,
         Some(&SigAction {
-            sighandler: linux_signal::SIG_IGN as *const (),
+            sighandler: (linux_signal::SIG_IGN as *const ()).into(),
             sa_flags: 0,
-            sa_restorer: core::ptr::null(),
+            sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
             sa_mask: SigSet { bits: 0 },
         }),
         None,
@@ -362,9 +362,9 @@ fn install_terminal_signal_handler_with_flags(signo: SigNo, flags: u64) -> Resul
     sigaction(
         signo,
         Some(&SigAction {
-            sighandler: terminal_signal_handler as *const (),
+            sighandler: (terminal_signal_handler as *const ()).into(),
             sa_flags: flags,
-            sa_restorer: core::ptr::null(),
+            sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
             sa_mask: SigSet { bits: 0 },
         }),
         None,

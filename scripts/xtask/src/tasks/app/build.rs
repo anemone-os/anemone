@@ -11,7 +11,8 @@ use super::driver::{self, DriverContext};
 
 use crate::{
     config::{
-        app::{App, Artifact},
+        app::{App, AppTarget, Artifact},
+        build::RUST_OBJDUMP,
         platform::{Arch, TargetTriple},
     },
     log_progress,
@@ -23,7 +24,7 @@ pub struct BuildArgs {
     #[arg(help = "Name of the app to build")]
     pub app: String,
 
-    #[arg(long, help = "Target architecture for the app build")]
+    #[arg(long, help = "App build target: riscv64, loongarch64, or host")]
     pub arch: String,
 
     #[arg(
@@ -55,25 +56,33 @@ impl BuiltArtifactInfo {
 
 #[derive(Debug, Clone)]
 pub struct BuildCtx {
-    arch: Arch,
+    target: AppTarget,
 }
 
 impl BuildCtx {
     pub fn new(arch: Arch) -> anyhow::Result<Self> {
-        Ok(Self { arch })
+        Ok(Self::for_target(arch.into()))
     }
 
-    pub fn target_triple(&self) -> TargetTriple {
-        self.arch.target_triple()
+    pub fn for_target(target: AppTarget) -> Self {
+        Self { target }
     }
 
-    pub fn arch_name(&self) -> &str {
-        self.arch.as_str()
+    pub fn target_triple(&self) -> Option<TargetTriple> {
+        self.target.target_triple()
+    }
+
+    pub fn target_name(&self) -> &str {
+        self.target.as_str()
+    }
+
+    pub fn target(&self) -> &AppTarget {
+        &self.target
     }
 }
 
 pub fn run(args: BuildArgs) -> anyhow::Result<()> {
-    let context = BuildCtx::new(Arch::try_from_str(&args.arch)?)?;
+    let context = BuildCtx::for_target(AppTarget::try_from_str(&args.arch)?);
 
     build_app(&args.app, &args.args, &context, args.disasm)?;
     Ok(())
@@ -94,6 +103,7 @@ pub fn build_app(
     })?;
     let app = App::from_str(&content)?;
     validate_app_reference(name, &app, &manifest_path)?;
+    validate_app_target(&app, context.target(), &manifest_path)?;
 
     let app_dir = manifest_path
         .parent()
@@ -149,6 +159,25 @@ fn validate_app_reference(name: &str, app: &App, manifest_path: &Path) -> anyhow
     Ok(())
 }
 
+fn validate_app_target(app: &App, target: &AppTarget, manifest_path: &Path) -> anyhow::Result<()> {
+    if !app.targets.contains(target) {
+        let declared = app
+            .targets
+            .iter()
+            .map(AppTarget::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!(
+            "app '{}' does not support build target '{}' at '{}'; declared targets: {}",
+            app.name,
+            target.as_str(),
+            manifest_path.display(),
+            declared
+        );
+    }
+    Ok(())
+}
+
 fn copy_artifact(
     app: &App,
     workdir: &Path,
@@ -156,7 +185,7 @@ fn copy_artifact(
     out_dir: &Path,
     context: &BuildCtx,
 ) -> anyhow::Result<BuiltArtifactInfo> {
-    let source_path = workdir.join(expand_artifact_path(artifact, context));
+    let source_path = workdir.join(expand_artifact_path(artifact, context)?);
     if !source_path.exists() {
         bail!(
             "artifact '{}' for app '{}' does not exist after build",
@@ -214,7 +243,7 @@ fn generate_artifact_disasm(
         )
     );
 
-    let output = Command::new(context.target_triple().objdump())
+    let output = Command::new(RUST_OBJDUMP)
         .arg("-d")
         .arg("-S")
         .arg(&artifact.output_path)
@@ -259,18 +288,25 @@ fn artifact_disasm_path(artifact_path: &Path) -> anyhow::Result<PathBuf> {
 }
 
 /// app.toml/artifact/path
-fn expand_artifact_path(artifact: &Artifact, context: &BuildCtx) -> String {
-    artifact
-        .path
-        .replace("${ARCH}", context.arch.as_str())
-        .replace("${TARGET_TRIPLE}", context.target_triple().as_str())
+fn expand_artifact_path(artifact: &Artifact, context: &BuildCtx) -> anyhow::Result<String> {
+    let expanded = artifact.path.replace("${ARCH}", context.target_name());
+    let Some(target_triple) = context.target_triple() else {
+        if expanded.contains("${TARGET_TRIPLE}") {
+            bail!(
+                "artifact path '{}' cannot expand ${{TARGET_TRIPLE}} for host because host has no Anemone target triple",
+                artifact.path
+            );
+        }
+        return Ok(expanded);
+    };
+    Ok(expanded.replace("${TARGET_TRIPLE}", target_triple.as_str()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{
-        app::{Build, BuildDriver, SourceBuild},
+        app::{AppTarget, Build, BuildDriver, SourceBuild},
         platform::Arch,
     };
     use std::{
@@ -304,6 +340,7 @@ mod tests {
     fn source_app(artifacts: Vec<Artifact>) -> App {
         App {
             name: "prebuilt".to_string(),
+            targets: vec![AppTarget::Anemone(Arch::RiscV64)],
             build: Build {
                 workdir: ".".to_string(),
                 driver: BuildDriver::Source(SourceBuild {}),
@@ -393,6 +430,44 @@ mod tests {
         .to_string();
         assert!(error.contains("reference-name"), "{error}");
         assert!(error.contains("prebuilt"), "{error}");
+    }
+
+    #[test]
+    fn app_target_must_be_declared() {
+        let app = source_app(Vec::new());
+        let error = validate_app_target(
+            &app,
+            &AppTarget::Host,
+            Path::new("anemone-apps/prebuilt/app.toml"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("prebuilt"), "{error}");
+        assert!(error.contains("host"), "{error}");
+        assert!(error.contains("riscv64"), "{error}");
+    }
+
+    #[test]
+    fn host_artifact_path_expands_without_a_target_triple() {
+        let context = BuildCtx::for_target(AppTarget::Host);
+        let artifact = Artifact {
+            path: "out/${ARCH}/prebuilt".to_string(),
+        };
+        assert_eq!(
+            expand_artifact_path(&artifact, &context).unwrap(),
+            "out/host/prebuilt"
+        );
+
+        let artifact = Artifact {
+            path: "target/${TARGET_TRIPLE}/prebuilt".to_string(),
+        };
+        let error = expand_artifact_path(&artifact, &context)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("host has no Anemone target triple"),
+            "{error}"
+        );
     }
 
     #[test]

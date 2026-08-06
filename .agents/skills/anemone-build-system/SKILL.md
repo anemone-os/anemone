@@ -34,9 +34,10 @@ Keep each concern in its owning layer:
 - `conf/build-presets/`: reusable explicit target, KernelConfig, and kernel Cargo-profile tuples;
 - `conf/system-targets/`: selected Platform reference, root mount/source, and initial-program source;
 - `conf/platforms/` and `conf/arch/`: platform identity, architecture, hardware constants, boot environment, tracked QEMU argv/bind templates, DTB, linker inputs, and Platform-required kernel outputs;
-- `anemone-apps/<app>/app.toml`: closed Cargo/Command/Source driver and exported artifacts; Command
-  runs a bounded direct argv with action-owned target context, while Source runs no command and only
-  admits existing ordinary files through the common export path;
+- `anemone-apps/<app>/app.toml`: explicit app build targets, closed Cargo/Command/Source driver, and
+  exported artifacts; Cargo is Anemone-target-only, Command runs a bounded direct argv with
+  action-owned target context, while Source runs no command and only admits existing ordinary files
+  through the common export path. `host` is app-local and never a Platform architecture;
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
 

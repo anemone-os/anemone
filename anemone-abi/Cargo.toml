@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+zerocopy = { version = "=0.8.42", default-features = false, features = ["derive"] }
 
 [workspace]
 members = ["."]

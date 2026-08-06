@@ -1,4 +1,5 @@
 name = "command-cpp"
+targets = ["riscv64", "loongarch64"]
 
 [build]
 workdir = "."
