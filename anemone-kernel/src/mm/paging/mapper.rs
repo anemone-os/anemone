@@ -840,3 +840,233 @@ impl Mapper<'_> {
         Ok(())
     }
 }
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn test_flags() -> PteFlags {
+        PteFlags::READ | PteFlags::WRITE | PteFlags::USER
+    }
+
+    fn frame() -> OwnedFrameHandle {
+        alloc_frame_zeroed().expect("mapper KUnit frame allocation should succeed")
+    }
+
+    unsafe fn map_page(mapper: &mut Mapper<'_>, vpn: VirtPageNum, frame: &OwnedFrameHandle) {
+        unsafe {
+            mapper
+                .map_one(vpn, frame.ppn(), test_flags(), 0, false)
+                .expect("mapper KUnit page mapping should succeed");
+        }
+    }
+
+    #[kunit]
+    fn unmap_single_page_reclaims_empty_tables() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let frame = frame();
+        let vpn = VirtPageNum::new(1);
+        let mut mapper = table.mapper();
+
+        unsafe { map_page(&mut mapper, vpn, &frame) };
+        assert_eq!(
+            mapper.translate(vpn).expect("page should be mapped").ppn,
+            frame.ppn()
+        );
+
+        unsafe {
+            mapper.try_unmap(Unmapping {
+                range: VirtPageRange::new(vpn, 1),
+            });
+        }
+        assert!(mapper.translate(vpn).is_none());
+    }
+
+    #[kunit]
+    fn traversal_crosses_leaf_table_boundary() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let first = frame();
+        let second = frame();
+        let first_vpn = VirtPageNum::new(PagingArch::PTE_PER_PGDIR as u64 - 1);
+        let second_vpn = first_vpn + 1;
+        let mut mapper = table.mapper();
+
+        unsafe {
+            map_page(&mut mapper, first_vpn, &first);
+            map_page(&mut mapper, second_vpn, &second);
+            mapper.try_unmap(Unmapping {
+                range: VirtPageRange::new(first_vpn, 2),
+            });
+        }
+
+        assert!(mapper.translate(first_vpn).is_none());
+        assert!(mapper.translate(second_vpn).is_none());
+    }
+
+    #[kunit]
+    fn change_flags_visits_each_cross_boundary_leaf_once() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let first = frame();
+        let second = frame();
+        let first_vpn = VirtPageNum::new(PagingArch::PTE_PER_PGDIR as u64 - 1);
+        let second_vpn = first_vpn + 1;
+        let mut mapper = table.mapper();
+        let mut changed = 0;
+
+        unsafe {
+            map_page(&mut mapper, first_vpn, &first);
+            map_page(&mut mapper, second_vpn, &second);
+            mapper.change_flags(
+                VirtPageRange::new(first_vpn, 2),
+                |_, flags| {
+                    changed += 1;
+                    Some(flags - PteFlags::WRITE)
+                },
+                TraverseOrder::PreOrder,
+            );
+        }
+
+        assert_eq!(changed, 2);
+        for vpn in [first_vpn, second_vpn] {
+            let flags = mapper
+                .translate(vpn)
+                .expect("page should remain mapped")
+                .flags;
+            assert!(flags.contains(PteFlags::READ));
+            assert!(!flags.contains(PteFlags::WRITE));
+        }
+        drop(mapper);
+        drop(table);
+    }
+
+    #[kunit]
+    fn huge_leaf_survives_partial_range_and_unmaps_when_covered() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let huge_pages = PagingArch::PTE_PER_PGDIR as u64;
+        let vpn = VirtPageNum::new(huge_pages * 4);
+        let mut mapper = table.mapper();
+
+        unsafe {
+            mapper
+                .map_one(vpn, PhysPageNum::new(0), PteFlags::READ, 1, false)
+                .expect("mapper KUnit huge mapping should succeed");
+            mapper.try_unmap(Unmapping {
+                range: VirtPageRange::new(vpn + 1, 1),
+            });
+        }
+        assert!(mapper.translate(vpn + 1).is_some());
+
+        unsafe {
+            mapper.try_unmap(Unmapping {
+                range: VirtPageRange::new(vpn, huge_pages),
+            });
+        }
+        assert!(mapper.translate(vpn).is_none());
+    }
+
+    #[kunit]
+    fn global_leaf_is_not_unmapped() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let frame = frame();
+        let vpn = VirtPageNum::new(7);
+        let range = VirtPageRange::new(vpn, 1);
+        let mut mapper = table.mapper();
+
+        unsafe {
+            mapper
+                .map_one(vpn, frame.ppn(), test_flags() | PteFlags::GLOBAL, 0, false)
+                .expect("mapper KUnit global mapping should succeed");
+            mapper.try_unmap(Unmapping { range });
+        }
+        assert!(mapper.translate(vpn).is_some());
+
+        // Restore non-global ownership before cleanup. Global branch entries
+        // intentionally survive ordinary unmap, so the test must withdraw the
+        // test-only global publication before PageTable::drop.
+        unsafe {
+            match mapper.traverse::<_, _, ()>(
+                range,
+                |pte, _| {
+                    pte.set_flags(pte.flags() - PteFlags::GLOBAL);
+                    ControlFlow::Continue
+                },
+                |pte, _| {
+                    pte.set_flags(pte.flags() - PteFlags::GLOBAL);
+                    ControlFlow::Continue
+                },
+                TraverseOrder::PreOrder,
+            ) {
+                ControlFlow::Continue => {},
+                ControlFlow::Break(()) => unreachable!(),
+            }
+            mapper.try_unmap(Unmapping { range });
+        }
+        assert!(mapper.translate(vpn).is_none());
+    }
+
+    #[kunit]
+    fn failed_range_map_rolls_back_only_new_pages() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let first = frame();
+        let collision = frame();
+        let vpn = VirtPageNum::new(32);
+        let mut mapper = table.mapper();
+
+        unsafe { map_page(&mut mapper, vpn + 1, &collision) };
+        assert_eq!(
+            mapper.map(Mapping {
+                vpn,
+                ppn: first.ppn(),
+                flags: test_flags(),
+                npages: 2,
+                huge_pages: false,
+            }),
+            Err(SysError::AlreadyMapped)
+        );
+
+        assert!(mapper.translate(vpn).is_none());
+        assert_eq!(
+            mapper
+                .translate(vpn + 1)
+                .expect("collision mapping must remain")
+                .ppn,
+            collision.ppn()
+        );
+        drop(mapper);
+        drop(table);
+    }
+
+    #[kunit]
+    fn canonical_high_half_traversal_sign_extends_vpn() {
+        let vpn_bits = PagingArch::PAGE_LEVELS * PagingArch::PGDIR_IDX_BITS;
+        let effective_vpn_bits = u64::BITS as usize - PagingArch::PAGE_SIZE_BITS;
+        let high_half_start = 1u64 << (vpn_bits - 1);
+        let effective_mask = (1u64 << effective_vpn_bits) - 1;
+        let low_mask = (1u64 << vpn_bits) - 1;
+        let high_vpn = Mapper::canonicalize_vpn(high_half_start);
+
+        assert_eq!(high_vpn.get(), effective_mask & !low_mask | high_half_start);
+        assert_eq!(Mapper::canonicalize_vpn(low_mask).get(), effective_mask);
+
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let frame = frame();
+        let mut mapper = table.mapper();
+
+        unsafe {
+            map_page(&mut mapper, high_vpn, &frame);
+        }
+        assert_eq!(
+            mapper
+                .translate(high_vpn)
+                .expect("canonical high-half page should be mapped")
+                .ppn,
+            frame.ppn()
+        );
+        unsafe {
+            mapper.try_unmap(Unmapping {
+                range: VirtPageRange::new(high_vpn, 1),
+            });
+        }
+        assert!(mapper.translate(high_vpn).is_none());
+    }
+}

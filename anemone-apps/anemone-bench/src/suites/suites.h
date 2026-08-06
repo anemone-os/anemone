@@ -11,6 +11,12 @@ struct cpu_bench_config {
     size_t iterations;
 };
 
+struct vm_bench_config {
+    size_t pages;
+    size_t iterations;
+    size_t leaf_span_pages;
+};
+
 size_t b_cpu_integer(const void *argument);
 size_t b_cpu_floating_point(const void *argument);
 size_t b_malloc_sparse(const void *argument);
@@ -37,5 +43,9 @@ size_t b_string_strchr(const void *argument);
 size_t b_string_strlen(const void *argument);
 size_t b_utf8_bigbuf(const void *argument);
 size_t b_utf8_onebyone(const void *argument);
+size_t b_vm_map_lifecycle_inside(const void *argument);
+size_t b_vm_map_lifecycle_cross(const void *argument);
+size_t b_vm_protect_refault_inside(const void *argument);
+size_t b_vm_protect_refault_cross(const void *argument);
 
 #endif
