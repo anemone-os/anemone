@@ -74,6 +74,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-07 - Ext4 synchronous I/O batching](./devlog/changes/2026-08-07-ext4-synchronous-io-batching.md)
 		- [2026-08-07 - ELF demand paging](./devlog/changes/2026-08-07-elf-demand-paging.md)
 		- [2026-08-06 - IPv4 UDP ICMP extended error](./devlog/changes/2026-08-06-ipv4-udp-icmp-extended-error.md)
 		- [2026-08-06 - Inode address space](./devlog/changes/2026-08-06-inode-address-space.md)

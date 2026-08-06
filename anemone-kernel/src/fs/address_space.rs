@@ -9,15 +9,17 @@ use crate::{
     },
 };
 
-/// The page-local persistence capability consumed by an inode address space.
+/// The bounded-range persistence capability consumed by an inode address space.
 ///
 /// Implementations own only filesystem identity and transaction access. Page
 /// publication, dirty state, accounting, and logical size remain owned by the
 /// address space and inode.
 pub(in crate::fs) trait AddressSpaceBackend: Send + Sync {
-    fn fill_page(&self, offset: usize, frame: &mut [u8]) -> Result<(), SysError>;
+    fn batch_page_cap(&self) -> usize;
 
-    fn writeback_page(&self, offset: usize, data: &[u8]) -> Result<(), SysError>;
+    fn fill_range(&self, offset: usize, data: &mut [u8]) -> Result<(), SysError>;
+
+    fn writeback_range(&self, offset: usize, data: &[u8]) -> Result<(), SysError>;
 }
 
 #[derive(Clone)]
@@ -51,6 +53,15 @@ impl AddressSpace {
         size: Arc<AtomicU64>,
         backend: Arc<dyn AddressSpaceBackend>,
     ) -> Arc<Self> {
+        let batch_page_cap = backend.batch_page_cap();
+        assert!(
+            batch_page_cap > 0,
+            "address-space batch cap must be non-zero"
+        );
+        assert!(
+            batch_page_cap <= isize::MAX as usize / PagingArch::PAGE_SIZE_BYTES,
+            "address-space batch buffer must fit the allocation size domain"
+        );
         Arc::new(Self {
             size,
             backend: Some(backend),
@@ -69,6 +80,25 @@ impl AddressSpace {
 
     fn page_index(offset: usize) -> usize {
         offset >> PagingArch::PAGE_SIZE_BITS
+    }
+
+    fn page_end(offset: usize, len: usize) -> Result<usize, SysError> {
+        let end = offset.checked_add(len).ok_or(SysError::InvalidArgument)?;
+        if len == 0 {
+            Ok(Self::page_index(offset))
+        } else {
+            Self::page_index(end - 1)
+                .checked_add(1)
+                .ok_or(SysError::InvalidArgument)
+        }
+    }
+
+    fn zeroed_staging(len: usize) -> Result<Vec<u8>, SysError> {
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(|_| SysError::OutOfMemory)?;
+        data.resize(len, 0);
+        Ok(data)
     }
 
     fn publish(&self, pidx: usize, page: ResidentPage) -> ResidentPage {
@@ -100,9 +130,14 @@ impl AddressSpace {
         Ok(self.publish(pidx, page))
     }
 
-    fn load_page(&self, pidx: usize) -> Result<ResidentPage, SysError> {
+    fn load_page_for_request(
+        &self,
+        pidx: usize,
+        requested_page_end: usize,
+    ) -> Result<ResidentPage, SysError> {
         let offset = Self::page_start(pidx)?;
-        if offset >= self.size()? {
+        let size = self.size()?;
+        if offset >= size {
             return Err(SysError::NotMapped);
         }
 
@@ -114,15 +149,66 @@ impl AddressSpace {
             return self.allocate_page(pidx);
         };
 
-        // Fill outside the page-map lock. Concurrent fills may duplicate I/O,
-        // but publication below selects exactly one resident frame.
-        let mut frame = alloc_frame_zeroed().ok_or(SysError::OutOfMemory)?;
-        backend.fill_page(offset, frame.as_bytes_mut())?;
-        let page = ResidentPage {
-            frame: unsafe { frame.into_frame_handle() },
-            dirty: false,
+        let file_page_end = Self::page_index(size - 1) + 1;
+        let run_limit = requested_page_end
+            .min(file_page_end)
+            .min(pidx.saturating_add(backend.batch_page_cap()));
+        assert!(
+            run_limit > pidx,
+            "requested miss run must contain its first page"
+        );
+
+        let run_end = {
+            let pages = self.pages.read();
+            let mut end = pidx + 1;
+            while end < run_limit && !pages.contains_key(&end) {
+                end += 1;
+            }
+            end
         };
-        Ok(self.publish(pidx, page))
+        let run_pages = run_end - pidx;
+        let staging_len = run_pages
+            .checked_mul(PagingArch::PAGE_SIZE_BYTES)
+            .ok_or(SysError::InvalidArgument)?;
+        let valid_len = (size - offset).min(staging_len);
+        let mut staging = Self::zeroed_staging(staging_len)?;
+        let mut new_pages = Vec::new();
+        new_pages
+            .try_reserve_exact(run_pages)
+            .map_err(|_| SysError::OutOfMemory)?;
+        for _ in 0..run_pages {
+            let frame = alloc_frame_zeroed().ok_or(SysError::OutOfMemory)?;
+            new_pages.push(ResidentPage {
+                frame: unsafe { frame.into_frame_handle() },
+                dirty: false,
+            });
+        }
+
+        // Backend I/O runs without the page-map lock. No page from this run is
+        // published until the complete bounded fill succeeds; concurrent
+        // publication still wins independently for each page below.
+        backend.fill_range(offset, &mut staging[..valid_len])?;
+        let mut first = None;
+        for (index, page) in new_pages.into_iter().enumerate() {
+            let src_start = index * PagingArch::PAGE_SIZE_BYTES;
+            let dst = unsafe {
+                core::slice::from_raw_parts_mut(
+                    page.frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                    PagingArch::PAGE_SIZE_BYTES,
+                )
+            };
+            dst.copy_from_slice(&staging[src_start..src_start + PagingArch::PAGE_SIZE_BYTES]);
+            let published = self.publish(pidx + index, page);
+            if first.is_none() {
+                first = Some(published);
+            }
+        }
+        Ok(first.expect("non-empty miss run must publish its first page"))
+    }
+
+    fn load_page(&self, pidx: usize) -> Result<ResidentPage, SysError> {
+        let requested_page_end = pidx.checked_add(1).ok_or(SysError::InvalidArgument)?;
+        self.load_page_for_request(pidx, requested_page_end)
     }
 
     fn page_for_write(
@@ -149,6 +235,7 @@ impl AddressSpace {
     }
 
     pub(in crate::fs) fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
+        let requested_page_end = Self::page_end(offset, buffer.len())?;
         let mut remaining = buffer;
         let mut cur_offset = offset;
 
@@ -160,7 +247,7 @@ impl AddressSpace {
                 .min(PagingArch::PAGE_SIZE_BYTES - page_offset);
 
             let page = if self.backend.is_some() {
-                Some(self.load_page(pidx)?)
+                Some(self.load_page_for_request(pidx, requested_page_end)?)
             } else {
                 self.pages.read().get(&pidx).cloned()
             };
@@ -185,6 +272,7 @@ impl AddressSpace {
         len: usize,
         dst: &mut UserBufferSink<'_>,
     ) -> Result<(), SysError> {
+        let requested_page_end = Self::page_end(offset, len)?;
         let mut remaining = len;
         let mut cur_offset = offset;
 
@@ -193,7 +281,7 @@ impl AddressSpace {
             let page_offset = cur_offset & (PagingArch::PAGE_SIZE_BYTES - 1);
             let copy_len = remaining.min(PagingArch::PAGE_SIZE_BYTES - page_offset);
             let page = if self.backend.is_some() {
-                Some(self.load_page(pidx)?)
+                Some(self.load_page_for_request(pidx, requested_page_end)?)
             } else {
                 self.pages.read().get(&pidx).cloned()
             };
@@ -305,37 +393,126 @@ impl AddressSpace {
         Ok(written)
     }
 
-    pub(in crate::fs) fn sync_page(&self, pidx: usize) -> Result<(), SysError> {
+    fn writeback_run(
+        &self,
+        pages: &[(usize, ResidentPage)],
+        size_snapshot: usize,
+    ) -> Result<(), SysError> {
+        assert!(!pages.is_empty(), "writeback run must not be empty");
         let Some(backend) = &self.backend else {
             return Ok(());
         };
+        let mut valid_pages = 0;
+        for (pidx, _) in pages {
+            if Self::page_start(*pidx)? >= size_snapshot {
+                break;
+            }
+            valid_pages += 1;
+        }
+        if valid_pages == 0 {
+            return Err(SysError::NotMapped);
+        }
+
+        let valid = &pages[..valid_pages];
+        let offset = Self::page_start(valid[0].0)?;
+        let staging_len = valid_pages
+            .checked_mul(PagingArch::PAGE_SIZE_BYTES)
+            .ok_or(SysError::InvalidArgument)?;
+        let write_len = (size_snapshot - offset).min(staging_len);
+        let mut staging = Self::zeroed_staging(staging_len)?;
+        for (index, (_, page)) in valid.iter().enumerate() {
+            let dst_start = index * PagingArch::PAGE_SIZE_BYTES;
+            staging[dst_start..dst_start + PagingArch::PAGE_SIZE_BYTES]
+                .copy_from_slice(page.frame.as_bytes());
+        }
+        backend.writeback_range(offset, &staging[..write_len])?;
+        // Dirty is intentionally sticky: writable PTE stores are not yet
+        // tracked well enough to prove that a successful writeback stayed
+        // clean. Eviction is the only current dirty retirement point.
+        if valid_pages < pages.len() {
+            Err(SysError::NotMapped)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn next_dirty_run(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> Result<Option<(Vec<(usize, ResidentPage)>, usize)>, SysError> {
+        let Some(backend) = &self.backend else {
+            return Ok(None);
+        };
+        let cap = backend.batch_page_cap();
+        let pages = self.pages.read();
+        let Some((&first, _)) = pages.range(start..end).find(|(_, page)| page.dirty) else {
+            return Ok(None);
+        };
+
+        let mut run_end = first;
+        let mut run_pages = 0;
+        while run_end < end && run_pages < cap {
+            match pages.get(&run_end) {
+                Some(page) if page.dirty => {
+                    run_pages += 1;
+                    run_end = run_end.checked_add(1).ok_or(SysError::InvalidArgument)?;
+                },
+                _ => break,
+            }
+        }
+
+        let mut run = Vec::new();
+        run.try_reserve_exact(run_pages)
+            .map_err(|_| SysError::OutOfMemory)?;
+        for pidx in first..run_end {
+            run.push((
+                pidx,
+                pages
+                    .get(&pidx)
+                    .expect("discovered dirty run must remain under page-map read lock")
+                    .clone(),
+            ));
+        }
+        Ok(Some((run, run_end)))
+    }
+
+    fn sync_dirty_range(&self, start: usize, end: usize) -> Result<(), SysError> {
+        let mut cursor = start;
+        while cursor < end {
+            // Size is sampled before the frame snapshot. A concurrent grow may
+            // invalidate this run, but it must not make bytes beyond the old
+            // EOF in an already-cloned frame eligible for writeback.
+            let size_snapshot = self.size()?;
+            // A frame snapshot remains authoritative only for this bounded
+            // backend call. The next run is rediscovered from the live page
+            // map so invalidation cannot leave operation-wide stale frames.
+            let Some((run, next)) = self.next_dirty_run(cursor, end)? else {
+                break;
+            };
+            self.writeback_run(&run, size_snapshot)?;
+            cursor = next;
+        }
+        Ok(())
+    }
+
+    pub(in crate::fs) fn sync_page(&self, pidx: usize) -> Result<(), SysError> {
+        if self.backend.is_none() {
+            return Ok(());
+        }
         let size = self.size()?;
-        let offset = Self::page_start(pidx)?;
-        if offset >= size {
+        if Self::page_start(pidx)? >= size {
             return Err(SysError::NotMapped);
         }
         let page = self.pages.read().get(&pidx).cloned();
         if let Some(page) = page.filter(|page| page.dirty) {
-            let valid_len = (size - offset).min(PagingArch::PAGE_SIZE_BYTES);
-            backend.writeback_page(offset, &page.frame.as_bytes()[..valid_len])?;
-            // Dirty is intentionally sticky: writable PTE stores are not yet
-            // tracked well enough to prove that a successful writeback stayed
-            // clean. Eviction is the only current dirty retirement point.
+            self.writeback_run(&[(pidx, page)], size)?;
         }
         Ok(())
     }
 
     pub(in crate::fs) fn sync_all(&self) -> Result<(), SysError> {
-        let dirty_pages = self
-            .pages
-            .read()
-            .iter()
-            .filter_map(|(pidx, page)| page.dirty.then_some(*pidx))
-            .collect::<Vec<_>>();
-        for pidx in dirty_pages {
-            self.sync_page(pidx)?;
-        }
-        Ok(())
+        self.sync_dirty_range(0, usize::MAX)
     }
 
     pub(in crate::fs) fn apply_volatile_truncate(&self, old_size: usize, new_size: usize) {
@@ -414,10 +591,17 @@ impl VmObject for AddressSpace {
     }
 
     fn sync_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
-        for pidx in range {
-            self.sync_page(pidx)?;
+        if self.backend.is_none() || range.start >= range.end {
+            return Ok(());
         }
-        Ok(())
+        self.sync_dirty_range(range.start, range.end)?;
+        let size = self.size()?;
+        let file_page_end = Self::page_end(0, size)?;
+        if range.end > file_page_end {
+            Err(SysError::NotMapped)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -434,33 +618,60 @@ mod kunits {
     use super::*;
 
     struct FakeBackend {
-        fills: AtomicUsize,
-        writebacks: AtomicUsize,
-        fail_writeback: AtomicBool,
+        batch_page_cap: usize,
+        fills: SpinLock<Vec<(usize, usize)>>,
+        writebacks: SpinLock<Vec<(usize, usize)>>,
+        fail_fill_offset: SpinLock<Option<usize>>,
+        fail_writeback_offset: SpinLock<Option<usize>>,
     }
 
     impl FakeBackend {
-        fn new() -> Self {
+        fn new(batch_page_cap: usize) -> Self {
             Self {
-                fills: AtomicUsize::new(0),
-                writebacks: AtomicUsize::new(0),
-                fail_writeback: AtomicBool::new(false),
+                batch_page_cap,
+                fills: SpinLock::new(Vec::new()),
+                writebacks: SpinLock::new(Vec::new()),
+                fail_fill_offset: SpinLock::new(None),
+                fail_writeback_offset: SpinLock::new(None),
             }
+        }
+
+        fn take_fills(&self) -> Vec<(usize, usize)> {
+            core::mem::take(&mut *self.fills.lock())
+        }
+
+        fn take_writebacks(&self) -> Vec<(usize, usize)> {
+            core::mem::take(&mut *self.writebacks.lock())
+        }
+
+        fn fail_fill_at(&self, offset: Option<usize>) {
+            *self.fail_fill_offset.lock() = offset;
+        }
+
+        fn fail_writeback_at(&self, offset: Option<usize>) {
+            *self.fail_writeback_offset.lock() = offset;
         }
     }
 
     impl AddressSpaceBackend for FakeBackend {
-        fn fill_page(&self, offset: usize, frame: &mut [u8]) -> Result<(), SysError> {
-            self.fills.fetch_add(1, Ordering::Relaxed);
-            for (index, byte) in frame.iter_mut().enumerate() {
+        fn batch_page_cap(&self) -> usize {
+            self.batch_page_cap
+        }
+
+        fn fill_range(&self, offset: usize, data: &mut [u8]) -> Result<(), SysError> {
+            self.fills.lock().push((offset, data.len()));
+            if *self.fail_fill_offset.lock() == Some(offset) {
+                return Err(SysError::InvalidArgument);
+            }
+            for (index, byte) in data.iter_mut().enumerate() {
                 *byte = offset.wrapping_add(index) as u8;
             }
             Ok(())
         }
 
-        fn writeback_page(&self, _offset: usize, _data: &[u8]) -> Result<(), SysError> {
-            self.writebacks.fetch_add(1, Ordering::Relaxed);
-            if self.fail_writeback.load(Ordering::Relaxed) {
+        fn writeback_range(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
+            self.writebacks.lock().push((offset, data.len()));
+            if *self.fail_writeback_offset.lock() == Some(offset) {
                 Err(SysError::InvalidArgument)
             } else {
                 Ok(())
@@ -497,38 +708,308 @@ mod kunits {
     fn backed_fill_cache_sticky_dirty_failure_and_accounting_share_one_owner() {
         let before = crate::fs::resident_file_inode_cache_pages();
         let size = Arc::new(AtomicU64::new(PagingArch::PAGE_SIZE_BYTES as u64));
-        let backend = Arc::new(FakeBackend::new());
+        let backend = Arc::new(FakeBackend::new(4));
         let address_space = AddressSpace::new_backed(size, backend.clone());
 
         let first = address_space.resolve_frame(0, PageFaultType::Read).unwrap();
         assert_eq!(first.frame.as_bytes()[17], 17);
         address_space.resolve_frame(0, PageFaultType::Read).unwrap();
-        assert_eq!(backend.fills.load(Ordering::Relaxed), 1);
+        assert_eq!(backend.take_fills(), [(0, PagingArch::PAGE_SIZE_BYTES)]);
         assert_eq!(crate::fs::resident_file_inode_cache_pages(), before + 1);
 
         address_space
             .resolve_frame(0, PageFaultType::Write)
             .unwrap();
-        backend.fail_writeback.store(true, Ordering::Relaxed);
+        backend.fail_writeback_at(Some(0));
         assert_eq!(
             address_space.sync_page(0).unwrap_err(),
             SysError::InvalidArgument
         );
         assert!(address_space.pages.read().get(&0).unwrap().dirty);
 
-        backend.fail_writeback.store(false, Ordering::Relaxed);
+        backend.fail_writeback_at(None);
         address_space.sync_page(0).unwrap();
         assert!(address_space.pages.read().get(&0).unwrap().dirty);
-        assert_eq!(backend.writebacks.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            backend.take_writebacks(),
+            [
+                (0, PagingArch::PAGE_SIZE_BYTES),
+                (0, PagingArch::PAGE_SIZE_BYTES)
+            ]
+        );
 
         drop(address_space);
         assert_eq!(crate::fs::resident_file_inode_cache_pages(), before);
     }
 
     #[kunit]
+    fn backed_requested_reads_batch_misses_and_respect_resident_and_cap_boundaries() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+
+        let backend = Arc::new(FakeBackend::new(4));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 3) as u64)),
+            backend.clone(),
+        );
+        address_space.read(0, &mut vec![0; page_size * 3]).unwrap();
+        assert_eq!(backend.take_fills(), [(0, page_size * 3)]);
+
+        let backend = Arc::new(FakeBackend::new(4));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 5) as u64)),
+            backend.clone(),
+        );
+        let resident = address_space
+            .resolve_frame(2, PageFaultType::Read)
+            .unwrap()
+            .frame;
+        backend.take_fills();
+        address_space.read(0, &mut vec![0; page_size * 5]).unwrap();
+        assert_eq!(
+            backend.take_fills(),
+            [(0, page_size * 2), (page_size * 3, page_size * 2)]
+        );
+        assert_eq!(
+            address_space.pages.read().get(&2).unwrap().frame.ppn(),
+            resident.ppn()
+        );
+
+        let backend = Arc::new(FakeBackend::new(2));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 5) as u64)),
+            backend.clone(),
+        );
+        address_space.read(0, &mut vec![0; page_size * 5]).unwrap();
+        assert_eq!(
+            backend.take_fills(),
+            [
+                (0, page_size * 2),
+                (page_size * 2, page_size * 2),
+                (page_size * 4, page_size)
+            ]
+        );
+    }
+
+    #[kunit]
+    fn backed_read_batch_handles_unaligned_eof_and_failure_before_publication() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let before = crate::fs::resident_file_inode_cache_pages();
+        let backend = Arc::new(FakeBackend::new(4));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size + 17) as u64)),
+            backend.clone(),
+        );
+        let offset = page_size - 3;
+        let mut data = [0u8; 20];
+        address_space.read(offset, &mut data).unwrap();
+        for (index, byte) in data.iter().enumerate() {
+            assert_eq!(*byte, offset.wrapping_add(index) as u8);
+        }
+        assert_eq!(backend.take_fills(), [(0, page_size + 17)]);
+        assert!(
+            address_space.pages.read().get(&1).unwrap().frame.as_bytes()[17..]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        drop(address_space);
+        assert_eq!(crate::fs::resident_file_inode_cache_pages(), before);
+
+        let backend = Arc::new(FakeBackend::new(4));
+        backend.fail_fill_at(Some(0));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 2) as u64)),
+            backend.clone(),
+        );
+        assert_eq!(
+            address_space
+                .read(0, &mut vec![0; page_size * 2])
+                .unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert!(address_space.pages.read().is_empty());
+        assert_eq!(backend.take_fills(), [(0, page_size * 2)]);
+        assert_eq!(crate::fs::resident_file_inode_cache_pages(), before);
+    }
+
+    #[kunit]
+    fn backed_read_failure_after_completed_batch_keeps_published_prefix() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let before = crate::fs::resident_file_inode_cache_pages();
+        let backend = Arc::new(FakeBackend::new(1));
+        backend.fail_fill_at(Some(page_size));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 2) as u64)),
+            backend.clone(),
+        );
+        let mut data = vec![0; page_size * 2];
+
+        assert_eq!(
+            address_space.read(0, &mut data).unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(data[17], 17);
+        assert_eq!(
+            address_space
+                .pages
+                .read()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [0]
+        );
+        assert_eq!(
+            backend.take_fills(),
+            [(0, page_size), (page_size, page_size)]
+        );
+        assert_eq!(crate::fs::resident_file_inode_cache_pages(), before + 1);
+
+        drop(address_space);
+        assert_eq!(crate::fs::resident_file_inode_cache_pages(), before);
+    }
+
+    #[kunit]
+    fn backed_competing_publication_selects_one_frame_and_one_accounting_winner() {
+        let before = crate::fs::resident_file_inode_cache_pages();
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new(PagingArch::PAGE_SIZE_BYTES as u64)),
+            Arc::new(FakeBackend::new(1)),
+        );
+        let first = ResidentPage {
+            frame: unsafe {
+                alloc_frame_zeroed()
+                    .expect("test frame allocation must succeed")
+                    .into_frame_handle()
+            },
+            dirty: false,
+        };
+        let second = ResidentPage {
+            frame: unsafe {
+                alloc_frame_zeroed()
+                    .expect("test frame allocation must succeed")
+                    .into_frame_handle()
+            },
+            dirty: false,
+        };
+        let winner = address_space.publish(0, first.clone());
+        let loser_observation = address_space.publish(0, second);
+
+        assert_eq!(winner.frame.ppn(), first.frame.ppn());
+        assert_eq!(loser_observation.frame.ppn(), first.frame.ppn());
+        assert_eq!(address_space.pages.read().len(), 1);
+        assert_eq!(crate::fs::resident_file_inode_cache_pages(), before + 1);
+
+        drop(address_space);
+        assert_eq!(crate::fs::resident_file_inode_cache_pages(), before);
+    }
+
+    #[kunit]
+    fn backed_writeback_batches_dirty_runs_and_keeps_dirty_sticky() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let backend = Arc::new(FakeBackend::new(2));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 6) as u64)),
+            backend.clone(),
+        );
+        for pidx in [0, 1, 3, 4, 5] {
+            address_space
+                .resolve_frame(pidx, PageFaultType::Write)
+                .unwrap();
+        }
+        address_space.resolve_frame(2, PageFaultType::Read).unwrap();
+        backend.take_fills();
+
+        backend.fail_writeback_at(Some(page_size * 3));
+        assert_eq!(
+            address_space.sync_all().unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            backend.take_writebacks(),
+            [(0, page_size * 2), (page_size * 3, page_size * 2)]
+        );
+        assert!(
+            [0, 1, 3, 4, 5]
+                .iter()
+                .all(|pidx| address_space.pages.read().get(pidx).unwrap().dirty)
+        );
+
+        backend.fail_writeback_at(None);
+        address_space.sync_all().unwrap();
+        assert_eq!(
+            backend.take_writebacks(),
+            [
+                (0, page_size * 2),
+                (page_size * 3, page_size * 2),
+                (page_size * 5, page_size)
+            ]
+        );
+        assert!(
+            [0, 1, 3, 4, 5]
+                .iter()
+                .all(|pidx| address_space.pages.read().get(pidx).unwrap().dirty)
+        );
+
+        address_space.sync_page(3).unwrap();
+        assert_eq!(backend.take_writebacks(), [(page_size * 3, page_size)]);
+    }
+
+    #[kunit]
+    fn backed_writeback_run_uses_size_sampled_before_its_frame_snapshot() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let size = Arc::new(AtomicU64::new((page_size + 17) as u64));
+        let backend = Arc::new(FakeBackend::new(2));
+        let address_space = AddressSpace::new_backed(size.clone(), backend.clone());
+        address_space
+            .resolve_frame(1, PageFaultType::Write)
+            .unwrap();
+        backend.take_fills();
+
+        let size_snapshot = address_space.size().unwrap();
+        let (run, _) = address_space
+            .next_dirty_run(1, 2)
+            .unwrap()
+            .expect("dirty tail page must form one run");
+        size.store((page_size * 2) as u64, Ordering::Release);
+        address_space.writeback_run(&run, size_snapshot).unwrap();
+
+        assert_eq!(backend.take_writebacks(), [(page_size, 17)]);
+    }
+
+    #[kunit]
+    fn backed_sync_range_respects_range_cap_eof_and_existing_errno_order() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let backend = Arc::new(FakeBackend::new(2));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 4 + 17) as u64)),
+            backend.clone(),
+        );
+        for pidx in 0..5 {
+            address_space
+                .resolve_frame(pidx, PageFaultType::Write)
+                .unwrap();
+        }
+        backend.take_fills();
+
+        address_space.sync_range(1..4).unwrap();
+        assert_eq!(
+            backend.take_writebacks(),
+            [(page_size, page_size * 2), (page_size * 3, page_size)]
+        );
+
+        address_space.sync_range(6..6).unwrap();
+        assert!(backend.take_writebacks().is_empty());
+
+        assert_eq!(
+            address_space.sync_range(4..6).unwrap_err(),
+            SysError::NotMapped
+        );
+        assert_eq!(backend.take_writebacks(), [(page_size * 4, 17)]);
+    }
+
+    #[kunit]
     fn backed_resolution_arms_first_write_before_publishing_writable_frame() {
         let size = Arc::new(AtomicU64::new(PagingArch::PAGE_SIZE_BYTES as u64));
-        let backend = Arc::new(FakeBackend::new());
+        let backend = Arc::new(FakeBackend::new(4));
         let address_space = AddressSpace::new_backed(size, backend);
 
         let read = address_space.resolve_frame(0, PageFaultType::Read).unwrap();

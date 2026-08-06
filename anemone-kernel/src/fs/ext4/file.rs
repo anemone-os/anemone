@@ -11,6 +11,15 @@ use crate::{
     prelude::*,
 };
 
+static_assert!(
+    EXT4_SYNC_IO_BATCH_PAGES > 0,
+    "ext4_sync_io_batch_pages must be non-zero"
+);
+static_assert!(
+    EXT4_SYNC_IO_BATCH_PAGES <= isize::MAX as usize / PagingArch::PAGE_SIZE_BYTES,
+    "ext4 synchronous I/O batch buffer must fit the allocation size domain"
+);
+
 /// Ext4 identity and transaction access for one inode address space.
 ///
 /// This capability deliberately has no page map, dirty state, logical-size
@@ -27,24 +36,28 @@ impl Ext4AddressSpaceBackend {
 }
 
 impl AddressSpaceBackend for Ext4AddressSpaceBackend {
-    fn fill_page(&self, offset: usize, frame: &mut [u8]) -> Result<(), SysError> {
+    fn batch_page_cap(&self) -> usize {
+        EXT4_SYNC_IO_BATCH_PAGES
+    }
+
+    fn fill_range(&self, offset: usize, data: &mut [u8]) -> Result<(), SysError> {
         ext4_sb(&self.sb).read_tx(|| {
             ext4_sb(&self.sb).with_fs(|fs| {
-                fs.read_at(self.ino.get() as u32, frame, offset as u64)
+                fs.read_at(self.ino.get() as u32, data, offset as u64)
                     .map(|_| ())
                     .map_err(map_ext4_error)
             })
         })
     }
 
-    fn writeback_page(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
+    fn writeback_range(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         ext4_sb(&self.sb).write_tx(|| {
             ext4_sb(&self.sb).with_fs(|fs| {
                 fs.write_at(self.ino.get() as u32, data, offset as u64)
                     .map(|_| ())
                     .map_err(|err| {
                         kwarningln!(
-                            "ext4: failed to write page at offset {} of inode {}: {:?}",
+                            "ext4: failed to write range at offset {} of inode {}: {:?}",
                             offset,
                             self.ino.get(),
                             err

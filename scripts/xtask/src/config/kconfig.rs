@@ -65,6 +65,7 @@ pub struct Parameters {
     pub epoll_file_max_waiters: Option<usize>,
     pub max_iovec_count: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
+    pub ext4_sync_io_batch_pages: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
@@ -182,6 +183,7 @@ impl Parameters {
         materialize!(epoll_file_max_waiters);
         materialize!(max_iovec_count);
         materialize!(getdents64_buffer_bytes);
+        materialize!(ext4_sync_io_batch_pages);
         materialize!(pipe_capacity_pages);
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
@@ -330,6 +332,8 @@ pub const EPOLL_FILE_MAX_WAITERS: usize = {};
 pub const MAX_IOVEC_COUNT: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
+/// Maximum pages staged in one synchronous ext4 read or writeback request.
+pub const EXT4_SYNC_IO_BATCH_PAGES: usize = {};
 /// Default anonymous-pipe capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Maximum anonymous-pipe capacity in pages.
@@ -524,6 +528,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(epoll_file_max_waiters),
             resolved!(max_iovec_count),
             resolved!(getdents64_buffer_bytes),
+            resolved!(ext4_sync_io_batch_pages),
             resolved!(pipe_capacity_pages),
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
