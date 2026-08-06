@@ -236,7 +236,7 @@ fn siginfo_handler(signo: SigNo, siginfo: *const SigInfo, ucontext: *const UCont
             .handled_signo
             .store(siginfo.si_signo as usize, Ordering::SeqCst);
         if siginfo.si_code == linux_signal::SI_QUEUE {
-            let sigval = unsafe { siginfo.fields.rt.sigval.as_u64() } as usize;
+            let sigval = siginfo.fields.rt().sigval.as_u64() as usize;
             shared.handled_sigval.store(sigval, Ordering::SeqCst);
         }
     }
@@ -253,7 +253,7 @@ fn rt_queue_handler(signo: SigNo, siginfo: *const SigInfo, _ucontext: *const UCo
 
     if let Some(shared) = rt_queue_shared_state() {
         let slot = shared.received_count.fetch_add(1, Ordering::SeqCst);
-        let sigval = unsafe { siginfo.fields.rt.sigval.as_u64() } as usize;
+        let sigval = siginfo.fields.rt().sigval.as_u64() as usize;
         if slot < RT_QUEUE_STRESS_COUNT {
             shared.observed_sigvals[slot].store(sigval, Ordering::SeqCst);
         } else {
@@ -268,8 +268,9 @@ fn rt_queue_handler(signo: SigNo, siginfo: *const SigInfo, _ucontext: *const UCo
 
 fn install_handler(sig: SigNo, handler: *const (), sa_flags: u64) -> Result<(), Errno> {
     let action = linux_signal::SigAction {
-        sighandler: handler,
+        sighandler: handler.into(),
         sa_flags,
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: linux_signal::SigSet { bits: 0 },
     };
     signal::sigaction(sig, Some(&action), None)
@@ -282,20 +283,19 @@ fn sigset_of(sig: SigNo) -> linux_signal::SigSet {
 }
 
 fn queue_siginfo(sig: SigNo, sigval: usize) -> linux_signal::SigInfoWrapper {
+    let mut fields = linux_signal::sifields::SigInfoFields::default();
+    fields.set_rt(linux_signal::sifields::Rt {
+        pid: 0,
+        uid: 0,
+        sigval: linux_signal::sifields::SigVal::from_bits(sigval as u64),
+    });
     linux_signal::SigInfoWrapper {
         info: linux_signal::SigInfo {
             si_signo: sig.as_usize() as i32,
             si_errno: 0,
             si_code: linux_signal::SI_QUEUE,
-            fields: linux_signal::sifields::SigInfoFields {
-                rt: linux_signal::sifields::Rt {
-                    pid: 0,
-                    uid: 0,
-                    sigval: linux_signal::sifields::SigVal {
-                        sival_ptr: sigval as *mut _,
-                    },
-                },
-            },
+            __pad0: 0,
+            fields,
         },
     }
 }

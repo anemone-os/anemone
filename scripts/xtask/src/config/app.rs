@@ -190,11 +190,7 @@ mod tests {
 
     #[test]
     fn target_list_is_required_closed_and_unique() {
-        let missing = example_app().replacen(
-            "targets = [\"riscv64\", \"loongarch64\"]\n",
-            "",
-            1,
-        );
+        let missing = example_app().replacen("targets = [\"riscv64\", \"loongarch64\"]\n", "", 1);
         let error = format!("{:#}", App::from_str(&missing).unwrap_err());
         assert!(error.contains("missing field `targets`"), "{error}");
 
@@ -212,11 +208,17 @@ mod tests {
             1,
         );
         let error = format!("{:#}", App::from_str(&duplicate).unwrap_err());
-        assert!(error.contains("duplicate app build target 'riscv64'"), "{error}");
+        assert!(
+            error.contains("duplicate app build target 'riscv64'"),
+            "{error}"
+        );
 
         let unknown = example_app().replacen("\"loongarch64\"", "\"mips64\"", 1);
         let error = format!("{:#}", App::from_str(&unknown).unwrap_err());
-        assert!(error.contains("Unsupported app build target: mips64"), "{error}");
+        assert!(
+            error.contains("Unsupported app build target: mips64"),
+            "{error}"
+        );
     }
 
     #[test]

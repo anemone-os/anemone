@@ -59,10 +59,7 @@ mod tests {
     fn command_app(argv: &[&str]) -> App {
         App {
             name: "command-test".to_string(),
-            targets: vec![
-                AppTarget::Anemone(Arch::RiscV64),
-                AppTarget::Host,
-            ],
+            targets: vec![AppTarget::Anemone(Arch::RiscV64), AppTarget::Host],
             build: Build {
                 workdir: ".".to_string(),
                 driver: BuildDriver::Command(CommandBuild {

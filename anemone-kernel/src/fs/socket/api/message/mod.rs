@@ -30,7 +30,7 @@ pub(super) fn message_iovecs(
     let count = usize::try_from(header.msg_iovlen).map_err(|_| SysError::MessageTooLong)?;
     load_message_iovecs(
         uspace,
-        VirtAddr::new(header.msg_iov as u64),
+        VirtAddr::new(header.msg_iov.bits()),
         count,
         direction,
     )
@@ -58,7 +58,7 @@ mod kunits {
         };
         assert_eq!(normalized_name_len(header), Ok(0));
 
-        header.msg_name = 1usize as *mut _;
+        header.msg_name = anemone_abi::RawUserAddr64::from_bits(1);
         assert_eq!(normalized_name_len(header), Err(SysError::InvalidArgument));
     }
 }

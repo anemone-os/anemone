@@ -408,9 +408,7 @@ mod tests {
                 .filter(|line| {
                     !line.trim_start().starts_with("max_logical_cpus")
                         && !line.trim_start().starts_with("ns16550a_default_baud")
-                        && !line
-                            .trim_start()
-                            .starts_with("oom_kill_sample_interval_ms")
+                        && !line.trim_start().starts_with("oom_kill_sample_interval_ms")
                 })
                 .collect::<Vec<_>>()
                 .join("\n");

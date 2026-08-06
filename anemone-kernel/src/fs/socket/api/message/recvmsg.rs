@@ -66,7 +66,11 @@ impl SocketReceiveSink for MessageReceiveSink<'_> {
     }
 }
 
-fn write_message_field<T: Copy>(message: u64, offset: usize, value: T) -> Result<(), SysError> {
+fn write_message_field<T: zerocopy::IntoBytes + zerocopy::Immutable>(
+    message: u64,
+    offset: usize,
+    value: T,
+) -> Result<(), SysError> {
     let address = message
         .checked_add(offset as u64)
         .ok_or(SysError::BadAddress)?;
@@ -137,7 +141,7 @@ fn sys_recvmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
             .ok_or(SysError::BadAddress)?;
         write_socket_address(
             socket.socket_type(),
-            header.msg_name as u64,
+            header.msg_name.bits(),
             name_len,
             Some(peer),
         )?;

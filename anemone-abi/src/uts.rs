@@ -1,5 +1,14 @@
 pub mod linux {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct OldUtsName {
         pub sysname: [u8; 65],

@@ -114,11 +114,11 @@ fn test_resolver_options_and_records() -> Result<(), Errno> {
     ensure(write(first, b"first")? == 5)?;
     let write_iov = [
         IoVec {
-            iov_base: b"sec".as_ptr() as *mut c_void,
+            iov_base: (b"sec".as_ptr() as *mut c_void).into(),
             iov_len: 3,
         },
         IoVec {
-            iov_base: b"ond".as_ptr() as *mut c_void,
+            iov_base: (b"ond".as_ptr() as *mut c_void).into(),
             iov_len: 3,
         },
     ];
@@ -128,11 +128,11 @@ fn test_resolver_options_and_records() -> Result<(), Errno> {
     let mut right = [0u8; 3];
     let mut read_iov = [
         IoVec {
-            iov_base: left.as_mut_ptr().cast(),
+            iov_base: left.as_mut_ptr().cast::<c_void>().into(),
             iov_len: left.len() as u64,
         },
         IoVec {
-            iov_base: right.as_mut_ptr().cast(),
+            iov_base: right.as_mut_ptr().cast::<c_void>().into(),
             iov_len: right.len() as u64,
         },
     ];

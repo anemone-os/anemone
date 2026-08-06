@@ -1,33 +1,83 @@
 pub mod linux {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct TimeVal {
         pub tv_sec: i64,
         pub tv_usec: i64,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct TimeZone {
         pub tz_minuteswest: i32,
         pub tz_dsttime: i32,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct TimeSpec {
         pub tv_sec: i64,
         pub tv_nsec: i64,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct ITimerSpec {
         pub it_interval: TimeSpec,
         pub it_value: TimeSpec,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Tms {
         pub tms_utime: i64,
@@ -69,7 +119,17 @@ pub mod linux {
         pub const ITIMER_VIRTUAL: i32 = 1;
         pub const ITIMER_PROF: i32 = 2;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Default,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct OldITimerVal {
             pub it_interval: TimeVal,

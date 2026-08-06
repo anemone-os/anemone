@@ -83,7 +83,7 @@ fn sys_sendmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     } else {
         Some(read_socket_address(
             socket.socket_type(),
-            header.msg_name as u64,
+            header.msg_name.bits(),
             name_len as u32,
         )?)
     };

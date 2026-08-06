@@ -3,12 +3,9 @@ pub mod native {}
 pub mod linux {
     //! Linux socket ABI shared by RV64 and LA64.
 
-    use core::{
-        ffi::c_void,
-        mem::{align_of, offset_of, size_of},
-    };
+    use core::mem::{align_of, offset_of, size_of};
 
-    use crate::fs::linux::IoVec;
+    use crate::RawUserAddr64;
 
     pub const AF_UNSPEC: i32 = 0;
     pub const AF_UNIX: i32 = 1;
@@ -45,7 +42,17 @@ pub mod linux {
     #[allow(non_camel_case_types)]
     pub type socklen_t = u32;
 
-    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct InAddr {
         pub s_addr: u32,
@@ -67,7 +74,16 @@ pub mod linux {
         }
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct SockAddrIn {
         pub sin_family: u16,
@@ -78,7 +94,16 @@ pub mod linux {
 
     pub const UNIX_PATH_MAX: usize = 108;
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct SockAddrUn {
         pub sun_family: u16,
@@ -90,16 +115,28 @@ pub mod linux {
     /// RV64 and LA64 share this representation. Kernel-internal Socket and
     /// family APIs must translate it at the syscall boundary rather than carry
     /// raw pointers or Linux field ordering into their operation types.
-    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct MsgHdr {
-        pub msg_name: *mut c_void,
+        pub msg_name: RawUserAddr64,
         pub msg_namelen: i32,
-        pub msg_iov: *mut IoVec,
+        pub __pad0: u32,
+        pub msg_iov: RawUserAddr64,
         pub msg_iovlen: u64,
-        pub msg_control: *mut c_void,
+        pub msg_control: RawUserAddr64,
         pub msg_controllen: u64,
         pub msg_flags: u32,
+        pub __pad1: u32,
     }
 
     impl Default for SockAddrUn {

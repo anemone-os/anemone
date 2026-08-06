@@ -545,9 +545,9 @@ fn wait_for_children_ready(ready_rx: Fd, count: usize) -> Result<(), Errno> {
 
 fn install_usr1_handler() -> Result<(), Errno> {
     let action = anemone_rs::abi::process::linux::signal::SigAction {
-        sighandler: usr1_handler as *const (),
+        sighandler: (usr1_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: anemone_rs::abi::process::linux::signal::SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGUSR1, Some(&action), None)

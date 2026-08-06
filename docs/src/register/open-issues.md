@@ -3,7 +3,7 @@
 ## ANE-20260805-USER-ACCESS-TYPED-COPY-SOUNDNESS
 
 **Type:** Issue
-**Status:** Open
+**Status:** Closed / neutralized by user-access typed-copy soundness cutover
 **Severity:** Apollyon
 **Area:** syscall / user access / typed copy / ABI representation
 
@@ -18,13 +18,18 @@
 也不能证明其它ABI struct的bit validity与padding边界。
 
 **Owner:** syscall user-access typed-copy boundary；ABI wire representation由`anemone-abi`共同参与
-**Last Verified:** 2026-08-05
+**Last Verified:** 2026-08-06
 **Exit Condition:** typed copy按方向建立可由编译器检查的能力边界：copyin只接受任意输入bit pattern均为
 合法值的类型，copyout只接受完整表示均已初始化且无隐式padding的类型；补齐受影响ABI struct的显式
 padding或等价byte codec，并完成全部typed caller审计、双架构layout assertion与build/runtime验证。
 
-**Workaround:** 新代码避免为带受限bit pattern或隐式padding的类型新增generic typed copy调用；已有调用点
-可在owner-local边界使用显式byte codec降低单一路径风险，但这不关闭本问题。
+**Related:** [User-access typed-copy soundness小迭代](../devlog/changes/2026-08-06-user-access-typed-copy-soundness.md)
+
+**Resolution:** scalar copyin、scalar/slice copyout与typed slice copyin已分别由`FromBytes`、
+`IntoBytes + Immutable`及两组能力的交集建立编译期边界；全部production typed caller已由方向性derive、显式
+padding或唯一byte codec闭合。raw user address已改为无provenance的64-bit token，双架构layout/build、focused
+RV64 runtime、全consumer lock审计与独立review通过；没有保留`T: Copy` fallback、逐类型unsafe marker或平行ABI
+truth。Linux-visible ABI、errno、owner/handoff与current contract保持不变。
 
 ## ANE-20260801-LA64-SOFT-UNALIGNED-USER-MEMORY-CORRUPTION
 

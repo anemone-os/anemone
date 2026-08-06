@@ -4,8 +4,6 @@
 ///
 /// TODO: tidy up organization.
 pub mod linux {
-    use core::ffi::c_void;
-
     pub mod open {
         pub const O_RDONLY: u32 = 0x0000;
         pub const O_WRONLY: u32 = 0x0001;
@@ -77,7 +75,17 @@ pub mod linux {
         ///
         /// The explicit padding keeps `data` at offset 8. Kernel adapters copy
         /// this record as bytes because Linux permits unaligned event pointers.
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Default,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct EpollEvent {
             pub events: u32,
@@ -204,7 +212,17 @@ pub mod linux {
         pub const ATTRIBUTE_VERITY: u64 = 0x0010_0000;
         pub const ATTRIBUTE_DAX: u64 = 0x0020_0000;
 
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Default,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct StatXTimestamp {
             pub tv_sec: i64,
@@ -212,7 +230,17 @@ pub mod linux {
             pub __reserved: i32,
         }
 
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Default,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct StatX {
             pub stx_mask: u32,
@@ -247,7 +275,17 @@ pub mod linux {
         ///
         /// Reference:
         /// - https://elixir.bootlin.com/linux/v6.6.32/source/include/uapi/asm-generic/stat.h
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Default,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct Stat {
             pub st_dev: u64,
@@ -271,7 +309,17 @@ pub mod linux {
             pub __unused: [u32; 2],
         }
 
-        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Default,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct StatFs {
             pub f_type: u64,
@@ -444,12 +492,26 @@ pub mod linux {
         pub const FAN_INFO: u32 = 0x20;
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct IoVec {
-        pub iov_base: *mut c_void,
+        pub iov_base: crate::RawUserAddr64,
         pub iov_len: u64,
     }
+
+    const _: () = assert!(size_of::<IoVec>() == 16);
+    const _: () = assert!(align_of::<IoVec>() == 8);
+    const _: () = assert!(core::mem::offset_of!(IoVec, iov_base) == 0);
+    const _: () = assert!(core::mem::offset_of!(IoVec, iov_len) == 8);
 
     pub const IOV_MAX: usize = 1024;
 
@@ -605,7 +667,16 @@ pub mod linux {
             }
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         #[allow(non_camel_case_types)]
         pub struct loop_info {
@@ -619,8 +690,10 @@ pub mod linux {
             pub lo_flags: i32,
             pub lo_name: [u8; LO_NAME_SIZE],
             pub lo_encrypt_key: [u8; LO_KEY_SIZE],
+            pub __pad0: [u8; 4],
             pub lo_init: [usize; 2],
             pub reserved: [u8; 4],
+            pub __pad1: [u8; 4],
         }
 
         impl Default for loop_info {
@@ -636,13 +709,24 @@ pub mod linux {
                     lo_flags: 0,
                     lo_name: [0; LO_NAME_SIZE],
                     lo_encrypt_key: [0; LO_KEY_SIZE],
+                    __pad0: [0; 4],
                     lo_init: [0; 2],
                     reserved: [0; 4],
+                    __pad1: [0; 4],
                 }
             }
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         #[allow(non_camel_case_types)]
         pub struct loop_info64 {
@@ -743,7 +827,17 @@ pub mod linux {
         // less-or-more non-standard.
         pub const POLLRDHUP: i16 = 0x2000;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Default,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct PollFd {
             pub fd: i32,
@@ -757,7 +851,17 @@ pub mod linux {
         /// applications nowadays.
         pub const FD_SETSIZE: usize = 1024;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Default,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct FdSet {
             pub fds_bits: [u64; FD_SETSIZE / (8 * size_of::<u64>())],

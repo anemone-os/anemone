@@ -185,9 +185,9 @@ fn cancel_and_wait_child(pid: u32, signal: SigNo) -> Result<(), Errno> {
 
 fn install_sigpipe_handler() -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: sigpipe_handler as *const (),
+        sighandler: (sigpipe_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGPIPE, Some(&action), None)
@@ -195,9 +195,9 @@ fn install_sigpipe_handler() -> Result<(), Errno> {
 
 fn install_noop_signal_handler() -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: noop_signal_handler as *const (),
+        sighandler: (noop_signal_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGUSR1, Some(&action), None)
@@ -914,11 +914,11 @@ fn test_bidirectional_vector_and_nonblocking() -> Result<(), Errno> {
     let right = b"tored";
     let write_iov = [
         IoVec {
-            iov_base: left.as_ptr() as *mut c_void,
+            iov_base: (left.as_ptr() as *mut c_void).into(),
             iov_len: left.len() as u64,
         },
         IoVec {
-            iov_base: right.as_ptr() as *mut c_void,
+            iov_base: (right.as_ptr() as *mut c_void).into(),
             iov_len: right.len() as u64,
         },
     ];
@@ -927,11 +927,11 @@ fn test_bidirectional_vector_and_nonblocking() -> Result<(), Errno> {
     let mut out_right = [0u8; 6];
     let mut read_iov = [
         IoVec {
-            iov_base: out_left.as_mut_ptr().cast(),
+            iov_base: out_left.as_mut_ptr().cast::<c_void>().into(),
             iov_len: out_left.len() as u64,
         },
         IoVec {
-            iov_base: out_right.as_mut_ptr().cast(),
+            iov_base: out_right.as_mut_ptr().cast::<c_void>().into(),
             iov_len: out_right.len() as u64,
         },
     ];
@@ -966,11 +966,11 @@ fn test_zero_length_io_observes_send_state() -> Result<(), Errno> {
     ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before + 1)?;
 
     let mut read_iov = [IoVec {
-        iov_base: core::ptr::null_mut(),
+        iov_base: anemone_rs::abi::RawUserAddr64::NULL,
         iov_len: 0,
     }];
     let write_iov = [IoVec {
-        iov_base: core::ptr::null_mut(),
+        iov_base: anemone_rs::abi::RawUserAddr64::NULL,
         iov_len: 0,
     }];
     ensure(readv(first, &mut read_iov)? == 0)?;

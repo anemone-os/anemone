@@ -55,8 +55,7 @@ pub const INIT_USER_STACK_PAGES: u64 = const {
         INIT_USER_STACK_BYTES % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
         "initial user stack size must be a multiple of page size"
     );
-    const INIT_USER_STACK_PAGES: u64 =
-        INIT_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64;
+    const INIT_USER_STACK_PAGES: u64 = INIT_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64;
     const_assert!(
         INIT_USER_STACK_PAGES <= MAX_USER_STACK_PAGES,
         "initial user stack size must not exceed maximum user stack size"

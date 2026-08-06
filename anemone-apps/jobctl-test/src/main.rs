@@ -87,7 +87,7 @@ fn sigchld_handler(
     }
 
     let info = unsafe { &*siginfo };
-    let chld = unsafe { info.fields.chld };
+    let chld = info.fields.chld();
     SIGCHLD_CODE.store(info.si_code, Ordering::SeqCst);
     SIGCHLD_PID.store(chld.pid, Ordering::SeqCst);
     SIGCHLD_UID.store(chld.uid, Ordering::SeqCst);
@@ -101,9 +101,9 @@ fn install_sigchld_handler() -> Result<(), Errno> {
 
 fn install_sigchld_handler_with_flags(flags: u64) -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: sigchld_handler as *const (),
+        sighandler: (sigchld_handler as *const ()).into(),
         sa_flags: linux_signal::SA_SIGINFO | flags,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     signal::sigaction(SigNo::SIGCHLD, Some(&action), None)
@@ -111,9 +111,9 @@ fn install_sigchld_handler_with_flags(flags: u64) -> Result<(), Errno> {
 
 fn install_sigcont_handler() -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: sigcont_handler as *const (),
+        sighandler: (sigcont_handler as *const ()).into(),
         sa_flags: linux_signal::SA_RESTART,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     signal::sigaction(SigNo::SIGCONT, Some(&action), None)
@@ -121,9 +121,9 @@ fn install_sigcont_handler() -> Result<(), Errno> {
 
 fn install_handler(signo: SigNo, handler: *const (), flags: u64) -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: handler,
+        sighandler: handler.into(),
         sa_flags: flags,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     signal::sigaction(signo, Some(&action), None)
@@ -144,18 +144,19 @@ fn signal_set(signo: SigNo) -> SigSet {
 }
 
 fn queued_siginfo(signo: SigNo) -> SigInfoWrapper {
+    let mut fields = linux_signal::sifields::SigInfoFields::default();
+    fields.set_rt(linux_signal::sifields::Rt {
+        pid: 0,
+        uid: 0,
+        sigval: linux_signal::sifields::SigVal::from_int(0),
+    });
     SigInfoWrapper {
         info: SigInfo {
             si_signo: signo.as_usize() as i32,
             si_errno: 0,
             si_code: linux_signal::SI_QUEUE,
-            fields: linux_signal::sifields::SigInfoFields {
-                rt: linux_signal::sifields::Rt {
-                    pid: 0,
-                    uid: 0,
-                    sigval: linux_signal::sifields::SigVal { sival_int: 0 },
-                },
-            },
+            __pad0: 0,
+            fields,
         },
     }
 }
@@ -515,8 +516,9 @@ fn run_child_scenario(scenario: ChildScenario, ready: Fd, release: Fd) -> Result
                 None,
             )?;
             let altstack = linux_signal::SigStack {
-                ss_sp: stack.as_ptr(),
+                ss_sp: stack.as_ptr().into(),
                 ss_flags: 0,
+                __pad0: 0,
                 ss_size: ALTSTACK_SIZE,
             };
             signal::sigaltstack(Some(&altstack), None)?;
@@ -904,7 +906,7 @@ fn waitid(pid: u32, options: i32) -> Result<SigInfo, Errno> {
 }
 
 fn waitid_child_fields(info: &SigInfo) -> (i32, u32, i32) {
-    let chld = unsafe { info.fields.chld };
+    let chld = info.fields.chld();
     (chld.pid, chld.uid, chld.status)
 }
 

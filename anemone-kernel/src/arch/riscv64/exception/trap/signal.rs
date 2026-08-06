@@ -22,7 +22,7 @@ impl SignalArchTrait for RiscV64SignalArch {
         // unused fields.
         {
             buf.uc_flags = 0;
-            buf.uc_link = 0 as _;
+            buf.uc_link = anemone_abi::RawUserAddr64::NULL;
         }
         buf.uc_stack = altstack;
         buf.uc_sigmask = linux_signal::SigSet {

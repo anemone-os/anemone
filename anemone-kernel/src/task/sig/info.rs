@@ -143,56 +143,45 @@ impl SigInfoFields {
 
         match self {
             Self::Kill(SigKill { pid, uid }) | Self::TKill(SigKill { pid, uid }) => {
-                dst.kill = Kill {
+                dst.set_kill(Kill {
                     pid: pid.get() as i32,
                     uid: uid.get(),
-                }
+                })
             },
-            Self::Rt(SigRt { pid, uid, sigval }) => {
-                dst.rt = Rt {
-                    pid: pid.get() as i32,
-                    uid: uid.get(),
-                    sigval: SigVal {
-                        // just use the pointer field to store the sigval.
-                        sival_ptr: *sigval as *mut _,
-                    },
-                }
-            },
+            Self::Rt(SigRt { pid, uid, sigval }) => dst.set_rt(Rt {
+                pid: pid.get() as i32,
+                uid: uid.get(),
+                sigval: SigVal::from_bits(*sigval),
+            }),
             Self::Timer(SigTimer {
                 tid,
                 overrun,
                 sigval,
                 sys_private,
-            }) => {
-                dst.timer = Timer {
-                    tid: *tid,
-                    overrun: *overrun,
-                    sigval: SigVal {
-                        sival_ptr: *sigval as *mut _,
-                    },
-                    sys_private: *sys_private,
-                }
-            },
+            }) => dst.set_timer(Timer {
+                tid: *tid,
+                overrun: *overrun,
+                sigval: SigVal::from_bits(*sigval),
+                sys_private: *sys_private,
+                __pad0: 0,
+            }),
             Self::Chld(SigChld {
                 pid,
                 uid,
                 status,
                 utime,
                 stime,
-            }) => {
-                dst.chld = Chld {
-                    pid: pid.get() as i32,
-                    uid: uid.get(),
-                    status: *status,
-                    utime: *utime,
-                    stime: *stime,
-                }
-            },
-            Self::Fault(SigFault { addr }) | Self::Ill(SigFault { addr }) => {
-                dst.fault = Fault {
-                    addr: addr.get() as usize as _, // TODO
-                }
-            },
+            }) => dst.set_chld(Chld {
+                pid: pid.get() as i32,
+                uid: uid.get(),
+                status: *status,
+                __pad0: 0,
+                utime: *utime,
+                stime: *stime,
+            }),
+            Self::Fault(SigFault { addr }) | Self::Ill(SigFault { addr }) => dst.set_fault(Fault {
+                addr: anemone_abi::RawUserAddr64::from_bits(addr.get()),
+            }),
         }
     }
 

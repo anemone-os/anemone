@@ -73,7 +73,7 @@ fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, Sys
         SigInfoFields::Rt(SigRt {
             pid: task.tgid(),
             uid: task.cred().uid.real,
-            sigval: sifields.rt.sigval.as_u64(),
+            sigval: sifields.rt().sigval.as_u64(),
         })
     };
 

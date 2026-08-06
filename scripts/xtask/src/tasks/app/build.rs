@@ -24,10 +24,7 @@ pub struct BuildArgs {
     #[arg(help = "Name of the app to build")]
     pub app: String,
 
-    #[arg(
-        long,
-        help = "App build target: riscv64, loongarch64, or host"
-    )]
+    #[arg(long, help = "App build target: riscv64, loongarch64, or host")]
     pub arch: String,
 
     #[arg(
@@ -162,11 +159,7 @@ fn validate_app_reference(name: &str, app: &App, manifest_path: &Path) -> anyhow
     Ok(())
 }
 
-fn validate_app_target(
-    app: &App,
-    target: &AppTarget,
-    manifest_path: &Path,
-) -> anyhow::Result<()> {
+fn validate_app_target(app: &App, target: &AppTarget, manifest_path: &Path) -> anyhow::Result<()> {
     if !app.targets.contains(target) {
         let declared = app
             .targets
@@ -471,7 +464,10 @@ mod tests {
         let error = expand_artifact_path(&artifact, &context)
             .unwrap_err()
             .to_string();
-        assert!(error.contains("host has no Anemone target triple"), "{error}");
+        assert!(
+            error.contains("host has no Anemone target triple"),
+            "{error}"
+        );
     }
 
     #[test]

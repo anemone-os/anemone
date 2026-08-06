@@ -578,7 +578,7 @@ fn perform_signal_action(
                             (ss, curr_sp)
                         } else {
                             // first time to use altstack.
-                            (ss, ss.ss_sp as u64 + ss.ss_size as u64)
+                            (ss, ss.ss_sp.bits() + ss.ss_size as u64)
                         }
                     } else {
                         // SA_ONSTACK is not set but altstack is configured.
@@ -588,8 +588,9 @@ fn perform_signal_action(
                     // altstack not configured. just use current stack.
                     (
                         linux_signal::SigStack {
-                            ss_sp: 0 as *mut u8,
+                            ss_sp: anemone_abi::RawUserAddr64::NULL,
                             ss_flags: linux_signal::SS_DISABLE,
+                            __pad0: 0,
                             ss_size: 0,
                         },
                         curr_sp,

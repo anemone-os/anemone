@@ -41,6 +41,7 @@ range-allocator = { path = "crates/range-allocator" }
 kernel-macros = { path = "crates/kernel-macros" }
 goblin = { workspace = true }
 wavltree = { workspace = true }
+zerocopy = { workspace = true }
 symtab = { path = "../symtab", optional = true }
 
 

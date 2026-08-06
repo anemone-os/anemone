@@ -105,6 +105,7 @@ fn linux_ipc_perm(perm: ShmPerm) -> IpcPerm {
         mode: perm.mode as u32,
         __seq: perm.seq,
         __pad2: 0,
+        __pad3: 0,
         __unused1: 0,
         __unused2: 0,
     }
@@ -135,7 +136,10 @@ fn segment_ds(segment: &ShmSegment) -> ShmIdDs {
     }
 }
 
-fn write_user<T: Copy>(addr: VirtAddr, value: T) -> Result<(), SysError> {
+fn write_user<T: zerocopy::IntoBytes + zerocopy::Immutable>(
+    addr: VirtAddr,
+    value: T,
+) -> Result<(), SysError> {
     let usp = get_current_task().clone_uspace_handle();
     usp.with_usp(|usp| {
         UserWritePtr::<T>::try_new(addr, usp)?.write(value)?;
@@ -143,7 +147,7 @@ fn write_user<T: Copy>(addr: VirtAddr, value: T) -> Result<(), SysError> {
     })
 }
 
-fn read_user<T: Copy>(addr: VirtAddr) -> Result<T, SysError> {
+fn read_user<T: zerocopy::FromBytes>(addr: VirtAddr) -> Result<T, SysError> {
     let usp = get_current_task().clone_uspace_handle();
     usp.with_usp(|usp| UserReadPtr::<T>::try_new(addr, usp)?.read())
 }
@@ -176,6 +180,7 @@ fn shm_info(stats: ShmRegistryStats) -> (Shm_Info, u64) {
     (
         Shm_Info {
             used_ids: usize_to_i32_saturating(stats.used_ids),
+            __pad0: 0,
             shm_tot: stats.allocated_pages as u64,
             shm_rss: stats.resident_pages as u64,
             shm_swp: 0,

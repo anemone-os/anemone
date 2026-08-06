@@ -296,7 +296,7 @@ pub fn sys_pselect6(
                     return Err(SysError::InvalidArgument);
                 }
                 let linux_signal::SigSet { bits } =
-                    UserReadPtr::<linux_signal::SigSet>::try_new(user_addr(p as u64)?, &mut usp)?
+                    UserReadPtr::<linux_signal::SigSet>::try_new(user_addr(p.bits())?, &mut usp)?
                         .read()?;
                 Ok(Some(SigSet::new_with_mask(bits)))
             })
