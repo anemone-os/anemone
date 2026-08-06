@@ -404,9 +404,12 @@ impl VmObject for AddressSpace {
         if matches!(access, PageFaultType::Write) {
             self.mark_dirty(pidx);
         }
+        // A backed page becomes writable only after the write fault above has
+        // published sticky dirty state. Subsequent PTE stores need no further
+        // faults because the page remains dirty until eviction.
         Ok(ResolvedFrame {
             frame: page.frame,
-            writable: true,
+            writable: self.backend.is_none() || matches!(access, PageFaultType::Write),
         })
     }
 
@@ -523,6 +526,24 @@ mod kunits {
     }
 
     #[kunit]
+    fn backed_resolution_arms_first_write_before_publishing_writable_frame() {
+        let size = Arc::new(AtomicU64::new(PagingArch::PAGE_SIZE_BYTES as u64));
+        let backend = Arc::new(FakeBackend::new());
+        let address_space = AddressSpace::new_backed(size, backend);
+
+        let read = address_space.resolve_frame(0, PageFaultType::Read).unwrap();
+        assert!(!read.writable);
+        assert!(!address_space.pages.read().get(&0).unwrap().dirty);
+
+        let write = address_space
+            .resolve_frame(0, PageFaultType::Write)
+            .unwrap();
+        assert!(write.writable);
+        assert_eq!(write.frame.ppn(), read.frame.ppn());
+        assert!(address_space.pages.read().get(&0).unwrap().dirty);
+    }
+
+    #[kunit]
     fn address_space_admission_reads_the_inode_size_cell_directly() {
         let size = Arc::new(AtomicU64::new(0));
         let address_space = AddressSpace::new_volatile(size.clone());
@@ -534,7 +555,8 @@ mod kunits {
         );
 
         size.store(PagingArch::PAGE_SIZE_BYTES as u64, Ordering::Release);
-        address_space.resolve_frame(0, PageFaultType::Read).unwrap();
+        let page = address_space.resolve_frame(0, PageFaultType::Read).unwrap();
+        assert!(page.writable);
         size.store(0, Ordering::Release);
         assert_eq!(
             address_space
