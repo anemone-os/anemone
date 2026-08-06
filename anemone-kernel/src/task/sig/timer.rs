@@ -72,8 +72,14 @@ pub(crate) enum PosixTimerSignalCompletion {
 }
 
 /// Callback allocated with the timer object, never on its expiry path.
-pub(crate) type PosixTimerSignalCallback =
-    dyn Fn(PosixTimerSignalIdentity, PosixTimerSignalCompletion) + Send + Sync + 'static;
+///
+/// A dequeued live periodic timer returns its finalized overrun. Signal keeps
+/// ownership of the siginfo representation and applies that narrow result
+/// before frame or synchronous-wait copyout.
+pub(crate) type PosixTimerSignalCallback = dyn Fn(PosixTimerSignalIdentity, PosixTimerSignalCompletion) -> Option<i32>
+    + Send
+    + Sync
+    + 'static;
 
 /// Pending owner selected when the registration is created.
 ///
@@ -135,9 +141,9 @@ impl TimerSignalDelivery {
         }
     }
 
-    fn complete(self, reason: PosixTimerSignalCompletion) {
+    fn complete(self, reason: PosixTimerSignalCompletion) -> Option<i32> {
         self.owner.finish_slot(self.slot);
-        (self.callback)(self.identity, reason);
+        (self.callback)(self.identity, reason)
     }
 }
 
@@ -192,8 +198,8 @@ impl PosixTimerSignalRegistration {
 
     /// Reserve a task-private slot while the target still admits registrations.
     ///
-    /// Gate 1 deliberately leaves this capability without a syscall consumer;
-    /// Gate 2 must connect it to strict same-thread-group TID resolution.
+    /// The syscall boundary resolves and validates the same-thread-group TID;
+    /// this registration retains only the non-rebinding exact-task capability.
     pub(crate) fn try_new_private(
         target: &Arc<Task>,
         no: SigNo,
@@ -469,7 +475,18 @@ impl Signal {
 
     pub(super) fn finish_timer_signal_handoff(&mut self, reason: PosixTimerSignalCompletion) {
         if let Some(delivery) = self.timer_delivery.take() {
-            delivery.complete(reason);
+            let Some(overrun) = delivery.complete(reason) else {
+                return;
+            };
+            assert_eq!(
+                reason,
+                PosixTimerSignalCompletion::Dequeued,
+                "only a dequeued POSIX timer occurrence can finalize overrun"
+            );
+            let SigInfoFields::Timer(fields) = &mut self.fields else {
+                panic!("POSIX timer completion lost SI_TIMER fields");
+            };
+            fields.overrun = overrun;
         }
     }
 }
@@ -496,6 +513,7 @@ mod kunits {
         let callback_log = log.clone();
         let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, reason| {
             callback_log.lock().push((identity, reason));
+            None
         });
         (log, callback)
     }
@@ -539,6 +557,7 @@ mod kunits {
             // under the pending guard that detached this occurrence.
             assert!(!target.pending_signal_set().get(SigNo::SIGUSR2));
             callback_count.fetch_add(1, Ordering::SeqCst);
+            None
         });
         let registration = PosixTimerSignalRegistration::try_new_private(
             &target,
@@ -704,7 +723,7 @@ mod kunits {
                 SigNo::SIGUSR1,
                 102,
                 0,
-                Arc::new(|_, _| {}),
+                Arc::new(|_, _| None),
             ),
             Err(SysError::NoSuchProcess)
         ));
@@ -723,6 +742,7 @@ mod kunits {
             0,
             Arc::new(move |identity, reason| {
                 callback_log.lock().push((identity, reason));
+                None
             }),
         )
         .unwrap();
@@ -753,6 +773,7 @@ mod kunits {
             0,
             Arc::new(move |identity, reason| {
                 callback_log.lock().push((identity, reason));
+                None
             }),
         )
         .unwrap();

@@ -707,7 +707,7 @@ mod kunits {
     use super::*;
     use crate::task::sig::{
         PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
-        PosixTimerSignalRegistration,
+        PosixTimerSignalRegistration, info::SigInfoFields,
     };
 
     #[kunit]
@@ -718,6 +718,7 @@ mod kunits {
         let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |_, reason| {
             assert_eq!(reason, PosixTimerSignalCompletion::Dequeued);
             callback_count.fetch_add(1, Ordering::SeqCst);
+            Some(7)
         });
         let registration = PosixTimerSignalRegistration::try_new_private(
             &target,
@@ -748,6 +749,10 @@ mod kunits {
         assert!(reserved);
         assert_eq!(signal.no, SigNo::SIGUSR1);
         signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Dequeued);
+        let SigInfoFields::Timer(fields) = &signal.fields else {
+            panic!("private POSIX timer lost SI_TIMER fields");
+        };
+        assert_eq!(fields.overrun, 7);
         assert_eq!(callbacks.load(Ordering::SeqCst), 1);
         drop(registration);
     }

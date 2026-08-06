@@ -27,9 +27,9 @@ pub mod linux {
         pub it_value: TimeSpec,
     }
 
-    /// Native asm-generic `struct sigevent`. The trailing union is kept as raw
-    /// padding because Anemone supports only `SIGEV_NONE` and `SIGEV_SIGNAL`,
-    /// but its size and offsets remain user ABI.
+    /// Native asm-generic `struct sigevent`. The trailing union stays raw ABI
+    /// storage; the syscall boundary exposes only the `_tid` interpretation
+    /// used by `SIGEV_THREAD_ID`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     #[repr(C)]
     pub struct SigEvent {

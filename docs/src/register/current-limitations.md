@@ -864,3 +864,30 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Owner:** doruche
 **Last Verified:** 2026-07-29
 **Related:** [Global membarrier 当前契约](../contracts/membarrier/global-rendezvous.md), [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md)
+
+## ANE-20260806-KILL-ZOMBIE-PROCESS-IDENTITY
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** task topology / signal permission / zombie lifecycle
+
+**Summary:** Anemone 在 exit 与 reap 之间保留 zombie `ThreadGroup` 的退出状态，但会在最后一个成员 detach
+时移除 live `Task`、process-group membership 和 task-owned credentials。因此 `kill(pid, sig)` 虽然仍能找到
+zombie `ThreadGroup`，却无法取得 Linux 所要求的 zombie process identity/permission credentials，当前对该阶段
+返回 `ESRCH`。本限制是维护当前 task/topology owner 边界的工程妥协；不得在 syscall 中以无权限校验的 success
+fallback 掩盖，也不得通过保留可执行 `Arc<Task>` 伪造 Linux 生命周期。本文不把该差异写成 POSIX timer
+Gate 2 的实现缺陷。
+
+**Visible difference:** Linux 6.6.32 在 `release_task()` 前仍保留 zombie 的 PID、credentials、sighand 和
+PGID/SID 关系，允许 `kill(pid, 0)` 与经权限检查的 armed signal generation；Anemone 在相同阶段可能返回
+`ESRCH`，并且 process-group selectors 不能观察该 zombie。reap 后两者都应返回 `ESRCH`。
+
+**Exit Condition:** 由独立 task/topology/signal-permission follow-up 定义 zombie identity snapshot、exit/reap
+线性化、PGID/SID 保留与 `kill()` 正 PID/进程组返回规则；用 same/different UID、`CAP_KILL`、`SIGCONT` session、
+`sig=0`、armed signal、exit-vs-kill race 和 reap-after-kill 的 Linux source/runtime matrix 完成新的 target
+与 contract cutover。仅把 `leader()==None` 改成 success，或只修 LTP 清理路径，不能关闭本限制。
+
+**Owner:** task topology / signal permission lifecycle
+**Last Verified:** 2026-08-06
+**Related:** [POSIX Timer Thread-ID Gate 2 review](../rfcs/posix-timer-thread-id-notification/implementation.md#gate-2-pre-cutover-source-review--2026-08-06)

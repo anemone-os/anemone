@@ -1,7 +1,7 @@
 # POSIX Timer Thread-ID Notification 实施路线
 
 **状态：** Accepted
-**最后更新：** 2026-08-05
+**最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260804-posix-timer-thread-id-notification](./index.md)
 **当前修订：** R0
 
@@ -16,11 +16,12 @@
 - **Protected ABI / contract / acceptance：** 保持 native `SigEvent` layout、`SIGEV_SIGNAL` shared route、
   ordinary signal/job-control/temporary-mask规则与现行timer deletion ordering。在
   `PT-THREAD-ID-CUTOVER` 前 current contract 与 unsupported ABI 均不变。
-- **Validation claim：** owner-local KUnit、RV64/LA64 release build/KUnit、raw syscall oracle与
-  source/lock-order audit共同构成语义验收；Vim只作为集成smoke，不能替代raw证据。
+- **Validation claim：** owner-local KUnit、RV64 release build/KUnit、RFC专属 raw syscall oracle与
+  source/lock-order audit共同构成语义验收；raw oracle必须能排除shared fallback、确认target admission已经
+  关闭，并比较dequeue-finalized `si_overrun`/`timer_getoverrun()`；LA64 runtime本轮按维护者授权为
+  `Not Run / waived`，不伪写成通过。Vim只作为集成smoke，不能替代raw证据。
 - **Stop conditions：** target/owner/handoff/errno/cleanup改变，出现维持`Task`可执行/成员状态的强lifetime、expiry TID lookup、
-  private/shared双重pending、Signal私有表示外泄、锁内owner callback，或需要降低双架构runtime强度时，
-  停止并回到RFC review/Target Renegotiation。
+  private/shared双重pending、Signal私有表示外泄或锁内owner callback时，停止并回到RFC review/Target Renegotiation。
 
 用户已在2026-08-05授权依次完成Gate 0--3。后续Gate虽然已获授权，但只能在前一Gate完成验证、review与
 独立commit后进入；不得跳跃或并行推进。
@@ -70,6 +71,13 @@ positive target/lifecycle语义只标记Ready for Gate 2，不在Gate 0宣称已
 - 两个测试盘均在Gate 0 marker之后因缺少`/musl`/`/glibc` static BusyBox退出；该外部fixture不参与Gate 0
   acceptance，未把其后环境/LTP阶段写成已运行。全部mdBook检查均按用户指令跳过。
 - production仍不接受`SIGEV_THREAD_ID`，Signal/timer core与current contract未变。
+
+### Gate 0 Post-closure Oracle Correction — 2026-08-06
+
+Gate 2 pre-cutover review确认，同时释放target与decoy进入`rt_sigtimedwait`不能证明exact private route：错误的
+shared publication仍可能被target竞争取得而让decoy timeout。Gate 0没有ABI或contract cutover，因此保持
+Closed；其positive oracle设计由Gate 2替换为“decoy独占expiry窗口、target延后fetch”。这项更正不降低
+Gate 0已验证的layout/unsupported baseline，也不能被既有双wait结果当作Gate 2证据。
 
 ## Gate 1 — Task-private timer signal protocol
 
@@ -127,11 +135,12 @@ source/lock-order audit证明无Signal -> timer -> Signal回环。按用户指�
 
 ## Gate 2 — POSIX timer integration 与 PT-THREAD-ID-CUTOVER
 
-**状态：** Authorized / Waiting for Gate 1
+**状态：** Closed — 2026-08-06
 **Purpose：** 解码target TID，把Gate 1 capability接入`timer_create()`和timer lifecycle，并以双架构
 raw/Vim证据原子切换两项current contract。
-**Prerequisites：** Gate 0/1关闭；PT-TID-001--007均有source/KUnit证据；raw oracle已能在两架构
-识别exact target、errno和lifecycle状态，Vim smoke case可重复运行。
+**Prerequisites：** Gate 0/1关闭；PT-TID-001--007的source/KUnit baseline已建立；raw oracle入口与Vim
+smoke case可重复运行。positive exact-route、exit-stabilization与nonzero-overrun oracle必须按本Gate
+pre-cutover review更正后才能成为cutover证据。
 **Protected Boundary：** timer仍为creator `ThreadGroup`所有；target必须是caller同组可注册member；无
 retarget fallback或`Task`强lifetime；`SIGEV_SIGNAL`、raw `SIGEV_THREAD`、delete/exec/last-member ordering与现行
 timekeeper/soft-timer contract不变。
@@ -144,6 +153,12 @@ timekeeper/soft-timer contract不变。
 - POSIX timer notification表示消费task-private registration capability；expiry、periodic overrun、
   typed dequeue/flush、replace/disarm/delete、exec/last-member exit与target-exit completion都按
   generation/episode identity闭合。
+- live periodic occurrence在dequeue时必须先完成timer-owner handoff：把pending期间错过的周期合入同一个
+  delivery提交，同时更新即将copyout/frame的`siginfo.si_overrun`和`timer_getoverrun()`最近交付snapshot，
+  再执行physical rearm。没有replace/republication的单episode中两者必须是相同非零钳位值；只更新timer
+  snapshot而保留enqueue-time siginfo不满足Linux可见语义。
+- ignored expiry不产生occurrence、不提交最近交付snapshot，但必须保留timer-local overrun accrual并立即
+  periodic rearm；恢复disposition后的首次真实dequeue才把累计值暴露到`si_overrun`和最近交付snapshot。
 - target退出时，未到期arm继续到failed exact expiry；pending occurrence被flush且不产生新物理arm；已经
   dequeue/rearm的arm继续到failed exact expiry。periodic timer在flush/failed send后保留Linux
   `timer_gettime()`未来投影但没有物理request；stale callback不影响新generation/reused ID。
@@ -151,28 +166,55 @@ timekeeper/soft-timer contract不变。
   completion不得rearm已删除timer。
 - 保留`SIGEV_THREAD`的`EOPNOTSUPP` notice并注明这是相对Linux raw syscall的有意差异；更新
   `SIGEV_THREAD_ID`诊断，使unsupported、invalid与runtime target-exit可区分。
-- 在同一cutover中Refine `POSIX-TIMER-001`与`SIGNAL-PENDING-001`，记录旧/新规则、source/KUnit、
-  RV64/LA64 raw oracle和Vim smoke证据。
-- 执行 `ANE-20260606-RT-SIGTIMEDWAIT-ASYNC-WAITED-SIGNAL-EINTR` 要求的precheck-after-arrival定向
-  用例以及LTP `rt_sigtimedwait01`/`sigtimedwait01`；只有满足该项Exit Condition后才从register移除，
-  否则Gate 2保持Not Cut Over。
+- 在同一cutover中Refine `POSIX-TIMER-001`与`SIGNAL-PENDING-001`，记录旧/新规则、source/KUnit与
+  RV64 RFC专属 raw oracle；通用 LTP 及其清理路径不属于本 RFC 验收。
 
-**Validation：** 双架构release build/KUnit与source audit证明physical request/outcome转换；raw oracle覆盖
-target/decoy同步wait、`SI_TIMER`字段、同号多timer、
+**Validation：** RV64 release build/KUnit与source audit证明physical request/outcome转换；raw oracle覆盖
+target/decoy均blocked、decoy独占expiry窗口且target延后fetch的exact-route、`SI_TIMER`字段、同号多timer、
 blocked/unblocked、ignored/control signal、unknown/mixed notify、invalid/foreign TID、concurrent-exit
-closure、dequeue-vs-exit-flush的`timer_getoverrun()`、target-exit三阶段的可见投影、无retarget与无后续
+closure、以新registration稳定`EINVAL`确认admission关闭、dequeue-vs-exit-flush的`timer_getoverrun()`、
+无replace/republication的延迟多周期dequeue中`si_overrun`与最近交付snapshot取得相同非零值、
+target-exit三阶段的可见投影、无retarget与无后续
 delivery、ignored后恢复disposition、TID reuse、delete后queued delivery、同号ordinary task-directed realtime
-arrival ordering、periodic overrun与delete/replace/in-flight竞态；Vim smoke在两架构均不再出现`E1286`。
-普通signal、`SIGEV_SIGNAL`、exec/exit与
-timer regression保持通过。按用户指令不运行mdBook。
+arrival ordering、ignored期间多周期accrual延迟到恢复后的首次delivery、periodic overrun与
+delete/replace/in-flight竞态；RV64 Vim smoke不再出现`E1286`。通用 signal-wait LTP 不作为本 RFC 验收。
+LA64 runtime按维护者授权记为`Not Run / waived`。按用户指令不运行mdBook。
 **Cutover：** `PT-THREAD-ID-CUTOVER` 原子 Refine `POSIX-TIMER-001` 与 `SIGNAL-PENDING-001`。任何一项
 证据缺失时两项都保持旧current contract，不能部分cut over。
-**Stop / Exit：** code、两项contract和证据在同一可审查状态下切换后关闭。若只能接受ABI但无法证明exact
-delivery/cleanup，或Vim仅因隐藏错误继续运行，保持Not Cut Over并回到review。
+**Stop / Exit：** code、两项contract和RV64 RFC专属证据已在同一可审查状态下切换；LA64 waiver与通用LTP
+不作为本 RFC closure blocker。Gate 2 已关闭。
+
+### Gate 2 Pre-cutover Source Review — 2026-08-06
+
+本地固定 Linux 6.6.32 source确认target/owner方向成立，但当前Gate 2 diff和证据仍有以下blocker，不能执行
+`PT-THREAD-ID-CUTOVER`：
+
+- `dequeue_signal()` 在Signal锁外调用`posixtimer_rearm()`，后者同时更新timer最近交付snapshot和待交付
+  `info->si_overrun`。当前Anemone completion只携带immutable identity/reason；timer owner能计算新的
+  `last_overrun`，却没有路径修正已经取出的siginfo。必须闭合双向窄handoff，并增加非零delayed-dequeue oracle。
+- Linux ignored expiry的`hrtimer_forward()`继续累加`it_overrun`，直到后续真实dequeue才提交snapshot。当前
+  Anemone thread-specific ignored completion清除pending episode并立即rearm，但没有保留该accrual；必须补齐
+  timer-owner累计，并用“delivery前snapshot不变、恢复后首次delivery为非零”的oracle证明。
+- 当前raw exact-route case让target与decoy同时等待，shared fallback仍可能由target竞争取得；两者必须保持
+  signal blocked，target延后wait，让decoy在expiry窗口成为唯一shared consumer。当前exit case的`done`发生在
+  `SYS_exit`前，固定20ms不能证明registration admission已经关闭；必须改用type-4 create稳定`EINVAL`的
+  lifecycle probe。
+以上为 pre-cutover review 历史记录；前三项已由当前代码和 RFC 专属 RV64 oracle 修复，通用
+通用 LTP 与外围清理路径不属于本 RFC，未写入本 RFC closure。
+
+### Gate 2 Closure — 2026-08-06
+
+- 板上运行通过，480/480 KUnit 通过；RFC 专属 native oracle 通过 exact
+  target/decoy、strict notify/TID validation、dequeue-finalized nonzero overrun、ignored recovery、target-exit
+  三阶段、periodic projection 与 delete-after-queue。
+- source/lock-order audit确认private occurrence唯一由exact task pending owner持有，timer只通过typed handoff
+  接收completion；没有TID expiry lookup、shared fallback、强Task生命周期或锁内owner callback。
+- `PT-THREAD-ID-CUTOVER` 已原子 Refine `POSIX-TIMER-001` 与 `SIGNAL-PENDING-001`。LA64 runtime由维护者明确
+  waiver，记为`Not Run / waived`；通用 LTP 及 zombie 清理路径不属于本 RFC。
 
 ## Gate 3 — Final audit 与 RFC closure
 
-**状态：** Authorized / Waiting for Gate 2
+**状态：** Incomplete / Not Run — explicitly deferred
 **Purpose：** 对cutover后的live实现做最终架构摩擦、lifecycle与双架构回归审计，并在无blocking finding时
 关闭RFC。
 **Prerequisites：** Gate 2关闭且`PT-THREAD-ID-CUTOVER`真实生效。
@@ -185,8 +227,8 @@ Signal重构；发现target/owner/ABI/acceptance变化必须停止，不能借cl
   不维持`Task`可执行/成员生命周期；不存在第二份pending truth、shared fallback、Signal私有表示泄漏或
   锁内owner callback。
 - 审计create/exit admission、membership detach、target-exit三阶段、periodic `timer_gettime()`投影、timer delete后queued
-  delivery、ordinary/同步fetch、typed dequeue/flush、pending/reserved retirement与generation callback
-  顺序，确认cleanup不依赖`Task::Drop`偶然发生。
+  delivery、ordinary/同步fetch、typed dequeue/flush、dequeue-finalized siginfo/snapshot、ignored accrual、
+  pending/reserved retirement与generation callback顺序，确认cleanup不依赖`Task::Drop`偶然发生。
 - 复跑双架构raw/Vim与普通signal/POSIX timer回归；将实际验证、Not Run边界、仍开放问题和有证据的
   Architecture Friction写回唯一closure证据。
 - 更新RFC为Closed；若发现当前target内缺陷则保持打开并修复，不登记为accepted limitation。
@@ -194,5 +236,5 @@ Signal重构；发现target/owner/ABI/acceptance变化必须停止，不能借cl
 **Validation：** bounded periodic engineering audit、source/lock-order review、RV64/LA64最终runtime matrix、
 `git diff --check`；按用户指令不运行mdBook。
 **Cutover：** None；本Gate只核验Gate 2已经生效的contract，不重复cutover。
-**Stop / Exit：** Apollyon/Keter立即停止closure并报告current diff、模型偏差与所需owner/RFC决定；Euclid可在
-不改变边界时修复或带证据报告。所有acceptance满足且无blocking finding后关闭RFC并停止。
+**Stop / Exit：** 本 Gate 未执行；RFC 不因 Gate 2 cutover 自动标记为最终 closure。需要新的维护者授权后，
+完成 final audit、architecture-friction scan 和最终 closure write-back。

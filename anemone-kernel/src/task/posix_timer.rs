@@ -7,8 +7,8 @@
 use crate::{
     prelude::*,
     task::sig::{
-        PosixTimerSignalCallback, PosixTimerSignalEnqueue, PosixTimerSignalIdentity,
-        PosixTimerSignalRegistration, SigNo,
+        PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
+        PosixTimerSignalIdentity, PosixTimerSignalRegistration, SigNo,
     },
     time::{
         monotonic_ns, realtime_ns,
@@ -52,11 +52,22 @@ impl PosixTimerTimeline {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum PosixTimerNotification {
     None,
     DefaultSignal,
-    Signal { no: SigNo, sigval: u64 },
+    Signal {
+        no: SigNo,
+        sigval: u64,
+    },
+    /// Syscall-transaction snapshot used only to reserve the private slot.
+    /// The published timer retains the registration's weak exact identity,
+    /// not this `Task` reference.
+    ThreadSignal {
+        target: Arc<Task>,
+        no: SigNo,
+        sigval: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -223,7 +234,8 @@ impl Drop for PreparedPosixTimer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NotificationKind {
     None,
-    Signal,
+    SharedSignal,
+    ThreadSignal,
 }
 
 #[derive(Debug)]
@@ -245,6 +257,10 @@ struct PosixTimerInner {
     next_episode: u64,
     pending: Option<PendingEpisode>,
     last_overrun: i32,
+    /// Actual expirations ignored while SIGEV_THREAD_ID had SIG_IGN.
+    /// This is accrual, not a delivered snapshot; a later real occurrence
+    /// transfers it to that occurrence before dequeue commits it.
+    ignored_expirations: u64,
 }
 
 #[derive(Debug)]
@@ -282,6 +298,7 @@ impl PosixTimer {
                 next_episode: 0,
                 pending: None,
                 last_overrun: 0,
+                ignored_expirations: 0,
             }),
         }
     }
@@ -357,6 +374,7 @@ impl PosixTimer {
                 .checked_add(1)
                 .expect("POSIX timer generation exhausted");
             inner.pending = None;
+            inner.ignored_expirations = 0;
             let old_request = inner.arm.as_mut().and_then(|arm| arm.request.take());
             inner.arm = new_target.map(|target_ns| {
                 let request = self.schedule(inner.generation, timeline, target_ns);
@@ -418,13 +436,15 @@ impl PosixTimer {
                     return;
                 };
                 arm.target_ns = next_target;
-                arm.request = Some(self.schedule(generation, arm.timeline, next_target));
+                if self.notification_kind != NotificationKind::ThreadSignal {
+                    arm.request = Some(self.schedule(generation, arm.timeline, next_target));
+                }
                 inner.arm = Some(arm);
             }
 
             match self.notification_kind {
                 NotificationKind::None => return,
-                NotificationKind::Signal => {
+                NotificationKind::SharedSignal | NotificationKind::ThreadSignal => {
                     let pending = if let Some(pending) = inner.pending.as_mut() {
                         assert_eq!(pending.generation, generation);
                         pending.overrun = pending.overrun.saturating_add(expirations);
@@ -434,10 +454,17 @@ impl PosixTimer {
                             .next_episode
                             .checked_add(1)
                             .expect("POSIX timer notification episode exhausted");
+                        let ignored_expirations =
+                            if self.notification_kind == NotificationKind::ThreadSignal {
+                                core::mem::take(&mut inner.ignored_expirations)
+                            } else {
+                                0
+                            };
                         let pending = PendingEpisode {
                             generation,
                             episode: inner.next_episode,
-                            overrun: expirations.saturating_sub(1),
+                            overrun: ignored_expirations
+                                .saturating_add(expirations.saturating_sub(1)),
                         };
                         inner.pending = Some(pending);
                         pending
@@ -463,11 +490,113 @@ impl PosixTimer {
         };
         match outcome {
             PosixTimerSignalEnqueue::Queued | PosixTimerSignalEnqueue::AlreadyPending => {},
-            PosixTimerSignalEnqueue::Ignored | PosixTimerSignalEnqueue::Consumed => {
-                self.finish_unqueued_episode(notification);
+            PosixTimerSignalEnqueue::Ignored => match self.notification_kind {
+                NotificationKind::SharedSignal => self.finish_unqueued_episode(notification),
+                NotificationKind::ThreadSignal => {
+                    self.finish_thread_unqueued_episode(notification, false)
+                },
+                NotificationKind::None => unreachable!(),
             },
-            PosixTimerSignalEnqueue::TargetExited => self.stop_after_target_exit(generation),
+            PosixTimerSignalEnqueue::Consumed => match self.notification_kind {
+                NotificationKind::SharedSignal => self.finish_unqueued_episode(notification),
+                NotificationKind::ThreadSignal => {
+                    self.finish_thread_unqueued_episode(notification, true)
+                },
+                NotificationKind::None => unreachable!(),
+            },
+            PosixTimerSignalEnqueue::TargetExited => match self.notification_kind {
+                NotificationKind::SharedSignal => self.stop_after_target_exit(generation),
+                NotificationKind::ThreadSignal => self.stop_after_thread_target_exit(generation),
+                NotificationKind::None => unreachable!(),
+            },
         }
+    }
+
+    fn finish_thread_unqueued_episode(self: &Arc<Self>, expected: PendingEpisode, commit: bool) {
+        let mut inner = self.inner.lock();
+        if inner.deleted || inner.pending != Some(expected) {
+            return;
+        }
+        if commit {
+            inner.last_overrun = clamp_overrun(expected.overrun);
+        } else if self.notification_kind == NotificationKind::ThreadSignal {
+            // `expected.overrun` excludes the expiry that created this
+            // ignored episode. Accumulating actual expirations avoids storing
+            // Linux's internal -1 baseline as a second state variable.
+            inner.ignored_expirations = inner
+                .ignored_expirations
+                .saturating_add(expected.overrun.saturating_add(1));
+        }
+        inner.pending = None;
+        self.rearm_thread_periodic_locked(&mut inner);
+    }
+
+    fn thread_signal_completed(
+        self: &Arc<Self>,
+        identity: PosixTimerSignalIdentity,
+        reason: PosixTimerSignalCompletion,
+    ) -> Option<i32> {
+        let mut inner = self.inner.lock();
+        if inner.deleted || inner.generation != identity.generation() {
+            return None;
+        }
+        let Some(pending) = inner.pending else {
+            return None;
+        };
+        if pending.episode != identity.episode() || identity.timer_id() != self.id {
+            return None;
+        }
+
+        if reason == PosixTimerSignalCompletion::Flushed {
+            // Signal removed the occurrence without userspace consumption.
+            // Keep only the periodic projection; a flush cannot commit overrun
+            // or create the next physical request.
+            inner.pending = None;
+            return None;
+        }
+
+        let mut delivered_overrun = pending.overrun;
+        let mut overflowed = false;
+        if let Some(arm) = inner.arm.as_mut() {
+            assert!(
+                arm.request.is_none(),
+                "thread-directed timer rearmed before signal dequeue"
+            );
+            if arm.interval_ns != 0 {
+                let now_ns = arm.timeline.now_ns();
+                if now_ns >= arm.target_ns {
+                    let periods = periods_through(arm.target_ns, arm.interval_ns, now_ns);
+                    delivered_overrun = delivered_overrun.saturating_add(periods);
+                    if let Some(target_ns) = advance_target(arm.target_ns, arm.interval_ns, periods)
+                    {
+                        arm.target_ns = target_ns;
+                    } else {
+                        overflowed = true;
+                    }
+                }
+            }
+        }
+        if overflowed {
+            inner.arm = None;
+        }
+        inner.last_overrun = clamp_overrun(delivered_overrun);
+        inner.pending = None;
+        self.rearm_thread_periodic_locked(&mut inner);
+        Some(inner.last_overrun)
+    }
+
+    fn rearm_thread_periodic_locked(self: &Arc<Self>, inner: &mut PosixTimerInner) {
+        let Some(arm) = inner.arm.as_mut() else {
+            return;
+        };
+        if arm.interval_ns == 0 {
+            return;
+        }
+        assert!(
+            arm.request.is_none(),
+            "thread-directed periodic timer already has a request"
+        );
+        arm.request = Some(self.schedule(inner.generation, arm.timeline, arm.target_ns));
     }
 
     fn finish_unqueued_episode(&self, expected: PendingEpisode) {
@@ -510,6 +639,22 @@ impl PosixTimer {
         }
     }
 
+    fn stop_after_thread_target_exit(&self, generation: u64) {
+        let mut inner = self.inner.lock();
+        if inner.deleted || inner.generation != generation {
+            return;
+        }
+        // A periodic arm remains as projection-only state. There is no physical
+        // request after failed exact delivery, and a one-shot has no arm here.
+        if let Some(arm) = inner.arm.as_ref() {
+            assert!(
+                arm.request.is_none(),
+                "failed thread-directed delivery retained a physical request"
+            );
+        }
+        inner.pending = None;
+    }
+
     fn delete(&self) {
         let request = {
             let mut inner = self.inner.lock();
@@ -543,28 +688,64 @@ impl ThreadGroup {
         notification: PosixTimerNotification,
     ) -> Result<PreparedPosixTimer, SysError> {
         let (id, reservation) = self.posix_timers.table.lock().reserve()?;
-        let (kind, signal) = match notification {
-            PosixTimerNotification::None => (NotificationKind::None, None),
-            PosixTimerNotification::DefaultSignal => {
-                (NotificationKind::Signal, Some((SigNo::SIGALRM, id as u64)))
+        let kind = match &notification {
+            PosixTimerNotification::None => NotificationKind::None,
+            PosixTimerNotification::DefaultSignal | PosixTimerNotification::Signal { .. } => {
+                NotificationKind::SharedSignal
             },
-            PosixTimerNotification::Signal { no, sigval } => {
-                (NotificationKind::Signal, Some((no, sigval)))
-            },
+            PosixTimerNotification::ThreadSignal { .. } => NotificationKind::ThreadSignal,
         };
         let timer = Arc::new(PosixTimer::new(id, clock, kind));
-        if let Some((no, sigval)) = signal {
-            let weak_timer = Arc::downgrade(&timer);
-            let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, _reason| {
-                if let Some(timer) = weak_timer.upgrade() {
-                    // The current shared SIGEV_SIGNAL route predates typed
-                    // completion and preserves its existing dequeue/flush
-                    // behavior in Gate 1. Gate 2 consumes the reason only for
-                    // the new exact-task notification mode.
-                    timer.signal_delivered(identity);
-                }
-            });
-            match PosixTimerSignalRegistration::try_new(self, no, id, sigval, callback) {
+        let registration = match notification {
+            PosixTimerNotification::None => None,
+            PosixTimerNotification::DefaultSignal => {
+                let weak_timer = Arc::downgrade(&timer);
+                let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, _reason| {
+                    if let Some(timer) = weak_timer.upgrade() {
+                        timer.signal_delivered(identity);
+                    }
+                    None
+                });
+                Some(PosixTimerSignalRegistration::try_new(
+                    self,
+                    SigNo::SIGALRM,
+                    id,
+                    id as u64,
+                    callback,
+                ))
+            },
+            PosixTimerNotification::Signal { no, sigval } => {
+                let weak_timer = Arc::downgrade(&timer);
+                let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, _reason| {
+                    if let Some(timer) = weak_timer.upgrade() {
+                        timer.signal_delivered(identity);
+                    }
+                    None
+                });
+                Some(PosixTimerSignalRegistration::try_new(
+                    self, no, id, sigval, callback,
+                ))
+            },
+            PosixTimerNotification::ThreadSignal { target, no, sigval } => {
+                let weak_timer = Arc::downgrade(&timer);
+                let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, reason| {
+                    weak_timer
+                        .upgrade()
+                        .and_then(|timer| timer.thread_signal_completed(identity, reason))
+                });
+                Some(
+                    PosixTimerSignalRegistration::try_new_private(
+                        &target, no, id, sigval, callback,
+                    )
+                    .map_err(|error| match error {
+                        SysError::NoSuchProcess => SysError::InvalidArgument,
+                        other => other,
+                    }),
+                )
+            },
+        };
+        if let Some(registration) = registration {
+            match registration {
                 Ok(registration) => {
                     timer.signal_registration.lock().replace(registration);
                 },
@@ -783,6 +964,157 @@ mod kunits {
     }
 
     #[kunit]
+    fn thread_completion_distinguishes_dequeue_from_flush() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let timer = Arc::new(PosixTimer::new(
+            51,
+            PosixTimerClock::Monotonic,
+            NotificationKind::ThreadSignal,
+        ));
+        let target_ns = monotonic_ns().saturating_add(NSEC_PER_SEC);
+        {
+            let mut inner = timer.inner.lock();
+            inner.generation = 4;
+            inner.arm = Some(PosixTimerArm {
+                timeline: PosixTimerTimeline::Monotonic,
+                target_ns,
+                interval_ns: NSEC_PER_SEC,
+                request: None,
+            });
+            inner.pending = Some(PendingEpisode {
+                generation: 4,
+                episode: 7,
+                overrun: 3,
+            });
+            inner.last_overrun = 11;
+        }
+
+        timer.thread_signal_completed(
+            PosixTimerSignalIdentity::new(51, 4, 7),
+            PosixTimerSignalCompletion::Flushed,
+        );
+        {
+            let inner = timer.inner.lock();
+            assert!(inner.pending.is_none());
+            assert_eq!(inner.last_overrun, 11);
+            assert!(inner.arm.as_ref().unwrap().request.is_none());
+        }
+        assert_eq!(queued_timer_count(cpu), baseline);
+
+        timer.inner.lock().pending = Some(PendingEpisode {
+            generation: 4,
+            episode: 8,
+            overrun: 5,
+        });
+        timer.thread_signal_completed(
+            PosixTimerSignalIdentity::new(51, 4, 8),
+            PosixTimerSignalCompletion::Dequeued,
+        );
+        {
+            let inner = timer.inner.lock();
+            assert!(inner.pending.is_none());
+            assert_eq!(inner.last_overrun, 5);
+            assert!(inner.arm.as_ref().unwrap().request.is_some());
+        }
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        timer.delete();
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
+
+    #[kunit]
+    fn thread_unqueued_outcomes_control_overrun_commit() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let timer = Arc::new(PosixTimer::new(
+            52,
+            PosixTimerClock::Monotonic,
+            NotificationKind::ThreadSignal,
+        ));
+        let target_ns = monotonic_ns().saturating_add(NSEC_PER_SEC);
+        {
+            let mut inner = timer.inner.lock();
+            inner.generation = 6;
+            inner.arm = Some(PosixTimerArm {
+                timeline: PosixTimerTimeline::Monotonic,
+                target_ns,
+                interval_ns: NSEC_PER_SEC,
+                request: None,
+            });
+            inner.pending = Some(PendingEpisode {
+                generation: 6,
+                episode: 9,
+                overrun: 7,
+            });
+            inner.last_overrun = 2;
+        }
+        let ignored = timer.inner.lock().pending.unwrap();
+        timer.finish_thread_unqueued_episode(ignored, false);
+        let ignored_request = {
+            let mut inner = timer.inner.lock();
+            assert_eq!(inner.last_overrun, 2);
+            assert_eq!(inner.ignored_expirations, 8);
+            assert!(inner.arm.as_ref().unwrap().request.is_some());
+            let request = inner.arm.as_mut().unwrap().request.take().unwrap();
+            // The next block constructs a standalone Consumed episode instead
+            // of passing through expiry, which would transfer this accrual.
+            inner.ignored_expirations = 0;
+            inner.pending = Some(PendingEpisode {
+                generation: 6,
+                episode: 10,
+                overrun: 8,
+            });
+            request
+        };
+        assert!(cancel_timer_event(&ignored_request));
+        let consumed = timer.inner.lock().pending.unwrap();
+        timer.finish_thread_unqueued_episode(consumed, true);
+        {
+            let inner = timer.inner.lock();
+            assert_eq!(inner.last_overrun, 8);
+            assert!(inner.arm.as_ref().unwrap().request.is_some());
+        }
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        timer.delete();
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
+
+    #[kunit]
+    fn thread_target_exit_keeps_periodic_projection_only() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let timer = Arc::new(PosixTimer::new(
+            53,
+            PosixTimerClock::Monotonic,
+            NotificationKind::ThreadSignal,
+        ));
+        let now_ns = monotonic_ns();
+        {
+            let mut inner = timer.inner.lock();
+            inner.generation = 8;
+            inner.arm = Some(PosixTimerArm {
+                timeline: PosixTimerTimeline::Monotonic,
+                target_ns: now_ns.saturating_sub(1),
+                interval_ns: NSEC_PER_SEC,
+                request: None,
+            });
+            inner.pending = Some(PendingEpisode {
+                generation: 8,
+                episode: 11,
+                overrun: 0,
+            });
+        }
+        timer.stop_after_thread_target_exit(8);
+        let setting = timer.setting_snapshot();
+        assert_eq!(setting.interval_ns, NSEC_PER_SEC);
+        assert!(setting.value_ns > 0);
+        let inner = timer.inner.lock();
+        assert!(inner.pending.is_none());
+        assert!(inner.arm.as_ref().unwrap().request.is_none());
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
+
+    #[kunit]
     fn snapshot_derives_future_period_without_mutating_schedule() {
         let inner = PosixTimerInner {
             generation: 1,
@@ -796,6 +1128,7 @@ mod kunits {
             next_episode: 0,
             pending: None,
             last_overrun: 0,
+            ignored_expirations: 0,
         };
         assert_eq!(
             setting_snapshot_at(&inner, 139),

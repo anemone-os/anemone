@@ -891,6 +891,7 @@ mod kunits {
         let callback_log = log.clone();
         let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |identity, reason| {
             callback_log.lock().push((identity, reason));
+            None
         });
         (log, callback)
     }
@@ -1073,6 +1074,7 @@ mod kunits {
             if identity.generation() as usize != callback_generation.load(Ordering::SeqCst) {
                 callback_count.fetch_add(1, Ordering::SeqCst);
             }
+            None
         });
         let slot = register_timer(&mut pending, SigNo::SIGUSR1, 19, 0, callback);
         assert_eq!(

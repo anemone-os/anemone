@@ -3,7 +3,7 @@
 **状态：** Accepted
 **修订：** R0
 **负责人：** doruche, Codex
-**最后更新：** 2026-08-05
+**最后更新：** 2026-08-06
 **领域：** time / POSIX timer / task / signal / syscall ABI
 **影响契约：** Refine [`POSIX-TIMER-001`](../../contracts/time/posix-timer.md#posix-timer-001--threadgroup唯一拥有timer对象id与通知episode) 与
 [`SIGNAL-PENDING-001`](../../contracts/signal/pending-routing.md#signal-pending-001--directed-occurrence-只进入对应-pending-owner)
@@ -51,6 +51,24 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
 `SIGEV_THREAD` 并按 process-directed signal 处理；本 RFC 明确保留 Anemone 的 unsupported 边界，不把它
 伪装成 `SIGEV_THREAD_ID`。
 
+`posix_timer_fn()` 的 ignored 路径虽然不提交delivery snapshot，但每次`hrtimer_forward()`仍累计
+`it_overrun`；恢复非ignored disposition后的第一次真实dequeue才把该累计值提交到`si_overrun`与最近交付
+snapshot。因此“ignored立即rearm”不能实现成清空本轮累计；在真实delivery前，`timer_getoverrun()`仍保持
+上一次delivery值。依据见`xref:linux-6.6.32:kernel/time/posix-timers.c#posix_timer_fn`与
+`xref:linux-6.6.32:kernel/time/posix-timers.c#posixtimer_rearm`。
+
+Linux 的 dequeue 还有一个容易被 owner handoff 隐藏的可见要求：`dequeue_signal()` 先从 private/shared
+pending 取出 `kernel_siginfo`，再在 signal lock 外调用 `posixtimer_rearm()`；后者推进 periodic target，
+同时更新 timer 的最近交付 overrun snapshot 和即将暴露给 userspace 的 `info->si_overrun`。因此 Anemone
+不必复制 Linux 的 `sigqueue` 或锁实现，但 live periodic timer 的一次 dequeue 必须在 siginfo copyout/frame
+之前得到 dequeue-finalized overrun，让 `si_overrun` 与 `timer_getoverrun()` 观察同一次delivery提交；Linux
+允许`si_overrun`再叠加already-pending sigqueue base count，因此本RFC只在没有replace/republication的受控
+单episode中要求两者数值相等。依据见
+`xref:linux-6.6.32:kernel/signal.c#dequeue_signal` 与
+`xref:linux-6.6.32:kernel/signal.c#send_sigqueue`、
+`xref:linux-6.6.32:kernel/time/posix-timers.c#timer_overrun_to_int`、
+`xref:linux-6.6.32:kernel/time/posix-timers.c#posixtimer_rearm`。
+
 ## 目标
 
 - `timer_create()` 接受 native 64-bit `SIGEV_THREAD_ID`，解析 union 中的 target TID，
@@ -94,7 +112,10 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
   admission 同时仍有效时建立 slot；timer expiry 把 immutable timer identity 交给该 slot；
   pending publication 后 Signal 拥有 occurrence，fetch/flush/exit retirement 在释放 Signal
   guard 后把同一 identity与typed `Dequeued`/`Flushed` reason回告timer owner。普通delivery和同步wait
-  dequeue会提交最近交付overrun；flush只撤销未交付episode，不能伪装成userspace delivery。
+  dequeue必须在siginfo对userspace可见前完成timer-owner handoff：live periodic timer把等待期间新增的
+  expirations合入delivery overrun，dequeued occurrence的`si_overrun`与timer最近交付snapshot在同一次
+  handoff中提交，然后才rearm；没有replace/republication的单episode中两者必须相等。flush只撤销未交付
+  episode，不能伪装成userspace delivery。
 - **Failure / cancellation / cleanup：** 稳定的无效/异组 TID，或 Anemone target 已关闭 admission
   时，create 返回 `EINVAL`且不发布 timer ID；并发 target exit 可以在 registration commit 前失败，
   也可以先成功绑定原 identity，但不能绑定后来复用相同 TID 的 task。目标 task 退出时必须先关闭新
@@ -111,6 +132,12 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
 - native RV64/LA64 `SigEvent` 保持 64 bytes、8-byte alignment；`sigev_value`、
   `sigev_signo`、`sigev_notify` 与 union 的 offset 分别保持 0、8、12、16。target TID 是 union
   offset 16 的首个 `i32`，必须通过 ABI accessor 解码，不能让 raw union 布局进入 core owner。
+- 成功 notification 的 `siginfo` 保持 `si_code == SI_TIMER`，`si_value` 等于 create 时的
+  `sigev_value`，`si_tid` 是 timer ID而不是 target TID。periodic occurrence 的`si_overrun`必须包含从
+  首次enqueue到实际dequeue之间错过且可归属于该delivery的周期，并按`INT_MAX`钳位；当timer在dequeue时
+  仍有效，`timer_getoverrun()`必须读取同一次dequeue提交的最近交付snapshot。在没有timer replace或
+  already-pending republication的受控单episode中，两者数值必须相等；不得据此抹掉Linux允许siginfo叠加
+  occurrence-local base count的边界。
 - `sigev_notify == SIGEV_THREAD_ID (4)` 时仍按现行 signal-number 规则校验
   `sigev_signo`。稳定的 target TID 不存在、不属于调用者 `ThreadGroup`，或 admission 已关闭时返回
   `EINVAL`。并发 exit 的 success/`EINVAL` race 结果不承诺固定时点，但成功结果必须绑定原 identity。
@@ -132,8 +159,8 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
   | Outcome | Pending / delivery commit | Periodic physical rearm |
   | --- | --- | --- |
   | `Queued` / `AlreadyPending` | Signal 持有或更新 occurrence；等待 dequeue | 不立即 rearm |
-  | `Dequeued` | 提交最近交付 overrun | Signal guard 外 rearm |
-  | `Ignored` | 不产生 occurrence，不更新最近交付 overrun | expiry 路径立即 rearm；恢复 disposition 后必须可再次通知 |
+  | `Dequeued` | 在userspace可见前提交finalized `si_overrun`与最近交付snapshot | Signal guard 外 rearm |
+  | `Ignored` | 不产生 occurrence、不更新最近交付snapshot，但保留本轮overrun accrual | expiry 路径立即 rearm；恢复 disposition 后首次delivery提交累计值 |
   | `Consumed` | 按 `JOBCTL-SIGNAL-001` 提交 `SIGSTOP` control consumption 与对应 overrun | 立即继续 periodic arm |
   | `Flushed` / `TargetExited` | 不提交最近交付 overrun | 不 rearm |
 
@@ -146,8 +173,8 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `POSIX-TIMER-001` | Refine | Timer 由 `ThreadGroup` 拥有，通知只支持 none 或 shared process-directed `SI_TIMER` | Timer owner 不变；notification target扩展为shared process-directed或exact task-directed；queued等待dequeue rearm，ignored与scoped consumed立即继续periodic arm，flush/target-exited不rearm；target exit按未到期、pending/flush、已dequeue/rearm三阶段闭合，failed send后保持Linux `timer_gettime()`投影 | `PT-THREAD-ID-CUTOVER` |
-| `SIGNAL-PENDING-001` | Refine | POSIX timer registration slot 只在 shared pending owner 中 | exact task的private pending owner可持有per-registration `SI_TIMER` slot，由普通delivery或`rt_sigtimedwait`消费，锁外回告typed dequeue/flush，并保持ordinary standard signal合并与realtime arrival ordering不变 | `PT-THREAD-ID-CUTOVER` |
+| `POSIX-TIMER-001` | Refine | Timer 由 `ThreadGroup` 拥有，通知只支持 none 或 shared process-directed `SI_TIMER` | Timer owner 不变；notification target扩展为shared process-directed或exact task-directed；queued等待dequeue rearm，dequeue在userspace可见前finalize overrun，ignored保留accrual并立即继续periodic arm，flush/target-exited不rearm；target exit按未到期、pending/flush、已dequeue/rearm三阶段闭合，failed send后保持Linux `timer_gettime()`投影 | `PT-THREAD-ID-CUTOVER` |
+| `SIGNAL-PENDING-001` | Refine | POSIX timer registration slot 只在 shared pending owner 中 | exact task的private pending owner可持有per-registration `SI_TIMER` slot，由普通delivery或`rt_sigtimedwait`消费；锁外typed dequeue handoff必须在copyout/frame前取得finalized overrun，flush不提交snapshot，并保持ordinary standard signal合并与realtime arrival ordering不变 | `PT-THREAD-ID-CUTOVER` |
 
 ### Dependencies
 
@@ -178,16 +205,24 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
 - RFC 接受只批准本页 target、owner、ABI、contract delta 与 gate 顺序，不自动授权任何 Gate。
 - source/KUnit 证明 ABI offset、strict notification decode、同组校验、private slot identity、mask/ignore/
   job-control、ignored后恢复disposition、完整outcome/rearm矩阵、普通delivery与`rt_sigtimedwait`同步消费、
+  dequeue-finalized `si_overrun`/`timer_getoverrun()`同源提交、ignored期间accrual延迟到下一次真实delivery、
   dequeue-vs-flush overrun、目标退出、
   delete/flush/in-flight callback、
   TID reuse 与普通 signal regression。
-- RV64 与 LA64 release build/KUnit 均须通过；raw syscall oracle 必须覆盖成功 exact delivery、异组/
+- RV64 release build/KUnit 与 raw syscall oracle 必须覆盖成功 exact delivery、异组/
   不存在 TID 的 `EINVAL`、unknown/mixed notify的`EINVAL`、concurrent-exit两种合法closure、private
   `rt_sigtimedwait`、blocked/unblocked target、target-exit三个阶段、periodic物理停止与
   `timer_gettime()`投影、删除后已排队 signal仍可消费，以及同号 ordinary task-directed realtime signal
-  与 timer occurrence 的 arrival ordering。
-- 两个架构都必须通过 raw oracle；Vim 只作为集成 smoke 证明原始 `E1286` 症状消失，不能替代 raw
-  ABI、errno、exact-delivery 与 lifecycle 证据。
+  与 timer occurrence 的 arrival ordering。exact-delivery用例必须让target与decoy都保持signal blocked，
+  decoy在expiry窗口独占同步等待、target仍存活但延后开始等待；decoy timeout且target随后取得occurrence才能
+  排除shared fallback。target-exit用例必须以
+  新type-4 registration稳定返回`EINVAL`确认admission已经关闭，不能用`SYS_exit`前的用户态flag加固定sleep
+  代替。periodic用例必须延迟dequeue跨过多个interval，并同时断言收到的`si_overrun`和紧随其后的
+  `timer_getoverrun()`；该case不得插入replace/republication，必须得到相同的非零值，不能只覆盖零overrun。
+  ignored-recovery用例还必须让timer在`SIG_IGN`期间跨过多个interval，确认delivery前
+  `timer_getoverrun()`保持旧值、恢复disposition后的首次`SI_TIMER.si_overrun`和最近交付snapshot包含该累计。
+- RV64 必须通过 raw oracle；Vim 只作为集成 smoke 证明原始 `E1286` 症状消失，不能替代 raw
+  ABI、errno、exact-delivery 与 lifecycle 证据。LA64 runtime 本轮按维护者授权为 `Not Run / waived`。
 - 文档检查按仓库流程执行；本任务显式跳过全部 mdBook 检查。
 
 ## 风险与反馈
@@ -196,10 +231,6 @@ Signal 完成交付，只是 dequeue 时不能重新激活已删除 timer。Linu
 重入 timer owner 导致锁序回环。对应 proof obligations 见[目标与不变量](./invariants.md)，分阶段路线、
 验证与 hard stop 见[实施路线](./implementation.md)。任何证据若要求改变 target identity、owner、
 failure errno、cleanup 或 cutover 强度，必须先回写 RFC review，不能把较弱能力写成完成。
-
-[`ANE-20260606-RT-SIGTIMEDWAIT-ASYNC-WAITED-SIGNAL-EINTR`](../../register/open-issues.md#ane-20260606-rt-sigtimedwait-async-waited-signal-eintr)
-仍是 Gate 2 同步消费 oracle 的验证风险。live source 中已有 waited-set retry 不能替代 register 要求的
-precheck-after-arrival 定向用例与 LTP 复验；证据闭合前不得据此宣称 exact synchronous consumption 已验证。
 
 ## 文档与证据
 
@@ -210,6 +241,8 @@ precheck-after-arrival 定向用例与 LTP 复验；证据闭合前不得据此�
   `xref:linux-6.6.32:kernel/time/posix-timers.c#good_sigevent`、
   `xref:linux-6.6.32:kernel/time/posix-timers.c#posix_timer_event`、
   `xref:linux-6.6.32:kernel/time/posix-timers.c#posix_timer_fn`、
+  `xref:linux-6.6.32:kernel/time/posix-timers.c#timer_overrun_to_int`、
+  `xref:linux-6.6.32:kernel/time/posix-timers.c#posixtimer_rearm`、
   `xref:linux-6.6.32:kernel/time/posix-timers.c#common_timer_get`、
   `xref:linux-6.6.32:kernel/signal.c#send_sigqueue`、
   `xref:linux-6.6.32:kernel/signal.c#dequeue_signal`、
@@ -220,8 +253,9 @@ precheck-after-arrival 定向用例与 LTP 复验；证据闭合前不得据此�
 
 - **R0（2026-08-05）：** 接受 native `SIGEV_THREAD_ID` exact-task delivery target；以固定 Linux
   6.6.32 的 create/expiry/private-pending/dequeue/flush/gettime 语义为依据，Vim仅作为集成smoke。
+- **R0 clarification（2026-08-06）：** 固化 dequeue-finalized `si_overrun` 与最近交付snapshot的同源
+  可见语义，并收紧exact-route和target-exit raw oracle；target、owner、ABI范围与contract delta未改变。
 
 ## Closure
 
-Not started。只有 Gate 3 完成最终审计、双架构 acceptance 且
-`PT-THREAD-ID-CUTOVER` 已真实生效后，RFC 才能关闭。
+Not started。Gate 2 与 `PT-THREAD-ID-CUTOVER` 已完成；Gate 3 final audit 明确保持未完成，RFC 暂不关闭。
