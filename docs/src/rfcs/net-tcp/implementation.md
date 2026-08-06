@@ -1,13 +1,16 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Not Cut Over / TCP Not Effective
+**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Ready / Not Cut Over / TCP Not Effective
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 **执行授权：** 用户于 2026-08-05 明确接受 R0、授权并关闭 P0，随后授权Stage 1解析并单独授权其implementation；
 Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
-用户于2026-08-06先授权Stage 3 Implementation Resolution，随后分别授权并关闭CKPT 3A与CKPT 3B；Stage 4--5均未授权
-**当前 Gate：** Stage 3 Closed / Not Cut Over / TCP Not Effective；Stage 4--5 Outline / Not Resolved / Not Authorized
+用户于2026-08-06先授权Stage 3 Implementation Resolution，随后分别授权并关闭CKPT 3A与CKPT 3B；同日接受
+Stage 4提前接通真实userspace syscall candidate的Route Correction，并只授权Stage 4 Implementation Resolution；
+CKPT 4A、CKPT 4B implementation与Stage 5均未授权
+**当前 Gate：** Stage 4 Resolved / Ready / Not Active / Not Authorized；CKPT 4A--4B Not Active / Not Authorized；
+Stage 5 Outline / Not Resolved / Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
@@ -16,7 +19,13 @@ owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收�
 `AF_INET + SOCK_STREAM` creation tuple、不发布handler或部分UAPI，也不执行contract cutover。
 Stage 3已经解析为两个分别授权、分别review的execution checkpoint：CKPT 3A完成Stack TCP owner fact与lifecycle，
 CKPT 3B完成仍不可由syscall到达的Socket/ABI projection；整个Stage 3不注册TCP creation tuple、不发布handler、
-fd或部分UAPI，也不执行contract cutover。CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over；Stage 4--5仍未授权。
+fd或部分UAPI，也不执行contract cutover。CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over。Stage 4现已
+解析为两个分别授权、分别review的execution checkpoint：CKPT 4A在resolver继续拒绝TCP tuple时闭合owner predicate、
+invalidation、Socket source与wait capability；CKPT 4B先闭合剩余Linux syscall projection，再通过唯一normal resolver
+发布完整syscall-reachable candidate并开始repository-owned RV64 userspace纵向验证。Stage 5不再拥有首次route
+activation，只拥有剩余双架构/external/capstone证据与最终`NET-TCP-CUTOVER`。这项Route Correction与Stage 4
+Implementation Resolution不改变R0 target、owner、ABI、Contract Impact、acceptance或validation claim；Stage 4
+Ready / Not Active / Not Authorized，Stage 5仍为Outline / Not Resolved / Not Authorized。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -262,8 +271,8 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
 | Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 3 — Stream、ABI与lifecycle completion | Closed / Not Cut Over | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
-| Stage 4 — Blocking、readiness与concurrency hardening | Outline / Not Resolved / Not Authorized | 以各operation owner predicate接入blocking/poll/select/epoll，并关闭race、fault、signal与capacity recovery | None；TCP target contracts继续Pending | Stage 3 Closed且完整operation/lifecycle surface可供wait proof |
-| Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 完成mandatory双架构、remote-external、shared regression与架构封顶，原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、acceptance assets与独立final review可用 |
+| Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | Resolved / Ready / Not Active / Not Authorized | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；4A保持不可达，4B关闭后candidate syscall-reachable但TCP target contracts继续Pending | 已满足；等待CKPT 4A独立授权 |
+| Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 在Stage 4已可达candidate上完成mandatory双架构、remote-external、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、candidate保持可达、acceptance assets与独立final review可用 |
 
 ### 6.3 Stage 1 Resolved Gate — Stack TCP owner与protocol progression foundation
 
@@ -1058,43 +1067,294 @@ Opened-description、IOMUX与Epoll contracts不变，transaction保持None。TCP
 TCP guest、CAgent、deployment probe、full network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform
 均Not Run。Stage 4保持Outline / Not Resolved / Not Authorized；Stage 3授权在此耗尽，立即停止。
 
-### 6.6 Stage 4 Outline — Blocking、readiness与concurrency hardening
+### 6.6 Stage 4 Resolved Gate — Userspace vertical slice、blocking/readiness与concurrency hardening
 
-**目的：** 让connect、accept、send与receive/EOF分别读取各自owner-defined predicate，复用existing
-snapshot/register/recheck/final-scan接入blocking、poll、select与epoll；同时关闭multi-waiter、signal/cancel、
-copy fault、receive/final-close、capacity saturation/recovery及late hint/stop交错。Stage 4先在未发布candidate上完成
-source/wait proof，production syscall route仍留给Stage 5最终activation。
+#### 6.6.1 成熟度、授权与live baseline
 
-**前置依赖：** Stage 3 Closed，全部operation outcome、stream/lifecycle fact与resource transition已经由唯一owner
-表达，blocking wait不会被迫发明缺失的protocol fact。
+Stage 4是一个不执行contract cutover、但在第二个checkpoint发布完整syscall-reachable candidate的formal execution
+gate。它包含两个分别授权、分别review的execution checkpoint：CKPT 4A先在TCP tuple继续不可达时闭合owner
+predicate、invalidation、Socket source与wait capability；CKPT 4B再闭合剩余Linux syscall projection，通过唯一normal
+resolver activation发布完整candidate，并立即以repository-owned RV64 userspace consumer开始纵向验证。CKPT 4A
+必须独立安全且对current visible semantics与current contracts中性；CKPT 4B完成整个Stage 4，只承担一次candidate
+activation，不执行`NET-TCP-CUTOVER`。
 
-**受保护边界：** 不建立shared `tcp_ready`、ready-mask cache、第二wait loop或event-carried outcome；notification
-只提示重查，public writable只作最低admission hint，operation-specific retry重读对应owner fact。wait cancellation
-不推进protocol或lifecycle，final release先withdraw source且不等待waiter；UDP、ICMP raw、Unix、iomux与epoll
-existing consumer必须保持同一current contract。Stage 4关闭时TCP creation tuple与handler仍不可达，不执行partial
-UAPI或contract cutover。
+用户于2026-08-06只授权本节Implementation Resolution。本文据此达到Resolved / Ready / Not Active /
+Not Authorized；没有Stage 4代码、runtime、review或closure主张，也没有CKPT 4A implementation授权。进入CKPT 4A前
+必须重新确认以下live baseline没有语义漂移：
 
-**解析触发点：** Stage 3关闭后逐项核验predicate producer、source publication与current iomux/epoll consumer，
-再解析wait matrix、并发validation、guest coverage与停止条件。若existing wait contract不能自然承载TCP而需要
-shared readiness truth或caller special case，停止并回到RFC review；优先修订自然shared owner，而不是建立
-TCP-private wait/readiness hack。
+- Stage 3保持Closed / Not Cut Over，四项TCP target contract继续Pending；current Network、Socket、Opened-
+  description、IOMUX与Epoll contracts不变，`resolve_socket_profile(AF_INET, SOCK_STREAM, 0/IPPROTO_TCP)`继续
+  拒绝，TCP syscall、fd、blocking与readiness route均不可达；
+- Stack TCP owner已经唯一表达Endpoint role、connect outcome、pending child、stream capacity、RX bytes、EOF/error、
+  shutdown与lifecycle fact，kernel capability只持opaque Endpoint association与operation-local reservation；但TCP
+  尚未提供完整point-in-time readiness facts、Endpoint invalidation vocabulary或kernel reverse observer route；
+- `DomainStack::protocol_transition()`已经在Stack guard外路由UDP与ICMP raw invalidation，production
+  `SocketPollSource`已经提供fallible route publication、snapshot/register recheck、retire withdrawal与guard-out
+  notification；当前两者都不覆盖TCP，Stage 4必须扩展真实TCP consumer而不是建立第二source protocol；
+- TCP family的temporary `poll_unpublished_tcp()`仍返回`NotSupported`，accept would-block只携带该bridge；general
+  Socket wait orchestration已经可用，send/receive blocking driver通过file source重试，connect syscall仍把TCP
+  `Started`、`InProgress`与timeout映射为placeholder `NotSupported`；
+- static `TCP_ABI_METADATA`已经覆盖完整R0 tuple、flag与message profile，但published resolver表仍只包含UDP、ICMP
+  raw与Unix；因此CKPT 4B可以只形成一个normal production activation point，不需要Kconfig、test profile、private
+  syscall或第二resolver；
+- repository已有boot-root `socket-test`、competition-root glibc/musl runtime、focused C oracle staging与RV64/LA64
+  end-to-end wrapper。Stage 4复用这些production harness边界；不建立host socket proxy、test-only kernel route或长期
+  TCP validation facade。
+
+若上述source/current contract事实变化已经影响target、owner/handoff、failure/cleanup、ABI、Contract Impact、
+acceptance或validation claim，先回到父RFC review或重新解析本Stage，不能按过期resolution执行。
+
+#### 6.6.2 Stage 4 Implementation Boundary
+
+**Target：** 在Stage 3同一Stack TCP owner、general Socket front与opened-description topology上形成完整blocking与
+readiness capability，并把完整R0 candidate发布给普通用户程序。CKPT 4A让connect completion、pending child、TX
+admission、RX bytes/EOF/error各自从owner fact生成point-in-time snapshot与recheck-only invalidation，通过kernel TCP
+source接入existing `SocketPollSource`、operation wait与poll/select/epoll projection；TCP creation tuple继续不可达。
+CKPT 4B先闭合blocking/nonblocking connect、accept、send/receive、errno/signal与generic syscall retry，再把同一
+static profile加入唯一normal resolver，并以RV64 glibc/musl focused C consumer验证真实fd、copy、wait、retry、
+opened-description与failure cleanup纵向路径。
+
+**Non-goals：** Stage 4不执行`NET-TCP-CUTOVER`，不更新Pending TCP contracts或宣称TCP Effective；不完成LA64
+userspace、self/remote-external、CAgent transport marker、条件性deployment probe、full shared matrix或architecture
+capstone，这些仍由Stage 5拥有。它不新增partial tuple、nonblocking-only profile、private syscall、test-only resolver、
+Kconfig activation switch、第二wait loop、ready-mask bus、TCP-private fd/publication path或长期validation abstraction；
+也不扩张R0 non-goals、实现IPv6/diag/procfs、socket timeout/linger/keepalive或其它未选择UAPI。
+
+**Protected boundary：** Stack TCP owner继续唯一决定binding/listener/connection/stream/terminal/error/resource与
+protocol lifecycle fact；kernel TCP source只持opaque Endpoint association、reverse invalidation registration与
+non-owning poll routes，并在每次snapshot重新读取owner fact。general Socket owner继续唯一拥有Linux tuple、errno、
+signal、blocking choice、fd publication与wait orchestration；iomux/epoll继续只拥有round/watch/policy/final harvest。
+不得让Stack取得`PollEvent`、Linux errno、Task/File/fd/waiter，不得让Socket缓存connect phase、pending error、child、
+RX/TX capacity、EOF或terminal truth，也不得让notification携带mask、errno、child或operation outcome。
+
+每个operation读取自己的owner-defined predicate；一份role-aware point-in-time fact carrier可以同时服务同一Endpoint的
+多种projection，但它不能成为可独立推进的`tcp_ready` state或跨round cache。source route publication与current
+snapshot必须位于同一source critical section；Stack先提交fact并取得typed invalidation，释放Stack guard后才路由
+observer hint。source notification必须覆盖所有可能改变final projection的route，包括mandatory ERROR/HUP和请求的
+RDHUP；允许保守多发recheck hint，不允许漏掉transition或让hint决定用户结果。
+
+**Failure / cleanup：** TCP source preparation在fd publication前完成fallible allocation、reverse observer
+registration与association publication；任一步失败都由unpublished creation owner撤销observer并以
+`CreationRollback`释放同一Endpoint。accepted child在source preparation、peer copy或fd publication失败时以
+`AcceptedChildRollback`释放，不能requeue或留下不可达child。semantic final release先withdraw source并detach全部
+routes，再注销reverse observer，最后以`FinalRelease`向Stack提交non-blocking release；它不获取sleeping operation
+guard、不等待waiter/worker/FIN/TIME_WAIT。signal、timeout、force、losing waiter或epoll watch removal只retire本轮
+consumer state，不取消connect、child、stream或其它waiter；late/repeated invalidation对retired source fail closed。
+
+#### 6.6.3 Owner fact、source与readiness model
+
+Stack TCP owner必须提供足够的role-aware current fact来投影以下互不替代的predicate：
+
+- active connect：未开始/已绑定、in progress、connected与typed failed/terminal outcome保持可区分；connect
+  completion无论success或failure都结束当前connect wait，pending error仍由Stack一份truth拥有；
+- listener：只有当前listener的completed pending child可满足accept/readable predicate；receive bytes或其它Endpoint
+  activity不能复用为accept truth，claim/take/cancel后必须重新读取队列事实；
+- stream send：writable只表示当前Endpoint对至少一个byte的最低admission hint，broken stream或terminal error必须
+  使operation退出wait并按ordinary send/`SO_ERROR`竞争规则重新读取owner outcome；
+- stream receive：buffered bytes、EOF、pending terminal error与local read shutdown按既有bytes-first规则决定
+  readable；peer FIN产生receive-half-close fact，不能与complete HUP、local shutdown或RST合并；
+- public poll：listener readable、connect completion writable/error、RX bytes/EOF readable、TX admission writable、
+  peer FIN RDHUP、terminal HUP与pending ERROR按固定Linux 6.6.32 oracle投影。ERROR/HUP是mandatory result，RDHUP只在
+  caller请求时交付；具体bit组合由focused oracle固定，不能从operation名称或历史edge猜测。
+
+TCP Endpoint invalidation必须覆盖pump ingress/egress/timer导致的handshake、child、capacity、RX/FIN/RST与terminal
+transition，也覆盖pump外connect/send/receive-window reopening/shutdown/release等committed mutation。具体是否按
+Endpoint合并、怎样存储batch及fact carrier/type名称仍是implementation preference；但invalidations必须在同一次
+Stack access window取出，不能靠周期轮询、无关provider IRQ、另一个syscall或worker偶然运行补偿。
+
+kernel TCP source复用shared `SocketPollSource`的publication/retire protocol。若TCP的mandatory terminal category要求
+对shared source内部做owner-neutral窄扩展，该扩展必须保持UDP/ICMP raw现有predicate、visible result与current
+contract不变，并以existing consumer regression证明；不得为TCP复制source、在generic source内识别TCP role，或让
+shared source计算family readiness。source poll callback只能取得non-sleeping current fact，不能持source guard进入
+sleeping operation mutex；producer notification和最后reference drop都发生在Stack/source guard外。
+
+#### 6.6.4 Blocking、Linux mapping与activation model
+
+blocking与nonblocking connect必须消费同一Stack outcome，但syscall owner可以保存只属于当前调用的
+`started-by-this-call`事实，以区分一次blocking connect自己启动后完成返回0，和调用开始前已经connected返回
+`EISCONN`；该operation-local marker不复制protocol phase，也不能跨syscall或写回Socket。首次nonblocking start返回
+`EINPROGRESS`，仍在推进的重复nonblocking调用返回`EALREADY`，已经connected返回`EISCONN`；RST/refused、timeout与
+route/source/admission failure分别映射`ECONNREFUSED`、`ETIMEDOUT`与对应`ENETUNREACH/EADDR*/ENOBUFS`。并发
+blocking/nonblocking caller、ordinary operation与`SO_ERROR`消费竞争的exact result在implementation前由focused Linux
+oracle冻结；不能增加kernel error mirror使多个consumer都取得同一pending error。
+
+accept在no-child时返回绑定到listener source的operation wait；send/receive继续由shared retry owner在每次
+`WouldBlock`后释放family operation guard，再用file source等待并重新执行完整operation。`O_NONBLOCK`、creation-time
+`SOCK_NONBLOCK`与per-call `MSG_DONTWAIT`只改变是否等待，不改变predicate或opened-description status；signal只终止
+当前blocking round，不能撤销已经启动的connect或影响其它waiter。public readiness只是hint，operation retry仍负责
+最终role、capacity、error与partial-progress判断。
+
+resolver activation只能发生在以下条件同时满足后：4A source/wait closure已独立review；剩余connect/errno/signal
+projection及全部R0 ordinary operation不再因未完成Stage 4工作落入placeholder `EOPNOTSUPP/ENOTSUP`；creation、accept
+与message/file/vector failure rollback已由production path覆盖；existing published profiles回归保持不变。activation
+只把`TCP_ABI_METADATA`加入normal published profile集合，不增加第二表、runtime switch或test-only branch；之后所有
+userspace验证都走同一production tuple和generic handler。
+
+#### 6.6.5 CKPT 4A — Internal owner predicate、source与wait closure
+
+**Purpose / Deliverable：** 在TCP creation tuple继续不可达的前提下，交付完整production owner fact/invalidation与
+kernel source/wait capability。CKPT 4A至少完成：
+
+- 在shared TCP vocabulary与Stack owner内补足role-aware point-in-time fact和Endpoint invalidation，覆盖listener
+  child、connect completion/error、TX capacity、RX bytes/EOF/RST、shutdown、terminal与reclaim transition；shared
+  vocabulary不包含Linux poll mask、errno、waiter、callback或kernel object；
+- 让`DomainStack::protocol_transition()`与pump path在Stack guard外路由TCP invalidation，通过kernel-private weak
+  observer registration命中同一boot-unique Endpoint source；registration identity不参与readiness/lifecycle决定；
+- 把TCP family source接入existing `SocketPollSource`，以真实owner snapshot替换`poll_unpublished_tcp()`，并为
+  connect/accept would-block提供窄`SocketWait` capability；send/receive继续复用file source与shared retry owner；
+- 按第6.6.2节闭合creation/accepted-child rollback、final release withdrawal、observer unregister、multi-waiter与
+  late hint cleanup；不得让wait route延长Endpoint或opened-description lifecycle；
+- 保持`PUBLISHED_SOCKET_ABI_PROFILES`不含TCP，profile/resolver KUnit继续证明`AF_INET + SOCK_STREAM +
+  0/IPPROTO_TCP`返回`SocketTypeNotSupported`，不运行或宣称TCP userspace proof。
+
+**Acceptance：** owner/host tests必须逐项证明not-ready -> ready/terminal transition与invalidations不会丢失或重复驱动
+behavior，覆盖empty listener/child arrival/take/cancel、connect success/refused/timeout、TX full/recovery、RX bytes/
+FIN/RST、shutdown、final release、old generation与late timer。kernel KUnit必须覆盖snapshot/register race、
+ready-at-register仍保留route、multi-waiter、signal/cancel route retirement、mandatory terminal hint、source retire与
+late invalidation、accepted-child source failure rollback，以及poll/select/epoll source-facing projection；所有case走
+production descriptor/source，不增加probe或test-only activation。
+
+**Exit / Stop：** CKPT 4A全部acceptance、validation与独立review满足后只标记CKPT 4A Closed；Stage 4保持
+In Progress，CKPT 4B仍Not Active / Not Authorized，TCP tuple、fd/runtime与四项target contract继续不可达/Pending，
+并立即停止。若owner fact无法在Stack fence内表达、必须缓存ready/error/phase、observer route会强持source、
+source publication无法避免lost wake、final release必须等待/失败，或需要改变current Socket/IOMUX/Epoll/opened-
+description contract才能闭合，保持Review Hold并回父RFC review，不能进入CKPT 4B。
+
+#### 6.6.6 CKPT 4B — Normal syscall activation与RV64 userspace vertical slice
+
+**Purpose / Deliverable：** 在review接受的CKPT 4A capability上闭合Linux syscall mapping，原子发布完整R0
+creation tuple，并以真实userspace持续验证candidate。CKPT 4B至少完成：
+
+- 按第6.6.4节完成blocking/nonblocking connect、concurrent retry、typed terminal errno与`SO_ERROR`竞争；accept、
+  scalar/vector/message/file send/receive、shutdown、option、address query与final-release继续走Stage 3已经形成的
+  generic production adapter，不建立TCP-local syscall loop；
+- 在activation前通过source/KUnit/profile audit证明R0 ordinary operation只有target外flag/option/case才稳定返回
+  `EOPNOTSUPP/ENOPROTOOPT`，不能把缺失blocking、readiness、errno或cleanup伪装成unsupported；
+- 只修改normal resolver admission，使`AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`同时解析到同一static descriptor；
+  invalid family/type/protocol/flags保持原有stable rejection，UDP、ICMP raw与Unix resolution不变；
+- 增加一份repository-owned focused TCP C source，并通过既有fixture/staging分别提供RV64 glibc与musl binary；source
+  是validation asset，不进入production dependency，closure记录compiler、libc、binary identity与实际运行case；
+- 通过RV64 guest-local loopback覆盖creation flags、explicit/implicit bind、listen/accept/accept4、blocking与
+  nonblocking connect、partial stream/EOF/shutdown、`SO_ERROR`、`SO_REUSEADDR`、`TCP_NODELAY`、SIGPIPE/
+  `MSG_NOSIGNAL`、poll/select/epoll、fd rollback、dup/CLOEXEC/final close及至少一组wait/cancel或final-close交错；
+  deterministic RST、capacity、generation和copy-fault corner继续由owner/host/KUnit补足，不能由userspace smoke替代。
+
+Stage 4 userspace asset可以按case可读性拆分，但不得建立只在测试时发布的tuple、kernel-private command、host-to-guest
+socket bypass或第二peer protocol。boot-root Rust `socket-test`可以补充direct syscall与existing-consumer regression，
+但不能替代glibc/musl C consumer；CAgent、BusyBox `wget`或其它deployment workload即使成功，也不替代本checkpoint
+focused matrix。
+
+**Acceptance：** exact-source RV64 end-to-end run必须在同一candidate上完成两套libc focused consumer与既有UDP、UDP
+extension、ICMP raw、Unix stream/seqpacket、Socket、iomux和epoll regression；KUnit/host必须补齐4A全部source race、
+connect/`SO_ERROR` linearization、partial/fault/rollback、capacity recovery、final-close与late-hint matrix。RV64/LA64
+release build都必须通过，证明共同source与ABI代码可编译；LA64 userspace、self/remote-external、CAgent与最终full
+matrix仍诚实记录Not Run并留给Stage 5，不从build或RV64结果外推。
+
+**Exit / Stop：** CKPT 4B只有在normal route、两套RV64 libc纵向证据、existing consumer regression、Architecture
+Friction Scan与独立review全部满足后才能Closed，并同时把Stage 4标记`Syscall-Reachable Candidate / Not Cut Over`。
+activation后发现target defect时，CKPT 4B保持In Progress / Review Hold并在同一production route修复；不得保留
+partial profile、以test skip降级matrix或把失败推迟为accepted limitation。若只能改变R0 target/ABI/acceptance、
+current shared contract或owner topology，停止并回父RFC review / Target Renegotiation，不得声明Stage 4关闭。
+
+#### 6.6.7 Implementation ordering
+
+Stage 4按以下顺序形成两个独立授权的closure unit：
+
+1. 在实现前把Linux 6.6.32 role/readiness/connect oracle与RV64 C consumer case冻结为验收矩阵，尤其区分
+   first-start/in-progress/already-connected、success/error completion、listener/stream/terminal poll categories、
+   mandatory ERROR/HUP、requested RDHUP与signal/cancel；
+2. 单独授权并完成CKPT 4A，只接入owner fact/invalidation/source/wait capability；resolver保持拒绝。完成owner/
+   KUnit/build/regression、Architecture Friction Scan与独立review后关闭4A并停止；
+3. 经用户单独授权CKPT 4B后，先在resolver仍拒绝时闭合剩余syscall mapping与activation preflight；只有全部R0
+   operation可安全到达后，才把TCP metadata加入唯一normal published resolver；
+4. activation后立即运行RV64 glibc/musl focused consumer与shared regression，在同一checkpoint修复纵向暴露的target
+   defect；完成final review和closure write-back后关闭4B与Stage 4，并立即停止。
+
+每个checkpoint内部可以形成多个普通Git commit；普通commit只服务实现顺序、review和证据，不是额外checkpoint、
+授权停止点、independent closure或partial cutover。步骤不冻结具体type、method、lock、fact carrier、invalidation batch
+或非strict文件路径；但4A/4B的resolver可达性、visible semantics、validation与停止边界不得在执行中静默重排。
+
+#### 6.6.8 Validation、review与observability
+
+每个checkpoint只记录实际执行的证据，不从另一checkpoint、architecture或harness外推。Stage 4 implementation
+closure至少需要：
+
+- CKPT 4A运行`just test net-host`覆盖TCP owner facts、invalidation、capacity、generation、progression与UDP/ICMP raw/
+  frame-path regression；production/no-default target继续通过；
+- repository-owned RV64 KUnit flow覆盖shared `SocketPollSource`、TCP source/observer、connect/accept/send/receive
+  wait、poll/select/epoll projection、rollback/final-release与existing Socket consumer；4A必须保持resolver rejection，
+  4B必须改为normal tuple success并保留invalid tuple stable rejection；
+- CKPT 4B使用
+  `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-tcp-stage4-ckpt4b-rv64.log`
+  运行最终source的glibc/musl focused TCP consumer与selected shared regression。master image只作只读输入，wrapper
+  使用worktree-local副本；实际profile、compiler与binary identity写入closure evidence；
+- `just fmt kernel --check`、RV64/LA64 release build与`git diff --check`；只有Kconfig/config materialization输入变化时才
+  运行`just test xtask`并证明xtask没有解释semantic value；C validation source按其实际toolchain执行format/build
+  check，不把预生成binary当作canonical source；
+- source/behavior audit确认UDP、ICMP raw、Unix stream/seqpacket、general Socket profile/source/wait、opened-
+  description final release、iomux/epoll和Stage 1 progression handoff保持原contract；4B activation只有一个normal
+  resolver truth，没有test branch或第二profile；
+- CKPT 4A与4B分别执行Architecture Friction Scan与独立engineering review。review至少检查第二readiness/error/
+  lifecycle truth、owner penetration、private representation leakage、source/Stack lock order、guard内callback/drop、
+  family-specific wait/syscall path、partial public profile、无退出条件bridge、rollback/final-release顺序、ordinary
+  operation与`SO_ERROR`竞争，以及通过降低oracle/validation换取userspace通过。
+
+production不增加驱动行为的ready/error cache、wake sequence或diagnostic state。若为race定位临时增加trace/counter，
+必须明确纯诊断、不参与predicate、notification、retry或cleanup，并在checkpoint closure前删除，除非review确认长期
+owner、用途和不影响behavior。
+
+本次Implementation Resolution只运行文档检查。CKPT 4A/4B代码与runtime、TCP guest、CAgent、deployment probe、
+full network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run；本文不得把Stage 3证据或
+source audit写成Stage 4 execution PASS。
+
+#### 6.6.9 Stage 4 exit、cutover与stop conditions
+
+CKPT 4A与4B都Closed、normal resolver只有一份TCP publication truth、focused validation asset没有production
+dependency、最终source没有test-only activation、ready/error cache、second wait loop、fallible final release、private
+representation leakage或TCP-local common-ABI bypass，Architecture Friction Scan没有未处理的本Stage Keter/Apollyon且
+final review接受时，Stage 4才可在同一closure write-back中：
+
+1. 标记Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over，记录两个checkpoint的Git/PR、实际命令、
+   compiler/binary identity、结果、proof scope与Not Run；
+2. 明确`AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`已经通过normal resolver可达，TCP fd、blocking与poll/select/epoll
+   candidate由真实userspace持续回归，但不把该candidate写成current effective contract或final architecture closure；
+3. 保持`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001` Introduce与
+   `SOCKET-ABI-001` Refine Pending，transaction默认None，并立即停止，不解析或进入Stage 5。
+
+任一checkpoint失败时保留已经独立安全的前一checkpoint evidence，Stage 4保持In Progress / Review Hold；4A失败时
+TCP resolver必须继续拒绝，4B activation后的失败不能被写成Stage closure、contract cutover或accepted reduced target。
+不得用build、KUnit、Rust-only smoke、单一libc、HTTP workload或旧日志替代本Stage要求的exact-source RV64双libc纵向
+证据。
+
+以下事实要求立即停止并回父RFC review / Target Renegotiation：需要改变R0 target/non-goal、owner/handoff、failure/
+cleanup、public ABI、Contract Impact、acceptance或validation claim；需要Stack取得Linux errno/Task/File/fd/waiter，
+或Socket/notification保存第二份phase/error/ready/child/capacity truth；existing Socket/IOMUX/Epoll/opened-description
+contract不能自然承载TCP而必须发生shared semantic Refine；只能通过partial profile、caller/test special case、
+busy-poll、周期轮询、test-only route、长期bridge、丢失mandatory terminal hint或降低Linux oracle/validation才能
+发布candidate。owner-neutral、保持current consumer behavior的shared source内部窄扩展与同owner行为保持型拆分只要
+满足本节边界，不构成额外resolution gate。
 
 ### 6.7 Stage 5 Outline — Dual-architecture与architecture-capstone closure
 
-**目的：** 原子激活完整candidate的TCP creation tuple与syscall route，并执行父RFC规定的TCP capability与
-architecture capstone合取验收：repository-owned focused consumer、RV64/LA64 loopback/self-external/
-remote-external、CAgent transport marker、shared consumer regression、source architecture audit与final
-independent review；全部满足后原子执行`NET-TCP-CUTOVER`。
+**目的：** 在Stage 4已经由正常resolver发布、可被真实userspace持续回归的完整candidate上，补齐父RFC仍要求的
+TCP capability与architecture capstone合取验收：repository-owned focused C/libc consumer、RV64/LA64
+loopback/self-external/remote-external、CAgent transport marker、shared consumer regression、source architecture
+audit与final independent review；全部满足后原子执行`NET-TCP-CUTOVER`。Stage 5不再拥有首次route activation，也
+不通过第二开关把同一candidate重新发布一次。
 
 **前置依赖：** Stage 1--4全部独立Closed，Stage 1的两项Network Refine保持Effective，父RFC mandatory acceptance
 assets可用，所有target内Apollyon/Keter已关闭；实际Not Run范围与条件性deployment probe边界已经可诚实记录。
 
-**受保护边界：** route activation与最终cutover属于同一Stage 5 closure unit，不能在更早Stage或独立commit形成
-长期可见partial UAPI。两组closure claim缺一不可；HTTP或条件性`wget/curl/git`成功不能替代repository-owned TCP、
-双架构与architecture proof，`ss -tan`/procfs/diag失败也不能扩大target。final cutover只使父RFC表中仍Pending的
-三项TCP Introduce与`SOCKET-ABI-001` Refine生效；不得重复cut over Stage 1已经Effective的Network规则，也不得把
-TCP-local machinery提升为无第二consumer的generic framework，或为维持旧framework而保留本应shared的TCP hack。
+**受保护边界：** Stage 4 candidate reachability不是contract cutover、accepted limitation或较弱TCP target；Stage 5
+必须沿同一normal production route完成剩余证据，不能以test-only profile、第二activation switch、parallel handler或
+缩小validation掩盖Stage 4暴露的问题。两组closure claim缺一不可；HTTP或条件性`wget/curl/git`成功不能替代
+repository-owned TCP、双架构与architecture proof，`ss -tan`/procfs/diag失败也不能扩大target。final cutover只使
+父RFC表中仍Pending的三项TCP Introduce与`SOCKET-ABI-001` Refine生效；不得重复cut over Stage 1已经Effective的
+Network规则，也不得把TCP-local machinery提升为无第二consumer的generic framework，或为维持旧framework而保留
+本应shared的TCP hack。
 
-**解析触发点：** Stage 4关闭后重新核验完整diff、current contracts、register、双架构环境与external peer资产，
-把父RFCmandatory matrix解析成最终validation/cutover unit。任一mandatory evidence失败或architecture capstone
-出现第二truth/旁路时保持Not Cut Over并进入Review Hold / Target Renegotiation，不得以缩小validation收口。
+**解析触发点：** Stage 4以`Syscall-Reachable Candidate / Not Cut Over`关闭后，重新核验完整diff、current contracts、
+register、Stage 4真实userspace证据、双架构环境与external peer资产，把父RFC尚未满足的mandatory matrix解析成最终
+validation/cutover unit，不机械重跑已经由exact-source Stage 4证据充分覆盖且未受后续修改影响的同一轨道。任一
+mandatory evidence失败、candidate存在未关闭target defect或architecture capstone出现第二truth/旁路时保持
+Not Cut Over并进入Review Hold / Target Renegotiation，不得以缩小validation收口。

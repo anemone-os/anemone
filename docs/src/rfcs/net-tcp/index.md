@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Not Cut Over / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Ready / Not Cut Over / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-06
@@ -9,6 +9,7 @@
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
 **执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed / CKPT 3A-3B Closed / Not Cut Over；
+Stage 4 Resolved / Ready / CKPT 4A-4B Not Active / Not Authorized；
 `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
@@ -29,8 +30,11 @@ Stage 2先建立kernel窄TCP owner capability，再接入syscall-unreachable的g
 creation tuple、不发布handler、fd或部分UAPI，也不执行contract cutover。Stage 3已经解析为两个需分别授权、分别
 review的execution checkpoint：CKPT 3A完成Stack TCP owner fact与lifecycle，CKPT 3B完成仍不可达的Socket/ABI
 projection；`fs/socket/tcp.rs`的行为保持型目录化属于Stage 3必要implementation ordering，不单列semantic gate。
-CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over；Stage 4--5仍为Outline / Not Resolved / Not Authorized。
-本次closure不执行contract cutover，也不授权后续Stage。
+CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over。随后接受的Route Correction把首次normal resolver
+activation与真实userspace纵向验证从Stage 5提前到Stage 4；Stage 4现已解析为两个需分别授权、分别review的execution
+checkpoint：CKPT 4A完成仍不可达的owner predicate/source/wait closure，CKPT 4B完成syscall projection、唯一normal
+resolver activation与RV64双libc vertical slice。Stage 4 Ready / Not Active / Not Authorized；Stage 5仍为Outline /
+Not Resolved / Not Authorized。本次resolution不执行contract cutover，也不授权任何implementation或后续Stage。
 
 ## 摘要
 
@@ -344,7 +348,8 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 ## Implementation Boundary
 
 本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0、Stage 1、Stage 2与Stage 3都曾取得各自所需
-授权并已关闭；Stage 2的CKPT 2A/2B与Stage 3的CKPT 3A/3B均分别授权、分别review。Stage 4--5仍需分别解析和授权。
+授权并已关闭；Stage 2的CKPT 2A/2B与Stage 3的CKPT 3A/3B均分别授权、分别review。Stage 4已经解析为需分别授权、
+分别review的CKPT 4A/4B，但两者均未获得implementation授权；Stage 5仍需独立解析和授权。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -473,13 +478,16 @@ cause与bounded multi-engine listener composition路线；Stage 1将其收敛为
 operation与kernel-private capability，并接入syscall-unreachable general Socket descriptor；TCP tuple、handler、fd、
 readiness与contract均未发布。Stage 3以CKPT 3A闭合Stack owner fact/lifecycle completion，再由CKPT 3B完成
 syscall-unreachable Socket/ABI completion；两个checkpoint均已关闭，Stage 3 Closed / Not Cut Over。
-Stage 4--5继续只表达future Outline / Not Resolved / Not Authorized。
+Stage 4已经解析为CKPT 4A internal owner predicate/source/wait closure与CKPT 4B normal syscall activation/RV64
+userspace vertical slice，当前Ready / Not Active / Not Authorized；Stage 5继续只表达future Outline / Not Resolved /
+Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
 - [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed /
-  CKPT 3A-3B Closed / Not Cut Over；Stage 4--5 Outline / Not Resolved / Not Authorized）
+  CKPT 3A-3B Closed / Not Cut Over；Stage 4 Resolved / Ready / CKPT 4A-4B Not Active / Not Authorized；
+  Stage 5 Outline / Not Resolved / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
   [Socket](../../contracts/socket/index.md)、
@@ -508,6 +516,12 @@ Contract Impact或acceptance，因此修订号继续保持R0。随后单独授�
 不进入Socket/ABI projection；该implementation write-back同样不改变R0 target语义，修订号继续保持R0。
 随后单独授权并关闭CKPT 3B，完成仍不可达的Socket/ABI projection与Stage 3 closure，不发布TCP tuple、handler、fd、
 readiness或current contract；该execution write-back仍不改变R0 target语义，修订号保持R0。
+同日接受Stage 4提前发布完整syscall-reachable candidate并开始userspace纵向验证的Route Correction：首次normal
+resolver activation从Stage 5移入Stage 4，Stage 5只保留剩余双架构/external/capstone证据与最终cutover。随后只授权
+Stage 4 Implementation Resolution，把本Stage解析为分别授权、分别review的CKPT 4A internal owner predicate/
+source/wait closure与CKPT 4B syscall activation/RV64双libc vertical slice。该调整只改变implementation route、
+checkpoint、validation placement与stop condition，不改变R0 target、owner、ABI、Contract Impact、acceptance或
+validation claim，因此修订号继续保持R0；两个checkpoint implementation均未授权。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -546,4 +560,7 @@ Socket consumer回归、glibc+musl socket LTP `6/6`、格式与独立review通�
 `0 Apollyon / 0 Keter / 0 Euclid`。详情见[Stage 3 execution result](./implementation.md#6510-ckpt-3b-与-stage-3-execution-result--closed--not-cut-over)。
 四项TCP target contract继续Pending，current contracts不变，transaction仍为None。TCP tuple、handler、fd/runtime、
 blocking/readiness、TCP guest、CAgent、deployment probe、full network LTP、final harness、hardware、`smp>1`与其它
-NIC/platform均Not Run。Stage 4保持Outline / Not Resolved / Not Authorized；Stage 3授权在此耗尽。
+NIC/platform均Not Run。Stage 4现已完成docs-only Implementation Resolution：CKPT 4A将在resolver继续拒绝TCP时
+闭合owner predicate、invalidation、Socket source与wait capability，CKPT 4B再闭合Linux mapping、执行唯一normal
+resolver activation并运行RV64 glibc/musl focused C vertical slice。两个checkpoint均Not Active / Not Authorized，
+Stage 4没有代码、runtime、review或closure证据；Stage 5保持Outline / Not Resolved / Not Authorized。
