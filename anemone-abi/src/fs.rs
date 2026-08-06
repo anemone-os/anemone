@@ -825,6 +825,9 @@ pub mod linux {
         pub const POLLNVAL: i16 = 0x0020;
 
         // less-or-more non-standard.
+        pub const POLLRDNORM: i16 = 0x0040;
+        pub const POLLRDBAND: i16 = 0x0080;
+        pub const POLLWRNORM: i16 = 0x0100;
         pub const POLLRDHUP: i16 = 0x2000;
 
         #[derive(
