@@ -33,6 +33,7 @@ mod kunits {
     use anemone_net_api::Ipv4Address;
 
     use crate::{
+        fs::iomux::{PollObserver, PollRoute},
         prelude::*,
         task::files::{OpenAccessMode, OpenedFileFinalReleaseCtx},
     };
@@ -55,6 +56,31 @@ mod kunits {
     }
 
     struct BytesSource<'a>(&'a [u8]);
+
+    struct CountingObserver(AtomicUsize);
+
+    impl CountingObserver {
+        fn new() -> Self {
+            Self(AtomicUsize::new(0))
+        }
+
+        fn notifications(&self) -> usize {
+            self.0.load(Ordering::Acquire)
+        }
+    }
+
+    impl PollObserver for CountingObserver {
+        fn notify(&self) {
+            self.0.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn route(observer: &Arc<CountingObserver>) -> PollRoute {
+        let erased: Arc<dyn PollObserver> = observer.clone();
+        let route = PollRoute::new(&erased);
+        drop(erased);
+        route
+    }
 
     impl SocketWriteSource for BytesSource<'_> {
         fn remaining(&self) -> usize {
@@ -142,15 +168,18 @@ mod kunits {
     }
 
     fn start_connect_to(socket: &Socket, peer: SocketAddress) {
-        assert!(matches!(
-            socket.connect(peer.clone()),
-            Err(SocketConnectError::Started)
-        ));
+        let Err(SocketConnectError::WouldBlock(wait)) = socket.connect(peer.clone()) else {
+            panic!("first KUnit TCP connect did not return its operation wait");
+        };
+        assert_eq!(
+            wait.poll(&PollRequest::snapshot(PollEvent::WRITABLE)),
+            Ok(PollRegisterResult::Ready(PollEvent::empty()))
+        );
         // No scheduling point exists between these attempts, so the owner must
-        // still expose the distinct in-progress observation.
+        // still expose the in-progress predicate through the same source.
         assert!(matches!(
             socket.connect(peer),
-            Err(SocketConnectError::InProgress)
+            Err(SocketConnectError::WouldBlock(_))
         ));
     }
 
@@ -161,7 +190,7 @@ mod kunits {
     fn wait_connected_to(socket: &Socket, peer: SocketAddress) {
         for _ in 0..20_000 {
             match socket.connect(peer.clone()) {
-                Err(SocketConnectError::InProgress) => yield_now(),
+                Err(SocketConnectError::WouldBlock(_)) => yield_now(),
                 Err(SocketConnectError::AlreadyConnected) => return,
                 Err(SocketConnectError::ConnectionRefused) => {
                     panic!("KUnit loopback TCP connection was reset")
@@ -247,6 +276,89 @@ mod kunits {
             }),
             Err(SocketSendError::Retired)
         );
+    }
+
+    #[kunit]
+    fn tcp_connect_and_accept_waits_share_production_sources_without_lost_wake() {
+        let listener_file = prepare_committed_tcp();
+        let listener = socket_from_file(&listener_file).unwrap();
+        let address = SocketAddress::Ipv4 {
+            address: Ipv4Address::LOOPBACK,
+            port: LISTEN_PORT + 2,
+        };
+        listener.bind(address.clone()).unwrap();
+        listener.listen(1).unwrap();
+
+        let Err(SocketAcceptError::WouldBlock(accept_wait)) = listener.accept() else {
+            panic!("empty KUnit listener did not return its operation wait");
+        };
+        let accept_observer = Arc::new(CountingObserver::new());
+        assert_eq!(
+            accept_wait
+                .poll(&PollRequest::register_with_route(
+                    PollEvent::READABLE,
+                    &route(&accept_observer),
+                ))
+                .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+
+        let client_file = prepare_committed_tcp();
+        let client = socket_from_file(&client_file).unwrap();
+        let Err(SocketConnectError::WouldBlock(connect_wait)) = client.connect(address) else {
+            panic!("KUnit active open did not return its operation wait");
+        };
+        let connect_observer = Arc::new(CountingObserver::new());
+        assert_eq!(
+            connect_wait
+                .poll(&PollRequest::register_with_route(
+                    PollEvent::WRITABLE,
+                    &route(&connect_observer),
+                ))
+                .unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+
+        let mut ready = false;
+        for _ in 0..20_000 {
+            let connect_ready = matches!(
+                connect_wait.poll(&PollRequest::snapshot(PollEvent::WRITABLE)),
+                Ok(PollRegisterResult::Ready(events)) if events.contains(PollEvent::WRITABLE)
+            );
+            let accept_ready = matches!(
+                accept_wait.poll(&PollRequest::snapshot(PollEvent::READABLE)),
+                Ok(PollRegisterResult::Ready(events)) if events.contains(PollEvent::READABLE)
+            );
+            if connect_ready && accept_ready {
+                ready = true;
+                break;
+            }
+            yield_now();
+        }
+        assert!(ready, "TCP source waits missed connection completion");
+        assert!(connect_observer.notifications() > 0);
+        assert!(accept_observer.notifications() > 0);
+        assert!(matches!(
+            client_file.poll(&PollRequest::snapshot(PollEvent::WRITABLE)),
+            Ok(PollRegisterResult::Ready(events)) if events.contains(PollEvent::WRITABLE)
+        ));
+        assert!(matches!(
+            listener_file.poll(&PollRequest::snapshot(PollEvent::READABLE)),
+            Ok(PollRegisterResult::Ready(events)) if events.contains(PollEvent::READABLE)
+        ));
+
+        let accepted = match listener.accept() {
+            Ok(accepted) => accepted,
+            Err(_) => panic!("ready KUnit TCP listener did not return its child"),
+        };
+        let accepted_file = accepted.prepare_file().unwrap();
+        assert_eq!(
+            listener_file.poll(&PollRequest::snapshot(PollEvent::READABLE)),
+            Ok(PollRegisterResult::Ready(PollEvent::empty()))
+        );
+        release(&accepted_file);
+        release(&client_file);
+        release(&listener_file);
     }
 
     #[kunit]
@@ -449,7 +561,7 @@ mod kunits {
         let option_socket = socket_from_file(&option_file).unwrap();
         assert!(matches!(
             option_socket.connect(refused.clone()),
-            Err(SocketConnectError::Started)
+            Err(SocketConnectError::WouldBlock(_))
         ));
         let mut consumed = false;
         for _ in 0..20_000 {
@@ -478,7 +590,7 @@ mod kunits {
         let operation_socket = socket_from_file(&operation_file).unwrap();
         assert!(matches!(
             operation_socket.connect(refused),
-            Err(SocketConnectError::Started)
+            Err(SocketConnectError::WouldBlock(_))
         ));
         let mut operation_consumed = false;
         for _ in 0..20_000 {

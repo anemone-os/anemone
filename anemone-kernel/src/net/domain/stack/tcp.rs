@@ -4,17 +4,47 @@ use anemone_net_api::{
     InterfaceId, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
-        TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
-        TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason,
-        TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome,
-        TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpEndpointInvalidation, TcpListenBacklog,
+        TcpListenError, TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError,
+        TcpReceiveError, TcpReceiveMode, TcpReceiveReservation, TcpReceiveReservationId,
+        TcpReceiveResolveError, TcpReleaseReason, TcpRetireError, TcpSendError,
+        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
+        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 
 use super::*;
 
+use crate::net::tcp::{EventRegistrationError, TcpEndpointInvalidationObserver};
+
+pub(super) type TcpEndpointEventRoutes =
+    RecheckRoutes<TcpEndpointId, dyn TcpEndpointInvalidationObserver>;
+
 impl DomainStack {
+    pub(in crate::net) fn register_tcp_endpoint_observer(
+        &self,
+        endpoint: TcpEndpointId,
+        observer: &Arc<dyn TcpEndpointInvalidationObserver>,
+    ) -> Result<(), EventRegistrationError> {
+        self.tcp_event_routes.lock().register(endpoint, observer)
+    }
+
+    pub(in crate::net) fn unregister_tcp_endpoint_observer(&self, endpoint: TcpEndpointId) {
+        self.tcp_event_routes.lock().unregister(endpoint);
+    }
+
+    pub(super) fn route_tcp_invalidations(&self, invalidations: Vec<TcpEndpointInvalidation>) {
+        for invalidation in invalidations {
+            let observer = self
+                .tcp_event_routes
+                .lock()
+                .observer(invalidation.endpoint());
+            if let Some(observer) = observer.and_then(|observer| observer.upgrade()) {
+                observer.invalidate();
+            }
+        }
+    }
+
     pub(in crate::net) fn create_tcp_endpoint(&self) -> Result<TcpEndpointId, TcpCreateError> {
         self.protocol_transition(|stack| stack.create_tcp_endpoint())
     }
@@ -32,6 +62,13 @@ impl DomainStack {
         endpoint: TcpEndpointId,
     ) -> Result<Option<TcpLocalBinding>, TcpQueryError> {
         self.stack.lock().tcp_endpoint_binding(endpoint)
+    }
+
+    pub(in crate::net) fn tcp_endpoint_facts(
+        &self,
+        endpoint: TcpEndpointId,
+    ) -> Result<TcpEndpointFacts, TcpQueryError> {
+        self.stack.lock().tcp_endpoint_facts(endpoint)
     }
 
     pub(in crate::net) fn tcp_reuse_address(

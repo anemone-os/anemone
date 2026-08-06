@@ -4,11 +4,12 @@ use anemone_net_api::{
     InterfaceId, Ipv4Address, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
-        TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
-        TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason,
-        TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome,
-        TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpListenBacklog, TcpListenError,
+        TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError,
+        TcpReceiveMode, TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError,
+        TcpReleaseReason, TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError,
+        TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome,
+        TcpStreamSendError,
     },
 };
 use smoltcp::{
@@ -22,7 +23,9 @@ use super::{ProtocolProgression, Stack};
 
 impl Stack {
     pub fn create_tcp_endpoint(&mut self) -> Result<TcpEndpointId, TcpCreateError> {
-        self.protocols.tcp.create_endpoint()
+        let endpoint = self.protocols.tcp.create_endpoint()?;
+        self.protocols.tcp.invalidate(endpoint);
+        Ok(endpoint)
     }
 
     pub fn bind_tcp_endpoint(
@@ -30,7 +33,9 @@ impl Stack {
         id: TcpEndpointId,
         request: TcpBindRequest,
     ) -> Result<TcpLocalBinding, TcpBindError> {
-        self.protocols.tcp.bind_endpoint(id, request)
+        let binding = self.protocols.tcp.bind_endpoint(id, request)?;
+        self.protocols.tcp.invalidate(id);
+        Ok(binding)
     }
 
     pub fn tcp_endpoint_binding(
@@ -46,6 +51,24 @@ impl Stack {
         Ok(self.protocols.tcp.current_binding(id))
     }
 
+    pub fn tcp_endpoint_facts(&self, id: TcpEndpointId) -> Result<TcpEndpointFacts, TcpQueryError> {
+        let endpoint = self
+            .protocols
+            .tcp
+            .endpoint(id)
+            .ok_or(TcpQueryError::UnknownEndpoint)?;
+        let interface = match &endpoint.role {
+            crate::tcp::EndpointRole::Listener(listener) => Some(listener.interface),
+            crate::tcp::EndpointRole::Connection(connection) => Some(connection.interface),
+            crate::tcp::EndpointRole::Idle | crate::tcp::EndpointRole::Bound(_) => None,
+            crate::tcp::EndpointRole::Reclaiming { .. } | crate::tcp::EndpointRole::Vacant => {
+                return Err(TcpQueryError::UnknownEndpoint);
+            },
+        };
+        let sockets = interface.and_then(|interface| self.tcp_sockets(interface));
+        self.protocols.tcp.endpoint_facts(sockets, id)
+    }
+
     pub fn tcp_reuse_address(&self, id: TcpEndpointId) -> Result<bool, TcpBindError> {
         self.protocols.tcp.reuse_address(id)
     }
@@ -55,7 +78,11 @@ impl Stack {
         id: TcpEndpointId,
         enabled: bool,
     ) -> Result<(), TcpBindError> {
-        self.protocols.tcp.set_reuse_address(id, enabled)
+        let result = self.protocols.tcp.set_reuse_address(id, enabled);
+        if result.is_ok() {
+            self.protocols.tcp.invalidate(id);
+        }
+        result
     }
 
     pub fn tcp_no_delay(&self, id: TcpEndpointId) -> Result<bool, TcpQueryError> {
@@ -74,14 +101,17 @@ impl Stack {
             .map(|connection| connection.interface);
         let Some(interface) = interface else {
             self.protocols.tcp.set_no_delay(None, id, enabled)?;
+            self.protocols.tcp.invalidate(id);
             return Ok(None);
         };
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        Ok(tcp_owner
+        let progression = tcp_owner
             .set_no_delay(Some(sockets), id, enabled)?
-            .map(ProtocolProgression::committed))
+            .map(ProtocolProgression::committed);
+        tcp_owner.invalidate(id);
+        Ok(progression)
     }
 
     pub fn start_tcp_connect(
@@ -119,6 +149,7 @@ impl Stack {
             .expect("owner-validated TCP connect tuple must be accepted by the engine");
         let handle = sockets.add(socket);
         tcp_owner.commit_connect(id, selection.interface(), handle, binding, local, peer);
+        tcp_owner.invalidate(id);
         Ok(ProtocolProgression::committed(selection.interface()))
     }
 
@@ -177,7 +208,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        tcp_owner.connection_result(sockets, id)
+        let result = tcp_owner.connection_result(sockets, id);
+        tcp_owner.invalidate(id);
+        result
     }
 
     pub fn consume_tcp_pending_error(
@@ -202,7 +235,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        tcp_owner.consume_pending_error(sockets, id)
+        let result = tcp_owner.consume_pending_error(sockets, id);
+        tcp_owner.invalidate(id);
+        result
     }
 
     pub fn observe_tcp_stream(
@@ -224,7 +259,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        tcp_owner.stream_observation(sockets, id)
+        let result = tcp_owner.stream_observation(sockets, id);
+        tcp_owner.invalidate(id);
+        result
     }
 
     pub fn listen_tcp_endpoint(
@@ -258,6 +295,7 @@ impl Stack {
             .tcp_owner_interface_mut(interface)
             .expect("validated TCP listener interface disappeared");
         tcp_owner.commit_listener(sockets, id, interface, binding, backlog);
+        tcp_owner.invalidate(id);
         Ok(())
     }
 
@@ -280,7 +318,11 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP listener references an attached interface");
-        tcp_owner.claim_pending_child(sockets, listener)
+        let child = tcp_owner.claim_pending_child(sockets, listener)?;
+        if child.is_some() {
+            tcp_owner.invalidate(listener);
+        }
+        Ok(child)
     }
 
     pub fn take_tcp_child(
@@ -297,7 +339,10 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP listener references an attached interface");
-        tcp_owner.take_child(sockets, child)
+        let endpoint = tcp_owner.take_child(sockets, child)?;
+        tcp_owner.invalidate(listener);
+        tcp_owner.invalidate(endpoint);
+        Ok(endpoint)
     }
 
     pub fn cancel_tcp_child(
@@ -315,6 +360,7 @@ impl Stack {
             .tcp_owner_interface_mut(interface)
             .expect("live TCP listener references an attached interface");
         let interface = tcp_owner.cancel_child(sockets, child)?;
+        tcp_owner.invalidate(listener);
         Ok(interface.map(ProtocolProgression::committed))
     }
 
@@ -338,7 +384,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        let accepted = tcp_owner.send(sockets, id, bytes)?;
+        let result = tcp_owner.send(sockets, id, bytes);
+        tcp_owner.invalidate(id);
+        let accepted = result?;
         Ok((
             accepted,
             (accepted != 0).then(|| ProtocolProgression::committed(interface)),
@@ -365,7 +413,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        let accepted = tcp_owner.send_stream(sockets, id, bytes)?;
+        let result = tcp_owner.send_stream(sockets, id, bytes);
+        tcp_owner.invalidate(id);
+        let accepted = result?;
         Ok((
             accepted,
             (accepted != 0).then(|| ProtocolProgression::committed(interface)),
@@ -392,7 +442,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        tcp_owner.reserve_receive(sockets, id, maximum)
+        let result = tcp_owner.reserve_receive(sockets, id, maximum);
+        tcp_owner.invalidate(id);
+        result
     }
 
     pub fn receive_tcp_stream(
@@ -416,7 +468,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        tcp_owner.receive_stream(sockets, id, maximum, mode)
+        let result = tcp_owner.receive_stream(sockets, id, maximum, mode);
+        tcp_owner.invalidate(id);
+        result
     }
 
     pub fn shutdown_tcp_endpoint(
@@ -439,7 +493,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP connection references an attached interface");
-        let (outcome, progression) = tcp_owner.shutdown(sockets, id, direction)?;
+        let result = tcp_owner.shutdown(sockets, id, direction);
+        tcp_owner.invalidate(id);
+        let (outcome, progression) = result?;
         Ok((outcome, progression.map(ProtocolProgression::committed)))
     }
 
@@ -456,7 +512,9 @@ impl Stack {
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP reservation references an attached interface");
-        let progression = tcp_owner.resolve_receive(sockets, reservation, committed)?;
+        let result = tcp_owner.resolve_receive(sockets, reservation, committed);
+        tcp_owner.invalidate_interface(interface);
+        let progression = result?;
         Ok(progression.map(ProtocolProgression::committed))
     }
 
@@ -465,6 +523,7 @@ impl Stack {
         id: TcpEndpointId,
         reason: TcpReleaseReason,
     ) -> Result<Option<ProtocolProgression>, TcpRetireError> {
+        self.protocols.tcp.invalidate(id);
         let interface = self
             .protocols
             .tcp

@@ -1,9 +1,11 @@
 //! Syscall-unreachable TCP integration with the family-neutral Socket front.
 
 mod lifecycle;
+mod source;
 mod stream;
 
 use lifecycle::*;
+use source::*;
 use stream::*;
 
 use anemone_net_api::tcp::{
@@ -13,16 +15,16 @@ use anemone_net_api::tcp::{
 
 use crate::{
     kconfig_defs::NET_TCP_LISTENER_COMPLETED_CAPACITY,
-    net::tcp::{BindError, ConnectError, ListenError, TcpEndpointPort, create_endpoint},
+    net::tcp::{BindError, ConnectError, ListenError, TcpEndpointAccessPort, create_endpoint},
     prelude::*,
-    utils::any_opaque::{AnyOpaque, NilOpaque},
+    utils::any_opaque::AnyOpaque,
 };
 
 use super::{
     SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
     SocketConnectError, SocketCreation, SocketIoOps, SocketListenError, SocketOps,
     SocketOptionMutation, SocketOptionQuery, SocketOptionValue, SocketPreparation,
-    SocketQueryError, SocketReleaseReason, SocketType, SocketWait,
+    SocketQueryError, SocketReleaseReason, SocketType,
 };
 
 fn bind_tcp_socket(private: &AnyOpaque, address: SocketAddress) -> Result<(), SocketBindError> {
@@ -33,8 +35,9 @@ fn bind_tcp_socket(private: &AnyOpaque, address: SocketAddress) -> Result<(), So
     let _operation = socket.operation.lock();
     socket
         .source
-        .with_live(|endpoint| endpoint.bind(address, port))
+        .endpoint()
         .ok_or(SocketBindError::Retired)?
+        .bind(address, port)
         .map(|_| ())
         .map_err(map_bind_error)
 }
@@ -47,8 +50,9 @@ fn query_tcp_local_address(
     let _operation = socket.operation.lock();
     let binding = socket
         .source
-        .with_live(TcpEndpointPort::binding)
+        .endpoint()
         .ok_or(SocketQueryError::Retired)?
+        .binding()
         .map_err(map_query_error)?;
     sink.copy_address(binding.map(|binding| SocketAddress::Ipv4 {
         address: binding.address(),
@@ -65,8 +69,9 @@ fn query_tcp_peer_address(
     let _operation = socket.operation.lock();
     let peer = socket
         .source
-        .with_live(TcpEndpointPort::peer)
+        .endpoint()
         .ok_or(SocketQueryError::Retired)?
+        .peer()
         .map_err(map_query_error)?
         .ok_or(SocketQueryError::NotConnected)?;
     sink.copy_address(Some(SocketAddress::Ipv4 {
@@ -86,14 +91,21 @@ fn connect_tcp_socket(
     let peer = TcpPeer::new(address, port);
     let socket = tcp_private(private);
     let _operation = socket.operation.lock();
-    socket
+    let endpoint = socket
         .source
-        .with_live(|endpoint| connect_tcp_endpoint(endpoint, peer))
-        .ok_or(SocketConnectError::Retired)?
+        .endpoint()
+        .ok_or(SocketConnectError::Retired)?;
+    let result = connect_tcp_endpoint(&endpoint, peer);
+    match result {
+        Err(SocketConnectError::Started | SocketConnectError::InProgress) => Err(
+            SocketConnectError::WouldBlock(TcpSocketSource::connect_wait(&socket.source)),
+        ),
+        result => result,
+    }
 }
 
 fn connect_tcp_endpoint(
-    endpoint: &TcpEndpointPort,
+    endpoint: &TcpEndpointAccessPort,
     peer: TcpPeer,
 ) -> Result<(), SocketConnectError> {
     match endpoint.connect_result().map_err(|error| match error {
@@ -127,8 +139,9 @@ fn listen_tcp_socket(private: &AnyOpaque, backlog: i32) -> Result<(), SocketList
     let _operation = socket.operation.lock();
     socket
         .source
-        .with_live(|endpoint| endpoint.listen_with_backlog(normalized))
+        .endpoint()
         .ok_or(SocketListenError::Retired)?
+        .listen_with_backlog(normalized)
         .map_err(map_listen_error)
 }
 
@@ -147,8 +160,9 @@ fn tcp_is_accepting(private: &AnyOpaque) -> Result<bool, SocketQueryError> {
     let _operation = socket.operation.lock();
     socket
         .source
-        .with_live(TcpEndpointPort::is_listening)
+        .endpoint()
         .ok_or(SocketQueryError::Retired)?
+        .is_listening()
         .map_err(map_query_error)
 }
 
@@ -157,17 +171,23 @@ fn accept_tcp_socket(private: &AnyOpaque) -> Result<SocketAcceptItem, SocketAcce
     let _operation = socket.operation.lock();
     let child = socket
         .source
-        .with_live(TcpEndpointPort::claim_child)
+        .endpoint()
         .ok_or(SocketAcceptError::Retired)?
-        .map_err(map_child_error)?
-        .ok_or_else(tcp_accept_would_block)?;
+        .claim_child()
+        .map_err(map_child_error)?;
+    let Some(child) = child else {
+        return Err(SocketAcceptError::WouldBlock(TcpSocketSource::accept_wait(
+            &socket.source,
+        )));
+    };
     let endpoint = child.accept().map_err(map_child_error)?;
     let peer = endpoint
         .peer()
         .expect("completed TCP child lost its owner query")
         .expect("completed TCP child did not carry a peer");
     Ok(SocketAcceptItem {
-        private: tcp_private_from_endpoint(endpoint),
+        private: tcp_private_from_accepted_endpoint(endpoint)
+            .map_err(|_| SocketAcceptError::ResourceExhausted)?,
         peer_address: Some(SocketAddress::Ipv4 {
             address: peer.address(),
             port: peer.port(),
@@ -175,19 +195,11 @@ fn accept_tcp_socket(private: &AnyOpaque) -> Result<SocketAcceptItem, SocketAcce
     })
 }
 
-fn tcp_accept_would_block() -> SocketAcceptError {
-    SocketAcceptError::WouldBlock(SocketWait::new(NilOpaque::new(), poll_unpublished_tcp))
-}
-
-fn poll_unpublished_tcp(
-    _private: &AnyOpaque,
-    _request: &PollRequest<'_>,
+fn poll_tcp_socket(
+    private: &AnyOpaque,
+    request: &PollRequest<'_>,
 ) -> Result<PollRegisterResult, SysError> {
-    // The static capability bundle requires a poll entry, but TCP remains
-    // unpublished and Stage 3 claims no readiness. Stage 4 must replace this bridge
-    // with an owner-predicate source before any creation tuple becomes
-    // reachable.
-    Err(SysError::NotSupported)
+    tcp_private(private).source.poll(request)
 }
 
 fn map_query_error(error: TcpQueryError) -> SocketQueryError {
@@ -282,7 +294,7 @@ pub(super) static TCP_SOCKET_OPS: SocketOps = SocketOps {
     accepting: tcp_is_accepting,
     query_option: Some(query_tcp_option),
     mutate_option: Some(mutate_tcp_option),
-    poll: poll_unpublished_tcp,
+    poll: poll_tcp_socket,
     final_release: final_release_tcp_socket,
 };
 

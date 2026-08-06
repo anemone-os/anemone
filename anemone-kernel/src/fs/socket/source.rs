@@ -8,14 +8,12 @@ use crate::{
 #[derive(Clone, Debug)]
 struct SocketPollRoute {
     route: PollRoute,
-    interests: PollEvent,
 }
 
 impl SocketPollRoute {
-    fn new(route: &PollRoute, interests: PollEvent) -> Self {
+    fn new(route: &PollRoute) -> Self {
         Self {
             route: route.clone(),
-            interests,
         }
     }
 }
@@ -101,7 +99,7 @@ impl<A> SocketPollSource<A> {
                 };
                 routes.clone()
             };
-            let replacement = prepare_route_replacement(&expected, route, request.interests())?;
+            let replacement = prepare_route_replacement(&expected, route)?;
 
             let (previous, readiness) = {
                 let mut publication = self.publication.lock();
@@ -134,7 +132,11 @@ impl<A> SocketPollSource<A> {
         };
         let routes = routes.clone();
         drop(publication);
-        notify_interested_routes(&routes);
+        // An invalidation carries no event mask. Every registered consumer
+        // must re-read family facts because mandatory ERROR/HUP and optional
+        // terminal categories can change even when READABLE/WRITABLE were not
+        // requested.
+        notify_all_routes(&routes);
     }
 
     /// Withdraws source publication, then consumes the family's reverse
@@ -165,7 +167,6 @@ impl<A> SocketPollSource<A> {
 fn prepare_route_replacement(
     routes: &Arc<Vec<SocketPollRoute>>,
     route: &PollRoute,
-    interests: PollEvent,
 ) -> Result<Arc<Vec<SocketPollRoute>>, SysError> {
     let retained = routes
         .iter()
@@ -182,19 +183,8 @@ fn prepare_route_replacement(
             .filter(|entry| !entry.route.is_prunable())
             .cloned(),
     );
-    replacement.push(SocketPollRoute::new(route, interests));
+    replacement.push(SocketPollRoute::new(route));
     Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)
-}
-
-fn notify_interested_routes(routes: &Arc<Vec<SocketPollRoute>>) {
-    for entry in routes.iter() {
-        if entry
-            .interests
-            .intersects(PollEvent::READABLE | PollEvent::WRITABLE)
-        {
-            entry.route.notify();
-        }
-    }
 }
 
 fn notify_all_routes(routes: &Arc<Vec<SocketPollRoute>>) {
@@ -239,7 +229,7 @@ mod kunits {
     }
 
     #[kunit]
-    fn invalidation_filters_interests_and_prunes_retired_routes() {
+    fn invalidation_rechecks_every_interest_and_prunes_retired_routes() {
         let source = SocketPollSource::try_new().expect("KUnit source routes must fit");
         source.publish(());
         let first = Arc::new(CountingObserver::new());
@@ -255,7 +245,7 @@ mod kunits {
             .unwrap();
         source
             .poll(
-                &PollRequest::register_with_route(PollEvent::WRITABLE, &second_route),
+                &PollRequest::register_with_route(PollEvent::HANG_UP, &second_route),
                 no_readiness,
             )
             .unwrap();

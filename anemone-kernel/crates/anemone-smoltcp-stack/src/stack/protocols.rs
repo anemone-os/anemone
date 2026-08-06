@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     icmp_raw::{IcmpRawEndpointId, IcmpRawEndpointInvalidation, IcmpRawNamespacePolicy},
+    tcp::TcpEndpointInvalidation,
     udp::{UdpEndpointId, UdpEndpointInvalidation, UdpNamespacePolicy},
 };
 use smoltcp::iface::{AdmittedIpv4Packet, SocketSet};
@@ -60,6 +61,7 @@ pub(crate) struct InterfaceProtocols {
 pub struct StackInvalidations {
     udp: Vec<UdpEndpointInvalidation>,
     icmp_raw: Vec<IcmpRawEndpointInvalidation>,
+    tcp: Vec<TcpEndpointInvalidation>,
 }
 
 impl StackInvalidations {
@@ -68,8 +70,9 @@ impl StackInvalidations {
     ) -> (
         Vec<UdpEndpointInvalidation>,
         Vec<IcmpRawEndpointInvalidation>,
+        Vec<TcpEndpointInvalidation>,
     ) {
-        (self.udp, self.icmp_raw)
+        (self.udp, self.icmp_raw, self.tcp)
     }
 }
 
@@ -204,7 +207,12 @@ impl Protocols {
         StackInvalidations {
             udp: self.udp.take_invalidations(),
             icmp_raw: self.icmp_raw.take_invalidations(),
+            tcp: self.tcp.take_invalidations(),
         }
+    }
+
+    pub(crate) fn invalidate_tcp_interface(&mut self, interface: InterfaceId) {
+        self.tcp.invalidate_interface(interface);
     }
 
     pub(crate) fn reclaim_tcp(&mut self, interface: InterfaceId, sockets: &mut SocketSet<'static>) {

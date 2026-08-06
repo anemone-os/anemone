@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::net::tcp::TcpEndpointPort;
+
 #[derive(Opaque)]
 pub(super) struct TcpSocketFile {
     pub(super) source: Arc<TcpSocketSource>,
@@ -15,47 +17,6 @@ impl TcpSocketFile {
         Self {
             source,
             operation: Mutex::new(()),
-        }
-    }
-}
-
-pub(super) struct TcpSocketSource {
-    /// The move-only Endpoint capability is the sole kernel association. The
-    /// binding, role, peer, stream, cause, and readiness facts remain in the
-    /// Stack owner and are queried for each operation.
-    endpoint: SpinLock<Option<TcpEndpointPort>>,
-}
-
-impl TcpSocketSource {
-    fn new(endpoint: TcpEndpointPort) -> Self {
-        Self {
-            endpoint: SpinLock::new(Some(endpoint)),
-        }
-    }
-
-    pub(super) fn with_live<R>(&self, operation: impl FnOnce(&TcpEndpointPort) -> R) -> Option<R> {
-        self.endpoint.lock().as_ref().map(operation)
-    }
-
-    fn release(&self, reason: TcpReleaseReason) -> bool {
-        let endpoint = self.endpoint.lock().take();
-        let Some(endpoint) = endpoint else {
-            return false;
-        };
-        endpoint.release(reason);
-        true
-    }
-}
-
-impl Drop for TcpSocketSource {
-    fn drop(&mut self) {
-        let endpoint = self.endpoint.lock().take();
-        if let Some(endpoint) = endpoint {
-            // This is a fail-close assertion path, not a second lifecycle
-            // trigger: withdraw and retire first so the diagnostic cannot leak
-            // a live Endpoint if an unpublished/final-release owner is lost.
-            endpoint.release(TcpReleaseReason::FinalRelease);
-            panic!("TCP Socket source dropped before lifecycle-owned retirement");
         }
     }
 }
@@ -89,15 +50,35 @@ pub(super) fn tcp_private(private: &AnyOpaque) -> &TcpSocketFile {
         .expect("TCP SocketOps used without TCP private state")
 }
 
-pub(super) fn tcp_private_from_endpoint(endpoint: TcpEndpointPort) -> AnyOpaque {
-    AnyOpaque::new(TcpSocketFile::new(Arc::new(TcpSocketSource::new(endpoint))))
+pub(super) fn tcp_private_from_accepted_endpoint(
+    endpoint: TcpEndpointPort,
+) -> Result<AnyOpaque, SysError> {
+    finish_accepted_source(TcpSocketSource::try_new(endpoint))
+}
+
+fn finish_accepted_source(
+    prepared: Result<Arc<TcpSocketSource>, (SysError, TcpEndpointPort)>,
+) -> Result<AnyOpaque, SysError> {
+    match prepared {
+        Ok(source) => Ok(AnyOpaque::new(TcpSocketFile::new(source))),
+        Err((error, endpoint)) => {
+            endpoint.release(TcpReleaseReason::AcceptedChildRollback);
+            Err(error)
+        },
+    }
 }
 
 pub(super) fn prepare_tcp_socket() -> Result<SocketPreparation, SysError> {
     let endpoint = create_endpoint().map_err(|error| match error {
         TcpCreateError::EndpointCapacity => SysError::NoBufferSpace,
     })?;
-    let source = Arc::new(TcpSocketSource::new(endpoint));
+    let source = match TcpSocketSource::try_new(endpoint) {
+        Ok(source) => source,
+        Err((error, endpoint)) => {
+            endpoint.release(TcpReleaseReason::CreationRollback);
+            return Err(error);
+        },
+    };
     Ok(SocketPreparation {
         private: AnyOpaque::new(TcpSocketFile::new(source.clone())),
         creation: SocketCreation {
@@ -127,4 +108,22 @@ pub(super) fn final_release_tcp_socket(private: &AnyOpaque, reason: SocketReleas
         }),
         "TCP final release lost its Endpoint capability"
     );
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    use anemone_net_api::tcp::TcpQueryError;
+
+    #[kunit]
+    fn accepted_source_preparation_failure_uses_child_rollback_reason() {
+        let endpoint = create_endpoint().expect("KUnit TCP Endpoint must fit");
+        let access = endpoint.access();
+        assert!(matches!(
+            finish_accepted_source(Err((SysError::OutOfMemory, endpoint))),
+            Err(SysError::OutOfMemory)
+        ));
+        assert_eq!(access.facts(), Err(TcpQueryError::UnknownEndpoint));
+    }
 }

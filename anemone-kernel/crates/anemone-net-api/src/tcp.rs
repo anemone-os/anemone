@@ -187,6 +187,114 @@ pub enum TcpPendingError {
     TimedOut,
 }
 
+/// Point-in-time active-open fact owned by the TCP Stack.
+///
+/// This is an observation, not a second protocol state machine. Callers must
+/// obtain a fresh `TcpEndpointFacts` after every recheck hint.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TcpConnectFact {
+    Connecting,
+    Connected,
+    Failed,
+}
+
+/// Point-in-time facts for one Stack-owned TCP connection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TcpConnectionFacts {
+    connect: TcpConnectFact,
+    send_capacity: usize,
+    received_bytes: usize,
+    pending_error: bool,
+    local_read_shutdown: bool,
+    local_write_shutdown: bool,
+    peer_receive_closed: bool,
+    terminal: bool,
+}
+
+impl TcpConnectionFacts {
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn from_owner_snapshot(
+        connect: TcpConnectFact,
+        send_capacity: usize,
+        received_bytes: usize,
+        pending_error: bool,
+        local_read_shutdown: bool,
+        local_write_shutdown: bool,
+        peer_receive_closed: bool,
+        terminal: bool,
+    ) -> Self {
+        Self {
+            connect,
+            send_capacity,
+            received_bytes,
+            pending_error,
+            local_read_shutdown,
+            local_write_shutdown,
+            peer_receive_closed,
+            terminal,
+        }
+    }
+
+    pub const fn connect(self) -> TcpConnectFact {
+        self.connect
+    }
+
+    pub const fn send_capacity(self) -> usize {
+        self.send_capacity
+    }
+
+    pub const fn received_bytes(self) -> usize {
+        self.received_bytes
+    }
+
+    pub const fn has_pending_error(self) -> bool {
+        self.pending_error
+    }
+
+    pub const fn is_local_read_shutdown(self) -> bool {
+        self.local_read_shutdown
+    }
+
+    pub const fn is_local_write_shutdown(self) -> bool {
+        self.local_write_shutdown
+    }
+
+    pub const fn is_peer_receive_closed(self) -> bool {
+        self.peer_receive_closed
+    }
+
+    pub const fn is_terminal(self) -> bool {
+        self.terminal
+    }
+}
+
+/// Role-aware point-in-time facts for one boot-unique TCP Endpoint.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TcpEndpointFacts {
+    Idle,
+    Bound,
+    Listener { has_pending_child: bool },
+    Connection(TcpConnectionFacts),
+}
+
+/// Recheck-only evidence that an Endpoint fact may have changed.
+///
+/// It carries no readiness, errno, operation result, or lifecycle authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TcpEndpointInvalidation(TcpEndpointId);
+
+impl TcpEndpointInvalidation {
+    #[doc(hidden)]
+    pub const fn from_owner_transition(endpoint: TcpEndpointId) -> Self {
+        Self(endpoint)
+    }
+
+    pub const fn endpoint(self) -> TcpEndpointId {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TcpConnectResult {
     Idle,

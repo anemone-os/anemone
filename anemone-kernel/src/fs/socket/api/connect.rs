@@ -34,9 +34,9 @@ fn sys_connect(fd: Fd, addr: u64, addrlen: u32) -> Result<u64, SysError> {
             Err(SocketConnectError::Unsupported) => return Err(SysError::NotSupported),
             Err(SocketConnectError::Retired) => return Err(SysError::BadFileDescriptor),
             Err(SocketConnectError::InvalidState) => return Err(SysError::InvalidArgument),
-            // These outcomes are currently produced only by the unpublished
-            // TCP descriptor. Stage 5 must add the Linux EINPROGRESS,
-            // EALREADY, and ETIMEDOUT mapping before publishing its tuple.
+            // CKPT 4A converts TCP start/in-progress into a private operation
+            // wait before this syscall boundary. CKPT 4B still owns the final
+            // EINPROGRESS, EALREADY, and ETIMEDOUT mapping before publication.
             Err(
                 SocketConnectError::Started
                 | SocketConnectError::InProgress

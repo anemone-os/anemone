@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Ready / Not Cut Over / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 In Progress / CKPT 4A Closed / Not Cut Over / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-06
@@ -9,7 +9,7 @@
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
 **执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed / CKPT 3A-3B Closed / Not Cut Over；
-Stage 4 Resolved / Ready / CKPT 4A-4B Not Active / Not Authorized；
+Stage 4 In Progress / CKPT 4A Closed / CKPT 4B Not Active / Not Authorized；
 `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
@@ -33,8 +33,9 @@ projection；`fs/socket/tcp.rs`的行为保持型目录化属于Stage 3必要imp
 CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over。随后接受的Route Correction把首次normal resolver
 activation与真实userspace纵向验证从Stage 5提前到Stage 4；Stage 4现已解析为两个需分别授权、分别review的execution
 checkpoint：CKPT 4A完成仍不可达的owner predicate/source/wait closure，CKPT 4B完成syscall projection、唯一normal
-resolver activation与RV64双libc vertical slice。Stage 4 Ready / Not Active / Not Authorized；Stage 5仍为Outline /
-Not Resolved / Not Authorized。本次resolution不执行contract cutover，也不授权任何implementation或后续Stage。
+resolver activation与RV64双libc vertical slice。CKPT 4A已经单独授权并关闭；Stage 4保持In Progress，CKPT 4B仍
+Not Active / Not Authorized，Stage 5仍为Outline / Not Resolved / Not Authorized。4A closure不执行contract cutover，
+也不授权下一checkpoint或后续Stage。
 
 ## 摘要
 
@@ -349,7 +350,7 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 
 本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0、Stage 1、Stage 2与Stage 3都曾取得各自所需
 授权并已关闭；Stage 2的CKPT 2A/2B与Stage 3的CKPT 3A/3B均分别授权、分别review。Stage 4已经解析为需分别授权、
-分别review的CKPT 4A/4B，但两者均未获得implementation授权；Stage 5仍需独立解析和授权。
+分别review的CKPT 4A/4B；CKPT 4A已经单独授权并关闭，CKPT 4B未获得implementation授权；Stage 5仍需独立解析和授权。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -479,14 +480,14 @@ operation与kernel-private capability，并接入syscall-unreachable general Soc
 readiness与contract均未发布。Stage 3以CKPT 3A闭合Stack owner fact/lifecycle completion，再由CKPT 3B完成
 syscall-unreachable Socket/ABI completion；两个checkpoint均已关闭，Stage 3 Closed / Not Cut Over。
 Stage 4已经解析为CKPT 4A internal owner predicate/source/wait closure与CKPT 4B normal syscall activation/RV64
-userspace vertical slice，当前Ready / Not Active / Not Authorized；Stage 5继续只表达future Outline / Not Resolved /
-Not Authorized。
+userspace vertical slice；CKPT 4A已经关闭，Stage 4当前In Progress，CKPT 4B仍Not Active / Not Authorized；Stage 5
+继续只表达future Outline / Not Resolved / Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
 - [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed /
-  CKPT 3A-3B Closed / Not Cut Over；Stage 4 Resolved / Ready / CKPT 4A-4B Not Active / Not Authorized；
+  CKPT 3A-3B Closed / Not Cut Over；Stage 4 In Progress / CKPT 4A Closed / CKPT 4B Not Active / Not Authorized；
   Stage 5 Outline / Not Resolved / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
@@ -498,7 +499,7 @@ Not Authorized。
   [`simple_llm_server.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/simple_llm_server.c)、
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
-- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2与Stage 3 focused Git commit；
+- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2、Stage 3与CKPT 4A focused Git commit；
   transaction None
 
 ## 修订记录
@@ -521,7 +522,10 @@ resolver activation从Stage 5移入Stage 4，Stage 5只保留剩余双架构/ext
 Stage 4 Implementation Resolution，把本Stage解析为分别授权、分别review的CKPT 4A internal owner predicate/
 source/wait closure与CKPT 4B syscall activation/RV64双libc vertical slice。该调整只改变implementation route、
 checkpoint、validation placement与stop condition，不改变R0 target、owner、ABI、Contract Impact、acceptance或
-validation claim，因此修订号继续保持R0；两个checkpoint implementation均未授权。
+validation claim，因此修订号继续保持R0；当时两个checkpoint implementation均未授权。
+随后单独授权并关闭CKPT 4A，在resolver继续拒绝TCP时完成owner predicate/invalidation、production source、
+connect/accept wait与lifecycle closure；该execution write-back不改变R0 target、owner、ABI、Contract Impact或
+current contracts，因此修订号保持R0。CKPT 4B与Stage 5仍未授权。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -560,7 +564,13 @@ Socket consumer回归、glibc+musl socket LTP `6/6`、格式与独立review通�
 `0 Apollyon / 0 Keter / 0 Euclid`。详情见[Stage 3 execution result](./implementation.md#6510-ckpt-3b-与-stage-3-execution-result--closed--not-cut-over)。
 四项TCP target contract继续Pending，current contracts不变，transaction仍为None。TCP tuple、handler、fd/runtime、
 blocking/readiness、TCP guest、CAgent、deployment probe、full network LTP、final harness、hardware、`smp>1`与其它
-NIC/platform均Not Run。Stage 4现已完成docs-only Implementation Resolution：CKPT 4A将在resolver继续拒绝TCP时
-闭合owner predicate、invalidation、Socket source与wait capability，CKPT 4B再闭合Linux mapping、执行唯一normal
-resolver activation并运行RV64 glibc/musl focused C vertical slice。两个checkpoint均Not Active / Not Authorized，
-Stage 4没有代码、runtime、review或closure证据；Stage 5保持Outline / Not Resolved / Not Authorized。
+NIC/platform均Not Run。Stage 4 In Progress / CKPT 4A Closed：Stack owner现以role-aware facts表达TCP predicate，
+conservative invalidation经weak reverse route命中shared production `SocketPollSource`，connect/accept使用各自窄wait；
+source retirement、rollback、multi-waiter与late hint保持既有lifecycle/wait contract。published resolver仍排除TCP，
+tuple、handler、fd/runtime不可达。host TCP owner `20/20`、focused smoltcp TCP `178/178`、RV64 KUnit `465/465`、
+glibc+musl既有socket LTP `6/6`、RV64/LA64 release build、格式与独立review通过；final review为
+`0 Apollyon / 0 Keter / 0 Euclid`。详情见[CKPT 4A execution result](./implementation.md#6610-ckpt-4a-execution-result--closed)。
+四项TCP target contract继续Pending，current contracts不变，transaction仍为None。TCP userspace、normal resolver
+activation、LA64 userspace、CAgent、deployment probe、full network LTP、final harness、hardware、`smp>1`与其它
+NIC/platform均Not Run。CKPT 4A授权已经耗尽；CKPT 4B保持Not Active / Not Authorized，Stage 5保持Outline /
+Not Resolved / Not Authorized。

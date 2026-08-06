@@ -1,5 +1,6 @@
 //! The sole TCP namespace, endpoint, stream, and reclaim owner.
 
+mod facts;
 mod listener;
 mod namespace;
 mod reclaim;
@@ -10,8 +11,8 @@ use alloc::{vec, vec::Vec};
 use anemone_net_api::{
     InterfaceId,
     tcp::{
-        TcpEndpointId, TcpLocalBinding, TcpPeer, TcpPendingError, TcpReceiveMode,
-        TcpReceiveReservationId, TcpReleaseReason,
+        TcpEndpointId, TcpEndpointInvalidation, TcpLocalBinding, TcpPeer, TcpPendingError,
+        TcpReceiveMode, TcpReceiveReservationId, TcpReleaseReason,
     },
 };
 use smoltcp::{
@@ -181,6 +182,9 @@ pub(crate) struct TcpEndpoints {
     next_reservation_id: u64,
     engine_count: usize,
     deferred: Vec<DeferredReclaim>,
+    /// Bounded, coalesced recheck hints. Endpoint facts remain authoritative
+    /// in the role/engine owners and no readiness payload is stored here.
+    pending_invalidations: Vec<TcpEndpointInvalidation>,
 }
 
 impl TcpEndpoints {
@@ -208,6 +212,7 @@ impl TcpEndpoints {
             // cleanup therefore never allocates and cannot be rejected after
             // a capability has crossed into the kernel.
             deferred: Vec::with_capacity(policy.deferred_reclaim_capacity),
+            pending_invalidations: Vec::with_capacity(policy.endpoint_capacity),
         }
     }
 
@@ -358,10 +363,10 @@ mod tests {
         Instant, Ipv4Address, Ipv4Cidr, Ipv4EgressSelection,
         icmp_raw::IcmpRawNamespacePolicy,
         tcp::{
-            TcpBindError, TcpBindRequest, TcpConnectResult, TcpListenBacklog, TcpListenError,
-            TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveMode, TcpReceiveResolveError,
-            TcpReleaseReason, TcpShutdownDirection, TcpShutdownOutcome, TcpStreamReceiveError,
-            TcpStreamReceiveOutcome, TcpStreamSendError,
+            TcpBindError, TcpBindRequest, TcpConnectFact, TcpConnectResult, TcpEndpointFacts,
+            TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError, TcpQueryError,
+            TcpReceiveMode, TcpReceiveResolveError, TcpReleaseReason, TcpShutdownDirection,
+            TcpShutdownOutcome, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
         },
         udp::UdpNamespacePolicy,
     };
@@ -439,6 +444,147 @@ mod tests {
             .expect("connected pair must publish one completed child");
         let accepted = stack.take_tcp_child(child).unwrap();
         (listener, client, accepted)
+    }
+
+    fn tcp_invalidations(stack: &mut Stack) -> Vec<anemone_net_api::tcp::TcpEndpointInvalidation> {
+        stack.take_invalidations().into_parts().2
+    }
+
+    #[test]
+    fn endpoint_facts_and_invalidations_cover_listener_stream_shutdown_and_retire() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, LISTEN_PORT))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        assert!(
+            tcp_invalidations(&mut stack)
+                .iter()
+                .any(|entry| entry.endpoint() == listener)
+        );
+        assert_eq!(
+            stack.tcp_endpoint_facts(listener),
+            Ok(TcpEndpointFacts::Listener {
+                has_pending_child: false
+            })
+        );
+        assert!(tcp_invalidations(&mut stack).is_empty());
+
+        let client = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, LISTEN_PORT),
+            )
+            .unwrap();
+        let TcpEndpointFacts::Connection(connecting) = stack.tcp_endpoint_facts(client).unwrap()
+        else {
+            panic!("active open did not publish connection facts");
+        };
+        assert_eq!(connecting.connect(), TcpConnectFact::Connecting);
+        assert!(
+            tcp_invalidations(&mut stack)
+                .iter()
+                .any(|entry| entry.endpoint() == client)
+        );
+
+        drive(&mut stack, interface, 0);
+        let invalidations = tcp_invalidations(&mut stack);
+        assert_eq!(
+            invalidations
+                .iter()
+                .filter(|entry| entry.endpoint() == listener)
+                .count(),
+            1
+        );
+        assert_eq!(
+            invalidations
+                .iter()
+                .filter(|entry| entry.endpoint() == client)
+                .count(),
+            1
+        );
+        assert_eq!(
+            stack.tcp_endpoint_facts(listener),
+            Ok(TcpEndpointFacts::Listener {
+                has_pending_child: true
+            })
+        );
+        let TcpEndpointFacts::Connection(connected) = stack.tcp_endpoint_facts(client).unwrap()
+        else {
+            panic!("completed active open lost connection facts");
+        };
+        assert_eq!(connected.connect(), TcpConnectFact::Connected);
+        assert!(connected.send_capacity() > 0);
+
+        let child = stack
+            .claim_tcp_pending_child(listener)
+            .unwrap()
+            .expect("completed child must be claimable");
+        assert_eq!(
+            stack.tcp_endpoint_facts(listener),
+            Ok(TcpEndpointFacts::Listener {
+                has_pending_child: false
+            })
+        );
+        let accepted = stack.take_tcp_child(child).unwrap();
+        assert!(
+            tcp_invalidations(&mut stack)
+                .iter()
+                .any(|entry| entry.endpoint() == accepted)
+        );
+
+        assert_eq!(stack.send_tcp_stream(client, &[0x5a; 32]).unwrap().0, 32);
+        let TcpEndpointFacts::Connection(full) = stack.tcp_endpoint_facts(client).unwrap() else {
+            panic!("sender lost connection facts");
+        };
+        assert_eq!(full.send_capacity(), 0);
+        drive(&mut stack, interface, 128);
+        let TcpEndpointFacts::Connection(receiving) = stack.tcp_endpoint_facts(accepted).unwrap()
+        else {
+            panic!("receiver lost connection facts");
+        };
+        assert_eq!(receiving.received_bytes(), 32);
+
+        assert_eq!(
+            stack
+                .shutdown_tcp_endpoint(accepted, TcpShutdownDirection::Read)
+                .unwrap()
+                .0,
+            TcpShutdownOutcome::Changed
+        );
+        let TcpEndpointFacts::Connection(shut_read) = stack.tcp_endpoint_facts(accepted).unwrap()
+        else {
+            panic!("shutdown receiver lost connection facts");
+        };
+        assert!(shut_read.is_local_read_shutdown());
+        assert!(
+            tcp_invalidations(&mut stack)
+                .iter()
+                .any(|entry| entry.endpoint() == accepted)
+        );
+
+        stack
+            .release_tcp_endpoint(accepted, TcpReleaseReason::AcceptedChildRollback)
+            .unwrap();
+        assert_eq!(
+            stack.tcp_endpoint_facts(accepted),
+            Err(TcpQueryError::UnknownEndpoint)
+        );
+        assert!(
+            tcp_invalidations(&mut stack)
+                .iter()
+                .any(|entry| entry.endpoint() == accepted)
+        );
     }
 
     #[test]
@@ -819,6 +965,24 @@ mod tests {
             &mut device,
             &mut local.sockets,
         );
+        assert!(
+            stack
+                .observe_tcp_stream(endpoint)
+                .unwrap()
+                .has_pending_error()
+        );
+        let TcpEndpointFacts::Connection(timed_out) = stack.tcp_endpoint_facts(endpoint).unwrap()
+        else {
+            panic!("timed-out active open lost connection facts");
+        };
+        assert_eq!(timed_out.connect(), TcpConnectFact::Failed);
+        assert!(timed_out.has_pending_error());
+        assert!(timed_out.is_terminal());
+        assert!(
+            tcp_invalidations(&mut stack)
+                .iter()
+                .any(|entry| entry.endpoint() == endpoint)
+        );
         assert_eq!(
             stack.tcp_connect_result(endpoint).unwrap(),
             TcpConnectResult::Failed(TcpPendingError::TimedOut)
@@ -1154,6 +1318,13 @@ mod tests {
             .unwrap();
         drive(&mut stack, interface, 128);
 
+        let TcpEndpointFacts::Connection(fin) = stack.tcp_endpoint_facts(accepted).unwrap() else {
+            panic!("FIN receiver lost connection facts");
+        };
+        assert_eq!(fin.received_bytes(), 5);
+        assert!(fin.is_peer_receive_closed());
+        assert!(!fin.is_terminal());
+
         let peek = match stack
             .receive_tcp_stream(accepted, 5, TcpReceiveMode::Peek)
             .unwrap()
@@ -1188,6 +1359,13 @@ mod tests {
             .release_tcp_endpoint(client, TcpReleaseReason::AcceptedChildRollback)
             .unwrap();
         drive(&mut stack, interface, 512);
+        let TcpEndpointFacts::Connection(reset) = stack.tcp_endpoint_facts(accepted).unwrap()
+        else {
+            panic!("reset receiver lost connection facts");
+        };
+        assert_eq!(reset.received_bytes(), 5);
+        assert!(reset.has_pending_error());
+        assert!(reset.is_terminal());
         let observation = stack.observe_tcp_stream(accepted).unwrap();
         assert!(observation.has_received_bytes());
         assert!(observation.has_pending_error());
@@ -1209,6 +1387,13 @@ mod tests {
             stack.receive_tcp_stream(accepted, 5, TcpReceiveMode::Consume),
             Err(TcpStreamReceiveError::ConnectionReset)
         );
+        let TcpEndpointFacts::Connection(consumed_reset) =
+            stack.tcp_endpoint_facts(accepted).unwrap()
+        else {
+            panic!("consumed reset lost connection facts");
+        };
+        assert!(!consumed_reset.has_pending_error());
+        assert!(!consumed_reset.is_peer_receive_closed());
         assert!(stack.observe_tcp_stream(accepted).unwrap().end_of_stream());
 
         let (_, client, accepted) = connected_pair(&mut stack, interface, 25005, 640);

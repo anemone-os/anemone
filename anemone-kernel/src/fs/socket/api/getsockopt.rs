@@ -294,7 +294,7 @@ mod kunits {
                     address: Ipv4Address::LOOPBACK,
                     port: 1,
                 }),
-            Err(SocketConnectError::Started)
+            Err(SocketConnectError::WouldBlock(_))
         ));
 
         for _ in 0..20_000 {

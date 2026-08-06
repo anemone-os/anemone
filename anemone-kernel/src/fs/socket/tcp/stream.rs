@@ -36,20 +36,15 @@ pub(super) fn send_tcp_socket(
     // this family therefore treats both markers as the same stream operation.
     let socket = tcp_private(private);
     let _operation = socket.operation.lock();
-    let maximum = socket
-        .source
-        .with_live(crate::net::tcp::TcpEndpointPort::stream_observation)
-        .ok_or(SocketSendError::Retired)?
+    let endpoint = socket.source.endpoint().ok_or(SocketSendError::Retired)?;
+    let maximum = endpoint
+        .stream_observation()
         .map_err(map_stream_query_send_error)?
         .send_capacity()
         .min(source.remaining())
         .min(NET_TCP_TX_BUFFER_BYTES);
     if maximum == 0 {
-        let result = socket
-            .source
-            .with_live(|endpoint| endpoint.send_stream(&[]))
-            .ok_or(SocketSendError::Retired)?
-            .map_err(map_stream_send_error)?;
+        let result = endpoint.send_stream(&[]).map_err(map_stream_send_error)?;
         return if source.remaining() == 0 {
             Ok(result)
         } else {
@@ -70,10 +65,8 @@ pub(super) fn send_tcp_socket(
     if copied == 0 {
         return Ok(0);
     }
-    let accepted = socket
-        .source
-        .with_live(|endpoint| endpoint.send_stream(&bytes[..copied]))
-        .ok_or(SocketSendError::Retired)?
+    let accepted = endpoint
+        .send_stream(&bytes[..copied])
         .map_err(map_stream_send_error)?;
     assert_eq!(
         accepted, copied,
@@ -91,20 +84,20 @@ pub(super) fn receive_tcp_socket(
     };
     let socket = tcp_private(private);
     let _operation = socket.operation.lock();
-    let maximum = sink.remaining().min(NET_TCP_RX_BUFFER_BYTES);
-    let outcome = socket
+    let endpoint = socket
         .source
-        .with_live(|endpoint| {
-            endpoint.receive_stream(
-                maximum,
-                if flags.peek {
-                    TcpReceiveMode::Peek
-                } else {
-                    TcpReceiveMode::Consume
-                },
-            )
-        })
-        .ok_or(SocketReceiveError::Retired)?
+        .endpoint()
+        .ok_or(SocketReceiveError::Retired)?;
+    let maximum = sink.remaining().min(NET_TCP_RX_BUFFER_BYTES);
+    let outcome = endpoint
+        .receive_stream(
+            maximum,
+            if flags.peek {
+                TcpReceiveMode::Peek
+            } else {
+                TcpReceiveMode::Consume
+            },
+        )
         .map_err(map_stream_receive_error)?;
     let crate::net::tcp::TcpReceiveOutcome::Data(reservation) = outcome else {
         return Ok(SocketReceiveOutcome::byte_stream(0));
@@ -130,14 +123,13 @@ pub(super) fn shutdown_tcp_socket(
     let _operation = socket.operation.lock();
     socket
         .source
-        .with_live(|endpoint| {
-            endpoint.shutdown(match direction {
-                SocketShutdown::Read => TcpShutdownDirection::Read,
-                SocketShutdown::Write => TcpShutdownDirection::Write,
-                SocketShutdown::ReadWrite => TcpShutdownDirection::ReadWrite,
-            })
-        })
+        .endpoint()
         .ok_or(SocketShutdownError::Retired)?
+        .shutdown(match direction {
+            SocketShutdown::Read => TcpShutdownDirection::Read,
+            SocketShutdown::Write => TcpShutdownDirection::Write,
+            SocketShutdown::ReadWrite => TcpShutdownDirection::ReadWrite,
+        })
         .map(|_| ())
         .map_err(|error| match error {
             TcpShutdownError::UnknownEndpoint => SocketShutdownError::Retired,
@@ -151,24 +143,22 @@ pub(super) fn query_tcp_option(
 ) -> Result<SocketOptionValue, SocketOptionError> {
     let socket = tcp_private(private);
     let _operation = socket.operation.lock();
-    socket
-        .source
-        .with_live(|endpoint| match query {
-            SocketOptionQuery::ReuseAddress => endpoint
-                .reuse_address()
-                .map(SocketOptionValue::Boolean)
-                .map_err(map_bind_option_error),
-            SocketOptionQuery::PendingError => endpoint
-                .consume_pending_error()
-                .map(|error| SocketOptionValue::PendingError(error.map(map_pending_error)))
-                .map_err(map_query_option_error),
-            SocketOptionQuery::TcpNoDelay => endpoint
-                .no_delay()
-                .map(SocketOptionValue::Boolean)
-                .map_err(map_query_option_error),
-            _ => Err(SocketOptionError::Unsupported),
-        })
-        .ok_or(SocketOptionError::Retired)?
+    let endpoint = socket.source.endpoint().ok_or(SocketOptionError::Retired)?;
+    match query {
+        SocketOptionQuery::ReuseAddress => endpoint
+            .reuse_address()
+            .map(SocketOptionValue::Boolean)
+            .map_err(map_bind_option_error),
+        SocketOptionQuery::PendingError => endpoint
+            .consume_pending_error()
+            .map(|error| SocketOptionValue::PendingError(error.map(map_pending_error)))
+            .map_err(map_query_option_error),
+        SocketOptionQuery::TcpNoDelay => endpoint
+            .no_delay()
+            .map(SocketOptionValue::Boolean)
+            .map_err(map_query_option_error),
+        _ => Err(SocketOptionError::Unsupported),
+    }
 }
 
 pub(super) fn mutate_tcp_option(
@@ -177,18 +167,16 @@ pub(super) fn mutate_tcp_option(
 ) -> Result<(), SocketOptionError> {
     let socket = tcp_private(private);
     let _operation = socket.operation.lock();
-    socket
-        .source
-        .with_live(|endpoint| match mutation {
-            SocketOptionMutation::ReuseAddress(enabled) => endpoint
-                .set_reuse_address(enabled)
-                .map_err(map_bind_option_error),
-            SocketOptionMutation::TcpNoDelay(enabled) => endpoint
-                .set_no_delay(enabled)
-                .map_err(map_query_option_error),
-            _ => Err(SocketOptionError::Unsupported),
-        })
-        .ok_or(SocketOptionError::Retired)?
+    let endpoint = socket.source.endpoint().ok_or(SocketOptionError::Retired)?;
+    match mutation {
+        SocketOptionMutation::ReuseAddress(enabled) => endpoint
+            .set_reuse_address(enabled)
+            .map_err(map_bind_option_error),
+        SocketOptionMutation::TcpNoDelay(enabled) => endpoint
+            .set_no_delay(enabled)
+            .map_err(map_query_option_error),
+        _ => Err(SocketOptionError::Unsupported),
+    }
 }
 
 fn map_stream_query_send_error(error: TcpQueryError) -> SocketSendError {

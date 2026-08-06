@@ -8,11 +8,11 @@ use anemone_net_api::{
     Ipv4Address, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpCreateError, TcpEndpointId, TcpListenBacklog, TcpListenError, TcpLocalBinding, TcpPeer,
-        TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode, TcpReceiveReservation,
-        TcpReceiveResolveError, TcpReleaseReason, TcpSendError, TcpShutdownDirection,
-        TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError,
-        TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpListenBacklog, TcpListenError,
+        TcpLocalBinding, TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
+        TcpReceiveReservation, TcpReceiveResolveError, TcpReleaseReason, TcpSendError,
+        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
+        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use anemone_smoltcp_stack::TcpPolicy;
@@ -23,6 +23,8 @@ use super::{
     ACTIVE_PATHS,
     domain::{DomainStack, SelectionError},
 };
+
+pub(crate) use super::EventRegistrationError;
 
 pub(in crate::net) const TCP_POLICY: TcpPolicy = TcpPolicy::new(
     NET_TCP_ENDPOINT_CAPACITY,
@@ -90,13 +92,67 @@ static_assert!(
 );
 
 pub(crate) struct TcpEndpointPort {
-    stack: Arc<DomainStack>,
+    access: TcpEndpointAccessPort,
     endpoint: Option<TcpEndpointId>,
+}
+
+/// Cloneable operation capability without Endpoint lifecycle authority.
+///
+/// A Socket source may copy this handle out of its publication guard before a
+/// Stack mutation. Final release owns the separate move-only `TcpEndpointPort`;
+/// a racing access simply observes `UnknownEndpoint` after that retirement.
+#[derive(Clone)]
+pub(crate) struct TcpEndpointAccessPort {
+    stack: Arc<DomainStack>,
+    endpoint: TcpEndpointId,
+}
+
+pub(crate) trait TcpEndpointInvalidationObserver: Send + Sync {
+    fn invalidate(&self);
+}
+
+/// Source-owned proof that one weak reverse route is published.
+///
+/// The boot-unique Endpoint identity selects only the route to withdraw; it
+/// carries no readiness, protocol phase, or lifecycle decision.
+pub(crate) struct TcpEndpointEventRegistration {
+    stack: Arc<DomainStack>,
+    endpoint: TcpEndpointId,
+    active: bool,
+}
+
+impl TcpEndpointEventRegistration {
+    pub(crate) fn unregister(mut self) {
+        self.stack.unregister_tcp_endpoint_observer(self.endpoint);
+        self.active = false;
+    }
+}
+
+impl Drop for TcpEndpointEventRegistration {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.stack.unregister_tcp_endpoint_observer(self.endpoint);
+        self.active = false;
+        assert!(
+            false,
+            "TCP endpoint event registration dropped while active"
+        );
+    }
 }
 
 impl core::fmt::Debug for TcpEndpointPort {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TcpEndpointPort").finish_non_exhaustive()
+    }
+}
+
+impl core::ops::Deref for TcpEndpointPort {
+    type Target = TcpEndpointAccessPort;
+
+    fn deref(&self) -> &Self::Target {
+        &self.access
     }
 }
 
@@ -150,15 +206,53 @@ pub(crate) fn create_endpoint() -> Result<TcpEndpointPort, TcpCreateError> {
     };
     let endpoint = stack.create_tcp_endpoint()?;
     Ok(TcpEndpointPort {
-        stack,
+        access: TcpEndpointAccessPort { stack, endpoint },
         endpoint: Some(endpoint),
     })
 }
 
 impl TcpEndpointPort {
+    pub(crate) fn access(&self) -> TcpEndpointAccessPort {
+        self.access.clone()
+    }
+
+    pub(crate) fn release(mut self, reason: TcpReleaseReason) {
+        self.release_inner(reason);
+    }
+
+    fn release_inner(&mut self, reason: TcpReleaseReason) {
+        let endpoint = self
+            .endpoint
+            .take()
+            .expect("TCP capability retired more than once");
+        self.access
+            .stack
+            .release_tcp_endpoint(endpoint, reason)
+            .expect("live TCP capability lost its owner before retirement");
+    }
+}
+
+impl TcpEndpointAccessPort {
     fn id(&self) -> TcpEndpointId {
         self.endpoint
-            .expect("retired TCP capability cannot issue another operation")
+    }
+
+    pub(crate) fn register_invalidation_observer(
+        &self,
+        observer: &Arc<dyn TcpEndpointInvalidationObserver>,
+    ) -> Result<TcpEndpointEventRegistration, EventRegistrationError> {
+        let endpoint = self.id();
+        self.stack
+            .register_tcp_endpoint_observer(endpoint, observer)?;
+        Ok(TcpEndpointEventRegistration {
+            stack: self.stack.clone(),
+            endpoint,
+            active: true,
+        })
+    }
+
+    pub(crate) fn facts(&self) -> Result<TcpEndpointFacts, TcpQueryError> {
+        self.stack.tcp_endpoint_facts(self.id())
     }
 
     pub(crate) fn bind(
@@ -318,20 +412,6 @@ impl TcpEndpointPort {
     ) -> Result<TcpShutdownOutcome, TcpShutdownError> {
         self.stack.shutdown_tcp_endpoint(self.id(), direction)
     }
-
-    pub(crate) fn release(mut self, reason: TcpReleaseReason) {
-        self.release_inner(reason);
-    }
-
-    fn release_inner(&mut self, reason: TcpReleaseReason) {
-        let endpoint = self
-            .endpoint
-            .take()
-            .expect("TCP capability retired more than once");
-        self.stack
-            .release_tcp_endpoint(endpoint, reason)
-            .expect("live TCP capability lost its owner before retirement");
-    }
 }
 
 impl Drop for TcpEndpointPort {
@@ -342,7 +422,8 @@ impl Drop for TcpEndpointPort {
         // Cleanup is non-blocking and reclaim storage was reserved at Stack
         // construction. The move-only capability makes a stale identity an
         // owner invariant violation, not a recoverable cleanup outcome.
-        self.stack
+        self.access
+            .stack
             .release_tcp_endpoint(endpoint, TcpReleaseReason::CreationRollback)
             .expect("dropped TCP capability lost its owner before retirement");
     }
@@ -362,7 +443,10 @@ impl TcpPendingChildPort {
             },
         };
         Ok(TcpEndpointPort {
-            stack: self.stack.clone(),
+            access: TcpEndpointAccessPort {
+                stack: self.stack.clone(),
+                endpoint,
+            },
             endpoint: Some(endpoint),
         })
     }

@@ -1,6 +1,6 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Ready / Not Cut Over / TCP Not Effective
+**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 In Progress / CKPT 4A Closed / Not Cut Over / TCP Not Effective
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
@@ -8,8 +8,8 @@
 Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
 用户于2026-08-06先授权Stage 3 Implementation Resolution，随后分别授权并关闭CKPT 3A与CKPT 3B；同日接受
 Stage 4提前接通真实userspace syscall candidate的Route Correction，并只授权Stage 4 Implementation Resolution；
-CKPT 4A、CKPT 4B implementation与Stage 5均未授权
-**当前 Gate：** Stage 4 Resolved / Ready / Not Active / Not Authorized；CKPT 4A--4B Not Active / Not Authorized；
+随后单独授权并关闭CKPT 4A；CKPT 4B implementation与Stage 5均未授权
+**当前 Gate：** Stage 4 In Progress / CKPT 4A Closed；CKPT 4B Not Active / Not Authorized；
 Stage 5 Outline / Not Resolved / Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
@@ -25,7 +25,8 @@ invalidation、Socket source与wait capability；CKPT 4B先闭合剩余Linux sys
 发布完整syscall-reachable candidate并开始repository-owned RV64 userspace纵向验证。Stage 5不再拥有首次route
 activation，只拥有剩余双架构/external/capstone证据与最终`NET-TCP-CUTOVER`。这项Route Correction与Stage 4
 Implementation Resolution不改变R0 target、owner、ABI、Contract Impact、acceptance或validation claim；Stage 4
-Ready / Not Active / Not Authorized，Stage 5仍为Outline / Not Resolved / Not Authorized。
+现为In Progress / CKPT 4A Closed，CKPT 4B仍Not Active / Not Authorized；Stage 5仍为Outline / Not Resolved /
+Not Authorized。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -271,7 +272,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
 | Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 3 — Stream、ABI与lifecycle completion | Closed / Not Cut Over | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
-| Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | Resolved / Ready / Not Active / Not Authorized | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；4A保持不可达，4B关闭后candidate syscall-reachable但TCP target contracts继续Pending | 已满足；等待CKPT 4A独立授权 |
+| Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | In Progress / CKPT 4A Closed / CKPT 4B Not Active / Not Authorized | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；4A保持不可达，4B关闭后candidate syscall-reachable但TCP target contracts继续Pending | CKPT 4A已满足并停止；等待CKPT 4B独立授权 |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 在Stage 4已可达candidate上完成mandatory双架构、remote-external、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、candidate保持可达、acceptance assets与独立final review可用 |
 
 ### 6.3 Stage 1 Resolved Gate — Stack TCP owner与protocol progression foundation
@@ -1078,9 +1079,8 @@ resolver activation发布完整candidate，并立即以repository-owned RV64 use
 必须独立安全且对current visible semantics与current contracts中性；CKPT 4B完成整个Stage 4，只承担一次candidate
 activation，不执行`NET-TCP-CUTOVER`。
 
-用户于2026-08-06只授权本节Implementation Resolution。本文据此达到Resolved / Ready / Not Active /
-Not Authorized；没有Stage 4代码、runtime、review或closure主张，也没有CKPT 4A implementation授权。进入CKPT 4A前
-必须重新确认以下live baseline没有语义漂移：
+用户于2026-08-06先授权本节Implementation Resolution，随后单独授权并关闭CKPT 4A；CKPT 4B仍未授权。以下是进入
+CKPT 4A前实际核验的live baseline；执行结果见第6.6.10节：
 
 - Stage 3保持Closed / Not Cut Over，四项TCP target contract继续Pending；current Network、Socket、Opened-
   description、IOMUX与Epoll contracts不变，`resolve_socket_profile(AF_INET, SOCK_STREAM, 0/IPPROTO_TCP)`继续
@@ -1303,9 +1303,9 @@ production不增加驱动行为的ready/error cache、wake sequence或diagnostic
 必须明确纯诊断、不参与predicate、notification、retry或cleanup，并在checkpoint closure前删除，除非review确认长期
 owner、用途和不影响behavior。
 
-本次Implementation Resolution只运行文档检查。CKPT 4A/4B代码与runtime、TCP guest、CAgent、deployment probe、
-full network LTP、final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run；本文不得把Stage 3证据或
-source audit写成Stage 4 execution PASS。
+Implementation Resolution当时只运行文档检查。CKPT 4A的实际代码、review与validation证据见第6.6.10节；CKPT 4B
+代码与runtime、TCP guest、CAgent、deployment probe、full network LTP、final harness、physical hardware、`smp>1`
+与其它NIC/platform仍Not Run，不从Stage 3或CKPT 4A的source/build证据外推。
 
 #### 6.6.9 Stage 4 exit、cutover与stop conditions
 
@@ -1333,6 +1333,46 @@ contract不能自然承载TCP而必须发生shared semantic Refine；只能通�
 busy-poll、周期轮询、test-only route、长期bridge、丢失mandatory terminal hint或降低Linux oracle/validation才能
 发布candidate。owner-neutral、保持current consumer behavior的shared source内部窄扩展与同owner行为保持型拆分只要
 满足本节边界，不构成额外resolution gate。
+
+#### 6.6.10 CKPT 4A execution result — Closed
+
+CKPT 4A在既定Implementation Boundary内关闭；Stage 4保持In Progress，不执行resolver、semantic或contract cutover：
+
+- Stack TCP owner以role-aware point-in-time facts唯一表达listener child、connect phase、TX/RX、FIN/RST、shutdown、
+  pending error与terminal；recheck-only invalidation不携带readiness或operation outcome。external/local pump每个有界
+  reclaim round都保守失效所属接口的TCP Endpoint，因此timer已提交timeout而TX provider exhausted时也不会漏通知；
+  valid bounded invalidation batch沿用R0 allocation/OOM boundary，不为消除适度重新分配引入第二buffer protocol或
+  fallible final-release结果。
+- kernel以boot-unique Endpoint identity注册weak reverse observer，production TCP source复用shared
+  `SocketPollSource`，connect与accept分别读取自己的owner-defined predicate。operation从source guard内复制窄
+  `TcpEndpointAccessPort`后释放guard再进入Stack；move-only `TcpEndpointPort`仍唯一拥有lifecycle authority。
+  source retirement按withdraw/detach routes、unregister weak observer、release Endpoint、notify detached routes排序，
+  creation、accepted-child rollback、multi-waiter、late invalidation与outstanding stream reservation均未建立第二truth。
+- 固定Linux 6.6.32 loopback oracle覆盖idle/bound、connected、local `SHUT_RD/SHUT_WR/SHUT_RDWR`、peer FIN与RST/refused
+  poll组合。RST pending error消费后仍保持`peer_receive_closed=false`；terminal结束requested READABLE/WRITABLE，
+  mandatory ERROR只在pending error尚未消费时出现，HUP与requested RDHUP保持Linux分类。
+- `TCP_ABI_METADATA`仍只作static descriptor metadata，`PUBLISHED_SOCKET_ABI_PROFILES`继续排除TCP；KUnit证明
+  `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`仍返回`SocketTypeNotSupported`。TCP tuple、handler、fd/runtime与普通
+  userspace route继续不可达，未进入CKPT 4B。
+- `just test net-host`通过：TCP owner `20/20`、focused smoltcp TCP `178/178`，新增timeout +
+  `TransmitOutcome::Exhausted`回归证明同轮产生invalidation及`Failed/pending/terminal` facts；UDP、ICMP raw、frame path
+  与no-default production checks继续通过。最终source上的`just fmt kernel --check`与`git diff --check`通过。
+- exact-source RV64 wrapper
+  `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-tcp-stage4-ckpt4a-rv64.log`
+  正常退出并完成orderly shutdown：KUnit `465/465`，TCP source/wait/lifecycle、resolver rejection及既有Socket/UDP/
+  ICMP raw/Unix regression通过，glibc与musl socket LTP合计`6/6`；verified symbol为`6653`。这不是TCP userspace
+  proof。LA64 release build通过，verified symbol为`6255`；config/Kconfig输入未变化，故`just test xtask`未运行。
+- 独立engineering review先报告RST/FIN分类、error-consumed terminal poll组合与TX-exhausted timer invalidation三项
+  Keter；修复及回归后复审为`0 Apollyon / 0 Keter / 0 Euclid`并接受closure。Architecture Friction Scan未发现第二
+  readiness/error/lifecycle truth、owner/private representation泄漏、锁序反转、guard内通知/drop、强reverse route、
+  family-specific wait/syscall旁路、无退出条件bridge或rollback/final-release顺序问题。
+
+据此CKPT 4A标记Closed，Stage 4保持In Progress。`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
+`NET-TCP-LIFECYCLE-001` Introduce与`SOCKET-ABI-001` Refine继续Pending；current Network、Socket、
+Opened-description、IOMUX与Epoll contracts不变，transaction保持None。TCP guest与glibc/musl focused TCP consumer、
+TCP fd/runtime、normal resolver activation、LA64 userspace、self/remote-external、CAgent、deployment probe、full network
+LTP、final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run。CKPT 4A授权在此耗尽；CKPT 4B保持
+Not Active / Not Authorized，不进入下一checkpoint。
 
 ### 6.7 Stage 5 Outline — Dual-architecture与architecture-capstone closure
 
