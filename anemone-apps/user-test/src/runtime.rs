@@ -62,6 +62,10 @@ pub(crate) fn install_bin_sh_ash_wrapper_if_needed() {
         return;
     }
 
+    install_bin_sh_ash_wrapper();
+}
+
+pub(crate) fn install_bin_sh_ash_wrapper() {
     crate::busybox::run_busybox(&["busybox", "ash", "-c", "true"], "busybox ash smoke");
     crate::busybox::run_busybox(&["busybox", "rm", "-f", "/bin/sh"], "/bin/sh");
 

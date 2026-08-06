@@ -9,6 +9,7 @@ mod guest;
 mod ltp;
 mod process;
 mod runtime;
+mod tcp_stage5;
 
 use anemone_rs::{
     abi::{fs::linux::open::O_RDONLY, system::native::power::SHUTDOWN_MAGIC},
@@ -143,7 +144,7 @@ fn run_local_tests() {
 }
 
 /// competition tests.
-fn run_comp_tests() {
+fn run_comp_tests(tcp_stage5_peer: Option<(&str, &str)>) {
     guest::enter_competition_root();
     guest::init_competition_environment();
 
@@ -160,16 +161,40 @@ fn run_comp_tests() {
     // competition::run_competition_tests();
     ltp::run_ltp_tests();
 
+    if let Some((peer, port)) = tcp_stage5_peer {
+        tcp_stage5::run(peer, port).expect("user-test: TCP Stage 5 validation failed");
+    }
+
     println!("user-test: all competition tests finished.");
 }
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
+    let mut args = anemone_rs::env::args();
+    let _program = args.next();
+    let tcp_stage5_peer = match args.next() {
+        None => None,
+        Some("--tcp-stage5") => {
+            let peer = args.next().ok_or(EINVAL)?;
+            let port = args.next().ok_or(EINVAL)?;
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            Some((peer, port))
+        },
+        Some(_) => return Err(EINVAL),
+    };
+    let drain_tcp_stage5_markers = tcp_stage5_peer.is_some();
     run_local_tests();
 
-    run_comp_tests();
+    run_comp_tests(tcp_stage5_peer);
 
     println!("user-test: all tests finished, shutting down.");
+    if drain_tcp_stage5_markers {
+        // The Stage 5 validation master powers off immediately below; retain a
+        // bounded window for the terminal owner to publish every final marker.
+        tcp_stage5::drain_terminal()?;
+    }
     shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
     unreachable!("user-test: shutdown returned unexpectedly");
 }

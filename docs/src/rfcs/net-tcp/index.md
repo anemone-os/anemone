@@ -1,17 +1,17 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Stage 5 Resolved / Not Active / Not Authorized / Not Cut Over / TCP Not Effective
+**状态：** Closed / Stage 1--5 Closed / TCP Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-06
 **领域：** network / socket / TCP / userspace ABI
-**影响契约：** R0仍Pending Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
+**影响契约：** R0已Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
 **执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed / CKPT 3A-3B Closed / Not Cut Over；
 Stage 4 Closed / CKPT 4A-4B Closed / Syscall-Reachable Candidate / Not Cut Over；
-Stage 5 Resolved / Checkpoint 5A Not Active / Not Authorized；
-`NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
+Stage 5 / Checkpoint 5A Closed；`NET-PROTOCOL-PROGRESSION-CUTOVER`与`NET-TCP-CUTOVER` Effective；
+transaction None
 
 ## 文档状态
 
@@ -19,8 +19,8 @@ Stage 5 Resolved / Checkpoint 5A Not Active / Not Authorized；
 唯一 canonical target source。本文固定已经接受的 target、non-goals、owner/handoff、
 failure/cleanup、ABI、Contract Impact、acceptance 与 validation boundary；它不覆盖
 [Network current contracts](../../contracts/net/index.md)或
-[Socket current contracts](../../contracts/socket/index.md)，也不因发布实施计划而授权执行probe、
-Stage 1 implementation、后续stage、checkpoint或contract cutover；各gate仍以自己的独立授权为准。
+[Socket current contracts](../../contracts/socket/index.md)。全部实施gate现已关闭；current effective TCP规则以
+[IPv4 TCP Socket](../../contracts/net/tcp-socket.md)与Socket current contract为准，本文保留target、理由与执行历史。
 
 本 RFC 的规范性页面是正文、[目标与不变量](./invariants.md)与
 [实施计划](./implementation.md)；公共 R0 形成前的
@@ -35,17 +35,16 @@ CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over。随后接受的R
 activation与真实userspace纵向验证从Stage 5提前到Stage 4；Stage 4现已解析为两个需分别授权、分别review的execution
 checkpoint：CKPT 4A完成仍不可达的owner predicate/source/wait closure，CKPT 4B完成syscall projection、唯一normal
 resolver activation与RV64双libc vertical slice。两个checkpoint均已独立授权、review并关闭；Stage 4现为Closed /
-Syscall-Reachable Candidate / Not Cut Over。Stage 5已经解析为单一Checkpoint 5A，负责长期`socket-test` TCP suite、
+Syscall-Reachable Candidate / Not Cut Over。Stage 5随后以单一Checkpoint 5A完成长期`socket-test` TCP suite、
 双架构双libc focused consumer、loopback/self-external/remote-external、CAgent、shared regression、architecture capstone与
-唯一`NET-TCP-CUTOVER`；本次只完成Implementation Resolution，Checkpoint 5A仍Not Active / Not Authorized，四项
-target contract继续Pending。
+唯一`NET-TCP-CUTOVER`；Checkpoint 5A与R0现已Closed，四项target contract已经生效。
 
 ## 摘要
 
 Anemone 已经拥有 boot-time IPv4 control plane、bounded frame/Stack progression、IPv4 UDP、
 ICMP raw、general Socket front、Unix stream/seqpacket、opened-description final release 与
-poll/select/epoll wait/recheck。Stage 4已经在normal resolver发布完整TCP syscall-reachable candidate并通过RV64
-双libc纵向验证，但current effective contracts尚未覆盖TCP，也未执行`NET-TCP-CUTOVER`。
+poll/select/epoll wait/recheck。Stage 4在normal resolver发布完整TCP syscall-reachable candidate并通过RV64
+双libc纵向验证；Stage 5补齐双架构、external、CAgent与capstone证据后执行`NET-TCP-CUTOVER`，TCP现为effective。
 
 本 RFC 提议交付一组普通用户程序可消费的 initial-domain IPv4 TCP 字节流能力：主动和
 被动连接、blocking/nonblocking connect、accept、partial stream I/O、half-close、真实
@@ -319,10 +318,10 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 
 | Contract ID | 变化 | 当前规则 | Target摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `NET-TCP-ENDPOINT-001` | Introduce | None | TCP Endpoint identity、bind/implicit-bind、listener/pending-child、active connect outcome、accepted-child handoff与stale isolation由Stack TCP owner统一拥有 | `NET-TCP-CUTOVER` Pending |
-| `NET-TCP-STREAM-001` | Introduce | None | bounded byte-prefix send/receive、partial progress、buffer-before-EOF/error、FIN/RST/shutdown、SIGPIPE与owner-defined stream predicates | `NET-TCP-CUTOVER` Pending |
-| `NET-TCP-LIFECYCLE-001` | Introduce | None | Socket publication/final release与FIN/RST/orphan/TIME_WAIT/deferred engine reclaim分离，并固定唯一cleanup owner | `NET-TCP-CUTOVER` Pending |
-| `SOCKET-ABI-001` | Refine | [Active](../../contracts/socket/front-abi-wait.md#socket-abi-001--linux-abi止于family-neutral-adapter) | 增加IPv4 TCP tuple、stream message projection、真实`SO_ERROR`/`SO_REUSEADDR`/`TCP_NODELAY`、SIGPIPE/`MSG_NOSIGNAL`与typed async errno；不建立通用option/error bag | `NET-TCP-CUTOVER` Pending |
+| `NET-TCP-ENDPOINT-001` | Introduce | [Active](../../contracts/net/tcp-socket.md#net-tcp-endpoint-001--endpointlistener与connection-outcome由stack-tcp-owner统一拥有) | TCP Endpoint identity、bind/implicit-bind、listener/pending-child、active connect outcome、accepted-child handoff与stale isolation由Stack TCP owner统一拥有 | `NET-TCP-CUTOVER` Effective |
+| `NET-TCP-STREAM-001` | Introduce | [Active](../../contracts/net/tcp-socket.md#net-tcp-stream-001--字节流committerminal-precedence与readiness读取owner-fact) | bounded byte-prefix send/receive、partial progress、buffer-before-EOF/error、FIN/RST/shutdown、SIGPIPE与owner-defined stream predicates | `NET-TCP-CUTOVER` Effective |
+| `NET-TCP-LIFECYCLE-001` | Introduce | [Active](../../contracts/net/tcp-socket.md#net-tcp-lifecycle-001--socket-publication与protocol-reclaim分离) | Socket publication/final release与FIN/RST/orphan/TIME_WAIT/deferred engine reclaim分离，并固定唯一cleanup owner | `NET-TCP-CUTOVER` Effective |
+| `SOCKET-ABI-001` | Refine | [Active](../../contracts/socket/front-abi-wait.md#socket-abi-001--linux-abi止于family-neutral-adapter) | 增加IPv4 TCP tuple、stream message projection、真实`SO_ERROR`/`SO_REUSEADDR`/`TCP_NODELAY`、SIGPIPE/`MSG_NOSIGNAL`与typed async errno；不建立通用option/error bag | `NET-TCP-CUTOVER` Effective |
 | `NET-CONTROL-PLANE-001` | Refine | [Active](../../contracts/net/control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface) | selection只交付route/source/interface；protocol mutation wake policy迁到对应Stack-side owner，control plane不再把`PumpWake`作为operation selection的一部分 | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective |
 | `NET-STACK-PUMP-001` | Refine | [Active](../../contracts/net/frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state) | 增加各protocol owner在pump外commit后向相关既有worker可靠交付可合并progression request的共同义务；Stack state/deadline仍是truth，各protocol effect policy与具体wake/worker形状不固定 | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective |
 
@@ -352,8 +351,8 @@ cutover前都不是effective。实现反馈可以在review中收窄本表；若�
 ## Implementation Boundary
 
 本文只定义实现授权必须遵守的语义边界；R0接受本身不授权实现。P0与Stage 1--4都曾取得各自所需授权并已关闭；
-Stage 2的CKPT 2A/2B、Stage 3的CKPT 3A/3B与Stage 4的CKPT 4A/4B均分别授权、分别review。Stage 5现已完成
-Implementation Resolution并收敛为单一Checkpoint 5A，但该checkpoint仍需独立implementation授权，尚未运行或cut over。
+Stage 2的CKPT 2A/2B、Stage 3的CKPT 3A/3B与Stage 4的CKPT 4A/4B均分别授权、分别review。Stage 5以单一
+Checkpoint 5A完成final evidence、独立review与唯一contract cutover；全部授权在Stage 5 closure处耗尽。
 
 - **允许改变：** 与R0 target直接对应的TCP protocol vocabulary、domain Stack TCP owner、kernel TCP
   family/source、general Socket ABI/descriptor capability、ABI constants/wrappers、owner-local Kconfig，
@@ -484,14 +483,14 @@ readiness与contract均未发布。Stage 3以CKPT 3A闭合Stack owner fact/lifec
 syscall-unreachable Socket/ABI completion；两个checkpoint均已关闭，Stage 3 Closed / Not Cut Over。
 Stage 4已经解析为CKPT 4A internal owner predicate/source/wait closure与CKPT 4B normal syscall activation/RV64
 userspace vertical slice；两个checkpoint均已关闭，Stage 4为Closed / Syscall-Reachable Candidate / Not Cut Over；
-Stage 5已经解析为单一Checkpoint 5A final evidence/capstone/cutover unit，仍Not Active / Not Authorized。
+Stage 5已经以单一Checkpoint 5A完成final evidence/capstone/cutover unit并Closed。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
 - [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed /
   CKPT 3A-3B Closed / Not Cut Over；Stage 4 Closed / CKPT 4A-4B Closed / Syscall-Reachable Candidate / Not Cut Over；
-  Stage 5 Resolved / Checkpoint 5A Not Active / Not Authorized）
+  Stage 5 / Checkpoint 5A Closed / TCP Effective）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
   [Socket](../../contracts/socket/index.md)、
@@ -502,8 +501,7 @@ Stage 5已经解析为单一Checkpoint 5A final evidence/capstone/cutover unit�
   [`simple_llm_server.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/simple_llm_server.c)、
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
-- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2、Stage 3与Stage 4 focused Git commit；
-  Stage 5 Implementation Resolution由本次文档diff拥有；
+- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2、Stage 3、Stage 4与Stage 5 focused Git commit；
   transaction None
 
 ## 修订记录
@@ -538,6 +536,10 @@ host/KUnit、existing consumer regression、source architecture audit与独立fi
 才原子执行三项TCP Introduce与`SOCKET-ABI-001` Refine。该解析只改变implementation route、validation placement、
 evidence reuse与stop condition，不改变R0 target、owner、ABI、Contract Impact或acceptance，因此修订号保持R0；
 Checkpoint 5A implementation仍未授权，current contracts不变。
+随后授权并关闭Checkpoint 5A：同一production tuple与source完成双架构双libc、loopback/self-external/
+remote-external、established RST、CAgent、shared regression、Architecture Friction Scan与独立review；唯一review
+Euclid在cutover前修复并用RV64新运行闭合。`NET-TCP-CUTOVER`原子Introduce三项TCP contract并Refine
+`SOCKET-ABI-001`。该closure只实现R0已接受target，修订号保持R0。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -590,3 +592,33 @@ external TCP、CAgent、deployment probe、full network/final harness、hardware
 Stage 4授权已经耗尽；Stage 5已完成Implementation Resolution并保持Not Active / Not Authorized。由于Stage 4后
 `5d6ce709`触及cross-layer TCP production source，Checkpoint 5A必须在current exact source上刷新host与双架构证据，
 不能直接把Stage 4日志外推为final cutover proof。
+
+Stage 5 / Checkpoint 5A Closed / TCP Effective。长期`socket-test` TCP suite在RV64/LA64均为`8/8`；同一
+`tcp-r0.c` source以两架构glibc/musl静态toolchain构建并全部TPASS。两架构loopback/self-external/remote-external、
+established RST、host peer stream/reset `4/4`、双并发CAgent HTTP/shell与server/child cleanup marker全部通过。
+current-source host TCP owner `20/20`、focused smoltcp TCP `178/178`、RV64 KUnit `466/466`、LA64 KUnit `471/471`、
+shared Socket/UDP/ICMP raw/Unix regression与`just test xtask` `75/75`通过。RV64以QEMU exit 0结束；LA64在完整
+mandatory marker和orderly shutdown后由launcher monitor boundary结束terminal halt，不宣称LA64 machine power-off。
+独立review最终为`0 Apollyon / 0 Keter / 0 Euclid / 0 Safe`；review发现runner曾把RV64 timeout误计为PASS的一个
+Euclid，修复为只有LA64可在完整marker后接受124，并以RV64 wrapper新运行的`qemu-exit-0`闭合。该host-only判定修复
+不改变LA64 guest、production、fixture或已记录marker，故LA64不重复运行。
+
+fixed oracle source SHA256为`afe25f94f6f30ac22ceac4f615208aebcd80f9b46265ba2cb82d88230a5a73ce`；
+RV64 glibc/musl binary分别为`030855ae0ac4f6c49a8933a3bb689f60d679557df06c429ebc43638acc3416af`与
+`ab91039cbfa188835a7401f2cd106ac0ecff07e63f1254bf191fd0ffec144653`，LA64分别为
+`ec7dbef26c88e7f249c7a385092befc1bee3643ad6f5297299a1191b168760b8`与
+`3ba3311dee164b8d5c7547082fa3e76a1ed34b8563c5732e0277525977385589`。CAgent固定来源为
+`final-2026@b5ec6ef8497e1818cbdec3b54bb722f036e57972`；RV64 agent/server为
+`1098304cae7f8c4ad48a921954a173cbeccfc4bd19ec5474d6cb20b7bf88ad5c`/
+`d48e4814df1c9b557933b270ac86b6d09d0b7935674b3847fc238d932a8c59b1`，LA64为
+`2eb0ecd10ff63776260f7b22734b69a6a0bcea22dd8c2d2122cb6ede3902a8d8`/
+`539333bd3596770d8043c48b993499f3dca2663f0cfce257fee35f565dac30d4`。
+决赛盘master SHA256为RV64 `381e8cce52d19fe40cf246f28f149b22b9b34e05eee64e0c8ecfae96ff7c2a42`、
+LA64 `b2352f796196aa345aef82db6027ec1c328681d3b4276d45d05d1001636ac3a5`；执行日志为
+`build/net-tcp-stage5-{rv64,la64}.log`及对应`-peer.log`。CAgent直接消费决赛盘静态binary与BusyBox shell；
+`user-test`仍来自启动盘并在挂载/chroot后启动workload，没有嵌入kernel或复制第二套CAgent/libc asset。
+
+`NET-TCP-CUTOVER`现已Effective：current contract原子Introduce `NET-TCP-ENDPOINT-001`、
+`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`。physical hardware、`smp > 1`、
+其它NIC/platform、full network LTP、完整final harness与条件性deployment probe均Not Run；这些结果没有被外推为
+PASS。register保持只读，transaction保持None，全部Stage 5授权在此耗尽，不进入后续gate。

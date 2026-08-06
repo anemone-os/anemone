@@ -17,6 +17,8 @@ use anemone_rs::{
 pub fn main() -> Result<(), Errno> {
     let cwd = current_dir()?;
     let pid = process_id();
+    let mut user_test_args = vec!["user-test"];
+    user_test_args.extend(args().skip(1));
     println!("init: started:\n\tcwd:{}\n\tpid:{}", cwd.display(), pid);
     let env = envs();
     for (key, value) in env {
@@ -73,7 +75,9 @@ pub fn main() -> Result<(), Errno> {
         },
         None => {
             // child
-            execve("/bin/user-test", &["user-test"], &[])
+            // SystemTarget arguments belong to the selected workload; init only
+            // retains its fixed child/reaping lifecycle while forwarding them.
+            execve("/bin/user-test", user_test_args.as_slice(), &[])
                 .expect("init: failed to execve user-test");
             unreachable!();
         },

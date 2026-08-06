@@ -1,6 +1,6 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Stage 5 Resolved / Not Active / Not Authorized / Not Cut Over / TCP Not Effective
+**状态：** R0 / Stage 1--5 Closed / TCP Effective
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
@@ -8,9 +8,8 @@
 Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
 用户于2026-08-06先授权Stage 3 Implementation Resolution，随后分别授权并关闭CKPT 3A与CKPT 3B；同日接受
 Stage 4提前接通真实userspace syscall candidate的Route Correction，并只授权Stage 4 Implementation Resolution；
-随后分别授权并关闭CKPT 4A与CKPT 4B；同日只授权Stage 5 Implementation Resolution，Checkpoint 5A implementation未授权
-**当前 Gate：** Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over；
-Stage 5 Resolved / Not Active / Not Authorized
+随后分别授权并关闭CKPT 4A与CKPT 4B；同日先授权Stage 5 Implementation Resolution，随后授权并关闭Checkpoint 5A
+**当前 Gate：** Stage 5 / Checkpoint 5A Closed / `NET-TCP-CUTOVER` Effective；不进入后续gate
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
 owner-driven progression handoff、原子迁移UDP/ICMP raw，并把P0结论收敛为Stack-private TCP owner foundation；
@@ -27,7 +26,7 @@ activation，只拥有剩余双架构/external/capstone证据与最终`NET-TCP-C
 Implementation Resolution不改变R0 target、owner、ABI、Contract Impact、acceptance或validation claim；Stage 4
 现已由CKPT 4A/4B关闭并形成Syscall-Reachable Candidate / Not Cut Over；Stage 5现已解析为一个拥有完整双架构、
 external、CAgent、shared regression与architecture-capstone evidence并在exit执行唯一`NET-TCP-CUTOVER`的Checkpoint
-5A。该checkpoint仍Not Active / Not Authorized，current contracts保持不变。
+5A。该checkpoint现已关闭，`NET-TCP-CUTOVER` Effective，TCP current contracts已经生效。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -274,7 +273,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 3 — Stream、ABI与lifecycle completion | Closed / Not Cut Over | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | Closed / Syscall-Reachable Candidate / Not Cut Over | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；candidate syscall-reachable但TCP target contracts继续Pending | 已满足；本Stage停止，不进入Stage 5 |
-| Stage 5 — Dual-architecture与architecture-capstone closure | Resolved / Not Active / Not Authorized | 以单一Checkpoint 5A在Stage 4已可达candidate上完成mandatory双架构、remote-external、CAgent、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Implementation Resolution已完成；需单独implementation授权 |
+| Stage 5 — Dual-architecture与architecture-capstone closure | Closed / TCP Effective | 以单一Checkpoint 5A在Stage 4已可达candidate上完成mandatory双架构、remote-external、CAgent、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Effective | 已满足；全部授权耗尽 |
 
 ### 6.3 Stage 1 Resolved Gate — Stack TCP owner与protocol progression foundation
 
@@ -1631,6 +1630,54 @@ current-source host/KUnit、format/build/docs gate通过；所有stage-scoped as
 `ss -tan`/procfs/diag失败、条件性`wget/curl/git`因resolver/TLS/rootfs缺失而Not Run、physical hardware、`smp > 1`、
 其它NIC/platform、full network LTP与完整final harness未执行，不单独触发Review Hold，也不允许扩大target或写成PASS。
 
-本次Implementation Resolution只更新RFC计划与状态，实际运行仅限文档检查。Checkpoint 5A保持Not Active / Not
-Authorized，四项TCP contract继续Pending，current contracts、source、tests、rootfs、wrapper、register与transaction
-均不在本次resolution中修改；授权在此耗尽，不进入implementation。
+上述Implementation Resolution当时只更新RFC计划与状态，实际运行限于文档检查；当时Checkpoint 5A保持Not Active /
+Not Authorized。其后的独立implementation授权与执行结果见下节。
+
+#### 6.7.9 Checkpoint 5A execution result — Closed / TCP Effective
+
+Checkpoint 5A在既定Implementation Boundary内完成，没有修改production kernel、public API或R0 Contract Impact：
+
+- boot-root长期`socket-test::tcp`加入8组direct-syscall cases，覆盖tuple/metadata/rejection、bind/listen/reuse/name、
+  nonblocking connect/accept4 rollback、scalar/vector/message/readiness、shutdown/EOF/SIGPIPE、dup/fork/CLOEXEC/final
+  close、sockaddr/fault与blocking accept；RV64和LA64均输出`TCPTEST:SUMMARY:PASS:8`，既有suite继续通过；
+- 同一`tcp-r0.c` source SHA256为
+  `afe25f94f6f30ac22ceac4f615208aebcd80f9b46265ba2cb82d88230a5a73ce`，以`-static -O2 -Wall -Wextra
+  -Werror -pthread`构建。RV64 glibc GCC 13.3.0 binary为
+  `030855ae0ac4f6c49a8933a3bb689f60d679557df06c429ebc43638acc3416af`，musl GCC 11.2.1为
+  `ab91039cbfa188835a7401f2cd106ac0ecff07e63f1254bf191fd0ffec144653`；LA64 glibc GCC 15.1.0为
+  `ec7dbef26c88e7f249c7a385092befc1bee3643ad6f5297299a1191b168760b8`，musl GCC 14.3.0为
+  `3ba3311dee164b8d5c7547082fa3e76a1ed34b8563c5732e0277525977385589`。四份consumer均TPASS；
+- 两份Stage 5 SystemTarget均以`RootfsEntry`启动既有`/sbin/init`；init保留唯一child/reaper lifecycle，只把自身
+  `argv[1..]`转交启动盘`/bin/user-test`。user-test挂载validation disk、chroot后直接运行决赛盘CAgent，未把
+  user-test或CAgent嵌入kernel，也未复制第二套CAgent/libc。RV64 validation=`disk-x0`、rootfs=`disk-x1`；LA64
+  rootfs=`disk-x0`、validation=`disk-x1`；
+- 决赛盘master SHA256为RV64
+  `381e8cce52d19fe40cf246f28f149b22b9b34e05eee64e0c8ecfae96ff7c2a42`与LA64
+  `b2352f796196aa345aef82db6027ec1c328681d3b4276d45d05d1001636ac3a5`。CAgent固定来源为
+  `final-2026@b5ec6ef8497e1818cbdec3b54bb722f036e57972`；RV64 agent/server SHA256为
+  `1098304cae7f8c4ad48a921954a173cbeccfc4bd19ec5474d6cb20b7bf88ad5c`/
+  `d48e4814df1c9b557933b270ac86b6d09d0b7935674b3847fc238d932a8c59b1`，LA64为
+  `2eb0ecd10ff63776260f7b22734b69a6a0bcea22dd8c2d2122cb6ede3902a8d8`/
+  `539333bd3596770d8043c48b993499f3dca2663f0cfce257fee35f565dac30d4`；四者均为静态binary；
+- CAgent binary本身不缺动态库；其`popen()`解析的决赛盘RV64 `dash`需要`GLIBC_2.38`，而LTP切换后的`/lib`最高
+  `GLIBC_2.35`。显式Stage 5路径在LTP后把`/bin/sh`安装为决赛盘静态BusyBox ash wrapper；普通user-test路径不变。
+  每架构两个client在wait前并发启动、各自拥有process group；timeout按group kill/reap。server、client与final marker
+  cleanup完整，CAgent输出`CLIENTS:PASS:2`、`CLEANUP:PASS`与summary；
+- self-external、remote-external和remote established RST在两架构两libc均TPASS。bounded host peer分别完成两次
+  stream与两次`SO_LINGER={1,0}` reset，guest同时验证error readiness和`recv=ECONNRESET`，peer summary为`4/4`；
+- `just test net-host`通过TCP owner `20/20`、focused smoltcp TCP `178/178`及shared frame/UDP/ICMP raw suites；
+  `just test xtask`为`75/75`；RV64 KUnit `466/466`、LA64 KUnit `471/471`。四份C `-Werror` build、受影响app
+  format、shell/Python syntax与`git diff --check`通过；最终文档与kernel format结果随本closure commit记录；
+- RV64 wrapper在review修复后重新运行并以`TCPSTAGE5:RUNNER:TERMINAL:qemu-exit-0`结束。LA64在全部mandatory marker、
+  peer summary与orderly shutdown完成后因当前platform没有有效machine power-off handler进入terminal halt，由既有monitor
+  boundary结束QEMU；wrapper完成marker复核并返回0。后续runner-only修复只把timeout 124例外收窄到LA64，不改变
+  LA64 guest、production、fixture、QEMU输入或已记录marker，因此按用户决定不重复LA64运行；
+- 独立engineering review最终为`0 Apollyon / 0 Keter / 0 Euclid / 0 Safe`。review曾发现runner同时允许RV64/LA64
+  timeout 124通过的一个Euclid；该finding已按上述arch-specific terminal policy修复并由RV64新运行闭合。
+  Architecture Friction Scan未发现第二状态truth、owner/private representation穿透、caller/architecture/test production
+  branch、第二wait/control-plane/progression path、无退出条件bridge、隐含cleanup owner或弱oracle/Not Run-as-PASS。
+
+`NET-TCP-CUTOVER`据此原子Introduce `NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`与
+`NET-TCP-LIFECYCLE-001`，并Refine `SOCKET-ABI-001`；Stage 5与R0 Closed / TCP Effective。physical hardware、
+`smp > 1`、其它NIC/platform、full network LTP、完整final harness与条件性deployment probe均Not Run。register保持
+只读，transaction保持None；授权在此耗尽，不进入后续gate。

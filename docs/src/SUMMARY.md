@@ -26,6 +26,7 @@
 		- [Protocol Socket](./contracts/net/protocol-socket.md)
 		- [UDP Socket](./contracts/net/udp-socket.md)
 		- [IPv4 ICMP Raw Socket](./contracts/net/icmp-raw-socket.md)
+		- [IPv4 TCP Socket](./contracts/net/tcp-socket.md)
 		- [Attach lifecycle](./contracts/net/attach-lifecycle.md)
 	- [Socket 当前契约](./contracts/socket/index.md)
 		- [Front、ABI 与 wait](./contracts/socket/front-abi-wait.md)

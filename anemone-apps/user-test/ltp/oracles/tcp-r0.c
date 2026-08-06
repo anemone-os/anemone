@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 
 /*
- * Focused RV64 dual-libc oracle for the net-tcp Stage 4 candidate.
+ * Focused dual-architecture, dual-libc oracle for the net-tcp R0 candidate.
  *
  * The same source is statically linked with the competition image's glibc and
  * musl toolchains.  It exercises only the accepted IPv4 TCP R0 envelope and is
@@ -13,9 +13,11 @@
 #include <fcntl.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/select.h>
@@ -65,7 +67,8 @@ static int wait_poll(int fd, short events, short required, const char *step)
 	return 1;
 }
 
-static int make_listener(struct sockaddr_in *address)
+static int make_listener_at(struct sockaddr_in *address, uint32_t host_address,
+			    uint16_t host_port)
 {
 	socklen_t length = sizeof(*address);
 	socklen_t option_length = sizeof(int);
@@ -77,7 +80,8 @@ static int make_listener(struct sockaddr_in *address)
 		return -1;
 	memset(address, 0, sizeof(*address));
 	address->sin_family = AF_INET;
-	address->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	address->sin_addr.s_addr = htonl(host_address);
+	address->sin_port = htons(host_port);
 	if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &enabled,
 			       sizeof(enabled)) < 0 ||
 	    getsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &queried,
@@ -89,6 +93,11 @@ static int make_listener(struct sockaddr_in *address)
 		return -1;
 	}
 	return listener;
+}
+
+static int make_listener(struct sockaddr_in *address)
+{
+	return make_listener_at(address, INADDR_LOOPBACK, 0);
 }
 
 static int creation_and_rejection_oracle(void)
@@ -491,12 +500,291 @@ static int blocking_accept_wait_oracle(void)
 	return 0;
 }
 
-int main(void)
+struct receive_close_race {
+	pthread_barrier_t entered;
+	int fd;
+	char byte;
+	ssize_t result;
+	int error;
+};
+
+static void *receive_close_worker(void *argument)
 {
+	struct receive_close_race *race = argument;
+
+	pthread_barrier_wait(&race->entered);
+	race->result = recv(race->fd, &race->byte, 1, 0);
+	race->error = errno;
+	return NULL;
+}
+
+static int receive_final_close_race_oracle(void)
+{
+	struct timespec delay = { .tv_sec = 0, .tv_nsec = 20 * 1000 * 1000 };
+	struct receive_close_race race;
+	struct sockaddr_in address;
+	pthread_t worker;
+	char eof;
+	int thread_error;
+	int send_result;
+	int join_error;
+	int listener;
+	int client;
+	int accepted;
+
+	listener = make_listener(&address);
+	if (listener < 0)
+		return fail("receive-close-listener");
+	client = socket(AF_INET, SOCK_STREAM, 0);
+	if (client < 0 || connect(client, (struct sockaddr *)&address,
+				 sizeof(address)) < 0)
+		return fail("receive-close-connect");
+	accepted = accept(listener, NULL, NULL);
+	if (accepted < 0)
+		return fail("receive-close-accept");
+
+	memset(&race, 0, sizeof(race));
+	race.fd = accepted;
+	thread_error = pthread_barrier_init(&race.entered, NULL, 2);
+	if (thread_error != 0) {
+		errno = thread_error;
+		return fail("receive-close-thread");
+	}
+	thread_error = pthread_create(&worker, NULL, receive_close_worker, &race);
+	if (thread_error != 0) {
+		pthread_barrier_destroy(&race.entered);
+		errno = thread_error;
+		return fail("receive-close-thread");
+	}
+	pthread_barrier_wait(&race.entered);
+	nanosleep(&delay, NULL);
+	close(accepted);
+	send_result = send(client, "c", 1, 0);
+	if (send_result != 1)
+		shutdown(client, SHUT_RDWR);
+	join_error = pthread_join(worker, NULL);
+	pthread_barrier_destroy(&race.entered);
+	if (send_result != 1 || join_error != 0 ||
+	    !((race.result == 1 && race.byte == 'c') ||
+	      (race.result == -1 && race.error == EIDRM))) {
+		errno = join_error != 0 ? join_error : race.error;
+		return fail("receive-close-race");
+	}
+	printf("TINFO: tcp_r0_receive_final_close winner=%s\n",
+	       race.result == 1 ? "receive" : "final-close");
+	if (shutdown(client, SHUT_WR) < 0 ||
+	    wait_poll(client, POLLIN | POLLRDHUP, POLLIN | POLLRDHUP,
+		      "receive-close-final-hint") ||
+	    recv(client, &eof, 1, 0) != 0)
+		return fail("receive-close-final-eof");
+	close(client);
+	close(listener);
+	return 0;
+}
+
+static int send_all(int fd, const void *buffer, size_t length, const char *step)
+{
+	const unsigned char *bytes = buffer;
+	size_t offset = 0;
+
+	while (offset < length) {
+		ssize_t sent = send(fd, bytes + offset, length - offset, 0);
+
+		if (sent <= 0)
+			return fail(step);
+		offset += (size_t)sent;
+	}
+	return 0;
+}
+
+static int receive_exact(int fd, void *buffer, size_t length, const char *step)
+{
+	unsigned char *bytes = buffer;
+	size_t offset = 0;
+
+	while (offset < length) {
+		ssize_t received = recv(fd, bytes + offset, length - offset, 0);
+
+		if (received <= 0)
+			return fail(step);
+		offset += (size_t)received;
+	}
+	return 0;
+}
+
+static int self_external_oracle(void)
+{
+	static const char request[] = "ANEMONE_TCP_SELF_REQUEST";
+	static const char reply[] = "ANEMONE_TCP_SELF_REPLY";
+	struct sockaddr_in address;
+	struct sockaddr_in local;
+	struct sockaddr_in peer;
+	socklen_t length;
+	char request_buffer[sizeof(request)];
+	char reply_buffer[sizeof(reply)];
+	char eof;
+	int listener;
+	int client;
+	int accepted;
+
+	listener = make_listener_at(&address, 0x0a00020fU, 0);
+	if (listener < 0)
+		return fail("self-external-listener");
+	client = socket(AF_INET, SOCK_STREAM, 0);
+	if (client < 0 || connect(client, (struct sockaddr *)&address,
+				 sizeof(address)) < 0)
+		return fail("self-external-connect");
+	accepted = accept(listener, NULL, NULL);
+	if (accepted < 0)
+		return fail("self-external-accept");
+
+	length = sizeof(local);
+	if (getsockname(client, (struct sockaddr *)&local, &length) < 0 ||
+	    local.sin_addr.s_addr != address.sin_addr.s_addr ||
+	    local.sin_port == 0)
+		return fail("self-external-local-name");
+	length = sizeof(peer);
+	if (getpeername(client, (struct sockaddr *)&peer, &length) < 0 ||
+	    peer.sin_addr.s_addr != address.sin_addr.s_addr ||
+	    peer.sin_port != address.sin_port)
+		return fail("self-external-peer-name");
+
+	if (send_all(client, request, sizeof(request), "self-external-send") ||
+	    receive_exact(accepted, request_buffer, sizeof(request_buffer),
+			  "self-external-server-receive") ||
+	    memcmp(request_buffer, request, sizeof(request)) != 0 ||
+	    send_all(accepted, reply, sizeof(reply), "self-external-reply") ||
+	    receive_exact(client, reply_buffer, sizeof(reply_buffer),
+			  "self-external-client-receive") ||
+	    memcmp(reply_buffer, reply, sizeof(reply)) != 0)
+		return fail("self-external-payload");
+	if (shutdown(client, SHUT_WR) < 0 || recv(accepted, &eof, 1, 0) != 0)
+		return fail("self-external-fin");
+	close(accepted);
+	if (recv(client, &eof, 1, 0) != 0)
+		return fail("self-external-close");
+	close(client);
+	close(listener);
+	puts("TPASS: tcp_r0_self_external");
+	return 0;
+}
+
+static int parse_port(const char *text, uint16_t *port)
+{
+	char *end;
+	long value;
+
+	errno = 0;
+	value = strtol(text, &end, 10);
+	if (errno != 0 || *text == '\0' || *end != '\0' || value <= 0 ||
+	    value > UINT16_MAX)
+		return 1;
+	*port = (uint16_t)value;
+	return 0;
+}
+
+static int remote_external_oracle(const char *host, const char *port_text)
+{
+	static const char request[] = "ANEMONE_TCP_STAGE5_REQUEST";
+	static const char reply[] = "ANEMONE_TCP_STAGE5_REPLY";
+	struct sockaddr_in remote;
+	struct sockaddr_in local;
+	struct sockaddr_in observed_peer;
+	socklen_t length;
+	char reply_buffer[sizeof(reply)];
+	char eof;
+	uint16_t port;
+	int client;
+
+	memset(&remote, 0, sizeof(remote));
+	remote.sin_family = AF_INET;
+	if (parse_port(port_text, &port) ||
+	    inet_pton(AF_INET, host, &remote.sin_addr) != 1)
+		return fail("remote-external-address");
+	remote.sin_port = htons(port);
+
+	client = socket(AF_INET, SOCK_STREAM, 0);
+	if (client < 0)
+		return fail("remote-external-socket");
+	memset(&local, 0, sizeof(local));
+	local.sin_family = AF_INET;
+	local.sin_addr.s_addr = htonl(0x0a00020fU);
+	if (bind(client, (struct sockaddr *)&local, sizeof(local)) < 0 ||
+	    connect(client, (struct sockaddr *)&remote, sizeof(remote)) < 0)
+		return fail("remote-external-connect");
+
+	length = sizeof(local);
+	if (getsockname(client, (struct sockaddr *)&local, &length) < 0 ||
+	    local.sin_addr.s_addr != htonl(0x0a00020fU) || local.sin_port == 0)
+		return fail("remote-external-local-name");
+	length = sizeof(observed_peer);
+	if (getpeername(client, (struct sockaddr *)&observed_peer, &length) < 0 ||
+	    observed_peer.sin_addr.s_addr != remote.sin_addr.s_addr ||
+	    observed_peer.sin_port != remote.sin_port)
+		return fail("remote-external-peer-name");
+
+	if (send_all(client, request, sizeof(request), "remote-external-send") ||
+	    receive_exact(client, reply_buffer, sizeof(reply_buffer),
+			  "remote-external-receive") ||
+	    memcmp(reply_buffer, reply, sizeof(reply)) != 0)
+		return fail("remote-external-payload");
+	if (shutdown(client, SHUT_WR) < 0 || recv(client, &eof, 1, 0) != 0)
+		return fail("remote-external-fin");
+	close(client);
+	puts("TPASS: tcp_r0_remote_external");
+	return 0;
+}
+
+static int remote_reset_oracle(const char *host, const char *port_text)
+{
+	static const char request[] = "ANEMONE_TCP_STAGE5_RESET__";
+	struct sockaddr_in remote;
+	char byte;
+	uint16_t port;
+	int client;
+
+	memset(&remote, 0, sizeof(remote));
+	remote.sin_family = AF_INET;
+	if (parse_port(port_text, &port) ||
+	    inet_pton(AF_INET, host, &remote.sin_addr) != 1)
+		return fail("remote-reset-address");
+	remote.sin_port = htons(port);
+
+	client = socket(AF_INET, SOCK_STREAM, 0);
+	if (client < 0 || connect(client, (struct sockaddr *)&remote,
+				 sizeof(remote)) < 0 ||
+	    send_all(client, request, sizeof(request), "remote-reset-send"))
+		return fail("remote-reset-connect");
+	if (wait_poll(client, POLLIN | POLLERR, POLLIN | POLLERR,
+		      "remote-reset-observable"))
+		return 1;
+	errno = 0;
+	if (expect_errno(recv(client, &byte, 1, 0), ECONNRESET,
+			 "remote-established-reset"))
+		return 1;
+	close(client);
+	puts("TPASS: tcp_r0_remote_reset");
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	if (argc == 2 && strcmp(argv[1], "--self-external") == 0)
+		return self_external_oracle();
+	if (argc == 4 && strcmp(argv[1], "--remote-external") == 0)
+		return remote_external_oracle(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "--remote-reset") == 0)
+		return remote_reset_oracle(argv[2], argv[3]);
+	if (argc != 1) {
+		fprintf(stderr,
+			"usage: %s [--self-external | --remote-external HOST PORT | --remote-reset HOST PORT]\n",
+			argv[0]);
+		return 2;
+	}
 	if (creation_and_rejection_oracle() || blocking_stream_oracle() ||
 	    nonblocking_accept_and_lifecycle_oracle() ||
 	    wildcard_bind_projection_oracle() || refused_so_error_oracle() ||
-	    blocking_accept_wait_oracle())
+	    blocking_accept_wait_oracle() || receive_final_close_race_oracle())
 		return 1;
 	puts("TPASS: tcp_r0_oracle");
 	return 0;

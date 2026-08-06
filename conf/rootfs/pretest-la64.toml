@@ -90,3 +90,11 @@ installed_path = "/fixtures/user-test/tools/socket-r1-glibc"
 [[files]]
 source = "anemone-apps/user-test/staged/loongarch/socket-r1-musl"
 installed_path = "/fixtures/user-test/tools/socket-r1-musl"
+
+[[files]]
+source = "anemone-apps/user-test/staged/loongarch/tcp-r0-glibc"
+installed_path = "/fixtures/user-test/tools/tcp-r0-glibc"
+
+[[files]]
+source = "anemone-apps/user-test/staged/loongarch/tcp-r0-musl"
+installed_path = "/fixtures/user-test/tools/tcp-r0-musl"

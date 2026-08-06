@@ -122,8 +122,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
-- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Closed / Stage 2 Closed /
-  Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over / TCP Not Effective；目标为
+- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Closed R0 / Stage 1--5 Closed / TCP Effective；目标为
   initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
   TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
   current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
@@ -140,12 +139,13 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   smoltcp TCP `178/178`、RV64 KUnit `465/465`、RV64/LA64 release build与独立复审通过。CKPT 4B通过唯一normal
   resolver发布完整TCP creation tuple，闭合connect errno、`SO_ERROR` single-consumer/rearm与binding/local分离；
   exact-source RV64 KUnit `466/466`、双libc TCP oracle、socket LTP `8/8`、shared regression、LA64 release build与
-  最终独立review通过。三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending，current contracts不变，transaction
-  None。Stage 5已解析为单一Checkpoint 5A，负责长期`socket-test` TCP suite、双架构双libc focused consumer、
-  self/remote-external、CAgent、shared regression、architecture capstone与最终cutover；本次只完成Implementation
-  Resolution，Checkpoint 5A仍Not Active / Not Authorized，current contracts不变。
+  最终独立review通过。Stage 5随后以单一Checkpoint 5A完成长期`socket-test` TCP suite、双架构双libc focused
+  consumer、self/remote-external、established RST、CAgent、shared regression与architecture capstone；独立review
+  最终为`0 Apollyon / 0 Keter / 0 Euclid / 0 Safe`。`NET-TCP-CUTOVER`已Introduce三项TCP current contract并Refine
+  `SOCKET-ABI-001`，transaction None；physical hardware、`smp>1`、其它NIC/platform、full network LTP、完整final
+  harness与条件性deployment probe保持Not Run。
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
-  [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Stage 1只更新上述两项Network current contract，
+  [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current effective规则见Network与Socket contract，
   register没有新增当前问题。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过

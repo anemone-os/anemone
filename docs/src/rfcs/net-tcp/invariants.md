@@ -1,14 +1,16 @@
 # IPv4 TCP Socket 与网络架构封顶目标与不变量
 
-**状态：** Accepted Target / TCP Not Effective / Network Refine Effective
-**最后更新：** 2026-08-05
+**状态：** Closed Target / TCP Effective / Network Refine Effective
+**最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
 
 本文只定义父RFC的target、shared-contract delta与correctness proof obligations。当前effective
 Network、Socket、Opened-description、IOMUX与Epoll规则仍以`docs/src/contracts/`为准；本文始终是
-target文档，不直接成为current contract。Stage 1已经通过`NET-PROTOCOL-PROGRESSION-CUTOVER`把两项Network
-Refine回写到对应current contract页面；TCP条款在`NET-TCP-CUTOVER`前均不生效。本文不授权后续实现。
+target文档，不直接成为current contract。Stage 1通过`NET-PROTOCOL-PROGRESSION-CUTOVER`把两项Network
+Refine回写到对应current contract页面；Stage 5通过`NET-TCP-CUTOVER`把TCP条款回写到
+[IPv4 TCP Socket](../../contracts/net/tcp-socket.md)与Socket current contract。本文保留R0 target与proof obligations，
+不再授权后续实现。
 
 ## 规则分类
 

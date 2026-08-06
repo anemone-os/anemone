@@ -2,6 +2,7 @@
 #![no_main]
 
 mod icmp_raw;
+mod tcp;
 mod udp;
 mod udp_extension;
 mod udp_message;
@@ -29,6 +30,13 @@ fn main() -> Result<(), Errno> {
             }
             icmp_raw::run_cloexec_child(fd)
         },
+        Some("--tcp-cloexec-child") => {
+            let fd = args.next().ok_or(EINVAL)?;
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            tcp::run_cloexec_child(fd)
+        },
         Some("--limitations") => {
             if args.next().is_some() {
                 return Err(EINVAL);
@@ -42,12 +50,14 @@ fn main() -> Result<(), Errno> {
             let unix_result = unix::run();
             let seqpacket_result = unix_seqpacket::run();
             let icmp_raw_result = icmp_raw::run();
+            let tcp_result = tcp::run();
             udp_result
                 .and(udp_extension_result)
                 .and(udp_message_result)
                 .and(unix_result)
                 .and(seqpacket_result)
                 .and(icmp_raw_result)
+                .and(tcp_result)
         },
         Some(_) => Err(EINVAL),
     }
