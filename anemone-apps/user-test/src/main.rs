@@ -49,7 +49,7 @@ fn run_local_tests() {
     run_udp_extension_c_consumer();
 
     println!("user-test: running local POSIX timer test...");
-    local_run_cmd("/bin/local-test", &["local-test"], &[]);
+    local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
     println!("user-test: local POSIX timer test finished.");
 
     // println!("user-test: running native clock read test...");

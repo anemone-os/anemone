@@ -198,7 +198,7 @@ fn spawn_timer_thread(entry: extern "C" fn(usize) -> !, arg: usize) -> u32 {
     let stack_top = unsafe { stack.as_ptr().add(RAW_THREAD_STACK_SIZE) };
 
     // Raw threads have no pthread-style join owner. These focused test stacks
-    // intentionally remain mapped until local-test exits after the oracle run.
+    // intentionally remain mapped until clock_tests exits after the oracle run.
     unsafe {
         spawn_raw_thread(
             raw_thread_flags(),

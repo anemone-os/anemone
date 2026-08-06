@@ -10,7 +10,7 @@ pub fn main() -> Result<(), Errno> {
     posix_timer::verify_posix_timers();
     println!(
         "{}",
-        yansi::Paint::green("local-test: POSIX timer RFC checks passed")
+        yansi::Paint::green("clock_tests: POSIX timer RFC checks passed")
     );
     Ok(())
 }
