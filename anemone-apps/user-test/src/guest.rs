@@ -6,64 +6,16 @@ use anemone_rs::{
 
 const COMPETITION_DISK: &str = "/dev/vdb";
 
-cfg_select! {
-    target_arch = "riscv64" => {
-        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.ext4",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.ext3",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/socket-r1-glibc",
-                dest: "/glibc/ltp/testcases/bin/socket_r1_oracle",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/socket-r1-musl",
-                dest: "/musl/ltp/testcases/bin/socket_r1_oracle",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/tcp-r0-glibc",
-                dest: "/glibc/ltp/testcases/bin/tcp_r0_oracle",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/tcp-r0-musl",
-                dest: "/musl/ltp/testcases/bin/tcp_r0_oracle",
-            },
-        ];
+const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
+    StagedCompetitionFixture {
+        source: "/fixtures/user-test/tools/mke2fs",
+        dest: "/bin/mkfs.ext4",
     },
-    target_arch = "loongarch64" => {
-        const STAGED_COMPETITION_FIXTURES: &[StagedCompetitionFixture] = &[
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.ext4",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/mke2fs",
-                dest: "/bin/mkfs.ext3",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/socket-r1-glibc",
-                dest: "/glibc/ltp/testcases/bin/socket_r1_oracle",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/socket-r1-musl",
-                dest: "/musl/ltp/testcases/bin/socket_r1_oracle",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/tcp-r0-glibc",
-                dest: "/glibc/ltp/testcases/bin/tcp_r0_oracle",
-            },
-            StagedCompetitionFixture {
-                source: "/fixtures/user-test/tools/tcp-r0-musl",
-                dest: "/musl/ltp/testcases/bin/tcp_r0_oracle",
-            },
-        ];
-    }
-}
+    StagedCompetitionFixture {
+        source: "/fixtures/user-test/tools/mke2fs",
+        dest: "/bin/mkfs.ext3",
+    },
+];
 
 struct StagedCompetitionFixture {
     source: &'static str,

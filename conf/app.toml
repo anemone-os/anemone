@@ -40,5 +40,8 @@ args = ["build"]
 # Xtask will expand following variables in the path:
 # - ${ARCH}: replaced by the app build target, e.g., "riscv64" or "host".
 # - ${TARGET_TRIPLE}: replaced by the Anemone target triple, e.g.,
-#   "riscv64-unknown-anemone-elf". Host-capable manifests cannot use it.
+#   "riscv64-unknown-anemone-elf". Artifacts applicable to host cannot use it.
 path = "target/${TARGET_TRIPLE}/debug/example"
+# Optional non-empty subset of app targets that exports this artifact. Omit to
+# export it for every declared app target. Every app target needs an artifact.
+# targets = ["riscv64", "loongarch64"]

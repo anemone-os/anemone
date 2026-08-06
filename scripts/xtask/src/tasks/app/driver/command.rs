@@ -68,6 +68,7 @@ mod tests {
             },
             artifacts: vec![Artifact {
                 path: "out/command-test".to_string(),
+                targets: None,
             }],
         }
     }

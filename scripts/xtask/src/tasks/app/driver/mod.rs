@@ -56,6 +56,7 @@ mod tests {
             },
             artifacts: vec![Artifact {
                 path: "prebuilt".to_string(),
+                targets: None,
             }],
         }
     }

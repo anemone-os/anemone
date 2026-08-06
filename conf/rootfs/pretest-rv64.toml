@@ -19,12 +19,23 @@ path = "/mnt"
 [[dirs]]
 path = "/proc"
 
+[[dirs]]
+path = "/tmp"
+
 [[apps]]
 name = "init"
 installed_dir = "/sbin"
 
 [[apps]]
 name = "user-test"
+installed_dir = "/bin"
+
+[[apps]]
+name = "socket-r1-oracle"
+installed_dir = "/bin"
+
+[[apps]]
+name = "tcp-r0-oracle"
 installed_dir = "/bin"
 
 [[apps]]
@@ -94,19 +105,3 @@ installed_dir = "/bin"
 [[files]]
 source = "anemone-apps/user-test/staged/riscv/mke2fs"
 installed_path = "/fixtures/user-test/tools/mke2fs"
-
-[[files]]
-source = "anemone-apps/user-test/staged/riscv/socket-r1-glibc"
-installed_path = "/fixtures/user-test/tools/socket-r1-glibc"
-
-[[files]]
-source = "anemone-apps/user-test/staged/riscv/socket-r1-musl"
-installed_path = "/fixtures/user-test/tools/socket-r1-musl"
-
-[[files]]
-source = "anemone-apps/user-test/staged/riscv/tcp-r0-glibc"
-installed_path = "/fixtures/user-test/tools/tcp-r0-glibc"
-
-[[files]]
-source = "anemone-apps/user-test/staged/riscv/tcp-r0-musl"
-installed_path = "/fixtures/user-test/tools/tcp-r0-musl"

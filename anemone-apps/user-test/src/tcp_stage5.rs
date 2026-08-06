@@ -1,8 +1,8 @@
-//! Focused final-asset runner for the net-tcp Stage 5 SystemTargets.
+//! Focused competition-asset runner for the net-tcp Stage 5 SystemTargets.
 //!
 //! The mode is explicit so ordinary user-test runs keep their existing profile.
-//! It consumes the fixed competition binaries without making their marker or
-//! process identity part of kernel behavior.
+//! Repository-owned static oracles run from the boot root before chroot; this
+//! module consumes only the fixed competition CAgent assets after chroot.
 
 use anemone_rs::{
     abi::{
@@ -22,14 +22,7 @@ use anemone_rs::{
     prelude::*,
 };
 
-cfg_select! {
-    target_arch = "riscv64" => {
-        const ARCH: &str = "rv64";
-    },
-    target_arch = "loongarch64" => {
-        const ARCH: &str = "la64";
-    }
-}
+use crate::ARCH_LABEL;
 
 const CAGENT_PORT: u16 = 8080;
 const CHILD_TIMEOUT_US: i64 = 60_000_000;
@@ -174,7 +167,7 @@ fn run_cagent() -> Result<(), Errno> {
 
     let result = (|| {
         wait_server_ready(server)?;
-        println!("TCPSTAGE5:CAGENT:READY:arch={ARCH}:libc=glibc:pid={server}");
+        println!("TCPSTAGE5:CAGENT:READY:arch={ARCH_LABEL}:libc=glibc:pid={server}");
 
         let argv = [
             "agent_lite",
@@ -215,40 +208,13 @@ fn run_cagent() -> Result<(), Errno> {
         println!("TCPSTAGE5:CAGENT:CLEANUP:PASS:pid={server}");
     }
     result.and(cleanup)?;
-    println!("TCPSTAGE5:CAGENT:SUMMARY:PASS:arch={ARCH}:libc=glibc");
+    println!("TCPSTAGE5:CAGENT:SUMMARY:PASS:arch={ARCH_LABEL}:libc=glibc");
     Ok(())
 }
 
-fn run_oracle(family: &str, mode: &str, peer: &str, port: &str) {
-    crate::runtime::switch_runtime(family);
-    let workdir = format!("/{family}");
-    let oracle = format!("/{family}/ltp/testcases/bin/tcp_r0_oracle");
-    let name = format!("TCP Stage 5 {family} {mode}");
-    let args = match mode {
-        "self-external" => vec!["tcp_r0_oracle", "--self-external"],
-        "remote-external" => vec!["tcp_r0_oracle", "--remote-external", peer, port],
-        "remote-reset" => vec!["tcp_r0_oracle", "--remote-reset", peer, port],
-        _ => unreachable!(),
-    };
-    crate::process::run_execve_in_dir(
-        Some(workdir.as_str()),
-        oracle.as_str(),
-        args.as_slice(),
-        &[],
-        name.as_str(),
-    );
-    println!("TCPSTAGE5:TOPOLOGY:PASS:arch={ARCH}:libc={family}:mode={mode}");
-}
-
-pub(crate) fn run(peer: &str, port: &str) -> Result<(), Errno> {
-    println!("TCPSTAGE5:START:arch={ARCH}:peer={peer}:port={port}");
-    for family in ["glibc", "musl"] {
-        run_oracle(family, "self-external", peer, port);
-        run_oracle(family, "remote-external", peer, port);
-        run_oracle(family, "remote-reset", peer, port);
-    }
+pub(crate) fn run() -> Result<(), Errno> {
     run_cagent()?;
-    println!("TCPSTAGE5:SUMMARY:PASS:arch={ARCH}");
+    println!("TCPSTAGE5:SUMMARY:PASS:arch={ARCH_LABEL}");
     Ok(())
 }
 

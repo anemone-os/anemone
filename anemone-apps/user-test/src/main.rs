@@ -7,6 +7,7 @@ mod competition;
 mod file;
 mod guest;
 mod ltp;
+mod oracle;
 mod process;
 mod runtime;
 mod tcp_stage5;
@@ -19,6 +20,15 @@ use anemone_rs::{
     },
     prelude::*,
 };
+
+cfg_select! {
+    target_arch = "riscv64" => {
+        pub(crate) const ARCH_LABEL: &str = "rv64";
+    },
+    target_arch = "loongarch64" => {
+        pub(crate) const ARCH_LABEL: &str = "la64";
+    }
+}
 
 fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
     process::run_execve(cmd, args, envs, cmd);
@@ -44,6 +54,7 @@ fn run_udp_extension_c_consumer() {
 /// local tests for development.
 fn run_local_tests() {
     run_udp_extension_c_consumer();
+    oracle::run_local();
 
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
@@ -144,7 +155,7 @@ fn run_local_tests() {
 }
 
 /// competition tests.
-fn run_comp_tests(tcp_stage5_peer: Option<(&str, &str)>) {
+fn run_comp_tests(run_tcp_stage5: bool) {
     guest::enter_competition_root();
     guest::init_competition_environment();
 
@@ -161,8 +172,8 @@ fn run_comp_tests(tcp_stage5_peer: Option<(&str, &str)>) {
     // competition::run_competition_tests();
     ltp::run_ltp_tests();
 
-    if let Some((peer, port)) = tcp_stage5_peer {
-        tcp_stage5::run(peer, port).expect("user-test: TCP Stage 5 validation failed");
+    if run_tcp_stage5 {
+        tcp_stage5::run().expect("user-test: TCP Stage 5 validation failed");
     }
 
     println!("user-test: all competition tests finished.");
@@ -186,8 +197,11 @@ pub fn main() -> Result<(), Errno> {
     };
     let drain_tcp_stage5_markers = tcp_stage5_peer.is_some();
     run_local_tests();
+    if let Some((peer, port)) = tcp_stage5_peer {
+        oracle::run_tcp_stage5(peer, port);
+    }
 
-    run_comp_tests(tcp_stage5_peer);
+    run_comp_tests(drain_tcp_stage5_markers);
 
     println!("user-test: all tests finished, shutting down.");
     if drain_tcp_stage5_markers {

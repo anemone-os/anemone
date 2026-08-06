@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -49,8 +50,11 @@ pub struct BuiltArtifactInfo {
 }
 
 impl BuiltArtifactInfo {
-    pub fn name(&self) -> Option<&str> {
-        self.output_path.file_name().and_then(|n| n.to_str())
+    pub fn name(&self) -> &str {
+        self.output_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("app artifact export name was validated before copy")
     }
 }
 
@@ -104,6 +108,7 @@ pub fn build_app(
     let app = App::from_str(&content)?;
     validate_app_reference(name, &app, &manifest_path)?;
     validate_app_target(&app, context.target(), &manifest_path)?;
+    validate_artifact_exports(&app, context)?;
 
     let app_dir = manifest_path
         .parent()
@@ -125,8 +130,12 @@ pub fn build_app(
         execute_build_command(&app.name, &mut cmd)?;
     }
 
-    let mut built = Vec::with_capacity(app.artifacts.len());
-    for artifact in &app.artifacts {
+    let artifacts = app
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.supports(context.target()));
+    let mut built = Vec::new();
+    for artifact in artifacts {
         let built_artifact = copy_artifact(&app, &workdir, artifact, &out_dir, context)?;
         if disasm {
             generate_artifact_disasm(&built_artifact, context)?;
@@ -178,6 +187,26 @@ fn validate_app_target(app: &App, target: &AppTarget, manifest_path: &Path) -> a
     Ok(())
 }
 
+fn validate_artifact_exports(app: &App, context: &BuildCtx) -> anyhow::Result<()> {
+    let mut names = HashSet::new();
+    for artifact in app
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.supports(context.target()))
+    {
+        let name = artifact_export_name(artifact, context)?;
+        if !names.insert(name.clone()) {
+            bail!(
+                "app '{}' artifacts export duplicate file name '{}' for target '{}'",
+                app.name,
+                name,
+                context.target_name()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn copy_artifact(
     app: &App,
     workdir: &Path,
@@ -186,6 +215,7 @@ fn copy_artifact(
     context: &BuildCtx,
 ) -> anyhow::Result<BuiltArtifactInfo> {
     let source_path = workdir.join(expand_artifact_path(artifact, context)?);
+    let name = artifact_export_name(artifact, context)?;
     if !source_path.exists() {
         bail!(
             "artifact '{}' for app '{}' does not exist after build",
@@ -201,14 +231,7 @@ fn copy_artifact(
         );
     }
 
-    let file_name = source_path.file_name().with_context(|| {
-        format!(
-            "artifact '{}' for app '{}' has no file name",
-            source_path.display(),
-            app.name
-        )
-    })?;
-    let output_path = out_dir.join(file_name);
+    let output_path = out_dir.join(&name);
     fs::copy(&source_path, &output_path).with_context(|| {
         format!(
             "failed to export app '{}' artifact '{}' to {}",
@@ -228,13 +251,7 @@ fn generate_artifact_disasm(
     artifact: &BuiltArtifactInfo,
     context: &BuildCtx,
 ) -> anyhow::Result<()> {
-    let artifact_name = artifact.name().unwrap_or_else(|| {
-        artifact
-            .output_path
-            .as_os_str()
-            .to_str()
-            .unwrap_or("<unknown>")
-    });
+    let artifact_name = artifact.name();
     log_progress!(
         "DISASM",
         &format!(
@@ -302,6 +319,22 @@ fn expand_artifact_path(artifact: &Artifact, context: &BuildCtx) -> anyhow::Resu
     Ok(expanded.replace("${TARGET_TRIPLE}", target_triple.as_str()))
 }
 
+fn artifact_export_name(artifact: &Artifact, context: &BuildCtx) -> anyhow::Result<String> {
+    let expanded = expand_artifact_path(artifact, context)?;
+    Path::new(&expanded)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .with_context(|| {
+            format!(
+                "artifact path '{}' has no UTF-8 file name for target '{}'",
+                artifact.path,
+                context.target_name()
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,9 +400,11 @@ mod tests {
         let artifacts = vec![
             Artifact {
                 path: "${ARCH}/${TARGET_TRIPLE}/prebuilt".to_string(),
+                targets: None,
             },
             Artifact {
                 path: "script.sh".to_string(),
+                targets: None,
             },
         ];
         let app = source_app(artifacts.clone());
@@ -407,6 +442,7 @@ mod tests {
         for path in ["missing", "directory", "device"] {
             let artifact = Artifact {
                 path: path.to_string(),
+                targets: None,
             };
             let app = source_app(vec![artifact.clone()]);
             let error = copy_artifact(&app, &workdir, &artifact, &out_dir, &context)
@@ -448,10 +484,32 @@ mod tests {
     }
 
     #[test]
+    fn artifact_export_names_must_be_unique_for_selected_target() {
+        let app = source_app(vec![
+            Artifact {
+                path: "left/${ARCH}/same".to_string(),
+                targets: None,
+            },
+            Artifact {
+                path: "right/${ARCH}/same".to_string(),
+                targets: None,
+            },
+        ]);
+        let context = BuildCtx::new(Arch::RiscV64).unwrap();
+        let error = validate_artifact_exports(&app, &context)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("prebuilt"), "{error}");
+        assert!(error.contains("same"), "{error}");
+        assert!(error.contains("riscv64"), "{error}");
+    }
+
+    #[test]
     fn host_artifact_path_expands_without_a_target_triple() {
         let context = BuildCtx::for_target(AppTarget::Host);
         let artifact = Artifact {
             path: "out/${ARCH}/prebuilt".to_string(),
+            targets: None,
         };
         assert_eq!(
             expand_artifact_path(&artifact, &context).unwrap(),
@@ -460,6 +518,7 @@ mod tests {
 
         let artifact = Artifact {
             path: "target/${TARGET_TRIPLE}/prebuilt".to_string(),
+            targets: None,
         };
         let error = expand_artifact_path(&artifact, &context)
             .unwrap_err()

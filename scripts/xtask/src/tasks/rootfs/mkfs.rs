@@ -217,7 +217,7 @@ impl<'a> RootfsCtx<'a> {
 
             let artifacts = build_app(&app.name, &[], &build_ctx, false)?;
             for artifact in artifacts {
-                let dest = installed_dir.join(artifact.name().unwrap());
+                let dest = installed_dir.join(artifact.name());
                 std::fs::copy(artifact.output_path, &dest)?;
             }
         }

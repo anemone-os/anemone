@@ -123,6 +123,16 @@ pub struct SourceBuild {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
     pub path: String,
+    #[serde(default)]
+    pub targets: Option<Vec<AppTarget>>,
+}
+
+impl Artifact {
+    pub fn supports(&self, target: &AppTarget) -> bool {
+        self.targets
+            .as_ref()
+            .is_none_or(|targets| targets.contains(target))
+    }
 }
 
 impl App {
@@ -133,11 +143,52 @@ impl App {
             !manifest.targets.is_empty(),
             "app target list must not be empty"
         );
+        anyhow::ensure!(
+            !manifest.artifacts.is_empty(),
+            "app artifact list must not be empty"
+        );
         let mut targets = HashSet::new();
         for target in &manifest.targets {
             anyhow::ensure!(
                 targets.insert(target.as_str()),
                 "duplicate app build target '{}'",
+                target.as_str()
+            );
+        }
+        for artifact in &manifest.artifacts {
+            let Some(artifact_targets) = &artifact.targets else {
+                continue;
+            };
+            anyhow::ensure!(
+                !artifact_targets.is_empty(),
+                "artifact '{}' target list must not be empty",
+                artifact.path
+            );
+            let mut targets = HashSet::new();
+            for target in artifact_targets {
+                anyhow::ensure!(
+                    targets.insert(target.as_str()),
+                    "artifact '{}' has duplicate build target '{}'",
+                    artifact.path,
+                    target.as_str()
+                );
+                anyhow::ensure!(
+                    manifest.targets.contains(target),
+                    "artifact '{}' selects target '{}' not declared by app '{}'",
+                    artifact.path,
+                    target.as_str(),
+                    manifest.name
+                );
+            }
+        }
+        for target in &manifest.targets {
+            anyhow::ensure!(
+                manifest
+                    .artifacts
+                    .iter()
+                    .any(|artifact| artifact.supports(target)),
+                "app '{}' target '{}' has no artifact",
+                manifest.name,
                 target.as_str()
             );
         }
@@ -158,7 +209,11 @@ impl App {
                 !matches!(manifest.build.driver, BuildDriver::Cargo(_)),
                 "cargo driver is Anemone-only and cannot declare the host target; use the command driver for host Cargo builds"
             );
-            for artifact in &manifest.artifacts {
+            for artifact in manifest
+                .artifacts
+                .iter()
+                .filter(|artifact| artifact.supports(&AppTarget::Host))
+            {
                 anyhow::ensure!(
                     !artifact.path.contains("${TARGET_TRIPLE}"),
                     "host-capable app artifact path '{}' cannot use ${{TARGET_TRIPLE}} because host has no Anemone target triple",
@@ -219,6 +274,63 @@ mod tests {
             error.contains("Unsupported app build target: mips64"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn artifact_list_must_not_be_empty() {
+        let empty = r#"
+name = "empty"
+targets = ["riscv64"]
+artifacts = []
+
+[build]
+workdir = "."
+driver = "source"
+"#;
+        let error = format!("{:#}", App::from_str(empty).unwrap_err());
+        assert!(error.contains("artifact list must not be empty"), "{error}");
+    }
+
+    #[test]
+    fn artifact_targets_are_closed_and_cover_every_app_target() {
+        let valid = r#"
+name = "variants"
+targets = ["riscv64", "host"]
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${TARGET_TRIPLE}/guest"
+targets = ["riscv64"]
+
+[[artifacts]]
+path = "out/host/native"
+targets = ["host"]
+"#;
+        App::from_str(valid).expect("target-specific artifacts should parse");
+
+        let empty = valid.replacen("targets = [\"host\"]", "targets = []", 1);
+        let error = format!("{:#}", App::from_str(&empty).unwrap_err());
+        assert!(error.contains("target list must not be empty"), "{error}");
+
+        let duplicate = valid.replacen(
+            "targets = [\"host\"]",
+            "targets = [\"host\", \"host\"]",
+            1,
+        );
+        let error = format!("{:#}", App::from_str(&duplicate).unwrap_err());
+        assert!(error.contains("duplicate build target 'host'"), "{error}");
+
+        let outside = valid.replacen("targets = [\"host\"]", "targets = [\"loongarch64\"]", 1);
+        let error = format!("{:#}", App::from_str(&outside).unwrap_err());
+        assert!(error.contains("not declared by app 'variants'"), "{error}");
+
+        let uncovered = valid.replace("targets = [\"host\"]", "targets = [\"riscv64\"]");
+        let error = format!("{:#}", App::from_str(&uncovered).unwrap_err());
+        assert!(error.contains("target 'host' has no artifact"), "{error}");
     }
 
     #[test]

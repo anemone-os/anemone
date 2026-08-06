@@ -56,7 +56,9 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm the CLI app name locates the intended manifest.
 - Confirm the requested target is explicitly declared by the app and agrees with the closed
-  Cargo/Command/Source driver and artifact path. `host` is app-local, not a Platform architecture.
+  Cargo/Command/Source driver and the artifacts applicable to that target. Artifact target subsets
+  must be non-empty, remain inside the app target list, cover every app target, and produce unique
+  export names. `host` is app-local, not a Platform architecture.
 - Treat Cargo as Anemone-target-only: it selects the repository target JSON and bare-metal
   `build-std` parameters. A host Cargo recipe uses Command and remains app-owned.
 - Treat Command as trusted repository build code: execute its non-empty bounded argv directly in

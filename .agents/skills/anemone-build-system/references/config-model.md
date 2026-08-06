@@ -52,9 +52,12 @@ inherits the process environment. Anemone targets override `ANEMONE_ARCH` and
 `ANEMONE_TARGET_TRIPLE`; host overrides `ANEMONE_ARCH=host` and removes inherited
 `ANEMONE_TARGET_TRIPLE`. Source accepts no driver args and runs no command; it submits
 already-existing ordinary files to the same path expansion and export path. Host-capable manifests
-cannot use `${TARGET_TRIPLE}` because host has no Anemone target triple. No driver proves toolchain
-availability or runtime compatibility. Keep locator name, manifest identity, target list, driver
-choice, and artifact path coherent.
+may restrict an artifact to a non-empty subset of the app targets; omission applies it to every app
+target, and every declared app target must retain at least one artifact. Only artifacts applicable to
+`host` reject `${TARGET_TRIPLE}`, because host has no Anemone target triple. The selected target's
+export names must be unique. No driver proves toolchain availability or runtime compatibility. Keep
+locator name, manifest identity, target list, driver choice, artifact target subset, and artifact path
+coherent.
 
 ### Rootfs Manifest
 
