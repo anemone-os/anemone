@@ -793,6 +793,7 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     accepting: query_unix_accepting,
     query_option: None,
     mutate_option: None,
+    detach_ipv4_extended_error: None,
     poll: poll_unix_stream,
     final_release: final_release_unix_endpoint_with_reason,
 };
@@ -816,6 +817,7 @@ pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOp
     accepting: query_unix_accepting,
     query_option: None,
     mutate_option: None,
+    detach_ipv4_extended_error: None,
     poll: poll_unix_seqpacket,
     final_release: final_release_unix_endpoint_with_reason,
 };

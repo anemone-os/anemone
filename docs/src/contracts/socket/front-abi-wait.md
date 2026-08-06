@@ -47,12 +47,23 @@ UDP adapter接受IPv4 connect/reconnect、`AF_UNSPEC` disconnect与peer query，
 configuration为1024且不高于公开`IOV_MAX`；UDP family不保存第二份limit。超限、range/total overflow与payload fault在
 datagram commit前完成验证。
 
+`sendmmsg`在一个稳定opened description上顺序复用既有family `sendmsg` transaction，并逐项投影`msg_len`；首条失败
+返回errno，已有成功后遇到send或copyout failure返回已完成数，partial stream message停止后续项，`vlen`按Linux上限
+clamp到1024。adapter不建立batch queue、shared commit、family state或跨message原子性。
+
 `SOCK_NONBLOCK`进入shared opened-description status，`SOCK_CLOEXEC`进入fd-local flags。descriptor直接回答`SO_DOMAIN`、`SO_TYPE`、`SO_PROTOCOL`，family role回答`SO_ACCEPTCONN`。ICMP raw额外支持`IP_TTL`、`IP_TOS`与`ICMP_FILTER`的Linux optlen/value/copy policy；TCP发布`SO_REUSEADDR`、`TCP_NODELAY`与真实consuming `SO_ERROR`，option fact与async cause仍由TCP owner唯一保存，common adapter只分发normalized mutation/query，不建立mutable option/error bag。没有对应producer的family与其它未支持option返回`ENOPROTOOPT`，不得以恒零值或pending-error bag冒充支持。
 
-UDP send flags支持`MSG_DONTWAIT | MSG_NOSIGNAL`，receive支持`MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC`；
+UDP发布真实`IP_RECVERR` scalar option、consuming `SO_ERROR`与`MSG_ERRQUEUE` ancillary projection。raw option/header、
+Linux errno、`sock_extended_err`、sockaddr/cmsg alignment与copy ordering只存在于adapter；UDP owner只接收normalized
+enable request并返回typed pending cause或move-only record。`MSG_ERRQUEUE`输出quoted UDP payload、original destination、
+offender、`SOL_IP/IP_RECVERR` cmsg和`MSG_ERRQUEUE` flag；data/control short分别加`MSG_TRUNC`/`MSG_CTRUNC`，empty
+queue返回`EAGAIN`，detach后的copy fault消费record。ordinary I/O与`SO_ERROR`竞争同一Endpoint pending cause，adapter
+不得缓存并列error truth或用恒零query冒充支持。
+
+UDP send flags支持`MSG_DONTWAIT | MSG_NOSIGNAL`，ordinary receive支持`MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC`；
 `MSG_NOSIGNAL`在没有SIGPIPE producer时是带诊断和退出条件的compatibility no-op，其它flag稳定返回
 `EOPNOTSUPP`。nonzero send control length返回`EOPNOTSUPP`且不提交payload；receive没有ancillary producer时不读取
-control buffer并输出`msg_controllen = 0`。`msghdr.msg_flags`不作为send input flag；short receive输出
+control buffer并输出`msg_controllen = 0`；UDP `MSG_ERRQUEUE`是该规则的具名ancillary producer。`msghdr.msg_flags`不作为send input flag；short receive输出
 `MSG_TRUNC`，syscall input `MSG_TRUNC`只决定返回full packet length还是copied length。
 
 `recvmsg`先完成payload transaction，再按peer name、`msg_flags`、`msg_controllen`顺序写回header字段；non-peek已经
@@ -70,19 +81,22 @@ blocking/nonblocking connect、accept/accept4、local/peer query和typed async e
 `SIGPIPE`由adapter投递，本次`MSG_NOSIGNAL`只抑制该信号。unsupported flag稳定返回`EOPNOTSUPP`，不得因consumer忽略
 错误而success-no-op。
 
-**违反表现：** family ops解析Linux bit或返回Linux errno；raw user pointer越过adapter；descriptor与另存type不一致；copy fault提交未复制bytes；`SO_ERROR`恒零成功、Socket复制TCP pending cause或建立无producer的error state。
+**违反表现：** family ops解析Linux bit或返回Linux errno；raw user pointer越过adapter；descriptor与另存type不一致；
+copy fault提交未复制bytes；`SO_ERROR`恒零成功；Socket复制TCP/UDP pending cause；`sendmmsg`建立batch-owned state或绕过
+single-message transaction；没有producer却建立error state。
 
 **验证 / Enforcement：** tuple/permission/flag、IPv4 connected/unconnected与Unix sockaddr input/output、file/vector/
-message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault与fd rollback KUnit/focused oracle；
-repository-owned C/libc consumer、musl resolver、glibc/musl curated Socket LTP；两架构guest Socket/TCP suite、
-remote-external peer与CAgent consumer。
+message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault、`sendmmsg` partial/copyout/clamp与fd
+rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc resolver、glibc/musl curated Socket LTP；
+两架构既有Socket/TCP suite，以及RV64 UDP extended-error deterministic chain。
 
 **最初来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)。
 
 **当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`，并由[IPv4 ICMP Raw Socket RFC R0](../../rfcs/icmp-raw-socket/index.md)的
 `ICMP-RAW-CUTOVER`和[UDP Socket Extension RFC R1](../../rfcs/udp-socket-extension/index.md)的
 `UDP-EXT-R1-CUTOVER` Refine；随后由[IPv4 TCP Socket RFC R0](../../rfcs/net-tcp/index.md)的
-`NET-TCP-CUTOVER` Refine。
+`NET-TCP-CUTOVER`及[IPv4 UDP ICMP extended error小迭代](../../devlog/changes/2026-08-06-ipv4-udp-icmp-extended-error.md)
+Refine。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 
@@ -105,8 +119,10 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
 - 当前五个真实consumer是IPv4 connected/unconnected UDP、`AF_INET + SOCK_RAW + IPPROTO_ICMP`、
   `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`、
   `AF_UNIX + SOCK_STREAM + protocol 0`与`AF_UNIX + SOCK_SEQPACKET + protocol 0`；message-style
-  success surface发布给IPv4 UDP与TCP，本页不外推通用BSD Socket framework。
-- closure evidence覆盖RV64/LA64 release与guest runtime、UDP/TCP C/libc和musl resolver、raw/seqpacket focused ABI、
+  success surface发布给IPv4 UDP与TCP，`sendmmsg`只逐条复用这些已发布family transaction；本页不外推通用BSD
+  Socket framework或`recvmmsg`。
+- 既有closure evidence覆盖RV64/LA64 release与guest runtime、UDP/TCP C/libc和musl resolver、raw/seqpacket focused ABI、
   glibc/musl curated Socket LTP、owner-local proof、UDP/Unix regression、TCP external/CAgent及RV64 `smp=4` focused runtime。
-  glibc resolver保持Not Supported / Not Cut Over；physical hardware、LA64 `smp>1`、其它SMP拓扑、
-  full socket/network LTP与final harness Not Run。
+  UDP extended-error增量覆盖RV64 dual-libc oracle、deterministic packet chain与glibc final-product resolver；该增量的
+  LA64、physical hardware、`smp>1`、long pressure、full socket/network LTP均Not Run。final-image Socket LTP因缺少
+  executable为0 attempted/6 skipped，初赛盘对应curated suite为6/6 PASS。

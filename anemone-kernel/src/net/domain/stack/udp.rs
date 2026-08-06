@@ -2,9 +2,9 @@ use anemone_net_api::{
     Ipv4EgressSelection,
     udp::{
         UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
-        UdpEndpointId, UdpEndpointInvalidation, UdpEndpointLimits, UdpLocalBinding,
-        UdpPeekedDatagram, UdpPeer, UdpQueryError, UdpReceiveError, UdpReceivedDatagram,
-        UdpRetireError, UdpSendError,
+        UdpEndpointId, UdpEndpointInvalidation, UdpEndpointLimits, UdpErrorCause, UdpErrorRecord,
+        UdpLocalBinding, UdpPeekOutcome, UdpPeer, UdpQueryError, UdpReceiveError,
+        UdpReceiveOutcome, UdpRetireError, UdpSendError,
     },
 };
 
@@ -102,6 +102,35 @@ impl DomainStack {
         self.stack.lock().udp_endpoint_facts(endpoint)
     }
 
+    pub(in crate::net) fn udp_receive_errors_enabled(
+        &self,
+        endpoint: UdpEndpointId,
+    ) -> Result<bool, UdpQueryError> {
+        self.stack.lock().udp_receive_errors_enabled(endpoint)
+    }
+
+    pub(in crate::net) fn set_udp_receive_errors(
+        &self,
+        endpoint: UdpEndpointId,
+        enabled: bool,
+    ) -> Result<(), UdpQueryError> {
+        self.protocol_transition(|stack| stack.set_udp_receive_errors(endpoint, enabled))
+    }
+
+    pub(in crate::net) fn take_udp_pending_error(
+        &self,
+        endpoint: UdpEndpointId,
+    ) -> Result<Option<UdpErrorCause>, UdpQueryError> {
+        self.protocol_transition(|stack| stack.take_udp_pending_error(endpoint))
+    }
+
+    pub(in crate::net) fn detach_udp_error(
+        &self,
+        endpoint: UdpEndpointId,
+    ) -> Result<Option<UdpErrorRecord>, UdpQueryError> {
+        self.protocol_transition(|stack| stack.detach_udp_error(endpoint))
+    }
+
     pub(in crate::net) fn send_udp_endpoint(
         &self,
         endpoint: UdpEndpointId,
@@ -119,15 +148,15 @@ impl DomainStack {
     pub(in crate::net) fn receive_udp_endpoint(
         &self,
         endpoint: UdpEndpointId,
-    ) -> Result<UdpReceivedDatagram, UdpReceiveError> {
+    ) -> Result<UdpReceiveOutcome, UdpReceiveError> {
         self.protocol_transition(|stack| stack.receive_udp_endpoint(endpoint))
     }
 
     pub(in crate::net) fn peek_udp_endpoint(
         &self,
         endpoint: UdpEndpointId,
-    ) -> Result<UdpPeekedDatagram, UdpReceiveError> {
-        self.stack.lock().peek_udp_endpoint(endpoint)
+    ) -> Result<UdpPeekOutcome, UdpReceiveError> {
+        self.protocol_transition(|stack| stack.peek_udp_endpoint(endpoint))
     }
 
     pub(in crate::net) fn retire_udp_endpoint(

@@ -24,6 +24,7 @@ pub mod linux {
     pub const IPPROTO_UDP: i32 = 17;
     pub const IP_TOS: i32 = 1;
     pub const IP_TTL: i32 = 2;
+    pub const IP_RECVERR: i32 = 11;
     pub const SOL_SOCKET: i32 = 1;
     pub const SOL_RAW: i32 = 255;
     pub const ICMP_FILTER: i32 = 1;
@@ -38,9 +39,12 @@ pub mod linux {
     pub const SHUT_WR: i32 = 1;
     pub const SHUT_RDWR: i32 = 2;
     pub const MSG_PEEK: i32 = 0x02;
+    pub const MSG_CTRUNC: i32 = 0x08;
     pub const MSG_TRUNC: i32 = 0x20;
     pub const MSG_DONTWAIT: i32 = 0x40;
+    pub const MSG_ERRQUEUE: i32 = 0x2000;
     pub const MSG_NOSIGNAL: i32 = 0x4000;
+    pub const SO_EE_ORIGIN_ICMP: u8 = 2;
 
     #[allow(non_camel_case_types)]
     pub type socklen_t = u32;
@@ -142,6 +146,66 @@ pub mod linux {
         pub __pad1: u32,
     }
 
+    /// 64-bit asm-generic Linux `struct mmsghdr` layout.
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
+    #[repr(C)]
+    pub struct MMsgHdr {
+        pub msg_hdr: MsgHdr,
+        pub msg_len: u32,
+        pub __pad: u32,
+    }
+
+    /// 64-bit asm-generic Linux `struct cmsghdr` layout.
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
+    #[repr(C)]
+    pub struct CMsgHdr {
+        pub cmsg_len: u64,
+        pub cmsg_level: i32,
+        pub cmsg_type: i32,
+    }
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
+    #[repr(C)]
+    pub struct SockExtendedErr {
+        pub ee_errno: u32,
+        pub ee_origin: u8,
+        pub ee_type: u8,
+        pub ee_code: u8,
+        pub ee_pad: u8,
+        pub ee_info: u32,
+        pub ee_data: u32,
+    }
+
     impl Default for SockAddrUn {
         fn default() -> Self {
             Self {
@@ -197,4 +261,19 @@ pub mod linux {
     const _: [(); 32] = [(); offset_of!(MsgHdr, msg_control)];
     const _: [(); 40] = [(); offset_of!(MsgHdr, msg_controllen)];
     const _: [(); 48] = [(); offset_of!(MsgHdr, msg_flags)];
+    const _: [(); 64] = [(); size_of::<MMsgHdr>()];
+    const _: [(); 8] = [(); align_of::<MMsgHdr>()];
+    const _: [(); 0] = [(); offset_of!(MMsgHdr, msg_hdr)];
+    const _: [(); 56] = [(); offset_of!(MMsgHdr, msg_len)];
+    const _: [(); 16] = [(); size_of::<CMsgHdr>()];
+    const _: [(); 8] = [(); align_of::<CMsgHdr>()];
+    const _: [(); 0] = [(); offset_of!(CMsgHdr, cmsg_len)];
+    const _: [(); 8] = [(); offset_of!(CMsgHdr, cmsg_level)];
+    const _: [(); 12] = [(); offset_of!(CMsgHdr, cmsg_type)];
+    const _: [(); 16] = [(); size_of::<SockExtendedErr>()];
+    const _: [(); 4] = [(); align_of::<SockExtendedErr>()];
+    const _: [(); 0] = [(); offset_of!(SockExtendedErr, ee_errno)];
+    const _: [(); 4] = [(); offset_of!(SockExtendedErr, ee_origin)];
+    const _: [(); 8] = [(); offset_of!(SockExtendedErr, ee_info)];
+    const _: [(); 12] = [(); offset_of!(SockExtendedErr, ee_data)];
 }

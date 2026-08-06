@@ -2,7 +2,10 @@
 
 mod source;
 
-use anemone_net_api::udp::{UdpBindError, UdpPeer, UdpQueryError, UdpReceiveError, UdpSendError};
+use anemone_net_api::udp::{
+    UdpBindError, UdpErrorCause, UdpPeekOutcome, UdpPeer, UdpQueryError, UdpReceiveError,
+    UdpReceiveOutcome, UdpSendError,
+};
 
 use crate::{
     kconfig_defs::NET_UDP_MAX_PAYLOAD_BYTES,
@@ -13,9 +16,10 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
-    SocketIoOps, SocketOps, SocketPreparation, SocketQueryError, SocketReceiveError,
-    SocketReceiveOutcome, SocketReceiveRequest, SocketReleaseReason, SocketSendError,
-    SocketSendRequest, SocketType,
+    SocketIoOps, SocketIpv4ExtendedError, SocketOps, SocketOptionError, SocketOptionMutation,
+    SocketOptionQuery, SocketOptionValue, SocketPendingError, SocketPreparation, SocketQueryError,
+    SocketReceiveError, SocketReceiveOutcome, SocketReceiveRequest, SocketReleaseReason,
+    SocketSendError, SocketSendRequest, SocketType,
 };
 use source::UdpSocketSource;
 
@@ -269,11 +273,120 @@ fn receive_udp_socket(
     let _operation = socket.operation.lock();
     let endpoint = socket.endpoint().ok_or(SocketReceiveError::Retired)?;
     if flags.peek {
-        let datagram = endpoint.peek().map_err(map_receive_error)?;
-        copy_udp_datagram(datagram.payload(), datagram.peer(), sink)
+        match endpoint.peek().map_err(map_receive_error)? {
+            UdpPeekOutcome::Datagram(datagram) => {
+                copy_udp_datagram(datagram.payload(), datagram.peer(), sink)
+            },
+            UdpPeekOutcome::PendingError(error) => {
+                Err(SocketReceiveError::Pending(map_pending_error(error)))
+            },
+        }
     } else {
-        let datagram = endpoint.receive().map_err(map_receive_error)?;
-        copy_udp_datagram(datagram.payload(), datagram.peer(), sink)
+        match endpoint.receive().map_err(map_receive_error)? {
+            UdpReceiveOutcome::Datagram(datagram) => {
+                copy_udp_datagram(datagram.payload(), datagram.peer(), sink)
+            },
+            UdpReceiveOutcome::PendingError(error) => {
+                Err(SocketReceiveError::Pending(map_pending_error(error)))
+            },
+        }
+    }
+}
+
+fn query_udp_option(
+    private: &AnyOpaque,
+    query: SocketOptionQuery,
+) -> Result<SocketOptionValue, SocketOptionError> {
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let endpoint = socket.endpoint().ok_or(SocketOptionError::Retired)?;
+    match query {
+        SocketOptionQuery::ReceiveErrors => endpoint
+            .receive_errors_enabled()
+            .map(SocketOptionValue::Boolean)
+            .map_err(map_option_query_error),
+        SocketOptionQuery::PendingError => endpoint
+            .take_pending_error()
+            .map(|error| SocketOptionValue::PendingError(error.map(map_pending_error)))
+            .map_err(map_option_query_error),
+        _ => Err(SocketOptionError::Unsupported),
+    }
+}
+
+fn mutate_udp_option(
+    private: &AnyOpaque,
+    mutation: SocketOptionMutation,
+) -> Result<(), SocketOptionError> {
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let endpoint = socket.endpoint().ok_or(SocketOptionError::Retired)?;
+    match mutation {
+        SocketOptionMutation::ReceiveErrors(enabled) => endpoint
+            .set_receive_errors(enabled)
+            .map_err(map_option_query_error),
+        _ => Err(SocketOptionError::Unsupported),
+    }
+}
+
+fn detach_udp_extended_error(
+    private: &AnyOpaque,
+) -> Result<SocketIpv4ExtendedError, SocketReceiveError> {
+    let socket = udp_private(private);
+    let _operation = socket.operation.lock();
+    let endpoint = socket.endpoint().ok_or(SocketReceiveError::Retired)?;
+    let record = endpoint
+        .detach_error()
+        .map_err(map_receive_query_error)?
+        .ok_or(SocketReceiveError::WouldBlock)?;
+    let (cause, icmp_type, icmp_code, info, destination, offender, quoted_payload) =
+        record.into_parts();
+    Ok(SocketIpv4ExtendedError {
+        cause: map_pending_error(cause),
+        icmp_type,
+        icmp_code,
+        info,
+        original_destination: SocketAddress::Ipv4 {
+            address: destination.address(),
+            port: destination.port(),
+        },
+        offender,
+        quoted_payload,
+    })
+}
+
+fn map_receive_query_error(error: UdpQueryError) -> SocketReceiveError {
+    match error {
+        UdpQueryError::UnknownEndpoint => SocketReceiveError::Retired,
+    }
+}
+
+fn map_option_query_error(error: UdpQueryError) -> SocketOptionError {
+    match error {
+        UdpQueryError::UnknownEndpoint => SocketOptionError::Retired,
+    }
+}
+
+const fn map_pending_error(error: UdpErrorCause) -> SocketPendingError {
+    match error {
+        UdpErrorCause::NetworkUnreachable
+        | UdpErrorCause::DestinationNetworkUnknown
+        | UdpErrorCause::NetworkProhibited
+        | UdpErrorCause::NetworkUnreachableForTypeOfService => {
+            SocketPendingError::NetworkUnreachable
+        },
+        UdpErrorCause::HostUnreachable
+        | UdpErrorCause::HostProhibited
+        | UdpErrorCause::HostUnreachableForTypeOfService
+        | UdpErrorCause::CommunicationProhibited
+        | UdpErrorCause::HostPrecedenceViolation
+        | UdpErrorCause::PrecedenceCutoff
+        | UdpErrorCause::TimeExceeded => SocketPendingError::HostUnreachable,
+        UdpErrorCause::ProtocolUnreachable => SocketPendingError::ProtocolOptionNotSupported,
+        UdpErrorCause::PortUnreachable => SocketPendingError::ConnectionRefused,
+        UdpErrorCause::MessageTooLong => SocketPendingError::MessageTooLong,
+        UdpErrorCause::SourceRouteFailed => SocketPendingError::OperationNotSupported,
+        UdpErrorCause::DestinationHostUnknown => SocketPendingError::HostDown,
+        UdpErrorCause::SourceHostIsolated => SocketPendingError::NoNetwork,
     }
 }
 
@@ -367,6 +480,9 @@ fn map_send_error(error: SendError) -> SocketSendError {
         SendError::Stack(UdpSendError::UnsupportedSource) => SocketSendError::AddressUnavailable,
         SendError::Stack(UdpSendError::InvalidDestination) => SocketSendError::InvalidDestination,
         SendError::Stack(UdpSendError::MessageTooLong { .. }) => SocketSendError::MessageTooLong,
+        SendError::Stack(UdpSendError::Pending(error)) => {
+            SocketSendError::Pending(map_pending_error(error))
+        },
         SendError::Stack(UdpSendError::WouldBlock) => SocketSendError::WouldBlock,
     }
 }
@@ -394,8 +510,9 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     local_address: Some(query_udp_socket),
     peer_address: Some(query_udp_peer),
     accepting: udp_is_accepting,
-    query_option: None,
-    mutate_option: None,
+    query_option: Some(query_udp_option),
+    mutate_option: Some(mutate_udp_option),
+    detach_ipv4_extended_error: Some(detach_udp_extended_error),
     poll: poll_udp_socket,
     final_release: final_release_udp_socket,
 };

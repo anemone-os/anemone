@@ -3,8 +3,8 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK,
-    MSG_TRUNC, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
+    AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT, MSG_ERRQUEUE,
+    MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
 };
 
 use crate::{
@@ -148,7 +148,7 @@ static UDP_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::CanonicalOrZero,
     address: SocketAddressAbi::Ipv4,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_ERRQUEUE,
     message_io: SocketMessageIo::Datagram,
     required_capability: None,
     no_signal_compatibility: Some(&UDP_NOSIGNAL_COMPATIBILITY),

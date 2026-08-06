@@ -1,11 +1,12 @@
 //! Aggregate UDP operations owned by the protocol Stack.
 
 use anemone_net_api::{
-    InterfaceId, Ipv4Address as ApiIpv4Address, Ipv4EgressSelection,
+    InterfaceId, Ipv4EgressSelection,
     udp::{
         UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
-        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeekedDatagram, UdpPeer,
-        UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpEndpointId, UdpEndpointLimits, UdpErrorCause, UdpErrorRecord, UdpLocalBinding,
+        UdpPeekOutcome, UdpPeer, UdpQueryError, UdpReceiveError, UdpReceiveOutcome, UdpRetireError,
+        UdpSendError,
     },
 };
 use smoltcp::wire::{EthernetFrame, IpAddress, IpEndpoint, Ipv4Address};
@@ -149,6 +150,32 @@ impl Stack {
             .ok_or(UdpQueryError::UnknownEndpoint)
     }
 
+    pub fn udp_receive_errors_enabled(&self, id: UdpEndpointId) -> Result<bool, UdpQueryError> {
+        self.protocols.udp.receive_errors_enabled(id)
+    }
+
+    pub fn set_udp_receive_errors(
+        &mut self,
+        id: UdpEndpointId,
+        enabled: bool,
+    ) -> Result<(), UdpQueryError> {
+        self.protocols.udp.set_receive_errors(id, enabled)
+    }
+
+    pub fn take_udp_pending_error(
+        &mut self,
+        id: UdpEndpointId,
+    ) -> Result<Option<UdpErrorCause>, UdpQueryError> {
+        self.protocols.udp.take_pending_error(id)
+    }
+
+    pub fn detach_udp_error(
+        &mut self,
+        id: UdpEndpointId,
+    ) -> Result<Option<UdpErrorRecord>, UdpQueryError> {
+        self.protocols.udp.detach_error(id)
+    }
+
     pub fn send_udp_endpoint(
         &mut self,
         endpoint: UdpEndpointId,
@@ -184,8 +211,8 @@ impl Stack {
     pub fn receive_udp_endpoint(
         &mut self,
         endpoint: UdpEndpointId,
-    ) -> Result<UdpReceivedDatagram, UdpReceiveError> {
-        let datagram = self.protocols.udp.receive(endpoint)?;
+    ) -> Result<UdpReceiveOutcome, UdpReceiveError> {
+        let outcome = self.protocols.udp.receive(endpoint)?;
         // Detach restores one aggregate RX credit. Refill it while the Stack
         // owner is still active: a full aggregate queue intentionally leaves
         // the next datagram in the engine without a durable pump edge.
@@ -199,17 +226,13 @@ impl Stack {
                 .udp
                 .drain_ingress(local.id, &mut local.sockets);
         }
-        let IpAddress::Ipv4(source) = datagram.source.addr;
-        Ok(UdpReceivedDatagram::from_owner_detach(
-            datagram.payload,
-            UdpPeer::new(ApiIpv4Address::new(source.octets()), datagram.source.port),
-        ))
+        Ok(outcome)
     }
 
     pub fn peek_udp_endpoint(
-        &self,
+        &mut self,
         endpoint: UdpEndpointId,
-    ) -> Result<UdpPeekedDatagram, UdpReceiveError> {
+    ) -> Result<UdpPeekOutcome, UdpReceiveError> {
         self.protocols.udp.peek(endpoint)
     }
 

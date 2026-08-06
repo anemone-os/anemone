@@ -175,10 +175,18 @@ fn cancel_and_wait_child(pid: u32, signal: SigNo) -> Result<(), Errno> {
             Ok(()) | Err(ESRCH) => {},
             Err(error) => return Err(error),
         }
-        nanosleep(TimeSpec {
+        let sleep = nanosleep(TimeSpec {
             tv_sec: 0,
             tv_nsec: 10_000_000,
-        })?;
+        });
+        // SIGCHLD can interrupt this polling delay exactly when the child has
+        // completed the expected EINTR path. Recheck wait4 instead of turning
+        // that successful completion into a harness failure.
+        if let Err(error) = sleep
+            && error != EINTR
+        {
+            return Err(error);
+        }
     }
     Err(ETIMEDOUT)
 }

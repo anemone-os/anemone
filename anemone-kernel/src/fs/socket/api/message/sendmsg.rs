@@ -1,6 +1,11 @@
 use alloc::vec::Vec;
+use core::mem::offset_of;
 
-use anemone_abi::syscall::SYS_SENDMSG;
+use anemone_abi::{
+    fs::linux::IOV_MAX,
+    net::linux::MMsgHdr,
+    syscall::{SYS_SENDMMSG, SYS_SENDMSG},
+};
 
 use crate::{
     fs::{
@@ -13,7 +18,8 @@ use crate::{
         },
     },
     prelude::*,
-    task::files::{Fd, FileStatusFlags},
+    syscall::user_access::{UserWritePtr, user_addr},
+    task::files::{Fd, FileDesc, FileStatusFlags},
 };
 
 use super::{message_iovecs, normalized_name_len, read_message_header};
@@ -118,10 +124,18 @@ pub(super) fn validate_send_control(length: u64) -> Result<(), SysError> {
     Err(SysError::NotSupported)
 }
 
-pub(super) fn send_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
-    let task = get_current_task();
-    let desc = task.get_fd(fd)?;
-    let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
+struct MessageSendResult {
+    sent: u64,
+    complete: bool,
+}
+
+fn send_message_on_socket(
+    task: &Arc<Task>,
+    desc: &FileDesc,
+    socket: &Socket,
+    message: u64,
+    flags: i32,
+) -> Result<MessageSendResult, SysError> {
     let message_io = socket_abi_profile(socket.socket_type()).message_io();
     if message_io == SocketMessageIo::Unsupported {
         return Err(SysError::NotSupported);
@@ -160,15 +174,19 @@ pub(super) fn send_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysE
     };
     if message_io == SocketMessageIo::ByteStream {
         let mut source = UserBufferSource::new(&uspace, &payload.segments);
-        return send_stream_message(
-            &task,
+        let sent = send_stream_message(
+            task,
             desc.vfs_file(),
             socket,
             &mut source,
             stream_destination(has_destination),
             flags,
             desc.file_flags().contains(FileStatusFlags::NONBLOCK),
-        );
+        )?;
+        return Ok(MessageSendResult {
+            sent,
+            complete: source.remaining() == 0,
+        });
     }
     let message_flags = validate_send_message_flags(socket.socket_type(), flags)?;
     let nonblocking =
@@ -176,7 +194,7 @@ pub(super) fn send_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysE
     let mut operation = SocketDatagramSendOperation::new();
     retry_socket_send(
         "sys_sendmsg",
-        &task,
+        task,
         desc.vfs_file(),
         None,
         nonblocking,
@@ -190,10 +208,76 @@ pub(super) fn send_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysE
         },
         map_send_error,
     )
-    .map(|sent| sent as u64)
+    .map(|sent| MessageSendResult {
+        sent: sent as u64,
+        complete: true,
+    })
+}
+
+pub(super) fn send_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
+    let task = get_current_task();
+    let desc = task.get_fd(fd)?;
+    let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
+    send_message_on_socket(&task, &desc, socket, message, flags).map(|result| result.sent)
+}
+
+fn send_messages(fd: Fd, messages: u64, vlen: u32, flags: i32) -> Result<u64, SysError> {
+    let task = get_current_task();
+    // Keep one opened-description identity for the whole batch, as Linux does
+    // with one sockfd lookup before its sequential single-message loop.
+    let desc = task.get_fd(fd)?;
+    let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
+    let count = (vlen as usize).min(IOV_MAX);
+    let stride = size_of::<MMsgHdr>() as u64;
+    let uspace = task.clone_uspace_handle();
+    let mut completed = 0u64;
+
+    for index in 0..count {
+        let offset = (index as u64)
+            .checked_mul(stride)
+            .ok_or(SysError::BadAddress);
+        let entry =
+            offset.and_then(|offset| messages.checked_add(offset).ok_or(SysError::BadAddress));
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if completed == 0 => return Err(error),
+            Err(_) => return Ok(completed),
+        };
+        let result = match send_message_on_socket(&task, &desc, socket, entry, flags) {
+            Ok(result) => result,
+            Err(error) if completed == 0 => return Err(error),
+            Err(_) => return Ok(completed),
+        };
+        let message_len = match u32::try_from(result.sent) {
+            Ok(message_len) => message_len,
+            Err(_) if completed == 0 => return Err(SysError::MessageTooLong),
+            Err(_) => return Ok(completed),
+        };
+        let length_address = entry
+            .checked_add(offset_of!(MMsgHdr, msg_len) as u64)
+            .ok_or(SysError::BadAddress);
+        let write_result = length_address.and_then(|address| {
+            UserWritePtr::<u32>::try_new(user_addr(address)?, &mut uspace.lock())?
+                .write(message_len)
+        });
+        match write_result {
+            Ok(()) => completed += 1,
+            Err(error) if completed == 0 => return Err(error),
+            Err(_) => return Ok(completed),
+        }
+        if !result.complete {
+            break;
+        }
+    }
+    Ok(completed)
 }
 
 #[syscall(SYS_SENDMSG)]
 fn sys_sendmsg(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     send_message(fd, message, flags)
+}
+
+#[syscall(SYS_SENDMMSG)]
+fn sys_sendmmsg(fd: Fd, messages: u64, vlen: u32, flags: i32) -> Result<u64, SysError> {
+    send_messages(fd, messages, vlen, flags)
 }

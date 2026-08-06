@@ -122,6 +122,7 @@ pub struct Parameters {
     pub net_udp_endpoint_capacity: Option<usize>,
     pub net_udp_tx_datagram_capacity: Option<usize>,
     pub net_udp_rx_datagram_capacity: Option<usize>,
+    pub net_udp_error_record_capacity: Option<usize>,
     pub net_udp_max_payload_bytes: Option<usize>,
     pub net_udp_ephemeral_port_first: Option<u16>,
     pub net_udp_ephemeral_port_last: Option<u16>,
@@ -237,6 +238,7 @@ impl Parameters {
         materialize!(net_udp_endpoint_capacity);
         materialize!(net_udp_tx_datagram_capacity);
         materialize!(net_udp_rx_datagram_capacity);
+        materialize!(net_udp_error_record_capacity);
         materialize!(net_udp_max_payload_bytes);
         materialize!(net_udp_ephemeral_port_first);
         materialize!(net_udp_ephemeral_port_last);
@@ -458,6 +460,8 @@ pub const NET_UDP_ENDPOINT_CAPACITY: usize = {};
 pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};
 /// Per-endpoint UDP receive datagram capacity.
 pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = {};
+/// Per-endpoint IPv4 UDP extended-error record capacity.
+pub const NET_UDP_ERROR_RECORD_CAPACITY: usize = {};
 /// Maximum UDP payload bytes reserved by one protocol engine datagram.
 pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
 /// First port in the deterministic UDP ephemeral allocation range.
@@ -572,6 +576,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_udp_endpoint_capacity),
             resolved!(net_udp_tx_datagram_capacity),
             resolved!(net_udp_rx_datagram_capacity),
+            resolved!(net_udp_error_record_capacity),
             resolved!(net_udp_max_payload_bytes),
             resolved!(net_udp_ephemeral_port_first),
             resolved!(net_udp_ephemeral_port_last),

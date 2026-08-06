@@ -114,6 +114,7 @@ pub(super) enum SocketSendError {
     ConnectionRefused,
     ConnectionReset,
     ConnectionTimedOut,
+    Pending(SocketPendingError),
     PeerClosed,
     WouldBlock,
     Copy(SysError),
@@ -128,6 +129,7 @@ pub(super) enum SocketReceiveError {
     ConnectionRefused,
     ConnectionReset,
     ConnectionTimedOut,
+    Pending(SocketPendingError),
     WouldBlock,
     Copy(SysError),
 }
@@ -269,6 +271,7 @@ impl SocketReceiveOutcome {
 pub(super) enum SocketOptionQuery {
     ReuseAddress,
     PendingError,
+    ReceiveErrors,
     TcpNoDelay,
     Ipv4TimeToLive,
     Ipv4TypeOfService,
@@ -287,6 +290,7 @@ pub(super) enum SocketOptionValue {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionMutation {
     ReuseAddress(bool),
+    ReceiveErrors(bool),
     TcpNoDelay(bool),
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
@@ -305,6 +309,43 @@ pub(super) enum SocketPendingError {
     ConnectionRefused,
     ConnectionReset,
     TimedOut,
+    NetworkUnreachable,
+    HostUnreachable,
+    ProtocolOptionNotSupported,
+    MessageTooLong,
+    OperationNotSupported,
+    HostDown,
+    NoNetwork,
+}
+
+pub(super) const fn pending_error_to_sys_error(error: SocketPendingError) -> SysError {
+    match error {
+        SocketPendingError::ConnectionRefused => SysError::ConnectionRefused,
+        SocketPendingError::ConnectionReset => SysError::ConnectionReset,
+        SocketPendingError::TimedOut => SysError::Timeout,
+        SocketPendingError::NetworkUnreachable => SysError::NetworkUnreachable,
+        SocketPendingError::HostUnreachable => SysError::HostUnreachable,
+        SocketPendingError::ProtocolOptionNotSupported => SysError::ProtocolOptionNotSupported,
+        SocketPendingError::MessageTooLong => SysError::MessageTooLong,
+        SocketPendingError::OperationNotSupported => SysError::NotSupported,
+        SocketPendingError::HostDown => SysError::HostDown,
+        SocketPendingError::NoNetwork => SysError::NoNetwork,
+    }
+}
+
+/// One detached IPv4 ICMP extended error in family-neutral Socket values.
+///
+/// The UDP Endpoint remains the sole queue owner. Once returned here the
+/// current syscall owns the record, so a later user-copy fault consumes it.
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct SocketIpv4ExtendedError {
+    pub(super) cause: SocketPendingError,
+    pub(super) icmp_type: u8,
+    pub(super) icmp_code: u8,
+    pub(super) info: u32,
+    pub(super) original_destination: SocketAddress,
+    pub(super) offender: Ipv4Address,
+    pub(super) quoted_payload: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -453,6 +494,8 @@ pub(super) struct SocketOps {
         Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
     pub(super) mutate_option:
         Option<fn(&AnyOpaque, SocketOptionMutation) -> Result<(), SocketOptionError>>,
+    pub(super) detach_ipv4_extended_error:
+        Option<fn(&AnyOpaque) -> Result<SocketIpv4ExtendedError, SocketReceiveError>>,
     pub(super) poll:
         for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
     pub(super) final_release: fn(&AnyOpaque, SocketReleaseReason),
@@ -571,6 +614,14 @@ impl Socket {
         self.ops
             .mutate_option
             .ok_or(SocketOptionError::Unsupported)?(&self.private, mutation)
+    }
+
+    pub(super) fn detach_ipv4_extended_error(
+        &self,
+    ) -> Result<SocketIpv4ExtendedError, SocketReceiveError> {
+        self.ops
+            .detach_ipv4_extended_error
+            .ok_or(SocketReceiveError::Unsupported)?(&self.private)
     }
 
     fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {

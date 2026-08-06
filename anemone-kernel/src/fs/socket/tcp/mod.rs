@@ -288,6 +288,7 @@ pub(super) static TCP_SOCKET_OPS: SocketOps = SocketOps {
     accepting: tcp_is_accepting,
     query_option: Some(query_tcp_option),
     mutate_option: Some(mutate_tcp_option),
+    detach_ipv4_extended_error: None,
     poll: poll_tcp_socket,
     final_release: final_release_tcp_socket,
 };

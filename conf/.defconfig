@@ -90,6 +90,7 @@ net_local_link_mtu_bytes = 1500 # Maximum IP-medium packet size owned by the loc
 net_udp_endpoint_capacity = 64 # Maximum live UDP endpoints in the initial domain.
 net_udp_tx_datagram_capacity = 8 # Per-endpoint transmit datagram slots.
 net_udp_rx_datagram_capacity = 64 # Per-endpoint receive datagram slots.
+net_udp_error_record_capacity = 16 # Per-endpoint IPv4 UDP extended-error records.
 net_udp_max_payload_bytes = 1472 # Maximum UDP payload storage per datagram; protocol ceiling is 65507.
 net_udp_ephemeral_port_first = 32768 # First deterministic ephemeral UDP port.
 net_udp_ephemeral_port_last = 60999 # Last deterministic ephemeral UDP port.

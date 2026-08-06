@@ -37,6 +37,17 @@ const TCP_R0: &[OracleBinary] = &[
     },
 ];
 
+const UDP_ERRQUEUE: &[OracleBinary] = &[
+    OracleBinary {
+        family: "glibc",
+        path: "/bin/udp-errqueue-glibc",
+    },
+    OracleBinary {
+        family: "musl",
+        path: "/bin/udp-errqueue-musl",
+    },
+];
+
 const TCP_ORACLE_RECLAIM_GRACE: TimeSpec = TimeSpec {
     tv_sec: 11,
     tv_nsec: 0,
@@ -106,6 +117,7 @@ fn run_tcp_local_pair() {
 
 pub(crate) fn run_local() {
     run_local_pair("socket-r1", SOCKET_R1);
+    run_local_pair("udp-errqueue", UDP_ERRQUEUE);
     run_tcp_local_pair();
 }
 

@@ -2,8 +2,8 @@ use core::mem::size_of;
 
 use anemone_abi::{
     net::linux::{
-        ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR,
-        SO_PROTOCOL, SO_REUSEADDR, SO_TYPE, SOL_RAW, SOL_SOCKET, TCP_NODELAY,
+        ICMP_FILTER, IP_RECVERR, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_ACCEPTCONN, SO_DOMAIN,
+        SO_ERROR, SO_PROTOCOL, SO_REUSEADDR, SO_TYPE, SOL_RAW, SOL_SOCKET, TCP_NODELAY,
     },
     syscall::SYS_GETSOCKOPT,
 };
@@ -13,7 +13,7 @@ use super::profile::socket_abi_profile;
 use crate::{
     fs::socket::{
         SocketOptionError, SocketOptionQuery, SocketOptionValue, SocketPendingError,
-        SocketQueryError, front::Socket, socket_from_file,
+        SocketQueryError, front::Socket, pending_error_to_sys_error, socket_from_file,
     },
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
@@ -113,6 +113,13 @@ fn query_option(socket: &Socket, level: i32, option: i32) -> Result<GetOption, S
                 SocketOptionValue::Ipv4TimeToLive(value) => Ok(GetOption::Ipv4Scalar(value as i32)),
                 _ => Err(SysError::ProtocolOptionNotSupported),
             }),
+        (IPPROTO_IP, IP_RECVERR) => socket
+            .query_option(SocketOptionQuery::ReceiveErrors)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::Boolean(value) => Ok(GetOption::Ipv4Scalar(i32::from(value))),
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
         (IPPROTO_IP, IP_TOS) => socket
             .query_option(SocketOptionQuery::Ipv4TypeOfService)
             .map_err(map_option_error)
@@ -136,11 +143,7 @@ fn query_option(socket: &Socket, level: i32, option: i32) -> Result<GetOption, S
 }
 
 const fn pending_error_errno(error: SocketPendingError) -> i32 {
-    match error {
-        SocketPendingError::ConnectionRefused => SysError::ConnectionRefused.as_errno(),
-        SocketPendingError::ConnectionReset => SysError::ConnectionReset.as_errno(),
-        SocketPendingError::TimedOut => SysError::Timeout.as_errno(),
-    }
+    pending_error_to_sys_error(error).as_errno()
 }
 
 trait GetOptionOutput {
@@ -257,8 +260,12 @@ mod kunits {
         assert_eq!(query_value(udp, SO_PROTOCOL), Ok(IPPROTO_UDP));
         assert_eq!(query_value(udp, SO_ACCEPTCONN), Ok(0));
         assert_eq!(
-            query_value(udp, anemone_abi::net::linux::SO_ERROR),
-            Err(SysError::ProtocolOptionNotSupported)
+            udp.query_option(SocketOptionQuery::PendingError),
+            Ok(SocketOptionValue::PendingError(None))
+        );
+        assert_eq!(
+            udp.query_option(SocketOptionQuery::ReceiveErrors),
+            Ok(SocketOptionValue::Boolean(false))
         );
         drop(creation);
 

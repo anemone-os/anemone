@@ -86,6 +86,12 @@ fn project_facts(facts: UdpEndpointFacts, interests: PollEvent) -> PollEvent {
         return PollEvent::empty();
     }
     let mut events = PollEvent::empty();
+    // ERROR is a mandatory Linux poll result. It projects the current
+    // Endpoint-owned pending/FIFO fact even when the caller did not request
+    // it; invalidation remains only a hint to rerun this snapshot.
+    if facts.has_error() {
+        events |= PollEvent::ERROR;
+    }
     if interests.contains(PollEvent::READABLE) && facts.is_readable() {
         events |= PollEvent::READABLE;
     }
@@ -147,5 +153,13 @@ mod kunits {
         source
             .retire()
             .expect("KUnit UDP source must retain its Endpoint");
+    }
+
+    #[kunit]
+    fn error_projection_is_mandatory_and_clears_with_owner_fact() {
+        let error = UdpEndpointFacts::from_owner_snapshot(false, true, true);
+        assert_eq!(project_facts(error, PollEvent::empty()), PollEvent::ERROR);
+        let clear = UdpEndpointFacts::from_owner_snapshot(false, true, false);
+        assert_eq!(project_facts(clear, PollEvent::empty()), PollEvent::empty());
     }
 }

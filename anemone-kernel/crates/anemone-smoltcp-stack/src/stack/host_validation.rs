@@ -5,7 +5,8 @@ use anemone_net_api::{
     Ipv4EgressSelection,
     udp::{
         UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
-        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeer, UdpQueryError, UdpSendError,
+        UdpEndpointId, UdpEndpointLimits, UdpErrorCause, UdpErrorRecord, UdpLocalBinding,
+        UdpPeekOutcome, UdpPeer, UdpQueryError, UdpReceiveOutcome, UdpSendError,
     },
 };
 use smoltcp::{socket::raw, wire::IpVersion};
@@ -41,6 +42,7 @@ pub enum HostSendError {
     UnsupportedSource,
     InvalidDestination,
     Oversize { maximum: usize },
+    Pending(UdpErrorCause),
     TxFull,
 }
 
@@ -163,6 +165,7 @@ impl Stack {
             .create_udp_endpoint(UdpEndpointLimits::new(
                 1,
                 receive_packet_capacity,
+                receive_packet_capacity,
                 engine_payload_capacity,
             ))
             .map(HostEndpointId)
@@ -245,10 +248,12 @@ impl Stack {
     }
 
     pub fn peek_udp_for_host_validation(
-        &self,
+        &mut self,
         endpoint: HostEndpointId,
     ) -> Option<HostReceivedDatagram> {
-        let datagram = self.peek_udp_endpoint(endpoint.0).ok()?;
+        let UdpPeekOutcome::Datagram(datagram) = self.peek_udp_endpoint(endpoint.0).ok()? else {
+            return None;
+        };
         Some(HostReceivedDatagram {
             payload: datagram.payload().to_vec(),
             source_address: datagram.peer().address().octets(),
@@ -304,7 +309,10 @@ impl Stack {
         &mut self,
         endpoint: HostEndpointId,
     ) -> Option<HostReceivedDatagram> {
-        let datagram = self.receive_udp_endpoint(endpoint.0).ok()?;
+        let UdpReceiveOutcome::Datagram(datagram) = self.receive_udp_endpoint(endpoint.0).ok()?
+        else {
+            return None;
+        };
         Some(HostReceivedDatagram {
             payload: datagram.payload().to_vec(),
             source_address: datagram.peer().address().octets(),
@@ -336,6 +344,35 @@ impl Stack {
         endpoint: HostEndpointId,
     ) -> Result<UdpEndpointFacts, UdpQueryError> {
         self.udp_endpoint_facts(endpoint.0)
+    }
+
+    pub fn set_udp_receive_errors_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+        enabled: bool,
+    ) -> Result<(), UdpQueryError> {
+        self.set_udp_receive_errors(endpoint.0, enabled)
+    }
+
+    pub fn udp_receive_errors_enabled_for_host_validation(
+        &self,
+        endpoint: HostEndpointId,
+    ) -> Result<bool, UdpQueryError> {
+        self.udp_receive_errors_enabled(endpoint.0)
+    }
+
+    pub fn take_udp_pending_error_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+    ) -> Result<Option<UdpErrorCause>, UdpQueryError> {
+        self.take_udp_pending_error(endpoint.0)
+    }
+
+    pub fn detach_udp_error_for_host_validation(
+        &mut self,
+        endpoint: HostEndpointId,
+    ) -> Result<Option<UdpErrorRecord>, UdpQueryError> {
+        self.detach_udp_error(endpoint.0)
     }
 
     pub fn take_udp_invalidations_for_host_validation(&mut self) -> Vec<HostEndpointId> {
@@ -383,6 +420,7 @@ impl From<UdpSendError> for HostSendError {
             UdpSendError::UnsupportedSource => Self::UnsupportedSource,
             UdpSendError::InvalidDestination => Self::InvalidDestination,
             UdpSendError::MessageTooLong { maximum } => Self::Oversize { maximum },
+            UdpSendError::Pending(error) => Self::Pending(error),
             UdpSendError::WouldBlock => Self::TxFull,
         }
     }

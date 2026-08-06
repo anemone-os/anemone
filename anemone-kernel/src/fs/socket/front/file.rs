@@ -14,6 +14,7 @@ use super::{
     SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
     SocketWriteSource,
     operation::{retry_socket_receive, retry_socket_send},
+    pending_error_to_sys_error,
 };
 
 pub(super) fn prepare_socket_file(
@@ -259,6 +260,7 @@ fn map_file_receive_error(error: SocketReceiveError) -> SysError {
         SocketReceiveError::ConnectionRefused => SysError::ConnectionRefused,
         SocketReceiveError::ConnectionReset => SysError::ConnectionReset,
         SocketReceiveError::ConnectionTimedOut => SysError::Timeout,
+        SocketReceiveError::Pending(error) => pending_error_to_sys_error(error),
         SocketReceiveError::Copy(error) => error,
     }
 }
@@ -351,6 +353,7 @@ fn map_file_send_error(error: SocketSendError) -> SysError {
         SocketSendError::ConnectionRefused => SysError::ConnectionRefused,
         SocketSendError::ConnectionReset => SysError::ConnectionReset,
         SocketSendError::ConnectionTimedOut => SysError::Timeout,
+        SocketSendError::Pending(error) => pending_error_to_sys_error(error),
         SocketSendError::Copy(error) => error,
     }
 }

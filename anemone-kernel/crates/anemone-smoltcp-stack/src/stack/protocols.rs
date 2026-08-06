@@ -121,6 +121,7 @@ impl Protocols {
 
     pub(crate) fn observe_admitted_ipv4(&mut self, packet: AdmittedIpv4Packet<'_>) {
         self.icmp_raw.fanout_admitted(packet);
+        self.udp.observe_icmp_error(packet);
     }
 
     pub(crate) fn drain_engine_ingress(

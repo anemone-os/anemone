@@ -4,15 +4,15 @@ use alloc::{vec, vec::Vec};
 use core::mem::size_of;
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, AF_UNSPEC, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SockAddrIn,
-    SockAddrUn, socklen_t,
+    AF_INET, AF_UNIX, AF_UNSPEC, MSG_DONTWAIT, MSG_ERRQUEUE, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC,
+    SockAddrIn, SockAddrUn, socklen_t,
 };
 use anemone_net_api::Ipv4Address;
 
 use crate::{
     fs::socket::{
         SocketAddress, SocketBindError, SocketQueryError, SocketReceiveError, SocketSendError,
-        SocketType,
+        SocketType, pending_error_to_sys_error,
     },
     prelude::*,
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
@@ -281,6 +281,7 @@ pub(super) struct ReceiveMessageFlags {
     pub(super) nonblocking: bool,
     pub(super) peek: bool,
     pub(super) truncate_result: bool,
+    pub(super) error_queue: bool,
 }
 
 pub(super) fn validate_receive_message_flags(
@@ -296,6 +297,7 @@ pub(super) fn validate_receive_message_flags(
         nonblocking: flags & MSG_DONTWAIT != 0,
         peek: flags & MSG_PEEK != 0,
         truncate_result: flags & MSG_TRUNC != 0,
+        error_queue: flags & MSG_ERRQUEUE != 0,
     })
 }
 
@@ -337,6 +339,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::ConnectionRefused => SysError::ConnectionRefused,
         SocketSendError::ConnectionReset => SysError::ConnectionReset,
         SocketSendError::ConnectionTimedOut => SysError::Timeout,
+        SocketSendError::Pending(error) => pending_error_to_sys_error(error),
         SocketSendError::PeerClosed => SysError::BrokenPipe,
         SocketSendError::Copy(error) => error,
     }
@@ -351,6 +354,7 @@ pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
         SocketReceiveError::ConnectionRefused => SysError::ConnectionRefused,
         SocketReceiveError::ConnectionReset => SysError::ConnectionReset,
         SocketReceiveError::ConnectionTimedOut => SysError::Timeout,
+        SocketReceiveError::Pending(error) => pending_error_to_sys_error(error),
         SocketReceiveError::WouldBlock => SysError::Again,
         SocketReceiveError::Copy(error) => error,
     }

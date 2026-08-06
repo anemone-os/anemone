@@ -5,8 +5,9 @@
 **Owner：** shared protocol vocabulary、kernel UDP Socket/source、initial-domain control plane、domain Stack/Endpoint
 分别拥有各自state；本页只拥有它们之间的协议
 **参与领域：** network control plane / protocol Stack / VFS opened description / socket syscall / iomux / epoll
-**覆盖范围：** UDP Socket/Endpoint association与retire，以及bind/connect/send/receive transaction
-**不覆盖：** IPv6、`SO_REUSE*`、bound-device、async ICMP error/`SO_ERROR`、IPv4 fragment
+**覆盖范围：** UDP Socket/Endpoint association与retire，bind/connect/send/receive transaction，以及IPv4 ICMP
+extended-error admission与consumption
+**不覆盖：** IPv6/ICMPv6、`SO_REUSE*`、bound-device、local-origin error、PMTU cache、IPv4 fragment
 reassembly、runtime network reconfiguration/detach、TCP或raw socket
 **实现位置：** `anemone-kernel/crates/anemone-net-api/src/udp.rs`、
 `anemone-kernel/crates/anemone-smoltcp-stack/src/{stack/udp.rs,udp/}`、
@@ -16,7 +17,7 @@ reassembly、runtime network reconfiguration/detach、TCP或raw socket
 `NET-STACK-PUMP-001`、`NET-CONTROL-PLANE-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、
 `EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-04
+**最后核验：** 2026-08-06
 
 ## 状态与能力所有权
 
@@ -26,6 +27,7 @@ reassembly、runtime network reconfiguration/detach、TCP或raw socket
 | Linux UAPI、opened-description association、blocking choice与readiness/error投影 | kernel `UdpSocketFile` / `UdpSocketSource` | `File::prv`中的Socket private state与opaque `UdpEndpointPort` | syscall normalization、wait registration与Linux结果映射 |
 | local address、route与source/interface selection | initial-domain `Ipv4ControlPlane` | operation-local immutable selection | 在Endpoint connect/send admission前唯一决定路径，不拥有binding或peer |
 | Endpoint identity/lifecycle、binding/peer association、queue/capacity/private engine与datagram storage | domain Stack的UDP Endpoint owner | kernel只持opaque port并取得point-in-time facts/outcome | bind/connect、ingress filter、send/receive commit、retire与stale isolation |
+| `IP_RECVERR` enable truth、extended-error FIFO与ordinary pending error | domain Stack的UDP Endpoint owner | Socket只取得typed option/outcome、move-only detached record与fresh error fact | ICMP error admission、`MSG_ERRQUEUE`/ordinary error consumption与ERROR projection |
 | Endpoint fact invalidation | domain Stack产生的owner transition | Socket source持weak observer route；iomux/epoll持non-owning poll route | 只提示重算当前predicate，不携带readiness/error truth |
 | opened-description terminal publication | `ProcFile` lifecycle owner | UDP final-release hook取得窄ctx | 最后published fd slot移除时发起一次Socket retire |
 | 一轮wait、watch与harvest | iomux / epoll各自owner | Socket source提供snapshot/register/final-recheck | cancellation、timeout、signal与ready交付 |
@@ -57,6 +59,11 @@ peer replace；任一失败保持原binding/peer。`AF_UNSPEC` disconnect只清�
 queue admission前按current peer过滤新datagram；wrong-peer流量不占queue/capacity，已经queued的datagram不因后续
 connect/reconnect/disconnect回溯清理或重分类。
 
+Endpoint还唯一拥有`IP_RECVERR` enable truth、bounded extended-error FIFO与一个ordinary pending-error slot。matching
+ICMP error总是更新pending slot；FIFO capacity或record allocation不足只丢弃新record并保持已有FIFO顺序。disable原子
+停止后续record admission并清空FIFO，但不撤回已经发布的pending error；retire清除option、FIFO与pending slot。
+point-in-time facts只报告当前ERROR predicate，invalidation只提示重读，Socket/front不得缓存并列error truth。
+
 **失败、取消与shutdown：** final-release handoff或creation rollback不以`Drop`、raw fd number、临时`Arc` borrow或
 memory lifetime代替semantic close。wait cancellation只retire当前wait registration，不延长Socket/Endpoint lifetime。
 orderly network shutdown先撤销新protocol admission；boot-persistent Stack/provider retention仍由Network/System Power
@@ -66,14 +73,15 @@ contracts拥有，本规则不宣称runtime detach或完整reclamation。
 private queue truth；Endpoint持task/waiter；old cleanup命中新generation/port owner；`Drop`成为semantic close。
 
 **验证 / Enforcement：** creation rollback、connect/reconnect/disconnect、peer-filter与queued non-retroactivity、
-dup/fork、one-alias/final close、CLOEXEC、retire publication withdrawal、late duplicate hint、port reuse isolation与
-blocking wait cancellation KUnit/host/real-consumer matrix。
+dup/fork、one-alias/final close、CLOEXEC、retire publication withdrawal、late duplicate hint、port reuse isolation、
+error FIFO/pending/disable cleanup与blocking wait cancellation KUnit/host/real-consumer matrix。
 
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/invariants.md#net-socket-endpoint-001--socket与endpoint保持owner-fence和单向association)。
 
 **当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
 `NET-UDP-FINAL-CUTOVER`，并由[UDP Socket Extension RFC R1](../../rfcs/udp-socket-extension/index.md)的
-`UDP-EXT-R1-CUTOVER` Refine。
+`UDP-EXT-R1-CUTOVER`及[IPv4 UDP ICMP extended error小迭代](../../devlog/changes/2026-08-06-ipv4-udp-icmp-extended-error.md)
+Refine。
 
 ## NET-UDP-TRANSACTION-001 — Bind、connect、send与receive各自只有一个commit boundary
 
@@ -107,6 +115,17 @@ detach/peek outcome：adapter按payload、peer name、`msg_flags`、`msg_control
 `MSG_TRUNC`，input `MSG_TRUNC`决定返回完整packet length还是copied length；没有ancillary producer时control length输出0。
 detach后的后续output fault不requeue，peek路径的任一fault不改变queue。
 
+normal admitted IPv4 ICMP Destination Unreachable或Time Exceeded由protocol composition验证outer packet和quoted
+IPv4/UDP header，再按quoted local/remote tuple匹配current Endpoint binding/peer。disabled、malformed、fragmented、
+non-UDP、quote不足或unmatched packet不改变Endpoint；raw ICMP fanout与UDP error observation读取同一admitted view且
+互不消费。标准quote不提供historical send generation，归属只承诺current tuple与opaque Endpoint identity。
+
+matching error在同一Endpoint owner window更新ordinary pending slot，并在capacity/allocation允许时把record加入FIFO。
+ordinary send在新datagram commit前消费pending error；ordinary receive先交付已经queued的数据，数据为空时再消费；
+`SO_ERROR`与两者竞争同一个pending slot。`MSG_ERRQUEUE`只detach FIFO head，不消费pending slot或data queue；empty FIFO
+立即返回not-ready且不进入blocking wait。detach后record归当前kernel projection transaction唯一拥有，copy fault不
+requeue、不重排。FIFO或pending任一非空都使ERROR predicate成立，消费其中一路后必须按另一owner fact重新计算。
+
 **资源、失败与cleanup：** datagram在kernel transaction、Endpoint queue、protocol engine、local link/provider和
 ingress之间每次只有一个访问owner。handoff前失败由当前owner rollback/retain，handoff后前owner不得再次访问。
 retire释放binding与bounded storage时必须按Endpoint identity隔离；normal capacity/backpressure是可恢复结果，不得
@@ -118,7 +137,8 @@ local copy；fragment进入UDP demux；旧retire释放新port owner。
 
 **验证 / Enforcement：** full bind-conflict/port0/implicit/demux/reuse、connect/reconnect/disconnect、explicit/default
 destination、selection/admission/capacity与provider recovery host tests，scalar/vector/message short/zero/peek/truncate/
-fault/concurrent receive、fragment rejection KUnit/real-consumer tests，以及RV64/LA64 focused UDP runtime。Stage 5
+fault/concurrent receive、ICMP parse/lookup/FIFO/pending/disable/retire与fragment rejection KUnit/real-consumer tests，以及
+RV64/LA64 focused UDP runtime。Stage 5
 transaction保留loopback、self-external与remote-external双向cutover evidence；通用
 `run-user-test`不再维护专用host peer，后续external-path持续回归由进入canonical验证的真实UDP consumer承接；
 validation asset维护见[2026-07-31清理记录](../../devlog/changes/2026-07-31-net-udp-external-peer-retirement.md)。
@@ -127,18 +147,20 @@ validation asset维护见[2026-07-31清理记录](../../devlog/changes/2026-07-3
 
 **当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
 `NET-UDP-FINAL-CUTOVER`，并由[UDP Socket Extension RFC R1](../../rfcs/udp-socket-extension/index.md)的
-`UDP-EXT-R1-CUTOVER` Refine。
+`UDP-EXT-R1-CUTOVER`及[IPv4 UDP ICMP extended error小迭代](../../devlog/changes/2026-08-06-ipv4-udp-icmp-extended-error.md)
+Refine。
 
 ## 当前接受边界
 
 - 当前能力是IPv4 UDP：`socket(AF_INET, SOCK_DGRAM, 0或IPPROTO_UDP)`、bind/local query、connect/reconnect/
-  disconnect/peer query、显式或默认destination、scalar/file/vector/single-message I/O、R1 flag以及ordinary
-  poll/select/epoll；批量message、ancillary producer、error queue与其它能力不从本页外推。
-- cutover evidence覆盖RV64 virtio-mmio与LA64 virtio-pci的single-NIC、`smp=1` loopback/self-external/
+  disconnect/peer query、显式或默认destination、scalar/file/vector/single-message I/O、逐条`sendmmsg`、R1 flag、
+  ordinary poll/select/epoll，以及opt-in ICMPv4 Destination Unreachable/Time Exceeded error channel。`recvmmsg`、
+  IPv6/ICMPv6、local-origin error、PMTU cache、其它ancillary producer与generic error queue不从本页外推。
+- 原UDP cutover evidence覆盖RV64 virtio-mmio与LA64 virtio-pci的single-NIC、`smp=1` loopback/self-external/
   remote-external，以及两架构guest-local C/libc与musl resolver consumer；临时focused host orchestration已删除。
-  physical hardware、`smp>1`、
-  任意其它NIC或deployment均Not Run。
-- full network LTP与final harness Not Run；glibc resolver因`IP_RECVERR`依赖保持Not Supported / Not Cut Over。
-  当前Linux ABI证据是RFC列出的focused real-consumer matrix和curated Socket LTP，不宣称完整Linux socket兼容。
+  extended-error cutover另覆盖owner-local host/KUnit、RV64 dual-libc deterministic chain、初赛盘curated Socket LTP及
+  决赛产品resolver恢复；该增量的LA64、physical hardware、`smp>1`、任意其它NIC或deployment均Not Run。
+- final-image Socket LTP因缺少六个executable为`attempted=0, skipped=6`；初赛盘对应curated Socket LTP为6/6 PASS。
+  当前Linux ABI证据只覆盖上述focused surface，不宣称完整Linux socket兼容或full network LTP。
 - runtime address/route reconfiguration、hotplug/detach/restart和完整network teardown不在当前target；这些非目标不
   改变本页已经生效的owner、transaction、wait与stale-isolation义务。

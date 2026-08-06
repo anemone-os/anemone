@@ -526,6 +526,7 @@ pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     accepting: raw_is_accepting,
     query_option: Some(query_icmp_raw_option),
     mutate_option: Some(mutate_icmp_raw_option),
+    detach_ipv4_extended_error: None,
     poll: poll_icmp_raw_socket,
     final_release: final_release_icmp_raw_socket,
 };

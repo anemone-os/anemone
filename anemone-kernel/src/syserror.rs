@@ -129,6 +129,12 @@ pub enum SysError {
     MessageTooLong,
     /// The network control plane has no route to the destination.
     NetworkUnreachable,
+    /// The destination host is unreachable.
+    HostUnreachable,
+    /// The destination host is down.
+    HostDown,
+    /// The requested network is not available.
+    NoNetwork,
     /// Pipe write attempted after all readers were gone.
     BrokenPipe,
     /// The file does not support seeking.
@@ -278,6 +284,9 @@ impl SysError {
             SysError::DestinationAddressRequired => EDESTADDRREQ,
             SysError::MessageTooLong => EMSGSIZE,
             SysError::NetworkUnreachable => ENETUNREACH,
+            SysError::HostUnreachable => EHOSTUNREACH,
+            SysError::HostDown => EHOSTDOWN,
+            SysError::NoNetwork => ENONET,
             SysError::BrokenPipe => EPIPE,
             SysError::IllegalSeek => ESPIPE,
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't

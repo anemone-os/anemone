@@ -2,8 +2,8 @@ use core::mem::size_of;
 
 use anemone_abi::{
     net::linux::{
-        ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_REUSEADDR, SOL_RAW, SOL_SOCKET,
-        TCP_NODELAY,
+        ICMP_FILTER, IP_RECVERR, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_REUSEADDR, SOL_RAW,
+        SOL_SOCKET, TCP_NODELAY,
     },
     syscall::SYS_SETSOCKOPT,
 };
@@ -58,6 +58,19 @@ fn read_scalar(input: &mut dyn OptionInput, len: usize) -> Result<i32, SysError>
     })
 }
 
+fn read_ipv4_scalar(input: &mut dyn OptionInput, len: usize) -> Result<i32, SysError> {
+    // Linux IPv4 scalar options copy an int for optlen >= 4, one unsigned
+    // byte for optlen 1..=3, and treat optlen zero as value zero.
+    read_scalar(
+        input,
+        if len >= size_of::<i32>() {
+            4
+        } else {
+            len.min(1)
+        },
+    )
+}
+
 fn normalize_option_len(len: i32) -> Result<usize, SysError> {
     usize::try_from(len).map_err(|_| SysError::InvalidArgument)
 }
@@ -70,6 +83,9 @@ fn mutate_socket_option(
     input: &mut dyn OptionInput,
 ) -> Result<(), SysError> {
     let mutation = match (socket.socket_type(), level, option) {
+        (SocketType::Ipv4Udp, IPPROTO_IP, IP_RECVERR) => {
+            SocketOptionMutation::ReceiveErrors(read_ipv4_scalar(input, len)? != 0)
+        },
         (SocketType::Ipv4Tcp, SOL_SOCKET, SO_REUSEADDR) => {
             if len < size_of::<i32>() {
                 return Err(SysError::InvalidArgument);
@@ -82,13 +98,13 @@ fn mutate_socket_option(
             }
             SocketOptionMutation::TcpNoDelay(read_scalar(input, size_of::<i32>())? != 0)
         },
-        (SocketType::Ipv4IcmpRaw, IPPROTO_IP, IP_TTL) => match read_scalar(input, len)? {
+        (SocketType::Ipv4IcmpRaw, IPPROTO_IP, IP_TTL) => match read_ipv4_scalar(input, len)? {
             -1 => SocketOptionMutation::Ipv4TimeToLive(NET_ICMP_RAW_DEFAULT_TTL),
             ttl @ 1..=255 => SocketOptionMutation::Ipv4TimeToLive(ttl as u8),
             _ => return Err(SysError::InvalidArgument),
         },
         (SocketType::Ipv4IcmpRaw, IPPROTO_IP, IP_TOS) => {
-            SocketOptionMutation::Ipv4TypeOfService(read_scalar(input, len)? as u8)
+            SocketOptionMutation::Ipv4TypeOfService(read_ipv4_scalar(input, len)? as u8)
         },
         (SocketType::Ipv4IcmpRaw, SOL_RAW, ICMP_FILTER) => {
             let SocketOptionValue::IcmpTypeFilter(current) = socket
@@ -134,7 +150,9 @@ mod kunits {
     use super::*;
 
     use crate::{
-        fs::socket::{TCP_SOCKET_OPS, prepare_socket, socket_file_desc_ops},
+        fs::socket::{
+            TCP_SOCKET_OPS, UDP_SOCKET_OPS, prepare_socket, socket_file_desc_ops, socket_from_file,
+        },
         task::files::{OpenAccessMode, OpenedFileFinalReleaseCtx},
     };
 
@@ -164,6 +182,9 @@ mod kunits {
 
     impl OptionInput for ScalarInput {
         fn read(&mut self, bytes: &mut [u8]) -> Result<(), SysError> {
+            if bytes.is_empty() {
+                return Ok(());
+            }
             self.reads += 1;
             if self.fault {
                 return Err(SysError::BadAddress);
@@ -209,6 +230,61 @@ mod kunits {
         );
         assert_eq!(
             socket.query_option(SocketOptionQuery::TcpNoDelay),
+            Ok(SocketOptionValue::Boolean(true))
+        );
+
+        (socket_file_desc_ops().final_release.unwrap())(OpenedFileFinalReleaseCtx {
+            file: &file,
+            access: OpenAccessMode::ReadWrite,
+            notification_suppressed: true,
+        });
+    }
+
+    #[kunit]
+    fn udp_recverr_uses_linux_ipv4_scalar_lengths_and_fault_precedence() {
+        let (file, creation) = prepare_socket(&UDP_SOCKET_OPS).unwrap();
+        creation.commit();
+        let socket = socket_from_file(&file).unwrap();
+
+        let mut zero = ScalarInput::fault();
+        assert_eq!(
+            mutate_socket_option(socket, IPPROTO_IP, IP_RECVERR, 0, &mut zero),
+            Ok(())
+        );
+        assert_eq!(zero.reads, 0);
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::ReceiveErrors),
+            Ok(SocketOptionValue::Boolean(false))
+        );
+
+        let mut short = ScalarInput::value(0x100);
+        assert_eq!(
+            mutate_socket_option(socket, IPPROTO_IP, IP_RECVERR, 3, &mut short),
+            Ok(())
+        );
+        assert_eq!(short.reads, 1);
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::ReceiveErrors),
+            Ok(SocketOptionValue::Boolean(false))
+        );
+
+        let mut enabled = ScalarInput::value(0x100);
+        assert_eq!(
+            mutate_socket_option(socket, IPPROTO_IP, IP_RECVERR, 4, &mut enabled),
+            Ok(())
+        );
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::ReceiveErrors),
+            Ok(SocketOptionValue::Boolean(true))
+        );
+
+        let mut fault = ScalarInput::fault();
+        assert_eq!(
+            mutate_socket_option(socket, IPPROTO_IP, IP_RECVERR, 1, &mut fault),
+            Err(SysError::BadAddress)
+        );
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::ReceiveErrors),
             Ok(SocketOptionValue::Boolean(true))
         );
 

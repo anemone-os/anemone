@@ -4,8 +4,9 @@ use anemone_net_api::{
     Ipv4Address, Ipv4EgressSelection,
     udp::{
         UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointFacts,
-        UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeekedDatagram,
-        UdpPeer, UdpQueryError, UdpReceiveError, UdpReceivedDatagram, UdpRetireError, UdpSendError,
+        UdpEndpointId, UdpEndpointLimits, UdpErrorCause, UdpErrorRecord, UdpLocalBinding,
+        UdpNamespacePolicy, UdpPeekOutcome, UdpPeer, UdpQueryError, UdpReceiveError,
+        UdpReceiveOutcome, UdpRetireError, UdpSendError,
     },
 };
 
@@ -23,6 +24,7 @@ pub(in crate::net) const UDP_NAMESPACE_POLICY: UdpNamespacePolicy = UdpNamespace
 const UDP_ENDPOINT_LIMITS: UdpEndpointLimits = UdpEndpointLimits::new(
     NET_UDP_TX_DATAGRAM_CAPACITY,
     NET_UDP_RX_DATAGRAM_CAPACITY,
+    NET_UDP_ERROR_RECORD_CAPACITY,
     NET_UDP_MAX_PAYLOAD_BYTES,
 );
 
@@ -44,6 +46,10 @@ static_assert!(
 static_assert!(
     NET_UDP_RX_DATAGRAM_CAPACITY > 0,
     "net_udp_rx_datagram_capacity must be nonzero"
+);
+static_assert!(
+    NET_UDP_ERROR_RECORD_CAPACITY > 0,
+    "net_udp_error_record_capacity must be nonzero"
 );
 static_assert!(
     NET_UDP_MAX_PAYLOAD_BYTES > 0 && NET_UDP_MAX_PAYLOAD_BYTES <= 65_507,
@@ -174,6 +180,22 @@ impl UdpEndpointPort {
         self.stack.udp_endpoint_facts(self.endpoint)
     }
 
+    pub(crate) fn receive_errors_enabled(&self) -> Result<bool, UdpQueryError> {
+        self.stack.udp_receive_errors_enabled(self.endpoint)
+    }
+
+    pub(crate) fn set_receive_errors(&self, enabled: bool) -> Result<(), UdpQueryError> {
+        self.stack.set_udp_receive_errors(self.endpoint, enabled)
+    }
+
+    pub(crate) fn take_pending_error(&self) -> Result<Option<UdpErrorCause>, UdpQueryError> {
+        self.stack.take_udp_pending_error(self.endpoint)
+    }
+
+    pub(crate) fn detach_error(&self) -> Result<Option<UdpErrorRecord>, UdpQueryError> {
+        self.stack.detach_udp_error(self.endpoint)
+    }
+
     pub(crate) fn bind(
         &self,
         address: Ipv4Address,
@@ -294,11 +316,11 @@ impl UdpEndpointPort {
         Ok(())
     }
 
-    pub(crate) fn receive(&self) -> Result<UdpReceivedDatagram, UdpReceiveError> {
+    pub(crate) fn receive(&self) -> Result<UdpReceiveOutcome, UdpReceiveError> {
         self.stack.receive_udp_endpoint(self.endpoint)
     }
 
-    pub(crate) fn peek(&self) -> Result<UdpPeekedDatagram, UdpReceiveError> {
+    pub(crate) fn peek(&self) -> Result<UdpPeekOutcome, UdpReceiveError> {
         self.stack.peek_udp_endpoint(self.endpoint)
     }
 
