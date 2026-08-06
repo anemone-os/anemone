@@ -41,11 +41,9 @@ impl SignalArchTrait for RiscV64SignalArch {
         if fpu {
             buf.uc_mcontext
                 .sc_fpregs
-                .copy_from_slice(&trapframe.fpu_regs().f);
-            buf.uc_mcontext.fcsr = trapframe.fpu_regs.fcsr
+                .set_d(&trapframe.fpu_regs().f, trapframe.fpu_regs.fcsr as u32);
         } else {
-            buf.uc_mcontext.sc_fpregs.fill(0);
-            buf.uc_mcontext.fcsr = 0;
+            buf.uc_mcontext.sc_fpregs.clear();
         }
         // done.
     }
@@ -59,11 +57,12 @@ impl SignalArchTrait for RiscV64SignalArch {
         trapframe.gpr.x[1..].copy_from_slice(&ucontext.uc_mcontext.sc_regs.gprs);
 
         if fpu {
+            let regs = ucontext.uc_mcontext.sc_fpregs.d_regs();
             trapframe
                 .fpu_regs_mut()
                 .f
-                .copy_from_slice(&ucontext.uc_mcontext.sc_fpregs);
-            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.fcsr;
+                .copy_from_slice(&regs);
+            trapframe.fpu_regs_mut().fcsr = ucontext.uc_mcontext.sc_fpregs.d_fcsr() as u64;
         } else {
             // keep
         }

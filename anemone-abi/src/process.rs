@@ -838,16 +838,61 @@ pub mod linux {
             #[repr(C, align(16))]
             pub struct SigContext {
                 pub sc_regs: UserRegsStruct,
-                /// We only care about riscv64 with D extension for now. That
-                /// huge union in Linux is too complicated to deal with...
-                pub sc_fpregs: [u64; 32],
-                pub fcsr: u64,
-                pub __reserved: [u8; 8],
+                pub sc_fpregs: RiscvFpState,
             }
 
             impl SigContext {
                 pub fn pc(&self) -> u64 {
                     self.sc_regs.pc
+                }
+            }
+
+            const RISCV_D_REGS_SIZE: usize = size_of::<[u64; 32]>();
+            const RISCV_D_FCSR_OFFSET: usize = RISCV_D_REGS_SIZE;
+            const RISCV_FP_STATE_SIZE: usize =
+                size_of::<[u64; 64]>() + size_of::<u32>() + 3 * size_of::<u32>();
+
+            /// Canonical storage for Linux `union __riscv_fp_state`.
+            ///
+            /// Anemone currently saves and restores only the D-extension
+            /// member. The Q member still determines the fixed UAPI size, so
+            /// the inactive tail remains present and zeroed rather than
+            /// shrinking the signal frame around the implemented member. Its
+            /// final bytes also overlay Linux's reserved field and END context
+            /// header, which must remain zero until another extension is
+            /// published there.
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
+            #[repr(C, align(16))]
+            pub struct RiscvFpState([u8; RISCV_FP_STATE_SIZE]);
+
+            impl RiscvFpState {
+                pub fn clear(&mut self) {
+                    self.0.fill(0);
+                }
+
+                pub fn set_d(&mut self, regs: &[u64; 32], fcsr: u32) {
+                    self.clear();
+                    self.0[..RISCV_D_REGS_SIZE]
+                        .copy_from_slice(zerocopy::IntoBytes::as_bytes(regs));
+                    self.0[RISCV_D_FCSR_OFFSET..RISCV_D_FCSR_OFFSET + size_of::<u32>()]
+                        .copy_from_slice(&fcsr.to_ne_bytes());
+                }
+
+                pub fn d_regs(&self) -> [u64; 32] {
+                    // Every initialized byte pattern is valid for the register
+                    // array; use an unaligned read so this codec does not rely
+                    // on the byte storage's internal alignment.
+                    unsafe { self.0.as_ptr().cast::<[u64; 32]>().read_unaligned() }
+                }
+
+                pub fn d_fcsr(&self) -> u32 {
+                    u32::from_ne_bytes(
+                        self.0[RISCV_D_FCSR_OFFSET..RISCV_D_FCSR_OFFSET + size_of::<u32>()]
+                            .try_into()
+                            .unwrap(),
+                    )
                 }
             }
 
@@ -863,7 +908,13 @@ pub mod linux {
 
             const _: () = assert!(size_of::<Stack>() == 24);
             const _: () = assert!(core::mem::offset_of!(Stack, ss_size) == 16);
+            const _: () = assert!(size_of::<RiscvFpState>() == 528);
+            const _: () = assert!(core::mem::align_of::<RiscvFpState>() == 16);
+            const _: () = assert!(size_of::<SigContext>() == 784);
+            const _: () = assert!(core::mem::align_of::<SigContext>() == 16);
+            const _: () = assert!(core::mem::offset_of!(SigContext, sc_fpregs) == 256);
             const _: () = assert!(core::mem::offset_of!(UContext, uc_mcontext) == 176);
+            const _: () = assert!(size_of::<UContext>() == 960);
         }
         #[cfg(target_arch = "riscv64")]
         pub use __riscv64::*;
