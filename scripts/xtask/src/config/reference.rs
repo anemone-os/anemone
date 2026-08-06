@@ -233,8 +233,11 @@ mod tests {
 
     #[test]
     fn kernel_config_references_are_normalized_and_bounded() {
-        let reference = KernelConfigRef::new("./conf/./.defconfig").unwrap();
-        assert_eq!(reference.as_path(), Path::new("conf/.defconfig"));
+        let reference = KernelConfigRef::new("./conf/./kconfs/default.toml").unwrap();
+        assert_eq!(
+            reference.as_path(),
+            Path::new("conf/kconfs/default.toml")
+        );
         let reference = KernelConfigRef::new("conf/../kconfig").unwrap();
         assert_eq!(reference.as_path(), Path::new("kconfig"));
 

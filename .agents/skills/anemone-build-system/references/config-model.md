@@ -17,7 +17,7 @@ Do not copy a current configuration snapshot into the skill. Point to its owner 
 
 ### Kernel Configuration
 
-Root `kconfig` and `conf/.defconfig` own kernel feature, policy, and capacity values only. Build selection, kernel Cargo profile, action presentation, and QEMU host paths are rejected from KernelConfig. Before changing either file, inspect which parameter values may fall back and which generated definitions the build writes.
+Root `kconfig` and `conf/kconfs/default.toml` own kernel feature, policy, and capacity values only. Build selection, kernel Cargo profile, action presentation, and QEMU host paths are rejected from KernelConfig. Before changing either file, inspect which parameter values may fall back and which generated definitions the build writes.
 
 ### Explicit Build Input
 

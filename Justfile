@@ -78,10 +78,10 @@ xref *args:
 rootfs *args:
     @just xtask rootfs {{ args }}
 
-[doc("generate the kconfig file from .defconfig")]
+[doc("generate kconfig from the tracked default KernelConfig")]
 defconfig:
-    @just log "DEFCONFIG" "Copying .defconfig to kconfig"
-    @cp conf/.defconfig ./kconfig
+    @just log "DEFCONFIG" "Copying the default KernelConfig to kconfig"
+    @cp conf/kconfs/default.toml ./kconfig
 
 [private]
 log topic msg:

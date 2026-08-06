@@ -1,6 +1,5 @@
-#! kconfig configuration for Anemone OS
-#! This file specifies how the kernel is configured and built.
-#! This is an example configuration file.
+#! Default KernelConfig for Anemone OS.
+#! This file owns default kernel features, policy, and capacity.
 
 # Kernel tailoring options
 [features]

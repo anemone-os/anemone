@@ -334,7 +334,7 @@ mod tests {
             "system_hz = 999",
         );
         replace_file_text(
-            workspace.0.join("conf/.defconfig"),
+            workspace.0.join("conf/kconfs/default.toml"),
             "max_logical_cpus = 1",
             "max_logical_cpus = 99",
         );
@@ -370,7 +370,8 @@ mod tests {
     #[test]
     fn kernel_config_rejects_legacy_build_selection() {
         let workspace = TestWorkspace::new();
-        let default_kconfig = fs::read_to_string(workspace.0.join("conf/.defconfig")).unwrap();
+        let default_kconfig =
+            fs::read_to_string(workspace.0.join("conf/kconfs/default.toml")).unwrap();
         let legacy = format!(
             "[build]\ntarget = \"example\"\nprofile = \"release\"\ndisasm = false\n\n{default_kconfig}"
         );
@@ -392,9 +393,10 @@ mod tests {
             fs::create_dir_all(root.join("conf/system-targets")).unwrap();
             fs::create_dir_all(root.join("conf/platforms")).unwrap();
             fs::create_dir_all(root.join("conf/build-presets")).unwrap();
+            fs::create_dir_all(root.join("conf/kconfs")).unwrap();
 
             for relative in [
-                "conf/.defconfig",
+                "conf/kconfs/default.toml",
                 "conf/system-targets/example.toml",
                 "conf/platforms/example.toml",
                 "conf/build-presets/example.toml",
@@ -402,7 +404,8 @@ mod tests {
                 fs::copy(Path::new("../..").join(relative), root.join(relative)).unwrap();
             }
 
-            let default_content = fs::read_to_string(root.join("conf/.defconfig")).unwrap();
+            let default_content =
+                fs::read_to_string(root.join("conf/kconfs/default.toml")).unwrap();
             let selected_content = default_content
                 .lines()
                 .filter(|line| {
@@ -415,7 +418,7 @@ mod tests {
             fs::write(root.join("kconfig"), selected_content).unwrap();
             replace_file_text(
                 root.join("conf/build-presets/example.toml"),
-                "kernel-config = \"conf/.defconfig\"",
+                "kernel-config = \"conf/kconfs/default.toml\"",
                 "kernel-config = \"kconfig\"",
             );
             Self(root)

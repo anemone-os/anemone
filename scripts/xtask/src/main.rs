@@ -122,7 +122,7 @@ mod tests {
                 "--target",
                 "example",
                 "--kernel-config",
-                "conf/.defconfig",
+                "conf/kconfs/default.toml",
                 "--profile",
                 "release",
                 "--bind",
