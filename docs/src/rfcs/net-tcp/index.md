@@ -1,6 +1,6 @@
 # RFC-20260805-net-tcp
 
-**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 In Progress / CKPT 4A Closed / Not Cut Over / TCP Not Effective
+**状态：** Accepted / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over / TCP Not Effective
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-06
@@ -9,7 +9,7 @@
 `NET-TCP-LIFECYCLE-001`并Refine `SOCKET-ABI-001`；Stage 1已Refine `NET-CONTROL-PLANE-001`与
 `NET-STACK-PUMP-001`
 **执行记录：** P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed / CKPT 3A-3B Closed / Not Cut Over；
-Stage 4 In Progress / CKPT 4A Closed / CKPT 4B Not Active / Not Authorized；
+Stage 4 Closed / CKPT 4A-4B Closed / Syscall-Reachable Candidate / Not Cut Over；
 `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；transaction None
 
 ## 文档状态
@@ -33,16 +33,16 @@ projection；`fs/socket/tcp.rs`的行为保持型目录化属于Stage 3必要imp
 CKPT 3A与CKPT 3B均已关闭，Stage 3 Closed / Not Cut Over。随后接受的Route Correction把首次normal resolver
 activation与真实userspace纵向验证从Stage 5提前到Stage 4；Stage 4现已解析为两个需分别授权、分别review的execution
 checkpoint：CKPT 4A完成仍不可达的owner predicate/source/wait closure，CKPT 4B完成syscall projection、唯一normal
-resolver activation与RV64双libc vertical slice。CKPT 4A已经单独授权并关闭；Stage 4保持In Progress，CKPT 4B仍
-Not Active / Not Authorized，Stage 5仍为Outline / Not Resolved / Not Authorized。4A closure不执行contract cutover，
-也不授权下一checkpoint或后续Stage。
+resolver activation与RV64双libc vertical slice。两个checkpoint均已独立授权、review并关闭；Stage 4现为Closed /
+Syscall-Reachable Candidate / Not Cut Over。四项target contract仍Pending，Stage 5仍为Outline / Not Resolved /
+Not Authorized。
 
 ## 摘要
 
 Anemone 已经拥有 boot-time IPv4 control plane、bounded frame/Stack progression、IPv4 UDP、
 ICMP raw、general Socket front、Unix stream/seqpacket、opened-description final release 与
-poll/select/epoll wait/recheck。当前尚无 kernel TCP Socket capability，production Stack 也
-没有发布 TCP protocol resource。
+poll/select/epoll wait/recheck。Stage 4已经在normal resolver发布完整TCP syscall-reachable candidate并通过RV64
+双libc纵向验证，但current effective contracts尚未覆盖TCP，也未执行`NET-TCP-CUTOVER`。
 
 本 RFC 提议交付一组普通用户程序可消费的 initial-domain IPv4 TCP 字节流能力：主动和
 被动连接、blocking/nonblocking connect、accept、partial stream I/O、half-close、真实
@@ -480,14 +480,14 @@ operation与kernel-private capability，并接入syscall-unreachable general Soc
 readiness与contract均未发布。Stage 3以CKPT 3A闭合Stack owner fact/lifecycle completion，再由CKPT 3B完成
 syscall-unreachable Socket/ABI completion；两个checkpoint均已关闭，Stage 3 Closed / Not Cut Over。
 Stage 4已经解析为CKPT 4A internal owner predicate/source/wait closure与CKPT 4B normal syscall activation/RV64
-userspace vertical slice；CKPT 4A已经关闭，Stage 4当前In Progress，CKPT 4B仍Not Active / Not Authorized；Stage 5
-继续只表达future Outline / Not Resolved / Not Authorized。
+userspace vertical slice；两个checkpoint均已关闭，Stage 4为Closed / Syscall-Reachable Candidate / Not Cut Over；
+Stage 5继续只表达future Outline / Not Resolved / Not Authorized。
 
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
 - [实施计划](./implementation.md)（P0 Positive / Closed；Stage 1 Closed；Stage 2 Closed；Stage 3 Closed /
-  CKPT 3A-3B Closed / Not Cut Over；Stage 4 In Progress / CKPT 4A Closed / CKPT 4B Not Active / Not Authorized；
+  CKPT 3A-3B Closed / Not Cut Over；Stage 4 Closed / CKPT 4A-4B Closed / Syscall-Reachable Candidate / Not Cut Over；
   Stage 5 Outline / Not Resolved / Not Authorized）
 - [背景材料：历史定位共识](./backgrounds/positionings.md)（冻结，不再维护）
 - Current baseline：[Network](../../contracts/net/index.md)、
@@ -499,7 +499,7 @@ userspace vertical slice；CKPT 4A已经关闭，Stage 4当前In Progress，CKPT
   [`simple_llm_server.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/simple_llm_server.c)、
   [`agent_lite.c`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/cagent-test/agent_lite.c)与
   [`cagent_testcode.sh`](https://github.com/oscomp/testsuits-for-oskernel/blob/b5ec6ef8497e1818cbdec3b54bb722f036e57972/scripts/cagent_testcode.sh)
-- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2、Stage 3与CKPT 4A focused Git commit；
+- implementation：[实施计划](./implementation.md)；P0、Stage 1、Stage 2、Stage 3与Stage 4 focused Git commit；
   transaction None
 
 ## 修订记录
@@ -525,7 +525,9 @@ checkpoint、validation placement与stop condition，不改变R0 target、owner�
 validation claim，因此修订号继续保持R0；当时两个checkpoint implementation均未授权。
 随后单独授权并关闭CKPT 4A，在resolver继续拒绝TCP时完成owner predicate/invalidation、production source、
 connect/accept wait与lifecycle closure；该execution write-back不改变R0 target、owner、ABI、Contract Impact或
-current contracts，因此修订号保持R0。CKPT 4B与Stage 5仍未授权。
+current contracts，因此修订号保持R0。随后单独授权并关闭CKPT 4B，完成normal resolver activation、Linux syscall
+mapping与RV64双libc vertical slice，使Stage 4成为Syscall-Reachable Candidate / Not Cut Over；该execution
+write-back仍不改变R0 target、Contract Impact或current contracts，修订号保持R0。Stage 5仍未解析、未授权。
 文本历史由仓库Git保存。
 
 ## Closure
@@ -564,13 +566,15 @@ Socket consumer回归、glibc+musl socket LTP `6/6`、格式与独立review通�
 `0 Apollyon / 0 Keter / 0 Euclid`。详情见[Stage 3 execution result](./implementation.md#6510-ckpt-3b-与-stage-3-execution-result--closed--not-cut-over)。
 四项TCP target contract继续Pending，current contracts不变，transaction仍为None。TCP tuple、handler、fd/runtime、
 blocking/readiness、TCP guest、CAgent、deployment probe、full network LTP、final harness、hardware、`smp>1`与其它
-NIC/platform均Not Run。Stage 4 In Progress / CKPT 4A Closed：Stack owner现以role-aware facts表达TCP predicate，
+NIC/platform均Not Run。Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over：CKPT 4A让Stack owner以role-aware facts表达TCP predicate，
 conservative invalidation经weak reverse route命中shared production `SocketPollSource`，connect/accept使用各自窄wait；
-source retirement、rollback、multi-waiter与late hint保持既有lifecycle/wait contract。published resolver仍排除TCP，
-tuple、handler、fd/runtime不可达。host TCP owner `20/20`、focused smoltcp TCP `178/178`、RV64 KUnit `465/465`、
-glibc+musl既有socket LTP `6/6`、RV64/LA64 release build、格式与独立review通过；final review为
-`0 Apollyon / 0 Keter / 0 Euclid`。详情见[CKPT 4A execution result](./implementation.md#6610-ckpt-4a-execution-result--closed)。
-四项TCP target contract继续Pending，current contracts不变，transaction仍为None。TCP userspace、normal resolver
-activation、LA64 userspace、CAgent、deployment probe、full network LTP、final harness、hardware、`smp>1`与其它
-NIC/platform均Not Run。CKPT 4A授权已经耗尽；CKPT 4B保持Not Active / Not Authorized，Stage 5保持Outline /
-Not Resolved / Not Authorized。
+source retirement、rollback、multi-waiter与late hint保持既有lifecycle/wait contract。CKPT 4B通过唯一normal resolver
+发布`AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`，闭合blocking/nonblocking connect errno、`SO_ERROR`消费/rearm、
+binding/local分离与RV64双libc focused consumer。host TCP owner `20/20`、focused smoltcp TCP `178/178`、RV64
+KUnit `466/466`、双libc TCP oracle与socket LTP `8/8`、shared Socket regression、RV64/LA64 release build、格式、
+Architecture Friction Scan与独立review通过；final review为`0 Apollyon / 0 Keter / 0 Euclid / 0 Safe`。详情见
+[CKPT 4A result](./implementation.md#6610-ckpt-4a-execution-result--closed)与
+[CKPT 4B / Stage 4 result](./implementation.md#6611-ckpt-4b-execution-result--closed--syscall-reachable-candidate--not-cut-over)。
+四项TCP target contract继续Pending，current contracts不变，transaction仍为None。LA64 userspace、self/remote-
+external TCP、CAgent、deployment probe、full network/final harness、hardware、`smp>1`与其它NIC/platform均Not Run。
+Stage 4授权已经耗尽；Stage 5保持Outline / Not Resolved / Not Authorized。

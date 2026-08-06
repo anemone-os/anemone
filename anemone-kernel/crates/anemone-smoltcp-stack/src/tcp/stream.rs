@@ -50,13 +50,20 @@ impl TcpEndpoints {
         }
 
         for port in self.policy.ephemeral_port_first..=self.policy.ephemeral_port_last {
-            let binding = TcpLocalBinding::from_owner_commit(source, port);
+            // An implicit connect reserves an autobound namespace port without
+            // user-locking the selected source. The concrete route selection
+            // belongs only to this connection attempt and is projected through
+            // `local`; a failed attempt may therefore return to this wildcard
+            // binding and select another valid source on retry.
+            let binding =
+                TcpLocalBinding::from_owner_commit(anemone_net_api::Ipv4Address::UNSPECIFIED, port);
+            let local = TcpLocalBinding::from_owner_commit(source, port);
             if self.binding_conflicts(id, binding)
-                || self.connection_tuple_conflicts(id, binding, peer)
+                || self.connection_tuple_conflicts(id, local, peer)
             {
                 continue;
             }
-            return Ok((binding, binding));
+            return Ok((binding, local));
         }
         Err(TcpConnectError::EphemeralPortsExhausted)
     }
@@ -122,21 +129,57 @@ impl TcpEndpoints {
         id: TcpEndpointId,
     ) -> Result<TcpConnectResult, TcpQueryError> {
         self.refresh_connection(sockets, id)?;
-        let connection = self
-            .connection_mut(id)
-            .expect("refreshed TCP connection disappeared");
-        Ok(match connection.phase {
-            ConnectionPhase::Connecting => TcpConnectResult::Connecting {
-                local: connection.local,
-                peer: connection.peer,
+        let phase = self
+            .connection(id)
+            .expect("refreshed TCP connection disappeared")
+            .phase;
+        Ok(match phase {
+            ConnectionPhase::Connecting => {
+                let connection = self
+                    .connection(id)
+                    .expect("connecting TCP connection disappeared");
+                TcpConnectResult::Connecting {
+                    local: connection.local,
+                    peer: connection.peer,
+                }
             },
-            ConnectionPhase::Connected => TcpConnectResult::Connected {
-                local: connection.local,
-                peer: connection.peer,
+            ConnectionPhase::Connected => {
+                let connection = self
+                    .connection(id)
+                    .expect("connected TCP connection disappeared");
+                TcpConnectResult::Connected {
+                    local: connection.local,
+                    peer: connection.peer,
+                }
             },
-            ConnectionPhase::Failed => match connection.pending_error.take() {
-                Some(error) => TcpConnectResult::Failed(error),
-                None => TcpConnectResult::Terminal,
+            ConnectionPhase::Failed => {
+                let (result, binding, handle) = {
+                    let connection = self
+                        .connection_mut(id)
+                        .expect("failed TCP connection disappeared before consumption");
+                    assert!(connection.reservation.is_none());
+                    let result = match connection.pending_error.take() {
+                        Some(error) => TcpConnectResult::Failed(error),
+                        None => TcpConnectResult::Terminal,
+                    };
+                    (result, connection.binding, connection.handle)
+                };
+                assert!(
+                    sockets
+                        .get::<tcp::Socket>(handle)
+                        .remote_endpoint()
+                        .is_none()
+                );
+                // Linux completes a failed stream connect by disconnecting the
+                // transport and returning the socket to its retained local bind.
+                // This owner transition happens in the same access window as the
+                // sole error consumption, so SO_ERROR cannot leave a second phase
+                // or error truth in the Socket adapter.
+                self.remove_engine(sockets, handle);
+                self.endpoint_mut(id)
+                    .expect("failed TCP Endpoint disappeared before rearm")
+                    .role = EndpointRole::Bound(binding);
+                result
             },
         })
     }

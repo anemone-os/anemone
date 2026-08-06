@@ -2,3 +2,4 @@
 socketpair02
 bind03
 listen01
+tcp_r0_oracle

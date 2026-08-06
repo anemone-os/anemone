@@ -1,14 +1,12 @@
 use core::mem::size_of;
 
 use anemone_abi::{
-    net::linux::{ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, SOL_RAW, SOL_SOCKET},
+    net::linux::{
+        ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_REUSEADDR, SOL_RAW, SOL_SOCKET,
+        TCP_NODELAY,
+    },
     syscall::SYS_SETSOCKOPT,
 };
-
-// These constants stay private until the TCP creation tuple is published.
-const SO_REUSEADDR: i32 = 2;
-const IPPROTO_TCP: i32 = 6;
-const TCP_NODELAY: i32 = 1;
 
 use crate::{
     fs::socket::{

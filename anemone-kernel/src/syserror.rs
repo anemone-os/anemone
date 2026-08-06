@@ -89,6 +89,10 @@ pub enum SysError {
     NoSpace,
     /// Operation would block and nonblocking mode was requested.
     Again,
+    /// A nonblocking operation has started and completion is pending.
+    InProgress,
+    /// The requested operation is already in progress.
+    AlreadyInProgress,
     /// The requested socket address family is unsupported.
     AddressFamilyNotSupported,
     /// The requested socket base type is unsupported.
@@ -111,6 +115,8 @@ pub enum SysError {
     ConnectionRefused,
     /// A connected stream was reset by its peer.
     ConnectionReset,
+    /// An asynchronous connection attempt ended after its error was consumed.
+    ConnectionAborted,
     /// The requested local address/port conflicts with an active binding.
     AddressInUse,
     /// The requested local address is not owned by this network domain.
@@ -253,6 +259,8 @@ impl SysError {
             SysError::ReadOnlyFs => EROFS,
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
             SysError::Again => EAGAIN,
+            SysError::InProgress => EINPROGRESS,
+            SysError::AlreadyInProgress => EALREADY,
             SysError::AddressFamilyNotSupported => EAFNOSUPPORT,
             SysError::SocketTypeNotSupported => ESOCKTNOSUPPORT,
             SysError::ProtocolNotSupported => EPROTONOSUPPORT,
@@ -263,6 +271,7 @@ impl SysError {
             SysError::ProtocolTypeMismatch => EPROTOTYPE,
             SysError::ConnectionRefused => ECONNREFUSED,
             SysError::ConnectionReset => ECONNRESET,
+            SysError::ConnectionAborted => ECONNABORTED,
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,
             SysError::NoBufferSpace => ENOBUFS,

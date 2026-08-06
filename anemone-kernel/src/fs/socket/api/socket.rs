@@ -1,7 +1,7 @@
 #[cfg(feature = "kunit")]
 use anemone_abi::net::linux::{
     AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
-    SOCK_STREAM,
+    SOCK_SEQPACKET, SOCK_STREAM,
 };
 use anemone_abi::syscall::SYS_SOCKET;
 
@@ -78,7 +78,7 @@ mod kunits {
             Err(SysError::InvalidArgument)
         ));
         assert!(matches!(
-            resolve_socket(AF_INET, 1, 0),
+            resolve_socket(AF_INET, SOCK_SEQPACKET, 0),
             Err(SysError::SocketTypeNotSupported)
         ));
         assert!(matches!(

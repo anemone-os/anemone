@@ -25,6 +25,14 @@ cfg_select! {
                 source: "/fixtures/user-test/tools/socket-r1-musl",
                 dest: "/musl/ltp/testcases/bin/socket_r1_oracle",
             },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/tcp-r0-glibc",
+                dest: "/glibc/ltp/testcases/bin/tcp_r0_oracle",
+            },
+            StagedCompetitionFixture {
+                source: "/fixtures/user-test/tools/tcp-r0-musl",
+                dest: "/musl/ltp/testcases/bin/tcp_r0_oracle",
+            },
         ];
     },
     target_arch = "loongarch64" => {

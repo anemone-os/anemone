@@ -1,4 +1,5 @@
-//! Syscall-unreachable TCP integration with the family-neutral Socket front.
+//! Syscall-reachable TCP candidate integration with the family-neutral Socket
+//! front.
 
 mod lifecycle;
 mod source;
@@ -15,7 +16,7 @@ use anemone_net_api::tcp::{
 
 use crate::{
     kconfig_defs::NET_TCP_LISTENER_COMPLETED_CAPACITY,
-    net::tcp::{BindError, ConnectError, ListenError, TcpEndpointAccessPort, create_endpoint},
+    net::tcp::{BindError, ConnectError, ListenError, create_endpoint},
     prelude::*,
     utils::any_opaque::AnyOpaque,
 };
@@ -95,28 +96,19 @@ fn connect_tcp_socket(
         .source
         .endpoint()
         .ok_or(SocketConnectError::Retired)?;
-    let result = connect_tcp_endpoint(&endpoint, peer);
-    match result {
-        Err(SocketConnectError::Started | SocketConnectError::InProgress) => Err(
-            SocketConnectError::WouldBlock(TcpSocketSource::connect_wait(&socket.source)),
-        ),
-        result => result,
-    }
-}
-
-fn connect_tcp_endpoint(
-    endpoint: &TcpEndpointAccessPort,
-    peer: TcpPeer,
-) -> Result<(), SocketConnectError> {
     match endpoint.connect_result().map_err(|error| match error {
         TcpQueryError::UnknownEndpoint => SocketConnectError::Retired,
         TcpQueryError::WrongRole => SocketConnectError::InvalidState,
     })? {
-        TcpConnectResult::Idle | TcpConnectResult::Bound(_) => endpoint
-            .connect(peer)
-            .map(|()| Err(SocketConnectError::Started))
-            .map_err(map_connect_start_error)?,
-        TcpConnectResult::Connecting { .. } => Err(SocketConnectError::InProgress),
+        TcpConnectResult::Idle | TcpConnectResult::Bound(_) => {
+            endpoint.connect(peer).map_err(map_connect_start_error)?;
+            Err(SocketConnectError::Started(TcpSocketSource::connect_wait(
+                &socket.source,
+            )))
+        },
+        TcpConnectResult::Connecting { .. } => Err(SocketConnectError::InProgress(
+            TcpSocketSource::connect_wait(&socket.source),
+        )),
         TcpConnectResult::Connected { .. } => Err(SocketConnectError::AlreadyConnected),
         TcpConnectResult::Failed(TcpPendingError::ConnectionRefused) => {
             Err(SocketConnectError::ConnectionRefused)
@@ -124,9 +116,10 @@ fn connect_tcp_endpoint(
         TcpConnectResult::Failed(TcpPendingError::TimedOut) => {
             Err(SocketConnectError::ConnectionTimedOut)
         },
-        TcpConnectResult::Failed(TcpPendingError::ConnectionReset) | TcpConnectResult::Terminal => {
-            Err(SocketConnectError::InvalidState)
+        TcpConnectResult::Failed(TcpPendingError::ConnectionReset) => {
+            Err(SocketConnectError::ConnectionReset)
         },
+        TcpConnectResult::Terminal => Err(SocketConnectError::ConnectionAborted),
     }
 }
 

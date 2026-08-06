@@ -1,6 +1,6 @@
 # IPv4 TCP Socket 实施计划
 
-**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 In Progress / CKPT 4A Closed / Not Cut Over / TCP Not Effective
+**状态：** R0 / Stage 1 Closed / Stage 2 Closed / Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over / TCP Not Effective
 **最后更新：** 2026-08-06
 **父 RFC：** [RFC-20260805-net-tcp](./index.md)
 **适用修订：** R0
@@ -8,8 +8,8 @@
 Stage 1已经关闭。用户同日解析Stage 2并明确Stage 2不发布syscall，随后分别授权并关闭CKPT 2A与CKPT 2B；
 用户于2026-08-06先授权Stage 3 Implementation Resolution，随后分别授权并关闭CKPT 3A与CKPT 3B；同日接受
 Stage 4提前接通真实userspace syscall candidate的Route Correction，并只授权Stage 4 Implementation Resolution；
-随后单独授权并关闭CKPT 4A；CKPT 4B implementation与Stage 5均未授权
-**当前 Gate：** Stage 4 In Progress / CKPT 4A Closed；CKPT 4B Not Active / Not Authorized；
+随后分别授权并关闭CKPT 4A与CKPT 4B；Stage 5未授权
+**当前 Gate：** Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over；
 Stage 5 Outline / Not Resolved / Not Authorized
 
 本文保存已经Positive / Closed的TCP engine feasibility Probe Gate和Stage 1 closure。Stage 1已经建立production
@@ -25,8 +25,8 @@ invalidation、Socket source与wait capability；CKPT 4B先闭合剩余Linux sys
 发布完整syscall-reachable candidate并开始repository-owned RV64 userspace纵向验证。Stage 5不再拥有首次route
 activation，只拥有剩余双架构/external/capstone证据与最终`NET-TCP-CUTOVER`。这项Route Correction与Stage 4
 Implementation Resolution不改变R0 target、owner、ABI、Contract Impact、acceptance或validation claim；Stage 4
-现为In Progress / CKPT 4A Closed，CKPT 4B仍Not Active / Not Authorized；Stage 5仍为Outline / Not Resolved /
-Not Authorized。
+现已由CKPT 4A/4B关闭并形成Syscall-Reachable Candidate / Not Cut Over；Stage 5仍为Outline / Not Resolved /
+Not Authorized，未执行`NET-TCP-CUTOVER`。
 
 P0只有在父RFC target与Contract Impact完成R0接受、live baseline重新核验且用户明确授权本gate后才能从
 Not Active转为Active；三项前置已于2026-08-05满足。R0接受不自动授权执行，P0 closure也不授权任何后续gate。
@@ -272,7 +272,7 @@ Stage名称、数量与相邻职责可以在保持父RFC target、Stage 1 Networ
 | Stage 1 — Stack TCP owner与protocol progression foundation | Closed | 建立production owner-driven handoff、原子迁移UDP/ICMP raw，并把P0证据收敛为Stack TCP owner foundation | `NET-PROTOCOL-PROGRESSION-CUTOVER` Effective；TCP target contracts继续Pending | 已满足；本gate停止 |
 | Stage 2 — TCP owner与Socket-front integration | Closed | 以CKPT 2A/2B先建立kernel窄capability，再接入syscall-unreachable Socket descriptor与nonblocking scalar integration | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
 | Stage 3 — Stream、ABI与lifecycle completion | Closed / Not Cut Over | 以CKPT 3A/3B先闭合Stack owner fact与lifecycle，再完成仍不可达的partial stream、option/error和message/vector Socket/ABI projection | None；TCP target contracts继续Pending | 已满足；本Stage停止 |
-| Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | In Progress / CKPT 4A Closed / CKPT 4B Not Active / Not Authorized | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；4A保持不可达，4B关闭后candidate syscall-reachable但TCP target contracts继续Pending | CKPT 4A已满足并停止；等待CKPT 4B独立授权 |
+| Stage 4 — Userspace vertical slice、blocking/readiness与concurrency hardening | Closed / Syscall-Reachable Candidate / Not Cut Over | 以CKPT 4A闭合仍不可达的owner predicate/source/wait capability，再由CKPT 4B完成syscall projection、唯一normal resolver activation与RV64真实userspace纵向验证 | None；candidate syscall-reachable但TCP target contracts继续Pending | 已满足；本Stage停止，不进入Stage 5 |
 | Stage 5 — Dual-architecture与architecture-capstone closure | Outline / Not Resolved / Not Authorized | 在Stage 4已可达candidate上完成mandatory双架构、remote-external、shared regression与架构封顶，并原子执行最终cutover | `NET-TCP-CUTOVER` Pending | Stage 4 Closed、candidate保持可达、acceptance assets与独立final review可用 |
 
 ### 6.3 Stage 1 Resolved Gate — Stack TCP owner与protocol progression foundation
@@ -1373,6 +1373,50 @@ Opened-description、IOMUX与Epoll contracts不变，transaction保持None。TCP
 TCP fd/runtime、normal resolver activation、LA64 userspace、self/remote-external、CAgent、deployment probe、full network
 LTP、final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run。CKPT 4A授权在此耗尽；CKPT 4B保持
 Not Active / Not Authorized，不进入下一checkpoint。
+
+#### 6.6.11 CKPT 4B execution result — Closed / Syscall-Reachable Candidate / Not Cut Over
+
+CKPT 4B在既定Implementation Boundary内关闭并完成Stage 4，不执行`NET-TCP-CUTOVER`：
+
+- 唯一normal `PUBLISHED_SOCKET_ABI_PROFILES`现在同时发布`AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`，invalid
+  family/type/protocol/flag继续稳定拒绝；UDP、ICMP raw与Unix resolver保持原路径。TCP继续使用family-neutral
+  syscall adapter、shared `SocketPollSource`与opened-description final release，没有test-only profile、partial
+  activation、TCP-local syscall/wait loop或第二resolver truth。
+- blocking/nonblocking connect在syscall-local wait round区分首次`EINPROGRESS`、重复`EALREADY`、fresh
+  `EISCONN`与`ETIMEDOUT`。Stack TCP owner在唯一failed-result消费窗口同时移除closed engine并rearm retained
+  binding；`SO_ERROR`或stream operation先消费pending error后，下一次connect以`ECONNABORTED`暴露terminal history，
+  随后可重新发起连接，没有Socket-side phase/error mirror。
+- namespace binding与selected local tuple保持分离：implicit connect只长期保留wildcard autobind reservation，live
+  address query投影connection-local selected source；失败rearm不会把一次route/source selection固化为长期binding。
+  owner regression证明rearm后可换用另一selected source，双libc oracle覆盖implicit/explicit wildcard bind、connected
+  `getsockname()`与failure rearm。
+- repository-owned source `anemone-apps/user-test/ltp/oracles/tcp-r0.c`由
+  `riscv64-linux-gnu-gcc 13.3.0`和`riscv64-linux-musl-gcc 16.1.0`以
+  `-static -O2 -Wall -Wextra -Werror`构建。source SHA-256为
+  `47054e0cf2fe5f2500d6f19ac55c9ba62ed4cb9f9cd8bee16721dda1876d39b6`；glibc/musl binary SHA-256分别为
+  `8e772d1a87b60268498bc821e2a9b933c4a655904ab7a756a916c15016ba8145`与
+  `60a57b76cb4ba2c9c82e7d2efef3483241642bfa4b0b3049b8f1856f1385c4cf`。source是canonical validation
+  asset，staged binary不进入production dependency。
+- exact-source RV64 wrapper
+  `./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/net-tcp-stage4-ckpt4b-rv64.log`
+  通过并完成orderly shutdown：KUnit `466/466`，glibc与musl TCP oracle均TPASS，socket LTP合计`8/8`；UDP
+  `16`、UDP extension `10`、UDP message `7`、Unix stream `23`、Unix seqpacket `4`、ICMP raw `10`与Rust
+  command `2`项shared regression全部通过，verified RV64 symbol为`6592`。
+- `just test net-host`通过TCP owner `20/20`、focused smoltcp TCP `178/178`及shared frame/UDP/ICMP raw
+  regression；`just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`通过并verified `6268`
+  symbols；`just test xtask`为`75/75`。kernel、socket-test与user-test format check、双C `-Werror` build、
+  `git diff --check`与`mdbook build docs`作为最终静态/文档检查。
+- 独立review依次发现blocking caller进入既有`InProgress`、pending error先被消费后的connect/rearm，以及namespace
+  binding与selected local混淆；均在同一checkpoint以production driver/owner/C oracle修正并复审。最终结果为
+  `0 Apollyon / 0 Keter / 0 Euclid / 0 Safe`并接受closure。Architecture Friction Scan未发现第二readiness/error/
+  lifecycle/binding truth、owner/private representation泄漏、family/test/architecture special path、无退出条件bridge、
+  隐藏cleanup owner或降低oracle/validation换取通过。
+
+据此CKPT 4B与Stage 4标记Closed / Syscall-Reachable Candidate / Not Cut Over。`NET-TCP-ENDPOINT-001`、
+`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001` Introduce与`SOCKET-ABI-001` Refine继续Pending；current Network、
+Socket、Opened-description、IOMUX与Epoll contracts不变，transaction保持None。LA64 userspace、self/remote-external
+TCP、CAgent、deployment probe、full network/final harness、physical hardware、`smp>1`与其它NIC/platform均Not Run。
+Stage 5保持Outline / Not Resolved / Not Authorized；Stage 4授权在此耗尽，不进入下一Stage。
 
 ### 6.7 Stage 5 Outline — Dual-architecture与architecture-capstone closure
 

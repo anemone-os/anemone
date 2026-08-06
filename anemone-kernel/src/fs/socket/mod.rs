@@ -168,7 +168,7 @@ mod kunits {
     }
 
     fn start_connect_to(socket: &Socket, peer: SocketAddress) {
-        let Err(SocketConnectError::WouldBlock(wait)) = socket.connect(peer.clone()) else {
+        let Err(SocketConnectError::Started(wait)) = socket.connect(peer.clone()) else {
             panic!("first KUnit TCP connect did not return its operation wait");
         };
         assert_eq!(
@@ -179,7 +179,7 @@ mod kunits {
         // still expose the in-progress predicate through the same source.
         assert!(matches!(
             socket.connect(peer),
-            Err(SocketConnectError::WouldBlock(_))
+            Err(SocketConnectError::InProgress(_))
         ));
     }
 
@@ -190,7 +190,7 @@ mod kunits {
     fn wait_connected_to(socket: &Socket, peer: SocketAddress) {
         for _ in 0..20_000 {
             match socket.connect(peer.clone()) {
-                Err(SocketConnectError::WouldBlock(_)) => yield_now(),
+                Err(SocketConnectError::InProgress(_)) => yield_now(),
                 Err(SocketConnectError::AlreadyConnected) => return,
                 Err(SocketConnectError::ConnectionRefused) => {
                     panic!("KUnit loopback TCP connection was reset")
@@ -305,7 +305,7 @@ mod kunits {
 
         let client_file = prepare_committed_tcp();
         let client = socket_from_file(&client_file).unwrap();
-        let Err(SocketConnectError::WouldBlock(connect_wait)) = client.connect(address) else {
+        let Err(SocketConnectError::Started(connect_wait)) = client.connect(address) else {
             panic!("KUnit active open did not return its operation wait");
         };
         let connect_observer = Arc::new(CountingObserver::new());
@@ -561,7 +561,7 @@ mod kunits {
         let option_socket = socket_from_file(&option_file).unwrap();
         assert!(matches!(
             option_socket.connect(refused.clone()),
-            Err(SocketConnectError::WouldBlock(_))
+            Err(SocketConnectError::Started(_))
         ));
         let mut consumed = false;
         for _ in 0..20_000 {
@@ -584,13 +584,21 @@ mod kunits {
             option_socket.query_option(SocketOptionQuery::PendingError),
             Ok(SocketOptionValue::PendingError(None))
         );
+        assert!(matches!(
+            option_socket.connect(refused.clone()),
+            Err(SocketConnectError::ConnectionAborted)
+        ));
+        assert!(matches!(
+            option_socket.connect(refused.clone()),
+            Err(SocketConnectError::Started(_))
+        ));
         release(&option_file);
 
         let operation_file = prepare_committed_tcp();
         let operation_socket = socket_from_file(&operation_file).unwrap();
         assert!(matches!(
-            operation_socket.connect(refused),
-            Err(SocketConnectError::WouldBlock(_))
+            operation_socket.connect(refused.clone()),
+            Err(SocketConnectError::Started(_))
         ));
         let mut operation_consumed = false;
         for _ in 0..20_000 {
@@ -615,6 +623,14 @@ mod kunits {
             operation_socket.query_option(SocketOptionQuery::PendingError),
             Ok(SocketOptionValue::PendingError(None))
         );
+        assert!(matches!(
+            operation_socket.connect(refused.clone()),
+            Err(SocketConnectError::ConnectionAborted)
+        ));
+        assert!(matches!(
+            operation_socket.connect(refused),
+            Err(SocketConnectError::Started(_))
+        ));
         release(&operation_file);
     }
 }

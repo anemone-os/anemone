@@ -1094,6 +1094,17 @@ mod tests {
             .start_tcp_connect(first, Ipv4EgressSelection::new(interface, LOCAL), peer)
             .unwrap();
         drive(&mut stack, interface, 0);
+        let first_connection = stack.protocols.tcp.connection(first).unwrap();
+        assert_eq!(first_connection.binding.address(), Ipv4Address::UNSPECIFIED);
+        assert_eq!(first_connection.local.address(), LOCAL);
+        assert_eq!(
+            stack
+                .tcp_endpoint_binding(first)
+                .unwrap()
+                .unwrap()
+                .address(),
+            LOCAL
+        );
         assert_eq!(
             stack.tcp_endpoint_binding(first).unwrap().unwrap().port(),
             40000
@@ -1214,10 +1225,10 @@ mod tests {
             TcpConnectResult::Failed(TcpPendingError::ConnectionReset)
         );
         assert_eq!(stack.consume_tcp_pending_error(client).unwrap(), None);
-        assert_eq!(
+        assert!(matches!(
             stack.tcp_connect_result(client).unwrap(),
-            TcpConnectResult::Terminal
-        );
+            TcpConnectResult::Bound(_)
+        ));
 
         let refused = stack.create_tcp_endpoint().unwrap();
         let _ = stack
@@ -1232,6 +1243,26 @@ mod tests {
             stack.consume_tcp_pending_error(refused).unwrap(),
             Some(TcpPendingError::ConnectionRefused)
         );
+        assert_eq!(
+            stack.tcp_connect_result(refused).unwrap(),
+            TcpConnectResult::Terminal
+        );
+        let TcpConnectResult::Bound(retained) = stack.tcp_connect_result(refused).unwrap() else {
+            panic!("terminal connect consumption must rearm the retained binding");
+        };
+        assert_eq!(retained.address(), Ipv4Address::UNSPECIFIED);
+
+        let alternate = Ipv4Address::new([127, 0, 0, 2]);
+        let _ = stack
+            .start_tcp_connect(
+                refused,
+                Ipv4EgressSelection::new(interface, alternate),
+                TcpPeer::new(LOCAL, 25998),
+            )
+            .unwrap();
+        let retried = stack.protocols.tcp.connection(refused).unwrap();
+        assert_eq!(retried.binding, retained);
+        assert_eq!(retried.local.address(), alternate);
     }
 
     #[test]

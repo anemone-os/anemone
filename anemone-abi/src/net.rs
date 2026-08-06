@@ -23,12 +23,15 @@ pub mod linux {
     pub const SOCK_CLOEXEC: i32 = 0x0008_0000;
     pub const IPPROTO_IP: i32 = 0;
     pub const IPPROTO_ICMP: i32 = 1;
+    pub const IPPROTO_TCP: i32 = 6;
     pub const IPPROTO_UDP: i32 = 17;
     pub const IP_TOS: i32 = 1;
     pub const IP_TTL: i32 = 2;
     pub const SOL_SOCKET: i32 = 1;
     pub const SOL_RAW: i32 = 255;
     pub const ICMP_FILTER: i32 = 1;
+    pub const TCP_NODELAY: i32 = 1;
+    pub const SO_REUSEADDR: i32 = 2;
     pub const SO_TYPE: i32 = 3;
     pub const SO_ERROR: i32 = 4;
     pub const SO_ACCEPTCONN: i32 = 30;

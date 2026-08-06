@@ -2,8 +2,8 @@ use core::mem::size_of;
 
 use anemone_abi::{
     net::linux::{
-        ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PROTOCOL,
-        SO_TYPE, SOL_RAW, SOL_SOCKET,
+        ICMP_FILTER, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR,
+        SO_PROTOCOL, SO_REUSEADDR, SO_TYPE, SOL_RAW, SOL_SOCKET, TCP_NODELAY,
     },
     syscall::SYS_GETSOCKOPT,
 };
@@ -19,11 +19,6 @@ use crate::{
     syscall::user_access::{UserReadSlice, UserWriteSlice, user_addr},
     task::files::Fd,
 };
-
-// These constants stay private until the TCP creation tuple is published.
-const SO_REUSEADDR: i32 = 2;
-const IPPROTO_TCP: i32 = 6;
-const TCP_NODELAY: i32 = 1;
 
 fn query_value(socket: &Socket, option: i32) -> Result<i32, SysError> {
     let profile = socket_abi_profile(socket.socket_type());
@@ -294,7 +289,7 @@ mod kunits {
                     address: Ipv4Address::LOOPBACK,
                     port: 1,
                 }),
-            Err(SocketConnectError::WouldBlock(_))
+            Err(SocketConnectError::Started(_))
         ));
 
         for _ in 0..20_000 {

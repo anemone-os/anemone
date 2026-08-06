@@ -43,7 +43,7 @@ impl TcpEndpoints {
         match &self.endpoint(id)?.role {
             EndpointRole::Bound(binding) => Some(*binding),
             EndpointRole::Listener(listener) => Some(listener.binding),
-            EndpointRole::Connection(connection) => Some(connection.binding),
+            EndpointRole::Connection(connection) => Some(connection.local),
             EndpointRole::Vacant | EndpointRole::Idle | EndpointRole::Reclaiming { .. } => None,
         }
     }

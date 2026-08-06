@@ -3,8 +3,8 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC,
-    SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
+    AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK,
+    MSG_TRUNC, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
 };
 
 use crate::{
@@ -15,10 +15,6 @@ use crate::{
     prelude::*,
     task::credentials::cap::Capability,
 };
-
-// TCP ABI metadata stays private to the unpublished Socket profile; the public
-// ABI constant belongs with the later creation-tuple cutover.
-const IPPROTO_TCP: i32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketAddressAbi {
@@ -212,22 +208,12 @@ static TCP_ABI_METADATA: SocketAbiProfile = SocketAbiProfile {
     no_signal_compatibility: None,
 };
 
-/// Metadata exists for every static semantic descriptor. This table does not
-/// publish creation tuples; the resolver below consults the separate admitted
-/// set so the TCP descriptor remains syscall-unreachable.
-static SOCKET_ABI_PROFILES: [&SocketAbiProfile; 5] = [
+static PUBLISHED_SOCKET_ABI_PROFILES: [&SocketAbiProfile; 5] = [
     &UDP_ABI_PROFILE,
     &ICMP_RAW_ABI_PROFILE,
     &UNIX_STREAM_ABI_PROFILE,
     &UNIX_SEQPACKET_ABI_PROFILE,
     &TCP_ABI_METADATA,
-];
-
-static PUBLISHED_SOCKET_ABI_PROFILES: [&SocketAbiProfile; 4] = [
-    &UDP_ABI_PROFILE,
-    &ICMP_RAW_ABI_PROFILE,
-    &UNIX_STREAM_ABI_PROFILE,
-    &UNIX_SEQPACKET_ABI_PROFILE,
 ];
 
 pub(super) fn resolve_socket_profile(
@@ -277,13 +263,11 @@ mod kunits {
 
     #[kunit]
     fn profile_table_round_trips_every_semantic_type_and_canonical_tuple() {
-        for profile in &SOCKET_ABI_PROFILES {
+        for profile in &PUBLISHED_SOCKET_ABI_PROFILES {
             assert!(core::ptr::eq(
                 socket_abi_profile(profile.socket_type()),
                 *profile
             ));
-        }
-        for profile in &PUBLISHED_SOCKET_ABI_PROFILES {
             assert!(core::ptr::eq(
                 resolve_socket_profile(profile.domain(), profile.socket_kind(), profile.protocol())
                     .unwrap(),
@@ -293,20 +277,24 @@ mod kunits {
     }
 
     #[kunit]
-    fn tcp_metadata_does_not_publish_a_creation_tuple() {
+    fn tcp_profile_publishes_zero_and_canonical_protocol_tuples() {
         let metadata = socket_abi_profile(SocketType::Ipv4Tcp);
         assert!(core::ptr::eq(metadata, &TCP_ABI_METADATA));
         assert!(core::ptr::eq(metadata.ops(), &TCP_SOCKET_OPS));
         assert_eq!(metadata.send_flags(), MSG_DONTWAIT | MSG_NOSIGNAL);
         assert_eq!(metadata.receive_flags(), MSG_DONTWAIT | MSG_PEEK);
         assert_eq!(metadata.message_io(), SocketMessageIo::ByteStream);
-        assert!(matches!(
-            resolve_socket_profile(AF_INET, SOCK_STREAM, 0),
-            Err(SysError::SocketTypeNotSupported)
+        assert!(core::ptr::eq(
+            resolve_socket_profile(AF_INET, SOCK_STREAM, 0).unwrap(),
+            metadata
+        ));
+        assert!(core::ptr::eq(
+            resolve_socket_profile(AF_INET, SOCK_STREAM, IPPROTO_TCP).unwrap(),
+            metadata
         ));
         assert!(matches!(
-            resolve_socket_profile(AF_INET, SOCK_STREAM, IPPROTO_TCP),
-            Err(SysError::SocketTypeNotSupported)
+            resolve_socket_profile(AF_INET, SOCK_STREAM, IPPROTO_TCP + 1),
+            Err(SysError::ProtocolNotSupported)
         ));
     }
 

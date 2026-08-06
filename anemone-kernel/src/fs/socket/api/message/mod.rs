@@ -109,12 +109,12 @@ mod kunits {
             let client_socket = socket_from_file(&client).unwrap();
             assert!(matches!(
                 client_socket.connect(address.clone()),
-                Err(SocketConnectError::WouldBlock(_))
+                Err(SocketConnectError::Started(_))
             ));
             let mut connected = false;
             for _ in 0..20_000 {
                 match client_socket.connect(address.clone()) {
-                    Err(SocketConnectError::WouldBlock(_)) => yield_now(),
+                    Err(SocketConnectError::InProgress(_)) => yield_now(),
                     Err(SocketConnectError::AlreadyConnected) => {
                         connected = true;
                         break;

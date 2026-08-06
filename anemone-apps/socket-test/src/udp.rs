@@ -11,7 +11,7 @@ use anemone_rs::{
             select::FdSet,
             statx as linux_statx,
         },
-        net::linux::{AF_INET, SOCK_DGRAM, SockAddrIn, socklen_t},
+        net::linux::{AF_INET, SOCK_DGRAM, SOCK_SEQPACKET, SockAddrIn, socklen_t},
         time::linux::TimeSpec,
     },
     os::linux::{
@@ -64,7 +64,10 @@ fn wait_child(pid: u32) -> Result<(), Errno> {
 
 fn test_create_errno_and_flags() -> Result<(), Errno> {
     expect_errno(unsafe { socket_raw(0, SOCK_DGRAM, 0) }, EAFNOSUPPORT)?;
-    expect_errno(unsafe { socket_raw(AF_INET, 1, 0) }, ESOCKTNOSUPPORT)?;
+    expect_errno(
+        unsafe { socket_raw(AF_INET, SOCK_SEQPACKET, 0) },
+        ESOCKTNOSUPPORT,
+    )?;
     expect_errno(
         unsafe { socket_raw(AF_INET, SOCK_DGRAM, 6) },
         EPROTONOSUPPORT,

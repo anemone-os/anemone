@@ -123,7 +123,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
 - [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Accepted R0 / Stage 1 Closed / Stage 2 Closed /
-  Stage 3 Closed / Stage 4 In Progress / CKPT 4A Closed / Not Cut Over / TCP Not Effective；目标为
+  Stage 3 Closed / Stage 4 Closed / Syscall-Reachable Candidate / Not Cut Over / TCP Not Effective；目标为
   initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
   TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
   current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
@@ -137,13 +137,12 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   已完成仍不可达的Socket/ABI completion与同owner TCP family目录化；RV64/LA64 release build、RV64 KUnit `459/459`、
   既有Socket consumer回归与独立review通过。CKPT 4A随后以Stack owner facts、recheck-only invalidation、weak reverse
   route和shared production source闭合TCP readiness/connect/accept wait与lifecycle；host TCP owner `20/20`、focused
-  smoltcp TCP `178/178`、RV64 KUnit `465/465`、RV64/LA64 release build与独立复审通过。TCP creation tuple、handler、
-  fd/runtime仍未发布，published resolver继续拒绝TCP。三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending，
-  current contracts不变，transaction None；Stage 4 In Progress / CKPT 4A Closed。Route Correction把首次normal
-  resolver activation与真实userspace
-  验证从Stage 5提前到Stage 4；Stage 4已解析为分别授权、分别review的CKPT 4A internal owner predicate/source/wait
-  closure与CKPT 4B normal syscall activation/RV64双libc vertical slice；CKPT 4B当前Not Active / Not Authorized。
-  Stage 5继续保持Outline / Not Resolved / Not Authorized，并拥有剩余双架构/external/capstone与最终cutover。
+  smoltcp TCP `178/178`、RV64 KUnit `465/465`、RV64/LA64 release build与独立复审通过。CKPT 4B通过唯一normal
+  resolver发布完整TCP creation tuple，闭合connect errno、`SO_ERROR` single-consumer/rearm与binding/local分离；
+  exact-source RV64 KUnit `466/466`、双libc TCP oracle、socket LTP `8/8`、shared regression、LA64 release build与
+  最终独立review通过。三项TCP Introduce与`SOCKET-ABI-001` Refine继续Pending，current contracts不变，transaction
+  None。Stage 5继续保持Outline / Not Resolved / Not Authorized，并拥有剩余双架构userspace、external/capstone与
+  最终cutover；本closure不进入Stage 5。
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；Stage 1只更新上述两项Network current contract，
   register没有新增当前问题。
