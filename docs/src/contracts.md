@@ -10,7 +10,7 @@
 
 - `docs/src/contracts/` 下的条目只表达已经生效的共享规则。对已经登记的 contract ID，它是当前语义的唯一文档权威。
 - RFC `index.md` / `invariants.md` 表达 accepted target、相对当前契约的 delta，以及只服务该方案或迁移的 RFC-local proof obligations。它们不能在 cutover 前把目标规则写成当前事实。
-- 执行证据记录实际 review、验证和 contract cutover，不重新定义规则。单次实现使用 change record/RFC closure 与 Git/PR 即可；只有长期、多 checkpoint 或多个 cutover 时才需要 transaction。
+- 执行证据记录实际 review、验证和 contract cutover，不重新定义规则。单次实现使用 change record/RFC closure 与 Git/PR 即可；只有长期 RFC、多 checkpoint 或多个 cutover 时才需要 transaction。小迭代内部至多两个 execution checkpoint 仍使用同一 change record，不因此创建 transaction。
 - Git 保存所有物理文本历史。契约文档不建立 `v1` / `v2` 副本，也不维护第二套修订号；语义变化由来源 RFC/change record 和生效证据解释。
 - register / current limitations 继续保存当前开放问题和已接受缺口，不承担 contract 或迁移计划。
 
@@ -87,7 +87,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
 
 `Introduce` 表示 RFC 新增此前不存在的 effective contract ID。该 ID 在 cutover 前只存在于 RFC target，current rule 为 `None（尚未生效）`；达到 cutover gate 后才在契约层创建 Active 条目。若规则已经由 live code 或 Closed RFC 生效、只是尚未迁入契约层，应先提取最小 baseline，再按真实 delta 分类，不能使用 `Introduce` 把既有行为伪装成新增语义。
 
-严格的 contract-bearing small change 可以使用同一组变化分类，但只能在 target、owner、handoff、failure、cleanup、Implementation Boundary 与验证均已解析，且实现和 contract 只有一个原子 cutover 时采用。change record 是 local target 与 cutover 证据入口，不保存另一份 effective 正文；`docs/src/contracts/` 在 checkpoint 完成后立即成为唯一 current authority。若需要多阶段、probe、transitional contract、target renegotiation 或未关闭的高等级 finding，必须改走 RFC；transaction 仍按需创建。
+严格的 contract-bearing small change 可以使用同一组变化分类，但只能在 target、owner、handoff、failure、cleanup、Implementation Boundary 与验证均已解析，且实现和 contract 只有一个原子 cutover 时采用。默认在一个 closure checkpoint 中完成；如使用至多两个 execution checkpoint，CKPT 1 必须对受保护 visible semantics 与 current contract 中性，CKPT 2 承担整个小迭代唯一的原子 cutover。change record 是 local target 与 cutover 证据入口，不保存另一份 effective 正文；CKPT 2 完成后，`docs/src/contracts/` 立即成为唯一 current authority。若需要多阶段、probe、transitional contract、跨 checkpoint 重新解析语义边界、多个独立 cutover、target renegotiation 或未关闭的高等级 finding，必须改走 RFC；transaction 仍按需创建。
 
 生命周期如下：
 
@@ -144,6 +144,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Front、ABI 与 wait](./contracts/socket/front-abi-wait.md)
   - [Unix state、stream、address 与 lifecycle](./contracts/socket/unix-stream-lifecycle.md)
   - [Unix pathname namespace](./contracts/socket/unix-namespace.md)
+  - [Unix seqpacket](./contracts/socket/unix-seqpacket.md)
 - [Build Configuration 当前契约](./contracts/configuration/index.md)
   - [System target 与 resolved selection](./contracts/configuration/system-target.md)
 - [System Power 当前契约](./contracts/power/index.md)

@@ -3,8 +3,9 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     udp::{
-        UdpBindError, UdpBindRequest, UdpCreateError, UdpEndpointId, UdpEndpointInvalidation,
-        UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpQueryError, UdpRetireError,
+        UdpBindError, UdpBindRequest, UdpConnectError, UdpCreateError, UdpEndpointId,
+        UdpEndpointInvalidation, UdpEndpointLimits, UdpLocalBinding, UdpNamespacePolicy, UdpPeer,
+        UdpQueryError, UdpRetireError,
     },
 };
 use smoltcp::iface::SocketSet;
@@ -25,6 +26,17 @@ pub(crate) struct UdpEndpoints {
     /// Bounded, coalesced recheck hints. Endpoint facts remain authoritative
     /// in `endpoints`; this queue carries no readiness payload.
     pending_invalidations: Vec<UdpEndpointInvalidation>,
+}
+
+pub(crate) struct ConnectPlan {
+    binding: Option<UdpLocalBinding>,
+    peer: UdpPeer,
+}
+
+impl ConnectPlan {
+    pub(crate) fn binding(&self) -> Option<UdpLocalBinding> {
+        self.binding
+    }
 }
 
 impl UdpEndpoints {
@@ -92,6 +104,79 @@ impl UdpEndpoints {
             .expect("prepared UDP endpoint disappeared before binding commit")
             .commit_binding(binding);
         self.invalidate(id);
+    }
+
+    pub(crate) fn prepare_connect(
+        &mut self,
+        id: UdpEndpointId,
+        local_address: anemone_net_api::Ipv4Address,
+        peer: UdpPeer,
+    ) -> Result<ConnectPlan, UdpConnectError> {
+        if peer.address().is_unspecified() || peer.port() == 0 {
+            return Err(UdpConnectError::InvalidPeer);
+        }
+        let existing_binding = self
+            .endpoint(id)
+            .ok_or(UdpConnectError::UnknownEndpoint)?
+            .binding;
+        let binding = match existing_binding {
+            Some(_) => None,
+            None => Some(UdpLocalBinding::from_owner_commit(
+                local_address,
+                self.allocate_ephemeral(local_address)
+                    .map_err(|error| match error {
+                        UdpBindError::EphemeralPortsExhausted => {
+                            UdpConnectError::EphemeralPortsExhausted
+                        },
+                        _ => unreachable!("ephemeral allocation only reports exhaustion"),
+                    })?,
+            )),
+        };
+        Ok(ConnectPlan { binding, peer })
+    }
+
+    pub(crate) fn commit_connect(&mut self, id: UdpEndpointId, plan: ConnectPlan) {
+        let endpoint = self
+            .endpoint_mut(id)
+            .expect("prepared UDP endpoint disappeared before connect commit");
+        match plan.binding {
+            Some(binding) => endpoint.commit_binding(binding),
+            None => assert!(
+                endpoint.binding.is_some(),
+                "bound connect plan lost its committed binding"
+            ),
+        }
+        endpoint.commit_peer(plan.peer);
+        self.invalidate(id);
+    }
+
+    pub(crate) fn peer(&self, id: UdpEndpointId) -> Result<Option<UdpPeer>, UdpQueryError> {
+        self.endpoint(id)
+            .map(|endpoint| endpoint.peer)
+            .ok_or(UdpQueryError::UnknownEndpoint)
+    }
+
+    pub(crate) fn resolve_destination(
+        &self,
+        id: UdpEndpointId,
+        explicit: Option<UdpPeer>,
+    ) -> Result<UdpPeer, anemone_net_api::udp::UdpSendError> {
+        let endpoint = self
+            .endpoint(id)
+            .ok_or(anemone_net_api::udp::UdpSendError::UnknownEndpoint)?;
+        explicit
+            .or(endpoint.peer)
+            .ok_or(anemone_net_api::udp::UdpSendError::DestinationRequired)
+    }
+
+    pub(crate) fn disconnect(&mut self, id: UdpEndpointId) -> Result<(), UdpQueryError> {
+        let endpoint = self
+            .endpoint_mut(id)
+            .ok_or(UdpQueryError::UnknownEndpoint)?;
+        if endpoint.peer.take().is_some() {
+            self.invalidate(id);
+        }
+        Ok(())
     }
 
     pub(crate) fn binding(

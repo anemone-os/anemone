@@ -11,11 +11,14 @@ use super::{
         SocketWait,
     },
     endpoint::{
-        BindingPublication, EndpointAssociation, EndpointSide, UnixConnection, UnixEndpointCore,
-        UnixPollRoute, private_from_core, replacement_poll_routes,
+        BindingPublication, ConnectionAdmission, EndpointAssociation, EndpointSide, UnixConnection,
+        UnixEndpointCore, UnixPollRoute, private_from_core, replacement_poll_routes,
     },
-    namespace::{LiveBinding, resolve_live_binding},
+    namespace::{BindingAdmissionError, resolve_live_binding},
 };
+
+#[cfg(feature = "kunit")]
+use super::endpoint::UnixProfile;
 
 static_assert!(
     UNIX_LISTENER_MAX_BACKLOG < usize::MAX,
@@ -157,7 +160,7 @@ pub(super) struct ListenerClose {
 #[derive(Debug, Opaque)]
 struct ConnectWaitSource {
     client: Arc<UnixEndpointCore>,
-    listener_endpoint: Arc<UnixEndpointCore>,
+    listener_admission: ConnectionAdmission,
     listener: Arc<UnixListener>,
 }
 
@@ -178,7 +181,9 @@ fn connect_wait_ready(source: &ConnectWaitSource) -> bool {
     if !matches!(
         source.client.state.lock().association,
         EndpointAssociation::Unconnected
-    ) || !listener_is_current(&source.listener_endpoint, &source.listener)
+    ) || !source
+        .listener_admission
+        .listener_is_current(&source.listener)
     {
         return true;
     }
@@ -223,7 +228,10 @@ fn poll_connect_wait(
             }
             drop(client);
 
-            if !listener_is_current(&source.listener_endpoint, &source.listener) {
+            if !source
+                .listener_admission
+                .listener_is_current(&source.listener)
+            {
                 return (
                     None,
                     None,
@@ -389,27 +397,6 @@ pub(super) fn listen(
     Ok(())
 }
 
-fn current_listener(
-    endpoint: &UnixEndpointCore,
-    binding: &LiveBinding,
-) -> Result<Arc<UnixListener>, SocketConnectError> {
-    let state = endpoint.state.lock();
-    let binding_matches = matches!(
-        &state.binding,
-        BindingPublication::Live(registration) if binding.matches_registration(registration)
-    );
-    if !binding_matches {
-        return Err(SocketConnectError::ConnectionRefused);
-    }
-    match &state.association {
-        EndpointAssociation::Listening(listener) => Ok(listener.clone()),
-        EndpointAssociation::Retired => Err(SocketConnectError::ConnectionRefused),
-        EndpointAssociation::Unconnected | EndpointAssociation::Connected { .. } => {
-            Err(SocketConnectError::ConnectionRefused)
-        },
-    }
-}
-
 pub(super) fn connect(
     client: &Arc<UnixEndpointCore>,
     address: SocketAddress,
@@ -421,18 +408,25 @@ pub(super) fn connect(
         SysError::ConnectionRefused => SocketConnectError::ConnectionRefused,
         error => SocketConnectError::Operation(error),
     })?;
-    let listener_endpoint = binding
-        .endpoint()
-        .ok_or(SocketConnectError::ConnectionRefused)?;
+    let admission = binding
+        .admission(client.profile)
+        .map_err(|error| match error {
+            BindingAdmissionError::Expired => SocketConnectError::ConnectionRefused,
+            BindingAdmissionError::TypeMismatch => SocketConnectError::ProtocolTypeMismatch,
+        })?;
 
     // Prepare every object before the commit gate. The accepted endpoint
     // shares only the listener's immutable name capability, never registration.
-    let accepted = UnixEndpointCore::new_with_name(listener_endpoint.name.clone());
-    let connection = UnixConnection::new([client.name.clone(), accepted.name.clone()]);
+    let accepted =
+        UnixEndpointCore::new_with_profile_and_name(client.profile, admission.local_name());
+    let connection =
+        UnixConnection::new(client.profile, [client.name.clone(), accepted.name.clone()]);
     let empty_client_routes = Arc::new(Vec::new());
 
     let result = with_admission_commit(|| {
-        let listener = current_listener(&listener_endpoint, &binding)?;
+        let listener = admission
+            .current_listener()
+            .ok_or(SocketConnectError::ConnectionRefused)?;
         {
             let state = client.state.lock();
             match state.association {
@@ -476,7 +470,7 @@ pub(super) fn connect(
         Ok(ConnectCommit::Full(listener)) => Err(SocketConnectError::WouldBlock(SocketWait::new(
             AnyOpaque::new(ConnectWaitSource {
                 client: client.clone(),
-                listener_endpoint,
+                listener_admission: admission,
                 listener,
             }),
             poll_connect_wait,
@@ -535,7 +529,12 @@ enum AcceptCommit {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::fs::iomux::PollObserver;
+    use crate::fs::{
+        iomux::PollObserver,
+        socket::{UNIX_STREAM_SOCKET_OPS, prepare_socket},
+    };
+
+    use super::super::namespace::{lookup_binding, publish_binding};
 
     #[derive(Default)]
     struct CountingObserver(AtomicUsize);
@@ -565,15 +564,24 @@ mod kunits {
         endpoint
     }
 
+    fn stream_admission(endpoint: &Arc<UnixEndpointCore>) -> ConnectionAdmission {
+        let (file, creation) = prepare_socket(&UNIX_STREAM_SOCKET_OPS).unwrap();
+        creation.commit();
+        let inode = file.inode().clone();
+        let registration = publish_binding(inode.clone(), endpoint);
+        endpoint.state.lock().binding = BindingPublication::Live(registration);
+        lookup_binding(&inode).unwrap().stream_admission().unwrap()
+    }
+
     fn register_connect_wait(
         client: &Arc<UnixEndpointCore>,
-        listener_endpoint: &Arc<UnixEndpointCore>,
+        listener_admission: &ConnectionAdmission,
         listener: &Arc<UnixListener>,
         route: &PollRoute,
     ) -> (AnyOpaque, PollRegisterResult) {
         let source = AnyOpaque::new(ConnectWaitSource {
             client: client.clone(),
-            listener_endpoint: listener_endpoint.clone(),
+            listener_admission: listener_admission.clone(),
             listener: listener.clone(),
         });
         let result = poll_connect_wait(
@@ -684,18 +692,22 @@ mod kunits {
             .try_push(UnixEndpointCore::new_unconnected())
             .unwrap();
         let listener_endpoint = listening_endpoint(&listener);
+        let listener_admission = stream_admission(&listener_endpoint);
         let client = UnixEndpointCore::new_unconnected();
         let observer = Arc::new(CountingObserver::default());
         let route = route(&observer);
         let (source, registered) =
-            register_connect_wait(&client, &listener_endpoint, &listener, &route);
+            register_connect_wait(&client, &listener_admission, &listener, &route);
         assert_eq!(
             registered,
             PollRegisterResult::Subscribed(PollEvent::empty())
         );
 
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new([client.name.clone(), peer.name.clone()]);
+        let connection = UnixConnection::new(
+            UnixProfile::Stream,
+            [client.name.clone(), peer.name.clone()],
+        );
         let routes =
             client.commit_connection(connection, EndpointSide::First, Arc::new(Vec::new()));
         notify_admission_routes(&routes, "KUnit client connection commit");
@@ -705,6 +717,7 @@ mod kunits {
             connect_wait_snapshot(&source),
             PollRegisterResult::Ready(PollEvent::WRITABLE)
         );
+        super::super::endpoint::retire_endpoint_core(&listener_endpoint);
     }
 
     #[kunit]
@@ -714,11 +727,12 @@ mod kunits {
             .try_push(UnixEndpointCore::new_unconnected())
             .unwrap();
         let listener_endpoint = listening_endpoint(&listener);
+        let listener_admission = stream_admission(&listener_endpoint);
         let client = UnixEndpointCore::new_unconnected();
         let capacity_observer = Arc::new(CountingObserver::default());
         let capacity_route = route(&capacity_observer);
         let (capacity_source, registered) =
-            register_connect_wait(&client, &listener_endpoint, &listener, &capacity_route);
+            register_connect_wait(&client, &listener_admission, &listener, &capacity_route);
         assert_eq!(
             registered,
             PollRegisterResult::Subscribed(PollEvent::empty())
@@ -738,7 +752,7 @@ mod kunits {
         let close_observer = Arc::new(CountingObserver::default());
         let close_route = route(&close_observer);
         let (close_source, registered) =
-            register_connect_wait(&client, &listener_endpoint, &listener, &close_route);
+            register_connect_wait(&client, &listener_admission, &listener, &close_route);
         assert_eq!(
             registered,
             PollRegisterResult::Subscribed(PollEvent::empty())
@@ -852,19 +866,24 @@ mod kunits {
     fn terminal_register_returns_ready_without_claiming_subscription() {
         let listener = UnixListener::new(0);
         let listener_endpoint = listening_endpoint(&listener);
+        let listener_admission = stream_admission(&listener_endpoint);
         let client = UnixEndpointCore::new_unconnected();
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new([client.name.clone(), peer.name.clone()]);
+        let connection = UnixConnection::new(
+            UnixProfile::Stream,
+            [client.name.clone(), peer.name.clone()],
+        );
         client.commit_connection(connection, EndpointSide::First, Arc::new(Vec::new()));
         let connect_observer = Arc::new(CountingObserver::default());
         let connect_route = route(&connect_observer);
         let (_, connect_result) =
-            register_connect_wait(&client, &listener_endpoint, &listener, &connect_route);
+            register_connect_wait(&client, &listener_admission, &listener, &connect_route);
         assert_eq!(
             connect_result,
             PollRegisterResult::Ready(PollEvent::WRITABLE)
         );
         assert_eq!(connect_observer.notifications(), 0);
+        super::super::endpoint::retire_endpoint_core(&listener_endpoint);
 
         let accept_listener = UnixListener::new(0);
         let accept_endpoint = listening_endpoint(&accept_listener);

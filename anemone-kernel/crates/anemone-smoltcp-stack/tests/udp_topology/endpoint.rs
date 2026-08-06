@@ -309,3 +309,143 @@ fn endpoint_facts_and_invalidations_cover_capacity_receive_and_retire() {
         Err(UdpQueryError::UnknownEndpoint)
     );
 }
+
+#[test]
+fn connect_transaction_reconnect_disconnect_and_stale_identity_are_atomic() {
+    let mut stack = host_stack(16, 50100, 50101);
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 2, 128, Instant::ZERO);
+    let endpoint = create_unbound(&mut stack);
+    let first_peer = [127, 0, 0, 2];
+    let second_peer = [127, 0, 0, 3];
+
+    stack
+        .connect_udp_endpoint_for_host_validation(
+            endpoint,
+            selection(local, LOCAL_IP),
+            first_peer,
+            53000,
+        )
+        .unwrap();
+    let binding = stack
+        .udp_binding_for_host_validation(endpoint)
+        .unwrap()
+        .expect("unbound connect must atomically commit an implicit binding");
+    assert_eq!(binding.address().octets(), LOCAL_IP);
+    assert_eq!(binding.port(), 50100);
+    assert_eq!(
+        stack.udp_peer_for_host_validation(endpoint).unwrap(),
+        Some(anemone_smoltcp_stack::HostPeer {
+            address: first_peer,
+            port: 53000,
+        })
+    );
+
+    stack
+        .connect_udp_endpoint_for_host_validation(
+            endpoint,
+            selection(local, LOCAL_IP),
+            first_peer,
+            53000,
+        )
+        .unwrap();
+    stack
+        .connect_udp_endpoint_for_host_validation(
+            endpoint,
+            selection(local, LOCAL_IP),
+            second_peer,
+            53001,
+        )
+        .unwrap();
+    assert_eq!(
+        stack.udp_binding_for_host_validation(endpoint).unwrap(),
+        Some(binding)
+    );
+    assert_eq!(
+        stack.udp_peer_for_host_validation(endpoint).unwrap(),
+        Some(anemone_smoltcp_stack::HostPeer {
+            address: second_peer,
+            port: 53001,
+        })
+    );
+
+    for (selection, peer, port, expected) in [
+        (
+            selection(local, LOCAL_IP),
+            second_peer,
+            0,
+            UdpConnectError::InvalidPeer,
+        ),
+        (
+            selection(InterfaceId::from_index(99), LOCAL_IP),
+            first_peer,
+            53002,
+            UdpConnectError::UnknownInterface,
+        ),
+        (
+            selection(local, [10, 0, 0, 9]),
+            first_peer,
+            53002,
+            UdpConnectError::UnsupportedSource,
+        ),
+    ] {
+        assert_eq!(
+            stack.connect_udp_endpoint_for_host_validation(endpoint, selection, peer, port),
+            Err(expected)
+        );
+        assert_eq!(
+            stack.udp_binding_for_host_validation(endpoint).unwrap(),
+            Some(binding)
+        );
+        assert_eq!(
+            stack.udp_peer_for_host_validation(endpoint).unwrap(),
+            Some(anemone_smoltcp_stack::HostPeer {
+                address: second_peer,
+                port: 53001,
+            })
+        );
+    }
+
+    stack
+        .disconnect_udp_endpoint_for_host_validation(endpoint)
+        .unwrap();
+    stack
+        .disconnect_udp_endpoint_for_host_validation(endpoint)
+        .unwrap();
+    assert_eq!(stack.udp_peer_for_host_validation(endpoint).unwrap(), None);
+    assert_eq!(
+        stack.udp_binding_for_host_validation(endpoint).unwrap(),
+        Some(binding)
+    );
+
+    let occupied = create_unbound(&mut stack);
+    bind_for_host(&mut stack, occupied, LOCAL_IP, 50101).unwrap();
+    let exhausted = create_unbound(&mut stack);
+    assert_eq!(
+        stack.connect_udp_endpoint_for_host_validation(
+            exhausted,
+            selection(local, LOCAL_IP),
+            first_peer,
+            53000,
+        ),
+        Err(UdpConnectError::EphemeralPortsExhausted)
+    );
+    assert_eq!(
+        stack.udp_binding_for_host_validation(exhausted).unwrap(),
+        None
+    );
+    assert_eq!(stack.udp_peer_for_host_validation(exhausted).unwrap(), None);
+
+    stack
+        .retire_udp_endpoint_for_host_validation(endpoint)
+        .unwrap();
+    let replacement = create_unbound(&mut stack);
+    assert_ne!(replacement, endpoint);
+    assert_eq!(
+        stack.udp_peer_for_host_validation(endpoint),
+        Err(UdpQueryError::UnknownEndpoint)
+    );
+    assert_eq!(
+        stack.udp_peer_for_host_validation(replacement).unwrap(),
+        None
+    );
+}

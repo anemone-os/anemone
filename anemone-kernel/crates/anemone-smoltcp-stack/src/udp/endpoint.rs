@@ -2,7 +2,7 @@ use alloc::{collections::VecDeque, vec, vec::Vec};
 
 use anemone_net_api::{
     InterfaceId,
-    udp::{UdpEndpointFacts, UdpEndpointId, UdpEndpointLimits, UdpLocalBinding},
+    udp::{UdpEndpointFacts, UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeer},
 };
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
@@ -23,6 +23,9 @@ pub(crate) struct Endpoint {
     /// Sole committed binding truth. Per-interface smoltcp bindings are
     /// private engine projections and never decide conflicts or allocation.
     pub(super) binding: Option<UdpLocalBinding>,
+    /// Sole persistent peer truth. Socket/front consumers only query it through
+    /// the Stack capability; engine metadata remains an ingress observation.
+    pub(super) peer: Option<UdpPeer>,
     engines: Vec<EngineResource>,
     pub(super) tx: TxPhase,
     pub(super) received: VecDeque<ReceivedDatagram>,
@@ -37,6 +40,7 @@ impl Endpoint {
         Self {
             id,
             binding: None,
+            peer: None,
             engines: Vec::new(),
             tx: TxPhase::Idle,
             received: VecDeque::with_capacity(limits.rx_datagram_capacity()),
@@ -96,6 +100,10 @@ impl Endpoint {
             "UDP endpoint binding committed twice"
         );
         self.binding = Some(binding);
+    }
+
+    pub(super) fn commit_peer(&mut self, peer: UdpPeer) {
+        self.peer = Some(peer);
     }
 
     pub(super) fn remove_engine(

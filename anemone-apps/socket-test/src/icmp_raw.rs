@@ -236,6 +236,13 @@ fn empty_receive(fd: Fd) -> Result<(), Errno> {
     expect_errno(recvfrom_ipv4(fd, &mut byte, MessageFlags::DONTWAIT), EAGAIN)
 }
 
+fn isolate_echo_request_receive(fd: Fd) -> Result<(), Errno> {
+    // A looped-back Echo Request is delivered to raw consumers and then
+    // answered by ordinary ICMP. These request-focused cases exclude that
+    // second, legitimate Echo Reply through the Linux ICMP_FILTER ABI.
+    set_option(fd, SOL_RAW, ICMP_FILTER, 1 << ECHO_REPLY)
+}
+
 fn test_creation_permission_flags_and_rollback() -> Result<(), Errno> {
     expect_errno(unsafe { socket_raw(AF_INET, SOCK_RAW, 0) }, EPROTONOSUPPORT)?;
     expect_errno(
@@ -573,6 +580,7 @@ fn test_header_policy_destination_override_and_io() -> Result<(), Errno> {
 fn test_receive_peek_trunc_zero_short_and_fault() -> Result<(), Errno> {
     let receiver = icmp_raw_socket(SocketFlags::NONBLOCK)?;
     bind_ipv4(receiver, LOOPBACK)?;
+    isolate_echo_request_receive(receiver)?;
     let sender = icmp_raw_socket(SocketFlags::NONBLOCK)?;
 
     ensure(sendto_ipv4(sender, &[], MessageFlags::empty(), LOOPBACK)? == 0)?;
@@ -707,6 +715,7 @@ fn fdset_contains(set: &FdSet, fd: Fd) -> bool {
 fn test_nonblocking_poll_select_epoll() -> Result<(), Errno> {
     let fd = icmp_raw_socket(SocketFlags::NONBLOCK)?;
     bind_ipv4(fd, LOOPBACK)?;
+    isolate_echo_request_receive(fd)?;
     let mut pollfd = [PollFd {
         fd: fd as i32,
         events: POLLIN | POLLOUT,
@@ -774,6 +783,7 @@ fn test_nonblocking_poll_select_epoll() -> Result<(), Errno> {
 fn test_blocking_receive_and_message_override() -> Result<(), Errno> {
     let receiver = icmp_raw_socket(SocketFlags::empty())?;
     bind_ipv4(receiver, LOOPBACK)?;
+    isolate_echo_request_receive(receiver)?;
     let sender = icmp_raw_socket(SocketFlags::NONBLOCK)?;
     send_echo(sender, LOOPBACK, 0xa404, 1)?;
     let mut packet = [0u8; 256];

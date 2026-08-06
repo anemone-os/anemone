@@ -13,7 +13,7 @@ docs/src/rfcs/<short-slug>/
 
 `index.md` 保存 accepted target、non-goals、owner/handoff/failure/cleanup、ABI/visible semantics、实际 contract delta、Implementation Boundary、acceptance、validation 和 closure。
 
-只有出现真实需要时才增加 `invariants.md`、`implementation.md`、`tracking-issues.md` 或 `backgrounds/`。transaction 也不是 RFC 实现的默认产物；只有长期、多 checkpoint、多 cutover、probe/renegotiation 证据需要独立执行历史时才创建。具体形状见 [RFC 模板](./rfc-template.md)。
+只有出现真实需要时才增加 `invariants.md`、`implementation.md`、`tracking-issues.md` 或 `backgrounds/`。positioning/backgrounds 不是 RFC 前置步骤；target 已经闭合时直接编写 `index.md`。transaction 也不是 RFC 实现的默认产物；只有长期 RFC、多 checkpoint、多 cutover、probe/renegotiation 证据需要独立执行历史时才创建。具体形状见 [RFC 模板](./rfc-template.md)。
 
 ## Target、current contract 与 Git
 
@@ -131,6 +131,11 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `NET-UDP-FINAL-CUTOVER`已原子使四项[UDP Socket contract](./contracts/net/udp-socket.md) Active；hardware、
   `smp>1`、full network LTP与final harness保持Not Run。执行证据见
   [transaction](./devlog/transactions/2026-07-29-net-udp.md)。
+- [RFC-20260804-udp-socket-extension](./rfcs/udp-socket-extension/index.md)：IPv4 UDP connected、
+  file/message/vector I/O、flag边界与Endpoint owner/lifecycle；R1与Stage 1/2均已关闭，
+  `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
+  未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
+  Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入

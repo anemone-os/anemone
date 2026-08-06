@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 
 use crate::{
     fs::socket::{
-        SocketDatagramSendOperation, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
-        SocketType, retry_socket_send, socket_from_file,
+        SocketDatagramSendOperation, SocketIoOps, SocketSendPayload, SocketSendRequest,
+        SocketStreamDestination, SocketType, retry_socket_send, socket_from_file,
     },
     prelude::*,
     syscall::user_access::user_addr,
@@ -12,7 +12,7 @@ use crate::{
 use anemone_abi::syscall::SYS_SENDTO;
 
 use super::abi::{
-    map_send_error, read_payload, read_sockaddr_in, validate_raw_socket_address,
+    map_send_error, read_payload, read_socket_address, validate_raw_socket_address,
     validate_send_message_flags,
 };
 
@@ -47,7 +47,10 @@ fn sys_sendto(
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
-    if socket.socket_type() == SocketType::UnixStream {
+    if matches!(
+        socket.socket_type(),
+        SocketType::UnixStream | SocketType::UnixSeqpacket
+    ) {
         let destination = if addr == 0 || addrlen == 0 {
             SocketStreamDestination::Absent
         } else {
@@ -62,17 +65,32 @@ fn sys_sendto(
         let segments = segment.as_ref().map_or(&[][..], core::slice::from_ref);
         let uspace = task.clone_uspace_handle();
         let mut source = UserBufferSource::new(&uspace, segments);
+        let operation_wait = match socket.io() {
+            SocketIoOps::ByteStream { .. } => None,
+            SocketIoOps::Seqpacket { .. } => Some(socket.seqpacket_send_wait(source.remaining())),
+            SocketIoOps::Datagram { .. } => {
+                unreachable!("connection-oriented Socket type used a non-stream I/O bundle")
+            },
+        };
 
         return retry_socket_send(
             "sys_sendto",
             &task,
             desc.vfs_file(),
+            operation_wait.as_ref(),
             nonblocking,
             !message_flags.no_signal,
             || {
-                socket.send(SocketSendRequest::Stream {
-                    source: &mut source,
-                    destination,
+                socket.send(match socket.socket_type() {
+                    SocketType::UnixStream => SocketSendRequest::Stream {
+                        source: &mut source,
+                        destination,
+                    },
+                    SocketType::UnixSeqpacket => SocketSendRequest::Seqpacket {
+                        source: &mut source,
+                        destination,
+                    },
+                    _ => unreachable!("Unix send branch selected a non-Unix socket"),
                 })
             },
             map_send_error,
@@ -83,7 +101,7 @@ fn sys_sendto(
     let destination = if addr == 0 {
         None
     } else {
-        Some(read_sockaddr_in(addr, addrlen)?)
+        Some(read_socket_address(socket.socket_type(), addr, addrlen)?)
     };
     let mut payload = SendPayload {
         address: buf,
@@ -98,6 +116,7 @@ fn sys_sendto(
         "sys_sendto",
         &task,
         desc.vfs_file(),
+        None,
         nonblocking,
         false,
         || {
