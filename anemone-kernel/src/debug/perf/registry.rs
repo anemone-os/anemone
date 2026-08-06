@@ -21,7 +21,7 @@ pub(crate) enum MetricUnit {
 #[derive(Debug)]
 enum MetricStorage {
     Counter(&'static PerCpu<AtomicU64>),
-    Histogram(&'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>),
+    Histogram(&'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>),
 }
 
 #[derive(Debug)]
@@ -50,7 +50,7 @@ impl MetricRegistration {
     pub(crate) const fn histogram(
         name: &'static str,
         unit: MetricUnit,
-        storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>,
+        storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>,
     ) -> Self {
         Self {
             name,
@@ -75,7 +75,7 @@ impl MetricRegistration {
     pub(crate) fn value_count(&self) -> usize {
         match self.storage {
             MetricStorage::Counter(_) => 1,
-            MetricStorage::Histogram(_) => PERF_HISTOGRAM_BUCKET_COUNT,
+            MetricStorage::Histogram(_) => PERF_HISTOGRAM_VALUE_COUNT,
         }
     }
 
@@ -96,9 +96,9 @@ impl MetricRegistration {
                     values[0] = values[0].wrapping_add(value);
                 },
                 MetricStorage::Histogram(storage) => {
-                    let add = |buckets: &[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]| {
-                        for (total, bucket) in values.iter_mut().zip(buckets) {
-                            *total = total.wrapping_add(bucket.load(Ordering::Relaxed));
+                    let add = |metric_values: &[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]| {
+                        for (total, value) in values.iter_mut().zip(metric_values) {
+                            *total = total.wrapping_add(value.load(Ordering::Relaxed));
                         }
                     };
                     if cpu == cur_cpu_id() {
@@ -205,7 +205,7 @@ pub(super) fn replace_recording_enabled(enabled: bool) -> bool {
 }
 
 pub(super) fn snapshot_values<E>(mut emit: impl FnMut(u64) -> Result<(), E>) -> Result<(), E> {
-    const MAX_VALUES_PER_METRIC: usize = PERF_HISTOGRAM_BUCKET_COUNT;
+    const MAX_VALUES_PER_METRIC: usize = PERF_HISTOGRAM_VALUE_COUNT;
     let mut aggregate = [0u64; MAX_VALUES_PER_METRIC];
     for metric in registrations() {
         let count = metric.value_count();

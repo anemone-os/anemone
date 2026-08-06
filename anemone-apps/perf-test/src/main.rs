@@ -148,7 +148,7 @@ fn validate_catalog(catalog: &PerfCatalog) -> Result<(), Errno> {
     let latency = metric(catalog, "debug.printk.record_latency")?;
     if latency.kind != PerfMetricKind::Histogram
         || latency.unit != PerfMetricUnit::MonotonicTicks
-        || latency.value_count != PERF_HISTOGRAM_BUCKET_COUNT
+        || latency.value_count != PERF_HISTOGRAM_VALUE_COUNT
     {
         return Err(EINVAL);
     }
@@ -316,7 +316,9 @@ fn validate_printk_pilot(catalog: &PerfCatalog) -> Result<(), Errno> {
         }
         let delta = after.wrapping_delta_from(&before)?;
         let record_delta = delta[records.value_offset];
-        let latency_delta = delta[latency.value_offset..latency.value_offset + latency.value_count]
+        let latency_values =
+            &delta[latency.value_offset..latency.value_offset + latency.value_count];
+        let latency_delta = latency_values[..catalog.histogram_bucket_count]
             .iter()
             .fold(0u64, |sum, value| sum.wrapping_add(*value));
         if record_delta < PILOT_CALLS as u64 || latency_delta < PILOT_CALLS as u64 {
@@ -327,8 +329,13 @@ fn validate_printk_pilot(catalog: &PerfCatalog) -> Result<(), Errno> {
             return Err(EIO);
         }
         println!(
-            "perf-test: pilot stage={} cpu={} reader={} records={} latency-samples={}",
-            stage, cpu, reader_cpu, record_delta, latency_delta
+            "perf-test: pilot stage={} cpu={} reader={} records={} latency-samples={} latency-sum-ticks={}",
+            stage,
+            cpu,
+            reader_cpu,
+            record_delta,
+            latency_delta,
+            latency_values[PERF_HISTOGRAM_SUM_INDEX],
         );
     }
     Ok(())

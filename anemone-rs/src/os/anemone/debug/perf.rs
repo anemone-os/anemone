@@ -180,7 +180,7 @@ fn parse_catalog(bytes: &[u8]) -> Result<PerfCatalog, Errno> {
             || name_offset.checked_add(name_len).ok_or(EINVAL)? > names.len()
             || (kind == PerfMetricKind::Counter && metric_value_count != 1)
             || (kind == PerfMetricKind::Histogram
-                && metric_value_count != histogram_bucket_count)
+                && metric_value_count != PERF_HISTOGRAM_VALUE_COUNT)
         {
             return Err(EINVAL);
         }

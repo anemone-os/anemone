@@ -18,7 +18,7 @@ pub(crate) use timer::TimerGuard;
 #[cfg(feature = "perf_observe")]
 use crate::prelude::*;
 #[cfg(feature = "perf_observe")]
-use anemone_abi::system::native::perf::PERF_HISTOGRAM_BUCKET_COUNT;
+use anemone_abi::system::native::perf::{PERF_HISTOGRAM_SUM_INDEX, PERF_HISTOGRAM_VALUE_COUNT};
 
 #[cfg(feature = "perf_observe")]
 fn __counter_add(storage: &'static PerCpu<AtomicU64>, delta: u64) {
@@ -29,7 +29,7 @@ fn __counter_add(storage: &'static PerCpu<AtomicU64>, delta: u64) {
 
 #[cfg(feature = "perf_observe")]
 fn __histogram_record(
-    storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>,
+    storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>,
     sample: u64,
 ) {
     let bucket = if sample == 0 {
@@ -37,8 +37,9 @@ fn __histogram_record(
     } else {
         u64::BITS as usize - sample.leading_zeros() as usize
     };
-    storage.with(|buckets| {
-        buckets[bucket].fetch_add(1, Ordering::Relaxed);
+    storage.with(|values| {
+        values[bucket].fetch_add(1, Ordering::Relaxed);
+        values[PERF_HISTOGRAM_SUM_INDEX].fetch_add(sample, Ordering::Relaxed);
     });
 }
 
@@ -56,7 +57,7 @@ pub(crate) fn __counter_add_if_enabled(
 #[cfg(feature = "perf_observe")]
 #[doc(hidden)]
 pub(crate) fn __histogram_record_if_enabled(
-    storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>,
+    storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>,
     sample: impl FnOnce() -> u64,
 ) {
     if recording_enabled() {
@@ -67,7 +68,7 @@ pub(crate) fn __histogram_record_if_enabled(
 #[cfg(feature = "perf_observe")]
 #[doc(hidden)]
 pub(crate) fn __timer_if_enabled(
-    storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>,
+    storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>,
 ) -> TimerGuard {
     if recording_enabled() {
         TimerGuard::__new(storage, crate::time::perf_clock_ticks())
@@ -105,9 +106,9 @@ macro_rules! declare_perf_metrics {
         $(
             #[percpu]
             static $histogram: [core::sync::atomic::AtomicU64;
-                anemone_abi::system::native::perf::PERF_HISTOGRAM_BUCKET_COUNT] =
+                anemone_abi::system::native::perf::PERF_HISTOGRAM_VALUE_COUNT] =
                 [const { core::sync::atomic::AtomicU64::new(0) };
-                    anemone_abi::system::native::perf::PERF_HISTOGRAM_BUCKET_COUNT];
+                    anemone_abi::system::native::perf::PERF_HISTOGRAM_VALUE_COUNT];
             ::paste::paste! {
                 #[used]
                 #[unsafe(link_section = ".perf_metrics")]
@@ -189,8 +190,8 @@ mod kunits {
     #[percpu]
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     #[percpu]
-    static TEST_HISTOGRAM: [AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT] =
-        [const { AtomicU64::new(0) }; PERF_HISTOGRAM_BUCKET_COUNT];
+    static TEST_HISTOGRAM: [AtomicU64; PERF_HISTOGRAM_VALUE_COUNT] =
+        [const { AtomicU64::new(0) }; PERF_HISTOGRAM_VALUE_COUNT];
 
     static EVALUATED: AtomicU64 = AtomicU64::new(0);
 
@@ -227,26 +228,42 @@ mod kunits {
 
         clear();
         __histogram_record(&TEST_HISTOGRAM, 0);
-        TEST_HISTOGRAM.with(|buckets| assert_eq!(buckets[0].load(Ordering::Relaxed), 1));
+        TEST_HISTOGRAM.with(|values| {
+            assert_eq!(values[0].load(Ordering::Relaxed), 1);
+            assert_eq!(values[PERF_HISTOGRAM_SUM_INDEX].load(Ordering::Relaxed), 0);
+        });
 
         for exponent in 0..u64::BITS as usize {
             clear();
             let power = 1u64 << exponent;
             __histogram_record(&TEST_HISTOGRAM, power);
-            TEST_HISTOGRAM.with(|buckets| {
-                assert_eq!(buckets[exponent + 1].load(Ordering::Relaxed), 1);
+            TEST_HISTOGRAM.with(|values| {
+                assert_eq!(values[exponent + 1].load(Ordering::Relaxed), 1);
+                assert_eq!(
+                    values[PERF_HISTOGRAM_SUM_INDEX].load(Ordering::Relaxed),
+                    power
+                );
             });
             if exponent != 0 {
                 __histogram_record(&TEST_HISTOGRAM, power - 1);
-                TEST_HISTOGRAM.with(|buckets| {
-                    assert_eq!(buckets[exponent].load(Ordering::Relaxed), 1);
+                TEST_HISTOGRAM.with(|values| {
+                    assert_eq!(values[exponent].load(Ordering::Relaxed), 1);
+                    assert_eq!(
+                        values[PERF_HISTOGRAM_SUM_INDEX].load(Ordering::Relaxed),
+                        power.wrapping_add(power - 1)
+                    );
                 });
             }
         }
 
         clear();
         __histogram_record(&TEST_HISTOGRAM, u64::MAX);
-        TEST_HISTOGRAM.with(|buckets| assert_eq!(buckets[64].load(Ordering::Relaxed), 1));
+        __histogram_record(&TEST_HISTOGRAM, 1);
+        TEST_HISTOGRAM.with(|values| {
+            assert_eq!(values[64].load(Ordering::Relaxed), 1);
+            assert_eq!(values[1].load(Ordering::Relaxed), 1);
+            assert_eq!(values[PERF_HISTOGRAM_SUM_INDEX].load(Ordering::Relaxed), 0);
+        });
     }
 }
 
