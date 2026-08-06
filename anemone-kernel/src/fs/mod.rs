@@ -1,6 +1,7 @@
 //! Virtual file system and filesystem drivers.
 
 // vfs infrastructure
+mod address_space;
 mod anonymous;
 mod cache_stats;
 mod dentry;

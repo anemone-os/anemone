@@ -61,8 +61,11 @@ fn print_snapshot(catalog: &PerfCatalog, image: &PerfSnapshot) -> Result<(), Err
         if metric.kind == PerfMetricKind::Counter {
             println!("{}={}", metric.name, values[0]);
         } else {
-            print!("{}=[", metric.name);
-            for (index, value) in values.iter().enumerate() {
+            print!(
+                "{} sum_ticks={} buckets=[",
+                metric.name, values[catalog.histogram_bucket_count],
+            );
+            for (index, value) in values[..catalog.histogram_bucket_count].iter().enumerate() {
                 if *value != 0 {
                     print!("{}:{} ", index, value);
                 }
@@ -79,15 +82,30 @@ fn print_delta(
     after: &PerfSnapshot,
 ) -> Result<(), Errno> {
     let delta = after.wrapping_delta_from(before)?;
+    println!(
+        "delta window_ticks={} clock_frequency_hz={}",
+        after.begin_ticks.wrapping_sub(before.end_ticks),
+        catalog.clock_frequency_hz,
+    );
     for metric in &catalog.metrics {
         let values = &delta[metric.value_offset..metric.value_offset + metric.value_count];
         if metric.kind == PerfMetricKind::Counter {
             println!("delta {}={}", metric.name, values[0]);
         } else {
-            let samples = values
+            let buckets = &values[..catalog.histogram_bucket_count];
+            let samples = buckets
                 .iter()
                 .fold(0u64, |sum, value| sum.wrapping_add(*value));
-            println!("delta {} samples={}", metric.name, samples);
+            print!(
+                "delta {} samples={} sum_ticks={} buckets=[",
+                metric.name, samples, values[catalog.histogram_bucket_count],
+            );
+            for (index, value) in buckets.iter().enumerate() {
+                if *value != 0 {
+                    print!("{}:{} ", index, value);
+                }
+            }
+            println!("]");
         }
     }
     Ok(())

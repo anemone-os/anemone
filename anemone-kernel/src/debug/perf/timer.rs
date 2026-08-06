@@ -1,12 +1,12 @@
 #[cfg(feature = "perf_observe")]
 use crate::prelude::*;
 #[cfg(feature = "perf_observe")]
-use anemone_abi::system::native::perf::PERF_HISTOGRAM_BUCKET_COUNT;
+use anemone_abi::system::native::perf::{PERF_HISTOGRAM_SUM_INDEX, PERF_HISTOGRAM_VALUE_COUNT};
 
 #[cfg(feature = "perf_observe")]
 pub(crate) struct TimerGuard {
     armed: Option<(
-        &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>,
+        &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>,
         u64,
     )>,
 }
@@ -18,7 +18,7 @@ impl TimerGuard {
     #[cfg(feature = "perf_observe")]
     #[doc(hidden)]
     pub(super) fn __new(
-        storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT]>,
+        storage: &'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>,
         begin: u64,
     ) -> Self {
         Self {
@@ -67,12 +67,12 @@ mod kunits {
     use super::*;
 
     #[percpu]
-    static TIMER_HISTOGRAM: [AtomicU64; PERF_HISTOGRAM_BUCKET_COUNT] =
-        [const { AtomicU64::new(0) }; PERF_HISTOGRAM_BUCKET_COUNT];
+    static TIMER_HISTOGRAM: [AtomicU64; PERF_HISTOGRAM_VALUE_COUNT] =
+        [const { AtomicU64::new(0) }; PERF_HISTOGRAM_VALUE_COUNT];
 
     fn samples() -> u64 {
         TIMER_HISTOGRAM.with(|buckets| {
-            buckets
+            buckets[..PERF_HISTOGRAM_SUM_INDEX]
                 .iter()
                 .map(|bucket| bucket.load(Ordering::Relaxed))
                 .sum()

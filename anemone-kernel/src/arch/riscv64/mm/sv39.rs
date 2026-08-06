@@ -2,7 +2,26 @@ use riscv::register::satp;
 
 use crate::{mm::layout::KernelLayoutTrait, prelude::*};
 
+declare_perf_metrics! {
+    counter RISCV64_TLB_RANGE_PAGES {
+        name: "arch.riscv64.tlb.range_pages",
+        unit: Events,
+    }
+    counter RISCV64_TLB_PAGE_FLUSHES {
+        name: "arch.riscv64.tlb.page_flushes",
+        unit: Events,
+    }
+    counter RISCV64_TLB_FULL_FLUSHES {
+        name: "arch.riscv64.tlb.full_flushes",
+        unit: Events,
+    }
+}
+
 pub struct Sv39PagingArch;
+
+const fn use_full_tlb_flush(npages: u64) -> bool {
+    npages > RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES as u64
+}
 
 impl PagingArchTrait for Sv39PagingArch {
     type PgDir = super::RiscV64PgDir;
@@ -92,8 +111,36 @@ impl PagingArchTrait for Sv39PagingArch {
         riscv::asm::sfence_vma(0, vpn.to_virt_addr().get() as usize);
     }
 
+    fn tlb_shootdown_range(range: VirtPageRange) {
+        let npages = range.npages();
+        perf_counter_add!(RISCV64_TLB_RANGE_PAGES, npages);
+        if use_full_tlb_flush(npages) {
+            perf_counter_inc!(RISCV64_TLB_FULL_FLUSHES);
+            Self::tlb_shootdown_all();
+        } else {
+            perf_counter_add!(RISCV64_TLB_PAGE_FLUSHES, npages);
+            for offset in 0..npages {
+                Self::tlb_shootdown(range.start() + offset);
+            }
+        }
+    }
+
     fn tlb_shootdown_all() {
         riscv::asm::sfence_vma_all();
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn range_policy_uses_full_flush_only_above_threshold() {
+        let threshold = RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES as u64;
+        assert!(!use_full_tlb_flush(threshold));
+        if let Some(above) = threshold.checked_add(1) {
+            assert!(use_full_tlb_flush(above));
+        }
     }
 }
 

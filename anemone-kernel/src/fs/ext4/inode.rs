@@ -4,7 +4,7 @@ use lwext4_rust::InodeType as LwExt4InodeType;
 use crate::{
     fs::{
         ext4::{
-            Ext4Fs, ext4_ino, ext4_reg, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error,
+            Ext4Fs, ext4_ino, ext4_sb, file::EXT4_SYMLINK_FILE_OPS, map_ext4_error,
             map_lwext4_inode_type, map_vfs_inode_type,
         },
         inode::RenameFlags,
@@ -165,24 +165,31 @@ fn ext4_zero_grown_range(
 }
 
 fn ext4_truncate(inode: &InodeRef, size: u64) -> Result<(), SysError> {
-    let size_usize = usize::try_from(size).map_err(|_| SysError::InvalidArgument)?;
-    let reg = ext4_reg(inode)?;
+    let new_size = usize::try_from(size).map_err(|_| SysError::InvalidArgument)?;
     let ino = inode.ino().get() as u32;
-    let old_size = inode.size();
+    let old_size_u64 = inode.size();
+    let old_size = usize::try_from(old_size_u64).map_err(|_| SysError::InvalidArgument)?;
+    let address_space = inode
+        .inode()
+        .address_space()
+        .expect("regular ext4 inode must own an address space");
 
-    reg.sync_all()?;
+    address_space.sync_all()?;
 
     let sb = inode.sb();
     ext4_sb(&sb).write_tx(|| {
         ext4_sb(&sb).with_fs(|fs| {
             fs.set_len(ino, size).map_err(map_ext4_error)?;
-            ext4_zero_grown_range(fs, ino, old_size, size)?;
+            ext4_zero_grown_range(fs, ino, old_size_u64, size)?;
 
             fs.flush().map_err(map_ext4_error)
         })
     })?;
 
-    reg.apply_truncate(size_usize);
+    // The persistent image is authoritative after the transaction succeeds.
+    // Invalidate only pages whose visible bytes changed, preserving the
+    // existing stage-1 truncate/cache limitation for unaffected pages.
+    address_space.invalidate_size_delta(old_size, new_size);
     inode.inode().set_size(size);
     Ok(())
 }

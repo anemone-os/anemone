@@ -10,6 +10,7 @@ use core::{
 
 use crate::{
     fs::{
+        address_space::{AddressSpace, AddressSpaceBackend},
         file::FileMode,
         lock::{FlockDomain, PosixLockDomain},
         permission::FsPermChecker,

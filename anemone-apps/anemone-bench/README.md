@@ -35,6 +35,18 @@ A syscall-free CPU baseline can be scaled independently:
 
     anemone-bench --case cpu.integer --cpu-iterations 50000000
 
+Focused virtual-memory cases keep the operation count and page-table placement
+explicit. This example repeatedly maps, touches, and unmaps a 16-page range
+that crosses a 512-page leaf-table boundary:
+
+    anemone-bench --case vm.map_lifecycle.cross_leaf --vm-pages 16 \
+        --vm-iterations 1000 --vm-leaf-span-pages 512 --repeat 5
+
+The `vm.protect_refault.*` cases alternate read-only and writable protection,
+touching every page after each transition so every iteration starts with
+resident PTEs. A one-page range cannot cross a leaf-table boundary and is
+rejected by the `cross_leaf` cases.
+
 The benchmark rootfs also installs perfctl, so the same case can be wrapped as:
 
     perfctl run /bin/anemone-bench --case pthread.createjoin_serial1 --pthread-count 2500

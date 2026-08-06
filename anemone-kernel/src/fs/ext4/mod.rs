@@ -125,15 +125,6 @@ pub(super) fn ext4_sb(sb: &SuperBlock) -> &Ext4Sb {
 }
 
 #[inline(always)]
-fn ext4_reg(inode: &InodeRef) -> Result<&file::Ext4Reg, SysError> {
-    inode
-        .inode()
-        .prv()
-        .cast::<file::Ext4Reg>()
-        .ok_or(SysError::NotReg)
-}
-
-#[inline(always)]
 pub(super) fn ext4_ino(ino: u32) -> Result<Ino, SysError> {
     Ino::try_from(ino as u64).map_err(|_| SysError::InvalidArgument)
 }

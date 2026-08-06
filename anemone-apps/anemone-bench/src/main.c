@@ -11,12 +11,16 @@
 
 #define DEFAULT_PTHREAD_COUNT 2500
 #define DEFAULT_CPU_ITERATIONS 50000000
+#define DEFAULT_VM_PAGES 16
+#define DEFAULT_VM_ITERATIONS 1000
+#define DEFAULT_VM_LEAF_SPAN_PAGES 512
 
 static void usage(FILE *stream)
 {
     fprintf(stream,
         "usage: anemone-bench [--list] [--case NAME] "
-        "[--pthread-count N] [--cpu-iterations N] [--repeat N]\n");
+        "[--pthread-count N] [--cpu-iterations N] [--vm-pages N] "
+        "[--vm-iterations N] [--vm-leaf-span-pages N] [--repeat N]\n");
 }
 
 static bool parse_positive_size(const char *text, size_t *value)
@@ -40,6 +44,11 @@ int main(int argc, char **argv)
     };
     struct cpu_bench_config cpu_config = {
         .iterations = DEFAULT_CPU_ITERATIONS,
+    };
+    struct vm_bench_config vm_config = {
+        .pages = DEFAULT_VM_PAGES,
+        .iterations = DEFAULT_VM_ITERATIONS,
+        .leaf_span_pages = DEFAULT_VM_LEAF_SPAN_PAGES,
     };
     size_t repeats = 1;
     bool list = false;
@@ -88,6 +97,14 @@ int main(int argc, char **argv)
         { "regex.compile_default", b_regex_compile, "(a|b|c)*d*b" },
         { "regex.search_default", b_regex_search, "(a|b|c)*d*b" },
         { "regex.search_repeat", b_regex_search, "a{25}b" },
+        { "vm.map_lifecycle.inside_leaf", b_vm_map_lifecycle_inside,
+            &vm_config },
+        { "vm.map_lifecycle.cross_leaf", b_vm_map_lifecycle_cross,
+            &vm_config },
+        { "vm.protect_refault.inside_leaf", b_vm_protect_refault_inside,
+            &vm_config },
+        { "vm.protect_refault.cross_leaf", b_vm_protect_refault_cross,
+            &vm_config },
     };
     const size_t case_count = sizeof cases / sizeof cases[0];
 
@@ -112,6 +129,25 @@ int main(int argc, char **argv)
             if (++i >= (size_t)argc ||
                 !parse_positive_size(argv[i], &cpu_config.iterations)) {
                 fprintf(stderr, "anemone-bench: invalid --cpu-iterations\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--vm-pages")) {
+            if (++i >= (size_t)argc ||
+                !parse_positive_size(argv[i], &vm_config.pages)) {
+                fprintf(stderr, "anemone-bench: invalid --vm-pages\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--vm-iterations")) {
+            if (++i >= (size_t)argc ||
+                !parse_positive_size(argv[i], &vm_config.iterations)) {
+                fprintf(stderr, "anemone-bench: invalid --vm-iterations\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--vm-leaf-span-pages")) {
+            if (++i >= (size_t)argc ||
+                !parse_positive_size(argv[i], &vm_config.leaf_span_pages)) {
+                fprintf(stderr,
+                    "anemone-bench: invalid --vm-leaf-span-pages\n");
                 return 2;
             }
         } else if (!strcmp(argv[i], "--repeat")) {
@@ -150,6 +186,7 @@ int main(int argc, char **argv)
     }
 
     bench_display_configuration(pthread_config.count, cpu_config.iterations,
+        vm_config.pages, vm_config.iterations, vm_config.leaf_span_pages,
         repeats);
     for (repeat = 1; repeat <= repeats; repeat++) {
         if (selected) {
