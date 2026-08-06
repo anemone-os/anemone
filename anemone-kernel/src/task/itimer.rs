@@ -89,7 +89,13 @@ impl ThreadGroup {
 
             // Submit before unlocking so the armed state is not visible without
             // a matching queued request.
-            let expire_at = Instant::now() + timeout;
+            // Linux's ktime conversion saturates representable deadlines. Keep
+            // the same fail-forward behavior for user-controlled timeval
+            // values instead of letting Instant's infallible Add panic on a
+            // timeout beyond the monotonic u64 domain.
+            let expire_at = Instant::now()
+                .checked_add(timeout)
+                .unwrap_or(Instant::from_mono(u64::MAX));
             let request = schedule_real_itimer_callback(tg, callback_validness, timeout);
             real.replace(RealITimer {
                 expire_at,
@@ -155,21 +161,19 @@ fn next_periodic_expiration(expire_at: Instant, interval: Duration, now: Instant
         now >= expire_at,
         "ITIMER_REAL completion ran before its owner deadline"
     );
-    let interval_mono = duration_to_mono(interval)
-        .filter(|interval| *interval != 0)
-        .expect("ITIMER_REAL interval is below the architecture clock resolution");
+    // Linux clamps an out-of-range ktime interval to KTIME_MAX. A duration
+    // below this clock's counter resolution still needs a live periodic arm,
+    // so advance it by the smallest representable monotonic unit.
+    let interval_mono = duration_to_mono(interval).unwrap_or(u64::MAX).max(1);
     let elapsed = now.mono() - expire_at.mono();
     // Skip every elapsed period in one step. Rearming from `now` would turn
     // timer-worker delay into permanent phase drift.
-    let periods = elapsed / interval_mono + 1;
-    let advance = interval_mono
-        .checked_mul(periods)
-        .expect("ITIMER_REAL periodic deadline overflow");
+    let periods = (elapsed / interval_mono).saturating_add(1);
+    let advance = interval_mono.saturating_mul(periods);
     Instant::from_mono(
         expire_at
             .mono()
-            .checked_add(advance)
-            .expect("ITIMER_REAL periodic deadline overflow"),
+            .saturating_add(advance),
     )
 }
 
@@ -289,6 +293,26 @@ mod kunits {
         let next = next_periodic_expiration(expire_at, interval, now);
         assert_eq!(next.mono(), 100 + interval_mono * 4);
         assert!(next > now);
+    }
+
+    #[kunit]
+    fn unrepresentable_periodic_interval_saturates_without_panicking() {
+        let next = next_periodic_expiration(
+            Instant::from_mono(1),
+            Duration::from_secs(u64::MAX),
+            Instant::from_mono(2),
+        );
+        assert_eq!(next, Instant::from_mono(u64::MAX));
+    }
+
+    #[kunit]
+    fn unrepresentable_initial_timeout_saturates_owner_deadline() {
+        let tg = get_current_task().get_thread_group();
+        tg.cancel_real_itimer();
+        tg.set_real_itimer(Duration::from_secs(u64::MAX), None);
+        let snapshot = tg.real_itimer_snapshot();
+        assert!(snapshot.is_some());
+        tg.cancel_real_itimer();
     }
 
     #[kunit]
