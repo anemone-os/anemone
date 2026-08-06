@@ -25,7 +25,7 @@ use crate::{
 
 use super::{message_iovecs, normalized_name_len, read_message_header};
 use crate::fs::socket::api::{
-    abi::{map_receive_error, validate_receive_message_flags, write_socket_address},
+    abi::{map_receive_error, validate_recvmsg_flags, write_socket_address},
     profile::{SocketMessageIo, socket_abi_profile},
 };
 use zerocopy::IntoBytes;
@@ -146,7 +146,6 @@ fn receive_error_message(
     message: u64,
     header: MsgHdr,
     iovecs: &[CheckedIoVec],
-    truncate_result: bool,
 ) -> Result<u64, SysError> {
     // Detach precedes every payload/name/control/header copy. Linux consumes
     // the skb even when a later user access faults; the Endpoint must never
@@ -199,7 +198,10 @@ fn receive_error_message(
         control_copied as u64,
     )?;
 
-    Ok(if truncate_result { payload_len } else { copied } as u64)
+    // MSG_TRUNC is still reported as an output flag for a short quoted
+    // payload, but Linux errqueue receive returns the copied length even when
+    // MSG_TRUNC was also supplied as an input flag.
+    Ok(copied as u64)
 }
 
 pub(super) trait StreamMessageOutput {
@@ -247,7 +249,7 @@ pub(super) fn receive_stream_message(
     flags: i32,
     file_nonblocking: bool,
 ) -> Result<SocketReceiveOutcome, SysError> {
-    let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
+    let message_flags = validate_recvmsg_flags(socket.socket_type(), flags)?;
     retry_socket_receive(
         "sys_recvmsg",
         task,
@@ -303,15 +305,9 @@ pub(super) fn receive_message(fd: Fd, message: u64, flags: i32) -> Result<u64, S
         )?;
         return Ok(outcome.copied() as u64);
     }
-    let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
+    let message_flags = validate_recvmsg_flags(socket.socket_type(), flags)?;
     if message_flags.error_queue {
-        return receive_error_message(
-            socket,
-            message,
-            header,
-            &iovecs,
-            message_flags.truncate_result,
-        );
+        return receive_error_message(socket, message, header, &iovecs);
     }
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);

@@ -97,6 +97,7 @@ fn scan_ppoll_fds(
         let Some(fd) = poll_fd.fd else {
             continue;
         };
+        has_source = true;
 
         let Ok(file) = task.get_fd(fd) else {
             poll_fd.revents = LinuxPollEvent::NVAL;
@@ -104,16 +105,12 @@ fn scan_ppoll_fds(
             continue;
         };
 
-        // Compatibility-only interests still need fd validation and a snapshot
-        // for unconditional ERR/HUP, but they have no route that could wake a
-        // register round. Classify them as no-source instead of turning a
-        // source's empty-interest Unsupported result into a visible ENOTSUP.
-        let request = if poll_fd.events.is_empty() {
-            PollRequest::snapshot(poll_fd.events)
-        } else {
-            has_source = true;
-            mode.poll_request(poll_fd.events)
-        };
+        // Even an empty normalized interest set must reach a register-capable
+        // source: Linux POLLERR/POLLHUP are mandatory results, and that source
+        // may own the only wake route for a later transition. Sources without
+        // mandatory events may reject the empty registration below; for them
+        // the fd remains a timeout-only source instead of exposing ENOTSUP.
+        let request = mode.poll_request(poll_fd.events);
 
         match file.poll(&request) {
             Ok(PollRegisterResult::Subscribed(revents)) if request.is_register() => {
@@ -159,6 +156,7 @@ fn scan_ppoll_fds(
                 break;
             },
             Ok(PollRegisterResult::Ready(_)) => {},
+            Ok(PollRegisterResult::Unsupported) if poll_fd.events.is_empty() => {},
             Ok(PollRegisterResult::Unsupported) => {
                 kdebugln!(
                     "sys_ppoll: unsupported register source fd {:?} interests={:?}",

@@ -77,7 +77,8 @@ pub(super) struct SocketAbiProfile {
     protocol_admission: ProtocolAdmission,
     address: SocketAddressAbi,
     send_flags: i32,
-    receive_flags: i32,
+    ordinary_receive_flags: i32,
+    recvmsg_only_flags: i32,
     message_io: SocketMessageIo,
     required_capability: Option<Capability>,
     no_signal_compatibility: Option<&'static NoSignalCompatibility>,
@@ -112,8 +113,12 @@ impl SocketAbiProfile {
         self.send_flags
     }
 
-    pub(super) const fn receive_flags(&self) -> i32 {
-        self.receive_flags
+    pub(super) const fn recvfrom_flags(&self) -> i32 {
+        self.ordinary_receive_flags
+    }
+
+    pub(super) const fn recvmsg_flags(&self) -> i32 {
+        self.ordinary_receive_flags | self.recvmsg_only_flags
     }
 
     pub(super) const fn message_io(&self) -> SocketMessageIo {
@@ -148,7 +153,10 @@ static UDP_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::CanonicalOrZero,
     address: SocketAddressAbi::Ipv4,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_ERRQUEUE,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    // The accepted UDP ABI publishes the extended-error queue only through
+    // recvmsg, whose control buffer can carry the required ancillary record.
+    recvmsg_only_flags: MSG_ERRQUEUE,
     message_io: SocketMessageIo::Datagram,
     required_capability: None,
     no_signal_compatibility: Some(&UDP_NOSIGNAL_COMPATIBILITY),
@@ -161,7 +169,8 @@ static ICMP_RAW_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::Canonical,
     address: SocketAddressAbi::Ipv4,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    recvmsg_only_flags: 0,
     message_io: SocketMessageIo::Unsupported,
     required_capability: Some(Capability::NET_RAW),
     no_signal_compatibility: Some(&ICMP_RAW_NOSIGNAL_COMPATIBILITY),
@@ -174,7 +183,8 @@ static UNIX_STREAM_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::Canonical,
     address: SocketAddressAbi::UnixPathname,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT | MSG_PEEK,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK,
+    recvmsg_only_flags: 0,
     message_io: SocketMessageIo::Unsupported,
     required_capability: None,
     no_signal_compatibility: None,
@@ -187,7 +197,8 @@ static UNIX_SEQPACKET_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::Canonical,
     address: SocketAddressAbi::UnixPathname,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    recvmsg_only_flags: 0,
     // Record send/receive is an internal data-plane capability. The
     // accepted seqpacket target does not publish sendmsg/recvmsg.
     message_io: SocketMessageIo::Unsupported,
@@ -202,7 +213,8 @@ static TCP_ABI_METADATA: SocketAbiProfile = SocketAbiProfile {
     protocol_admission: ProtocolAdmission::CanonicalOrZero,
     address: SocketAddressAbi::Ipv4,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
-    receive_flags: MSG_DONTWAIT | MSG_PEEK,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK,
+    recvmsg_only_flags: 0,
     message_io: SocketMessageIo::ByteStream,
     required_capability: None,
     no_signal_compatibility: None,
@@ -282,7 +294,8 @@ mod kunits {
         assert!(core::ptr::eq(metadata, &TCP_ABI_METADATA));
         assert!(core::ptr::eq(metadata.ops(), &TCP_SOCKET_OPS));
         assert_eq!(metadata.send_flags(), MSG_DONTWAIT | MSG_NOSIGNAL);
-        assert_eq!(metadata.receive_flags(), MSG_DONTWAIT | MSG_PEEK);
+        assert_eq!(metadata.recvfrom_flags(), MSG_DONTWAIT | MSG_PEEK);
+        assert_eq!(metadata.recvmsg_flags(), MSG_DONTWAIT | MSG_PEEK);
         assert_eq!(metadata.message_io(), SocketMessageIo::ByteStream);
         assert!(core::ptr::eq(
             resolve_socket_profile(AF_INET, SOCK_STREAM, 0).unwrap(),

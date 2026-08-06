@@ -3,7 +3,7 @@ use anemone_net_api::{
     icmp_raw::IcmpRawEndpointLimits,
     udp::{UdpErrorCause, UdpQueryError},
 };
-use smoltcp::wire::{Icmpv4DstUnreachable, Icmpv4Packet, Icmpv4Repr};
+use smoltcp::wire::{Icmpv4DstUnreachable, Icmpv4Message, Icmpv4Packet, Icmpv4Repr};
 
 use super::fixture::*;
 
@@ -79,6 +79,15 @@ fn mutate_quoted_ipv4(frame: &mut [u8], mutation: impl FnOnce(&mut Ipv4Packet<&m
     let mut inner = Ipv4Packet::new_unchecked(icmp.data_mut());
     mutation(&mut inner);
     inner.fill_checksum();
+    icmp.fill_checksum();
+}
+
+fn mutate_icmp_header(frame: &mut [u8], message: Icmpv4Message, code: u8) {
+    let mut ethernet = EthernetFrame::new_unchecked(frame);
+    let mut outer = Ipv4Packet::new_unchecked(ethernet.payload_mut());
+    let mut icmp = Icmpv4Packet::new_unchecked(outer.payload_mut());
+    icmp.set_msg_type(message);
+    icmp.set_msg_code(code);
     icmp.fill_checksum();
 }
 
@@ -363,6 +372,56 @@ fn malformed_non_udp_and_fragmented_quotes_do_not_publish_errors() {
     let mut fragmented = icmp_error_frame(20 + 8);
     mutate_quoted_ipv4(&mut fragmented, |inner| inner.set_more_frags(true));
     inject_external(&mut stack, &mut provider, interface, &fragmented);
+
+    assert_eq!(
+        stack
+            .take_udp_pending_error_for_host_validation(endpoint)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        stack
+            .detach_udp_error_for_host_validation(endpoint)
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn unsupported_icmp_error_codes_do_not_publish_errors() {
+    let (mut stack, mut provider, interface) = external_error_stack();
+    let endpoint = stack
+        .create_udp_endpoint_for_host_validation(ERROR_SOURCE_PORT, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    stack
+        .set_udp_receive_errors_for_host_validation(endpoint, true)
+        .unwrap();
+
+    let mut unknown_destination_unreachable = icmp_error_frame(20 + 8);
+    mutate_icmp_header(
+        &mut unknown_destination_unreachable,
+        Icmpv4Message::DstUnreachable,
+        16,
+    );
+    inject_external(
+        &mut stack,
+        &mut provider,
+        interface,
+        &unknown_destination_unreachable,
+    );
+
+    let mut fragment_reassembly_timeout = icmp_error_frame(20 + 8);
+    mutate_icmp_header(
+        &mut fragment_reassembly_timeout,
+        Icmpv4Message::TimeExceeded,
+        1,
+    );
+    inject_external(
+        &mut stack,
+        &mut provider,
+        interface,
+        &fragment_reassembly_timeout,
+    );
 
     assert_eq!(
         stack

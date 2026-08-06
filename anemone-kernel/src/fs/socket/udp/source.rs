@@ -156,6 +156,26 @@ mod kunits {
     }
 
     #[kunit]
+    fn empty_interest_registers_for_later_mandatory_error() {
+        let endpoint = create_endpoint().expect("KUnit UDP endpoint must fit");
+        let source = UdpSocketSource::try_new(endpoint).expect("KUnit UDP source must fit");
+        let observer = Arc::new(CountingObserver::new());
+        let route = route(&observer);
+        let request = PollRequest::register_with_route(PollEvent::empty(), &route);
+
+        assert_eq!(
+            source.poll(&request).unwrap(),
+            PollRegisterResult::Subscribed(PollEvent::empty())
+        );
+        UdpEndpointInvalidationObserver::invalidate(source.as_ref());
+        assert_eq!(observer.notifications(), 1);
+
+        source
+            .retire()
+            .expect("KUnit UDP source must retain its Endpoint");
+    }
+
+    #[kunit]
     fn error_projection_is_mandatory_and_clears_with_owner_fact() {
         let error = UdpEndpointFacts::from_owner_snapshot(false, true, true);
         assert_eq!(project_facts(error, PollEvent::empty()), PollEvent::ERROR);

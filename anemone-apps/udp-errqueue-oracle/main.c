@@ -106,7 +106,7 @@ static int wait_so_error(int fd, int expected)
 static int receive_error(int fd, const char *marker,
 			 const struct sockaddr_in *expected_destination,
 			 size_t payload_capacity, size_t control_len,
-			 int expected_extra_flags)
+			 int input_flags, int expected_extra_flags)
 {
 	struct sockaddr_in name;
 	unsigned char control[128];
@@ -130,7 +130,7 @@ static int receive_error(int fd, const char *marker,
 	memset(&name, 0, sizeof(name));
 	memset(control, 0, sizeof(control));
 	errno = 0;
-	received = recvmsg(fd, &message, MSG_ERRQUEUE | MSG_DONTWAIT);
+	received = recvmsg(fd, &message, MSG_ERRQUEUE | MSG_DONTWAIT | input_flags);
 	if (received < 0 || (size_t)received != expected_length ||
 	    memcmp(payload, marker, expected_length) != 0 ||
 	    name.sin_family != AF_INET ||
@@ -158,11 +158,18 @@ static int receive_error(int fd, const char *marker,
 
 static int send_wait_take(int fd, const char *marker, int take_pending)
 {
-	if (send(fd, marker, strlen(marker), 0) != (ssize_t)strlen(marker) ||
-	    wait_error(fd) < 0)
+	if (send(fd, marker, strlen(marker), 0) != (ssize_t)strlen(marker)) {
+		fail("send-wait-take-send");
 		return -1;
-	if (take_pending && wait_so_error(fd, ECONNREFUSED) < 0)
+	}
+	if (wait_error(fd) < 0) {
+		fail("send-wait-take-pollerr");
 		return -1;
+	}
+	if (take_pending && wait_so_error(fd, ECONNREFUSED) < 0) {
+		fail("send-wait-take-so-error");
+		return -1;
+	}
 	return 0;
 }
 
@@ -236,14 +243,16 @@ static int connected_oracle(void)
 	if (fd < 0 || enable_errors(fd, 1) < 0 ||
 	    connect(fd, (struct sockaddr *)&closed, sizeof(closed)) < 0)
 		return fail("connected-setup");
-	if (send_wait_take(fd, first, 1) < 0 || take_so_error(fd, 0) < 0)
+	if (send_wait_take(fd, first, 1) < 0)
+		return fail("pending-produce-and-take");
+	if (take_so_error(fd, 0) < 0)
 		return fail("pending-consume-once");
 
 	epfd = epoll_create1(0);
 	if (epfd < 0 || epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &interest) < 0 ||
 	    epoll_wait(epfd, &event, 1, 0) != 1 || !(event.events & EPOLLERR))
 		return fail("epoll-mandatory-error");
-	if (receive_error(fd, first, &closed, 64, sizeof(control), 0) < 0)
+	if (receive_error(fd, first, &closed, 64, sizeof(control), 0, 0) < 0)
 		return fail("first-errqueue-projection");
 	errno = 0;
 	memset(&message, 0, sizeof(message));
@@ -252,24 +261,28 @@ static int connected_oracle(void)
 	if (epoll_wait(epfd, &event, 1, 0) != 0 ||
 	    send_wait_take(fd, second, 1) < 0 ||
 	    epoll_wait(epfd, &event, 1, 0) != 1 || !(event.events & EPOLLERR) ||
-	    receive_error(fd, second, &closed, 64, sizeof(control), 0) < 0 ||
+	    receive_error(fd, second, &closed, 64, sizeof(control), 0, 0) < 0 ||
 	    epoll_wait(epfd, &event, 1, 0) != 0)
 		return fail("epoll-error-rearm");
 	close(epfd);
 
 	if (send_wait_take(fd, second, 1) < 0 ||
 	    send_wait_take(fd, third, 1) < 0 ||
-	    receive_error(fd, second, &closed, 64, sizeof(control), 0) < 0 ||
-	    receive_error(fd, third, &closed, 64, sizeof(control), 0) < 0)
+	    receive_error(fd, second, &closed, 64, sizeof(control), 0, 0) < 0 ||
+	    receive_error(fd, third, &closed, 64, sizeof(control), 0, 0) < 0)
 		return fail("fifo-order");
 
 	if (send_wait_take(fd, first, 1) < 0 ||
 	    receive_error(fd, first, &closed, 64,
-			  sizeof(struct cmsghdr) + 4, MSG_CTRUNC) < 0)
+			  sizeof(struct cmsghdr) + 4, 0, MSG_CTRUNC) < 0)
 		return fail("control-truncation");
 	if (send_wait_take(fd, first, 1) < 0 ||
-	    receive_error(fd, first, &closed, 4, sizeof(control), MSG_TRUNC) < 0)
+	    receive_error(fd, first, &closed, 4, sizeof(control), 0, MSG_TRUNC) < 0)
 		return fail("payload-truncation");
+	if (send_wait_take(fd, first, 1) < 0 ||
+	    receive_error(fd, first, &closed, 4, sizeof(control),
+			  MSG_TRUNC, MSG_TRUNC) < 0)
+		return fail("payload-truncation-input-flag");
 
 	if (send_wait_take(fd, second, 0) < 0) {
 		return fail("ordinary-send-error-setup");
@@ -277,7 +290,7 @@ static int connected_oracle(void)
 	errno = 0;
 	if (send(fd, third, strlen(third), 0) != -1 || errno != ECONNREFUSED ||
 	    take_so_error(fd, 0) < 0 ||
-	    receive_error(fd, second, &closed, 64, sizeof(control), 0) < 0)
+	    receive_error(fd, second, &closed, 64, sizeof(control), 0, 0) < 0)
 		return fail("ordinary-send-consumes-pending-only");
 
 	if (send_wait_take(fd, second, 1) < 0)
@@ -362,7 +375,7 @@ static int unconnected_oracle(void)
 	    sendto(fd, marker, strlen(marker), 0,
 		   (struct sockaddr *)&closed, sizeof(closed)) != (ssize_t)strlen(marker) ||
 	    wait_error(fd) < 0 || take_so_error(fd, ECONNREFUSED) < 0 ||
-	    receive_error(fd, marker, &closed, 64, sizeof(control), 0) < 0)
+	    receive_error(fd, marker, &closed, 64, sizeof(control), 0, 0) < 0)
 		return fail("unconnected-full-chain");
 	close(fd);
 	return 0;

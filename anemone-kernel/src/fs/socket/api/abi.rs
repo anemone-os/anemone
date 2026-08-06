@@ -284,13 +284,13 @@ pub(super) struct ReceiveMessageFlags {
     pub(super) error_queue: bool,
 }
 
-pub(super) fn validate_receive_message_flags(
-    socket_type: SocketType,
+fn validate_receive_flags(
     flags: i32,
+    supported: i32,
+    syscall: &str,
 ) -> Result<ReceiveMessageFlags, SysError> {
-    let supported = socket_abi_profile(socket_type).receive_flags();
     if flags & !supported != 0 {
-        knoticeln!("socket: unsupported recvfrom flags {:#x}", flags);
+        knoticeln!("socket: unsupported {} flags {:#x}", syscall, flags);
         return Err(SysError::NotSupported);
     }
     Ok(ReceiveMessageFlags {
@@ -299,6 +299,22 @@ pub(super) fn validate_receive_message_flags(
         truncate_result: flags & MSG_TRUNC != 0,
         error_queue: flags & MSG_ERRQUEUE != 0,
     })
+}
+
+pub(super) fn validate_recvfrom_flags(
+    socket_type: SocketType,
+    flags: i32,
+) -> Result<ReceiveMessageFlags, SysError> {
+    let profile = socket_abi_profile(socket_type);
+    validate_receive_flags(flags, profile.recvfrom_flags(), "recvfrom")
+}
+
+pub(super) fn validate_recvmsg_flags(
+    socket_type: SocketType,
+    flags: i32,
+) -> Result<ReceiveMessageFlags, SysError> {
+    let profile = socket_abi_profile(socket_type);
+    validate_receive_flags(flags, profile.recvmsg_flags(), "recvmsg")
 }
 
 pub(super) fn map_bind_error(error: SocketBindError) -> SysError {
@@ -363,6 +379,20 @@ pub(super) fn map_receive_error(error: SocketReceiveError) -> SysError {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+
+    #[kunit]
+    fn udp_error_queue_flag_is_recvmsg_only() {
+        assert!(matches!(
+            validate_recvfrom_flags(SocketType::Ipv4Udp, MSG_ERRQUEUE),
+            Err(SysError::NotSupported)
+        ));
+        let flags =
+            validate_recvmsg_flags(SocketType::Ipv4Udp, MSG_ERRQUEUE | MSG_DONTWAIT | MSG_TRUNC)
+                .unwrap();
+        assert!(flags.error_queue);
+        assert!(flags.nonblocking);
+        assert!(flags.truncate_result);
+    }
 
     fn unix_bytes(path: &[u8]) -> Vec<u8> {
         let mut bytes = (AF_UNIX as u16).to_ne_bytes().to_vec();

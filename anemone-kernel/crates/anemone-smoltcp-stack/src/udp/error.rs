@@ -153,8 +153,11 @@ fn parse_icmp_error(admitted: AdmittedIpv4Packet<'_>) -> Option<ParsedError<'_>>
     let icmp_type = u8::from(icmp.msg_type());
     let icmp_code = icmp.msg_code();
     let cause = match icmp.msg_type() {
-        Icmpv4Message::DstUnreachable => destination_unreachable_cause(icmp_code),
-        Icmpv4Message::TimeExceeded => UdpErrorCause::TimeExceeded,
+        Icmpv4Message::DstUnreachable => destination_unreachable_cause(icmp_code)?,
+        // Only TTL expiry is delivered to a transport. Fragment reassembly
+        // timeout (code 1) is handled by the IPv4 owner and has no UDP error
+        // recipient in Linux's ICMP admission path.
+        Icmpv4Message::TimeExceeded if icmp_code == 0 => UdpErrorCause::TimeExceeded,
         _ => return None,
     };
 
@@ -216,8 +219,8 @@ fn parse_icmp_error(admitted: AdmittedIpv4Packet<'_>) -> Option<ParsedError<'_>>
     })
 }
 
-const fn destination_unreachable_cause(code: u8) -> UdpErrorCause {
-    match code {
+const fn destination_unreachable_cause(code: u8) -> Option<UdpErrorCause> {
+    Some(match code {
         0 => UdpErrorCause::NetworkUnreachable,
         1 => UdpErrorCause::HostUnreachable,
         2 => UdpErrorCause::ProtocolUnreachable,
@@ -234,8 +237,6 @@ const fn destination_unreachable_cause(code: u8) -> UdpErrorCause {
         13 => UdpErrorCause::CommunicationProhibited,
         14 => UdpErrorCause::HostPrecedenceViolation,
         15 => UdpErrorCause::PrecedenceCutoff,
-        // Linux uses EHOSTUNREACH for a destination-unreachable code beyond
-        // its conversion table while preserving the raw code in errqueue.
-        _ => UdpErrorCause::HostUnreachable,
-    }
+        _ => return None,
+    })
 }

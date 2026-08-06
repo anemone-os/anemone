@@ -32,8 +32,9 @@ datagram transaction、iomux/epoll wait protocol与opened-description final rele
 - `recvmsg(MSG_ERRQUEUE)`从FIFO detach一个move-only record，再由Socket ABI adapter投影quoted UDP payload、original
   destination、offender、`SOL_IP/IP_RECVERR` cmsg、`sock_extended_err`与输出flags。short data/control分别设置
   `MSG_TRUNC`/`MSG_CTRUNC`；empty queue立即返回`EAGAIN`；detach后的copy fault消费该record且不requeue。
-- Destination Unreachable codes 0..15及未知code按Linux errno family投影；Port Unreachable为`ECONNREFUSED`，
-  Fragmentation Needed为`EMSGSIZE`并在可得时投影quoted MTU，Time Exceeded为`EHOSTUNREACH`。本轮不建立PMTU cache。
+- Destination Unreachable只接收codes 0..15，Time Exceeded只接收TTL expiry code 0；其它code在Endpoint
+  lookup/mutation前丢弃。Port Unreachable为`ECONNREFUSED`，Fragmentation Needed为`EMSGSIZE`并在可得时投影
+  quoted MTU，接收的Time Exceeded为`EHOSTUNREACH`。本轮不建立PMTU cache。
 - `sendmmsg`在一个稳定opened description上顺序执行既有`sendmsg` transaction，逐条写回`msg_len`；首条失败返回errno，
   已有成功后遇到send/copyout failure返回完成数，partial stream message停止后续条目，`vlen`按Linux上限clamp到1024。
 - userspace oracle只断言已发布的Linux UAPI，不冻结Endpoint内部queue priority、owner handoff、allocation path或未发布
@@ -68,6 +69,11 @@ historical attribution。
 - 独立初审发现detached payload二次分配、quoted `total_len`边界不足和private-boundary coverage不足；修复后record以
   `into_parts()`移动payload，parser同时约束UDP header/payload并忽略声明长度后的尾随字节，host suite经production
   admission补齐owner协议。复审确认三个blocking finding全部关闭且没有新的correctness finding。
+- 后续软件工程复审补齐syscall-specific receive flag admission，稳定拒绝`recvfrom(MSG_ERRQUEUE)`，并修正errqueue输入
+  `MSG_TRUNC`时的返回长度与非法ICMP code admission。UDP Socket在同一owner内按descriptor/lifecycle、datagram与error
+  roles拆分文件，没有移动状态truth、改变visibility/shared contract或增加转发层。复审运行还暴露相邻iomux修改把empty
+  interest误判为无wake source；修复后register-capable source仍可为mandatory `POLLERR/POLLHUP`注册，而无对应producer的
+  source继续作为timeout-only source且不向userspace暴露`ENOTSUP`。
 
 ## Contract Impact / Cutover
 
@@ -83,23 +89,24 @@ historical attribution。
 
 ## Validation
 
-- `just test net-host`通过，UDP topology `24/24`；host Linux
-  `6.18.33.2-microsoft-standard-WSL2`上的production packet-chain oracle通过。
-- RV64 glibc/musl oracle构建通过。决赛盘RV64 pretest通过`471/471` KUnit、UDP `16/16`、UDP extension `10/10`、
-  UDP message `7/7`、Unix `23/23`、seqpacket `4/4`、raw ICMP `10/10`、TCP `8/8`、Rust Command `2/2`以及双libc
-  UDP errqueue/TCP oracle，最后正常PowerOff。
-- 决赛盘没有profile中的六个Socket LTP executable，该次结果是`attempted=0, skipped=6`，不作为final-image LTP
-  PASS。以初赛盘运行同一RV64 wrapper后，curated Socket LTP在glibc `3/3`、musl `3/3`通过，汇总
-  `attempted=6, passed=6, failed=0, infra_failed=0, skipped=0`并正常PowerOff；这只补足对应UAPI回归。
+- 原closure的`just test net-host`通过UDP topology `24/24`，host Linux
+  `6.18.33.2-microsoft-standard-WSL2`上的production packet-chain oracle通过。后续review fixes将production-ingress非法
+  ICMP code case加入owner suite，`just test net-host`通过UDP topology `25/25`。
+- review fixes后的ordinary RV64 release build完成discovery/final pass与6299项symbol verification。初赛盘RV64 wrapper
+  重新构建rootfs、双libc oracle和kernel；QEMU通过`477/477` KUnit、UDP `16/16`、UDP extension `10/10`、UDP message
+  `7/7`、Unix `23/23`、seqpacket `4/4`、raw ICMP `10/10`、TCP `8/8`、Rust Command `2/2`，glibc/musl UDP
+  errqueue production packet chain和TCP oracle均TPASS，最后正常PowerOff。
+- 同一次初赛盘RV64 wrapper中，curated Socket LTP在glibc `3/3`、musl `3/3`通过，汇总
+  `attempted=6, passed=6, failed=0, infra_failed=0, skipped=0`；这只补足对应UAPI回归。较早的决赛盘没有profile中的
+  六个Socket LTP executable，其`attempted=0, skipped=6`不作为final-image LTP PASS。
 - 较早的RV64 final harness记录`/etc/resolv.conf`为`nameserver 10.0.2.3`，未修改glibc BusyBox对numeric
   `223.5.5.5`、`ping -4 dns.alidns.com`及default AF_UNSPEC hostname ping均通过。该证据早于review fixes；修复只改变
   record move、malformed quote admission与oracle边界，没有修改normal resolver path。final image没有shutdown app，
   测试结束后直接关闭对应QEMU。
-- `just test xtask`通过`83/83`；`just fmt kernel --check`通过。review fixes后代码未再修改，因此公共文档cutover后不重复
-  运行kernel、xtask、QEMU或runtime suite；一次ordinary RV64 release build完成discovery/final pass与6279项symbol
-  verification。`mdbook build docs`、`git diff --check`与closure diff/residual-reference audit通过。
-- 独立复审确认没有Apollyon、Keter或其它blocking finding；Architecture Friction Scan未发现第二份truth、owner穿透、
-  private representation泄漏、无退出条件bridge、batch-owned state或测试/架构特判。
+- 原closure的`just test xtask`通过`83/83`。review fixes后的`just fmt kernel --check`、`mdbook build docs`、
+  `git diff --check`与closure diff/residual-reference audit通过。
+- 原closure与review fixes后的独立复审均确认没有Apollyon、Keter、Euclid或其它blocking finding；Architecture Friction
+  Scan未发现第二份truth、owner穿透、private representation泄漏、无退出条件bridge、batch-owned state或测试/架构特判。
 - **Not Run:** LA64 build/runtime/final harness、physical hardware、`smp > 1`、low-memory allocation-failure runtime、
   long queue-pressure stress与full network LTP。
 
@@ -107,6 +114,9 @@ historical attribution。
 
 - [UDP Socket当前契约](../../contracts/net/udp-socket.md)和
   [Socket ABI当前契约](../../contracts/socket/front-abi-wait.md)是effective语义的唯一正文；Closed RFC保持历史资料。
+- `recvfrom(MSG_ERRQUEUE)`拒绝由KUnit与直接调用路径审计证明，没有独立userspace syscall oracle；无mandatory
+  event producer的empty-interest source不暴露`ENOTSUP`主要由source audit证明，真实runtime oracle直接覆盖UDP
+  register-capable路径。
 - bounded FIFO在capacity/allocation pressure下允许丢失新record，但pending slot与ERROR wake仍更新；本轮没有公开drop
   counter或lossless guarantee，low-memory和长期pressure运行仍Not Run。
 - standard ICMP quote不能证明historical send generation；晚到error可能按current tuple归属复用后的Endpoint。external

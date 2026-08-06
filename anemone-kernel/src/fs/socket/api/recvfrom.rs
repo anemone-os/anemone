@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::abi::{
-    map_query_error, map_receive_error, validate_receive_message_flags, write_empty_socket_address,
+    map_query_error, map_receive_error, validate_recvfrom_flags, write_empty_socket_address,
     write_payload, write_socket_address,
 };
 
@@ -55,7 +55,7 @@ fn sys_recvfrom(
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
+    let message_flags = validate_recvfrom_flags(socket.socket_type(), flags)?;
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
