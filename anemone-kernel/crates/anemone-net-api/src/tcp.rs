@@ -363,21 +363,6 @@ pub enum TcpQueryError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TcpSendError {
-    UnknownEndpoint,
-    NotConnected,
-    WouldBlock,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TcpReceiveError {
-    UnknownEndpoint,
-    NotConnected,
-    WouldBlock,
-    ReservationOutstanding,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TcpReceiveResolveError {
     UnknownReservation,
     InvalidPrefix,

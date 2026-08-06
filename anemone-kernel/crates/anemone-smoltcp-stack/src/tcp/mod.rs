@@ -660,20 +660,35 @@ mod tests {
             Err(anemone_net_api::tcp::TcpChildError::StaleChild)
         ));
 
-        let accepted_prefix = stack.send_tcp_endpoint(clients[0], &[0x5a; 64]).unwrap().0;
+        let accepted_prefix = stack.send_tcp_stream(clients[0], &[0x5a; 64]).unwrap().0;
         assert_eq!(accepted_prefix, POLICY.tx_buffer_bytes);
         drive(&mut stack, interface, 256);
 
-        let reservation = stack.reserve_tcp_receive(accepted, 64).unwrap();
+        let TcpStreamReceiveOutcome::Data(reservation) = stack
+            .receive_tcp_stream(accepted, 64, TcpReceiveMode::Consume)
+            .unwrap()
+        else {
+            panic!("buffered bytes must precede end of stream");
+        };
         assert_eq!(reservation.bytes(), &[0x5a; 32]);
         let (reservation_id, _) = reservation.into_owner_parts();
         stack.resolve_tcp_receive(reservation_id, 7).unwrap();
 
-        let rolled_back = stack.reserve_tcp_receive(accepted, 64).unwrap();
+        let TcpStreamReceiveOutcome::Data(rolled_back) = stack
+            .receive_tcp_stream(accepted, 64, TcpReceiveMode::Consume)
+            .unwrap()
+        else {
+            panic!("buffered bytes must precede end of stream");
+        };
         assert_eq!(rolled_back.bytes(), &[0x5a; 25]);
         let (rolled_back_id, _) = rolled_back.into_owner_parts();
         stack.resolve_tcp_receive(rolled_back_id, 0).unwrap();
-        let repeated = stack.reserve_tcp_receive(accepted, 64).unwrap();
+        let TcpStreamReceiveOutcome::Data(repeated) = stack
+            .receive_tcp_stream(accepted, 64, TcpReceiveMode::Consume)
+            .unwrap()
+        else {
+            panic!("rolled-back bytes must remain available");
+        };
         assert_eq!(repeated.bytes(), &[0x5a; 25]);
         let (repeated_id, _) = repeated.into_owner_parts();
         assert_eq!(
@@ -682,9 +697,14 @@ mod tests {
         );
         stack.resolve_tcp_receive(repeated_id, 25).unwrap();
 
-        let _ = stack.send_tcp_endpoint(accepted, b"final").unwrap().1;
+        let _ = stack.send_tcp_stream(accepted, b"final").unwrap().1;
         drive(&mut stack, interface, 384);
-        let outstanding = stack.reserve_tcp_receive(clients[0], 5).unwrap();
+        let TcpStreamReceiveOutcome::Data(outstanding) = stack
+            .receive_tcp_stream(clients[0], 5, TcpReceiveMode::Consume)
+            .unwrap()
+        else {
+            panic!("buffered bytes must precede end of stream");
+        };
         assert_eq!(outstanding.bytes(), b"final");
         let (outstanding_id, _) = outstanding.into_owner_parts();
         let retiring_handle = stack.protocols.tcp.connection(clients[0]).unwrap().handle;

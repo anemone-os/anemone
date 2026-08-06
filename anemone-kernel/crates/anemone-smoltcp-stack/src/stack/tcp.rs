@@ -5,11 +5,10 @@ use anemone_net_api::{
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
         TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpListenBacklog, TcpListenError,
-        TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveError,
-        TcpReceiveMode, TcpReceiveReservation, TcpReceiveReservationId, TcpReceiveResolveError,
-        TcpReleaseReason, TcpRetireError, TcpSendError, TcpShutdownDirection, TcpShutdownError,
-        TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome,
-        TcpStreamSendError,
+        TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveMode,
+        TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason, TcpRetireError,
+        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
+        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use smoltcp::{
@@ -364,35 +363,6 @@ impl Stack {
         Ok(interface.map(ProtocolProgression::committed))
     }
 
-    pub fn send_tcp_endpoint(
-        &mut self,
-        id: TcpEndpointId,
-        bytes: &[u8],
-    ) -> Result<(usize, Option<ProtocolProgression>), TcpSendError> {
-        let interface = self
-            .protocols
-            .tcp
-            .connection(id)
-            .ok_or_else(|| {
-                if self.protocols.tcp.endpoint(id).is_some() {
-                    TcpSendError::NotConnected
-                } else {
-                    TcpSendError::UnknownEndpoint
-                }
-            })?
-            .interface;
-        let (tcp_owner, _, sockets) = self
-            .tcp_owner_interface_mut(interface)
-            .expect("live TCP connection references an attached interface");
-        let result = tcp_owner.send(sockets, id, bytes);
-        tcp_owner.invalidate(id);
-        let accepted = result?;
-        Ok((
-            accepted,
-            (accepted != 0).then(|| ProtocolProgression::committed(interface)),
-        ))
-    }
-
     pub fn send_tcp_stream(
         &mut self,
         id: TcpEndpointId,
@@ -420,31 +390,6 @@ impl Stack {
             accepted,
             (accepted != 0).then(|| ProtocolProgression::committed(interface)),
         ))
-    }
-
-    pub fn reserve_tcp_receive(
-        &mut self,
-        id: TcpEndpointId,
-        maximum: usize,
-    ) -> Result<TcpReceiveReservation, TcpReceiveError> {
-        let interface = self
-            .protocols
-            .tcp
-            .connection(id)
-            .ok_or_else(|| {
-                if self.protocols.tcp.endpoint(id).is_some() {
-                    TcpReceiveError::NotConnected
-                } else {
-                    TcpReceiveError::UnknownEndpoint
-                }
-            })?
-            .interface;
-        let (tcp_owner, _, sockets) = self
-            .tcp_owner_interface_mut(interface)
-            .expect("live TCP connection references an attached interface");
-        let result = tcp_owner.reserve_receive(sockets, id, maximum);
-        tcp_owner.invalidate(id);
-        result
     }
 
     pub fn receive_tcp_stream(

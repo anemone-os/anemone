@@ -9,10 +9,10 @@ use anemone_net_api::{
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
         TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpListenBacklog, TcpListenError,
-        TcpLocalBinding, TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode,
-        TcpReceiveReservation, TcpReceiveResolveError, TcpReleaseReason, TcpSendError,
-        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
-        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpLocalBinding, TcpPeer, TcpPendingError, TcpQueryError, TcpReceiveMode,
+        TcpReceiveReservation, TcpReceiveResolveError, TcpReleaseReason, TcpShutdownDirection,
+        TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError,
+        TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use anemone_smoltcp_stack::TcpPolicy;
@@ -145,14 +145,6 @@ impl Drop for TcpEndpointEventRegistration {
 impl core::fmt::Debug for TcpEndpointPort {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TcpEndpointPort").finish_non_exhaustive()
-    }
-}
-
-impl core::ops::Deref for TcpEndpointPort {
-    type Target = TcpEndpointAccessPort;
-
-    fn deref(&self) -> &Self::Target {
-        &self.access
     }
 }
 
@@ -374,20 +366,8 @@ impl TcpEndpointAccessPort {
             }))
     }
 
-    pub(crate) fn send(&self, bytes: &[u8]) -> Result<usize, TcpSendError> {
-        self.stack.send_tcp_endpoint(self.id(), bytes)
-    }
-
     pub(crate) fn send_stream(&self, bytes: &[u8]) -> Result<usize, TcpStreamSendError> {
         self.stack.send_tcp_stream(self.id(), bytes)
-    }
-
-    pub(crate) fn receive(&self, maximum: usize) -> Result<TcpReceivePort, TcpReceiveError> {
-        let reservation = self.stack.reserve_tcp_receive(self.id(), maximum)?;
-        Ok(TcpReceivePort {
-            stack: self.stack.clone(),
-            reservation: Some(reservation),
-        })
     }
 
     pub(crate) fn receive_stream(

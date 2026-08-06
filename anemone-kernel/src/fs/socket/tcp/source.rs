@@ -51,7 +51,8 @@ impl TcpSocketSource {
             Err(_) => return Err((SysError::OutOfMemory, endpoint)),
         };
         let observer: Arc<dyn TcpEndpointInvalidationObserver> = source.clone();
-        let event_registration = match endpoint.register_invalidation_observer(&observer) {
+        let access = endpoint.access();
+        let event_registration = match access.register_invalidation_observer(&observer) {
             Ok(registration) => registration,
             Err(EventRegistrationError::OutOfMemory) => {
                 drop(observer);
@@ -59,7 +60,6 @@ impl TcpSocketSource {
             },
         };
         drop(observer);
-        let access = endpoint.access();
         source.source.publish(TcpAssociation {
             endpoint,
             access,

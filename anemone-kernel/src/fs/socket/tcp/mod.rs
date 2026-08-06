@@ -175,6 +175,7 @@ fn accept_tcp_socket(private: &AnyOpaque) -> Result<SocketAcceptItem, SocketAcce
     };
     let endpoint = child.accept().map_err(map_child_error)?;
     let peer = endpoint
+        .access()
         .peer()
         .expect("completed TCP child lost its owner query")
         .expect("completed TCP child did not carry a peer");

@@ -6,10 +6,10 @@ use anemone_net_api::{
     InterfaceId,
     tcp::{
         TcpConnectError, TcpConnectResult, TcpEndpointId, TcpLocalBinding, TcpPeer,
-        TcpPendingError, TcpQueryError, TcpReceiveError, TcpReceiveMode, TcpReceiveReservation,
-        TcpReceiveReservationId, TcpReceiveResolveError, TcpSendError, TcpShutdownDirection,
-        TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError,
-        TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpPendingError, TcpQueryError, TcpReceiveMode, TcpReceiveReservation,
+        TcpReceiveReservationId, TcpReceiveResolveError, TcpShutdownDirection, TcpShutdownError,
+        TcpShutdownOutcome, TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome,
+        TcpStreamSendError,
     },
 };
 use smoltcp::{iface::SocketSet, socket::tcp};
@@ -262,24 +262,6 @@ impl TcpEndpoints {
         ))
     }
 
-    pub(crate) fn send(
-        &mut self,
-        sockets: &mut SocketSet<'static>,
-        id: TcpEndpointId,
-        bytes: &[u8],
-    ) -> Result<usize, TcpSendError> {
-        self.send_stream(sockets, id, bytes)
-            .map_err(|error| match error {
-                TcpStreamSendError::UnknownEndpoint => TcpSendError::UnknownEndpoint,
-                TcpStreamSendError::WouldBlock => TcpSendError::WouldBlock,
-                TcpStreamSendError::NotConnected
-                | TcpStreamSendError::BrokenStream
-                | TcpStreamSendError::ConnectionRefused
-                | TcpStreamSendError::ConnectionReset
-                | TcpStreamSendError::TimedOut => TcpSendError::NotConnected,
-            })
-    }
-
     pub(crate) fn send_stream(
         &mut self,
         sockets: &mut SocketSet<'static>,
@@ -318,29 +300,6 @@ impl TcpEndpoints {
             return Err(TcpStreamSendError::WouldBlock);
         }
         Ok(accepted)
-    }
-
-    pub(crate) fn reserve_receive(
-        &mut self,
-        sockets: &mut SocketSet<'static>,
-        id: TcpEndpointId,
-        maximum: usize,
-    ) -> Result<TcpReceiveReservation, TcpReceiveError> {
-        match self.receive_stream(sockets, id, maximum, TcpReceiveMode::Consume) {
-            Ok(TcpStreamReceiveOutcome::Data(reservation)) => Ok(reservation),
-            Ok(TcpStreamReceiveOutcome::EndOfStream) => Err(TcpReceiveError::WouldBlock),
-            Err(error) => Err(match error {
-                TcpStreamReceiveError::UnknownEndpoint => TcpReceiveError::UnknownEndpoint,
-                TcpStreamReceiveError::WouldBlock => TcpReceiveError::WouldBlock,
-                TcpStreamReceiveError::ReservationOutstanding => {
-                    TcpReceiveError::ReservationOutstanding
-                },
-                TcpStreamReceiveError::NotConnected
-                | TcpStreamReceiveError::ConnectionRefused
-                | TcpStreamReceiveError::ConnectionReset
-                | TcpStreamReceiveError::TimedOut => TcpReceiveError::NotConnected,
-            }),
-        }
     }
 
     pub(crate) fn receive_stream(

@@ -6,10 +6,9 @@ use anemone_net_api::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
         TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpEndpointInvalidation, TcpListenBacklog,
         TcpListenError, TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError,
-        TcpReceiveError, TcpReceiveMode, TcpReceiveReservation, TcpReceiveReservationId,
-        TcpReceiveResolveError, TcpReleaseReason, TcpRetireError, TcpSendError,
-        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
-        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpReceiveMode, TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason,
+        TcpRetireError, TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome,
+        TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 
@@ -201,19 +200,6 @@ impl DomainStack {
         Ok(())
     }
 
-    pub(in crate::net) fn send_tcp_endpoint(
-        &self,
-        endpoint: TcpEndpointId,
-        bytes: &[u8],
-    ) -> Result<usize, TcpSendError> {
-        let (accepted, progression) =
-            self.protocol_transition(|stack| stack.send_tcp_endpoint(endpoint, bytes))?;
-        if let Some(progression) = progression {
-            crate::net::submit_protocol_progression(progression);
-        }
-        Ok(accepted)
-    }
-
     pub(in crate::net) fn send_tcp_stream(
         &self,
         endpoint: TcpEndpointId,
@@ -225,14 +211,6 @@ impl DomainStack {
             crate::net::submit_protocol_progression(progression);
         }
         Ok(accepted)
-    }
-
-    pub(in crate::net) fn reserve_tcp_receive(
-        &self,
-        endpoint: TcpEndpointId,
-        maximum: usize,
-    ) -> Result<TcpReceiveReservation, TcpReceiveError> {
-        self.protocol_transition(|stack| stack.reserve_tcp_receive(endpoint, maximum))
     }
 
     pub(in crate::net) fn receive_tcp_stream(
