@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-07 - ELF demand paging](./2026-08-07-elf-demand-paging.md)
 - [2026-08-06 - Inode address space](./2026-08-06-inode-address-space.md)
 - [2026-08-06 - User-access typed-copy soundness](./2026-08-06-user-access-typed-copy-soundness.md)
 - [2026-08-05 - Kernel performance observation](./2026-08-05-kernel-performance-observation.md)

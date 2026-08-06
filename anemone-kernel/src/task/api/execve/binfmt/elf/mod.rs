@@ -13,6 +13,7 @@ use crate::{
 pub mod auxv;
 pub mod init_stack;
 pub mod parse;
+mod segment;
 
 fn load_binary(ctx: &mut ExecCtx) -> Result<ExecResult, SysError> {
     let file = ctx.path.open().map_err(|e| {
