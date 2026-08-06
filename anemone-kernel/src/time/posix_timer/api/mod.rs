@@ -1,18 +1,21 @@
+mod timer_create;
+mod timer_delete;
+mod timer_getoverrun;
+mod timer_gettime;
+mod timer_settime;
+
 use anemone_abi::time::linux::{
     ITimerSpec, SigEvent, TimeSpec,
     clock::{
         CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME,
-        CLOCK_THREAD_CPUTIME_ID, TIMER_ABSTIME,
+        CLOCK_THREAD_CPUTIME_ID,
     },
     posix_timer::{SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD, SIGEV_THREAD_ID},
 };
 
 use crate::{
     prelude::*,
-    syscall::{
-        handler::TryFromSyscallArg,
-        user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
-    },
+    syscall::handler::TryFromSyscallArg,
     task::{
         get_task_and_thread_group,
         sig::SigNo,
@@ -21,114 +24,6 @@ use crate::{
 };
 
 const NSEC_PER_SEC: u64 = 1_000_000_000;
-
-#[syscall(SYS_TIMER_CREATE)]
-fn sys_timer_create(
-    clock_id: i32,
-    event_ptr: u64,
-    #[validate_with(user_addr)] timer_id_ptr: VirtAddr,
-) -> Result<u64, SysError> {
-    let clock = timer_clock(clock_id)?;
-    let task = get_current_task();
-    let owner = task.get_thread_group();
-    let notification = if event_ptr == 0 {
-        PosixTimerNotification::DefaultSignal
-    } else {
-        let event = {
-            let event_ptr = user_addr(event_ptr)?;
-            let usp_handle = task.clone_uspace_handle();
-            let mut usp = usp_handle.lock();
-            UserReadPtr::<SigEvent>::try_new(event_ptr, &mut usp)?.read()?
-        };
-        notification_from_uapi(&owner, event)?
-    };
-
-    let prepared = owner.prepare_posix_timer(clock, notification)?;
-    let timer_id = prepared.id();
-    {
-        let usp_handle = task.clone_uspace_handle();
-        let mut usp = usp_handle.lock();
-        UserWritePtr::<i32>::try_new(timer_id_ptr, &mut usp)?.write(timer_id)?;
-    }
-    prepared.publish()?;
-    Ok(0)
-}
-
-#[syscall(SYS_TIMER_GETTIME)]
-fn sys_timer_gettime(
-    timer_id: i32,
-    #[validate_with(user_addr)] current_ptr: VirtAddr,
-) -> Result<u64, SysError> {
-    let task = get_current_task();
-    let setting = task.get_thread_group().posix_timer_gettime(timer_id)?;
-    let current = setting_to_uapi(setting);
-    let usp_handle = task.clone_uspace_handle();
-    let mut usp = usp_handle.lock();
-    UserWritePtr::<ITimerSpec>::try_new(current_ptr, &mut usp)?.write(current)?;
-    Ok(0)
-}
-
-#[syscall(SYS_TIMER_GETOVERRUN)]
-fn sys_timer_getoverrun(timer_id: i32) -> Result<u64, SysError> {
-    let overrun = get_current_task()
-        .get_thread_group()
-        .posix_timer_getoverrun(timer_id)?;
-    Ok(overrun as u64)
-}
-
-#[syscall(SYS_TIMER_SETTIME)]
-fn sys_timer_settime(
-    timer_id: i32,
-    flags: i32,
-    #[validate_with(user_addr)] new_ptr: VirtAddr,
-    old_ptr: u64,
-) -> Result<u64, SysError> {
-    // Linux accepts every non-TIMER_ABSTIME bit, so record this compatibility
-    // choice once without turning normal legacy use into a persistent warning.
-    static IGNORED_SETTIME_FLAGS_LOGGED: AtomicBool = AtomicBool::new(false);
-
-    let task = get_current_task();
-    let new_setting = {
-        let usp_handle = task.clone_uspace_handle();
-        let mut usp = usp_handle.lock();
-        let value = UserReadPtr::<ITimerSpec>::try_new(new_ptr, &mut usp)?.read()?;
-        setting_from_uapi(value)?
-    };
-
-    let ignored_flags = flags & !TIMER_ABSTIME;
-    if ignored_flags != 0 && !IGNORED_SETTIME_FLAGS_LOGGED.swap(true, Ordering::Relaxed) {
-        // Linux's legacy timer_settime ABI tests only TIMER_ABSTIME and ignores
-        // every other bit. Preserve that visible behavior, but keep it
-        // observable so a future ABI revision cannot accidentally tighten it.
-        knoticeln!(
-            "timer_settime: ignoring legacy flag bits {:#x}",
-            ignored_flags
-        );
-    }
-    let old_setting = task.get_thread_group().posix_timer_settime(
-        timer_id,
-        new_setting,
-        flags & TIMER_ABSTIME != 0,
-    )?;
-
-    // Linux applies the new setting before old-value copyout. An EFAULT here
-    // is fail-forward and must not roll the timer back to its previous arm.
-    if let Some(old_ptr) = (user_addr.nullable())(old_ptr)? {
-        let usp_handle = task.clone_uspace_handle();
-        let mut usp = usp_handle.lock();
-        UserWritePtr::<ITimerSpec>::try_new(old_ptr, &mut usp)?
-            .write(setting_to_uapi(old_setting))?;
-    }
-    Ok(0)
-}
-
-#[syscall(SYS_TIMER_DELETE)]
-fn sys_timer_delete(timer_id: i32) -> Result<u64, SysError> {
-    get_current_task()
-        .get_thread_group()
-        .delete_posix_timer(timer_id)?;
-    Ok(0)
-}
 
 fn timer_clock(clock_id: i32) -> Result<PosixTimerClock, SysError> {
     match clock_id {
