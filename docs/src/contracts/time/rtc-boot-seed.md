@@ -56,9 +56,13 @@ change sequence或进入runtime step notification；普通clock read再次访问
 selection、read failure no-fallback、一次read/finalize与ordinary clock不重入provider；timekeeper KUnit覆盖normal、negative、
 overflow、no-partial-mutation与change sequence不变。2026-08-07 RV64 provider-bearing QEMU通过576/576 KUnit，启动日志
 证明Goldfish registration、preference selection、一次read与seed commit；同次`clock_tests`验证2020+ realtime、同offset
-coarse projection及后续mutation/restore。RV64/LA64 app与release kernel构建通过。LA64 QEMU runtime未运行：其DTB虽有
-`loongson,ls7a-rtc`且QEMU使用`-rtc base=utc`，当前内核没有对应provider，strict provider-bearing oracle按决定预期失败。
+coarse projection及后续mutation/restore。2026-08-08 LA64 QEMU的LS7A provider接入后通过578/578 KUnit；同次
+`clock_tests`的首次realtime `1786121791006115430ns`落在host日志birth/mtime区间
+`[1786121778, 1786121798]s`内，并通过native clock、realtime mutation/restore、soft timer与POSIX timer检查。该LA64运行
+随后在无关的gateway ping阶段由调用者终止，因此不作为full user-test或orderly poweroff证据。RV64/LA64 app与release
+kernel构建通过。
 
 **最初来源：** [RTC Provider 与 Boot Walltime Seed 小迭代](../../devlog/changes/2026-08-08-rtc-provider-boot-walltime-seed.md)。
 
-**当前来源：** 同一closure commit中的device RTC core、Goldfish provider、boot handoff、timekeeper seed与验证证据。
+**当前来源：** 原closure commit中的device RTC core、Goldfish provider、boot handoff与timekeeper seed，以及后续LS7A
+concrete provider Patch及其LA64验证证据。

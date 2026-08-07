@@ -54,6 +54,10 @@ impl MachineDesc for Qemu3A5000 {
     unsafe fn early_init_timer(&self) {
         // no-op; we may extend machine init to support percpu?
     }
+
+    fn preferred_rtc_origin(&self) -> Option<Arc<dyn crate::device::discovery::fwnode::FwNode>> {
+        of_with_node_by_path("/rtc@100d0100", |node| get_of_node(node.handle()) as Arc<_>).ok()
+    }
 }
 
 impl MachineIpi for Qemu3A5000 {
