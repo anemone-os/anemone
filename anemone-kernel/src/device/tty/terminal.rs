@@ -18,6 +18,7 @@ pub(super) struct TtyTermios {
     pub(super) icrnl: bool,
     pub(super) opost: bool,
     pub(super) onlcr: bool,
+    pub(super) tab3: bool,
     pub(super) icanon: bool,
     pub(super) isig: bool,
     pub(super) echo: bool,
@@ -54,6 +55,7 @@ impl Default for TtyTermios {
             icrnl: true,
             opost: true,
             onlcr: true,
+            tab3: false,
             icanon: true,
             isig: true,
             echo: true,
@@ -200,6 +202,10 @@ impl EchoBytes {
 
 pub(super) struct TerminalOutput {
     queue: Box<RingBuffer<u8, TTY_OUTPUT_CAPACITY_BYTES>>,
+    /// Logical column after every source byte admitted by this output
+    /// processor. It is committed with the complete transform token and is
+    /// not physical-UART or console cursor truth.
+    column: usize,
     generation: usize,
 }
 
@@ -207,30 +213,43 @@ impl TerminalOutput {
     fn try_new() -> Result<Self, SysError> {
         Ok(Self {
             queue: Box::try_new(RingBuffer::new()).map_err(|_| SysError::OutOfMemory)?,
+            column: 0,
             generation: 0,
         })
     }
 
     pub(super) fn can_enqueue(&self, source: &EchoBytes, termios: TtyTermios) -> bool {
-        self.queue.available() >= transformed_len(source.as_slice(), termios)
+        self.queue.available() >= transformed_len(source.as_slice(), termios, self.column)
     }
 
     pub(super) fn can_enqueue_after_clear(&self, source: &EchoBytes, termios: TtyTermios) -> bool {
-        TTY_OUTPUT_CAPACITY_BYTES >= transformed_len(source.as_slice(), termios)
+        TTY_OUTPUT_CAPACITY_BYTES >= transformed_len(source.as_slice(), termios, self.column)
     }
 
     pub(super) fn enqueue(&mut self, source: &EchoBytes, termios: TtyTermios) -> bool {
         self.enqueue_slice(source.as_slice(), termios) == source.as_slice().len()
     }
 
+    fn writable(&self, termios: TtyTermios) -> bool {
+        let mut maximum_token_len = 1;
+        if termios.opost && termios.onlcr {
+            maximum_token_len = 2;
+        }
+        if termios.opost && termios.tab3 {
+            maximum_token_len = maximum_token_len.max(8 - self.column % 8);
+        }
+        self.queue.available() >= maximum_token_len
+    }
+
     fn enqueue_slice(&mut self, source: &[u8], termios: TtyTermios) -> usize {
         let mut consumed = 0;
         for &byte in source {
-            let token = transform_token(byte, termios);
+            let token = transform_token(byte, termios, self.column);
             if self.queue.available() < token.len {
                 break;
             }
             assert_eq!(self.queue.try_push_slice(token.as_slice()), token.len);
+            self.column = token.next_column;
             consumed += 1;
         }
         if consumed != 0 {
@@ -264,6 +283,10 @@ impl TerminalOutput {
         if self.queue.is_empty() {
             return;
         }
+        // The column is output-processor stream state committed when source
+        // bytes enter this queue. A later output flush discards backend work;
+        // it does not reinterpret subsequent tabs as if admitted bytes never
+        // existed.
         self.queue.clear();
         self.bump_generation();
     }
@@ -286,8 +309,9 @@ impl TerminalOutput {
 
 #[derive(Debug, Clone, Copy)]
 struct OutputToken {
-    bytes: [u8; 2],
+    bytes: [u8; 8],
     len: usize,
+    next_column: usize,
 }
 
 impl OutputToken {
@@ -296,24 +320,51 @@ impl OutputToken {
     }
 }
 
-fn transform_token(byte: u8, termios: TtyTermios) -> OutputToken {
-    if termios.opost && termios.onlcr && byte == b'\n' {
-        OutputToken {
-            bytes: [b'\r', b'\n'],
-            len: 2,
-        }
-    } else {
-        OutputToken {
-            bytes: [byte, 0],
-            len: 1,
-        }
+fn transform_token(byte: u8, termios: TtyTermios, column: usize) -> OutputToken {
+    // This follows the supported subset of Linux N_TTY byte post-processing.
+    // It deliberately does not parse ANSI escape sequences or claim the host
+    // terminal's physical cursor as TTY-owned truth.
+    let mut token = OutputToken {
+        bytes: [0; 8],
+        len: 1,
+        next_column: column,
+    };
+    token.bytes[0] = byte;
+    if !termios.opost {
+        return token;
     }
+
+    match byte {
+        b'\n' if termios.onlcr => {
+            token.bytes[..2].copy_from_slice(b"\r\n");
+            token.len = 2;
+            token.next_column = 0;
+        },
+        b'\n' => {},
+        b'\r' => token.next_column = 0,
+        0x08 => token.next_column = column.saturating_sub(1),
+        b'\t' => {
+            let width = 8 - column % 8;
+            token.next_column = column.wrapping_add(width);
+            if termios.tab3 {
+                token.bytes[..width].fill(b' ');
+                token.len = width;
+            }
+        },
+        _ if !byte.is_ascii_control() => token.next_column = column.wrapping_add(1),
+        _ => {},
+    }
+    token
 }
 
-fn transformed_len(source: &[u8], termios: TtyTermios) -> usize {
+fn transformed_len(source: &[u8], termios: TtyTermios, mut column: usize) -> usize {
     source
         .iter()
-        .map(|&byte| transform_token(byte, termios).len)
+        .map(|&byte| {
+            let token = transform_token(byte, termios, column);
+            column = token.next_column;
+            token.len
+        })
         .sum()
 }
 
@@ -644,12 +695,7 @@ impl Terminal {
 
     pub(super) fn writable(&self) -> bool {
         let inner = self.inner.lock();
-        inner.output.queue.available()
-            >= if inner.termios.opost && inner.termios.onlcr {
-                2
-            } else {
-                1
-            }
+        inner.output.writable(inner.termios)
     }
 
     pub(super) fn wait_readable(&self) -> Result<(), SysError> {
@@ -733,12 +779,7 @@ impl Terminal {
         if interests.contains(PollEvent::READABLE) && inner.discipline.readable(inner.termios) {
             ready |= PollEvent::READABLE;
         }
-        let token = if inner.termios.opost && inner.termios.onlcr {
-            2
-        } else {
-            1
-        };
-        if interests.contains(PollEvent::WRITABLE) && inner.output.queue.available() >= token {
+        if interests.contains(PollEvent::WRITABLE) && inner.output.writable(inner.termios) {
             ready |= PollEvent::WRITABLE;
         }
         ready
@@ -1147,6 +1188,46 @@ mod kunits {
         assert_eq!(drain_output(&terminal), fill);
         assert_eq!(terminal.enqueue_output(b"\n"), 1);
         assert_eq!(drain_output(&terminal), b"\r\n");
+    }
+
+    #[kunit]
+    fn tab3_expands_from_the_committed_logical_column() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| termios.tab3 = true);
+
+        assert_eq!(terminal.enqueue_output(b"abcde\tX\rabc\x08\t\n"), 14);
+        assert_eq!(drain_output(&terminal), b"abcde   X\rabc\x08      \r\n");
+
+        terminal.set_termios_for_test(|termios| termios.tab3 = false);
+        assert_eq!(terminal.enqueue_output(b"abc\t"), 4);
+        terminal.set_termios_for_test(|termios| termios.tab3 = true);
+        assert_eq!(terminal.enqueue_output(b"\t"), 1);
+        assert_eq!(drain_output(&terminal), b"abc\t        ");
+
+        assert_eq!(terminal.enqueue_output(b"\r\x1b\t"), 3);
+        assert_eq!(drain_output(&terminal), b"\r\x1b        ");
+    }
+
+    #[kunit]
+    fn tab3_backpressure_does_not_advance_the_logical_column() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| termios.tab3 = true);
+        let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES - 3];
+        assert_eq!(terminal.enqueue_output(&fill), fill.len());
+        assert_eq!(terminal.enqueue_output(b"\r"), 1);
+        assert!(!terminal.writable());
+        assert!(
+            Terminal::poll_events_locked(&terminal.inner.lock(), PollEvent::WRITABLE).is_empty()
+        );
+        assert_eq!(terminal.enqueue_output(b"\t"), 0);
+
+        let mut queued = vec![0_u8; TTY_OUTPUT_CAPACITY_BYTES];
+        let count = terminal.peek_output(&mut queued);
+        terminal.consume_output(&queued[..count]);
+        assert_eq!(count, TTY_OUTPUT_CAPACITY_BYTES - 2);
+        assert!(terminal.writable());
+        assert_eq!(terminal.enqueue_output(b"\t"), 1);
+        assert_eq!(drain_output(&terminal), b"        ");
     }
 
     #[kunit]

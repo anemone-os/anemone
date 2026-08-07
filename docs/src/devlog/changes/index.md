@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-08 - TTY TAB3/XTABS output processing](./2026-08-08-tty-tab3-output.md)
 - [2026-08-08 - RTC provider 与 boot walltime seed](./2026-08-08-rtc-provider-boot-walltime-seed.md)
 - [2026-08-07 - TCP local reverse TIME_WAIT admission](./2026-08-07-tcp-local-time-wait-admission.md)
 - [2026-08-07 - Ext4 synchronous I/O batching](./2026-08-07-ext4-synchronous-io-batching.md)
