@@ -447,7 +447,7 @@ impl WaitFor {
     }
 }
 
-/// rusage is not yet implemented.
+/// This convenience wrapper does not request rusage.
 pub fn wait4(
     target: WaitFor,
     wstatus: Option<&mut WStatusRaw>,
