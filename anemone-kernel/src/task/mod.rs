@@ -24,7 +24,7 @@ pub mod sig;
 pub mod task_fs;
 #[path = "itimer.rs"]
 pub mod task_itimer;
-#[path = "posix_timer.rs"]
+#[path = "posix_timer/mod.rs"]
 pub(crate) mod task_posix_timer;
 #[path = "resource/mod.rs"]
 pub mod task_resource;

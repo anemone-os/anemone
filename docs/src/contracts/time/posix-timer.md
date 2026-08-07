@@ -6,7 +6,7 @@
 **参与领域：** time / soft timer / task / signal / syscall ABI
 **覆盖范围：** native 64-bit timer 107--111、ID/object生命周期、timeline、周期/overrun、shared `SI_TIMER`与exact-task `SIGEV_THREAD_ID`交接
 **不覆盖：** compat 403--409、CPU-time timer、raw `SIGEV_THREAD` callback ABI、alarm clock、time namespace或high-resolution timer
-**实现位置：** `anemone-kernel/src/task/posix_timer.rs`、`anemone-kernel/src/time/posix_timer/`、`anemone-kernel/src/task/sig/`
+**实现位置：** `anemone-kernel/src/task/posix_timer/`、`anemone-kernel/src/time/posix_timer/`、`anemone-kernel/src/task/sig/`
 **依赖：** `TIMEKEEPER-CLOCK-001`、`TIMEKEEPER-STEP-001`、`SOFT-TIMER-REQUEST-001`、`SIGNAL-PENDING-001`、`TASK-LIFE-002`
 **最后核验：** 2026-08-06
 
