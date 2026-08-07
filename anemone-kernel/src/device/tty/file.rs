@@ -559,9 +559,7 @@ static TTY_FILE_OPS: FileOps = FileOps {
 mod kunits {
     use super::*;
     use crate::{
-        device::tty::{
-            TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource,
-        },
+        device::tty::{TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource},
         fs::anony_open_with,
     };
 
