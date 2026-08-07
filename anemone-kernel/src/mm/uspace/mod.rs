@@ -545,7 +545,13 @@ impl UserSpace {
                     let end = start
                         .checked_add(count as usize)
                         .ok_or(SysError::InvalidArgument)?;
-                    heap_vma.backing().decommit_range(start..end)?
+                    // SAFETY: the reserved heap VMA is created CopyOnWrite and
+                    // its backing is not published to another VMA. Fork replaces
+                    // it with distinct parent/child ShadowObjects, so this
+                    // UserSpace owns the complete mapping domain. `retired` is
+                    // transferred to the fence guard below and stays alive until
+                    // the remote TLB invalidation completes or fails closed.
+                    unsafe { heap_vma.backing().decommit_private_range(start..end)? }
                 };
 
                 let mut mapper = self.table.mapper();

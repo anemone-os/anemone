@@ -147,7 +147,10 @@ impl VmObject for ShadowObject {
         Ok(())
     }
 
-    fn decommit_range(&self, range: core::ops::Range<usize>) -> Result<RetiredFrames, SysError> {
+    unsafe fn decommit_private_range(
+        &self,
+        range: core::ops::Range<usize>,
+    ) -> Result<RetiredFrames, SysError> {
         self.take_overlay(range, true)
     }
 
@@ -207,9 +210,10 @@ mod kunits {
         fill_frame(&overlay.frame, 0x5a);
         drop(overlay);
 
-        let retired = shadow
-            .decommit_range(0..1)
-            .expect("shadow decommit should succeed");
+        // SAFETY: this test owns the only ShadowObject mapping domain and keeps
+        // the returned frame handles alive in `retired` for the whole check.
+        let retired =
+            unsafe { shadow.decommit_private_range(0..1) }.expect("shadow decommit should succeed");
         assert_eq!(retired.len(), 1);
 
         let zero = shadow

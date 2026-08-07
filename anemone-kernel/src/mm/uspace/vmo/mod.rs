@@ -98,10 +98,21 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    /// Remove resident frames and return their ownership to the address-space
-    /// retirement protocol. Unlike `discard_range`, this operation must also
-    /// prevent a COW backing from exposing parent contents on a later fault.
-    fn decommit_range(&self, _range: Range<usize>) -> Result<RetiredFrames, SysError> {
+    /// Remove resident frames from a private mapping and return their ownership
+    /// to its address-space retirement protocol. Unlike `discard_range`, this
+    /// operation must also prevent a COW backing from exposing parent contents
+    /// on a later fault.
+    ///
+    /// # Safety
+    ///
+    /// The caller must own the complete mapping domain for this object: no
+    /// other address space or VMA may retain a mapping of a returned frame. The
+    /// returned frames must remain alive until every affected CPU has completed
+    /// the corresponding TLB invalidation.
+    unsafe fn decommit_private_range(
+        &self,
+        _range: Range<usize>,
+    ) -> Result<RetiredFrames, SysError> {
         Err(SysError::NotSupported)
     }
 

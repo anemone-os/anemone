@@ -85,7 +85,10 @@ impl VmObject for AnonObject {
         Ok(())
     }
 
-    fn decommit_range(&self, range: core::ops::Range<usize>) -> Result<RetiredFrames, SysError> {
+    unsafe fn decommit_private_range(
+        &self,
+        range: core::ops::Range<usize>,
+    ) -> Result<RetiredFrames, SysError> {
         self.take_pages(range)
     }
 
