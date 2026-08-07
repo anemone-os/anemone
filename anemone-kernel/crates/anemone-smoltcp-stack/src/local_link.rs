@@ -130,10 +130,6 @@ impl LocalPort {
     pub(crate) fn ip_mtu(&self) -> usize {
         self.link.mtu
     }
-
-    pub(crate) fn local_link_capacity(&self) -> usize {
-        self.link.packet_capacity
-    }
 }
 
 pub(crate) fn packet_owner(active: ActiveEgress) -> Option<PacketOwner> {

@@ -9,7 +9,7 @@ use crate::{
     stack::{Protocols, PumpError, PumpOrder, Stack},
 };
 
-use super::common::{PumpBudget, pump_outcome};
+use super::common::{PumpBudget, RoundContinuation, pump_outcome};
 
 impl Stack {
     /// Advances the production IP-medium local port with the same exclusive
@@ -83,7 +83,6 @@ impl Stack {
         // round; otherwise a sleeping production worker can strand the packet
         // without another owner capable of issuing a wake.
         let transferred = local.link.transfer(budget.ingress_frames());
-        let owner_blocked = device_blocked && local.link.occupied() >= local.local_link_capacity();
         let protocol_egress_may_remain =
             self.protocols
                 .complete_egress(active, id, &local.protocols, &local.sockets);
@@ -97,13 +96,21 @@ impl Stack {
             .interface
             .poll_at(smoltcp_now, &local.sockets)
             .map(from_smoltcp_instant);
-        Ok(pump_outcome(
-            owner_blocked,
-            ingress_may_remain,
-            egress_may_remain || protocol_egress_may_remain || transferred != 0,
-            now,
-            next_deadline,
-        ))
+        // Local capacity never waits on another owner: the next pump can
+        // consume normal ingress and free the same bounded link. A transmit
+        // rejected earlier in this round therefore remains runnable even if
+        // another progress signal was not observed after ingress.
+        let continuation = if device_blocked
+            || ingress_may_remain
+            || egress_may_remain
+            || protocol_egress_may_remain
+            || transferred != 0
+        {
+            RoundContinuation::Runnable
+        } else {
+            RoundContinuation::Quiescent
+        };
+        Ok(pump_outcome(continuation, now, next_deadline))
     }
 }
 

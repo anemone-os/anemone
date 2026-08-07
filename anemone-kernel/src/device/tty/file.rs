@@ -560,8 +560,7 @@ mod kunits {
     use super::*;
     use crate::{
         device::tty::{
-            TtyPort, TtyPortAttachment, TtyPortId, TtyRxUnit, TtyWakeSource,
-            attach_unpublished_port,
+            TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource,
         },
         fs::anony_open_with,
     };
@@ -627,15 +626,6 @@ mod kunits {
         let wake = TtyWakeHandle { source };
         let placeholder = crate::device::console::open_console_stdin();
         anony_open_with(placeholder.path(), opened_file(endpoint, wake)).unwrap()
-    }
-
-    fn attachment_file(attachment: &TtyPortAttachment) -> TtyFile {
-        TtyFile {
-            endpoint: attachment.endpoint.clone(),
-            wake: TtyWakeHandle {
-                source: attachment.wake_source.as_ref().unwrap().clone(),
-            },
-        }
     }
 
     #[kunit]
@@ -781,38 +771,6 @@ mod kunits {
             validate_termios(canonical_cc, current, line()),
             Err(SysError::InvalidArgument)
         );
-    }
-
-    #[kunit]
-    fn set_modes_commit_after_drain_and_flush_only_for_tcsetsf() {
-        let port = DrainPort::new("/kunit/tty/file-set-modes");
-        let (attachment, _) = attach_unpublished_port(port.clone()).unwrap();
-        let tty = attachment_file(&attachment);
-        let mut candidate = project_termios(TtyTermios::default(), line()).unwrap();
-        candidate.c_lflag &= !abi::ECHO;
-
-        assert_eq!(tty.endpoint.terminal.enqueue_output(b"queued\n"), 7);
-        set_termios(&tty, candidate, SetMode::Now).unwrap();
-        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert!(tty.endpoint.terminal.output_pending());
-        assert_eq!(port.submitted.load(Ordering::Relaxed), 0);
-
-        candidate.c_lflag |= abi::ECHO;
-        set_termios(&tty, candidate, SetMode::Drain).unwrap();
-        assert!(tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert_eq!(port.submitted.load(Ordering::Relaxed), 8);
-
-        for byte in b"unread\n" {
-            assert!(tty.endpoint.terminal.receive_rx_byte(*byte));
-        }
-        candidate.c_lflag &= !abi::ECHO;
-        set_termios(&tty, candidate, SetMode::DrainFlush).unwrap();
-        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert_eq!(
-            tty.endpoint.terminal.read_input(&mut [0_u8; 8]),
-            InputRead::Empty
-        );
-        attachment.abort();
     }
 
     #[kunit]

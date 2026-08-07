@@ -20,6 +20,7 @@ impl TcpEndpoints {
     pub(crate) fn prepare_connect(
         &self,
         id: TcpEndpointId,
+        interface: InterfaceId,
         source: anemone_net_api::Ipv4Address,
         peer: TcpPeer,
     ) -> Result<(TcpLocalBinding, TcpLocalBinding), TcpConnectError> {
@@ -43,7 +44,7 @@ impl TcpEndpoints {
                 return Err(TcpConnectError::UnsupportedSource);
             }
             let local = TcpLocalBinding::from_owner_commit(source, binding.port());
-            if self.connection_tuple_conflicts(id, local, peer) {
+            if self.connection_tuple_conflicts(id, interface, local, peer) {
                 return Err(TcpConnectError::PortInUse);
             }
             return Ok((binding, local));
@@ -59,7 +60,7 @@ impl TcpEndpoints {
                 TcpLocalBinding::from_owner_commit(anemone_net_api::Ipv4Address::UNSPECIFIED, port);
             let local = TcpLocalBinding::from_owner_commit(source, port);
             if self.binding_conflicts(id, binding)
-                || self.connection_tuple_conflicts(id, local, peer)
+                || self.connection_tuple_conflicts(id, interface, local, peer)
             {
                 continue;
             }
@@ -71,27 +72,37 @@ impl TcpEndpoints {
     fn connection_tuple_conflicts(
         &self,
         id: TcpEndpointId,
+        interface: InterfaceId,
         local: TcpLocalBinding,
         peer: TcpPeer,
     ) -> bool {
+        let candidate = super::ConnectionTuple { local, peer };
+        let conflicts = |existing_interface, existing| {
+            engine_tuple_conflicts_with_active_open(
+                existing_interface,
+                existing,
+                interface,
+                candidate,
+            )
+        };
         self.endpoints.iter().any(|slot| match &slot.role {
-            EndpointRole::Connection(connection) if slot.id != Some(id) => {
-                connection.local == local && connection.peer == peer
-            },
-            EndpointRole::Listener(listener) => listener
-                .slots
-                .iter()
-                .filter_map(|slot| slot.tuple)
-                .any(|tuple| tuple.local == local && tuple.peer == peer),
-            EndpointRole::Reclaiming {
-                tuple: Some(tuple), ..
-            } => tuple.local == local && tuple.peer == peer,
+            EndpointRole::Connection(connection) if slot.id != Some(id) => conflicts(
+                connection.interface,
+                super::ConnectionTuple {
+                    local: connection.local,
+                    peer: connection.peer,
+                },
+            ),
+            EndpointRole::Listener(listener) => listener.slots.iter().any(|slot| {
+                slot.tuple
+                    .is_some_and(|tuple| conflicts(listener.interface, tuple))
+            }),
             _ => false,
-        }) || self
-            .deferred
-            .iter()
-            .filter_map(|reclaim| reclaim.tuple)
-            .any(|tuple| tuple.local == local && tuple.peer == peer)
+        }) || self.deferred.iter().any(|reclaim| {
+            reclaim
+                .tuple
+                .is_some_and(|tuple| conflicts(reclaim.interface, tuple))
+        })
     }
 
     pub(crate) fn commit_connect(
@@ -526,6 +537,60 @@ impl TcpEndpoints {
             connection.phase = previous_phase;
         }
         Ok(())
+    }
+}
+
+fn engine_tuple_conflicts_with_active_open(
+    existing_interface: InterfaceId,
+    existing: super::ConnectionTuple,
+    candidate_interface: InterfaceId,
+    candidate: super::ConnectionTuple,
+) -> bool {
+    if existing == candidate {
+        return true;
+    }
+    // Every smoltcp SocketSet demultiplexes ingress to the first connected
+    // engine whose local/peer tuple accepts the packet. On one interface, the
+    // candidate SYN's source/destination flow must therefore not equal an old
+    // engine's ingress claim; otherwise a reverse TIME_WAIT engine consumes the
+    // SYN before the listener. Different interfaces have independent engine
+    // sets, so their reversed tuples do not create this collision.
+    existing_interface == candidate_interface
+        && existing.local.address() == candidate.peer.address()
+        && existing.local.port() == candidate.peer.port()
+        && existing.peer.address() == candidate.local.address()
+        && existing.peer.port() == candidate.local.port()
+}
+
+#[cfg(test)]
+mod tests {
+    use anemone_net_api::Ipv4Address;
+
+    use super::*;
+
+    #[test]
+    fn reverse_demux_conflict_is_scoped_to_one_interface() {
+        let first = InterfaceId::from_index(1);
+        let second = InterfaceId::from_index(2);
+        let local = Ipv4Address::new([127, 0, 0, 1]);
+        let candidate = super::super::ConnectionTuple {
+            local: TcpLocalBinding::from_owner_commit(local, 40000),
+            peer: TcpPeer::new(local, 25021),
+        };
+        let reverse = super::super::ConnectionTuple {
+            local: TcpLocalBinding::from_owner_commit(local, 25021),
+            peer: TcpPeer::new(local, 40000),
+        };
+
+        assert!(engine_tuple_conflicts_with_active_open(
+            first, reverse, first, candidate
+        ));
+        assert!(!engine_tuple_conflicts_with_active_open(
+            first, reverse, second, candidate
+        ));
+        assert!(engine_tuple_conflicts_with_active_open(
+            first, candidate, second, candidate
+        ));
     }
 }
 

@@ -8,7 +8,7 @@ use crate::{
     stack::{InterfaceEntry, Protocols, PumpError, PumpOrder, Stack},
 };
 
-use super::common::{PumpBudget, pump_outcome};
+use super::common::{PumpBudget, RoundContinuation, pump_outcome};
 
 impl Stack {
     pub fn pump<P: FrameProvider>(
@@ -79,13 +79,17 @@ impl Stack {
             .interface
             .poll_at(smoltcp_now, &entry.sockets)
             .map(from_smoltcp_instant);
-        Ok(pump_outcome(
-            device.blocked_work(),
-            ingress_may_remain,
-            egress_may_remain || protocol_egress_may_remain,
-            now,
-            next_deadline,
-        ))
+        let continuation = if device.blocked_work() {
+            // External TX credit and link availability are provider-owned.
+            // Repeating the same round cannot progress until its durable
+            // completion/link edge requests a recheck.
+            RoundContinuation::AwaitProviderEdge
+        } else if ingress_may_remain || egress_may_remain || protocol_egress_may_remain {
+            RoundContinuation::Runnable
+        } else {
+            RoundContinuation::Quiescent
+        };
+        Ok(pump_outcome(continuation, now, next_deadline))
     }
 }
 
