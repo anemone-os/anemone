@@ -1,5 +1,5 @@
 use anemone_net_api::{
-    EthernetAddress,
+    EthernetAddress, Recheck,
     icmp_raw::IcmpRawEndpointLimits,
     udp::{UdpErrorCause, UdpQueryError},
 };
@@ -156,6 +156,77 @@ fn local_closed_port_drives_endpoint_pending_and_error_fifo_through_normal_ingre
             .udp_endpoint_facts_for_host_validation(client)
             .unwrap()
             .has_error()
+    );
+}
+
+#[test]
+fn full_local_link_repolls_transferred_icmp_without_an_external_edge() {
+    let mut stack = standard_stack();
+    let local = stack.add_local_ipv4_for_host_validation(LOCAL_IP, 8, 1, 128, Instant::ZERO);
+    let client = stack
+        .create_udp_endpoint_for_host_validation(46_080, 2, ENDPOINT_PAYLOAD_CAPACITY)
+        .unwrap();
+    stack
+        .set_udp_receive_errors_for_host_validation(client, true)
+        .unwrap();
+
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            46_081,
+            b"first",
+        )
+        .unwrap();
+    let first = stack
+        .pump_local_for_host_validation(local, Instant::from_micros(1), PumpBudget::new(1, 1))
+        .unwrap();
+    assert_eq!(first.recheck, Recheck::Immediate);
+    assert_eq!(
+        stack
+            .local_link_observation_for_host_validation()
+            .unwrap()
+            .occupied_packets,
+        1
+    );
+
+    stack
+        .send_udp_for_host_validation(
+            client,
+            Some(selection(local, LOCAL_IP)),
+            LOCAL_IP,
+            46_081,
+            b"second",
+        )
+        .unwrap();
+    let blocked = stack
+        .pump_local_for_host_validation(local, Instant::from_micros(2), PumpBudget::new(1, 1))
+        .unwrap();
+    assert!(blocked.work_remaining);
+    assert_eq!(
+        blocked.recheck,
+        Recheck::Immediate,
+        "normal ingress published by local transfer must drive a later bounded round"
+    );
+    assert_eq!(
+        stack
+            .take_udp_pending_error_for_host_validation(client)
+            .unwrap(),
+        None
+    );
+
+    // This call models the production worker consuming only the Immediate
+    // continuation above; no protocol mutation, timer, or provider edge
+    // occurs between the two rounds.
+    stack
+        .pump_local_for_host_validation(local, Instant::from_micros(3), PumpBudget::new(1, 1))
+        .unwrap();
+    assert_eq!(
+        stack
+            .take_udp_pending_error_for_host_validation(client)
+            .unwrap(),
+        Some(UdpErrorCause::PortUnreachable)
     );
 }
 
