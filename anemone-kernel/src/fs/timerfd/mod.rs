@@ -4,11 +4,12 @@
 //! only provides a stable fd identity; timer expiration, blocking reads, poll
 //! readiness, and logical cancellation all live in `TimerFdCore`.
 
+mod abi;
 mod api;
 
-use core::mem::size_of;
+use abi::{TimerFdSettimeFlags, TimerFdSpec};
 
-use anemone_abi::time::linux::{ITimerSpec, TimeSpec};
+use core::mem::size_of;
 
 use crate::{
     fs::FileMode,
@@ -26,14 +27,7 @@ use crate::{
 
 use super::iomux::PollRoute;
 
-const NSEC_PER_SEC: u64 = 1_000_000_000;
 const TIMERFD_TRIGGER_QUEUE_CAPACITY: usize = 16;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TimerFdSettimeFlags {
-    abstime: bool,
-    cancel_on_set: bool,
-}
 
 #[derive(Clone, Debug)]
 struct TimerFdPollRoute {
@@ -356,42 +350,12 @@ fn queue_with_capacity<T>() -> Result<Vec<T>, SysError> {
     Ok(queue)
 }
 
-fn timespec_to_ns(ts: TimeSpec) -> Result<u64, SysError> {
-    if ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= NSEC_PER_SEC as i64 {
-        return Err(SysError::InvalidArgument);
-    }
-    let sec_ns = (ts.tv_sec as u64)
-        .checked_mul(NSEC_PER_SEC)
-        .ok_or(SysError::InvalidArgument)?;
-    sec_ns
-        .checked_add(ts.tv_nsec as u64)
-        .ok_or(SysError::InvalidArgument)
-}
-
-fn ns_to_timespec(ns: u64) -> TimeSpec {
-    TimeSpec {
-        tv_sec: (ns / NSEC_PER_SEC) as i64,
-        tv_nsec: (ns % NSEC_PER_SEC) as i64,
-    }
-}
-
 fn ns_to_duration(ns: u64) -> Duration {
-    Duration::from_secs(ns / NSEC_PER_SEC) + Duration::from_nanos(ns % NSEC_PER_SEC)
+    Duration::from_nanos(ns)
 }
 
 fn deadline_timeout(now_ns: u64, deadline_ns: u64) -> Duration {
     ns_to_duration(deadline_ns.saturating_sub(now_ns))
-}
-
-fn validate_itimerspec(spec: ITimerSpec) -> Result<(u64, Option<u64>), SysError> {
-    let value_ns = timespec_to_ns(spec.it_value)?;
-    let interval_ns = timespec_to_ns(spec.it_interval)?;
-    let interval = (interval_ns != 0).then_some(interval_ns);
-    Ok((value_ns, interval))
-}
-
-fn validate_settime_value(spec: ITimerSpec) -> Result<(), SysError> {
-    validate_itimerspec(spec).map(|_| ())
 }
 
 fn deadline_read(deadline: TimerFdDeadline) -> (u64, Option<u64>) {
@@ -406,7 +370,7 @@ fn deadline_read(deadline: TimerFdDeadline) -> (u64, Option<u64>) {
     }
 }
 
-fn snapshot_itimerspec(state: &TimerFdState) -> ITimerSpec {
+fn snapshot_spec(state: &TimerFdState) -> TimerFdSpec {
     // Remaining time is a projection of the authoritative absolute deadline;
     // it is never cached because realtime steps can change it immediately.
     let interval_ns = match state.schedule {
@@ -420,9 +384,9 @@ fn snapshot_itimerspec(state: &TimerFdState) -> ITimerSpec {
             deadline.deadline_ns().saturating_sub(now_ns)
         },
     };
-    ITimerSpec {
-        it_interval: ns_to_timespec(interval_ns),
-        it_value: ns_to_timespec(value_ns),
+    TimerFdSpec {
+        interval_ns: (interval_ns != 0).then_some(interval_ns),
+        value_ns,
     }
 }
 
@@ -930,20 +894,23 @@ fn create_timerfd(clockid: i32) -> Result<File, SysError> {
     )
 }
 
-fn gettime(file: &File) -> Result<ITimerSpec, SysError> {
+fn gettime(file: &File) -> Result<TimerFdSpec, SysError> {
     let core = TimerFdFile::core_from_file(file)?;
     let state = core.state.lock();
-    Ok(snapshot_itimerspec(&state))
+    Ok(snapshot_spec(&state))
 }
 
 fn settime(
     file: &File,
     flags: TimerFdSettimeFlags,
-    new_value: ITimerSpec,
-) -> Result<ITimerSpec, SysError> {
+    new_value: TimerFdSpec,
+) -> Result<TimerFdSpec, SysError> {
     use anemone_abi::time::linux::clock::CLOCK_REALTIME;
 
-    let (value_ns, interval_ns) = validate_itimerspec(new_value)?;
+    let TimerFdSpec {
+        value_ns,
+        interval_ns,
+    } = new_value;
     let core = TimerFdFile::core_from_file(file)?;
     if flags.cancel_on_set && (!flags.abstime || core.clockid != CLOCK_REALTIME) {
         // Linux accepts this combination and simply leaves cancel-on-set
@@ -997,7 +964,7 @@ fn settime(
 
     let old_value = {
         let mut state = core.state.lock();
-        let old_value = snapshot_itimerspec(&state);
+        let old_value = snapshot_spec(&state);
 
         // Retire the previous generation before publishing any replacement.
         // This orders an already-dequeued old callback behind stale identity.
@@ -1043,16 +1010,11 @@ mod kunits {
     };
     use anemone_abi::time::linux::clock::{CLOCK_MONOTONIC, CLOCK_REALTIME};
 
-    fn timer_spec(value_sec: i64, interval_sec: i64) -> ITimerSpec {
-        ITimerSpec {
-            it_interval: TimeSpec {
-                tv_sec: interval_sec,
-                tv_nsec: 0,
-            },
-            it_value: TimeSpec {
-                tv_sec: value_sec,
-                tv_nsec: 0,
-            },
+    fn timer_spec(value_sec: u64, interval_sec: u64) -> TimerFdSpec {
+        TimerFdSpec {
+            value_ns: value_sec.checked_mul(1_000_000_000).unwrap(),
+            interval_ns: (interval_sec != 0)
+                .then(|| interval_sec.checked_mul(1_000_000_000).unwrap()),
         }
     }
 
@@ -1274,14 +1236,14 @@ mod kunits {
         let file = create_timerfd(CLOCK_REALTIME).unwrap();
         let target_ns = realtime_read()
             .now_ns()
-            .checked_add(3600 * NSEC_PER_SEC)
+            .checked_add(timer_spec(3600, 0).value_ns)
             .unwrap();
         settime(
             &file,
             realtime_absolute_flags(true),
-            ITimerSpec {
-                it_interval: TimeSpec::default(),
-                it_value: ns_to_timespec(target_ns),
+            TimerFdSpec {
+                interval_ns: None,
+                value_ns: target_ns,
             },
         )
         .unwrap();
@@ -1321,11 +1283,11 @@ mod kunits {
         let file = create_timerfd(CLOCK_REALTIME).unwrap();
         let target_ns = realtime_read()
             .now_ns()
-            .checked_add(3600 * NSEC_PER_SEC)
+            .checked_add(timer_spec(3600, 0).value_ns)
             .unwrap();
-        let spec = ITimerSpec {
-            it_interval: TimeSpec::default(),
-            it_value: ns_to_timespec(target_ns),
+        let spec = TimerFdSpec {
+            interval_ns: None,
+            value_ns: target_ns,
         };
         settime(&file, realtime_absolute_flags(true), spec).unwrap();
         let core = TimerFdFile::core_from_file(&file).unwrap();
