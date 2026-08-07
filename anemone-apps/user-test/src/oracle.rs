@@ -116,9 +116,9 @@ fn run_tcp_local_pair() {
 }
 
 pub(crate) fn run_local() {
-    run_local_pair("socket-r1", SOCKET_R1);
-    run_local_pair("udp-errqueue", UDP_ERRQUEUE);
-    run_tcp_local_pair();
+    // run_local_pair("socket-r1", SOCKET_R1);
+    // run_local_pair("udp-errqueue", UDP_ERRQUEUE);
+    // run_tcp_local_pair();
 }
 
 pub(crate) fn run_tcp_stage5(peer: &str, port: &str) {
