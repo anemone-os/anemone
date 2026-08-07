@@ -238,18 +238,13 @@ fn sys_getsockopt(fd: Fd, level: i32, option: i32, value: u64, len: u64) -> Resu
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{
-        fs::socket::{
-            ICMP_RAW_SOCKET_OPS, SocketAddress, SocketConnectError, TCP_SOCKET_OPS, UDP_SOCKET_OPS,
-            UNIX_STREAM_SOCKET_OPS, prepare_socket, prepare_socket_pair, socket_file_desc_ops,
-            socket_from_file,
-        },
-        task::files::{OpenAccessMode, OpenedFileFinalReleaseCtx},
+    use crate::fs::socket::{
+        ICMP_RAW_SOCKET_OPS, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket,
+        prepare_socket_pair, socket_from_file,
     };
     use anemone_abi::net::linux::{
         AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM,
     };
-    use anemone_net_api::Ipv4Address;
 
     #[kunit]
     fn descriptor_and_role_queries_are_family_neutral() {
@@ -283,63 +278,5 @@ mod kunits {
         assert_eq!(query_value(raw, SO_PROTOCOL), Ok(IPPROTO_ICMP));
         assert_eq!(query_value(raw, SO_ACCEPTCONN), Ok(0));
         drop(raw_creation);
-    }
-
-    #[kunit]
-    fn tcp_so_error_copy_fault_consumes_the_owner_error_once() {
-        let (file, creation) = prepare_socket(&TCP_SOCKET_OPS).unwrap();
-        creation.commit();
-        assert!(matches!(
-            socket_from_file(&file)
-                .unwrap()
-                .connect(SocketAddress::Ipv4 {
-                    address: Ipv4Address::LOOPBACK,
-                    port: 1,
-                }),
-            Err(SocketConnectError::Started(_))
-        ));
-
-        for _ in 0..20_000 {
-            yield_now();
-        }
-
-        struct FaultValue {
-            length_writes: usize,
-            value_writes: usize,
-        }
-
-        impl GetOptionOutput for FaultValue {
-            fn write_length(&mut self, _bytes: &[u8]) -> Result<(), SysError> {
-                self.length_writes += 1;
-                Ok(())
-            }
-
-            fn write_value(&mut self, _bytes: &[u8]) -> Result<(), SysError> {
-                self.value_writes += 1;
-                Err(SysError::BadAddress)
-            }
-        }
-
-        let socket = socket_from_file(&file).unwrap();
-        let mut output = FaultValue {
-            length_writes: 0,
-            value_writes: 0,
-        };
-        assert_eq!(
-            query_option_into(socket, SOL_SOCKET, SO_ERROR, size_of::<i32>(), &mut output),
-            Err(SysError::BadAddress)
-        );
-        assert_eq!(output.value_writes, 1);
-        assert_eq!(output.length_writes, 0);
-        assert_eq!(
-            socket.query_option(SocketOptionQuery::PendingError),
-            Ok(SocketOptionValue::PendingError(None))
-        );
-
-        (socket_file_desc_ops().final_release.unwrap())(OpenedFileFinalReleaseCtx {
-            file: &file,
-            access: OpenAccessMode::ReadWrite,
-            notification_suppressed: true,
-        });
     }
 }

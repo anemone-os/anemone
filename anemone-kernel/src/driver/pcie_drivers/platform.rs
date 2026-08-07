@@ -4,6 +4,8 @@
 //! `bus-range`, `ranges`, and `interrupt-map` properties from the Open Firmware
 //! node to configure a [`PcieDomain`], then registers the root bus device.
 
+use core::mem::size_of;
+
 use kernel_macros::{Driver, KObject};
 
 use crate::{
@@ -30,6 +32,77 @@ use crate::{
 
 /// Global allocator for unique PCIe domain identifiers.
 static DOMAINS: AtomicUsize = AtomicUsize::new(0);
+
+// QEMU 10.0.2's LoongArch `virt` DT omits the PCI child
+// `#interrupt-cells` property and the level-high cell from every PCH-PIC
+// parent specifier. Keep this recognition exact so malformed generic PCI DTs
+// remain rejected. The compatibility path can be removed once every supported
+// QEMU build provider emits the corrected seven-cell entries.
+const QEMU_LOONGARCH_LEGACY_MAP_ENTRY_COUNT: usize = 16;
+const QEMU_LOONGARCH_LEGACY_MAP_ENTRY_BYTES: usize = 6 * size_of::<u32>();
+const QEMU_LOONGARCH_LEGACY_MAP_MASK: [u32; 4] = [0x1800, 0, 0, 7];
+const QEMU_LOONGARCH_PCH_LEVEL_HIGH: u32 = 4;
+
+struct QemuLoongArchLegacyInterruptMap {
+    normalized: Vec<u8>,
+    parent_handle: u32,
+}
+
+fn normalize_qemu_loongarch_legacy_interrupt_map(
+    intr_map: &[u8],
+    intr_mask: Option<&[u8]>,
+) -> Option<QemuLoongArchLegacyInterruptMap> {
+    let Some(intr_mask) = intr_mask else {
+        return None;
+    };
+    if intr_map.len()
+        != QEMU_LOONGARCH_LEGACY_MAP_ENTRY_COUNT * QEMU_LOONGARCH_LEGACY_MAP_ENTRY_BYTES
+        || intr_mask.len() != QEMU_LOONGARCH_LEGACY_MAP_MASK.len() * size_of::<u32>()
+    {
+        return None;
+    }
+    if !intr_mask
+        .chunks_exact(size_of::<u32>())
+        .map(|cell| u32::from_be_bytes(cell.try_into().unwrap()))
+        .eq(QEMU_LOONGARCH_LEGACY_MAP_MASK)
+    {
+        return None;
+    }
+
+    let mut normalized =
+        Vec::with_capacity(QEMU_LOONGARCH_LEGACY_MAP_ENTRY_COUNT * 7 * size_of::<u32>());
+    let mut parent_handle = None;
+    for (index, entry) in intr_map
+        .chunks_exact(QEMU_LOONGARCH_LEGACY_MAP_ENTRY_BYTES)
+        .enumerate()
+    {
+        let slot = index / 4;
+        let pin_index = index % 4;
+        let child_addr_hi = u32::from_be_bytes(entry[0..4].try_into().unwrap());
+        let child_addr_mid = u32::from_be_bytes(entry[4..8].try_into().unwrap());
+        let child_addr_lo = u32::from_be_bytes(entry[8..12].try_into().unwrap());
+        let child_intr_spec = u32::from_be_bytes(entry[12..16].try_into().unwrap());
+        let entry_parent_handle = u32::from_be_bytes(entry[16..20].try_into().unwrap());
+        let parent_hwirq = u32::from_be_bytes(entry[20..24].try_into().unwrap());
+        if child_addr_hi != (slot as u32) << 11
+            || child_addr_mid != 0
+            || child_addr_lo != 0
+            || child_intr_spec != (pin_index + 1) as u32
+            || parent_hwirq != 16 + ((slot + pin_index) % 4) as u32
+            || parent_handle.is_some_and(|expected| expected != entry_parent_handle)
+        {
+            return None;
+        }
+        parent_handle = Some(entry_parent_handle);
+        normalized.extend_from_slice(entry);
+        normalized.extend_from_slice(&QEMU_LOONGARCH_PCH_LEVEL_HIGH.to_be_bytes());
+    }
+
+    Some(QemuLoongArchLegacyInterruptMap {
+        normalized,
+        parent_handle: parent_handle.unwrap(),
+    })
+}
 
 /// Driver for generic ECAM-compatible PCIe host controllers.
 #[derive(Debug, KObject, Driver)]
@@ -161,13 +234,34 @@ impl DriverOps for PcieEcamDriver {
 
         // Parse "interrupt-map" property: translate PCIe INTx pins to platform
         // interrupt specifiers and register them with the domain.
-        let intr_cells = of_node.node().interrupt_cells().ok_or_else(|| {
+        let intr_map_raw = of_node.prop_read_raw("interrupt-map").ok_or_else(|| {
             kerrln!(
-                "error probing PCIe ECAM device {}: '#interrupt-cells' not specified.",
+                "error probing PCIe ECAM device {}: 'interrupt-map' not specified.",
                 pdev.name()
             );
             SysError::InvalidArgument
-        })? as usize;
+        })?;
+        let intr_mask = of_node.prop_read_raw("interrupt-map-mask");
+        let legacy_qemu_loongarch = of_node
+            .node()
+            .interrupt_cells()
+            .is_none()
+            .then(|| normalize_qemu_loongarch_legacy_interrupt_map(intr_map_raw, intr_mask))
+            .flatten();
+        let intr_cells = match of_node.node().interrupt_cells() {
+            Some(intr_cells) => intr_cells as usize,
+            None if legacy_qemu_loongarch.is_some() => 1,
+            None => {
+                kerrln!(
+                    "error probing PCIe ECAM device {}: '#interrupt-cells' not specified.",
+                    pdev.name()
+                );
+                return Err(SysError::InvalidArgument);
+            },
+        };
+        let intr_map = legacy_qemu_loongarch
+            .as_ref()
+            .map_or(intr_map_raw, |legacy| legacy.normalized.as_slice());
 
         if intr_cells == 0 || intr_cells > 2 {
             kerrln!(
@@ -177,16 +271,6 @@ impl DriverOps for PcieEcamDriver {
             );
             return Err(SysError::InvalidArgument);
         }
-
-        let intr_map = of_node.prop_read_raw("interrupt-map").ok_or_else(|| {
-            kerrln!(
-                "error probing PCIe ECAM device {}: 'interrupt-map' not specified.",
-                pdev.name()
-            );
-            SysError::InvalidArgument
-        })?;
-
-        let intr_mask = of_node.prop_read_raw("interrupt-map-mask");
 
         if let Some(intr_mask) = intr_mask {
             if intr_mask.len() != (3 + intr_cells) * 4 {
@@ -241,13 +325,32 @@ impl DriverOps for PcieEcamDriver {
                 .map(get_of_node)
                 .ok_or_else(||{
                     kerrln!(
-                        "error probing PCIe ECAM device {}: failed to lookup interrupt parent node with phandle {:#x}.", 
+                        "error probing PCIe ECAM device {}: failed to lookup interrupt parent node with phandle {:#x}.",
                         pdev.name(),
                         intr_parent_handle
                     );
                     SysError::FwNodeLookupFailed
                 }
             )?;
+
+            if legacy_qemu_loongarch.as_ref().is_some_and(|legacy| {
+                legacy.parent_handle != intr_parent_handle
+                    || !parent_node
+                        .node()
+                        .compatible()
+                        .is_some_and(|mut compatible| {
+                            compatible.any(|entry| entry == "loongson,pch-pic-1.0")
+                        })
+                    || parent_node.node().address_cells_or_none().unwrap_or(0) != 0
+                    || parent_node.node().interrupt_cells() != Some(2)
+            }) {
+                kerrln!(
+                    "error probing PCIe ECAM device {}: QEMU LoongArch legacy interrupt parent {:#x} is not its single two-cell PCH-PIC domain.",
+                    pdev.name(),
+                    intr_parent_handle
+                );
+                return Err(SysError::InvalidArgument);
+            }
 
             // QEMU's interrupt controller sets #address-cells=0, which
             // deviates from the DTB spec; use 0 as the fallback.
@@ -290,6 +393,12 @@ impl DriverOps for PcieEcamDriver {
             );
             index += intr_map_item_width_half + intr_map_item_width_half_upper;
         }
+        if legacy_qemu_loongarch.is_some() {
+            knoticeln!(
+                "PCIe ECAM device {} accepted the QEMU 10.0.2 LoongArch legacy interrupt-map",
+                pdev.name()
+            );
+        }
 
         let domain = Arc::new(domain);
         let device = PcieDevice::new_bus(ident, domain, root_bus_num);
@@ -325,4 +434,48 @@ fn init() {
     });
 
     platform::register_driver(driver);
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn cells(values: &[u32]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|value| value.to_be_bytes())
+            .collect()
+    }
+
+    #[kunit]
+    fn qemu_loongarch_legacy_map_requires_the_exact_container_shape() {
+        let mut map = Vec::new();
+        for index in 0..QEMU_LOONGARCH_LEGACY_MAP_ENTRY_COUNT {
+            let slot = index / 4;
+            let pin_index = index % 4;
+            map.extend_from_slice(&cells(&[
+                (slot as u32) << 11,
+                0,
+                0,
+                (pin_index + 1) as u32,
+                0x800a,
+                16 + ((slot + pin_index) % 4) as u32,
+            ]));
+        }
+        let mask = cells(&QEMU_LOONGARCH_LEGACY_MAP_MASK);
+        let normalized = normalize_qemu_loongarch_legacy_interrupt_map(&map, Some(&mask)).unwrap();
+        assert_eq!(normalized.parent_handle, 0x800a);
+        assert_eq!(normalized.normalized.len(), 16 * 7 * size_of::<u32>());
+        for entry in normalized.normalized.chunks_exact(7 * size_of::<u32>()) {
+            assert_eq!(&entry[24..28], &QEMU_LOONGARCH_PCH_LEVEL_HIGH.to_be_bytes());
+        }
+
+        assert!(
+            normalize_qemu_loongarch_legacy_interrupt_map(&map[..map.len() - 1], Some(&mask))
+                .is_none()
+        );
+        let wrong_mask = cells(&[0x1800, 0, 0, 3]);
+        assert!(normalize_qemu_loongarch_legacy_interrupt_map(&map, Some(&wrong_mask)).is_none());
+        assert!(normalize_qemu_loongarch_legacy_interrupt_map(&map, None).is_none());
+    }
 }

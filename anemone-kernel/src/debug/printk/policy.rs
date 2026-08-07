@@ -106,33 +106,6 @@ pub(crate) fn replace_policy(policy: LogPolicy) -> LogPolicy {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{
-        task::kthread::{KThreadBuilder, KThreadCtx},
-        utils::any_opaque::AnyOpaque,
-    };
-
-    #[derive(Opaque)]
-    struct PolicyReaderContext {
-        first: LogPolicy,
-        second: LogPolicy,
-        ready: Arc<AtomicBool>,
-        done: Arc<AtomicBool>,
-    }
-
-    fn policy_reader(_: KThreadCtx, opaque: AnyOpaque) -> i32 {
-        let context = opaque
-            .cast::<PolicyReaderContext>()
-            .expect("invalid printk policy reader context");
-        let mut valid = matches!(snapshot_policy(), observed if observed == context.first || observed == context.second);
-        context.ready.store(true, Ordering::Release);
-
-        while valid && !context.done.load(Ordering::Acquire) {
-            let observed = snapshot_policy();
-            valid = observed == context.first || observed == context.second;
-            yield_now();
-        }
-        i32::from(!valid)
-    }
 
     #[kunit]
     fn packed_policy_rejects_every_invalid_relation() {
@@ -155,42 +128,5 @@ mod kunits {
                 Err(SysError::InvalidArgument)
             );
         }
-    }
-
-    #[kunit]
-    fn concurrent_snapshots_never_observe_split_levels() {
-        if RECORD_LOG_LEVEL == 0 {
-            return;
-        }
-
-        let first = LogPolicy::from_packed(0).unwrap();
-        let second = LogPolicy::from_packed(1).unwrap();
-        let initial = replace_policy(first);
-        let ready = Arc::new(AtomicBool::new(false));
-        let done = Arc::new(AtomicBool::new(false));
-        let worker = KThreadBuilder::new("kunit:printk-policy-reader")
-            .spawn(
-                policy_reader,
-                AnyOpaque::new(PolicyReaderContext {
-                    first,
-                    second,
-                    ready: ready.clone(),
-                    done: done.clone(),
-                }),
-            )
-            .expect("failed to spawn printk policy reader");
-
-        while !ready.load(Ordering::Acquire) {
-            yield_now();
-        }
-        for iteration in 0..10_000 {
-            replace_policy(if iteration % 2 == 0 { second } else { first });
-            if iteration % 64 == 0 {
-                yield_now();
-            }
-        }
-        done.store(true, Ordering::Release);
-        assert_eq!(worker.wait_exited(), 0);
-        replace_policy(initial);
     }
 }

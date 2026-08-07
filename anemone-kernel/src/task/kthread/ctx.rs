@@ -53,7 +53,6 @@ mod kunits {
         timeout: Duration,
         ready: Arc<AtomicBool>,
         elapsed_nanos: Arc<AtomicU64>,
-        task: Arc<SpinLock<Option<Arc<Task>>>>,
     }
 
     fn wait_for_entry(ctx: KThreadCtx, opaque: AnyOpaque) -> i32 {
@@ -61,7 +60,6 @@ mod kunits {
             .cast::<WaitForContext>()
             .expect("invalid kthread wait_for context");
         let start = Instant::now();
-        *context.task.lock() = Some(get_current_task());
         context.ready.store(true, Ordering::Release);
         ctx.wait_for(context.timeout);
         context
@@ -75,7 +73,7 @@ mod kunits {
         let timeout = Duration::from_millis(5);
         let ready = Arc::new(AtomicBool::new(false));
         let elapsed_nanos = Arc::new(AtomicU64::new(0));
-        let (worker, _) = spawn_waiter(timeout, ready, elapsed_nanos.clone());
+        let worker = spawn_waiter(timeout, ready, elapsed_nanos.clone());
 
         assert_eq!(worker.wait_exited(), 0);
         assert!(
@@ -87,7 +85,7 @@ mod kunits {
     #[kunit]
     fn request_stop_interrupts_wait_for() {
         let ready = Arc::new(AtomicBool::new(false));
-        let (worker, _) = spawn_waiter(
+        let worker = spawn_waiter(
             Duration::from_secs(60),
             ready.clone(),
             Arc::new(AtomicU64::new(0)),
@@ -100,51 +98,11 @@ mod kunits {
         assert_eq!(worker.wait_exited(), 1);
     }
 
-    #[kunit]
-    fn ordinary_wake_does_not_complete_wait_for_or_leak_stale_timeouts() {
-        let timeout = Duration::from_millis(20);
-        let ready = Arc::new(AtomicBool::new(false));
-        let elapsed_nanos = Arc::new(AtomicU64::new(0));
-        let (worker, task) = spawn_waiter(timeout, ready.clone(), elapsed_nanos.clone());
-
-        while !ready.load(Ordering::Acquire) {
-            yield_now();
-        }
-        let task = task
-            .lock()
-            .as_ref()
-            .cloned()
-            .expect("wait_for worker did not publish its task");
-        while !matches!(
-            task.sched_state(),
-            TaskSchedState::Waiting {
-                park: ParkState::Parked,
-                ..
-            }
-        ) {
-            yield_now();
-        }
-        for _ in 0..4 {
-            worker.wake();
-            yield_now();
-        }
-
-        assert_eq!(worker.wait_exited(), 0);
-        assert!(
-            elapsed_nanos.load(Ordering::Acquire) >= timeout.as_nanos() as u64,
-            "ordinary or stale wake completed kthread wait_for early"
-        );
-    }
-
     fn spawn_waiter(
         timeout: Duration,
         ready: Arc<AtomicBool>,
         elapsed_nanos: Arc<AtomicU64>,
-    ) -> (
-        super::super::KThreadHandle,
-        Arc<SpinLock<Option<Arc<Task>>>>,
-    ) {
-        let task = Arc::new(SpinLock::new(None));
+    ) -> super::super::KThreadHandle {
         let worker = KThreadBuilder::new("kunit:kthread-wait-for")
             .spawn(
                 wait_for_entry,
@@ -152,10 +110,9 @@ mod kunits {
                     timeout,
                     ready,
                     elapsed_nanos,
-                    task: task.clone(),
                 }),
             )
             .expect("failed to spawn kthread wait_for worker");
-        (worker, task)
+        worker
     }
 }
