@@ -15,7 +15,6 @@ use crate::{
     fs::FileMode,
     prelude::*,
     time::{
-        clock::get_clock,
         monotonic_ns, realtime_read,
         timer::{
             TimerHandle, cancel_timer_event, schedule_realtime_threaded_timer_event,
@@ -31,6 +30,13 @@ static_assert!(
     TIMERFD_FILE_MAX_WAITERS > 0,
     "timerfd_file_max_waiters must be nonzero"
 );
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimerFdClock {
+    Realtime,
+    Monotonic,
+    Boottime,
+}
 
 #[derive(Clone, Debug)]
 struct TimerFdPollRoute {
@@ -293,14 +299,14 @@ impl TimerFdState {
 #[derive(Debug)]
 struct TimerFdCore {
     state: NoIrqSpinLock<TimerFdState>,
-    clockid: i32,
+    clock: TimerFdClock,
 }
 
 impl TimerFdCore {
-    fn new(clockid: i32) -> Result<Self, SysError> {
+    fn new(clock: TimerFdClock) -> Result<Self, SysError> {
         Ok(Self {
             state: NoIrqSpinLock::new(TimerFdState::new()?),
-            clockid,
+            clock,
         })
     }
 }
@@ -328,9 +334,9 @@ struct TimerFdFile {
 }
 
 impl TimerFdFile {
-    fn new(clockid: i32) -> Result<Self, SysError> {
+    fn new(clock: TimerFdClock) -> Result<Self, SysError> {
         Ok(Self {
-            core: Arc::new(TimerFdCore::new(clockid)?),
+            core: Arc::new(TimerFdCore::new(clock)?),
         })
     }
 
@@ -926,25 +932,14 @@ static TIMERFD_INODE_OPS: InodeOps = InodeOps {
     get_attr: timerfd_get_attr,
 };
 
-fn valid_timerfd_clockid(clockid: i32) -> bool {
-    use anemone_abi::time::linux::clock::{CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_REALTIME};
-
-    matches!(clockid, CLOCK_REALTIME | CLOCK_MONOTONIC | CLOCK_BOOTTIME)
-        && get_clock(clockid as usize).is_some()
-}
-
-fn create_timerfd(clockid: i32) -> Result<File, SysError> {
-    if !valid_timerfd_clockid(clockid) {
-        return Err(SysError::InvalidArgument);
-    }
-
+fn create_timerfd(clock: TimerFdClock) -> Result<File, SysError> {
     let path = anony_new_inode(InodeType::Anon, &TIMERFD_INODE_OPS, NilOpaque::new())?;
     anony_open_with(
         &path,
         OpenedFile::with_mode(
             &TIMERFD_FILE_OPS,
             FileMode::STREAM,
-            AnyOpaque::new(TimerFdFile::new(clockid)?),
+            AnyOpaque::new(TimerFdFile::new(clock)?),
         ),
     )
 }
@@ -965,20 +960,18 @@ fn settime(
     flags: TimerFdSettimeFlags,
     new_value: TimerFdSpec,
 ) -> Result<TimerFdSpec, SysError> {
-    use anemone_abi::time::linux::clock::CLOCK_REALTIME;
-
     let TimerFdSpec {
         value_ns,
         interval_ns,
     } = new_value;
     let core = TimerFdFile::core_from_file(file)?;
-    if flags.cancel_on_set && (!flags.abstime || core.clockid != CLOCK_REALTIME) {
+    if flags.cancel_on_set && (!flags.abstime || core.clock != TimerFdClock::Realtime) {
         // Linux accepts this combination and simply leaves cancel-on-set
         // disabled. Keep Anemone's current EINVAL behavior visible until that
         // compatibility gap is implemented.
         knoticeln!(
-            "timerfd_settime: TFD_TIMER_CANCEL_ON_SET without absolute CLOCK_REALTIME is not implemented as a Linux-compatible no-op; clock_id={}, abstime={}; errno=EINVAL",
-            core.clockid,
+            "timerfd_settime: TFD_TIMER_CANCEL_ON_SET without absolute CLOCK_REALTIME is not implemented as a Linux-compatible no-op; clock={:?}, abstime={}; errno=EINVAL",
+            core.clock,
             flags.abstime,
         );
         return Err(SysError::InvalidArgument);
@@ -994,7 +987,7 @@ fn settime(
 
     let prepared = if value_ns == 0 {
         None
-    } else if flags.abstime && core.clockid == CLOCK_REALTIME {
+    } else if flags.abstime && core.clock == TimerFdClock::Realtime {
         // Capture the calendar value and sequence together. The timer queue's
         // insert-side recheck closes a concurrent step between this snapshot
         // and publication of the request.
@@ -1068,7 +1061,6 @@ mod kunits {
         fs::iomux::IomuxWaitRound,
         time::timer::{queued_timer_count, timer_event_is_queued},
     };
-    use anemone_abi::time::linux::clock::{CLOCK_MONOTONIC, CLOCK_REALTIME};
 
     fn timer_spec(value_sec: u64, interval_sec: u64) -> TimerFdSpec {
         TimerFdSpec {
@@ -1096,7 +1088,7 @@ mod kunits {
     fn replace_disarm_and_last_close_remove_queued_requests() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);
-        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
 
         settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
         {
@@ -1121,7 +1113,7 @@ mod kunits {
     fn overdue_refresh_physically_removes_the_queued_completion() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);
-        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
         settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
 
         let detached = {
@@ -1166,7 +1158,7 @@ mod kunits {
     fn gettime_refreshes_overdue_periodic_owner_and_rearms_successor() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);
-        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
         let periodic = timer_spec(3600, 3600);
         let interval_ns = periodic.interval_ns.unwrap();
         settime(&file, relative_flags(), periodic).unwrap();
@@ -1211,7 +1203,7 @@ mod kunits {
     fn settime_old_value_projects_periodic_deadline_without_old_rearm() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);
-        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
         let periodic = timer_spec(3600, 3600);
         let interval_ns = periodic.interval_ns.unwrap();
         settime(&file, relative_flags(), periodic).unwrap();
@@ -1249,7 +1241,7 @@ mod kunits {
 
     #[kunit]
     fn poll_route_notifies_after_unlock_and_reuses_stale_capacity() {
-        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
         let core = TimerFdFile::core_from_file(&file).unwrap();
 
         let ready_round = IomuxWaitRound::begin_current();
@@ -1316,7 +1308,7 @@ mod kunits {
 
     #[kunit]
     fn cancel_on_set_requires_absolute_realtime_without_mutating_existing_request() {
-        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
         settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
         let core = TimerFdFile::core_from_file(&file).unwrap();
         let generation = core.state.lock().generation;
@@ -1344,7 +1336,7 @@ mod kunits {
         assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
         drop(state);
 
-        let realtime_file = create_timerfd(CLOCK_REALTIME).unwrap();
+        let realtime_file = create_timerfd(TimerFdClock::Realtime).unwrap();
         assert_eq!(
             settime(
                 &realtime_file,
@@ -1360,7 +1352,7 @@ mod kunits {
 
     #[kunit]
     fn relative_realtime_timer_is_fixed_to_monotonic_domain() {
-        let file = create_timerfd(CLOCK_REALTIME).unwrap();
+        let file = create_timerfd(TimerFdClock::Realtime).unwrap();
         settime(&file, relative_flags(), timer_spec(3600, 0)).unwrap();
         let core = TimerFdFile::core_from_file(&file).unwrap();
         let state = core.state.lock();
@@ -1378,7 +1370,7 @@ mod kunits {
     fn absolute_realtime_cancel_is_physical_and_read_reports_ecanceled_once() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);
-        let file = create_timerfd(CLOCK_REALTIME).unwrap();
+        let file = create_timerfd(TimerFdClock::Realtime).unwrap();
         let target_ns = realtime_read()
             .now_ns()
             .checked_add(timer_spec(3600, 0).value_ns)
@@ -1425,7 +1417,7 @@ mod kunits {
 
     #[kunit]
     fn stale_clock_change_completion_cannot_cancel_a_replacement() {
-        let file = create_timerfd(CLOCK_REALTIME).unwrap();
+        let file = create_timerfd(TimerFdClock::Realtime).unwrap();
         let target_ns = realtime_read()
             .now_ns()
             .checked_add(timer_spec(3600, 0).value_ns)

@@ -1,16 +1,28 @@
-use anemone_abi::syscall::SYS_TIMERFD_CREATE;
+use anemone_abi::{
+    syscall::SYS_TIMERFD_CREATE,
+    time::linux::clock::{CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_REALTIME},
+};
 
 use crate::{
-    fs::timerfd::create_timerfd,
+    fs::timerfd::{TimerFdClock, create_timerfd},
     prelude::*,
     task::files::{FdFlags, FileDescOps, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
 };
 
 use super::TimerFdCreateFlags;
 
+fn timerfd_clock(clockid: i32) -> Result<TimerFdClock, SysError> {
+    match clockid {
+        CLOCK_REALTIME => Ok(TimerFdClock::Realtime),
+        CLOCK_MONOTONIC => Ok(TimerFdClock::Monotonic),
+        CLOCK_BOOTTIME => Ok(TimerFdClock::Boottime),
+        _ => Err(SysError::InvalidArgument),
+    }
+}
+
 #[syscall(SYS_TIMERFD_CREATE)]
 fn sys_timerfd_create(clockid: i32, flags: TimerFdCreateFlags) -> Result<u64, SysError> {
-    let file = create_timerfd(clockid)?;
+    let file = create_timerfd(timerfd_clock(clockid)?)?;
 
     let mut status_flags = FileStatusFlags::empty();
     status_flags.set(
