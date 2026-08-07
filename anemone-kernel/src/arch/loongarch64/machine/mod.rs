@@ -1,6 +1,7 @@
 //! Machine-specific code for early boot.
 
 use crate::{
+    arch::MachineBootPolicy,
     arch::loongarch64::machine::descs::{
         loongson_2k1000::Loongson2K1000, qemu_virt::Qemu3A5000,
     },
@@ -65,15 +66,21 @@ pub trait MachineDesc: Sync {
 
     /// Initialize the timer.
     unsafe fn early_init_timer(&self);
+
+    /// Optional stable firmware identity preferred as this boot's RTC source.
+    fn preferred_rtc_origin(&self) -> Option<Arc<dyn crate::device::discovery::fwnode::FwNode>> {
+        None
+    }
 }
 
 impl dyn MachineDesc {
-    unsafe fn init(&self) {
+    unsafe fn init(&self) -> MachineBootPolicy {
         unsafe {
             self.ipi().init_runtime();
             self.early_init_intc();
             self.early_init_timer();
         }
+        MachineBootPolicy::new(self.preferred_rtc_origin())
     }
 }
 
@@ -158,8 +165,6 @@ pub fn wake_secondary(target: PhysCpuId, entry: PhysAddr) {
 /// - Runtime IPI resource initialization.
 /// - Root interrupt controllers initialization.
 /// - Timer initialization.
-pub unsafe fn machine_init() {
-    unsafe {
-        selected_machine().init();
-    }
+pub unsafe fn machine_init() -> MachineBootPolicy {
+    unsafe { selected_machine().init() }
 }

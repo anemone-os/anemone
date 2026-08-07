@@ -23,6 +23,7 @@ pub use cpu::{
 };
 pub mod kobject;
 pub mod resource;
+pub(crate) mod rtc;
 
 pub mod devnum;
 pub use devnum::{BlockDevNum, CharDevNum, DeviceNumber, MajorNum, MinorNum};

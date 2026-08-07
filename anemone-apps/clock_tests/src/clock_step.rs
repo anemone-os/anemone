@@ -19,9 +19,8 @@ use anemone_rs::{
             signal::{SigAction, SigSet},
         },
         syscall::{
-            SYS_CLOCK_ADJTIME, SYS_CLOCK_GETTIME, SYS_CLOCK_NANOSLEEP, SYS_CLOCK_SETTIME,
-            SYS_FUTEX, SYS_SETITIMER, SYS_SETUID, SYS_TIMERFD_CREATE, SYS_TIMERFD_GETTIME,
-            SYS_TIMERFD_SETTIME, syscall,
+            SYS_CLOCK_ADJTIME, SYS_CLOCK_NANOSLEEP, SYS_CLOCK_SETTIME, SYS_FUTEX, SYS_SETUID,
+            syscall,
         },
         time::linux::{
             ITimerSpec, TimeSpec, TimeVal, Timex,
@@ -41,6 +40,7 @@ use anemone_rs::{
             signal::{SigNo, sigaction},
             wait4,
         },
+        time,
     },
     prelude::*,
 };
@@ -60,19 +60,7 @@ fn ns_to_timespec(ns: u64) -> TimeSpec {
 }
 
 fn clock_ns(clock_id: i32) -> u64 {
-    let mut value = TimeSpec::default();
-    unsafe {
-        syscall(
-            SYS_CLOCK_GETTIME,
-            clock_id as u64,
-            (&mut value as *mut TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    let value = time::clock_gettime(clock_id).unwrap();
     (value.tv_sec as u64)
         .checked_mul(NSEC_PER_SEC)
         .and_then(|seconds| seconds.checked_add(value.tv_nsec as u64))
@@ -81,18 +69,7 @@ fn clock_ns(clock_id: i32) -> u64 {
 
 fn set_realtime(target_ns: u64) -> Result<(), Errno> {
     let target = ns_to_timespec(target_ns);
-    unsafe {
-        syscall(
-            SYS_CLOCK_SETTIME,
-            CLOCK_REALTIME as u64,
-            (&target as *const TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )?;
-    }
-    Ok(())
+    time::clock_settime(CLOCK_REALTIME, &target)
 }
 
 fn step_realtime(delta_ns: i64) {
@@ -111,21 +88,7 @@ fn clock_nanosleep(
     request: &TimeSpec,
     remaining: Option<&mut TimeSpec>,
 ) -> Result<(), Errno> {
-    let remaining = remaining
-        .map(|value| value as *mut TimeSpec as u64)
-        .unwrap_or(0);
-    unsafe {
-        syscall(
-            SYS_CLOCK_NANOSLEEP,
-            clock_id as u64,
-            flags as u64,
-            (request as *const TimeSpec) as u64,
-            remaining,
-            0,
-            0,
-        )?;
-    }
-    Ok(())
+    time::clock_nanosleep(clock_id, flags, request, remaining)
 }
 
 fn sleep_relative(clock_id: i32, ns: u64) {
@@ -205,18 +168,8 @@ fn verify_set_and_adjust_abi() {
 
     let mut query = Timex::default();
     assert_eq!(
-        unsafe {
-            syscall(
-                SYS_CLOCK_ADJTIME,
-                CLOCK_REALTIME as u64,
-                (&mut query as *mut Timex) as u64,
-                0,
-                0,
-                0,
-                0,
-            )
-        },
-        Ok(TIME_ERROR as u64)
+        time::clock_adjtime(CLOCK_REALTIME, &mut query),
+        Ok(TIME_ERROR)
     );
     assert_eq!(query.status, STA_UNSYNC);
     assert!(query.precision > 0);
@@ -266,18 +219,8 @@ fn verify_set_and_adjust_abi() {
     };
     adjust.time.tv_usec = 100_000_000;
     assert_eq!(
-        unsafe {
-            syscall(
-                SYS_CLOCK_ADJTIME,
-                CLOCK_REALTIME as u64,
-                (&mut adjust as *mut Timex) as u64,
-                0,
-                0,
-                0,
-                0,
-            )
-        },
-        Ok(TIME_ERROR as u64)
+        time::clock_adjtime(CLOCK_REALTIME, &mut adjust),
+        Ok(TIME_ERROR)
     );
     assert!(clock_ns(CLOCK_REALTIME) >= before + 100_000_000);
 }
@@ -342,18 +285,7 @@ fn verify_relative_sleep_remaining() {
             tv_usec: 20_000,
         },
     };
-    unsafe {
-        syscall(
-            SYS_SETITIMER,
-            ITIMER_REAL as u64,
-            (&alarm as *const OldITimerVal) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    time::setitimer(ITIMER_REAL, &alarm, None).unwrap();
 
     let mut remaining = TimeSpec::default();
     assert_eq!(
@@ -482,39 +414,15 @@ fn verify_futex_realtime_abi() {
 }
 
 fn timerfd_create(clock_id: i32) -> u32 {
-    unsafe { syscall(SYS_TIMERFD_CREATE, clock_id as u64, 0, 0, 0, 0, 0).unwrap() as u32 }
+    time::timerfd_create(clock_id, 0).unwrap()
 }
 
 fn timerfd_settime(fd: u32, flags: u32, value: ITimerSpec) -> Result<(), Errno> {
-    unsafe {
-        syscall(
-            SYS_TIMERFD_SETTIME,
-            fd as u64,
-            flags as u64,
-            (&value as *const ITimerSpec) as u64,
-            0,
-            0,
-            0,
-        )?;
-    }
-    Ok(())
+    time::timerfd_settime(fd, flags, &value, None)
 }
 
 fn timerfd_gettime(fd: u32) -> ITimerSpec {
-    let mut value = ITimerSpec::default();
-    unsafe {
-        syscall(
-            SYS_TIMERFD_GETTIME,
-            fd as u64,
-            (&mut value as *mut ITimerSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
-    value
+    time::timerfd_gettime(fd).unwrap()
 }
 
 fn read_expirations(fd: u32) -> Result<u64, Errno> {
@@ -594,7 +502,7 @@ fn verify_timerfd_realtime_steps() {
 
 fn verify_settime_permission() {
     // Isolate credential loss in a child; the main test process must retain
-    // SYS_TIME to restore realtime for later user-test modules.
+    // SYS_TIME to restore the boot calendar for later clock suites.
     match fork().unwrap() {
         Some(pid) => wait_child_ok(pid, "clock_settime permission"),
         None => {
@@ -619,7 +527,7 @@ fn verify_settime_permission() {
     }
 }
 
-pub(crate) fn verify_clock_steps() {
+pub(crate) fn verify_clock_steps(initial: super::clock_read::BootBaseline) {
     verify_set_and_adjust_abi();
     set_realtime(clock_ns(CLOCK_REALTIME) + 5 * NSEC_PER_SEC).unwrap();
     verify_sleep_matrix();
@@ -629,8 +537,8 @@ pub(crate) fn verify_clock_steps() {
     verify_timerfd_realtime_steps();
     verify_settime_permission();
 
-    // Leave later tests near the boot-relative calendar baseline instead of
-    // leaking this module's accumulated forward/backward steps.
-    set_realtime(clock_ns(CLOCK_MONOTONIC) + NSEC_PER_SEC).unwrap();
+    // Restore the boot calendar offset instead of leaking this module's
+    // accumulated forward/backward steps into later suites.
+    set_realtime(clock_ns(CLOCK_MONOTONIC) + initial.offset_ns).unwrap();
     println!("clock-step: realtime mutation, sleep, futex, and timerfd checks passed");
 }

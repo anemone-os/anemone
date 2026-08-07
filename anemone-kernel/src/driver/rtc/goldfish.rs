@@ -12,13 +12,30 @@ use crate::{
     },
     mm::remap::{IoRemap, ioremap},
     prelude::*,
+    time::RealtimeInstant,
     utils::any_opaque::AnyOpaque,
 };
 
+use crate::device::rtc::{RegisterError, RtcProvider, RtcReadError, register_provider};
+
 #[derive(Debug, Opaque)]
-struct GoldfishState {
-    base: PhysAddr,
+struct GoldfishProvider {
     remap: IoRemap,
+}
+
+#[derive(Opaque)]
+struct GoldfishState {
+    /// Holds the same provider object published to the device RTC core.
+    provider: Arc<GoldfishProvider>,
+}
+
+impl RtcProvider for GoldfishProvider {
+    fn read_time(&self) -> Result<RealtimeInstant, RtcReadError> {
+        let registers = unsafe {
+            driver_core::GoldfishRegisters::from_raw(self.remap.as_ptr().as_ptr().cast())
+        };
+        Ok(RealtimeInstant::from_nanos(registers.read_time()))
+    }
 }
 
 mod driver_core {
@@ -89,11 +106,23 @@ impl DriverOps for GoldfishDriver {
 
         let remap = unsafe { ioremap(base, len) }?;
 
-        let state = GoldfishState { base, remap };
+        let provider = Arc::new(GoldfishProvider { remap });
+        let origin = pdev.fwnode().ok_or(SysError::MissingFwNode)?.clone();
+        register_provider(origin, provider.clone()).map_err(|error| {
+            kwarningln!(
+                "{}: RTC provider registration failed: {:?}",
+                pdev.name(),
+                error
+            );
+            match error {
+                RegisterError::DuplicateOrigin => SysError::AlreadyExists,
+                RegisterError::Finalized => SysError::ProbeFailed,
+            }
+        })?;
 
-        device.set_drv_state(AnyOpaque::new(state));
-
-        {}
+        // Driver state and the RTC registry share this exact provider object;
+        // the mapping is never copied into a second hardware truth source.
+        device.set_drv_state(AnyOpaque::new(GoldfishState { provider }));
 
         kinfoln!("{}: probed", pdev.name());
         Ok(())

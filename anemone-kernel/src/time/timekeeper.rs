@@ -34,6 +34,29 @@ impl RealtimeSnapshot {
         self.set_offset(monotonic_ns, new_offset)
     }
 
+    fn seed_boot(
+        &mut self,
+        rtc_epoch_ns: u64,
+        monotonic_sample_ns: u64,
+        monotonic_commit_ns: u64,
+    ) -> Result<u64, BootSeedError> {
+        // The RTC registry and boot coordinator own one-shot authority. These
+        // assertions protect that ordering without adding a second long-lived
+        // `seeded` truth to the timekeeper.
+        assert_eq!(self.offset_ns, 0, "RTC seed observed a nonzero boot offset");
+        assert_eq!(self.change_seq, 0, "RTC seed observed a runtime step");
+
+        let offset_ns = rtc_epoch_ns
+            .checked_sub(monotonic_sample_ns)
+            .ok_or(BootSeedError::EpochBeforeMonotonic)?;
+        monotonic_commit_ns
+            .checked_add(offset_ns)
+            .ok_or(BootSeedError::RealtimeOverflow)?;
+
+        self.offset_ns = offset_ns;
+        Ok(offset_ns)
+    }
+
     fn adjust(&mut self, monotonic_ns: u64, delta_ns: i128) -> Result<bool, SysError> {
         let new_offset = i128::from(self.offset_ns)
             .checked_add(delta_ns)
@@ -90,6 +113,12 @@ impl RealtimeRead {
 #[must_use = "publish a committed realtime step after releasing the timekeeper lock"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RealtimeStep;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BootSeedError {
+    EpochBeforeMonotonic,
+    RealtimeOverflow,
+}
 
 struct Timekeeper {
     /// The architecture counter sample that defines `CLOCK_MONOTONIC == 0`.
@@ -294,6 +323,22 @@ pub(crate) fn realtime_read() -> RealtimeRead {
     }
 }
 
+/// Establish the initial realtime offset from one selected RTC sample.
+///
+/// This boot-only commit deliberately does not advance `change_seq` or return
+/// a [`RealtimeStep`]. All arithmetic is validated before the offset changes.
+pub(crate) fn seed_boot_realtime(rtc_epoch: RealtimeInstant) -> Result<u64, BootSeedError> {
+    let monotonic_sample_ns = monotonic_ns();
+    let timekeeper = TIMEKEEPER.get();
+    let mut realtime = timekeeper.realtime.lock();
+    let monotonic_commit_ns = monotonic_ns();
+    realtime.seed_boot(
+        rtc_epoch.as_nanos(),
+        monotonic_sample_ns,
+        monotonic_commit_ns,
+    )
+}
+
 /// Set the realtime calendar value and atomically advance its change identity.
 ///
 /// Notification is deliberately not performed here. The caller must publish a
@@ -455,6 +500,30 @@ mod kunits {
         assert_eq!(realtime, before);
         assert_eq!(realtime.adjust(u64::MAX, 1), Err(SysError::InvalidArgument));
         assert_eq!(realtime, before);
+    }
+
+    #[kunit]
+    fn boot_seed_is_atomic_and_does_not_publish_a_step() {
+        let mut realtime = RealtimeSnapshot::new(0, 0).unwrap();
+        assert_eq!(realtime.seed_boot(1_000, 100, 110), Ok(900));
+        assert_eq!(realtime.offset_ns, 900);
+        assert_eq!(realtime.change_seq, 0);
+
+        let mut negative = RealtimeSnapshot::new(0, 0).unwrap();
+        let before = negative;
+        assert_eq!(
+            negative.seed_boot(99, 100, 100),
+            Err(BootSeedError::EpochBeforeMonotonic)
+        );
+        assert_eq!(negative, before);
+
+        let mut overflow = RealtimeSnapshot::new(0, 0).unwrap();
+        let before = overflow;
+        assert_eq!(
+            overflow.seed_boot(u64::MAX, 0, 1),
+            Err(BootSeedError::RealtimeOverflow)
+        );
+        assert_eq!(overflow, before);
     }
 
     #[kunit]
