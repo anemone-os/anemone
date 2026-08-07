@@ -390,6 +390,61 @@ fn snapshot_spec(state: &TimerFdState) -> TimerFdSpec {
     }
 }
 
+fn replacement_snapshot_spec(state: &TimerFdState) -> TimerFdSpec {
+    let TimerFdSchedule::Armed {
+        deadline,
+        interval_ns,
+    } = state.schedule
+    else {
+        return TimerFdSpec {
+            interval_ns: None,
+            value_ns: 0,
+        };
+    };
+
+    let (now_ns, _) = deadline_read(deadline);
+    let deadline = replacement_projection_deadline(deadline, interval_ns, now_ns);
+    TimerFdSpec {
+        interval_ns,
+        value_ns: deadline.deadline_ns().saturating_sub(now_ns),
+    }
+}
+
+fn replacement_projection_deadline(
+    deadline: TimerFdDeadline,
+    interval_ns: Option<u64>,
+    now_ns: u64,
+) -> TimerFdDeadline {
+    let Some(interval_ns) = interval_ns else {
+        return deadline;
+    };
+    assert!(interval_ns > 0, "armed timerfd interval must be nonzero");
+    if now_ns < deadline.deadline_ns() {
+        return deadline;
+    }
+
+    // settime reports the old periodic timer as if it had advanced from its
+    // original target, but replacement must not publish old expirations or
+    // queue a successor that will immediately be retired.
+    periodic_advance(deadline, interval_ns, now_ns).1
+}
+
+fn periodic_advance(
+    deadline: TimerFdDeadline,
+    interval_ns: u64,
+    now_ns: u64,
+) -> (u64, TimerFdDeadline) {
+    assert!(interval_ns > 0, "armed timerfd interval must be nonzero");
+    assert!(
+        now_ns >= deadline.deadline_ns(),
+        "periodic timerfd advance requires a due deadline"
+    );
+    let elapsed = now_ns.saturating_sub(deadline.deadline_ns());
+    let ticks = (elapsed / interval_ns).saturating_add(1);
+    let deadline = deadline.advance(interval_ns.saturating_mul(ticks));
+    (ticks, deadline)
+}
+
 fn drop_stale_waiters(waiters: TimerFdHandoffBatch, reason: &'static str) {
     if waiters.is_empty() {
         return;
@@ -653,11 +708,8 @@ fn account_due_expiration_locked(
         // Advance from the previous target, not callback execution time. This
         // both counts missed periods and prevents worker latency from drifting
         // the periodic schedule.
-        let elapsed = now_ns.saturating_sub(next_expire_at_ns);
-        let ticks = (elapsed / interval_ns).saturating_add(1);
+        let (ticks, deadline) = periodic_advance(deadline, interval_ns, now_ns);
         state.expirations = state.expirations.saturating_add(ticks);
-        let advanced = interval_ns.saturating_mul(ticks);
-        let deadline = deadline.advance(advanced);
         state.schedule = TimerFdSchedule::Armed {
             deadline,
             interval_ns: Some(interval_ns),
@@ -896,8 +948,13 @@ fn create_timerfd(clockid: i32) -> Result<File, SysError> {
 
 fn gettime(file: &File) -> Result<TimerFdSpec, SysError> {
     let core = TimerFdFile::core_from_file(file)?;
-    let state = core.state.lock();
-    Ok(snapshot_spec(&state))
+    let (snapshot, due) = {
+        let mut state = core.state.lock();
+        let due = refresh_due_expiration_locked(&core, &mut state);
+        (snapshot_spec(&state), due)
+    };
+    notify_waiters_after_unlock(due, "gettime_refresh");
+    Ok(snapshot)
 }
 
 fn settime(
@@ -964,7 +1021,7 @@ fn settime(
 
     let old_value = {
         let mut state = core.state.lock();
-        let old_value = snapshot_spec(&state);
+        let old_value = replacement_snapshot_spec(&state);
 
         // Retire the previous generation before publishing any replacement.
         // This orders an already-dequeued old callback behind stale identity.
@@ -1100,6 +1157,91 @@ mod kunits {
             }
         );
         assert_eq!(timeout, Some(Duration::from_nanos(5)));
+    }
+
+    #[kunit]
+    fn gettime_refreshes_overdue_periodic_owner_and_rearms_successor() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let periodic = timer_spec(3600, 3600);
+        let interval_ns = periodic.interval_ns.unwrap();
+        settime(&file, relative_flags(), periodic).unwrap();
+
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+        let stale_generation = {
+            let mut state = core.state.lock();
+            let stale_generation = state.generation;
+            assert!(cancel_timer_event(state.request.as_ref().unwrap()));
+            state.schedule = TimerFdSchedule::Armed {
+                deadline: TimerFdDeadline::Monotonic(0),
+                interval_ns: Some(interval_ns),
+            };
+            stale_generation
+        };
+
+        let snapshot = gettime(&file).unwrap();
+        assert_eq!(snapshot.interval_ns, Some(interval_ns));
+        assert!(snapshot.value_ns > 0);
+        assert!(snapshot.value_ns <= interval_ns);
+        let state = core.state.lock();
+        assert!(state.expirations > 0);
+        assert!(matches!(state.schedule, TimerFdSchedule::Armed { .. }));
+        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
+        let refreshed_expirations = state.expirations;
+        drop(state);
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+
+        // Model an old threaded completion that left the queue before gettime's
+        // refresh. The refreshed generation must make it harmless.
+        timerfd_expire_callback(Arc::downgrade(&core), stale_generation);
+        let state = core.state.lock();
+        assert_eq!(state.expirations, refreshed_expirations);
+        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
+        drop(state);
+        drop(core);
+        drop(file);
+        assert_eq!(queued_timer_count(cpu), baseline);
+    }
+
+    #[kunit]
+    fn settime_old_value_projects_periodic_deadline_without_old_rearm() {
+        let cpu = cur_cpu_id();
+        let baseline = queued_timer_count(cpu);
+        let file = create_timerfd(CLOCK_MONOTONIC).unwrap();
+        let periodic = timer_spec(3600, 3600);
+        let interval_ns = periodic.interval_ns.unwrap();
+        settime(&file, relative_flags(), periodic).unwrap();
+
+        let core = TimerFdFile::core_from_file(&file).unwrap();
+        {
+            let mut state = core.state.lock();
+            state.expirations = 7;
+            state.schedule = TimerFdSchedule::Armed {
+                deadline: TimerFdDeadline::Monotonic(0),
+                interval_ns: Some(interval_ns),
+            };
+        }
+
+        let old = settime(&file, relative_flags(), timer_spec(7200, 0)).unwrap();
+        assert_eq!(old.interval_ns, Some(interval_ns));
+        assert!(old.value_ns > 0);
+        assert!(old.value_ns <= interval_ns);
+        let state = core.state.lock();
+        assert_eq!(state.expirations, 0);
+        assert!(matches!(
+            state.schedule,
+            TimerFdSchedule::Armed {
+                interval_ns: None,
+                ..
+            }
+        ));
+        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
+        drop(state);
+        assert_eq!(queued_timer_count(cpu), baseline + 1);
+        drop(core);
+        drop(file);
+        assert_eq!(queued_timer_count(cpu), baseline);
     }
 
     #[kunit]
