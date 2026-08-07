@@ -1,5 +1,40 @@
 # 开放问题
 
+## ANE-20260807-TIMERFD-CANCEL-ON-SET-ENROLLMENT
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Keter
+**Area:** timerfd / realtime step / soft timer request / ABI lifecycle
+
+**Symptom / Trigger:** `TimerFdCore`当前只把`TFD_TIMER_CANCEL_ON_SET`的change-sequence snapshot保存于
+`TimerFdSchedule::Armed`中的realtime deadline。one-shot到期、解除arm或clock-change callback把schedule切回
+`Disarmed`后，该登记事实随单次queue request一同消失；已消费一次`ECANCELED`后也没有独立的持久登记状态。
+因此后续realtime step无法继续按Linux timerfd lifecycle观察该fd，除非用户再次执行带flag的有效
+`timerfd_settime()`。此外，非absolute-realtime组合当前返回`EINVAL`，而不是接受调用但不启用cancel-on-set。
+
+**Impact:** 当前实现把timerfd对象的clock-step enrollment生命周期与一次armed soft-timer request生命周期
+合并为同一事实。这不会破坏普通relative/absolute timerfd、物理request取消、generation stale filtering或
+missed-expiry accounting，但它使完整`TFD_TIMER_CANCEL_ON_SET`语义未达到
+`TIMEKEEPER-STEP-001`已经声明的effective范围；现有Gate 3 closure和窄KUnit只能证明单次armed generation，
+不能证明disarm、到期或一次`ECANCELED`后的持久登记。
+
+**Owner:** `TimerFdCore`拥有enrollment与readable cancellation状态；realtime-step publisher和per-CPU soft
+timer request service只参与无丢失step通知与一次request交接
+**Last Verified:** 2026-08-07
+**Exit Condition:** 为`TimerFdCore`建立独立于armed request的cancel-on-set enrollment，并闭合register、replace、
+disarm、expiry、一次`ECANCELED`消费和last-close的撤销/保留规则；realtime step必须在不持timekeeper锁进入
+timerfd owner的前提下无丢失通知所有live enrollment。修复非absolute-realtime flag组合的Linux-visible行为，
+并以focused KUnit和双架构用户态oracle覆盖disarm、one-shot expiry、periodic rearm窗口、已消费`ECANCELED`、
+replacement、close与并发step；随后更新`TIMEKEEPER-STEP-001`的核验来源并移除此条目。
+
+**Related:** [Realtime Step当前契约](../contracts/time/realtime-step.md),
+[Clock Timekeeping与POSIX Timers RFC](../rfcs/clock-timekeeping-posix-timers/index.md)
+
+**Workaround:** 不要把当前cancel-on-set通过证据外推到单次armed generation之外。该问题不阻塞保持
+public API、ABI、owner、handoff和visible semantics不变的timerfd结构维护；任何语义修复、contract closure或
+完整conformance声明仍须先闭合上述跨owner协议。
+
 ## ANE-20260805-USER-ACCESS-TYPED-COPY-SOUNDNESS
 
 **Type:** Issue
