@@ -27,7 +27,10 @@ use crate::{
 
 use super::iomux::PollRoute;
 
-const TIMERFD_TRIGGER_QUEUE_CAPACITY: usize = 16;
+static_assert!(
+    TIMERFD_FILE_MAX_WAITERS > 0,
+    "timerfd_file_max_waiters must be nonzero"
+);
 
 #[derive(Clone, Debug)]
 struct TimerFdPollRoute {
@@ -71,9 +74,9 @@ struct TimerFdHandoffBatch {
     // Caller-owned handoff built while holding TimerFdState's no-IRQ lock.
     // Read triggers and stale routes are removed; live poll routes are cloned
     // for notification. Every notify and drop is consumed after unlock.
-    read: heapless::Vec<TimerFdIoTrigger, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
-    poll_notify: heapless::Vec<TimerFdPollRoute, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
-    poll_stale: heapless::Vec<TimerFdPollRoute, TIMERFD_TRIGGER_QUEUE_CAPACITY>,
+    read: heapless::Vec<TimerFdIoTrigger, TIMERFD_FILE_MAX_WAITERS>,
+    poll_notify: heapless::Vec<TimerFdPollRoute, TIMERFD_FILE_MAX_WAITERS>,
+    poll_stale: heapless::Vec<TimerFdPollRoute, TIMERFD_FILE_MAX_WAITERS>,
 }
 
 impl TimerFdHandoffBatch {
@@ -221,7 +224,7 @@ impl TimerFdState {
         stale: &mut TimerFdHandoffBatch,
     ) -> Result<(), SysError> {
         self.detach_prunable_read_triggers(stale);
-        if self.read_triggers.len() >= TIMERFD_TRIGGER_QUEUE_CAPACITY {
+        if self.read_triggers.len() >= TIMERFD_FILE_MAX_WAITERS {
             return Err(SysError::OutOfMemory);
         }
         self.read_triggers.push(TimerFdIoTrigger::new(trigger));
@@ -235,7 +238,7 @@ impl TimerFdState {
         stale: &mut TimerFdHandoffBatch,
     ) -> bool {
         self.detach_prunable_poll_routes(stale);
-        if self.poll_routes.len() >= TIMERFD_TRIGGER_QUEUE_CAPACITY {
+        if self.poll_routes.len() >= TIMERFD_FILE_MAX_WAITERS {
             return false;
         }
         self.poll_routes
@@ -345,7 +348,7 @@ impl TimerFdFile {
 fn queue_with_capacity<T>() -> Result<Vec<T>, SysError> {
     let mut queue = Vec::new();
     queue
-        .try_reserve_exact(TIMERFD_TRIGGER_QUEUE_CAPACITY)
+        .try_reserve_exact(TIMERFD_FILE_MAX_WAITERS)
         .map_err(|_| SysError::OutOfMemory)?;
     Ok(queue)
 }
@@ -860,7 +863,7 @@ fn timerfd_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterRe
     if capacity_exhausted {
         kwarningln!(
             "timerfd: poll route capacity exhausted capacity={}",
-            TIMERFD_TRIGGER_QUEUE_CAPACITY,
+            TIMERFD_FILE_MAX_WAITERS,
         );
     }
     Ok(result)
@@ -1269,7 +1272,7 @@ mod kunits {
             let mut state = core.state.lock();
             state.expirations = 0;
         }
-        for _ in 0..TIMERFD_TRIGGER_QUEUE_CAPACITY {
+        for _ in 0..TIMERFD_FILE_MAX_WAITERS {
             assert_eq!(
                 file.poll(&notified_request).unwrap(),
                 PollRegisterResult::Subscribed(PollEvent::empty())
@@ -1277,7 +1280,7 @@ mod kunits {
         }
         assert_eq!(
             core.state.lock().poll_routes.len(),
-            TIMERFD_TRIGGER_QUEUE_CAPACITY
+            TIMERFD_FILE_MAX_WAITERS
         );
         assert_eq!(
             file.poll(&notified_request).unwrap(),
@@ -1288,11 +1291,11 @@ mod kunits {
             let mut state = core.state.lock();
             account_due_expiration_locked(&mut state, 1, TimerFdDeadline::Monotonic(1), None).0
         };
-        assert_eq!(detached.poll_notify.len(), TIMERFD_TRIGGER_QUEUE_CAPACITY);
+        assert_eq!(detached.poll_notify.len(), TIMERFD_FILE_MAX_WAITERS);
         assert!(detached.poll_stale.is_empty());
         assert_eq!(
             core.state.lock().poll_routes.len(),
-            TIMERFD_TRIGGER_QUEUE_CAPACITY
+            TIMERFD_FILE_MAX_WAITERS
         );
         notify_waiters_after_unlock(detached, "kunit_expire");
 

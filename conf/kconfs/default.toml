@@ -30,6 +30,7 @@ max_path_len_bytes = 4096 # Maximum length of file paths in bytes
 execve_max_string_count = 256 # Maximum strings accepted in each execve argv or envp vector; the initial stack remains the total byte budget.
 max_processes = 32768 # Maximum number of processes
 epoll_file_max_waiters = 64 # Fixed waiter-route capacity per epoll instance.
+timerfd_file_max_waiters = 16 # Fixed blocking-read and poll-route capacity per timerfd file.
 max_iovec_count = 1024 # Maximum vectors imported by one ordinary vector I/O request; must not exceed IOV_MAX.
 getdents64_buffer_bytes = 2097152 # Maximum kernel staging buffer used by one getdents64 call.
 ext4_sync_io_batch_pages = 16 # Maximum pages staged in one synchronous ext4 read or writeback request.

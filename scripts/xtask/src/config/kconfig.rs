@@ -63,6 +63,7 @@ pub struct Parameters {
     pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
+    pub timerfd_file_max_waiters: Option<usize>,
     pub max_iovec_count: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub ext4_sync_io_batch_pages: Option<usize>,
@@ -181,6 +182,7 @@ impl Parameters {
         materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
+        materialize!(timerfd_file_max_waiters);
         materialize!(max_iovec_count);
         materialize!(getdents64_buffer_bytes);
         materialize!(ext4_sync_io_batch_pages);
@@ -328,6 +330,8 @@ pub const EXECVE_MAX_STRING_COUNT: usize = {};
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Fixed blocking-read and poll-route capacity per timerfd file.
+pub const TIMERFD_FILE_MAX_WAITERS: usize = {};
 /// Maximum number of vectors imported by one ordinary vector I/O request.
 pub const MAX_IOVEC_COUNT: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
@@ -526,6 +530,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
+            resolved!(timerfd_file_max_waiters),
             resolved!(max_iovec_count),
             resolved!(getdents64_buffer_bytes),
             resolved!(ext4_sync_io_batch_pages),
