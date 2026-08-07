@@ -1,0 +1,3 @@
+target = "qemu-virt-rv64-bench"
+kernel-config = "conf/kconfs/default.toml"
+profile = "release"

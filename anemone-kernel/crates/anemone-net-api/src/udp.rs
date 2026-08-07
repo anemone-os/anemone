@@ -35,16 +35,18 @@ pub struct UdpEndpointFacts {
     live: bool,
     readable: bool,
     writable: bool,
+    error: bool,
 }
 
 impl UdpEndpointFacts {
     /// Construct a snapshot at the concrete Endpoint owner boundary.
     #[doc(hidden)]
-    pub const fn from_owner_snapshot(readable: bool, writable: bool) -> Self {
+    pub const fn from_owner_snapshot(readable: bool, writable: bool, error: bool) -> Self {
         Self {
             live: true,
             readable,
             writable,
+            error,
         }
     }
 
@@ -58,6 +60,10 @@ impl UdpEndpointFacts {
 
     pub const fn is_writable(self) -> bool {
         self.writable
+    }
+
+    pub const fn has_error(self) -> bool {
+        self.error
     }
 }
 
@@ -122,6 +128,7 @@ impl UdpNamespacePolicy {
 pub struct UdpEndpointLimits {
     tx_datagram_capacity: usize,
     rx_datagram_capacity: usize,
+    error_record_capacity: usize,
     max_payload_bytes: usize,
 }
 
@@ -129,11 +136,13 @@ impl UdpEndpointLimits {
     pub const fn new(
         tx_datagram_capacity: usize,
         rx_datagram_capacity: usize,
+        error_record_capacity: usize,
         max_payload_bytes: usize,
     ) -> Self {
         Self {
             tx_datagram_capacity,
             rx_datagram_capacity,
+            error_record_capacity,
             max_payload_bytes,
         }
     }
@@ -146,8 +155,119 @@ impl UdpEndpointLimits {
         self.rx_datagram_capacity
     }
 
+    pub const fn error_record_capacity(self) -> usize {
+        self.error_record_capacity
+    }
+
     pub const fn max_payload_bytes(self) -> usize {
         self.max_payload_bytes
+    }
+}
+
+/// Protocol-domain meaning of one admitted IPv4 ICMP error.
+///
+/// Linux errno projection remains in the kernel Socket ABI adapter. Keeping
+/// this semantic cause with the Endpoint lets ordinary I/O, `SO_ERROR`, and
+/// the extended-error FIFO compete for one owner fact without storing ABI
+/// numbers in the protocol Stack.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UdpErrorCause {
+    NetworkUnreachable,
+    HostUnreachable,
+    ProtocolUnreachable,
+    PortUnreachable,
+    MessageTooLong,
+    SourceRouteFailed,
+    DestinationNetworkUnknown,
+    DestinationHostUnknown,
+    SourceHostIsolated,
+    NetworkProhibited,
+    HostProhibited,
+    NetworkUnreachableForTypeOfService,
+    HostUnreachableForTypeOfService,
+    CommunicationProhibited,
+    HostPrecedenceViolation,
+    PrecedenceCutoff,
+    TimeExceeded,
+}
+
+/// One ICMP-origin error detached from the Endpoint FIFO.
+///
+/// The record contains protocol values only. The Socket adapter owns Linux
+/// errno, sockaddr, cmsg, and `sock_extended_err` layout projection.
+#[derive(Debug, Eq, PartialEq)]
+pub struct UdpErrorRecord {
+    cause: UdpErrorCause,
+    icmp_type: u8,
+    icmp_code: u8,
+    info: u32,
+    original_destination: UdpPeer,
+    offender: Ipv4Address,
+    quoted_payload: Vec<u8>,
+}
+
+impl UdpErrorRecord {
+    /// Construct a move-only record at the concrete Endpoint owner boundary.
+    #[doc(hidden)]
+    pub fn from_owner_detach(
+        cause: UdpErrorCause,
+        icmp_type: u8,
+        icmp_code: u8,
+        info: u32,
+        original_destination: UdpPeer,
+        offender: Ipv4Address,
+        quoted_payload: Vec<u8>,
+    ) -> Self {
+        Self {
+            cause,
+            icmp_type,
+            icmp_code,
+            info,
+            original_destination,
+            offender,
+            quoted_payload,
+        }
+    }
+
+    pub const fn cause(&self) -> UdpErrorCause {
+        self.cause
+    }
+
+    pub const fn icmp_type(&self) -> u8 {
+        self.icmp_type
+    }
+
+    pub const fn icmp_code(&self) -> u8 {
+        self.icmp_code
+    }
+
+    pub const fn info(&self) -> u32 {
+        self.info
+    }
+
+    pub const fn original_destination(&self) -> UdpPeer {
+        self.original_destination
+    }
+
+    pub const fn offender(&self) -> Ipv4Address {
+        self.offender
+    }
+
+    pub fn quoted_payload(&self) -> &[u8] {
+        &self.quoted_payload
+    }
+
+    /// Consume the detached record without duplicating its payload storage.
+    pub fn into_parts(self) -> (UdpErrorCause, u8, u8, u32, UdpPeer, Ipv4Address, Vec<u8>) {
+        (
+            self.cause,
+            self.icmp_type,
+            self.icmp_code,
+            self.info,
+            self.original_destination,
+            self.offender,
+            self.quoted_payload,
+        )
     }
 }
 
@@ -248,6 +368,18 @@ pub struct UdpPeekedDatagram {
     peer: UdpPeer,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UdpReceiveOutcome {
+    Datagram(UdpReceivedDatagram),
+    PendingError(UdpErrorCause),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UdpPeekOutcome {
+    Datagram(UdpPeekedDatagram),
+    PendingError(UdpErrorCause),
+}
+
 impl UdpPeekedDatagram {
     #[doc(hidden)]
     pub fn from_owner_observation(payload: Vec<u8>, peer: UdpPeer) -> Self {
@@ -299,6 +431,7 @@ pub enum UdpSendError {
     UnsupportedSource,
     InvalidDestination,
     MessageTooLong { maximum: usize },
+    Pending(UdpErrorCause),
     WouldBlock,
 }
 

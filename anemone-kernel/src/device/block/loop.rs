@@ -416,12 +416,15 @@ fn copy_name(raw: &mut [u8; LO_NAME_SIZE], name: &str) {
     raw[..len].copy_from_slice(&name.as_bytes()[..len]);
 }
 
-fn read_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>) -> Result<T, SysError> {
+fn read_ioctl_value<T: zerocopy::FromBytes>(ctx: &BlockIoctlCtx<'_>) -> Result<T, SysError> {
     ctx.uspace()
         .with_usp(|usp| UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
 }
 
-fn write_ioctl_value<T: Copy>(ctx: &BlockIoctlCtx<'_>, value: T) -> Result<(), SysError> {
+fn write_ioctl_value<T: zerocopy::IntoBytes + zerocopy::Immutable>(
+    ctx: &BlockIoctlCtx<'_>,
+    value: T,
+) -> Result<(), SysError> {
     ctx.uspace().with_usp(|usp| {
         UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value)?;
         Ok(())

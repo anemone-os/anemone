@@ -4,14 +4,18 @@ use anemone_net_api::{
     EthernetAddress, FrameProvider, Instant as NetworkInstant, InterfaceId, Ipv4Address, Ipv4Cidr,
     PumpOutcome, icmp_raw::IcmpRawNamespacePolicy, udp::UdpNamespacePolicy,
 };
-use anemone_smoltcp_stack::{Ipv4ConfigError, PumpBudget, PumpError, Stack, StackPolicy};
+use anemone_smoltcp_stack::{
+    Ipv4ConfigError, PumpBudget, PumpError, Stack, StackPolicy, TcpPolicy,
+};
 
 use crate::prelude::*;
 
 mod icmp_raw;
+mod tcp;
 mod udp;
 
 use icmp_raw::IcmpRawEndpointEventRoutes;
+use tcp::TcpEndpointEventRoutes;
 use udp::UdpEndpointEventRoutes;
 
 struct RecheckRoute<Id, Observer: ?Sized> {
@@ -71,6 +75,7 @@ impl<Id: Copy + Eq, Observer: ?Sized> RecheckRoutes<Id, Observer> {
 pub(in crate::net) struct DomainStack {
     stack: SpinLock<Stack>,
     icmp_raw_event_routes: SpinLock<IcmpRawEndpointEventRoutes>,
+    tcp_event_routes: SpinLock<TcpEndpointEventRoutes>,
     udp_event_routes: SpinLock<UdpEndpointEventRoutes>,
 }
 
@@ -78,29 +83,38 @@ impl DomainStack {
     pub(super) fn new(
         udp_policy: UdpNamespacePolicy,
         icmp_raw_policy: IcmpRawNamespacePolicy,
+        tcp_policy: TcpPolicy,
     ) -> Self {
         Self {
             stack: SpinLock::new(Stack::with_policy(StackPolicy::new(
                 udp_policy,
                 icmp_raw_policy,
+                tcp_policy,
             ))),
             icmp_raw_event_routes: SpinLock::new(IcmpRawEndpointEventRoutes::new()),
+            tcp_event_routes: SpinLock::new(TcpEndpointEventRoutes::new()),
             udp_event_routes: SpinLock::new(UdpEndpointEventRoutes::new()),
         }
     }
 
     fn protocol_transition<T>(&self, operation: impl FnOnce(&mut Stack) -> T) -> T {
-        let (result, udp_invalidations, icmp_raw_invalidations) = {
+        let (result, udp_invalidations, icmp_raw_invalidations, tcp_invalidations) = {
             let mut stack = self.stack.lock();
             let result = operation(&mut stack);
-            let (udp_invalidations, icmp_raw_invalidations) =
+            let (udp_invalidations, icmp_raw_invalidations, tcp_invalidations) =
                 stack.take_invalidations().into_parts();
-            (result, udp_invalidations, icmp_raw_invalidations)
+            (
+                result,
+                udp_invalidations,
+                icmp_raw_invalidations,
+                tcp_invalidations,
+            )
         };
         // Endpoint owners commit facts under the Stack guard. Recheck-only
         // hints cross into kernel observers only after that guard is gone.
         self.route_udp_invalidations(udp_invalidations);
         self.route_icmp_raw_invalidations(icmp_raw_invalidations);
+        self.route_tcp_invalidations(tcp_invalidations);
         result
     }
 
@@ -265,11 +279,12 @@ impl ExternalPumpPort {
 
 #[cfg(feature = "kunit")]
 mod kunits {
-    use anemone_net_api::{icmp_raw::IcmpRawEndpointId, udp::UdpEndpointId};
+    use anemone_net_api::{icmp_raw::IcmpRawEndpointId, tcp::TcpEndpointId, udp::UdpEndpointId};
 
     use super::*;
     use crate::net::{
-        icmp_raw::IcmpRawEndpointInvalidationObserver, udp::UdpEndpointInvalidationObserver,
+        icmp_raw::IcmpRawEndpointInvalidationObserver, tcp::TcpEndpointInvalidationObserver,
+        udp::UdpEndpointInvalidationObserver,
     };
 
     struct Observer;
@@ -279,6 +294,10 @@ mod kunits {
     }
 
     impl IcmpRawEndpointInvalidationObserver for Observer {
+        fn invalidate(&self) {}
+    }
+
+    impl TcpEndpointInvalidationObserver for Observer {
         fn invalidate(&self) {}
     }
 
@@ -300,5 +319,14 @@ mod kunits {
         icmp_routes.register(icmp_id, &icmp_observer).unwrap();
         drop(icmp_observer);
         assert!(icmp_routes.observer(icmp_id).is_none());
+
+        let tcp_id = TcpEndpointId::from_owner_raw(13);
+        let tcp_observer: Arc<dyn TcpEndpointInvalidationObserver> = Arc::new(Observer);
+        let mut tcp_routes =
+            RecheckRoutes::<TcpEndpointId, dyn TcpEndpointInvalidationObserver>::new();
+        tcp_routes.register(tcp_id, &tcp_observer).unwrap();
+        assert!(tcp_routes.observer(tcp_id).unwrap().upgrade().is_some());
+        tcp_routes.unregister(tcp_id);
+        assert!(tcp_routes.observer(tcp_id).is_none());
     }
 }

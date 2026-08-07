@@ -39,8 +39,9 @@ fn sys_sigaltstack(
             kbuf
         } else {
             linux_signal::SigStack {
-                ss_sp: 0 as *mut u8,
+                ss_sp: anemone_abi::RawUserAddr64::NULL,
                 ss_flags: SS_DISABLE,
+                __pad0: 0,
                 ss_size: 0,
             }
         };
@@ -54,6 +55,7 @@ fn sys_sigaltstack(
             ss_sp,
             ss_flags,
             ss_size,
+            ..
         } = {
             let mut guard = usp.lock();
             UserReadPtr::<linux_signal::SigStack>::try_new(uss, &mut guard)?.read()?
@@ -80,7 +82,7 @@ fn sys_sigaltstack(
             // set altstack
 
             // basic sanity checks.
-            if ss_sp as u64 == 0 {
+            if ss_sp.is_null() {
                 return Err(SysError::InvalidArgument);
             }
             if let Some(altstack) = *sig_altstack {
@@ -99,8 +101,8 @@ fn sys_sigaltstack(
                 return Err(SysError::OutOfMemory);
             }
 
-            let stack_base = user_addr(ss_sp as u64)?;
-            let _end = user_addr(ss_sp as u64 + ss_size as u64)?;
+            let stack_base = user_addr(ss_sp.bits())?;
+            let _end = user_addr(ss_sp.bits() + ss_size as u64)?;
 
             let flags = SigAltStackFlags::try_from_linux_bits(ss_flags)?;
 

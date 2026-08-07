@@ -1,0 +1,19 @@
+name = "tcp-r0-oracle"
+targets = ["riscv64", "loongarch64", "host"]
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/tcp-r0-glibc"
+targets = ["riscv64", "loongarch64"]
+
+[[artifacts]]
+path = "out/${ARCH}/tcp-r0-musl"
+targets = ["riscv64", "loongarch64"]
+
+[[artifacts]]
+path = "out/host/tcp-r0-host"
+targets = ["host"]

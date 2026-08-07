@@ -2,7 +2,7 @@ use anemone_abi::syscall::SYS_RECVFROM;
 
 use crate::{
     fs::socket::{
-        SocketAddress, SocketAddressSink, SocketReceiveFlags, SocketReceiveRequest,
+        SocketAddress, SocketAddressSink, SocketIoOps, SocketReceiveFlags, SocketReceiveRequest,
         SocketReceiveSink, SocketType, retry_socket_receive, socket_from_file,
     },
     prelude::*,
@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::abi::{
-    map_query_error, map_receive_error, validate_receive_message_flags, write_payload,
-    write_socket_address,
+    map_query_error, map_receive_error, validate_recvfrom_flags, write_empty_socket_address,
+    write_payload, write_socket_address,
 };
 
 struct ReceiveSink {
@@ -55,13 +55,14 @@ fn sys_recvfrom(
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
     let socket = socket_from_file(desc.vfs_file()).ok_or(SysError::NotSocket)?;
-    let message_flags = validate_receive_message_flags(socket.socket_type(), flags)?;
+    let message_flags = validate_recvfrom_flags(socket.socket_type(), flags)?;
     let nonblocking =
         message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK);
 
+    let io = socket.io();
     if matches!(
-        socket.socket_type(),
-        SocketType::UnixStream | SocketType::UnixSeqpacket
+        io,
+        SocketIoOps::ByteStream { .. } | SocketIoOps::Seqpacket { .. }
     ) {
         let segment = if len == 0 {
             None
@@ -77,30 +78,36 @@ fn sys_recvfrom(
             desc.vfs_file(),
             nonblocking,
             || {
-                socket.receive(match socket.socket_type() {
-                    SocketType::UnixStream => SocketReceiveRequest::Stream {
+                socket.receive(match io {
+                    SocketIoOps::ByteStream { .. } => SocketReceiveRequest::Stream {
                         sink: &mut stream_sink,
                         flags: SocketReceiveFlags {
                             peek: message_flags.peek,
                         },
                     },
-                    SocketType::UnixSeqpacket => SocketReceiveRequest::Seqpacket {
+                    SocketIoOps::Seqpacket { .. } => SocketReceiveRequest::Seqpacket {
                         sink: &mut stream_sink,
                         flags: SocketReceiveFlags {
                             peek: message_flags.peek,
                         },
                     },
-                    _ => unreachable!("Unix receive branch selected a non-Unix socket"),
+                    SocketIoOps::Datagram { .. } => {
+                        unreachable!("connection-oriented receive branch used datagram I/O")
+                    },
                 })
             },
             map_receive_error,
         )?;
         if peer != 0 {
-            let mut peer_address = PeerCapture::default();
-            socket
-                .copy_peer_address(&mut peer_address)
-                .map_err(map_query_error)?;
-            write_socket_address(socket.socket_type(), peer, addrlen, peer_address.0)?;
+            if socket.socket_type() == SocketType::Ipv4Tcp {
+                write_empty_socket_address(peer, addrlen)?;
+            } else {
+                let mut peer_address = PeerCapture::default();
+                socket
+                    .copy_peer_address(&mut peer_address)
+                    .map_err(map_query_error)?;
+                write_socket_address(socket.socket_type(), peer, addrlen, peer_address.0)?;
+            }
         }
         return Ok(if message_flags.truncate_result {
             outcome

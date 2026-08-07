@@ -16,7 +16,7 @@ fn sys_timerfd_gettime(
 ) -> Result<u64, SysError> {
     let task = get_current_task();
     let file = task.get_fd(fd)?;
-    let snapshot = gettime(file.vfs_file())?;
+    let snapshot: ITimerSpec = gettime(file.vfs_file())?.into();
 
     let uspace = task.clone_uspace_handle();
     let mut usp = uspace.lock();

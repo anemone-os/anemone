@@ -4,7 +4,7 @@ use crate::{
     prelude::*,
     task::{
         for_each_thread_group_from, get_thread_group,
-        kthread::{KThreadBuilder, KThreadCtx, KThreadHandle},
+        kthread::{KThreadBuilder, KThreadCtx},
         sig::{
             SigNo, Signal,
             info::{SiCode, SigInfoFields, SigKill},
@@ -13,7 +13,12 @@ use crate::{
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-static OOM_KILLER: SpinLock<Option<KThreadHandle>> = SpinLock::new(None);
+static_assert!(
+    OOM_KILL_SAMPLE_INTERVAL_MS > 0,
+    "OOM_KILL_SAMPLE_INTERVAL_MS must be non-zero"
+);
+
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(OOM_KILL_SAMPLE_INTERVAL_MS);
 
 #[derive(Debug)]
 struct OomVictim {
@@ -24,60 +29,71 @@ struct OomVictim {
 
 #[initcall(late)]
 fn init_oom_killer() {
-    let worker = KThreadBuilder::new("oom-killer-0")
+    KThreadBuilder::new("oom-killer-0")
         .spawn(oom_killer_entry, NilOpaque::new())
         .unwrap_or_else(|err| panic!("failed to spawn OOM killer: {:?}", err));
-
-    let mut slot = OOM_KILLER.lock();
-    assert!(slot.is_none(), "OOM killer initialized twice");
-    *slot = Some(worker);
-}
-
-pub fn wake_oom_killer() {
-    if let Some(worker) = OOM_KILLER.lock().as_ref().cloned() {
-        worker.wake();
-    }
 }
 
 fn oom_killer_entry(ctx: KThreadCtx, _: AnyOpaque) -> i32 {
     let mut active_victim = None;
+    // Diagnostic suppression only. FrameAllocatorStats remains the sole
+    // pressure truth and this flag never controls sampling or victim policy.
+    let mut no_victim_reported = false;
+
+    knoticeln!(
+        "oom killer: fixed-delay sampling started threshold={} interval_ms={}",
+        OOM_KILL_THRESHOLD,
+        OOM_KILL_SAMPLE_INTERVAL_MS,
+    );
 
     loop {
-        if ctx.should_stop() {
-            break;
-        }
-
-        ctx.wait_until_woken(|| frame_allocator_stats().exceeds_oom_kill_threshold());
+        ctx.wait_for(SAMPLE_INTERVAL);
 
         if ctx.should_stop() {
             break;
         }
-        if !frame_allocator_stats().exceeds_oom_kill_threshold() {
+
+        let stats = frame_allocator_stats();
+        if !stats.exceeds_oom_kill_threshold() {
+            no_victim_reported = false;
             continue;
         }
 
-        run_oom_kill_round(&mut active_victim);
+        match run_oom_kill_round(&mut active_victim, stats) {
+            OomKillRound::ActiveVictimPending | OomKillRound::KilledVictim => {
+                no_victim_reported = false;
+            },
+            OomKillRound::NoEligibleVictim => {
+                if !no_victim_reported {
+                    knoticeln!(
+                        "oom killer: no eligible victim while frame usage is {}/{} pages",
+                        stats.used_pages(),
+                        stats.total_pages
+                    );
+                    no_victim_reported = true;
+                }
+            },
+        }
     }
 
     0
 }
 
-fn run_oom_kill_round(active_victim: &mut Option<Tid>) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OomKillRound {
+    ActiveVictimPending,
+    KilledVictim,
+    NoEligibleVictim,
+}
+
+fn run_oom_kill_round(active_victim: &mut Option<Tid>, stats: FrameAllocatorStats) -> OomKillRound {
     if active_victim_is_pending(*active_victim) {
-        yield_now();
-        return;
+        return OomKillRound::ActiveVictimPending;
     }
     *active_victim = None;
 
-    let stats = frame_allocator_stats();
     let Some(victim) = select_victim() else {
-        knoticeln!(
-            "oom killer: no eligible victim while frame usage is {}/{} pages",
-            stats.used_pages(),
-            stats.total_pages
-        );
-        yield_now();
-        return;
+        return OomKillRound::NoEligibleVictim;
     };
 
     kalertln!(
@@ -98,7 +114,7 @@ fn run_oom_kill_round(active_victim: &mut Option<Tid>) {
         }),
     ));
     *active_victim = Some(victim.tgid);
-    yield_now();
+    OomKillRound::KilledVictim
 }
 
 fn active_victim_is_pending(active_victim: Option<Tid>) -> bool {

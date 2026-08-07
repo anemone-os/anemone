@@ -2,7 +2,10 @@ use alloc::vec::Vec;
 
 use anemone_net_api::{
     InterfaceId,
-    udp::{UdpPeekedDatagram, UdpPeer, UdpReceiveError, UdpSendError},
+    udp::{
+        UdpPeekOutcome, UdpPeekedDatagram, UdpPeer, UdpReceiveError, UdpReceiveOutcome,
+        UdpReceivedDatagram, UdpSendError,
+    },
 };
 use smoltcp::{
     iface::SocketSet,
@@ -68,6 +71,10 @@ impl UdpEndpoints {
             .iter_mut()
             .find(|endpoint| endpoint.id == endpoint_id)
             .ok_or(UdpSendError::UnknownEndpoint)?;
+        if let Some(error) = endpoint.pending_error.take() {
+            self.invalidate(endpoint_id);
+            return Err(UdpSendError::Pending(error));
+        }
         if endpoint.binding.is_none() {
             return Err(UdpSendError::UnboundEndpoint);
         }
@@ -232,35 +239,52 @@ impl UdpEndpoints {
         }
     }
 
-    pub(crate) fn receive(&mut self, id: EndpointId) -> Result<ReceivedDatagram, UdpReceiveError> {
-        let datagram = self
+    pub(crate) fn receive(&mut self, id: EndpointId) -> Result<UdpReceiveOutcome, UdpReceiveError> {
+        let endpoint = self
             .endpoints
             .iter_mut()
             .find(|endpoint| endpoint.id == id)
-            .ok_or(UdpReceiveError::UnknownEndpoint)?
-            .received
-            .pop_front()
-            .ok_or(UdpReceiveError::WouldBlock)?;
+            .ok_or(UdpReceiveError::UnknownEndpoint)?;
+        let outcome = if let Some(datagram) = endpoint.received.pop_front() {
+            let IpAddress::Ipv4(source) = datagram.source.addr;
+            UdpReceiveOutcome::Datagram(UdpReceivedDatagram::from_owner_detach(
+                datagram.payload,
+                UdpPeer::new(
+                    anemone_net_api::Ipv4Address::new(source.octets()),
+                    datagram.source.port,
+                ),
+            ))
+        } else if let Some(error) = endpoint.pending_error.take() {
+            UdpReceiveOutcome::PendingError(error)
+        } else {
+            return Err(UdpReceiveError::WouldBlock);
+        };
         self.invalidate(id);
-        Ok(datagram)
+        Ok(outcome)
     }
 
-    pub(crate) fn peek(&self, id: EndpointId) -> Result<UdpPeekedDatagram, UdpReceiveError> {
-        let datagram = self
+    pub(crate) fn peek(&mut self, id: EndpointId) -> Result<UdpPeekOutcome, UdpReceiveError> {
+        let endpoint = self
             .endpoints
-            .iter()
+            .iter_mut()
             .find(|endpoint| endpoint.id == id)
-            .ok_or(UdpReceiveError::UnknownEndpoint)?
-            .received
-            .front()
-            .ok_or(UdpReceiveError::WouldBlock)?;
-        let IpAddress::Ipv4(source) = datagram.source.addr;
-        Ok(UdpPeekedDatagram::from_owner_observation(
-            datagram.payload.clone(),
-            UdpPeer::new(
-                anemone_net_api::Ipv4Address::new(source.octets()),
-                datagram.source.port,
-            ),
-        ))
+            .ok_or(UdpReceiveError::UnknownEndpoint)?;
+        if let Some(datagram) = endpoint.received.front() {
+            let IpAddress::Ipv4(source) = datagram.source.addr;
+            return Ok(UdpPeekOutcome::Datagram(
+                UdpPeekedDatagram::from_owner_observation(
+                    datagram.payload.clone(),
+                    UdpPeer::new(
+                        anemone_net_api::Ipv4Address::new(source.octets()),
+                        datagram.source.port,
+                    ),
+                ),
+            ));
+        }
+        let Some(error) = endpoint.pending_error.take() else {
+            return Err(UdpReceiveError::WouldBlock);
+        };
+        self.invalidate(id);
+        Ok(UdpPeekOutcome::PendingError(error))
     }
 }

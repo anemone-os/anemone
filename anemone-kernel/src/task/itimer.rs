@@ -170,11 +170,7 @@ fn next_periodic_expiration(expire_at: Instant, interval: Duration, now: Instant
     // timer-worker delay into permanent phase drift.
     let periods = (elapsed / interval_mono).saturating_add(1);
     let advance = interval_mono.saturating_mul(periods);
-    Instant::from_mono(
-        expire_at
-            .mono()
-            .saturating_add(advance),
-    )
+    Instant::from_mono(expire_at.mono().saturating_add(advance))
 }
 
 fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>) {

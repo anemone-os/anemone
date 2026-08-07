@@ -46,7 +46,7 @@ pub trait SignalArchTrait {
 
 /// The struct to be pushed onto the user stack when executing a user-defined
 /// signal handler.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes)]
 #[repr(C)]
 pub struct RtSigFrame {
     /// Second argument, if SA_SIGINFO is set.
@@ -72,11 +72,12 @@ impl RtSigFrame {
                 ss_sp,
                 ss_flags,
                 ss_size,
+                ..
             } = self.ucontext.uc_stack;
 
             if ss_flags & linux_signal::SS_DISABLE == 0 {
-                let _stack_base = user_addr(ss_sp as u64)?;
-                let _stack_top = user_addr(ss_sp as u64 + ss_size as u64)?;
+                let _stack_base = user_addr(ss_sp.bits())?;
+                let _stack_top = user_addr(ss_sp.bits() + ss_size as u64)?;
             }
 
             // 2. pc, which must be a user address.

@@ -323,15 +323,15 @@ fn verify_relative_sleep_remaining() {
     // validated through the production signal/wait path.
     SIGALRM_DELIVERIES.store(0, Ordering::Relaxed);
     let action = SigAction {
-        sighandler: sigalrm_handler as *const (),
+        sighandler: (sigalrm_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     let mut old_action = SigAction {
-        sighandler: core::ptr::null(),
+        sighandler: anemone_rs::abi::RawUserAddr64::NULL,
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGALRM, Some(&action), Some(&mut old_action)).unwrap();

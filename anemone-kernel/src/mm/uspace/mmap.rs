@@ -1076,7 +1076,7 @@ mod kunits {
             ))
             .expect("anonymous mapping should succeed");
         uspace
-            .inject_page_fault((base + 3).to_virt_addr(), PageFaultType::Read)
+            .fault_in_page((base + 3).to_virt_addr(), PageFaultType::Read)
             .expect("faulting mapped page should succeed");
         assert!(
             uspace

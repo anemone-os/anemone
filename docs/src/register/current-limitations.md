@@ -2,6 +2,30 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** MM / user address space / remote TLB fence / frame retirement
+
+**Summary:** `RemoteUspFenceGuard`在Drop中同步完成remote TLB shootdown，携带的退休frame只有在该轮
+completion成功后才会回到allocator。当前`broadcast_ipi()`失败时没有可返回、重试或转交隔离队列的owner API；
+guard只能取走并永久保留这些frame，同时输出alert，避免remote CPU通过stale TLB访问已经复用的物理页。
+
+正常shootdown成功路径仍会释放全部退休frame；不携带退休frame的普通fence也不会产生该泄漏。当前命名consumer是
+`brk`跨整页shrink的private-backing decommit。该fail-close选择保护memory safety，但若IPI失败可重复发生，会把
+受影响frame永久排除在可分配内存之外。
+
+**Exit Condition:** MM address-space owner获得infallible或retryable的remote-fence completion/failure handoff；
+失败轮次必须在保持退休frame隔离的同时拥有可恢复的重试、CPU offline completion或等价的终止证明，并只在所有
+受影响CPU不再能够使用旧translation后释放frame。以携带真实退休frame的成功路径和注入IPI失败路径共同验证：
+既不提前复用物理页，也不会在可恢复失败后永久遗失frame。
+
+**Owner:** MM UserSpace remote-fence protocol；IPI transport为依赖
+**Last Verified:** 2026-08-07
+**Related:** [brk shrink decommit小迭代](../devlog/changes/2026-08-05-brk-shrink-decommit.md)
+
 ## ANE-20260804-UNIX-SEQPACKET-EDGE-ABI
 
 **Type:** Limitation
@@ -623,14 +647,14 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Type:** Limitation
 **Status:** Active
 **Severity:** Low
-**Area:** fs / iomux / pselect6
+**Area:** fs / iomux / ppoll / pselect6
 
-**Summary:** `pselect6` 当前接受 `exceptfds` 作为 stage-1 兼容入口：置位 fd 仍会被校验，返回前对应用户 fdset 会被清空，并在非空 `exceptfds` 请求时打 notice；但内核尚无内部 `POLLPRI` / exception readiness `PollEvent`，也没有 source-side register / wake 能力，因此不会把任何 fd 报告为 exception-ready。这个兼容 no-op 是为了让 lmbench 等 defensive `exceptfds` 探测不再被 `ENOTSUP` 拦截，不代表完整 Linux `exceptfds` 语义已经实现。
+**Summary:** `pselect6` 当前接受 `exceptfds` 作为 stage-1 兼容入口：置位 fd 仍会被校验，返回前对应用户 fdset 会被清空，并在非空 `exceptfds` 请求时打 notice；`ppoll` 同样接受 `POLLRDBAND` 并保持其与普通 readability 隔离。但内核尚无内部 `POLLPRI` / band / exception readiness `PollEvent`，也没有 source-side register / wake 能力，因此不会把任何 fd 报告为 exception-ready 或 band-readable。这些兼容 no-op 是为了让 defensive 探测不被 syscall admission 拦截，不代表完整 Linux priority/band/`exceptfds` 语义已经实现。
 
-**Exit Condition:** 为 iomux 引入明确的 exception / priority readiness 表达，补齐相关 source 的 snapshot 与 latch register 语义，并让 `pselect6 exceptfds` 按真实 readiness 更新输出 fdset；随后用 lmbench 与覆盖 `POLLPRI` / exception readiness 的回归重新验证。
+**Exit Condition:** 为 iomux 引入明确的 exception / priority / band readiness 表达，补齐相关 source 的 snapshot 与 latch register 语义，并让 `pselect6 exceptfds` 与 `ppoll POLLRDBAND` 按真实 readiness 更新输出；随后用 lmbench 与覆盖 `POLLPRI` / `POLLRDBAND` / exception readiness 的回归重新验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-08
+**Last Verified:** 2026-08-07
 **Related:** [pselect6 exceptfds 小迭代记录](../devlog/changes/2026-06-08-pselect6-exceptfds-compat.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md)
 
 ## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY

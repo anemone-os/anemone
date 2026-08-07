@@ -1,26 +1,66 @@
 pub mod linux {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct TimeVal {
         pub tv_sec: i64,
         pub tv_usec: i64,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct TimeZone {
         pub tz_minuteswest: i32,
         pub tz_dsttime: i32,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct TimeSpec {
         pub tv_sec: i64,
         pub tv_nsec: i64,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct ITimerSpec {
         pub it_interval: TimeSpec,
@@ -30,7 +70,17 @@ pub mod linux {
     /// Native asm-generic `struct sigevent`. The trailing union stays raw ABI
     /// storage; the syscall boundary exposes only the `_tid` interpretation
     /// used by `SIGEV_THREAD_ID`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct SigEvent {
         pub sigev_value: u64,
@@ -52,7 +102,17 @@ pub mod linux {
     /// Field order and explicit padding are UAPI, not Rust implementation
     /// details. They match asm-generic time64's 208-byte layout on RV64 and
     /// LA64; removing apparently unused fields would corrupt userspace copies.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Timex {
         pub modes: u32,
@@ -81,7 +141,17 @@ pub mod linux {
         pub padding: [i32; 11],
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Tms {
         pub tms_utime: i64,
@@ -152,7 +222,17 @@ pub mod linux {
         pub const ITIMER_VIRTUAL: i32 = 1;
         pub const ITIMER_PROF: i32 = 2;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Default,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct OldITimerVal {
             pub it_interval: TimeVal,

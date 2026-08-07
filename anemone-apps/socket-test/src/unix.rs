@@ -175,19 +175,27 @@ fn cancel_and_wait_child(pid: u32, signal: SigNo) -> Result<(), Errno> {
             Ok(()) | Err(ESRCH) => {},
             Err(error) => return Err(error),
         }
-        nanosleep(TimeSpec {
+        let sleep = nanosleep(TimeSpec {
             tv_sec: 0,
             tv_nsec: 10_000_000,
-        })?;
+        });
+        // SIGCHLD can interrupt this polling delay exactly when the child has
+        // completed the expected EINTR path. Recheck wait4 instead of turning
+        // that successful completion into a harness failure.
+        if let Err(error) = sleep
+            && error != EINTR
+        {
+            return Err(error);
+        }
     }
     Err(ETIMEDOUT)
 }
 
 fn install_sigpipe_handler() -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: sigpipe_handler as *const (),
+        sighandler: (sigpipe_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGPIPE, Some(&action), None)
@@ -195,9 +203,9 @@ fn install_sigpipe_handler() -> Result<(), Errno> {
 
 fn install_noop_signal_handler() -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: noop_signal_handler as *const (),
+        sighandler: (noop_signal_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGUSR1, Some(&action), None)
@@ -444,8 +452,8 @@ fn test_pathname_admission_backlog_flags_and_lifecycle() -> Result<(), Errno> {
     ensure(fcntl_getfd(first_accepted)? == 1)?;
     ensure(fcntl_getfl(first_accepted)? & O_NONBLOCK != 0)?;
 
-    // backlog 0 admits one child. Consuming that child makes the next
-    // operation-local connect attempt eligible without retaining old lookup.
+    // Once the sole pending connection is accepted, a subsequent connect can
+    // enter the listener queue.
     connect_unix_path(second_client, ADMISSION_PATH.as_bytes())?;
     let second_accepted = accept_unix(listener)?;
     ensure(fcntl_getfd(second_accepted)? == 0)?;
@@ -453,9 +461,8 @@ fn test_pathname_admission_backlog_flags_and_lifecycle() -> Result<(), Errno> {
 
     let (local, local_len) = unix_name(first_accepted, false)?;
     ensure_pathname(&local, local_len, ADMISSION_PATH)?;
-    // Accepted sockets inherit the listener's local name without inheriting
-    // its live binding registration. A second bind must therefore fail before
-    // creating a pathname rather than reaching name publication again.
+    // An accepted socket reports the listener's local name, but bind on that
+    // connected socket fails without creating the requested pathname.
     unlink_if_present(ACCEPTED_REBIND_PATH, 0)?;
     expect_errno(
         bind_unix_path(first_accepted, ACCEPTED_REBIND_PATH.as_bytes()),
@@ -818,7 +825,7 @@ fn test_blocked_connect_is_cancelled_by_signal() -> Result<(), Errno> {
     unlink_if_present(SIGNAL_PATH, 0)
 }
 
-fn test_parallel_connect_commit_wakes_old_listener_wait() -> Result<(), Errno> {
+fn test_concurrent_connect_on_shared_socket() -> Result<(), Errno> {
     unlink_if_present(PARALLEL_PATH_A, 0)?;
     unlink_if_present(PARALLEL_PATH_B, 0)?;
     let first_listener = unix_stream_socket(SocketFlags::empty())?;
@@ -915,11 +922,11 @@ fn test_bidirectional_vector_and_nonblocking() -> Result<(), Errno> {
     let right = b"tored";
     let write_iov = [
         IoVec {
-            iov_base: left.as_ptr() as *mut c_void,
+            iov_base: (left.as_ptr() as *mut c_void).into(),
             iov_len: left.len() as u64,
         },
         IoVec {
-            iov_base: right.as_ptr() as *mut c_void,
+            iov_base: (right.as_ptr() as *mut c_void).into(),
             iov_len: right.len() as u64,
         },
     ];
@@ -928,11 +935,11 @@ fn test_bidirectional_vector_and_nonblocking() -> Result<(), Errno> {
     let mut out_right = [0u8; 6];
     let mut read_iov = [
         IoVec {
-            iov_base: out_left.as_mut_ptr().cast(),
+            iov_base: out_left.as_mut_ptr().cast::<c_void>().into(),
             iov_len: out_left.len() as u64,
         },
         IoVec {
-            iov_base: out_right.as_mut_ptr().cast(),
+            iov_base: out_right.as_mut_ptr().cast::<c_void>().into(),
             iov_len: out_right.len() as u64,
         },
     ];
@@ -967,11 +974,11 @@ fn test_zero_length_io_observes_send_state() -> Result<(), Errno> {
     ensure(SIGPIPE_COUNT.load(Ordering::SeqCst) == before + 1)?;
 
     let mut read_iov = [IoVec {
-        iov_base: core::ptr::null_mut(),
+        iov_base: anemone_rs::abi::RawUserAddr64::NULL,
         iov_len: 0,
     }];
     let write_iov = [IoVec {
-        iov_base: core::ptr::null_mut(),
+        iov_base: anemone_rs::abi::RawUserAddr64::NULL,
         iov_len: 0,
     }];
     ensure(readv(first, &mut read_iov)? == 0)?;
@@ -1301,8 +1308,10 @@ fn test_shutdown_buffered_eof_and_sigpipe() -> Result<(), Errno> {
     expect_errno(shutdown(first, 3), EINVAL)?;
     expect_errno(shutdown(Fd::MAX, 3), EBADF)?;
     close(first)?;
-    close(second)?;
+    close(second)
+}
 
+fn test_preconnection_shutdown_limitation() -> Result<(), Errno> {
     unlink_if_present(STAGE3A_PATH, 0)?;
     let listener = unix_stream_socket(SocketFlags::empty())?;
     for how in [SHUT_RD, SHUT_WR, SHUT_RDWR] {
@@ -1476,10 +1485,8 @@ fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
     close(accepted)?;
     close(client)?;
 
-    // A watch installed before connect must move from endpoint-role routes to
-    // the resulting connection owner. Consume the role-change recheck while
-    // IN is still false, then prove that a later peer write wakes a blocked ET
-    // waiter through the transferred connection route.
+    // An epoll watch installed before connect remains attached to the same
+    // open file description and observes data delivered after connection.
     let client = unix_stream_socket(SocketFlags::NONBLOCK)?;
     let client_epfd = epoll_create1(EpollCreateFlags::empty())?;
     epoll_ctl(
@@ -1503,7 +1510,7 @@ fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
     unlink_if_present(STAGE3B_PATH, 0)?;
 
     // Linux select puts HUP in readfds, not writefds. A closed pipe read end
-    // isolates that grouping from the Unix terminal-send WRITABLE predicate.
+    // establishes that mapping independently of Unix socket write readiness.
     let (pipe_rx, pipe_tx) = pipe2(PipeFlags::empty())?;
     close(pipe_tx)?;
     let mut writefds = fdset_with(pipe_rx);
@@ -1571,8 +1578,8 @@ fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
     close(first)?;
     close(second)?;
 
-    // LT keeps deriving RDHUP from the current source predicate. MOD must
-    // re-scan the same current fact without relying on the earlier IN event.
+    // A level-triggered half-close remains observable after MOD changes the
+    // requested event from IN to RDHUP.
     let (first, second) = unix_stream_pair(SocketFlags::empty())?;
     let epfd = epoll_create1(EpollCreateFlags::empty())?;
     epoll_ctl(
@@ -1598,8 +1605,8 @@ fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
     close(first)?;
     close(second)?;
 
-    // ADD observes an already-current half-close through its initial exact
-    // scan; ET consumes only the transition's dirty claim.
+    // ADD reports a half-close that was already present; an edge-triggered
+    // watch reports the transition once.
     let (first, second) = unix_stream_pair(SocketFlags::empty())?;
     shutdown(second, SHUT_WR)?;
     let epfd = epoll_create1(EpollCreateFlags::empty())?;
@@ -1632,8 +1639,8 @@ fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
     close(first)?;
     close(second)?;
 
-    // ONESHOT disables delivery after commit; MOD creates a new generation
-    // whose initial dirty claim rechecks the still-current RDHUP predicate.
+    // ONESHOT disables further delivery until MOD rearms the watch, at which
+    // point the still-present half-close is reported again.
     let (first, second) = unix_stream_pair(SocketFlags::empty())?;
     let epfd = epoll_create1(EpollCreateFlags::empty())?;
     let one_shot = EpollEvent::new(EPOLLRDHUP | EPOLLONESHOT, 0x3b40);
@@ -1744,8 +1751,8 @@ pub(crate) fn run() -> Result<(), Errno> {
         test_blocked_connect_is_cancelled_by_signal,
     );
     results.case(
-        "parallel-connect-lifecycle-wake",
-        test_parallel_connect_commit_wakes_old_listener_wait,
+        "concurrent-connect-shared-socket",
+        test_concurrent_connect_on_shared_socket,
     );
     results.case(
         "bidirectional-vector-nonblocking",
@@ -1784,5 +1791,21 @@ pub(crate) fn run() -> Result<(), Errno> {
             results.passed, results.failed
         );
         Err(EIO)
+    }
+}
+
+pub(crate) fn run_limitations() -> Result<(), Errno> {
+    println!("UNIXLIMIT:START");
+    match test_preconnection_shutdown_limitation() {
+        Ok(()) => {
+            println!("UNIXLIMIT:PASS:preconnection-shutdown");
+            println!("UNIXLIMIT:SUMMARY:PASS:1");
+            Ok(())
+        },
+        Err(errno) => {
+            println!("UNIXLIMIT:FAIL:preconnection-shutdown:{errno}");
+            println!("UNIXLIMIT:SUMMARY:FAIL:passed=0:failed=1");
+            Err(EIO)
+        },
     }
 }

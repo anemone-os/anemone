@@ -100,7 +100,7 @@ struct Timekeeper {
     counts_per_tick: u64,
     /// Serializes the calendar offset with its step identity. The lock does not
     /// protect monotonic time, which remains derived directly from hardware.
-    realtime: SpinLock<RealtimeSnapshot>,
+    realtime: NoIrqSpinLock<RealtimeSnapshot>,
     /// A deliberately stale performance snapshot, never a second monotonic
     /// truth.
     coarse_mono_ns: AtomicU64,
@@ -116,7 +116,7 @@ impl Timekeeper {
             boot_counter,
             frequency_hz,
             counts_per_tick: frequency_hz / SYSTEM_HZ as u64,
-            realtime: SpinLock::new(RealtimeSnapshot::new(0, 0)?),
+            realtime: NoIrqSpinLock::new(RealtimeSnapshot::new(0, 0)?),
             coarse_mono_ns: AtomicU64::new(0),
         })
     }
@@ -244,6 +244,16 @@ pub fn monotonic_uptime() -> u64 {
     TIMEKEEPER
         .get()
         .elapsed_counts(LocalClockSource::curr_monotonic_time())
+}
+
+/// Narrow raw-clock capability for diagnostic performance observation.
+/// Timekeeping remains the sole owner of the counter timeline and frequency.
+pub(crate) fn perf_clock_ticks() -> u64 {
+    monotonic_uptime()
+}
+
+pub(crate) fn perf_clock_frequency_hz() -> u64 {
+    TIMEKEEPER.get().frequency_hz
 }
 
 /// Return a non-panicking timestamp for early diagnostic consumers.

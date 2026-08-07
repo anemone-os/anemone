@@ -121,9 +121,11 @@ impl DomainStack {
         policy: IcmpRawEgressPolicy,
         message: &[u8],
     ) -> Result<(), IcmpRawSendError> {
-        self.protocol_transition(|stack| {
+        let progression = self.protocol_transition(|stack| {
             stack.send_icmp_raw_endpoint(endpoint, selection, destination, policy, message)
-        })
+        })?;
+        crate::net::submit_protocol_progression(progression);
+        Ok(())
     }
 
     pub(in crate::net) fn receive_icmp_raw_endpoint(

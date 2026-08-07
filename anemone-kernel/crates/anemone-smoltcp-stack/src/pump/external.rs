@@ -8,7 +8,7 @@ use crate::{
     stack::{InterfaceEntry, Protocols, PumpError, PumpOrder, Stack},
 };
 
-use super::common::{PumpBudget, pump_outcome};
+use super::common::{PumpBudget, RoundContinuation, pump_outcome};
 
 impl Stack {
     pub fn pump<P: FrameProvider>(
@@ -40,7 +40,6 @@ impl Stack {
         let mut device = FrameDevice::new(provider);
         entry.interface.poll_maintenance(smoltcp_now);
         let active = protocols.prepare_egress(id, &mut entry.protocols, &mut entry.sockets);
-
         let (ingress_may_remain, egress_may_remain) = match entry.next_pump_order {
             PumpOrder::IngressFirst => (
                 poll_ingress(
@@ -67,19 +66,30 @@ impl Stack {
         };
         let protocol_egress_may_remain =
             protocols.complete_egress(active, id, &entry.protocols, &entry.sockets);
+        // Deferred TCP resources stay engine-owned until a pump has emitted
+        // their final protocol work; only then may the old generation detach.
+        protocols.reclaim_tcp(id, &mut entry.sockets);
+        // A TCP timer may commit a terminal state before an exhausted TX
+        // provider prevents smoltcp from reporting SocketStateChanged. This is
+        // a conservative recheck hint; endpoint facts remain the sole truth.
+        protocols.invalidate_tcp_interface(id);
         entry.next_pump_order = entry.next_pump_order.next();
 
         let next_deadline = entry
             .interface
             .poll_at(smoltcp_now, &entry.sockets)
             .map(from_smoltcp_instant);
-        Ok(pump_outcome(
-            device.blocked_work(),
-            ingress_may_remain,
-            egress_may_remain || protocol_egress_may_remain,
-            now,
-            next_deadline,
-        ))
+        let continuation = if device.blocked_work() {
+            // External TX credit and link availability are provider-owned.
+            // Repeating the same round cannot progress until its durable
+            // completion/link edge requests a recheck.
+            RoundContinuation::AwaitProviderEdge
+        } else if ingress_may_remain || egress_may_remain || protocol_egress_may_remain {
+            RoundContinuation::Runnable
+        } else {
+            RoundContinuation::Quiescent
+        };
+        Ok(pump_outcome(continuation, now, next_deadline))
     }
 }
 
@@ -130,8 +140,12 @@ mod tests {
     use alloc::vec;
 
     use anemone_net_api::{
-        EthernetAddress, FrameCapabilities, FrameSizeError, LinkState, ReceiveOutcome, Recheck,
-        RxToken, TransmitOutcome, TxToken,
+        EthernetAddress, FrameCapabilities, FrameSizeError, Ipv4Address as ApiIpv4Address,
+        Ipv4Cidr, Ipv4EgressSelection, LinkState, ReceiveOutcome, Recheck, RxToken,
+        TransmitOutcome, TxToken,
+        icmp_raw::IcmpRawNamespacePolicy,
+        tcp::{TcpConnectFact, TcpEndpointFacts, TcpPeer},
+        udp::UdpNamespacePolicy,
     };
     use smoltcp::{
         phy::ChecksumCapabilities,
@@ -140,6 +154,8 @@ mod tests {
     };
 
     use super::*;
+
+    use crate::{stack::StackPolicy, tcp::TcpPolicy};
 
     struct UnusedRxToken;
 
@@ -243,5 +259,65 @@ mod tests {
         assert_eq!(outcome.recheck, Recheck::Idle);
         assert_eq!(outcome.next_deadline, None);
         assert_eq!(provider.transmit_calls, 1);
+    }
+
+    #[test]
+    fn tcp_timeout_invalidates_even_when_provider_is_exhausted() {
+        let mut stack = Stack::with_policy(StackPolicy::new(
+            UdpNamespacePolicy::new(4, 30000, 30003),
+            IcmpRawNamespacePolicy::new(4),
+            TcpPolicy::new(4, 4, 1, 64, 64, 4, 1, 60_000, 40000, 40003),
+        ));
+        let mut provider = UnavailableProvider { transmit_calls: 0 };
+        let interface = stack.add_interface(
+            &mut provider,
+            EthernetAddress::new([0x02, 0, 0, 0, 0, 1]),
+            Instant::ZERO,
+        );
+        let local = ApiIpv4Address::new([10, 0, 0, 2]);
+        stack
+            .configure_external_ipv4(interface, Ipv4Cidr::new(local, 24).unwrap(), None)
+            .unwrap();
+        let endpoint = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                endpoint,
+                Ipv4EgressSelection::new(interface, local),
+                TcpPeer::new(ApiIpv4Address::new([10, 0, 0, 1]), 80),
+            )
+            .unwrap();
+        let _ = stack.take_invalidations();
+
+        stack
+            .pump(
+                interface,
+                &mut provider,
+                Instant::ZERO,
+                PumpBudget::new(1, 1),
+            )
+            .unwrap();
+        let _ = stack.take_invalidations();
+        stack
+            .pump(
+                interface,
+                &mut provider,
+                Instant::from_micros(2_000),
+                PumpBudget::new(1, 1),
+            )
+            .unwrap();
+
+        let invalidations = stack.take_invalidations().into_parts().2;
+        assert!(
+            invalidations
+                .iter()
+                .any(|invalidation| invalidation.endpoint() == endpoint)
+        );
+        let TcpEndpointFacts::Connection(facts) = stack.tcp_endpoint_facts(endpoint).unwrap()
+        else {
+            panic!("timed-out active open lost connection facts");
+        };
+        assert_eq!(facts.connect(), TcpConnectFact::Failed);
+        assert!(facts.has_pending_error());
+        assert!(facts.is_terminal());
     }
 }

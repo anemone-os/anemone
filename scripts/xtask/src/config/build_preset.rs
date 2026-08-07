@@ -62,7 +62,7 @@ mod tests {
     fn parses_closed_build_preset() {
         let preset = BuildPreset::from_str(&example_preset()).unwrap();
         assert_eq!(preset.target.as_str(), "example");
-        assert_eq!(preset.kernel_config.to_string(), "conf/.defconfig");
+        assert_eq!(preset.kernel_config.to_string(), "conf/kconfs/default.toml");
         assert_eq!(preset.profile, CargoProfile::Release);
         assert_eq!(CargoProfile::Dev.as_cargo_arg(), ["--profile", "dev"]);
         assert_eq!(CargoProfile::Release.as_cargo_arg(), ["--release"]);

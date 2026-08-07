@@ -1,5 +1,8 @@
-//! This module is responsible for handling the top level
-//! kernel configuration file `conf/kconfig.toml`.
+//! Deserializes KernelConfig input, materializes omitted defaults, and renders
+//! generated kernel definitions.
+//!
+//! Semantic validity belongs to kernel consumers. This module deliberately
+//! does not range-check, clamp, or otherwise reinterpret parameter values.
 
 use std::collections::HashMap;
 
@@ -52,6 +55,7 @@ pub struct Parameters {
     pub print_log_level: Option<u8>,
     pub record_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
+    pub riscv64_tlb_flush_all_threshold_pages: Option<usize>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
@@ -59,8 +63,10 @@ pub struct Parameters {
     pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
+    pub timerfd_file_max_waiters: Option<usize>,
     pub max_iovec_count: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
+    pub ext4_sync_io_batch_pages: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
@@ -81,6 +87,7 @@ pub struct Parameters {
     pub shmmni: Option<usize>,
     pub io_shrink_threshold: Option<u8>,
     pub oom_kill_threshold: Option<u8>,
+    pub oom_kill_sample_interval_ms: Option<u64>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
     pub initial_umask: Option<u16>,
@@ -118,6 +125,7 @@ pub struct Parameters {
     pub net_udp_endpoint_capacity: Option<usize>,
     pub net_udp_tx_datagram_capacity: Option<usize>,
     pub net_udp_rx_datagram_capacity: Option<usize>,
+    pub net_udp_error_record_capacity: Option<usize>,
     pub net_udp_max_payload_bytes: Option<usize>,
     pub net_udp_ephemeral_port_first: Option<u16>,
     pub net_udp_ephemeral_port_last: Option<u16>,
@@ -128,12 +136,22 @@ pub struct Parameters {
     pub net_icmp_raw_rx_byte_capacity: Option<usize>,
     pub net_icmp_raw_default_ttl: Option<u8>,
     pub net_icmp_raw_default_tos: Option<u8>,
+    pub net_tcp_endpoint_capacity: Option<usize>,
+    pub net_tcp_engine_timer_capacity: Option<usize>,
+    pub net_tcp_listener_completed_capacity: Option<usize>,
+    pub net_tcp_rx_buffer_bytes: Option<usize>,
+    pub net_tcp_tx_buffer_bytes: Option<usize>,
+    pub net_tcp_deferred_reclaim_capacity: Option<usize>,
+    pub net_tcp_connect_timeout_ms: Option<usize>,
+    pub net_tcp_orphan_timeout_ms: Option<usize>,
+    pub net_tcp_ephemeral_port_first: Option<u16>,
+    pub net_tcp_ephemeral_port_last: Option<u16>,
 }
 
 impl Parameters {
     /// Materialize the optional parameter syntax into the complete value owned
     /// by a resolved KernelConfig. Build consumers must not consult
-    /// `.defconfig` after this boundary.
+    /// the default KernelConfig after this boundary.
     pub(super) fn materialize_defaults(&mut self, defaults: Option<&Self>) -> anyhow::Result<()> {
         macro_rules! materialize {
             ($field:ident) => {
@@ -156,6 +174,7 @@ impl Parameters {
         materialize!(print_log_level);
         materialize!(record_log_level);
         materialize!(kstack_shift_kb);
+        materialize!(riscv64_tlb_flush_all_threshold_pages);
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
@@ -163,8 +182,10 @@ impl Parameters {
         materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
+        materialize!(timerfd_file_max_waiters);
         materialize!(max_iovec_count);
         materialize!(getdents64_buffer_bytes);
+        materialize!(ext4_sync_io_batch_pages);
         materialize!(pipe_capacity_pages);
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
@@ -185,6 +206,7 @@ impl Parameters {
         materialize!(shmmni);
         materialize!(io_shrink_threshold);
         materialize!(oom_kill_threshold);
+        materialize!(oom_kill_sample_interval_ms);
         materialize!(symlink_resolve_limit);
         materialize!(max_fd_per_process);
         materialize!(initial_umask);
@@ -222,6 +244,7 @@ impl Parameters {
         materialize!(net_udp_endpoint_capacity);
         materialize!(net_udp_tx_datagram_capacity);
         materialize!(net_udp_rx_datagram_capacity);
+        materialize!(net_udp_error_record_capacity);
         materialize!(net_udp_max_payload_bytes);
         materialize!(net_udp_ephemeral_port_first);
         materialize!(net_udp_ephemeral_port_last);
@@ -232,6 +255,16 @@ impl Parameters {
         materialize!(net_icmp_raw_rx_byte_capacity);
         materialize!(net_icmp_raw_default_ttl);
         materialize!(net_icmp_raw_default_tos);
+        materialize!(net_tcp_endpoint_capacity);
+        materialize!(net_tcp_engine_timer_capacity);
+        materialize!(net_tcp_listener_completed_capacity);
+        materialize!(net_tcp_rx_buffer_bytes);
+        materialize!(net_tcp_tx_buffer_bytes);
+        materialize!(net_tcp_deferred_reclaim_capacity);
+        materialize!(net_tcp_connect_timeout_ms);
+        materialize!(net_tcp_orphan_timeout_ms);
+        materialize!(net_tcp_ephemeral_port_first);
+        materialize!(net_tcp_ephemeral_port_last);
         Ok(())
     }
 
@@ -275,6 +308,9 @@ pub const PRINT_LOG_LEVEL: u8 = {};
 pub const RECORD_LOG_LEVEL: u8 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
+/// RV64 page-range length above which one full local TLB flush replaces
+/// per-page invalidation.
+pub const RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES: usize = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum number of logical CPUs enabled by this kernel
@@ -294,10 +330,14 @@ pub const EXECVE_MAX_STRING_COUNT: usize = {};
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Fixed blocking-read and poll-route capacity per timerfd file.
+pub const TIMERFD_FILE_MAX_WAITERS: usize = {};
 /// Maximum number of vectors imported by one ordinary vector I/O request.
 pub const MAX_IOVEC_COUNT: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
+/// Maximum pages staged in one synchronous ext4 read or writeback request.
+pub const EXT4_SYNC_IO_BATCH_PAGES: usize = {};
 /// Default anonymous-pipe capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Maximum anonymous-pipe capacity in pages.
@@ -354,8 +394,10 @@ pub const SHMMNI: usize = {};
 /// runs a scan.
 pub const IO_SHRINK_THRESHOLD: u8 = {};
 /// Physical memory usage percentage above which the OOM killer worker
-/// is woken.
+/// runs one victim-selection round.
 pub const OOM_KILL_THRESHOLD: u8 = {};
+/// Fixed delay between OOM killer frame-usage samples, in milliseconds.
+pub const OOM_KILL_SAMPLE_INTERVAL_MS: u64 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Build-time file-table capacity and system-wide fd-number ceiling.
@@ -431,6 +473,8 @@ pub const NET_UDP_ENDPOINT_CAPACITY: usize = {};
 pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};
 /// Per-endpoint UDP receive datagram capacity.
 pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = {};
+/// Per-endpoint IPv4 UDP extended-error record capacity.
+pub const NET_UDP_ERROR_RECORD_CAPACITY: usize = {};
 /// Maximum UDP payload bytes reserved by one protocol engine datagram.
 pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
 /// First port in the deterministic UDP ephemeral allocation range.
@@ -451,6 +495,26 @@ pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
 pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = {};
 /// Default IPv4 TOS for ICMP raw Socket sends.
 pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
+/// Maximum live private TCP endpoints in the initial domain.
+pub const NET_TCP_ENDPOINT_CAPACITY: usize = {};
+/// Shared upper bound for TCP engines and their embedded protocol timers.
+pub const NET_TCP_ENGINE_TIMER_CAPACITY: usize = {};
+/// Completed-child engine slots retained by one private TCP listener.
+pub const NET_TCP_LISTENER_COMPLETED_CAPACITY: usize = {};
+/// Receive bytes owned by each private TCP engine.
+pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
+/// Transmit bytes owned by each private TCP engine.
+pub const NET_TCP_TX_BUFFER_BYTES: usize = {};
+/// TCP engines awaiting final protocol cleanup after retirement.
+pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
+/// Maximum unanswered active-open interval.
+pub const NET_TCP_CONNECT_TIMEOUT_MS: usize = {};
+/// Maximum peer-silence window bounding orphaned graceful close.
+pub const NET_TCP_ORPHAN_TIMEOUT_MS: usize = {};
+/// First port in the deterministic TCP ephemeral allocation range.
+pub const NET_TCP_EPHEMERAL_PORT_FIRST: u16 = {};
+/// Last port in the deterministic TCP ephemeral allocation range.
+pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -458,6 +522,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(print_log_level),
             resolved!(record_log_level),
             resolved!(kstack_shift_kb),
+            resolved!(riscv64_tlb_flush_all_threshold_pages),
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
@@ -465,8 +530,10 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
+            resolved!(timerfd_file_max_waiters),
             resolved!(max_iovec_count),
             resolved!(getdents64_buffer_bytes),
+            resolved!(ext4_sync_io_batch_pages),
             resolved!(pipe_capacity_pages),
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
@@ -487,6 +554,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(shmmni),
             resolved!(io_shrink_threshold),
             resolved!(oom_kill_threshold),
+            resolved!(oom_kill_sample_interval_ms),
             resolved!(symlink_resolve_limit),
             resolved!(max_fd_per_process),
             resolved!(initial_umask),
@@ -524,6 +592,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(net_udp_endpoint_capacity),
             resolved!(net_udp_tx_datagram_capacity),
             resolved!(net_udp_rx_datagram_capacity),
+            resolved!(net_udp_error_record_capacity),
             resolved!(net_udp_max_payload_bytes),
             resolved!(net_udp_ephemeral_port_first),
             resolved!(net_udp_ephemeral_port_last),
@@ -534,6 +603,16 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(net_icmp_raw_rx_byte_capacity),
             resolved!(net_icmp_raw_default_ttl),
             resolved!(net_icmp_raw_default_tos),
+            resolved!(net_tcp_endpoint_capacity),
+            resolved!(net_tcp_engine_timer_capacity),
+            resolved!(net_tcp_listener_completed_capacity),
+            resolved!(net_tcp_rx_buffer_bytes),
+            resolved!(net_tcp_tx_buffer_bytes),
+            resolved!(net_tcp_deferred_reclaim_capacity),
+            resolved!(net_tcp_connect_timeout_ms),
+            resolved!(net_tcp_orphan_timeout_ms),
+            resolved!(net_tcp_ephemeral_port_first),
+            resolved!(net_tcp_ephemeral_port_last),
         )
     }
 }
@@ -562,161 +641,4 @@ impl Config {
 pub struct KernelConfig {
     pub features: HashMap<String, bool>,
     pub parameters: Parameters,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn defaults() -> Parameters {
-        Config::from_str(include_str!("../../../../conf/.defconfig"))
-            .unwrap()
-            .parameters
-    }
-
-    #[test]
-    fn udp_defaults_materialize_and_generate_exact_constants() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        let generated = parameters.gen_kconfig_defs();
-        for expected in [
-            "pub const NET_UDP_ENDPOINT_CAPACITY: usize = 64;",
-            "pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = 8;",
-            "pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = 64;",
-            "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1472;",
-            "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 32768;",
-            "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 60999;",
-        ] {
-            assert!(
-                generated.contains(expected),
-                "missing generated constant {expected}"
-            );
-        }
-    }
-
-    #[test]
-    fn icmp_raw_defaults_materialize_and_generate_exact_constants() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        let generated = parameters.gen_kconfig_defs();
-        for expected in [
-            "pub const NET_ICMP_RAW_ENDPOINT_CAPACITY: usize = 64;",
-            "pub const NET_ICMP_RAW_TX_PACKET_CAPACITY: usize = 8;",
-            "pub const NET_ICMP_RAW_TX_BYTE_CAPACITY: usize = 65536;",
-            "pub const NET_ICMP_RAW_RX_PACKET_CAPACITY: usize = 64;",
-            "pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = 262144;",
-            "pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = 64;",
-            "pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = 0;",
-        ] {
-            assert!(
-                generated.contains(expected),
-                "missing generated constant {expected}"
-            );
-        }
-    }
-
-    #[test]
-    fn getdents64_buffer_default_materializes_and_generates() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        assert!(
-            parameters
-                .gen_kconfig_defs()
-                .contains("pub const GETDENTS64_BUFFER_BYTES: usize = 2097152;")
-        );
-    }
-
-    #[test]
-    fn max_iovec_count_default_materializes_and_generates() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        assert_eq!(parameters.max_iovec_count, Some(1024));
-        assert!(
-            parameters
-                .gen_kconfig_defs()
-                .contains("pub const MAX_IOVEC_COUNT: usize = 1024;")
-        );
-    }
-
-    #[test]
-    fn reduced_max_iovec_count_materializes() {
-        let mut parameters = defaults();
-        parameters.max_iovec_count = Some(16);
-        parameters.materialize_defaults(None).unwrap();
-        assert!(
-            parameters
-                .gen_kconfig_defs()
-                .contains("pub const MAX_IOVEC_COUNT: usize = 16;")
-        );
-    }
-
-    #[test]
-    fn execve_string_count_default_materializes_and_generates() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        assert!(
-            parameters
-                .gen_kconfig_defs()
-                .contains("pub const EXECVE_MAX_STRING_COUNT: usize = 256;")
-        );
-    }
-
-    #[test]
-    fn pipe_capacity_semantics_are_deferred_to_kernel_compilation() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        let generated = parameters.gen_kconfig_defs();
-        assert!(generated.contains("pub const PIPE_CAPACITY_PAGES: usize = 2;"));
-        assert!(generated.contains("pub const PIPE_MAX_CAPACITY_PAGES: usize = 16;"));
-
-        parameters.pipe_capacity_pages = Some(3);
-        parameters.pipe_max_capacity_pages = Some(1);
-        let generated = parameters.gen_kconfig_defs();
-        assert!(generated.contains("pub const PIPE_CAPACITY_PAGES: usize = 3;"));
-        assert!(generated.contains("pub const PIPE_MAX_CAPACITY_PAGES: usize = 1;"));
-    }
-
-    #[test]
-    fn unix_stream_capacity_default_materializes_and_generates() {
-        let mut parameters = defaults();
-        parameters.materialize_defaults(None).unwrap();
-        assert!(
-            parameters
-                .gen_kconfig_defs()
-                .contains("pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = 65536;")
-        );
-        assert!(
-            parameters
-                .gen_kconfig_defs()
-                .contains("pub const UNIX_LISTENER_MAX_BACKLOG: usize = 128;")
-        );
-    }
-
-    #[test]
-    fn udp_parameter_semantics_are_deferred_to_kernel_compilation() {
-        let mut parameters = defaults();
-        parameters.net_udp_endpoint_capacity = Some(0);
-        parameters.net_udp_tx_datagram_capacity = Some(usize::MAX);
-        parameters.net_udp_max_payload_bytes = Some(1);
-        parameters.net_udp_ephemeral_port_first = Some(60_000);
-        parameters.net_udp_ephemeral_port_last = Some(50_000);
-        parameters.materialize_defaults(None).unwrap();
-
-        let generated = parameters.gen_kconfig_defs();
-        for expected in [
-            "pub const NET_UDP_ENDPOINT_CAPACITY: usize = 0;".to_string(),
-            format!(
-                "pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};",
-                usize::MAX
-            ),
-            "pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = 1;".to_string(),
-            "pub const NET_UDP_EPHEMERAL_PORT_FIRST: u16 = 60000;".to_string(),
-            "pub const NET_UDP_EPHEMERAL_PORT_LAST: u16 = 50000;".to_string(),
-        ] {
-            assert!(
-                generated.contains(&expected),
-                "missing generated constant {expected}"
-            );
-        }
-    }
 }

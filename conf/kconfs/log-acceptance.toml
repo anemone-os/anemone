@@ -74,6 +74,7 @@ net_local_link_mtu_bytes = 1500
 net_udp_endpoint_capacity = 64
 net_udp_tx_datagram_capacity = 8
 net_udp_rx_datagram_capacity = 64
+net_udp_error_record_capacity = 16
 net_udp_max_payload_bytes = 1472
 net_udp_ephemeral_port_first = 32768
 net_udp_ephemeral_port_last = 60999

@@ -601,9 +601,9 @@ fn wait_thread(case: &ThreadCase) -> Result<i32, Errno> {
 
 fn install_handler(flags: u64) -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: usr1_handler as *const (),
+        sighandler: (usr1_handler as *const ()).into(),
         sa_flags: flags,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     signal::sigaction(SigNo::SIGUSR1, Some(&action), None)

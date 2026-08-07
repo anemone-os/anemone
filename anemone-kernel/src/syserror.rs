@@ -89,6 +89,10 @@ pub enum SysError {
     NoSpace,
     /// Operation would block and nonblocking mode was requested.
     Again,
+    /// A nonblocking operation has started and completion is pending.
+    InProgress,
+    /// The requested operation is already in progress.
+    AlreadyInProgress,
     /// The requested socket address family is unsupported.
     AddressFamilyNotSupported,
     /// The requested socket base type is unsupported.
@@ -109,6 +113,10 @@ pub enum SysError {
     /// A pathname resolved, but no live listening socket admitted the
     /// connection.
     ConnectionRefused,
+    /// A connected stream was reset by its peer.
+    ConnectionReset,
+    /// An asynchronous connection attempt ended after its error was consumed.
+    ConnectionAborted,
     /// The requested local address/port conflicts with an active binding.
     AddressInUse,
     /// The requested local address is not owned by this network domain.
@@ -121,6 +129,12 @@ pub enum SysError {
     MessageTooLong,
     /// The network control plane has no route to the destination.
     NetworkUnreachable,
+    /// The destination host is unreachable.
+    HostUnreachable,
+    /// The destination host is down.
+    HostDown,
+    /// The requested network is not available.
+    NoNetwork,
     /// Pipe write attempted after all readers were gone.
     BrokenPipe,
     /// The file does not support seeking.
@@ -253,6 +267,8 @@ impl SysError {
             SysError::ReadOnlyFs => EROFS,
             SysError::NoSpace | SysError::ResourceExhausted | SysError::NoMinorAvailable => ENOSPC,
             SysError::Again => EAGAIN,
+            SysError::InProgress => EINPROGRESS,
+            SysError::AlreadyInProgress => EALREADY,
             SysError::AddressFamilyNotSupported => EAFNOSUPPORT,
             SysError::SocketTypeNotSupported => ESOCKTNOSUPPORT,
             SysError::ProtocolNotSupported => EPROTONOSUPPORT,
@@ -262,12 +278,17 @@ impl SysError {
             SysError::AlreadyConnected => EISCONN,
             SysError::ProtocolTypeMismatch => EPROTOTYPE,
             SysError::ConnectionRefused => ECONNREFUSED,
+            SysError::ConnectionReset => ECONNRESET,
+            SysError::ConnectionAborted => ECONNABORTED,
             SysError::AddressInUse => EADDRINUSE,
             SysError::AddressNotAvailable => EADDRNOTAVAIL,
             SysError::NoBufferSpace => ENOBUFS,
             SysError::DestinationAddressRequired => EDESTADDRREQ,
             SysError::MessageTooLong => EMSGSIZE,
             SysError::NetworkUnreachable => ENETUNREACH,
+            SysError::HostUnreachable => EHOSTUNREACH,
+            SysError::HostDown => EHOSTDOWN,
+            SysError::NoNetwork => ENONET,
             SysError::BrokenPipe => EPIPE,
             SysError::IllegalSeek => ESPIPE,
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't

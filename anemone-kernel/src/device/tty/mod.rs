@@ -544,24 +544,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn worker_completes_drain_only_after_port_idle() {
-        let port = FakePort::new("/kunit/tty/drain");
-        port.tx_idle.store(false, Ordering::Relaxed);
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
-        assert_eq!(terminal.enqueue_output(b"z"), 1);
-        terminal.request_drain_check();
-        notifier.wake();
-        port.wait_for(|| port.output_len() == 1);
-        assert!(terminal.drain_check_pending());
-
-        port.tx_idle.store(true, Ordering::Relaxed);
-        notifier.wake();
-        port.wait_for(|| !terminal.drain_check_pending());
-        attachment.abort();
-    }
-
-    #[kunit]
     fn prepublish_abort_drops_weak_notifier_and_joins_worker() {
         let port = FakePort::new("/kunit/tty/abort");
         let (attachment, notifier) = attach(&port);

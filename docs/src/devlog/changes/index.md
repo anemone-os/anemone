@@ -31,6 +31,15 @@
 
 ## 当前记录
 
+- [2026-08-07 - TCP local reverse TIME_WAIT admission](./2026-08-07-tcp-local-time-wait-admission.md)
+- [2026-08-07 - Ext4 synchronous I/O batching](./2026-08-07-ext4-synchronous-io-batching.md)
+- [2026-08-07 - ELF demand paging](./2026-08-07-elf-demand-paging.md)
+- [2026-08-06 - IPv4 UDP ICMP extended error](./2026-08-06-ipv4-udp-icmp-extended-error.md)
+- [2026-08-06 - Inode address space](./2026-08-06-inode-address-space.md)
+- [2026-08-06 - User-access typed-copy soundness](./2026-08-06-user-access-typed-copy-soundness.md)
+- [2026-08-05 - Kernel performance observation](./2026-08-05-kernel-performance-observation.md)
+- [2026-08-05 - Kworker](./2026-08-05-kworker.md)
+- [2026-08-05 - OOM periodic sampling](./2026-08-05-oom-periodic-sampling.md)
 - [2026-08-05 - brk shrink backing decommit](./2026-08-05-brk-shrink-decommit.md)
 - [2026-08-04 - Unix seqpacket](./2026-08-04-unix-seqpacket.md)
 - [2026-08-03 - Serial TTY RX conditioning](./2026-08-03-tty-serial-rx-conditioning.md)

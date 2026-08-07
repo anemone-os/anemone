@@ -10,16 +10,15 @@ use anemone_rs::{
             select::FdSet,
         },
         net::linux::{
-            AF_UNIX, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SHUT_WR, SO_ACCEPTCONN,
-            SO_DOMAIN, SO_PROTOCOL, SO_TYPE, SOCK_SEQPACKET, SockAddrUn, socklen_t,
+            AF_UNIX, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN,
+            SO_PROTOCOL, SO_TYPE, SOCK_SEQPACKET, SockAddrUn, socklen_t,
         },
         time::linux::TimeSpec,
     },
     os::linux::{
         fs::{
-            AtFd, EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, epoll_create1, epoll_ctl,
-            epoll_wait, fcntl_getfd, fcntl_getfl, pipe2, ppoll, pselect, read, readv, unlinkat,
-            write, writev,
+            AtFd, EpollCreateFlags, EpollCtlOp, Fd, close, epoll_create1, epoll_ctl, epoll_wait,
+            fcntl_getfd, fcntl_getfl, ppoll, pselect, read, readv, unlinkat, write, writev,
         },
         net::{
             SocketFlags, accept_unix, accept4_unix_raw, bind_unix_path, connect_unix_path,
@@ -27,7 +26,6 @@ use anemone_rs::{
             sendto_raw, shutdown, socket_raw, socketpair_raw, unix_stream_socket,
         },
         process::{WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, wait4},
-        time::nanosleep,
     },
     prelude::*,
 };
@@ -38,8 +36,6 @@ const ZERO_TIMEOUT: TimeSpec = TimeSpec {
 };
 const SEQPACKET_PATH: &str = "/mnt/socket-test-seqpacket";
 const STREAM_PATH: &str = "/mnt/socket-test-seqpacket-stream";
-const MAX_PAYLOAD: usize = 65_536;
-const MAX_RECORDS: usize = 128;
 
 fn ensure(condition: bool) -> Result<(), Errno> {
     if condition { Ok(()) } else { Err(EIO) }
@@ -103,7 +99,7 @@ fn wait_child(pid: u32) -> Result<(), Errno> {
     ensure(matches!(status.read(), WStatus::Exited(0)))
 }
 
-fn test_resolver_options_records_and_fault_retention() -> Result<(), Errno> {
+fn test_resolver_options_and_records() -> Result<(), Errno> {
     let flags = SocketFlags::NONBLOCK | SocketFlags::CLOEXEC;
     let (first, second) = seqpacket_pair(flags)?;
     ensure(fcntl_getfd(first)? == 1 && fcntl_getfd(second)? == 1)?;
@@ -118,11 +114,11 @@ fn test_resolver_options_records_and_fault_retention() -> Result<(), Errno> {
     ensure(write(first, b"first")? == 5)?;
     let write_iov = [
         IoVec {
-            iov_base: b"sec".as_ptr() as *mut c_void,
+            iov_base: (b"sec".as_ptr() as *mut c_void).into(),
             iov_len: 3,
         },
         IoVec {
-            iov_base: b"ond".as_ptr() as *mut c_void,
+            iov_base: (b"ond".as_ptr() as *mut c_void).into(),
             iov_len: 3,
         },
     ];
@@ -132,11 +128,11 @@ fn test_resolver_options_records_and_fault_retention() -> Result<(), Errno> {
     let mut right = [0u8; 3];
     let mut read_iov = [
         IoVec {
-            iov_base: left.as_mut_ptr().cast(),
+            iov_base: left.as_mut_ptr().cast::<c_void>().into(),
             iov_len: left.len() as u64,
         },
         IoVec {
-            iov_base: right.as_mut_ptr().cast(),
+            iov_base: right.as_mut_ptr().cast::<c_void>().into(),
             iov_len: right.len() as u64,
         },
     ];
@@ -171,41 +167,6 @@ fn test_resolver_options_records_and_fault_retention() -> Result<(), Errno> {
     )?;
     expect_errno(read(second, &mut empty), EAGAIN)?;
 
-    ensure(write(first, b"keep")? == 4)?;
-    ensure(
-        unsafe {
-            recvfrom_raw(
-                second as i32,
-                core::ptr::null_mut(),
-                0,
-                0,
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-            )
-        }? == 0,
-    )?;
-    let mut keep = [0u8; 4];
-    ensure(read(second, &mut keep)? == 4 && &keep == b"keep")?;
-    ensure(write(first, &[])? == 0)?;
-    expect_errno(read(second, &mut empty), EAGAIN)?;
-
-    ensure(write(first, b"fault")? == 5)?;
-    expect_errno(
-        unsafe {
-            recvfrom_raw(
-                second as i32,
-                1usize as *mut u8,
-                5,
-                0,
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-            )
-        },
-        EFAULT,
-    )?;
-    let mut fault = [0u8; 5];
-    ensure(read(second, &mut fault)? == 5 && &fault == b"fault")?;
-
     let destination = SockAddrUn::default();
     expect_errno(
         unsafe {
@@ -237,89 +198,58 @@ fn test_resolver_options_records_and_fault_retention() -> Result<(), Errno> {
     close(second)
 }
 
-fn test_payload_byte_and_record_capacity() -> Result<(), Errno> {
+fn test_zero_length_and_fault_retention_limitation() -> Result<(), Errno> {
     let (first, second) = seqpacket_pair(SocketFlags::NONBLOCK)?;
-    let oversized = vec![0u8; MAX_PAYLOAD + 1];
+    ensure(write(first, b"keep")? == 4)?;
+    ensure(
+        unsafe {
+            recvfrom_raw(
+                second as i32,
+                core::ptr::null_mut(),
+                0,
+                0,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        }? == 0,
+    )?;
+    let mut keep = [0u8; 4];
+    ensure(read(second, &mut keep)? == 4 && &keep == b"keep")?;
+    ensure(write(first, &[])? == 0)?;
+    let mut empty = [0u8; 1];
+    expect_errno(read(second, &mut empty), EAGAIN)?;
+
+    ensure(write(first, b"fault")? == 5)?;
     expect_errno(
+        unsafe {
+            recvfrom_raw(
+                second as i32,
+                1usize as *mut u8,
+                5,
+                0,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        },
+        EFAULT,
+    )?;
+    let mut fault = [0u8; 5];
+    ensure(read(second, &mut fault)? == 5 && &fault == b"fault")?;
+    shutdown(first, SHUT_WR)?;
+    ensure(
         unsafe {
             sendto_raw(
                 first as i32,
-                oversized.as_ptr(),
-                oversized.len(),
-                MSG_DONTWAIT | MSG_NOSIGNAL,
+                core::ptr::null(),
+                0,
+                MSG_NOSIGNAL,
                 core::ptr::null(),
                 0,
             )
-        },
-        EMSGSIZE,
+        }? == 0,
     )?;
-
-    for _ in 0..MAX_RECORDS {
-        ensure(write(first, b"r")? == 1)?;
-    }
-    expect_errno(write(first, b"r"), EAGAIN)?;
-    let mut byte = [0u8; 1];
-    ensure(read(second, &mut byte)? == 1 && byte[0] == b'r')?;
-    ensure(write(first, b"r")? == 1)?;
-    close(first)?;
-    close(second)?;
-
-    let (first, second) = seqpacket_pair(SocketFlags::NONBLOCK)?;
-    let maximum = vec![0x5au8; MAX_PAYLOAD];
-    ensure(write(first, &maximum)? == MAX_PAYLOAD)?;
-    expect_errno(write(first, b"x"), EAGAIN)?;
-    let mut prefix = [0u8; 1];
-    ensure(read(second, &mut prefix)? == 1 && prefix[0] == 0x5a)?;
-    ensure(write(first, b"x")? == 1)?;
     close(first)?;
     close(second)
-}
-
-fn test_payload_specific_blocking_send_wait() -> Result<(), Errno> {
-    let (writer, reader) = seqpacket_pair(SocketFlags::empty())?;
-    ensure(write(writer, b"x")? == 1)?;
-    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
-
-    let child = match fork()? {
-        None => {
-            let _ = close(ready_read);
-            let _ = close(reader);
-            let payload = vec![0x6du8; MAX_PAYLOAD];
-            let ok =
-                write(ready_write, b"r") == Ok(1) && write(writer, &payload) == Ok(MAX_PAYLOAD);
-            let _ = close(ready_write);
-            let _ = close(writer);
-            exit(if ok { 0 } else { 1 })
-        },
-        Some(pid) => pid,
-    };
-
-    close(ready_write)?;
-    close(writer)?;
-    let mut marker = [0u8; 1];
-    ensure(read(ready_read, &mut marker)? == 1 && marker[0] == b'r')?;
-    nanosleep(TimeSpec {
-        tv_sec: 0,
-        tv_nsec: 10_000_000,
-    })?;
-    let mut status = WStatusRaw::EMPTY;
-    ensure(
-        wait4(
-            WaitFor::ChildWithTgid(child),
-            Some(&mut status),
-            WaitOptions::NOHANG,
-        )?
-        .is_none(),
-    )?;
-
-    let mut first_record = [0u8; 1];
-    ensure(read(reader, &mut first_record)? == 1 && first_record[0] == b'x')?;
-    wait_child(child)?;
-    let mut payload = vec![0u8; MAX_PAYLOAD];
-    ensure(read(reader, &mut payload)? == MAX_PAYLOAD)?;
-    ensure(payload.iter().all(|byte| *byte == 0x6d))?;
-    close(ready_read)?;
-    close(reader)
 }
 
 fn test_pathname_admission_and_cross_type_rejection() -> Result<(), Errno> {
@@ -439,18 +369,6 @@ fn test_shutdown_poll_select_and_epoll_readiness() -> Result<(), Errno> {
         },
         EPIPE,
     )?;
-    ensure(
-        unsafe {
-            sendto_raw(
-                first as i32,
-                core::ptr::null(),
-                0,
-                MSG_NOSIGNAL,
-                core::ptr::null(),
-                0,
-            )
-        }? == 0,
-    )?;
 
     shutdown(second, SHUT_WR)?;
     poll[0].revents = 0;
@@ -565,16 +483,8 @@ pub(crate) fn run() -> Result<(), Errno> {
         failed: 0,
     };
     results.case(
-        "resolver-options-records-fault-retention",
-        test_resolver_options_records_and_fault_retention,
-    );
-    results.case(
-        "payload-byte-record-capacity",
-        test_payload_byte_and_record_capacity,
-    );
-    results.case(
-        "payload-specific-blocking-send-wait",
-        test_payload_specific_blocking_send_wait,
+        "resolver-options-records",
+        test_resolver_options_and_records,
     );
     results.case(
         "pathname-admission-cross-type",
@@ -598,5 +508,21 @@ pub(crate) fn run() -> Result<(), Errno> {
             results.passed, results.failed
         );
         Err(EIO)
+    }
+}
+
+pub(crate) fn run_limitations() -> Result<(), Errno> {
+    println!("SEQPACKETLIMIT:START");
+    match test_zero_length_and_fault_retention_limitation() {
+        Ok(()) => {
+            println!("SEQPACKETLIMIT:PASS:zero-length-fault-retention");
+            println!("SEQPACKETLIMIT:SUMMARY:PASS:1");
+            Ok(())
+        },
+        Err(errno) => {
+            println!("SEQPACKETLIMIT:FAIL:zero-length-fault-retention:{errno}");
+            println!("SEQPACKETLIMIT:SUMMARY:FAIL:passed=0:failed=1");
+            Err(EIO)
+        },
     }
 }

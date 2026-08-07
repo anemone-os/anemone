@@ -662,9 +662,9 @@ fn test_pwait_and_pwait2() -> Result<(), Errno> {
     )?;
 
     let action = linux_signal::SigAction {
-        sighandler: usr1_handler as *const (),
+        sighandler: (usr1_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: empty_mask,
     };
     sigaction(SigNo::SIGUSR1, Some(&action), None)?;

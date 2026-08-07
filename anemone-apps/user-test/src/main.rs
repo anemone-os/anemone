@@ -9,9 +9,11 @@ mod competition;
 mod file;
 mod guest;
 mod ltp;
+mod oracle;
 mod process;
 mod runtime;
 mod soft_timer;
+mod tcp_stage5;
 mod timer_signal;
 
 use anemone_rs::{
@@ -22,6 +24,15 @@ use anemone_rs::{
     },
     prelude::*,
 };
+
+cfg_select! {
+    target_arch = "riscv64" => {
+        pub(crate) const ARCH_LABEL: &str = "rv64";
+    },
+    target_arch = "loongarch64" => {
+        pub(crate) const ARCH_LABEL: &str = "la64";
+    }
+}
 
 fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
     process::run_execve(cmd, args, envs, cmd);
@@ -47,6 +58,7 @@ fn run_udp_extension_c_consumer() {
 /// local tests for development.
 fn run_local_tests() {
     run_udp_extension_c_consumer();
+    oracle::run_local();
 
     println!("user-test: running local POSIX timer test...");
     local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
@@ -167,7 +179,7 @@ fn run_local_tests() {
 }
 
 /// competition tests.
-fn run_comp_tests() {
+fn run_comp_tests(run_tcp_stage5: bool) {
     guest::enter_competition_root();
     guest::init_competition_environment();
 
@@ -184,16 +196,43 @@ fn run_comp_tests() {
     // competition::run_competition_tests();
     ltp::run_ltp_tests();
 
+    if run_tcp_stage5 {
+        tcp_stage5::run().expect("user-test: TCP Stage 5 validation failed");
+    }
+
     println!("user-test: all competition tests finished.");
 }
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
+    let mut args = anemone_rs::env::args();
+    let _program = args.next();
+    let tcp_stage5_peer = match args.next() {
+        None => None,
+        Some("--tcp-stage5") => {
+            let peer = args.next().ok_or(EINVAL)?;
+            let port = args.next().ok_or(EINVAL)?;
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            Some((peer, port))
+        },
+        Some(_) => return Err(EINVAL),
+    };
+    let drain_tcp_stage5_markers = tcp_stage5_peer.is_some();
     run_local_tests();
+    if let Some((peer, port)) = tcp_stage5_peer {
+        oracle::run_tcp_stage5(peer, port);
+    }
 
-    run_comp_tests();
+    run_comp_tests(drain_tcp_stage5_markers);
 
     println!("user-test: all tests finished, shutting down.");
+    if drain_tcp_stage5_markers {
+        // The Stage 5 validation master powers off immediately below; retain a
+        // bounded window for the terminal owner to publish every final marker.
+        tcp_stage5::drain_terminal()?;
+    }
     shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
     unreachable!("user-test: shutdown returned unexpectedly");
 }

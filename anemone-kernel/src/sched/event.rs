@@ -222,6 +222,81 @@ impl Event {
         }
     }
 
+    /// Block listening until the predicate holds or the timeout expires.
+    ///
+    /// Event publication and forced wakeups only make this listener recheck
+    /// the predicate and remaining timeout. Each recheck uses a fresh wait
+    /// identity, so a late timeout from an earlier round cannot complete the
+    /// current round.
+    ///
+    /// Returns `true` when the predicate is satisfied and `false` on timeout.
+    /// Signals do not interrupt this wait.
+    ///
+    /// **Ensure no lock or guard is held when calling this method.**
+    #[track_caller]
+    pub(crate) fn listen_uninterruptible_with_timeout<P>(
+        &self,
+        exclusive: bool,
+        prediction: P,
+        mut timeout: Duration,
+    ) -> bool
+    where
+        P: Fn() -> bool,
+    {
+        let task = get_current_task();
+        let mut guard = PreemptGuard::new();
+
+        loop {
+            let (active_wait, listener) = self.prepare_listener(&task, exclusive, false);
+
+            if prediction() {
+                active_wait.cancel(WaitReason::PredicateReady);
+                self.clean_listener(&listener, exclusive);
+                active_wait.finish();
+                return true;
+            }
+
+            if timeout == Duration::ZERO {
+                active_wait.cancel(WaitReason::Timeout);
+                self.clean_listener(&listener, exclusive);
+                active_wait.finish();
+                return false;
+            }
+
+            let token = listener.token().clone();
+            let remaining = {
+                drop(guard);
+                self.schedule_with_wait_token_timeout(&task, token, timeout)
+            };
+            guard = PreemptGuard::new();
+
+            self.clean_listener(&listener, exclusive);
+            let outcome = active_wait.finish();
+            timeout = remaining;
+            kdebugln!(
+                "event: listen_uninterruptible_with_timeout woke event={:#x} task={} listener={:?} outcome={:?} remaining={:?}",
+                self.debug_id(),
+                task.tid(),
+                listener,
+                outcome,
+                timeout,
+            );
+            match outcome {
+                WaitOutcome::Completed(WaitReason::Event | WaitReason::Force) => {},
+                WaitOutcome::Completed(WaitReason::Timeout) => return false,
+                other => {
+                    self.assert_unexpected_wait_outcome(
+                        "listen_uninterruptible_with_timeout",
+                        &task,
+                        &listener,
+                        other,
+                    );
+                    return false;
+                },
+            }
+        }
+    }
+
     /// Block listening with timeout.
     ///
     /// Return:

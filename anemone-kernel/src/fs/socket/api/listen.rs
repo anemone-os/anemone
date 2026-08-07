@@ -14,6 +14,7 @@ fn sys_listen(fd: Fd, backlog: i32) -> Result<u64, SysError> {
         SocketListenError::Unsupported => SysError::NotSupported,
         SocketListenError::Retired => SysError::BadFileDescriptor,
         SocketListenError::InvalidState => SysError::InvalidArgument,
+        SocketListenError::ResourceExhausted => SysError::NoBufferSpace,
     })?;
     Ok(0)
 }

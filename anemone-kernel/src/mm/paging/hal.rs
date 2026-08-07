@@ -86,6 +86,17 @@ pub trait PagingArchTrait: Sized {
     /// TODO: extend this to support ASID/PCID-based shootdowns.
     fn tlb_shootdown(vpn: VirtPageNum);
 
+    /// Perform a local TLB shootdown for a virtual page range in all address
+    /// spaces on the current core.
+    ///
+    /// Architectures may replace the default per-page implementation with an
+    /// owner-local range policy when a stronger full flush is cheaper.
+    fn tlb_shootdown_range(range: VirtPageRange) {
+        for offset in 0..range.npages() {
+            Self::tlb_shootdown(range.start() + offset);
+        }
+    }
+
     /// Perform a TLB shootdown for the whole address space, in all virtual
     /// address spaces on current core.
     ///

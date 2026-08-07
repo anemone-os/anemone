@@ -38,7 +38,7 @@ fn timer_handler(signo: SigNo, siginfo: *const SigInfo, ucontext: *const UContex
     assert!(!ucontext.is_null());
 
     let info = unsafe { &*siginfo };
-    let timer = unsafe { info.fields.timer };
+    let timer = info.fields.timer();
     TIMER_CODE.store(info.si_code, Ordering::SeqCst);
     TIMER_ID_SEEN.store(timer.tid, Ordering::SeqCst);
     TIMER_OVERRUN_SEEN.store(timer.overrun, Ordering::SeqCst);
@@ -55,9 +55,9 @@ fn ordinary_handler(signo: SigNo) {
 
 fn empty_action() -> SigAction {
     SigAction {
-        sighandler: core::ptr::null(),
+        sighandler: anemone_rs::abi::RawUserAddr64::NULL,
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     }
 }
@@ -67,31 +67,31 @@ fn verify_timer_frame() {
     TIMER_PRIVATE_SEEN.store(-1, Ordering::SeqCst);
 
     let action = SigAction {
-        sighandler: timer_handler as *const (),
+        sighandler: (timer_handler as *const ()).into(),
         sa_flags: SA_SIGINFO,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     let mut old_action = empty_action();
     signal::sigaction(SigNo::SIGUSR2, Some(&action), Some(&mut old_action)).unwrap();
 
+    let mut fields = linux_signal::sifields::SigInfoFields::default();
+    fields.set_timer(linux_signal::sifields::Timer {
+        tid: TIMER_ID,
+        overrun: TIMER_OVERRUN,
+        sigval: linux_signal::sifields::SigVal::from_bits(TIMER_SIGVAL),
+        // This word is kernel-private. The copy boundary must not reflect a
+        // userspace-supplied value into the frame.
+        sys_private: 0x55,
+        __pad0: 0,
+    });
     let info = SigInfoWrapper {
         info: SigInfo {
             si_signo: SigNo::SIGUSR2.as_usize() as i32,
             si_errno: 0,
             si_code: linux_signal::SI_TIMER,
-            fields: linux_signal::sifields::SigInfoFields {
-                timer: linux_signal::sifields::Timer {
-                    tid: TIMER_ID,
-                    overrun: TIMER_OVERRUN,
-                    sigval: linux_signal::sifields::SigVal {
-                        sival_ptr: TIMER_SIGVAL as *mut _,
-                    },
-                    // This word is kernel-private. The copy boundary must not
-                    // reflect a userspace-supplied value into the frame.
-                    sys_private: 0x55,
-                },
-            },
+            __pad0: 0,
+            fields,
         },
     };
     signal::sigqueueinfo(getpid().unwrap(), SigNo::SIGUSR2, &info).unwrap();
@@ -109,9 +109,9 @@ fn verify_timer_frame() {
 fn verify_ordinary_standard_merge() {
     ORDINARY_DELIVERIES.store(0, Ordering::SeqCst);
     let action = SigAction {
-        sighandler: ordinary_handler as *const (),
+        sighandler: (ordinary_handler as *const ()).into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     let mut old_action = empty_action();

@@ -27,6 +27,12 @@ enum RequestedTime {
     Explicit(TimeSpec),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UTimeTarget<'a> {
+    Descriptor,
+    Path(&'a str),
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct UTimeNsFlags: u32 {
@@ -63,10 +69,38 @@ fn ts_to_duration(ts: TimeSpec) -> Duration {
     Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
 
+fn classify_target<'a>(
+    dirfd: &AtFd,
+    pathname: Option<&'a str>,
+    flags: UTimeNsFlags,
+) -> Result<UTimeTarget<'a>, SysError> {
+    let Some(pathname) = pathname else {
+        // Linux implements futimens(fd, times) through the raw
+        // utimensat(fd, NULL, times, 0) ABI. AT_FDCWD has no file target for
+        // that extension, and flags belong to pathname resolution instead.
+        if matches!(dirfd, AtFd::Cwd) {
+            return Err(SysError::BadAddress);
+        }
+        if !flags.is_empty() {
+            return Err(SysError::InvalidArgument);
+        }
+        return Ok(UTimeTarget::Descriptor);
+    };
+
+    if pathname.is_empty() {
+        if !flags.contains(UTimeNsFlags::AT_EMPTY_PATH) {
+            return Err(SysError::InvalidArgument);
+        }
+        Ok(UTimeTarget::Descriptor)
+    } else {
+        Ok(UTimeTarget::Path(pathname))
+    }
+}
+
 #[syscall(SYS_UTIMENSAT)]
 fn sys_utimensat(
     dirfd: AtFd,
-    #[validate_with(c_readonly_path)] pathname: Box<str>,
+    #[validate_with(c_readonly_path.nullable())] pathname: Option<Box<str>>,
     #[validate_with(user_addr.nullable())] utimes: Option<VirtAddr>,
     flags: UTimeNsFlags,
 ) -> Result<u64, SysError> {
@@ -92,24 +126,22 @@ fn sys_utimensat(
         None
     };
 
-    let pathref = if pathname.is_empty() {
-        if !flags.contains(UTimeNsFlags::AT_EMPTY_PATH) {
-            return Err(SysError::InvalidArgument);
-        }
-        dirfd.to_pathref(false)?
-    } else {
-        let path = Path::new(pathname.as_ref());
-        let resolve_flags = if flags.contains(UTimeNsFlags::AT_SYMLINK_NOFOLLOW) {
-            ResolveFlags::UNFOLLOW_LAST_SYMLINK
-        } else {
-            ResolveFlags::empty()
-        };
-        if path.is_absolute() {
-            task.lookup_path(path, resolve_flags)?
-        } else {
-            let dir_path = dirfd.to_pathref(true)?;
-            task.lookup_path_from(&dir_path, &path, resolve_flags)?
-        }
+    let pathref = match classify_target(&dirfd, pathname.as_deref(), flags)? {
+        UTimeTarget::Descriptor => dirfd.to_pathref(false)?,
+        UTimeTarget::Path(pathname) => {
+            let path = Path::new(pathname);
+            let resolve_flags = if flags.contains(UTimeNsFlags::AT_SYMLINK_NOFOLLOW) {
+                ResolveFlags::UNFOLLOW_LAST_SYMLINK
+            } else {
+                ResolveFlags::empty()
+            };
+            if path.is_absolute() {
+                task.lookup_path(path, resolve_flags)?
+            } else {
+                let dir_path = dirfd.to_pathref(true)?;
+                task.lookup_path_from(&dir_path, &path, resolve_flags)?
+            }
+        },
     };
 
     let touch_current_time = times
@@ -153,4 +185,55 @@ fn sys_utimensat(
     );
 
     Ok(0)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use crate::task::files::Fd;
+
+    use super::*;
+
+    fn fd_target() -> AtFd {
+        AtFd::Fd(Fd::new(0).unwrap())
+    }
+
+    #[kunit]
+    fn null_path_matches_linux_futimens_classification() {
+        assert_eq!(
+            classify_target(&fd_target(), None, UTimeNsFlags::empty()),
+            Ok(UTimeTarget::Descriptor)
+        );
+        assert_eq!(
+            classify_target(&AtFd::Cwd, None, UTimeNsFlags::empty()),
+            Err(SysError::BadAddress)
+        );
+        assert_eq!(
+            classify_target(&fd_target(), None, UTimeNsFlags::AT_EMPTY_PATH),
+            Err(SysError::InvalidArgument)
+        );
+        assert_eq!(
+            classify_target(&fd_target(), None, UTimeNsFlags::AT_SYMLINK_NOFOLLOW),
+            Err(SysError::InvalidArgument)
+        );
+    }
+
+    #[kunit]
+    fn empty_and_nonempty_paths_keep_their_existing_resolution_modes() {
+        assert_eq!(
+            classify_target(&fd_target(), Some(""), UTimeNsFlags::empty()),
+            Err(SysError::InvalidArgument)
+        );
+        assert_eq!(
+            classify_target(&fd_target(), Some(""), UTimeNsFlags::AT_EMPTY_PATH),
+            Ok(UTimeTarget::Descriptor)
+        );
+        assert_eq!(
+            classify_target(
+                &AtFd::Cwd,
+                Some("relative"),
+                UTimeNsFlags::AT_SYMLINK_NOFOLLOW
+            ),
+            Ok(UTimeTarget::Path("relative"))
+        );
+    }
 }

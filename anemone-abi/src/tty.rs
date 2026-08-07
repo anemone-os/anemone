@@ -5,7 +5,17 @@ pub mod linux {
     pub type Cc = u8;
     pub const NCCS: usize = 19;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Termios {
         pub c_iflag: TcFlag,
@@ -16,7 +26,17 @@ pub mod linux {
         pub c_cc: [Cc; NCCS],
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Winsize {
         pub ws_row: u16,

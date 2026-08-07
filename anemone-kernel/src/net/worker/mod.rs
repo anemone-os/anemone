@@ -9,7 +9,7 @@ use anemone_smoltcp_stack::PumpBudget;
 
 use crate::prelude::*;
 
-pub(super) use control::{PumpControl, PumpWake};
+pub(super) use control::PumpControl;
 use control::{deadline_due, schedule_deadline};
 pub(super) use external::{AttachFailure, PreparedPath, prepare};
 pub(super) use local::{PreparedLocalPath, prepare_local};

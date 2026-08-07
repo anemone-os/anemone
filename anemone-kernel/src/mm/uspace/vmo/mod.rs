@@ -5,7 +5,8 @@
 //! advanced version of shadow object. We may want to switch to that in the
 //! future, but for now shadow object is good enough for our use cases.
 //!
-//! See [fs::addr_space] for inode page cache, which is a special kind of VMO.
+//! See [fs::address_space] for inode page cache, which is a special kind of
+//! VMO.
 //!
 //! Reference:
 //! - https://fuchsia.dev/fuchsia-src/reference/kernel_objects/vm_object
@@ -97,50 +98,32 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    /// Remove resident frames and return their ownership to the address-space
-    /// retirement protocol. Unlike `discard_range`, this operation must also
-    /// prevent a COW backing from exposing parent contents on a later fault.
-    fn decommit_range(&self, _range: Range<usize>) -> Result<RetiredFrames, SysError> {
+    /// Remove resident frames from a private mapping and return their ownership
+    /// to its address-space retirement protocol. Unlike `discard_range`, this
+    /// operation must also prevent a COW backing from exposing parent contents
+    /// on a later fault.
+    ///
+    /// # Safety
+    ///
+    /// The caller must own the complete mapping domain for this object: no
+    /// other address space or VMA may retain a mapping of a returned frame. The
+    /// returned frames must remain alive until every affected CPU has completed
+    /// the corresponding TLB invalidation.
+    unsafe fn decommit_private_range(
+        &self,
+        _range: Range<usize>,
+    ) -> Result<RetiredFrames, SysError> {
         Err(SysError::NotSupported)
     }
 
     fn exclusive_physical_pages(&self, _range: core::ops::Range<usize>) -> usize {
         0
     }
+}
 
-    fn read_frame(
-        &self,
-        pidx: usize,
-        buffer: &mut [u8; PagingArch::PAGE_SIZE_BYTES],
-    ) -> Result<(), SysError> {
-        let ResolvedFrame { frame, .. } = self.resolve_frame(pidx, PageFaultType::Read)?;
-        buffer.copy_from_slice(frame.as_bytes());
-
-        Ok(())
-    }
-
-    fn write_frame(
-        &self,
-        pidx: usize,
-        data: &[u8; PagingArch::PAGE_SIZE_BYTES],
-    ) -> Result<(), SysError> {
-        let resolved = self.resolve_frame(pidx, PageFaultType::Write)?;
-        if !resolved.writable {
-            return Err(SysError::PermissionDenied);
-        }
-
-        let dst = unsafe {
-            core::slice::from_raw_parts_mut(
-                resolved.frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
-                PagingArch::PAGE_SIZE_BYTES,
-            )
-        };
-        dst.copy_from_slice(data);
-
-        Ok(())
-    }
-
-    fn read(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
+impl dyn VmObject {
+    /// Copy bytes from this object. Each touched page is resolved exactly once.
+    pub fn read_bytes(&self, offset: usize, buffer: &mut [u8]) -> Result<(), SysError> {
         let mut remaining = buffer;
         let mut cur_offset = offset;
         while !remaining.is_empty() {
@@ -150,9 +133,9 @@ pub trait VmObject: Send + Sync {
                 .len()
                 .min(PagingArch::PAGE_SIZE_BYTES - page_offset);
 
-            let mut page = [0u8; PagingArch::PAGE_SIZE_BYTES];
-            self.read_frame(pidx, &mut page)?;
-            remaining[..copy_len].copy_from_slice(&page[page_offset..page_offset + copy_len]);
+            let resolved = self.resolve_frame(pidx, PageFaultType::Read)?;
+            remaining[..copy_len]
+                .copy_from_slice(&resolved.frame.as_bytes()[page_offset..page_offset + copy_len]);
 
             remaining = &mut remaining[copy_len..];
             cur_offset = cur_offset
@@ -163,7 +146,10 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    fn write(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
+    /// Copy bytes into this object. Resolving with write access provides the
+    /// final frame, so partial-page writes preserve untouched bytes without a
+    /// separate read resolution.
+    pub fn write_bytes(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
         let mut remaining = data;
         let mut cur_offset = offset;
 
@@ -174,12 +160,17 @@ pub trait VmObject: Send + Sync {
                 .len()
                 .min(PagingArch::PAGE_SIZE_BYTES - page_offset);
 
-            let mut page = [0u8; PagingArch::PAGE_SIZE_BYTES];
-            if page_offset != 0 || copy_len != PagingArch::PAGE_SIZE_BYTES {
-                self.read_frame(pidx, &mut page)?;
+            let resolved = self.resolve_frame(pidx, PageFaultType::Write)?;
+            if !resolved.writable {
+                return Err(SysError::PermissionDenied);
             }
-            page[page_offset..page_offset + copy_len].copy_from_slice(&remaining[..copy_len]);
-            self.write_frame(pidx, &page)?;
+            let dst = unsafe {
+                core::slice::from_raw_parts_mut(
+                    resolved.frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                    PagingArch::PAGE_SIZE_BYTES,
+                )
+            };
+            dst[page_offset..page_offset + copy_len].copy_from_slice(&remaining[..copy_len]);
 
             remaining = &remaining[copy_len..];
             cur_offset = cur_offset
@@ -189,9 +180,6 @@ pub trait VmObject: Send + Sync {
 
         Ok(())
     }
-}
-
-impl dyn VmObject {
     /// Copy data from the given [DataSource] to this [VmObject] at the given
     /// offset.
     pub fn write_from_data_source<S: DataSource<TError = impl Into<SysError>>>(
@@ -211,7 +199,7 @@ impl dyn VmObject {
             source
                 .copy_to(cur_src_offset, &mut buffer[..copy_len])
                 .map_err(Into::into)?;
-            self.write(cur_vmo_offset, &buffer[..copy_len])?;
+            self.write_bytes(cur_vmo_offset, &buffer[..copy_len])?;
             remaining -= copy_len;
             cur_vmo_offset += copy_len;
             cur_src_offset += copy_len;
@@ -223,5 +211,95 @@ impl dyn VmObject {
 impl Debug for dyn VmObject {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "VmObject {{ ... }}")
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    struct CountingObject {
+        pages: Box<[FrameHandle]>,
+        resolutions: RwLock<Vec<(usize, PageFaultType)>>,
+        writable: bool,
+    }
+
+    impl CountingObject {
+        fn new(npages: usize, fill: u8, writable: bool) -> Self {
+            let pages = (0..npages)
+                .map(|_| {
+                    let frame = unsafe {
+                        alloc_frame_zeroed()
+                            .expect("VMO byte-helper KUnit frame allocation should succeed")
+                            .into_frame_handle()
+                    };
+                    let bytes = unsafe {
+                        core::slice::from_raw_parts_mut(
+                            frame.ppn().to_phys_addr().to_hhdm().as_ptr_mut(),
+                            PagingArch::PAGE_SIZE_BYTES,
+                        )
+                    };
+                    bytes.fill(fill);
+                    frame
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            Self {
+                pages,
+                resolutions: RwLock::new(Vec::new()),
+                writable,
+            }
+        }
+    }
+
+    impl VmObject for CountingObject {
+        fn resolve_frame(
+            &self,
+            pidx: usize,
+            access: PageFaultType,
+        ) -> Result<ResolvedFrame, SysError> {
+            let frame = self.pages.get(pidx).ok_or(SysError::NotMapped)?.clone();
+            self.resolutions.write().push((pidx, access));
+            Ok(ResolvedFrame {
+                frame,
+                writable: self.writable,
+            })
+        }
+    }
+
+    #[kunit]
+    fn byte_helpers_resolve_each_page_once_and_preserve_partial_edges() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let object = CountingObject::new(2, 0x5a, true);
+        let vmo: &dyn VmObject = &object;
+
+        vmo.write_bytes(page_size - 2, b"abcd").unwrap();
+        assert_eq!(
+            *object.resolutions.read(),
+            vec![(0, PageFaultType::Write), (1, PageFaultType::Write)]
+        );
+        assert_eq!(&object.pages[0].as_bytes()[page_size - 4..], b"ZZab");
+        assert_eq!(&object.pages[1].as_bytes()[..4], b"cdZZ");
+
+        object.resolutions.write().clear();
+        let mut data = [0u8; 4];
+        vmo.read_bytes(page_size - 2, &mut data).unwrap();
+        assert_eq!(&data, b"abcd");
+        assert_eq!(
+            *object.resolutions.read(),
+            vec![(0, PageFaultType::Read), (1, PageFaultType::Read)]
+        );
+    }
+
+    #[kunit]
+    fn byte_write_rejects_a_nonwritable_resolved_frame() {
+        let object = CountingObject::new(1, 0, false);
+        let vmo: &dyn VmObject = &object;
+        assert_eq!(
+            vmo.write_bytes(0, b"x").unwrap_err(),
+            SysError::PermissionDenied
+        );
+        assert_eq!(*object.resolutions.read(), vec![(0, PageFaultType::Write)]);
+        assert_eq!(object.pages[0].as_bytes()[0], 0);
     }
 }

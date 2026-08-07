@@ -188,12 +188,13 @@ pub unsafe fn activate_kernel_mapping() {
 /// holds a lock that might be waited on by cores with interrupts disabled,
 /// [TlbShootdownGuard] should only be released after the lock is released,
 /// thereby achieving the effect of delaying the sending of the IPI.
+/// Callers must not publish the new mapping to other cores before releasing
+/// the guard; bootstrap callers may omit the IPI only before those cores can
+/// activate the kernel page table.
 pub unsafe fn kmap(mapping: Mapping) -> Result<TlbShootdownGuard, SysError> {
     unsafe {
         KERNEL_PTABLE.kmap(mapping)?;
-        for i in 0..mapping.npages {
-            PagingArch::tlb_shootdown(mapping.vpn + i as u64);
-        }
+        PagingArch::tlb_shootdown_range(VirtPageRange::new(mapping.vpn, mapping.npages as u64));
     }
     Ok(TlbShootdownGuard::new(None))
 }
@@ -201,15 +202,17 @@ pub unsafe fn kmap(mapping: Mapping) -> Result<TlbShootdownGuard, SysError> {
 /// Do an unmapping in the global kernel page table. See [kmap] for details and
 /// safety concerns.
 ///
-/// Though an unmapping always succeeds, this function should not be overused,
-/// as it will cause TLB shootdowns to all cores, which is very expensive. So we
-/// mark this function as unsafe.
+/// This operation invalidates the range only on the current core. Other cores
+/// may retain stale translations while the range is unpublished. Before a
+/// released VPN is exposed again, its next [kmap] caller must drop the returned
+/// [TlbShootdownGuard], which performs the existing synchronous remote-flush
+/// attempt. The caller must therefore withdraw every capability to the old
+/// mapping before unmapping it and preserve that remap-before-publication
+/// ordering.
 pub unsafe fn kunmap(unmapping: Unmapping) {
     unsafe {
         KERNEL_PTABLE.kunmap(unmapping);
-        for i in 0..unmapping.range.npages() {
-            PagingArch::tlb_shootdown(unmapping.range.start() + i as u64);
-        }
+        PagingArch::tlb_shootdown_range(unmapping.range);
     }
 }
 

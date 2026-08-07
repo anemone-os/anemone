@@ -13,8 +13,8 @@ use super::{
     super::{
         SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
         SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketPairPreparation,
-        SocketPreparation, SocketQueryError, SocketReceiveError, SocketSendError, SocketShutdown,
-        SocketShutdownError, SocketType,
+        SocketPreparation, SocketQueryError, SocketReceiveError, SocketReleaseReason,
+        SocketSendError, SocketShutdown, SocketShutdownError, SocketType,
     },
     admission::{
         UnixListener, accept, connect, listen, notify_admission_routes, poll_unix_listener,
@@ -771,6 +771,10 @@ fn final_release_unix_endpoint(private: &AnyOpaque) {
     retire_endpoint_core(&endpoint(private).core);
 }
 
+fn final_release_unix_endpoint_with_reason(private: &AnyOpaque, _reason: SocketReleaseReason) {
+    final_release_unix_endpoint(private);
+}
+
 pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     io: super::super::SocketIoOps::ByteStream {
         socket_type: SocketType::UnixStream,
@@ -789,8 +793,9 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     accepting: query_unix_accepting,
     query_option: None,
     mutate_option: None,
+    detach_ipv4_extended_error: None,
     poll: poll_unix_stream,
-    final_release: final_release_unix_endpoint,
+    final_release: final_release_unix_endpoint_with_reason,
 };
 
 pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOps {
@@ -812,8 +817,9 @@ pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOp
     accepting: query_unix_accepting,
     query_option: None,
     mutate_option: None,
+    detach_ipv4_extended_error: None,
     poll: poll_unix_seqpacket,
-    final_release: final_release_unix_endpoint,
+    final_release: final_release_unix_endpoint_with_reason,
 };
 
 #[cfg(feature = "kunit")]

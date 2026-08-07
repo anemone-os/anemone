@@ -62,8 +62,9 @@ impl SigAltStack {
     /// may manually attach those flags if needed.
     pub fn to_linux_sigstack(&self) -> linux_signal::SigStack {
         linux_signal::SigStack {
-            ss_sp: self.stack_base.get() as *mut u8,
+            ss_sp: anemone_abi::RawUserAddr64::from_bits(self.stack_base.get()),
             ss_flags: self.flags.bits(),
+            __pad0: 0,
             ss_size: self.stack_bytes,
         }
     }

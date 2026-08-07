@@ -32,5 +32,3 @@ case "$-" in
         export PS1
         ;;
 esac
-
-bash /home/init_sys.sh

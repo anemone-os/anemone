@@ -4,12 +4,12 @@
 **状态：** Active
 **Owner：** shared protocol vocabulary、kernel family Socket/source与domain Stack protocol owner分别拥有各自state；本页只拥有跨owner capability与fact/wait协议
 **参与领域：** network control plane / protocol Stack / VFS opened description / Socket / iomux / epoll
-**覆盖范围：** IPv4 UDP与ICMP raw的窄、非阻塞owner handoff，以及owner predicate到Linux readiness的投影
-**不覆盖：** family-specific association/packet transaction、generic protocol registry、TCP、IPv6或通用error queue
-**实现位置：** `anemone-kernel/crates/anemone-net-api/src/{udp,icmp_raw}.rs`、`anemone-kernel/crates/anemone-smoltcp-stack/src/`、`anemone-kernel/src/net/`、`anemone-kernel/src/fs/socket/{udp,icmp_raw}/`
+**覆盖范围：** IPv4 UDP、ICMP raw与TCP的窄、非阻塞owner handoff，以及owner predicate到Linux readiness的投影
+**不覆盖：** family-specific association/packet/stream transaction、generic protocol registry、IPv6或通用error queue
+**实现位置：** `anemone-kernel/crates/anemone-net-api/src/{udp,icmp_raw,tcp}.rs`、`anemone-kernel/crates/anemone-smoltcp-stack/src/`、`anemone-kernel/src/net/`、`anemone-kernel/src/fs/socket/{udp,icmp_raw,tcp}/`
 **依赖：** `NET-CONTROL-PLANE-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`、`EPOLL-FILE-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-03
+**最后核验：** 2026-08-06
 
 ## 状态与能力所有权
 
@@ -32,7 +32,7 @@ role-scoped operation capability、request/outcome、point-in-time facts与inval
 waiter或Linux ABI policy。concrete Stack独占smoltcp handle、buffer、mapping与private packet representation；kernel独占
 task、fd、opened-description、user pointer、Linux wait和errno映射。
 
-当前真实consumer只有UDP与ICMP raw。共同composition可以静态分发两者的attach、ingress、egress与invalidation，但不得
+当前真实consumer是UDP、ICMP raw与TCP。共同composition可以静态分发三者的attach、ingress、egress与invalidation，但不得
 因此建立dynamic protocol manager、generic Endpoint hierarchy或把family association/transaction上收为shared truth。
 Stack operation只在owner-local同步mutation/observation中立即commit或返回typed rejection/not-ready；invalidation只表示
 owner fact可能改变，snapshot/outcome只供当前operation解释。
@@ -62,7 +62,7 @@ source服从`snapshot -> register -> recheck/final scan`：在source publication
 可能丢失精确覆盖时返回recheck而不park；任意hint、timeout、signal或force后再次读取owner predicate。default blocking与
 `O_NONBLOCK`/`SOCK_NONBLOCK`/`MSG_DONTWAIT`使用同一not-ready分类，per-call flag不修改opened-description status。
 
-UDP writable与ICMP raw writable都只承诺live Endpoint当前可以接纳本family范围内的最小TX admission；不承诺任意
+UDP writable、ICMP raw writable与TCP send-capacity predicate都只承诺live Endpoint当前可以接纳本family范围内的最小TX admission；不承诺任意
 destination、length、route/source selection或provider立即发送。raw readable只由RX queue非空产生，且raw不因connect
 取得peer-close、HUP/RDHUP或pending-error producer。family-specific predicate与request failure分别由其family contract
 拥有。
@@ -83,6 +83,6 @@ final-scan、multi-waiter/signal、poll/select/epoll、dup/fork/final close/late
 
 ## 当前接受边界
 
-- 当前protocol Socket consumer只有IPv4 unconnected UDP与`AF_INET + SOCK_RAW + IPPROTO_ICMP`；本页不外推TCP、任意raw protocol或generic BSD Socket framework。
-- closure evidence覆盖owner-local/host proof、RV64/LA64 release与guest runtime、UDP/Unix regression、raw focused ABI、glibc/musl curated Socket LTP和BusyBox gateway ping。
+- 当前protocol Socket consumer是IPv4 UDP、`AF_INET + SOCK_RAW + IPPROTO_ICMP`与`AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`；本页不外推任意其它raw protocol或generic BSD Socket framework。
+- closure evidence覆盖owner-local/host proof、RV64/LA64 release与guest runtime、UDP/Unix regression、raw/TCP focused ABI、glibc/musl curated Socket LTP、TCP external/CAgent和BusyBox gateway ping。
 - physical hardware、`smp > 1`、其它NIC、full network LTP与final harness均Not Run。

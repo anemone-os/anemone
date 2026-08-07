@@ -4,8 +4,8 @@ use crate::{
         Task, ThreadGroup, ThreadGroupInner,
         jobctl::group::ContinueEpoch,
         sig::{
-            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, SigNo, Signal,
-            disposition::SignalDisposition, pending::TimerSignalSlotId, set::SigSet,
+            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, PosixTimerSignalRegistration,
+            SigNo, Signal, disposition::SignalDisposition, set::SigSet,
         },
     },
 };
@@ -82,7 +82,7 @@ impl Task {
     /// generation transaction while retaining private occurrence ownership.
     pub(super) fn enqueue_private_timer_job_control_signal(
         self: &Arc<Self>,
-        slot: TimerSignalSlotId,
+        registration: &PosixTimerSignalRegistration,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -93,7 +93,7 @@ impl Task {
         };
         tg.enqueue_timer_job_control_signal_to(
             TimerJobControlSignalRoute::Private(self),
-            slot,
+            registration,
             no,
             generation,
             episode,
@@ -387,7 +387,7 @@ impl ThreadGroup {
     /// stays in the timer's preallocated signal slot.
     pub(super) fn enqueue_timer_job_control_signal(
         &self,
-        slot: TimerSignalSlotId,
+        registration: &PosixTimerSignalRegistration,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -395,7 +395,7 @@ impl ThreadGroup {
     ) -> PosixTimerSignalEnqueue {
         self.enqueue_timer_job_control_signal_to(
             TimerJobControlSignalRoute::Shared,
-            slot,
+            registration,
             no,
             generation,
             episode,
@@ -406,7 +406,7 @@ impl ThreadGroup {
     fn enqueue_timer_job_control_signal_to(
         &self,
         route: TimerJobControlSignalRoute<'_>,
-        slot: TimerSignalSlotId,
+        registration: &PosixTimerSignalRegistration,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -444,12 +444,12 @@ impl ThreadGroup {
                 }
 
                 let registration_no = match route {
-                    TimerJobControlSignalRoute::Shared => {
-                        inner.sig_pending.lock().timer_signal_no(slot)
-                    },
+                    TimerJobControlSignalRoute::Shared => registration
+                        .registered_no_locked(&inner.sig_pending.lock())
+                        .expect("shared timer signal registration is no longer active"),
                     TimerJobControlSignalRoute::Private(target) => {
                         let pending = target.sig_pending.lock();
-                        let Some(no) = pending.admitted_timer_signal_no(slot) else {
+                        let Some(no) = registration.registered_no_locked(&pending) else {
                             return (
                                 (
                                     PosixTimerSignalEnqueue::TargetExited,
@@ -535,33 +535,27 @@ impl ThreadGroup {
                 let outcome = match route {
                     TimerJobControlSignalRoute::Shared => {
                         let mut pending = inner.sig_pending.lock();
-                        let outcome = pending
-                            .enqueue_timer_signal(slot, generation, episode, overrun, discard);
-                        if let Some(epoch) = stop_epoch
-                            && matches!(
-                                outcome,
-                                PosixTimerSignalEnqueue::Queued
-                                    | PosixTimerSignalEnqueue::AlreadyPending
-                            )
-                        {
-                            pending.set_timer_signal_default_stop_epoch(slot, epoch);
-                        }
-                        outcome
+                        registration.enqueue_job_control_locked(
+                            &mut pending,
+                            no,
+                            generation,
+                            episode,
+                            overrun,
+                            discard,
+                            stop_epoch,
+                        )
                     },
                     TimerJobControlSignalRoute::Private(target) => {
                         let mut pending = target.sig_pending.lock();
-                        let outcome = pending
-                            .enqueue_timer_signal(slot, generation, episode, overrun, discard);
-                        if let Some(epoch) = stop_epoch
-                            && matches!(
-                                outcome,
-                                PosixTimerSignalEnqueue::Queued
-                                    | PosixTimerSignalEnqueue::AlreadyPending
-                            )
-                        {
-                            pending.set_timer_signal_default_stop_epoch(slot, epoch);
-                        }
-                        outcome
+                        registration.enqueue_job_control_locked(
+                            &mut pending,
+                            no,
+                            generation,
+                            episode,
+                            overrun,
+                            discard,
+                            stop_epoch,
+                        )
                     },
                 };
                 let notify_targets = if matches!(outcome, PosixTimerSignalEnqueue::Queued) {

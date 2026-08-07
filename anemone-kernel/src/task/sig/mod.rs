@@ -45,8 +45,8 @@ mod mask;
 pub use mask::{TaskSigMaskState, TemporarySigMaskToken};
 mod pending;
 pub use pending::PendingSignals;
+use pending::timer;
 pub mod set;
-mod timer;
 pub(crate) use timer::{
     PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
     PosixTimerSignalIdentity, PosixTimerSignalRegistration,
@@ -211,6 +211,14 @@ impl Signal {
         );
     }
 
+    fn assert_default_stop_epoch(&self, expected: ContinueEpoch) {
+        assert_eq!(
+            self.default_stop_epoch,
+            Some(expected),
+            "pending conditional-stop occurrence crossed a SIGCONT epoch"
+        );
+    }
+
     fn default_stop_epoch(&self) -> Option<ContinueEpoch> {
         self.default_stop_epoch
     }
@@ -232,6 +240,7 @@ impl Signal {
                 si_signo: self.no.as_usize() as i32,
                 si_errno: self.errno,
                 si_code: self.code.to_linux_code(),
+                __pad0: 0,
                 fields: kbuf,
             },
         }

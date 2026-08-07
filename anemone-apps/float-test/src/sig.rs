@@ -77,9 +77,9 @@ pub fn run() {
     println!("----- running signal handler test -----");
     // test 1: enable floatpoint on signal handler
     let action = SigAction {
-        sighandler: sig_usr1_handler as *const (),
+        sighandler: (sig_usr1_handler as *const ()).into(),
         sa_flags: SA_SIGINFO,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(SigNo::SIGUSR1, Some(&action), None).expect("fatal: failed to register sigaction");

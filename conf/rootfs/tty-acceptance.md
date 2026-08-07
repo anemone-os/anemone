@@ -11,6 +11,8 @@
   --log build/tty-stage4-rv64.log
 ```
 
+rootfs默认直接构建；开发环境中的libguestfs需要提权时，在wrapper参数中增加`--rootfs-sudo`。
+
 wrapper在复制前验证BusyBox是static RISC-V ELF；不限制其版本、构建来源或artifact identity。
 launcher在任何acceptance case前核对测试实际依赖的`ash/sleep/stty/vi` applet，缺失时fail closed。
 原件不被修改；运行副本分别位于

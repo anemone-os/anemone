@@ -17,11 +17,11 @@ Then read the corresponding Justfile recipe and xtask task. Help output defines 
 
 | Task | Preferred entrypoint | Inspect before use |
 | --- | --- | --- |
-| Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/.defconfig`, existing root `kconfig` |
+| Initialize or reset local KernelConfig | `just defconfig` | Justfile, `conf/kconfs/default.toml`, existing root `kconfig` |
 | List targets | `just conf ...` | target and Platform files |
 | Build the kernel | `just build --preset ...` or the complete low-level tuple | selected KernelConfig, target, Platform, build task |
 | Format Rust | `just fmt <scope> ...` | explicit `all`, `kernel`, or app scope; fmt help and task |
-| Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected architecture |
+| Build an app | `just app ...` or the app xtask interface | app manifest, app task, selected app build target |
 | Materialize a rootfs | `just rootfs ...` or the rootfs xtask interface | rootfs manifest, host inputs, app manifests, rootfs task |
 | Run QEMU | `just qemu ...` | explicit selection for automation, selected Platform bind declarations, firmware/device/image inputs |
 | Clean outputs | `just clean` | live recipe and cleanup task |
@@ -55,10 +55,17 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 ### App Build
 
 - Confirm the CLI app name locates the intended manifest.
-- Confirm requested architecture, closed Cargo/Command/Source driver, and declared artifact path agree.
+- Confirm the requested target is explicitly declared by the app and agrees with the closed
+  Cargo/Command/Source driver and the artifacts applicable to that target. Artifact target subsets
+  must be non-empty, remain inside the app target list, cover every app target, and produce unique
+  export names. `host` is app-local, not a Platform architecture.
+- Treat Cargo as Anemone-target-only: it selects the repository target JSON and bare-metal
+  `build-std` parameters. A host Cargo recipe uses Command and remains app-owned.
 - Treat Command as trusted repository build code: execute its non-empty bounded argv directly in
-  workdir, append caller extras, override only `ANEMONE_ARCH` / `ANEMONE_TARGET_TRIPLE`, and retain
-  the common status, artifact validation, export, and diagnostics path.
+  workdir, append caller extras, override only the target context, and retain the common status,
+  artifact validation, export, and diagnostics path. Anemone targets set `ANEMONE_ARCH` and
+  `ANEMONE_TARGET_TRIPLE`; host sets `ANEMONE_ARCH=host` and removes inherited
+  `ANEMONE_TARGET_TRIPLE` because no Anemone compiler target exists.
 - Treat Source as a command no-op only: reject manifest or caller driver args, then retain the same
   path expansion, ordinary-file check, export, and explicit post-export diagnostics as Cargo.
 - Inspect exported artifacts under `build/`; use app-local target output only for diagnosis.
