@@ -253,7 +253,7 @@ pub(crate) fn perf_clock_ticks() -> u64 {
 }
 
 pub(crate) fn perf_clock_frequency_hz() -> u64 {
-    LocalClockSource::monotonic_freq_hz()
+    TIMEKEEPER.get().frequency_hz
 }
 
 /// Return a non-panicking timestamp for early diagnostic consumers.
