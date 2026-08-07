@@ -32,6 +32,7 @@
 ## 当前记录
 
 - [2026-08-07 - TCP local reverse TIME_WAIT admission](./2026-08-07-tcp-local-time-wait-admission.md)
+- [2026-08-07 - Ext4 single Mutex](./2026-08-07-ext4-single-mutex.md)
 - [2026-08-07 - Ext4 synchronous I/O batching](./2026-08-07-ext4-synchronous-io-batching.md)
 - [2026-08-07 - ELF demand paging](./2026-08-07-elf-demand-paging.md)
 - [2026-08-06 - IPv4 UDP ICMP extended error](./2026-08-06-ipv4-udp-icmp-extended-error.md)

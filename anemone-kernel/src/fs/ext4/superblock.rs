@@ -30,14 +30,12 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
 }
 
 fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError> {
-    let attr = ext4_sb(sb).read_tx(|| {
-        ext4_sb(sb).with_fs(|fs| {
-            let mut attr = lwext4_rust::FileAttr::default();
-            fs.get_attr(ino.get() as u32, &mut attr)
-                .map_err(map_ext4_error)?;
+    let attr = ext4_sb(sb).with_fs(|fs| {
+        let mut attr = lwext4_rust::FileAttr::default();
+        fs.get_attr(ino.get() as u32, &mut attr)
+            .map_err(map_ext4_error)?;
 
-            Ok(attr)
-        })
+        Ok(attr)
     })?;
 
     let ty = map_lwext4_inode_type(attr.node_type)?;
@@ -90,22 +88,20 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), SysError> {
             .sync_all()?;
     }
 
-    ext4_sb(&sb).write_tx(|| {
-        ext4_sb(&sb).with_fs(|fs| {
-            fs.with_inode_ref(ino.get() as u32, |inode_ref| {
-                if inode_ref.size() != meta.size {
-                    inode_ref.set_len(meta.size)?;
-                }
-                inode_ref.set_atime(&meta.atime);
-                inode_ref.set_mtime(&meta.mtime);
-                inode_ref.set_ctime(&meta.ctime);
-                inode_ref.set_mode(InodeMode::new(inode.ty(), meta.perm).to_linux_mode());
-                inode_ref.set_owner(meta.uid.get(), meta.gid.get());
-                Ok(())
-            })
-            .map_err(map_ext4_error)?;
-            fs.flush().map_err(map_ext4_error)
+    ext4_sb(&sb).with_fs(|fs| {
+        fs.with_inode_ref(ino.get() as u32, |inode_ref| {
+            if inode_ref.size() != meta.size {
+                inode_ref.set_len(meta.size)?;
+            }
+            inode_ref.set_atime(&meta.atime);
+            inode_ref.set_mtime(&meta.mtime);
+            inode_ref.set_ctime(&meta.ctime);
+            inode_ref.set_mode(InodeMode::new(inode.ty(), meta.perm).to_linux_mode());
+            inode_ref.set_owner(meta.uid.get(), meta.gid.get());
+            Ok(())
         })
+        .map_err(map_ext4_error)?;
+        fs.flush().map_err(map_ext4_error)
     })
 }
 
@@ -118,8 +114,7 @@ fn ext4_sync_inode(inode: &InodeRef) -> Result<(), SysError> {
 }
 
 fn ext4_stat(sb: &SuperBlock) -> Result<FsStat, SysError> {
-    let stat =
-        ext4_sb(sb).read_tx(|| ext4_sb(sb).with_fs(|fs| fs.stat().map_err(map_ext4_error)))?;
+    let stat = ext4_sb(sb).with_fs(|fs| fs.stat().map_err(map_ext4_error))?;
 
     let blocks_free = stat.free_blocks_count.min(stat.blocks_count);
     let files = stat.inodes_count as u64;
