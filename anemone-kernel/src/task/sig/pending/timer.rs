@@ -285,18 +285,23 @@ impl TimerPending {
             overrun,
             discard,
         );
-        if let Some(epoch) = stop_epoch
-            && matches!(
-                outcome,
-                PosixTimerSignalEnqueue::Queued | PosixTimerSignalEnqueue::AlreadyPending
-            )
-        {
-            self.slot_mut(id)
-                .pending
-                .as_mut()
-                .expect("conditional timer signal is not pending")
-                .signal
-                .set_default_stop_epoch(epoch);
+        if let Some(epoch) = stop_epoch {
+            match outcome {
+                PosixTimerSignalEnqueue::Queued | PosixTimerSignalEnqueue::AlreadyPending => {
+                    let signal = &mut self
+                        .slot_mut(id)
+                        .pending
+                        .as_mut()
+                        .expect("conditional timer signal is not pending")
+                        .signal;
+                    if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+                        signal.set_default_stop_epoch(epoch);
+                    } else {
+                        signal.assert_default_stop_epoch(epoch);
+                    }
+                },
+                _ => {},
+            }
         }
         outcome
     }
@@ -1157,6 +1162,43 @@ mod kunits {
                     PosixTimerSignalCompletion::Dequeued,
                 ),
             ]
+        );
+
+        drop(registration);
+        target.set_permanent_sig_mask(old_mask);
+    }
+
+    #[kunit]
+    fn private_conditional_stop_duplicate_keeps_one_epoch_authority() {
+        let target = get_current_task();
+        let old_mask = target.snapshot_current_sig_mask();
+        let mut blocked = old_mask;
+        blocked.set(SigNo::SIGTSTP);
+        target.set_permanent_sig_mask(blocked);
+
+        let (log, callback) = callback_log();
+        let registration =
+            PosixTimerSignalRegistration::try_new_private(&target, SigNo::SIGTSTP, 97, 0, callback)
+                .unwrap();
+        assert_eq!(
+            registration.enqueue(1, 1, 0),
+            PosixTimerSignalEnqueue::Queued
+        );
+        assert_eq!(
+            registration.enqueue(1, 2, 3),
+            PosixTimerSignalEnqueue::AlreadyPending
+        );
+
+        let signal = target
+            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGTSTP]))
+            .expect("updated conditional-stop timer occurrence was not fetchable");
+        assert_eq!(signal.no, SigNo::SIGTSTP);
+        assert_eq!(
+            log.lock().as_slice(),
+            &[(
+                PosixTimerSignalIdentity::new(97, 1, 2),
+                PosixTimerSignalCompletion::Dequeued,
+            )]
         );
 
         drop(registration);

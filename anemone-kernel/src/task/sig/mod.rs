@@ -211,6 +211,14 @@ impl Signal {
         );
     }
 
+    fn assert_default_stop_epoch(&self, expected: ContinueEpoch) {
+        assert_eq!(
+            self.default_stop_epoch,
+            Some(expected),
+            "pending conditional-stop occurrence crossed a SIGCONT epoch"
+        );
+    }
+
     fn default_stop_epoch(&self) -> Option<ContinueEpoch> {
         self.default_stop_epoch
     }
