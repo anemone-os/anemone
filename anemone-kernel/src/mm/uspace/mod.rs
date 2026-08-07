@@ -14,7 +14,7 @@ use crate::{
     mm::kptable::KERNEL_PTABLE,
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{RetiredFrames, anon::AnonObject, empty::EmptyObject},
+        vmo::{anon::AnonObject, empty::EmptyObject},
         *,
     },
     sync::r#final::Final,
@@ -23,6 +23,10 @@ use vma::{VmArea, VmReservation};
 
 mod api;
 pub use api::*;
+
+mod fence;
+mod heap;
+pub use fence::RemoteUspFenceGuard;
 
 pub mod fault;
 pub mod mmap;
@@ -511,68 +515,6 @@ impl UserSpace {
         }
     }
 
-    /// Get the program break
-    pub fn brk(&self) -> VirtAddr {
-        self.heap.brk
-    }
-
-    /// Adjust the program break for this address space.
-    ///
-    /// This function grows or shrinks the heap tracked in `uheap` to make
-    /// `brk` the new program break. It returns an error if the requested
-    /// break is out of range or if the backing cannot decommit a shrink range.
-    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<Option<RemoteUspFenceGuard>, SysError> {
-        let heap_range = *self.heap_vma().range();
-
-        if brk < heap_range.start().to_virt_addr() {
-            return Err(SysError::OutOfMemory); // see reference https://www.man7.org/linux/man-pages/man2/brk.2.html
-        }
-        if brk > heap_range.end().to_virt_addr() {
-            return Err(SysError::OutOfMemory);
-        }
-
-        let old_brk_vpn = self.heap.brk.page_up();
-        let new_brk_vpn = brk.page_up();
-        let guard = if self.heap.brk > brk {
-            let count = old_brk_vpn - new_brk_vpn;
-            let range = VirtPageRange::new(new_brk_vpn, count);
-            if count == 0 {
-                None
-            } else {
-                let retired = {
-                    let heap_vma = self.heap_vma();
-                    let start = heap_vma.vmo_pidx(new_brk_vpn);
-                    let end = start
-                        .checked_add(count as usize)
-                        .ok_or(SysError::InvalidArgument)?;
-                    // SAFETY: the reserved heap VMA is created CopyOnWrite and
-                    // its backing is not published to another VMA. Fork replaces
-                    // it with distinct parent/child ShadowObjects, so this
-                    // UserSpace owns the complete mapping domain. `retired` is
-                    // transferred to the fence guard below and stays alive until
-                    // the remote TLB invalidation completes or fails closed.
-                    unsafe { heap_vma.backing().decommit_private_range(start..end)? }
-                };
-
-                let mut mapper = self.table.mapper();
-                unsafe {
-                    mapper.try_unmap(Unmapping { range });
-                }
-                for vpn in range.iter() {
-                    PagingArch::tlb_shootdown(vpn);
-                }
-
-                Some(RemoteUspFenceGuard::with_retired(Some(range), retired))
-            }
-        } else {
-            None
-        };
-        self.heap.brk = brk;
-        kdebugln!("brk of {} set to {}", current_task_id(), brk);
-
-        Ok(guard)
-    }
-
     /// Push data onto the user init stack and return a pointer to the copied
     /// data on the stack.
     ///
@@ -932,166 +874,5 @@ impl UserSpace {
             addr.page_down(),
             1,
         ))))
-    }
-}
-
-/// Mainly for preventing sending synchronous IPI while holding the user space
-/// mutex, which may cause deadlock.
-#[derive(Debug)]
-pub struct RemoteUspFenceGuard {
-    /// `None` requests one full remote flush. A range is sent as one broadcast
-    /// round and acknowledged only after each CPU applies its local range
-    /// policy.
-    range: Option<VirtPageRange>,
-    retired: RetiredFrames,
-}
-
-impl RemoteUspFenceGuard {
-    fn new(range: Option<VirtPageRange>) -> Self {
-        Self {
-            range,
-            retired: RetiredFrames::default(),
-        }
-    }
-
-    fn with_retired(range: Option<VirtPageRange>, retired: RetiredFrames) -> Self {
-        Self { range, retired }
-    }
-}
-
-// Equality describes only the invalidation scope. Retired frames are a linear
-// cleanup capability and deliberately do not participate in comparisons.
-impl PartialEq for RemoteUspFenceGuard {
-    fn eq(&self, other: &Self) -> bool {
-        self.range == other.range
-    }
-}
-
-impl Eq for RemoteUspFenceGuard {}
-
-impl Drop for RemoteUspFenceGuard {
-    fn drop(&mut self) {
-        let fence_failed =
-            if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { range: self.range }) {
-                kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
-                true
-            } else {
-                false
-            };
-
-        if fence_failed && !self.retired.is_empty() {
-            let npages = self.retired.len();
-            let retired = core::mem::take(&mut self.retired);
-            // Fail-close bridge: Drop cannot return an IPI transport failure. Keep
-            // the old frames out of the allocator until shootdown completion has
-            // an infallible or retryable owner API, then remove this leak fallback.
-            core::mem::forget(retired);
-            kalertln!("retaining {npages} decommitted user frames after failed TLB shootdown");
-        }
-    }
-}
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-
-    fn write_first_byte(ppn: PhysPageNum, value: u8) {
-        unsafe {
-            *ppn.to_phys_addr().to_hhdm().as_ptr_mut::<u8>() = value;
-        }
-    }
-
-    fn first_byte(ppn: PhysPageNum) -> u8 {
-        unsafe { *ppn.to_phys_addr().to_hhdm().as_ptr::<u8>() }
-    }
-
-    #[kunit]
-    fn brk_shrink_decommits_full_pages_and_preserves_partial_page() {
-        let mut uspace = UserSpace::new().expect("user space setup should succeed");
-        let heap_start = uspace.heap.svpn;
-        let target_vpn = heap_start + 1;
-        let grown_brk = (heap_start + 2).to_virt_addr();
-
-        assert!(
-            uspace
-                .set_brk(grown_brk)
-                .expect("heap growth should succeed")
-                .is_none()
-        );
-        drop(
-            uspace
-                .fault_in_page(target_vpn.to_virt_addr(), PageFaultType::Write)
-                .expect("heap write fault should allocate a page"),
-        );
-        let old_ppn = uspace
-            .page_table_mut()
-            .mapper()
-            .translate(target_vpn)
-            .expect("faulted heap page should be mapped")
-            .ppn;
-        write_first_byte(old_ppn, 0xa5);
-
-        let mut guard = uspace
-            .set_brk(target_vpn.to_virt_addr())
-            .expect("full-page heap shrink should succeed")
-            .expect("full-page heap shrink should require remote fencing");
-        assert!(
-            uspace
-                .page_table_mut()
-                .mapper()
-                .translate(target_vpn)
-                .is_none()
-        );
-        assert_eq!(guard.retired.len(), 1);
-        assert_eq!(unsafe { get_frame_raw(old_ppn) }.rc(), 1);
-
-        // KUnit does not need a stale user TLB. Preserve production ordering by
-        // completing the guard first, then releasing its extracted retirement hold.
-        let retired = core::mem::take(&mut guard.retired);
-        drop(guard);
-        drop(retired);
-        assert_eq!(unsafe { get_frame_raw(old_ppn) }.rc(), 0);
-
-        assert!(
-            uspace
-                .set_brk(grown_brk)
-                .expect("heap regrowth should succeed")
-                .is_none()
-        );
-        drop(
-            uspace
-                .fault_in_page(target_vpn.to_virt_addr(), PageFaultType::Write)
-                .expect("regrown heap page should fault from zero"),
-        );
-        let regrown_ppn = uspace
-            .page_table_mut()
-            .mapper()
-            .translate(target_vpn)
-            .expect("regrown heap page should be mapped")
-            .ppn;
-        assert_eq!(first_byte(regrown_ppn), 0);
-        write_first_byte(regrown_ppn, 0x5a);
-
-        let partial_old = target_vpn.to_virt_addr() + 0x800;
-        let partial_new = target_vpn.to_virt_addr() + 0x100;
-        assert!(
-            uspace
-                .set_brk(partial_old)
-                .expect("partial-page shrink should succeed")
-                .is_none()
-        );
-        assert!(
-            uspace
-                .set_brk(partial_new)
-                .expect("same-page shrink should succeed")
-                .is_none()
-        );
-        let preserved = uspace
-            .page_table_mut()
-            .mapper()
-            .translate(target_vpn)
-            .expect("same-page shrink must preserve the boundary page");
-        assert_eq!(preserved.ppn, regrown_ppn);
-        assert_eq!(first_byte(preserved.ppn), 0x5a);
     }
 }
