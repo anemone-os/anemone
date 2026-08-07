@@ -547,7 +547,7 @@ impl UserSpace {
             for vpn in range.iter() {
                 PagingArch::tlb_shootdown(vpn);
             }
-            Some(RemoteUspFenceGuard { vpn: Some(range) })
+            Some(RemoteUspFenceGuard { range: Some(range) })
         } else if new_brk_vpn > heap_range.end() {
             // nothing to do. page fault handler will map new pages when
             // accessed.
@@ -767,7 +767,7 @@ impl UserSpace {
         // local tlb shootdown
         PagingArch::tlb_shootdown_all();
 
-        Ok((new_inner, RemoteUspFenceGuard { vpn: None }))
+        Ok((new_inner, RemoteUspFenceGuard { range: None }))
     }
 
     /// Check if the given virtual page has the requested permissions.
@@ -918,7 +918,7 @@ impl UserSpace {
         }
 
         Ok(RemoteUspFenceGuard {
-            vpn: Some(VirtPageRange::new(addr.page_down(), 1)),
+            range: Some(VirtPageRange::new(addr.page_down(), 1)),
         })
     }
 }
@@ -927,21 +927,15 @@ impl UserSpace {
 /// mutex, which may cause deadlock.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RemoteUspFenceGuard {
-    vpn: Option<VirtPageRange>,
+    /// `None` requests one full remote flush. A range is sent as one broadcast
+    /// round and acknowledged only after each CPU applies its local range policy.
+    range: Option<VirtPageRange>,
 }
 
 impl Drop for RemoteUspFenceGuard {
     fn drop(&mut self) {
-        if let Some(vpns) = &self.vpn {
-            for vpn in vpns.iter() {
-                if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: Some(vpn) }) {
-                    kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
-                }
-            }
-        } else {
-            if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: None }) {
-                kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
-            }
+        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { range: self.range }) {
+            kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
         }
     }
 }

@@ -17,7 +17,8 @@ use crate::prelude::*;
 #[derive(Debug)]
 pub enum IpiPayload {
     MemoryBarrier,
-    TlbShootdown { vpn: Option<VirtPageNum> },
+    /// `None` invalidates the entire local TLB on the receiving CPU.
+    TlbShootdown { range: Option<VirtPageRange> },
     EnqueueNewTask { tid: Tid },
     WakeUpTaskStaleSafe { task: Arc<Task>, park: ParkState },
     SchedulerRequest(Box<SchedRequest>),
@@ -28,7 +29,7 @@ impl IpiPayload {
     fn copy_for_broadcast(&self) -> Self {
         match self {
             Self::MemoryBarrier => Self::MemoryBarrier,
-            Self::TlbShootdown { vpn } => Self::TlbShootdown { vpn: *vpn },
+            Self::TlbShootdown { range } => Self::TlbShootdown { range: *range },
             Self::EnqueueNewTask { tid } => Self::EnqueueNewTask { tid: *tid },
             Self::WakeUpTaskStaleSafe { .. } => {
                 panic!("wake placement cannot be copied for IPI broadcast")
@@ -213,9 +214,9 @@ pub fn handle_ipi() {
                     full_memory_barrier();
                     msg.is_accomplished.store(true, Ordering::Release);
                 },
-                TlbShootdown { vpn } => {
-                    if let Some(vpn) = *vpn {
-                        PagingArch::tlb_shootdown(vpn);
+                TlbShootdown { range } => {
+                    if let Some(range) = *range {
+                        PagingArch::tlb_shootdown_range(range);
                     } else {
                         PagingArch::tlb_shootdown_all();
                     }
@@ -256,9 +257,11 @@ mod kunits {
     #[kunit]
     fn test_broadcast_copy_reconstructs_only_eligible_payloads() {
         let tid = Tid::new(7);
+        let range = VirtPageRange::new(VirtPageNum::new(11), 3);
         let copies = [
             IpiPayload::MemoryBarrier.copy_for_broadcast(),
-            IpiPayload::TlbShootdown { vpn: None }.copy_for_broadcast(),
+            IpiPayload::TlbShootdown { range: Some(range) }.copy_for_broadcast(),
+            IpiPayload::TlbShootdown { range: None }.copy_for_broadcast(),
             IpiPayload::EnqueueNewTask { tid }.copy_for_broadcast(),
             IpiPayload::StopExecution.copy_for_broadcast(),
         ];
@@ -267,7 +270,13 @@ mod kunits {
         assert!(matches!(copies.next().unwrap(), IpiPayload::MemoryBarrier));
         assert!(matches!(
             copies.next().unwrap(),
-            IpiPayload::TlbShootdown { vpn: None }
+            IpiPayload::TlbShootdown {
+                range: Some(copied)
+            } if copied == range
+        ));
+        assert!(matches!(
+            copies.next().unwrap(),
+            IpiPayload::TlbShootdown { range: None }
         ));
         assert!(matches!(
             copies.next().unwrap(),
@@ -279,18 +288,19 @@ mod kunits {
 }
 
 pub struct TlbShootdownGuard {
-    vpn: Option<VirtPageNum>,
+    /// `None` preserves the existing full-flush request.
+    range: Option<VirtPageRange>,
 }
 
 impl TlbShootdownGuard {
-    pub fn new(vpn: Option<VirtPageNum>) -> Self {
-        Self { vpn }
+    pub fn new(range: Option<VirtPageRange>) -> Self {
+        Self { range }
     }
 }
 
 impl Drop for TlbShootdownGuard {
     fn drop(&mut self) {
-        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: self.vpn }) {
+        if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { range: self.range }) {
             kwarningln!("failed to send TLB shootdown IPI in TlbShootdownGuard: {e:?}");
         }
     }
