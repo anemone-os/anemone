@@ -6,7 +6,7 @@
 **参与领域：** timekeeper、clock syscall、soft timer、scheduler wait-core、timerfd
 **覆盖范围：** realtime offset/change-seq 原子提交、锁外全 CPU request 重检、absolute realtime sleep、timerfd absolute realtime 与 cancel-on-set
 **不覆盖：** POSIX timer ID/overrun/signal pending、CPU-time timer、RTC seed/writeback、suspend accounting、频率修正和渐调
-**实现位置：** `anemone-kernel/src/{time/timekeeper.rs,time/clock,time/timer,fs/timerfd/mod.rs,sched/mod.rs}`
+**实现位置：** `anemone-kernel/src/{time/timekeeper.rs,time/clock,time/timer,fs/timerfd,sched/mod.rs}`
 **依赖：** [`TIMEKEEPER-CLOCK-001`](./clock-derivation.md#timekeeper-clock-001--所有-clock-读取来自一条整数推导链)、[`SOFT-TIMER-REQUEST-001`](./soft-timer-request.md#soft-timer-request-001--排队句柄物理删除一次请求)
 **最后核验：** 2026-08-04
 
