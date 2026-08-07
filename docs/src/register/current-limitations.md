@@ -77,6 +77,31 @@ binding挂入generic inode/backend `prv`或扩张pathname-keyed状态。
 **Related:** [Socket Abstraction与Unix Socket Checkpoint 2A](../rfcs/socket-abstraction-and-unix-socket/implementation.md#checkpoint-2a-closed--endpointname-与-pathname-namespace),
 [VFS create publication atomicity](./open-issues.md#ane-20260801-vfs-create-publication-atomicity)
 
+## ANE-20260802-RV64-HWPROBE-CONSERVATIVE-CAPABILITIES
+
+**Type:** Limitation
+**Status:** Active
+**Severity:** Low
+**Area:** RISC-V / syscall ABI / CPU capabilities
+
+**Summary:** RV64 `riscv_hwprobe` 已提供 Linux 6.6 的 flags、CPU mask、用户内存和
+unknown-key ABI，但当前只发布 CPU 准入规则保证的 IMA、F/D 与 C，并把 misaligned
+performance 报告为 unknown。`mvendorid`、`marchid`、`mimpid` 暂作为 unknown key；Vector、
+Zba、Zbb、Zbs 也不发布。该缩减避免在尚无 per-hart capability/ID snapshot owner 时把当前
+hart 或 FDT 的局部事实错误投影到任意用户 CPU mask。
+
+因此 Linux 6.6 `tools/testing/selftests/riscv/hwprobe` 要求 ID key 0..2 被识别的基础用例
+不在当前 acceptance 内；用户态必须把 unknown key 当作 capability 不可用并使用通用路径。
+
+**Exit Condition:** RISC-V CPU discovery/boot 建立每个已注册 hart 的不可变 SBI ID 与 ISA
+capability snapshot，在所有 AP 发布完成后才开放 syscall，并按用户 CPU mask 对 value-like key
+做一致性聚合、对 feature-like key 做交集；只有内核具备对应用户上下文支持时才能发布 Vector。
+随后通过 Linux hwprobe selftest、异构 mask 定向测试和 QEMU/实机验证关闭本限制。
+
+**Owner:** RISC-V CPU capability discovery
+**Last Verified:** 2026-08-02
+**Related:** [RISC-V architecture syscalls 小迭代](../devlog/changes/2026-08-02-riscv-arch-syscalls.md)
+
 ## ANE-20260801-LA64-LSX-STICKY-LAZY-SCOPE
 
 **Type:** Limitation
@@ -866,3 +891,30 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Owner:** doruche
 **Last Verified:** 2026-07-29
 **Related:** [Global membarrier 当前契约](../contracts/membarrier/global-rendezvous.md), [Minimal global membarrier 小迭代](../devlog/changes/2026-07-29-minimal-global-membarrier.md)
+
+## ANE-20260806-KILL-ZOMBIE-PROCESS-IDENTITY
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** task topology / signal permission / zombie lifecycle
+
+**Summary:** Anemone 在 exit 与 reap 之间保留 zombie `ThreadGroup` 的退出状态，但会在最后一个成员 detach
+时移除 live `Task`、process-group membership 和 task-owned credentials。因此 `kill(pid, sig)` 虽然仍能找到
+zombie `ThreadGroup`，却无法取得 Linux 所要求的 zombie process identity/permission credentials，当前对该阶段
+返回 `ESRCH`。本限制是维护当前 task/topology owner 边界的工程妥协；不得在 syscall 中以无权限校验的 success
+fallback 掩盖，也不得通过保留可执行 `Arc<Task>` 伪造 Linux 生命周期。本文不把该差异写成 POSIX timer
+Gate 2 的实现缺陷。
+
+**Visible difference:** Linux 6.6.32 在 `release_task()` 前仍保留 zombie 的 PID、credentials、sighand 和
+PGID/SID 关系，允许 `kill(pid, 0)` 与经权限检查的 armed signal generation；Anemone 在相同阶段可能返回
+`ESRCH`，并且 process-group selectors 不能观察该 zombie。reap 后两者都应返回 `ESRCH`。
+
+**Exit Condition:** 由独立 task/topology/signal-permission follow-up 定义 zombie identity snapshot、exit/reap
+线性化、PGID/SID 保留与 `kill()` 正 PID/进程组返回规则；用 same/different UID、`CAP_KILL`、`SIGCONT` session、
+`sig=0`、armed signal、exit-vs-kill race 和 reap-after-kill 的 Linux source/runtime matrix 完成新的 target
+与 contract cutover。仅把 `leader()==None` 改成 success，或只修 LTP 清理路径，不能关闭本限制。
+
+**Owner:** task topology / signal permission lifecycle
+**Last Verified:** 2026-08-06
+**Related:** [POSIX Timer Thread-ID Gate 2 review](../rfcs/posix-timer-thread-id-notification/implementation.md#gate-2-pre-cutover-source-review--2026-08-06)

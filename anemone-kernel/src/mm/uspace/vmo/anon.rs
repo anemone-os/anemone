@@ -25,6 +25,14 @@ impl AnonObject {
         }
         Ok(())
     }
+
+    fn take_pages(&self, range: core::ops::Range<usize>) -> Result<RetiredFrames, SysError> {
+        if range.start >= self.max_pages || range.end > self.max_pages || range.start > range.end {
+            return Err(SysError::InvalidArgument);
+        }
+
+        Ok(retire_frame_range(&mut self.pages.write(), range))
+    }
 }
 
 impl VmObject for AnonObject {
@@ -73,13 +81,12 @@ impl VmObject for AnonObject {
     }
 
     fn discard_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
-        if range.start >= self.max_pages || range.end > self.max_pages || range.start > range.end {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let mut pages = self.pages.write();
-        pages.retain(|pidx, _| !range.contains(pidx));
+        drop(self.take_pages(range)?);
         Ok(())
+    }
+
+    fn decommit_range(&self, range: core::ops::Range<usize>) -> Result<RetiredFrames, SysError> {
+        self.take_pages(range)
     }
 
     fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {

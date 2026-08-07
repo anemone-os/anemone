@@ -132,7 +132,7 @@ fn materialize_embedded_at(mountpoint: &Path, bytes: &[u8]) -> Result<String, Ma
     let file = step(temp.open(), "open-temp", &temp_path)?;
     write_all(&file, bytes, &temp_path)?;
     step(
-        kernel_fchmod(&temp, InodePerm::all_rx(), Instant::now().to_duration()),
+        kernel_fchmod(&temp, InodePerm::all_rx(), realtime()),
         "chmod-temp",
         &temp_path,
     )?;
@@ -185,11 +185,7 @@ fn mount_embedded_ramfs(mountpoint: &Path) -> Result<PathRef, MaterializeError> 
     )?;
     let root = step(vfs_lookup(mountpoint), "resolve-ramfs-root", mountpoint)?;
     step(
-        kernel_fchmod(
-            &root,
-            InodePerm::all_rx() | InodePerm::IWUSR,
-            Instant::now().to_duration(),
-        ),
+        kernel_fchmod(&root, InodePerm::all_rx() | InodePerm::IWUSR, realtime()),
         "chmod-ramfs-root",
         mountpoint,
     )?;

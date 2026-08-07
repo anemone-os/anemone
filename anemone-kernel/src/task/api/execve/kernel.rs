@@ -69,6 +69,11 @@ pub fn kernel_execve_from_pathref(
 
                 task.dethread();
 
+                // POSIX timers are process-image resources, not inheritable
+                // task state. Dethreading has removed sibling syscall races;
+                // use the same owner-local deletion protocol as final exit.
+                task.get_thread_group().delete_all_posix_timers();
+
                 // these resoureces must be cleaned after dethreading.
                 task.split_files_if_shared();
                 task.close_cloexec_fds();

@@ -316,11 +316,7 @@ targets = ["host"]
         let error = format!("{:#}", App::from_str(&empty).unwrap_err());
         assert!(error.contains("target list must not be empty"), "{error}");
 
-        let duplicate = valid.replacen(
-            "targets = [\"host\"]",
-            "targets = [\"host\", \"host\"]",
-            1,
-        );
+        let duplicate = valid.replacen("targets = [\"host\"]", "targets = [\"host\", \"host\"]", 1);
         let error = format!("{:#}", App::from_str(&duplicate).unwrap_err());
         assert!(error.contains("duplicate build target 'host'"), "{error}");
 

@@ -3,11 +3,14 @@ use crate::{
     task::{
         Task, ThreadGroup, ThreadGroupInner,
         jobctl::group::ContinueEpoch,
-        sig::{SigNo, Signal, disposition::SignalDisposition, set::SigSet},
+        sig::{
+            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, SigNo, Signal,
+            disposition::SignalDisposition, pending::TimerSignalSlotId, set::SigSet,
+        },
     },
 };
 
-fn is_job_control_signal(no: SigNo) -> bool {
+pub(super) fn is_job_control_signal(no: SigNo) -> bool {
     matches!(
         no,
         SigNo::SIGSTOP | SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU | SigNo::SIGCONT
@@ -16,6 +19,12 @@ fn is_job_control_signal(no: SigNo) -> bool {
 
 fn is_conditional_stop_signal(no: SigNo) -> bool {
     matches!(no, SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU)
+}
+
+fn finish_timer_signal_flushes(signals: Vec<Signal>) {
+    for mut signal in signals {
+        signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Flushed);
+    }
 }
 
 impl Task {
@@ -67,6 +76,29 @@ impl Task {
                 },
             );
         }
+    }
+
+    /// Admit an exact-task timer control signal through the ThreadGroup's
+    /// generation transaction while retaining private occurrence ownership.
+    pub(super) fn enqueue_private_timer_job_control_signal(
+        self: &Arc<Self>,
+        slot: TimerSignalSlotId,
+        no: SigNo,
+        generation: u64,
+        episode: u64,
+        overrun: i32,
+    ) -> PosixTimerSignalEnqueue {
+        let Some(tg) = get_thread_group(&self.tgid()) else {
+            return PosixTimerSignalEnqueue::TargetExited;
+        };
+        tg.enqueue_timer_job_control_signal_to(
+            TimerJobControlSignalRoute::Private(self),
+            slot,
+            no,
+            generation,
+            episode,
+            overrun,
+        )
     }
 }
 
@@ -151,14 +183,16 @@ impl ThreadGroup {
     /// groups. currently we restrict clone's flags to avoid this. But later we
     /// should support that, and this method won't be put in [ThreadGroup].
     pub fn flush_specific_signals(&self, set: SigSet) {
-        {
+        let mut retired = {
             let inner = self.inner.write();
             let mut pending = inner.sig_pending.lock();
-            pending.flush_specific(set);
+            pending.flush_specific(set)
+        };
+        let members = self.get_members();
+        for member in &members {
+            retired.extend(member.sig_pending.lock().flush_specific(set));
         }
-        for member in self.get_members() {
-            member.sig_pending.lock().flush_specific(set);
-        }
+        finish_timer_signal_flushes(retired);
     }
 
     /// Deliver a process-directed occurrence after revalidating the exact task
@@ -203,7 +237,7 @@ impl ThreadGroup {
         // Topology selects the exact live member objects before the child owner
         // admits any cleanup, phase mutation, or parent-visible report. The
         // helper releases every guard before the effects below.
-        let Some((notify_targets, transition)) =
+        let Some(((notify_targets, retired), transition)) =
             self.with_child_status_transaction(|members, inner| {
                 if !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive)
                     || members.is_empty()
@@ -214,7 +248,7 @@ impl ThreadGroup {
                     // cannot admit cleanup, a control transition, or an ordinary
                     // SIGCONT occurrence.
                     return (
-                        Vec::new(),
+                        (Vec::new(), Vec::new()),
                         crate::task::jobctl::group::JobControlTransition::NONE,
                     );
                 }
@@ -227,7 +261,7 @@ impl ThreadGroup {
                         // this exact ThreadGroup. No cleanup or phase effect is
                         // allowed after that relation becomes stale.
                         return (
-                            Vec::new(),
+                            (Vec::new(), Vec::new()),
                             crate::task::jobctl::group::JobControlTransition::NONE,
                         );
                     }
@@ -239,7 +273,7 @@ impl ThreadGroup {
                     // snapshot. A departed ThreadGroup must not receive any
                     // control cleanup, occurrence, or phase side effect.
                     return (
-                        Vec::new(),
+                        (Vec::new(), Vec::new()),
                         crate::task::jobctl::group::JobControlTransition::NONE,
                     );
                 }
@@ -254,11 +288,11 @@ impl ThreadGroup {
                         SigNo::SIGTTOU,
                     ])
                 };
-                inner.sig_pending.lock().flush_specific(opposite);
+                let mut retired = inner.sig_pending.lock().flush_specific(opposite);
                 for member in members {
                     // Reserved delivery is deliberately outside ordinary pending
                     // cleanup and remains owned by the target task.
-                    member.sig_pending.lock().flush_specific(opposite);
+                    retired.extend(member.sig_pending.lock().flush_specific(opposite));
                 }
 
                 let transition = match no {
@@ -329,18 +363,231 @@ impl ThreadGroup {
                         members.to_vec()
                     }
                 };
-                (notify_targets, transition)
+                ((notify_targets, retired), transition)
             })
         else {
             return;
         };
         self.finish_job_control_transition(transition);
+        // Opposite-class cleanup may retire POSIX timer occurrences sharing a
+        // control signal number. Complete their owner callbacks only after the
+        // ThreadGroup generation transaction has released every guard.
+        finish_timer_signal_flushes(retired);
 
         for member in notify_targets {
             if !member.is_current_sig_mask_blocking(no) {
                 notify(&member, false);
             }
         }
+    }
+
+    /// Admit a POSIX-timer control signal without moving its occurrence into
+    /// ordinary standard-signal storage. Job-control effects and opposite-class
+    /// cleanup remain one ThreadGroup transaction; any deliverable occurrence
+    /// stays in the timer's preallocated signal slot.
+    pub(super) fn enqueue_timer_job_control_signal(
+        &self,
+        slot: TimerSignalSlotId,
+        no: SigNo,
+        generation: u64,
+        episode: u64,
+        overrun: i32,
+    ) -> PosixTimerSignalEnqueue {
+        self.enqueue_timer_job_control_signal_to(
+            TimerJobControlSignalRoute::Shared,
+            slot,
+            no,
+            generation,
+            episode,
+            overrun,
+        )
+    }
+
+    fn enqueue_timer_job_control_signal_to(
+        &self,
+        route: TimerJobControlSignalRoute<'_>,
+        slot: TimerSignalSlotId,
+        no: SigNo,
+        generation: u64,
+        episode: u64,
+        overrun: i32,
+    ) -> PosixTimerSignalEnqueue {
+        let Some(((outcome, notify_targets, no, retired), transition)) = self
+            .with_child_status_transaction(|members, inner| {
+                if !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive)
+                    || members.is_empty()
+                {
+                    return (
+                        (
+                            PosixTimerSignalEnqueue::TargetExited,
+                            Vec::new(),
+                            no,
+                            Vec::new(),
+                        ),
+                        crate::task::jobctl::group::JobControlTransition::NONE,
+                    );
+                }
+
+                if let Some(target) = route.private_target()
+                    && (target.tgid() != self.tgid()
+                        || !members.iter().any(|member| Arc::ptr_eq(member, target)))
+                {
+                    return (
+                        (
+                            PosixTimerSignalEnqueue::TargetExited,
+                            Vec::new(),
+                            no,
+                            Vec::new(),
+                        ),
+                        crate::task::jobctl::group::JobControlTransition::NONE,
+                    );
+                }
+
+                let registration_no = match route {
+                    TimerJobControlSignalRoute::Shared => {
+                        inner.sig_pending.lock().timer_signal_no(slot)
+                    },
+                    TimerJobControlSignalRoute::Private(target) => {
+                        let pending = target.sig_pending.lock();
+                        let Some(no) = pending.admitted_timer_signal_no(slot) else {
+                            return (
+                                (
+                                    PosixTimerSignalEnqueue::TargetExited,
+                                    Vec::new(),
+                                    no,
+                                    Vec::new(),
+                                ),
+                                crate::task::jobctl::group::JobControlTransition::NONE,
+                            );
+                        };
+                        no
+                    },
+                };
+                assert_eq!(
+                    registration_no, no,
+                    "timer job-control route changed registration signal"
+                );
+                assert!(is_job_control_signal(no));
+                let opposite = if no != SigNo::SIGCONT {
+                    SigSet::new_with_signos(&[SigNo::SIGCONT])
+                } else {
+                    SigSet::new_with_signos(&[
+                        SigNo::SIGSTOP,
+                        SigNo::SIGTSTP,
+                        SigNo::SIGTTIN,
+                        SigNo::SIGTTOU,
+                    ])
+                };
+                let mut retired = inner.sig_pending.lock().flush_specific(opposite);
+                for member in members.iter() {
+                    retired.extend(member.sig_pending.lock().flush_specific(opposite));
+                }
+
+                if no == SigNo::SIGSTOP {
+                    let transition = if self.tgid() == Tid::INIT {
+                        crate::task::jobctl::group::JobControlTransition::NONE
+                    } else {
+                        let ThreadGroupInner {
+                            members,
+                            job_control,
+                            ..
+                        } = &mut *inner;
+                        job_control
+                            .as_mut()
+                            .expect("jobctl: user ThreadGroup lacks control state")
+                            .request_unconditional_stop(members, self.tgid(), no)
+                    };
+                    return (
+                        (PosixTimerSignalEnqueue::Consumed, Vec::new(), no, retired),
+                        transition,
+                    );
+                }
+
+                let disposition_owner = route.private_target().unwrap_or_else(|| {
+                    members
+                        .first()
+                        .expect("jobctl: live ThreadGroup has no disposition owner")
+                });
+                let disposition = disposition_owner.sig_disposition.read().get_disposition(no);
+                let (discard, stop_epoch, transition) = if no == SigNo::SIGCONT {
+                    let discard = disposition.action.is_explicit_ignore()
+                        || disposition.action.is_default_ignore()
+                            && !disposition_owner.is_current_sig_mask_blocking(no);
+                    let transition = inner
+                        .job_control
+                        .as_mut()
+                        .expect("jobctl: user ThreadGroup lacks control state")
+                        .continue_generation(self.tgid());
+                    (discard, None, transition)
+                } else {
+                    assert!(is_conditional_stop_signal(no));
+                    let epoch = inner
+                        .job_control
+                        .as_ref()
+                        .expect("jobctl: user ThreadGroup lacks control state")
+                        .continue_epoch();
+                    (
+                        disposition.action.is_ignored(),
+                        Some(epoch),
+                        crate::task::jobctl::group::JobControlTransition::NONE,
+                    )
+                };
+                let outcome = match route {
+                    TimerJobControlSignalRoute::Shared => {
+                        let mut pending = inner.sig_pending.lock();
+                        let outcome = pending
+                            .enqueue_timer_signal(slot, generation, episode, overrun, discard);
+                        if let Some(epoch) = stop_epoch
+                            && matches!(
+                                outcome,
+                                PosixTimerSignalEnqueue::Queued
+                                    | PosixTimerSignalEnqueue::AlreadyPending
+                            )
+                        {
+                            pending.set_timer_signal_default_stop_epoch(slot, epoch);
+                        }
+                        outcome
+                    },
+                    TimerJobControlSignalRoute::Private(target) => {
+                        let mut pending = target.sig_pending.lock();
+                        let outcome = pending
+                            .enqueue_timer_signal(slot, generation, episode, overrun, discard);
+                        if let Some(epoch) = stop_epoch
+                            && matches!(
+                                outcome,
+                                PosixTimerSignalEnqueue::Queued
+                                    | PosixTimerSignalEnqueue::AlreadyPending
+                            )
+                        {
+                            pending.set_timer_signal_default_stop_epoch(slot, epoch);
+                        }
+                        outcome
+                    },
+                };
+                let notify_targets = if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+                    match route {
+                        TimerJobControlSignalRoute::Shared => members.to_vec(),
+                        TimerJobControlSignalRoute::Private(target) => vec![target.clone()],
+                    }
+                } else {
+                    Vec::new()
+                };
+                ((outcome, notify_targets, no, retired), transition)
+            })
+        else {
+            return PosixTimerSignalEnqueue::TargetExited;
+        };
+
+        self.finish_job_control_transition(transition);
+        // Opposite-class cleanup spans shared and private owners. Each owner
+        // extracts callbacks under its own leaf lock and completes them here.
+        finish_timer_signal_flushes(retired);
+        for member in notify_targets {
+            if !member.is_current_sig_mask_blocking(no) {
+                notify(&member, false);
+            }
+        }
+        outcome
     }
 
     /// Consume one live conditional default-stop occurrence. The occurrence
@@ -388,6 +635,21 @@ enum JobControlSignalRoute<'a> {
     Private(&'a Arc<Task>),
     SharedForExactMember(&'a Arc<Task>),
     SharedForProcessGroup(Tid),
+}
+
+#[derive(Clone, Copy)]
+enum TimerJobControlSignalRoute<'a> {
+    Shared,
+    Private(&'a Arc<Task>),
+}
+
+impl<'a> TimerJobControlSignalRoute<'a> {
+    fn private_target(self) -> Option<&'a Arc<Task>> {
+        match self {
+            Self::Shared => None,
+            Self::Private(target) => Some(target),
+        }
+    }
 }
 
 impl<'a> JobControlSignalRoute<'a> {

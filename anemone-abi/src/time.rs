@@ -67,6 +67,80 @@ pub mod linux {
         pub it_value: TimeSpec,
     }
 
+    /// Native asm-generic `struct sigevent`. The trailing union stays raw ABI
+    /// storage; the syscall boundary exposes only the `_tid` interpretation
+    /// used by `SIGEV_THREAD_ID`.
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
+    #[repr(C)]
+    pub struct SigEvent {
+        pub sigev_value: u64,
+        pub sigev_signo: i32,
+        pub sigev_notify: i32,
+        pub _sigev_un: [i32; 12],
+    }
+
+    impl SigEvent {
+        /// Reads Linux's native `_tid` union member for `SIGEV_THREAD_ID`.
+        /// Other union interpretations remain opaque at the syscall boundary.
+        pub const fn sigev_notify_thread_id(&self) -> i32 {
+            self._sigev_un[0]
+        }
+    }
+
+    /// Native 64-bit Linux `struct __kernel_timex` used by `clock_adjtime`.
+    ///
+    /// Field order and explicit padding are UAPI, not Rust implementation
+    /// details. They match asm-generic time64's 208-byte layout on RV64 and
+    /// LA64; removing apparently unused fields would corrupt userspace copies.
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
+    #[repr(C)]
+    pub struct Timex {
+        pub modes: u32,
+        pub _padding0: i32,
+        pub offset: i64,
+        pub freq: i64,
+        pub maxerror: i64,
+        pub esterror: i64,
+        pub status: i32,
+        pub _padding1: i32,
+        pub constant: i64,
+        pub precision: i64,
+        pub tolerance: i64,
+        pub time: TimeVal,
+        pub tick: i64,
+        pub ppsfreq: i64,
+        pub jitter: i64,
+        pub shift: i32,
+        pub _padding2: i32,
+        pub stabil: i64,
+        pub jitcnt: i64,
+        pub calcnt: i64,
+        pub errcnt: i64,
+        pub stbcnt: i64,
+        pub tai: i32,
+        pub padding: [i32; 11],
+    }
+
     #[derive(
         Debug,
         Clone,
@@ -102,6 +176,28 @@ pub mod linux {
         pub const TIMER_ABSTIME: i32 = 1;
     }
 
+    pub mod timex {
+        // Numeric values are Linux UAPI. The kernel syscall layer decides which
+        // recognized operations are implemented; this ABI module only names
+        // the wire representation.
+        pub const ADJ_OFFSET: u32 = 0x0001;
+        pub const ADJ_FREQUENCY: u32 = 0x0002;
+        pub const ADJ_MAXERROR: u32 = 0x0004;
+        pub const ADJ_ESTERROR: u32 = 0x0008;
+        pub const ADJ_STATUS: u32 = 0x0010;
+        pub const ADJ_TIMECONST: u32 = 0x0020;
+        pub const ADJ_TAI: u32 = 0x0080;
+        pub const ADJ_SETOFFSET: u32 = 0x0100;
+        pub const ADJ_MICRO: u32 = 0x1000;
+        pub const ADJ_NANO: u32 = 0x2000;
+        pub const ADJ_TICK: u32 = 0x4000;
+        pub const ADJ_OFFSET_SINGLESHOT: u32 = 0x8001;
+        pub const ADJ_OFFSET_SS_READ: u32 = 0xa001;
+
+        pub const STA_UNSYNC: i32 = 0x0040;
+        pub const TIME_ERROR: i32 = 5;
+    }
+
     pub mod timerfd {
         use crate::fs::linux::open::{O_CLOEXEC, O_NONBLOCK};
 
@@ -110,6 +206,13 @@ pub mod linux {
 
         pub const TFD_CLOEXEC: u32 = O_CLOEXEC;
         pub const TFD_NONBLOCK: u32 = O_NONBLOCK;
+    }
+
+    pub mod posix_timer {
+        pub const SIGEV_SIGNAL: i32 = 0;
+        pub const SIGEV_NONE: i32 = 1;
+        pub const SIGEV_THREAD: i32 = 2;
+        pub const SIGEV_THREAD_ID: i32 = 4;
     }
 
     pub mod itimer {
@@ -139,3 +242,28 @@ pub mod linux {
 }
 
 pub mod native {}
+
+#[cfg(test)]
+mod tests {
+    use super::linux::{SigEvent, Timex};
+
+    #[test]
+    fn native_timex_layout_matches_asm_generic_time64() {
+        assert_eq!(core::mem::size_of::<Timex>(), 208);
+        assert_eq!(core::mem::align_of::<Timex>(), 8);
+    }
+
+    #[test]
+    fn native_sigevent_layout_matches_asm_generic() {
+        assert_eq!(core::mem::size_of::<SigEvent>(), 64);
+        assert_eq!(core::mem::align_of::<SigEvent>(), 8);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_value), 0);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_signo), 8);
+        assert_eq!(core::mem::offset_of!(SigEvent, sigev_notify), 12);
+        assert_eq!(core::mem::offset_of!(SigEvent, _sigev_un), 16);
+
+        let mut event = SigEvent::default();
+        event._sigev_un[0] = 0x1234_5678;
+        assert_eq!(event.sigev_notify_thread_id(), 0x1234_5678);
+    }
+}

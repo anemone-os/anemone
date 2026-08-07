@@ -21,12 +21,11 @@ fn sys_gettimeofday(
     let mut guard = uspace.lock();
 
     if let Some(tv) = tv {
-        // todo: unix epoch time instead of uptime
-        let uptime = uptime().to_duration();
+        let now = realtime();
         let mut tv = UserWritePtr::<TimeVal>::try_new(tv, &mut guard)?;
         tv.write(TimeVal {
-            tv_sec: uptime.as_secs() as i64,
-            tv_usec: (uptime.subsec_micros()) as i64,
+            tv_sec: now.as_secs() as i64,
+            tv_usec: now.subsec_micros() as i64,
         })?;
     }
 

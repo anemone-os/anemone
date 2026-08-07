@@ -1,20 +1,52 @@
-use crate::{prelude::*, task::kworker::local_system_worker};
+use crate::{prelude::*, task::kworker::system_worker_on};
 
-use super::{TimerEvent, deadline_after, push_timer_event};
+use super::{TimerHandle, TimerLane, deadline_after, push_realtime_timer_event, push_timer_event};
 
-/// Schedule a timer event whose completion runs on the local CPU's system
+/// Schedule a timer event whose completion runs on the request CPU's system
 /// worker. Timer core remains the owner of deadline and cancellation semantics;
-/// it transfers the callback to the worker queue only after expiry.
+/// it transfers the callback only after expiry.
 pub fn schedule_threaded_timer_event(
     expire: Duration,
     callback: Box<dyn FnOnce() + Send + 'static>,
-) {
-    push_timer_event(TimerEvent::new_threaded(deadline_after(expire), callback));
+) -> TimerHandle {
+    let deadline = deadline_after(expire);
+    push_timer_event(deadline, TimerLane::Threaded(callback))
 }
 
-pub(super) fn enqueue_expired_threaded(callback: Box<dyn FnOnce() + Send + 'static>) {
-    debug_assert!(IntrArch::local_intr_disabled());
-    local_system_worker().submit_boxed(callback);
+/// Schedule an absolute realtime request on the local CPU's timer queue.
+///
+/// `cancel_on_change_seq` is the timekeeper snapshot taken before registration.
+/// When present, any later sequence consumes the request through
+/// `clock_changed`; otherwise calendar steps only re-evaluate `deadline_ns`.
+pub(crate) fn schedule_realtime_threaded_timer_event(
+    deadline_ns: u64,
+    cancel_on_change_seq: Option<u64>,
+    expired: Box<dyn FnOnce() + Send + 'static>,
+    clock_changed: Option<Box<dyn FnOnce() + Send + 'static>>,
+) -> TimerHandle {
+    assert_eq!(
+        cancel_on_change_seq.is_some(),
+        clock_changed.is_some(),
+        "cancel-on-set identity and callback must be installed together"
+    );
+    push_realtime_timer_event(
+        deadline_ns,
+        cancel_on_change_seq,
+        TimerLane::RealtimeThreaded {
+            expired,
+            clock_changed,
+        },
+    )
+}
+
+pub(super) fn enqueue_expired_threaded_on(
+    owner_cpu: CpuId,
+    callback: Box<dyn FnOnce() + Send + 'static>,
+) {
+    // Realtime clock-step rechecks can dequeue a request from a remote timer
+    // queue. Preserve the request's owner-CPU execution lane without giving
+    // timer core access to kworker queue or kthread representation.
+    system_worker_on(owner_cpu).submit_boxed(callback);
 }
 
 #[cfg(feature = "kunit")]
@@ -28,7 +60,7 @@ mod kunits {
         let callback_completed = completed.clone();
         let callback_done = done.clone();
 
-        schedule_threaded_timer_event(
+        let _request = schedule_threaded_timer_event(
             Duration::from_millis(1),
             Box::new(move || {
                 assert!(
@@ -71,7 +103,7 @@ mod kunits {
             let callback_completed = completed.clone();
             let callback_done = done.clone();
             let callback_observed = observed.clone();
-            schedule_threaded_timer_event(
+            let _request = schedule_threaded_timer_event(
                 Duration::from_millis(1),
                 Box::new(move || {
                     assert!(!crate::percpu::in_hwirq());

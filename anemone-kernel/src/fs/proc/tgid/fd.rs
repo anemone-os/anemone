@@ -121,7 +121,7 @@ fn new_proc_fd_entry_inode(
         AnyOpaque::new(ProcFdEntryPrivate { binding, fd }),
     );
 
-    let now = Instant::now().to_duration();
+    let now = realtime();
     inode.set_meta(&InodeMeta {
         nlink: 1,
         size: 0,
@@ -187,7 +187,7 @@ fn proc_fd_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let dir = proc_fd_dir_private(inode);
     let _leader = validate_fd_access(&dir.binding)?;
     let meta = inode.inode().meta_snapshot();
-    let now = Instant::now().to_duration();
+    let now = realtime();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,
@@ -217,7 +217,7 @@ fn proc_fd_entry_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let leader = validate_fd_access(&entry.binding)?;
     let _file_desc = lookup_proc_fd(&leader, entry.fd)?;
     let meta = inode.inode().meta_snapshot();
-    let now = Instant::now().to_duration();
+    let now = realtime();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,

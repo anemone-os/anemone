@@ -2,10 +2,11 @@
 //! - https://elixir.bootlin.com/linux/v7.0-rc6/source/arch/loongarch/include/asm/time.h
 
 use crate::prelude::*;
+use crate::sync::mono::MonoOnce;
 use la_insc::{
     insc::rdtime,
     reg::{
-        csr::{tcfg, ticlr, tid},
+        csr::{cntc, tcfg, ticlr, tid},
         timer::Tcfg,
     },
 };
@@ -13,13 +14,18 @@ use la_insc::{
 pub struct LA64TimeArch;
 
 /// Hardware timer frequency in hertz, discovered from firmware.
-static mut CLOCK_FREQUENCY_HZ: Option<u64> = None;
+static CLOCK_FREQUENCY_HZ: MonoOnce<u64> = unsafe { MonoOnce::new() };
+
+/// Shared correction written to each CPU's local CNTC register before that CPU
+/// publishes timekeeping readiness.
+static CLOCK_COUNTER_OFFSET: MonoOnce<u64> = unsafe { MonoOnce::new() };
 
 /// Record the timer frequency reported by firmware.
 pub unsafe fn set_hw_clock_freq(freq_hz: u64) {
-    unsafe {
-        CLOCK_FREQUENCY_HZ = Some(freq_hz);
-    }
+    assert!(freq_hz > 0, "LoongArch stable counter frequency must be nonzero");
+    CLOCK_FREQUENCY_HZ.init(|slot| {
+        slot.write(freq_hz);
+    });
 }
 
 impl TimeArchTrait for LA64TimeArch {
@@ -29,16 +35,21 @@ impl TimeArchTrait for LA64TimeArch {
 
 impl LocalClockSourceArch for LA64TimeArch {
     fn curr_monotonic_time() -> u64 {
-        rdtime(cur_cpu_id().physical_id().get())
+        // RDTIME reads the architecture stable counter shared by all cores;
+        // the instruction's second output is only a constant-counter ID.
+        rdtime()
     }
 
     fn monotonic_freq_hz() -> u64 {
-        unsafe { CLOCK_FREQUENCY_HZ.expect("clock frequency not set") }
+        *CLOCK_FREQUENCY_HZ.get()
     }
 }
 
 impl LocalClockEventArch for LA64TimeArch {
     fn program_next_timer(deadline: u64) {
+        // TCFG stores its initial value in bits 63:2. `Tcfg::new` accepts that
+        // field value and shifts it into place, so convert the shared raw-counter
+        // delta to the register field before constructing the CSR value.
         let countdown = deadline.saturating_sub(Self::curr_monotonic_time()) >> 2;
 
         unsafe {
@@ -48,6 +59,57 @@ impl LocalClockEventArch for LA64TimeArch {
 }
 
 impl LA64TimeArch {
+    /// Establish the correction that makes every CPU's RDTIME value part of one
+    /// counter domain. Architecturally, `RDTIME = raw counter + CNTC`; subtracting
+    /// the inherited CNTC therefore recovers raw counter before choosing the
+    /// shared zero point. This is the same `-(drdtime() - CNTC)` correction used
+    /// by Linux before writing CNTC on every secondary CPU.
+    pub fn init_shared_counter_offset() {
+        let inherited_offset = unsafe { cntc::csr_read() };
+        let raw_counter = rdtime().wrapping_sub(inherited_offset);
+        let shared_offset = 0u64.wrapping_sub(raw_counter);
+        CLOCK_COUNTER_OFFSET.init(|slot| {
+            slot.write(shared_offset);
+        });
+        unsafe { cntc::csr_write(shared_offset) };
+    }
+
+    /// Initialize the shared source frequency from CPUCFG before AP startup
+    /// when firmware did not publish `timebase-frequency`.
+    pub fn init_clock_source_from_cpucfg() {
+        fn rd_cpucfg(reg: usize) -> u32 {
+            let val: u32;
+            unsafe {
+                core::arch::asm!(
+                    "cpucfg {val}, {reg}",
+                    val = out(reg) val,
+                    reg = in(reg) reg,
+                );
+            }
+            val
+        }
+
+        const LOONGARCH_EXT_LLFTP: u32 = bit!(14);
+
+        let extensions = rd_cpucfg(2);
+        assert!(
+            extensions & LOONGARCH_EXT_LLFTP != 0,
+            "llftp extension not supported, cannot determine timer frequency"
+        );
+
+        let base_freq = rd_cpucfg(4);
+        let ratio = rd_cpucfg(5);
+        // CPUCFG.5 packs multiplier in the low half and divisor in the high
+        // half. Compute in u64 so the u32 base times u16 multiplier cannot wrap.
+        let multiplier = ratio & 0xffff;
+        let divisor = (ratio >> 16) & 0xffff;
+        assert!(divisor != 0, "LoongArch stable counter divisor is zero");
+        let freq_hz = (base_freq as u64 * multiplier as u64) / divisor as u64;
+
+        unsafe { set_hw_clock_freq(freq_hz) };
+        knoticeln!("detected timer frequency: {} Hz", freq_hz);
+    }
+
     pub fn claim_timer_interrupt() {
         unsafe {
             ticlr::csr_write(1);
@@ -57,49 +119,10 @@ impl LA64TimeArch {
     /// This does not program the first timer interrupt.
     pub fn init_this_cpu() {
         unsafe {
+            // CNTC is CPU-local. Every AP must install the BSP-owned offset
+            // before the common timekeeper may observe its RDTIME value.
+            cntc::csr_write(*CLOCK_COUNTER_OFFSET.get());
             tid::csr_write(cur_cpu_id().physical_id().get() as u32);
-        }
-
-        unsafe {
-            if CLOCK_FREQUENCY_HZ == None {
-                // device tree does not specify stable time source frequency.
-                // we should calculate it from csr.
-
-                // see reference code in linux kernel for more details.
-
-                fn rd_cpucfg(reg: usize) -> u32 {
-                    let val: u32;
-                    unsafe {
-                        core::arch::asm!(
-                            "cpucfg {val}, {reg}",
-                            val = out(reg) val,
-                            reg = in(reg) reg,
-                        );
-                    }
-                    val
-                }
-
-                const LOONGARCH_EXT_LLFTP: u32 = bit!(14);
-
-                let extensions: u32 = rd_cpucfg(2);
-                if extensions & LOONGARCH_EXT_LLFTP == 0 {
-                    panic!("llftp extension not supported, cannot determine timer frequency");
-                }
-
-                let base_freq: u32 = rd_cpucfg(4);
-                let (cfm, cfd) = {
-                    let val = rd_cpucfg(5);
-                    let cfm = val & 0xffff;
-                    let cfd = (val >> 16) & 0xffff;
-                    (cfm, cfd)
-                };
-
-                let freq_hz = (base_freq as u64 * cfm as u64) / cfd as u64;
-
-                CLOCK_FREQUENCY_HZ = Some(freq_hz);
-
-                knoticeln!("detected timer frequency: {} Hz", freq_hz);
-            }
         }
     }
 }

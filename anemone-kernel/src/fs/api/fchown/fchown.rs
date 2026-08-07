@@ -14,7 +14,7 @@ fn sys_fchown(fd: Fd, owner: Uid, group: Gid) -> Result<u64, SysError> {
         return Err(SysError::BadFileDescriptor);
     }
     let pathref = file_desc.vfs_file().path().clone();
-    let ctime = Instant::now().to_duration();
+    let ctime = realtime();
 
     let r = kernel_fchown(
         &pathref,

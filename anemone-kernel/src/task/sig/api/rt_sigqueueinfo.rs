@@ -3,7 +3,7 @@ use crate::{
     syscall::user_access::UserReadPtr,
     task::sig::{
         Signal,
-        info::{SiCode, SigInfoFields, SigRt},
+        info::{SiCode, SigInfoFields, SigRt, SigTimer},
     },
 };
 
@@ -69,12 +69,28 @@ fn sys_rt_sigqueueinfo(pid: i32, sig: KillSignal, uinfo: u64) -> Result<u64, Sys
         return Err(SysError::InvalidArgument);
     }
 
-    let si_fields = unsafe {
-        SigInfoFields::Rt(SigRt {
-            pid: task.tgid(),
-            uid: task.cred().uid.real,
-            sigval: sifields.rt().sigval.as_u64(),
-        })
+    let si_fields = match si_code {
+        SiCode::Queue => {
+            let rt = sifields.rt();
+            SigInfoFields::Rt(SigRt {
+                pid: task.tgid(),
+                uid: task.cred().uid.real,
+                sigval: rt.sigval.as_u64(),
+            })
+        },
+        // Linux permits negative si_code values from rt_sigqueueinfo. Keep
+        // the timer-shaped union fields intact for ABI/frame validation,
+        // but never accept the kernel-private word from userspace.
+        SiCode::Timer => {
+            let timer = sifields.timer();
+            SigInfoFields::Timer(SigTimer {
+                tid: timer.tid,
+                overrun: timer.overrun,
+                sigval: timer.sigval.as_u64(),
+                sys_private: 0,
+            })
+        },
+        _ => return Err(SysError::InvalidArgument),
     };
 
     // Linux rt_sigqueueinfo() first resolves pid as PIDTYPE_PID, then sends a

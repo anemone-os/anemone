@@ -43,6 +43,10 @@ name = "udp-errqueue-oracle"
 installed_dir = "/bin"
 
 [[apps]]
+name = "clock_tests"
+installed_dir = "/bin"
+
+[[apps]]
 name = "userptr"
 installed_dir = "/bin"
 

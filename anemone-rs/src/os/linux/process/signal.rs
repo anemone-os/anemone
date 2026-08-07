@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::sys::linux::process::signal;
+use anemone_abi::time::linux::TimeSpec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SigNo(usize);
@@ -145,4 +146,20 @@ pub fn raise(sig: SigNo) -> Result<(), Errno> {
 
 pub fn sigreturn() -> Result<(), Errno> {
     signal::rt_sigreturn().map(|_| ())
+}
+
+pub fn rt_sigtimedwait(
+    set: &SigSet,
+    timeout: Option<&TimeSpec>,
+) -> Result<SigInfo, Errno> {
+    // The kernel fills the complete Linux siginfo wire frame; expose the
+    // typed value only after the syscall has completed and copied it out.
+    let mut info = SigInfoWrapper::default();
+    signal::rt_sigtimedwait(
+        set as *const SigSet as u64,
+        &mut info as *mut SigInfoWrapper as u64,
+        timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
+        size_of::<SigSet>() as u64,
+    )?;
+    Ok(info.info)
 }

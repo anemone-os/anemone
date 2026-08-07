@@ -4,12 +4,12 @@
 **状态：** Active
 **Owner：** Signal pending / disposition protocol
 **参与领域：** signal / task / thread group / architecture trap return
-**覆盖范围：** task-directed 与 ThreadGroup-directed occurrence 的 pending 归属、ignored admission、普通 return-to-user 的 fetch / action selection，以及control-signal generation handoff
+**覆盖范围：** task-directed 与 ThreadGroup-directed occurrence 的 pending 归属、POSIX timer occurrence 身份、ignored admission、普通 return-to-user 的 fetch / action selection，以及control-signal generation handoff
 **不覆盖：** temporary-mask reserved-delivery handoff、`rt_sigtimedwait` 的完整同步消费语义、ThreadGroup-owned job-control phase / report、fresh / clone / exec user entry
 **实现位置：** `anemone-kernel/src/task/sig/`、`anemone-kernel/src/arch/{riscv64,loongarch64}/exception/trap/utrap.rs`
 **依赖：** `JOBCTL-SIGNAL-001`、`JOBCTL-STATE-001`
 **Pending Successor：** None
-**最后核验：** 2026-07-21
+**最后核验：** 2026-08-06
 
 ## 状态与能力所有权
 
@@ -17,6 +17,7 @@
 | --- | --- | --- | --- |
 | task-private pending occurrence | 目标 `Task::sig_pending` | sender 只提交 occurrence | task-directed delivery |
 | ThreadGroup-shared pending occurrence | `ThreadGroupInner::sig_pending` | member 只通过 fetch / notification 参与 | process-directed delivery |
+| POSIX timer pending occurrence | shared owner内的per-registration slot，或exact target的private owner内的per-registration slot | timer owner只提交identity/overrun并接收锁外回告 | `SI_TIMER` delivery |
 | live disposition | 共享 `SignalDisposition` | receiver 和 trap-return 读取 snapshot | ignored admission 与 action selection |
 | current signal mask | 目标 task 的 signal-mask owner | pending scan 读取 snapshot | fetch eligibility |
 
@@ -24,15 +25,15 @@
 
 ## SIGNAL-PENDING-001 — Directed occurrence 只进入对应 pending owner
 
-**规则：** task-directed ordinary occurrence进入目标task的private pending；ThreadGroup-directed ordinary occurrence只进入该ThreadGroup的shared pending。standard signal使用单slot合并，realtime signal使用FIFO queue。ordinary pending occurrence在被fetch、显式flush或pending owner teardown前由对应pending owner持有；temporary-mask classifier完成claim后的task-private handoff由[`SIGNAL-TEMP-MASK-002`](./temporary-mask-delivery.md#signal-temp-mask-002--defer-必须先建立-task-private-delivery-handoff)负责。`SIGSTOP`是唯一scoped exception：合法generation完成opposite-class ordinary pending cleanup和global-init admission后，直接作为[`JOBCTL-SIGNAL-001`](../task/job-control.md#jobctl-signal-001--control-signal-generation与jobctl提交同序)的control input消费，不进入private / shared pending。
+**规则：** task-directed ordinary occurrence进入目标task的private pending；ThreadGroup-directed ordinary occurrence只进入该ThreadGroup的shared pending。ordinary standard signal使用单slot合并，ordinary realtime signal使用FIFO queue。POSIX timer `SI_TIMER`按registration使用独立slot：`SIGEV_SIGNAL`放在shared owner，`SIGEV_THREAD_ID`只放在注册exact task的private owner；不同timer即使选择同一个standard signal也不合并，同一timer已经pending时只更新该slot的generation/episode/overrun。timer owner不得读取signal私有容器，只接收typed enqueue结果；pending owner在释放自身锁和ThreadGroup guard后才回告delivery/flush identity。ordinary或timer pending occurrence在被fetch、显式flush或pending owner teardown前由对应pending owner持有；temporary-mask classifier完成claim后的task-private handoff由[`SIGNAL-TEMP-MASK-002`](./temporary-mask-delivery.md#signal-temp-mask-002--defer-必须先建立-task-private-delivery-handoff)负责。`SIGSTOP`是唯一scoped exception：合法generation完成opposite-class ordinary/timer pending cleanup和global-init admission后，直接作为[`JOBCTL-SIGNAL-001`](../task/job-control.md#jobctl-signal-001--control-signal-generation与jobctl提交同序)的control input消费，不进入private / shared pending。
 
 **违反表现：** 同一个 group-directed occurrence 被复制到多个 member、private / shared 同时持有同一 occurrence，或 notification 结果反向决定 pending truth。
 
-**验证 / Enforcement：** `Task::recv_signal()`、`ThreadGroup::recv_signal()`、owner-private `ThreadGroup::recv_job_control_signal()`、`PendingSignals::{push_signal,fetch_any,flush_specific}`源码审计；task/group-directed四种stop signal、opposite cleanup与signal LTP回归。
+**验证 / Enforcement：** `Task::recv_signal()`、`ThreadGroup::recv_signal()`、owner-private `ThreadGroup::recv_job_control_signal()`、`PendingSignals::{push_signal,enqueue_timer_signal,fetch_any,flush_specific}`源码审计；task/group-directed stop signal、同号多timer、timer overrun/flush/slot reuse与signal回归。RV64 release通过480/480 KUnit及RFC专属 exact-task `SI_TIMER` raw oracle；LA64 runtime本轮由维护者授权不运行，记为`Not Run / waived`。
 
 **最初来源：** 现有 Signal 实现；[Signal temporary-mask restore 事务](../../devlog/transactions/2026-06-06-signal-temp-mask-restore.md)记录了 pending 与 deferred delivery 的后续演进。
 
-**当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。
+**当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)；[POSIX timer Gate 5 cutover](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md#gate-5-closure-与-pt-signal-cutover--2026-08-04)。
 
 ## SIGNAL-PENDING-002 — Group-directed publication 与 member notification 分离
 
@@ -44,7 +45,7 @@
 
 **最初来源：** 现有 Signal 与 ThreadGroup 实现。
 
-**当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。
+**当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)；[POSIX Timer Thread-ID RFC Gate 2/3 closure](../../rfcs/posix-timer-thread-id-notification/implementation.md#gate-3-closure--2026-08-06)。
 
 ## SIGNAL-ACTION-001 — Ignored disposition 在 pending publication 前生效
 

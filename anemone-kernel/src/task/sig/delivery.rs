@@ -16,8 +16,8 @@ use crate::{
 };
 
 use super::{
-    RtSigFrame, SigNo, Signal, SignalArchTrait, disposition::SignalDisposition,
-    pending::FetchedSignal,
+    PosixTimerSignalCompletion, RtSigFrame, SigNo, Signal, SignalArchTrait,
+    disposition::SignalDisposition, pending::FetchedSignal,
 };
 
 /// Typed wait outcome candidate for delayed temporary-mask classification.
@@ -181,21 +181,29 @@ impl Task {
     /// See [PendingSignals::fetch_specific] for more details.
     pub fn fetch_specific_signal(&self, set: SigSet) -> Option<Signal> {
         // first private pending
-        {
+        let private = {
             let mut pending = self.sig_pending.lock();
-            if let Some(signal) = pending.fetch_specific(set) {
-                return Some(signal);
-            }
+            pending.fetch_specific(set)
+        };
+        if let Some(mut signal) = private {
+            // Synchronous signal consumption owns the same dequeue handoff as
+            // trap-return delivery. The private pending guard is gone here.
+            signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Dequeued);
+            return Some(signal);
         }
 
         // no private signals satisfied the criteria. check shared pending signals.
-        {
+        let shared = {
             let tg = self.get_thread_group();
             let tg_inner = tg.inner.read();
             let mut pending = tg_inner.sig_pending.lock();
-            if let Some(signal) = pending.fetch_specific(set) {
-                return Some(signal);
-            }
+            pending.fetch_specific(set)
+        };
+        if let Some(mut signal) = shared {
+            // Both the ThreadGroup guard and shared pending guard have been
+            // released before the callback can acquire a timer-object lock.
+            signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Dequeued);
+            return Some(signal);
         }
 
         None
@@ -447,7 +455,15 @@ pub fn handle_signals(
             let task = get_current_task();
             task.fetch_signal()
         };
-        if let Some(FetchedSignal { signal, reserved }) = fetched {
+        if let Some(FetchedSignal {
+            mut signal,
+            reserved,
+        }) = fetched
+        {
+            // `fetch_signal()` returned only after private/shared pending and
+            // ThreadGroup guards were released. Freeze the timer owner episode
+            // here before live disposition/action selection consumes siginfo.
+            signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Dequeued);
             match perform_signal_action(signal, trapframe, restart_syscall) {
                 SignalActionResult::Continue => {
                     if reserved {
@@ -683,4 +699,62 @@ fn perform_signal_action(
     }
 
     SignalActionResult::HandlerFrame
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::task::sig::{
+        PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
+        PosixTimerSignalRegistration, info::SigInfoFields,
+    };
+
+    #[kunit]
+    fn private_timer_reservation_reaches_trap_fetch_facade() {
+        let target = get_current_task();
+        let callbacks = Arc::new(AtomicUsize::new(0));
+        let callback_count = callbacks.clone();
+        let callback: Arc<PosixTimerSignalCallback> = Arc::new(move |_, reason| {
+            assert_eq!(reason, PosixTimerSignalCompletion::Dequeued);
+            callback_count.fetch_add(1, Ordering::SeqCst);
+            Some(7)
+        });
+        let registration = PosixTimerSignalRegistration::try_new_private(
+            &target,
+            SigNo::SIGUSR1,
+            111,
+            0,
+            callback,
+        )
+        .unwrap();
+        assert_eq!(
+            registration.enqueue(7, 8, 0),
+            PosixTimerSignalEnqueue::Queued
+        );
+
+        assert_eq!(
+            target.classify_temporary_mask_wait(
+                TemporaryMaskWaitCandidate::Signal,
+                TemporaryMaskWaitContext::Ppoll,
+            ),
+            TemporaryMaskWaitDecision::DeferToTrapReturnDelivery
+        );
+        let FetchedSignal {
+            mut signal,
+            reserved,
+        } = target
+            .fetch_signal()
+            .expect("reserved private timer occurrence did not reach trap fetch");
+        assert!(reserved);
+        assert_eq!(signal.no, SigNo::SIGUSR1);
+        signal.finish_timer_signal_handoff(PosixTimerSignalCompletion::Dequeued);
+        let SigInfoFields::Timer(fields) = &signal.fields else {
+            panic!("private POSIX timer lost SI_TIMER fields");
+        };
+        assert_eq!(fields.overrun, 7);
+        assert_eq!(callbacks.load(Ordering::SeqCst), 1);
+        drop(registration);
+    }
 }

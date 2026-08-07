@@ -118,7 +118,7 @@ fn proc_pde_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
 fn proc_pde_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let pde = pde_inode_private(inode).pde;
     let meta = inode.inode().meta_snapshot();
-    let now = Instant::now().to_duration();
+    let now = realtime();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,

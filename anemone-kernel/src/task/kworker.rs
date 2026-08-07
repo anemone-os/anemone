@@ -95,25 +95,39 @@ pub fn activate_system_workers() {
 
 /// Return the already-published worker bound to the current CPU.
 pub(crate) fn local_system_worker() -> SystemWorker {
+    system_worker_on(cur_cpu_id())
+}
+
+/// Return the already-published worker bound to `cpu`.
+///
+/// This is a target-CPU submission capability, not scheduler placement state.
+/// It exists so cross-CPU providers such as realtime clock-step rechecks can
+/// preserve the original request lane without importing worker slots or
+/// kthread handles.
+pub(crate) fn system_worker_on(cpu: CpuId) -> SystemWorker {
     assert!(
         ACTIVATED.load(Ordering::Acquire),
         "system worker requested before boot activation"
     );
-    SYSTEM_WORKER_SLOT.with(|slot| {
-        let slot = slot.lock();
-        let slot = slot
-            .as_ref()
-            .expect("local system worker slot was not published");
-        assert_eq!(
-            slot.cpu,
-            cur_cpu_id(),
-            "system worker slot has wrong CPU identity"
-        );
-        SystemWorker {
-            cpu: slot.cpu,
-            handle: slot.handle.clone(),
-        }
-    })
+    if cpu == cur_cpu_id() {
+        SYSTEM_WORKER_SLOT.with(|slot| worker_from_slot(cpu, slot))
+    } else {
+        // Topology is sealed after boot activation, and this lookup holds no
+        // other per-CPU worker lock.
+        unsafe { SYSTEM_WORKER_SLOT.with_remote(cpu, |slot| worker_from_slot(cpu, slot)) }
+    }
+}
+
+fn worker_from_slot(cpu: CpuId, slot: &NoIrqSpinLock<Option<SystemWorkerSlot>>) -> SystemWorker {
+    let slot = slot.lock();
+    let slot = slot
+        .as_ref()
+        .expect("target system worker slot was not published");
+    assert_eq!(slot.cpu, cpu, "system worker slot has wrong CPU identity");
+    SystemWorker {
+        cpu: slot.cpu,
+        handle: slot.handle.clone(),
+    }
 }
 
 impl SystemWorker {

@@ -28,6 +28,9 @@ for applet in sh ls init; do
     "$BUSYBOX" ln -sf /home/bin/busybox "$ROOT/usr/bin/$applet"
 done
 
+echo "Installing remaining BusyBox applets..."
+"$BUSYBOX" --install -s $ROOT/usr/bin
+
 "$BUSYBOX" cp -Rf /home/etc/. "$ROOT/etc/"
 "$BUSYBOX" cp -Rf /home/root/. "$ROOT/root/"
 "$BUSYBOX" rm -f "$ROOT/usr/sbin/init"

@@ -4,8 +4,12 @@ use crate::{prelude::*, time::clock::Clock};
 pub struct RealtimeCoarseClock;
 
 impl Clock for RealtimeCoarseClock {
+    fn resolution_ns(&self) -> u64 {
+        coarse_resolution_ns()
+    }
+
     fn now_ns(&self) -> u64 {
-        Instant::now().to_duration().as_nanos() as u64
+        coarse_realtime_ns()
     }
 }
 

@@ -199,6 +199,8 @@ pub enum SysError {
     BinFmtUnrecognized,
     /// The operation is interrupted by a signal.
     Interrupted,
+    /// A stateful operation was cancelled by an externally visible change.
+    OperationCancelled,
     /// Target thread group doesn't exist.
     NoSuchProcess,
     /// Literal meaning.
@@ -312,6 +314,7 @@ impl SysError {
             SysError::ChildNotFound => ECHILD,
             SysError::BinFmtUnrecognized => ENOEXEC,
             SysError::Interrupted => EINTR,
+            SysError::OperationCancelled => ECANCELED,
             SysError::NoSuchProcess => ESRCH,
             SysError::Timeout => ETIMEDOUT,
             SysError::RestartSyscall(_) => EINTR,

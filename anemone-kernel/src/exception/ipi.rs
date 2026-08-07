@@ -18,9 +18,16 @@ use crate::prelude::*;
 pub enum IpiPayload {
     MemoryBarrier,
     /// `None` invalidates the entire local TLB on the receiving CPU.
-    TlbShootdown { range: Option<VirtPageRange> },
-    EnqueueNewTask { tid: Tid },
-    WakeUpTaskStaleSafe { task: Arc<Task>, park: ParkState },
+    TlbShootdown {
+        range: Option<VirtPageRange>,
+    },
+    EnqueueNewTask {
+        tid: Tid,
+    },
+    WakeUpTaskStaleSafe {
+        task: Arc<Task>,
+        park: ParkState,
+    },
     SchedulerRequest(Box<SchedRequest>),
     StopExecution,
 }

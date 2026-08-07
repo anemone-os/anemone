@@ -57,7 +57,7 @@ bitflags! {
         const SYS_NICE = 1u64 << abi::CAP_SYS_NICE;
         /// Allows overriding and raising resource limits.
         const SYS_RESOURCE = 1u64 << abi::CAP_SYS_RESOURCE;
-        /// [NYI] Allows changing system and real-time clocks.
+        /// Allows changing system and real-time clocks.
         const SYS_TIME = 1u64 << abi::CAP_SYS_TIME;
         /// [NYI] Allows privileged tty configuration operations.
         const SYS_TTY_CONFIG = 1u64 << abi::CAP_SYS_TTY_CONFIG;
@@ -106,6 +106,7 @@ bitflags! {
             | Self::SYS_ADMIN.bits()
             | Self::SYS_NICE.bits()
             | Self::SYS_RESOURCE.bits()
+            | Self::SYS_TIME.bits()
             | Self::MKNOD.bits();
     }
 }

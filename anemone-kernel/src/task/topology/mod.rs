@@ -159,6 +159,7 @@ impl PublishGuard {
             jobctl_unblocked: Event::new(),
             terminate_signal: None,
             itimers: ITimers::new(),
+            posix_timers: PosixTimers::new(),
             resource_limits: Some(NoIrqRwLock::new(
                 task_resource::UserResourceLimits::new_default(),
             )),
@@ -298,6 +299,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                                 jobctl_unblocked: Event::new(),
                                 terminate_signal,
                                 itimers: ITimers::new(),
+                                posix_timers: PosixTimers::new(),
                                 resource_limits: Some(NoIrqRwLock::new(resource_limits)),
                                 inner: NoIrqRwLock::new(inner),
                             };
@@ -343,6 +345,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 jobctl_unblocked: Event::new(),
                 terminate_signal: None,
                 itimers: ITimers::new(),
+                posix_timers: PosixTimers::new(),
                 resource_limits: None,
                 inner: NoIrqRwLock::new(ThreadGroupInner {
                     status: ThreadGroupStatus::new_alive(),

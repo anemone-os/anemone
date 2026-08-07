@@ -58,7 +58,7 @@ fn requested_time(time: TimeSpec) -> Result<RequestedTime, SysError> {
 }
 
 fn current_timespec() -> TimeSpec {
-    let now = Instant::now().to_duration();
+    let now = realtime();
     TimeSpec {
         tv_sec: now.as_secs() as i64,
         tv_nsec: now.subsec_nanos() as i64,
@@ -181,7 +181,7 @@ fn sys_utimensat(
     pathref.inode().set_times(
         atime.map(ts_to_duration),
         mtime.map(ts_to_duration),
-        Instant::now().to_duration(),
+        realtime(),
     );
 
     Ok(0)

@@ -3,6 +3,10 @@ use crate::{prelude::*, time::clock::Clock};
 pub struct ProcessCpuTimeClock;
 
 impl Clock for ProcessCpuTimeClock {
+    fn resolution_ns(&self) -> u64 {
+        source_resolution_ns()
+    }
+
     fn now_ns(&self) -> u64 {
         let cpu_usage = get_current_task().get_thread_group().cpu_usage_snapshot();
 

@@ -3,6 +3,8 @@
 #![allow(unused)]
 
 mod busybox;
+mod clock_read;
+mod clock_step;
 mod competition;
 mod file;
 mod guest;
@@ -10,7 +12,9 @@ mod ltp;
 mod oracle;
 mod process;
 mod runtime;
+mod soft_timer;
 mod tcp_stage5;
+mod timer_signal;
 
 use anemone_rs::{
     abi::{fs::linux::open::O_RDONLY, system::native::power::SHUTDOWN_MAGIC},
@@ -56,6 +60,26 @@ fn run_local_tests() {
     run_udp_extension_c_consumer();
     oracle::run_local();
 
+    println!("user-test: running local POSIX timer test...");
+    local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
+    println!("user-test: local POSIX timer test finished.");
+
+    // println!("user-test: running native clock read test...");
+    // clock_read::verify_native_clocks();
+    // println!("user-test: native clock read test finished.");
+    //
+    // println!("user-test: running soft timer consumer test...");
+    // soft_timer::verify_soft_timer_consumers();
+    // println!("user-test: soft timer consumer test finished.");
+    //
+    // println!("user-test: running realtime clock step test...");
+    // clock_step::verify_clock_steps();
+    // println!("user-test: realtime clock step test finished.");
+    //
+    // println!("user-test: running SI_TIMER signal frame test...");
+    // timer_signal::verify_timer_signal_frame();
+    // println!("user-test: SI_TIMER signal frame test finished.");
+    //
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");

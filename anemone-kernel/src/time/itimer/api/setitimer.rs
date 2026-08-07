@@ -90,7 +90,9 @@ pub fn sys_setitimer(
             Ok(0)
         },
         _ => {
-            knoticeln!("[NYI] sys_setitimer: which={which:?}");
+            knoticeln!(
+                "setitimer: which={which:?} requires scheduler-driven CPU timers; errno=ENOSYS"
+            );
             Err(SysError::NotYetImplemented)
         },
     }

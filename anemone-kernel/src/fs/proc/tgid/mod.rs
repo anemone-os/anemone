@@ -85,7 +85,7 @@ impl TgidEntry {
             (self.make_prv)(binding),
         );
 
-        let now = Instant::now().to_duration();
+        let now = realtime();
         inode.set_meta(&InodeMeta {
             nlink: match self.mode.ty() {
                 InodeType::Dir => 3, // randomly chosen. doesn't make much sense.
@@ -145,7 +145,7 @@ pub fn new_tgid_dir_inode(
         AnyOpaque::new(prv),
     );
 
-    let now = Instant::now().to_duration();
+    let now = realtime();
 
     inode.set_meta(&InodeMeta {
         nlink: 3, // randomly chosen. doesn't make much sense.
