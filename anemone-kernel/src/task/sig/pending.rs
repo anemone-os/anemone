@@ -6,10 +6,14 @@ use crate::{
         Task, ThreadGroup,
         sig::{
             PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
-            PosixTimerSignalIdentity, SigNo, Signal, set::SigSet, timer::TimerSignalPendingOwner,
+            PosixTimerSignalIdentity, SigNo, Signal, set::SigSet,
         },
     },
 };
+
+pub(super) mod timer;
+
+use timer::TimerSignalPendingOwner;
 
 #[derive(Debug)]
 struct SequencedSignal {

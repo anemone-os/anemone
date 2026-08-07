@@ -45,8 +45,8 @@ mod mask;
 pub use mask::{TaskSigMaskState, TemporarySigMaskToken};
 mod pending;
 pub use pending::PendingSignals;
+use pending::timer;
 pub mod set;
-mod timer;
 pub(crate) use timer::{
     PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
     PosixTimerSignalIdentity, PosixTimerSignalRegistration,

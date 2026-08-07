@@ -11,14 +11,17 @@ use core::fmt::{Debug, Formatter};
 
 use crate::{
     prelude::*,
-    task::{Task, ThreadGroup, ThreadGroupLifeCycle},
+    task::{
+        Task, ThreadGroup, ThreadGroupLifeCycle,
+        sig::{
+            SigNo, Signal, SignalPurpose,
+            generation::is_job_control_signal,
+            info::{SiCode, SigInfoFields, SigTimer},
+        },
+    },
 };
 
-use super::{
-    SigNo, Signal,
-    info::{SiCode, SigInfoFields, SigTimer},
-    pending::TimerSignalSlotId,
-};
+use super::TimerSignalSlotId;
 
 /// Identity preserved from one timer expiry episode until signal dequeue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +90,7 @@ pub(crate) type PosixTimerSignalCallback = dyn Fn(PosixTimerSignalIdentity, Posi
 /// executable or membership lifetime. In particular, private expiry never
 /// resolves the numeric TID again and therefore cannot bind a reused identity.
 #[derive(Clone)]
-pub(super) enum TimerSignalPendingOwner {
+pub(in crate::task::sig) enum TimerSignalPendingOwner {
     Shared(Weak<ThreadGroup>),
     Private(Weak<Task>),
 }
@@ -119,7 +122,7 @@ impl Debug for TimerSignalPendingOwner {
 }
 
 /// Signal-private handoff consumed exactly once after pending dequeue.
-pub(super) struct TimerSignalDelivery {
+pub(in crate::task::sig) struct TimerSignalDelivery {
     identity: PosixTimerSignalIdentity,
     callback: Arc<PosixTimerSignalCallback>,
     owner: TimerSignalPendingOwner,
@@ -127,7 +130,7 @@ pub(super) struct TimerSignalDelivery {
 }
 
 impl TimerSignalDelivery {
-    pub(super) fn new(
+    pub(in crate::task::sig) fn new(
         identity: PosixTimerSignalIdentity,
         callback: Arc<PosixTimerSignalCallback>,
         owner: TimerSignalPendingOwner,
@@ -252,7 +255,7 @@ impl PosixTimerSignalRegistration {
             let inner = target.inner.read();
             inner.sig_pending.lock().timer_signal_no(self.slot)
         };
-        if super::generation::is_job_control_signal(no) {
+        if is_job_control_signal(no) {
             return target
                 .enqueue_timer_job_control_signal(self.slot, no, generation, episode, overrun);
         }
@@ -311,7 +314,7 @@ impl PosixTimerSignalRegistration {
             };
             no
         };
-        if super::generation::is_job_control_signal(no) {
+        if is_job_control_signal(no) {
             return target.enqueue_private_timer_job_control_signal(
                 self.slot, no, generation, episode, overrun,
             );
@@ -424,7 +427,7 @@ impl Task {
 }
 
 impl Signal {
-    pub(super) fn new_posix_timer(
+    pub(in crate::task::sig) fn new_posix_timer(
         no: SigNo,
         timer_id: i32,
         overrun: i32,
@@ -445,18 +448,22 @@ impl Signal {
                 sys_private: 0,
             }),
             default_stop_epoch: None,
-            purpose: super::SignalPurpose::Ordinary,
+            purpose: SignalPurpose::Ordinary,
             timer_delivery: Some(TimerSignalDelivery::new(identity, callback, owner, slot)),
         }
     }
 
-    pub(super) fn timer_signal_identity(&self) -> Option<PosixTimerSignalIdentity> {
+    pub(in crate::task::sig) fn timer_signal_identity(&self) -> Option<PosixTimerSignalIdentity> {
         self.timer_delivery
             .as_ref()
             .map(|delivery| delivery.identity)
     }
 
-    pub(super) fn update_timer_signal(&mut self, identity: PosixTimerSignalIdentity, overrun: i32) {
+    pub(in crate::task::sig) fn update_timer_signal(
+        &mut self,
+        identity: PosixTimerSignalIdentity,
+        overrun: i32,
+    ) {
         let delivery = self
             .timer_delivery
             .as_mut()
@@ -473,7 +480,10 @@ impl Signal {
         fields.overrun = overrun;
     }
 
-    pub(super) fn finish_timer_signal_handoff(&mut self, reason: PosixTimerSignalCompletion) {
+    pub(in crate::task::sig) fn finish_timer_signal_handoff(
+        &mut self,
+        reason: PosixTimerSignalCompletion,
+    ) {
         if let Some(delivery) = self.timer_delivery.take() {
             let Some(overrun) = delivery.complete(reason) else {
                 return;
