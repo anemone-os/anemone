@@ -8,7 +8,7 @@ fs_ext4 = true # Enable ext4 filesystem support
 kernel_preempt = false # Enable trap-exit kernel preemption
 spin_lock_irqsave = true # Make ordinary spin locks disable local interrupts
 soft_unaligned_access = true # Emulate supported unaligned user-memory accesses in architecture trap handlers
-kernel_symbols = true # Embed checked text/function symbols for kernel backtraces
+kernel_symbols = false # Embed checked text/function symbols for kernel backtraces
 perf_observe = true # Enable native kernel performance observation; runtime recording starts disabled
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
@@ -24,7 +24,7 @@ record_log_level = 0 # Maximum log level recorded: Emerg=0 ... Debug=7; higher l
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 riscv64_tlb_flush_all_threshold_pages = 64 # Full local TLB flush threshold for RV64 page ranges; larger ranges use one full flush.
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
-max_logical_cpus = 1 # Maximum number of logical CPUs enabled by this kernel
+max_logical_cpus = 8 # Maximum number of logical CPUs enabled by this kernel
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
 max_path_len_bytes = 4096 # Maximum length of file paths in bytes
 execve_max_string_count = 256 # Maximum strings accepted in each execve argv or envp vector; the initial stack remains the total byte budget.

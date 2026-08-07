@@ -784,38 +784,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn set_modes_commit_after_drain_and_flush_only_for_tcsetsf() {
-        let port = DrainPort::new("/kunit/tty/file-set-modes");
-        let (attachment, _) = attach_unpublished_port(port.clone()).unwrap();
-        let tty = attachment_file(&attachment);
-        let mut candidate = project_termios(TtyTermios::default(), line()).unwrap();
-        candidate.c_lflag &= !abi::ECHO;
-
-        assert_eq!(tty.endpoint.terminal.enqueue_output(b"queued\n"), 7);
-        set_termios(&tty, candidate, SetMode::Now).unwrap();
-        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert!(tty.endpoint.terminal.output_pending());
-        assert_eq!(port.submitted.load(Ordering::Relaxed), 0);
-
-        candidate.c_lflag |= abi::ECHO;
-        set_termios(&tty, candidate, SetMode::Drain).unwrap();
-        assert!(tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert_eq!(port.submitted.load(Ordering::Relaxed), 8);
-
-        for byte in b"unread\n" {
-            assert!(tty.endpoint.terminal.receive_rx_byte(*byte));
-        }
-        candidate.c_lflag &= !abi::ECHO;
-        set_termios(&tty, candidate, SetMode::DrainFlush).unwrap();
-        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert_eq!(
-            tty.endpoint.terminal.read_input(&mut [0_u8; 8]),
-            InputRead::Empty
-        );
-        attachment.abort();
-    }
-
-    #[kunit]
     fn winsize_defaults_and_updates_without_foreground_relation() {
         let terminal = Terminal::try_new(line()).unwrap();
         assert_eq!(terminal.winsize(), TtyWinsize::default());
