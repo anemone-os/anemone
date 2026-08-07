@@ -239,7 +239,7 @@ fn map_connect_start_error(error: ConnectError) -> SocketConnectError {
             SocketConnectError::Operation(SysError::AddressInUse)
         },
         ConnectError::Stack(TcpConnectError::EphemeralPortsExhausted) => {
-            SocketConnectError::Operation(SysError::Again)
+            SocketConnectError::Operation(SysError::AddressNotAvailable)
         },
     }
 }
@@ -313,6 +313,12 @@ mod kunits {
                 SocketAcceptError::ResourceExhausted
             ));
         }
+        assert!(matches!(
+            map_connect_start_error(ConnectError::Stack(
+                TcpConnectError::EphemeralPortsExhausted
+            )),
+            SocketConnectError::Operation(SysError::AddressNotAvailable)
+        ));
     }
 
     #[kunit]

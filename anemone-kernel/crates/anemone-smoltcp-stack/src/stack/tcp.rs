@@ -121,7 +121,10 @@ impl Stack {
     ) -> Result<ProtocolProgression, TcpConnectError> {
         let source = selection.source();
         self.validate_tcp_selection(selection.interface(), source)?;
-        let (binding, local) = self.protocols.tcp.prepare_connect(id, source, peer)?;
+        let (binding, local) =
+            self.protocols
+                .tcp
+                .prepare_connect(id, selection.interface(), source, peer)?;
         let policy = self.protocols.tcp.policy();
         let no_delay = self
             .protocols

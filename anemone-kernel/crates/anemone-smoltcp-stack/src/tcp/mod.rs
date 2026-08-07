@@ -89,7 +89,6 @@ pub(crate) enum EndpointRole {
     Reclaiming {
         remaining: usize,
         binding: Option<TcpLocalBinding>,
-        tuple: Option<ConnectionTuple>,
     },
 }
 
@@ -141,8 +140,7 @@ pub(crate) struct Connection {
     pub(crate) release_requested: Option<TcpReleaseReason>,
 }
 
-/// Exact connection reservation moved from `Connection` into reclaim state.
-/// The tuple exists in only one role at a time and disappears with the engine.
+/// Exact association reserved by one live or deferred protocol engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ConnectionTuple {
     pub(crate) local: TcpLocalBinding,
@@ -159,8 +157,8 @@ pub(crate) struct OutstandingReceive {
 pub(crate) struct DeferredReclaim {
     pub(crate) interface: InterfaceId,
     pub(crate) handle: SocketHandle,
-    /// Exact reservation moved from a listener slot while its engine emits
-    /// final protocol work. It disappears with this deferred engine.
+    /// Exact reservation moved from the former Endpoint role while this engine
+    /// emits final protocol work. It disappears with the deferred engine.
     pub(crate) tuple: Option<ConnectionTuple>,
     pub(crate) action: ReclaimAction,
 }
@@ -1138,6 +1136,76 @@ mod tests {
         assert_eq!(
             stack.tcp_endpoint_binding(second).unwrap().unwrap().port(),
             40001
+        );
+    }
+
+    #[test]
+    fn local_reverse_time_wait_reserves_the_active_ephemeral_tuple() {
+        let policy = TcpPolicy::new(16, 16, 1, 32, 32, 16, 60_000, 60_000, 40000, 40001);
+        let (mut stack, interface) = test_stack(policy);
+        let (listener, client, accepted) = connected_pair(&mut stack, interface, 25021, 0);
+        let first_port = stack.protocols.tcp.connection(client).unwrap().local.port();
+        assert_eq!(first_port, 40000);
+
+        // The HTTP server is the active closer, so its engine retains the
+        // reverse tuple after the client Endpoint and autobind are reclaimed.
+        stack.set_tcp_reuse_address(accepted, true).unwrap();
+        stack
+            .release_tcp_endpoint(accepted, TcpReleaseReason::FinalRelease)
+            .unwrap();
+        drive(&mut stack, interface, 128);
+        assert!(stack.observe_tcp_stream(client).unwrap().end_of_stream());
+        stack
+            .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
+            .unwrap();
+        drive(&mut stack, interface, 256);
+        assert!(stack.protocols.tcp.endpoint(client).is_none());
+        assert!(stack.protocols.tcp.deferred.iter().any(|entry| {
+            entry.interface == interface
+                && entry.tuple.is_some_and(|tuple| {
+                    tuple.local.port() == 25021 && tuple.peer.port() == first_port
+                })
+        }));
+
+        let explicit = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_reuse_address(explicit, true).unwrap();
+        stack
+            .bind_tcp_endpoint(explicit, TcpBindRequest::new(LOCAL, first_port))
+            .unwrap();
+        assert_eq!(
+            stack.start_tcp_connect(
+                explicit,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25021),
+            ),
+            Err(anemone_net_api::tcp::TcpConnectError::PortInUse)
+        );
+        stack
+            .release_tcp_endpoint(explicit, TcpReleaseReason::CreationRollback)
+            .unwrap();
+
+        let next = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                next,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25021),
+            )
+            .unwrap();
+        assert_eq!(
+            stack.protocols.tcp.connection(next).unwrap().local.port(),
+            40001
+        );
+        drive(&mut stack, interface, 384);
+        assert!(matches!(
+            stack.tcp_connect_result(next).unwrap(),
+            TcpConnectResult::Connected { .. }
+        ));
+        assert_eq!(
+            stack.tcp_endpoint_facts(listener),
+            Ok(TcpEndpointFacts::Listener {
+                has_pending_child: true
+            })
         );
     }
 

@@ -104,7 +104,6 @@ impl TcpEndpoints {
                     EndpointRole::Reclaiming {
                         remaining: deferred_needed,
                         binding: Some(binding),
-                        tuple: None,
                     },
                 );
                 let EndpointRole::Listener(listener) = role else {
@@ -185,15 +184,14 @@ impl TcpEndpoints {
             .role = EndpointRole::Reclaiming {
             remaining: 1,
             binding: Some(connection.binding),
-            // The active Connection role has ended. Preserve its exact tuple
-            // here as the sole reservation truth until protocol reclaim, so
-            // SO_REUSEADDR cannot admit the same 4-tuple through TIME_WAIT.
-            tuple: Some(tuple),
         };
         self.queue_reclaim(DeferredReclaim {
             interface,
             handle,
-            tuple: None,
+            // The active Connection role has ended. Move its exact tuple with
+            // the engine so admission observes one reservation truth until
+            // TIME_WAIT and all other final protocol work are reclaimed.
+            tuple: Some(tuple),
             action: ReclaimAction::ReleaseEndpoint(id),
         });
     }
