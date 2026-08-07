@@ -89,10 +89,16 @@ impl PosixTimerTable {
         if id < 0 {
             return None;
         }
-        match self.slots.get_mut(id as usize)?.take()? {
-            PosixTimerSlot::Reserved(_) => None,
-            PosixTimerSlot::Published(timer) => Some(timer),
+        let slot = self.slots.get_mut(id as usize)?;
+        // A concurrent delete cannot observe the reserved timer, and its
+        // EINVAL result must not revoke the creator's publication token.
+        if !matches!(slot, Some(PosixTimerSlot::Published(_))) {
+            return None;
         }
+        let Some(PosixTimerSlot::Published(timer)) = slot.take() else {
+            unreachable!("published POSIX timer slot changed without releasing the table lock")
+        };
+        Some(timer)
     }
 
     fn take_all(&mut self) -> Vec<Option<PosixTimerSlot>> {
@@ -339,5 +345,20 @@ mod kunits {
             table.publish(id, stale_token, stale_timer),
             Err(SysError::NoSuchProcess)
         );
+    }
+
+    #[kunit]
+    fn remove_does_not_cancel_inflight_reservation() {
+        let mut table = PosixTimerTable::default();
+        let (id, token) = table.reserve().unwrap();
+        assert!(table.remove(id).is_none());
+
+        let timer = Arc::new(PosixTimer::new(
+            id,
+            PosixTimerClock::Monotonic,
+            NotificationKind::None,
+        ));
+        table.publish(id, token, timer.clone()).unwrap();
+        assert!(Arc::ptr_eq(&table.remove(id).unwrap(), &timer));
     }
 }
