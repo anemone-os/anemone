@@ -1,21 +1,17 @@
 use crate::{
     prelude::*,
-    time::timekeeper::{self, monotonic_uptime},
+    time::timekeeper::{self, duration_from_mono, duration_to_mono, monotonic_uptime},
 };
 
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 
-use super::timekeeper::{duration_from_mono, duration_to_mono};
-
-/// Under no-std, Rust's core library doesn't have a built-in `Instant` type, cz
-/// it heavily relies on existing OS time APIs. We define our own `Instant` type
-/// here, with our own timekeeping support.
+/// A point on the kernel's immutable monotonic counter timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Instant {
+pub struct MonotonicInstant {
     mono: u64,
 }
 
-impl Instant {
+impl MonotonicInstant {
     pub const ZERO: Self = Self { mono: 0 };
 
     /// Returns an instant corresponding to "now" on the kernel monotonic
@@ -83,7 +79,7 @@ impl Instant {
     }
 }
 
-impl Add<Duration> for Instant {
+impl Add<Duration> for MonotonicInstant {
     type Output = Self;
 
     fn add(self, rhs: Duration) -> Self::Output {
@@ -92,13 +88,13 @@ impl Add<Duration> for Instant {
     }
 }
 
-impl AddAssign<Duration> for Instant {
+impl AddAssign<Duration> for MonotonicInstant {
     fn add_assign(&mut self, rhs: Duration) {
         *self = *self + rhs;
     }
 }
 
-impl Sub<Duration> for Instant {
+impl Sub<Duration> for MonotonicInstant {
     type Output = Self;
 
     fn sub(self, rhs: Duration) -> Self::Output {
@@ -107,16 +103,16 @@ impl Sub<Duration> for Instant {
     }
 }
 
-impl SubAssign<Duration> for Instant {
+impl SubAssign<Duration> for MonotonicInstant {
     fn sub_assign(&mut self, rhs: Duration) {
         *self = *self - rhs;
     }
 }
 
-impl Sub<Instant> for Instant {
+impl Sub<MonotonicInstant> for MonotonicInstant {
     type Output = Duration;
 
-    fn sub(self, rhs: Instant) -> Self::Output {
+    fn sub(self, rhs: MonotonicInstant) -> Self::Output {
         self.duration_since(rhs)
     }
 }

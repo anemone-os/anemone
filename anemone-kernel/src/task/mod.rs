@@ -86,7 +86,7 @@ pub struct Task {
     /// Thread group ID.
     tgid: Tid,
     /// Task creation time on the kernel monotonic timeline.
-    create_instant: Instant,
+    create_instant: MonotonicInstant,
 
     /// Kernel stack owned by this task.
     kstack: KernelStack,
@@ -450,7 +450,7 @@ impl Task {
         let tgid = tgid.unwrap_or(tid.get_typed());
         let stack = KernelStack::new()?;
         let stack_top = stack.stack_top();
-        let create_instant = Instant::now();
+        let create_instant = MonotonicInstant::now();
         let cpuid = cpu.unwrap_or_else(|| pick_next_cpu_in(sched.config_snapshot().affinity()));
         sched.assert_owner_cpu(cpuid);
         let task = Self {
@@ -510,7 +510,7 @@ impl Task {
                 tid: NoIrqRwLock::new(TidRef::Idle),
                 creator: None,
                 tgid: Tid::IDLE,
-                create_instant: Instant::now(),
+                create_instant: MonotonicInstant::now(),
                 kstack: stack,
                 name: NoIrqRwLock::new(Box::from("@idle")),
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
@@ -623,7 +623,7 @@ impl Task {
     }
 
     /// Get the task creation time on the kernel monotonic timeline.
-    pub fn create_instant(&self) -> Instant {
+    pub fn create_instant(&self) -> MonotonicInstant {
         self.create_instant
     }
 

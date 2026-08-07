@@ -681,7 +681,7 @@ mod higher_level {
                     wait_id,
                     timeout,
                 );
-                let start = Instant::now();
+                let start = MonotonicInstant::now();
                 unsafe {
                     schedule_wait_sleep(&token);
                 }
@@ -740,7 +740,7 @@ mod higher_level {
                 None
             };
 
-            let start = Instant::now();
+            let start = MonotonicInstant::now();
             unsafe {
                 schedule_wait_sleep(&token);
             }

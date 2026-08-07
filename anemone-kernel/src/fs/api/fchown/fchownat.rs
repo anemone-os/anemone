@@ -68,7 +68,7 @@ fn sys_fchownat(
         }
     };
 
-    let ctime = realtime();
+    let ctime = RealtimeInstant::now().to_duration();
     let r = kernel_fchown(
         &pathref,
         owner_from_syscall(owner),

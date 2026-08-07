@@ -21,7 +21,7 @@ fn sys_gettimeofday(
     let mut guard = uspace.lock();
 
     if let Some(tv) = tv {
-        let now = realtime();
+        let now = RealtimeInstant::now().to_duration();
         let mut tv = UserWritePtr::<TimeVal>::try_new(tv, &mut guard)?;
         tv.write(TimeVal {
             tv_sec: now.as_secs() as i64,

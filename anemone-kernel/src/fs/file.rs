@@ -834,8 +834,11 @@ impl File {
             }
         };
         if written > 0 {
-            self.inode()
-                .after_modified(&cred, ModifType::Modify, realtime());
+            self.inode().after_modified(
+                &cred,
+                ModifType::Modify,
+                RealtimeInstant::now().to_duration(),
+            );
         }
 
         Ok(written)
@@ -861,8 +864,11 @@ impl File {
     fn update_after_write(&self, written: usize) {
         if written > 0 {
             let cred = get_current_task().cred();
-            self.inode()
-                .after_modified(&cred, ModifType::Modify, realtime());
+            self.inode().after_modified(
+                &cred,
+                ModifType::Modify,
+                RealtimeInstant::now().to_duration(),
+            );
         }
     }
 
@@ -911,8 +917,11 @@ impl File {
         let cred = get_current_task().cred();
         let written = (self.ops.write_at)(self, pos, buf, ctx)?;
         if written > 0 {
-            self.inode()
-                .after_modified(&cred, ModifType::Modify, realtime());
+            self.inode().after_modified(
+                &cred,
+                ModifType::Modify,
+                RealtimeInstant::now().to_duration(),
+            );
         }
 
         Ok(written)
@@ -959,8 +968,11 @@ impl File {
             (self.ops.write)(self, &mut *pos, buf, ctx)?
         };
         if written > 0 {
-            self.inode()
-                .after_modified(&cred, ModifType::Modify, realtime());
+            self.inode().after_modified(
+                &cred,
+                ModifType::Modify,
+                RealtimeInstant::now().to_duration(),
+            );
         }
         Ok(written)
     }
@@ -1015,8 +1027,11 @@ impl File {
             (self.ops.write)(self, &mut append_pos, buf, ctx)?
         };
         if written > 0 {
-            self.inode()
-                .after_modified(&cred, ModifType::Modify, realtime());
+            self.inode().after_modified(
+                &cred,
+                ModifType::Modify,
+                RealtimeInstant::now().to_duration(),
+            );
         }
         Ok(written)
     }

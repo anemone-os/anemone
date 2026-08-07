@@ -111,9 +111,9 @@ fn init() {
         perm: InodePerm::all_rwx(),
         uid: Uid::ROOT,
         gid: Gid::ROOT,
-        atime: Instant::ZERO.to_duration(),
-        mtime: Instant::ZERO.to_duration(),
-        ctime: Instant::ZERO.to_duration(),
+        atime: Duration::ZERO,
+        mtime: Duration::ZERO,
+        ctime: Duration::ZERO,
     });
     sb.seed_inode(root_inode);
 

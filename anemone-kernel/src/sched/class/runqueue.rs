@@ -71,19 +71,19 @@ impl RunQueue {
         self.ntasks -= 1;
     }
 
-    pub fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant) {
+    pub fn requeue_yielded_current(&mut self, task: Arc<Task>, now: MonotonicInstant) {
         self.requeue_current_with(task, CurrentRequeueTransaction::Yielded { now });
     }
 
-    pub fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant) {
+    pub fn requeue_preempted_current(&mut self, task: Arc<Task>, now: MonotonicInstant) {
         self.requeue_current_with(task, CurrentRequeueTransaction::Preempted { now });
     }
 
-    pub fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant) {
+    pub fn handoff_woken_current(&mut self, task: Arc<Task>, now: MonotonicInstant) {
         self.requeue_current_with(task, CurrentRequeueTransaction::WokenHandoff { now });
     }
 
-    pub fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
+    pub fn put_prev_blocked(&mut self, task: &Arc<Task>, now: MonotonicInstant) {
         match task.sched_class_kind() {
             SchedClassKind::Realtime => self.realtime.put_prev_blocked(task, now),
             SchedClassKind::Fair => self.fair.put_prev_blocked(task, now),
@@ -91,7 +91,7 @@ impl RunQueue {
         }
     }
 
-    pub fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant) {
+    pub fn put_prev_exiting(&mut self, task: &Arc<Task>, now: MonotonicInstant) {
         match task.sched_class_kind() {
             SchedClassKind::Realtime => self.realtime.put_prev_exiting(task, now),
             SchedClassKind::Fair => self.fair.put_prev_exiting(task, now),
@@ -124,7 +124,7 @@ impl RunQueue {
         panic!("idle scheduler should always have a task to run")
     }
 
-    pub fn set_next_task(&mut self, task: &Arc<Task>, now: Instant) {
+    pub fn set_next_task(&mut self, task: &Arc<Task>, now: MonotonicInstant) {
         match task.sched_class_kind() {
             SchedClassKind::Realtime => self.realtime.set_next_task(task, now),
             SchedClassKind::Fair => self.fair.set_next_task(task, now),
@@ -132,7 +132,7 @@ impl RunQueue {
         }
     }
 
-    pub fn task_tick(&mut self, task: &Arc<Task>, now: Instant) -> TickAction {
+    pub fn task_tick(&mut self, task: &Arc<Task>, now: MonotonicInstant) -> TickAction {
         match task.sched_class_kind() {
             SchedClassKind::Idle => self.idle.task_tick(task, now),
             SchedClassKind::Realtime => self.realtime.task_tick(task, now),
@@ -144,7 +144,7 @@ impl RunQueue {
         &mut self,
         current: &Arc<Task>,
         candidate: &Arc<Task>,
-        now: Instant,
+        now: MonotonicInstant,
     ) -> PreemptDecision {
         let current_kind = current.sched_class_kind();
         let candidate_kind = candidate.sched_class_kind();
@@ -526,9 +526,9 @@ enum EnqueueTransaction {
 
 #[derive(Clone, Copy)]
 enum CurrentRequeueTransaction {
-    Yielded { now: Instant },
-    Preempted { now: Instant },
-    WokenHandoff { now: Instant },
+    Yielded { now: MonotonicInstant },
+    Preempted { now: MonotonicInstant },
+    WokenHandoff { now: MonotonicInstant },
 }
 
 #[cfg(feature = "kunit")]
@@ -601,17 +601,17 @@ mod kunits {
         let selected = runq.pick_next_task();
         assert!(Arc::ptr_eq(&selected, &task));
         assert!(!task.sched_on_runq());
-        runq.set_next_task(&selected, Instant::now());
+        runq.set_next_task(&selected, MonotonicInstant::now());
 
-        runq.requeue_preempted_current(task.clone(), Instant::now());
+        runq.requeue_preempted_current(task.clone(), MonotonicInstant::now());
         assert!(task.sched_on_runq());
 
         let selected = runq.pick_next_task();
         assert!(Arc::ptr_eq(&selected, &task));
         assert!(!task.sched_on_runq());
-        runq.set_next_task(&selected, Instant::now());
+        runq.set_next_task(&selected, MonotonicInstant::now());
 
-        runq.handoff_woken_current(task.clone(), Instant::now());
+        runq.handoff_woken_current(task.clone(), MonotonicInstant::now());
         assert!(task.sched_on_runq());
         runq.dequeue(&task);
         assert!(!task.sched_on_runq());
@@ -627,13 +627,13 @@ mod kunits {
 
         let selected = runq.pick_next_task();
         assert!(Arc::ptr_eq(&selected, &realtime));
-        runq.set_next_task(&selected, Instant::now());
-        runq.put_prev_blocked(&selected, Instant::now());
+        runq.set_next_task(&selected, MonotonicInstant::now());
+        runq.put_prev_blocked(&selected, MonotonicInstant::now());
 
         let selected = runq.pick_next_task();
         assert!(Arc::ptr_eq(&selected, &fair));
-        runq.set_next_task(&selected, Instant::now());
-        runq.put_prev_blocked(&selected, Instant::now());
+        runq.set_next_task(&selected, MonotonicInstant::now());
+        runq.put_prev_blocked(&selected, MonotonicInstant::now());
 
         assert_eq!(
             runq.pick_next_task().sched_class_kind(),
@@ -648,17 +648,17 @@ mod kunits {
         let candidate = fair_task();
         same.enqueue_new(current.clone());
         let current = same.pick_next_task();
-        same.set_next_task(&current, Instant::now());
+        same.set_next_task(&current, MonotonicInstant::now());
         same.enqueue_new(candidate.clone());
         assert_eq!(
-            same.decide_preempt_current(&current, &candidate, Instant::now()),
+            same.decide_preempt_current(&current, &candidate, MonotonicInstant::now()),
             PreemptDecision::KeepCurrent
         );
 
         let realtime = realtime_task();
         same.enqueue_new(realtime.clone());
         assert_eq!(
-            same.decide_preempt_current(&current, &realtime, Instant::now()),
+            same.decide_preempt_current(&current, &realtime, MonotonicInstant::now()),
             PreemptDecision::RequestResched
         );
 
@@ -667,7 +667,11 @@ mod kunits {
         let fair_candidate = fair_task();
         lower.enqueue_new(fair_candidate.clone());
         assert_eq!(
-            lower.decide_preempt_current(&realtime_current, &fair_candidate, Instant::now()),
+            lower.decide_preempt_current(
+                &realtime_current,
+                &fair_candidate,
+                MonotonicInstant::now()
+            ),
             PreemptDecision::KeepCurrent
         );
 
@@ -675,7 +679,7 @@ mod kunits {
         let fair_candidate = fair_task();
         idle.enqueue_new(fair_candidate.clone());
         assert_eq!(
-            idle.decide_preempt_current(&idle_task(), &fair_candidate, Instant::now()),
+            idle.decide_preempt_current(&idle_task(), &fair_candidate, MonotonicInstant::now()),
             PreemptDecision::RequestResched
         );
     }
@@ -686,7 +690,7 @@ mod kunits {
         let current = fair_task();
         current_runq.enqueue_new(current.clone());
         let current = current_runq.pick_next_task();
-        current_runq.set_next_task(&current, Instant::now());
+        current_runq.set_next_task(&current, MonotonicInstant::now());
         let old_pass = current_runq.fair.assert_current(&current);
 
         assert_eq!(
@@ -876,7 +880,7 @@ mod kunits {
         let rt_peer = realtime_task_with(RtMode::Fifo, priority);
         to_rt.enqueue_new(fair_current.clone());
         let fair_current = to_rt.pick_next_task();
-        to_rt.set_next_task(&fair_current, Instant::now());
+        to_rt.set_next_task(&fair_current, MonotonicInstant::now());
         to_rt.enqueue_new(rt_peer.clone());
 
         assert_eq!(
@@ -898,7 +902,7 @@ mod kunits {
         fair_current.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             rt::assert_test_fifo(entity);
         });
-        to_rt.requeue_preempted_current(fair_current.clone(), Instant::now());
+        to_rt.requeue_preempted_current(fair_current.clone(), MonotonicInstant::now());
         assert!(Arc::ptr_eq(&to_rt.pick_next_task(), &fair_current));
         assert!(Arc::ptr_eq(&to_rt.pick_next_task(), &rt_peer));
 
@@ -908,7 +912,7 @@ mod kunits {
         let fair_peer = fair_task();
         to_fair.enqueue_new(rt_current.clone());
         let rt_current = to_fair.pick_next_task();
-        to_fair.set_next_task(&rt_current, Instant::now());
+        to_fair.set_next_task(&rt_current, MonotonicInstant::now());
         to_fair.enqueue_new(rotation_peer.clone());
         to_fair.enqueue_new(fair_peer.clone());
 
@@ -925,7 +929,7 @@ mod kunits {
         );
         assert_eq!(rt_current.sched_class_kind(), SchedClassKind::Fair);
         let _ = to_fair.fair.assert_current(&rt_current);
-        to_fair.requeue_preempted_current(rt_current.clone(), Instant::now());
+        to_fair.requeue_preempted_current(rt_current.clone(), MonotonicInstant::now());
         assert!(Arc::ptr_eq(&to_fair.pick_next_task(), &rotation_peer));
         assert!(Arc::ptr_eq(&to_fair.pick_next_task(), &fair_peer));
         assert!(Arc::ptr_eq(&to_fair.pick_next_task(), &rt_current));
@@ -988,7 +992,7 @@ mod kunits {
         let fair_current = fair_task();
         fair_runq.enqueue_new(fair_current.clone());
         let fair_current = fair_runq.pick_next_task();
-        fair_runq.set_next_task(&fair_current, Instant::now());
+        fair_runq.set_next_task(&fair_current, MonotonicInstant::now());
         let old_pass = fair_runq.fair.assert_current(&fair_current);
         assert_eq!(
             fair_runq.apply_config_patch(

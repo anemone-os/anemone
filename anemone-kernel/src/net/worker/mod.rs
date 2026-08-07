@@ -39,7 +39,9 @@ const PUMP_BUDGET: PumpBudget =
     PumpBudget::new(NET_PUMP_INGRESS_BUDGET_FRAMES, NET_PUMP_EGRESS_BUDGET_STEPS);
 
 pub(in crate::net) fn network_now() -> NetworkInstant {
-    let micros = crate::time::Instant::now().to_duration().as_micros();
+    let micros = crate::time::MonotonicInstant::now()
+        .to_duration()
+        .as_micros();
     let micros = i64::try_from(micros).unwrap_or(i64::MAX);
     NetworkInstant::from_micros(micros)
 }

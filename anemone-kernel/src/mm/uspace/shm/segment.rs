@@ -149,7 +149,7 @@ impl ShmSegment {
                     last_operator_tgid: creator_tgid,
                     last_attach_time: Duration::ZERO,
                     last_detach_time: Duration::ZERO,
-                    last_change_time: realtime(),
+                    last_change_time: RealtimeInstant::now().to_duration(),
                 },
             }),
             object: Arc::new(ShmObject::new(npages)),
@@ -219,7 +219,7 @@ impl ShmSegment {
     }
 
     fn record_attach(&self, tgid: Tid) -> usize {
-        let now = realtime();
+        let now = RealtimeInstant::now().to_duration();
         let mut inner = self.inner.lock();
         inner.state.last_attach_time = now;
         inner.state.last_operator_tgid = tgid;
@@ -237,7 +237,7 @@ impl ShmSegment {
     }
 
     pub fn on_detach(&self, tgid: Tid) -> usize {
-        let now = realtime();
+        let now = RealtimeInstant::now().to_duration();
         let mut inner = self.inner.lock();
         assert!(
             inner.state.attach_count > 0,
@@ -260,7 +260,7 @@ impl ShmSegment {
     }
 
     pub fn update_from_ipc_set(&self, update: ShmPermUpdate) {
-        let now = realtime();
+        let now = RealtimeInstant::now().to_duration();
         let mut inner = self.inner.lock();
 
         inner.perm.uid = update.uid;

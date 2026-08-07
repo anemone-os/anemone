@@ -1,6 +1,6 @@
 //! Timekeeping. Owns the kernel clock derivation chain and periodic tick state.
 
-use crate::{prelude::*, sync::mono::MonoOnce};
+use crate::{prelude::*, sync::mono::MonoOnce, time::RealtimeInstant};
 
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
@@ -65,13 +65,17 @@ impl RealtimeSnapshot {
 /// Consistent calendar read used by absolute realtime request registration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RealtimeRead {
-    now_ns: u64,
+    now: RealtimeInstant,
     change_seq: u64,
 }
 
 impl RealtimeRead {
     pub(crate) const fn now_ns(self) -> u64 {
-        self.now_ns
+        self.now.as_nanos()
+    }
+
+    pub(crate) const fn now(self) -> RealtimeInstant {
+        self.now
     }
 
     pub(crate) const fn change_seq(self) -> u64 {
@@ -274,7 +278,7 @@ pub fn monotonic_ns() -> u64 {
 }
 
 pub fn realtime_ns() -> u64 {
-    realtime_read().now_ns
+    realtime_read().now().as_nanos()
 }
 
 pub(crate) fn realtime_read() -> RealtimeRead {
@@ -285,7 +289,7 @@ pub(crate) fn realtime_read() -> RealtimeRead {
         .checked_add(realtime.offset_ns)
         .expect("realtime clock value exceeded its internal nanosecond range");
     RealtimeRead {
-        now_ns,
+        now: RealtimeInstant::from_nanos(now_ns),
         change_seq: realtime.change_seq,
     }
 }
@@ -335,14 +339,9 @@ pub fn coarse_resolution_ns() -> u64 {
     TIMEKEEPER.get().coarse_resolution_ns()
 }
 
-/// Return the current calendar timeline.
-pub fn realtime() -> Duration {
-    Duration::from_nanos(realtime_ns())
-}
-
 /// Return monotonic uptime since the timekeeper established its boot counter.
-pub fn uptime() -> Instant {
-    Instant::from_mono(monotonic_uptime())
+pub fn uptime() -> MonotonicInstant {
+    MonotonicInstant::from_mono(monotonic_uptime())
 }
 
 pub fn ticks() -> u64 {

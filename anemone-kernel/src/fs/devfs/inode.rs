@@ -71,11 +71,7 @@ pub(super) fn devfs_new_root_inode(sb: Arc<SuperBlock>) -> Arc<Inode> {
     // remains searchable even though device leaves below it are non-executable.
     inode.set_perm(InodePerm::all_rwx());
     inode.set_size(0);
-    inode.set_times(
-        Instant::ZERO.to_duration(),
-        Instant::ZERO.to_duration(),
-        Instant::ZERO.to_duration(),
-    );
+    inode.set_times(Duration::ZERO, Duration::ZERO, Duration::ZERO);
 
     inode
 }
@@ -96,11 +92,7 @@ pub(super) fn devfs_new_node_inode(sb: Arc<SuperBlock>, node: Arc<DevfsNode>) ->
     });
     inode.set_perm(attr.perm);
     inode.set_size(0);
-    inode.set_times(
-        Instant::ZERO.to_duration(),
-        Instant::ZERO.to_duration(),
-        Instant::ZERO.to_duration(),
-    );
+    inode.set_times(Duration::ZERO, Duration::ZERO, Duration::ZERO);
 
     inode
 }

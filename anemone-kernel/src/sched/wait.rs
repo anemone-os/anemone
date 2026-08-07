@@ -98,7 +98,7 @@ struct WaitOrigin {
     /// Diagnostic creator tid captured for stale tokens and debug dumps only.
     created_by: Tid,
     /// Diagnostic creation timestamp used to reason about stuck or stale waits.
-    created_at: Instant,
+    created_at: MonotonicInstant,
     /// Diagnostic-only begin call site captured with `Location::caller()`.
     begin_caller: &'static Location<'static>,
 }
@@ -107,7 +107,7 @@ impl WaitOrigin {
     fn new(task: &Task, begin_caller: &'static Location<'static>) -> Self {
         Self {
             created_by: task.tid(),
-            created_at: Instant::now(),
+            created_at: MonotonicInstant::now(),
             begin_caller,
         }
     }

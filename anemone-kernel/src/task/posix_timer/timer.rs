@@ -8,7 +8,7 @@ use crate::{
         PosixTimerSignalRegistration,
     },
     time::{
-        monotonic_ns, realtime_ns,
+        RealtimeInstant, monotonic_ns, realtime_ns,
         timer::{
             TimerHandle, cancel_timer_event, schedule_realtime_threaded_timer_event,
             schedule_threaded_timer_event,
@@ -45,6 +45,44 @@ impl PosixTimerTimeline {
             Self::Monotonic => monotonic_ns(),
         }
     }
+
+    fn deadline(self, target_ns: u64) -> PosixTimerDeadline {
+        match self {
+            Self::Realtime => PosixTimerDeadline::Realtime(RealtimeInstant::from_nanos(target_ns)),
+            Self::Monotonic => PosixTimerDeadline::Monotonic(target_ns),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PosixTimerDeadline {
+    Realtime(RealtimeInstant),
+    /// Exact logical nanoseconds used by timer_gettime and periodic accounting.
+    /// This must not be replaced by the counter-rounded `MonotonicInstant`.
+    Monotonic(u64),
+}
+
+impl PosixTimerDeadline {
+    fn now_ns(self) -> u64 {
+        match self {
+            Self::Realtime(_) => realtime_ns(),
+            Self::Monotonic(_) => monotonic_ns(),
+        }
+    }
+
+    fn target_ns(self) -> u64 {
+        match self {
+            Self::Realtime(deadline) => deadline.as_nanos(),
+            Self::Monotonic(deadline_ns) => deadline_ns,
+        }
+    }
+
+    fn with_target_ns(self, target_ns: u64) -> Self {
+        match self {
+            Self::Realtime(_) => Self::Realtime(RealtimeInstant::from_nanos(target_ns)),
+            Self::Monotonic(_) => Self::Monotonic(target_ns),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -77,11 +115,10 @@ struct PosixTimerArm {
     /// Relative arms always use monotonic. Only an absolute CLOCK_REALTIME arm
     /// uses the mutable calendar timeline, so date changes cannot alter an
     /// elapsed-duration request.
-    timeline: PosixTimerTimeline,
-    /// Authoritative target on `timeline`; callback execution time never
+    /// Authoritative target; callback execution time never
     /// replaces this value, so periodic timers cannot accumulate scheduler
     /// drift.
-    target_ns: u64,
+    deadline: PosixTimerDeadline,
     interval_ns: u64,
     request: Option<TimerHandle>,
 }
@@ -116,16 +153,11 @@ impl PosixTimer {
         self.signal_registration.lock().replace(registration);
     }
 
-    fn schedule(
-        self: &Arc<Self>,
-        generation: u64,
-        timeline: PosixTimerTimeline,
-        target_ns: u64,
-    ) -> TimerHandle {
+    fn schedule(self: &Arc<Self>, generation: u64, deadline: PosixTimerDeadline) -> TimerHandle {
         let timer = Arc::downgrade(self);
-        match timeline {
-            PosixTimerTimeline::Realtime => schedule_realtime_threaded_timer_event(
-                target_ns,
+        match deadline {
+            PosixTimerDeadline::Realtime(deadline) => schedule_realtime_threaded_timer_event(
+                deadline,
                 None,
                 Box::new(move || {
                     if let Some(timer) = timer.upgrade() {
@@ -134,8 +166,8 @@ impl PosixTimer {
                 }),
                 None,
             ),
-            PosixTimerTimeline::Monotonic => {
-                let delay = ns_to_duration(target_ns.saturating_sub(timeline.now_ns()));
+            PosixTimerDeadline::Monotonic(deadline_ns) => {
+                let delay = ns_to_duration(deadline_ns.saturating_sub(monotonic_ns()));
                 schedule_threaded_timer_event(
                     delay,
                     Box::new(move || {
@@ -190,10 +222,10 @@ impl PosixTimer {
             inner.ignored_expirations = 0;
             let old_request = inner.arm.as_mut().and_then(|arm| arm.request.take());
             inner.arm = new_target.map(|target_ns| {
-                let request = self.schedule(inner.generation, timeline, target_ns);
+                let deadline = timeline.deadline(target_ns);
+                let request = self.schedule(inner.generation, deadline);
                 PosixTimerArm {
-                    timeline,
-                    target_ns,
+                    deadline,
                     interval_ns: setting.interval_ns,
                     request: Some(request),
                 }
@@ -228,9 +260,10 @@ impl PosixTimer {
             // would let later cleanup pretend it can still remove queue state.
             arm.request = None;
 
-            let now_ns = arm.timeline.now_ns();
-            if now_ns < arm.target_ns {
-                arm.request = Some(self.schedule(generation, arm.timeline, arm.target_ns));
+            let now_ns = arm.deadline.now_ns();
+            let target_ns = arm.deadline.target_ns();
+            if now_ns < target_ns {
+                arm.request = Some(self.schedule(generation, arm.deadline));
                 inner.arm = Some(arm);
                 return;
             }
@@ -238,19 +271,19 @@ impl PosixTimer {
             let expirations = if arm.interval_ns == 0 {
                 1
             } else {
-                periods_through(arm.target_ns, arm.interval_ns, now_ns)
+                periods_through(target_ns, arm.interval_ns, now_ns)
             };
             if arm.interval_ns != 0 {
-                let Some(next_target) = advance_target(arm.target_ns, arm.interval_ns, expirations)
+                let Some(next_target) = advance_target(target_ns, arm.interval_ns, expirations)
                 else {
                     // No representable future target remains. Disarm rather
                     // than creating a wrapped second schedule truth.
                     inner.arm = None;
                     return;
                 };
-                arm.target_ns = next_target;
+                arm.deadline = arm.deadline.with_target_ns(next_target);
                 if self.notification_kind != NotificationKind::ThreadSignal {
-                    arm.request = Some(self.schedule(generation, arm.timeline, next_target));
+                    arm.request = Some(self.schedule(generation, arm.deadline));
                 }
                 inner.arm = Some(arm);
             }
@@ -376,13 +409,13 @@ impl PosixTimer {
                 "thread-directed timer rearmed before signal dequeue"
             );
             if arm.interval_ns != 0 {
-                let now_ns = arm.timeline.now_ns();
-                if now_ns >= arm.target_ns {
-                    let periods = periods_through(arm.target_ns, arm.interval_ns, now_ns);
+                let now_ns = arm.deadline.now_ns();
+                let target_ns = arm.deadline.target_ns();
+                if now_ns >= target_ns {
+                    let periods = periods_through(target_ns, arm.interval_ns, now_ns);
                     delivered_overrun = delivered_overrun.saturating_add(periods);
-                    if let Some(target_ns) = advance_target(arm.target_ns, arm.interval_ns, periods)
-                    {
-                        arm.target_ns = target_ns;
+                    if let Some(target_ns) = advance_target(target_ns, arm.interval_ns, periods) {
+                        arm.deadline = arm.deadline.with_target_ns(target_ns);
                     } else {
                         overflowed = true;
                     }
@@ -409,7 +442,7 @@ impl PosixTimer {
             arm.request.is_none(),
             "thread-directed periodic timer already has a request"
         );
-        arm.request = Some(self.schedule(inner.generation, arm.timeline, arm.target_ns));
+        arm.request = Some(self.schedule(inner.generation, arm.deadline));
     }
 
     fn finish_unqueued_episode(&self, expected: PendingEpisode) {
@@ -498,14 +531,15 @@ fn setting_snapshot(inner: &PosixTimerInner) -> PosixTimerSetting {
     let Some(arm) = &inner.arm else {
         return PosixTimerSetting::default();
     };
-    let now_ns = arm.timeline.now_ns();
-    let value_ns = if now_ns < arm.target_ns {
-        arm.target_ns - now_ns
+    let now_ns = arm.deadline.now_ns();
+    let target_ns = arm.deadline.target_ns();
+    let value_ns = if now_ns < target_ns {
+        target_ns - now_ns
     } else if arm.interval_ns == 0 {
         0
     } else {
-        let periods = periods_through(arm.target_ns, arm.interval_ns, now_ns);
-        advance_target(arm.target_ns, arm.interval_ns, periods)
+        let periods = periods_through(target_ns, arm.interval_ns, now_ns);
+        advance_target(target_ns, arm.interval_ns, periods)
             .map(|target| target.saturating_sub(now_ns))
             .unwrap_or(0)
     };
@@ -562,8 +596,7 @@ mod kunits {
             let mut inner = timer.inner.lock();
             inner.generation = 4;
             inner.arm = Some(PosixTimerArm {
-                timeline: PosixTimerTimeline::Monotonic,
-                target_ns,
+                deadline: PosixTimerDeadline::Monotonic(target_ns),
                 interval_ns: NSEC_PER_SEC,
                 request: None,
             });
@@ -621,8 +654,7 @@ mod kunits {
             let mut inner = timer.inner.lock();
             inner.generation = 6;
             inner.arm = Some(PosixTimerArm {
-                timeline: PosixTimerTimeline::Monotonic,
-                target_ns,
+                deadline: PosixTimerDeadline::Monotonic(target_ns),
                 interval_ns: NSEC_PER_SEC,
                 request: None,
             });
@@ -678,8 +710,7 @@ mod kunits {
             let mut inner = timer.inner.lock();
             inner.generation = 8;
             inner.arm = Some(PosixTimerArm {
-                timeline: PosixTimerTimeline::Monotonic,
-                target_ns: now_ns.saturating_sub(1),
+                deadline: PosixTimerDeadline::Monotonic(now_ns.saturating_sub(1)),
                 interval_ns: NSEC_PER_SEC,
                 request: None,
             });
@@ -705,8 +736,7 @@ mod kunits {
             generation: 1,
             deleted: false,
             arm: Some(PosixTimerArm {
-                timeline: PosixTimerTimeline::Monotonic,
-                target_ns: 100,
+                deadline: PosixTimerDeadline::Monotonic(100),
                 interval_ns: 10,
                 request: None,
             }),
@@ -722,16 +752,17 @@ mod kunits {
                 interval_ns: 10,
             }
         );
-        assert_eq!(inner.arm.as_ref().unwrap().target_ns, 100);
+        assert_eq!(inner.arm.as_ref().unwrap().deadline.target_ns(), 100);
     }
 
     fn setting_snapshot_at(inner: &PosixTimerInner, now_ns: u64) -> PosixTimerSetting {
         let arm = inner.arm.as_ref().unwrap();
-        let value_ns = if now_ns < arm.target_ns {
-            arm.target_ns - now_ns
+        let target_ns = arm.deadline.target_ns();
+        let value_ns = if now_ns < target_ns {
+            target_ns - now_ns
         } else {
-            let periods = periods_through(arm.target_ns, arm.interval_ns, now_ns);
-            advance_target(arm.target_ns, arm.interval_ns, periods)
+            let periods = periods_through(target_ns, arm.interval_ns, now_ns);
+            advance_target(target_ns, arm.interval_ns, periods)
                 .unwrap()
                 .saturating_sub(now_ns)
         };

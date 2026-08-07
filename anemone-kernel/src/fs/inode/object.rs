@@ -615,7 +615,11 @@ impl InodeRef {
             InodeType::Dir => Err(SysError::IsDir),
             InodeType::Regular => {
                 (self.inode().ops.truncate)(self, size)?;
-                self.after_modified(cred, ModifType::Modify, realtime());
+                self.after_modified(
+                    cred,
+                    ModifType::Modify,
+                    RealtimeInstant::now().to_duration(),
+                );
                 Ok(())
             },
             _ => Err(SysError::NotReg),

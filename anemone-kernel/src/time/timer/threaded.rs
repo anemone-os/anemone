@@ -17,9 +17,9 @@ pub fn schedule_threaded_timer_event(
 ///
 /// `cancel_on_change_seq` is the timekeeper snapshot taken before registration.
 /// When present, any later sequence consumes the request through
-/// `clock_changed`; otherwise calendar steps only re-evaluate `deadline_ns`.
+/// `clock_changed`; otherwise calendar steps only re-evaluate `deadline`.
 pub(crate) fn schedule_realtime_threaded_timer_event(
-    deadline_ns: u64,
+    deadline: RealtimeInstant,
     cancel_on_change_seq: Option<u64>,
     expired: Box<dyn FnOnce() + Send + 'static>,
     clock_changed: Option<Box<dyn FnOnce() + Send + 'static>>,
@@ -30,7 +30,7 @@ pub(crate) fn schedule_realtime_threaded_timer_event(
         "cancel-on-set identity and callback must be installed together"
     );
     push_realtime_timer_event(
-        deadline_ns,
+        deadline,
         cancel_on_change_seq,
         TimerLane::RealtimeThreaded {
             expired,

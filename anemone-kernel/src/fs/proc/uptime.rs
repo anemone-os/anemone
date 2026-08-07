@@ -13,7 +13,7 @@ fn proc_uptime_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
 
 fn proc_uptime_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
-    let now = realtime();
+    let now = RealtimeInstant::now().to_duration();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,
@@ -48,7 +48,7 @@ static PROC_UPTIME_INODE_OPS: InodeOps = InodeOps {
 
 fn uptime_string() -> String {
     // kernel dosn't use floating point.
-    let uptime = Instant::now().to_duration().as_secs();
+    let uptime = MonotonicInstant::now().to_duration().as_secs();
 
     let idle_uptime = 0; // TODO: calculate idle uptime.
 

@@ -20,7 +20,7 @@ fn tgid_stat_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
 fn tgid_stat_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let _binding = validate_tgid_sub_inode(inode)?;
     let meta = inode.inode().meta_snapshot();
-    let now = realtime();
+    let now = RealtimeInstant::now().to_duration();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,
