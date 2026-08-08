@@ -1,7 +1,7 @@
 //! Architecture-agnostic context switching primitives. Built on top of
 //! architectural context switching code.
 use crate::{
-    mm::kptable::activate_kernel_mapping,
+    mm::uspace::activate_mapping_transition,
     prelude::*,
     sched::processor::{get_local_sched_ctx, get_local_sched_ctx_mut, set_current_task},
 };
@@ -58,27 +58,7 @@ pub unsafe fn switch_mapping(prev: &Task, next: &Task) {
     unsafe {
         let prev_mapping = prev.try_clone_uspace_handle();
         let next_mapping = next.try_clone_uspace_handle();
-        match (prev_mapping, next_mapping) {
-            (Some(prev_mapping), Some(next_mapping)) => {
-                if prev_mapping.as_ref().eq(&next_mapping) {
-                    // same mapping.
-                    return;
-                }
-                next_mapping.activate();
-            },
-            (None, Some(next_mapping)) => {
-                // kernel -> user.
-                next_mapping.activate();
-            },
-            (Some(_), None) => {
-                // user -> kernel.
-                activate_kernel_mapping();
-            },
-            (None, None) => {
-                // kernel -> kernel.
-                return;
-            },
-        }
+        activate_mapping_transition(prev_mapping.as_deref(), next_mapping.as_deref());
     }
 }
 

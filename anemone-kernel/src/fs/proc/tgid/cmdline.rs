@@ -71,9 +71,8 @@ fn tgid_cmdline_read(
 
     let cur_task = get_current_task();
     let cur_usp_handle = cur_task.clone_uspace_handle();
-    if usp_handle != cur_usp_handle {
-        usp_handle.activate();
-    }
+    let _temporary_activation = (usp_handle != cur_usp_handle)
+        .then(|| TemporaryUserSpaceActivation::new(cur_usp_handle.as_ref(), usp_handle.as_ref()));
 
     // The command-line range is placed on the initial user stack together with
     // environ, so reading it follows the same direct-copy model as environ.
@@ -87,10 +86,6 @@ fn tgid_cmdline_read(
     }
 
     *pos += to_read;
-
-    if usp_handle != cur_usp_handle {
-        cur_usp_handle.activate();
-    }
 
     Ok(to_read)
 }

@@ -81,17 +81,22 @@ impl<'a> UserSpaceGuard<'a> {
         range: Option<VirtPageRange>,
         op: impl FnOnce(&mut UserSpace) -> Result<(R, Option<DestructiveUserTlbChange>), SysError>,
     ) -> Result<R, SysError> {
-        let prepared = self.handle.user_tlb_shootdown.prepare(range);
         let (result, change) = op(self
             .usp
             .as_deref_mut()
             .expect("user-space guard must hold the inner mutex during mutation"))?;
 
         let Some(change) = change else {
-            drop(prepared);
             return Ok(result);
         };
 
+        // The mutation and current-core completion precede this snapshot.
+        // Activation joins through the same residency lock, so a later join
+        // must perform its full local invalidation after this point.
+        let prepared = self
+            .handle
+            .tlb_residency
+            .prepare_targets(&self.handle.user_tlb_shootdown, range);
         let committed = prepared.commit();
         drop(
             self.usp

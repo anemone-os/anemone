@@ -186,9 +186,10 @@ pub(super) fn handle_user_tlb_shootdowns() {
 /// Per-address-space storage for allocation-free synchronous remote TLB rounds.
 ///
 /// Construction is fallible and happens before the address space is published.
-/// Once constructed, preparing and completing a round cannot allocate. Runtime
-/// CPU hotplug is unsupported, so every round snapshots the boot-fixed online
-/// set and treats a later offline transition as a correctness violation.
+/// Storage covers the boot-fixed CPU domain; once constructed, preparing and
+/// completing a submitted resident-target snapshot cannot allocate. Runtime
+/// CPU hotplug is unsupported, so a submitted target becoming offline remains
+/// a correctness violation.
 #[derive(Debug)]
 pub(crate) struct UserTlbShootdownSet {
     messages: Vec<UserTlbShootdownMsg>,
@@ -212,23 +213,19 @@ impl UserTlbShootdownSet {
         Ok(Self { messages })
     }
 
-    pub(crate) fn prepare(&self, range: Option<VirtPageRange>) -> PreparedUserTlbShootdown<'_> {
-        self.prepare_with_online(range, target_online)
-    }
-
-    fn prepare_with_online(
+    pub(crate) fn prepare_targets(
         &self,
         range: Option<VirtPageRange>,
-        is_online: impl Fn(CpuId) -> bool,
+        is_target: impl Fn(CpuId) -> bool,
     ) -> PreparedUserTlbShootdown<'_> {
         let source = cur_cpu_id();
         for (logical_id, msg) in self.messages.iter().enumerate() {
             let target = CpuId::new(logical_id);
-            // An AP that has not been published online cannot hold a user TLB
-            // entry yet and is therefore outside this round. Runtime hotplug
-            // is unsupported; an online target disappearing after this
-            // snapshot is asserted in `complete`.
-            if target != source && is_online(target) {
+            if target != source && is_target(target) {
+                assert!(
+                    target_online(target),
+                    "resident CPU must remain boot-online during user TLB preparation"
+                );
                 msg.prepare(range);
             }
         }
@@ -344,7 +341,7 @@ mod kunits {
     }
 
     #[kunit]
-    fn preparation_snapshots_only_targets_already_online() {
+    fn preparation_snapshots_only_selected_remote_targets() {
         if ncpus() < 2 {
             return;
         }
@@ -355,7 +352,7 @@ mod kunits {
             .find(|cpu| *cpu != source)
             .expect("SMP KUnit requires one remote CPU");
 
-        let prepared = set.prepare_with_online(None, |target| target != skipped);
+        let prepared = set.prepare_targets(None, |target| target != skipped);
         for (logical_id, msg) in set.messages.iter().enumerate() {
             let target = CpuId::new(logical_id);
             let expected = if target == source || target == skipped {
@@ -371,5 +368,19 @@ mod kunits {
                 .iter()
                 .all(|msg| msg.phase.load(Ordering::Acquire) == USER_TLB_IDLE)
         );
+    }
+
+    #[kunit]
+    fn source_only_residency_prepares_no_remote_target() {
+        let set = UserTlbShootdownSet::try_new().expect("transport allocation should succeed");
+        let source = cur_cpu_id();
+
+        let prepared = set.prepare_targets(None, |target| target == source);
+        assert!(
+            set.messages
+                .iter()
+                .all(|msg| msg.phase.load(Ordering::Acquire) == USER_TLB_IDLE)
+        );
+        drop(prepared);
     }
 }

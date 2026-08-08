@@ -46,6 +46,9 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
+- [RFC-20260809-user-tlb-residency-targeting](./rfcs/user-tlb-residency-targeting/index.md)：Closed / R1；为全部user
+  page-table activation建立唯一residency handoff，使destructive TLB shootdown在稳定状态只覆盖仍可能观察旧translation
+  的CPU，同时保留现有同步ack、retirement与dependent continuation边界。
 - [RFC-20260808-user-tlb-completion](./rfcs/user-tlb-completion/index.md)：Closed / R2；把 user address-space
   remote fence从每次fault的无条件Drop broadcast收敛为completion ordering：monotonic PTE change不创建自己的
   remote obligation，destructive commit的dependent continuation/exposure与retired cleanup均在锁外remote ack之后；

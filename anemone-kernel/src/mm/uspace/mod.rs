@@ -29,6 +29,9 @@ mod fence;
 mod heap;
 pub use fence::UserSpaceGuard;
 use fence::{DestructiveUserTlbChange, UserTlbRetirement};
+mod residency;
+use residency::UserTlbResidency;
+pub(crate) use residency::{TemporaryUserSpaceActivation, activate_mapping_transition};
 
 pub mod fault;
 pub mod mmap;
@@ -121,6 +124,8 @@ pub struct UserSpaceHandle {
     /// Stable, preallocated transport storage; this is a capability owned by
     /// the completion domain and does not cache mapping or CPU residency.
     pub(super) user_tlb_shootdown: UserTlbShootdownSet,
+    /// Sole target-selection truth for CPUs that may retain this mapping.
+    tlb_residency: UserTlbResidency,
 }
 
 #[derive(Debug)]
@@ -186,17 +191,8 @@ impl UserSpaceHandle {
             usp: Mutex::new(usp),
             completion_ordering: Mutex::new(()),
             user_tlb_shootdown,
+            tlb_residency: UserTlbResidency::new(),
         }
-    }
-
-    pub fn activate(&self) {
-        unsafe {
-            PagingArch::activate_addr_space(self.table_ppn);
-        }
-    }
-
-    pub fn root_ppn(&self) -> PhysPageNum {
-        self.table_ppn
     }
 
     pub fn exe(&self) -> &PathRef {
