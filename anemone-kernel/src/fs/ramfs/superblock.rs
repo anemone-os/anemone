@@ -11,15 +11,17 @@ use anemone_abi::fs::linux::stat::RAMFS_MAGIC;
 #[derive(Opaque)]
 pub(super) struct RamfsSb {
     next_ino: AtomicU64,
-    // transaction lock. used to serialize namespace operations.
-    tx_lock: RwLock<()>,
+    /// Sleeping gate for ramfs namespace transactions. `RamfsDir::children`
+    /// protects each directory container, while this lock keeps lookup-to-iget
+    /// and compound inode-cache/link-count/dirent updates in one transaction.
+    tx_lock: Mutex<()>,
 }
 
 impl RamfsSb {
     pub(super) fn new() -> Self {
         Self {
             next_ino: AtomicU64::new(2), // Ino 0 is reserved; root gets ino 1; children start at 2.
-            tx_lock: RwLock::new(()),
+            tx_lock: Mutex::new(()),
         }
     }
 
@@ -27,13 +29,8 @@ impl RamfsSb {
         Ino::try_from(self.next_ino.fetch_add(1, Ordering::Relaxed)).unwrap()
     }
 
-    pub(super) fn read_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.read();
-        f()
-    }
-
-    pub(super) fn write_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.write();
+    pub(super) fn with_tx<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _guard = self.tx_lock.lock();
         f()
     }
 }
