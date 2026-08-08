@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-08 - User fault local TLB completion](./2026-08-08-user-fault-local-tlb.md)
 - [2026-08-08 - Ramfs namespace single Mutex](./2026-08-08-ramfs-namespace-single-mutex.md)
 - [2026-08-08 - Signal return fast path and syscall profiling](./2026-08-08-signal-return-fast-path-and-syscall-profiling.md)
 - [2026-08-08 - TTY TAB3/XTABS output processing](./2026-08-08-tty-tab3-output.md)

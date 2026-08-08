@@ -45,16 +45,22 @@ enum PageAccessContinuation {
 
 impl PageAccessContinuation {
     fn requires_local_completion(self, commit: LeafPteCommit) -> bool {
-        // CKPT 1 deliberately preserves eager completion for every route and
-        // relation while making both inputs explicit at the MM policy owner.
+        // Only an operation-local additive user fault may return without eager
+        // local completion. If hardware retains an invalid or more restrictive
+        // translation and the installed leaf remains, the retried user access
+        // faults again; that invocation no longer commits `Added` and therefore
+        // completes locally.
+        //
+        // This deliberately does not prove that another CPU has completed an
+        // earlier destructive remote invalidation. User-entry Signal redirect
+        // or an intervening destructive mutation can bypass that completion;
+        // the accepted boundary is ANE-20260808-MM-LAZY-LOCAL-TLB-REMOTE-
+        // PREDECESSOR-WINDOW. Remove it only with an explicit predecessor or
+        // fault-retry handoff.
+        // Immediate kernel access cannot rely on a future user-mode refault.
         match (self, commit) {
-            (
-                Self::UserReturn | Self::Immediate,
-                LeafPteCommit::Added
-                | LeafPteCommit::Unchanged
-                | LeafPteCommit::Relaxed
-                | LeafPteCommit::ReplacedOrRestricted,
-            ) => true,
+            (Self::UserReturn, LeafPteCommit::Added) => false,
+            (Self::UserReturn, _) | (Self::Immediate, _) => true,
         }
     }
 }
@@ -930,19 +936,26 @@ mod kunits {
     use super::*;
 
     #[kunit]
-    fn every_preparation_checkpoint_route_completes_locally() {
-        for continuation in [
-            PageAccessContinuation::UserReturn,
-            PageAccessContinuation::Immediate,
+    fn only_additive_user_return_may_defer_local_completion() {
+        assert!(
+            !PageAccessContinuation::UserReturn.requires_local_completion(LeafPteCommit::Added)
+        );
+
+        for commit in [
+            LeafPteCommit::Unchanged,
+            LeafPteCommit::Relaxed,
+            LeafPteCommit::ReplacedOrRestricted,
         ] {
-            for commit in [
-                LeafPteCommit::Added,
-                LeafPteCommit::Unchanged,
-                LeafPteCommit::Relaxed,
-                LeafPteCommit::ReplacedOrRestricted,
-            ] {
-                assert!(continuation.requires_local_completion(commit));
-            }
+            assert!(PageAccessContinuation::UserReturn.requires_local_completion(commit));
+        }
+
+        for commit in [
+            LeafPteCommit::Added,
+            LeafPteCommit::Unchanged,
+            LeafPteCommit::Relaxed,
+            LeafPteCommit::ReplacedOrRestricted,
+        ] {
+            assert!(PageAccessContinuation::Immediate.requires_local_completion(commit));
         }
     }
 }

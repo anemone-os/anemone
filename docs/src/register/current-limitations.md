@@ -2,6 +2,43 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260808-MM-LAZY-LOCAL-TLB-REMOTE-PREDECESSOR-WINDOW
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** High
+**Area:** MM / user page fault / local TLB completion / remote predecessor / Signal user entry
+
+**Summary:** actual user-mode fault在同一次Mapper walk看到invalid leaf、且没有替换valid ancestor时，会把commit分类为
+operation-local `Added`并延迟current-core TLB invalidation。该分类不证明其它CPU不存在尚未完成remote invalidation的
+旧valid/restrictive translation。
+
+具体窗口是：一个CPU在`MAP_FIXED`、unmap/remap、discard、heap decommit或其它使当前PTE变为invalid的destructive
+transaction中完成mutation与自己的local invalidation，随后释放`UserSpace` mutex，但返回的
+`RemoteUspFenceGuard`尚未Drop；另一个CPU可能携带predecessor translation取得mutex，在新mapping上因旧权限fault，
+并把当前invalid PTE提交为`Added`。
+ordinary trap在原instruction retry前还会执行user-entry Signal arbitration；如果它先改写trapframe进入handler，原access
+不保证先refault，handler中被旧translation允许的访问可能在remote completion前短暂观察predecessor mapping。
+
+维护者在2026-08-08明确接受该窗口并要求保留lazy路线。当前保证只覆盖operation-local policy：`UserReturn + Added`
+延迟completion；已安装leaf保持时，同一access若refault则进入非`Added` relation并eager完成；intervening destructive
+mutation也可能使其再次得到`Added`，该情况仍在本限制内。Immediate、permission relaxation、replacement与restriction
+始终eager。该限制不把remote guard、IPI failure、retired-frame cleanup或Signal owner改写成local policy的一部分，也
+不形成SMP mapping-identity强一致性声明。单HART runtime、普通refault reasoning或Mapper relation KUnit都不能关闭本项。
+
+**Exit Condition:** future工作建立可证明的predecessor-completion handoff，例如让in-flight remote completion参与下一轮
+UserSpace fault admission，或让fault-retry capability跨user-entry arbitration并在任何handler redirect前完成local
+invalidation；不能只检查当前PTE invalid bit、Signal pending snapshot或按architecture/QEMU特判。修复必须定义唯一owner、
+failure/cleanup和CPU-offline行为，并以SMP forced-interleaving覆盖destructive replacement、old restrictive translation、
+pending Signal handler redirect、原instruction refault、Immediate userptr与remote IPI失败；随后移除此条目并更新
+`MM-TLB-LOCAL-001`。
+
+**Owner:** MM UserSpace local-completion policy；remote-fence protocol与USER-ENTRY/Signal arbitration为future handoff依赖
+**Last Verified:** 2026-08-08
+**Related:** [User Fault Local TLB Completion当前契约](../contracts/mm/user-fault-local-tlb.md),
+[User fault local TLB completion小迭代](../devlog/changes/2026-08-08-user-fault-local-tlb.md),
+[Exception userptr remote-fence issue](../rfcs/exception-userptr-access/tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)
+
 ## ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION
 
 **Type:** Limitation
