@@ -16,6 +16,9 @@ pub trait MachineDesc: Sync {
     unsafe fn early_init_intc(&self);
     /// Currently nothing to do cz we already have SBI timer.
     unsafe fn early_init_timer(&self);
+    /// Discover machine-provided reset controllers before platform probing.
+    /// Machines without a reset provider intentionally keep this as a no-op.
+    unsafe fn early_init_reset_controllers(&self) {}
 }
 
 impl dyn MachineDesc {
@@ -23,6 +26,7 @@ impl dyn MachineDesc {
         unsafe {
             self.early_init_intc();
             self.early_init_timer();
+            self.early_init_reset_controllers();
         }
     }
 }

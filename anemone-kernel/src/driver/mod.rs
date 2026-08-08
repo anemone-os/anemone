@@ -21,6 +21,8 @@ use crate::{
 // this one must be public for the early boot code to initialize the root
 // interrupt controller.
 pub mod intc;
+#[path = "reset/mod.rs"]
+pub mod rstc;
 
 mod ahci;
 mod block;

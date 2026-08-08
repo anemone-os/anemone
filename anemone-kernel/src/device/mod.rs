@@ -22,6 +22,7 @@ pub use cpu::{
     register_cpu,
 };
 pub mod kobject;
+pub mod reset;
 pub mod resource;
 
 pub mod devnum;

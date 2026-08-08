@@ -1,7 +1,11 @@
 use crate::{
     arch::riscv64::machine::MachineDesc,
-    device::discovery::open_firmware::{get_of_node, of_with_node_by_path},
+    device::{
+        discovery::open_firmware::{get_of_node, of_with_node_by_path, of_with_root},
+        reset::{ResetDomain, register_reset_controller},
+    },
     driver::intc::sifive_plic::{self, SiFivePlic},
+    driver::rstc::jh7110::Jh7110ResetController,
     prelude::*,
     utils::identity::GeneralIdentity,
 };
@@ -48,5 +52,44 @@ impl MachineDesc for StarFive {
 
     unsafe fn early_init_timer(&self) {
         kwarningln!("init timer currently is a no-op");
+    }
+
+    unsafe fn early_init_reset_controllers(&self) {
+        fn discover(node: &device_tree::DeviceNode) {
+            if node.status() == device_tree::DeviceStatus::Okay
+                && node.compatible().is_some_and(|mut compatibles| {
+                    compatibles.any(|compatible| compatible == "starfive,jh7110-reset")
+                })
+            {
+                let ofnode = get_of_node(node.handle());
+                match Jh7110ResetController::from_of_node(ofnode.as_ref()) {
+                    Ok(controller) => {
+                        if let Err(error) = register_reset_controller(ResetDomain::new(
+                            ofnode,
+                            Box::new(controller),
+                        )) {
+                            kerrln!(
+                                "starfive reset {}: registration failed: {:?}",
+                                node.path(),
+                                error
+                            );
+                        }
+                    },
+                    Err(error) => {
+                        kerrln!(
+                            "starfive reset {}: provider discovery failed: {:?}",
+                            node.path(),
+                            error
+                        );
+                    },
+                }
+            }
+            for child in node.children() {
+                discover(child);
+            }
+        }
+
+        kinfoln!("discovering reset controllers for starfive machine");
+        of_with_root(discover);
     }
 }
