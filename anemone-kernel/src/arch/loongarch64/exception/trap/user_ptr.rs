@@ -323,7 +323,7 @@ impl UserPtrAccessorArch for LA64UserPtrAccessor {
                     }
 
                     let fence = uspace
-                        .handle_page_fault(&fault.info)
+                        .resolve_immediate_page_fault(&fault.info)
                         .map_err(|_| access_error(copied))?;
                     drop(fence);
 
@@ -379,7 +379,7 @@ impl UserPtrAccessorArch for LA64UserPtrAccessor {
                     }
 
                     let fence = uspace
-                        .handle_page_fault(&fault.info)
+                        .resolve_immediate_page_fault(&fault.info)
                         .map_err(|_| access_error(copied))?;
                     drop(fence);
 

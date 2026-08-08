@@ -11,7 +11,7 @@
 //! [UserSpace] should might be something like `GuardedUserSpace`.
 
 use crate::{
-    mm::kptable::KERNEL_PTABLE,
+    mm::{kptable::KERNEL_PTABLE, paging::LeafPteCommit},
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
         vmo::{anon::AnonObject, empty::EmptyObject},
@@ -34,6 +34,30 @@ pub mod shm;
 pub mod vma;
 pub mod vmo;
 // TODO: vdso
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageAccessContinuation {
+    /// The resolver returns to user mode, where hardware retries the access.
+    UserReturn,
+    /// The kernel retries or directly accesses the page immediately on return.
+    Immediate,
+}
+
+impl PageAccessContinuation {
+    fn requires_local_completion(self, commit: LeafPteCommit) -> bool {
+        // CKPT 1 deliberately preserves eager completion for every route and
+        // relation while making both inputs explicit at the MM policy owner.
+        match (self, commit) {
+            (
+                Self::UserReturn | Self::Immediate,
+                LeafPteCommit::Added
+                | LeafPteCommit::Unchanged
+                | LeafPteCommit::Relaxed
+                | LeafPteCommit::ReplacedOrRestricted,
+            ) => true,
+        }
+    }
+}
 
 // TODO: these constants should be in KB, not in pages.
 
@@ -187,9 +211,12 @@ impl UserSpaceHandle {
         Ok((UserSpaceHandle::new(new_usp, self.exe.clone()), guard))
     }
 
-    pub fn handle_page_fault(&self, info: &PageFaultInfo) -> Result<RemoteUspFenceGuard, SysError> {
+    pub(crate) fn resolve_user_page_fault(
+        &self,
+        info: &PageFaultInfo,
+    ) -> Result<RemoteUspFenceGuard, SysError> {
         let mut usp = self.usp.lock();
-        let res = usp.handle_page_fault(info);
+        let res = usp.resolve_user_page_fault(info);
         drop(usp);
         res
     }
@@ -254,7 +281,7 @@ impl UserSpace {
             Protection::READ | Protection::WRITE,
             ForkPolicy::CopyOnWrite,
             // note that stack vma is not marked with [VmFlags::GROW_DOWN]. it's managed
-            // separately and explicitly in [UserSpace::handle_page_fault].
+            // separately and explicitly in [UserSpace::resolve_user_page_fault].
             VmFlags::empty(),
             VmReservation::Stack,
             stack_vmo,
@@ -780,12 +807,29 @@ impl UserSpace {
 }
 
 impl UserSpace {
-    /// Resolve a page fault reported by an actual user-memory access.
-    pub fn handle_page_fault(
+    /// Resolve a page fault reported by an actual user-mode access.
+    fn resolve_user_page_fault(
         &mut self,
         fault_info: &PageFaultInfo,
     ) -> Result<RemoteUspFenceGuard, SysError> {
-        self.resolve_page_access(fault_info.fault_addr(), fault_info.fault_type())
+        self.resolve_page_access(
+            fault_info.fault_addr(),
+            fault_info.fault_type(),
+            PageAccessContinuation::UserReturn,
+        )
+    }
+
+    /// Resolve a captured kernel user-pointer fault before its one immediate
+    /// retry. This route cannot defer local completion to a later user trap.
+    pub(crate) fn resolve_immediate_page_fault(
+        &mut self,
+        fault_info: &PageFaultInfo,
+    ) -> Result<RemoteUspFenceGuard, SysError> {
+        self.resolve_page_access(
+            fault_info.fault_addr(),
+            fault_info.fault_type(),
+            PageAccessContinuation::Immediate,
+        )
     }
 
     /// Ensure that one user page can satisfy `access` without performing the
@@ -800,13 +844,14 @@ impl UserSpace {
         addr: VirtAddr,
         access: PageFaultType,
     ) -> Result<RemoteUspFenceGuard, SysError> {
-        self.resolve_page_access(addr, access)
+        self.resolve_page_access(addr, access, PageAccessContinuation::Immediate)
     }
 
     fn resolve_page_access(
         &mut self,
         addr: VirtAddr,
         access: PageFaultType,
+        continuation: PageAccessContinuation,
     ) -> Result<RemoteUspFenceGuard, SysError> {
         // Stack and heap reservations impose accessibility bounds in addition
         // to ordinary VMA membership.
@@ -816,7 +861,7 @@ impl UserSpace {
             .ok_or(SysError::NotMapped)?
             .reservation();
 
-        match reservation {
+        let commit = match reservation {
             Some(VmReservation::Stack) => {
                 if !self.stack_accessible(addr) {
                     return Err(SysError::NotMapped);
@@ -833,10 +878,11 @@ impl UserSpace {
                     .get_mut(&stack.svpn)
                     .expect("stack reservation must stay registered");
 
-                stack_vma.resolve_page_access(&mut mapper, addr, access)?;
+                let commit = stack_vma.resolve_page_access(&mut mapper, addr, access)?;
                 if addr.page_down() < stack.committed_bottom {
                     stack.committed_bottom = addr.page_down();
                 }
+                commit
             },
             Some(VmReservation::Heap) => {
                 if !self.heap_accessible(addr) {
@@ -854,7 +900,7 @@ impl UserSpace {
                     .get_mut(&heap.svpn)
                     .expect("heap reservation must stay registered");
 
-                heap_vma.resolve_page_access(&mut mapper, addr, access)?;
+                heap_vma.resolve_page_access(&mut mapper, addr, access)?
             },
             Some(VmReservation::Guard) => return Err(SysError::NotMapped),
             None => {
@@ -866,13 +912,37 @@ impl UserSpace {
                 let mut mapper = table.mapper();
                 let other_vma = Self::find_vma_raw_mut(vmas, addr).ok_or(SysError::NotMapped)?;
 
-                other_vma.resolve_page_access(&mut mapper, addr, access)?;
+                other_vma.resolve_page_access(&mut mapper, addr, access)?
             },
+        };
+
+        let vpn = addr.page_down();
+        if continuation.requires_local_completion(commit) {
+            PagingArch::tlb_shootdown(vpn);
         }
 
-        Ok(RemoteUspFenceGuard::new(Some(VirtPageRange::new(
-            addr.page_down(),
-            1,
-        ))))
+        Ok(RemoteUspFenceGuard::new(Some(VirtPageRange::new(vpn, 1))))
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn every_preparation_checkpoint_route_completes_locally() {
+        for continuation in [
+            PageAccessContinuation::UserReturn,
+            PageAccessContinuation::Immediate,
+        ] {
+            for commit in [
+                LeafPteCommit::Added,
+                LeafPteCommit::Unchanged,
+                LeafPteCommit::Relaxed,
+                LeafPteCommit::ReplacedOrRestricted,
+            ] {
+                assert!(continuation.requires_local_completion(commit));
+            }
+        }
     }
 }

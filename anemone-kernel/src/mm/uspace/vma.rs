@@ -3,9 +3,12 @@
 //! Reference:
 //! - https://fuchsia.dev/fuchsia-src/reference/kernel_objects/vm_address_region
 
-use crate::prelude::{
-    vmo::{VmObject, shadow::ShadowObject},
-    *,
+use crate::{
+    mm::paging::LeafPteCommit,
+    prelude::{
+        vmo::{VmObject, shadow::ShadowObject},
+        *,
+    },
 };
 
 /// Determines how a [VmArea] is [VmArea::fork]ed.
@@ -236,7 +239,7 @@ impl VmArea {
         mapper: &mut Mapper,
         vpn: VirtPageNum,
         access: PageFaultType,
-    ) -> Result<(), SysError> {
+    ) -> Result<LeafPteCommit, SysError> {
         debug_assert!(self.range.contains(vpn));
 
         if !self.prot.contains(access.into()) {
@@ -250,27 +253,24 @@ impl VmArea {
             flags -= PteFlags::WRITE;
         }
 
-        unsafe { mapper.map_one(vpn, resolved.frame.ppn(), flags, 0, true) }
+        unsafe { mapper.commit_leaf(vpn, resolved.frame.ppn(), flags) }
     }
 
     /// Resolve one page access in this VMA.
     ///
     /// `addr` is guaranteed to be in the range of this VMA.
     ///
-    /// A local TLB shootdown will be performed.
+    /// The caller owns local completion for the returned commit relation.
     pub(super) fn resolve_page_access(
         &mut self,
         mapper: &mut Mapper,
         addr: VirtAddr,
         access: PageFaultType,
-    ) -> Result<(), SysError> {
+    ) -> Result<LeafPteCommit, SysError> {
         let vpn = addr.page_down();
         debug_assert!(self.range.contains(vpn));
 
-        self.map_page(mapper, vpn, access)?;
-        PagingArch::tlb_shootdown(vpn);
-
-        Ok(())
+        self.map_page(mapper, vpn, access)
     }
 
     /// Used when cloning a task without `CLONE_VM`. Think of it as forking a
