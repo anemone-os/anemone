@@ -12,10 +12,6 @@ use core::{
 use anemone_rs::{
     abi::{
         process::linux::signal::{SigAction, SigSet},
-        syscall::{
-            SYS_GETITIMER, SYS_NANOSLEEP, SYS_SETITIMER, SYS_TIMERFD_CREATE, SYS_TIMERFD_GETTIME,
-            SYS_TIMERFD_SETTIME, syscall,
-        },
         time::linux::{
             ITimerSpec, TimeSpec, TimeVal,
             clock::CLOCK_MONOTONIC,
@@ -25,6 +21,7 @@ use anemone_rs::{
     os::linux::{
         fs::{close, read},
         process::signal::{SigNo, sigaction},
+        time,
     },
     prelude::*,
 };
@@ -36,73 +33,23 @@ extern "C" fn sigalrm_handler(_signo: i32) {
 }
 
 fn timerfd_settime(fd: u32, value: ITimerSpec) {
-    unsafe {
-        syscall(
-            SYS_TIMERFD_SETTIME,
-            fd as u64,
-            0,
-            (&value as *const ITimerSpec) as u64,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    time::timerfd_settime(fd, 0, &value, None).unwrap();
 }
 
 fn timerfd_gettime(fd: u32) -> ITimerSpec {
-    let mut value = ITimerSpec::default();
-    unsafe {
-        syscall(
-            SYS_TIMERFD_GETTIME,
-            fd as u64,
-            (&mut value as *mut ITimerSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
-    value
+    time::timerfd_gettime(fd).unwrap()
 }
 
 fn set_real_itimer(value: OldITimerVal) {
-    unsafe {
-        syscall(
-            SYS_SETITIMER,
-            ITIMER_REAL as u64,
-            (&value as *const OldITimerVal) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    time::setitimer(ITIMER_REAL, &value, None).unwrap();
 }
 
 fn get_real_itimer() -> OldITimerVal {
-    let mut value = OldITimerVal::default();
-    unsafe {
-        syscall(
-            SYS_GETITIMER,
-            ITIMER_REAL as u64,
-            (&mut value as *mut OldITimerVal) as u64,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
-    value
+    time::getitimer(ITIMER_REAL).unwrap()
 }
 
 fn verify_timerfd_replace_periodic_and_close() {
-    let fd = unsafe {
-        syscall(SYS_TIMERFD_CREATE, CLOCK_MONOTONIC as u64, 0, 0, 0, 0, 0).unwrap() as u32
-    };
+    let fd = time::timerfd_create(CLOCK_MONOTONIC, 0).unwrap();
 
     // Every replacement names a far-future request. Implementations that keep
     // stale requests queued accumulate all 64 instead of retaining one live arm.
@@ -184,17 +131,7 @@ fn verify_itimer_signal_interrupts_nanosleep() {
         tv_sec: 1,
         tv_nsec: 0,
     };
-    let result = unsafe {
-        syscall(
-            SYS_NANOSLEEP,
-            (&sleep as *const TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-    };
+    let result = time::nanosleep(sleep);
     assert_eq!(result, Err(EINTR));
     assert_eq!(SIGALRM_DELIVERIES.load(Ordering::Relaxed), 1);
     assert_eq!(get_real_itimer(), OldITimerVal::default());

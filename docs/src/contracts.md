@@ -119,6 +119,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [POSIX record lock](./contracts/vfs/posix-record-lock.md)
 - [Time 当前契约](./contracts/time/index.md)
   - [Clock derivation](./contracts/time/clock-derivation.md)
+  - [RTC boot seed](./contracts/time/rtc-boot-seed.md)
   - [Realtime step](./contracts/time/realtime-step.md)
   - [Soft timer request](./contracts/time/soft-timer-request.md)
   - [POSIX timer](./contracts/time/posix-timer.md)

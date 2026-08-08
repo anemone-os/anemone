@@ -48,4 +48,8 @@ impl MachineDesc for QemuVirt {
 
         kinfoln!("initializing timer for qemu virt machine");
     }
+
+    fn preferred_rtc_origin(&self) -> Option<Arc<dyn crate::device::discovery::fwnode::FwNode>> {
+        of_with_node_by_path("/soc/rtc@101000", |node| get_of_node(node.handle()) as Arc<_>).ok()
+    }
 }

@@ -46,7 +46,9 @@ impl KThreadCtx {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{task::kthread::KThreadBuilder, time::Instant, utils::any_opaque::AnyOpaque};
+    use crate::{
+        task::kthread::KThreadBuilder, time::MonotonicInstant, utils::any_opaque::AnyOpaque,
+    };
 
     #[derive(Opaque)]
     struct WaitForContext {
@@ -59,7 +61,7 @@ mod kunits {
         let context = opaque
             .cast::<WaitForContext>()
             .expect("invalid kthread wait_for context");
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         context.ready.store(true, Ordering::Release);
         ctx.wait_for(context.timeout);
         context

@@ -32,7 +32,7 @@ pub(super) fn schedule_timerfd_callback(
             )
         },
         TimerFdDeadline::Realtime {
-            deadline_ns,
+            deadline,
             cancel_on_change_seq,
         } => {
             let expire_core = Arc::downgrade(core);
@@ -42,7 +42,7 @@ pub(super) fn schedule_timerfd_callback(
                     as Box<dyn FnOnce() + Send + 'static>
             });
             schedule_realtime_threaded_timer_event(
-                deadline_ns,
+                deadline,
                 cancel_on_change_seq,
                 Box::new(move || timerfd_expire_callback(expire_core, generation)),
                 clock_changed,

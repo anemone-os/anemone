@@ -312,7 +312,7 @@ fn local_wake_enqueue(task: Arc<Task>, park: ParkState) -> WakeEnqueueResult {
 
 fn requeue_current_with<F>(task: Arc<Task>, f: F)
 where
-    F: FnOnce(&mut RunQueue, Arc<Task>, Instant),
+    F: FnOnce(&mut RunQueue, Arc<Task>, MonotonicInstant),
 {
     assert!(task.cpuid() == cur_cpu_id());
     assert!(task.is_sched_runnable());
@@ -332,7 +332,7 @@ where
                 !task.sched_on_runq(),
                 "current running task should not already be on run queue"
             );
-            f(&mut proc.runq, task, Instant::now());
+            f(&mut proc.runq, task, MonotonicInstant::now());
         });
     });
 }
@@ -361,7 +361,7 @@ pub fn local_handoff_woken_current(task: Arc<Task>) {
 
 fn put_prev_current_with<F>(task: &Arc<Task>, f: F)
 where
-    F: FnOnce(&mut RunQueue, &Arc<Task>, Instant),
+    F: FnOnce(&mut RunQueue, &Arc<Task>, MonotonicInstant),
 {
     assert!(task.cpuid() == cur_cpu_id());
 
@@ -380,7 +380,7 @@ where
                 !task.sched_on_runq(),
                 "current running task should not already be on run queue"
             );
-            f(&mut proc.runq, task, Instant::now());
+            f(&mut proc.runq, task, MonotonicInstant::now());
         });
     });
 }
@@ -413,7 +413,7 @@ pub fn local_pick_next() -> Arc<Task> {
         // selection. Interrupts are disabled here, so this clear cannot race
         // with a new local request; requests raised later remain pending.
         proc.pending_resched = PendingResched::empty();
-        proc.runq.set_next_task(&task, Instant::now());
+        proc.runq.set_next_task(&task, MonotonicInstant::now());
         task
     });
     assert!(task.is_sched_runnable());
@@ -429,7 +429,7 @@ pub fn local_sched_tick() {
     let action = PROCESSOR.with_mut(|proc| {
         proc.runq.task_tick(
             proc.running_task.as_ref().expect("no running task"),
-            Instant::now(),
+            MonotonicInstant::now(),
         )
     });
     if let TickAction::RequestResched = action {
@@ -582,7 +582,7 @@ impl Processor {
         let Some(current) = self.running_task.as_ref() else {
             return;
         };
-        let now = Instant::now();
+        let now = MonotonicInstant::now();
         if self.runq.decide_preempt_current(current, candidate, now)
             == PreemptDecision::RequestResched
         {

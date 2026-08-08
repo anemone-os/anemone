@@ -1,4 +1,24 @@
-use crate::prelude::*;
+use crate::{device::discovery::fwnode::FwNode, prelude::*};
+
+/// Machine-owned boot policy handed once to the common boot coordinator.
+///
+/// This value carries only firmware identity. It cannot inspect an RTC
+/// registry, read a provider, or mutate the timekeeper.
+pub(crate) struct MachineBootPolicy {
+    preferred_rtc_origin: Option<Arc<dyn FwNode>>,
+}
+
+impl MachineBootPolicy {
+    pub(crate) fn new(preferred_rtc_origin: Option<Arc<dyn FwNode>>) -> Self {
+        Self {
+            preferred_rtc_origin,
+        }
+    }
+
+    pub(crate) fn into_preferred_rtc_origin(self) -> Option<Arc<dyn FwNode>> {
+        self.preferred_rtc_origin
+    }
+}
 
 pub mod link_symbols;
 
@@ -19,9 +39,11 @@ macro_rules! arch_select {
         #[cfg(target_arch = $arch_str)]
         mod $arch;
         #[cfg(target_arch = $arch_str)]
+        pub(crate) use $crate::arch::$arch::machine_init;
+        #[cfg(target_arch = $arch_str)]
         pub use $crate::arch::$arch::{
             BacktraceArch, CpuArch, IntrArch, KernelLayout, PagingArch, SchedArch, SignalArch,
-            TimeArch, TrapArch, machine_init,
+            TimeArch, TrapArch,
         };
     };
 }

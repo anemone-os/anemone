@@ -80,36 +80,36 @@ pub(super) trait Scheduler: Send + Sync {
     fn dequeue(&mut self, task: &Arc<Task>) -> bool;
 
     /// Requeue the current task after an explicit yield.
-    fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant);
+    fn requeue_yielded_current(&mut self, task: Arc<Task>, now: MonotonicInstant);
 
     /// Requeue the current task after involuntary preemption.
-    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: Instant);
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, now: MonotonicInstant);
 
     /// Requeue the current task after a parked wait was woken in place.
-    fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant);
+    fn handoff_woken_current(&mut self, task: Arc<Task>, now: MonotonicInstant);
 
     /// Observe that the previous current task blocked and will not be requeued.
-    fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant);
+    fn put_prev_blocked(&mut self, task: &Arc<Task>, now: MonotonicInstant);
 
     /// Observe that the previous current task is exiting and will not be
     /// requeued.
-    fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant);
+    fn put_prev_exiting(&mut self, task: &Arc<Task>, now: MonotonicInstant);
 
     /// Pick and remove the next runnable task from this class.
     fn pick_next_task(&mut self) -> Option<Arc<Task>>;
 
     /// Mark a picked task as the next execution segment.
-    fn set_next_task(&mut self, task: &Arc<Task>, now: Instant);
+    fn set_next_task(&mut self, task: &Arc<Task>, now: MonotonicInstant);
 
     /// Timer-tick lifecycle transaction for the running task.
-    fn task_tick(&mut self, task: &Arc<Task>, now: Instant) -> TickAction;
+    fn task_tick(&mut self, task: &Arc<Task>, now: MonotonicInstant) -> TickAction;
 
     /// Decide whether a newly placed candidate should preempt current.
     fn decide_preempt_current(
         &mut self,
         current: &Arc<Task>,
         candidate: &Arc<Task>,
-        now: Instant,
+        now: MonotonicInstant,
     ) -> PreemptDecision;
 }
 

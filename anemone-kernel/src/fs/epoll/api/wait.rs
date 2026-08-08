@@ -69,12 +69,12 @@ fn wait_for_harvest<'a>(
     timeout: Option<Duration>,
 ) -> EpollWaitResult<'a> {
     let deadline = timeout.map(|duration| {
-        let now = Instant::now();
+        let now = MonotonicInstant::now();
         // Linux accepts every nonnegative i64 timespec. Durations beyond the
         // monotonic clock's representable horizon are still valid waits, so
         // clamp them to the farthest deadline instead of panicking in `Add`.
         now.checked_add(duration)
-            .unwrap_or(Instant::from_mono(u64::MAX))
+            .unwrap_or(MonotonicInstant::from_mono(u64::MAX))
     });
 
     loop {
@@ -90,7 +90,7 @@ fn wait_for_harvest<'a>(
 
         let remaining = match deadline {
             Some(deadline) => {
-                let now = Instant::now();
+                let now = MonotonicInstant::now();
                 if now >= deadline {
                     return EpollWaitResult::Terminal(IomuxWaitOutcome::Timeout);
                 }

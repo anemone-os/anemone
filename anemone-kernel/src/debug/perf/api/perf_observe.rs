@@ -230,7 +230,9 @@ fn write_snapshot(usp: &mut UserSpace, base: u64) -> Result<(), SysError> {
 /// Native developer ABI for catalog discovery, recording control and snapshots.
 /// Validation and size errors precede capability checks; protected operation
 /// copyout begins only after effective `CAP_SYS_ADMIN` admission.
-#[syscall(SYS_PERF_OBSERVE)]
+// The observation control plane must not recursively contaminate the metrics
+// whose snapshots it publishes.
+#[syscall(SYS_PERF_OBSERVE, profile = false)]
 fn sys_perf_observe(op: u64, arg: u64, buf: u64, len: usize, flags: u64) -> Result<u64, SysError> {
     let layout = perf::catalog_layout();
     let snapshot_len = PERF_SNAPSHOT_HEADER_SIZE
@@ -380,7 +382,10 @@ mod kunits {
                     .try_into()
                     .unwrap(),
             );
-            assert!(matches!(kind, PERF_METRIC_COUNTER | PERF_METRIC_HISTOGRAM));
+            assert!(matches!(
+                kind,
+                PERF_METRIC_COUNTER | PERF_METRIC_HISTOGRAM | PERF_METRIC_ELAPSED
+            ));
             let unit = u16::from_ne_bytes(
                 descriptor[PERF_METRIC_UNIT_OFFSET..][..2]
                     .try_into()

@@ -8,8 +8,8 @@
 **不覆盖：** PTY/devpts/ptmx、orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、relation-disassociation `SIGHUP`/`SIGCONT`、hardware hangup、runtime line reconfiguration或procfs TTY字段
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/task/{jobctl,sig}/`
 **依赖：** [TTY data plane](./data-plane.md)、[process-group signaling](../task/process-group-signaling.md)、[Signal pending/action](../signal/pending-routing.md)、[Unix job control](../task/job-control.md)、[task lifecycle](../task/thread-group-lifecycle.md)、[user entry](../task/user-entry.md)
-**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)
-**最后核验：** 2026-08-03
+**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)
+**最后核验：** 2026-08-08
 
 ## 状态与能力所有权
 
@@ -103,20 +103,25 @@ chars/winsize/ioctl、显式`setsid + TIOCSCTTY(arg=0)`、`TIOCGPGRP/TIOCSPGRP/T
 signals、serial `BRKINT` foreground `SIGINT`、changed winsize `SIGWINCH`、普通background read `SIGTTIN`以及
 session-leader detach/exit cleanup。termios input envelope还真实round-trip并执行`IGNBRK`、`BRKINT`、`IGNPAR`、
 `PARMRK`、`INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`；其它changed unsupported bits继续原子`EINVAL`。
+termios output envelope真实round-trip `TAB0`与`TAB3/XTABS`，并按`TTY-OUTPUT-001`执行TAB3 expansion；
+`TAB1/TAB2`及其它changed unsupported output bits继续原子`EINVAL`。
 
 BusyBox ash必须取得真实controlling TTY；`jobs`、Ctrl-Z、`fg`、`bg`、foreground Ctrl-C、background read与shell
 reclaim都必须经过本页的relation/Signal/job-control handoff。BusyBox vi依赖真实raw/canonical切换、readiness与byte
 I/O完成启动、编辑、保存和退出。shell prompt、`job control turned off`、unconditional `TIOCSPGRP`、anonymous-console
-特判或ioctl success stub都不满足该能力。
+特判或ioctl success stub都不满足该能力。GNU `less 668`必须能以真实`TCSETSW`进入可用全屏界面，并以`q`
+退出；仅接受`XTABS`却继续输出literal tab不满足该能力。
 
 包络外能力可以稳定拒绝或保留明确限制，但不得把已经交付的non-orphan `TIOCSPGRP`三分支、ordinary background
 read或foreground signal重新归入延期范围，也不得成功后丢弃状态。
 
 **违反表现：** ash降级运行、foreground job结束后shell不能reclaim、`TIOCSPGRP`无条件放行或错误拒绝
 blocked/ignored路径、vi依赖fake ioctl、unsupported设置成功无效果，或background read绕过foreground policy。
+GNU `less`因其`TAB3` candidate被拒绝，或`TAB3`被当作success-no-op，也属于违反。
 
 **验证 / Enforcement：** RV64自动TTY matrix `50/50`、BusyBox vi与ash host oracle、native Python 3.13 basic REPL与
-PyREPL、用户人工ash checklist、404项KUnit、19项Unix job-control focused回归、ABI/source/bypass audit与final review。
+PyREPL、用户人工ash checklist、GNU `less 668`进入可用全屏界面并以`q`退出的用户运行证据、404项KUnit、
+TAB3 inline KUnit compile/source audit、19项Unix job-control focused回归、ABI/source/bypass audit与final review。
 
 ## 跨领域handoff义务
 
@@ -135,6 +140,7 @@ PyREPL、用户人工ash checklist、404项KUnit、19项Unix job-control focused
   BusyBox与kernel hash上的ash checklist完成Ctrl-C、
   `Ctrl-Z -> jobs -> fg -> Ctrl-Z -> bg -> jobs -> fg -> Ctrl-C`、background `cat`的`SIGTTIN` stop、foreground
   input与clean exit，launcher与wrapper均PASS。
+- 2026-08-08维护者在决赛RV64 guest中确认GNU `less 668`进入可用全屏界面，并以`q`退出。
 - 本轮build/runtime acceptance只覆盖RV64。LA64 compile/runtime、实体UART parity/framing injection、hardware与LTP为Not Run；focused pretest中的
   signal/wait profile为`attempted=0`，不是LTP通过证据。
 - relation-disassociation `SIGHUP`/`SIGCONT`、newly orphaned stopped-group policy、orphaned-pgrp errno/effect、

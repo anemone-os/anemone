@@ -8,6 +8,7 @@ use crate::{prelude::*, sys::anemone::debug};
 pub enum PerfMetricKind {
     Counter,
     Histogram,
+    Elapsed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +163,7 @@ fn parse_catalog(bytes: &[u8]) -> Result<PerfCatalog, Errno> {
         let kind = match read_u16(bytes, base + PERF_METRIC_KIND_OFFSET)? {
             PERF_METRIC_COUNTER => PerfMetricKind::Counter,
             PERF_METRIC_HISTOGRAM => PerfMetricKind::Histogram,
+            PERF_METRIC_ELAPSED => PerfMetricKind::Elapsed,
             _ => return Err(EINVAL),
         };
         let unit = match read_u16(bytes, base + PERF_METRIC_UNIT_OFFSET)? {
@@ -181,6 +183,8 @@ fn parse_catalog(bytes: &[u8]) -> Result<PerfCatalog, Errno> {
             || (kind == PerfMetricKind::Counter && metric_value_count != 1)
             || (kind == PerfMetricKind::Histogram
                 && metric_value_count != PERF_HISTOGRAM_VALUE_COUNT)
+            || (kind == PerfMetricKind::Elapsed
+                && metric_value_count != PERF_ELAPSED_VALUE_COUNT)
         {
             return Err(EINVAL);
         }

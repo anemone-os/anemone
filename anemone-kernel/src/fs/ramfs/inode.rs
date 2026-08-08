@@ -151,7 +151,7 @@ fn ramfs_create_child(
     debug_assert!(matches!(ty, InodeType::Dir | InodeType::Regular));
 
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
             return Err(SysError::AlreadyExists);
@@ -221,7 +221,7 @@ fn ramfs_make_node(
     ));
 
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
             return Err(SysError::AlreadyExists);
@@ -266,7 +266,7 @@ fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<Ino
     let target_path = PathBuf::from(target_text.as_str());
     let target_len = target_text.len() as u64;
 
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
             return Err(SysError::AlreadyExists);
@@ -294,7 +294,7 @@ fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<Ino
 /// Look up a child inode by name inside a directory.
 fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     let sb = parent.sb();
-    ramfs_sb(&sb).read_tx(|| ramfs_lookup_locked(parent, name))
+    ramfs_sb(&sb).with_tx(|| ramfs_lookup_locked(parent, name))
 }
 
 fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
@@ -334,7 +334,7 @@ fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysEr
         return Err(SysError::CrossDeviceLink);
     }
 
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
 
         if dir_data.contains(name) {
@@ -350,12 +350,12 @@ fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysEr
 
 fn ramfs_unlink(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| ramfs_remove_locked(dir, name, false))
+    ramfs_sb(&sb).with_tx(|| ramfs_remove_locked(dir, name, false))
 }
 
 fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let child = ramfs_lookup_locked(dir, name)?;
 
         if child.ty() != InodeType::Dir {
@@ -387,7 +387,7 @@ fn ramfs_rename(
         return Err(SysError::CrossDeviceLink);
     }
 
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let old_data = ramfs_dir(old_dir)?;
         let new_data = ramfs_dir(new_dir)?;
         let src_ino = old_data.get_by_name(old_name).ok_or(SysError::NotFound)?;

@@ -61,6 +61,8 @@ impl Task {
         }
 
         self.sig_pending.lock().push_signal(signal);
+        // Publish private pending before making the conservative cache visible.
+        self.rearm_signal_return_work();
 
         if self.is_current_sig_mask_blocking(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
             // signal masked. nothing to do now, just wait for the task to
@@ -153,6 +155,13 @@ impl ThreadGroup {
         {
             let inner = self.inner.read();
             inner.sig_pending.lock().push_signal(signal);
+        }
+
+        // Snapshot after publication. A member present now is rearmed below;
+        // one joining later starts armed and cannot miss this shared pending.
+        let members = self.get_members();
+        for member in &members {
+            member.rearm_signal_return_work();
         }
 
         for member in members {
@@ -368,6 +377,11 @@ impl ThreadGroup {
         else {
             return;
         };
+        // Pending and job-control phase publication precede rearm, which in
+        // turn precedes the existing job-control wake and notification.
+        for member in &notify_targets {
+            member.rearm_signal_return_work();
+        }
         self.finish_job_control_transition(transition);
         // Opposite-class cleanup may retire POSIX timer occurrences sharing a
         // control signal number. Complete their owner callbacks only after the
@@ -572,6 +586,11 @@ impl ThreadGroup {
             return PosixTimerSignalEnqueue::TargetExited;
         };
 
+        // Pending publication precedes rearm; every target is armed before
+        // job-control completion can wake a task or expose the new phase.
+        for member in &notify_targets {
+            member.rearm_signal_return_work();
+        }
         self.finish_job_control_transition(transition);
         // Opposite-class cleanup spans shared and private owners. Each owner
         // extracts callbacks under its own leaf lock and completes them here.

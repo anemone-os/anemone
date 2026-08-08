@@ -27,8 +27,8 @@ static_assert!(
     "TTY committed input capacity must be non-zero"
 );
 static_assert!(
-    TTY_OUTPUT_CAPACITY_BYTES >= 4,
-    "TTY output capacity must hold the default transformed signal echo"
+    TTY_OUTPUT_CAPACITY_BYTES >= 8,
+    "TTY output capacity must hold one maximum TAB3 transform token"
 );
 static_assert!(
     TTY_WORKER_BATCH_BYTES > 0,

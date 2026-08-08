@@ -11,7 +11,10 @@ mod threaded;
 
 use core::fmt::Debug;
 
-use crate::prelude::*;
+use crate::{
+    prelude::*,
+    time::{MonotonicInstant, RealtimeInstant},
+};
 
 pub use irq::schedule_local_irq_timer_event;
 pub(crate) use threaded::schedule_realtime_threaded_timer_event;
@@ -63,10 +66,10 @@ impl Debug for TimerLane {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TimerDeadline {
     /// Fixed at submission; later realtime steps cannot move this deadline.
-    Monotonic(Instant),
+    Monotonic(MonotonicInstant),
     Realtime {
         /// Absolute point on the mutable calendar timeline.
-        deadline_ns: u64,
+        deadline: RealtimeInstant,
         /// When present, a newer timekeeper sequence consumes the request via
         /// its clock-change completion instead of its expiry completion.
         cancel_on_change_seq: Option<u64>,
@@ -77,7 +80,7 @@ impl TimerDeadline {
     fn sort_key(self) -> u64 {
         match self {
             Self::Monotonic(deadline) => deadline.mono(),
-            Self::Realtime { deadline_ns, .. } => deadline_ns,
+            Self::Realtime { deadline, .. } => deadline.as_nanos(),
         }
     }
 
@@ -93,7 +96,7 @@ struct TimerEvent {
 }
 
 impl TimerEvent {
-    fn new(deadline: Instant, event_id: u64, lane: TimerLane) -> Self {
+    fn new(deadline: MonotonicInstant, event_id: u64, lane: TimerLane) -> Self {
         Self {
             deadline: TimerDeadline::Monotonic(deadline),
             event_id,
@@ -102,14 +105,14 @@ impl TimerEvent {
     }
 
     fn new_realtime(
-        deadline_ns: u64,
+        deadline: RealtimeInstant,
         cancel_on_change_seq: Option<u64>,
         event_id: u64,
         lane: TimerLane,
     ) -> Self {
         Self {
             deadline: TimerDeadline::Realtime {
-                deadline_ns,
+                deadline,
                 cancel_on_change_seq,
             },
             event_id,
@@ -174,7 +177,7 @@ impl TimerQueue {
         Self::push_into(&mut self.realtime_events, event);
     }
 
-    fn pop_expired(&mut self, now: Instant) -> Option<TimerEvent> {
+    fn pop_expired(&mut self, now: MonotonicInstant) -> Option<TimerEvent> {
         if self.events.first()?.deadline.sort_key() > now.mono() {
             return None;
         }
@@ -183,7 +186,7 @@ impl TimerQueue {
 
     fn pop_ready_realtime(
         &mut self,
-        now_ns: u64,
+        now: RealtimeInstant,
         change_seq: u64,
     ) -> Option<(TimerEvent, RealtimeReadyCause)> {
         // A scanner may be delayed behind a newer backward step. Once this
@@ -213,7 +216,11 @@ impl TimerQueue {
             self.observed_realtime_change_seq = change_seq;
         }
 
-        if self.realtime_events.first()?.deadline.sort_key() > now_ns {
+        let TimerDeadline::Realtime { deadline, .. } = self.realtime_events.first()?.deadline
+        else {
+            unreachable!("realtime heap contained a monotonic deadline")
+        };
+        if deadline > now {
             return None;
         }
         Some((
@@ -225,7 +232,7 @@ impl TimerQueue {
     fn take_ready_realtime(
         &mut self,
         event_id: u64,
-        now_ns: u64,
+        now: RealtimeInstant,
         change_seq: u64,
     ) -> Option<(TimerEvent, RealtimeReadyCause)> {
         // This named lookup is the insert-side half of registration. It checks
@@ -240,7 +247,7 @@ impl TimerQueue {
             .position(|event| event.event_id == event_id)?;
         let event = &self.realtime_events[index];
         let TimerDeadline::Realtime {
-            deadline_ns,
+            deadline,
             cancel_on_change_seq,
         } = event.deadline
         else {
@@ -248,7 +255,7 @@ impl TimerQueue {
         };
         let cause = if cancel_on_change_seq.is_some_and(|armed_seq| armed_seq < change_seq) {
             RealtimeReadyCause::ClockChanged
-        } else if deadline_ns <= now_ns {
+        } else if deadline <= now {
             RealtimeReadyCause::Expired
         } else {
             return None;
@@ -335,21 +342,22 @@ enum RealtimeReadyCause {
 #[percpu]
 static TIMER_QUEUE: NoIrqSpinLock<TimerQueue> = NoIrqSpinLock::new(TimerQueue::new());
 
-fn deadline_after(expire: Duration) -> Instant {
+fn deadline_after(expire: Duration) -> MonotonicInstant {
     // A relative tick count loses the current tick phase: at 100 Hz, a 10 ms
     // timeout submitted just before the next tick could expire almost
-    // immediately. `Instant::checked_add` converts the duration by rounding
-    // down to counter units, so advance every nonzero timeout by one unit to
-    // keep the representable deadline on or after the requested instant. An
-    // exactly representable timeout may therefore be late by one counter unit,
-    // which is below the periodic interrupt's delivery granularity.
-    let deadline = Instant::now()
+    // immediately. `MonotonicInstant::checked_add` converts the duration by
+    // rounding down to counter units, so advance every nonzero timeout by one
+    // unit to keep the representable deadline on or after the requested
+    // instant. An exactly representable timeout may therefore be late by one
+    // counter unit, which is below the periodic interrupt's delivery
+    // granularity.
+    let deadline = MonotonicInstant::now()
         .checked_add(expire)
-        .unwrap_or(Instant::from_mono(u64::MAX));
+        .unwrap_or(MonotonicInstant::from_mono(u64::MAX));
     if expire.is_zero() {
         deadline
     } else {
-        Instant::from_mono(deadline.mono().saturating_add(1))
+        MonotonicInstant::from_mono(deadline.mono().saturating_add(1))
     }
 }
 
@@ -364,7 +372,7 @@ fn try_allocate_event_id(allocator: &AtomicU64) -> Option<u64> {
         .ok()
 }
 
-fn push_timer_event(deadline: Instant, lane: TimerLane) -> TimerHandle {
+fn push_timer_event(deadline: MonotonicInstant, lane: TimerLane) -> TimerHandle {
     let event_id =
         try_allocate_event_id(&NEXT_EVENT_ID).expect("soft timer event identity space exhausted");
     let owner_cpu = cur_cpu_id();
@@ -376,7 +384,7 @@ fn push_timer_event(deadline: Instant, lane: TimerLane) -> TimerHandle {
 }
 
 fn push_realtime_timer_event(
-    deadline_ns: u64,
+    deadline: RealtimeInstant,
     cancel_on_change_seq: Option<u64>,
     lane: TimerLane,
 ) -> TimerHandle {
@@ -385,7 +393,7 @@ fn push_realtime_timer_event(
     let owner_cpu = cur_cpu_id();
     TIMER_QUEUE.with(|queue| {
         queue.lock().push_realtime(TimerEvent::new_realtime(
-            deadline_ns,
+            deadline,
             cancel_on_change_seq,
             event_id,
             lane,
@@ -403,7 +411,7 @@ fn push_realtime_timer_event(
     if let Some((event, cause)) = TIMER_QUEUE.with(|queue| {
         queue
             .lock()
-            .take_ready_realtime(event_id, realtime.now_ns(), realtime.change_seq())
+            .take_ready_realtime(event_id, realtime.now(), realtime.change_seq())
     }) {
         dispatch_ready_event(owner_cpu, event, Some(cause));
     }
@@ -445,7 +453,7 @@ pub fn on_timer_interrupt() {
             // This batch bounds each IRQ critical section. Remaining expired
             // events stay queued and are handled by the next loop iteration.
             let mut events = heapless::Vec::<(TimerEvent, Option<RealtimeReadyCause>), 8>::new();
-            let now = Instant::now();
+            let now = MonotonicInstant::now();
             while !events.is_full() {
                 let Some(event) = queue.pop_expired(now) else {
                     break;
@@ -453,8 +461,7 @@ pub fn on_timer_interrupt() {
                 events.push((event, None)).unwrap();
             }
             while !events.is_full() {
-                let Some(event) =
-                    queue.pop_ready_realtime(realtime.now_ns(), realtime.change_seq())
+                let Some(event) = queue.pop_ready_realtime(realtime.now(), realtime.change_seq())
                 else {
                     break;
                 };
@@ -488,7 +495,7 @@ pub(crate) fn recheck_realtime_requests() {
                 let mut events = heapless::Vec::<(TimerEvent, RealtimeReadyCause), 8>::new();
                 while !events.is_full() {
                     let Some(event) =
-                        queue.pop_ready_realtime(realtime.now_ns(), realtime.change_seq())
+                        queue.pop_ready_realtime(realtime.now(), realtime.change_seq())
                     else {
                         break;
                     };
@@ -596,7 +603,7 @@ mod kunits {
 
     fn test_event(deadline: u64, event_id: u64) -> TimerEvent {
         TimerEvent::new(
-            Instant::from_mono(deadline),
+            MonotonicInstant::from_mono(deadline),
             event_id,
             TimerLane::Irq(Box::new(|| {})),
         )
@@ -608,7 +615,7 @@ mod kunits {
         cancel_on_change_seq: Option<u64>,
     ) -> TimerEvent {
         TimerEvent::new_realtime(
-            deadline_ns,
+            RealtimeInstant::from_nanos(deadline_ns),
             cancel_on_change_seq,
             event_id,
             TimerLane::RealtimeThreaded {
@@ -635,13 +642,16 @@ mod kunits {
         queue.push(test_event(10, 2));
         assert_heap_order(&queue);
 
-        let now = Instant::from_mono(10);
+        let now = MonotonicInstant::from_mono(10);
         assert_eq!(queue.pop_expired(now).unwrap().event_id, 1);
         assert_eq!(queue.pop_expired(now).unwrap().event_id, 2);
         assert_eq!(queue.pop_expired(now).unwrap().event_id, 3);
         assert!(queue.pop_expired(now).is_none());
         assert_eq!(
-            queue.pop_expired(Instant::from_mono(20)).unwrap().event_id,
+            queue
+                .pop_expired(MonotonicInstant::from_mono(20))
+                .unwrap()
+                .event_id,
             4
         );
     }
@@ -659,7 +669,7 @@ mod kunits {
         for expected in [1, 2, 3, 6, 8] {
             assert_eq!(
                 queue
-                    .pop_expired(Instant::from_mono(u64::MAX))
+                    .pop_expired(MonotonicInstant::from_mono(u64::MAX))
                     .unwrap()
                     .event_id,
                 expected
@@ -787,9 +797,19 @@ mod kunits {
         let mut queue = TimerQueue::new();
         queue.push_realtime(test_realtime_event(100, 1, None));
 
-        assert!(queue.pop_ready_realtime(90, 0).is_none());
-        assert!(queue.pop_ready_realtime(20, 0).is_none());
-        let (event, cause) = queue.pop_ready_realtime(100, 0).unwrap();
+        assert!(
+            queue
+                .pop_ready_realtime(RealtimeInstant::from_nanos(90), 0)
+                .is_none()
+        );
+        assert!(
+            queue
+                .pop_ready_realtime(RealtimeInstant::from_nanos(20), 0)
+                .is_none()
+        );
+        let (event, cause) = queue
+            .pop_ready_realtime(RealtimeInstant::from_nanos(100), 0)
+            .unwrap();
         assert_eq!(event.event_id, 1);
         assert_eq!(cause, RealtimeReadyCause::Expired);
     }
@@ -799,8 +819,14 @@ mod kunits {
         let mut queue = TimerQueue::new();
         queue.push_realtime(test_realtime_event(u64::MAX, 1, Some(3)));
 
-        assert!(queue.pop_ready_realtime(0, 3).is_none());
-        let (event, cause) = queue.pop_ready_realtime(0, 4).unwrap();
+        assert!(
+            queue
+                .pop_ready_realtime(RealtimeInstant::from_nanos(0), 3)
+                .is_none()
+        );
+        let (event, cause) = queue
+            .pop_ready_realtime(RealtimeInstant::from_nanos(0), 4)
+            .unwrap();
         assert_eq!(event.event_id, 1);
         assert_eq!(cause, RealtimeReadyCause::ClockChanged);
     }
@@ -812,14 +838,27 @@ mod kunits {
         queue.push_realtime(test_realtime_event(u64::MAX, 1, Some(5)));
         queue.push_realtime(test_realtime_event(50, 2, None));
 
-        assert!(queue.pop_ready_realtime(100, 4).is_none());
+        assert!(
+            queue
+                .pop_ready_realtime(RealtimeInstant::from_nanos(100), 4)
+                .is_none()
+        );
         assert_eq!(queue.observed_realtime_change_seq, 5);
-        assert!(queue.take_ready_realtime(1, 0, 5).is_none());
-        let (expired, cause) = queue.pop_ready_realtime(100, 5).unwrap();
+        assert!(
+            queue
+                .take_ready_realtime(1, RealtimeInstant::from_nanos(0), 5)
+                .is_none()
+        );
+        let (expired, cause) = queue
+            .pop_ready_realtime(RealtimeInstant::from_nanos(100), 5)
+            .unwrap();
         assert_eq!(expired.event_id, 2);
         assert_eq!(cause, RealtimeReadyCause::Expired);
         assert_eq!(
-            queue.take_ready_realtime(1, 0, 6).unwrap().1,
+            queue
+                .take_ready_realtime(1, RealtimeInstant::from_nanos(0), 6)
+                .unwrap()
+                .1,
             RealtimeReadyCause::ClockChanged
         );
     }
@@ -833,7 +872,10 @@ mod kunits {
         // The scanner already processed sequence 8 before this old-snapshot
         // request was inserted, so only the insert-side named recheck can take it.
         assert_eq!(
-            queue.take_ready_realtime(1, 0, 8).unwrap().1,
+            queue
+                .take_ready_realtime(1, RealtimeInstant::from_nanos(0), 8)
+                .unwrap()
+                .1,
             RealtimeReadyCause::ClockChanged
         );
         assert!(queue.realtime_events.is_empty());
@@ -855,7 +897,7 @@ mod kunits {
         let event_id = try_allocate_event_id(&NEXT_EVENT_ID).unwrap();
         let now_ns = realtime_read().now_ns();
         let event = TimerEvent::new_realtime(
-            now_ns,
+            RealtimeInstant::from_nanos(now_ns),
             None,
             event_id,
             TimerLane::RealtimeThreaded {

@@ -95,6 +95,12 @@ pub mod linux {
     );
     pub const OPOST: TcFlag = 0x0001;
     pub const ONLCR: TcFlag = 0x0004;
+    pub const TABDLY: TcFlag = 0x1800;
+    pub const TAB0: TcFlag = 0x0000;
+    pub const TAB1: TcFlag = 0x0800;
+    pub const TAB2: TcFlag = 0x1000;
+    pub const TAB3: TcFlag = 0x1800;
+    pub const XTABS: TcFlag = TAB3;
     pub const ISIG: TcFlag = 0x0001;
     pub const ICANON: TcFlag = 0x0002;
     pub const ECHO: TcFlag = 0x0008;

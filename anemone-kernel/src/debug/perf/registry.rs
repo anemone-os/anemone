@@ -9,6 +9,7 @@ static RECORDING_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) enum MetricKind {
     Counter = PERF_METRIC_COUNTER,
     Histogram = PERF_METRIC_HISTOGRAM,
+    Elapsed = PERF_METRIC_ELAPSED,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub(crate) enum MetricUnit {
 enum MetricStorage {
     Counter(&'static PerCpu<AtomicU64>),
     Histogram(&'static PerCpu<[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]>),
+    Elapsed(&'static PerCpu<[AtomicU64; PERF_ELAPSED_VALUE_COUNT]>),
 }
 
 #[derive(Debug)]
@@ -60,6 +62,18 @@ impl MetricRegistration {
         }
     }
 
+    pub(crate) const fn elapsed(
+        name: &'static str,
+        storage: &'static PerCpu<[AtomicU64; PERF_ELAPSED_VALUE_COUNT]>,
+    ) -> Self {
+        Self {
+            name,
+            kind: MetricKind::Elapsed,
+            unit: MetricUnit::MonotonicTicks,
+            storage: MetricStorage::Elapsed(storage),
+        }
+    }
+
     pub(crate) fn name(&self) -> &'static str {
         self.name
     }
@@ -76,6 +90,7 @@ impl MetricRegistration {
         match self.storage {
             MetricStorage::Counter(_) => 1,
             MetricStorage::Histogram(_) => PERF_HISTOGRAM_VALUE_COUNT,
+            MetricStorage::Elapsed(_) => PERF_ELAPSED_VALUE_COUNT,
         }
     }
 
@@ -97,6 +112,18 @@ impl MetricRegistration {
                 },
                 MetricStorage::Histogram(storage) => {
                     let add = |metric_values: &[AtomicU64; PERF_HISTOGRAM_VALUE_COUNT]| {
+                        for (total, value) in values.iter_mut().zip(metric_values) {
+                            *total = total.wrapping_add(value.load(Ordering::Relaxed));
+                        }
+                    };
+                    if cpu == cur_cpu_id() {
+                        storage.with(add);
+                    } else {
+                        unsafe { storage.with_remote(cpu, add) };
+                    }
+                },
+                MetricStorage::Elapsed(storage) => {
+                    let add = |metric_values: &[AtomicU64; PERF_ELAPSED_VALUE_COUNT]| {
                         for (total, value) in values.iter_mut().zip(metric_values) {
                             *total = total.wrapping_add(value.load(Ordering::Relaxed));
                         }
@@ -190,6 +217,14 @@ pub(crate) fn validate_registry() {
             metric.kind == MetricKind::Counter,
             metric.value_count() == 1
         );
+        assert_eq!(
+            metric.kind == MetricKind::Histogram,
+            metric.value_count() == PERF_HISTOGRAM_VALUE_COUNT
+        );
+        assert_eq!(
+            metric.kind == MetricKind::Elapsed,
+            metric.value_count() == PERF_ELAPSED_VALUE_COUNT
+        );
         for other in &registrations()[..index] {
             assert_ne!(metric.name, other.name, "duplicate performance metric name");
         }
@@ -241,5 +276,56 @@ mod kunits {
         })
         .unwrap();
         assert_eq!(expected_offset, layout.value_count);
+    }
+
+    #[kunit]
+    fn syscall_metrics_are_elapsed_pairs_and_exclude_nonreturning_control_paths() {
+        let mut pair_count = 0;
+        for metric in registrations() {
+            let Some(component) = metric.name.strip_prefix("syscall.") else {
+                continue;
+            };
+            let (syscall, counterpart_suffix) =
+                if let Some(syscall) = component.strip_suffix(".elapsed") {
+                    (syscall, ".kernel_cpu")
+                } else if let Some(syscall) = component.strip_suffix(".kernel_cpu") {
+                    (syscall, ".elapsed")
+                } else {
+                    panic!("unexpected syscall metric name: {}", metric.name);
+                };
+            assert_eq!(metric.kind, MetricKind::Elapsed);
+            assert_eq!(metric.value_count(), PERF_ELAPSED_VALUE_COUNT);
+            assert!(
+                registrations().iter().any(|other| {
+                    other
+                        .name
+                        .strip_prefix("syscall.")
+                        .and_then(|name| name.strip_suffix(counterpart_suffix))
+                        == Some(syscall)
+                }),
+                "missing syscall metric pair for {syscall}"
+            );
+            pair_count += 1;
+        }
+        assert!(pair_count > 0);
+        for excluded in [
+            "syscall.perf_observe.elapsed",
+            "syscall.perf_observe.kernel_cpu",
+            "syscall.exit.elapsed",
+            "syscall.exit.kernel_cpu",
+            "syscall.exit_group.elapsed",
+            "syscall.exit_group.kernel_cpu",
+            "syscall.power_shutdown.elapsed",
+            "syscall.power_shutdown.kernel_cpu",
+            "syscall.execve.elapsed",
+            "syscall.execve.kernel_cpu",
+            "syscall.execveat.elapsed",
+            "syscall.execveat.kernel_cpu",
+        ] {
+            assert!(
+                !registrations().iter().any(|metric| metric.name == excluded),
+                "excluded syscall was profiled: {excluded}"
+            );
+        }
     }
 }

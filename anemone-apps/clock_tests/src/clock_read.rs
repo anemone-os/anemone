@@ -5,7 +5,7 @@
 
 use anemone_rs::{
     abi::{
-        syscall::{SYS_CLOCK_GETRES, SYS_CLOCK_GETTIME, SYS_NANOSLEEP, syscall},
+        syscall::{SYS_CLOCK_GETRES, SYS_CLOCK_GETTIME, syscall},
         time::linux::{
             TimeSpec,
             clock::{
@@ -15,6 +15,7 @@ use anemone_rs::{
             },
         },
     },
+    os::linux::time,
     prelude::*,
 };
 
@@ -30,32 +31,64 @@ const CLOCKS: [(&str, i32); 8] = [
     ("boottime", CLOCK_BOOTTIME),
 ];
 
-fn clock_value(syscall_number: u64, clock_id: i32) -> Result<u64, Errno> {
-    let mut value = TimeSpec::default();
-    unsafe {
-        syscall(
-            syscall_number,
-            clock_id as u64,
-            (&mut value as *mut TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-        )?;
-    }
-
-    assert!(
-        value.tv_sec >= 0,
-        "clock {clock_id} returned negative seconds"
-    );
-    assert!(
-        (0..NANOS_PER_SEC as i64).contains(&value.tv_nsec),
-        "clock {clock_id} returned invalid nanoseconds"
-    );
+fn clock_now(clock_id: i32) -> u64 {
+    let value = time::clock_gettime(clock_id).unwrap();
+    assert!(value.tv_sec >= 0);
+    assert!((0..NANOS_PER_SEC as i64).contains(&value.tv_nsec));
     (value.tv_sec as u64)
         .checked_mul(NANOS_PER_SEC)
         .and_then(|seconds| seconds.checked_add(value.tv_nsec as u64))
-        .ok_or(EOVERFLOW)
+        .unwrap()
+}
+
+fn clock_resolution(clock_id: i32) -> u64 {
+    let value = time::clock_getres(clock_id).unwrap();
+    assert!(value.tv_sec >= 0);
+    (value.tv_sec as u64)
+        .checked_mul(NANOS_PER_SEC)
+        .and_then(|seconds| seconds.checked_add(value.tv_nsec as u64))
+        .unwrap()
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BootBaseline {
+    pub(crate) offset_ns: u64,
+}
+
+/// Capture and validate the calendar anchor before any test mutates it.
+pub(crate) fn verify_boot_walltime() -> BootBaseline {
+    let monotonic_before = clock_now(CLOCK_MONOTONIC);
+    let realtime = clock_now(CLOCK_REALTIME);
+    let monotonic_after = clock_now(CLOCK_MONOTONIC);
+    let epoch_floor = 1_577_836_800_u64 * NANOS_PER_SEC; // 2020-01-01
+    assert!(
+        realtime >= epoch_floor,
+        "RTC seed left realtime near the boot epoch"
+    );
+    let lower_offset = realtime
+        .checked_sub(monotonic_after)
+        .expect("realtime must be ahead of monotonic");
+    let upper_offset = realtime
+        .checked_sub(monotonic_before)
+        .expect("realtime must be ahead of monotonic");
+    assert!(lower_offset <= upper_offset);
+
+    let coarse_before = clock_now(CLOCK_MONOTONIC_COARSE);
+    let realtime_coarse = clock_now(CLOCK_REALTIME_COARSE);
+    let coarse_after = clock_now(CLOCK_MONOTONIC_COARSE);
+    let coarse_lower = realtime_coarse
+        .checked_sub(coarse_after)
+        .expect("coarse realtime must be ahead of coarse monotonic");
+    let coarse_upper = realtime_coarse
+        .checked_sub(coarse_before)
+        .expect("coarse realtime must be ahead of coarse monotonic");
+    assert!(lower_offset <= coarse_upper && coarse_lower <= upper_offset);
+    println!(
+        "boot-walltime: realtime_ns={realtime} monotonic_ns={monotonic_after} offset_ns={upper_offset} coarse_offset_ns={coarse_lower}"
+    );
+    BootBaseline {
+        offset_ns: upper_offset,
+    }
 }
 
 fn expect_invalid_clock(syscall_number: u64) {
@@ -79,29 +112,18 @@ fn nanosleep(nanoseconds: i64) {
         tv_sec: 0,
         tv_nsec: nanoseconds,
     };
-    unsafe {
-        syscall(
-            SYS_NANOSLEEP,
-            (&duration as *const TimeSpec) as u64,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-        .unwrap();
-    }
+    time::nanosleep(duration).unwrap();
 }
 
 pub(crate) fn verify_native_clocks() {
     let mut resolutions = [0u64; CLOCKS.len()];
 
     for (index, (name, clock_id)) in CLOCKS.iter().copied().enumerate() {
-        let first = clock_value(SYS_CLOCK_GETTIME, clock_id).unwrap();
-        let second = clock_value(SYS_CLOCK_GETTIME, clock_id).unwrap();
+        let first = clock_now(clock_id);
+        let second = clock_now(clock_id);
         assert!(second >= first, "{name} regressed between ordered reads");
 
-        let resolution = clock_value(SYS_CLOCK_GETRES, clock_id).unwrap();
+        let resolution = clock_resolution(clock_id);
         assert!(resolution > 0, "{name} reported zero resolution");
         resolutions[index] = resolution;
         println!("clock-read: {name} time_ns={second} resolution_ns={resolution}");
@@ -128,47 +150,47 @@ pub(crate) fn verify_native_clocks() {
     );
     assert!(resolutions[CLOCK_MONOTONIC_COARSE as usize] >= resolutions[CLOCK_MONOTONIC as usize]);
 
-    // With no RTC seed, correction, or suspend accounting, these projections
-    // must land inside one bracketing monotonic read interval.
-    let monotonic_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC).unwrap();
-    let realtime = clock_value(SYS_CLOCK_GETTIME, CLOCK_REALTIME).unwrap();
-    let raw = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC_RAW).unwrap();
-    let boottime = clock_value(SYS_CLOCK_GETTIME, CLOCK_BOOTTIME).unwrap();
-    let monotonic_after = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC).unwrap();
-    for (name, value) in [("realtime", realtime), ("raw", raw), ("boottime", boottime)] {
+    // Raw and boottime remain boot-relative; realtime now carries the boot
+    // calendar offset and must not be compared directly with monotonic.
+    let monotonic_before = clock_now(CLOCK_MONOTONIC);
+    let raw = clock_now(CLOCK_MONOTONIC_RAW);
+    let boottime = clock_now(CLOCK_BOOTTIME);
+    let monotonic_after = clock_now(CLOCK_MONOTONIC);
+    for (name, value) in [("raw", raw), ("boottime", boottime)] {
         assert!(
             (monotonic_before..=monotonic_after).contains(&value),
             "{name} did not use the Gate 1 monotonic derivation"
         );
     }
 
-    let coarse_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC_COARSE).unwrap();
-    let realtime_coarse = clock_value(SYS_CLOCK_GETTIME, CLOCK_REALTIME_COARSE).unwrap();
-    let coarse_after = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC_COARSE).unwrap();
+    let coarse_before = clock_now(CLOCK_MONOTONIC_COARSE);
+    let realtime_coarse = clock_now(CLOCK_REALTIME_COARSE);
+    let coarse_after = clock_now(CLOCK_MONOTONIC_COARSE);
+    assert!(coarse_after >= coarse_before);
     assert!(
-        (coarse_before..=coarse_after).contains(&realtime_coarse),
-        "realtime-coarse did not use the Gate 1 coarse monotonic snapshot"
+        realtime_coarse > coarse_after,
+        "realtime-coarse lost the boot calendar offset"
     );
 
     // Busy work must advance task-owned CPU clocks, while blocked wall time must
     // not be charged as CPU consumption.
-    let process_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_PROCESS_CPUTIME_ID).unwrap();
-    let thread_before = clock_value(SYS_CLOCK_GETTIME, CLOCK_THREAD_CPUTIME_ID).unwrap();
+    let process_before = clock_now(CLOCK_PROCESS_CPUTIME_ID);
+    let thread_before = clock_now(CLOCK_THREAD_CPUTIME_ID);
     for _ in 0..100_000 {
         core::hint::spin_loop();
     }
-    let process_after = clock_value(SYS_CLOCK_GETTIME, CLOCK_PROCESS_CPUTIME_ID).unwrap();
-    let thread_after = clock_value(SYS_CLOCK_GETTIME, CLOCK_THREAD_CPUTIME_ID).unwrap();
+    let process_after = clock_now(CLOCK_PROCESS_CPUTIME_ID);
+    let thread_after = clock_now(CLOCK_THREAD_CPUTIME_ID);
     assert!(process_after > process_before);
     assert!(thread_after > thread_before);
 
-    let monotonic_before_sleep = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC).unwrap();
-    let process_before_sleep = clock_value(SYS_CLOCK_GETTIME, CLOCK_PROCESS_CPUTIME_ID).unwrap();
-    let thread_before_sleep = clock_value(SYS_CLOCK_GETTIME, CLOCK_THREAD_CPUTIME_ID).unwrap();
+    let monotonic_before_sleep = clock_now(CLOCK_MONOTONIC);
+    let process_before_sleep = clock_now(CLOCK_PROCESS_CPUTIME_ID);
+    let thread_before_sleep = clock_now(CLOCK_THREAD_CPUTIME_ID);
     nanosleep(50_000_000);
-    let process_after_sleep = clock_value(SYS_CLOCK_GETTIME, CLOCK_PROCESS_CPUTIME_ID).unwrap();
-    let thread_after_sleep = clock_value(SYS_CLOCK_GETTIME, CLOCK_THREAD_CPUTIME_ID).unwrap();
-    let monotonic_after_sleep = clock_value(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC).unwrap();
+    let process_after_sleep = clock_now(CLOCK_PROCESS_CPUTIME_ID);
+    let thread_after_sleep = clock_now(CLOCK_THREAD_CPUTIME_ID);
+    let monotonic_after_sleep = clock_now(CLOCK_MONOTONIC);
     let elapsed = monotonic_after_sleep - monotonic_before_sleep;
     assert!(elapsed >= 50_000_000);
     assert!(process_after_sleep - process_before_sleep < elapsed / 4);

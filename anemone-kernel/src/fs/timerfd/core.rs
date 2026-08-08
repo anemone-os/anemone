@@ -7,7 +7,7 @@ use crate::{
     fs::iomux::PollRoute,
     prelude::*,
     time::{
-        monotonic_ns, realtime_read,
+        RealtimeInstant, monotonic_ns, realtime_read,
         timer::{TimerHandle, cancel_timer_event},
     },
 };
@@ -128,9 +128,11 @@ enum TimerFdSchedule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TimerFdDeadline {
+    /// Exact logical nanoseconds used by gettime and periodic accounting.
+    /// This must not be replaced by the counter-rounded `MonotonicInstant`.
     Monotonic(u64),
     Realtime {
-        deadline_ns: u64,
+        deadline: RealtimeInstant,
         // Protocol snapshot retained by TimerFdCore for direct read/poll
         // refresh and copied into the one queued soft-timer request.
         cancel_on_change_seq: Option<u64>,
@@ -140,7 +142,8 @@ enum TimerFdDeadline {
 impl TimerFdDeadline {
     fn deadline_ns(self) -> u64 {
         match self {
-            Self::Monotonic(deadline_ns) | Self::Realtime { deadline_ns, .. } => deadline_ns,
+            Self::Monotonic(deadline_ns) => deadline_ns,
+            Self::Realtime { deadline, .. } => deadline.as_nanos(),
         }
     }
 
@@ -152,7 +155,7 @@ impl TimerFdDeadline {
                 cancel_on_change_seq,
                 ..
             } => Self::Realtime {
-                deadline_ns,
+                deadline: RealtimeInstant::from_nanos(deadline_ns),
                 cancel_on_change_seq,
             },
         }
@@ -626,7 +629,7 @@ pub(super) fn settime(
         let realtime = realtime_read();
         Some((
             TimerFdDeadline::Realtime {
-                deadline_ns: value_ns,
+                deadline: RealtimeInstant::from_nanos(value_ns),
                 cancel_on_change_seq: flags.cancel_on_set.then_some(realtime.change_seq()),
             },
             realtime.now_ns(),

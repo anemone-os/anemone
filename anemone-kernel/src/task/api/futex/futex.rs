@@ -221,7 +221,7 @@ fn sys_futex(
                     // CLOCK_REALTIME is absent.
                     Some(FutexTimeout::Monotonic(
                         Duration::new(tv_sec as u64, tv_nsec as u32)
-                            .saturating_sub(Instant::now().to_duration()),
+                            .saturating_sub(MonotonicInstant::now().to_duration()),
                     ))
                 }
             } else {
@@ -460,7 +460,7 @@ fn wait_with_realtime_timeout(waiter: &Arc<FutexWaiter>, deadline_ns: u64) -> Fu
 
     let timed_out = Arc::new(AtomicBool::new(false));
     let request = schedule_realtime_threaded_timer_event(
-        deadline_ns,
+        RealtimeInstant::from_nanos(deadline_ns),
         None,
         Box::new({
             let waiter = waiter.clone();

@@ -31,7 +31,7 @@ pub(super) struct EevdfEntity {
     vruntime: Vruntime,
     deadline: Deadline,
     slice: Duration,
-    exec_start: Option<Instant>,
+    exec_start: Option<MonotonicInstant>,
     initialized: bool,
 }
 
@@ -348,13 +348,13 @@ impl Eevdf {
         self.update_rq_vtime(None);
     }
 
-    fn set_exec_start(task: &Arc<Task>, now: Instant) {
+    fn set_exec_start(task: &Arc<Task>, now: MonotonicInstant) {
         Self::with_entity_mut(task, |entity| {
             entity.exec_start = Some(now);
         });
     }
 
-    fn account_current(&mut self, task: &Arc<Task>, now: Instant) -> AccountOutcome {
+    fn account_current(&mut self, task: &Arc<Task>, now: MonotonicInstant) -> AccountOutcome {
         self.assert_current(task);
         let weight = Self::task_weight(task);
         let outcome = Self::with_entity_mut(task, |entity| {
@@ -582,7 +582,7 @@ impl Scheduler for Eevdf {
         removed
     }
 
-    fn requeue_yielded_current(&mut self, task: Arc<Task>, now: Instant) {
+    fn requeue_yielded_current(&mut self, task: Arc<Task>, now: MonotonicInstant) {
         let _accounting = self.account_current(&task, now);
         self.clear_current(&task);
         self.apply_yield_penalty(&task);
@@ -592,7 +592,7 @@ impl Scheduler for Eevdf {
     fn requeue_preempted_current(
         &mut self,
         task: Arc<Task>,
-        now: Instant,
+        now: MonotonicInstant,
         _pending: PendingResched,
     ) {
         let _accounting = self.account_current(&task, now);
@@ -600,20 +600,20 @@ impl Scheduler for Eevdf {
         self.enqueue_back(task);
     }
 
-    fn handoff_woken_current(&mut self, task: Arc<Task>, now: Instant) {
+    fn handoff_woken_current(&mut self, task: Arc<Task>, now: MonotonicInstant) {
         let _accounting = self.account_current(&task, now);
         self.clear_current(&task);
         self.apply_wake_clamp(&task);
         self.enqueue_back(task);
     }
 
-    fn put_prev_blocked(&mut self, task: &Arc<Task>, now: Instant) {
+    fn put_prev_blocked(&mut self, task: &Arc<Task>, now: MonotonicInstant) {
         let _accounting = self.account_current(task, now);
         self.clear_current(task);
         self.update_rq_vtime(None);
     }
 
-    fn put_prev_exiting(&mut self, task: &Arc<Task>, now: Instant) {
+    fn put_prev_exiting(&mut self, task: &Arc<Task>, now: MonotonicInstant) {
         let _accounting = self.account_current(task, now);
         self.clear_current(task);
         self.update_rq_vtime(None);
@@ -647,14 +647,14 @@ impl Scheduler for Eevdf {
         Some(task)
     }
 
-    fn set_next_task(&mut self, task: &Arc<Task>, now: Instant) {
+    fn set_next_task(&mut self, task: &Arc<Task>, now: MonotonicInstant) {
         let _ = Self::entity_snapshot(task);
         self.set_current(task);
         Self::set_exec_start(task, now);
         self.update_rq_vtime(None);
     }
 
-    fn task_tick(&mut self, cur_task: &Arc<Task>, now: Instant) -> TickAction {
+    fn task_tick(&mut self, cur_task: &Arc<Task>, now: MonotonicInstant) -> TickAction {
         let accounting = self.account_current(cur_task, now);
         let current = Self::entity_snapshot(cur_task);
         Self::decide_tick_action(
@@ -668,7 +668,7 @@ impl Scheduler for Eevdf {
         &mut self,
         current: &Arc<Task>,
         candidate: &Arc<Task>,
-        now: Instant,
+        now: MonotonicInstant,
     ) -> PreemptDecision {
         let accounting = self.account_current(current, now);
         let current = Self::entity_snapshot(current);

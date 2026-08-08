@@ -234,14 +234,14 @@ pub(in crate::task) struct ContinueEpoch(u64);
 pub(super) struct StopEpisode {
     pub(super) reason: SigNo,
     /// Diagnostic timestamp only; it never participates in phase decisions.
-    started_at: Instant,
+    started_at: MonotonicInstant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum JobControlPhase {
     Running {
         /// Diagnostic timestamp only; it never participates in phase decisions.
-        started_at: Instant,
+        started_at: MonotonicInstant,
     },
     Stopping(StopEpisode),
     Stopped(StopEpisode),
@@ -293,7 +293,7 @@ impl UserJobControl {
     pub(in crate::task) fn new_running() -> Self {
         Self {
             phase: JobControlPhase::Running {
-                started_at: Instant::now(),
+                started_at: MonotonicInstant::now(),
             },
             continue_epoch: ContinueEpoch(0),
             report: None,
@@ -318,7 +318,7 @@ impl UserJobControl {
             JobControlPhase::Running { .. } => {
                 let episode = StopEpisode {
                     reason,
-                    started_at: Instant::now(),
+                    started_at: MonotonicInstant::now(),
                 };
                 if members.exposed_count() == 0 {
                     self.phase = JobControlPhase::Stopped(episode);
@@ -416,7 +416,7 @@ impl UserJobControl {
             JobControlPhase::Running { .. } => JobControlTransition::NONE,
             JobControlPhase::Stopping(episode) => {
                 self.phase = JobControlPhase::Running {
-                    started_at: Instant::now(),
+                    started_at: MonotonicInstant::now(),
                 };
                 kdebugln!(
                     "jobctl: tgid={} phase Stopping -> Running reason={:?} age={:?} without report",
@@ -432,7 +432,7 @@ impl UserJobControl {
             },
             JobControlPhase::Stopped(episode) => {
                 self.phase = JobControlPhase::Running {
-                    started_at: Instant::now(),
+                    started_at: MonotonicInstant::now(),
                 };
                 self.report = Some(JobControlReport::Continued);
                 kdebugln!(
@@ -465,7 +465,7 @@ impl UserJobControl {
             "jobctl: terminal transaction left exposed user members"
         );
         self.phase = JobControlPhase::Running {
-            started_at: Instant::now(),
+            started_at: MonotonicInstant::now(),
         };
         self.report = None;
         kdebugln!(
@@ -544,7 +544,7 @@ impl ThreadGroupInner {
     }
 }
 
-fn episode_age(started_at: Instant) -> Duration {
+fn episode_age(started_at: MonotonicInstant) -> Duration {
     started_at.elapsed()
 }
 

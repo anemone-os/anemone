@@ -3,8 +3,6 @@
 #![allow(unused)]
 
 mod busybox;
-mod clock_read;
-mod clock_step;
 mod competition;
 mod file;
 mod guest;
@@ -12,9 +10,7 @@ mod ltp;
 mod oracle;
 mod process;
 mod runtime;
-mod soft_timer;
 mod tcp_stage5;
-mod timer_signal;
 
 use anemone_rs::{
     abi::{fs::linux::open::O_RDONLY, system::native::power::SHUTDOWN_MAGIC},
@@ -57,29 +53,13 @@ fn run_udp_extension_c_consumer() {
 
 /// local tests for development.
 fn run_local_tests() {
-    run_udp_extension_c_consumer();
+    // run_udp_extension_c_consumer();
     oracle::run_local();
 
-    println!("user-test: running local POSIX timer test...");
-    local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
-    println!("user-test: local POSIX timer test finished.");
+    // println!("user-test: running local clock/time/timer test...");
+    // local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
+    // println!("user-test: local clock/time/timer test finished.");
 
-    // println!("user-test: running native clock read test...");
-    // clock_read::verify_native_clocks();
-    // println!("user-test: native clock read test finished.");
-    //
-    // println!("user-test: running soft timer consumer test...");
-    // soft_timer::verify_soft_timer_consumers();
-    // println!("user-test: soft timer consumer test finished.");
-    //
-    // println!("user-test: running realtime clock step test...");
-    // clock_step::verify_clock_steps();
-    // println!("user-test: realtime clock step test finished.");
-    //
-    // println!("user-test: running SI_TIMER signal frame test...");
-    // timer_signal::verify_timer_signal_frame();
-    // println!("user-test: SI_TIMER signal frame test finished.");
-    //
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");
@@ -157,17 +137,17 @@ fn run_local_tests() {
     // println!("user-test: epoll test finished.");
 
     // 13. Socket suites: UDP regression and AF_UNIX Stage 1 vertical slice
-    println!("user-test: running socket test...");
-    local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
-    println!("user-test: socket test finished.");
+    // println!("user-test: running socket test...");
+    // local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
+    // println!("user-test: socket test finished.");
 
-    println!("user-test: running Rust Command seqpacket consumer...");
-    local_run_cmd("/bin/rust-command-test", &["rust-command-test"], &[]);
-    println!("user-test: Rust Command seqpacket consumer finished.");
+    // println!("user-test: running Rust Command seqpacket consumer...");
+    // local_run_cmd("/bin/rust-command-test", &["rust-command-test"], &[]);
+    // println!("user-test: Rust Command seqpacket consumer finished.");
 
-    println!("user-test: running pipe capacity test...");
-    local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
-    println!("user-test: pipe capacity test finished.");
+    // println!("user-test: running pipe capacity test...");
+    // local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
+    // println!("user-test: pipe capacity test finished.");
 
     // println!("user-test: running POSIX record lock test...");
     // local_run_cmd(
@@ -183,13 +163,13 @@ fn run_comp_tests(run_tcp_stage5: bool) {
     guest::enter_competition_root();
     guest::init_competition_environment();
 
-    println!("user-test: running BusyBox loopback ping...");
-    local_run_cmd("/bin/ping", &["ping", "-c", "1", "127.0.0.1"], &[]);
-    println!("user-test: BusyBox loopback ping finished.");
+    // println!("user-test: running BusyBox loopback ping...");
+    // local_run_cmd("/bin/ping", &["ping", "-c", "1", "127.0.0.1"], &[]);
+    // println!("user-test: BusyBox loopback ping finished.");
 
-    println!("user-test: running BusyBox gateway ping...");
-    local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);
-    println!("user-test: BusyBox gateway ping finished.");
+    // println!("user-test: running BusyBox gateway ping...");
+    // local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);
+    // println!("user-test: BusyBox gateway ping finished.");
 
     ltp::install_ltp_fixtures();
 

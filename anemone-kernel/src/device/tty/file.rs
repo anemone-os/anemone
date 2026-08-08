@@ -342,7 +342,8 @@ fn project_termios(termios: TtyTermios, line: TtyLineSnapshot) -> Result<abi::Te
     let mut result = abi::Termios {
         c_iflag: 0,
         c_oflag: (if termios.opost { abi::OPOST } else { 0 })
-            | (if termios.onlcr { abi::ONLCR } else { 0 }),
+            | (if termios.onlcr { abi::ONLCR } else { 0 })
+            | (if termios.tab3 { abi::TAB3 } else { abi::TAB0 }),
         c_cflag: baud_flag(line.baud).ok_or(SysError::InvalidArgument)?
             | data_bits_flag(line.data_bits).ok_or(SysError::InvalidArgument)?
             | abi::CREAD
@@ -404,7 +405,11 @@ fn validate_termios(
         | abi::INLCR
         | abi::IGNCR
         | abi::ICRNL;
-    let allowed_oflag = abi::OPOST | abi::ONLCR;
+    let tab_mode = candidate.c_oflag & abi::TABDLY;
+    if !matches!(tab_mode, abi::TAB0 | abi::TAB3) {
+        return Err(SysError::InvalidArgument);
+    }
+    let allowed_oflag = abi::OPOST | abi::ONLCR | abi::TABDLY;
     let allowed_lflag = abi::ISIG | abi::ICANON | abi::ECHO | abi::ECHOE | abi::ECHOK | abi::ECHONL;
     if candidate.c_iflag & !allowed_iflag != projected.c_iflag & !allowed_iflag
         || candidate.c_oflag & !allowed_oflag != projected.c_oflag & !allowed_oflag
@@ -451,6 +456,7 @@ fn validate_termios(
         icrnl: candidate.c_iflag & abi::ICRNL != 0,
         opost: candidate.c_oflag & abi::OPOST != 0,
         onlcr: candidate.c_oflag & abi::ONLCR != 0,
+        tab3: tab_mode == abi::TAB3,
         icanon: candidate.c_lflag & abi::ICANON != 0,
         isig: candidate.c_lflag & abi::ISIG != 0,
         echo: candidate.c_lflag & abi::ECHO != 0,
@@ -559,9 +565,7 @@ static TTY_FILE_OPS: FileOps = FileOps {
 mod kunits {
     use super::*;
     use crate::{
-        device::tty::{
-            TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource,
-        },
+        device::tty::{TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource},
         fs::anony_open_with,
     };
 
@@ -698,6 +702,7 @@ mod kunits {
         assert_eq!(raw.c_cc[abi::VMIN], 1);
         assert_eq!(raw.c_cc[abi::VTIME], 0);
         assert_eq!(raw.c_iflag, abi::ICRNL);
+        assert_eq!(raw.c_oflag & abi::TABDLY, abi::TAB0);
 
         let mut input_modes = raw;
         input_modes.c_iflag = abi::IGNBRK
@@ -728,6 +733,27 @@ mod kunits {
         let updated = validate_termios(candidate, current, line()).unwrap();
         assert!(!updated.icanon);
         assert!(!updated.echo);
+
+        // GNU less 668 enables XTABS while entering its noncanonical input
+        // mode. TAB3 is a real output transform; legacy TAB1/TAB2 delay modes
+        // remain unsupported and must not become success-no-op flags.
+        let mut less = raw;
+        less.c_oflag |= abi::XTABS;
+        less.c_lflag = abi::ISIG;
+        let less = validate_termios(less, current, line()).unwrap();
+        assert!(less.tab3);
+        assert_eq!(
+            project_termios(less, line()).unwrap().c_oflag & abi::TABDLY,
+            abi::TAB3
+        );
+        for unsupported_tab_mode in [abi::TAB1, abi::TAB2] {
+            let mut unsupported = raw;
+            unsupported.c_oflag |= unsupported_tab_mode;
+            assert_eq!(
+                validate_termios(unsupported, current, line()),
+                Err(SysError::InvalidArgument)
+            );
+        }
 
         let mut disabled = raw;
         for index in [

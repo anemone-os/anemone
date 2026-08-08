@@ -184,7 +184,7 @@ pub(in crate::fs) fn wait_for_iomux_ready<F>(
 where
     F: for<'a> FnMut(IomuxScanMode<'a>) -> Result<IomuxScanOutcome, SysError>,
 {
-    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    let deadline = timeout.map(|timeout| MonotonicInstant::now() + timeout);
 
     loop {
         let no_sources = match snapshot_scan(context, &mut scan) {
@@ -205,7 +205,7 @@ where
 
         let remaining = match deadline {
             Some(deadline) => {
-                let now = Instant::now();
+                let now = MonotonicInstant::now();
                 if now >= deadline {
                     kdebugln!("{}: timeout expired before latch begin", context);
                     return IomuxWaitOutcome::Timeout;

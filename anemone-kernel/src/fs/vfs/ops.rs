@@ -53,7 +53,7 @@ mod primitives {
     use super::*;
 
     fn init_new_inode_metadata(inode: &InodeRef, perm: InodePerm, uid: Uid, gid: Gid) {
-        let ctime = realtime();
+        let ctime = RealtimeInstant::now().to_duration();
 
         inode.chown(Some(uid), Some(gid), ctime);
         inode.chmod(perm, ctime);

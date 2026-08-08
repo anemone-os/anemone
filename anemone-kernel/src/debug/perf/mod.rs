@@ -13,12 +13,15 @@ use registry::{
     catalog_layout, recording_enabled, replace_recording_enabled, snapshot_values,
     try_for_each_metric,
 };
-pub(crate) use timer::TimerGuard;
+pub(crate) use timer::{ElapsedGuard, SyscallProfileGuard, TimerGuard};
 
 #[cfg(feature = "perf_observe")]
 use crate::prelude::*;
 #[cfg(feature = "perf_observe")]
-use anemone_abi::system::native::perf::{PERF_HISTOGRAM_SUM_INDEX, PERF_HISTOGRAM_VALUE_COUNT};
+use anemone_abi::system::native::perf::{
+    PERF_ELAPSED_SAMPLE_COUNT_INDEX, PERF_ELAPSED_SUM_INDEX, PERF_ELAPSED_VALUE_COUNT,
+    PERF_HISTOGRAM_SUM_INDEX, PERF_HISTOGRAM_VALUE_COUNT,
+};
 
 #[cfg(feature = "perf_observe")]
 fn __counter_add(storage: &'static PerCpu<AtomicU64>, delta: u64) {
@@ -40,6 +43,14 @@ fn __histogram_record(
     storage.with(|values| {
         values[bucket].fetch_add(1, Ordering::Relaxed);
         values[PERF_HISTOGRAM_SUM_INDEX].fetch_add(sample, Ordering::Relaxed);
+    });
+}
+
+#[cfg(feature = "perf_observe")]
+fn __elapsed_record(storage: &'static PerCpu<[AtomicU64; PERF_ELAPSED_VALUE_COUNT]>, sample: u64) {
+    storage.with(|values| {
+        values[PERF_ELAPSED_SAMPLE_COUNT_INDEX].fetch_add(1, Ordering::Relaxed);
+        values[PERF_ELAPSED_SUM_INDEX].fetch_add(sample, Ordering::Relaxed);
     });
 }
 
@@ -77,17 +88,63 @@ pub(crate) fn __timer_if_enabled(
     }
 }
 
+#[cfg(feature = "perf_observe")]
+#[doc(hidden)]
+pub(crate) fn __elapsed_timer_if_enabled(
+    storage: &'static PerCpu<[AtomicU64; PERF_ELAPSED_VALUE_COUNT]>,
+) -> ElapsedGuard {
+    if recording_enabled() {
+        ElapsedGuard::__new(storage, crate::time::perf_clock_ticks())
+    } else {
+        ElapsedGuard::__disabled()
+    }
+}
+
+#[cfg(feature = "perf_observe")]
+#[doc(hidden)]
+pub(crate) fn __syscall_profile_if_enabled(
+    elapsed_storage: &'static PerCpu<[AtomicU64; PERF_ELAPSED_VALUE_COUNT]>,
+    kernel_cpu_storage: &'static PerCpu<[AtomicU64; PERF_ELAPSED_VALUE_COUNT]>,
+) -> SyscallProfileGuard {
+    if recording_enabled() {
+        let elapsed_begin = crate::time::perf_clock_ticks();
+        let task = get_current_task();
+        let kernel_cpu_begin = task.cpu_usage_snapshot().kernel_mono();
+        SyscallProfileGuard::__new(
+            elapsed_storage,
+            kernel_cpu_storage,
+            elapsed_begin,
+            kernel_cpu_begin,
+        )
+    } else {
+        SyscallProfileGuard::__disabled()
+    }
+}
+
 #[cfg(not(feature = "perf_observe"))]
 #[doc(hidden)]
 pub(crate) const fn __disabled_timer() -> TimerGuard {
     TimerGuard::__disabled()
 }
 
+#[cfg(not(feature = "perf_observe"))]
+#[doc(hidden)]
+pub(crate) const fn __disabled_elapsed_timer() -> ElapsedGuard {
+    ElapsedGuard::__disabled()
+}
+
+#[cfg(not(feature = "perf_observe"))]
+#[doc(hidden)]
+pub(crate) const fn __disabled_syscall_profile() -> SyscallProfileGuard {
+    SyscallProfileGuard::__disabled()
+}
+
 #[cfg(feature = "perf_observe")]
 #[macro_export]
 macro_rules! declare_perf_metrics {
     ($(counter $counter:ident { name: $counter_name:literal, unit: $counter_unit:ident, })*
-     $(histogram $histogram:ident { name: $histogram_name:literal, unit: $histogram_unit:ident, })*) => {
+     $(histogram $histogram:ident { name: $histogram_name:literal, unit: $histogram_unit:ident, })*
+     $(elapsed $elapsed:ident { name: $elapsed_name:literal, })*) => {
         $(
             #[percpu]
             static $counter: core::sync::atomic::AtomicU64 =
@@ -117,6 +174,22 @@ macro_rules! declare_perf_metrics {
                         $histogram_name,
                         $crate::debug::perf::MetricUnit::$histogram_unit,
                         &$histogram,
+                    );
+            }
+        )*
+        $(
+            #[percpu]
+            static $elapsed: [core::sync::atomic::AtomicU64;
+                anemone_abi::system::native::perf::PERF_ELAPSED_VALUE_COUNT] =
+                [const { core::sync::atomic::AtomicU64::new(0) };
+                    anemone_abi::system::native::perf::PERF_ELAPSED_VALUE_COUNT];
+            ::paste::paste! {
+                #[used]
+                #[unsafe(link_section = ".perf_metrics")]
+                static [<__PERF_REG_ $elapsed>]: $crate::debug::perf::MetricRegistration =
+                    $crate::debug::perf::MetricRegistration::elapsed(
+                        $elapsed_name,
+                        &$elapsed,
                     );
             }
         )*
@@ -177,6 +250,30 @@ macro_rules! perf_timer {
     ($metric:ident) => {{ $crate::debug::perf::__timer_if_enabled(&$metric) }};
 }
 
+#[cfg(feature = "perf_observe")]
+#[macro_export]
+macro_rules! perf_elapsed {
+    ($metric:ident) => {{ $crate::debug::perf::__elapsed_timer_if_enabled(&$metric) }};
+}
+
+#[cfg(not(feature = "perf_observe"))]
+#[macro_export]
+macro_rules! perf_elapsed {
+    ($metric:ident) => {{ $crate::debug::perf::__disabled_elapsed_timer() }};
+}
+
+#[cfg(feature = "perf_observe")]
+#[macro_export]
+macro_rules! perf_syscall_profile {
+    ($elapsed_metric:ident, $kernel_cpu_metric:ident) => {{ $crate::debug::perf::__syscall_profile_if_enabled(&$elapsed_metric, &$kernel_cpu_metric) }};
+}
+
+#[cfg(not(feature = "perf_observe"))]
+#[macro_export]
+macro_rules! perf_syscall_profile {
+    ($elapsed_metric:ident, $kernel_cpu_metric:ident) => {{ $crate::debug::perf::__disabled_syscall_profile() }};
+}
+
 #[cfg(not(feature = "perf_observe"))]
 #[macro_export]
 macro_rules! perf_timer {
@@ -192,6 +289,9 @@ mod kunits {
     #[percpu]
     static TEST_HISTOGRAM: [AtomicU64; PERF_HISTOGRAM_VALUE_COUNT] =
         [const { AtomicU64::new(0) }; PERF_HISTOGRAM_VALUE_COUNT];
+    #[percpu]
+    static TEST_ELAPSED: [AtomicU64; PERF_ELAPSED_VALUE_COUNT] =
+        [const { AtomicU64::new(0) }; PERF_ELAPSED_VALUE_COUNT];
 
     static EVALUATED: AtomicU64 = AtomicU64::new(0);
 
@@ -265,6 +365,23 @@ mod kunits {
             assert_eq!(values[PERF_HISTOGRAM_SUM_INDEX].load(Ordering::Relaxed), 0);
         });
     }
+
+    #[kunit]
+    fn elapsed_metric_counts_samples_and_wraps_sum() {
+        TEST_ELAPSED.with(|values| {
+            values[PERF_ELAPSED_SAMPLE_COUNT_INDEX].store(0, Ordering::Relaxed);
+            values[PERF_ELAPSED_SUM_INDEX].store(u64::MAX - 4, Ordering::Relaxed);
+        });
+        __elapsed_record(&TEST_ELAPSED, 7);
+        __elapsed_record(&TEST_ELAPSED, 11);
+        TEST_ELAPSED.with(|values| {
+            assert_eq!(
+                values[PERF_ELAPSED_SAMPLE_COUNT_INDEX].load(Ordering::Relaxed),
+                2
+            );
+            assert_eq!(values[PERF_ELAPSED_SUM_INDEX].load(Ordering::Relaxed), 13);
+        });
+    }
 }
 
 #[cfg(all(feature = "kunit", not(feature = "perf_observe")))]
@@ -285,6 +402,8 @@ mod compile_disabled_kunits {
         perf_counter_add!(NO_COUNTER_STORAGE, evaluated());
         perf_histogram_record!(NO_HISTOGRAM_STORAGE, evaluated());
         perf_timer!(NO_HISTOGRAM_STORAGE).finish();
+        perf_elapsed!(NO_ELAPSED_STORAGE).finish();
+        perf_syscall_profile!(NO_SYSCALL_ELAPSED_STORAGE, NO_SYSCALL_CPU_STORAGE).finish();
         assert_eq!(EVALUATED.load(Ordering::Relaxed), 0);
     }
 }

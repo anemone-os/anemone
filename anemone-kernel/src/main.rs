@@ -135,9 +135,29 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         driver::register_builtin_drivers();
         unflatten_device_tree(fdt_va);
         parse_bootargs();
-        machine_init();
+        let machine_policy = machine_init();
         of_platform_discovery();
         probe_virtual_devices();
+        if let Some(rtc_epoch) =
+            device::rtc::finalize_boot(machine_policy.into_preferred_rtc_origin())
+        {
+            match time::seed_boot_realtime(rtc_epoch) {
+                Ok(offset_ns) => {
+                    kinfoln!(
+                        "RTC boot seed committed: epoch_ns={} offset_ns={}",
+                        rtc_epoch.as_nanos(),
+                        offset_ns
+                    );
+                },
+                Err(error) => {
+                    kwarningln!(
+                        "RTC boot seed rejected: epoch_ns={} reason={:?}",
+                        rtc_epoch.as_nanos(),
+                        error
+                    );
+                },
+            }
+        }
 
         program_first_timer();
         percpu_login();

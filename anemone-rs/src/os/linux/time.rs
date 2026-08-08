@@ -1,4 +1,4 @@
-use anemone_abi::time::linux::{ITimerSpec, SigEvent, TimeSpec, TimeVal};
+use anemone_abi::time::linux::{ITimerSpec, SigEvent, TimeSpec, TimeVal, Timex, itimer::OldITimerVal};
 
 use crate::{prelude::*, sys::linux::time};
 
@@ -16,8 +16,74 @@ pub fn clock_gettime(clock_id: i32) -> Result<TimeSpec, Errno> {
     time::clock_gettime(clock_id, &mut value as *mut TimeSpec as u64).map(|_| value)
 }
 
+pub fn clock_getres(clock_id: i32) -> Result<TimeSpec, Errno> {
+    let mut value = TimeSpec::default();
+    time::clock_getres(clock_id, &mut value as *mut TimeSpec as u64).map(|_| value)
+}
+
 pub fn clock_settime(clock_id: i32, value: &TimeSpec) -> Result<(), Errno> {
     time::clock_settime(clock_id, value as *const TimeSpec as u64).map(|_| ())
+}
+
+pub fn clock_nanosleep(
+    clock_id: i32,
+    flags: i32,
+    request: &TimeSpec,
+    remaining: Option<&mut TimeSpec>,
+) -> Result<(), Errno> {
+    time::clock_nanosleep(
+        clock_id,
+        flags,
+        request as *const TimeSpec as u64,
+        remaining.map_or(0, |value| value as *mut TimeSpec as u64),
+    )
+    .map(|_| ())
+}
+
+pub fn clock_adjtime(clock_id: i32, value: &mut Timex) -> Result<i32, Errno> {
+    time::clock_adjtime(clock_id, value as *mut Timex as u64).map(|result| result as i32)
+}
+
+pub fn timerfd_create(clock_id: i32, flags: i32) -> Result<u32, Errno> {
+    time::timerfd_create(clock_id, flags).map(|fd| fd as u32)
+}
+
+pub fn timerfd_settime(
+    fd: u32,
+    flags: u32,
+    value: &ITimerSpec,
+    old_value: Option<&mut ITimerSpec>,
+) -> Result<(), Errno> {
+    time::timerfd_settime(
+        fd,
+        flags,
+        value as *const ITimerSpec as u64,
+        old_value.map_or(0, |value| value as *mut ITimerSpec as u64),
+    )
+    .map(|_| ())
+}
+
+pub fn timerfd_gettime(fd: u32) -> Result<ITimerSpec, Errno> {
+    let mut value = ITimerSpec::default();
+    time::timerfd_gettime(fd, &mut value as *mut ITimerSpec as u64).map(|_| value)
+}
+
+pub fn setitimer(
+    which: i32,
+    value: &OldITimerVal,
+    old_value: Option<&mut OldITimerVal>,
+) -> Result<(), Errno> {
+    time::setitimer(
+        which,
+        value as *const OldITimerVal as u64,
+        old_value.map_or(0, |value| value as *mut OldITimerVal as u64),
+    )
+    .map(|_| ())
+}
+
+pub fn getitimer(which: i32) -> Result<OldITimerVal, Errno> {
+    let mut value = OldITimerVal::default();
+    time::getitimer(which, &mut value as *mut OldITimerVal as u64).map(|_| value)
 }
 
 pub fn timer_create(clock_id: i32, event: Option<&SigEvent>) -> Result<i32, Errno> {

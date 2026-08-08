@@ -14,7 +14,7 @@ fn sys_fchmod(fd: Fd, linux_perm: LinuxInodePerm) -> Result<u64, SysError> {
         return Err(SysError::BadFileDescriptor);
     }
     let pathref = file_desc.vfs_file().path().clone();
-    let ctime = realtime();
+    let ctime = RealtimeInstant::now().to_duration();
     let perm = InodePerm::try_from(linux_perm)?;
 
     let r = kernel_fchmod(&pathref, perm, ctime).map(|()| 0);

@@ -33,7 +33,7 @@ fn sys_fchmodat(
     };
 
     let perm = InodePerm::try_from(linux_perm)?;
-    let ctime = realtime();
+    let ctime = RealtimeInstant::now().to_duration();
 
     let r = kernel_fchmod(&pathref, perm, ctime).map(|()| 0);
 

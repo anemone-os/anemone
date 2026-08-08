@@ -41,30 +41,26 @@ impl AddressSpaceBackend for Ext4AddressSpaceBackend {
     }
 
     fn fill_range(&self, offset: usize, data: &mut [u8]) -> Result<(), SysError> {
-        ext4_sb(&self.sb).read_tx(|| {
-            ext4_sb(&self.sb).with_fs(|fs| {
-                fs.read_at(self.ino.get() as u32, data, offset as u64)
-                    .map(|_| ())
-                    .map_err(map_ext4_error)
-            })
+        ext4_sb(&self.sb).with_fs(|fs| {
+            fs.read_at(self.ino.get() as u32, data, offset as u64)
+                .map(|_| ())
+                .map_err(map_ext4_error)
         })
     }
 
     fn writeback_range(&self, offset: usize, data: &[u8]) -> Result<(), SysError> {
-        ext4_sb(&self.sb).write_tx(|| {
-            ext4_sb(&self.sb).with_fs(|fs| {
-                fs.write_at(self.ino.get() as u32, data, offset as u64)
-                    .map(|_| ())
-                    .map_err(|err| {
-                        kwarningln!(
-                            "ext4: failed to write range at offset {} of inode {}: {:?}",
-                            offset,
-                            self.ino.get(),
-                            err
-                        );
-                        SysError::InvalidArgument
-                    })
-            })
+        ext4_sb(&self.sb).with_fs(|fs| {
+            fs.write_at(self.ino.get() as u32, data, offset as u64)
+                .map(|_| ())
+                .map_err(|err| {
+                    kwarningln!(
+                        "ext4: failed to write range at offset {} of inode {}: {:?}",
+                        offset,
+                        self.ino.get(),
+                        err
+                    );
+                    SysError::InvalidArgument
+                })
         })
     }
 }
@@ -177,36 +173,40 @@ fn ext4_read_dir(
 
     let sb = inode.sb();
     let mut pushed_any = false;
-    ext4_sb(&sb).read_tx(|| {
-        ext4_sb(&sb).with_fs(|fs| {
+    loop {
+        let entry = ext4_sb(&sb).with_fs(|fs| {
             let mut reader = fs
                 .read_dir(inode.ino().get() as u32, *offset as u64)
                 .map_err(map_ext4_error)?;
-            loop {
-                let Some(current) = reader.current() else {
-                    return if pushed_any {
-                        Ok(ReadDirResult::Progressed)
-                    } else {
-                        Ok(ReadDirResult::Eof)
-                    };
-                };
-                let name = str::from_utf8(current.name())
+            let Some(current) = reader.current() else {
+                return Ok(None);
+            };
+            let entry = DirEntry {
+                name: str::from_utf8(current.name())
                     .map_err(|_| SysError::InvalidArgument)?
-                    .to_string();
-                let ino = ext4_ino(current.ino())?;
-                let ty = map_lwext4_inode_type(current.inode_type())?;
+                    .to_string(),
+                ino: ext4_ino(current.ino())?,
+                ty: map_lwext4_inode_type(current.inode_type())?,
+            };
+            reader.step().map_err(map_ext4_error)?;
+            Ok(Some((entry, reader.offset() as usize)))
+        })?;
 
-                match sink.push(DirEntry { name, ino, ty })? {
-                    SinkResult::Accepted => {
-                        pushed_any = true;
-                        reader.step().map_err(map_ext4_error)?;
-                        *offset = reader.offset() as usize;
-                    },
-                    SinkResult::Stop => break Ok(ReadDirResult::Progressed),
-                }
-            }
-        })
-    })
+        let Some((entry, next_offset)) = entry else {
+            return if pushed_any {
+                Ok(ReadDirResult::Progressed)
+            } else {
+                Ok(ReadDirResult::Eof)
+            };
+        };
+        match sink.push(entry)? {
+            SinkResult::Accepted => {
+                pushed_any = true;
+                *offset = next_offset;
+            },
+            SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+        }
+    }
 }
 
 pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
