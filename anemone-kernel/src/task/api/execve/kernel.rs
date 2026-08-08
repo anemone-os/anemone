@@ -52,7 +52,7 @@ pub fn kernel_execve_from_pathref(
     ) {
         Ok(meta) => {
             let new_cred = meta.cred;
-            let usp = Arc::new(UserSpaceHandle::new(usp, meta.exe));
+            let usp = Arc::new(UserSpaceHandle::new(usp, meta.exe)?);
             unsafe {
                 if !task.flags().is_kernel() {
                     if let Err(e) = exit_robust_list() {
@@ -85,6 +85,11 @@ pub fn kernel_execve_from_pathref(
                 if let Some(old_uspace) = old_uspace.take() {
                     if task.is_last_user_of_uspace(&old_uspace) {
                         old_uspace.detach_all_sysv_shm_for(tgid);
+                        // The current CPU still runs on the old page table.
+                        // Retire its mappings through the address-space
+                        // completion owner before activating and publishing the
+                        // replacement image.
+                        old_uspace.clear();
                     }
                 }
 

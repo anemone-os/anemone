@@ -57,6 +57,12 @@ enum ControlFlow<R> {
     // Skip,
 }
 
+enum PageTableRetirement<'a> {
+    Immediate,
+    Retire(&'a mut Vec<OwnedFrameHandle>),
+    Keep,
+}
+
 /// Mapper. Computation engine for page table traversal and modification.
 ///
 /// **Note that Mapper won't flush the TLB when needed, as should be done by the
@@ -365,6 +371,31 @@ impl Mapper<'_> {
     /// This method is unsafe because it cannot always fully unmap
     ///     mappings within the given range.
     pub unsafe fn try_unmap(&mut self, unmapping: Unmapping) {
+        unsafe { self.try_unmap_with(unmapping, PageTableRetirement::Immediate) }
+    }
+
+    /// Unmap leaves while transferring detached page-table frames to the
+    /// caller. The caller must retain them until remote page walks using the
+    /// old branch PTEs have completed.
+    pub(crate) unsafe fn try_unmap_retiring_page_tables(
+        &mut self,
+        unmapping: Unmapping,
+        retired: &mut Vec<OwnedFrameHandle>,
+    ) {
+        unsafe { self.try_unmap_with(unmapping, PageTableRetirement::Retire(retired)) }
+    }
+
+    /// Unmap leaves without detaching empty page tables. This is used by exit,
+    /// where the complete page table remains owned until its later safe drop.
+    pub(crate) unsafe fn try_unmap_keep_page_tables(&mut self, unmapping: Unmapping) {
+        unsafe { self.try_unmap_with(unmapping, PageTableRetirement::Keep) }
+    }
+
+    unsafe fn try_unmap_with(
+        &mut self,
+        unmapping: Unmapping,
+        mut retirement: PageTableRetirement<'_>,
+    ) {
         let Unmapping { range } = unmapping;
 
         unsafe {
@@ -380,9 +411,17 @@ impl Mapper<'_> {
                         .expect("pgdir ppn should not be null");
 
                     if pgdir.is_empty() && !pte.is_global() {
-                        // deallocate the empty page table
-                        *pte = Pte::ZEROED;
-                        let _frame = OwnedFrameHandle::from_ppn(ppn);
+                        match &mut retirement {
+                            PageTableRetirement::Immediate => {
+                                *pte = Pte::ZEROED;
+                                let _frame = OwnedFrameHandle::from_ppn(ppn);
+                            },
+                            PageTableRetirement::Retire(retired) => {
+                                *pte = Pte::ZEROED;
+                                retired.push(OwnedFrameHandle::from_ppn(ppn));
+                            },
+                            PageTableRetirement::Keep => {},
+                        }
                     }
                     ControlFlow::<()>::Continue
                 },
@@ -943,6 +982,25 @@ mod kunits {
             });
         }
         assert!(mapper.translate(vpn).is_none());
+    }
+
+    #[kunit]
+    fn unmap_can_transfer_empty_tables_to_remote_retirement() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let frame = frame();
+        let vpn = VirtPageNum::new(1);
+        let range = VirtPageRange::new(vpn, 1);
+        let mut mapper = table.mapper();
+
+        unsafe { map_page(&mut mapper, vpn, &frame) };
+        let mut retired = Vec::new();
+        unsafe {
+            mapper.try_unmap_retiring_page_tables(Unmapping { range }, &mut retired);
+        }
+
+        assert!(mapper.translate(vpn).is_none());
+        assert!(!retired.is_empty());
+        drop(retired);
     }
 
     #[kunit]

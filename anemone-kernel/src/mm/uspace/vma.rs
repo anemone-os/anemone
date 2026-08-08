@@ -273,30 +273,16 @@ impl VmArea {
         self.map_page(mapper, vpn, access)
     }
 
-    /// Used when cloning a task without `CLONE_VM`. Think of it as forking a
-    /// repository: the child process gets a copy of the parent's memory, but
-    /// changes in one process won't affect the other...
+    /// Fork this VMA and report whether the parent PTEs were restricted.
     ///
-    /// See [ForkPolicy] for more details about how the forking is performed.
-    ///
-    /// Judging by its name, you might never guess that this function performs
-    /// such an important work. So ***be careful***!
-    ///
-    /// A local tlb shootdown will be performed when necessary (i.e. when
-    /// [ForkPolicy::CopyOnWrite] and we need to remove write permissions).
-    pub(super) fn fork(&mut self, mapper: &mut Mapper) -> Self {
+    /// The address-space owner performs the single local flush and remote
+    /// completion after all VMAs have been processed.
+    pub(super) fn fork(&mut self, mapper: &mut Mapper) -> (Self, bool) {
         match self.on_fork {
-            ForkPolicy::Shared => Self {
-                range: self.range,
-                poffset: self.poffset,
-                prot: self.prot,
-                on_fork: self.on_fork,
-                flags: self.flags,
-                reservation: self.reservation,
-                backing: self.backing.clone(),
-            },
+            ForkPolicy::Shared => (self.clone(), false),
             ForkPolicy::CopyOnWrite => {
-                if self.prot.contains(Protection::WRITE) {
+                let restricted = self.prot.contains(Protection::WRITE);
+                if restricted {
                     unsafe {
                         mapper.change_flags(
                             self.range,
@@ -310,23 +296,23 @@ impl VmArea {
                             TraverseOrder::PreOrder,
                         );
                     }
-                    PagingArch::tlb_shootdown_all();
                 }
 
                 let original = self.backing.clone();
-
-                let pshadow = ShadowObject::new(original.clone());
-                let cshadow = ShadowObject::new(original.clone());
-                self.backing = Arc::new(pshadow);
-                Self {
-                    range: self.range,
-                    poffset: self.poffset,
-                    prot: self.prot,
-                    on_fork: self.on_fork,
-                    flags: self.flags,
-                    reservation: self.reservation,
-                    backing: Arc::new(cshadow),
-                }
+                self.backing = Arc::new(ShadowObject::new(original.clone()));
+                let child: Arc<dyn VmObject> = Arc::new(ShadowObject::new(original));
+                (
+                    Self {
+                        range: self.range,
+                        poffset: self.poffset,
+                        prot: self.prot,
+                        on_fork: self.on_fork,
+                        flags: self.flags,
+                        reservation: self.reservation,
+                        backing: child,
+                    },
+                    restricted,
+                )
             },
         }
     }

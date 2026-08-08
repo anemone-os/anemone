@@ -34,20 +34,23 @@ pub(super) fn cap_validate_magic(version: u32) -> Result<usize, SysError> {
 
 pub(super) fn read_cap_version(
     header_addr: VirtAddr,
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
 ) -> Result<u32, SysError> {
     UserReadPtr::<u32>::try_new(header_addr, usp).and_then(|mut version| version.read())
 }
 
 pub(super) fn write_preferred_cap_version(
     header_addr: VirtAddr,
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
 ) -> Result<(), SysError> {
     UserWritePtr::<u32>::try_new(header_addr, usp)?.write(abi::_KERNEL_CAPABILITY_VERSION)?;
     Ok(())
 }
 
-pub(super) fn read_cap_pid(header_addr: VirtAddr, usp: &mut UserSpace) -> Result<i32, SysError> {
+pub(super) fn read_cap_pid(
+    header_addr: VirtAddr,
+    usp: &mut UserSpaceGuard<'_>,
+) -> Result<i32, SysError> {
     let pid_addr = user_addr_offset(header_addr.get(), offset_of!(abi::UserCapHeader, pid))?;
     UserReadPtr::<i32>::try_new(pid_addr, usp).and_then(|mut pid| pid.read())
 }

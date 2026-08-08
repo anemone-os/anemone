@@ -33,8 +33,8 @@ operation-local `Added`后，user-entry Signal arbitration可能在原instructio
 因此operation-local `Added`不证明全局fresh mapping，handler可能在remote completion前短暂观察predecessor mapping。
 
 维护者明确接受该窗口并要求坚持lazy路线。R1把target guarantee收窄为本文的operation-local completion policy，不
-承诺该cross-CPU predecessor / Signal redirect窗口内的mapping-identity强一致性；限制登记于
-[`ANE-20260808-MM-LAZY-LOCAL-TLB-REMOTE-PREDECESSOR-WINDOW`](../../register/current-limitations.md#ane-20260808-mm-lazy-local-tlb-remote-predecessor-window)。
+承诺该cross-CPU predecessor / Signal redirect窗口内的mapping-identity强一致性；当时限制登记为
+`ANE-20260808-MM-LAZY-LOCAL-TLB-REMOTE-PREDECESSOR-WINDOW`。
 本轮不设计remote-fence predecessor handoff、pending generation或user-entry retry capability，也不把该限制写成已经
 由单核runtime证明安全。
 
@@ -46,8 +46,7 @@ MM UserSpace resolver唯一拥有relation加continuation到local-completion的de
 
 受保护边界是syscall ABI、errno、signal、一次retry、partial prefix、COW、permission、unmap/mprotect/discard/brk、
 remote fence、IPI failure、frame retirement及RV64/LA64 primitive；R1 limitation是唯一明确的visible guarantee缩减。
-本轮不改变
-[`ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION`](../../register/current-limitations.md#ane-20260807-mm-remote-fence-fail-close-retention)
+本轮不改变当时的`ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION`
 或exception userptr RFC记录的remote-fence lock handoff。
 
 ## Checkpoints / Change
@@ -93,11 +92,15 @@ current limitation、本记录与导航在第二个focused commit原子生效；
 
 ## Remaining Risk / Links
 
-- [`ANE-20260808-MM-LAZY-LOCAL-TLB-REMOTE-PREDECESSOR-WINDOW`](../../register/current-limitations.md#ane-20260808-mm-lazy-local-tlb-remote-predecessor-window)
-  是R1 accepted limitation；单核PASS、普通refault reasoning或Mapper relation KUnit不能替代其future SMP proof。
+- `ANE-20260808-MM-LAZY-LOCAL-TLB-REMOTE-PREDECESSOR-WINDOW`是R1当时的accepted limitation；单核PASS、
+  普通refault reasoning或Mapper relation KUnit不能替代其future SMP proof。
 - local policy不关闭
-  [`ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION`](../../register/current-limitations.md#ane-20260807-mm-remote-fence-fail-close-retention)，
+  `ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION`，
   也不修正exception userptr RFC中的
   [`UACCESS-KETER-001`](../../rfcs/exception-userptr-access/tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)。
 - [User Fault Local TLB Completion当前契约](../../contracts/mm/user-fault-local-tlb.md)是effective policy的唯一正文。
   后续性能研究需要独立授权和新baseline，不能用历史结果替代production implementation的after evidence。
+
+**后续处置：** 上述两项limitation与`UACCESS-KETER-001`已由
+[User TLB Completion RFC R2 closure](../../rfcs/user-tlb-completion/index.md#closure)在2026-08-09完成cutover并从
+active register移除；本记录保留它们在R1小迭代关闭时的历史状态。

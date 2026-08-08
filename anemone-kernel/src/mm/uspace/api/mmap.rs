@@ -76,7 +76,7 @@ fn sys_mmap(
             flags,
         };
 
-        let (addr, _guard) = usp
+        let addr = usp
             .map_anonymous(&mapping)
             .map_err(|err| mmap_error_at_syscall_boundary(err, clobber))?;
         Ok(addr.get())
@@ -136,7 +136,7 @@ fn sys_mmap(
             inode,
         };
 
-        let (addr, _guard) = usp
+        let addr = usp
             .map_file(&mapping)
             .map_err(|err| mmap_error_at_syscall_boundary(err, clobber))?;
 

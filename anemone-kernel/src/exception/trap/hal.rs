@@ -1,4 +1,4 @@
-use crate::prelude::{SysError, UserSpace, VirtAddr};
+use crate::prelude::{SysError, UserSpaceGuard, VirtAddr};
 
 pub trait TrapArchTrait {
     type TrapFrame: TrapFrameArch;
@@ -51,14 +51,14 @@ impl UserPtrAccessError {
 pub trait UserPtrAccessorArch {
     /// Copy a user-memory range into a kernel buffer.
     fn read(
-        uspace: &mut UserSpace,
+        uspace: &mut UserSpaceGuard<'_>,
         dst: &mut [u8],
         src: VirtAddr,
     ) -> Result<usize, UserPtrAccessError>;
 
     /// Copy a kernel buffer into a user-memory range.
     fn write(
-        uspace: &mut UserSpace,
+        uspace: &mut UserSpaceGuard<'_>,
         dst: VirtAddr,
         src: &[u8],
     ) -> Result<usize, UserPtrAccessError>;

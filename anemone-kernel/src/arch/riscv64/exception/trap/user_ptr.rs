@@ -297,7 +297,7 @@ impl RiscV64UserPtrAccessor {
 
 impl UserPtrAccessorArch for RiscV64UserPtrAccessor {
     fn read(
-        uspace: &mut UserSpace,
+        uspace: &mut UserSpaceGuard<'_>,
         dst: &mut [u8],
         src: VirtAddr,
     ) -> Result<usize, UserPtrAccessError> {
@@ -324,10 +324,9 @@ impl UserPtrAccessorArch for RiscV64UserPtrAccessor {
                         return Err(access_error(copied));
                     }
 
-                    let fence = uspace
+                    uspace
                         .resolve_immediate_page_fault(&fault.info)
                         .map_err(|_| access_error(copied))?;
-                    drop(fence);
 
                     let retry_len = chunk_end - copied;
                     let retry_addr = VirtAddr::new(src.get() + copied as u64);
@@ -353,7 +352,7 @@ impl UserPtrAccessorArch for RiscV64UserPtrAccessor {
     }
 
     fn write(
-        uspace: &mut UserSpace,
+        uspace: &mut UserSpaceGuard<'_>,
         dst: VirtAddr,
         src: &[u8],
     ) -> Result<usize, UserPtrAccessError> {
@@ -380,10 +379,9 @@ impl UserPtrAccessorArch for RiscV64UserPtrAccessor {
                         return Err(access_error(copied));
                     }
 
-                    let fence = uspace
+                    uspace
                         .resolve_immediate_page_fault(&fault.info)
                         .map_err(|_| access_error(copied))?;
-                    drop(fence);
 
                     let retry_len = chunk_end - copied;
                     let retry_addr = VirtAddr::new(dst.get() + copied as u64);

@@ -46,6 +46,10 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
+- [RFC-20260808-user-tlb-completion](./rfcs/user-tlb-completion/index.md)：Closed / R2；把 user address-space
+  remote fence从每次fault的无条件Drop broadcast收敛为completion ordering：monotonic PTE change不创建自己的
+  remote obligation，destructive commit的dependent continuation/exposure与retired cleanup均在锁外remote ack之后；
+  `MM-TLB-LOCAL-001`已Refine、`MM-TLB-REMOTE-001`已Introduce。
 - [RFC-20260803-clock-timekeeping-posix-timers](./rfcs/clock-timekeeping-posix-timers/index.md)：R0 已实现并关闭；建立从硬件计数和
   Hertz 计算的 monotonic/raw、由内存偏移得到的 realtime、按真实更新周期计算的 coarse clock，以及可物理删除
   排队请求的 soft timer；目标是在 RV64/LA64 native 64 位 ABI 上实现五个 clock syscall 和五个 POSIX timer
@@ -63,7 +67,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 - [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
   RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供
   fallible copyin/copyout，typed exact access与VFS partial progress边界已经固化。早于本RFC的
-  `RemoteUspFenceGuard`锁内同步shootdown问题保持明确follow-up，不被R0 closure写成已修复。
+  `RemoteUspFenceGuard`锁内同步shootdown问题后来由User TLB Completion RFC关闭；R0 closure仍保留其历史边界。
 - [RFC-20260801-loongarch-lsx-context](./rfcs/loongarch-lsx-context/index.md)：R0已实现并关闭；以per-task
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、

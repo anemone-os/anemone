@@ -31,7 +31,7 @@ fn extend_load(bytes: [u8; 8], width: AccessWidth, kind: AccessKind) -> u64 {
 pub(super) fn emulate_user(
     access: DecodedAccess,
     trapframe: &mut LA64TrapFrame,
-    uspace: &mut UserSpace,
+    uspace: &mut UserSpaceGuard<'_>,
 ) -> Result<(), SysError> {
     assert!(
         IntrArch::local_intr_enabled(),
