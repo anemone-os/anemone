@@ -1,23 +1,23 @@
 # RFC-20260808-jh7110-gmac
 
 **状态：** Accepted
-**修订：** R1
+**修订：** R2
 **负责人：** Anemone maintainers
-**最后更新：** 2026-08-08
+**最后更新：** 2026-08-09
 **领域：** driver / net / irq / mm
 **影响契约：** `IRQ-FLOW-001`、`NET-IFACE-DOMAIN-001`、`NET-ATTACH-001`
-**执行记录：** Git commit（R0 acceptance；Gate 0 closure）
+**执行记录：** Git commit（R0 acceptance；Gate 0 closure；R2 target renegotiation）
 
 ## 摘要
 
 本 RFC 提议为 JH7110 的 DWMAC 5.20 GMAC 节点实现 boot-time、one-time-initialized 的
 以太网驱动。所有 `status = "okay"` 且 compatible 匹配的节点都按 DT discovery 顺序独立
-probe；每个节点拥有自己的 MMIO、非一致 DMA backing、descriptor ring、IRQ context、
+probe；每个节点拥有自己的 MMIO、DMA-coherent backing、descriptor ring、IRQ context、
 `FrameProvider`、worker 和 recheck edge，不建立 GMAC bus、GMAC 全局 registry 或固定双实例表。
 
 板级 clock、reset、syscon/RGMII path 与 PHY 被视为 firmware handoff 前提。本 RFC 不建立这些
-子系统的通用 owner，也不接管运行时 link management。驱动只在真实 non-coherent cache
-maintenance、DMA ownership、`macirq` 和 per-node resource 均成立后发布 netdev。多个已发布
+子系统的通用 owner，也不接管运行时 link management。驱动只在硬件 DMA coherency、ordering、
+DMA ownership、`macirq` 和 per-node resource 均成立后发布 netdev。多个已发布
 GMAC 进入现有 initial domain 与唯一 global Stack；沿用现有单个 `[network.ipv4]` 配置，只给
 配置选中的稳定 `eth<N>` 分配 IPv4 和唯一 default route。
 
@@ -43,9 +43,11 @@ global Stack、per-interface worker 和单接口 static IPv4 control plane。当
 发生在成功 publication 后的 attach transaction 内；若把失败节点排除在编号之外，后续节点会
 顶替 `eth<N>`，不满足本 RFC 的稳定 DT identity 目标。
 
-`DmaRegion::sync_for_device()` 与 `sync_for_cpu()` 当前只有 fence。JH7110 不是 DMA-coherent，
-因此 fence-only 实现不能作为 descriptor 或 frame backing 的 cache correctness 证明，也不能
-进入 active frame path。
+`DmaRegion::sync_for_device()` 与 `sync_for_cpu()` 当前只有 fence。R2 接受用户提供的板级证据：
+JH7110 GMAC 的 DMA 路径是 coherent，因此不要求额外的 clean/invalidate 才能实现 CPU/device
+visibility；现有 fence 仍只承担 ordering，不能替代 descriptor ownership、MMIO doorbell/completion
+顺序或 quiesce 证明。Linux 6.6.32 的 RISC-V 默认 coherent DMA 与 `dma-noncoherent` 覆盖规则可作为
+外部佐证，但不替代 Anemone 的硬件验收。
 
 ## 目标
 
@@ -55,8 +57,9 @@ global Stack、per-interface worker 和单接口 static IPv4 control plane。当
   queue、有界 descriptor/frame backing、IRQ context、provider、worker 和 wake path。
 - 增加 crate-local IRQ resource selector，使 driver 按 interrupt name 或 index 取得单个 specifier；
   现有 public `request_irq()` 保持不变。首版 JH7110 只选择 `macirq`，不请求 Wake/LPI IRQ。
-- 在 publication 前完成真实 non-coherent cache clean/invalidate、memory ordering、DMA address
-  representation 与 descriptor/frame ownership proof。
+- 在 publication 前完成 coherent DMA visibility 的调用语义、memory/MMIO ordering、DMA address
+  representation 与 descriptor/frame ownership proof；不以 coherency 假设掩盖 ordering 或 ownership
+  错误。
 - 让每个匹配节点在 probe admission 时按稳定 DT discovery order 消费一个 `eth<N>` reservation；
   后续失败只 abort membership，不复用 ordinal，也不让下一节点顶替。
 - 让所有 boot-time external netdev publisher（包括现有 VirtIO provider）使用同一个 opaque
@@ -106,7 +109,7 @@ runtime hotplug。
 4. Attach authority 建立 Stack mapping 和 inactive worker，最后在同一 authority transaction 中
    commit 原 reservation、记录 active path 并 activate worker。
 5. Frame backing 的每次 CPU/device ownership transfer 以 descriptor ownership publication 或
-   completion observation 为线性化点；cache operation 与 ordering fence 都必须在对应一侧完成。
+   completion observation 为线性化点；coherent visibility 与 ordering fence 都必须在对应一侧成立。
 
 ### Failure 与 cleanup
 
@@ -163,7 +166,7 @@ contract。
 ## Implementation Boundary
 
 - **允许改变：** JH7110 net driver；按 name/index 选择单项 interrupt 的 FwNode/IRQ resource surface；
-  RISC-V/JH7110 non-coherent DMA cache capability；logical reservation 的提前取得与跨 publication
+  RISC-V/JH7110 coherent DMA sync/order capability；logical reservation 的提前取得与跨 publication
   handoff；attach 对预留 token 的消费；owner-local tests、target config/Kconfig 与必要 module registration。
 - **必须保持：** per-node provider 是 queue/DMA/IRQ truth 的唯一 owner；driver 不拥有 logical
   namespace、route 或 Stack；现有 SystemTarget schema、socket ABI、single-control-plane 语义、
@@ -171,15 +174,16 @@ contract。
   reservation handoff 可以迁移，但不得形成第二套编号规则。
 - **实现提示：** 预计涉及 `driver/net`、`exception/intr/irq`、firmware-node DT parsing、`mm/dma`、
   `device/net` 与 `net/domain`；这些是非穷举提示，不是逐文件 write set。
-- **验证 claim：** Gate 检查只证明 source/build/targeted semantics；JH7110 IRQ、cache、PHY handoff、
+- **验证 claim：** Gate 检查只证明 source/build/targeted semantics；JH7110 IRQ、coherency/order、PHY handoff、
   双口收发和稳定跨启动 identity 只能由最终 VisionFive 2 acceptance 证明。
 - **停止条件：** 任何证据要求 driver 接管 clock/reset/syscon/PHY owner，改变 SystemTarget 为多 IP，
-  让 driver 保存 `eth<N>`/route/Stack truth，依赖 fence-only cache correctness，使用固定 GMAC 数组，
-  改变 frame ownership，或降低最终板级验收时，必须回到 RFC review / Target Renegotiation。
+  让 driver 保存 `eth<N>`/route/Stack truth，把 fence-only 当作硬件 coherency 保证，未证明 ordering、
+  ownership 或 quiesce，使用固定 GMAC 数组，改变 frame ownership，或降低最终板级验收时，必须回到
+  RFC review / Target Renegotiation。
 
 ## Acceptance 与 Validation
 
-接受本 R1 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示硬件能力已经
+接受本 R2 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示 Gate 1 或完整硬件能力已经
 交付。实现 closure 必须依次满足：
 
 1. Gate 0--3 全部实现，并在每个 Gate 后完成其 source audit、build、targeted tests 和
@@ -196,8 +200,8 @@ RFC acceptance。Gate 0 implementation 与用户确认通过的 VisionFive 2 Gat
 
 ## 风险与反馈
 
-最大风险是 JH7110 可用的 cache maintenance 机制、descriptor cache-line sharing、IRQ 注册后的
-不可回收生命周期，以及提前 reservation 跨越 driver/device/net/attach owner 的 token handoff。对应
+最大风险是 coherency 与 ordering 语义未被 production call site 正确使用、DWMAC DMA addressability、
+IRQ 注册后的不可回收生命周期，以及提前 reservation 跨越 driver/device/net/attach owner 的 token handoff。对应
 correctness obligations 见[目标与不变量](./invariants.md)，逐 Gate deliverable、检查和 hard stop 见
 [实施路线](./implementation.md)。任何实现反馈若改变 target、owner、cleanup、contract delta 或
 acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
@@ -208,7 +212,9 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
 - [实施路线](./implementation.md)
 - [RFC 前定位材料](./positioning.md)（非规范）
 - commit / PR / optional transaction：None
-- 外部源码证据：固定 `xref:linux-6.6.32:drivers/net/ethernet/stmicro/stmmac/dwmac4.h`、
+- 外部源码证据：固定 `xref:linux-6.6.32:arch/riscv/Kconfig#ARCH_DMA_DEFAULT_COHERENT`、
+  `xref:linux-6.6.32:drivers/of/address.c#of_dma_is_coherent`、
+  `xref:linux-6.6.32:drivers/net/ethernet/stmicro/stmmac/dwmac4.h`、
   `dwmac4_dma.h`、`hwif.h` 与 `common.h`；硬件描述基线使用仓库跟踪的
   [`visionfive2-board.dts`](../../../../conf/platforms/visionfive2-board.dts)。
 
@@ -218,10 +224,15 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
 - `R1`：按板级 authority 只接受每节点 `local-mac-address`，删除通用 `mac-address` precedence；IRQ
   selector 保持 crate-local，现有 public `request_irq()` 不扩张。其它 target、owner、contract delta 与
   acceptance 不变。
+- `R2`：接受用户提供的 VisionFive 2 板级证据，将 JH7110 GMAC DMA target 从 non-coherent 修订为
+  coherent。删除强制 clean/invalidate 和 cache-line ownership isolation，保留独立的 fence/MMIO
+  ordering、DMA addressability、descriptor/frame layout、ownership 与 quiesce proof；其它 target、
+  owner、contract delta 与 acceptance 不变。
 
 ## Closure
 
-Not Closed。R1 target 已接受；Gate 0 implementation 与修复后的 board diagnostic 已关闭。诊断确认两
+Not Closed。R2 target 已接受；Gate 0 implementation 与修复后的 board diagnostic 已关闭。诊断确认两
 个 GMAC 节点都能独立读取 DWMAC capability，但 Gate 0 仍按设计在 DMA/IRQ/attach 前返回
-`NotYetImplemented`；QEMU 不含 JH7110。Gate 1--3、最终 VisionFive 2 验收与 current-contract cutover
-均未完成；本次用户授权在 Gate 0 后停止。
+`NotYetImplemented`；QEMU 不含 JH7110。用户板级证据已闭合 R2 的 coherency target 前提，但 Gate 1--3、
+最终 VisionFive 2 验收与 current-contract cutover 均未完成；本次仅修订 RFC target，不自动进入 Gate 1
+实现。

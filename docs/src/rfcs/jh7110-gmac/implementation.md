@@ -1,14 +1,14 @@
 # JH7110 GMAC 实施路线
 
-**状态：** Accepted / R1
-**最后更新：** 2026-08-08
+**状态：** Accepted / R2
+**最后更新：** 2026-08-09
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**当前修订：** R1
+**当前修订：** R2
 
 ## 全局 Implementation Boundary
 
 - **Target / non-goals：** 任意有限数量 JH7110 matching nodes 的 one-time boot driver、命名 IRQ、
-  non-coherent DMA、per-node provider、稳定 `eth<N>` 与既有单接口 static IPv4；不实现板级
+  coherent DMA、per-node provider、稳定 `eth<N>` 与既有单接口 static IPv4；不实现板级
   clock/reset/syscon/PHY owner、runtime lifecycle、offload、多 queue 或多 IP。现有 boot-time
   external publisher（包括 VirtIO）必须迁移到同一 reservation handoff，避免按 provider 类型分叉。
 - **Owner / handoff / failure / cleanup：** per-node provider拥有 hardware progression；IRQ、logical、
@@ -22,7 +22,7 @@
   VisionFive 2 完整验收。在此之前最终硬件 acceptance 事实保持 Not Run；Gate-specific board
   diagnostics 只作为诊断证据，不改变该边界。
 - **Stop conditions：** 发现需要改变 target/owner/handoff/failure/cleanup/ABI/contract/acceptance，
-  需要 generic PHY/clock framework，cache correctness 只能依赖 fence，或不能保持 per-node isolation，
+  需要 generic PHY/clock framework，fence 被误当作 coherency 保证，或不能保持 per-node isolation，
   必须停止并回 RFC review / Target Renegotiation。
 
 Gate 0--3 是同一 RFC 实现的有序阶段，不是独立产品 release。用户后续若只授权某一个 Gate，完成其
@@ -92,56 +92,56 @@ GMAC 不保存其状态或写 raw register。该调用与本 Gate “不写 cloc
 board diagnostic 已完成；最终 hardware acceptance 与 current contract 保持 Not Run/未切换。Gate 1
 仍为 `Planned / Not Run`，本 checkpoint 不把后续前置审计或实现写成 Gate 1 closure。
 
-## Gate 1 — Non-coherent DMA 与 ring ownership
+## Gate 1 — Coherent DMA 与 ring ownership
 
 **状态：** Planned / Not Run
-**Purpose：** 建立可审计的真实 cache maintenance、DMA addressability 与 bounded RX/TX ownership；
+**Purpose：** 建立可审计的 coherent DMA sync/order 语义、DMA addressability 与 bounded RX/TX ownership；
 仍不发布 netdev。
-**Prerequisites：** Gate 0 post-gate check 关闭；已确定 JH7110/RISC-V 可用且可执行的 cache clean/
-invalidate 机制与 cache-line truth。
-**Protected Boundary：** `NET-FRAME-OWN-001` 不变；cache op 与 ordering fence 分离；没有 quiesce proof
-不释放 backing；不借机实现 generic DWMAC/offload/multi-queue。
+**Prerequisites：** Gate 0 post-gate check 关闭；用户提供的板级 coherency proof 已接受；DMA address
+width、descriptor/frame hardware alignment 与 ordering/fence semantics 已确定。
+**Protected Boundary：** `NET-FRAME-OWN-001` 不变；coherent visibility 与 ordering fence 分离；没有
+quiesce proof 不释放 backing；不借机实现 generic DWMAC/offload/multi-queue。
 
 **Deliverable：**
 
-- 为 DMA sync surface 增加 coherent/non-coherent 可区分的真实语义；JH7110 明确选择 non-coherent，
-  不允许落到当前 fence-only path。
-- 建立 cache-line-safe descriptor/buffer allocation、hardware address-width validation 和 Kconfig-owned
+- 为 DMA sync surface 建立 coherent visibility 与 ordering 的真实语义；JH7110 采用 coherent path，
+  不添加未经硬件要求的 clean/invalidate。
+- 建立满足 DWMAC 硬件约束的 descriptor/frame allocation、40-bit DMA address validation 和 Kconfig-owned
   bounded RX/TX ring capacity；重要 ring/alignment 常量不散落在 driver 内。
 - 实现单 RX queue 与单 TX queue 的 owner transition、descriptor initialization、RX refill、TX submit、
   completion/reclaim、queue exhaustion/backpressure 和 error unwind。
 - rings、handler context、device status clear 与 retention path 全部 ready 后，才以 Gate 0 的 selector
   注册 `macirq` 并启用 device-side cause；失败不得留下可访问已释放 backing 的 IRQ context。
-- 在 production call sites 配置方向正确的 clean/invalidate 与 fence/MMIO ordering；descriptor与payload
-  分别按 device 实际读写方向处理。
+- 在 production call sites 保持方向正确的 fence/MMIO ordering；descriptor 与 payload 仍按 device 实际
+  读写方向进行 ownership handoff，不能因 coherent 而跳过 publication/completion ordering。
 - IRQ context 只发布 completion/recheck事实；真实 frame progression 保持在 provider/worker side。
 - Gate 1 仍在 netdev publication 前停止。所有已启动 DMA 在 probe退出前必须证明未启动、已 quiesce，
   或按 terminal retention 规则保留；不能假装释放。
 
 **Post-gate check：**
 
-- Source/ownership audit：逐 transition 检查 CPU/device owner、cache range、descriptor ownership bit、
+- Source/ownership audit：逐 transition 检查 CPU/device owner、visibility/order handoff、descriptor ownership bit、
   doorbell/completion ordering、address truncation 与 failure cleanup。
-- Targeted tests：operation-recording cache backend 必须经过 production ring call sites；覆盖 cache-line
-  边界、wrap、full/empty、RX/TX completion、stale completion、address overflow、partial allocation 与
-  unwind/retention。
+- Targeted tests：production sync/order call sites 必须可记录或可审计；覆盖 descriptor/frame hardware
+  alignment、ring wrap、full/empty、RX/TX completion、stale completion、40-bit address overflow、partial
+  allocation 与 unwind/retention。
 - Build/architecture audit：相关 RV64 build、格式检查和生成指令/architecture capability 审计；编译成功
-  只证明路径存在，不证明板上 cache correctness。
-- Architecture Friction Scan：检查 cached owner bit、共享相反 ownership cache line、generic DMA API
-  为单 driver 过度扩张、test-only bypass 与隐含 quiesce。
-- **Hardware status：** Not Run。Gate 1 后不上板；真实 cache、DMA engine 和 ring traffic 仍未验收。
+  只证明路径存在，不证明板上 coherency/order correctness。
+- Architecture Friction Scan：检查第二份 coherency truth、generic DMA API 为单 driver 过度扩张、
+  test-only bypass 与隐含 quiesce。
+- **Hardware status：** Not Run。Gate 1 后不上板；硬件 coherency、DMA engine 和 ring traffic 仍未验收。
 
 **Cutover：** None。
-**Stop / Exit：** 只要 clean/invalidate 仍是 fence、line size来源不明、范围会破坏邻接 CPU 写入、DMA
-address 不能可靠表示，或 cleanup 可能释放 device-owned backing，就立即停止，Gate 1 不关闭。全部静态/
-定向证据通过后关闭本阶段并等待下一 Gate 授权。
+**Stop / Exit：** 只要 coherency proof 缺失、DMA address width/representation 不可靠、ordering 或
+ownership handoff 不成立，或 cleanup 可能释放 device-owned backing，就立即停止，Gate 1 不关闭。全部
+静态/定向证据通过后关闭本阶段并等待下一 Gate 授权。
 
 ## Gate 2 — Per-node provider 与稳定 identity
 
 **状态：** Planned / Not Run
 **Purpose：** 把 Gate 1 的 hardware core 组成独立 `FrameProvider`，建立 early logical reservation、
 多 provider isolation 和现有 global Stack 所需的窄能力；仍不进入 production publication。
-**Prerequisites：** Gate 1 post-gate check 关闭；ring/cache/IRQ ownership 已在 source/tests 中闭合。
+**Prerequisites：** Gate 1 post-gate check 关闭；ring/DMA/IRQ ownership 已在 source/tests 中闭合。
 **Protected Boundary：** logical owner唯一分配 `eth<N>`；driver只携带 token；netdev/logical/protocol
 identity不合并；每个 provider独立，不增加 GMAC registry 或 per-provider Stack。
 
@@ -188,7 +188,7 @@ provider retention 和 `filesystem -> network -> device -> PowerOff` 不变；�
 
 **Deliverable：**
 
-- Provider 在 queue/RX refill/IRQ/cache/wake 全部 ready 后一次性发布 netdev，并携带对应 opaque logical
+- Provider 在 queue/RX refill/IRQ/DMA-order/wake 全部 ready 后一次性发布 netdev，并携带对应 opaque logical
   reservation；删除 Gate 0--2 的 placeholder error、dormant switch 和 test-only activation branch。
 - Attach authority 消费既有 reservation，建立 global Stack mapping、inactive worker、wake/time wiring，
   最后 commit logical member与active path并activate。rollback 保持 mapping 先于 reservation。
@@ -222,9 +222,9 @@ Gate 3。若任何硬件相关 claim 被写成已通过，先纠正为 Not Run�
 **Purpose：** 在全部 Gate 实现和 post-gate check 完成后，以 VisionFive 2 对同一 production build
 一次性验证完整 target；这是唯一 JH7110 acceptance，不是第五个实现 Gate。
 **Prerequisites：** Gate 0--3 均关闭；无 blocking Architecture Friction；production build无 probe占位、
-cache bypass或test-only activation；测试所需两路外部 peer 与可切换 SystemTarget 配置已准备。
-**Protected Boundary：** 不为过板改变 owner、跳过 cache maintenance、硬编码 node/IRQ/MAC、给两个接口
-复制同一 IP，或降低 failure/shutdown oracle。
+coherency bypass或test-only activation；测试所需两路外部 peer 与可切换 SystemTarget 配置已准备。
+**Protected Boundary：** 不为过板把未证明的 coherency 假设写成硬件保证、跳过 ordering/ownership proof、
+硬编码 node/IRQ/MAC、给两个接口复制同一 IP，或降低 failure/shutdown oracle。
 
 ### Acceptance matrix
 
@@ -237,9 +237,9 @@ cache bypass或test-only activation；测试所需两路外部 peer 与可切换
   counters证明 RX/TX 都跨越 ring wrap，并覆盖 queue pressure 后恢复。
 - **Port B：** 只改变 `network.ipv4.interface` 选择第二个 GMAC，重复独立双向、ring wrap与queue pressure
   验证；另一接口仍 active L2但没有 IPv4/default route。
-- **Non-coherent DMA：** 两个端口分别在多种 frame length 与重复 RX/TX 下没有 stale payload、重复/
-  丢失 completion、descriptor corruption、地址截断或 use-after-submit。证据必须来自启用真实 cache
-  maintenance 的 production path。
+- **Coherent DMA：** 两个端口分别在多种 frame length 与重复 RX/TX 下没有 stale payload、重复/丢失
+  completion、descriptor corruption、地址截断或 use-after-submit。证据必须同时覆盖硬件 coherency
+  与 production path 的 fence/MMIO ordering；coherency 证明不替代 ownership/quiesce 证据。
 - **Isolation：** 每个 IRQ、completion、wake、worker、mapping 与计数只推进对应 node；一个端口无流量、
   queue pressure或受控失败不阻塞/重编号另一个。
 - **Control plane：** 每次启动只有 configured `eth<N>` 获得 address/prefix 和唯一 default route；其它
@@ -248,7 +248,7 @@ cache bypass或test-only activation；测试所需两路外部 peer 与可切换
   无新的 worker reactivation，device step抑制每个 GMAC 的 IRQ/DMA，未证明 quiesce 的 backing保持到
   reset/power-off。
 
-QEMU、host fake cache backend和KUnit结果作为前置/回归证据附带记录，但不能替代以上任一板级项。
+QEMU、host fake DMA/order backend和KUnit结果作为前置/回归证据附带记录，但不能替代以上任一板级项。
 若板级失败暴露 route correction，可在不改变 target/owner/acceptance 的前提下修复并重新执行完整 matrix；
 若要求改变这些边界，进入 Target Renegotiation，不能只豁免失败项。
 

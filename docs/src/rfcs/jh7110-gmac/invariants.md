@@ -1,9 +1,9 @@
 # JH7110 GMAC 目标与不变量
 
-**状态：** Accepted / R1
-**最后更新：** 2026-08-08
+**状态：** Accepted / R2
+**最后更新：** 2026-08-09
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**适用修订：** R1
+**适用修订：** R2
 
 本文只定义本 RFC 的 target 与 proof obligations。当前 effective 规则以
 [`docs/src/contracts/`](../../contracts.md) 为准；本页不能在最终板级验收和
@@ -11,7 +11,7 @@
 
 ## 规则分类
 
-- **Correctness Invariant：** 唯一 owner、DMA/cache、并发、生命周期、cleanup 与 ABI 诚实性；
+- **Correctness Invariant：** 唯一 owner、DMA visibility/ordering、并发、生命周期、cleanup 与 ABI 诚实性；
   不得通过 target renegotiation 降低。
 - **Target Guarantee / Capability：** 本修订承诺的多节点、one-time init、稳定 identity 与单接口
   IPv4 能力；改变它必须进入 Target Renegotiation。
@@ -81,31 +81,33 @@ device-owned mutable bytes，device 不取得尚未完成 CPU publication 的 de
 队列；error cleanup 释放 device-owned backing。
 **Proof：** typed/explicit slot transitions、assertions、wrap/exhaustion/completion tests 与板级压力流量。
 
-### JH-GMAC-006 — Cache maintenance 与 ordering fence 缺一不可
+### JH-GMAC-006 — Coherent DMA visibility 与 ordering fence 各自成立
 
 **分类：** Correctness Invariant
-**规则：** 对 non-coherent descriptor/frame：CPU 向 device 移交前必须对 device 将读取的范围 clean；
-device 向 CPU 移交后必须在 CPU 读取前 invalidate；双向 descriptor 按实际方向执行相应操作。
-cache operation 前后的 ordering fence 与 MMIO doorbell/completion ordering 必须独立满足，不能用 fence
-冒充 clean/invalidate，也不能用 cache op 代替 ordering。
-**Owner：** DMA/cache capability 拥有 architecture operation；per-node ring protocol 拥有调用位置、
-range 与方向。
-**违反表现：** `sync_for_*()` 仍只有 fence；clean/invalidate 范围未按 cache line 扩展；invalidate
-覆盖 CPU 仍拥有的脏字节；doorbell 先于 descriptor visibility。
-**Proof：** operation-recording fake backend、source/assembly audit、cache-line boundary tests 与最终
-板级重复 RX/TX。任何 hardware correctness 仅由 fence 或未验证 firmware 假设支撑时 hard stop。
+**规则：** JH7110 的硬件 coherency 负责 CPU/device 对 descriptor 和 frame backing 的 visibility；这不
+替代 ordering fence、MMIO doorbell/completion ordering、ownership handoff 或 quiesce。CPU 向 device
+移交前必须完成 descriptor/frame publication 的 ordering，device completion 后 CPU 必须以正确顺序
+读取状态和 payload；不得用未经证明的 coherency 假设掩盖 ordering 或 ownership 错误。
+**Owner：** architecture DMA capability 拥有 coherency 与 ordering primitive；per-node ring protocol
+拥有调用位置、方向、ownership 与设备寄存器顺序。
+**违反表现：** doorbell 先于 descriptor visibility；completion 读取早于必要的 CPU acquire；把硬件
+coherency 当成 ownership/quiesce 证明；或在没有 coherency 证据时把 fence-only 路径写成硬件保证。
+**Proof：** production sync/order call-site audit、source/assembly audit、descriptor/frame layout 与
+DMA address-width tests，以及最终板级重复 RX/TX。硬件 coherency 证据与 Anemone ordering/ownership
+证据必须分别可追溯。
 
-### JH-GMAC-007 — Cache line 不跨越相反 ownership
+### JH-GMAC-007 — Descriptor/frame hardware alignment 与 layout
 
 **分类：** Correctness Invariant
-**规则：** 同一 cache line 内不得同时放置 CPU-owned mutable bytes 与 device-owned mutable bytes。
-descriptor layout、ring alignment、buffer head/tail padding 与 cache range rounding 必须共同证明
-invalidate 不会丢失邻接 CPU 写入。cache line size 来源必须是 architecture truth，不得从猜测常量
-推导；关键 ring size/alignment 进入 Kconfig 或 architecture-owned constant。
+**规则：** descriptor ring base、descriptor stride、frame backing、DMA address 字段和硬件访问范围必须
+满足 DWMAC/JH7110 的对齐、长度和表示约束；40-bit DMA address 不能被截断，ring/descriptor layout
+不得产生设备未定义的跨界访问。coherent target 不要求为了 cache-line isolation 添加额外 padding；
+需要的对齐常量必须来自 architecture/device truth，而不是猜测。
 **Owner：** DMA allocation/layout owner。
-**违反表现：** 两个相邻 slot 在不同 owner 下共享 line；partial-line invalidate 抹去 control state；
-硬编码未经证明的 line size。
-**Proof：** compile-time/runtime layout assertions、boundary fixture 与 architecture audit。
+**违反表现：** ring 或 descriptor 未按硬件要求对齐；地址高位丢失；descriptor/frame 长度或 stride
+超出硬件表示；通过 cache-line 假设掩盖 layout 错误。
+**Proof：** compile-time/runtime layout assertions、40-bit address and boundary fixtures、descriptor
+format audit 与 architecture/device register audit。
 
 ### JH-GMAC-008 — DMA address 必须可表示且 backing 生命周期覆盖 device
 
@@ -147,7 +149,7 @@ abort 后重新分配相同 name。
 ### JH-GMAC-011 — Publication 与 active attach 各只有一个提交点
 
 **分类：** Correctness Invariant
-**规则：** queue、RX refill、IRQ、DMA/cache 和 wake 全部 ready 后才 publish netdev。Stack mapping、
+**规则：** queue、RX refill、IRQ、DMA/order 和 wake 全部 ready 后才 publish netdev。Stack mapping、
 inactive worker、time/wake wiring 全部 ready 后，attach authority 才 commit logical reservation、记录
 active path 并 activate。任何失败不得留下半 published member/mapping。
 **Owner：** `device/net` 拥有 netdev publication；attach authority 拥有 active publication。
@@ -211,25 +213,25 @@ DT matching node
 每个 RX/TX slot 至少表达以下 owner 转换；具体类型名称不是规范：
 
 ```text
-RX: CPU-empty -> cache prepared -> Device-posted -> completion observed
-    -> cache invalidated -> CPU-frame window -> CPU-empty
+RX: CPU-empty -> descriptor/order prepared -> Device-posted -> completion observed
+    -> CPU acquire/order observed -> CPU-frame window -> CPU-empty
 
-TX: CPU-free -> CPU-frame window -> cache cleaned -> Device-submitted
+TX: CPU-free -> CPU-frame window -> descriptor/order prepared -> Device-submitted
     -> completion observed -> CPU-free
 ```
 
-descriptor completion 字段本身也由 device 写回，CPU 在 invalidate 后才能读取。error/shutdown 只有在
-device quiesce 已证明时才能把 device-owned slot 转回可释放状态；否则进入 terminal-retained。
+descriptor completion 字段本身也由 device 写回，CPU 必须在正确的 acquire/order 窗口读取。error/shutdown
+只有在 device quiesce 已证明时才能把 device-owned slot 转回可释放状态；否则进入 terminal-retained。
 
 ## RFC-local Proof Obligations
 
 - IRQ selector 必须以 synthetic DT 同时证明 variable `#interrupt-cells`、多个 specifier 与 name/index
   一致解析；不能只测 JH7110 的单 cell PLIC。
-- DMA tests 必须经过 production sync call sites 和可记录 cache backend；只测试独立 helper 不证明
-  ring 调用顺序。
+- DMA tests 必须经过 production sync/order call sites；只测试独立 helper 不证明 descriptor publication、
+  completion acquire 与 ring 调用顺序。硬件 coherency 作为板级前提单独记录，不能由 host fake 代替。
 - provider tests 必须至少包含两个节点、两个 IRQ context、两个 wake predicate 和两个 ring set，并
   注入第一个/中间节点失败。
-- final acceptance 必须在同一实现上完成，不允许为板测加入会绕过 owner 或关闭 cache maintenance 的
+- final acceptance 必须在同一实现上完成，不允许为板测加入会绕过 owner、ordering 或 coherency proof 的
   test-only production branch。
 - Gate 间临时“匹配但不 publication”状态只服务本 RFC 实施，Gate 3 必须删除返回占位错误或 dormant
   activation switch；否则不得进入板级验收。
@@ -239,7 +241,8 @@ device quiesce 已证明时才能把 device-owned slot 转回可释放状态；�
 
 - 为 GMAC 增加全局 current instance、共享 rings 或第二份 logical identity map。
 - 让 driver 读取/修改 raw Stack、route、socket 或其它 provider state。
-- 用 volatile access、compiler fence 或 CPU memory fence 宣称完成 non-coherent cache maintenance。
+- 在没有硬件 coherency 证据时用 volatile access、compiler fence 或 CPU memory fence 冒充 coherency；
+  或以 coherency 假设替代 ordering、ownership 和 quiesce proof。
 - 用硬编码 IRQ/MMIO/MAC、成功 attach 顺序或 U-Boot 的 `eth0/eth1` 名称代替 DT/resource owner。
 - 将 GMAC0 MAC 缺失、PHY handoff失败或双口不能收发改写为 accepted limitation；这些都在 target 内，
   必须失败并回到 review。
