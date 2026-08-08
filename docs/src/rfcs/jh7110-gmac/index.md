@@ -1,12 +1,12 @@
 # RFC-20260808-jh7110-gmac
 
 **状态：** Accepted
-**修订：** R0
+**修订：** R1
 **负责人：** Anemone maintainers
 **最后更新：** 2026-08-08
 **领域：** driver / net / irq / mm
 **影响契约：** `IRQ-FLOW-001`、`NET-IFACE-DOMAIN-001`、`NET-ATTACH-001`
-**执行记录：** Git commit（R0 acceptance；Gate 0 execution follows）
+**执行记录：** Git commit（R0 acceptance；Gate 0 closure）
 
 ## 摘要
 
@@ -53,8 +53,8 @@ global Stack、per-interface worker 和单接口 static IPv4 control plane。当
   space 限制，不在 driver 中写死 GMAC0/GMAC1 分支或实例上限。
 - 以每个 DT node 为独立 failure 和 ownership domain，建立一套 MMIO、单 RX queue、单 TX
   queue、有界 descriptor/frame backing、IRQ context、provider、worker 和 wake path。
-- 扩展 IRQ 公共接口，使 driver 按 interrupt name 或 index 请求单个 specifier；首版 JH7110
-  只选择 `macirq`，不请求 Wake/LPI IRQ。
+- 增加 crate-local IRQ resource selector，使 driver 按 interrupt name 或 index 取得单个 specifier；
+  现有 public `request_irq()` 保持不变。首版 JH7110 只选择 `macirq`，不请求 Wake/LPI IRQ。
 - 在 publication 前完成真实 non-coherent cache clean/invalidate、memory ordering、DMA address
   representation 与 descriptor/frame ownership proof。
 - 让每个匹配节点在 probe admission 时按稳定 DT discovery order 消费一个 `eth<N>` reservation；
@@ -179,7 +179,7 @@ contract。
 
 ## Acceptance 与 Validation
 
-接受本 R0 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示硬件能力已经
+接受本 R1 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示硬件能力已经
 交付。实现 closure 必须依次满足：
 
 1. Gate 0--3 全部实现，并在每个 Gate 后完成其 source audit、build、targeted tests 和
@@ -191,7 +191,8 @@ contract。
    RFC 关闭。
 
 QEMU 可用于保护既有 VirtIO/network regression，但结果必须标记为 regression-only，不能计入本
-RFC acceptance。当前 Draft 的 implementation、board runtime 与 contract cutover 均为 Not Run。
+RFC acceptance。Gate 0 implementation 与用户确认通过的 VisionFive 2 Gate 0 board diagnostic 已关闭；
+完整 board acceptance 与 contract cutover 仍为 Not Run。
 
 ## 风险与反馈
 
@@ -207,13 +208,20 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
 - [实施路线](./implementation.md)
 - [RFC 前定位材料](./positioning.md)（非规范）
 - commit / PR / optional transaction：None
-- 外部源码证据：None；硬件描述基线使用仓库跟踪的
+- 外部源码证据：固定 `xref:linux-6.6.32:drivers/net/ethernet/stmicro/stmmac/dwmac4.h`、
+  `dwmac4_dma.h`、`hwif.h` 与 `common.h`；硬件描述基线使用仓库跟踪的
   [`visionfive2-board.dts`](../../../../conf/platforms/visionfive2-board.dts)。
 
 ## 修订记录
 
-当前为已接受的 `R0`；接受没有改变三项 current contract，也没有产生硬件通过结论。
+- `R0`：接受初始 target、owner、contract delta 与 acceptance。
+- `R1`：按板级 authority 只接受每节点 `local-mac-address`，删除通用 `mac-address` precedence；IRQ
+  selector 保持 crate-local，现有 public `request_irq()` 不扩张。其它 target、owner、contract delta 与
+  acceptance 不变。
 
 ## Closure
 
-Not Closed。R0 已接受；Gate 0--3、最终板级验收与 current-contract cutover 均未完成。
+Not Closed。R1 target 已接受；Gate 0 implementation 与修复后的 board diagnostic 已关闭。诊断确认两
+个 GMAC 节点都能独立读取 DWMAC capability，但 Gate 0 仍按设计在 DMA/IRQ/attach 前返回
+`NotYetImplemented`；QEMU 不含 JH7110。Gate 1--3、最终 VisionFive 2 验收与 current-contract cutover
+均未完成；本次用户授权在 Gate 0 后停止。

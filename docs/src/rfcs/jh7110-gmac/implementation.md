@@ -1,9 +1,9 @@
 # JH7110 GMAC 实施路线
 
-**状态：** Accepted / R0
+**状态：** Accepted / R1
 **最后更新：** 2026-08-08
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**当前修订：** R0
+**当前修订：** R1
 
 ## 全局 Implementation Boundary
 
@@ -19,7 +19,8 @@
   path与 shutdown order 不变。`IRQ-FLOW-001`、`NET-IFACE-DOMAIN-001`、`NET-ATTACH-001` 只在最终
   `JH7110-GMAC-CUTOVER` 原子 Refine。QEMU 永远不是本 RFC acceptance。
 - **Validation claim：** 每 Gate 后只形成 source/build/targeted-test 检查；所有 Gate 完成后才运行
-  VisionFive 2 完整验收。在此之前所有硬件事实保持 Not Run。
+  VisionFive 2 完整验收。在此之前最终硬件 acceptance 事实保持 Not Run；Gate-specific board
+  diagnostics 只作为诊断证据，不改变该边界。
 - **Stop conditions：** 发现需要改变 target/owner/handoff/failure/cleanup/ABI/contract/acceptance，
   需要 generic PHY/clock framework，cache correctness 只能依赖 fence，或不能保持 per-node isolation，
   必须停止并回 RFC review / Target Renegotiation。
@@ -29,7 +30,7 @@ post-gate check 后必须停止。本文当前只规划路线，不授权实现�
 
 ## Gate 0 — Per-node discovery、resource、IRQ 与 firmware handoff
 
-**状态：** Planned / Not Run
+**状态：** Closed (Gate 0 implementation + board diagnostic)
 **Purpose：** 建立每个 matching node 的独立 probe 基础、准确 DT resource 事实和可复用的单项 IRQ
 selector；不启动 DMA、不发布 netdev。
 **Prerequisites：** RFC target/owner/contract delta 已 review；实现 Gate 0 获得明确授权。
@@ -40,12 +41,12 @@ MMIO、IRQ 或 MAC；不 publication/attach；IRQ flow/device cause owner不变�
 
 - 为 observed JH7110 compatible 注册一个 platform driver，使 DT 中每个 matching `okay` node 独立
   进入 probe；保留 DT path/origin 作为诊断 identity。
-- 解析并验证单个 MMIO resource、`phy-mode = "rgmii-id"`、有效的 DT MAC fact（当前运行时观察到
-  `local-mac-address`；source precedence 需在 Gate 0 review 中闭合）以及 target 所需的 frame/DMA
+- 解析并验证单个 MMIO resource、`phy-mode = "rgmii-id"`、有效的 DT `local-mac-address` 以及
+  target 所需的 frame/DMA
   register capability。任何节点单独失败，不影响后续节点 probe。
-- 扩展 FwNode/IRQ resource API，以 index 或 `interrupt-names` name 截取一个完整 specifier；扩展
-  `request_irq()` 接收 selector，JH7110 只请求 `macirq`。既有 caller 显式选择其单项/index 0，不能
-  依赖隐式整串解析。
+- 增加 crate-local FwNode/IRQ resource selector，以 index 或 `interrupt-names` name 截取一个完整
+  specifier；现有 public `request_irq()` 保持不变，multi-interrupt caller 必须使用 crate-local selected
+  path。JH7110 只选择 `macirq`，既有单中断 caller 显式选择 index 0。
 - 建立 per-node IRQ private context 和 device-cause enable/ack/disable 形状，但 Gate 0 不实际注册 JH7110
   IRQ；当前 `request_irq()` 会 unmask 且没有 `free_irq`，真实调用必须等 Gate 1 rings、handler context
   与 cause clear 全部 ready。不能注册空 handler。
@@ -63,12 +64,33 @@ MMIO、IRQ 或 MAC；不 publication/attach；IRQ flow/device cause owner不变�
 - Build：通过仓库 Justfile/xtask 的相关 RV64 kernel build 和格式检查；不以 bare Cargo 替代项目入口。
 - Architecture Friction Scan：检查 singleton instance、raw PLIC parse、第二份 identity map、无退出条件
   probe 或扩大 FwNode API。Keter/Apollyon 阻止 Gate 0 关闭。
-- **Hardware status：** Not Run。按本 RFC 不在 Gate 0 后上板，不声称 GMAC0 MAC、真实 `macirq` 或
-  firmware handoff 已验证。
+- **Evidence：** `just fmt kernel`、`just build --preset qemu-virt-rv64-release --bind smp=1 --bind memory=1G`
+  与 `just build --preset visionfive2-rv64-release` 通过；VisionFive 2 build 同时编译 `kunit`。QEMU virt
+  没有 JH7110 GMAC，运行日志因其 rootfs 期望的 `mmcblk0p3` 不存在而停止，不能作为本 Gate 的 GMAC
+  targeted test 或硬件证据。FwNode/IRQ owner-local KUnit 已在此前 Gate 0 build/test pass 中覆盖
+  name/index、specifier slicing、多节点独立失败与仅 `local-mac-address` 解析。
+- **Board diagnostic：** 用户运行修复后的 production build；被 `.gitignore` 忽略的用户私有日志
+  `etc/log-board-rv-13.log` 记录了 GMAC0/GMAC1 各自的 capability probe：register snapshot 中
+  `version=0x4152` 的低 8 位匹配 DWMAC 5.20，`hw_feature0..2` 非零，随后各自输出
+  `local-mac-address`、独立 MMIO、`macirq` index 0/specifier length 4、`rgmii-id` 和单 RX/TX queue。
+  该 snapshot 属于诊断运行；当前 production 成功路径只保留 bounded capability fields。probe 随后按
+  Gate 0 设计返回 `NotYetImplemented`，表示 attach 仍延期；该诊断不是完整硬件 acceptance。
+- **Hardware status：** Passed (Gate 0 board diagnostic)。用户确认同一 production build 已在
+  VisionFive 2 上完成本 Gate 的 capability/resource 诊断；该结果只覆盖本 Gate 的 MMIO、DWMAC
+  version/features、DT MAC、`macirq` selector 与 `rgmii-id` 事实，不声称真实 `macirq` dispatch、
+  DMA、收发或 firmware handoff 已验收。
+
+**Residual architecture friction (Euclid)：** GMAC probe 通过 generic `require_clock()`/
+`require_reset()` 满足 DT 声明的 provider 前提；clock/reset register owner 仍在 machine/provider，
+GMAC 不保存其状态或写 raw register。该调用与本 Gate “不写 clock/reset、firmware handoff 前提”的
+文字边界仍有表述张力，但没有形成第二份状态真相或 owner 穿透；后续 Gate 进入前应由 owner 明确
+这是 consumer admission 还是纯 firmware handoff，并在必要时做 route correction。该 Euclid 不阻塞
+当前 Gate 0 关闭，也不构成 current-contract cutover。
 
 **Cutover：** None。
-**Stop / Exit：** source/build/tests 全部通过且无 blocking friction 后，Gate 0 可作为实现阶段关闭；
-hardware 与 current contract 保持 Not Run/未切换，然后停止等待下一 Gate 授权。
+**Stop / Exit：** Gate 0 source/build/targeted semantic checks、architecture friction scan 与本 Gate
+board diagnostic 已完成；最终 hardware acceptance 与 current contract 保持 Not Run/未切换。Gate 1
+仍为 `Planned / Not Run`，本 checkpoint 不把后续前置审计或实现写成 Gate 1 closure。
 
 ## Gate 1 — Non-coherent DMA 与 ring ownership
 

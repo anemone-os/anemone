@@ -5,7 +5,7 @@ use virtio_drivers::transport::SomeTransport;
 use crate::{
     device::{
         bus::{pcie::PcieDevice, platform::PlatformDevice},
-        discovery::fwnode::FwNode,
+        discovery::fwnode::{FwNode, InterruptSelector},
         kobject::{KObject, KObjectBase, KObjectOps},
     },
     prelude::*,
@@ -105,6 +105,11 @@ impl VirtIODevice {
                     .expect("transport device should be a platform device or a PCIe device"),
             };
 
-        request_irq(transport_dev, handler, prv_data)
+        request_irq_selected(
+            transport_dev,
+            InterruptSelector::Index(0),
+            handler,
+            prv_data,
+        )
     }
 }

@@ -1,11 +1,13 @@
 use crate::{
     device::{
         console::Console,
+        discovery::fwnode::InterruptSelector,
         tty::{
             TtyLineSnapshot, TtyParity, TtyPort, TtyPortAttachment, TtyPortId, TtyRxNotifier,
             TtyRxUnit, attach_unpublished_port,
         },
     },
+    exception::intr::request_irq_selected,
     mm::remap::IoRemap,
     prelude::*,
     utils::{any_opaque::AnyOpaque, ring_buffer::RingBuffer},
@@ -409,7 +411,12 @@ impl Uart16550Device {
             notifier,
         });
 
-        if let Err(error) = request_irq(device, &IRQ_HANDLER, Some(irq_context)) {
+        if let Err(error) = request_irq_selected(
+            device,
+            InterruptSelector::Index(0),
+            &IRQ_HANDLER,
+            Some(irq_context),
+        ) {
             attachment.abort();
             return Err(error);
         }

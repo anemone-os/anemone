@@ -1,9 +1,9 @@
 # JH7110 GMAC 目标与不变量
 
-**状态：** Accepted / R0
+**状态：** Accepted / R1
 **最后更新：** 2026-08-08
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**适用修订：** R0
+**适用修订：** R1
 
 本文只定义本 RFC 的 target 与 proof obligations。当前 effective 规则以
 [`docs/src/contracts/`](../../contracts.md) 为准；本页不能在最终板级验收和
@@ -180,17 +180,14 @@ shutdown。link变化不重建 identity，失败不自动 retry，shutdown 后�
 ### JH-GMAC-014 — MAC fact 按 node 解析且不引入隐式 fallback
 
 **分类：** Correctness Invariant
-**规则：** 每个 matching node 必须独立得到有效、非零、unicast 的 MAC fact。R0 接受的 DT
-precedence 是 `mac-address`，随后 `local-mac-address`；每项都必须是完整六字节值，且只有非零
-unicast 值才可被选中。R0 不接受 obsolete `address`、NVM、随机地址或其它 firmware source；两项
-均缺失或无有效值时，该 node fail closed，不借用另一 node，也不让逻辑 owner 推导地址。
+**规则：** 每个 matching node 必须从本节点的 `local-mac-address` 独立得到有效、非零、unicast 的
+六字节 MAC fact。R1 不读取 `mac-address`、obsolete `address`、NVM、随机地址或其它 firmware
+source；属性缺失或无效时，该 node fail closed，不借用另一 node，也不让逻辑 owner 推导地址。
 **Owner：** per-node provider 拥有 publication-time Ethernet fact；firmware/DT 提供 source；logical
 owner 只保存 opaque netdev association。
 **违反表现：** GMAC0 借用 GMAC1 MAC；缺失属性时静默 random/NVM fallback；MAC snapshot 反向驱动
 其它 node 的 queue 或 `eth<N>`；只凭一个节点日志宣称所有节点有效。
-**Proof：** Gate 0 source audit、per-node invalid/duplicate fixture 与最终冷启动日志；该 precedence
-与固定 `xref:linux-6.6.32:net/core/of_net.c#of_get_mac_address` 顺序一致，但上游的 obsolete/NVM
-fallback 不属于本 RFC。
+**Proof：** Gate 0 source audit、per-node invalid fixture 与最终冷启动日志。
 
 ## 状态所有权与生命周期
 

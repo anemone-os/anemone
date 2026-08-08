@@ -10,7 +10,9 @@ pub use flow::IrqFlowType;
 use core::fmt::Debug;
 
 use crate::{
-    device::discovery::fwnode::FwNode,
+    device::discovery::fwnode::{
+        FwNode, InterruptResourceError, InterruptSelector, select_interrupt_resource,
+    },
     prelude::*,
     utils::{any_opaque::AnyOpaque, identity::GeneralIdentity},
 };
@@ -288,12 +290,45 @@ pub fn request_irq(
     handler: &'static IrqHandler,
     prv_data: Option<AnyOpaque>,
 ) -> Result<(), SysError> {
+    request_irq_inner(dev, None, handler, prv_data)
+}
+
+/// Request one explicitly selected firmware interrupt without changing the
+/// legacy public request surface. Callers for multi-interrupt DT nodes must use
+/// this crate-local path so a whole raw `interrupts` property cannot reach an
+/// irqchip translator.
+pub(crate) fn request_irq_selected(
+    dev: &dyn Device,
+    selector: InterruptSelector<'_>,
+    handler: &'static IrqHandler,
+    prv_data: Option<AnyOpaque>,
+) -> Result<(), SysError> {
+    request_irq_inner(dev, Some(selector), handler, prv_data)
+}
+
+fn request_irq_inner(
+    dev: &dyn Device,
+    selector: Option<InterruptSelector<'_>>,
+    handler: &'static IrqHandler,
+    prv_data: Option<AnyOpaque>,
+) -> Result<(), SysError> {
     let fwnode = dev.fwnode().ok_or(SysError::MissingFwNode)?;
     let ic = fwnode.interrupt_parent().ok_or(SysError::NoIrqDomain)?;
     let domain = find_irq_domain_by_fwnode(ic.as_ref()).expect("ic exists but no domain found");
     let ops = domain.ops.read_irqsave();
-    let intr_info_raw = fwnode.interrupt_info().ok_or(SysError::NoInterruptInfo)?;
-    kdebugln!("request intr info");
+    let selected = match selector {
+        Some(selector) => select_interrupt_resource(fwnode.as_ref(), selector)
+            .map_err(map_interrupt_resource_error)?,
+        None => fwnode
+            .interrupt_info()
+            .map(
+                |specifier| crate::device::discovery::fwnode::InterruptResource {
+                    index: 0,
+                    specifier,
+                },
+            )
+            .ok_or(SysError::NoInterruptInfo)?,
+    };
     let InterruptInfo {
         hwirq,
         trigger,
@@ -301,7 +336,7 @@ pub fn request_irq(
     } = ops
         .xlate(InterruptSpecifier {
             fwnode: fwnode.as_ref(),
-            raw: intr_info_raw,
+            raw: selected.specifier(),
         })
         .ok_or(SysError::InvalidInterruptInfo)?;
     drop(ops);
@@ -343,6 +378,21 @@ pub fn request_irq(
     );
 
     Ok(())
+}
+
+fn map_interrupt_resource_error(error: InterruptResourceError) -> SysError {
+    match error {
+        InterruptResourceError::MissingInterrupts => SysError::NoInterruptInfo,
+        InterruptResourceError::MissingParentCells
+        | InterruptResourceError::InvalidCellCount
+        | InterruptResourceError::SpecifierLengthMismatch
+        | InterruptResourceError::IndexOutOfRange
+        | InterruptResourceError::MissingNames
+        | InterruptResourceError::InvalidNames
+        | InterruptResourceError::NameCountMismatch
+        | InterruptResourceError::DuplicateName
+        | InterruptResourceError::NameNotFound => SysError::InvalidInterruptInfo,
+    }
 }
 
 /// Handle the given hardware IRQ from the root interrupt domain.

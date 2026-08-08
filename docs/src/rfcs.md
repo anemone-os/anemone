@@ -46,7 +46,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
-- [RFC-20260808-jh7110-gmac](./rfcs/jh7110-gmac/index.md)：Accepted / R0；为 VisionFive 2 上任意有限数量的
+- [RFC-20260808-jh7110-gmac](./rfcs/jh7110-gmac/index.md)：Accepted / R1；为 VisionFive 2 上任意有限数量的
   matching JH7110 GMAC 节点定义 per-node one-time driver、命名 `macirq`、non-coherent DMA、稳定
   DT-order `eth<N>` reservation 和现有单接口 static IPv4 接入。四个实现 Gate 各自执行检查，但全部
   Gate 完成后才做唯一的 VisionFive 2 完整验收；验收前不执行 current-contract cutover。
