@@ -11,3 +11,7 @@ perf_observe = true
 
 [parameters]
 max_logical_cpus = 16
+# The focused printk pilot records Debug callsites without printing them to the
+# serial console; leaving the parameter at its production default makes its
+# sample-count oracle vacuous.
+record_log_level = 7

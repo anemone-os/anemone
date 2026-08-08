@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    Error, Expr, FnArg, Ident, ItemFn, Pat, Token,
+    Error, Expr, FnArg, Ident, ItemFn, LitBool, LitStr, Pat, Token,
     parse::{Parse, ParseStream},
     parse_quote,
 };
@@ -9,12 +9,14 @@ use syn::{
 struct SyscallAttr {
     sysno: Expr,
     preparse: Option<Expr>,
+    profile: bool,
 }
 
 impl Parse for SyscallAttr {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let sysno = input.parse()?;
         let mut preparse = None;
+        let mut profile = None;
 
         while !input.is_empty() {
             input.parse::<Token![,]>()?;
@@ -35,16 +37,29 @@ impl Parse for SyscallAttr {
                     }
                     preparse = Some(input.parse()?);
                 },
+                "profile" => {
+                    if profile.is_some() {
+                        return Err(Error::new_spanned(
+                            key,
+                            "duplicate `profile` syscall attribute",
+                        ));
+                    }
+                    profile = Some(input.parse::<LitBool>()?.value());
+                },
                 _ => {
                     return Err(Error::new_spanned(
                         key,
-                        "unsupported syscall attribute; expected `preparse = ...`",
+                        "unsupported syscall attribute; expected `preparse = ...` or `profile = false`",
                     ));
                 },
             }
         }
 
-        Ok(Self { sysno, preparse })
+        Ok(Self {
+            sysno,
+            preparse,
+            profile: profile.unwrap_or(true),
+        })
     }
 }
 
@@ -52,6 +67,7 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let SyscallAttr {
         sysno: sysno_expr,
         preparse,
+        profile,
     } = syn::parse_macro_input!(attr as SyscallAttr);
 
     let mut input = syn::parse_macro_input!(item as ItemFn);
@@ -92,6 +108,21 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let static_name = format_ident!("__SYSCALL_{}", name.to_string().to_uppercase());
     let hidden_trapframe_arg = format_ident!("__trapframe__");
     let handler_name_expr = quote! { concat!(module_path!(), "::", stringify!(#name)) };
+    let elapsed_static = format_ident!(
+        "__SYSCALL_PROFILE_{}_ELAPSED",
+        name.to_string().to_uppercase()
+    );
+    let kernel_cpu_static = format_ident!(
+        "__SYSCALL_PROFILE_{}_KERNEL_CPU",
+        name.to_string().to_uppercase()
+    );
+    let rust_name = name.to_string();
+    let metric_component = rust_name.strip_prefix("sys_").unwrap_or(&rust_name);
+    let elapsed_name = LitStr::new(&format!("syscall.{metric_component}.elapsed"), name.span());
+    let kernel_cpu_name = LitStr::new(
+        &format!("syscall.{metric_component}.kernel_cpu"),
+        name.span(),
+    );
 
     let mut arg_bindings = Vec::new();
     let mut arg_names = Vec::new();
@@ -187,14 +218,35 @@ pub fn syscall_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
         },
         None => quote! {},
     };
+    let profile_declaration = profile.then(|| {
+        quote! {
+            crate::declare_perf_metrics! {
+                elapsed #elapsed_static {
+                    name: #elapsed_name,
+                }
+                elapsed #kernel_cpu_static {
+                    name: #kernel_cpu_name,
+                }
+            }
+        }
+    });
+    let profile_start = profile.then(|| {
+        quote! {
+            let __syscall_profile =
+                crate::perf_syscall_profile!(#elapsed_static, #kernel_cpu_static);
+        }
+    });
 
     let expanded = quote! {
         #input
+
+        #profile_declaration
 
         fn #wrapper_name(
             regs: &crate::syscall::handler::SyscallRegs,
             trapframe: &mut crate::arch::TrapFrame,
         ) -> core::result::Result<u64, crate::syserror::SysError> {
+            #profile_start
             #preparse_call
             #(#arg_bindings)*
 

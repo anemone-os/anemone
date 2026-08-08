@@ -20,6 +20,17 @@ pub enum FsState {
     },
 }
 
+/// Coherent namespace origins captured for one path operation.
+///
+/// These `PathRef` clones are stable lifetime capabilities, not a second source
+/// of filesystem-context state. The owning `FsState` guard must be released
+/// before namei because a backend lookup may take a sleepable lock or perform
+/// synchronous I/O.
+struct FsPathSnapshot {
+    root: PathRef,
+    cwd: PathRef,
+}
+
 impl FsState {
     fn initial_umask() -> InodePerm {
         InodePerm::from_bits_retain(INITIAL_UMASK)
@@ -93,6 +104,13 @@ impl FsState {
         }
     }
 
+    fn path_snapshot(&self) -> FsPathSnapshot {
+        FsPathSnapshot {
+            root: self.root().clone(),
+            cwd: self.cwd().clone(),
+        }
+    }
+
     /// Currently this implementation is the same as default `clone`. But it's
     /// still necessary to have a separate function to emphasize the semantic of
     /// this operation.
@@ -160,11 +178,15 @@ impl Task {
         self.fs_state.read().mask_creation_perm(requested)
     }
 
+    fn path_snapshot(&self) -> FsPathSnapshot {
+        self.fs_state.read().path_snapshot()
+    }
+
     /// Lookup a path in this task's filesystem context.
     pub fn lookup_path(&self, path: &Path, flags: ResolveFlags) -> Result<PathRef, SysError> {
-        let fs_state = self.fs_state.read();
+        let origins = self.path_snapshot();
         let checker = FsPermChecker::new(self.cred());
-        resolve_from_with_root_checked(fs_state.root(), fs_state.cwd(), path, flags, &checker)
+        resolve_from_with_root_checked(&origins.root, &origins.cwd, path, flags, &checker)
     }
 
     /// Lookup a path in this task's filesystem context using an explicit
@@ -175,8 +197,8 @@ impl Task {
         flags: ResolveFlags,
         checker: &FsPermChecker,
     ) -> Result<PathRef, SysError> {
-        let fs_state = self.fs_state.read();
-        resolve_from_with_root_checked(fs_state.root(), fs_state.cwd(), path, flags, checker)
+        let origins = self.path_snapshot();
+        resolve_from_with_root_checked(&origins.root, &origins.cwd, path, flags, checker)
     }
 
     /// Lookup a path in this task's filesystem context, relative to an
@@ -187,9 +209,9 @@ impl Task {
         path: &Path,
         flags: ResolveFlags,
     ) -> Result<PathRef, SysError> {
-        let fs_state = self.fs_state.read();
+        let root = self.root();
         let checker = FsPermChecker::new(self.cred());
-        resolve_from_with_root_checked(fs_state.root(), from, path, flags, &checker)
+        resolve_from_with_root_checked(&root, from, path, flags, &checker)
     }
 
     /// Lookup a path relative to an explicit starting directory using an
@@ -201,8 +223,8 @@ impl Task {
         flags: ResolveFlags,
         checker: &FsPermChecker,
     ) -> Result<PathRef, SysError> {
-        let fs_state = self.fs_state.read();
-        resolve_from_with_root_checked(fs_state.root(), from, path, flags, checker)
+        let root = self.root();
+        resolve_from_with_root_checked(&root, from, path, flags, checker)
     }
 
     /// Lookup the parent directory of a path in this task's filesystem context,
@@ -226,8 +248,8 @@ impl Task {
         flags: ResolveFlags,
         checker: &FsPermChecker,
     ) -> Result<(PathRef, String), SysError> {
-        let fs_state = self.fs_state.read();
-        resolve_parent_from_with_root_checked(fs_state.root(), fs_state.cwd(), path, flags, checker)
+        let origins = self.path_snapshot();
+        resolve_parent_from_with_root_checked(&origins.root, &origins.cwd, path, flags, checker)
     }
 
     /// Lookup the parent directory of a path in this task's filesystem context,
@@ -251,8 +273,8 @@ impl Task {
         flags: ResolveFlags,
         checker: &FsPermChecker,
     ) -> Result<(PathRef, String), SysError> {
-        let fs_state = self.fs_state.read();
-        resolve_parent_from_with_root_checked(fs_state.root(), from, path, flags, checker)
+        let root = self.root();
+        resolve_parent_from_with_root_checked(&root, from, path, flags, checker)
     }
 
     /// Get the current working directory of this task, relative to its root.

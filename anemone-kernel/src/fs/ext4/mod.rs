@@ -4,8 +4,6 @@ mod file;
 mod inode;
 mod superblock;
 
-use core::cell::UnsafeCell;
-
 use anemone_abi::errno::*;
 use lwext4_rust::{
     BlockDevice as LwExt4BlockDevice, Ext4Error as LwExt4Error, Ext4Filesystem as LwExt4Fs,
@@ -58,58 +56,47 @@ mod glue {
 
     pub type Ext4Fs = LwExt4Fs<Ext4Disk>;
 
-    /// `Ext4Fs` holds a pointer in itself which comes from C code, so it does
-    /// not implement `Send` or `Sync`. We, however, ensure that all
-    /// accesses to it are properly synchronized, (through `fs_lock` and
-    /// `tx_lock`) so we can safely wrap it in `Ext4FsCell` and implement
-    /// `Send` and `Sync` for the wrapper.
-    pub struct Ext4FsCell(UnsafeCell<Ext4Fs>);
+    /// The lwext4 filesystem owns a raw C pointer and therefore does not derive
+    /// `Send`. It has no thread-affine state: construction is unpublished and,
+    /// after publication, this payload is reachable only through `Ext4Sb::fs`'s
+    /// mutex guard. The wrapper deliberately does not implement `Sync` or
+    /// expose the inner value outside that guard.
+    pub struct GuardedExt4Fs(Ext4Fs);
 
-    impl Ext4FsCell {
+    impl GuardedExt4Fs {
         pub fn new(fs: Ext4Fs) -> Self {
-            Self(UnsafeCell::new(fs))
+            Self(fs)
         }
 
-        pub unsafe fn get_mut(&self) -> &mut Ext4Fs {
-            unsafe { &mut *self.0.get() }
+        pub fn as_mut(&mut self) -> &mut Ext4Fs {
+            &mut self.0
         }
     }
 
-    unsafe impl Send for Ext4FsCell {}
-    unsafe impl Sync for Ext4FsCell {}
+    // SAFETY: moving exclusive ownership of the lwext4 filesystem between
+    // tasks is sound; all published access remains serialized by `Ext4Sb::fs`.
+    unsafe impl Send for GuardedExt4Fs {}
 }
 use glue::*;
 
 #[derive(Opaque)]
 pub(super) struct Ext4Sb {
-    fs_lock: SpinLock<()>,
-    fs: Ext4FsCell,
-    tx_lock: RwLock<()>,
+    fs: Mutex<GuardedExt4Fs>,
 }
 
 impl Ext4Sb {
     fn new(fs: Ext4Fs) -> Self {
         Self {
-            fs_lock: SpinLock::new(()),
-            fs: Ext4FsCell::new(fs),
-            tx_lock: RwLock::new(()),
+            fs: Mutex::new(GuardedExt4Fs::new(fs)),
         }
     }
 
-    pub(super) fn read_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.read();
-        f()
-    }
-
-    pub(super) fn write_tx<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.tx_lock.write();
-        f()
-    }
-
-    fn with_fs<R, E>(&self, f: impl FnOnce(&mut Ext4Fs) -> Result<R, E>) -> Result<R, E> {
-        let _guard = self.fs_lock.lock();
-        let fs = unsafe { self.fs.get_mut() };
-        f(fs)
+    pub(super) fn with_fs<R, E>(
+        &self,
+        f: impl FnOnce(&mut Ext4Fs) -> Result<R, E>,
+    ) -> Result<R, E> {
+        let mut fs = self.fs.lock();
+        f(fs.as_mut())
     }
 
     fn flush(&self) -> Result<(), SysError> {

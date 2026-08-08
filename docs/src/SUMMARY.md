@@ -80,6 +80,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-08 - Signal return fast path and syscall profiling](./devlog/changes/2026-08-08-signal-return-fast-path-and-syscall-profiling.md)
 		- [2026-08-08 - TTY TAB3/XTABS output processing](./devlog/changes/2026-08-08-tty-tab3-output.md)
 		- [2026-08-08 - RTC provider 与 boot walltime seed](./devlog/changes/2026-08-08-rtc-provider-boot-walltime-seed.md)
 		- [2026-08-07 - Ext4 synchronous I/O batching](./devlog/changes/2026-08-07-ext4-synchronous-io-batching.md)

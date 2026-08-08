@@ -47,7 +47,7 @@ use crate::{
         jobctl::group::{ThreadGroupMembers, UserJobControl},
         kthread::KThreadTaskLocal,
         sig::{
-            PendingSignals, SigNo, TaskSigMaskState, altstack::SigAltStack,
+            PendingSignals, SigNo, SignalReturnWork, TaskSigMaskState, altstack::SigAltStack,
             disposition::SignalDisposition,
         },
         task_itimer::ITimers,
@@ -153,6 +153,13 @@ pub struct Task {
     sig_mask: NoIrqSpinLock<TaskSigMaskState>,
     /// Current pending signals. Local to each task.
     sig_pending: NoIrqSpinLock<PendingSignals>,
+    /// One-sided conservative cache of Signal-owned user-return work.
+    ///
+    /// Pending queues, masks, reserved delivery and job-control phase remain
+    /// authoritative. A stale `true` costs only a slow scan; producers publish
+    /// their owning fact before setting this cache so `false` can only skip a
+    /// scan when no later Signal work has been published.
+    sig_return_work: SignalReturnWork,
     /// Alternative signal stack. Local to each task.
     sig_altstack: NoIrqSpinLock<Option<SigAltStack>>,
 
@@ -484,6 +491,7 @@ impl Task {
             sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
             sig_mask: NoIrqSpinLock::new(TaskSigMaskState::new()),
             sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
+            sig_return_work: SignalReturnWork::new(),
             sig_altstack: NoIrqSpinLock::new(None),
 
             robust_list: SpinLock::new(None),
@@ -537,6 +545,7 @@ impl Task {
                 sig_disposition: Arc::new(NoIrqRwLock::new(SignalDisposition::new())),
                 sig_mask: NoIrqSpinLock::new(TaskSigMaskState::new()),
                 sig_pending: NoIrqSpinLock::new(PendingSignals::new()),
+                sig_return_work: SignalReturnWork::new(),
                 sig_altstack: NoIrqSpinLock::new(None),
 
                 robust_list: SpinLock::new(None),
