@@ -21,6 +21,7 @@ pub use cpu::{
     CpuArchTrait, CpuId, CpuTable, PhysCpuId, PhysCpuTable, cpu_count, finish_cpu_registration,
     register_cpu,
 };
+pub mod clock_controller;
 pub mod kobject;
 pub mod reset;
 pub mod resource;

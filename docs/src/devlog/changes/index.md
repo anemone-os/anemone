@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-08 - Clock controller framework](./2026-08-08-clock-controller-framework.md)
 - [2026-08-08 - Reset controller framework](./2026-08-08-reset-controller-framework.md)
 - [2026-08-05 - brk shrink backing decommit](./2026-08-05-brk-shrink-decommit.md)
 - [2026-08-04 - Unix seqpacket](./2026-08-04-unix-seqpacket.md)

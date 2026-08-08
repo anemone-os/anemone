@@ -5,16 +5,23 @@ use crate::{
         discovery::open_firmware::OpenFirmwareNode,
         reset::{ResetController, ResetSpecifier},
     },
+    driver::clkc::jh7110::Jh7110Crg,
     mm::remap::{IoRemap, ioremap},
     prelude::*,
 };
 
-const SYS: usize = 0;
-const STG: usize = 1;
-const AON: usize = 2;
-const ISP: usize = 3;
-const VOUT: usize = 4;
+#[repr(usize)]
+#[derive(Debug, Clone, Copy)]
+enum Window {
+    Sys = 0,
+    Stg = 1,
+    Aon = 2,
+    Isp = 3,
+    Vout = 4,
+}
+
 const WINDOW_COUNT: usize = 5;
+const SHARED_WINDOW_COUNT: usize = Window::Isp as usize;
 
 #[derive(Debug, Clone, Copy)]
 struct ResetLayout {
@@ -22,7 +29,7 @@ struct ResetLayout {
     count: u32,
     assert_offset: usize,
     status_offset: usize,
-    window: usize,
+    window: Window,
 }
 
 const RESET_LAYOUTS: [ResetLayout; WINDOW_COUNT] = [
@@ -31,40 +38,41 @@ const RESET_LAYOUTS: [ResetLayout; WINDOW_COUNT] = [
         count: 126,
         assert_offset: 0x2f8,
         status_offset: 0x308,
-        window: SYS,
+        window: Window::Sys,
     },
     ResetLayout {
         global_base: 128,
         count: 23,
         assert_offset: 0x74,
         status_offset: 0x78,
-        window: STG,
+        window: Window::Stg,
     },
     ResetLayout {
         global_base: 160,
         count: 8,
         assert_offset: 0x38,
         status_offset: 0x3c,
-        window: AON,
+        window: Window::Aon,
     },
     ResetLayout {
         global_base: 192,
         count: 12,
         assert_offset: 0x38,
         status_offset: 0x3c,
-        window: ISP,
+        window: Window::Isp,
     },
     ResetLayout {
         global_base: 224,
         count: 12,
         assert_offset: 0x48,
         status_offset: 0x4c,
-        window: VOUT,
+        window: Window::Vout,
     },
 ];
 
 #[derive(Debug)]
 pub struct Jh7110ResetController {
+    crg: Arc<Jh7110Crg>,
     windows: Vec<IoRemap>,
     lock: SpinLock<()>,
 }
@@ -72,7 +80,7 @@ pub struct Jh7110ResetController {
 impl Jh7110ResetController {
     /// Build a provider from the DT resources.  `reg-names`, rather than
     /// physical addresses or DT ordering, selects each CRG window.
-    pub fn from_of_node(node: &OpenFirmwareNode) -> Result<Self, SysError> {
+    pub fn from_of_node(node: &OpenFirmwareNode, crg: Arc<Jh7110Crg>) -> Result<Self, SysError> {
         let names = parse_names(
             node.node()
                 .property("reg-names")
@@ -82,11 +90,11 @@ impl Jh7110ResetController {
         let mut name_to_index = [None; WINDOW_COUNT];
         for (index, name) in names.iter().enumerate() {
             let slot = match *name {
-                "syscrg" => SYS,
-                "stgcrg" => STG,
-                "aoncrg" => AON,
-                "ispcrg" => ISP,
-                "voutcrg" => VOUT,
+                "syscrg" => Window::Sys as usize,
+                "stgcrg" => Window::Stg as usize,
+                "aoncrg" => Window::Aon as usize,
+                "ispcrg" => Window::Isp as usize,
+                "voutcrg" => Window::Vout as usize,
                 _ => return Err(SysError::DriverIncompatible),
             };
             if name_to_index[slot].replace(index).is_some() {
@@ -114,7 +122,6 @@ impl Jh7110ResetController {
         for slot in 0..WINDOW_COUNT {
             let resource_index = name_to_index[slot].ok_or(SysError::DriverIncompatible)?;
             let (base, len) = resources[resource_index];
-            let remap = unsafe { ioremap(base, len) }?;
             let layout = RESET_LAYOUTS[slot];
             let required = layout
                 .status_offset
@@ -123,19 +130,32 @@ impl Jh7110ResetController {
             if len < required {
                 return Err(SysError::MissingResource);
             }
-            windows.push(remap);
+            if slot < SHARED_WINDOW_COUNT {
+                if !crg.matches_window(slot, base, len) {
+                    return Err(SysError::DriverIncompatible);
+                }
+            } else {
+                windows.push(unsafe { ioremap(base, len) }?);
+            }
         }
         Ok(Self {
+            crg,
             windows,
             lock: SpinLock::new(()),
         })
     }
 
     fn layout_for(id: u32) -> Option<(ResetLayout, u32)> {
-        RESET_LAYOUTS.iter().copied().find_map(|layout| {
-            let end = layout.global_base.checked_add(layout.count)?;
-            (id >= layout.global_base && id < end).then_some((layout, id - layout.global_base))
-        })
+        let window = match id {
+            0..=125 => Window::Sys,
+            128..=150 => Window::Stg,
+            160..=167 => Window::Aon,
+            192..=203 => Window::Isp,
+            224..=235 => Window::Vout,
+            _ => return None,
+        };
+        let layout = RESET_LAYOUTS[window as usize];
+        Some((layout, id - layout.global_base))
     }
 
     fn ptr(window: &IoRemap, offset: usize) -> *mut u32 {
@@ -147,25 +167,64 @@ impl Jh7110ResetController {
         unsafe { window.as_ptr().as_ptr().cast::<u8>().add(offset).cast() }
     }
 
-    fn read(window: &IoRemap, offset: usize) -> u32 {
+    fn read_extra(window: &IoRemap, offset: usize) -> u32 {
         unsafe { core::ptr::read_volatile(Self::ptr(window, offset)) }
     }
 
-    fn write(window: &IoRemap, offset: usize, value: u32) {
+    fn write_extra(window: &IoRemap, offset: usize, value: u32) {
         unsafe { core::ptr::write_volatile(Self::ptr(window, offset), value) }
     }
 
-    fn wait_status(window: &IoRemap, offset: usize, mask: u32, asserted: bool) -> bool {
+    fn read(&self, window: Window, offset: usize) -> u32 {
+        if (window as usize) < SHARED_WINDOW_COUNT {
+            self.crg.read(window as usize, offset)
+        } else {
+            Self::read_extra(&self.windows[window as usize - SHARED_WINDOW_COUNT], offset)
+        }
+    }
+
+    fn modify(&self, window: Window, offset: usize, f: impl FnOnce(u32) -> u32) {
+        if (window as usize) < SHARED_WINDOW_COUNT {
+            self.crg.modify(window as usize, offset, f);
+        } else {
+            let value = self.read(window, offset);
+            self.write(window, offset, f(value));
+        }
+    }
+
+    fn write(&self, window: Window, offset: usize, value: u32) {
+        if (window as usize) < SHARED_WINDOW_COUNT {
+            self.crg.write(window as usize, offset, value);
+        } else {
+            Self::write_extra(
+                &self.windows[window as usize - SHARED_WINDOW_COUNT],
+                offset,
+                value,
+            );
+        }
+    }
+
+    fn wait_status(&self, window: Window, offset: usize, mask: u32, asserted: bool) -> bool {
         // The JH7110 CRG status bit is clear while reset is asserted and set
         // after deassertion.  Bound the poll so a gated clock cannot hang boot.
         for _ in 0..1000 {
-            let value = Self::read(window, offset);
+            let value = self.read(window, offset);
             if (value & mask != 0) == !asserted {
                 return true;
             }
             core::hint::spin_loop();
         }
         false
+    }
+
+    fn base(&self, window: Window) -> u64 {
+        if (window as usize) < SHARED_WINDOW_COUNT {
+            self.crg.phys_base(window as usize).get()
+        } else {
+            self.windows[window as usize - SHARED_WINDOW_COUNT]
+                .phys_base()
+                .get()
+        }
     }
 }
 
@@ -188,27 +247,24 @@ impl ResetController for Jh7110ResetController {
         let bit = 1u32 << (local_id % 32);
         let assert_offset = layout.assert_offset + word * 4;
         let status_offset = layout.status_offset + word * 4;
-        let window = &self.windows[layout.window];
         let _guard = self.lock.lock_irqsave();
 
-        let value = Self::read(window, assert_offset);
-        Self::write(window, assert_offset, value | bit);
-        if !Self::wait_status(window, status_offset, bit, true) {
+        self.modify(layout.window, assert_offset, |value| value | bit);
+        if !self.wait_status(layout.window, status_offset, bit, true) {
             kerrln!(
                 "jh7110-reset: reset id {:#x} assert timeout base={:#x}",
                 id,
-                window.phys_base().get()
+                self.base(layout.window)
             );
             return Err(SysError::Timeout);
         }
 
-        let value = Self::read(window, assert_offset);
-        Self::write(window, assert_offset, value & !bit);
-        if !Self::wait_status(window, status_offset, bit, false) {
+        self.modify(layout.window, assert_offset, |value| value & !bit);
+        if !self.wait_status(layout.window, status_offset, bit, false) {
             kerrln!(
                 "jh7110-reset: reset id {:#x} deassert timeout base={:#x}",
                 id,
-                window.phys_base().get()
+                self.base(layout.window)
             );
             return Err(SysError::Timeout);
         }

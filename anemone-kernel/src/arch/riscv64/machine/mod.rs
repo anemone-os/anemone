@@ -16,6 +16,9 @@ pub trait MachineDesc: Sync {
     unsafe fn early_init_intc(&self);
     /// Currently nothing to do cz we already have SBI timer.
     unsafe fn early_init_timer(&self);
+    /// Discover machine-provided clock controllers before platform probing.
+    /// Machines without a clock provider intentionally keep this as a no-op.
+    unsafe fn early_init_clock_controllers(&self) {}
     /// Discover machine-provided reset controllers before platform probing.
     /// Machines without a reset provider intentionally keep this as a no-op.
     unsafe fn early_init_reset_controllers(&self) {}
@@ -26,6 +29,7 @@ impl dyn MachineDesc {
         unsafe {
             self.early_init_intc();
             self.early_init_timer();
+            self.early_init_clock_controllers();
             self.early_init_reset_controllers();
         }
     }
@@ -44,6 +48,7 @@ static MACHINES: &[&dyn MachineDesc] = &[&qemu_virt::QemuVirt, &starfive::StarFi
 /// Currently it does:
 /// - Root interrupt controllers initialization.
 /// - Timer initialization.
+/// - Machine clock/reset-controller discovery.
 pub unsafe fn machine_init() {
     of_with_root(|root| {
         for compatible in root
