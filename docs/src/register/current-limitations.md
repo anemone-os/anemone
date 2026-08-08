@@ -367,13 +367,13 @@ limitation；不得重新激活已终止RFC。新增异步、多port、hotplug�
 **Severity:** Medium
 **Area:** devfs / device model
 
-**Summary:** 当前 devfs 第一版主要只支持启动期静态 publish 到扁平 `/dev` 根目录；为了 `user-test` 的 `ramfs` 挂载，另有一个静态 `/dev/shm` 目录挂载点，但这不代表通用目录层级能力。不支持运行期 unpublish/hot-unplug、别名或 symlink。
+**Summary:** 当前 devfs 支持 kernel subsystem 通过 opaque direct-child directory capability 建立 append-only 多级静态 namespace，所有 mounts 共享同一 production namespace、superblock 与 inode identity。仍不支持运行期 unpublish/hotplug、provider teardown、alias/symlink 或 inode/dentry reclaim。
 
-**Exit Condition:** 只有在真实设备热插拔或多级命名空间需求出现后，再为 devfs 增加显式的发布失效协议、目录发布能力与相应的 dentry/inode 回收路径。
+**Exit Condition:** 当真实设备热插拔、provider replacement/teardown 或别名需求出现时，为 devfs 增加显式 publication invalidation、open-handle 与 enumeration 语义、alias/symlink ownership，以及相应 dentry/inode reclaim 协议并完成运行期验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-24
-**Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
+**Last Verified:** 2026-08-08
+**Related:** [Devfs hierarchical publication](../devlog/changes/2026-08-08-devfs-hierarchical-publication.md), [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
 
 ## ANE-20260524-DEVFS-BLOCK-DEFAULT-SEMANTICS
 
