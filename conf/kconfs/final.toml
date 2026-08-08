@@ -10,4 +10,4 @@ kernel_symbols = true
 perf_observe = false
 
 [parameters]
-max_logical_cpus = 1
+max_logical_cpus = 8
