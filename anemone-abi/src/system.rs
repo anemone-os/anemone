@@ -46,6 +46,8 @@ pub mod native {
 
         pub const PERF_METRIC_COUNTER: u16 = 1;
         pub const PERF_METRIC_HISTOGRAM: u16 = 2;
+        /// Completed interval samples represented as `[count, sum_ticks]`.
+        pub const PERF_METRIC_ELAPSED: u16 = 3;
 
         pub const PERF_UNIT_EVENTS: u16 = 1;
         pub const PERF_UNIT_MONOTONIC_TICKS: u16 = 2;
@@ -55,6 +57,10 @@ pub mod native {
         /// wrapping sum of every recorded sample in the metric's unit.
         pub const PERF_HISTOGRAM_SUM_INDEX: usize = PERF_HISTOGRAM_BUCKET_COUNT;
         pub const PERF_HISTOGRAM_VALUE_COUNT: usize = PERF_HISTOGRAM_BUCKET_COUNT + 1;
+
+        pub const PERF_ELAPSED_SAMPLE_COUNT_INDEX: usize = 0;
+        pub const PERF_ELAPSED_SUM_INDEX: usize = 1;
+        pub const PERF_ELAPSED_VALUE_COUNT: usize = 2;
 
         pub const PERF_CATALOG_HEADER_SIZE: usize = 32;
         pub const PERF_CATALOG_CLOCK_KIND_OFFSET: usize = 0;
@@ -86,6 +92,7 @@ pub mod native {
         const _: () = assert!(PERF_METRIC_RESERVED_OFFSET + size_of::<u32>() == 24);
         const _: () = assert!(PERF_SNAPSHOT_RESERVED_OFFSET + 3 == 24);
         const _: () = assert!(PERF_HISTOGRAM_SUM_INDEX + 1 == PERF_HISTOGRAM_VALUE_COUNT);
+        const _: () = assert!(PERF_ELAPSED_SUM_INDEX + 1 == PERF_ELAPSED_VALUE_COUNT);
     }
 
     pub mod power {

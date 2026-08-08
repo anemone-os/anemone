@@ -100,24 +100,36 @@ fn expect_errno<T>(result: Result<T, Errno>, expected: Errno, what: &str) -> Res
 
 fn wait_child_exit(child: u32) -> Result<i8, Errno> {
     let mut status = WStatusRaw::EMPTY;
-    if wait4(
+    let waited = match wait4(
         WaitFor::ChildWithTgid(child),
         Some(&mut status),
         WaitOptions::empty(),
-    )? != Some(child)
-    {
+    ) {
+        Ok(waited) => waited,
+        Err(errno) => {
+            println!("perf-test: wait4 child {} failed with {}", child, errno);
+            return Err(errno);
+        },
+    };
+    if waited != Some(child) {
+        println!("perf-test: wait4 child {} returned {:?}", child, waited);
         return Err(ECHILD);
     }
     match status.read() {
         WStatus::Exited(code) => Ok(code),
-        _ => Err(EIO),
+        other => {
+            println!("perf-test: child {} status {:?}", child, other);
+            Err(EIO)
+        },
     }
 }
 
 fn wait_child(child: u32) -> Result<(), Errno> {
-    if wait_child_exit(child)? == 0 {
+    let code = wait_child_exit(child)?;
+    if code == 0 {
         Ok(())
     } else {
+        println!("perf-test: child {} exited with code {}", child, code);
         Err(EIO)
     }
 }
@@ -151,6 +163,39 @@ fn validate_catalog(catalog: &PerfCatalog) -> Result<(), Errno> {
         || latency.value_count != PERF_HISTOGRAM_VALUE_COUNT
     {
         return Err(EINVAL);
+    }
+
+    let syscall_elapsed = metric(catalog, "syscall.getpid.elapsed")?;
+    let syscall_cpu = metric(catalog, "syscall.getpid.kernel_cpu")?;
+    for descriptor in [syscall_elapsed, syscall_cpu] {
+        if descriptor.kind != PerfMetricKind::Elapsed
+            || descriptor.unit != PerfMetricUnit::MonotonicTicks
+            || descriptor.value_count != PERF_ELAPSED_VALUE_COUNT
+        {
+            return Err(EINVAL);
+        }
+    }
+    for excluded in [
+        "syscall.perf_observe.elapsed",
+        "syscall.perf_observe.kernel_cpu",
+        "syscall.exit.elapsed",
+        "syscall.exit.kernel_cpu",
+        "syscall.exit_group.elapsed",
+        "syscall.exit_group.kernel_cpu",
+        "syscall.power_shutdown.elapsed",
+        "syscall.power_shutdown.kernel_cpu",
+        "syscall.execve.elapsed",
+        "syscall.execve.kernel_cpu",
+        "syscall.execveat.elapsed",
+        "syscall.execveat.kernel_cpu",
+    ] {
+        if catalog
+            .metrics
+            .iter()
+            .any(|descriptor| descriptor.name == excluded)
+        {
+            return Err(EINVAL);
+        }
     }
     Ok(())
 }
@@ -235,10 +280,17 @@ fn run_perfctl(argv: &'static [&'static str]) -> Result<(), Errno> {
 }
 
 fn validate_perfctl_smoke() -> Result<(), Errno> {
+    println!("perf-test: perfctl list smoke");
     run_perfctl(&["perfctl", "list"])?;
+    println!("perf-test: perfctl status smoke");
     run_perfctl(&["perfctl", "status"])?;
+    println!("perf-test: perfctl snapshot smoke");
     run_perfctl(&["perfctl", "snapshot"])?;
+    println!("perf-test: perfctl run smoke");
     run_perfctl(&["perfctl", "run", "/bin/perfctl", "status"])?;
+    println!("perf-test: perfctl syscalls run smoke");
+    run_perfctl(&["perfctl", "syscalls", "run", "/bin/perfctl", "status"])?;
+    println!("perf-test: perfctl smoke complete");
     if get_enabled()? {
         let _ = set_enabled(false)?;
         return Err(EIO);
@@ -390,7 +442,12 @@ fn run() -> Result<(), Errno> {
 #[anemone_rs::main]
 fn main() -> Result<(), Errno> {
     println!("perf-test: CASE native-abi-catalog-snapshot-pilot start");
-    run()?;
+    if let Err(errno) = run() {
+        println!("perf-test: CASE native-abi-catalog-snapshot-pilot failed: {errno}");
+        let termios = tcgetattr(STDOUT_FILENO as _)?;
+        tcsetattr(STDOUT_FILENO as _, SetTermiosWhen::Drain, &termios)?;
+        return Err(errno);
+    }
     println!("perf-test: CASE native-abi-catalog-snapshot-pilot ok");
 
     if process_id() == 1 {

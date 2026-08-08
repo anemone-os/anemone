@@ -20,6 +20,52 @@ use super::{
     disposition::SignalDisposition, pending::FetchedSignal,
 };
 
+declare_perf_metrics! {
+    counter SIGNAL_USER_ENTRY_FAST_SKIP {
+        name: "signal.user_entry.fast_skip",
+        unit: Events,
+    }
+    counter SIGNAL_USER_ENTRY_SLOW_SCAN {
+        name: "signal.user_entry.slow_scan",
+        unit: Events,
+    }
+}
+
+/// One-sided conservative cache of Signal-owned return work.
+///
+/// This is not pending, mask, reservation or job-control truth. Producers set
+/// it only after publishing the owning fact. The current task takes it before
+/// a slow scan, so a later concurrent publication either participates in that
+/// scan or leaves `true` for a later mandatory user-entry arbitration. A stale
+/// `true` is deliberately harmless.
+#[derive(Debug)]
+pub(crate) struct SignalReturnWork(AtomicBool);
+
+impl SignalReturnWork {
+    pub(crate) const fn new() -> Self {
+        // A fresh task gets one slow scan before the cache can prove emptiness.
+        Self(AtomicBool::new(true))
+    }
+
+    fn rearm(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn take(&self) -> bool {
+        self.0.swap(false, Ordering::AcqRel)
+    }
+}
+
+impl Task {
+    pub(super) fn rearm_signal_return_work(&self) {
+        self.sig_return_work.rearm();
+    }
+
+    pub(super) fn take_signal_return_work(&self) -> bool {
+        self.sig_return_work.take()
+    }
+}
+
 /// Typed wait outcome candidate for delayed temporary-mask classification.
 ///
 /// This is intentionally signal-owned. Delayed-restore callsites should pass
@@ -415,6 +461,10 @@ pub(crate) fn arbitrate_user_entry(
             },
             UserEntryOutcome::Recheck => {
                 restart_crossed_jobctl_park |= restart_syscall.is_some();
+                // A stopped-phase scan may leave phase-ineligible pending in
+                // its owner. Resume is only a rescan opportunity; do not cache
+                // job-control phase in the return-work summary.
+                get_current_task().rearm_signal_return_work();
             },
             UserEntryOutcome::Exit(code) => {
                 // User-entry exclusion is decided atomically under the owner
@@ -446,7 +496,14 @@ pub fn handle_signals(
     trapframe: &mut TrapFrame,
     restart_syscall: &mut Option<(RestartSyscall, SyscallCtx)>,
 ) {
+    if !get_current_task().take_signal_return_work() {
+        perf_counter_inc!(SIGNAL_USER_ENTRY_FAST_SKIP);
+        return;
+    }
+    perf_counter_inc!(SIGNAL_USER_ENTRY_SLOW_SCAN);
+
     let mut committed_handler_frame = false;
+    let mut scan_ended_early = false;
     loop {
         // Keep the current-task Arc out of `perform_signal_action()`: a default
         // action may terminate without returning, and an if-let scrutinee
@@ -471,14 +528,19 @@ pub fn handle_signals(
                         // when live action selection produced no handler frame.
                         // Signal remains the sole owner of temporary-mask
                         // cleanup below.
+                        scan_ended_early = true;
                         break;
                     }
                 },
                 SignalActionResult::HandlerFrame => {
                     committed_handler_frame = true;
+                    scan_ended_early = true;
                     break;
                 },
-                SignalActionResult::EndScanNoFrame => break,
+                SignalActionResult::EndScanNoFrame => {
+                    scan_ended_early = true;
+                    break;
+                },
             }
         } else {
             break;
@@ -490,6 +552,11 @@ pub fn handle_signals(
     // owner responsible for closing any deferred temporary-mask restore.
     if !committed_handler_frame {
         get_current_task().restore_temporary_sig_mask_if_pending();
+    }
+    if scan_ended_early {
+        // A handler frame, reservation retirement or default stop may leave
+        // later pending in its owner for the next mandatory entry.
+        get_current_task().rearm_signal_return_work();
     }
 }
 

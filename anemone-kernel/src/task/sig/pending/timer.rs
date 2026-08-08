@@ -727,17 +727,16 @@ impl PosixTimerSignalRegistration {
             return target.enqueue_timer_job_control_signal(self, no, generation, episode, overrun);
         }
 
-        // Snapshot Arc targets before entering the signal leaf. The snapshot is
-        // revalidated against ThreadGroup membership below and used for wakeups
-        // only after all owner locks are released.
-        let mut members = target.get_members();
+        // Snapshot a disposition owner before entering the signal leaf, then
+        // revalidate that snapshot against ThreadGroup membership below.
+        let mut disposition_members = target.get_members();
         let (outcome, no) = {
             let inner = target.inner.read();
             if !matches!(inner.status.life_cycle(), ThreadGroupLifeCycle::Alive) {
                 return PosixTimerSignalEnqueue::TargetExited;
             }
-            members.retain(|member| inner.members.contains(&member.tid()));
-            let Some(disposition_owner) = members.first() else {
+            disposition_members.retain(|member| inner.members.contains(&member.tid()));
+            let Some(disposition_owner) = disposition_members.first() else {
                 return PosixTimerSignalEnqueue::TargetExited;
             };
 
@@ -772,6 +771,12 @@ impl PosixTimerSignalRegistration {
         };
 
         if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+            // Snapshot after publication. A member present now is rearmed;
+            // one joining later starts armed and cannot miss shared pending.
+            let members = target.get_members();
+            for member in &members {
+                member.rearm_signal_return_work();
+            }
             for member in members {
                 if no == SigNo::SIGKILL || !member.is_current_sig_mask_blocking(no) {
                     notify(&member, no == SigNo::SIGKILL);
@@ -830,10 +835,13 @@ impl PosixTimerSignalRegistration {
             (outcome, no)
         };
 
-        if matches!(outcome, PosixTimerSignalEnqueue::Queued)
-            && (no == SigNo::SIGKILL || !target.is_current_sig_mask_blocking(no))
-        {
-            notify(target, no == SigNo::SIGKILL);
+        if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+            // Masking suppresses notification, not mandatory user-entry work.
+            // Publish the timer slot first, then rearm before any wakeup.
+            target.rearm_signal_return_work();
+            if no == SigNo::SIGKILL || !target.is_current_sig_mask_blocking(no) {
+                notify(target, no == SigNo::SIGKILL);
+            }
         }
         outcome
     }
@@ -1067,6 +1075,10 @@ mod kunits {
     #[kunit]
     fn private_delivery_callback_reenters_after_pending_unlock() {
         let target = get_current_task();
+        let old_mask = target.snapshot_current_sig_mask();
+        let mut blocked = old_mask;
+        blocked.set(SigNo::SIGUSR2);
+        target.set_permanent_sig_mask(blocked);
         let callback_target = Arc::downgrade(&target);
         let callbacks = Arc::new(AtomicUsize::new(0));
         let callback_count = callbacks.clone();
@@ -1091,16 +1103,51 @@ mod kunits {
         )
         .unwrap();
 
+        let _ = target.take_signal_return_work();
+        assert!(!target.take_signal_return_work());
         assert_eq!(
             registration.enqueue(3, 4, 0),
             PosixTimerSignalEnqueue::Queued
         );
+        assert!(target.take_signal_return_work());
+        target.rearm_signal_return_work();
         let signal = target
             .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGUSR2]))
             .expect("private timer signal was not published to the exact task");
         assert_eq!(signal.no, SigNo::SIGUSR2);
         assert_eq!(callbacks.load(Ordering::SeqCst), 1);
         drop(registration);
+        target.set_permanent_sig_mask(old_mask);
+    }
+
+    #[kunit]
+    fn shared_timer_publication_rearms_return_work() {
+        let target = get_current_task();
+        let tg = target.get_thread_group();
+        let old_mask = target.snapshot_current_sig_mask();
+        let mut blocked = old_mask;
+        blocked.set(SigNo::SIGUSR1);
+        target.set_permanent_sig_mask(blocked);
+
+        let (_log, callback) = callback_log();
+        let registration =
+            PosixTimerSignalRegistration::try_new(&tg, SigNo::SIGUSR1, 92, 0, callback).unwrap();
+        let _ = target.take_signal_return_work();
+        assert!(!target.take_signal_return_work());
+
+        assert_eq!(
+            registration.enqueue(1, 1, 0),
+            PosixTimerSignalEnqueue::Queued
+        );
+        assert!(target.take_signal_return_work());
+        target.rearm_signal_return_work();
+        let signal = target
+            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGUSR1]))
+            .expect("shared timer signal was not published to the thread group");
+        assert_eq!(signal.no, SigNo::SIGUSR1);
+
+        drop(registration);
+        target.set_permanent_sig_mask(old_mask);
     }
 
     #[kunit]
@@ -1180,10 +1227,14 @@ mod kunits {
         let registration =
             PosixTimerSignalRegistration::try_new_private(&target, SigNo::SIGTSTP, 97, 0, callback)
                 .unwrap();
+        let _ = target.take_signal_return_work();
+        assert!(!target.take_signal_return_work());
         assert_eq!(
             registration.enqueue(1, 1, 0),
             PosixTimerSignalEnqueue::Queued
         );
+        assert!(target.take_signal_return_work());
+        target.rearm_signal_return_work();
         assert_eq!(
             registration.enqueue(1, 2, 3),
             PosixTimerSignalEnqueue::AlreadyPending
