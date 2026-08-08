@@ -46,6 +46,10 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
+- [RFC-20260808-jh7110-gmac](./rfcs/jh7110-gmac/index.md)：Accepted / R0；为 VisionFive 2 上任意有限数量的
+  matching JH7110 GMAC 节点定义 per-node one-time driver、命名 `macirq`、non-coherent DMA、稳定
+  DT-order `eth<N>` reservation 和现有单接口 static IPv4 接入。四个实现 Gate 各自执行检查，但全部
+  Gate 完成后才做唯一的 VisionFive 2 完整验收；验收前不执行 current-contract cutover。
 - [RFC-20260803-clock-timekeeping-posix-timers](./rfcs/clock-timekeeping-posix-timers/index.md)：R0 已实现并关闭；建立从硬件计数和
   Hertz 计算的 monotonic/raw、由内存偏移得到的 realtime、按真实更新周期计算的 coarse clock，以及可物理删除
   排队请求的 soft timer；目标是在 RV64/LA64 native 64 位 ABI 上实现五个 clock syscall 和五个 POSIX timer
