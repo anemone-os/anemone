@@ -1,5 +1,54 @@
 # 开放问题
 
+## ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION
+
+**Type:** Issue
+**Status:** Open / Deferred
+**Severity:** Medium
+**Area:** fs / VFS namei / dentry lifecycle / dynamic pseudo filesystem
+
+**Symptom / Trigger:** generic namei会先返回parent下已经cache的positive dentry；未命中时则先调用
+filesystem backend `lookup`取得inode，再由VFS materialize child dentry。当dynamic backend在两步之间撤销
+name-to-object binding时，失效路径只能清除当时已发布的dentry，无法阻止失效前已返回的旧inode
+在失效后迟到materialize。该旧dentry随后又可被cached-positive快路命中，而不重新进入backend
+完成liveness / incarnation核验。
+
+当前首个真实consumer是procfs `/proc/<tgid>`：`proc_root_lookup()`释放binding transaction并返回旧
+`InodeRef`后，`invalidate_thread_group_binding()`可以撤销binding、unindex inode并遍历procfs mounts清理
+root child，但generic namei仍可以在清理后重新发布该旧inode。这是当前VFS cached-positive
+publication / revocation协议的缺口，不是procfs binding owner独有的实现错误；procfs只是首个动态
+管理该类映射并暴露窗口的pseudo filesystem。
+
+**Impact:** 旧binding由`Arc` / `InodeRef`保活，当前没有use-after-free证据；多数procfs inode
+operation也会通过`binding.alive()` fail closed。但stale positive dentry仍可以使纯pathname / permission
+路径观察到过期可见性，并在可复用ID或未来其它dynamic pseudo fs中引入新旧incarnation的cache
+identity冲突。自然触发需要并发lookup与teardown交错，当前只有source-level时序证据，尚无
+forced interleaving或runtime复现证据。
+
+**Owner:** VFS core namei / positive-dentry publication and revocation protocol。动态pseudo filesystem只拥有
+各自backend mapping与lifecycle truth，不分别拥有generic dentry cache正确性或各自建立平行失效协议。
+
+**Decision / Current Boundary:** 本问题暂缓至后续独立VFS core工作。当前procfs以及后续新增的dynamic
+pseudo filesystem暂不需为此增加owner-local特判、临时freshness状态或单独acceptance gate；也不得
+为了绕开generic窗口而让namei依赖procfs私有binding表示。该暂缓不表示stale pathname语义
+已成为current contract，也不得将现有source review外推为完整namespace linearizability证据。
+
+**Last Verified:** 2026-08-09
+
+**Exit Condition:** 由独立VFS core RFC/迭代定义dynamic backend lookup结果与cached positive dentry之间的
+freshness / revocation handoff、唯一线性化点、迟到materialization、同名新旧incarnation、多个mount view
+与cleanup责任；实现必须保持backend mapping truth与VFS dentry cache owner分离，不依赖各pseudo filesystem
+特判。以procfs作为首个真实consumer完成deterministic interleaving、cached-hit、迟到publish、新旧identity
+与multi-mount验证，并对当时所有dynamic pseudo filesystem consumer做闭包审计后移除本条目。
+
+**Related:** [Positive dentry residency小迭代](../devlog/changes/2026-08-09-positive-dentry-residency.md),
+[Kthread Core procfs可见性不变量](../rfcs/kthread-core/invariants.md#procfs-可见性),
+[`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`](#ane-20260801-vfs-create-publication-atomicity)
+（后者记录common-create backend commit后的failure/rollback窗口，不由本动态撤销问题替代或自动关闭）。
+
+**Workaround:** 无需在当前dynamic pseudo filesystem中建立局部workaround；在VFS core协议闭合前，
+将该窗口保持为已知、低自然复现率但未证明不可达的并发正确性缺口。
+
 ## ANE-20260807-TIMERFD-CANCEL-ON-SET-ENROLLMENT
 
 **Type:** Issue
