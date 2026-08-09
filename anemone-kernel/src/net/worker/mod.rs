@@ -27,6 +27,10 @@ static_assert!(
     "NET_LOCAL_LINK_MTU_BYTES must fit IPv4 and UDP fixed headers"
 );
 static_assert!(
+    NET_LOCAL_LINK_MTU_BYTES <= u32::MAX as usize,
+    "NET_LOCAL_LINK_MTU_BYTES must fit Linux IFLA_MTU"
+);
+static_assert!(
     NET_PUMP_EGRESS_BUDGET_STEPS > 0,
     "NET_PUMP_EGRESS_BUDGET_STEPS must be non-zero"
 );

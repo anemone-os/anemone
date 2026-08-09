@@ -26,6 +26,7 @@ const DEFAULT_RECEIVE_BUDGET: usize = 1024 * 1024;
 const MINIMUM_BUDGET: usize = 4 * 1024;
 
 const _: () = assert!(NETLINK_PORT_CAPACITY > 0);
+const _: () = assert!(NETLINK_PORT_CAPACITY <= u32::MAX as usize);
 const _: () = assert!(NETLINK_REQUEST_MAX_BYTES >= MINIMUM_BUDGET);
 const _: () = assert!(NETLINK_REPLY_DATAGRAM_MAX_BYTES >= codec::MINIMUM_ERROR_REPLY_BYTES);
 const _: () = assert!(NETLINK_PENDING_REPLY_MAX_BYTES >= NETLINK_REPLY_DATAGRAM_MAX_BYTES);
@@ -54,11 +55,11 @@ impl PortRegistry {
         if self.live.len() == NETLINK_PORT_CAPACITY {
             return Err(SocketBindError::ResourceExhausted);
         }
-        let port = self.next;
-        self.next = self
-            .next
-            .checked_add(1)
-            .expect("netlink boot-local port identity space exhausted");
+        let mut port = self.next;
+        while self.live.contains(&port) {
+            port = next_port(port);
+        }
+        self.next = next_port(port);
         self.live.push(port);
         Ok(port)
     }
@@ -70,6 +71,13 @@ impl PortRegistry {
             .position(|candidate| *candidate == port)
             .expect("netlink final release lost its protocol-scoped port");
         self.live.swap_remove(index);
+    }
+}
+
+const fn next_port(port: u32) -> u32 {
+    match port.checked_add(1) {
+        Some(port) => port,
+        None => 1,
     }
 }
 
@@ -710,6 +718,23 @@ mod kunits {
             self.bytes.extend_from_slice(&payload[..copied]);
             Ok(copied)
         }
+    }
+
+    #[kunit]
+    fn port_registry_wraps_skips_live_and_recycles_released_identity() {
+        let mut registry = PortRegistry::new();
+        registry.next = u32::MAX;
+
+        assert_eq!(registry.allocate(), Ok(u32::MAX));
+        assert_eq!(registry.allocate(), Ok(1));
+
+        registry.next = u32::MAX;
+        assert_eq!(registry.allocate(), Ok(2));
+
+        registry.release(u32::MAX);
+        registry.next = u32::MAX;
+        assert_eq!(registry.allocate(), Ok(u32::MAX));
+        assert_eq!(registry.live.len(), 3);
     }
 
     #[kunit]

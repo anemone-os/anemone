@@ -21,7 +21,6 @@ pub(super) const MINIMUM_ERROR_REPLY_BYTES: usize = 36;
 pub(super) struct Request {
     header: NlMsgHdr,
     payload: Vec<u8>,
-    framing_valid: bool,
 }
 
 pub(super) struct ParsedDatagram {
@@ -42,25 +41,16 @@ pub(super) fn parse_datagram(bytes: &[u8]) -> ParsedDatagram {
         let header = parse_header(tail);
         let length = header.nlmsg_len as usize;
         if length < size_of::<NlMsgHdr>() || length > tail.len() {
-            requests.push(Request {
-                header,
-                payload: Vec::new(),
-                framing_valid: false,
-            });
             break;
         }
         let aligned = align4(length);
-        let framing_valid = if aligned <= tail.len() {
-            tail[length..aligned].iter().all(|byte| *byte == 0)
-        } else {
-            length == tail.len()
-        };
         requests.push(Request {
             header,
             payload: tail[size_of::<NlMsgHdr>()..length].to_vec(),
-            framing_valid,
         });
-        if !framing_valid || aligned > tail.len() {
+        // Linux consumes a complete final message even when the datagram does
+        // not carry its alignment padding. Other padding bytes are skipped.
+        if aligned >= tail.len() {
             break;
         }
         offset += aligned;
@@ -73,9 +63,6 @@ pub(super) fn reply_for_request(
     request: &Request,
     local_port: u32,
 ) -> Vec<Arc<[u8]>> {
-    if !request.framing_valid || request.header.nlmsg_len < size_of::<NlMsgHdr>() as u32 {
-        return one(error_reply(&request.header, EINVAL as i32, local_port));
-    }
     if request.header.nlmsg_flags & NLM_F_REQUEST == 0 {
         return one(error_reply(&request.header, EINVAL as i32, local_port));
     }
@@ -385,7 +372,8 @@ fn link_message(
     let mut name = link.name.as_bytes().to_vec();
     name.push(0);
     attribute(&mut payload, IFLA_IFNAME, &name);
-    attribute(&mut payload, IFLA_MTU, &(link.mtu as u32).to_ne_bytes());
+    let mtu = u32::try_from(link.mtu).expect("validated diagnostic MTU must fit Linux IFLA_MTU");
+    attribute(&mut payload, IFLA_MTU, &mtu.to_ne_bytes());
     if let Some(address) = link.ethernet_address {
         attribute(&mut payload, IFLA_ADDRESS, &address);
     }
@@ -571,7 +559,31 @@ mod kunits {
     use crate::kunit;
 
     #[kunit]
-    fn framing_keeps_valid_prefix_and_stops_at_unbounded_tail() {
+    fn framing_ignores_alignment_padding_and_continues() {
+        let header = NlMsgHdr {
+            nlmsg_len: 17,
+            nlmsg_type: u16::MAX,
+            nlmsg_flags: NLM_F_REQUEST,
+            nlmsg_seq: 7,
+            nlmsg_pid: 0,
+        };
+        let mut datagram = header.as_bytes().to_vec();
+        datagram.extend_from_slice(&[0xaa, 1, 2, 3]);
+        datagram.extend_from_slice(&message(RTM_GETADDR, NLM_F_REQUEST, 8, 0, vec![0; 8]));
+
+        let parsed = parse_datagram(&datagram);
+        assert_eq!(parsed.requests.len(), 2);
+        assert_eq!(parsed.requests[0].header.nlmsg_seq, 7);
+        assert_eq!(parsed.requests[1].header.nlmsg_seq, 8);
+        let reply = reply_for_request(NetlinkProtocol::Route, &parsed.requests[0], 41);
+        assert_eq!(
+            i32::from_ne_bytes(reply[0][16..20].try_into().unwrap()),
+            -(EOPNOTSUPP as i32)
+        );
+    }
+
+    #[kunit]
+    fn framing_keeps_valid_prefix_and_silently_stops_invalid_tail() {
         let first = message(RTM_GETLINK, NLM_F_REQUEST, 7, 0, vec![0; 16]);
         let second = message(RTM_GETADDR, NLM_F_REQUEST, 8, 0, vec![0; 8]);
         let mut datagram = first.to_vec();
@@ -592,28 +604,34 @@ mod kunits {
         .as_bytes()
         .to_vec();
         malformed.extend_from_slice(&[0; 4]);
-        datagram.extend_from_slice(&malformed);
-        let parsed = parse_datagram(&datagram);
-        assert_eq!(parsed.requests.len(), 3);
-        assert_eq!(parsed.requests[2].payload.len(), 0);
+        let mut with_malformed_tail = first.to_vec();
+        with_malformed_tail.extend_from_slice(&second);
+        with_malformed_tail.extend_from_slice(&malformed);
+        let parsed = parse_datagram(&with_malformed_tail);
+        assert_eq!(parsed.requests.len(), 2);
 
         let header = NlMsgHdr {
-            nlmsg_len: 17,
+            nlmsg_len: 8,
             nlmsg_type: RTM_GETLINK,
             nlmsg_flags: NLM_F_REQUEST,
             nlmsg_seq: 10,
             nlmsg_pid: 0,
         };
-        let mut bad_padding = header.as_bytes().to_vec();
-        bad_padding.extend_from_slice(&[0, 1, 0, 0]);
-        let parsed = parse_datagram(&bad_padding);
+        let parsed = parse_datagram(header.as_bytes());
+        assert!(parsed.requests.is_empty());
+
+        let header = NlMsgHdr {
+            nlmsg_len: 17,
+            nlmsg_type: RTM_GETLINK,
+            nlmsg_flags: NLM_F_REQUEST,
+            nlmsg_seq: 11,
+            nlmsg_pid: 0,
+        };
+        let mut unpadded = header.as_bytes().to_vec();
+        unpadded.push(0);
+        let parsed = parse_datagram(&unpadded);
         assert_eq!(parsed.requests.len(), 1);
-        assert!(!parsed.requests[0].framing_valid);
-        let reply = reply_for_request(NetlinkProtocol::Route, &parsed.requests[0], 41);
-        assert_eq!(
-            i32::from_ne_bytes(reply[0][16..20].try_into().unwrap()),
-            -(EINVAL as i32)
-        );
+        assert_eq!(parsed.requests[0].header.nlmsg_seq, 11);
     }
 
     #[kunit]
@@ -685,7 +703,6 @@ mod kunits {
         let address = Request {
             header: header(RTM_GETADDR, NLM_F_REQUEST, size_of::<IfAddrMsg>()),
             payload: vec![0; size_of::<IfAddrMsg>()],
-            framing_valid: true,
         };
         error(get_address(&address, 7), EINVAL);
 
@@ -704,7 +721,6 @@ mod kunits {
                 align4(size_of::<RtGenMsg>()),
             ),
             payload: vec![AF_PACKET as u8, 0xaa, 0x55, 0xff],
-            framing_valid: true,
         };
         assert!(
             get_link(&legacy_link_dump, 7).iter().all(|reply| {
@@ -746,7 +762,6 @@ mod kunits {
                 route_payload.len(),
             ),
             payload: route_payload,
-            framing_valid: true,
         };
         let replies = get_route(&route, 7);
         assert_eq!(replies.len(), 1);
@@ -766,7 +781,6 @@ mod kunits {
                 diag_payload.len(),
             ),
             payload: diag_payload,
-            framing_valid: true,
         };
         error(sock_diag_reply(&diag, 7), EINVAL);
     }
