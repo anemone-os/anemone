@@ -1,24 +1,25 @@
 # JH7110 GMAC 实施路线
 
-**状态：** Accepted / R3
+**状态：** Accepted / R4
 **最后更新：** 2026-08-09
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**当前修订：** R3
+**当前修订：** R4
 
 ## 全局 Implementation Boundary
 
 - **Target / non-goals：** 任意有限数量 JH7110 matching nodes 的 one-time boot driver、命名 IRQ、
-  coherent DMA、per-node provider、稳定 `eth<N>` 与既有单接口 static IPv4；不实现板级
-  clock/reset/syscon/PHY owner、runtime lifecycle、offload、多 queue 或多 IP。现有 boot-time
-  external publisher（包括 VirtIO）必须迁移到同一 reservation handoff，避免按 provider 类型分叉。
+  coherent DMA、per-node provider、success-order `eth<N>` 与既有单接口 static IPv4；不实现板级
+  clock/reset/syscon/PHY owner、runtime lifecycle、offload、多 queue 或多 IP。初始化或 publication
+  失败的 candidate 不进入 logical identity owner；现有 VirtIO publication/attach path保持不变。
 - **Owner / handoff / failure / cleanup：** generic clock/reset providers 拥有 consumer admission transaction，
   已 enable clock 与已完成 reset 不回滚，reset failure 只隔离当前 node；per-node provider拥有 hardware
-  progression；IRQ、logical、netdev、Stack、control plane 与 System Power 保持各自 owner。opaque reservation 与 frame/pump
-  capability单向移交；failure 先撤销未发布 mapping/reservation，IRQ/DMA 未 quiesce时 retain 到
-  reset/power-off。
+  progression；IRQ、logical、netdev、Stack、control plane 与 System Power 保持各自 owner。ready provider 与
+  frame/pump capability单向移交；attach-time reservation沿用既有 owner，failure先撤销未发布
+  mapping/reservation，IRQ/DMA未quiesce时retain到reset/power-off。
 - **Protected ABI / contract / acceptance：** SystemTarget schema、socket ABI、frame contract、VirtIO
-  path与 shutdown order 不变。`IRQ-FLOW-001`、`NET-IFACE-DOMAIN-001`、`NET-ATTACH-001` 只在最终
-  `JH7110-GMAC-CUTOVER` 原子 Refine。QEMU 永远不是本 RFC acceptance。
+  path与 shutdown order 不变。只有 `IRQ-FLOW-001` 在最终 `JH7110-GMAC-CUTOVER` Refine；
+  `NET-IFACE-DOMAIN-001` 与 `NET-ATTACH-001` 作为 unchanged dependencies 沿用。QEMU 永远不是本 RFC
+  acceptance。
 - **Validation claim：** 每 Gate 后只形成 source/build/targeted-test 检查；所有 Gate 完成后才运行
   VisionFive 2 完整验收。在此之前最终硬件 acceptance 事实保持 Not Run；Gate-specific board
   diagnostics 只作为诊断证据，不改变该边界。
@@ -56,7 +57,8 @@ selector；不启动 DMA、不发布 netdev。
 - 输出 bounded diagnostics：node path、MAC、MMIO range、selected interrupt name/index/specifier length、
   `phy-mode` 与 controller/firmware-handoff assumption。不得打印任意 DT property bytes 或敏感无关数据。
 - Gate 0 的临时 probe 以明确 unsupported/not-ready 结果停在 IRQ registration、DMA 与 publication 前；
-  该临时退出必须在 Gate 3 删除，不能成为长期 fallback。
+  Gate 2 必须以 per-device staged provider 的 probe success 替换该错误，Gate 3 再完成 publication，不能
+  让占位失败成为长期 fallback。
 
 **Post-gate check：**
 
@@ -148,46 +150,48 @@ quiesce proof 不释放 backing；不借机实现 generic DWMAC/offload/multi-qu
 registered-IRQ retention 的静态/定向证据已通过，本阶段关闭。硬件 DMA/ring traffic 仍属于最终板级
 验收，保持 Not Run；Gate 2 未获授权，不在本阶段自动进入。
 
-## Gate 2 — Per-node provider 与稳定 identity
+## Gate 2 — Per-node provider 与 staged bind
 
 **状态：** Planned / Not Run
-**Purpose：** 把 Gate 1 的 hardware core 组成独立 `FrameProvider`，建立 early logical reservation、
+**Purpose：** 把 Gate 1 的 hardware core 组成独立 `FrameProvider`，建立 per-device durable owner、
 多 provider isolation 和现有 global Stack 所需的窄能力；仍不进入 production publication。
 **Prerequisites：** Gate 1 post-gate check 关闭；ring/DMA/IRQ ownership 已在 source/tests 中闭合。
-**Protected Boundary：** logical owner唯一分配 `eth<N>`；driver只携带 token；netdev/logical/protocol
-identity不合并；每个 provider独立，不增加 GMAC registry 或 per-provider Stack。
+**Protected Boundary：** Gate 2 不分配 `eth<N>`、不修改 logical/netdev/Stack owner；每个 provider独立，
+不增加 GMAC registry 或 per-provider Stack。IRQ handler只发布 pending/recheck fact，不推进 frame。
 
 **Deliverable：**
 
-- 在 matching-node probe admission 先向 initial-domain logical owner取得 external reservation，随后才
-  解析会失败的 MAC/resource/DMA；DT discovery order 成为 ordinal order。
-- reservation 是线性、不可复制、必须 commit/abort 的 token。失败 abort 不发布 membership但不复用
-  ordinal；provider/device/net 不保存第二份 path-to-name truth。
-- 现有 VirtIO boot-time provider 迁移到同一 probe-admission reservation path；其 QEMU 可见行为仍是
-  单个 `eth0`，不再保留“JH7110 提前 reservation、VirtIO attach 时 reservation”的双语义。
+- 将“初始化成功”固定为 clock/reset、MMIO/capability、rings、IRQ context、device-cause baseline 和
+  provider construction 全部完成。此前任何失败不 publish，也不接触 logical identity owner。
 - 每个 node 实现独立 `FrameProvider` / `NetdevFrameProvider`，拥有自己的 rings、IRQ context、pending
   predicate、wake edge、frame capacity 和 current link/resource truth。
-- 扩展 pending publication/attach handoff，使 opaque logical reservation 可与对应 provider 一起到达
-  attach authority；`device/net` 不读取或分配 logical identity。
+- 初始化成功后把未发布 provider 放入本 platform device 的 driver state并返回 probe success，使 platform
+  bus 正式 bind driver。device causes保持关闭、DMA engine保持 stopped；driver state是唯一 staged owner，
+  shutdown可通过窄 hardware capability继续抑制本节点。staged slot必须是owner-local的一次性
+  `Option`/consuming transition；不得为此扩张通用`Device::drv_state`的take/replace API。
+- IRQ private data只持共享 narrow IRQ core；provider可持同一 core，但core不得反向拥有 staged provider，
+  避免引用环。不得用probe-error local、全局`PendingGmac`或GMAC registry保活provider。
 - host composition 以一个 global Stack、两个以上 fake providers 验证 pump/mapping isolation；一个
   provider blocked/failed 不阻止另一个 finite progress。
-- Gate 2 只准备 ready capability；production `publish()`/active attach wiring 保持关闭。任何临时开关或
-  placeholder必须有 Gate 3 删除条件。
+- Gate 2 只准备 ready capability；production `publish()`/active attach wiring 保持关闭。per-device
+  staged strong owner只服务本 Gate，Gate 3必须将provider单向移交publication/worker owner，不能留下
+  dormant双路径。
 
 **Post-gate check：**
 
-- Source audit：从 probe admission 追踪 reservation 到 abort/未来 commit，确认没有 driver map、token
-  Drop遗漏、成功顺序编号或 provider交叉引用。
-- Targeted tests：至少三个 matching candidates，覆盖全成功、首个失败、中间失败、attach prepare失败、
-  ordinal no-reuse、wrong-provider completion、独立 wake/ring 和 one-Stack multi-provider progression。
+- Source audit：从每个probe追踪hardware core、provider、driver state与IRQ private引用，确认没有provider
+  singleton、引用环、driver-owned logical map或probe success前的半初始化state。
+- Targeted tests：至少三个matching candidates，覆盖全成功、首个初始化失败、中间初始化失败、
+  wrong-provider completion、独立wake/ring、staged shutdown和one-Stack multi-provider progression。
 - Build/regression：相关 RV64 build、格式检查；既有 logical/netdev/frame tests 全通过。
 - Architecture Friction Scan：检查第二份 lifecycle/identity truth、raw Stack泄漏、provider singleton、
-  无 consumer abstraction 与临时 publication bypass。
+  无 consumer abstraction、probe-error retention与临时 publication bypass。
 - **Hardware status：** Not Run。Gate 2 后不上板；双 GMAC identity和独立 progression仍未验收。
 
 **Cutover：** None。
-**Stop / Exit：** 任何实现若要求 driver 分配/查询 `eth<N>`、为每个 GMAC 建 Stack、让失败节点释放
-ordinal 或把 provider 放入全局 GMAC registry，必须停止。检查通过后关闭本阶段并等待 Gate 3 授权。
+**Stop / Exit：** 任何实现若要求 driver 分配/查询 `eth<N>`、为每个 GMAC 建 Stack、以probe error下的
+无owner对象保活provider，或把provider放入全局GMAC registry，必须停止。检查通过后关闭本阶段并等待
+Gate 3授权。
 
 ## Gate 3 — Production publication、attach 与 single IPv4 deployment
 
@@ -195,28 +199,34 @@ ordinal 或把 provider 放入全局 GMAC registry，必须停止。检查通过
 **Purpose：** 删除实施期占位/禁用路径，完成 ready netdev publication、现有 attach/worker/global Stack、
 单接口 static IPv4 和 terminal shutdown 的 production wiring。
 **Prerequisites：** Gate 2 post-gate check 关闭；所有 temporary probe/activation path 的退出条件已定位。
-**Protected Boundary：** publication/active commit原子性、single IPv4/default route、无 fallback、
-provider retention 和 `filesystem -> network -> device -> PowerOff` 不变；不扩大 runtime lifecycle。
+**Protected Boundary：** publication/active commit原子性、single IPv4/default route、exact-name
+control-plane selection、provider retention 和 `filesystem -> network -> device -> PowerOff` 不变；
+不扩大 runtime lifecycle。success-order identity前移是R4接受语义，不得误写为control-plane扫描fallback。
 
 **Deliverable：**
 
-- Provider 在 queue/RX refill/IRQ/DMA-order/wake 全部 ready 后一次性发布 netdev，并携带对应 opaque logical
-  reservation；删除 Gate 0--2 的 placeholder error、dormant switch 和 test-only activation branch。
-- Attach authority 消费既有 reservation，建立 global Stack mapping、inactive worker、wake/time wiring，
-  最后 commit logical member与active path并activate。rollback 保持 mapping 先于 reservation。
+- Provider 在 queue/RX refill/IRQ/DMA-order/wake 全部 ready 后一次性发布 netdev；删除 Gate 0/1 的
+  placeholder error和Gate 2 staged strong-owner路径，不保留dormant switch或test-only activation branch。
+- Attach authority沿用既有路径，在成功publication后按pending顺序创建logical reservation，建立global
+  Stack mapping、inactive worker、wake/time wiring，最后commit logical member与active path并activate。
+  rollback保持mapping先于reservation；attach已取得的ordinal继续no-reuse。
+- 初始化或publication失败的candidate不分配`eth<N>`；成功publisher按publication/attach顺序连续编号。
+  同步JH7110 probe保持成功节点之间的DT相对顺序，较早失败节点不留空洞。
 - 所有成功 GMAC 都形成独立 active L2 path；每个 worker只持自己的 provider与pump port。
-- 现有 `StaticIpv4Deployment` 只匹配 configured `eth<N>`，只为它配置 address/prefix/default gateway；
-  其它 active GMAC 保持无 IPv4。missing target/duplicate mismatch fail closed，不自动 fallback。
+- 现有 `StaticIpv4Deployment` 只匹配configured exact `eth<N>`，只为它配置address/prefix/default gateway；
+  其它active GMAC保持无IPv4。missing target/duplicate mismatch fail closed，不扫描其它logical member；较早
+  candidate失败后后续provider取得该name属于success-order identity，不是control-plane fallback。
 - RX/TX 正常 progression、bounded recheck、queue backpressure 和 device-cause处理接入 production worker。
 - Network shutdown先关闭active pump；device shutdown随后对每个 provider禁止新 IRQ/DMA。无quiesce proof
   的 context/rings/backing retain到power-off。
 
 **Post-gate check：**
 
-- End-to-end source audit：从 DT node、reservation、resource/IRQ/DMA、publication、mapping、worker、IPv4
+- End-to-end source audit：从 DT node、resource/IRQ/DMA、publication、attach-time reservation、mapping、worker、IPv4
   selection 到 shutdown 逐 owner 核对；确认所有临时 probe/开关已删除。
-- Targeted tests：publication/attach rollback、multi-provider active progression、configured `eth0`/`eth1`、
-  missing target fail-closed、unselected no-L3、shutdown admission/retention 与既有 VirtIO regressions。
+- Targeted tests：初始化/publication失败不分配logical identity、success-order连续编号、attach rollback
+  no-reuse、multi-provider active progression、configured `eth0`/`eth1`、missing target fail-closed、
+  unselected no-L3、shutdown admission/retention 与既有 VirtIO regressions。
 - Build：完整相关 RV64 kernel/target build与格式检查。可运行 QEMU existing-network regression，但必须
   标记 `regression-only`，不能作为 JH7110 acceptance。
 - Architecture Friction Scan：检查 second truth、owner穿透、driver special-case control plane、隐含
@@ -243,8 +253,9 @@ coherency bypass或test-only activation；测试所需两路外部 peer 与可�
 - **Fresh discovery：** 冷启动日志逐一列出所有 target nodes 的稳定 DT path、有效 DT MAC source（记录
   实际属性，当前预期为 `local-mac-address`）、独立 MMIO、name/index选择的 `macirq`、`rgmii-id` 与
   per-node provider identity。GMAC0/GMAC1 必须分别有证据；一个节点的事实不能代替另一个。
-- **Stable identity：** 至少两次冷启动保持相同 DT-order -> `eth<N>` mapping。以受控失败 fixture/DT
-  让较早节点失败时，后续节点保持原 ordinal且 configured missing interface fail closed，不发生 fallback。
+- **Success-order identity：** 至少两次相同成功集合的冷启动保持相同 successful publication order ->
+  `eth<N>` mapping。以受控初始化失败fixture/DT让较早节点失败时，确认失败节点不占号、后续成功节点
+  连续前移；恢复该节点后，完整成功集合恢复DT相对顺序对应的`eth0`/`eth1`。
 - **Port A：** 使用现有单 `[network.ipv4]` 形状选择第一个 GMAC，与其外部 peer 完成双向流量；payload/
   counters证明 RX/TX 都跨越 ring wrap，并覆盖 queue pressure 后恢复。
 - **Port B：** 只改变 `network.ipv4.interface` 选择第二个 GMAC，重复独立双向、ring wrap与queue pressure
@@ -252,10 +263,12 @@ coherency bypass或test-only activation；测试所需两路外部 peer 与可�
 - **Coherent DMA：** 两个端口分别在多种 frame length 与重复 RX/TX 下没有 stale payload、重复/丢失
   completion、descriptor corruption、地址截断或 use-after-submit。证据必须同时覆盖硬件 coherency
   与 production path 的 fence/MMIO ordering；coherency 证明不替代 ownership/quiesce 证据。
-- **Isolation：** 每个 IRQ、completion、wake、worker、mapping 与计数只推进对应 node；一个端口无流量、
-  queue pressure或受控失败不阻塞/重编号另一个。
-- **Control plane：** 每次启动只有 configured `eth<N>` 获得 address/prefix 和唯一 default route；其它
-  active接口保持无L3；不存在自动 fallback或重复地址。
+- **Isolation：** 每个 IRQ、completion、wake、worker、mapping 与计数只推进对应 node；一个已发布端口
+  无流量或queue pressure不阻塞另一个。candidate初始化失败只通过R4 success-order规则影响尚未分配的
+  后续name，不修改其它已提交节点的runtime state。
+- **Control plane：** 每次启动只有configured exact `eth<N>`获得address/prefix和唯一default route；其它
+  active接口保持无L3；owner不扫描其它logical member，不产生重复地址。受控candidate失败造成的name
+  前移按R4 success-order语义验收。
 - **Shutdown：** orderly shutdown 日志保持 `filesystem -> network -> device -> PowerOff`；network stop后
   无新的 worker reactivation，device step抑制每个 GMAC 的 IRQ/DMA，未证明 quiesce 的 backing保持到
   reset/power-off。
@@ -269,9 +282,7 @@ QEMU、host fake DMA/order backend和KUnit结果作为前置/回归证据附带�
 全部 matrix 在同一可审查 production revision 上通过后，执行单个 `JH7110-GMAC-CUTOVER`：
 
 - Refine `IRQ-FLOW-001`，纳入 name/index 单项 firmware interrupt resource selection；
-- Refine `NET-IFACE-DOMAIN-001`，纳入 probe-admission reservation 与失败 no-reuse；
-- Refine `NET-ATTACH-001`，纳入对 publication 携带 reservation 的消费与既有 rollback；
 - 更新 RFC closure，记录 agent-run、user-run、Not Run、commit/PR 和仍开放的真正非目标；
 - 对最终 diff 执行 Architecture Friction Scan。Euclid 可带证据收口；Keter/Apollyon 阻止 cutover/closure。
 
-任一 acceptance item 缺失时三项 contract 全部保持旧规则，RFC 保持未关闭；不允许部分 cutover。
+任一 acceptance item 缺失时 `IRQ-FLOW-001` 保持旧规则，RFC 保持未关闭；不允许部分 cutover。

@@ -1,9 +1,9 @@
 # JH7110 GMAC 目标与不变量
 
-**状态：** Accepted / R3
+**状态：** Accepted / R4
 **最后更新：** 2026-08-09
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**适用修订：** R3
+**适用修订：** R4
 
 本文只定义本 RFC 的 target 与 proof obligations。当前 effective 规则以
 [`docs/src/contracts/`](../../contracts.md) 为准；本页不能在最终板级验收和
@@ -13,7 +13,7 @@
 
 - **Correctness Invariant：** 唯一 owner、DMA visibility/ordering、并发、生命周期、cleanup 与 ABI 诚实性；
   不得通过 target renegotiation 降低。
-- **Target Guarantee / Capability：** 本修订承诺的多节点、one-time init、稳定 identity 与单接口
+- **Target Guarantee / Capability：** 本修订承诺的多节点、one-time init、success-order identity 与单接口
   IPv4 能力；改变它必须进入 Target Renegotiation。
 - **Implementation Preference：** register wrapper、内部类型、ring helper、文件布局和具体算法；
   不构成 target。
@@ -127,27 +127,28 @@ Drop 仍可 DMA 的 region；IRQ context 弱引用失效后硬件仍 unmasked。
 
 **分类：** Correctness Invariant
 **规则：** 每个 provider 只拥有本 node 的 registers、rings、pending predicate、wake edge 与 worker。
-一个 node 的 IRQ、queue exhaustion、attach failure 或 shutdown attempt 不得读取、推进、清空或重编号
-另一 node。global Stack 只通过每个 mapping 的 narrow pump port 串行化 protocol progression。
+一个 node 的 IRQ、queue exhaustion、attach failure 或 shutdown attempt 不得读取、推进或清空另一 node；
+也不得修改另一 node 已提交的identity。candidate初始化失败可按R4 success-order规则影响尚未分配的
+后续ordinal。global Stack只通过每个mapping的narrow pump port串行化protocol progression。
 **Owner：** per-node provider 与 global DomainStack 各守自己的状态。
 **违反表现：** static current-device pointer；共享 completion queue；GMAC0 IRQ 唤醒 GMAC1 worker；一个
 attach rollback 撤销另一 mapping。
 **Proof：** two-provider host matrix、wrong-provider/failure injection 与板级分别选择两个端口收发。
 
-### JH-GMAC-010 — `eth<N>` 在 probe admission 单调消费
+### JH-GMAC-010 — `eth<N>` 只由成功 publisher 连续消费
 
 **分类：** Target Guarantee / Capability
-**规则：** matching node 进入 probe 后，在可能失败的 MAC/resource/DMA construction 前从
-`LogicalInterfaces` 取得 reservation。DT discovery order 决定 ordinal；commit 发布 membership，abort
-不发布但永久消费 ordinal。本 RFC 范围内 identity 不复用。
-**Owner：** initial-domain logical owner；driver/provider只携带不可复制 token。
-**违反表现：** 按成功 attach 排序；GMAC0 失败后 GMAC1 变成 `eth0`；driver另存 path-to-name map；
-abort 后重新分配相同 name。
-**Proof：** multi-node fail-first/fail-middle tests、token Drop assertion 与至少两次板级冷启动日志。
-
-本 RFC 同时要求现有 boot-time VirtIO publisher 迁移到相同的 probe-admission reservation handoff。
-否则含有两种 provider 的系统会有两套 ordinal 线性化点；QEMU 中仍只有一个可见 `eth0`，但该
-内部双语义不能作为长期实现保留。
+**规则：** clock/reset、MMIO/capability、rings、IRQ context、device-cause baseline与provider
+construction全部完成后才允许publish。初始化或publication失败不进入`LogicalInterfaces`；成功
+publisher沿用既有attach transaction并按publication/attach顺序连续取得`eth<N>`。同步JH7110 probe
+保持成功节点之间的DT相对顺序；较早candidate失败时后续成功provider前移补位。attach已经取得的
+reservation仍按现有规则commit或abort，abort后ordinal不复用。
+**Owner：** `device/net`拥有ready publication，initial-domain logical owner只在attach时分配identity；
+driver/provider不保存path-to-name或ordinal state。
+**违反表现：** 初始化失败仍消费`eth<N>`；driver自行编号；VirtIO与JH7110使用不同attach编号规则；
+attach abort后重新分配相同name。
+**Proof：** multi-node fail-first/fail-middle success-order tests、attach token Drop assertion与至少两次
+相同成功集合的板级冷启动日志。
 
 ### JH-GMAC-011 — Publication 与 active attach 各只有一个提交点
 
@@ -160,15 +161,16 @@ active path 并 activate。任何失败不得留下半 published member/mapping�
 尚未 commit；rollback 留下 mapping。
 **Proof：** failure injection、publication/attach source audit 与 active-path logs。
 
-### JH-GMAC-012 — 单个 SystemTarget deployment 不产生 fallback
+### JH-GMAC-012 — 单个 SystemTarget deployment 只匹配 exact logical name
 
 **分类：** Target Guarantee / Capability
-**规则：** 所有成功 GMAC 可提交为 L2 external member；`network.ipv4.interface` 只匹配一个 committed
-logical name，address/prefix/default gateway 只投影到该 mapping。其它接口保持无 L3 配置。目标接口
-缺失或不匹配时 fail closed，不选择下一个 GMAC。
+**规则：** 所有成功GMAC可提交为L2 external member；`network.ipv4.interface`只匹配一个committed
+logical name，address/prefix/default gateway只投影到该mapping。其它接口保持无L3配置。目标接口缺失
+或不匹配时fail closed，control plane不扫描其它member。较早candidate失败使后续成功provider取得同一
+success-order name是R4 identity语义，不是control-plane fallback。
 **Owner：** `Ipv4ControlPlane`。
-**违反表现：** 给所有 GMAC 复制同一地址；多个 default route；eth0失败后自动把配置投给eth1；driver
-直接配置 IP。
+**违反表现：** 给所有GMAC复制同一地址；多个default route；配置name缺失后扫描另一个name；driver
+直接配置IP。
 **Proof：** selection tests 与板级分别选择 `eth0`/`eth1` 的启动矩阵。
 
 ### JH-GMAC-013 — One-time lifecycle 不伪装 runtime recovery
@@ -198,10 +200,10 @@ owner 只保存 opaque netdev association。
 
 ```text
 DT matching node
-  -> logical reservation (ordinal consumed)
   -> resource/MAC/IRQ/DMA construction
   -> provider Ready
   -> netdev Published
+  -> logical reservation (success-order ordinal consumed)
   -> Stack mapping + inactive worker Prepared
   -> logical membership + active record Committed
   -> worker Active
@@ -210,8 +212,9 @@ DT matching node
   -> retained until reset/power-off
 ```
 
-任一 publication 前失败沿相反方向撤销已经建立但尚未发布的资源；reservation 只能 abort，ordinal
-不能回退。IRQ 注册后的 cleanup 以 device-side suppression 加 retention 取代不真实的资源回收承诺。
+任一publication前失败沿相反方向撤销已经建立但尚未发布的资源，不消费logical identity。publication后
+attach取得的reservation只能commit或abort，ordinal不能回退。IRQ注册后的cleanup以device-side
+suppression加retention取代不真实的资源回收承诺。
 
 每个 RX/TX slot 至少表达以下 owner 转换；具体类型名称不是规范：
 
@@ -236,8 +239,9 @@ descriptor completion 字段本身也由 device 写回，CPU 必须在正确的 
   注入第一个/中间节点失败。
 - final acceptance 必须在同一实现上完成，不允许为板测加入会绕过 owner、ordering 或 coherency proof 的
   test-only production branch。
-- Gate 间临时“匹配但不 publication”状态只服务本 RFC 实施，Gate 3 必须删除返回占位错误或 dormant
-  activation switch；否则不得进入板级验收。
+- Gate 2未发布provider由本platform device的driver state唯一持有，并以probe success建立durable bind；
+  Gate 3必须把provider单向移交publication/worker owner，删除staged strong-owner路径且不得留下dormant
+  activation switch。
 - QEMU/host 证据只证明既有路径 regression 或纯语义，不得写成 GMAC hardware evidence。
 
 ## 禁止退化项
@@ -246,7 +250,7 @@ descriptor completion 字段本身也由 device 写回，CPU 必须在正确的 
 - 让 driver 读取/修改 raw Stack、route、socket 或其它 provider state。
 - 在没有硬件 coherency 证据时用 volatile access、compiler fence 或 CPU memory fence 冒充 coherency；
   或以 coherency 假设替代 ordering、ownership 和 quiesce proof。
-- 用硬编码 IRQ/MMIO/MAC、成功 attach 顺序或 U-Boot 的 `eth0/eth1` 名称代替 DT/resource owner。
+- 用硬编码 IRQ/MMIO/MAC、driver-local ordinal map或 U-Boot 的 `eth0/eth1` 名称代替 DT/resource owner。
 - 将 GMAC0 MAC 缺失、PHY handoff失败或双口不能收发改写为 accepted limitation；这些都在 target 内，
   必须失败并回到 review。
 - 在任何 Gate 检查后提前更新 current contract、声称硬件通过或把 RFC 标为 Closed。

@@ -9,6 +9,9 @@
 > 本文保留 RFC 形成前的定位材料，不是 current contract、RFC target、implementation plan 或代码
 > 实现授权。规范性目标、owner、gate 与 acceptance 以正式 RFC 为准；本文中的历史判断不得覆盖
 > 正式 RFC 或 live source。
+>
+> R4 已用 success-order `eth<N>` 取代本文的固定 DT ordinal/失败空洞设想，并接受 coherent DMA 与
+> provider-owned clock/reset admission；下文相反表述只保留为历史输入。
 
 ## 文档目的
 
