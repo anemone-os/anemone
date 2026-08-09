@@ -6,7 +6,7 @@
 **参与领域：** VFS pathname/open / resident inode / ext4 / ramfs / Pipe / opened description / iomux / epoll
 **覆盖范围：** filesystem-backed `S_IFIFO` 的 read/write/read-write open、pending admission、stream I/O、readiness、alias/unlink与fresh-session lifecycle
 **不覆盖：** FIFO node creation与on-disk metadata、legacy `readdir`、Unix Socket namespace、packet-mode pipe、splice family、per-user pipe accounting、crash-time session persistence或 identity-preserving syscall restart
-**实现位置：** `anemone-kernel/src/fs/api/openat.rs`、`anemone-kernel/src/fs/inode/object.rs`、`anemone-kernel/src/fs/pipe/`、`anemone-apps/fcntl-test/src/named_fifo.rs`
+**实现位置：** `anemone-kernel/src/fs/api/openat.rs`、`anemone-kernel/src/fs/vfs/open.rs`、`anemone-kernel/src/fs/inode/object.rs`、`anemone-kernel/src/fs/pipe/`、`anemone-apps/fcntl-test/src/named_fifo.rs`
 **依赖：** `VFS-MAKE-NODE-001`、`VFS-FILE-KIND-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`
 **Pending Successor：** None
 **最后核验：** 2026-08-03

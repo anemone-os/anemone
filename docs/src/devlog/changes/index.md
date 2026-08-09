@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-09 - VFS open request](./2026-08-09-vfs-open-request.md)
 - [2026-08-08 - Devfs hierarchical publication](./2026-08-08-devfs-hierarchical-publication.md)
 - [2026-08-08 - User fault local TLB completion](./2026-08-08-user-fault-local-tlb.md)
 - [2026-08-08 - Ramfs namespace single Mutex](./2026-08-08-ramfs-namespace-single-mutex.md)

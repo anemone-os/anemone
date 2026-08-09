@@ -217,5 +217,8 @@ pub fn mount_placement_generation() -> (u64, u64) {
     )
 }
 
+mod open;
 mod ops;
+
+pub(crate) use open::vfs_open_description;
 pub use ops::*;

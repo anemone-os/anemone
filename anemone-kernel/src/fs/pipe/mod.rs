@@ -5,7 +5,7 @@ mod io;
 mod poll;
 
 use crate::{
-    fs::FileMode,
+    fs::{FileMode, FileOpenAccess, FileOpenRequest},
     prelude::*,
     utils::{
         any_opaque::{AnyOpaque, NilOpaque},
@@ -168,35 +168,6 @@ impl PipeAccess {
 
     const fn can_write(self) -> bool {
         matches!(self, Self::Write | Self::ReadWrite)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::fs) enum FifoOpenAccess {
-    Read,
-    Write,
-    ReadWrite,
-}
-
-impl From<FifoOpenAccess> for PipeAccess {
-    fn from(access: FifoOpenAccess) -> Self {
-        match access {
-            FifoOpenAccess::Read => Self::Read,
-            FifoOpenAccess::Write => Self::Write,
-            FifoOpenAccess::ReadWrite => Self::ReadWrite,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::fs) struct FifoOpenContext {
-    access: FifoOpenAccess,
-    nonblock: bool,
-}
-
-impl FifoOpenContext {
-    pub(in crate::fs) const fn new(access: FifoOpenAccess, nonblock: bool) -> Self {
-        Self { access, nonblock }
     }
 }
 
@@ -548,7 +519,7 @@ static PIPE_FILE_OPS: FileOps = FileOps {
     write_at: |_, _, _, _| Err(SysError::IllegalSeek),
     read_user_at: None,
     write_user_at: None,
-    check_status_flags: accept_file_op_status_flags,
+    check_status_flags: check_fifo_status_flags,
     seek: |_, _, _| Err(SysError::IllegalSeek),
     read_dir: |_, _, _| Err(SysError::NotDir),
     poll: poll::pipe_poll,
@@ -583,29 +554,39 @@ pub fn create_anonymous_pipe() -> Result<OpenedPipe, SysError> {
 
 pub(in crate::fs) fn open_named_fifo(
     path: PathRef,
-    context: FifoOpenContext,
+    request: FileOpenRequest,
 ) -> Result<File, SysError> {
     assert_eq!(
         path.inode().ty(),
         InodeType::Fifo,
         "named FIFO activation received a non-FIFO path"
     );
+    // Status admission must remain before the first session capability. A
+    // rejected request cannot create a session, publish participation or wake
+    // a partner.
+    validate_fifo_open_status(request.status_flags())?;
+    let access = match request.access() {
+        FileOpenAccess::Read => PipeAccess::Read,
+        FileOpenAccess::Write => PipeAccess::Write,
+        FileOpenAccess::ReadWrite => PipeAccess::ReadWrite,
+    };
+    let nonblock = request.status_flags().contains(FileOpStatusFlags::NONBLOCK);
     let pipe = path.inode().inode().fifo_anchor().get_or_create()?;
-    let admission = if context.access == FifoOpenAccess::Read && context.nonblock {
+    let admission = if access == PipeAccess::Read && nonblock {
         PipeAdmission::begin_nonblocking_reader(pipe)
-    } else if context.access == FifoOpenAccess::Write && context.nonblock {
+    } else if access == PipeAccess::Write && nonblock {
         // Reader observation and writer participation are one PipeInner
         // transaction. A writer that returns ENXIO must never advance a
         // generation or wake a concurrent blocking reader as a phantom peer.
         PipeAdmission::begin_nonblocking_writer(pipe)?
     } else {
-        PipeAdmission::begin(pipe, context.access.into())
+        PipeAdmission::begin(pipe, access)
     };
 
-    match context.access {
-        FifoOpenAccess::Read if context.nonblock => {},
-        FifoOpenAccess::Write if context.nonblock => {},
-        FifoOpenAccess::Read | FifoOpenAccess::Write => {
+    match access {
+        PipeAccess::Read if nonblock => {},
+        PipeAccess::Write if nonblock => {},
+        PipeAccess::Read | PipeAccess::Write => {
             if !admission.wait_for_partner() {
                 // Blocking FIFO open has not published an fd and the admission
                 // guard rolls this attempt back exactly, so the whole syscall
@@ -615,7 +596,7 @@ pub(in crate::fs) fn open_named_fifo(
                 return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
             }
         },
-        FifoOpenAccess::ReadWrite => {},
+        PipeAccess::ReadWrite => {},
     }
 
     let endpoint = admission.commit();
@@ -627,11 +608,15 @@ pub(in crate::fs) fn open_named_fifo(
     ))
 }
 
-pub(in crate::fs) fn validate_fifo_open_status(_status: FileOpStatusFlags) -> Result<(), SysError> {
+fn validate_fifo_open_status(_status: FileOpStatusFlags) -> Result<(), SysError> {
     // All status bits reaching this point were normalized and accepted by the
     // open ABI parser. Pipe I/O reads the opened-description snapshot on each
     // operation, so validation neither caches flags nor touches session state.
     Ok(())
+}
+
+fn check_fifo_status_flags(_file: &File, status: FileOpStatusFlags) -> Result<(), SysError> {
+    validate_fifo_open_status(status)
 }
 
 #[cfg(feature = "kunit")]
