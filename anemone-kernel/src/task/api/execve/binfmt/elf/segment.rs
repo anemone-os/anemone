@@ -4,7 +4,7 @@ use crate::{
     mm::layout::KernelLayoutTrait,
     prelude::{
         vma::{ForkPolicy, Protection, VmArea, VmFlags},
-        vmo::{ResolvedFrame, VmObject},
+        vmo::{ResolvedFrame, RetiredFrames, VmObject, retire_frame_range},
         *,
     },
 };
@@ -196,14 +196,12 @@ impl VmObject for ElfLoadObject {
         self.materialize(pidx, recipe)
     }
 
-    fn discard_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
-        if range.start > range.end || range.end > self.recipes.len() {
-            return Err(SysError::InvalidArgument);
-        }
-        self.materialized
-            .write()
-            .retain(|pidx, _| !range.contains(pidx));
-        Ok(())
+    fn discard_range(&self, range: core::ops::Range<usize>, retired: &mut RetiredFrames) {
+        assert!(
+            range.start <= range.end && range.end <= self.recipes.len(),
+            "VMA-backed discard range must stay within the ELF image"
+        );
+        retire_frame_range(&mut self.materialized.write(), range, retired)
     }
 
     fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {
@@ -621,7 +619,8 @@ mod kunits {
         let private = backing.resolve_frame(0, PageFaultType::Write).unwrap();
         write_first_byte(&private.frame, 0x55);
 
-        backing.discard_range(0..1).unwrap();
+        let mut retired = RetiredFrames::default();
+        backing.discard_range(0..1, &mut retired);
         let refaulted = backing.resolve_frame(0, PageFaultType::Read).unwrap();
         assert_eq!(refaulted.frame.ppn(), source.pages[0].ppn());
         assert_eq!(refaulted.frame.as_bytes()[0], 0x44);

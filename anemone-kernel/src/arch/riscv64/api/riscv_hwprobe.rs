@@ -44,7 +44,7 @@ fn mask_selects_online_cpu(mask: &[u8; KERNEL_CPU_MASK_BYTES]) -> bool {
 fn validate_cpu_selection(
     cpu_count: usize,
     cpus_addr: u64,
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
 ) -> Result<(), SysError> {
     if cpu_count == 0 && cpus_addr == 0 {
         return Ok(());
@@ -64,7 +64,11 @@ fn validate_cpu_selection(
     }
 }
 
-fn update_pair(base_addr: u64, index: usize, usp: &mut UserSpace) -> Result<(), SysError> {
+fn update_pair(
+    base_addr: u64,
+    index: usize,
+    usp: &mut UserSpaceGuard<'_>,
+) -> Result<(), SysError> {
     let pair_offset = index
         .checked_mul(size_of::<RiscvHwprobe>())
         .ok_or(SysError::BadAddress)? as u64;

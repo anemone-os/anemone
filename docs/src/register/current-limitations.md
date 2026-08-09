@@ -2,30 +2,6 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
-## ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION
-
-**Type:** Limitation
-**Status:** Active / Accepted
-**Severity:** Medium
-**Area:** MM / user address space / remote TLB fence / frame retirement
-
-**Summary:** `RemoteUspFenceGuard`在Drop中同步完成remote TLB shootdown，携带的退休frame只有在该轮
-completion成功后才会回到allocator。当前`broadcast_ipi()`失败时没有可返回、重试或转交隔离队列的owner API；
-guard只能取走并永久保留这些frame，同时输出alert，避免remote CPU通过stale TLB访问已经复用的物理页。
-
-正常shootdown成功路径仍会释放全部退休frame；不携带退休frame的普通fence也不会产生该泄漏。当前命名consumer是
-`brk`跨整页shrink的private-backing decommit。该fail-close选择保护memory safety，但若IPI失败可重复发生，会把
-受影响frame永久排除在可分配内存之外。
-
-**Exit Condition:** MM address-space owner获得infallible或retryable的remote-fence completion/failure handoff；
-失败轮次必须在保持退休frame隔离的同时拥有可恢复的重试、CPU offline completion或等价的终止证明，并只在所有
-受影响CPU不再能够使用旧translation后释放frame。以携带真实退休frame的成功路径和注入IPI失败路径共同验证：
-既不提前复用物理页，也不会在可恢复失败后永久遗失frame。
-
-**Owner:** MM UserSpace remote-fence protocol；IPI transport为依赖
-**Last Verified:** 2026-08-07
-**Related:** [brk shrink decommit小迭代](../devlog/changes/2026-08-05-brk-shrink-decommit.md)
-
 ## ANE-20260804-UNIX-SEQPACKET-EDGE-ABI
 
 **Type:** Limitation
@@ -367,13 +343,13 @@ limitation；不得重新激活已终止RFC。新增异步、多port、hotplug�
 **Severity:** Medium
 **Area:** devfs / device model
 
-**Summary:** 当前 devfs 第一版主要只支持启动期静态 publish 到扁平 `/dev` 根目录；为了 `user-test` 的 `ramfs` 挂载，另有一个静态 `/dev/shm` 目录挂载点，但这不代表通用目录层级能力。不支持运行期 unpublish/hot-unplug、别名或 symlink。
+**Summary:** 当前 devfs 支持 kernel subsystem 通过 opaque direct-child directory capability 建立 append-only 多级静态 namespace，所有 mounts 共享同一 production namespace、superblock 与 inode identity。仍不支持运行期 unpublish/hotplug、provider teardown、alias/symlink 或 inode/dentry reclaim。
 
-**Exit Condition:** 只有在真实设备热插拔或多级命名空间需求出现后，再为 devfs 增加显式的发布失效协议、目录发布能力与相应的 dentry/inode 回收路径。
+**Exit Condition:** 当真实设备热插拔、provider replacement/teardown 或别名需求出现时，为 devfs 增加显式 publication invalidation、open-handle 与 enumeration 语义、alias/symlink ownership，以及相应 dentry/inode reclaim 协议并完成运行期验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-24
-**Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
+**Last Verified:** 2026-08-08
+**Related:** [Devfs hierarchical publication](../devlog/changes/2026-08-08-devfs-hierarchical-publication.md), [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
 
 ## ANE-20260524-DEVFS-BLOCK-DEFAULT-SEMANTICS
 

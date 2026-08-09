@@ -19,7 +19,7 @@ fn sys_brk(#[validate_with(user_addr)] addr: VirtAddr) -> Result<u64, SysError> 
     let brk = usp.set_brk(addr);
 
     let brk = match brk {
-        Ok(_guard) => addr.get(),
+        Ok(()) => addr.get(),
         Err(e) => usp.lock().brk().get(),
     };
 

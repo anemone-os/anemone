@@ -26,12 +26,17 @@ impl AnonObject {
         Ok(())
     }
 
-    fn take_pages(&self, range: core::ops::Range<usize>) -> Result<RetiredFrames, SysError> {
+    fn take_pages(
+        &self,
+        range: core::ops::Range<usize>,
+        retired: &mut RetiredFrames,
+    ) -> Result<(), SysError> {
         if range.start >= self.max_pages || range.end > self.max_pages || range.start > range.end {
             return Err(SysError::InvalidArgument);
         }
 
-        Ok(retire_frame_range(&mut self.pages.write(), range))
+        retire_frame_range(&mut self.pages.write(), range, retired);
+        Ok(())
     }
 }
 
@@ -80,16 +85,20 @@ impl VmObject for AnonObject {
         }
     }
 
-    fn discard_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
-        drop(self.take_pages(range)?);
-        Ok(())
+    fn discard_range(&self, range: core::ops::Range<usize>, retired: &mut RetiredFrames) {
+        assert!(
+            range.start < self.max_pages && range.end <= self.max_pages && range.start <= range.end,
+            "VMA-backed discard range must stay within the anonymous VMO"
+        );
+        retire_frame_range(&mut self.pages.write(), range, retired)
     }
 
     unsafe fn decommit_private_range(
         &self,
         range: core::ops::Range<usize>,
-    ) -> Result<RetiredFrames, SysError> {
-        self.take_pages(range)
+        retired: &mut RetiredFrames,
+    ) -> Result<(), SysError> {
+        self.take_pages(range, retired)
     }
 
     fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {

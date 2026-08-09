@@ -74,7 +74,12 @@ fn validate_output(buf: u64, len: usize, required: usize) -> Result<bool, SysErr
     Ok(false)
 }
 
-fn copyout_at(usp: &mut UserSpace, base: u64, offset: usize, bytes: &[u8]) -> Result<(), SysError> {
+fn copyout_at(
+    usp: &mut UserSpaceGuard<'_>,
+    base: u64,
+    offset: usize,
+    bytes: &[u8],
+) -> Result<(), SysError> {
     let address = base
         .checked_add(offset as u64)
         .ok_or(SysError::BadAddress)?;
@@ -163,7 +168,7 @@ fn encode_descriptor(
     bytes
 }
 
-fn write_catalog(usp: &mut UserSpace, base: u64) -> Result<(), SysError> {
+fn write_catalog(usp: &mut UserSpaceGuard<'_>, base: u64) -> Result<(), SysError> {
     let layout = perf::catalog_layout();
     copyout_at(usp, base, 0, &encode_catalog_header())?;
     let descriptors_base = PERF_CATALOG_HEADER_SIZE;
@@ -208,7 +213,7 @@ fn encode_snapshot_header(
     bytes
 }
 
-fn write_snapshot(usp: &mut UserSpace, base: u64) -> Result<(), SysError> {
+fn write_snapshot(usp: &mut UserSpaceGuard<'_>, base: u64) -> Result<(), SysError> {
     let layout = perf::catalog_layout();
     let begin_ticks = crate::time::perf_clock_ticks();
     let enabled = perf::recording_enabled();
