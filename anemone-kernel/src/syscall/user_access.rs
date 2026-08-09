@@ -368,6 +368,78 @@ impl<T, V> SyscallArgValidatorExt<T> for V where V: FnOnce(u64) -> Result<T, Sys
 mod validators {
     use super::*;
 
+    const C_STRING_BATCH_BYTES: usize = kconfig_defs::C_STRING_BATCH_BYTES;
+
+    static_assert!(C_STRING_BATCH_BYTES > 0);
+    static_assert!(C_STRING_BATCH_BYTES <= PagingArch::PAGE_SIZE_BYTES);
+
+    pub(super) fn c_readonly_string_with_reader<const MAX_BYTES: usize, F>(
+        start: VirtAddr,
+        mut read: F,
+    ) -> Result<Box<str>, SysError>
+    where
+        F: FnMut(VirtAddr, &mut [u8]) -> Result<usize, UserPtrAccessError>,
+    {
+        let max_with_nul = MAX_BYTES.saturating_add(1);
+        let mut scanned = 0usize;
+        let mut bytes = Vec::new();
+        let mut batch = [0u8; C_STRING_BATCH_BYTES];
+
+        loop {
+            let current_addr = start
+                .get()
+                .checked_add(scanned as u64)
+                .ok_or(SysError::BadAddress)?;
+            if current_addr >= KernelLayout::USPACE_TOP_ADDR {
+                return Err(SysError::BadAddress);
+            }
+            let current = VirtAddr::new(current_addr);
+            let user_remaining =
+                usize::try_from(KernelLayout::USPACE_TOP_ADDR - current_addr).unwrap_or(usize::MAX);
+            let limit_remaining = max_with_nul
+                .checked_sub(scanned)
+                .ok_or(SysError::ListTooLong)?;
+            let request = C_STRING_BATCH_BYTES
+                .min(PagingArch::PAGE_SIZE_BYTES - current.page_offset())
+                .min(user_remaining)
+                .min(limit_remaining);
+            assert!(request > 0, "C-string batch must make progress");
+
+            let copied = match read(current, &mut batch[..request]) {
+                Ok(copied) => {
+                    assert_eq!(copied, request, "successful C-string batch was short");
+                    copied
+                },
+                Err(error) => {
+                    let copied = error.copied();
+                    assert!(
+                        copied < request,
+                        "failed C-string batch reported full progress"
+                    );
+                    if let Some(nul) = batch[..copied].iter().position(|&byte| byte == 0) {
+                        bytes.extend_from_slice(&batch[..nul]);
+                        break;
+                    }
+                    return Err(error.error());
+                },
+            };
+
+            if let Some(nul) = batch[..copied].iter().position(|&byte| byte == 0) {
+                bytes.extend_from_slice(&batch[..nul]);
+                break;
+            }
+
+            bytes.extend_from_slice(&batch[..copied]);
+            scanned += copied;
+            if scanned > MAX_BYTES {
+                return Err(SysError::ListTooLong);
+            }
+        }
+
+        let s = str::from_utf8(&bytes).map_err(|_| SysError::InvalidArgument)?;
+        Ok(Box::from(s))
+    }
+
     /// Validate that the address in `arg` is inside user space and return it as
     /// a [VirtAddr].
     pub fn user_addr(arg: u64) -> Result<VirtAddr, SysError> {
@@ -435,10 +507,11 @@ mod validators {
     pub fn c_readonly_string<const MAX_BYTES: usize>(arg: u64) -> Result<Box<str>, SysError> {
         let start = user_pointer_addr(arg)?;
         let usp = get_current_task().clone_uspace_handle();
-        let bytes =
-            usp.with_usp(|usp| c_readonly_array_from_addr::<MAX_BYTES, u8>(usp, start, 0, false))?;
-        let s = str::from_utf8(&bytes).map_err(|_| SysError::InvalidArgument)?;
-        Ok(Box::from(s))
+        usp.with_usp(|usp| {
+            c_readonly_string_with_reader::<MAX_BYTES, _>(start, |src, dst| {
+                read_user_bytes(usp, dst, src)
+            })
+        })
     }
 
     /// Validate a user C string pointer as a filesystem pathname.
@@ -586,5 +659,56 @@ mod kunits {
         assert!(RawUserAddr64::NULL.is_null());
         assert_eq!(size_of::<RawUserAddr64>(), size_of::<u64>());
         assert_eq!(align_of::<RawUserAddr64>(), align_of::<u64>());
+    }
+
+    fn read_test_c_string<const MAX_BYTES: usize>(
+        start: VirtAddr,
+        source: &[u8],
+        accessible: usize,
+    ) -> (Result<Box<str>, SysError>, Vec<usize>) {
+        assert!(accessible <= source.len());
+        let mut requests = Vec::new();
+        let result =
+            validators::c_readonly_string_with_reader::<MAX_BYTES, _>(start, |src, dst| {
+                let offset = usize::try_from(src.get() - start.get()).unwrap();
+                requests.push(dst.len());
+                let copied = accessible.saturating_sub(offset).min(dst.len());
+                dst[..copied].copy_from_slice(&source[offset..offset + copied]);
+                if copied == dst.len() {
+                    Ok(copied)
+                } else {
+                    Err(UserPtrAccessError::new(SysError::BadAddress, copied))
+                }
+            });
+        (result, requests)
+    }
+
+    #[kunit]
+    fn c_string_batch_preserves_page_and_length_boundaries() {
+        let start = VirtAddr::new(PagingArch::PAGE_SIZE_BYTES as u64 * 3 - 2);
+        let mut source = [0u8; 256];
+        source[..4].copy_from_slice(b"abc\0");
+        let (string, requests) = read_test_c_string::<255>(start, &source, source.len());
+        assert_eq!(&*string.unwrap(), "abc");
+        assert_eq!(requests, [2, 254]);
+
+        let start = VirtAddr::new(PagingArch::PAGE_SIZE_BYTES as u64 * 2);
+        let (exact, exact_requests) = read_test_c_string::<3>(start, b"abc\0", 4);
+        assert_eq!(&*exact.unwrap(), "abc");
+        assert_eq!(exact_requests, [4]);
+        let (too_long, too_long_requests) = read_test_c_string::<3>(start, b"abcd", 4);
+        assert_eq!(too_long.unwrap_err(), SysError::ListTooLong);
+        assert_eq!(too_long_requests, [4]);
+    }
+
+    #[kunit]
+    fn c_string_batch_preserves_fault_and_utf8_semantics() {
+        let start = VirtAddr::new(PagingArch::PAGE_SIZE_BYTES as u64 * 2);
+        let (before_fault, _) = read_test_c_string::<3>(start, b"a\0xx", 2);
+        assert_eq!(&*before_fault.unwrap(), "a");
+        let (fault_before_nul, _) = read_test_c_string::<3>(start, b"a\0xx", 1);
+        assert_eq!(fault_before_nul.unwrap_err(), SysError::BadAddress);
+        let (invalid, _) = read_test_c_string::<3>(start, &[0xff, 0, 0, 0], 4);
+        assert_eq!(invalid.unwrap_err(), SysError::InvalidArgument);
     }
 }
