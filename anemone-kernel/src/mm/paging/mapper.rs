@@ -963,6 +963,27 @@ mod kunits {
         }
     }
 
+    unsafe fn withdraw_global_mapping(mapper: &mut Mapper<'_>, range: VirtPageRange) {
+        unsafe {
+            match mapper.traverse::<_, _, ()>(
+                range,
+                |pte, _| {
+                    pte.set_flags(pte.flags() - PteFlags::GLOBAL);
+                    ControlFlow::Continue
+                },
+                |pte, _| {
+                    pte.set_flags(pte.flags() - PteFlags::GLOBAL);
+                    ControlFlow::Continue
+                },
+                TraverseOrder::PreOrder,
+            ) {
+                ControlFlow::Continue => {},
+                ControlFlow::Break(()) => unreachable!(),
+            }
+            mapper.try_unmap(Unmapping { range });
+        }
+    }
+
     #[kunit]
     fn unmap_single_page_reclaims_empty_tables() {
         let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
@@ -1104,24 +1125,41 @@ mod kunits {
         // Restore non-global ownership before cleanup. Global branch entries
         // intentionally survive ordinary unmap, so the test must withdraw the
         // test-only global publication before PageTable::drop.
+        unsafe { withdraw_global_mapping(&mut mapper, range) };
+        assert!(mapper.translate(vpn).is_none());
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    #[kunit]
+    fn global_huge_leaf_translation_ignores_huge_global_bit() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let huge_pages = PagingArch::PTE_PER_PGDIR as u64;
+        let vpn = VirtPageNum::new(huge_pages * 4);
+        let ppn = PhysPageNum::new(huge_pages * 6);
+        let range = VirtPageRange::new(vpn, huge_pages);
+        let mut mapper = table.mapper();
+
         unsafe {
-            match mapper.traverse::<_, _, ()>(
-                range,
-                |pte, _| {
-                    pte.set_flags(pte.flags() - PteFlags::GLOBAL);
-                    ControlFlow::Continue
-                },
-                |pte, _| {
-                    pte.set_flags(pte.flags() - PteFlags::GLOBAL);
-                    ControlFlow::Continue
-                },
-                TraverseOrder::PreOrder,
-            ) {
-                ControlFlow::Continue => {},
-                ControlFlow::Break(()) => unreachable!(),
-            }
-            mapper.try_unmap(Unmapping { range });
+            mapper
+                .map_one(vpn, ppn, PteFlags::READ | PteFlags::GLOBAL, 1, false)
+                .expect("mapper KUnit global huge mapping should succeed");
         }
+        assert_eq!(
+            mapper
+                .translate(vpn)
+                .expect("huge base should be mapped")
+                .ppn,
+            ppn
+        );
+        assert_eq!(
+            mapper
+                .translate(vpn + 37)
+                .expect("huge offset should be mapped")
+                .ppn,
+            ppn + 37
+        );
+
+        unsafe { withdraw_global_mapping(&mut mapper, range) };
         assert!(mapper.translate(vpn).is_none());
     }
 
