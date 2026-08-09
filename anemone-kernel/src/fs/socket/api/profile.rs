@@ -3,14 +3,16 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT, MSG_ERRQUEUE,
-    MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
+    AF_INET, AF_NETLINK, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT,
+    MSG_ERRQUEUE, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, NETLINK_ROUTE, NETLINK_SOCK_DIAG, SOCK_DGRAM,
+    SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
 };
 
 use crate::{
     fs::socket::{
-        ICMP_RAW_SOCKET_OPS, SocketOps, SocketType, TCP_SOCKET_OPS, UDP_SOCKET_OPS,
-        UNIX_SEQPACKET_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS,
+        ICMP_RAW_SOCKET_OPS, NETLINK_ROUTE_SOCKET_OPS, NETLINK_SOCK_DIAG_SOCKET_OPS, SocketOps,
+        SocketType, TCP_SOCKET_OPS, UDP_SOCKET_OPS, UNIX_SEQPACKET_SOCKET_OPS,
+        UNIX_STREAM_SOCKET_OPS,
     },
     prelude::*,
     task::credentials::cap::Capability,
@@ -19,6 +21,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketAddressAbi {
     Ipv4,
+    Netlink,
     UnixPathname,
 }
 
@@ -220,12 +223,44 @@ static TCP_ABI_METADATA: SocketAbiProfile = SocketAbiProfile {
     no_signal_compatibility: None,
 };
 
-static PUBLISHED_SOCKET_ABI_PROFILES: [&SocketAbiProfile; 5] = [
+static NETLINK_ROUTE_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
+    ops: &NETLINK_ROUTE_SOCKET_OPS,
+    domain: AF_NETLINK,
+    socket_kind: SOCK_RAW,
+    protocol: NETLINK_ROUTE,
+    protocol_admission: ProtocolAdmission::Canonical,
+    address: SocketAddressAbi::Netlink,
+    send_flags: MSG_DONTWAIT,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    recvmsg_only_flags: 0,
+    message_io: SocketMessageIo::Datagram,
+    required_capability: None,
+    no_signal_compatibility: None,
+};
+
+static NETLINK_SOCK_DIAG_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
+    ops: &NETLINK_SOCK_DIAG_SOCKET_OPS,
+    domain: AF_NETLINK,
+    socket_kind: SOCK_RAW,
+    protocol: NETLINK_SOCK_DIAG,
+    protocol_admission: ProtocolAdmission::Canonical,
+    address: SocketAddressAbi::Netlink,
+    send_flags: MSG_DONTWAIT,
+    ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC,
+    recvmsg_only_flags: 0,
+    message_io: SocketMessageIo::Datagram,
+    required_capability: None,
+    no_signal_compatibility: None,
+};
+
+static PUBLISHED_SOCKET_ABI_PROFILES: [&SocketAbiProfile; 7] = [
     &UDP_ABI_PROFILE,
     &ICMP_RAW_ABI_PROFILE,
     &UNIX_STREAM_ABI_PROFILE,
     &UNIX_SEQPACKET_ABI_PROFILE,
     &TCP_ABI_METADATA,
+    &NETLINK_ROUTE_ABI_PROFILE,
+    &NETLINK_SOCK_DIAG_ABI_PROFILE,
 ];
 
 pub(super) fn resolve_socket_profile(
@@ -233,24 +268,27 @@ pub(super) fn resolve_socket_profile(
     socket_kind: i32,
     protocol: i32,
 ) -> Result<&'static SocketAbiProfile, SysError> {
-    let profile = PUBLISHED_SOCKET_ABI_PROFILES
+    let tuple_profiles = PUBLISHED_SOCKET_ABI_PROFILES
         .iter()
         .copied()
-        .find(|profile| profile.domain == family && profile.socket_kind == socket_kind)
-        .ok_or_else(|| {
-            if PUBLISHED_SOCKET_ABI_PROFILES
-                .iter()
-                .any(|profile| profile.domain == family)
-            {
-                SysError::SocketTypeNotSupported
-            } else {
-                SysError::AddressFamilyNotSupported
-            }
-        })?;
-    if !profile.accepts_protocol(protocol) {
+        .filter(|profile| profile.domain == family && profile.socket_kind == socket_kind);
+    if let Some(profile) = tuple_profiles
+        .clone()
+        .find(|profile| profile.accepts_protocol(protocol))
+    {
+        return Ok(profile);
+    }
+    if tuple_profiles.count() != 0 {
         return Err(SysError::ProtocolNotSupported);
     }
-    Ok(profile)
+    if PUBLISHED_SOCKET_ABI_PROFILES
+        .iter()
+        .any(|profile| profile.domain == family)
+    {
+        Err(SysError::SocketTypeNotSupported)
+    } else {
+        Err(SysError::AddressFamilyNotSupported)
+    }
 }
 
 pub(super) fn socket_abi_profile(socket_type: SocketType) -> &'static SocketAbiProfile {
@@ -258,6 +296,8 @@ pub(super) fn socket_abi_profile(socket_type: SocketType) -> &'static SocketAbiP
         SocketType::Ipv4Udp => &UDP_ABI_PROFILE,
         SocketType::Ipv4IcmpRaw => &ICMP_RAW_ABI_PROFILE,
         SocketType::Ipv4Tcp => &TCP_ABI_METADATA,
+        SocketType::NetlinkRoute => &NETLINK_ROUTE_ABI_PROFILE,
+        SocketType::NetlinkSockDiag => &NETLINK_SOCK_DIAG_ABI_PROFILE,
         SocketType::UnixStream => &UNIX_STREAM_ABI_PROFILE,
         SocketType::UnixSeqpacket => &UNIX_SEQPACKET_ABI_PROFILE,
     };

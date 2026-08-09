@@ -21,6 +21,8 @@ pub(super) enum SocketType {
     Ipv4Udp,
     Ipv4IcmpRaw,
     Ipv4Tcp,
+    NetlinkRoute,
+    NetlinkSockDiag,
     UnixStream,
     UnixSeqpacket,
 }
@@ -29,6 +31,7 @@ pub(super) enum SocketType {
 pub(super) enum SocketAddress {
     Unspecified,
     Ipv4 { address: Ipv4Address, port: u16 },
+    Netlink { port: u32, groups: u32 },
     UnixPathname(Arc<str>),
 }
 
@@ -107,6 +110,7 @@ pub(super) enum SocketSendError {
     AddressInUse,
     AddressUnavailable,
     ResourceExhausted,
+    NoBufferSpace,
     NetworkUnreachable,
     DestinationRequired,
     InvalidDestination,
@@ -295,6 +299,8 @@ pub(super) enum SocketOptionMutation {
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+    SendBuffer(usize),
+    ReceiveBuffer(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

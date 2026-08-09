@@ -161,6 +161,10 @@ impl LogicalInterfaces {
         assert_eq!(loopback.kind, LogicalInterfaceKind::Loopback);
         loopback
     }
+
+    pub(in crate::net) fn diagnostic_members(&self) -> Vec<LogicalInterfaceSnapshot> {
+        self.members.clone()
+    }
 }
 
 #[cfg(feature = "kunit")]

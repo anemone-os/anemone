@@ -346,6 +346,7 @@ fn map_file_send_error(error: SocketSendError) -> SysError {
         SocketSendError::AddressInUse => SysError::AddressInUse,
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
         SocketSendError::ResourceExhausted => SysError::Again,
+        SocketSendError::NoBufferSpace => SysError::NoBufferSpace,
         SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
         SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,

@@ -9,7 +9,9 @@ pub(super) use control_plane::{
     SelectionError,
 };
 use interfaces::LogicalInterfaces;
-pub(super) use interfaces::{LogicalInterfaceReservation, LogicalInterfaceSnapshot};
+pub(super) use interfaces::{
+    LogicalInterfaceKind, LogicalInterfaceReservation, LogicalInterfaceSnapshot,
+};
 pub(super) use stack::{DomainStack, ExternalMapping, ExternalPumpPort, LocalPumpPort};
 
 use crate::prelude::*;
@@ -51,6 +53,10 @@ impl InitialDomain {
 
     pub(super) fn logical_mut(&mut self) -> &mut LogicalInterfaces {
         &mut self.logical
+    }
+
+    pub(in crate::net) fn logical_diagnostic_members(&self) -> Vec<LogicalInterfaceSnapshot> {
+        self.logical.diagnostic_members()
     }
 
     pub(super) fn stack(&self) -> Arc<DomainStack> {

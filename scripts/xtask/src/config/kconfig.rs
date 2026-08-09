@@ -122,6 +122,10 @@ pub struct Parameters {
     pub net_worker_repoll_rounds: Option<usize>,
     pub net_local_link_packet_capacity: Option<usize>,
     pub net_local_link_mtu_bytes: Option<usize>,
+    pub netlink_port_capacity: Option<usize>,
+    pub netlink_request_max_bytes: Option<usize>,
+    pub netlink_pending_reply_max_bytes: Option<usize>,
+    pub netlink_reply_datagram_max_bytes: Option<usize>,
     pub net_udp_endpoint_capacity: Option<usize>,
     pub net_udp_tx_datagram_capacity: Option<usize>,
     pub net_udp_rx_datagram_capacity: Option<usize>,
@@ -241,6 +245,10 @@ impl Parameters {
         materialize!(net_worker_repoll_rounds);
         materialize!(net_local_link_packet_capacity);
         materialize!(net_local_link_mtu_bytes);
+        materialize!(netlink_port_capacity);
+        materialize!(netlink_request_max_bytes);
+        materialize!(netlink_pending_reply_max_bytes);
+        materialize!(netlink_reply_datagram_max_bytes);
         materialize!(net_udp_endpoint_capacity);
         materialize!(net_udp_tx_datagram_capacity);
         materialize!(net_udp_rx_datagram_capacity);
@@ -467,6 +475,14 @@ pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
 pub const NET_LOCAL_LINK_PACKET_CAPACITY: usize = {};
 /// Maximum IP-medium packet size of the production local software link.
 pub const NET_LOCAL_LINK_MTU_BYTES: usize = {};
+/// Maximum live sockets in each supported netlink protocol port namespace.
+pub const NETLINK_PORT_CAPACITY: usize = {};
+/// Maximum bytes accepted in one netlink request datagram.
+pub const NETLINK_REQUEST_MAX_BYTES: usize = {};
+/// Maximum serialized reply bytes pending on one netlink Socket.
+pub const NETLINK_PENDING_REPLY_MAX_BYTES: usize = {};
+/// Maximum bytes emitted in one serialized netlink reply datagram.
+pub const NETLINK_REPLY_DATAGRAM_MAX_BYTES: usize = {};
 /// Maximum number of live UDP endpoints in the initial domain.
 pub const NET_UDP_ENDPOINT_CAPACITY: usize = {};
 /// Per-endpoint UDP transmit datagram capacity.
@@ -589,6 +605,10 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_worker_repoll_rounds),
             resolved!(net_local_link_packet_capacity),
             resolved!(net_local_link_mtu_bytes),
+            resolved!(netlink_port_capacity),
+            resolved!(netlink_request_max_bytes),
+            resolved!(netlink_pending_reply_max_bytes),
+            resolved!(netlink_reply_datagram_max_bytes),
             resolved!(net_udp_endpoint_capacity),
             resolved!(net_udp_tx_datagram_capacity),
             resolved!(net_udp_rx_datagram_capacity),

@@ -4,11 +4,11 @@ use anemone_net_api::{
     InterfaceId, Ipv4Address, Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
-        TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpListenBacklog, TcpListenError,
-        TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError, TcpReceiveMode,
-        TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason, TcpRetireError,
-        TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome, TcpStreamObservation,
-        TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+        TcpCreateError, TcpDiagnosticRecord, TcpEndpointFacts, TcpEndpointId, TcpListenBacklog,
+        TcpListenError, TcpLocalBinding, TcpPeer, TcpPendingChild, TcpPendingError, TcpQueryError,
+        TcpReceiveMode, TcpReceiveReservationId, TcpReceiveResolveError, TcpReleaseReason,
+        TcpRetireError, TcpShutdownDirection, TcpShutdownError, TcpShutdownOutcome,
+        TcpStreamObservation, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
     },
 };
 use smoltcp::{
@@ -21,6 +21,23 @@ use crate::tcp::{TcpEndpoints, tcp_socket};
 use super::{ProtocolProgression, Stack};
 
 impl Stack {
+    pub fn tcp_diagnostic_records(&self) -> alloc::vec::Vec<TcpDiagnosticRecord> {
+        let interfaces = &self.interfaces;
+        let local = &self.local;
+        self.protocols.tcp.diagnostic_records(|id| {
+            interfaces
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(|entry| &entry.sockets)
+                .or_else(|| {
+                    local
+                        .as_ref()
+                        .filter(|entry| entry.id == id)
+                        .map(|entry| &entry.sockets)
+                })
+        })
+    }
+
     pub fn create_tcp_endpoint(&mut self) -> Result<TcpEndpointId, TcpCreateError> {
         let endpoint = self.protocols.tcp.create_endpoint()?;
         self.protocols.tcp.invalidate(endpoint);

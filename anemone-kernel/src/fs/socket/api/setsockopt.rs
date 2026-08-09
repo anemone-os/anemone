@@ -1,8 +1,12 @@
-use core::mem::size_of;
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use anemone_abi::{
     net::linux::{
-        ICMP_FILTER, IP_RECVERR, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_REUSEADDR, SOL_RAW,
+        ICMP_FILTER, IP_RECVERR, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, NETLINK_EXT_ACK,
+        NETLINK_GET_STRICT_CHK, SO_RCVBUF, SO_REUSEADDR, SO_SNDBUF, SOL_NETLINK, SOL_RAW,
         SOL_SOCKET, TCP_NODELAY,
     },
     syscall::SYS_SETSOCKOPT,
@@ -82,7 +86,47 @@ fn mutate_socket_option(
     len: usize,
     input: &mut dyn OptionInput,
 ) -> Result<(), SysError> {
+    let netlink = matches!(
+        socket.socket_type(),
+        SocketType::NetlinkRoute | SocketType::NetlinkSockDiag
+    );
+    if netlink && level == SOL_NETLINK && matches!(option, NETLINK_EXT_ACK | NETLINK_GET_STRICT_CHK)
+    {
+        if len < size_of::<i32>() {
+            return Err(SysError::InvalidArgument);
+        }
+        let _enabled = read_scalar(input, size_of::<i32>())? != 0;
+        // R0 has one exact parser and no extended-ack TLV producer. These
+        // options are accepted only because unmodified iproute2 enables them.
+        // They must not become behavior-driving state; remove this no-op when
+        // the tools stop sending it or replace it with a reviewed real owner.
+        static REPORTED: AtomicBool = AtomicBool::new(false);
+        if !REPORTED.swap(true, Ordering::Relaxed) {
+            knoticeln!("netlink: EXT_ACK/STRICT_CHK accepted as stateless compatibility no-op");
+        }
+        return Ok(());
+    }
     let mutation = match (socket.socket_type(), level, option) {
+        (SocketType::NetlinkRoute | SocketType::NetlinkSockDiag, SOL_SOCKET, SO_SNDBUF) => {
+            if len < size_of::<i32>() {
+                return Err(SysError::InvalidArgument);
+            }
+            let value = read_scalar(input, size_of::<i32>())?;
+            if value <= 0 {
+                return Err(SysError::InvalidArgument);
+            }
+            SocketOptionMutation::SendBuffer(value as usize)
+        },
+        (SocketType::NetlinkRoute | SocketType::NetlinkSockDiag, SOL_SOCKET, SO_RCVBUF) => {
+            if len < size_of::<i32>() {
+                return Err(SysError::InvalidArgument);
+            }
+            let value = read_scalar(input, size_of::<i32>())?;
+            if value <= 0 {
+                return Err(SysError::InvalidArgument);
+            }
+            SocketOptionMutation::ReceiveBuffer(value as usize)
+        },
         (SocketType::Ipv4Udp, IPPROTO_IP, IP_RECVERR) => {
             SocketOptionMutation::ReceiveErrors(read_ipv4_scalar(input, len)? != 0)
         },

@@ -20,6 +20,12 @@ pub(super) type TcpEndpointEventRoutes =
     RecheckRoutes<TcpEndpointId, dyn TcpEndpointInvalidationObserver>;
 
 impl DomainStack {
+    pub(in crate::net) fn tcp_diagnostic_records(
+        &self,
+    ) -> Vec<anemone_net_api::tcp::TcpDiagnosticRecord> {
+        self.stack.lock().tcp_diagnostic_records()
+    }
+
     pub(in crate::net) fn register_tcp_endpoint_observer(
         &self,
         endpoint: TcpEndpointId,

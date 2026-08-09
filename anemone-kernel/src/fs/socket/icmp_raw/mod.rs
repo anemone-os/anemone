@@ -196,7 +196,9 @@ fn connect_icmp_raw_socket(
             operation.peer_port_projection = Some(port);
             Ok(())
         },
-        SocketAddress::UnixPathname(_) => Err(SocketConnectError::Unsupported),
+        SocketAddress::UnixPathname(_) | SocketAddress::Netlink { .. } => {
+            Err(SocketConnectError::Unsupported)
+        },
     }
 }
 
@@ -273,7 +275,11 @@ fn send_icmp_raw_socket(
     let explicit_destination = match destination {
         Some(SocketAddress::Ipv4 { address, .. }) => Some(address),
         None => None,
-        Some(SocketAddress::Unspecified | SocketAddress::UnixPathname(_)) => {
+        Some(
+            SocketAddress::Unspecified
+            | SocketAddress::UnixPathname(_)
+            | SocketAddress::Netlink { .. },
+        ) => {
             return Err(SocketSendError::Unsupported);
         },
     };

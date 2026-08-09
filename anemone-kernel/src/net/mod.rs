@@ -1,5 +1,6 @@
 //! Kernel-side network attach authority.
 
+mod diagnostics;
 mod domain;
 // Checkpoint 1 deliberately keeps this capability syscall-unreachable. The
 // next authorized checkpoint must connect its real Socket consumer or remove
@@ -8,6 +9,10 @@ pub(crate) mod icmp_raw;
 pub(crate) mod tcp;
 pub(crate) mod udp;
 mod worker;
+
+pub(crate) use diagnostics::{
+    LinkDiagnostic, LinkDiagnosticKind, TcpDiagnostic, route_diagnostics, tcp_diagnostics,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EventRegistrationError {

@@ -80,7 +80,9 @@ pub(super) fn connect_udp_socket(
         SocketAddress::Ipv4 { address, port } => endpoint
             .connect(UdpPeer::new(address, port))
             .map_err(map_connect_error),
-        SocketAddress::UnixPathname(_) => Err(SocketConnectError::Unsupported),
+        SocketAddress::UnixPathname(_) | SocketAddress::Netlink { .. } => {
+            Err(SocketConnectError::Unsupported)
+        },
     }
 }
 
@@ -124,7 +126,11 @@ pub(super) fn send_udp_socket(
     let destination = match destination {
         Some(SocketAddress::Ipv4 { address, port }) => Some(UdpPeer::new(address, port)),
         None => None,
-        Some(SocketAddress::Unspecified | SocketAddress::UnixPathname(_)) => {
+        Some(
+            SocketAddress::Unspecified
+            | SocketAddress::UnixPathname(_)
+            | SocketAddress::Netlink { .. },
+        ) => {
             return Err(SocketSendError::Unsupported);
         },
     };
