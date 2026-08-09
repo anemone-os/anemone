@@ -60,6 +60,7 @@ pub struct Parameters {
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
+    pub c_string_batch_bytes: Option<usize>,
     pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
@@ -184,6 +185,7 @@ impl Parameters {
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
+        materialize!(c_string_batch_bytes);
         materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
@@ -334,6 +336,8 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
+/// Maximum bytes copied per page-bounded direct C-string user-access window.
+pub const C_STRING_BATCH_BYTES: usize = {};
 /// Maximum number of strings accepted in each execve argv or envp vector.
 pub const EXECVE_MAX_STRING_COUNT: usize = {};
 /// Maximum number of processes
@@ -547,6 +551,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
+            resolved!(c_string_batch_bytes),
             resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
