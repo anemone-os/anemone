@@ -1,9 +1,9 @@
 # JH7110 GMAC 实施路线
 
-**状态：** Accepted / R2
+**状态：** Accepted / R3
 **最后更新：** 2026-08-09
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**当前修订：** R2
+**当前修订：** R3
 
 ## 全局 Implementation Boundary
 
@@ -11,8 +11,9 @@
   coherent DMA、per-node provider、稳定 `eth<N>` 与既有单接口 static IPv4；不实现板级
   clock/reset/syscon/PHY owner、runtime lifecycle、offload、多 queue 或多 IP。现有 boot-time
   external publisher（包括 VirtIO）必须迁移到同一 reservation handoff，避免按 provider 类型分叉。
-- **Owner / handoff / failure / cleanup：** per-node provider拥有 hardware progression；IRQ、logical、
-  netdev、Stack、control plane 与 System Power 保持各自 owner。opaque reservation 与 frame/pump
+- **Owner / handoff / failure / cleanup：** generic clock/reset providers 拥有 consumer admission transaction，
+  已 enable clock 与已完成 reset 不回滚，reset failure 只隔离当前 node；per-node provider拥有 hardware
+  progression；IRQ、logical、netdev、Stack、control plane 与 System Power 保持各自 owner。opaque reservation 与 frame/pump
   capability单向移交；failure 先撤销未发布 mapping/reservation，IRQ/DMA 未 quiesce时 retain 到
   reset/power-off。
 - **Protected ABI / contract / acceptance：** SystemTarget schema、socket ABI、frame contract、VirtIO
@@ -22,20 +23,22 @@
   VisionFive 2 完整验收。在此之前最终硬件 acceptance 事实保持 Not Run；Gate-specific board
   diagnostics 只作为诊断证据，不改变该边界。
 - **Stop conditions：** 发现需要改变 target/owner/handoff/failure/cleanup/ABI/contract/acceptance，
-  需要 generic PHY/clock framework，fence 被误当作 coherency 保证，或不能保持 per-node isolation，
+  需要扩大 generic controller API/contract、让 GMAC 保存 clock/reset 状态、fence 被误当作 coherency
+  保证，或不能保持 per-node isolation，
   必须停止并回 RFC review / Target Renegotiation。
 
 Gate 0--3 是同一 RFC 实现的有序阶段，不是独立产品 release。用户后续若只授权某一个 Gate，完成其
 post-gate check 后必须停止。本文当前只规划路线，不授权实现。
 
-## Gate 0 — Per-node discovery、resource、IRQ 与 firmware handoff
+## Gate 0 — Per-node discovery、resource、IRQ 与 controller/firmware handoff
 
 **状态：** Closed (Gate 0 implementation + board diagnostic)
 **Purpose：** 建立每个 matching node 的独立 probe 基础、准确 DT resource 事实和可复用的单项 IRQ
 selector；不启动 DMA、不发布 netdev。
 **Prerequisites：** RFC target/owner/contract delta 已 review；实现 Gate 0 获得明确授权。
-**Protected Boundary：** 不建立 GMAC bus/registry；不写 clock/reset/syscon/PHY；不硬编码 GMAC 数量、
-MMIO、IRQ 或 MAC；不 publication/attach；IRQ flow/device cause owner不变。
+**Protected Boundary：** 不建立 GMAC bus/registry；clock/reset 只走 generic provider，不解析 raw ID、
+不写 controller register、不保存其状态；不写 syscon/PHY；不硬编码 GMAC 数量、MMIO、IRQ 或 MAC；
+不 publication/attach；IRQ flow/device cause owner不变。
 
 **Deliverable：**
 
@@ -51,7 +54,7 @@ MMIO、IRQ 或 MAC；不 publication/attach；IRQ flow/device cause owner不变�
   IRQ；当前 `request_irq()` 会 unmask 且没有 `free_irq`，真实调用必须等 Gate 1 rings、handler context
   与 cause clear 全部 ready。不能注册空 handler。
 - 输出 bounded diagnostics：node path、MAC、MMIO range、selected interrupt name/index/specifier length、
-  `phy-mode` 与 firmware-handoff assumption。不得打印任意 DT property bytes 或敏感无关数据。
+  `phy-mode` 与 controller/firmware-handoff assumption。不得打印任意 DT property bytes 或敏感无关数据。
 - Gate 0 的临时 probe 以明确 unsupported/not-ready 结果停在 IRQ registration、DMA 与 publication 前；
   该临时退出必须在 Gate 3 删除，不能成为长期 fallback。
 
@@ -78,14 +81,12 @@ MMIO、IRQ 或 MAC；不 publication/attach；IRQ flow/device cause owner不变�
 - **Hardware status：** Passed (Gate 0 board diagnostic)。用户确认同一 production build 已在
   VisionFive 2 上完成本 Gate 的 capability/resource 诊断；该结果只覆盖本 Gate 的 MMIO、DWMAC
   version/features、DT MAC、`macirq` selector 与 `rgmii-id` 事实，不声称真实 `macirq` dispatch、
-  DMA、收发或 firmware handoff 已验收。
+  DMA、收发或完整 controller/firmware handoff 已验收。
 
-**Residual architecture friction (Euclid)：** GMAC probe 通过 generic `require_clock()`/
-`require_reset()` 满足 DT 声明的 provider 前提；clock/reset register owner 仍在 machine/provider，
-GMAC 不保存其状态或写 raw register。该调用与本 Gate “不写 clock/reset、firmware handoff 前提”的
-文字边界仍有表述张力，但没有形成第二份状态真相或 owner 穿透；后续 Gate 进入前应由 owner 明确
-这是 consumer admission 还是纯 firmware handoff，并在必要时做 route correction。该 Euclid 不阻塞
-当前 Gate 0 关闭，也不构成 current-contract cutover。
+**R3 route correction：** GMAC probe 通过 generic `require_clock()`/`require_reset()` 消费 DT 声明的
+provider capability；clock/reset register 与 transaction truth 仍只在 machine/provider。用户接受
+boot-lifetime no-rollback：已 enable clock 和已完成 reset 不撤销，reset failure 只隔离当前 node；GMAC
+不保存状态或执行补偿。原 firmware-only handoff owner mismatch 已闭合，不构成 current-contract cutover。
 
 **Cutover：** None。
 **Stop / Exit：** Gate 0 source/build/targeted semantic checks、architecture friction scan 与本 Gate
@@ -97,7 +98,8 @@ board diagnostic 已完成；最终 hardware acceptance 与 current contract 保
 **状态：** Planned / Not Run
 **Purpose：** 建立可审计的 coherent DMA sync/order 语义、DMA addressability 与 bounded RX/TX ownership；
 仍不发布 netdev。
-**Prerequisites：** Gate 0 post-gate check 关闭；用户提供的板级 coherency proof 已接受；DMA address
+**Prerequisites：** Gate 0 post-gate check 关闭；R3 controller admission/no-rollback semantics 已接受；
+用户提供的板级 coherency proof 已接受；DMA address
 width、descriptor/frame hardware alignment 与 ordering/fence semantics 已确定。
 **Protected Boundary：** `NET-FRAME-OWN-001` 不变；coherent visibility 与 ordering fence 分离；没有
 quiesce proof 不释放 backing；不借机实现 generic DWMAC/offload/multi-queue。

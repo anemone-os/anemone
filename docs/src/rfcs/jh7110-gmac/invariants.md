@@ -1,9 +1,9 @@
 # JH7110 GMAC 目标与不变量
 
-**状态：** Accepted / R2
+**状态：** Accepted / R3
 **最后更新：** 2026-08-09
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**适用修订：** R2
+**适用修订：** R3
 
 本文只定义本 RFC 的 target 与 proof obligations。当前 effective 规则以
 [`docs/src/contracts/`](../../contracts.md) 为准；本页不能在最终板级验收和
@@ -32,18 +32,21 @@
 覆盖另一个 node；后一个节点读取前一个节点资源。
 **Proof：** synthetic DT 多节点测试、source audit 与最终板级逐 node 日志。
 
-### JH-GMAC-002 — 固件交接是前提而不是隐式 owner
+### JH-GMAC-002 — Controller admission 与 firmware handoff 各有唯一 owner
 
 **分类：** Target Guarantee / Capability
-**规则：** driver 假定 firmware 已 enable clocks、deassert resets、选择 syscon/RGMII path 并初始化
-PHY。driver 可以验证 DT `phy-mode`、MAC register 可访问性和运行所需状态，但不得拥有或复制
-clock/reset/syscon/PHY state；不能证明 link 时必须报告 `Unknown`。
-**Owner：** firmware/board environment 拥有前置配置；per-node provider 拥有 handoff 后的 MAC/DMA
+**规则：** driver 必须按本节点 DT name 通过 generic providers 请求所需 clock enable 与 reset
+transaction；不得解析 raw provider ID、写 controller register 或缓存 controller 状态。Clock enable 是
+boot-lifetime 单调 admission，后续失败不回滚；reset failure 只让当前 node fail closed，已完成 reset 不
+重放或补偿。firmware/board environment 继续拥有 clock rate/mux、syscon/RGMII path 与 PHY 初始化；不能
+证明 link 时必须报告 `Unknown`。
+**Owner：** generic clock/reset providers 唯一拥有 register 与 transaction truth；firmware/board
+environment 拥有 rate/mux、syscon/RGMII/PHY handoff；per-node provider 拥有 admission 后的 MAC/DMA
 current truth。
-**违反表现：** 临时硬编码 syscon bit；把 DT clock/reset specifier 当作已执行动作；没有 PHY/link
-证据却发布 `Up`；为了过板隐式加入 MDIO policy。
-**Proof：** source audit确认无 board-controller write；probe diagnostics 与最终真实收发证明 handoff
-足以支持 target。若不足，停止并回 RFC review。
+**违反表现：** GMAC 直接 RMW controller；保存 `clock_enabled`/`reset_done` 第二份 truth；probe failure
+关闭已启用 clock或重放已完成 reset；一个 node 的失败补偿另一个 node；没有 PHY/link 证据却发布 `Up`。
+**Proof：** source audit确认所有 clock/reset 操作只走 generic providers，failure path 无 rollback/补偿；
+provider owner-local tests、per-node probe isolation 与最终真实收发证明 handoff 足以支持 target。
 
 ### JH-GMAC-003 — IRQ selector 只选择资源，不解释 controller
 

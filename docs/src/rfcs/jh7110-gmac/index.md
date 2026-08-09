@@ -1,12 +1,12 @@
 # RFC-20260808-jh7110-gmac
 
 **状态：** Accepted
-**修订：** R2
+**修订：** R3
 **负责人：** Anemone maintainers
 **最后更新：** 2026-08-09
 **领域：** driver / net / irq / mm
 **影响契约：** `IRQ-FLOW-001`、`NET-IFACE-DOMAIN-001`、`NET-ATTACH-001`
-**执行记录：** Git commit（R0 acceptance；Gate 0 closure；R2 target renegotiation）
+**执行记录：** Git commit（R0 acceptance；Gate 0 closure；R2/R3 target renegotiation）
 
 ## 摘要
 
@@ -15,8 +15,10 @@
 probe；每个节点拥有自己的 MMIO、DMA-coherent backing、descriptor ring、IRQ context、
 `FrameProvider`、worker 和 recheck edge，不建立 GMAC bus、GMAC 全局 registry 或固定双实例表。
 
-板级 clock、reset、syscon/RGMII path 与 PHY 被视为 firmware handoff 前提。本 RFC 不建立这些
-子系统的通用 owner，也不接管运行时 link management。驱动只在硬件 DMA coherency、ordering、
+通用 clock/reset provider 拥有控制寄存器与 enable/reset transaction；GMAC 只按本节点 DT name 请求
+boot-time consumer admission，不保存 provider 状态，也不执行失败回滚。firmware 继续拥有 clock
+rate/mux、syscon/RGMII path 与 PHY handoff。本 RFC 不建立这些通用 owner，也不接管运行时 link
+management。驱动只在硬件 DMA coherency、ordering、
 DMA ownership、`macirq` 和 per-node resource 均成立后发布 netdev。多个已发布
 GMAC 进入现有 initial domain 与唯一 global Stack；沿用现有单个 `[network.ipv4]` 配置，只给
 配置选中的稳定 `eth<N>` 分配 IPv4 和唯一 default route。
@@ -75,7 +77,8 @@ runtime hotplug。
 
 ## 非目标
 
-- 通用 clock、reset、syscon、pinctrl、MDIO 或 PHY framework，以及 driver 主动完成板级上电。
+- 新建或扩张通用 clock/reset/syscon/pinctrl/MDIO/PHY framework，以及 GMAC 直接解析 provider ID、写
+  controller register 或缓存 controller 状态。
 - 运行时 link renegotiation、cable hotplug policy、PHY interrupt、runtime detach/retry/restart。
 - Wake-on-LAN、EEE/LPI interrupt、TSO、checksum offload、PTP、Jumbo Frame 或多 queue。
 - 通用 DWMAC family、其它 SoC glue、SGMII、1000BASE-X 或非 `rgmii-id` 板型。
@@ -91,6 +94,8 @@ runtime hotplug。
 | DT traversal、platform device 与 driver binding | generic discovery / platform bus | 每个 matching node 独立调用 concrete `probe()` |
 | interrupt name/index 解析与单项 specifier | firmware-node / IRQ resource layer | 解析后的单个 specifier 交给 irqchip `xlate()` |
 | controller mapping 与 dispatch flow | IRQ core / irqchip | handler 前后遵循 `IRQ-FLOW-001` |
+| clock gate 与 reset transaction | generic clock/reset provider | GMAC 按本节点 DT name 请求 one-time consumer admission |
+| clock rate/mux、syscon/RGMII path 与 PHY | firmware/board environment | GMAC 消费既有 board handoff，不建立运行时管理 |
 | MAC/DMA registers、rings、frames、completion、current link truth | per-node JH7110 provider | callback-scoped frame capability与durable recheck edge |
 | netdev identity与publication record | `device/net` | published capability交给 attach authority |
 | logical identity、ifindex、`eth<N>` reservation与membership | initial-domain `LogicalInterfaces` | driver/provider只携带opaque reservation token |
@@ -100,19 +105,24 @@ runtime hotplug。
 
 ### Handoff 与线性化点
 
-1. Platform bus 按 DT discovery order 进入 matching-node probe。probe 的第一项网络动作是向
+1. Platform bus 按 DT discovery order 进入 matching-node probe。GMAC 先通过 generic providers 按
+   `clock-names`/`reset-names` 请求 boot-time admission；provider 独占寄存器与 transaction 语义。
+2. probe 的第一项网络动作是向
    logical owner 取得 unpublished external reservation；这个动作线性化 `eth<N>` ordinal。
-2. IRQ resource layer 以 name `macirq` 解析 index，再按 interrupt parent 的 cell width 截取恰好
+3. IRQ resource layer 以 name `macirq` 解析 index，再按 interrupt parent 的 cell width 截取恰好
    一个 specifier；irqchip 只翻译该项，descriptor 发布后 IRQ core 才 unmask。
-3. Provider 在 queue、RX refill、IRQ、cache/DMA proof 和 wake wiring 完成后，才将 ready
+4. Provider 在 queue、RX refill、IRQ、cache/DMA proof 和 wake wiring 完成后，才将 ready
    capability连同 opaque logical reservation 移交 `device/net`。
-4. Attach authority 建立 Stack mapping 和 inactive worker，最后在同一 authority transaction 中
+5. Attach authority 建立 Stack mapping 和 inactive worker，最后在同一 authority transaction 中
    commit 原 reservation、记录 active path 并 activate worker。
-5. Frame backing 的每次 CPU/device ownership transfer 以 descriptor ownership publication 或
+6. Frame backing 的每次 CPU/device ownership transfer 以 descriptor ownership publication 或
    completion observation 为线性化点；coherent visibility 与 ordering fence 都必须在对应一侧成立。
 
 ### Failure 与 cleanup
 
+- Clock enable 是 boot-lifetime 单调 admission；后续 clock/reset/resource/probe 失败不关闭已启用 clock。
+  Reset transaction 失败只让当前 node fail closed，不由 GMAC 猜测、缓存或反向补偿 provider 状态。
+  已完成的 reset 也不因后续 probe 失败而重放或回滚。
 - reservation 之后的 MAC、MMIO、IRQ、DMA 或 provider failure 必须 abort token；ordinal 保持已消费，
   不发布 logical member、netdev 或 Stack mapping。
 - IRQ 注册前的失败释放 owner-local allocations。IRQ 注册后因当前没有 `free_irq`，provider 必须
@@ -183,7 +193,7 @@ contract。
 
 ## Acceptance 与 Validation
 
-接受本 R2 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示 Gate 1 或完整硬件能力已经
+接受本 R3 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示 Gate 1 或完整硬件能力已经
 交付。实现 closure 必须依次满足：
 
 1. Gate 0--3 全部实现，并在每个 Gate 后完成其 source audit、build、targeted tests 和
@@ -228,11 +238,15 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
   coherent。删除强制 clean/invalidate 和 cache-line ownership isolation，保留独立的 fence/MMIO
   ordering、DMA addressability、descriptor/frame layout、ownership 与 quiesce proof；其它 target、
   owner、contract delta 与 acceptance 不变。
+- `R3`：接受 provider-owned clock/reset consumer admission。GMAC 按本节点 DT name 请求能力，generic
+  providers 唯一拥有 register 与 transaction；clock enable 和已完成 reset 均不回滚，reset failure 只使
+  当前 node fail closed。firmware 继续拥有 rate/mux、syscon/RGMII 与 PHY；public API、contract delta
+  和最终 acceptance 不变。
 
 ## Closure
 
-Not Closed。R2 target 已接受；Gate 0 implementation 与修复后的 board diagnostic 已关闭。诊断确认两
+Not Closed。R3 target 已接受；Gate 0 implementation 与修复后的 board diagnostic 已关闭。诊断确认两
 个 GMAC 节点都能独立读取 DWMAC capability，但 Gate 0 仍按设计在 DMA/IRQ/attach 前返回
-`NotYetImplemented`；QEMU 不含 JH7110。用户板级证据已闭合 R2 的 coherency target 前提，但 Gate 1--3、
-最终 VisionFive 2 验收与 current-contract cutover 均未完成；本次仅修订 RFC target，不自动进入 Gate 1
-实现。
+`NotYetImplemented`；QEMU 不含 JH7110。用户板级证据已闭合 coherency 前提，R3 已闭合 clock/reset
+consumer admission owner 与 no-rollback failure semantics；Gate 1--3、最终 VisionFive 2 验收与
+current-contract cutover 均未完成。
