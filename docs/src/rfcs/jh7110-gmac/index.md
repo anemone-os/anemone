@@ -6,7 +6,7 @@
 **最后更新：** 2026-08-09
 **领域：** driver / net / irq / mm
 **影响契约：** `IRQ-FLOW-001`、`NET-IFACE-DOMAIN-001`、`NET-ATTACH-001`
-**执行记录：** Git commit（R0 acceptance；Gate 0 closure；R2/R3 target renegotiation）
+**执行记录：** Git commit（R0 acceptance；Gate 0/1 closure；R2/R3 target renegotiation）
 
 ## 摘要
 
@@ -245,8 +245,11 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
 
 ## Closure
 
-Not Closed。R3 target 已接受；Gate 0 implementation 与修复后的 board diagnostic 已关闭。诊断确认两
+Not Closed。R3 target 已接受；Gate 0 implementation/board diagnostic 与 Gate 1 software implementation
+均已关闭。Gate 0 诊断确认两
 个 GMAC 节点都能独立读取 DWMAC capability，但 Gate 0 仍按设计在 DMA/IRQ/attach 前返回
-`NotYetImplemented`；QEMU 不含 JH7110。用户板级证据已闭合 coherency 前提，R3 已闭合 clock/reset
-consumer admission owner 与 no-rollback failure semantics；Gate 1--3、最终 VisionFive 2 验收与
+`NotYetImplemented`；Gate 1 已建立 stopped RX/TX rings、coherent ordering、40-bit address validation、
+device-cause handler 与 registered-IRQ retention，并继续在 publication 前返回临时错误。QEMU 不含
+JH7110。用户板级证据已闭合 coherency 前提，R3 已闭合 clock/reset consumer admission owner 与
+no-rollback failure semantics；Gate 1 硬件状态仍为 Not Run，Gate 2--3、最终 VisionFive 2 验收与
 current-contract cutover 均未完成。

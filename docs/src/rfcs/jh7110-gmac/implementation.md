@@ -90,12 +90,12 @@ boot-lifetime no-rollback：已 enable clock 和已完成 reset 不撤销，rese
 
 **Cutover：** None。
 **Stop / Exit：** Gate 0 source/build/targeted semantic checks、architecture friction scan 与本 Gate
-board diagnostic 已完成；最终 hardware acceptance 与 current contract 保持 Not Run/未切换。Gate 1
-仍为 `Planned / Not Run`，本 checkpoint 不把后续前置审计或实现写成 Gate 1 closure。
+board diagnostic 已完成；最终 hardware acceptance 与 current contract 保持 Not Run/未切换。本
+checkpoint 没有自动授权 Gate 1；Gate 1 的后续 closure 由下节独立记录。
 
 ## Gate 1 — Coherent DMA 与 ring ownership
 
-**状态：** Planned / Not Run
+**状态：** Closed
 **Purpose：** 建立可审计的 coherent DMA sync/order 语义、DMA addressability 与 bounded RX/TX ownership；
 仍不发布 netdev。
 **Prerequisites：** Gate 0 post-gate check 关闭；R3 controller admission/no-rollback semantics 已接受；
@@ -131,12 +131,20 @@ quiesce proof 不释放 backing；不借机实现 generic DWMAC/offload/multi-qu
   只证明路径存在，不证明板上 coherency/order correctness。
 - Architecture Friction Scan：检查第二份 coherency truth、generic DMA API 为单 driver 过度扩张、
   test-only bypass 与隐含 quiesce。
+- **Evidence：** VisionFive 2 RV64 release kernel build 与 xtask `fmt all --check` 通过；owner-local
+  KUnit 覆盖 FwNode、IRQ cause、descriptor layout、40-bit address boundary、ring wrap/full、RX refill、
+  TX reclaim 与 durable pending cause。RV64 production image 的反汇编确认 MMIO 路径生成 `fence w,o`
+  与 `fence i,ir`。Gate 1 source/ownership review 确认 DMA engine 保持 stopped，IRQ 只在 rings/context/
+  cause baseline ready 后注册，临时 probe error 前禁用 device cause，并由已注册 IRQ context retain
+  backing；该抑制在 Gate 3 成功 publication path 删除。完整 516-case KUnit suite 另在既有
+  backtrace/symtab fixture 失败；该 fixture 使用 discovery-pass 空 symbol table，不属于本 Gate 的 GMAC
+  targeted evidence。
 - **Hardware status：** Not Run。Gate 1 后不上板；硬件 coherency、DMA engine 和 ring traffic 仍未验收。
 
 **Cutover：** None。
-**Stop / Exit：** 只要 coherency proof 缺失、DMA address width/representation 不可靠、ordering 或
-ownership handoff 不成立，或 cleanup 可能释放 device-owned backing，就立即停止，Gate 1 不关闭。全部
-静态/定向证据通过后关闭本阶段并等待下一 Gate 授权。
+**Stop / Exit：** Coherency 前提、DMA address width/representation、ordering、ownership handoff 与
+registered-IRQ retention 的静态/定向证据已通过，本阶段关闭。硬件 DMA/ring traffic 仍属于最终板级
+验收，保持 Not Run；Gate 2 未获授权，不在本阶段自动进入。
 
 ## Gate 2 — Per-node provider 与稳定 identity
 

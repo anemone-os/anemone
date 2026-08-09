@@ -1,15 +1,17 @@
-//! Gate 0 JH7110 GMAC discovery and firmware-handoff validation.
+//! Gate 0/1 JH7110 GMAC discovery, stopped rings, and IRQ cause handling.
 //!
-//! This module deliberately stops before DMA, IRQ registration, netdev
-//! publication, and attach. Those capabilities belong to later RFC gates.
+//! This module deliberately leaves the DMA engines stopped and stops before
+//! netdev publication and attach. Those capabilities belong to later gates.
 
 mod fwnode;
 mod irq;
 mod regs;
+mod ring;
 
 use fwnode::GmacFwConfig;
-use irq::GmacIrqContext;
+use irq::{GmacIrqContext, IRQ_HANDLER};
 use regs::GmacRegs;
+use ring::GmacRings;
 
 use crate::{
     device::{
@@ -19,6 +21,7 @@ use crate::{
         kobject::{KObjIdent, KObjectBase, KObjectOps},
         reset::require_reset,
     },
+    exception::intr::request_irq_selected,
     mm::remap::ioremap,
     prelude::*,
 };
@@ -138,10 +141,40 @@ impl DriverOps for JH7110GmacDriver {
                 return Err(error);
             },
         };
-        let irq_context = GmacIrqContext::prepare(regs.clone());
+        // Clear any firmware-left cause before allocating device-owned
+        // backing. The channel remains stopped; Gate 1 never starts DMA.
+        regs.disable_device_interrupts();
+        regs.acknowledge_dma_causes();
+        let rings = match GmacRings::new() {
+            Ok(rings) => rings,
+            Err(error) => {
+                kerrln!(
+                    "jh7110-gmac {}: DMA ring construction failed: {:?}",
+                    device.name(),
+                    error
+                );
+                return Err(error);
+            },
+        };
+        if let Err(error) = regs.configure_stopped_rings(
+            rings.rx_descriptor_phys(),
+            rings.tx_descriptor_phys(),
+            rings.rx_tail_phys(),
+            rings.tx_tail_phys(),
+            rings.ring_size(),
+            rings.frame_capacity(),
+        ) {
+            kerrln!(
+                "jh7110-gmac {}: stopped DMA ring setup failed: {:?}",
+                device.name(),
+                error
+            );
+            return Err(error);
+        }
+        let irq_context = GmacIrqContext::prepare(regs.clone(), rings);
 
         kinfoln!(
-            "jh7110-gmac {}: path={} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} source=local-mac-address mmio={:#x}+{:#x} macirq=index{} specifier-bytes={} phy-mode=rgmii-id dwmac={:#x} rxq={} txq={} hw0={:#x} hw1={:#x} hw2={:#x} hw3={:#x}",
+            "jh7110-gmac {}: path={} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} source=local-mac-address mmio={:#x}+{:#x} macirq=index{} specifier-bytes={} phy-mode=rgmii-id dwmac={:#x} dma-bits={} rxq={} txq={} hw0={:#x} hw1={:#x} hw2={:#x} hw3={:#x}",
             device.name(),
             node.node().path(),
             config.mac[0],
@@ -155,6 +188,7 @@ impl DriverOps for JH7110GmacDriver {
             interrupt.index(),
             interrupt.specifier().len(),
             capabilities.version,
+            capabilities.dma_address_bits,
             capabilities.rx_queues,
             capabilities.tx_queues,
             capabilities.hw_feature0,
@@ -163,11 +197,29 @@ impl DriverOps for JH7110GmacDriver {
             capabilities.hw_feature3,
         );
 
-        // request_irq() unmasks the controller and the Gate 0 handler/rings do
-        // not exist yet. `prepare()` established the disabled/acknowledged
-        // baseline; keep this node explicitly unbound until Gate 1.
+        if let Err(error) = request_irq_selected(
+            device.as_ref(),
+            InterruptSelector::Name("macirq"),
+            &IRQ_HANDLER,
+            Some(irq_context.private()),
+        ) {
+            kerrln!(
+                "jh7110-gmac {}: macirq registration failed: {:?}",
+                device.name(),
+                error
+            );
+            return Err(error);
+        }
+        // The controller is unmasked only after the private context, rings,
+        // and device-cause baseline are all retained and ready.
+        irq_context.enable();
+        // Gate 1 still returns the temporary pre-publication error. The IRQ
+        // core has no free operation, so suppress the device source and let
+        // the registered private context retain all reachable backing. Gate 3
+        // removes this suppression when its publication path commits.
+        irq_context.suppress_device_causes();
         kerrln!(
-            "jh7110-gmac {}: Gate 0 discovery complete; attach deferred",
+            "jh7110-gmac {}: Gate 1 rings and macirq ready; device causes suppressed; attach deferred",
             device.name()
         );
         Err(SysError::NotYetImplemented)
