@@ -152,9 +152,17 @@ mod kunits {
             phy_mode: Some("mii"),
             local_mac_address: None,
         };
+        let middle = FakeFwNode {
+            phy_mode: Some("mii"),
+            local_mac_address: Some(vec![0x02, 0, 0, 0, 0, 2]),
+        };
         let ready = FakeFwNode {
             phy_mode: Some("rgmii-id"),
             local_mac_address: Some(mac.to_vec()),
+        };
+        let tail = FakeFwNode {
+            phy_mode: Some("rgmii-id"),
+            local_mac_address: Some(vec![0x02, 0, 0, 0, 0, 3]),
         };
         assert!(
             GmacFwConfig::parse_parts(
@@ -165,8 +173,22 @@ mod kunits {
         );
         assert!(
             GmacFwConfig::parse_parts(
+                &middle,
+                &[Resource::mmio(PhysAddr::new(0x1604_0000), 0x10000)]
+            )
+            .is_err()
+        );
+        assert!(
+            GmacFwConfig::parse_parts(
                 &ready,
                 &[Resource::mmio(PhysAddr::new(0x1604_0000), 0x10000)]
+            )
+            .is_ok()
+        );
+        assert!(
+            GmacFwConfig::parse_parts(
+                &tail,
+                &[Resource::mmio(PhysAddr::new(0x1605_0000), 0x10000)]
             )
             .is_ok()
         );

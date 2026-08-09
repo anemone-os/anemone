@@ -74,8 +74,8 @@ selector；不启动 DMA、不发布 netdev。
   没有 JH7110 GMAC，运行日志因其 rootfs 期望的 `mmcblk0p3` 不存在而停止，不能作为本 Gate 的 GMAC
   targeted test 或硬件证据。FwNode/IRQ owner-local KUnit 已在此前 Gate 0 build/test pass 中覆盖
   name/index、specifier slicing、多节点独立失败与仅 `local-mac-address` 解析。
-- **Board diagnostic：** 用户运行修复后的 production build；被 `.gitignore` 忽略的用户私有日志
-  `etc/log-board-rv-13.log` 记录了 GMAC0/GMAC1 各自的 capability probe：register snapshot 中
+- **Board diagnostic：** 用户在 VisionFive 2 上运行修复后的 board build；用户保留的板级日志
+  记录了 GMAC0/GMAC1 各自的 capability probe：register snapshot 中
   `version=0x4152` 的低 8 位匹配 DWMAC 5.20，`hw_feature0..2` 非零，随后各自输出
   `local-mac-address`、独立 MMIO、`macirq` index 0/specifier length 4、`rgmii-id` 和单 RX/TX queue。
   该 snapshot 属于诊断运行；当前 production 成功路径只保留 bounded capability fields。probe 随后按
@@ -148,11 +148,11 @@ quiesce proof 不释放 backing；不借机实现 generic DWMAC/offload/multi-qu
 **Cutover：** None。
 **Stop / Exit：** Coherency 前提、DMA address width/representation、ordering、ownership handoff 与
 registered-IRQ retention 的静态/定向证据已通过，本阶段关闭。硬件 DMA/ring traffic 仍属于最终板级
-验收，保持 Not Run；Gate 2 未获授权，不在本阶段自动进入。
+验收，保持 Not Run；Gate 2 单独完成 staged provider 后停止，不自动进入 Gate 3。
 
 ## Gate 2 — Per-node provider 与 staged bind
 
-**状态：** Planned / Not Run
+**状态：** Closed (software checks + Gate 2 board staged-bind acceptance)
 **Purpose：** 把 Gate 1 的 hardware core 组成独立 `FrameProvider`，建立 per-device durable owner、
 多 provider isolation 和现有 global Stack 所需的窄能力；仍不进入 production publication。
 **Prerequisites：** Gate 1 post-gate check 关闭；ring/DMA/IRQ ownership 已在 source/tests 中闭合。
@@ -186,7 +186,32 @@ registered-IRQ retention 的静态/定向证据已通过，本阶段关闭。硬
 - Build/regression：相关 RV64 build、格式检查；既有 logical/netdev/frame tests 全通过。
 - Architecture Friction Scan：检查第二份 lifecycle/identity truth、raw Stack泄漏、provider singleton、
   无 consumer abstraction、probe-error retention与临时 publication bypass。
-- **Hardware status：** Not Run。Gate 2 后不上板；双 GMAC identity和独立 progression仍未验收。
+- **Evidence (2026-08-09)：** JH7110 owner-local KUnit now covers three independent firmware candidates
+  (first/middle failure with later success), ring reservation cancellation and wrong-index rejection,
+  lock-free paired RX/TX callback backing, malformed RX discard/refill, and durable/coalesced IRQ recheck
+  wake. `just fmt kernel --check` and
+  `just build --preset visionfive2-rv64-release --disasm` passed. `just test net-host` passed all existing
+  logical/netdev/frame and multi-provider progression suites. The repository `just test xtask` suite has one
+  unrelated QEMU-DTB mock assertion failure (`qemu_provider_uses_only_topology_and_cleans_failures`); it
+  does not exercise JH7110 code and is retained as an environmental baseline failure. Source audit confirms
+  provider -> IRQ-context and IRQ-private -> IRQ-context are the only strong references; the staged
+  `Option<Provider>` is device-local, DMA/device causes remain stopped/suppressed, and no publication or
+  `eth<N>` path is called. The provider retains the validated per-node
+  `local-mac-address` snapshot for the later publication handoff. `DmaRegion` derives raw subrange pointers
+  from one stable HHDM address without recreating a whole-allocation mutable reference; no manual
+  `Send`/`Sync` implementation is introduced.
+- **Board evidence (2026-08-09, user-run)：** 用户在 VisionFive 2 上对同一 Gate 2
+  implementation/board run 记录了两个节点的完整 staged-bind 成功路径。`ethernet@16030000` 与
+  `ethernet@16040000` 分别解析独立 `local-mac-address` (`6c:cf:39:00:59:1a` / `...:1b`)、MMIO、
+  `macirq` 和 DWMAC 5.20/40-bit capability，随后各自输出 `Gate 2 provider ready; device causes
+  suppressed; DMA stopped; publication deferred`；没有对应 probe failure。板上 KUnit runner 同时通过
+  本 Gate 新增的 durable/coalesced recheck、reservation cancellation/wrong-index、paired RX/TX backing、
+  layout/address 和 ring transition cases，最终输出 `All tests passed!`。
+- **Hardware status：** Passed (Gate 2 staged-bind boundary)。该结果证明两个目标 node 都完成
+  clock/reset、MMIO/capability、rings、IRQ registration/context、device-cause baseline、provider
+  construction 和 per-device durable bind。由于本 Gate 按设计保持 device causes suppressed、DMA stopped
+  且不 publication，它不证明真实 `macirq` dispatch、DMA progression、收发、logical identity 或
+  success-order `eth<N>`；这些仍属于 Gate 3 与最终 VisionFive 2 验收。
 
 **Cutover：** None。
 **Stop / Exit：** 任何实现若要求 driver 分配/查询 `eth<N>`、为每个 GMAC 建 Stack、以probe error下的

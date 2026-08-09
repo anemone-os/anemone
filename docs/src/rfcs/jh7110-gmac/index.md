@@ -264,4 +264,5 @@ Not Closed。R4 target 已接受；Gate 0 implementation/board diagnostic 与 Ga
 device-cause handler 与 registered-IRQ retention，并继续在 publication 前返回临时错误。QEMU 不含
 JH7110。用户板级证据已闭合 coherency 前提，R3 已闭合 clock/reset consumer admission owner 与
 no-rollback failure semantics；R4 已接受 success-order `eth<N>` 与 Gate 2 per-device staged bind。
-Gate 1 硬件状态仍为 Not Run，Gate 2--3、最终 VisionFive 2 验收与 current-contract cutover 均未完成。
+Gate 1 硬件 DMA/ring traffic 状态仍为 Not Run；Gate 2 软件检查与用户运行的双节点 board staged-bind
+验收已关闭。Gate 3、真实 DMA/IRQ traffic、最终 VisionFive 2 验收与 current-contract cutover 均未完成。

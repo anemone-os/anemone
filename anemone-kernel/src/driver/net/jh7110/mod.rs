@@ -1,15 +1,18 @@
-//! Gate 0/1 JH7110 GMAC discovery, stopped rings, and IRQ cause handling.
+//! Gate 0-2 JH7110 GMAC discovery, stopped rings, IRQ causes, and staged
+//! provider.
 //!
 //! This module deliberately leaves the DMA engines stopped and stops before
 //! netdev publication and attach. Those capabilities belong to later gates.
 
 mod fwnode;
 mod irq;
+mod provider;
 mod regs;
 mod ring;
 
 use fwnode::GmacFwConfig;
 use irq::{GmacIrqContext, IRQ_HANDLER};
+use provider::JH7110GmacProvider;
 use regs::GmacRegs;
 use ring::GmacRings;
 
@@ -24,7 +27,15 @@ use crate::{
     exception::intr::request_irq_selected,
     mm::remap::ioremap,
     prelude::*,
+    utils::any_opaque::AnyOpaque,
 };
+
+#[derive(Opaque)]
+struct JH7110GmacBinding {
+    /// Gate 2's owner-local one-shot handoff. Gate 3 consumes this slot for
+    /// publication; generic Device::drv_state remains immutable and opaque.
+    provider: SpinLock<Option<JH7110GmacProvider>>,
+}
 
 #[derive(Debug, KObject, Driver)]
 struct JH7110GmacDriver {
@@ -210,22 +221,30 @@ impl DriverOps for JH7110GmacDriver {
             );
             return Err(error);
         }
-        // The controller is unmasked only after the private context, rings,
-        // and device-cause baseline are all retained and ready.
-        irq_context.enable();
-        // Gate 1 still returns the temporary pre-publication error. The IRQ
-        // core has no free operation, so suppress the device source and let
-        // the registered private context retain all reachable backing. Gate 3
-        // removes this suppression when its publication path commits.
+        // Gate 2 registers the handler while the device-side source remains
+        // suppressed. Gate 3 may enable causes only after publication owns the
+        // provider and its worker handoff.
         irq_context.suppress_device_causes();
-        kerrln!(
-            "jh7110-gmac {}: Gate 1 rings and macirq ready; device causes suppressed; attach deferred",
+        let provider = JH7110GmacProvider::new(irq_context, config.mac);
+        device.set_drv_state(AnyOpaque::new(JH7110GmacBinding {
+            provider: SpinLock::new(Some(provider)),
+        }));
+        kinfoln!(
+            "jh7110-gmac {}: Gate 2 provider ready; device causes suppressed; DMA stopped; publication deferred",
             device.name()
         );
-        Err(SysError::NotYetImplemented)
+        Ok(())
     }
 
-    fn shutdown(&self, _device: &dyn Device) {}
+    fn shutdown(&self, device: &dyn Device) {
+        let state = device
+            .drv_state()
+            .cast::<JH7110GmacBinding>()
+            .expect("JH7110 GMAC device must carry staged binding");
+        if let Some(provider) = state.provider.lock_irqsave().as_ref() {
+            provider.suppress_device_causes();
+        }
+    }
 
     fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
         Some(self)

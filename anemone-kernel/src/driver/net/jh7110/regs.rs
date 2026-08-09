@@ -300,9 +300,9 @@ impl GmacRegs {
         Ok(())
     }
 
-    /// Gate 0 leaves all device-side causes disabled. Gate 1 may replace this
-    /// with the same owner-local operation after rings and handler context are
-    /// ready; no IRQ is requested while this baseline is in use.
+    /// Gate 0-2 leave all device-side causes disabled. Gate 3 may replace this
+    /// with an owner-local enable after publication and worker handoff are
+    /// ready.
     pub(super) fn disable_device_interrupts(&self) {
         self.write(offsets::GMAC_INT_ENABLE, 0);
         self.write(offsets::DMA_CHANNEL0_INTERRUPT_ENABLE, 0);

@@ -65,6 +65,7 @@ pub(super) enum RingError {
     FrameTooLarge,
     QueueFull,
     DeviceOwned,
+    ReservationMismatch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -185,6 +186,12 @@ pub(super) struct RxCompletion<R> {
     pub(super) tail: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RxReservation {
+    pub(super) index: usize,
+    pub(super) length: Option<usize>,
+}
+
 /// One contiguous backing allocation for both queues and all frame slots.
 ///
 /// The physical base and the CPU mapping remain stable for the lifetime of
@@ -195,7 +202,9 @@ pub(super) struct GmacRings {
     dma: DmaRegion,
     layout: RingLayout,
     rx_next: usize,
+    rx_reserved: Option<RxReservation>,
     tx_next: usize,
+    tx_reserved: Option<usize>,
     tx_clean: usize,
     tx_in_flight: usize,
 }
@@ -246,7 +255,9 @@ impl GmacRings {
             dma,
             layout,
             rx_next: 0,
+            rx_reserved: None,
             tx_next: 0,
+            tx_reserved: None,
             tx_clean: 0,
             tx_in_flight: 0,
         };
@@ -298,27 +309,77 @@ impl GmacRings {
         if frame.is_empty() || frame.len() > self.layout.frame_capacity {
             return Err(RingError::FrameTooLarge);
         }
-        if self.tx_in_flight == self.layout.ring_size {
+        let Some(index) = self.reserve_tx() else {
             return Err(RingError::QueueFull);
+        };
+        let frame_ptr = self.tx_frame_parts(index, frame.len())?.0;
+        unsafe { core::slice::from_raw_parts_mut(frame_ptr, frame.len()) }.copy_from_slice(frame);
+        self.commit_tx(index, frame.len())
+    }
+
+    pub(super) fn reserve_tx(&mut self) -> Option<usize> {
+        if self.tx_reserved.is_some() || self.tx_in_flight == self.layout.ring_size {
+            return None;
         }
         let index = self.tx_next;
+        if TxDescriptorFlags::from_bits_retain(self.read_descriptor_status(true, index))
+            .contains(TxDescriptorFlags::OWN)
+        {
+            return None;
+        }
+        self.tx_reserved = Some(index);
+        Some(index)
+    }
+
+    pub(super) fn cancel_tx(&mut self, index: usize) -> Result<(), RingError> {
+        if self.tx_reserved != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        self.tx_reserved = None;
+        Ok(())
+    }
+
+    pub(super) fn tx_frame_parts(
+        &mut self,
+        index: usize,
+        length: usize,
+    ) -> Result<(*mut u8, usize), RingError> {
+        if self.tx_reserved != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        if length == 0 || length > self.layout.frame_capacity {
+            return Err(RingError::FrameTooLarge);
+        }
+        if TxDescriptorFlags::from_bits_retain(self.read_descriptor_status(true, index))
+            .contains(TxDescriptorFlags::OWN)
+        {
+            return Err(RingError::DeviceOwned);
+        }
+        Ok((self.frame_ptr(true, index), length))
+    }
+
+    pub(super) fn commit_tx(&mut self, index: usize, length: usize) -> Result<u32, RingError> {
+        if self.tx_reserved != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        if length == 0 || length > self.layout.frame_capacity {
+            return Err(RingError::FrameTooLarge);
+        }
         if TxDescriptorFlags::from_bits_retain(self.read_descriptor_status(true, index))
             .contains(TxDescriptorFlags::OWN)
         {
             return Err(RingError::DeviceOwned);
         }
         let mut descriptor = self.read_descriptor(true, index);
-        let frame_ptr = self.frame_ptr(true, index);
-        unsafe { copy_nonoverlapping(frame.as_ptr(), frame_ptr, frame.len()) };
         let frame_phys = self.phys_at(self.layout.frame_offset(true, index).unwrap());
         descriptor.des0 = (frame_phys as u32).to_le();
         descriptor.des1 = ((frame_phys >> 32) as u32).to_le();
         descriptor.des2 = (TxDescriptorControl::IOC.bits()
-            | ((frame.len() as u32) & TxDescriptorControl::BUFFER1_SIZE_MASK.bits()))
+            | ((length as u32) & TxDescriptorControl::BUFFER1_SIZE_MASK.bits()))
         .to_le();
         descriptor.des3 = (TxDescriptorFlags::FIRST.bits()
             | TxDescriptorFlags::LAST.bits()
-            | ((frame.len() as u32) & 0x7fff))
+            | ((length as u32) & 0x7fff))
             .to_le();
         self.write_descriptor_without_owner(true, index, descriptor);
         self.dma.sync_for_device();
@@ -329,12 +390,16 @@ impl GmacRings {
                 | TxDescriptorFlags::OWN.bits(),
         );
         self.dma.sync_for_device();
+        self.tx_reserved = None;
         self.tx_next = (index + 1) & (self.layout.ring_size - 1);
         self.tx_in_flight += 1;
         Ok(self.phys_at(self.layout.descriptor_offset(true, self.tx_next).unwrap()) as u32)
     }
 
     pub(super) fn reclaim_tx(&mut self) -> Result<Option<TxCompletion>, RingError> {
+        if self.tx_reserved.is_some() {
+            return Err(RingError::ReservationMismatch);
+        }
         if self.tx_in_flight == 0 {
             return Ok(None);
         }
@@ -370,6 +435,24 @@ impl GmacRings {
         &mut self,
         consume: impl FnOnce(&[u8]) -> R,
     ) -> Option<RxCompletion<R>> {
+        let reservation = self.reserve_rx()?;
+        let result = if reservation.length.is_some() {
+            self.consume_rx(reservation.index, consume).ok()
+        } else {
+            self.discard_rx(reservation.index)
+                .ok()
+                .map(|tail| (None, tail))
+        }?;
+        Some(RxCompletion {
+            frame: result.0,
+            tail: result.1,
+        })
+    }
+
+    pub(super) fn reserve_rx(&mut self) -> Option<RxReservation> {
+        if self.rx_reserved.is_some() {
+            return None;
+        }
         let index = self.rx_next;
         let status = self.read_descriptor_status(false, index);
         if RxDescriptorFlags::from_bits_retain(status).contains(RxDescriptorFlags::OWN) {
@@ -381,7 +464,7 @@ impl GmacRings {
         let descriptor = self.read_descriptor(false, index);
         let flags = RxDescriptorFlags::from_bits_retain(descriptor.des3);
         let length = (descriptor.des3 & 0x7fff) as usize;
-        let frame = if !flags.contains(RxDescriptorFlags::FIRST)
+        let length = if !flags.contains(RxDescriptorFlags::FIRST)
             || !flags.contains(RxDescriptorFlags::LAST)
             || length == 0
             || length > self.layout.frame_capacity
@@ -389,17 +472,73 @@ impl GmacRings {
         {
             None
         } else {
-            let frame_ptr = self.frame_ptr(false, index);
-            Some(consume(unsafe {
-                core::slice::from_raw_parts(frame_ptr, length)
-            }))
+            Some(length)
         };
+        let reservation = RxReservation { index, length };
+        self.rx_reserved = Some(reservation);
+        Some(reservation)
+    }
+
+    pub(super) fn cancel_rx(&mut self, index: usize) -> Result<(), RingError> {
+        if self.rx_reserved.map(|reservation| reservation.index) != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        self.rx_reserved = None;
+        Ok(())
+    }
+
+    pub(super) fn discard_rx(&mut self, index: usize) -> Result<u32, RingError> {
+        self.complete_rx(index)
+    }
+
+    pub(super) fn complete_rx(&mut self, index: usize) -> Result<u32, RingError> {
+        if self.rx_reserved.map(|reservation| reservation.index) != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        self.finish_rx(index)
+    }
+
+    pub(super) fn rx_frame_parts(&mut self, index: usize) -> Result<(*const u8, usize), RingError> {
+        let Some(reservation) = self.rx_reserved else {
+            return Err(RingError::ReservationMismatch);
+        };
+        if reservation.index != index {
+            return Err(RingError::ReservationMismatch);
+        }
+        let Some(length) = reservation.length else {
+            return Err(RingError::ReservationMismatch);
+        };
+        Ok((self.frame_ptr(false, index).cast_const(), length))
+    }
+
+    pub(super) fn consume_rx<R>(
+        &mut self,
+        index: usize,
+        consume: impl FnOnce(&[u8]) -> R,
+    ) -> Result<(Option<R>, u32), RingError> {
+        let Some(reservation) = self.rx_reserved else {
+            return Err(RingError::ReservationMismatch);
+        };
+        if reservation.index != index {
+            return Err(RingError::ReservationMismatch);
+        }
+        let Some(length) = reservation.length else {
+            return Err(RingError::ReservationMismatch);
+        };
+        let frame_ptr = self.frame_ptr(false, index);
+        let result = consume(unsafe { core::slice::from_raw_parts(frame_ptr, length) });
+        let tail = self.finish_rx(index)?;
+        Ok((Some(result), tail))
+    }
+
+    fn finish_rx(&mut self, index: usize) -> Result<u32, RingError> {
+        if self.rx_reserved.map(|reservation| reservation.index) != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        self.rx_reserved = None;
         self.refill_rx(index);
         self.rx_next = (index + 1) & (self.layout.ring_size - 1);
-        Some(RxCompletion {
-            frame,
-            tail: self.phys_at(self.layout.descriptor_offset(false, self.rx_next).unwrap()) as u32,
-        })
+        Ok(self.phys_at(self.layout.descriptor_offset(false, self.rx_next).unwrap()) as u32)
     }
 
     fn refill_rx(&mut self, index: usize) {
@@ -545,6 +684,60 @@ mod kunits {
         ));
         assert!(low32_ring_fits(0x1_0000_0000, 0x100));
         assert!(!low32_ring_fits(0xffff_ff00, 0x200));
+    }
+
+    #[kunit]
+    fn jh7110_reservation_cancellation_is_owner_local_and_index_checked() {
+        let mut rings = GmacRings::new().unwrap();
+        let mut other = GmacRings::new().unwrap();
+        let tx_index = rings.reserve_tx().unwrap();
+        assert_eq!(other.reserve_tx(), Some(tx_index));
+        other.cancel_tx(tx_index).unwrap();
+        assert_eq!(
+            rings.cancel_tx((tx_index + 1) & (rings.ring_size() - 1)),
+            Err(RingError::ReservationMismatch)
+        );
+        assert_eq!(rings.cancel_tx(tx_index), Ok(()));
+        assert_eq!(rings.reserve_tx(), Some(tx_index));
+        assert_eq!(rings.cancel_tx(tx_index), Ok(()));
+
+        rings.write_descriptor_owner(false, 0, 0);
+        let rx = rings.reserve_rx().unwrap();
+        assert_eq!(
+            rings.cancel_rx((rx.index + 1) & (rings.ring_size() - 1)),
+            Err(RingError::ReservationMismatch)
+        );
+        assert_eq!(rings.cancel_rx(rx.index), Ok(()));
+        assert_eq!(rings.reserve_rx(), Some(rx));
+        assert_eq!(rings.cancel_rx(rx.index), Ok(()));
+    }
+
+    #[kunit]
+    fn jh7110_paired_rx_tx_backings_can_progress_without_nested_ring_access() {
+        let mut rings = GmacRings::new().unwrap();
+        let payload = [1u8, 2, 3, 4];
+        unsafe {
+            copy_nonoverlapping(payload.as_ptr(), rings.frame_ptr(false, 0), payload.len());
+        }
+        rings.write_descriptor_owner(
+            false,
+            0,
+            RxDescriptorFlags::FIRST.bits() | RxDescriptorFlags::LAST.bits() | payload.len() as u32,
+        );
+        let rx = rings.reserve_rx().unwrap();
+        let tx = rings.reserve_tx().unwrap();
+        let (rx_ptr, rx_len) = rings.rx_frame_parts(rx.index).unwrap();
+        let observed = unsafe {
+            let frame = core::slice::from_raw_parts(rx_ptr, rx_len);
+            // Match the production nested-callback order: derive and commit
+            // the paired TX backing while the RX frame reference is live.
+            let (tx_ptr, tx_len) = rings.tx_frame_parts(tx, payload.len()).unwrap();
+            core::slice::from_raw_parts_mut(tx_ptr, tx_len).copy_from_slice(frame);
+            rings.commit_tx(tx, payload.len()).unwrap();
+            frame.iter().copied().sum::<u8>()
+        };
+        assert_eq!(observed, 10);
+        rings.complete_rx(rx.index).unwrap();
     }
 
     #[kunit]

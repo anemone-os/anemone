@@ -15,6 +15,11 @@ use crate::prelude::*;
 #[derive(Debug)]
 pub struct DmaRegion {
     folio: OwnedFolio,
+    /// Stable HHDM address captured while `folio` is exclusively owned. All
+    /// later raw subrange pointers derive from this address without recreating
+    /// a whole-allocation Rust reference while a DMA token is live.
+    base: VirtAddr,
+    bytes: usize,
 }
 
 impl DmaRegion {
@@ -32,8 +37,16 @@ impl DmaRegion {
     /// the current virtio-on-QEMU setup, which behaves as a coherent DMA
     /// device, but non-coherent platforms will need explicit cache maintenance
     /// around device ownership transfers.
-    pub fn as_ptr(&mut self) -> NonNull<[u8]> {
-        unsafe { NonNull::new_unchecked(self.folio.as_bytes_mut()) }
+    pub fn as_ptr(&self) -> NonNull<[u8]> {
+        // SAFETY: `base` and `bytes` were captured from `folio` at allocation;
+        // `folio` remains owned for this region's lifetime. `as_ptr_mut` only
+        // creates a raw pointer and does not manufacture a Rust reference.
+        unsafe {
+            NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
+                self.base.as_ptr_mut::<u8>(),
+                self.bytes,
+            ))
+        }
     }
 
     /// Make CPU writes visible before handing the buffer to a device.
@@ -69,6 +82,10 @@ pub fn dma_alloc(nbytes: usize) -> Result<DmaRegion, SysError> {
         align_up_power_of_2!(nbytes, PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
 
     let folio = alloc_frames_zeroed(npages).ok_or(SysError::OutOfMemory)?;
+    let bytes = npages
+        .checked_mul(PagingArch::PAGE_SIZE_BYTES)
+        .ok_or(SysError::InvalidArgument)?;
+    let base = folio.range().start().to_phys_addr().to_hhdm();
 
-    Ok(DmaRegion { folio })
+    Ok(DmaRegion { folio, base, bytes })
 }
