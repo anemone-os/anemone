@@ -83,6 +83,7 @@
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
 		- [2026-08-09 - VFS open request](./devlog/changes/2026-08-09-vfs-open-request.md)
+		- [2026-08-09 - Positive dentry residency](./devlog/changes/2026-08-09-positive-dentry-residency.md)
 		- [2026-08-08 - Devfs hierarchical publication](./devlog/changes/2026-08-08-devfs-hierarchical-publication.md)
 		- [2026-08-08 - User fault local TLB completion](./devlog/changes/2026-08-08-user-fault-local-tlb.md)
 		- [2026-08-08 - Signal return fast path and syscall profiling](./devlog/changes/2026-08-08-signal-return-fast-path-and-syscall-profiling.md)

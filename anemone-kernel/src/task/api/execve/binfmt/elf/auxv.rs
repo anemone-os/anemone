@@ -5,6 +5,26 @@ use crate::{
 
 use anemone_abi::process::linux::aux_vec::*;
 
+/// Return the Linux-compatible hardware capability mask exposed to userspace.
+///
+/// Anemone treats the LoongArch software unaligned-access fallback as providing
+/// the user-visible UAL capability: consumers may issue unaligned accesses, but
+/// the bit does not promise a hardware implementation or a particular cost.
+/// Correctness of that fallback remains owned by the architecture trap handler;
+/// disabling the fallback must also withdraw the advertised capability.
+fn elf_hwcap() -> u64 {
+    #[cfg(all(target_arch = "loongarch64", feature = "soft_unaligned_access"))]
+    {
+        const HWCAP_LOONGARCH_UAL: u64 = 1 << 2;
+        HWCAP_LOONGARCH_UAL
+    }
+
+    #[cfg(not(all(target_arch = "loongarch64", feature = "soft_unaligned_access")))]
+    {
+        0
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(u64)]
 pub enum AuxEntry {
@@ -25,7 +45,7 @@ pub enum AuxEntry {
     RealGid(Gid) = AT_GID,
     EffectiveGid(Gid) = AT_EGID,
     Platform(VirtAddr) = AT_PLATFORM,
-    HwCap(NotSupported) = AT_HWCAP,
+    HwCap(u64) = AT_HWCAP,
     ClkTck = AT_CLKTCK,
     Secure(bool) = AT_SECURE,
     BasePlatform(VirtAddr) = AT_BASE_PLATFORM,
@@ -64,8 +84,8 @@ impl AuxEntry {
             | Self::BasePlatform(addr) => addr.get(),
             Self::PhEnt(size) | Self::PhNum(size) | Self::PageSz(size) => *size as u64,
             Self::Secure(secure_exec) => *secure_exec as u64,
-            Self::HwCap(NotSupported)
-            | Self::HwCap2(NotSupported)
+            Self::HwCap(hwcap) => *hwcap,
+            Self::HwCap2(NotSupported)
             | Self::RseqFeatureSize(NotSupported)
             | Self::RseqAlign(NotSupported)
             | Self::Flags(NotSupported) => 0, // we won't support these features. too complex.
@@ -123,7 +143,7 @@ impl AuxV {
             AuxEntry::RealGid(cred.gid.real),
             AuxEntry::EffectiveUid(cred.uid.effective),
             AuxEntry::RealUid(cred.uid.real),
-            AuxEntry::HwCap(NotSupported),
+            AuxEntry::HwCap(elf_hwcap()),
             AuxEntry::HwCap2(NotSupported),
             AuxEntry::RseqFeatureSize(NotSupported),
             AuxEntry::RseqAlign(NotSupported),

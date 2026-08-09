@@ -233,7 +233,7 @@ fn ext4_sync_fs(sb: &SuperBlock) -> Result<(), SysError> {
 
 static EXT4_FS_OPS: FileSystemOps = FileSystemOps {
     name: "ext4",
-    flags: FileSystemFlags::SHRINKABLE_ICACHE,
+    flags: FileSystemFlags::SHRINKABLE_ICACHE.union(FileSystemFlags::POSITIVE_DENTRY_RESIDENCY),
     mount: FileSystemMountOps::BlockDevice(ext4_mount),
     sync_fs: ext4_sync_fs,
     kill_sb: ext4_kill_sb,

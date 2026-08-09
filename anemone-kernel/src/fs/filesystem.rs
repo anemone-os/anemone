@@ -19,6 +19,11 @@ bitflags! {
         /// Indexed resident inodes can be evicted and later rebuilt by
         /// `load_inode`. Ghost eviction does not require this flag.
         const SHRINKABLE_ICACHE = 1 << 2;
+
+        /// Superblocks of this filesystem retain a bounded, best-effort set of
+        /// materialized positive dentries. This is a declarative VFS policy;
+        /// the backend does not receive hit, eviction, or invalidation hooks.
+        const POSITIVE_DENTRY_RESIDENCY = 1 << 3;
     }
 }
 

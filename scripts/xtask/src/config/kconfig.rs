@@ -67,6 +67,7 @@ pub struct Parameters {
     pub max_iovec_count: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
     pub ext4_sync_io_batch_pages: Option<usize>,
+    pub vfs_positive_dentry_residency_capacity: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
@@ -190,6 +191,7 @@ impl Parameters {
         materialize!(max_iovec_count);
         materialize!(getdents64_buffer_bytes);
         materialize!(ext4_sync_io_batch_pages);
+        materialize!(vfs_positive_dentry_residency_capacity);
         materialize!(pipe_capacity_pages);
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
@@ -346,6 +348,8 @@ pub const MAX_IOVEC_COUNT: usize = {};
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
 /// Maximum pages staged in one synchronous ext4 read or writeback request.
 pub const EXT4_SYNC_IO_BATCH_PAGES: usize = {};
+/// Maximum positive dentries retained by each opt-in superblock.
+pub const VFS_POSITIVE_DENTRY_RESIDENCY_CAPACITY: usize = {};
 /// Default anonymous-pipe capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Maximum anonymous-pipe capacity in pages.
@@ -550,6 +554,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(max_iovec_count),
             resolved!(getdents64_buffer_bytes),
             resolved!(ext4_sync_io_batch_pages),
+            resolved!(vfs_positive_dentry_residency_capacity),
             resolved!(pipe_capacity_pages),
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),

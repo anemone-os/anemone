@@ -1,6 +1,9 @@
 //! Path resolution and name lookup.
 
-use super::permission::{FsAccess, FsPermChecker};
+use super::{
+    permission::{FsAccess, FsPermChecker},
+    superblock::DentryAdmission,
+};
 use crate::{
     fs::{mount_placement_generation, mount_stack_top_at, root_pathref},
     prelude::*,
@@ -42,6 +45,7 @@ pub(super) fn materialize_child_dentry(
     parent: &Arc<Dentry>,
     name: &str,
     inode: InodeRef,
+    admission: DentryAdmission<'_>,
 ) -> Result<Arc<Dentry>, SysError> {
     if let Ok(child) = parent.lookup_child(name) {
         assert!(
@@ -51,6 +55,7 @@ pub(super) fn materialize_child_dentry(
             inode.ino(),
             child.inode().ino()
         );
+        admission.admit(&child);
         return Ok(child);
     }
 
@@ -66,6 +71,7 @@ pub(super) fn materialize_child_dentry(
         expected_inode.ino(),
         child.inode().ino()
     );
+    admission.admit(&child);
     Ok(child)
 }
 
@@ -515,8 +521,10 @@ fn lookup_child(path: &PathRef, name: &str) -> Result<PathRef, SysError> {
         return Err(SysError::NotDir);
     }
 
+    let sb = dir.sb();
+    let admission = sb.prepare_positive_dentry_admission();
     let inode = dir.lookup(name)?;
-    let dentry = materialize_child_dentry(path.dentry(), name, inode)?;
+    let dentry = materialize_child_dentry(path.dentry(), name, inode, admission)?;
 
     Ok(PathRef::new(path.mount().clone(), dentry))
 }
