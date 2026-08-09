@@ -3,13 +3,13 @@
 **Contract IDs：** `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`SOCKET-WAIT-001`
 **状态：** Active
 **Owner：** general Socket front拥有immutable descriptor/private envelope与共同FileOps/ABI/wait orchestration；concrete family ops拥有family state与operation predicate
-**参与领域：** socket syscall / VFS opened description / UDP / ICMP raw / TCP / Unix IPC / iomux / epoll
-**覆盖范围：** UDP、ICMP raw、IPv4 TCP与Unix stream/seqpacket共同Socket file association、typed operation boundary、Linux ABI containment、blocking与poll wait/recheck
+**参与领域：** socket syscall / VFS opened description / UDP / ICMP raw / TCP / Unix IPC / read-only netlink diagnostics / iomux / epoll
+**覆盖范围：** UDP、ICMP raw、IPv4 TCP、Unix stream/seqpacket与read-only netlink diagnostics的共同Socket file association、typed operation boundary、Linux ABI containment、blocking与poll wait/recheck
 **不覆盖：** family-specific packet/stream transaction、future family registry、通用error queue或通用mutable option bag
-**实现位置：** `anemone-kernel/src/fs/socket/{front,api,udp,icmp_raw,tcp,unix}/`、`anemone-abi/src/net.rs`、`anemone-rs/src/{os,sys}/linux/net.rs`
+**实现位置：** `anemone-kernel/src/fs/socket/{front,api,udp,icmp_raw,tcp,unix,netlink}/`、`anemone-abi/src/net.rs`、`anemone-rs/src/{os,sys}/linux/net.rs`
 **依赖：** `OPENED-DESC-001..003`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`、`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`、`NET-SOCKET-WAIT-001`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-06
+**最后核验：** 2026-08-09
 
 ## 状态与能力所有权
 
@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | semantic type与ops association | immutable static `SocketOps` descriptor | Socket保存descriptor引用与匹配的opaque private envelope | family-neutral dispatch与type query |
 | Linux tuple、sockaddr、flags、errno与user copy | Socket ABI adapter | concrete ops只接收normalized value/request并返回typed outcome | containment与Linux-visible mapping |
-| family role、buffer、namespace、protocol queue与operation predicate | 对应UDP、ICMP raw、TCP或Unix owner | front只持opaque private envelope并调用descriptor capability | operation commit与readiness求值 |
+| family role、buffer、namespace、protocol queue与operation predicate | 对应UDP、ICMP raw、TCP、Unix或netlink transport owner | front只持opaque private envelope并调用descriptor capability | operation commit与readiness求值 |
 | fd publication、description status、fd-local flags与final-release trigger | `task::files` opened-description owner | Socket提供unpublished preparation与static final-release hook | creation rollback、dup/fork与exactly-once close |
 | blocking round与iomux/epoll policy | Socket syscall、iomux或epoll各自consumer | family source提供snapshot、route publication与typed not-ready | wait、cancel与最终结果 |
 
@@ -81,14 +81,22 @@ blocking/nonblocking connect、accept/accept4、local/peer query和typed async e
 `SIGPIPE`由adapter投递，本次`MSG_NOSIGNAL`只抑制该信号。unsupported flag稳定返回`EOPNOTSUPP`，不得因consumer忽略
 错误而success-no-op。
 
+Netlink tuple只接受`AF_NETLINK + SOCK_RAW + NETLINK_ROUTE/NETLINK_SOCK_DIAG`。`sockaddr_nl`、
+`nlmsghdr`、rtnetlink/inet-diag layout、message alignment、sequence、Linux state/flag/errno与user copy均止于
+Socket/netlink adapter；network/TCP owner只提供normalized owned snapshot。`SO_SNDBUF/SO_RCVBUF`分发为
+netlink transport的bounded budget mutation，`NETLINK_EXT_ACK/NETLINK_GET_STRICT_CHK`只作为有注释、低噪声
+诊断与退出条件的stateless compatibility no-op，不建立mutable option bag或第二套parser。transport/framing、
+route/TCP projection与allocation/cleanup边界见[Read-only Netlink Diagnostics](./netlink-diagnostics.md)。
+
 **违反表现：** family ops解析Linux bit或返回Linux errno；raw user pointer越过adapter；descriptor与另存type不一致；
-copy fault提交未复制bytes；`SO_ERROR`恒零成功；Socket复制TCP/UDP pending cause；`sendmmsg`建立batch-owned state或绕过
-single-message transaction；没有producer却建立error state。
+copy fault提交未复制bytes；`SO_ERROR`恒零成功；Socket复制TCP/UDP pending cause；Linux netlink struct或state进入
+Network/TCP owner；`sendmmsg`建立batch-owned state或绕过single-message transaction；没有producer却建立error state。
 
 **验证 / Enforcement：** tuple/permission/flag、IPv4 connected/unconnected与Unix sockaddr input/output、file/vector/
 message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault、`sendmmsg` partial/copyout/clamp与fd
 rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc resolver、glibc/musl curated Socket LTP；
-两架构既有Socket/TCP suite，以及RV64 UDP extended-error deterministic chain。
+两架构既有Socket/TCP suite、RV64 UDP extended-error deterministic chain，以及双架构netlink raw oracle和未修改
+`ip`/`ss` consumer。
 
 **最初来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)。
 
@@ -96,7 +104,8 @@ rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc re
 `ICMP-RAW-CUTOVER`和[UDP Socket Extension RFC R1](../../rfcs/udp-socket-extension/index.md)的
 `UDP-EXT-R1-CUTOVER` Refine；随后由[IPv4 TCP Socket RFC R0](../../rfcs/net-tcp/index.md)的
 `NET-TCP-CUTOVER`及[IPv4 UDP ICMP extended error小迭代](../../devlog/changes/2026-08-06-ipv4-udp-icmp-extended-error.md)
-Refine。
+Refine；[Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-diagnostics/index.md)的
+`NETLINK-DIAGNOSTICS-CUTOVER`随后增加AF_NETLINK tuple与wire containment。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 
@@ -116,9 +125,10 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
 
 ## 当前接受边界
 
-- 当前五个真实consumer是IPv4 connected/unconnected UDP、`AF_INET + SOCK_RAW + IPPROTO_ICMP`、
+- 当前七个published static tuple是IPv4 connected/unconnected UDP、`AF_INET + SOCK_RAW + IPPROTO_ICMP`、
   `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`、
-  `AF_UNIX + SOCK_STREAM + protocol 0`与`AF_UNIX + SOCK_SEQPACKET + protocol 0`；message-style
+  `AF_UNIX + SOCK_STREAM + protocol 0`、`AF_UNIX + SOCK_SEQPACKET + protocol 0`，以及
+  `AF_NETLINK + SOCK_RAW + NETLINK_ROUTE/NETLINK_SOCK_DIAG`；message-style
   success surface发布给IPv4 UDP与TCP，`sendmmsg`只逐条复用这些已发布family transaction；本页不外推通用BSD
   Socket framework或`recvmmsg`。
 - 既有closure evidence覆盖RV64/LA64 release与guest runtime、UDP/TCP C/libc和musl resolver、raw/seqpacket focused ABI、
@@ -126,3 +136,6 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
   UDP extended-error增量覆盖RV64 dual-libc oracle、deterministic packet chain与glibc final-product resolver；该增量的
   LA64、physical hardware、`smp>1`、long pressure、full socket/network LTP均Not Run。final-image Socket LTP因缺少
   executable为0 attempted/6 skipped，初赛盘对应curated suite为6/6 PASS。
+- Netlink增量覆盖RV64 609/609、LA64 611/611 KUnit、双架构raw oracle、RV64 BusyBox 1.33.1与
+  LA64 final-image `/bin/ip`的`link/addr/route show`，以及双架构iproute2 6.1.0 `ss -tan`；hardware、
+  `smp>1`、压力/并发、full network LTP、双libc与完整final harness保持Not Run。

@@ -34,6 +34,17 @@ pub(in crate::net) struct Ipv4ControlPlane {
     external: Option<ExternalIpv4>,
 }
 
+#[derive(Clone)]
+pub(in crate::net) struct Ipv4ControlPlaneDiagnostic {
+    pub(in crate::net) local_interface: InterfaceId,
+    pub(in crate::net) external: Option<(
+        LogicalInterfaceSnapshot,
+        InterfaceId,
+        Ipv4Cidr,
+        Option<Ipv4Address>,
+    )>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::net) enum ControlPlaneActivationError {
     AlreadyPublished,
@@ -64,6 +75,20 @@ impl Ipv4Selection {
 }
 
 impl Ipv4ControlPlane {
+    pub(in crate::net) fn diagnostic_snapshot(&self) -> Ipv4ControlPlaneDiagnostic {
+        Ipv4ControlPlaneDiagnostic {
+            local_interface: self.local_interface,
+            external: self.external.as_ref().map(|external| {
+                (
+                    external.logical.clone(),
+                    external.interface,
+                    external.cidr,
+                    external.default_gateway,
+                )
+            }),
+        }
+    }
+
     pub(in crate::net) fn publish(
         slot: &mut Option<Self>,
         control_plane: Self,

@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use crate::Ipv4Address;
+use crate::{InterfaceId, Ipv4Address};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TcpEndpointId(u64);
@@ -122,6 +122,82 @@ pub enum TcpReleaseReason {
     AcceptedChildRollback,
     ListenerWithdrawal,
     FinalRelease,
+}
+
+/// Owner-normalized protocol state for read-only diagnostics.
+///
+/// This deliberately carries no Linux numeric state, smoltcp handle, endpoint
+/// identity, task, or file association. The Socket ABI adapter performs the
+/// final UAPI mapping after the Stack owner releases its observation window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TcpDiagnosticState {
+    Closed,
+    Listen,
+    SynSent,
+    SynReceived,
+    Established,
+    FinWait1,
+    FinWait2,
+    CloseWait,
+    Closing,
+    LastAck,
+    TimeWait,
+}
+
+/// One immutable TCP fact projected by the Stack owner for a single dump.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TcpDiagnosticRecord {
+    interface: InterfaceId,
+    state: TcpDiagnosticState,
+    local: TcpLocalBinding,
+    peer: Option<TcpPeer>,
+    receive_queue: usize,
+    send_queue: usize,
+}
+
+impl TcpDiagnosticRecord {
+    #[doc(hidden)]
+    pub const fn from_owner_snapshot(
+        interface: InterfaceId,
+        state: TcpDiagnosticState,
+        local: TcpLocalBinding,
+        peer: Option<TcpPeer>,
+        receive_queue: usize,
+        send_queue: usize,
+    ) -> Self {
+        Self {
+            interface,
+            state,
+            local,
+            peer,
+            receive_queue,
+            send_queue,
+        }
+    }
+
+    pub const fn interface(self) -> InterfaceId {
+        self.interface
+    }
+
+    pub const fn state(self) -> TcpDiagnosticState {
+        self.state
+    }
+
+    pub const fn local(self) -> TcpLocalBinding {
+        self.local
+    }
+
+    pub const fn peer(self) -> Option<TcpPeer> {
+        self.peer
+    }
+
+    pub const fn receive_queue(self) -> usize {
+        self.receive_queue
+    }
+
+    pub const fn send_queue(self) -> usize {
+        self.send_queue
+    }
 }
 
 impl TcpBindRequest {

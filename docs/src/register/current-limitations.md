@@ -2,6 +2,35 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260809-NETLINK-EAGER-REPLY-MATERIALIZATION
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** Netlink Socket / reply preparation / transient memory
+
+**Summary:** 当前read-only netlink transport在检查并提交owner-local pending reply budget前，会先为一整个
+request datagram eager materialize全部reply。`SO_RCVBUF`及1 MiB production上限仍严格约束已经发布并保留的
+pending reply bytes，但不约束这段request-local transient preparation。
+
+默认production Kconfig允许一条64 KiB datagram容纳910个72-byte inet-diag request，TCP snapshot最多包含
+128个engine record与64个endpoint record。每个request最多形成192个88-byte record与一个20-byte
+`NLMSG_DONE`，完整候选reply本身合计15,393,560 bytes；实现还为每个request同时准备36-byte
+`NLMSG_ERROR(-ENOBUFS)`，serialized buffers合计15,426,320 bytes，约14.7 MiB（15.4 MB），另加request
+payload与`Vec` / `Arc`等容器元数据。多个Socket并发send还可以叠加该working set。该分配仍受request与TCP
+Kconfig上界约束，pending publication仍保持完整multipart与terminal message或有序`-ENOBUFS`，没有partial
+dump、第二份network truth或错误的持久budget accounting。当前阶段接受这一低内存鲁棒性边界，并沿用bounded
+natural allocation在global OOM时的kernel-fatal policy。
+
+**Exit Condition:** 后续采用per-request preparation、reservation或bounded immutable cursor，把transient reply
+work纳入明确且更低的上界，同时保持owner snapshot在guard外完成、完整terminal publication、不持live owner
+handle、不引入nested owner lock或第二份状态真相；随后以最大multi-message request、最大TCP record set与并发
+Socket压力验证关闭本限制。
+
+**Owner:** Netlink Socket transport
+**Last Verified:** 2026-08-09
+**Related:** [Read-only Netlink Diagnostics当前契约](../contracts/socket/netlink-diagnostics.md)
+
 ## ANE-20260804-UNIX-SEQPACKET-EDGE-ABI
 
 **Type:** Limitation

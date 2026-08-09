@@ -4,8 +4,8 @@ use alloc::{vec, vec::Vec};
 use core::mem::size_of;
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_UNIX, AF_UNSPEC, MSG_DONTWAIT, MSG_ERRQUEUE, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC,
-    SockAddrIn, SockAddrUn, socklen_t,
+    AF_INET, AF_NETLINK, AF_UNIX, AF_UNSPEC, MSG_DONTWAIT, MSG_ERRQUEUE, MSG_NOSIGNAL, MSG_PEEK,
+    MSG_TRUNC, SockAddrIn, SockAddrNl, SockAddrUn, socklen_t,
 };
 use anemone_net_api::Ipv4Address;
 
@@ -21,6 +21,7 @@ use crate::{
 use super::profile::{SocketAddressAbi, socket_abi_profile};
 
 const SOCKADDR_IN_LEN: usize = size_of::<SockAddrIn>();
+const SOCKADDR_NL_LEN: usize = size_of::<SockAddrNl>();
 const SOCKADDR_UN_LEN: usize = size_of::<SockAddrUn>();
 const SOCKADDR_UN_PATH_OFFSET: usize = 2;
 pub(super) const MAX_SOCKADDR_INPUT_LEN: usize = 128;
@@ -62,6 +63,18 @@ fn parse_sockaddr_in(bytes: &[u8]) -> Result<SocketAddress, SysError> {
 fn read_sockaddr_in(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
     let (bytes, len) = copy_sockaddr_input(addr, len, SOCKADDR_IN_LEN)?;
     parse_sockaddr_in(&bytes[..len])
+}
+
+fn read_sockaddr_nl(addr: u64, len: u32) -> Result<SocketAddress, SysError> {
+    let (bytes, len) = copy_sockaddr_input(addr, len, SOCKADDR_NL_LEN)?;
+    let bytes = &bytes[..len];
+    if u16::from_ne_bytes(bytes[0..2].try_into().unwrap()) != AF_NETLINK as u16 {
+        return Err(SysError::AddressFamilyNotSupported);
+    }
+    Ok(SocketAddress::Netlink {
+        port: u32::from_ne_bytes(bytes[4..8].try_into().unwrap()),
+        groups: u32::from_ne_bytes(bytes[8..12].try_into().unwrap()),
+    })
 }
 
 fn parse_sockaddr_un(bytes: &[u8]) -> Result<SocketAddress, SysError> {
@@ -112,6 +125,7 @@ pub(super) fn read_socket_address(
 ) -> Result<SocketAddress, SysError> {
     match socket_abi_profile(socket_type).address() {
         SocketAddressAbi::Ipv4 => read_sockaddr_in(addr, len),
+        SocketAddressAbi::Netlink => read_sockaddr_nl(addr, len),
         SocketAddressAbi::UnixPathname => read_sockaddr_un(addr, len),
     }
 }
@@ -190,6 +204,18 @@ fn socket_address_bytes(socket_type: SocketType, address: Option<SocketAddress>)
             bytes[0..2].copy_from_slice(&(AF_INET as u16).to_ne_bytes());
             bytes[2..4].copy_from_slice(&port.to_be_bytes());
             bytes[4..8].copy_from_slice(&address.octets());
+            bytes
+        },
+        (SocketAddressAbi::Netlink, None) => {
+            let mut bytes = vec![0u8; SOCKADDR_NL_LEN];
+            bytes[0..2].copy_from_slice(&(AF_NETLINK as u16).to_ne_bytes());
+            bytes
+        },
+        (SocketAddressAbi::Netlink, Some(SocketAddress::Netlink { port, groups })) => {
+            let mut bytes = vec![0u8; SOCKADDR_NL_LEN];
+            bytes[0..2].copy_from_slice(&(AF_NETLINK as u16).to_ne_bytes());
+            bytes[4..8].copy_from_slice(&port.to_ne_bytes());
+            bytes[8..12].copy_from_slice(&groups.to_ne_bytes());
             bytes
         },
         (SocketAddressAbi::UnixPathname, None) => (AF_UNIX as u16).to_ne_bytes().to_vec(),
@@ -348,6 +374,7 @@ pub(super) fn map_send_error(error: SocketSendError) -> SysError {
         SocketSendError::AddressInUse => SysError::AddressInUse,
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
         SocketSendError::ResourceExhausted | SocketSendError::WouldBlock => SysError::Again,
+        SocketSendError::NoBufferSpace => SysError::NoBufferSpace,
         SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
         SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,

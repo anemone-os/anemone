@@ -35,6 +35,52 @@ bitflags! {
     }
 }
 
+/// VFS-owned access mode for an ordinary opened file object.
+///
+/// Path-only access is resolved before this type is constructed, so backend
+/// activation code cannot accidentally treat `O_PATH` as an I/O participant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileOpenAccess {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+impl FileOpenAccess {
+    pub(crate) const fn can_read(self) -> bool {
+        matches!(self, Self::Read | Self::ReadWrite)
+    }
+}
+
+/// Normalized input for one userspace opened-description activation.
+///
+/// The request is an operation-local snapshot, not another owner of access or
+/// mutable status state. Linux lookup/create/fd flags remain at the syscall
+/// boundary, while the opened description remains the persistent truth after
+/// publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FileOpenRequest {
+    access: FileOpenAccess,
+    status_flags: FileOpStatusFlags,
+}
+
+impl FileOpenRequest {
+    pub(crate) const fn new(access: FileOpenAccess, status_flags: FileOpStatusFlags) -> Self {
+        Self {
+            access,
+            status_flags,
+        }
+    }
+
+    pub(crate) const fn access(self) -> FileOpenAccess {
+        self.access
+    }
+
+    pub(crate) const fn status_flags(self) -> FileOpStatusFlags {
+        self.status_flags
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileIoCtx {
     status_flags: FileOpStatusFlags,

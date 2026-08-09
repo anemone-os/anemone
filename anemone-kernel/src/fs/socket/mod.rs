@@ -1,6 +1,7 @@
 mod api;
 mod front;
 mod icmp_raw;
+mod netlink;
 mod source;
 mod tcp;
 mod udp;
@@ -19,6 +20,7 @@ use front::{
     socket_file_desc_ops, socket_from_file, wait_for_socket_operation,
 };
 use icmp_raw::ICMP_RAW_SOCKET_OPS;
+use netlink::{NETLINK_ROUTE_SOCKET_OPS, NETLINK_SOCK_DIAG_SOCKET_OPS};
 use tcp::TCP_SOCKET_OPS;
 use udp::UDP_SOCKET_OPS;
 use unix::{UNIX_SEQPACKET_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS};

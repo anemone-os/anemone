@@ -65,6 +65,7 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub(crate) use self::{
+    file::{FileOpenAccess, FileOpenRequest},
     inode::{RenameFlags, reject_make_node},
     iomux::PollRoute,
     lock::{
@@ -73,6 +74,7 @@ pub(crate) use self::{
         retire_posix_locks, set_posix_lock, unlock_posix_lock,
     },
     uio::{UserBufferSegment, UserBufferSink, UserBufferSource},
+    vfs::vfs_open_description,
 };
 pub use cache_stats::resident_file_inode_cache_pages;
 mod vfs;

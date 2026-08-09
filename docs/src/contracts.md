@@ -144,6 +144,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Attach lifecycle](./contracts/net/attach-lifecycle.md)
 - [Socket 当前契约](./contracts/socket/index.md)
   - [Front、ABI 与 wait](./contracts/socket/front-abi-wait.md)
+  - [Read-only Netlink Diagnostics](./contracts/socket/netlink-diagnostics.md)
   - [Unix state、stream、address 与 lifecycle](./contracts/socket/unix-stream-lifecycle.md)
   - [Unix pathname namespace](./contracts/socket/unix-namespace.md)
   - [Unix seqpacket](./contracts/socket/unix-seqpacket.md)

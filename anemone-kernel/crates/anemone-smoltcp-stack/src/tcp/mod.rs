@@ -1,5 +1,6 @@
 //! The sole TCP namespace, endpoint, stream, and reclaim owner.
 
+mod diagnostics;
 mod facts;
 mod listener;
 mod namespace;
@@ -361,10 +362,11 @@ mod tests {
         Instant, Ipv4Address, Ipv4Cidr, Ipv4EgressSelection,
         icmp_raw::IcmpRawNamespacePolicy,
         tcp::{
-            TcpBindError, TcpBindRequest, TcpConnectFact, TcpConnectResult, TcpEndpointFacts,
-            TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError, TcpQueryError,
-            TcpReceiveMode, TcpReceiveResolveError, TcpReleaseReason, TcpShutdownDirection,
-            TcpShutdownOutcome, TcpStreamReceiveError, TcpStreamReceiveOutcome, TcpStreamSendError,
+            TcpBindError, TcpBindRequest, TcpConnectFact, TcpConnectResult, TcpDiagnosticState,
+            TcpEndpointFacts, TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError,
+            TcpQueryError, TcpReceiveMode, TcpReceiveResolveError, TcpReleaseReason,
+            TcpShutdownDirection, TcpShutdownOutcome, TcpStreamReceiveError,
+            TcpStreamReceiveOutcome, TcpStreamSendError,
         },
         udp::UdpNamespacePolicy,
     };
@@ -523,6 +525,17 @@ mod tests {
         };
         assert_eq!(connected.connect(), TcpConnectFact::Connected);
         assert!(connected.send_capacity() > 0);
+        let diagnostics = stack.tcp_diagnostic_records();
+        let listener_record = diagnostics
+            .iter()
+            .find(|record| record.state() == TcpDiagnosticState::Listen)
+            .expect("diagnostics must retain the logical listener");
+        assert_eq!(listener_record.local().port(), LISTEN_PORT);
+        assert_eq!(listener_record.receive_queue(), 1);
+        assert_eq!(listener_record.send_queue(), 1);
+        assert!(diagnostics.iter().any(|record| {
+            record.state() == TcpDiagnosticState::Established && record.peer().is_some()
+        }));
 
         let child = stack
             .claim_tcp_pending_child(listener)
@@ -552,6 +565,9 @@ mod tests {
             panic!("receiver lost connection facts");
         };
         assert_eq!(receiving.received_bytes(), 32);
+        assert!(stack.tcp_diagnostic_records().iter().any(|record| {
+            record.state() == TcpDiagnosticState::Established && record.receive_queue() == 32
+        }));
 
         assert_eq!(
             stack
@@ -583,6 +599,60 @@ mod tests {
                 .iter()
                 .any(|entry| entry.endpoint() == accepted)
         );
+    }
+
+    #[test]
+    fn diagnostics_include_passive_syn_received_before_accept_backlog() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, LISTEN_PORT))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                interface,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+        let client = stack.create_tcp_endpoint().unwrap();
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, LISTEN_PORT),
+            )
+            .unwrap();
+        let client_local = stack.protocols.tcp.connection(client).unwrap().local;
+
+        let mut passive = None;
+        for tick in 0..128 {
+            let _ = stack
+                .pump_local(
+                    interface,
+                    Instant::from_micros(tick * 1_000),
+                    PumpBudget::new(1, 1),
+                )
+                .unwrap();
+            passive = stack
+                .tcp_diagnostic_records()
+                .into_iter()
+                .find(|record| record.state() == TcpDiagnosticState::SynReceived);
+            if passive.is_some() {
+                break;
+            }
+        }
+        let passive = passive.expect("passive SYN_RECV must be diagnosable before completion");
+        assert_eq!(passive.local().port(), LISTEN_PORT);
+        assert_eq!(passive.peer().unwrap().port(), client_local.port());
+        assert_eq!(passive.receive_queue(), 0);
+        let listener = stack
+            .tcp_diagnostic_records()
+            .into_iter()
+            .find(|record| record.state() == TcpDiagnosticState::Listen)
+            .unwrap();
+        assert_eq!(listener.receive_queue(), 0);
     }
 
     #[test]
@@ -1153,6 +1223,11 @@ mod tests {
         stack
             .release_tcp_endpoint(accepted, TcpReleaseReason::FinalRelease)
             .unwrap();
+        assert!(stack.tcp_diagnostic_records().iter().any(|record| {
+            record.state() == TcpDiagnosticState::FinWait1
+                && record.local().port() == 25021
+                && record.peer().is_some_and(|peer| peer.port() == first_port)
+        }));
         drive(&mut stack, interface, 128);
         assert!(stack.observe_tcp_stream(client).unwrap().end_of_stream());
         stack
@@ -1165,6 +1240,11 @@ mod tests {
                 && entry.tuple.is_some_and(|tuple| {
                     tuple.local.port() == 25021 && tuple.peer.port() == first_port
                 })
+        }));
+        assert!(stack.tcp_diagnostic_records().iter().any(|record| {
+            record.state() == TcpDiagnosticState::TimeWait
+                && record.local().port() == 25021
+                && record.peer().is_some_and(|peer| peer.port() == first_port)
         }));
 
         let explicit = stack.create_tcp_endpoint().unwrap();

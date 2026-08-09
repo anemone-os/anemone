@@ -168,6 +168,12 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current effective规则见Network与Socket contract，
   register没有新增当前问题。
+- [RFC-20260809-read-only-network-diagnostics](./rfcs/read-only-network-diagnostics/index.md)：Closed R0；交付
+  initial-domain、IPv4-only、request-time snapshot的只读netlink子集，使未修改`ip link/addr/route show`与
+  `ss -tan`可读取logical interface、static control plane与TCP owner facts。既有网络owner不迁移；新增netlink
+  transport只拥有port、budget state与bounded pending reply work，诊断snapshot不得反向驱动网络行为。
+  `NETLINK-DIAGNOSTICS-CUTOVER`已Introduce三项netlink current contract并Refine `SOCKET-ABI-001`；双架构
+  KUnit、raw oracle与未修改BusyBox/iproute2工具通过，独立review为全0，supporting pages与transaction未创建。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
