@@ -131,14 +131,16 @@ quiesce proof 不释放 backing；不借机实现 generic DWMAC/offload/multi-qu
   只证明路径存在，不证明板上 coherency/order correctness。
 - Architecture Friction Scan：检查第二份 coherency truth、generic DMA API 为单 driver 过度扩张、
   test-only bypass 与隐含 quiesce。
-- **Evidence：** VisionFive 2 RV64 release kernel build 与 xtask `fmt all --check` 通过；owner-local
-  KUnit 覆盖 FwNode、IRQ cause、descriptor layout、40-bit address boundary、ring wrap/full、RX refill、
-  TX reclaim 与 durable pending cause。RV64 production image 的反汇编确认 MMIO 路径生成 `fence w,o`
-  与 `fence i,ir`。Gate 1 source/ownership review 确认 DMA engine 保持 stopped，IRQ 只在 rings/context/
-  cause baseline ready 后注册，临时 probe error 前禁用 device cause，并由已注册 IRQ context retain
-  backing；该抑制在 Gate 3 成功 publication path 删除。完整 516-case KUnit suite 另在既有
-  backtrace/symtab fixture 失败；该 fixture 使用 discovery-pass 空 symbol table，不属于本 Gate 的 GMAC
-  targeted evidence。
+- **Evidence：** `just fmt all --check` 与
+  `just build --preset visionfive2-rv64-release --disasm` 通过；fresh runtime rootfs 上的 RV64 QEMU software
+  run 执行 516 个 KUnit 并全部通过，其中 10 个 JH7110 owner-local cases 覆盖 FwNode、IRQ cause、
+  descriptor layout、40-bit address boundary、ring wrap/full、RX refill、TX reclaim 与 durable pending
+  cause。QEMU 不含 JH7110 device，该结果只证明软件语义，不是硬件验收。RV64 production image 的
+  反汇编确认 MMIO 路径生成 `fence w,o` 与 `fence i,ir`。Gate 1 source/ownership review 确认 DMA
+  engine 保持 stopped，IRQ 只在 rings/context/cause baseline ready 后注册，临时 probe error 前禁用
+  device cause，并由已注册 IRQ context retain backing；该抑制在 Gate 3 成功 publication path 删除。
+  独立只读 review 未发现 Apollyon/Keter；review 指出的重复 40-bit device truth 已在 Gate 1 follow-up
+  收敛到 register capability owner。
 - **Hardware status：** Not Run。Gate 1 后不上板；硬件 coherency、DMA engine 和 ring traffic 仍未验收。
 
 **Cutover：** None。

@@ -8,8 +8,9 @@ use crate::{
     prelude::*,
 };
 
-const DMA_ADDRESS_BITS: u32 = 40;
-const DMA_ADDRESS_MASK: u64 = (1u64 << DMA_ADDRESS_BITS) - 1;
+use super::regs::DWMAC_DMA_ADDRESS_BITS;
+
+const DMA_ADDRESS_MASK: u64 = (1u64 << DWMAC_DMA_ADDRESS_BITS) - 1;
 const DESCRIPTOR_ALIGNMENT: usize = 16;
 const FRAME_ALIGNMENT: usize = align_of::<u32>();
 const MIN_RING_SIZE: usize = 64;
@@ -218,7 +219,7 @@ impl GmacRings {
         if !dma_range_fits(phys_base, layout.total_bytes(), DMA_ADDRESS_MASK) {
             kerrln!(
                 "jh7110-gmac: DMA backing exceeds {}-bit address width base={:#x} bytes={:#x}",
-                DMA_ADDRESS_BITS,
+                DWMAC_DMA_ADDRESS_BITS,
                 phys_base,
                 layout.total_bytes()
             );
@@ -533,12 +534,12 @@ mod kunits {
         assert!(dma_range_fits(0xffff_fff0, 16, 0xffff_ffff));
         assert!(!dma_range_fits(0xffff_fff0, 17, 0xffff_ffff));
         assert!(dma_range_fits(
-            (1u64 << DMA_ADDRESS_BITS) - 0x1000,
+            (1u64 << DWMAC_DMA_ADDRESS_BITS) - 0x1000,
             0x1000,
             DMA_ADDRESS_MASK
         ));
         assert!(!dma_range_fits(
-            (1u64 << DMA_ADDRESS_BITS) - 0x1000,
+            (1u64 << DWMAC_DMA_ADDRESS_BITS) - 0x1000,
             0x1001,
             DMA_ADDRESS_MASK
         ));

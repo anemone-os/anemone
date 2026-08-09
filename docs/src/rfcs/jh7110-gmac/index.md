@@ -221,7 +221,9 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
 - [目标与不变量](./invariants.md)
 - [实施路线](./implementation.md)
 - [RFC 前定位材料](./positioning.md)（非规范）
-- commit / PR / optional transaction：None
+- commit / PR / optional transaction：Git commits（R0 acceptance；Gate 0 closure；R2/R3 target
+  renegotiation；Gate 1 closure 与 review follow-up）；optional transaction 为 None，本 RFC 的执行证据
+  由 Git 与本页 closure 保存。
 - 外部源码证据：固定 `xref:linux-6.6.32:arch/riscv/Kconfig#ARCH_DMA_DEFAULT_COHERENT`、
   `xref:linux-6.6.32:drivers/of/address.c#of_dma_is_coherent`、
   `xref:linux-6.6.32:drivers/net/ethernet/stmicro/stmmac/dwmac4.h`、

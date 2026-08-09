@@ -97,7 +97,7 @@ bitflags! {
     }
 }
 
-const DWMAC_DMA_ADDRESS_BITS: u32 = 40;
+pub(super) const DWMAC_DMA_ADDRESS_BITS: u32 = 40;
 const DWMAC_DMA_ADDRESS_ENCODING_40: u32 = 1;
 const DWMAC_DMA_STATUS_W1C: DmaStatus = DmaStatus::from_bits_retain(
     DmaStatus::RX_ERROR_BITS.bits()
