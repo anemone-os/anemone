@@ -34,6 +34,7 @@ timerfd_file_max_waiters = 16 # Fixed blocking-read and poll-route capacity per 
 max_iovec_count = 1024 # Maximum vectors imported by one ordinary vector I/O request; must not exceed IOV_MAX.
 getdents64_buffer_bytes = 2097152 # Maximum kernel staging buffer used by one getdents64 call.
 ext4_sync_io_batch_pages = 16 # Maximum pages staged in one synchronous ext4 read or writeback request.
+vfs_positive_dentry_residency_capacity = 1024 # Maximum positive dentries retained by each opt-in superblock.
 pipe_capacity_pages = 2 # Default anonymous-pipe capacity in pages; must be a power of two and at least two.
 pipe_max_capacity_pages = 16 # Maximum anonymous-pipe capacity in pages; must be a power of two and at least the default.
 unix_stream_direction_capacity_bytes = 65536 # Fixed byte capacity of each AF_UNIX stream direction.

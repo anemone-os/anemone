@@ -2,6 +2,10 @@ use core::fmt::Debug;
 
 use crate::prelude::*;
 
+mod residency;
+
+pub(super) use residency::{DentryResidencyTicket, PositiveDentryResidency};
+
 /// A [Dentry] determines the location of a file in a mounted filesystem.
 ///
 /// See [PathRef] for absolute location in the entire namespace.
@@ -87,10 +91,21 @@ impl Dentry {
 
     /// Remove a child dentry with the given name.
     pub fn remove_child(&self, name: &str) -> Result<(), SysError> {
+        let removed = self.take_child(name)?;
+        // Dentry::drop may re-enter the parent map, so release the map lock
+        // before dropping the removed lifetime capability.
+        drop(removed);
+        Ok(())
+    }
+
+    /// Unpublish and return a live child without dropping it under the parent
+    /// map lock. VFS namespace mutation uses the returned identity to retire
+    /// superblock-local residency after unpublication.
+    pub(super) fn take_child(&self, name: &str) -> Result<Arc<Dentry>, SysError> {
         if let Some(children) = self.inner.write().children.as_mut() {
             if let Some(existing) = children.get(name).and_then(|weak| weak.upgrade()) {
                 children.remove(name);
-                Ok(())
+                Ok(existing)
             } else {
                 // though the weak reference exists, it's not counted as a child if it can't be
                 // upgraded.

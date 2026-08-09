@@ -273,6 +273,12 @@ impl MountTree {
         let tx = self.tx_lock.lock();
         let plan = self.inner.lock_irqsave().plan_unmount(mount)?;
 
+        if plan.last_view {
+            // Extra dentry references must not turn owner-local cache policy
+            // into a false live-inode result for the final mount view.
+            plan.sb.drain_positive_dentries();
+        }
+
         if plan.last_view && plan.sb.has_alive_inode() {
             knoticeln!("mount detach: op=unmount reason=alive-inodes");
             return Err(SysError::Busy);

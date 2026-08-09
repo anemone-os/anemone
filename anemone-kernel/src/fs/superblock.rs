@@ -1,6 +1,18 @@
 use core::fmt::Debug;
 
-use crate::{fs::inode::Inode, prelude::*, utils::any_opaque::AnyOpaque};
+use crate::{
+    fs::{
+        dentry::{DentryResidencyTicket, PositiveDentryResidency},
+        inode::Inode,
+    },
+    prelude::*,
+    utils::any_opaque::AnyOpaque,
+};
+
+const _: () = assert!(
+    VFS_POSITIVE_DENTRY_RESIDENCY_CAPACITY > 0,
+    "vfs_positive_dentry_residency_capacity must be nonzero"
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FsMagic(u64);
@@ -100,6 +112,40 @@ pub struct SuperBlock {
     backing: MountSource,
     /// Mutable state of superblock.
     inner: RwLock<SuperBlockInner>,
+    /// Sole owner of additional positive-dentry membership for this
+    /// superblock. `None` means the filesystem did not opt in.
+    positive_dentry_residency: Option<Mutex<PositiveDentryResidency>>,
+}
+
+pub(super) struct DentryAdmission<'a> {
+    sb: &'a SuperBlock,
+    ticket: Option<DentryResidencyTicket>,
+}
+
+impl DentryAdmission<'_> {
+    /// Admit only into the superblock that issued this freshness ticket.
+    pub(super) fn admit(self, dentry: &Arc<Dentry>) {
+        let Some(ticket) = self.ticket else {
+            return;
+        };
+
+        let dentry_sb = dentry.inode().sb();
+        assert!(
+            core::ptr::eq(Arc::as_ptr(&dentry_sb), self.sb),
+            "dentry admission ticket used for a different superblock"
+        );
+
+        let evicted = {
+            self.sb
+                .positive_dentry_residency
+                .as_ref()
+                .expect("enabled admission must have a residency owner")
+                .lock()
+                .admit(ticket, dentry)
+        };
+        // Dentry::drop may enter its parent weak-child map.
+        drop(evicted);
+    }
 }
 
 impl Debug for SuperBlock {
@@ -127,6 +173,15 @@ impl SuperBlock {
         root_ino: Ino,
         backing: MountSource,
     ) -> Self {
+        let positive_dentry_residency = fs
+            .flags()
+            .contains(FileSystemFlags::POSITIVE_DENTRY_RESIDENCY)
+            .then(|| {
+                Mutex::new(PositiveDentryResidency::new(
+                    VFS_POSITIVE_DENTRY_RESIDENCY_CAPACITY,
+                ))
+            });
+
         Self {
             fs,
             ops,
@@ -138,6 +193,7 @@ impl SuperBlock {
                 indexed: HashMap::new(),
                 ghosts: Vec::new(),
             }),
+            positive_dentry_residency,
         }
     }
 
@@ -207,6 +263,43 @@ impl SuperBlock {
 
     pub(crate) fn stat(&self) -> Result<FsStat, SysError> {
         (self.ops.stat)(self)
+    }
+
+    /// Capture freshness before backend lookup or creation begins.
+    pub(super) fn prepare_positive_dentry_admission(&self) -> DentryAdmission<'_> {
+        let ticket = self
+            .positive_dentry_residency
+            .as_ref()
+            .map(|residency| residency.lock().ticket());
+        DentryAdmission { sb: self, ticket }
+    }
+
+    /// Make pre-commit materialization tickets stale after a successful
+    /// namespace removal or replacement.
+    pub(super) fn invalidate_positive_dentry_admissions(&self) {
+        if let Some(residency) = &self.positive_dentry_residency {
+            residency.lock().invalidate();
+        }
+    }
+
+    /// Remove the extra reference for an already-unpublished dentry.
+    pub(super) fn forget_positive_dentry(&self, dentry: &Arc<Dentry>) {
+        let forgotten = self
+            .positive_dentry_residency
+            .as_ref()
+            .and_then(|residency| residency.lock().forget(dentry));
+        // Dentry::drop may enter its parent weak-child map.
+        drop(forgotten);
+    }
+
+    /// Release all additional dentry residency before last-view inode checks.
+    pub(super) fn drain_positive_dentries(&self) {
+        let drained = self
+            .positive_dentry_residency
+            .as_ref()
+            .map(|residency| residency.lock().drain());
+        // Cross-owner drops are deliberately outside the residency lock.
+        drop(drained);
     }
 }
 
