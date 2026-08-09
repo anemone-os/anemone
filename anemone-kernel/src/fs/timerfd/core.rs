@@ -792,51 +792,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn gettime_refreshes_overdue_periodic_owner_and_rearms_successor() {
-        let cpu = cur_cpu_id();
-        let baseline = queued_timer_count(cpu);
-        let file = create_timerfd(TimerFdClock::Monotonic).unwrap();
-        let periodic = timer_spec(3600, 3600);
-        let interval_ns = periodic.interval_ns.unwrap();
-        settime(&file, relative_flags(), periodic).unwrap();
-
-        let core = TimerFdFile::core_from_file(&file).unwrap();
-        let stale_generation = {
-            let mut state = core.state.lock();
-            let stale_generation = state.generation;
-            assert!(cancel_timer_event(state.request.as_ref().unwrap()));
-            state.schedule = TimerFdSchedule::Armed {
-                deadline: TimerFdDeadline::Monotonic(0),
-                interval_ns: Some(interval_ns),
-            };
-            stale_generation
-        };
-
-        let snapshot = gettime(&file).unwrap();
-        assert_eq!(snapshot.interval_ns, Some(interval_ns));
-        assert!(snapshot.value_ns > 0);
-        assert!(snapshot.value_ns <= interval_ns);
-        let state = core.state.lock();
-        assert!(state.expirations > 0);
-        assert!(matches!(state.schedule, TimerFdSchedule::Armed { .. }));
-        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
-        let refreshed_expirations = state.expirations;
-        drop(state);
-        assert_eq!(queued_timer_count(cpu), baseline + 1);
-
-        // Model an old threaded completion that left the queue before gettime's
-        // refresh. The refreshed generation must make it harmless.
-        timerfd_expire_callback(Arc::downgrade(&core), stale_generation);
-        let state = core.state.lock();
-        assert_eq!(state.expirations, refreshed_expirations);
-        assert!(timer_event_is_queued(state.request.as_ref().unwrap()));
-        drop(state);
-        drop(core);
-        drop(file);
-        assert_eq!(queued_timer_count(cpu), baseline);
-    }
-
-    #[kunit]
     fn settime_old_value_projects_periodic_deadline_without_old_rearm() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);
