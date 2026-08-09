@@ -273,7 +273,7 @@ pub fn kernel_clone(
         // new task's sigaltstack should be the same as parent's since VM is not set.
         new_task.sig_altstack = NoIrqSpinLock::new(current_task.sig_altstack.lock().clone());
 
-        let (new_usp, _guard) = match cur_uspace.fork() {
+        let new_usp = match cur_uspace.fork() {
             Ok(forked) => forked,
             Err(e) => {
                 let _ = unsafe { Box::from_raw(frame_ptr) };
@@ -346,7 +346,7 @@ pub fn kernel_clone(
             let new_uspace = new_task.clone_uspace_handle();
             let mut usp_guard = new_uspace.lock();
             match usp_guard.fault_in_page(child_tid, PageFaultType::Write) {
-                Ok(fence) => drop(fence),
+                Ok(()) => {},
                 Err(e) => {
                     drop(usp_guard);
                     let _ = unsafe { Box::from_raw(frame_ptr) };

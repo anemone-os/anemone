@@ -95,14 +95,16 @@ fn sys_shmat(
     let tgid = task.tgid();
     let usp = task.clone_uspace_handle();
     let hint = attach_addr.map(|addr| (addr.page_down(), true));
-    let (addr, _guard) = usp.with_usp(|usp| {
-        usp.attach_sysv_shm(
-            reservation,
-            hint,
-            flags.contains(ShmAtFlags::REMAP),
-            prot,
-            tgid,
-        )
+    let addr = usp.with_usp(|guard| {
+        guard.run_tlb_transaction(None, |inner| {
+            inner.attach_sysv_shm(
+                reservation,
+                hint,
+                flags.contains(ShmAtFlags::REMAP),
+                prot,
+                tgid,
+            )
+        })
     })?;
 
     Ok(addr.get())

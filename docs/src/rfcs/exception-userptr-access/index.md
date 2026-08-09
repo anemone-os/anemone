@@ -8,10 +8,10 @@
 **事务日志：** [2026-08-01-exception-userptr-access](../../devlog/transactions/2026-08-01-exception-userptr-access.md)；
 实现与验收早于本 RFC promotion，历史代码由提交 `4ed73b76`、`70f422a0` 和 `97e02808` 保存。
 **影响契约：** None；R0 规则保持 RFC-local，尚未提取跨 RFC 的 user-access current contract。
-**开放问题：** [UACCESS-KETER-001](./tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)
-记录早于本 RFC 的 `RemoteUspFenceGuard` 锁边界问题；它不改变用户已经完成的 R0 验收，也不表示该问题
-已经修复。
-**下一步：** R0 无待实现阶段。若修正 remote fence、引入通用 exception table、改变 retry/partial 语义或
+**开放问题：** None；历史
+[UACCESS-KETER-001](./tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)
+已由 User TLB Completion RFC neutralize，runtime userptr默认runner边界仍在tracking页作为Safe项记录。
+**下一步：** R0 无待实现阶段。若引入通用 exception table、改变 retry/partial 语义或
 扩大到长期 pin/zero-copy，应启动 follow-up revision 或独立 RFC。
 
 ## 摘要

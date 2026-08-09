@@ -1,7 +1,4 @@
 //! Syscall argument validation helpers for user-controlled data.
-//!
-//! TODO: tlb shootdown, out of mutex lock.
-
 use core::{mem::MaybeUninit, str};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -49,7 +46,7 @@ fn validate_user_range(start: VirtAddr, len: usize) -> Result<(), SysError> {
 }
 
 fn fault_in_user_range(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     start: VirtAddr,
     len: usize,
     access: PageFaultType,
@@ -63,10 +60,8 @@ fn fault_in_user_range(
     let svpn = start.page_down();
     let evpn = end.page_up();
     for vpn in VirtPageRange::new(svpn, evpn - svpn).iter() {
-        let fence = usp
-            .fault_in_page(vpn.to_virt_addr(), access)
+        usp.fault_in_page(vpn.to_virt_addr(), access)
             .map_err(user_memory_error)?;
-        drop(fence);
     }
     Ok(())
 }
@@ -76,7 +71,7 @@ fn map_user_pointer_error(error: UserPtrAccessError) -> UserPtrAccessError {
 }
 
 fn read_user_bytes(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     dst: &mut [u8],
     src: VirtAddr,
 ) -> Result<usize, UserPtrAccessError> {
@@ -88,7 +83,7 @@ fn read_user_bytes(
 }
 
 fn write_user_bytes(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     dst: VirtAddr,
     src: &[u8],
 ) -> Result<usize, UserPtrAccessError> {
@@ -103,22 +98,22 @@ mod ptrs {
     use super::*;
 
     #[derive(Debug)]
-    pub struct UserReadPtr<'a, T: ?Sized> {
+    pub struct UserReadPtr<'a, 'h, T: ?Sized> {
         pub(super) ptr: *const T,
-        pub(super) usp: &'a mut UserSpace,
+        pub(super) usp: &'a mut UserSpaceGuard<'h>,
     }
 
     #[derive(Debug)]
-    pub struct UserWritePtr<'a, T: ?Sized> {
+    pub struct UserWritePtr<'a, 'h, T: ?Sized> {
         pub(super) ptr: *mut T,
-        pub(super) usp: &'a mut UserSpace,
+        pub(super) usp: &'a mut UserSpaceGuard<'h>,
     }
 
-    pub type UserReadSlice<'a, T> = UserReadPtr<'a, [T]>;
-    pub type UserWriteSlice<'a, T> = UserWritePtr<'a, [T]>;
+    pub type UserReadSlice<'a, 'h, T> = UserReadPtr<'a, 'h, [T]>;
+    pub type UserWriteSlice<'a, 'h, T> = UserWritePtr<'a, 'h, [T]>;
 
-    impl<'a, T> UserReadPtr<'a, T> {
-        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
+    impl<'a, 'h, T> UserReadPtr<'a, 'h, T> {
+        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceGuard<'h>) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             validate_user_range(addr, size_of::<T>())?;
 
@@ -129,7 +124,7 @@ mod ptrs {
         }
     }
 
-    impl<T: FromBytes> UserReadPtr<'_, T> {
+    impl<T: FromBytes> UserReadPtr<'_, '_, T> {
         pub fn read(&mut self) -> Result<T, SysError> {
             let mut value = MaybeUninit::<T>::zeroed();
             // `FromBytes` proves that every initialized byte pattern is a
@@ -145,8 +140,8 @@ mod ptrs {
         }
     }
 
-    impl<'a, T> UserWritePtr<'a, T> {
-        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
+    impl<'a, 'h, T> UserWritePtr<'a, 'h, T> {
+        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceGuard<'h>) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             validate_user_range(addr, size_of::<T>())?;
             Ok(UserWritePtr {
@@ -168,7 +163,7 @@ mod ptrs {
         }
     }
 
-    impl<T: IntoBytes + Immutable> UserWritePtr<'_, T> {
+    impl<T: IntoBytes + Immutable> UserWritePtr<'_, '_, T> {
         pub fn write(&mut self, val: T) -> Result<(), SysError> {
             write_user_bytes(self.usp, VirtAddr::new(self.ptr as u64), val.as_bytes())
                 .map_err(|error| error.error())?;
@@ -176,11 +171,11 @@ mod ptrs {
         }
     }
 
-    impl<'a, T> UserReadPtr<'a, [T]> {
+    impl<'a, 'h, T> UserReadPtr<'a, 'h, [T]> {
         pub fn try_new(
             addr: VirtAddr,
             len: usize,
-            usp: &'a mut UserSpace,
+            usp: &'a mut UserSpaceGuard<'h>,
         ) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             let byte_len = len
@@ -195,7 +190,7 @@ mod ptrs {
         }
     }
 
-    impl<T: FromBytes + IntoBytes + Immutable> UserReadPtr<'_, [T]> {
+    impl<T: FromBytes + IntoBytes + Immutable> UserReadPtr<'_, '_, [T]> {
         /// Panics if kernel buffer is too small to hold the slice.
         ///
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
@@ -219,7 +214,7 @@ mod ptrs {
         }
     }
 
-    impl<'a> UserReadPtr<'a, [u8]> {
+    impl UserReadPtr<'_, '_, [u8]> {
         /// Ordinary byte-stream I/O needs the architecture-reported prefix so
         /// its cursor can publish short progress instead of erasing it as an
         /// exact typed-copy failure.
@@ -234,11 +229,11 @@ mod ptrs {
         }
     }
 
-    impl<'a, T> UserWritePtr<'a, [T]> {
+    impl<'a, 'h, T> UserWritePtr<'a, 'h, [T]> {
         pub fn try_new(
             addr: VirtAddr,
             len: usize,
-            usp: &'a mut UserSpace,
+            usp: &'a mut UserSpaceGuard<'h>,
         ) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             let byte_len = len
@@ -269,7 +264,7 @@ mod ptrs {
         }
     }
 
-    impl<T: IntoBytes + Immutable> UserWritePtr<'_, [T]> {
+    impl<T: IntoBytes + Immutable> UserWritePtr<'_, '_, [T]> {
         /// Panics if kernel buffer is too large for user slice to hold.
         ///
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
@@ -287,7 +282,7 @@ mod ptrs {
         }
     }
 
-    impl<'a> UserWritePtr<'a, [u8]> {
+    impl UserWritePtr<'_, '_, [u8]> {
         /// See [`UserReadPtr::copy_to_slice_partial`]. This byte-only entry
         /// keeps partial progress out of scalar and structured copy APIs.
         pub(crate) fn copy_from_slice_partial(
@@ -392,7 +387,7 @@ mod validators {
     /// In fact, this function almost always only serves as a helper for parsing
     /// C strings and arrays of C strings.
     fn c_readonly_array_from_addr<const MAX_LEN: usize, T: Eq + Copy + FromBytes>(
-        usp: &mut UserSpace,
+        usp: &mut UserSpaceGuard<'_>,
         start: VirtAddr,
         terminator: T,
         include_terminator: bool,

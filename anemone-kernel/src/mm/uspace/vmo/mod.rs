@@ -48,6 +48,10 @@ pub struct RetiredFrames {
 }
 
 impl RetiredFrames {
+    fn push(&mut self, frame: FrameHandle) {
+        self.frames.push(frame);
+    }
+
     pub(super) fn len(&self) -> usize {
         self.frames.len()
     }
@@ -57,20 +61,17 @@ impl RetiredFrames {
     }
 }
 
-fn retire_frame_range(
+pub(crate) fn retire_frame_range(
     frames: &mut BTreeMap<usize, FrameHandle>,
     range: Range<usize>,
-) -> RetiredFrames {
-    if range.is_empty() {
-        return RetiredFrames::default();
-    }
-
-    let mut selected_and_after = frames.split_off(&range.start);
-    let mut after = selected_and_after.split_off(&range.end);
-    frames.append(&mut after);
-
-    RetiredFrames {
-        frames: selected_and_after.into_values().collect(),
+    retired: &mut RetiredFrames,
+) {
+    while let Some(key) = frames.range(range.clone()).next().map(|(key, _)| *key) {
+        retired.push(
+            frames
+                .remove(&key)
+                .expect("selected resident frame must remain present while locked"),
+        );
     }
 }
 
@@ -91,11 +92,15 @@ pub trait VmObject: Send + Sync {
         Ok(())
     }
 
-    fn discard_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
+    /// Retire resident frames for a range already validated against its VMA.
+    ///
+    /// This handoff is infallible because callers may compose multiple backing
+    /// discards into one destructive transaction. Implementations must assert
+    /// owner-internal range violations before changing resident state.
+    fn discard_range(&self, _range: core::ops::Range<usize>, _retired: &mut RetiredFrames) {
         // `madvise(DONTNEED)` is a hint. Backings that do not support a
         // dedicated discard path can safely ignore it and let the caller drop
         // the current PTEs.
-        Ok(())
     }
 
     /// Remove resident frames from a private mapping and return their ownership
@@ -112,7 +117,8 @@ pub trait VmObject: Send + Sync {
     unsafe fn decommit_private_range(
         &self,
         _range: Range<usize>,
-    ) -> Result<RetiredFrames, SysError> {
+        _retired: &mut RetiredFrames,
+    ) -> Result<(), SysError> {
         Err(SysError::NotSupported)
     }
 

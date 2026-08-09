@@ -22,6 +22,7 @@
 mod hal;
 pub use hal::*;
 mod mapper;
+pub(crate) use mapper::LeafPteCommit;
 pub use mapper::{Mapper, Mapping, Translated, TraverseOrder, Unmapping};
 mod pagetable;
 pub use pagetable::PageTable;

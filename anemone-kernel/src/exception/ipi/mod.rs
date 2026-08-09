@@ -14,6 +14,9 @@ use alloc::{alloc::AllocError, collections::LinkedList};
 
 use crate::prelude::*;
 
+pub(crate) mod user_tlb;
+use user_tlb::handle_user_tlb_shootdowns;
+
 #[derive(Debug)]
 pub enum IpiPayload {
     MemoryBarrier,
@@ -202,6 +205,7 @@ pub fn broadcast_ipi_async(payload: IpiPayload) -> Result<(), IpiError> {
 pub fn handle_ipi() {
     use IpiPayload::*;
 
+    handle_user_tlb_shootdowns();
     IPI_QUEUE.with(|queue| {
         loop {
             // The queue lock protects transport ownership only. Business

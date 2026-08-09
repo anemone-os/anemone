@@ -13,7 +13,10 @@ impl UserSpace {
     /// This function grows or shrinks the reserved heap to make `brk` the new
     /// program break. It returns an error if the requested break is out of
     /// range or if the backing cannot decommit a shrink range.
-    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<Option<RemoteUspFenceGuard>, SysError> {
+    pub(super) fn set_brk_inner(
+        &mut self,
+        brk: VirtAddr,
+    ) -> Result<Option<DestructiveUserTlbChange>, SysError> {
         let heap_range = *self.heap_vma().range();
 
         if brk < heap_range.start().to_virt_addr() {
@@ -31,7 +34,8 @@ impl UserSpace {
             if count == 0 {
                 None
             } else {
-                let retired = {
+                let mut retirement = UserTlbRetirement::default();
+                {
                     let heap_vma = self.heap_vma();
                     let start = heap_vma.vmo_pidx(new_brk_vpn);
                     let end = start
@@ -41,20 +45,27 @@ impl UserSpace {
                     // its backing is not published to another VMA. Fork replaces
                     // it with distinct parent/child ShadowObjects, so this
                     // UserSpace owns the complete mapping domain. `retired` is
-                    // transferred to the fence guard below and stays alive until
-                    // the remote TLB invalidation completes or fails closed.
-                    unsafe { heap_vma.backing().decommit_private_range(start..end)? }
-                };
+                    // transferred to the address-space completion owner below
+                    // and stays alive until remote acknowledgement.
+                    unsafe {
+                        heap_vma
+                            .backing()
+                            .decommit_private_range(start..end, retirement.frames())?
+                    }
+                }
 
                 let mut mapper = self.table.mapper();
                 unsafe {
-                    mapper.try_unmap(Unmapping { range });
+                    mapper.try_unmap_retiring_page_tables(
+                        Unmapping { range },
+                        retirement.page_tables(),
+                    );
                 }
                 for vpn in range.iter() {
                     PagingArch::tlb_shootdown(vpn);
                 }
 
-                Some(RemoteUspFenceGuard::with_retired(Some(range), retired))
+                Some(DestructiveUserTlbChange::new(retirement))
             }
         } else {
             None
@@ -89,13 +100,17 @@ mod kunits {
 
         assert!(
             uspace
-                .set_brk(grown_brk)
+                .set_brk_inner(grown_brk)
                 .expect("heap growth should succeed")
                 .is_none()
         );
         drop(
             uspace
-                .fault_in_page(target_vpn.to_virt_addr(), PageFaultType::Write)
+                .resolve_page_access(
+                    target_vpn.to_virt_addr(),
+                    PageFaultType::Write,
+                    PageAccessContinuation::Immediate,
+                )
                 .expect("heap write fault should allocate a page"),
         );
         let old_ppn = uspace
@@ -106,8 +121,8 @@ mod kunits {
             .ppn;
         write_first_byte(old_ppn, 0xa5);
 
-        let guard = uspace
-            .set_brk(target_vpn.to_virt_addr())
+        let change = uspace
+            .set_brk_inner(target_vpn.to_virt_addr())
             .expect("full-page heap shrink should succeed")
             .expect("full-page heap shrink should require remote fencing");
         assert!(
@@ -119,18 +134,22 @@ mod kunits {
         );
         assert_eq!(unsafe { get_frame_raw(old_ppn) }.rc(), 1);
 
-        drop(guard);
+        drop(change);
         assert_eq!(unsafe { get_frame_raw(old_ppn) }.rc(), 0);
 
         assert!(
             uspace
-                .set_brk(grown_brk)
+                .set_brk_inner(grown_brk)
                 .expect("heap regrowth should succeed")
                 .is_none()
         );
         drop(
             uspace
-                .fault_in_page(target_vpn.to_virt_addr(), PageFaultType::Write)
+                .resolve_page_access(
+                    target_vpn.to_virt_addr(),
+                    PageFaultType::Write,
+                    PageAccessContinuation::Immediate,
+                )
                 .expect("regrown heap page should fault from zero"),
         );
         let regrown_ppn = uspace
@@ -146,13 +165,13 @@ mod kunits {
         let partial_new = target_vpn.to_virt_addr() + 0x100;
         assert!(
             uspace
-                .set_brk(partial_old)
+                .set_brk_inner(partial_old)
                 .expect("partial-page shrink should succeed")
                 .is_none()
         );
         assert!(
             uspace
-                .set_brk(partial_new)
+                .set_brk_inner(partial_new)
                 .expect("same-page shrink should succeed")
                 .is_none()
         );

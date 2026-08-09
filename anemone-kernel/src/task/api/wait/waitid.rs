@@ -180,7 +180,7 @@ fn user_addr_offset(base: VirtAddr, offset: usize) -> Result<VirtAddr, SysError>
 }
 
 fn write_i32_field(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     base: VirtAddr,
     offset: usize,
     value: i32,
@@ -190,7 +190,7 @@ fn write_i32_field(
 }
 
 fn write_u32_field(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     base: VirtAddr,
     offset: usize,
     value: u32,

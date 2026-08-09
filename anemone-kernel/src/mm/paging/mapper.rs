@@ -27,6 +27,22 @@ pub struct Translated {
     pub flags: PteFlags,
 }
 
+/// Operation-local relation between the old and new leaf PTE at one commit.
+///
+/// The PTE remains the only source of truth. This result describes only the
+/// completed mutation and must not be cached as address-space state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeafPteCommit {
+    /// No valid mapping was replaced anywhere along the committed walk.
+    Added,
+    /// The same frame and generic flags were written again.
+    Unchanged,
+    /// The same frame retained every old generic permission and gained more.
+    Relaxed,
+    /// A frame, permission, leaf, or valid ancestor was replaced or restricted.
+    ReplacedOrRestricted,
+}
+
 /// Flow signal for page table traversal.
 ///
 /// The [core::ops::ControlFlow] type isn't suitable for our use case, as we
@@ -39,6 +55,12 @@ enum ControlFlow<R> {
     Continue,
     Break(R),
     // Skip,
+}
+
+enum PageTableRetirement<'a> {
+    Immediate,
+    Retire(&'a mut Vec<OwnedFrameHandle>),
+    Keep,
 }
 
 /// Mapper. Computation engine for page table traversal and modification.
@@ -349,6 +371,31 @@ impl Mapper<'_> {
     /// This method is unsafe because it cannot always fully unmap
     ///     mappings within the given range.
     pub unsafe fn try_unmap(&mut self, unmapping: Unmapping) {
+        unsafe { self.try_unmap_with(unmapping, PageTableRetirement::Immediate) }
+    }
+
+    /// Unmap leaves while transferring detached page-table frames to the
+    /// caller. The caller must retain them until remote page walks using the
+    /// old branch PTEs have completed.
+    pub(crate) unsafe fn try_unmap_retiring_page_tables(
+        &mut self,
+        unmapping: Unmapping,
+        retired: &mut Vec<OwnedFrameHandle>,
+    ) {
+        unsafe { self.try_unmap_with(unmapping, PageTableRetirement::Retire(retired)) }
+    }
+
+    /// Unmap leaves without detaching empty page tables. This is used by exit,
+    /// where the complete page table remains owned until its later safe drop.
+    pub(crate) unsafe fn try_unmap_keep_page_tables(&mut self, unmapping: Unmapping) {
+        unsafe { self.try_unmap_with(unmapping, PageTableRetirement::Keep) }
+    }
+
+    unsafe fn try_unmap_with(
+        &mut self,
+        unmapping: Unmapping,
+        mut retirement: PageTableRetirement<'_>,
+    ) {
         let Unmapping { range } = unmapping;
 
         unsafe {
@@ -364,9 +411,17 @@ impl Mapper<'_> {
                         .expect("pgdir ppn should not be null");
 
                     if pgdir.is_empty() && !pte.is_global() {
-                        // deallocate the empty page table
-                        *pte = Pte::ZEROED;
-                        let _frame = OwnedFrameHandle::from_ppn(ppn);
+                        match &mut retirement {
+                            PageTableRetirement::Immediate => {
+                                *pte = Pte::ZEROED;
+                                let _frame = OwnedFrameHandle::from_ppn(ppn);
+                            },
+                            PageTableRetirement::Retire(retired) => {
+                                *pte = Pte::ZEROED;
+                                retired.push(OwnedFrameHandle::from_ppn(ppn));
+                            },
+                            PageTableRetirement::Keep => {},
+                        }
                     }
                     ControlFlow::<()>::Continue
                 },
@@ -685,10 +740,44 @@ impl Mapper<'_> {
         level_at: usize,
         overwrite: bool,
     ) -> Result<(), SysError> {
+        unsafe {
+            self.map_one_commit(vpn, ppn, flags, level_at, overwrite)
+                .map(|_| ())
+        }
+    }
+
+    /// Commit one ordinary leaf mapping and report its old/new relation.
+    ///
+    /// This is the narrow fault-resolution surface. Classification is derived
+    /// during the owning page-table walk, including any valid ancestor that the
+    /// overwrite replaces, so callers do not need a second translation walk.
+    ///
+    /// # Safety
+    ///
+    /// The caller must provide architecture-supported leaf flags and complete
+    /// any local and remote TLB invalidation required by the returned relation.
+    pub(crate) unsafe fn commit_leaf(
+        &mut self,
+        vpn: VirtPageNum,
+        ppn: PhysPageNum,
+        flags: PteFlags,
+    ) -> Result<LeafPteCommit, SysError> {
+        unsafe { self.map_one_commit(vpn, ppn, flags, 0, true) }
+    }
+
+    unsafe fn map_one_commit(
+        &mut self,
+        vpn: VirtPageNum,
+        ppn: PhysPageNum,
+        flags: PteFlags,
+        level_at: usize,
+        overwrite: bool,
+    ) -> Result<LeafPteCommit, SysError> {
         if !flags.is_supported_rwx_combination() {
             return Err(SysError::InvalidArgument);
         }
         let levels = PagingArch::PAGE_LEVELS;
+        let mut replaced_valid_ancestor = false;
 
         // Check level_at value
         debug_assert!(
@@ -729,8 +818,20 @@ impl Mapper<'_> {
                 if pte.is_valid() && !overwrite {
                     return Err(SysError::AlreadyMapped);
                 }
+                let old_flags = pte.flags() & !PteFlags::VALID;
+                let commit = if replaced_valid_ancestor {
+                    LeafPteCommit::ReplacedOrRestricted
+                } else if !pte.is_valid() {
+                    LeafPteCommit::Added
+                } else if pte.is_leaf() && pte.ppn() == ppn && old_flags == flags {
+                    LeafPteCommit::Unchanged
+                } else if pte.is_leaf() && pte.ppn() == ppn && flags.contains(old_flags) {
+                    LeafPteCommit::Relaxed
+                } else {
+                    LeafPteCommit::ReplacedOrRestricted
+                };
                 *pte = Pte::new(ppn, flags | PteFlags::VALID, level);
-                break;
+                return Ok(commit);
             } else {
                 // branch
                 if !pte.is_branch() {
@@ -738,6 +839,7 @@ impl Mapper<'_> {
                         // huge page exists.
                         return Err(SysError::AlreadyMapped);
                     }
+                    replaced_valid_ancestor |= pte.is_valid();
 
                     // allocate a new pgdir
 
@@ -766,7 +868,7 @@ impl Mapper<'_> {
                 };
             }
         }
-        Ok(())
+        unreachable!("page-table level count must be nonzero")
     }
 
     /// Change the flags of a single page at level `level_at`.
@@ -880,6 +982,25 @@ mod kunits {
             });
         }
         assert!(mapper.translate(vpn).is_none());
+    }
+
+    #[kunit]
+    fn unmap_can_transfer_empty_tables_to_remote_retirement() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let frame = frame();
+        let vpn = VirtPageNum::new(1);
+        let range = VirtPageRange::new(vpn, 1);
+        let mut mapper = table.mapper();
+
+        unsafe { map_page(&mut mapper, vpn, &frame) };
+        let mut retired = Vec::new();
+        unsafe {
+            mapper.try_unmap_retiring_page_tables(Unmapping { range }, &mut retired);
+        }
+
+        assert!(mapper.translate(vpn).is_none());
+        assert!(!retired.is_empty());
+        drop(retired);
     }
 
     #[kunit]
@@ -1068,5 +1189,62 @@ mod kunits {
             });
         }
         assert!(mapper.translate(high_vpn).is_none());
+    }
+
+    #[kunit]
+    fn leaf_commit_classifies_additive_and_present_changes() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let first = frame();
+        let second = frame();
+        let vpn = VirtPageNum::new(64);
+        let read = PteFlags::READ | PteFlags::USER;
+        let write = read | PteFlags::WRITE;
+        let mut mapper = table.mapper();
+
+        assert_eq!(
+            unsafe { mapper.commit_leaf(vpn, first.ppn(), read) }
+                .expect("additive leaf commit should succeed"),
+            LeafPteCommit::Added
+        );
+        assert_eq!(
+            unsafe { mapper.commit_leaf(vpn, first.ppn(), read) }
+                .expect("unchanged leaf commit should succeed"),
+            LeafPteCommit::Unchanged
+        );
+        assert_eq!(
+            unsafe { mapper.commit_leaf(vpn, first.ppn(), write) }
+                .expect("permission relaxation should succeed"),
+            LeafPteCommit::Relaxed
+        );
+        assert_eq!(
+            unsafe { mapper.commit_leaf(vpn, first.ppn(), read) }
+                .expect("permission restriction should succeed"),
+            LeafPteCommit::ReplacedOrRestricted
+        );
+        assert_eq!(
+            unsafe { mapper.commit_leaf(vpn, second.ppn(), read) }
+                .expect("frame replacement should succeed"),
+            LeafPteCommit::ReplacedOrRestricted
+        );
+    }
+
+    #[kunit]
+    fn leaf_commit_does_not_hide_replaced_valid_ancestor() {
+        let mut table = PageTable::new().expect("mapper KUnit page table should allocate");
+        let frame = frame();
+        let huge_pages = PagingArch::PTE_PER_PGDIR as u64;
+        let huge_vpn = VirtPageNum::new(huge_pages * 8);
+        let mut mapper = table.mapper();
+
+        unsafe {
+            mapper
+                .map_one(huge_vpn, PhysPageNum::new(0), PteFlags::READ, 1, false)
+                .expect("mapper KUnit huge mapping should succeed");
+        }
+        assert_eq!(
+            unsafe { mapper.commit_leaf(huge_vpn + 1, frame.ppn(), test_flags()) }
+                .expect("leaf replacement below the huge mapping should succeed"),
+            LeafPteCommit::ReplacedOrRestricted
+        );
     }
 }

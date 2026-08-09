@@ -2,30 +2,6 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
-## ANE-20260807-MM-REMOTE-FENCE-FAIL-CLOSE-RETENTION
-
-**Type:** Limitation
-**Status:** Active / Accepted
-**Severity:** Medium
-**Area:** MM / user address space / remote TLB fence / frame retirement
-
-**Summary:** `RemoteUspFenceGuard`在Drop中同步完成remote TLB shootdown，携带的退休frame只有在该轮
-completion成功后才会回到allocator。当前`broadcast_ipi()`失败时没有可返回、重试或转交隔离队列的owner API；
-guard只能取走并永久保留这些frame，同时输出alert，避免remote CPU通过stale TLB访问已经复用的物理页。
-
-正常shootdown成功路径仍会释放全部退休frame；不携带退休frame的普通fence也不会产生该泄漏。当前命名consumer是
-`brk`跨整页shrink的private-backing decommit。该fail-close选择保护memory safety，但若IPI失败可重复发生，会把
-受影响frame永久排除在可分配内存之外。
-
-**Exit Condition:** MM address-space owner获得infallible或retryable的remote-fence completion/failure handoff；
-失败轮次必须在保持退休frame隔离的同时拥有可恢复的重试、CPU offline completion或等价的终止证明，并只在所有
-受影响CPU不再能够使用旧translation后释放frame。以携带真实退休frame的成功路径和注入IPI失败路径共同验证：
-既不提前复用物理页，也不会在可恢复失败后永久遗失frame。
-
-**Owner:** MM UserSpace remote-fence protocol；IPI transport为依赖
-**Last Verified:** 2026-08-07
-**Related:** [brk shrink decommit小迭代](../devlog/changes/2026-08-05-brk-shrink-decommit.md)
-
 ## ANE-20260804-UNIX-SEQPACKET-EDGE-ABI
 
 **Type:** Limitation

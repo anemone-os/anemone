@@ -228,11 +228,14 @@ rg -n "assert_hwirq_not_armed" anemone-kernel/src/arch
 **受保护边界：** future fix必须形成“锁内PTE更新和local invalidation -> 锁外必要的同步remote shootdown ->
 重新加锁后才retry”的可证明handoff。不能只把guard延迟到整次copy结束，也不能用async IPI让当前CPU先retry。
 
-**记录：** [UACCESS-KETER-001](./tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)。
+**后续结果：** [UACCESS-KETER-001](./tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)
+已由独立的User TLB Completion RFC在2026-08-09 neutralize；本段保留R0实现期反馈历史。
 
 ## Remaining Boundaries
 
-- remote fence锁边界和IPI failure policy未由R0修复。
+- remote fence锁边界和IPI failure policy未由R0修复，后由
+  [`MM-TLB-REMOTE-001`](../../contracts/mm/user-fault-local-tlb.md#mm-tlb-remote-001--destructive-user-mapping在dependent-continuation与retirement前完成remote-ack)
+  cutover关闭。
 - userptr runtime app未默认自动执行。
 - bytewise copy没有word/vector性能优化。
 - R0不提供page pin、content snapshot或zero-copy。

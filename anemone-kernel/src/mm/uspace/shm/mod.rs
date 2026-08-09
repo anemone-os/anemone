@@ -1,5 +1,6 @@
 //! System V IPC shared memory implementation.
 
+use super::DestructiveUserTlbChange;
 use crate::{
     mm::uspace::{
         mmap::ObjectMapping,
@@ -72,7 +73,7 @@ impl UserSpace {
         clobber: bool,
         prot: Protection,
         tgid: Tid,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+    ) -> Result<(VirtAddr, Option<DestructiveUserTlbChange>), SysError> {
         let segment = reservation.segment().clone();
         let npages = segment.npages();
         let remap_range = hint
@@ -134,20 +135,20 @@ impl UserSpace {
         &mut self,
         start: VirtPageNum,
         tgid: Tid,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
+    ) -> Result<DestructiveUserTlbChange, SysError> {
         let attachment = self
             .sysv_shm
             .get(&start)
             .cloned()
             .ok_or(SysError::InvalidArgument)?;
         let range = attachment.range();
-        let guard = self.unmap(range)?;
+        let change = self.unmap_inner(range)?;
 
         self.sysv_shm
             .remove(&start)
             .expect("validated SysV shm attachment must still exist");
         detach_attachment(&attachment, tgid);
 
-        Ok(guard)
+        Ok(change)
     }
 }
