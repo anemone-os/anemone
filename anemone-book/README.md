@@ -1,10 +1,16 @@
 ## The Anemone Book
 
-## 状态
+## Status
 
-本书稿最后一次系统性维护对应 Anemone 初赛阶段，现已暂时封存，不再随内核实现持续更新。书稿源码与历史定位继续保留，可作为初赛设计叙述快照，以及未来恢复写作时的参考。
+This manuscript was last systematically maintained during Anemone's preliminary
+competition stage. It is now archived and is no longer updated alongside the
+kernel implementation. The source and its historical positioning are retained
+as a snapshot of the preliminary-stage design narrative and as a reference for
+any future resumption of the writing effort.
 
-封存期间，不应把书中的实现描述、能力边界或验证结论视为项目当前状态。
+While the manuscript is archived, its implementation descriptions, capability
+boundaries, and validation conclusions must not be treated as the project's
+current status.
 
 `The Anemone Book` is a design narrative snapshot for Anemone. It is not the
 single source of truth for the kernel.

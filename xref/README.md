@@ -1,20 +1,25 @@
-# 外部源码参考
+# External Source References
 
-本目录保存仓库精选的外部源码元数据。源码 checkout 是 `xref/<id>` 下被 Git 忽略的本地物化结果；它们不是
-Anemone 源码、构建输入、当前契约或 RFC 目标。
+This directory stores metadata for the repository's curated external source
+references. Source checkouts are Git-ignored local materializations under
+`xref/<id>`; they are not Anemone source code, build inputs, current contracts,
+or RFC targets.
 
-`sources.toml` 是规范注册表。每个条目包含：
+`sources.toml` is the canonical registry. Each entry contains:
 
-- 不可变的 `id`，同时也是 checkout 目录名；
-- 英文 `scope`，说明该源码适合参考什么，以及不具有什么权威；
-- 规范的只读 HTTPS Git `url`；
-- 可选的上游发布 `tag`；
-- 标识所选内容的完整 `commit`。
+- an immutable `id`, which is also the checkout directory name;
+- an English `scope` describing what the source is useful for and what
+  authority it does not carry;
+- the canonical read-only HTTPS Git `url`;
+- an optional upstream release `tag`;
+- the full `commit` identifying the selected content.
 
-公共文档引用某个 ID 后，不得把该 ID 改指向另一份内容；不同源码快照必须新增条目。tag 只提供获取和来源
-追溯提示，commit 才是内容身份；xref 会验证 tag peel 后是否等于注册的 commit。
+Once an ID is referenced by public documentation, it must not be redirected to
+different content; add a new entry for each distinct source snapshot. A tag is
+only a retrieval and provenance hint, while the commit is the content identity.
+xref verifies that the peeled tag resolves to the registered commit.
 
-通过仓库入口查看或物化参考源码：
+Use the repository entry points to inspect or materialize source references:
 
 ```text
 just xref list
@@ -24,10 +29,16 @@ just xref check linux-6.6.32
 just xref check --all
 ```
 
-`fetch` 会将源码 clone 到 `xref/<id>` 并 checkout 为 detached HEAD，不初始化上游 submodule。已有且匹配的
-clean checkout 会幂等成功；已有 non-Git 目录、origin 或 commit 不符、以及 dirty checkout 都只报告错误，不会
-被修改。普通构建、测试和文档流程不会 fetch 或依赖这些源码。
+`fetch` clones the source into `xref/<id>` and checks it out at a detached HEAD
+without initializing upstream submodules. An existing matching clean checkout
+succeeds idempotently. An existing non-Git directory, a mismatched origin or
+commit, or a dirty checkout causes an error and is left unmodified. Normal
+build, test, and documentation workflows neither fetch nor depend on these
+sources.
 
-公共证据使用[外部源码引用规则](../docs/src/external-source-references.md)定义的规范形式：
-`xref:<source-id>:<repo-relative-path>#<locator>`。不得引用私人 checkout 路径。能够读取参考源码也不等于获准
-把上游代码复制进 Anemone；复制前仍须审查上游许可证和本仓库的许可证边界。
+Public evidence must use the canonical form defined by the
+[External Source Reference Policy](../docs/src/external-source-references.md):
+`xref:<source-id>:<repo-relative-path>#<locator>`. Do not cite private checkout
+paths. Access to a reference checkout does not grant permission to copy upstream
+code into Anemone; review the upstream license and this repository's licensing
+boundary before copying any code.
