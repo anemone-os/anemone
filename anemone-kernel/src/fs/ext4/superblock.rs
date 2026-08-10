@@ -2,7 +2,7 @@ use crate::{
     fs::{
         ext4::{
             ext4_ino, ext4_sb,
-            file::{Ext4Reg, Ext4RegMapping},
+            file::Ext4AddressSpaceBackend,
             inode::{
                 EXT4_DEV_INODE_OPS, EXT4_DIR_INODE_OPS, EXT4_REG_INODE_OPS, EXT4_SYMLINK_INODE_OPS,
             },
@@ -11,8 +11,8 @@ use crate::{
         inode::{Inode, InodeMeta},
         superblock::{FsMagic, FsStat, SuperBlockOps},
     },
-    prelude::{vmo::VmObject, *},
-    utils::any_opaque::{AnyOpaque, NilOpaque},
+    prelude::*,
+    utils::any_opaque::NilOpaque,
 };
 
 use anemone_abi::fs::linux::stat::EXT4_SUPER_MAGIC;
@@ -30,32 +30,26 @@ fn ext4_inode_ops(ty: InodeType) -> &'static InodeOps {
 }
 
 fn ext4_load_inode(sb: &Arc<SuperBlock>, ino: Ino) -> Result<Arc<Inode>, SysError> {
-    let attr = ext4_sb(sb).read_tx(|| {
-        ext4_sb(sb).with_fs(|fs| {
-            let mut attr = lwext4_rust::FileAttr::default();
-            fs.get_attr(ino.get() as u32, &mut attr)
-                .map_err(map_ext4_error)?;
+    let attr = ext4_sb(sb).with_fs(|fs| {
+        let mut attr = lwext4_rust::FileAttr::default();
+        fs.get_attr(ino.get() as u32, &mut attr)
+            .map_err(map_ext4_error)?;
 
-            Ok(attr)
-        })
+        Ok(attr)
     })?;
 
     let ty = map_lwext4_inode_type(attr.node_type)?;
 
-    let (prv, mapping) = if ty == InodeType::Regular {
-        let prv = Ext4Reg::new(sb.clone(), ino, attr.size as usize);
-        let mapping = Ext4RegMapping::new(prv.state().clone());
-        (
-            AnyOpaque::new(prv),
-            Some(Arc::new(mapping) as Arc<dyn VmObject>),
-        )
-    } else {
-        (NilOpaque::new(), None)
-    };
-
-    let mut inode = Inode::new(ext4_ino(attr.ino)?, ty, ext4_inode_ops(ty), sb.clone(), prv);
-
-    inode.set_mapping(mapping);
+    let mut inode = Inode::new(
+        ext4_ino(attr.ino)?,
+        ty,
+        ext4_inode_ops(ty),
+        sb.clone(),
+        NilOpaque::new(),
+    );
+    if ty == InodeType::Regular {
+        inode.init_backed_address_space(Arc::new(Ext4AddressSpaceBackend::new(sb.clone(), ino)));
+    }
 
     inode.set_meta(&InodeMeta {
         nlink: attr.nlink,
@@ -89,28 +83,25 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), SysError> {
 
     if inode.ty() == InodeType::Regular {
         inode
-            .prv()
-            .cast::<Ext4Reg>()
-            .expect("regular inode must have Ext4Reg as its private data")
+            .address_space()
+            .expect("regular ext4 inode must own an address space")
             .sync_all()?;
     }
 
-    ext4_sb(&sb).write_tx(|| {
-        ext4_sb(&sb).with_fs(|fs| {
-            fs.with_inode_ref(ino.get() as u32, |inode_ref| {
-                if inode_ref.size() != meta.size {
-                    inode_ref.set_len(meta.size)?;
-                }
-                inode_ref.set_atime(&meta.atime);
-                inode_ref.set_mtime(&meta.mtime);
-                inode_ref.set_ctime(&meta.ctime);
-                inode_ref.set_mode(InodeMode::new(inode.ty(), meta.perm).to_linux_mode());
-                inode_ref.set_owner(meta.uid.get(), meta.gid.get());
-                Ok(())
-            })
-            .map_err(map_ext4_error)?;
-            fs.flush().map_err(map_ext4_error)
+    ext4_sb(&sb).with_fs(|fs| {
+        fs.with_inode_ref(ino.get() as u32, |inode_ref| {
+            if inode_ref.size() != meta.size {
+                inode_ref.set_len(meta.size)?;
+            }
+            inode_ref.set_atime(&meta.atime);
+            inode_ref.set_mtime(&meta.mtime);
+            inode_ref.set_ctime(&meta.ctime);
+            inode_ref.set_mode(InodeMode::new(inode.ty(), meta.perm).to_linux_mode());
+            inode_ref.set_owner(meta.uid.get(), meta.gid.get());
+            Ok(())
         })
+        .map_err(map_ext4_error)?;
+        fs.flush().map_err(map_ext4_error)
     })
 }
 
@@ -123,8 +114,7 @@ fn ext4_sync_inode(inode: &InodeRef) -> Result<(), SysError> {
 }
 
 fn ext4_stat(sb: &SuperBlock) -> Result<FsStat, SysError> {
-    let stat =
-        ext4_sb(sb).read_tx(|| ext4_sb(sb).with_fs(|fs| fs.stat().map_err(map_ext4_error)))?;
+    let stat = ext4_sb(sb).with_fs(|fs| fs.stat().map_err(map_ext4_error))?;
 
     let blocks_free = stat.free_blocks_count.min(stat.blocks_count);
     let files = stat.inodes_count as u64;

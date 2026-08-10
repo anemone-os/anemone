@@ -102,9 +102,9 @@ fn settle() -> Result<(), Errno> {
 
 fn install_handler(signal: SigNo, flags: u64) -> Result<(), Errno> {
     let action = SigAction {
-        sighandler: signal_handler as *const (),
+        sighandler: (signal_handler as *const ()).into(),
         sa_flags: flags,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     sigaction(signal, Some(&action), None)

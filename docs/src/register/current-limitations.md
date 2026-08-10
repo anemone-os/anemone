@@ -2,6 +2,35 @@
 
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
+## ANE-20260809-NETLINK-EAGER-REPLY-MATERIALIZATION
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Medium
+**Area:** Netlink Socket / reply preparation / transient memory
+
+**Summary:** 当前read-only netlink transport在检查并提交owner-local pending reply budget前，会先为一整个
+request datagram eager materialize全部reply。`SO_RCVBUF`及1 MiB production上限仍严格约束已经发布并保留的
+pending reply bytes，但不约束这段request-local transient preparation。
+
+默认production Kconfig允许一条64 KiB datagram容纳910个72-byte inet-diag request，TCP snapshot最多包含
+128个engine record与64个endpoint record。每个request最多形成192个88-byte record与一个20-byte
+`NLMSG_DONE`，完整候选reply本身合计15,393,560 bytes；实现还为每个request同时准备36-byte
+`NLMSG_ERROR(-ENOBUFS)`，serialized buffers合计15,426,320 bytes，约14.7 MiB（15.4 MB），另加request
+payload与`Vec` / `Arc`等容器元数据。多个Socket并发send还可以叠加该working set。该分配仍受request与TCP
+Kconfig上界约束，pending publication仍保持完整multipart与terminal message或有序`-ENOBUFS`，没有partial
+dump、第二份network truth或错误的持久budget accounting。当前阶段接受这一低内存鲁棒性边界，并沿用bounded
+natural allocation在global OOM时的kernel-fatal policy。
+
+**Exit Condition:** 后续采用per-request preparation、reservation或bounded immutable cursor，把transient reply
+work纳入明确且更低的上界，同时保持owner snapshot在guard外完成、完整terminal publication、不持live owner
+handle、不引入nested owner lock或第二份状态真相；随后以最大multi-message request、最大TCP record set与并发
+Socket压力验证关闭本限制。
+
+**Owner:** Netlink Socket transport
+**Last Verified:** 2026-08-09
+**Related:** [Read-only Netlink Diagnostics当前契约](../contracts/socket/netlink-diagnostics.md)
+
 ## ANE-20260804-UNIX-SEQPACKET-EDGE-ABI
 
 **Type:** Limitation
@@ -343,13 +372,13 @@ limitation；不得重新激活已终止RFC。新增异步、多port、hotplug�
 **Severity:** Medium
 **Area:** devfs / device model
 
-**Summary:** 当前 devfs 第一版主要只支持启动期静态 publish 到扁平 `/dev` 根目录；为了 `user-test` 的 `ramfs` 挂载，另有一个静态 `/dev/shm` 目录挂载点，但这不代表通用目录层级能力。不支持运行期 unpublish/hot-unplug、别名或 symlink。
+**Summary:** 当前 devfs 支持 kernel subsystem 通过 opaque direct-child directory capability 建立 append-only 多级静态 namespace，所有 mounts 共享同一 production namespace、superblock 与 inode identity。仍不支持运行期 unpublish/hotplug、provider teardown、alias/symlink 或 inode/dentry reclaim。
 
-**Exit Condition:** 只有在真实设备热插拔或多级命名空间需求出现后，再为 devfs 增加显式的发布失效协议、目录发布能力与相应的 dentry/inode 回收路径。
+**Exit Condition:** 当真实设备热插拔、provider replacement/teardown 或别名需求出现时，为 devfs 增加显式 publication invalidation、open-handle 与 enumeration 语义、alias/symlink ownership，以及相应 dentry/inode reclaim 协议并完成运行期验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-24
-**Related:** [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
+**Last Verified:** 2026-08-08
+**Related:** [Devfs hierarchical publication](../devlog/changes/2026-08-08-devfs-hierarchical-publication.md), [开发日志：2026-05-11 至 2026-05-24](../devlog/2026-05-11_to_2026-05-24.md)
 
 ## ANE-20260524-DEVFS-BLOCK-DEFAULT-SEMANTICS
 
@@ -623,14 +652,14 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Type:** Limitation
 **Status:** Active
 **Severity:** Low
-**Area:** fs / iomux / pselect6
+**Area:** fs / iomux / ppoll / pselect6
 
-**Summary:** `pselect6` 当前接受 `exceptfds` 作为 stage-1 兼容入口：置位 fd 仍会被校验，返回前对应用户 fdset 会被清空，并在非空 `exceptfds` 请求时打 notice；但内核尚无内部 `POLLPRI` / exception readiness `PollEvent`，也没有 source-side register / wake 能力，因此不会把任何 fd 报告为 exception-ready。这个兼容 no-op 是为了让 lmbench 等 defensive `exceptfds` 探测不再被 `ENOTSUP` 拦截，不代表完整 Linux `exceptfds` 语义已经实现。
+**Summary:** `pselect6` 当前接受 `exceptfds` 作为 stage-1 兼容入口：置位 fd 仍会被校验，返回前对应用户 fdset 会被清空，并在非空 `exceptfds` 请求时打 notice；`ppoll` 同样接受 `POLLRDBAND` 并保持其与普通 readability 隔离。但内核尚无内部 `POLLPRI` / band / exception readiness `PollEvent`，也没有 source-side register / wake 能力，因此不会把任何 fd 报告为 exception-ready 或 band-readable。这些兼容 no-op 是为了让 defensive 探测不被 syscall admission 拦截，不代表完整 Linux priority/band/`exceptfds` 语义已经实现。
 
-**Exit Condition:** 为 iomux 引入明确的 exception / priority readiness 表达，补齐相关 source 的 snapshot 与 latch register 语义，并让 `pselect6 exceptfds` 按真实 readiness 更新输出 fdset；随后用 lmbench 与覆盖 `POLLPRI` / exception readiness 的回归重新验证。
+**Exit Condition:** 为 iomux 引入明确的 exception / priority / band readiness 表达，补齐相关 source 的 snapshot 与 latch register 语义，并让 `pselect6 exceptfds` 与 `ppoll POLLRDBAND` 按真实 readiness 更新输出；随后用 lmbench 与覆盖 `POLLPRI` / `POLLRDBAND` / exception readiness 的回归重新验证。
 
 **Owner:** doruche
-**Last Verified:** 2026-06-08
+**Last Verified:** 2026-08-07
 **Related:** [pselect6 exceptfds 小迭代记录](../devlog/changes/2026-06-08-pselect6-exceptfds-compat.md), [开发日志：2026-06-08 至 2026-06-21](../devlog/2026-06-08_to_2026-06-21.md)
 
 ## ANE-20260527-FALLOCATE-BASIC-REGULAR-ONLY

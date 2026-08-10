@@ -1,0 +1,21 @@
+[build]
+name = "perf-observe-acceptance-la64"
+arch = "loongarch64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/perf-test"
+
+[[dirs]]
+path = "/dev"
+
+[[apps]]
+name = "perf-test"
+installed_dir = "/sbin"
+
+[[apps]]
+name = "perfctl"
+installed_dir = "/bin"

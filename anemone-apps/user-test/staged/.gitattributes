@@ -1,6 +1,2 @@
 riscv/mke2fs binary
 loongarch/mke2fs binary
-riscv/socket-r1-glibc binary
-riscv/socket-r1-musl binary
-loongarch/socket-r1-glibc binary
-loongarch/socket-r1-musl binary

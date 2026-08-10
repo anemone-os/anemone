@@ -1,5 +1,120 @@
 # 开放问题
 
+## ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION
+
+**Type:** Issue
+**Status:** Open / Deferred
+**Severity:** Medium
+**Area:** fs / VFS namei / dentry lifecycle / dynamic pseudo filesystem
+
+**Symptom / Trigger:** generic namei会先返回parent下已经cache的positive dentry；未命中时则先调用
+filesystem backend `lookup`取得inode，再由VFS materialize child dentry。当dynamic backend在两步之间撤销
+name-to-object binding时，失效路径只能清除当时已发布的dentry，无法阻止失效前已返回的旧inode
+在失效后迟到materialize。该旧dentry随后又可被cached-positive快路命中，而不重新进入backend
+完成liveness / incarnation核验。
+
+当前首个真实consumer是procfs `/proc/<tgid>`：`proc_root_lookup()`释放binding transaction并返回旧
+`InodeRef`后，`invalidate_thread_group_binding()`可以撤销binding、unindex inode并遍历procfs mounts清理
+root child，但generic namei仍可以在清理后重新发布该旧inode。这是当前VFS cached-positive
+publication / revocation协议的缺口，不是procfs binding owner独有的实现错误；procfs只是首个动态
+管理该类映射并暴露窗口的pseudo filesystem。
+
+**Impact:** 旧binding由`Arc` / `InodeRef`保活，当前没有use-after-free证据；多数procfs inode
+operation也会通过`binding.alive()` fail closed。但stale positive dentry仍可以使纯pathname / permission
+路径观察到过期可见性，并在可复用ID或未来其它dynamic pseudo fs中引入新旧incarnation的cache
+identity冲突。自然触发需要并发lookup与teardown交错，当前只有source-level时序证据，尚无
+forced interleaving或runtime复现证据。
+
+**Owner:** VFS core namei / positive-dentry publication and revocation protocol。动态pseudo filesystem只拥有
+各自backend mapping与lifecycle truth，不分别拥有generic dentry cache正确性或各自建立平行失效协议。
+
+**Decision / Current Boundary:** 本问题暂缓至后续独立VFS core工作。当前procfs以及后续新增的dynamic
+pseudo filesystem暂不需为此增加owner-local特判、临时freshness状态或单独acceptance gate；也不得
+为了绕开generic窗口而让namei依赖procfs私有binding表示。该暂缓不表示stale pathname语义
+已成为current contract，也不得将现有source review外推为完整namespace linearizability证据。
+
+**Last Verified:** 2026-08-09
+
+**Exit Condition:** 由独立VFS core RFC/迭代定义dynamic backend lookup结果与cached positive dentry之间的
+freshness / revocation handoff、唯一线性化点、迟到materialization、同名新旧incarnation、多个mount view
+与cleanup责任；实现必须保持backend mapping truth与VFS dentry cache owner分离，不依赖各pseudo filesystem
+特判。以procfs作为首个真实consumer完成deterministic interleaving、cached-hit、迟到publish、新旧identity
+与multi-mount验证，并对当时所有dynamic pseudo filesystem consumer做闭包审计后移除本条目。
+
+**Related:** [Positive dentry residency小迭代](../devlog/changes/2026-08-09-positive-dentry-residency.md),
+[Kthread Core procfs可见性不变量](../rfcs/kthread-core/invariants.md#procfs-可见性),
+[`ANE-20260801-VFS-CREATE-PUBLICATION-ATOMICITY`](#ane-20260801-vfs-create-publication-atomicity)
+（后者记录common-create backend commit后的failure/rollback窗口，不由本动态撤销问题替代或自动关闭）。
+
+**Workaround:** 无需在当前dynamic pseudo filesystem中建立局部workaround；在VFS core协议闭合前，
+将该窗口保持为已知、低自然复现率但未证明不可达的并发正确性缺口。
+
+## ANE-20260807-TIMERFD-CANCEL-ON-SET-ENROLLMENT
+
+**Type:** Issue
+**Status:** Open
+**Severity:** Keter
+**Area:** timerfd / realtime step / soft timer request / ABI lifecycle
+
+**Symptom / Trigger:** `TimerFdCore`当前只把`TFD_TIMER_CANCEL_ON_SET`的change-sequence snapshot保存于
+`TimerFdSchedule::Armed`中的realtime deadline。one-shot到期、解除arm或clock-change callback把schedule切回
+`Disarmed`后，该登记事实随单次queue request一同消失；已消费一次`ECANCELED`后也没有独立的持久登记状态。
+因此后续realtime step无法继续按Linux timerfd lifecycle观察该fd，除非用户再次执行带flag的有效
+`timerfd_settime()`。此外，非absolute-realtime组合当前返回`EINVAL`，而不是接受调用但不启用cancel-on-set。
+
+**Impact:** 当前实现把timerfd对象的clock-step enrollment生命周期与一次armed soft-timer request生命周期
+合并为同一事实。这不会破坏普通relative/absolute timerfd、物理request取消、generation stale filtering或
+missed-expiry accounting，但它使完整`TFD_TIMER_CANCEL_ON_SET`语义未达到
+`TIMEKEEPER-STEP-001`已经声明的effective范围；现有Gate 3 closure和窄KUnit只能证明单次armed generation，
+不能证明disarm、到期或一次`ECANCELED`后的持久登记。
+
+**Owner:** `TimerFdCore`拥有enrollment与readable cancellation状态；realtime-step publisher和per-CPU soft
+timer request service只参与无丢失step通知与一次request交接
+**Last Verified:** 2026-08-07
+**Exit Condition:** 为`TimerFdCore`建立独立于armed request的cancel-on-set enrollment，并闭合register、replace、
+disarm、expiry、一次`ECANCELED`消费和last-close的撤销/保留规则；realtime step必须在不持timekeeper锁进入
+timerfd owner的前提下无丢失通知所有live enrollment。修复非absolute-realtime flag组合的Linux-visible行为，
+并以focused KUnit和双架构用户态oracle覆盖disarm、one-shot expiry、periodic rearm窗口、已消费`ECANCELED`、
+replacement、close与并发step；随后更新`TIMEKEEPER-STEP-001`的核验来源并移除此条目。
+
+**Related:** [Realtime Step当前契约](../contracts/time/realtime-step.md),
+[Clock Timekeeping与POSIX Timers RFC](../rfcs/clock-timekeeping-posix-timers/index.md)
+
+**Workaround:** 不要把当前cancel-on-set通过证据外推到单次armed generation之外。该问题不阻塞保持
+public API、ABI、owner、handoff和visible semantics不变的timerfd结构维护；任何语义修复、contract closure或
+完整conformance声明仍须先闭合上述跨owner协议。
+
+## ANE-20260805-USER-ACCESS-TYPED-COPY-SOUNDNESS
+
+**Type:** Issue
+**Status:** Closed / neutralized by user-access typed-copy soundness cutover
+**Severity:** Apollyon
+**Area:** syscall / user access / typed copy / ABI representation
+
+**Symptom / Trigger:** `UserReadPtr<T>::read()`当前只要求`T: Copy`，随后把任意用户字节写入
+`MaybeUninit<T>`并`assume_init()`；`Copy`不保证所有bit pattern都是合法`T`。反向的
+`UserWritePtr<T>::write()`同样只要求`T: Copy`，却把整个`T`表示作为字节读取；`Copy`不保证结构没有
+未初始化padding。具体可达路径中，`anemone_abi::system::linux::SysInfo`在`pad`与`totalhigh`之间有
+4字节隐式padding，结构末尾还有4字节padding，`sys_sysinfo()`会通过typed copy直接将该表示写给用户态。
+
+**Impact:** copyin可能形成无效Rust值并触发undefined behavior；copyout可能读取未初始化padding并把
+内核栈内容泄漏给用户态。只清零某个具体调用点或只修补`SysInfo`不能恢复generic safe API的健全性，
+也不能证明其它ABI struct的bit validity与padding边界。
+
+**Owner:** syscall user-access typed-copy boundary；ABI wire representation由`anemone-abi`共同参与
+**Last Verified:** 2026-08-06
+**Exit Condition:** typed copy按方向建立可由编译器检查的能力边界：copyin只接受任意输入bit pattern均为
+合法值的类型，copyout只接受完整表示均已初始化且无隐式padding的类型；补齐受影响ABI struct的显式
+padding或等价byte codec，并完成全部typed caller审计、双架构layout assertion与build/runtime验证。
+
+**Related:** [User-access typed-copy soundness小迭代](../devlog/changes/2026-08-06-user-access-typed-copy-soundness.md)
+
+**Resolution:** scalar copyin、scalar/slice copyout与typed slice copyin已分别由`FromBytes`、
+`IntoBytes + Immutable`及两组能力的交集建立编译期边界；全部production typed caller已由方向性derive、显式
+padding或唯一byte codec闭合。raw user address已改为无provenance的64-bit token，双架构layout/build、focused
+RV64 runtime、全consumer lock审计与独立review通过；没有保留`T: Copy` fallback、逐类型unsafe marker或平行ABI
+truth。Linux-visible ABI、errno、owner/handoff与current contract保持不变。
+
 ## ANE-20260801-LA64-SOFT-UNALIGNED-USER-MEMORY-CORRUPTION
 
 **Type:** Issue
@@ -373,14 +488,14 @@ publication线性化点、post-commit failure/rollback和并发lookup语义，�
 **Status:** Open
 **Area:** irq / scheduler / task lifecycle / timer / mm allocator
 
-**Symptom / Trigger:** 单核、关抢占的 LTP 长 profile 仍可能在 case summary 或 `PASS/FAIL LTP CASE ...` 附近卡死。2026-06-22 审查中发现若干 hard IRQ 或 IRQ-off return-tail 路径仍会执行可能扩容的堆分配或 allocator side effect：例如 trap interrupt return 在重新开中断前调用 deferred task disposal，disposal 扫描时用 `Vec` 临时收集 task 并可能在日志中 clone task name；threaded timer 的 IRQ 到 worker ready queue 交接使用 `VecDeque::push_back()`；kmalloc OOM handler 还可能向 frame allocator 要页，而 frame allocation 后会检查水位并唤醒 OOM killer。
+**Symptom / Trigger:** 单核、关抢占的 LTP 长 profile 仍可能在 case summary 或 `PASS/FAIL LTP CASE ...` 附近卡死。2026-06-22 审查中发现若干 hard IRQ 或 IRQ-off return-tail 路径仍会执行可能扩容的堆分配或 allocator side effect：例如 trap interrupt return 在重新开中断前调用 deferred task disposal，disposal 扫描时用 `Vec` 临时收集 task 并可能在日志中 clone task name；threaded timer 的 IRQ 到 worker ready queue 交接使用 `VecDeque::push_back()`。当时还存在frame allocation后的OOM threshold/wake反向调用；2026-08-05 periodic-sampling小迭代已删除该hook和global OOM wake handle，因此这条递归OOM side effect已消除。
 
-**Impact:** 当前工程阶段允许简单、适度且有界的 IRQ-safe allocation；allocation 本身不再是禁止项，也不应为了消除它引入侵入式对象、镜像状态或额外 owner。未收敛风险是 allocation 周围的 blocking/reclaim protocol、普通锁或 remote placement、日志格式化、复杂对象析构和递归 OOM side effect，它们可能把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；allocator 内部使用 noirq lock 或开启 `spin_lock_irqsave` 仍不能单独证明这些副作用安全。
+**Impact:** 当前工程阶段允许简单、适度且有界的 IRQ-safe allocation；allocation 本身不再是禁止项，也不应为了消除它引入侵入式对象、镜像状态或额外 owner。递归OOM wake已不再是当前风险，但allocation周围仍可能存在blocking/reclaim protocol、普通锁或remote placement、日志格式化和复杂对象析构，把本应短小、不可睡眠、不可重入的上下文扩大成复杂工作；allocator内部使用noirq lock或开启`spin_lock_irqsave`仍不能单独证明这些剩余副作用安全。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-26
-**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；允许与一次有界操作绑定、同时存活数量受现有 credit/capacity 约束且不制造第二套状态 truth 的简单 IRQ-safe allocation，但必须移除或隔离 blocking/synchronous reclaim、普通锁、remote placement、task Drop、普通日志/name clone、复杂 callback 和递归 OOM handling 等副作用。随后用定向 source audit 和长 LTP profile 复跑，确认 post-summary hang 不再由 IRQ/off-tail 的复杂 allocator side effect 或重入路径解释。
-**Related:** [LTP post-summary hang](#ane-20260616-ltp-post-summary-hang), [fanotify tracking issues](../rfcs/fanotify/tracking-issues.md)
+**Last Verified:** 2026-08-05
+**Exit Condition:** 对 hard IRQ handler、trap interrupt return tail、scheduler noirq path、timer IRQ lane 和 deferred task disposal 做一次 source audit；允许与一次有界操作绑定、同时存活数量受现有 credit/capacity 约束且不制造第二套状态 truth 的简单 IRQ-safe allocation，但必须移除或隔离 blocking/synchronous reclaim、普通锁、remote placement、task Drop、普通日志/name clone和复杂callback等剩余副作用。随后用定向source audit和长LTP profile复跑，确认post-summary hang不再由IRQ/off-tail的复杂allocator side effect或重入路径解释。
+**Related:** [LTP post-summary hang](#ane-20260616-ltp-post-summary-hang), [fanotify tracking issues](../rfcs/fanotify/tracking-issues.md), [OOM periodic sampling](../devlog/changes/2026-08-05-oom-periodic-sampling.md)
 
 **Severity:** High
-**Workaround:** 当前把复杂 allocator side effect 与重入路径视为未收敛风险，不把所有 IRQ/off-tail allocation 一概禁止。保持对象模型直接，分配量和 live count 有界；避免 blocking/reclaim、普通锁、remote placement、日志格式化、complex drop/callback 与递归 OOM 路径。不要用 noirq allocator、`spin_lock_irqsave` 或偶然通过的 LTP case 作为关闭依据。
+**Workaround:** 当前把复杂allocator side effect与重入路径视为未收敛风险，不把所有IRQ/off-tail allocation一概禁止。保持对象模型直接，分配量和live count有界；避免blocking/reclaim、普通锁、remote placement、日志格式化和complex drop/callback。不要用noirq allocator、`spin_lock_irqsave`或偶然通过的LTP case作为关闭依据。

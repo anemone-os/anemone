@@ -20,3 +20,4 @@ LOCAL.md
 .codex
 **/__pycache__
 containers
+kernel-*

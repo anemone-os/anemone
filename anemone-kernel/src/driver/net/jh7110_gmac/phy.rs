@@ -1,5 +1,5 @@
 use super::{fwnode::GmacPhyConfig, regs::GmacRegs};
-use crate::prelude::*;
+use crate::{prelude::*, time::MonotonicInstant};
 
 mod register {
     pub const BMCR: u8 = 0;
@@ -98,7 +98,7 @@ fn soft_reset(regs: &GmacRegs, address: u8) -> Result<(), SysError> {
         register::BMCR,
         (control | BasicControl::RESET).bits(),
     )?;
-    let start = Instant::now();
+    let start = MonotonicInstant::now();
     let timeout = Duration::from_millis(JH7110_GMAC_RESET_TIMEOUT_MS);
     loop {
         let control = BasicControl::from_bits_retain(regs.mdio_read(address, register::BMCR)?);
@@ -155,7 +155,7 @@ fn restart_auto_negotiation(regs: &GmacRegs, address: u8) -> Result<(), SysError
 }
 
 fn wait_for_link(regs: &GmacRegs, address: u8) -> Result<Option<PhyLink>, SysError> {
-    let start = Instant::now();
+    let start = MonotonicInstant::now();
     let timeout = Duration::from_millis(JH7110_GMAC_PHY_TIMEOUT_MS);
     loop {
         let status =

@@ -5,11 +5,11 @@
 **Owner：** architecture clock source 与 common timekeeper
 **参与领域：** RV64 / LA64 architecture、timekeeper、clock route、task CPU usage、filesystem / procfs / SysV IPC calendar consumer
 **覆盖范围：** clock ID 0--7 的 get/res、统一 counter-to-nanoseconds 推导、realtime read projection 与 coarse snapshot
-**不覆盖：** `clock_settime()`、`clock_adjtime()`、完整 `clock_nanosleep()`、realtime step notification、soft timer、timerfd cancellation、POSIX timer、RTC seed/writeback 和 suspend accounting
+**不覆盖：** `clock_settime()`、`clock_adjtime()`、完整 `clock_nanosleep()`、realtime step notification、soft timer、timerfd cancellation、POSIX timer、RTC runtime read/writeback 和 suspend accounting
 **实现位置：** `anemone-kernel/src/{arch/riscv64/time.rs,arch/loongarch64/time.rs,time/timekeeper.rs,time/clock}`
 **依赖：** None
 **Pending Successor：** None
-**最后核验：** 2026-08-04
+**最后核验：** 2026-08-08
 
 ## 状态与能力所有权
 
@@ -41,8 +41,9 @@ realtime_ns = monotonic_ns + realtime_offset_ns
 boottime_ns = monotonic_ns
 ```
 
-当前没有 RTC seed，offset 从零开始；运行期只能按 `TIMEKEEPER-STEP-001` 修改并始终保持非负。`raw` 与
-`monotonic`、`boottime` 当前同值但保留独立 clock route，不通过对象 alias 表达 ABI identity。
+offset从零或一次validated [`RTC-BOOT-SEED-001`](./rtc-boot-seed.md#rtc-boot-seed-001--rtc-只在-boot-handoff-中建立一次-calendar-anchor)
+开始；boot seed只提交offset，不推进change sequence。运行期只能按`TIMEKEEPER-STEP-001`修改并始终保持非负。
+`raw`与`monotonic`、`boottime`当前同值但保留独立clock route，不通过对象alias表达ABI identity。
 
 BSP 的每个 system tick 更新一次 `coarse_mono_ns`；其它 CPU 不发布 coarse snapshot。`MONOTONIC_COARSE`
 直接读取该 snapshot，`REALTIME_COARSE` 在读取时加同一个 realtime offset；不得保存 `coarse_real_ns`。
@@ -90,3 +91,6 @@ source audit证明，不把 QEMU结果扩大为物理 CNTC runtime evidence。
 `TC-CLOCK-CUTOVER`。
 
 **当前来源：** [2026-08-04 Gate 0/1 transaction](../../devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md#gate-1-closure-与-tc-clock-cutover---2026-08-04)。
+
+**最近修订：** [RTC Provider 与 Boot Walltime Seed 小迭代](../../devlog/changes/2026-08-08-rtc-provider-boot-walltime-seed.md)
+允许offset从一次validated boot seed开始，同时保持唯一整数推导链和运行期timekeeper ownership。

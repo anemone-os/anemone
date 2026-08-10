@@ -1,8 +1,10 @@
 # OOM Killer 不变量需求
 
-**状态：** Active implementation
-**最后更新：** 2026-06-16
+**状态：** Historical（父RFC已Terminated）
+**最后更新：** 2026-08-05
 **父 RFC：** [RFC-20260615-oom-killer](./index.md)
+
+本页只保留已终止target的历史proof obligations，不是current contract或可恢复的implementation gate。
 
 本文定义第一版 OOM killer 的阈值、唤醒、victim selection、锁序和竞态边界。实施顺序见 [迁移实施计划](./implementation.md)。
 

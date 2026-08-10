@@ -2,14 +2,11 @@ use crate::{
     fs::{
         inode::{Inode, InodeMode, RenameFlags},
         ramfs::{
-            file::{
-                RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS, RamfsRegMapping,
-                RamfsRegState,
-            },
-            ramfs_dir, ramfs_reg, ramfs_sb, ramfs_symlink,
+            file::{RAMFS_DIR_FILE_OPS, RAMFS_REG_FILE_OPS, RAMFS_SYMLINK_FILE_OPS},
+            ramfs_dir, ramfs_sb, ramfs_symlink,
         },
     },
-    prelude::{vmo::VmObject, *},
+    prelude::*,
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
@@ -72,11 +69,6 @@ impl RamfsDir {
 }
 
 #[derive(Opaque)]
-pub(super) struct RamfsReg {
-    state: Arc<RamfsRegState>,
-}
-
-#[derive(Opaque)]
 pub(super) struct RamfsSpecial {
     rdev: DeviceId,
 }
@@ -84,18 +76,6 @@ pub(super) struct RamfsSpecial {
 impl RamfsSpecial {
     fn new(rdev: DeviceId) -> Self {
         Self { rdev }
-    }
-}
-
-impl RamfsReg {
-    pub(super) fn new() -> Self {
-        Self {
-            state: Arc::new(RamfsRegState::new()),
-        }
-    }
-
-    pub(super) fn state(&self) -> Arc<RamfsRegState> {
-        self.state.clone()
     }
 }
 
@@ -171,20 +151,16 @@ fn ramfs_create_child(
     debug_assert!(matches!(ty, InodeType::Dir | InodeType::Regular));
 
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
             return Err(SysError::AlreadyExists);
         }
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
-        let (new_prv, mapping): (AnyOpaque, Option<Arc<dyn VmObject>>) = match ty {
-            InodeType::Dir => (AnyOpaque::new(RamfsDir::new()), None),
-            InodeType::Regular => {
-                let reg = RamfsReg::new();
-                let mapping: Arc<dyn VmObject> = Arc::new(RamfsRegMapping::new(reg.state()));
-                (AnyOpaque::new(reg), Some(mapping))
-            },
+        let new_prv = match ty {
+            InodeType::Dir => AnyOpaque::new(RamfsDir::new()),
+            InodeType::Regular => NilOpaque::new(),
             _ => unreachable!(),
         };
         let mut new_inode = Arc::new(Inode::new(
@@ -199,9 +175,11 @@ fn ramfs_create_child(
             new_prv,
         ));
         new_inode.inc_nlink();
-        Arc::get_mut(&mut new_inode)
-            .expect("new ramfs inode should be uniquely owned before seeding")
-            .set_mapping(mapping);
+        if ty == InodeType::Regular {
+            Arc::get_mut(&mut new_inode)
+                .expect("new ramfs inode should be uniquely owned before seeding")
+                .init_volatile_address_space();
+        }
         if let InodeType::Dir = ty {
             // "." & ".."
             let new_dir_data = new_inode.prv().cast::<RamfsDir>().unwrap();
@@ -243,7 +221,7 @@ fn ramfs_make_node(
     ));
 
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
             return Err(SysError::AlreadyExists);
@@ -251,22 +229,20 @@ fn ramfs_make_node(
 
         let new_ino = ramfs_sb(&sb).alloc_ino();
         let ty = description.mode.ty();
-        let (prv, mapping, ops): (AnyOpaque, Option<Arc<dyn VmObject>>, &'static InodeOps) =
-            if ty == InodeType::Regular {
-                let reg = RamfsReg::new();
-                let mapping: Arc<dyn VmObject> = Arc::new(RamfsRegMapping::new(reg.state()));
-                (AnyOpaque::new(reg), Some(mapping), &RAMFS_REG_INODE_OPS)
-            } else {
-                (
-                    AnyOpaque::new(RamfsSpecial::new(description.rdev)),
-                    None,
-                    &RAMFS_SPECIAL_INODE_OPS,
-                )
-            };
+        let (prv, ops): (AnyOpaque, &'static InodeOps) = if ty == InodeType::Regular {
+            (NilOpaque::new(), &RAMFS_REG_INODE_OPS)
+        } else {
+            (
+                AnyOpaque::new(RamfsSpecial::new(description.rdev)),
+                &RAMFS_SPECIAL_INODE_OPS,
+            )
+        };
         let mut new_inode = Arc::new(Inode::new(new_ino, ty, ops, sb.clone(), prv));
-        Arc::get_mut(&mut new_inode)
-            .expect("new ramfs inode should be uniquely owned before seeding")
-            .set_mapping(mapping);
+        if ty == InodeType::Regular {
+            Arc::get_mut(&mut new_inode)
+                .expect("new ramfs inode should be uniquely owned before seeding")
+                .init_volatile_address_space();
+        }
         new_inode.set_meta(&InodeMeta {
             nlink: 1,
             size: 0,
@@ -290,7 +266,7 @@ fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<Ino
     let target_path = PathBuf::from(target_text.as_str());
     let target_len = target_text.len() as u64;
 
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
         if dir_data.contains(name) {
             return Err(SysError::AlreadyExists);
@@ -318,7 +294,7 @@ fn ramfs_symlink_create(dir: &InodeRef, name: &str, target: &Path) -> Result<Ino
 /// Look up a child inode by name inside a directory.
 fn ramfs_lookup(parent: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
     let sb = parent.sb();
-    ramfs_sb(&sb).read_tx(|| ramfs_lookup_locked(parent, name))
+    ramfs_sb(&sb).with_tx(|| ramfs_lookup_locked(parent, name))
 }
 
 fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
@@ -336,11 +312,14 @@ fn ramfs_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
 }
 
 fn ramfs_truncate(inode: &InodeRef, size: u64) -> Result<(), SysError> {
-    let size = usize::try_from(size).map_err(|_| SysError::InvalidArgument)?;
-    let reg = ramfs_reg(inode)?;
-
-    reg.state().truncate(size);
-    inode.inode().set_size(size as u64);
+    let new_size = usize::try_from(size).map_err(|_| SysError::InvalidArgument)?;
+    let old_size = usize::try_from(inode.size()).map_err(|_| SysError::InvalidArgument)?;
+    let address_space = inode
+        .inode()
+        .address_space()
+        .expect("regular ramfs inode must own an address space");
+    address_space.apply_volatile_truncate(old_size, new_size);
+    inode.inode().set_size(size);
     Ok(())
 }
 
@@ -355,7 +334,7 @@ fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysEr
         return Err(SysError::CrossDeviceLink);
     }
 
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let dir_data = ramfs_dir(dir)?;
 
         if dir_data.contains(name) {
@@ -371,12 +350,12 @@ fn ramfs_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysEr
 
 fn ramfs_unlink(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| ramfs_remove_locked(dir, name, false))
+    ramfs_sb(&sb).with_tx(|| ramfs_remove_locked(dir, name, false))
 }
 
 fn ramfs_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let child = ramfs_lookup_locked(dir, name)?;
 
         if child.ty() != InodeType::Dir {
@@ -408,7 +387,7 @@ fn ramfs_rename(
         return Err(SysError::CrossDeviceLink);
     }
 
-    ramfs_sb(&sb).write_tx(|| {
+    ramfs_sb(&sb).with_tx(|| {
         let old_data = ramfs_dir(old_dir)?;
         let new_data = ramfs_dir(new_dir)?;
         let src_ino = old_data.get_by_name(old_name).ok_or(SysError::NotFound)?;

@@ -5,12 +5,14 @@ use alloc::vec::Vec;
 use anemone_net_api::{
     InterfaceId,
     icmp_raw::{IcmpRawEndpointId, IcmpRawEndpointInvalidation, IcmpRawNamespacePolicy},
+    tcp::TcpEndpointInvalidation,
     udp::{UdpEndpointId, UdpEndpointInvalidation, UdpNamespacePolicy},
 };
 use smoltcp::iface::{AdmittedIpv4Packet, SocketSet};
 
 use crate::{
     icmp_raw::{EgressResource as IcmpRawEgressResource, IcmpRawEndpoints},
+    tcp::{TcpEndpoints, TcpPolicy},
     udp::UdpEndpoints,
 };
 
@@ -27,6 +29,27 @@ pub(crate) enum ActiveEgress {
     IcmpRaw(IcmpRawEndpointId),
 }
 
+/// Move-only proof that a protocol owner committed work for one interface.
+///
+/// It carries no packet, deadline, readiness, capacity, or completion truth.
+/// The kernel composition consumes it only to request that the existing worker
+/// reread the authoritative Stack state.
+#[must_use = "a committed protocol progression obligation must be handed to the worker owner"]
+#[derive(Debug, Eq, PartialEq)]
+pub struct ProtocolProgression {
+    interface: InterfaceId,
+}
+
+impl ProtocolProgression {
+    pub(crate) const fn committed(interface: InterfaceId) -> Self {
+        Self { interface }
+    }
+
+    pub fn into_interface(self) -> InterfaceId {
+        self.interface
+    }
+}
+
 pub(crate) struct InterfaceProtocols {
     pub(crate) icmp_raw_egress: IcmpRawEgressResource,
     // This cursor chooses only between newly admissible protocol work. An
@@ -38,6 +61,7 @@ pub(crate) struct InterfaceProtocols {
 pub struct StackInvalidations {
     udp: Vec<UdpEndpointInvalidation>,
     icmp_raw: Vec<IcmpRawEndpointInvalidation>,
+    tcp: Vec<TcpEndpointInvalidation>,
 }
 
 impl StackInvalidations {
@@ -46,24 +70,28 @@ impl StackInvalidations {
     ) -> (
         Vec<UdpEndpointInvalidation>,
         Vec<IcmpRawEndpointInvalidation>,
+        Vec<TcpEndpointInvalidation>,
     ) {
-        (self.udp, self.icmp_raw)
+        (self.udp, self.icmp_raw, self.tcp)
     }
 }
 
 pub(crate) struct Protocols {
     pub(crate) udp: UdpEndpoints,
     pub(crate) icmp_raw: IcmpRawEndpoints,
+    pub(crate) tcp: TcpEndpoints,
 }
 
 impl Protocols {
     pub(crate) fn new(
         udp_policy: UdpNamespacePolicy,
         icmp_raw_policy: IcmpRawNamespacePolicy,
+        tcp_policy: TcpPolicy,
     ) -> Self {
         Self {
             udp: UdpEndpoints::new(udp_policy),
             icmp_raw: IcmpRawEndpoints::new(icmp_raw_policy),
+            tcp: TcpEndpoints::new(tcp_policy),
         }
     }
 
@@ -93,6 +121,7 @@ impl Protocols {
 
     pub(crate) fn observe_admitted_ipv4(&mut self, packet: AdmittedIpv4Packet<'_>) {
         self.icmp_raw.fanout_admitted(packet);
+        self.udp.observe_icmp_error(packet);
     }
 
     pub(crate) fn drain_engine_ingress(
@@ -179,6 +208,15 @@ impl Protocols {
         StackInvalidations {
             udp: self.udp.take_invalidations(),
             icmp_raw: self.icmp_raw.take_invalidations(),
+            tcp: self.tcp.take_invalidations(),
         }
+    }
+
+    pub(crate) fn invalidate_tcp_interface(&mut self, interface: InterfaceId) {
+        self.tcp.invalidate_interface(interface);
+    }
+
+    pub(crate) fn reclaim_tcp(&mut self, interface: InterfaceId, sockets: &mut SocketSet<'static>) {
+        self.tcp.reclaim_interface(interface, sockets);
     }
 }

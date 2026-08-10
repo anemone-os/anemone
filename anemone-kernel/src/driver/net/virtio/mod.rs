@@ -43,6 +43,10 @@ static_assert!(
     BACKING_CAPACITY > HEADER_RESERVE,
     "VirtIO-Net backing must leave room for an Ethernet frame"
 );
+static_assert!(
+    FRAME_CAPACITY <= u32::MAX as usize,
+    "VirtIO-Net frame capacity must fit Linux IFLA_MTU"
+);
 
 #[derive(Opaque)]
 struct VirtIONetState {

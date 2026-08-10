@@ -103,9 +103,11 @@ fn resolve_execveat_path(
     }
 }
 
+// Successful image replacement abandons this raw wrapper, so it has no
+// completed invocation for the syscall profiler.
 #[syscall(SYS_EXECVE, preparse = |_, _, _| {
     kdebugln!("preparsing execve syscall arguments");
-})]
+}, profile = false)]
 pub fn execve(
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] path: Box<str>,
     #[validate_with(nullable_string_array::<EXECVE_MAX_STRING_COUNT, MAX_ARG_BYTES_LEN>)] argv: Vec<
@@ -130,9 +132,11 @@ pub fn execve(
     unreachable!();
 }
 
+// Successful image replacement abandons this raw wrapper, so it has no
+// completed invocation for the syscall profiler.
 #[syscall(SYS_EXECVEAT, preparse = |_, _, _, _, _| {
     kdebugln!("preparsing execveat syscall arguments");
-})]
+}, profile = false)]
 fn execveat(
     dirfd: i32,
     #[validate_with(c_readonly_string::<MAX_PATH_LEN_BYTES>)] pathname: Box<str>,

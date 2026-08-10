@@ -11,17 +11,11 @@ use goblin::{
 };
 
 use crate::{
-    mm::{
-        layout::KernelLayoutTrait,
-        uspace::vmo::{VmObject, anon::AnonObject},
-    },
-    prelude::{
-        vma::{ForkPolicy, Protection, VmArea, VmFlags},
-        *,
-    },
+    prelude::{vma::Protection, *},
     task::execve::binfmt::check_exec_permission,
-    utils::data::FileDataSource,
 };
+
+use super::segment::{LoadSegment, map_load_segments};
 
 /// randomly chosen. should refine this to really randomize it per process.
 ///
@@ -103,7 +97,8 @@ fn validate_elf(hdr: &Header) -> Result<&Header, SysError> {
 fn find_phdrs_vaddr(elf_hdr: &Header, phdrs: &[ProgramHeader]) -> Option<VirtAddr> {
     let mut phdrs_vaddr = None;
 
-    let phdrs_sz = elf_hdr.e_phentsize as usize * elf_hdr.e_phnum as usize;
+    let phdrs_sz = (elf_hdr.e_phentsize as usize).checked_mul(elf_hdr.e_phnum as usize)?;
+    let phdrs_end = (elf_hdr.e_phoff as usize).checked_add(phdrs_sz)?;
 
     for phdr in phdrs {
         if phdr.p_type == PT_PHDR {
@@ -116,12 +111,10 @@ fn find_phdrs_vaddr(elf_hdr: &Header, phdrs: &[ProgramHeader]) -> Option<VirtAdd
             // tbh idk why we don't use memsz here.
             let seg_filesz = phdr.p_filesz as usize;
 
-            if seg_off <= elf_hdr.e_phoff as usize
-                && elf_hdr.e_phoff as usize + phdrs_sz <= seg_off + seg_filesz
-            {
-                phdrs_vaddr = Some(VirtAddr::new(
-                    phdr.p_vaddr + elf_hdr.e_phoff - seg_off as u64,
-                ));
+            let seg_end = seg_off.checked_add(seg_filesz)?;
+            if seg_off <= elf_hdr.e_phoff as usize && phdrs_end <= seg_end {
+                let phdr_delta = elf_hdr.e_phoff.checked_sub(seg_off as u64)?;
+                phdrs_vaddr = Some(VirtAddr::new(phdr.p_vaddr.checked_add(phdr_delta)?));
                 break;
             }
         }
@@ -130,262 +123,7 @@ fn find_phdrs_vaddr(elf_hdr: &Header, phdrs: &[ProgramHeader]) -> Option<VirtAdd
     phdrs_vaddr
 }
 
-struct SegData {
-    offset: usize,
-    filesz: usize,
-    vaddr: VirtAddr,
-    memsz: usize,
-    prot: Protection,
-}
-
-impl SegData {
-    // also basic validation.
-    fn validate(&self) -> Result<(), SysError> {
-        if self.filesz > self.memsz {
-            return Err(SysError::InvalidArgument);
-        }
-
-        let vaddr_end = VirtAddr::new(self.vaddr.get().wrapping_add(self.memsz as u64));
-        if vaddr_end < self.vaddr || vaddr_end.get() > KernelLayout::KSPACE_ADDR {
-            return Err(SysError::InvalidArgument);
-        }
-        Ok(())
-    }
-
-    fn file_vaddr_end(&self) -> VirtAddr {
-        self.vaddr + self.filesz as u64
-    }
-
-    fn vaddr_end(&self) -> VirtAddr {
-        self.vaddr + self.memsz as u64
-    }
-
-    fn rounded_vpn_range(&self) -> VirtPageRange {
-        let start = self.vaddr.page_down();
-        let end = self.vaddr_end().page_up();
-        VirtPageRange::new(start, end - start)
-    }
-}
-
-/// This module mainly focuses on merging loadable segments into load chunks.
-///
-/// Linkers do not guarantee that every segment in an ELF file is page-aligned;
-/// rather, they only ensure that the starting virtual address and file offset
-/// are congruent modulo the page size. Therefore, it is entirely possible for
-/// multiple segments to reside within a single page. And in that case, the
-/// permissions of that page should be the union of permissions of all segments
-/// within it.
-mod seg_chunk {
-    use super::*;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct LoadPageRun {
-        range: VirtPageRange,
-        prot: Protection,
-    }
-
-    pub struct LoadChunk {
-        range: VirtPageRange,
-        prot: Protection,
-        backing: AnonObject,
-    }
-
-    impl LoadChunk {
-        fn new(run: LoadPageRun) -> Self {
-            let backing = AnonObject::new(run.range.npages() as usize);
-            Self {
-                range: run.range,
-                prot: run.prot,
-                backing,
-            }
-        }
-
-        pub fn into_vma(self) -> VmArea {
-            VmArea::new(
-                self.range,
-                0,
-                self.prot,
-                ForkPolicy::CopyOnWrite,
-                VmFlags::empty(),
-                Arc::new(self.backing),
-            )
-        }
-    }
-
-    /// Given the segments, collect the load page runs, which are continuous
-    /// page ranges with the same permissions after merging all segments.
-    ///
-    /// This function will union the permissions of overlapping segments. And
-    /// **it will merge adjacent page runs with the same permissions, even
-    /// though they originate from different segments.**
-    fn collect_load_page_runs(segments: &[SegData]) -> Vec<LoadPageRun> {
-        let mut page_prots = BTreeMap::new();
-
-        for seg in segments {
-            for vpn in seg.rounded_vpn_range().iter() {
-                page_prots
-                    .entry(vpn)
-                    .and_modify(|prot| *prot |= seg.prot)
-                    .or_insert(seg.prot);
-            }
-        }
-
-        let mut runs = Vec::new();
-        let mut run_start: Option<VirtPageNum> = None;
-        let mut run_prot = Protection::empty();
-        let mut prev_vpn: Option<VirtPageNum> = None;
-
-        for (vpn, prot) in page_prots {
-            let extend = match prev_vpn {
-                Some(prev) => prev + 1 == vpn && run_prot == prot,
-                None => false,
-            };
-
-            if !extend {
-                if let (Some(start), Some(prev)) = (run_start, prev_vpn) {
-                    runs.push(LoadPageRun {
-                        range: VirtPageRange::new(start, prev.get() + 1 - start.get()),
-                        prot: run_prot,
-                    });
-                }
-
-                run_start = Some(vpn);
-                run_prot = prot;
-            }
-
-            prev_vpn = Some(vpn);
-        }
-
-        if let (Some(start), Some(prev)) = (run_start, prev_vpn) {
-            runs.push(LoadPageRun {
-                range: VirtPageRange::new(start, prev.get() + 1 - start.get()),
-                prot: run_prot,
-            });
-        }
-
-        runs
-    }
-
-    /// Simply write those filesz bytes from the segment to the corresponding
-    /// load chunks.
-    fn write_segment_data(
-        source: &File,
-        seg: &SegData,
-        chunks: &[LoadChunk],
-    ) -> Result<(), SysError> {
-        if seg.filesz == 0 {
-            return Ok(());
-        }
-
-        let seg_file_end = seg.file_vaddr_end();
-
-        for chunk in chunks {
-            let copy_start = seg
-                .vaddr
-                .get()
-                .max(chunk.range.start().to_virt_addr().get());
-            let copy_end = seg_file_end
-                .get()
-                .min(chunk.range.end().to_virt_addr().get());
-
-            if copy_start >= copy_end {
-                continue;
-            }
-
-            (&chunk.backing as &dyn VmObject).write_from_data_source(
-                (copy_start - chunk.range.start().to_virt_addr().get()) as usize,
-                &FileDataSource::new(source, seg.offset + (copy_start - seg.vaddr.get()) as usize),
-                (copy_end - copy_start) as usize,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    /// What this module mainly does: given the segments, collect load chunks,
-    /// which can then be inserted to user's memory space.
-    pub fn collect_load_chunks(
-        file: &File,
-        segments: &[SegData],
-    ) -> Result<Vec<LoadChunk>, SysError> {
-        let runs = collect_load_page_runs(segments);
-        let chunks = runs.into_iter().map(LoadChunk::new).collect::<Vec<_>>();
-
-        for seg in segments {
-            // let source = FileDataSource::new(file, seg.offset);
-            write_segment_data(file, seg, &chunks)?;
-        }
-
-        Ok(chunks)
-    }
-
-    #[cfg(feature = "kunit")]
-    mod kunits {
-        use super::*;
-
-        fn seg(vaddr: u64, memsz: usize, prot: Protection) -> SegData {
-            SegData {
-                offset: 0,
-                filesz: 0,
-                vaddr: VirtAddr::new(vaddr),
-                memsz,
-                prot,
-            }
-        }
-
-        #[kunit]
-        fn merges_overlapping_pages_per_page_protection() {
-            let page_sz = PagingArch::PAGE_SIZE_BYTES as u64;
-            let base = VirtAddr::new(0x400000).page_down();
-
-            let runs = collect_load_page_runs(&[
-                seg(
-                    0x400000,
-                    page_sz as usize,
-                    Protection::READ | Protection::EXECUTE,
-                ),
-                seg(
-                    0x400000 + page_sz - 0x80,
-                    0x200,
-                    Protection::READ | Protection::WRITE,
-                ),
-            ]);
-
-            assert_eq!(
-                runs,
-                vec![
-                    LoadPageRun {
-                        range: VirtPageRange::new(base, 1),
-                        prot: Protection::READ | Protection::WRITE | Protection::EXECUTE,
-                    },
-                    LoadPageRun {
-                        range: VirtPageRange::new(base + 1, 1),
-                        prot: Protection::READ | Protection::WRITE,
-                    },
-                ]
-            );
-        }
-    }
-}
-use seg_chunk::*;
-
-/// During this process, rolling back will not be performed if any error is
-/// encountered, thus leaving the [UserSpace] in a possibly inconsistent state.
-pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, SysError> {
-    let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
-    file.read_exact(&mut elf_hdr_bytes)?;
-    let elf_hdr = validate_elf(Header::from_bytes(&elf_hdr_bytes))?;
-
-    let load_bias: u64 = if elf_hdr.e_type == ET_EXEC {
-        0
-    } else if elf_hdr.e_type == ET_DYN {
-        // for pie programs, we can load it anywhere.
-        DYN_LOAD_BIAS
-    } else {
-        knoticeln!("unsupported ELF type: {}", elf_hdr.e_type);
-        return Err(SysError::InvalidArgument);
-    };
-
+fn read_program_headers(file: &File, elf_hdr: &Header) -> Result<Box<[ProgramHeader]>, SysError> {
     let phdrs_offset = elf_hdr.e_phoff as usize;
     let phdr_entry_sz = elf_hdr.e_phentsize as usize;
     let phdr_entry_num = elf_hdr.e_phnum as usize;
@@ -405,32 +143,68 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
         return Err(SysError::InvalidArgument);
     }
 
-    let phdrs = {
-        let mut phdrs =
-            vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
+    let phdrs_len = phdr_entry_sz
+        .checked_mul(phdr_entry_num)
+        .ok_or(SysError::InvalidArgument)?;
+    let phdrs_end = phdrs_offset
+        .checked_add(phdrs_len)
+        .ok_or(SysError::InvalidArgument)?;
+    let file_size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
+    if phdrs_end > file_size {
+        return Err(SysError::InvalidArgument);
+    }
 
-        {
-            let raw_bytes = unsafe {
-                core::slice::from_raw_parts_mut(
-                    phdrs.as_mut_ptr().cast::<u8>(),
-                    phdr_entry_sz * phdr_entry_num,
-                )
-            };
+    let mut phdrs = vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
+    let raw_bytes =
+        unsafe { core::slice::from_raw_parts_mut(phdrs.as_mut_ptr().cast::<u8>(), phdrs_len) };
+    file.seek_set_checked(phdrs_offset)?;
+    file.read_exact(raw_bytes)?;
 
-            file.seek_set_checked(phdrs_offset)?;
-            file.read_exact(raw_bytes)?;
-        }
+    let ptr = Box::into_raw(phdrs) as *mut [ProgramHeader];
+    Ok(unsafe { Box::from_raw(ptr) })
+}
 
-        let ptr = Box::into_raw(phdrs) as *mut [ProgramHeader];
-        unsafe { Box::from_raw(ptr) }
+fn biased_vaddr(vaddr: u64, load_bias: u64) -> Result<VirtAddr, SysError> {
+    vaddr
+        .checked_add(load_bias)
+        .map(VirtAddr::new)
+        .ok_or(SysError::InvalidArgument)
+}
+
+fn page_align_up(addr: u64) -> Result<u64, SysError> {
+    addr.checked_add(PagingArch::PAGE_SIZE_BYTES as u64 - 1)
+        .map(|value| value & !(PagingArch::PAGE_SIZE_BYTES as u64 - 1))
+        .ok_or(SysError::InvalidArgument)
+}
+
+/// During this process, rolling back will not be performed if any error is
+/// encountered, thus leaving the [UserSpace] in a possibly inconsistent state.
+pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, SysError> {
+    let mut elf_hdr_bytes = [0; SIZEOF_EHDR];
+    file.read_exact(&mut elf_hdr_bytes)?;
+    let elf_hdr = validate_elf(Header::from_bytes(&elf_hdr_bytes))?;
+
+    let load_bias: u64 = if elf_hdr.e_type == ET_EXEC {
+        0
+    } else if elf_hdr.e_type == ET_DYN {
+        // for pie programs, we can load it anywhere.
+        DYN_LOAD_BIAS
+    } else {
+        knoticeln!("unsupported ELF type: {}", elf_hdr.e_type);
+        return Err(SysError::InvalidArgument);
     };
+
+    let phdr_entry_sz = elf_hdr.e_phentsize as usize;
+    let phdr_entry_num = elf_hdr.e_phnum as usize;
+    let phdrs = read_program_headers(file, elf_hdr)?;
+    let file_size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
 
     let mut dyn_interp = None;
     let mut interp_bias = load_bias;
     let mut segments = vec![];
     for phdr in &phdrs {
         // biased virtual address.
-        let vaddr = VirtAddr::new(phdr.p_vaddr + load_bias);
+        let vaddr = biased_vaddr(phdr.p_vaddr, load_bias)?;
 
         if phdr.p_type == PT_INTERP {
             if dyn_interp.is_some() {
@@ -471,20 +245,16 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
             prot |= Protection::EXECUTE;
         }
 
-        interp_bias = align_up_power_of_2!(
-            interp_bias.max(vaddr.get().wrapping_add(phdr.p_memsz)),
-            PagingArch::PAGE_SIZE_BYTES
-        ) as u64;
-
-        let seg = SegData {
-            offset: phdr.p_offset as usize,
-            filesz: phdr.p_filesz as usize,
+        let seg = LoadSegment::new(
+            phdr.p_offset as usize,
+            phdr.p_filesz as usize,
             vaddr,
-            memsz: phdr.p_memsz as usize,
+            phdr.p_memsz as usize,
             prot,
-        };
-        seg.validate()?;
+            file_size,
+        )?;
 
+        interp_bias = page_align_up(interp_bias.max(seg.vaddr_end().get()))?;
         segments.push(seg);
     }
 
@@ -492,17 +262,11 @@ pub unsafe fn load_image(file: &File, usp: &mut UserSpace) -> Result<ElfMeta, Sy
         return Err(SysError::InvalidArgument);
     };
     // apply bias.
-    let phdrs_addr = phdrs_addr + load_bias;
+    let phdrs_addr = biased_vaddr(phdrs_addr.get(), load_bias)?;
 
-    let load_chunks = collect_load_chunks(file, &segments)?;
+    map_load_segments(file, &segments, usp)?;
 
-    for chunk in load_chunks {
-        unsafe {
-            usp.add_segment(chunk.into_vma())?;
-        }
-    }
-
-    let entry = VirtAddr::new(elf_hdr.e_entry + load_bias);
+    let entry = biased_vaddr(elf_hdr.e_entry, load_bias)?;
 
     if let Some(interp_path) = dyn_interp {
         let interp_path =
@@ -564,48 +328,12 @@ fn load_interpreter(
         return Err(SysError::InvalidArgument);
     };
 
-    let phdrs_offset = elf_hdr.e_phoff as usize;
-    let phdr_entry_sz = elf_hdr.e_phentsize as usize;
-    let phdr_entry_num = elf_hdr.e_phnum as usize;
-
-    if phdr_entry_sz != size_of::<ProgramHeader>() {
-        knoticeln!(
-            "unexpected ELF program header entry size: {}",
-            phdr_entry_sz
-        );
-        return Err(SysError::InvalidArgument);
-    }
-    if !phdrs_offset.is_multiple_of(align_of::<ProgramHeader>()) {
-        knoticeln!(
-            "ELF program headers offset is not aligned: {:#x}",
-            phdrs_offset
-        );
-        return Err(SysError::InvalidArgument);
-    }
-
-    let phdrs = {
-        let mut phdrs =
-            vec![MaybeUninit::<ProgramHeader>::uninit(); phdr_entry_num].into_boxed_slice();
-
-        {
-            let raw_bytes = unsafe {
-                core::slice::from_raw_parts_mut(
-                    phdrs.as_mut_ptr().cast::<u8>(),
-                    phdr_entry_sz * phdr_entry_num,
-                )
-            };
-
-            file.seek_set_checked(phdrs_offset)?;
-            file.read_exact(raw_bytes)?;
-        }
-
-        let ptr = Box::into_raw(phdrs) as *mut [ProgramHeader];
-        unsafe { Box::from_raw(ptr) }
-    };
+    let phdrs = read_program_headers(file, elf_hdr)?;
+    let file_size = usize::try_from(file.inode().size()).map_err(|_| SysError::FileTooLarge)?;
 
     let mut segments = vec![];
     for phdr in &phdrs {
-        let vaddr = VirtAddr::new(phdr.p_vaddr + load_bias);
+        let vaddr = biased_vaddr(phdr.p_vaddr, load_bias)?;
 
         if phdr.p_type == PT_INTERP {
             // dynamic linker should be the endgame.
@@ -629,14 +357,14 @@ fn load_interpreter(
             prot |= Protection::EXECUTE;
         }
 
-        let seg = SegData {
-            offset: phdr.p_offset as usize,
-            filesz: phdr.p_filesz as usize,
+        let seg = LoadSegment::new(
+            phdr.p_offset as usize,
+            phdr.p_filesz as usize,
             vaddr,
-            memsz: phdr.p_memsz as usize,
+            phdr.p_memsz as usize,
             prot,
-        };
-        seg.validate()?;
+            file_size,
+        )?;
 
         segments.push(seg);
     }
@@ -645,15 +373,9 @@ fn load_interpreter(
         return Err(SysError::InvalidArgument);
     };
 
-    let load_chunks = collect_load_chunks(file, &segments)?;
+    map_load_segments(file, &segments, usp)?;
 
-    for chunk in load_chunks {
-        unsafe {
-            usp.add_segment(chunk.into_vma())?;
-        }
-    }
-
-    let entry = VirtAddr::new(elf_hdr.e_entry + load_bias);
+    let entry = biased_vaddr(elf_hdr.e_entry, load_bias)?;
     let base = VirtAddr::new(load_bias);
     kdebugln!(
         "interpreter ELF loaded: entry = {:#x}, base = {:#x}",

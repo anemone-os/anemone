@@ -4,7 +4,7 @@ exec_env = "sbi"
 
 [constants]
 phys_ram_start = 0x80000000
-max_phys_ram_size = 0x200000000     # 8GB
+max_phys_ram_size = 0x900000000     # 36GB
 kernel_la_base = 0x80200000
 kernel_va_base = 0xffffffff80200000
 earlycon_reg = 0x1fe001e0

@@ -9,14 +9,14 @@
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{boot_io,console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
 **Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
-**最后核验：** 2026-08-03
+**最后核验：** 2026-08-08
 
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
 | MMIO、IRQ、FIFO、boot-applied line、ordered raw RX unit handoff、break/fault/overrun/overflow counter与最终TX serialization | UART physical driver | TTY持窄`TtyPort` capability；console持output-only projection | bounded RX publication与console/TTY TX |
-| committed termios、winsize、discipline、editable/committed input与readiness predicate | endpoint共享的`Terminal` | opened file持Terminal引用；operation ctx提供live flags | read/write/poll/ioctl data plane |
+| committed termios、winsize、discipline、editable/committed input、output queue、逻辑输出列与readiness predicate | endpoint共享的`Terminal` | opened file持Terminal引用；operation ctx提供live flags | read/write/poll/ioctl data plane |
 | worker-local dequeued batch | 单次deferred-consumer invocation | notification只要求predicate重验 | raw handoff到discipline的短命ownership transfer |
 | immutable port identity到`ttyS<N>`映射及published endpoint | TTY endpoint registry | devfs持open provider；boot只消费selected identity | stable node、device number与shared Terminal lookup |
 | selected-console truth与`/dev/console` | console owner | TTY只在boot finalize重验selected-terminal identity | 安装real Terminal boot fd，不转移console owner |
@@ -53,22 +53,24 @@ repository build/QEMU自动matrix；raw 234、sideband condition、console RX、
 ## TTY-TERM-001 — Endpoint共享唯一terminal semantic truth
 
 **规则：** 同一serial endpoint的所有open file引用同一个`Terminal`。它唯一持有committed termios、winsize、
-concrete discipline、canonical pending edit、committed/noncanonical input和readiness predicate。opened file只保存
-Terminal引用；`O_NONBLOCK`每次来自通用open-file-description flags。`IGNBRK`、`BRKINT`、`IGNPAR`、`PARMRK`、
+concrete discipline、canonical pending edit、committed/noncanonical input、output queue、逻辑output-processing列和
+readiness predicate。逻辑列与完整output token一起提交；它只描述TTY output processor已经接受的stream位置，
+不是UART、console或host terminal的物理cursor truth。opened file只保存Terminal引用；`O_NONBLOCK`每次来自通用
+open-file-description flags。`IGNBRK`、`BRKINT`、`IGNPAR`、`PARMRK`、
 `INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`只改变Terminal的input interpretation，不反向修改UART line。
 用户可见属性只有在完整candidate可提交时一次性发布；invalid、不可表示或要求未支持hardware action的update失败
 并保持旧snapshot，不能success-stub。
 
-**违反表现：** 不同fd观察冲突termios/winsize/input、file缓存stale nonblock、port shadow反向驱动Terminal、
-失败update部分可见，或ioctl成功但丢弃用户状态。
+**违反表现：** 不同fd观察冲突termios/winsize/input、file缓存stale nonblock、UART/console保存或反向驱动第二份
+output列truth、失败update部分可见，或ioctl成功但丢弃用户状态。
 
 **验证 / Enforcement：** shared fd0/1/2与新开`ttyS0`交叉termios/winsize matrix；九个input flags与组合round-trip、
-unsupported rollback、`stty`、native Python 3.13 PyREPL、`TCSETSW/F`和owner/source audit；setter generation/
-revalidation assertion与KUnit。
+`TAB0/TAB3` round-trip、unsupported rollback、`stty`、native Python 3.13 PyREPL、GNU `less 668` user run、
+`TCSETSW/F`和owner/source audit；setter generation/revalidation assertion与KUnit。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)。
 
 ## TTY-INPUT-001 — Input ownership、record boundary与readiness同源
 
@@ -100,20 +102,26 @@ register-plus-recheck与worker batch assertion/KUnit；人工`VERASE/VKILL/VEOF`
 ## TTY-OUTPUT-001 — 输出按用户byte计量并由port最终序列化
 
 **规则：** TTY write接受任意bytes。`OPOST`关闭时原样提交；启用transform时，partial progress按已经消费的
-用户输入bytes计量，单个input byte的扩展不能重复提交。echo复用同一Terminal transform与port capability，但不在
-Terminal guard内等待hardware。writable、drain、partial write与`TCSETSW`来自真实backend progress；panic/early-console
-best-effort路径不是普通TTY TX truth。普通console record与整次TTY write不承诺相互原子，但都必须经同一个port owner
-按bounded batch序列化。
+用户输入bytes计量，单个input byte的扩展不能重复提交。`TAB0`保留literal tab，`TAB3/XTABS`按已经提交的逻辑列把
+tab原子展开到下一个8列边界，形成1至8个空格；CR、backspace、newline/`ONLCR`与ordinary/control byte按同一
+output-processing列规则推进。完整token进入Terminal queue后才同时推进源byte progress与逻辑列；backpressure不
+提交token prefix，也不推进二者。output flush丢弃尚未提交port的backend work，但不倒退已经接受的stream位置。
 
-**违反表现：** binary byte因UTF-8失败、ONLCR partial progress重发输入、echo持Terminal guard等待、虚构drain，
-或console/TTY形成两套TX truth。
+echo复用同一Terminal transform与port capability，但不在Terminal guard内等待hardware。blocking write与poll使用
+同一个Terminal-owned writable predicate，并为当前termios与逻辑列上任意一个完整source-byte token保留空间；
+writable、drain、partial write与`TCSETSW`来自真实backend progress。panic/early-console best-effort路径不是普通TTY
+TX truth。普通console record与整次TTY write不承诺相互原子，但都必须经同一个port owner按bounded batch序列化。
+
+**违反表现：** binary byte因UTF-8失败、ONLCR/TAB3 partial progress重发输入、TAB3 backpressure改变后续列、
+write wait与poll使用冲突的writable条件、echo持Terminal guard等待、虚构drain，或console/TTY形成两套TX truth。
 
 **验证 / Enforcement：** binary NUL/`0xff`、OPOST/ONLCR、TCSETSW payload-before-marker、TCSETSF与drain RV64
-byte oracle；partial backend progress和transform KUnit/source audit；final output/summary drain后再关机。
+byte oracle；TAB3列推进、完整token backpressure与readiness inline KUnit compile/source audit；GNU `less 668`
+进入可用全屏界面并以`q`退出的用户运行证据；final output/summary drain后再关机。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)。
 
 ## TTY-ENDPOINT-001 — Endpoint publication是稳定的单向transaction
 

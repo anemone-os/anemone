@@ -50,6 +50,10 @@ SECTIONS {
         __ssyscall = .;
         *(.syscall .syscall.*)
         __esyscall = .;
+        . = ALIGN(8);
+        __sperf_metrics = .;
+        KEEP(*(.perf_metrics .perf_metrics.*))
+        __eperf_metrics = .;
         __erodata = .;
     }  > VIRT AT> RAM
 

@@ -53,19 +53,21 @@ impl ShadowObject {
         &self,
         range: core::ops::Range<usize>,
         mark_decommitted: bool,
-    ) -> Result<RetiredFrames, SysError> {
+        retired: &mut RetiredFrames,
+    ) -> Result<(), SysError> {
         if range.start > range.end {
             return Err(SysError::InvalidArgument);
         }
         if range.is_empty() {
-            return Ok(RetiredFrames::default());
+            return Ok(());
         }
 
         let mut pages = self.pages.write();
         if mark_decommitted {
             pages.decommitted.insert(range.clone());
         }
-        Ok(retire_frame_range(&mut pages.overlay, range))
+        retire_frame_range(&mut pages.overlay, range, retired);
+        Ok(())
     }
 }
 
@@ -142,13 +144,20 @@ impl VmObject for ShadowObject {
         }
     }
 
-    fn discard_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
-        drop(self.take_overlay(range, false)?);
-        Ok(())
+    fn discard_range(&self, range: core::ops::Range<usize>, retired: &mut RetiredFrames) {
+        assert!(
+            range.start <= range.end,
+            "VMA-backed discard range must be ordered"
+        );
+        retire_frame_range(&mut self.pages.write().overlay, range, retired)
     }
 
-    fn decommit_range(&self, range: core::ops::Range<usize>) -> Result<RetiredFrames, SysError> {
-        self.take_overlay(range, true)
+    unsafe fn decommit_private_range(
+        &self,
+        range: core::ops::Range<usize>,
+        retired: &mut RetiredFrames,
+    ) -> Result<(), SysError> {
+        self.take_overlay(range, true, retired)
     }
 
     fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {
@@ -207,8 +216,10 @@ mod kunits {
         fill_frame(&overlay.frame, 0x5a);
         drop(overlay);
 
-        let retired = shadow
-            .decommit_range(0..1)
+        // SAFETY: this test owns the only ShadowObject mapping domain and keeps
+        // the returned frame handles alive in `retired` for the whole check.
+        let mut retired = RetiredFrames::default();
+        unsafe { shadow.decommit_private_range(0..1, &mut retired) }
             .expect("shadow decommit should succeed");
         assert_eq!(retired.len(), 1);
 

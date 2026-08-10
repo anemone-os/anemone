@@ -9,7 +9,6 @@
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
-- [OOM Killer](./2026-06-15-oom-killer.md)
 - [Fanotify](./2026-06-08-fanotify.md)
 - [Signal Temporary Mask Restore](./2026-06-06-signal-temp-mask-restore.md)
 - [FileOps Seek and Char Device ioctl](./2026-06-05-fileops-seek-char-ioctl.md)
@@ -19,6 +18,7 @@
 
 ## Closed / Deferred / Terminated
 
+- [OOM Killer](./2026-06-15-oom-killer.md)：allocation-success wake target未闭合runtime acceptance即被永久停止；已有source/build/rootfs证据与Not Run原样保留，当前periodic sampling由独立小迭代和current contract拥有。此项不是Completed。
 - [AHCI Controller](./2026-07-23-ahci-controller.md)：未接受Draft已Terminated，不再有active gate；第一阶段实现与结构移动证据保留，live lifecycle/capacity defect、shutdown/timeout限制及hardware Not Run由register拥有。此项不是Completed。
 - [Sched EEVDF-lite](./2026-07-09-sched-eevdf-lite.md)：Stage 3/R1 runtime acceptance 失败后延期关闭；关闭时恢复 RR，后续 default 已由 Fair / Stride 接管，四个 Keter 保持未解决。此项不是 Completed。
 

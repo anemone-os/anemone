@@ -89,7 +89,7 @@ fn test_connect_destination_and_disconnect() -> Result<(), Errno> {
     let unbound_name = getsockname_ipv4(client)?;
     ensure(unbound_name.port() == 0)?;
     let faulting = [IoVec {
-        iov_base: 1usize as *mut _,
+        iov_base: anemone_rs::abi::RawUserAddr64::from_bits(1),
         iov_len: 1,
     }];
     expect_errno(writev(client, &faulting), EDESTADDRREQ)?;
@@ -167,7 +167,7 @@ fn test_peer_filter_and_queued_nonretroactivity() -> Result<(), Errno> {
 
 fn iovec(bytes: &mut [u8]) -> IoVec {
     IoVec {
-        iov_base: bytes.as_mut_ptr().cast(),
+        iov_base: bytes.as_mut_ptr().into(),
         iov_len: bytes.len() as u64,
     }
 }
@@ -212,13 +212,15 @@ fn test_zero_length_file_vector_io() -> Result<(), Errno> {
 
     ensure(write(client, &[])? == 0)?;
     let mut empty = [];
-    // Scalar read(count=0) completes before FileOps and therefore must not
-    // consume the queued zero-length datagram. A nonempty vector with one
-    // zero-length element enters FileOps and consumes that datagram.
+    // Scalar read(count=0) and aggregate-zero readv complete before FileOps,
+    // so neither consumes the queued zero-length datagram. recvfrom with a
+    // zero-capacity destination still enters Socket receive and consumes it.
     ensure(read(server, &mut empty)? == 0)?;
     wait_readable(server)?;
     let mut zero = [iovec(&mut empty)];
     ensure(readv(server, &mut zero)? == 0)?;
+    wait_readable(server)?;
+    ensure(recv_retry(server, &mut empty)?.0 == 0)?;
     expect_empty(server)?;
 
     close(client)?;
@@ -243,21 +245,11 @@ fn test_short_file_read_consumes_datagram() -> Result<(), Errno> {
     close(server)
 }
 
-fn test_iovec_count_boundary() -> Result<(), Errno> {
+fn test_iovec_uapi_ceiling() -> Result<(), Errno> {
     let (server, client) = connected_pair()?;
-    let mut empty = [];
-    let accepted = vec![
-        IoVec {
-            iov_base: core::ptr::null_mut(),
-            iov_len: 0,
-        };
-        IOV_MAX
-    ];
-    ensure(writev(client, &accepted)? == 0)?;
-    recv_retry(server, &mut empty)?;
     let rejected = vec![
         IoVec {
-            iov_base: core::ptr::null_mut(),
+            iov_base: anemone_rs::abi::RawUserAddr64::NULL,
             iov_len: 0,
         };
         IOV_MAX + 1
@@ -274,7 +266,7 @@ fn test_writev_fault_is_atomic() -> Result<(), Errno> {
     let faulting_write = [
         iovec(&mut visible),
         IoVec {
-            iov_base: 1usize as *mut _,
+            iov_base: anemone_rs::abi::RawUserAddr64::from_bits(1),
             iov_len: 1,
         },
     ];
@@ -292,7 +284,7 @@ fn test_readv_fault_returns_visible_prefix() -> Result<(), Errno> {
     let mut faulting_read = [
         iovec(&mut prefix),
         IoVec {
-            iov_base: 1usize as *mut _,
+            iov_base: anemone_rs::abi::RawUserAddr64::from_bits(1),
             iov_len: 6,
         },
     ];
@@ -451,7 +443,7 @@ pub(crate) fn run() -> Result<(), Errno> {
         "short-file-read-consumes-datagram",
         test_short_file_read_consumes_datagram,
     );
-    results.case("iovec-count-boundary", test_iovec_count_boundary);
+    results.case("iovec-uapi-ceiling", test_iovec_uapi_ceiling);
     results.case("writev-fault-atomic", test_writev_fault_is_atomic);
     results.case(
         "readv-fault-visible-prefix",

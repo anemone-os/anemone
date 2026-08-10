@@ -331,7 +331,7 @@ impl DwMshcInner {
     /// Poll a self-clearing or completion condition under the configured hard
     /// deadline. The deadline bounds faulty hardware; it is not a sleep budget.
     fn poll_until(&self, mut predicate: impl FnMut() -> bool) -> bool {
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(DW_MSHC_POLL_TIMEOUT_MS);
         loop {
             if predicate() {
@@ -685,7 +685,7 @@ impl DwMshcInner {
     }
 
     fn wait_command_done(&self) -> Result<(), MmcHostError> {
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(DW_MSHC_POLL_TIMEOUT_MS);
         loop {
             let raw = self.regs.raw_interrupts();
@@ -733,7 +733,7 @@ impl DwMshcInner {
 
     fn read_data(&self, buffer: &mut [u8]) -> Result<(), MmcHostError> {
         let width = self.layout.fifo_width.bytes();
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(DW_MSHC_POLL_TIMEOUT_MS);
         let mut offset = 0;
         while offset < buffer.len() {
@@ -772,7 +772,7 @@ impl DwMshcInner {
 
     fn write_data(&self, buffer: &[u8]) -> Result<(), MmcHostError> {
         let width = self.layout.fifo_width.bytes();
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(DW_MSHC_POLL_TIMEOUT_MS);
         let mut offset = 0;
         while offset < buffer.len() {
@@ -813,7 +813,7 @@ impl DwMshcInner {
         self.wait_data_over(start)
     }
 
-    fn wait_data_over(&self, start: Instant) -> Result<(), MmcHostError> {
+    fn wait_data_over(&self, start: MonotonicInstant) -> Result<(), MmcHostError> {
         let timeout = Duration::from_millis(DW_MSHC_POLL_TIMEOUT_MS);
         loop {
             let raw = self.regs.raw_interrupts();

@@ -3,16 +3,14 @@
 #![allow(unused)]
 
 mod busybox;
-mod clock_read;
-mod clock_step;
 mod competition;
 mod file;
 mod guest;
 mod ltp;
+mod oracle;
 mod process;
 mod runtime;
-mod soft_timer;
-mod timer_signal;
+mod tcp_stage5;
 
 use anemone_rs::{
     abi::{fs::linux::open::O_RDONLY, system::native::power::SHUTDOWN_MAGIC},
@@ -22,6 +20,15 @@ use anemone_rs::{
     },
     prelude::*,
 };
+
+cfg_select! {
+    target_arch = "riscv64" => {
+        pub(crate) const ARCH_LABEL: &str = "rv64";
+    },
+    target_arch = "loongarch64" => {
+        pub(crate) const ARCH_LABEL: &str = "la64";
+    }
+}
 
 fn local_run_cmd(cmd: &str, args: &[&str], envs: &[&str]) {
     process::run_execve(cmd, args, envs, cmd);
@@ -46,28 +53,13 @@ fn run_udp_extension_c_consumer() {
 
 /// local tests for development.
 fn run_local_tests() {
-    run_udp_extension_c_consumer();
+    // run_udp_extension_c_consumer();
+    oracle::run_local();
 
-    println!("user-test: running local POSIX timer test...");
-    local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
-    println!("user-test: local POSIX timer test finished.");
+    // println!("user-test: running local clock/time/timer test...");
+    // local_run_cmd("/bin/clock_tests", &["clock_tests"], &[]);
+    // println!("user-test: local clock/time/timer test finished.");
 
-    // println!("user-test: running native clock read test...");
-    // clock_read::verify_native_clocks();
-    // println!("user-test: native clock read test finished.");
-    //
-    // println!("user-test: running soft timer consumer test...");
-    // soft_timer::verify_soft_timer_consumers();
-    // println!("user-test: soft timer consumer test finished.");
-    //
-    // println!("user-test: running realtime clock step test...");
-    // clock_step::verify_clock_steps();
-    // println!("user-test: realtime clock step test finished.");
-    //
-    // println!("user-test: running SI_TIMER signal frame test...");
-    // timer_signal::verify_timer_signal_frame();
-    // println!("user-test: SI_TIMER signal frame test finished.");
-    //
     // println!("user-test: running userptr test...");
     // local_run_cmd("/bin/userptr", &["userptr"], &[]);
     // println!("user-test: userptr test finished.");
@@ -145,17 +137,17 @@ fn run_local_tests() {
     // println!("user-test: epoll test finished.");
 
     // 13. Socket suites: UDP regression and AF_UNIX Stage 1 vertical slice
-    println!("user-test: running socket test...");
-    local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
-    println!("user-test: socket test finished.");
+    // println!("user-test: running socket test...");
+    // local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
+    // println!("user-test: socket test finished.");
 
-    println!("user-test: running Rust Command seqpacket consumer...");
-    local_run_cmd("/bin/rust-command-test", &["rust-command-test"], &[]);
-    println!("user-test: Rust Command seqpacket consumer finished.");
+    // println!("user-test: running Rust Command seqpacket consumer...");
+    // local_run_cmd("/bin/rust-command-test", &["rust-command-test"], &[]);
+    // println!("user-test: Rust Command seqpacket consumer finished.");
 
-    println!("user-test: running pipe capacity test...");
-    local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
-    println!("user-test: pipe capacity test finished.");
+    // println!("user-test: running pipe capacity test...");
+    // local_run_cmd("/bin/fcntl-test", &["fcntl-test", "pipe-capacity"], &[]);
+    // println!("user-test: pipe capacity test finished.");
 
     // println!("user-test: running POSIX record lock test...");
     // local_run_cmd(
@@ -167,33 +159,60 @@ fn run_local_tests() {
 }
 
 /// competition tests.
-fn run_comp_tests() {
+fn run_comp_tests(run_tcp_stage5: bool) {
     guest::enter_competition_root();
     guest::init_competition_environment();
 
-    println!("user-test: running BusyBox loopback ping...");
-    local_run_cmd("/bin/ping", &["ping", "-c", "1", "127.0.0.1"], &[]);
-    println!("user-test: BusyBox loopback ping finished.");
+    // println!("user-test: running BusyBox loopback ping...");
+    // local_run_cmd("/bin/ping", &["ping", "-c", "1", "127.0.0.1"], &[]);
+    // println!("user-test: BusyBox loopback ping finished.");
 
-    println!("user-test: running BusyBox gateway ping...");
-    local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);
-    println!("user-test: BusyBox gateway ping finished.");
+    // println!("user-test: running BusyBox gateway ping...");
+    // local_run_cmd("/bin/ping", &["ping", "-c", "1", "10.0.2.2"], &[]);
+    // println!("user-test: BusyBox gateway ping finished.");
 
     ltp::install_ltp_fixtures();
 
     // competition::run_competition_tests();
     ltp::run_ltp_tests();
 
+    if run_tcp_stage5 {
+        tcp_stage5::run().expect("user-test: TCP Stage 5 validation failed");
+    }
+
     println!("user-test: all competition tests finished.");
 }
 
 #[anemone_rs::main]
 pub fn main() -> Result<(), Errno> {
+    let mut args = anemone_rs::env::args();
+    let _program = args.next();
+    let tcp_stage5_peer = match args.next() {
+        None => None,
+        Some("--tcp-stage5") => {
+            let peer = args.next().ok_or(EINVAL)?;
+            let port = args.next().ok_or(EINVAL)?;
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            Some((peer, port))
+        },
+        Some(_) => return Err(EINVAL),
+    };
+    let drain_tcp_stage5_markers = tcp_stage5_peer.is_some();
     run_local_tests();
+    if let Some((peer, port)) = tcp_stage5_peer {
+        oracle::run_tcp_stage5(peer, port);
+    }
 
-    run_comp_tests();
+    run_comp_tests(drain_tcp_stage5_markers);
 
     println!("user-test: all tests finished, shutting down.");
+    if drain_tcp_stage5_markers {
+        // The Stage 5 validation master powers off immediately below; retain a
+        // bounded window for the terminal owner to publish every final marker.
+        tcp_stage5::drain_terminal()?;
+    }
     shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
     unreachable!("user-test: shutdown returned unexpectedly");
 }

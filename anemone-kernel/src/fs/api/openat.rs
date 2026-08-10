@@ -10,10 +10,7 @@ use crate::{
     fs::{
         api::args::{AtFd, LinuxInodePerm},
         fanotify::{FanHookEvent, FanMask, notify_path_event, observed_file_description_ops},
-        pipe::{
-            FifoOpenAccess, FifoOpenContext, open_named_fifo, pipe_file_desc_ops,
-            validate_fifo_open_status,
-        },
+        vfs_open_description,
     },
     prelude::{user_access::c_readonly_path, *},
     syscall::handler::TryFromSyscallArg,
@@ -293,34 +290,13 @@ fn finish_open(
         return Err(SysError::PermissionDenied);
     }
 
-    let activates_fifo = ty == InodeType::Fifo && !how.access.is_path_only();
-    if activates_fifo {
-        // FIFO status admission is deliberately side-effect free and precedes
-        // joining the Pipe session. A rejected open must not create a session,
-        // change participant generations, or wake a partner.
-        validate_fifo_open_status(how.status.to_file_op_status_flags())?;
-    }
-
-    let file = if how.access.is_path_only() {
-        File::path_only(path)
-    } else if activates_fifo {
-        let access = match how.access {
-            OpenAccessMode::Read => FifoOpenAccess::Read,
-            OpenAccessMode::Write => FifoOpenAccess::Write,
-            OpenAccessMode::ReadWrite => FifoOpenAccess::ReadWrite,
-            OpenAccessMode::Path => unreachable!("O_PATH cannot activate a FIFO"),
-        };
-        open_named_fifo(
-            path,
-            FifoOpenContext::new(access, how.status.contains(FileStatusFlags::NONBLOCK)),
-        )?
-    } else {
-        path.open()?
-    };
-
-    if !activates_fifo {
-        file.check_status_flags(how.status.to_file_op_status_flags())?;
-    }
+    let opened = vfs_open_description(
+        path,
+        how.access,
+        how.status.to_file_op_status_flags(),
+        observed_file_description_ops(),
+    )?;
+    let (file, description_ops) = opened.into_parts();
 
     let should_truncate = how.create.trunc && !created && ty == InodeType::Regular;
     if ty == InodeType::Regular && (how.access.can_write() || should_truncate) {
@@ -339,11 +315,6 @@ fn finish_open(
 
     let reserved_fd = reservation.fd();
     let opened_path = file.path().clone();
-    let description_ops = if activates_fifo {
-        pipe_file_desc_ops(observed_file_description_ops(), how.access.can_read())
-    } else {
-        observed_file_description_ops()
-    };
     let file_desc = FileDesc::new_opened(
         file,
         how.access,

@@ -46,7 +46,7 @@ fn timer_handler(signo: SigNo, siginfo: *const SigInfo, ucontext: *const UContex
     assert!(!siginfo.is_null());
     assert!(!ucontext.is_null());
     let info = unsafe { &*siginfo };
-    let timer = unsafe { info.fields.timer };
+    let timer = info.fields.timer();
     LAST_SIGNO.store(signo.as_usize() as i32, Ordering::SeqCst);
     LAST_TIMER_ID.store(timer.tid, Ordering::SeqCst);
     LAST_OVERRUN.store(timer.overrun, Ordering::SeqCst);
@@ -60,18 +60,18 @@ fn timer_handler(signo: SigNo, siginfo: *const SigInfo, ucontext: *const UContex
 
 fn empty_action() -> SigAction {
     SigAction {
-        sighandler: core::ptr::null(),
+        sighandler: anemone_rs::abi::RawUserAddr64::NULL,
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     }
 }
 
 fn install_handler(no: SigNo) -> SigAction {
     let action = SigAction {
-        sighandler: timer_handler as *const (),
+        sighandler: (timer_handler as *const ()).into(),
         sa_flags: SA_SIGINFO,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     let mut old = empty_action();
@@ -266,7 +266,7 @@ extern "C" fn exact_target_waiter(arg: usize) -> ! {
     wait_for_thread_go(case, 1);
     match sigtimedwait(SigNo::SIGUSR1, 500_000_000) {
         Ok(info) => {
-            let timer = unsafe { info.fields.timer };
+            let timer = info.fields.timer();
             case.target_result.store(info.si_signo, Ordering::SeqCst);
             case.timer_id.store(timer.tid, Ordering::SeqCst);
             case.code.store(info.si_code, Ordering::SeqCst);
@@ -673,9 +673,9 @@ fn verify_thread_id_ignore_recovery_and_delete_after_queue() {
     let current_tid = i32::try_from(gettid().unwrap()).unwrap();
     let event = thread_id_event(SigNo::SIGUSR1, 0x5449_4404, current_tid);
     let ignore = SigAction {
-        sighandler: linux_signal::SIG_IGN,
+        sighandler: linux_signal::SIG_IGN.into(),
         sa_flags: 0,
-        sa_restorer: core::ptr::null(),
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
         sa_mask: SigSet { bits: 0 },
     };
     let mut previous = empty_action();
@@ -719,7 +719,7 @@ fn verify_thread_id_ignore_recovery_and_delete_after_queue() {
     // Deletion withdraws future enqueue authority but cannot recall the
     // occurrence already owned by Signal.
     let info = sigtimedwait(SigNo::SIGUSR1, 100_000_000).unwrap();
-    let fields = unsafe { info.fields.timer };
+    let fields = info.fields.timer();
     assert_eq!(info.si_signo, SigNo::SIGUSR1.as_usize() as i32);
     assert_eq!(info.si_code, linux_signal::SI_TIMER);
     assert_eq!(fields.tid, timer);

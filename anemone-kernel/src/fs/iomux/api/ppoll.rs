@@ -30,6 +30,9 @@ use anemone_abi::{
 struct PollFd {
     fd: Option<Fd>,
     events: PollEvent,
+    /// Original syscall-input snapshot retained because normalization merges
+    /// the Linux normal aliases while `revents` must preserve requested bits.
+    linux_interests: LinuxPollEvent,
     revents: LinuxPollEvent,
 }
 
@@ -41,29 +44,38 @@ impl PollFd {
             None
         };
 
-        let linux_events = LinuxPollEvent::from_bits(events)
+        let linux_interests = LinuxPollEvent::from_bits(events)
             .ok_or(SysError::InvalidArgument)
             .map_err(|e| {
                 knoticeln!("sys_ppoll: unrecognized poll event bits: {:#x}", events,);
                 e
-            })?
+            })?;
+        let linux_events = linux_interests
             .difference(LinuxPollEvent::NVAL | LinuxPollEvent::ERR | LinuxPollEvent::HUP);
 
         let mut events = PollEvent::empty();
 
-        if linux_events.contains(LinuxPollEvent::IN) {
+        if linux_events.intersects(LinuxPollEvent::IN | LinuxPollEvent::RDNORM) {
             events |= PollEvent::READABLE;
         }
-        if linux_events.contains(LinuxPollEvent::OUT) {
+        if linux_events.intersects(LinuxPollEvent::OUT | LinuxPollEvent::WRNORM) {
             events |= PollEvent::WRITABLE;
         }
         if linux_events.contains(LinuxPollEvent::RDHUP) {
             events |= PollEvent::READ_HANG_UP;
         }
+        if linux_events.contains(LinuxPollEvent::RDBAND) {
+            // POLLRDBAND is accepted for Linux ABI compatibility, but Anemone
+            // has no priority/band readiness fact or source-side wake route.
+            // Keep it distinct from ordinary readability and remove this stub
+            // once that owner-defined event and registration path exist.
+            knoticeln!("sys_ppoll: POLLRDBAND is accepted without a readiness producer");
+        }
 
         Ok(Self {
             fd,
             events,
+            linux_interests,
             revents: LinuxPollEvent::empty(),
         })
     }
@@ -93,10 +105,18 @@ fn scan_ppoll_fds(
             continue;
         };
 
-        match file.poll(&mode.poll_request(poll_fd.events)) {
-            Ok(PollRegisterResult::Subscribed(revents)) if mode.is_register() => {
+        // Even an empty normalized interest set must reach a register-capable
+        // source: Linux POLLERR/POLLHUP are mandatory results, and that source
+        // may own the only wake route for a later transition. Sources without
+        // mandatory events may reject the empty registration below; for them
+        // the fd remains a timeout-only source instead of exposing ENOTSUP.
+        let request = mode.poll_request(poll_fd.events);
+
+        match file.poll(&request) {
+            Ok(PollRegisterResult::Subscribed(revents)) if request.is_register() => {
                 if !revents.is_empty() {
-                    poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
+                    poll_fd.revents =
+                        LinuxPollEvent::from_kernel_poll_event(revents, poll_fd.linux_interests);
                     nready += 1;
                     break;
                 }
@@ -108,7 +128,7 @@ fn scan_ppoll_fds(
                 );
                 return Err(SysError::IO);
             },
-            Ok(PollRegisterResult::SubscribedRecheck) if mode.is_register() => {
+            Ok(PollRegisterResult::SubscribedRecheck) if request.is_register() => {
                 recheck = true;
                 break;
             },
@@ -120,13 +140,14 @@ fn scan_ppoll_fds(
                 return Err(SysError::IO);
             },
             Ok(PollRegisterResult::Ready(revents)) if !revents.is_empty() => {
-                poll_fd.revents = LinuxPollEvent::from_kernel_poll_event(revents);
+                poll_fd.revents =
+                    LinuxPollEvent::from_kernel_poll_event(revents, poll_fd.linux_interests);
                 nready += 1;
                 if mode.is_register() {
                     break;
                 }
             },
-            Ok(PollRegisterResult::Ready(_)) if mode.is_register() => {
+            Ok(PollRegisterResult::Ready(_)) if request.is_register() => {
                 kwarningln!(
                     "sys_ppoll: register scan returned empty ready for fd {:?}",
                     fd,
@@ -135,6 +156,7 @@ fn scan_ppoll_fds(
                 break;
             },
             Ok(PollRegisterResult::Ready(_)) => {},
+            Ok(PollRegisterResult::Unsupported) if poll_fd.events.is_empty() => {},
             Ok(PollRegisterResult::Unsupported) => {
                 kdebugln!(
                     "sys_ppoll: unsupported register source fd {:?} interests={:?}",
@@ -270,11 +292,80 @@ fn sys_ppoll(
         let mut usp = usp_handle.lock();
 
         for (poll_fd, revent_ptr) in poll_fds.iter().zip(revent_ptrs.iter()) {
-            UserWritePtr::<LinuxPollEvent>::try_new(*revent_ptr, &mut usp)?
-                .write(poll_fd.revents)?;
+            UserWritePtr::<i16>::try_new(*revent_ptr, &mut usp)?.write(poll_fd.revents.bits())?;
         }
     }
 
     kdebugln!("sys_ppoll: {} fds are ready", nready);
     Ok(nready as u64)
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    fn parse(events: LinuxPollEvent) -> PollFd {
+        PollFd::try_from_linux(-1, events.bits()).unwrap()
+    }
+
+    #[kunit]
+    fn normal_and_band_bits_are_accepted_with_owner_defined_mapping() {
+        let read = parse(LinuxPollEvent::RDNORM);
+        assert_eq!(read.events, PollEvent::READABLE);
+        assert_eq!(read.linux_interests, LinuxPollEvent::RDNORM);
+
+        let write = parse(LinuxPollEvent::WRNORM);
+        assert_eq!(write.events, PollEvent::WRITABLE);
+        assert_eq!(write.linux_interests, LinuxPollEvent::WRNORM);
+
+        let band = parse(LinuxPollEvent::RDBAND);
+        assert_eq!(band.events, PollEvent::empty());
+        assert_eq!(band.linux_interests, LinuxPollEvent::RDBAND);
+    }
+
+    #[kunit]
+    fn normal_aliases_project_only_the_exact_requested_bits() {
+        let ready = PollEvent::READABLE | PollEvent::WRITABLE;
+
+        assert_eq!(
+            LinuxPollEvent::from_kernel_poll_event(
+                ready,
+                LinuxPollEvent::RDNORM | LinuxPollEvent::WRNORM,
+            ),
+            LinuxPollEvent::RDNORM | LinuxPollEvent::WRNORM
+        );
+        assert_eq!(
+            LinuxPollEvent::from_kernel_poll_event(ready, LinuxPollEvent::IN | LinuxPollEvent::OUT,),
+            LinuxPollEvent::IN | LinuxPollEvent::OUT
+        );
+        assert_eq!(
+            LinuxPollEvent::from_kernel_poll_event(
+                ready,
+                LinuxPollEvent::IN
+                    | LinuxPollEvent::RDNORM
+                    | LinuxPollEvent::OUT
+                    | LinuxPollEvent::WRNORM,
+            ),
+            LinuxPollEvent::IN
+                | LinuxPollEvent::RDNORM
+                | LinuxPollEvent::OUT
+                | LinuxPollEvent::WRNORM
+        );
+    }
+
+    #[kunit]
+    fn read_band_is_not_projected_from_ordinary_readiness() {
+        assert_eq!(
+            LinuxPollEvent::from_kernel_poll_event(PollEvent::READABLE, LinuxPollEvent::RDBAND,),
+            LinuxPollEvent::empty()
+        );
+    }
+
+    #[kunit]
+    fn unknown_event_bits_remain_rejected() {
+        assert!(matches!(
+            PollFd::try_from_linux(-1, 0x0800),
+            Err(SysError::InvalidArgument)
+        ));
+    }
 }

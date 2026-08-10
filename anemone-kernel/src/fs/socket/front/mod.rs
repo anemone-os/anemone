@@ -20,6 +20,9 @@ pub(super) use operation::{retry_socket_receive, retry_socket_send, wait_for_soc
 pub(super) enum SocketType {
     Ipv4Udp,
     Ipv4IcmpRaw,
+    Ipv4Tcp,
+    NetlinkRoute,
+    NetlinkSockDiag,
     UnixStream,
     UnixSeqpacket,
 }
@@ -28,6 +31,7 @@ pub(super) enum SocketType {
 pub(super) enum SocketAddress {
     Unspecified,
     Ipv4 { address: Ipv4Address, port: u16 },
+    Netlink { port: u32, groups: u32 },
     UnixPathname(Arc<str>),
 }
 
@@ -55,6 +59,7 @@ pub(super) enum SocketListenError {
     Unsupported,
     Retired,
     InvalidState,
+    ResourceExhausted,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,8 +80,13 @@ pub(super) enum SocketConnectError {
     Unsupported,
     Retired,
     InvalidState,
+    Started(SocketWait),
+    InProgress(SocketWait),
     AlreadyConnected,
     ConnectionRefused,
+    ConnectionReset,
+    ConnectionAborted,
+    ConnectionTimedOut,
     ProtocolTypeMismatch,
     WouldBlock(SocketWait),
     Operation(SysError),
@@ -86,6 +96,7 @@ pub(super) enum SocketAcceptError {
     Unsupported,
     Retired,
     InvalidState,
+    ResourceExhausted,
     WouldBlock(SocketWait),
 }
 
@@ -99,10 +110,15 @@ pub(super) enum SocketSendError {
     AddressInUse,
     AddressUnavailable,
     ResourceExhausted,
+    NoBufferSpace,
     NetworkUnreachable,
     DestinationRequired,
     InvalidDestination,
     MessageTooLong,
+    ConnectionRefused,
+    ConnectionReset,
+    ConnectionTimedOut,
+    Pending(SocketPendingError),
     PeerClosed,
     WouldBlock,
     Copy(SysError),
@@ -112,7 +128,12 @@ pub(super) enum SocketSendError {
 pub(super) enum SocketReceiveError {
     Unsupported,
     Retired,
+    NotConnected,
     InvalidState,
+    ConnectionRefused,
+    ConnectionReset,
+    ConnectionTimedOut,
+    Pending(SocketPendingError),
     WouldBlock,
     Copy(SysError),
 }
@@ -252,6 +273,10 @@ impl SocketReceiveOutcome {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionQuery {
+    ReuseAddress,
+    PendingError,
+    ReceiveErrors,
+    TcpNoDelay,
     Ipv4TimeToLive,
     Ipv4TypeOfService,
     IcmpTypeFilter,
@@ -259,6 +284,8 @@ pub(super) enum SocketOptionQuery {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionValue {
+    Boolean(bool),
+    PendingError(Option<SocketPendingError>),
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
@@ -266,9 +293,14 @@ pub(super) enum SocketOptionValue {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionMutation {
+    ReuseAddress(bool),
+    ReceiveErrors(bool),
+    TcpNoDelay(bool),
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+    SendBuffer(usize),
+    ReceiveBuffer(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -276,6 +308,56 @@ pub(super) enum SocketOptionError {
     Unsupported,
     Retired,
     InvalidValue,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketPendingError {
+    ConnectionRefused,
+    ConnectionReset,
+    TimedOut,
+    NetworkUnreachable,
+    HostUnreachable,
+    ProtocolOptionNotSupported,
+    MessageTooLong,
+    OperationNotSupported,
+    HostDown,
+    NoNetwork,
+}
+
+pub(super) const fn pending_error_to_sys_error(error: SocketPendingError) -> SysError {
+    match error {
+        SocketPendingError::ConnectionRefused => SysError::ConnectionRefused,
+        SocketPendingError::ConnectionReset => SysError::ConnectionReset,
+        SocketPendingError::TimedOut => SysError::Timeout,
+        SocketPendingError::NetworkUnreachable => SysError::NetworkUnreachable,
+        SocketPendingError::HostUnreachable => SysError::HostUnreachable,
+        SocketPendingError::ProtocolOptionNotSupported => SysError::ProtocolOptionNotSupported,
+        SocketPendingError::MessageTooLong => SysError::MessageTooLong,
+        SocketPendingError::OperationNotSupported => SysError::NotSupported,
+        SocketPendingError::HostDown => SysError::HostDown,
+        SocketPendingError::NoNetwork => SysError::NoNetwork,
+    }
+}
+
+/// One detached IPv4 ICMP extended error in family-neutral Socket values.
+///
+/// The UDP Endpoint remains the sole queue owner. Once returned here the
+/// current syscall owns the record, so a later user-copy fault consumes it.
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct SocketIpv4ExtendedError {
+    pub(super) cause: SocketPendingError,
+    pub(super) icmp_type: u8,
+    pub(super) icmp_code: u8,
+    pub(super) info: u32,
+    pub(super) original_destination: SocketAddress,
+    pub(super) offender: Ipv4Address,
+    pub(super) quoted_payload: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketReleaseReason {
+    AcceptedChildRollback,
+    FinalRelease,
 }
 
 pub(super) enum SocketSendRequest<'a> {
@@ -418,9 +500,11 @@ pub(super) struct SocketOps {
         Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
     pub(super) mutate_option:
         Option<fn(&AnyOpaque, SocketOptionMutation) -> Result<(), SocketOptionError>>,
+    pub(super) detach_ipv4_extended_error:
+        Option<fn(&AnyOpaque) -> Result<SocketIpv4ExtendedError, SocketReceiveError>>,
     pub(super) poll:
         for<'a> fn(&AnyOpaque, &PollRequest<'a>) -> Result<PollRegisterResult, SysError>,
-    pub(super) final_release: fn(&AnyOpaque),
+    pub(super) final_release: fn(&AnyOpaque, SocketReleaseReason),
 }
 
 impl SocketOps {
@@ -538,12 +622,20 @@ impl Socket {
             .ok_or(SocketOptionError::Unsupported)?(&self.private, mutation)
     }
 
+    pub(super) fn detach_ipv4_extended_error(
+        &self,
+    ) -> Result<SocketIpv4ExtendedError, SocketReceiveError> {
+        self.ops
+            .detach_ipv4_extended_error
+            .ok_or(SocketReceiveError::Unsupported)?(&self.private)
+    }
+
     fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         (self.ops.poll)(&self.private, request)
     }
 
     fn final_release(&self) {
-        (self.ops.final_release)(&self.private);
+        (self.ops.final_release)(&self.private, SocketReleaseReason::FinalRelease);
     }
 }
 
@@ -577,7 +669,7 @@ impl AcceptedSocket {
 impl Drop for AcceptedSocket {
     fn drop(&mut self) {
         if let Some(private) = self.private.as_ref() {
-            (self.ops.final_release)(private);
+            (self.ops.final_release)(private, SocketReleaseReason::AcceptedChildRollback);
         }
     }
 }

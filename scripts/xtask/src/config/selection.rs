@@ -194,7 +194,7 @@ mod tests {
     fn explicit_sources_are_complete_and_mutually_exclusive() {
         let preset = BuildPresetRef::new("preset").unwrap();
         let target = SystemTargetRef::new("target").unwrap();
-        let kernel_config = KernelConfigRef::new("conf/.defconfig").unwrap();
+        let kernel_config = KernelConfigRef::new("conf/kconfs/default.toml").unwrap();
 
         assert!(matches!(
             SelectionRequest::explicit_preset(preset.clone())
@@ -299,7 +299,7 @@ mod tests {
             "--target",
             "example",
             "--kernel-config",
-            "conf/.defconfig",
+            "conf/kconfs/default.toml",
             "--profile",
             "dev",
         ])

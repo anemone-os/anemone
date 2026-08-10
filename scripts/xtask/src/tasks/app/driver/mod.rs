@@ -40,7 +40,7 @@ mod tests {
     use super::*;
     use crate::{
         config::{
-            app::{App, Artifact, Build, SourceBuild},
+            app::{App, AppTarget, Artifact, Build, SourceBuild},
             platform::Arch,
         },
         tasks::app::build::BuildCtx,
@@ -49,12 +49,14 @@ mod tests {
     fn source_app() -> App {
         App {
             name: "prebuilt".to_string(),
+            targets: vec![AppTarget::Anemone(Arch::RiscV64)],
             build: Build {
                 workdir: ".".to_string(),
                 driver: BuildDriver::Source(SourceBuild {}),
             },
             artifacts: vec![Artifact {
                 path: "prebuilt".to_string(),
+                targets: None,
             }],
         }
     }

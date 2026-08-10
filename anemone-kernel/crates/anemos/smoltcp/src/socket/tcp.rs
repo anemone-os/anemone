@@ -124,6 +124,19 @@ pub enum State {
     TimeWait,
 }
 
+/// An asynchronous protocol reason for leaving an active TCP connection.
+///
+/// This deliberately contains no caller phase or operating-system error. The
+/// Stack-side TCP owner combines the consuming reason with its authoritative
+/// connection phase when projecting an operation result.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DisconnectReason {
+    ResetBeforeEstablished,
+    ResetAfterEstablished,
+    Timeout,
+}
+
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -468,6 +481,9 @@ pub enum CongestionControl {
 #[derive(Debug)]
 pub struct Socket<'a> {
     state: State,
+    /// Async engine cause only. Local close/abort never writes this field, and
+    /// it cannot drive the TCP state machine or carry Linux error policy.
+    disconnect_reason: Option<DisconnectReason>,
     timer: Timer,
     rtte: RttEstimator,
     assembler: Assembler,
@@ -584,6 +600,7 @@ impl<'a> Socket<'a> {
 
         Socket {
             state: State::Closed,
+            disconnect_reason: None,
             timer: Timer::new(),
             rtte: RttEstimator::default(),
             assembler: Assembler::new(),
@@ -806,6 +823,12 @@ impl<'a> Socket<'a> {
     ///     endpoint exceeds the specified duration between any two packets it
     ///     sends.
     pub fn set_timeout(&mut self, duration: Option<Duration>) {
+        if self.timeout != duration {
+            // A newly installed policy starts a new inactivity episode. Using
+            // the previous policy's receive timestamp could otherwise expire
+            // the connection retroactively before its next local transmit.
+            self.remote_last_ts = None;
+        }
         self.timeout = duration
     }
 
@@ -916,6 +939,15 @@ impl<'a> Socket<'a> {
         self.state
     }
 
+    /// Consume the asynchronous protocol reason that closed this socket.
+    ///
+    /// Starting a new connection/listener generation clears an unconsumed old
+    /// reason; the Stack owner must consume it or retire that generation first.
+    #[inline]
+    pub fn take_disconnect_reason(&mut self) -> Option<DisconnectReason> {
+        self.disconnect_reason.take()
+    }
+
     fn reset(&mut self) {
         let rx_cap_log2 =
             mem::size_of::<usize>() * 8 - self.rx_buffer.capacity().leading_zeros() as usize;
@@ -947,6 +979,11 @@ impl<'a> Socket<'a> {
             self.rx_waker.wake();
             self.tx_waker.wake();
         }
+    }
+
+    fn reset_for_new_generation(&mut self) {
+        self.reset();
+        self.disconnect_reason = None;
     }
 
     /// Start listening on the given endpoint.
@@ -982,7 +1019,7 @@ impl<'a> Socket<'a> {
             }
         }
 
-        self.reset();
+        self.reset_for_new_generation();
         self.listen_endpoint = local_endpoint;
         self.tuple = None;
         self.set_state(State::Listen);
@@ -1072,7 +1109,7 @@ impl<'a> Socket<'a> {
             return Err(ConnectError::Unaddressable);
         }
 
-        self.reset();
+        self.reset_for_new_generation();
         self.tuple = Some(Tuple {
             local: local_endpoint,
             remote: remote_endpoint,
@@ -1889,6 +1926,14 @@ impl<'a> Socket<'a> {
             // RSTs in any other state close the socket.
             (_, TcpControl::Rst) => {
                 tcp_trace!("received RST");
+                assert!(self.disconnect_reason.is_none());
+                self.disconnect_reason = Some(
+                    if matches!(self.state, State::SynSent | State::SynReceived) {
+                        DisconnectReason::ResetBeforeEstablished
+                    } else {
+                        DisconnectReason::ResetAfterEstablished
+                    },
+                );
                 self.set_state(State::Closed);
                 self.tuple = None;
                 return None;
@@ -2450,6 +2495,10 @@ impl<'a> Socket<'a> {
         if self.timed_out(cx.now()) {
             // If a timeout expires, we should abort the connection.
             net_debug!("timeout exceeded");
+            // A provider can temporarily reject the RST emitted for this
+            // close, causing dispatch to retry. Preserve the first cause.
+            self.disconnect_reason
+                .get_or_insert(DisconnectReason::Timeout);
             self.set_state(State::Closed);
         } else if !self.seq_to_transmit(cx) && self.timer.should_retransmit(cx.now()) {
             // If a retransmit timer expired, we should resend data starting at the last
@@ -3976,6 +4025,10 @@ mod test {
             }
         );
         assert_eq!(s.state, State::Closed);
+        assert_eq!(
+            s.take_disconnect_reason(),
+            Some(DisconnectReason::ResetBeforeEstablished)
+        );
     }
 
     #[test]
@@ -3991,6 +4044,11 @@ mod test {
             }
         );
         assert_eq!(s.state, State::Closed);
+        assert_eq!(
+            s.take_disconnect_reason(),
+            Some(DisconnectReason::ResetBeforeEstablished)
+        );
+        assert_eq!(s.take_disconnect_reason(), None);
     }
 
     #[test]
@@ -4985,6 +5043,40 @@ mod test {
             }
         );
         assert_eq!(s.state, State::Closed);
+        assert_eq!(
+            s.take_disconnect_reason(),
+            Some(DisconnectReason::ResetAfterEstablished)
+        );
+        assert_eq!(s.take_disconnect_reason(), None);
+    }
+
+    #[test]
+    fn test_timeout_cause_survives_blocked_abort_and_rejects_late_reset() {
+        let mut s = socket_established();
+        s.set_timeout(Some(Duration::from_millis(100)));
+        s.remote_last_ts = Some(Instant::ZERO);
+        s.cx.set_now(Instant::from_millis(100));
+        assert_eq!(s.socket.dispatch(&mut s.cx, |_, _| Err(())), Err(()));
+        assert_eq!(s.state, State::Closed);
+        assert!(s.tuple.is_some());
+
+        let late_reset = TcpRepr {
+            control: TcpControl::Rst,
+            seq_number: REMOTE_SEQ + 1,
+            ack_number: Some(LOCAL_SEQ + 1),
+            ..SEND_TEMPL
+        };
+        let ip_repr = IpReprIpvX(IpvXRepr {
+            src_addr: REMOTE_ADDR,
+            dst_addr: LOCAL_ADDR,
+            next_header: IpProtocol::Tcp,
+            payload_len: late_reset.buffer_len(),
+            hop_limit: 64,
+        });
+        s.cx.set_now(Instant::from_millis(101));
+        assert!(!s.socket.accepts(&mut s.cx, &ip_repr, &late_reset));
+        assert_eq!(s.take_disconnect_reason(), Some(DisconnectReason::Timeout));
+        assert_eq!(s.take_disconnect_reason(), None);
     }
 
     #[test]
@@ -5015,6 +5107,7 @@ mod test {
         let mut s = socket_established();
         s.abort();
         assert_eq!(s.state, State::Closed);
+        assert_eq!(s.take_disconnect_reason(), None);
         recv!(
             s,
             [TcpRepr {
@@ -7839,6 +7932,8 @@ mod test {
             ..RECV_TEMPL
         }));
         assert_eq!(s.state, State::Closed);
+        assert_eq!(s.take_disconnect_reason(), Some(DisconnectReason::Timeout));
+        assert_eq!(s.take_disconnect_reason(), None);
     }
 
     #[test]
@@ -7879,6 +7974,8 @@ mod test {
             ..RECV_TEMPL
         }));
         assert_eq!(s.state, State::Closed);
+        assert_eq!(s.take_disconnect_reason(), Some(DisconnectReason::Timeout));
+        assert_eq!(s.take_disconnect_reason(), None);
     }
 
     #[test]

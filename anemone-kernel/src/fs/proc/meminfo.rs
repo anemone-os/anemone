@@ -13,7 +13,7 @@ fn proc_meminfo_open(_inode: &InodeRef) -> Result<OpenedFile, SysError> {
 
 fn proc_meminfo_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
-    let now = realtime();
+    let now = RealtimeInstant::now().to_duration();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,

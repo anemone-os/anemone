@@ -25,6 +25,7 @@ pub mod clock_controller;
 pub mod kobject;
 pub mod reset;
 pub mod resource;
+pub(crate) mod rtc;
 
 pub mod devnum;
 pub use devnum::{BlockDevNum, CharDevNum, DeviceNumber, MajorNum, MinorNum};

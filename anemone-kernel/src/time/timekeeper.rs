@@ -1,6 +1,6 @@
 //! Timekeeping. Owns the kernel clock derivation chain and periodic tick state.
 
-use crate::{prelude::*, sync::mono::MonoOnce};
+use crate::{prelude::*, sync::mono::MonoOnce, time::RealtimeInstant};
 
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
@@ -34,6 +34,29 @@ impl RealtimeSnapshot {
         self.set_offset(monotonic_ns, new_offset)
     }
 
+    fn seed_boot(
+        &mut self,
+        rtc_epoch_ns: u64,
+        monotonic_sample_ns: u64,
+        monotonic_commit_ns: u64,
+    ) -> Result<u64, BootSeedError> {
+        // The RTC registry and boot coordinator own one-shot authority. These
+        // assertions protect that ordering without adding a second long-lived
+        // `seeded` truth to the timekeeper.
+        assert_eq!(self.offset_ns, 0, "RTC seed observed a nonzero boot offset");
+        assert_eq!(self.change_seq, 0, "RTC seed observed a runtime step");
+
+        let offset_ns = rtc_epoch_ns
+            .checked_sub(monotonic_sample_ns)
+            .ok_or(BootSeedError::EpochBeforeMonotonic)?;
+        monotonic_commit_ns
+            .checked_add(offset_ns)
+            .ok_or(BootSeedError::RealtimeOverflow)?;
+
+        self.offset_ns = offset_ns;
+        Ok(offset_ns)
+    }
+
     fn adjust(&mut self, monotonic_ns: u64, delta_ns: i128) -> Result<bool, SysError> {
         let new_offset = i128::from(self.offset_ns)
             .checked_add(delta_ns)
@@ -65,13 +88,17 @@ impl RealtimeSnapshot {
 /// Consistent calendar read used by absolute realtime request registration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RealtimeRead {
-    now_ns: u64,
+    now: RealtimeInstant,
     change_seq: u64,
 }
 
 impl RealtimeRead {
     pub(crate) const fn now_ns(self) -> u64 {
-        self.now_ns
+        self.now.as_nanos()
+    }
+
+    pub(crate) const fn now(self) -> RealtimeInstant {
+        self.now
     }
 
     pub(crate) const fn change_seq(self) -> u64 {
@@ -87,6 +114,12 @@ impl RealtimeRead {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RealtimeStep;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BootSeedError {
+    EpochBeforeMonotonic,
+    RealtimeOverflow,
+}
+
 struct Timekeeper {
     /// The architecture counter sample that defines `CLOCK_MONOTONIC == 0`.
     boot_counter: u64,
@@ -100,7 +133,7 @@ struct Timekeeper {
     counts_per_tick: u64,
     /// Serializes the calendar offset with its step identity. The lock does not
     /// protect monotonic time, which remains derived directly from hardware.
-    realtime: SpinLock<RealtimeSnapshot>,
+    realtime: NoIrqSpinLock<RealtimeSnapshot>,
     /// A deliberately stale performance snapshot, never a second monotonic
     /// truth.
     coarse_mono_ns: AtomicU64,
@@ -116,7 +149,7 @@ impl Timekeeper {
             boot_counter,
             frequency_hz,
             counts_per_tick: frequency_hz / SYSTEM_HZ as u64,
-            realtime: SpinLock::new(RealtimeSnapshot::new(0, 0)?),
+            realtime: NoIrqSpinLock::new(RealtimeSnapshot::new(0, 0)?),
             coarse_mono_ns: AtomicU64::new(0),
         })
     }
@@ -246,6 +279,16 @@ pub fn monotonic_uptime() -> u64 {
         .elapsed_counts(LocalClockSource::curr_monotonic_time())
 }
 
+/// Narrow raw-clock capability for diagnostic performance observation.
+/// Timekeeping remains the sole owner of the counter timeline and frequency.
+pub(crate) fn perf_clock_ticks() -> u64 {
+    monotonic_uptime()
+}
+
+pub(crate) fn perf_clock_frequency_hz() -> u64 {
+    TIMEKEEPER.get().frequency_hz
+}
+
 /// Return a non-panicking timestamp for early diagnostic consumers.
 ///
 /// `None` is returned before every boot CPU has completed local initialization.
@@ -264,7 +307,7 @@ pub fn monotonic_ns() -> u64 {
 }
 
 pub fn realtime_ns() -> u64 {
-    realtime_read().now_ns
+    realtime_read().now().as_nanos()
 }
 
 pub(crate) fn realtime_read() -> RealtimeRead {
@@ -275,9 +318,25 @@ pub(crate) fn realtime_read() -> RealtimeRead {
         .checked_add(realtime.offset_ns)
         .expect("realtime clock value exceeded its internal nanosecond range");
     RealtimeRead {
-        now_ns,
+        now: RealtimeInstant::from_nanos(now_ns),
         change_seq: realtime.change_seq,
     }
+}
+
+/// Establish the initial realtime offset from one selected RTC sample.
+///
+/// This boot-only commit deliberately does not advance `change_seq` or return
+/// a [`RealtimeStep`]. All arithmetic is validated before the offset changes.
+pub(crate) fn seed_boot_realtime(rtc_epoch: RealtimeInstant) -> Result<u64, BootSeedError> {
+    let monotonic_sample_ns = monotonic_ns();
+    let timekeeper = TIMEKEEPER.get();
+    let mut realtime = timekeeper.realtime.lock();
+    let monotonic_commit_ns = monotonic_ns();
+    realtime.seed_boot(
+        rtc_epoch.as_nanos(),
+        monotonic_sample_ns,
+        monotonic_commit_ns,
+    )
 }
 
 /// Set the realtime calendar value and atomically advance its change identity.
@@ -325,14 +384,9 @@ pub fn coarse_resolution_ns() -> u64 {
     TIMEKEEPER.get().coarse_resolution_ns()
 }
 
-/// Return the current calendar timeline.
-pub fn realtime() -> Duration {
-    Duration::from_nanos(realtime_ns())
-}
-
 /// Return monotonic uptime since the timekeeper established its boot counter.
-pub fn uptime() -> Instant {
-    Instant::from_mono(monotonic_uptime())
+pub fn uptime() -> MonotonicInstant {
+    MonotonicInstant::from_mono(monotonic_uptime())
 }
 
 pub fn ticks() -> u64 {
@@ -446,6 +500,30 @@ mod kunits {
         assert_eq!(realtime, before);
         assert_eq!(realtime.adjust(u64::MAX, 1), Err(SysError::InvalidArgument));
         assert_eq!(realtime, before);
+    }
+
+    #[kunit]
+    fn boot_seed_is_atomic_and_does_not_publish_a_step() {
+        let mut realtime = RealtimeSnapshot::new(0, 0).unwrap();
+        assert_eq!(realtime.seed_boot(1_000, 100, 110), Ok(900));
+        assert_eq!(realtime.offset_ns, 900);
+        assert_eq!(realtime.change_seq, 0);
+
+        let mut negative = RealtimeSnapshot::new(0, 0).unwrap();
+        let before = negative;
+        assert_eq!(
+            negative.seed_boot(99, 100, 100),
+            Err(BootSeedError::EpochBeforeMonotonic)
+        );
+        assert_eq!(negative, before);
+
+        let mut overflow = RealtimeSnapshot::new(0, 0).unwrap();
+        let before = overflow;
+        assert_eq!(
+            overflow.seed_boot(u64::MAX, 0, 1),
+            Err(BootSeedError::RealtimeOverflow)
+        );
+        assert_eq!(overflow, before);
     }
 
     #[kunit]

@@ -425,7 +425,7 @@ pub fn exit_robust_list() -> Result<(), SysError> {
 
         // note we use `true` here.
         let Some(ret) = with_futex(key, true, |futex| {
-            usp.inject_page_fault(word_addr, PageFaultType::Write)?;
+            usp.fault_in_page(word_addr, PageFaultType::Write)?;
             let atomic_view =
                 unsafe { (word_addr.as_ptr_mut() as *mut AtomicU32).as_ref().unwrap() };
 
@@ -507,7 +507,7 @@ pub fn exit_robust_list() -> Result<(), SysError> {
     };
 
     if !list_op_pending.is_null() {
-        handle_futex_death(user_addr((list_op_pending as i64 + futex_offset) as u64).map_err(|e| {
+        handle_futex_death(user_addr((list_op_pending.bits() as i64 + futex_offset) as u64).map_err(|e| {
             knoticeln!(
                 "futex: invalid futex address in robust list {:#x?}: {:?}, skip cleaning up this futex",
                 list_op_pending,
@@ -528,12 +528,12 @@ pub fn exit_robust_list() -> Result<(), SysError> {
             break;
         }
 
-        if curr_ptr.is_null() || curr_ptr as u64 == head_ptr.get() {
+        if curr_ptr.is_null() || curr_ptr.bits() == head_ptr.get() {
             // end of the list.
             break;
         }
 
-        let curr_word_addr = user_addr((curr_ptr as i64 + futex_offset) as u64).map_err(|e| {
+        let curr_word_addr = user_addr((curr_ptr.bits() as i64 + futex_offset) as u64).map_err(|e| {
             knoticeln!(
                 "futex: invalid futex address in robust list {:#x?}: {:?}, skip cleaning up this futex",
                 curr_ptr,
@@ -547,7 +547,7 @@ pub fn exit_robust_list() -> Result<(), SysError> {
         // current done.
         {
             let mut usp = usp_handle.lock();
-            match UserReadPtr::<RobustList>::try_new(VirtAddr::new(curr_ptr as u64), &mut usp) {
+            match UserReadPtr::<RobustList>::try_new(VirtAddr::new(curr_ptr.bits()), &mut usp) {
                 Ok(mut ptr) => match ptr.read() {
                     Ok(entry) => curr_ptr = entry.next,
                     Err(e) => {

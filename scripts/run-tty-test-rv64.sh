@@ -15,10 +15,11 @@ readonly sdcard_target=$runtime_dir/disk-x0.img
 
 usage() {
     cat <<'EOF'
-Usage: run-tty-test-rv64.sh --busybox PATH --sdcard PATH --mode auto|vi|jobctl [--log PATH]
+Usage: run-tty-test-rv64.sh --busybox PATH --sdcard PATH --mode auto|vi|jobctl [--log PATH] [--rootfs-sudo]
 
 Builds and runs the RV64 TTY acceptance rootfs. External BusyBox and
 sdcard inputs are validated and copied; the originals remain read-only.
+Rootfs materialization runs directly unless --rootfs-sudo is given.
 EOF
 }
 
@@ -35,6 +36,7 @@ busybox=
 sdcard=
 mode=
 log_file=build/tty-stage4-rv64.log
+rootfs_mode=direct
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
             log_file=$2
             shift 2
             ;;
+        --rootfs-sudo)
+            rootfs_mode=sudo
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -75,6 +81,11 @@ done
     || fail "--mode must be auto, vi, or jobctl"
 [[ -f $busybox ]] || fail "BusyBox not found: $busybox"
 [[ -f $sdcard ]] || fail "sdcard master not found: $sdcard"
+
+rootfs_mkfs_args=(-c "$rootfs_config")
+if [[ $rootfs_mode == sudo ]]; then
+    rootfs_mkfs_args+=(--sudo)
+fi
 
 for command in file readelf python3; do
     command -v "$command" >/dev/null || fail "required host command not found: $command"
@@ -111,10 +122,11 @@ fi
     progress "topology:smp=$smp,memory=$memory"
     progress "mode:$mode"
     progress "rootfs-config:$rootfs_config"
+    progress "rootfs-privilege:$rootfs_mode"
 } | tee "$log_file"
 
 progress "build-rootfs"
-just rootfs mkfs -c "$rootfs_config" --sudo 2>&1 | tee -a "$log_file"
+just rootfs mkfs "${rootfs_mkfs_args[@]}" 2>&1 | tee -a "$log_file"
 [[ -f $acceptance_rootfs ]] || fail "rootfs image not produced: $acceptance_rootfs"
 
 sdcard_source=$(realpath -- "$sdcard")

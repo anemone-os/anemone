@@ -105,6 +105,10 @@ pub(super) struct LtpGroup {
 
 pub(super) const LTP_GROUPS: &[LtpGroup] = &[
     LtpGroup {
+        name: "address-space",
+        cases: include_str!("../../ltp/groups/address-space.txt"),
+    },
+    LtpGroup {
         name: "chmod",
         cases: include_str!("../../ltp/groups/chmod.txt"),
     },

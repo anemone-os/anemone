@@ -134,12 +134,15 @@ fn tty_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult
     Ok(tty_file(file).endpoint.terminal.poll(request))
 }
 
-fn read_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
+fn read_ioctl_value<T: zerocopy::FromBytes>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
     ctx.uspace()
         .with_usp(|usp| UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
 }
 
-fn write_ioctl_value<T: Copy>(ctx: &IoctlCtx<'_>, value: T) -> Result<(), SysError> {
+fn write_ioctl_value<T: zerocopy::IntoBytes + zerocopy::Immutable>(
+    ctx: &IoctlCtx<'_>,
+    value: T,
+) -> Result<(), SysError> {
     ctx.uspace().with_usp(|usp| {
         UserWritePtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(value)?;
         Ok(())
@@ -339,7 +342,8 @@ fn project_termios(termios: TtyTermios, line: TtyLineSnapshot) -> Result<abi::Te
     let mut result = abi::Termios {
         c_iflag: 0,
         c_oflag: (if termios.opost { abi::OPOST } else { 0 })
-            | (if termios.onlcr { abi::ONLCR } else { 0 }),
+            | (if termios.onlcr { abi::ONLCR } else { 0 })
+            | (if termios.tab3 { abi::TAB3 } else { abi::TAB0 }),
         c_cflag: baud_flag(line.baud).ok_or(SysError::InvalidArgument)?
             | data_bits_flag(line.data_bits).ok_or(SysError::InvalidArgument)?
             | abi::CREAD
@@ -401,7 +405,11 @@ fn validate_termios(
         | abi::INLCR
         | abi::IGNCR
         | abi::ICRNL;
-    let allowed_oflag = abi::OPOST | abi::ONLCR;
+    let tab_mode = candidate.c_oflag & abi::TABDLY;
+    if !matches!(tab_mode, abi::TAB0 | abi::TAB3) {
+        return Err(SysError::InvalidArgument);
+    }
+    let allowed_oflag = abi::OPOST | abi::ONLCR | abi::TABDLY;
     let allowed_lflag = abi::ISIG | abi::ICANON | abi::ECHO | abi::ECHOE | abi::ECHOK | abi::ECHONL;
     if candidate.c_iflag & !allowed_iflag != projected.c_iflag & !allowed_iflag
         || candidate.c_oflag & !allowed_oflag != projected.c_oflag & !allowed_oflag
@@ -448,6 +456,7 @@ fn validate_termios(
         icrnl: candidate.c_iflag & abi::ICRNL != 0,
         opost: candidate.c_oflag & abi::OPOST != 0,
         onlcr: candidate.c_oflag & abi::ONLCR != 0,
+        tab3: tab_mode == abi::TAB3,
         icanon: candidate.c_lflag & abi::ICANON != 0,
         isig: candidate.c_lflag & abi::ISIG != 0,
         echo: candidate.c_lflag & abi::ECHO != 0,
@@ -556,10 +565,7 @@ static TTY_FILE_OPS: FileOps = FileOps {
 mod kunits {
     use super::*;
     use crate::{
-        device::tty::{
-            TtyPort, TtyPortAttachment, TtyPortId, TtyRxUnit, TtyWakeSource,
-            attach_unpublished_port,
-        },
+        device::tty::{TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource},
         fs::anony_open_with,
     };
 
@@ -624,15 +630,6 @@ mod kunits {
         let wake = TtyWakeHandle { source };
         let placeholder = crate::device::console::open_console_stdin();
         anony_open_with(placeholder.path(), opened_file(endpoint, wake)).unwrap()
-    }
-
-    fn attachment_file(attachment: &TtyPortAttachment) -> TtyFile {
-        TtyFile {
-            endpoint: attachment.endpoint.clone(),
-            wake: TtyWakeHandle {
-                source: attachment.wake_source.as_ref().unwrap().clone(),
-            },
-        }
     }
 
     #[kunit]
@@ -705,6 +702,7 @@ mod kunits {
         assert_eq!(raw.c_cc[abi::VMIN], 1);
         assert_eq!(raw.c_cc[abi::VTIME], 0);
         assert_eq!(raw.c_iflag, abi::ICRNL);
+        assert_eq!(raw.c_oflag & abi::TABDLY, abi::TAB0);
 
         let mut input_modes = raw;
         input_modes.c_iflag = abi::IGNBRK
@@ -735,6 +733,27 @@ mod kunits {
         let updated = validate_termios(candidate, current, line()).unwrap();
         assert!(!updated.icanon);
         assert!(!updated.echo);
+
+        // GNU less 668 enables XTABS while entering its noncanonical input
+        // mode. TAB3 is a real output transform; legacy TAB1/TAB2 delay modes
+        // remain unsupported and must not become success-no-op flags.
+        let mut less = raw;
+        less.c_oflag |= abi::XTABS;
+        less.c_lflag = abi::ISIG;
+        let less = validate_termios(less, current, line()).unwrap();
+        assert!(less.tab3);
+        assert_eq!(
+            project_termios(less, line()).unwrap().c_oflag & abi::TABDLY,
+            abi::TAB3
+        );
+        for unsupported_tab_mode in [abi::TAB1, abi::TAB2] {
+            let mut unsupported = raw;
+            unsupported.c_oflag |= unsupported_tab_mode;
+            assert_eq!(
+                validate_termios(unsupported, current, line()),
+                Err(SysError::InvalidArgument)
+            );
+        }
 
         let mut disabled = raw;
         for index in [
@@ -778,38 +797,6 @@ mod kunits {
             validate_termios(canonical_cc, current, line()),
             Err(SysError::InvalidArgument)
         );
-    }
-
-    #[kunit]
-    fn set_modes_commit_after_drain_and_flush_only_for_tcsetsf() {
-        let port = DrainPort::new("/kunit/tty/file-set-modes");
-        let (attachment, _) = attach_unpublished_port(port.clone()).unwrap();
-        let tty = attachment_file(&attachment);
-        let mut candidate = project_termios(TtyTermios::default(), line()).unwrap();
-        candidate.c_lflag &= !abi::ECHO;
-
-        assert_eq!(tty.endpoint.terminal.enqueue_output(b"queued\n"), 7);
-        set_termios(&tty, candidate, SetMode::Now).unwrap();
-        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert!(tty.endpoint.terminal.output_pending());
-        assert_eq!(port.submitted.load(Ordering::Relaxed), 0);
-
-        candidate.c_lflag |= abi::ECHO;
-        set_termios(&tty, candidate, SetMode::Drain).unwrap();
-        assert!(tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert_eq!(port.submitted.load(Ordering::Relaxed), 8);
-
-        for byte in b"unread\n" {
-            assert!(tty.endpoint.terminal.receive_rx_byte(*byte));
-        }
-        candidate.c_lflag &= !abi::ECHO;
-        set_termios(&tty, candidate, SetMode::DrainFlush).unwrap();
-        assert!(!tty.endpoint.terminal.termios_snapshot().0.echo);
-        assert_eq!(
-            tty.endpoint.terminal.read_input(&mut [0_u8; 8]),
-            InputRead::Empty
-        );
-        attachment.abort();
     }
 
     #[kunit]

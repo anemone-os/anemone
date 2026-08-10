@@ -385,7 +385,9 @@ mod api {
 
     use super::*;
 
-    #[syscall(SYS_POWER_SHUTDOWN)]
+    // Successful shutdown never returns through the generated wrapper, so it
+    // has no completed invocation for the syscall profiler.
+    #[syscall(SYS_POWER_SHUTDOWN, profile = false)]
     pub fn sys_power_shutdown(magic: u64) -> Result<u64, SysError> {
         if magic != SHUTDOWN_MAGIC {
             return Err(SysError::InvalidArgument);

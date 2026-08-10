@@ -143,14 +143,18 @@ impl TaskSigMaskState {
         self.assert_restore_slot_invariant(task_id, "signal_frame_committed_restore_mask");
     }
 
-    fn restore_temporary_if_pending(&mut self, task_id: Tid) {
+    fn restore_temporary_if_pending(&mut self, task_id: Tid) -> bool {
         self.assert_restore_slot_invariant(task_id, "restore_temporary_if_pending");
-        if let Some(old_mask) = self.restore.take() {
+        let restored = if let Some(old_mask) = self.restore.take() {
             self.active_restore_slot = None;
             Self::assert_valid_mask(old_mask);
             self.current = old_mask;
-        }
+            true
+        } else {
+            false
+        };
         self.assert_restore_slot_invariant(task_id, "restore_temporary_if_pending");
+        restored
     }
 }
 
@@ -210,6 +214,7 @@ impl TemporarySigMaskToken {
             .sig_mask
             .lock()
             .restore_temporary_now(self.task.tid(), self.slot);
+        self.task.rearm_signal_return_work();
         self.active = false;
     }
 
@@ -220,6 +225,7 @@ impl TemporarySigMaskToken {
             .sig_mask
             .lock()
             .assert_defer_slot(self.task.tid(), self.slot);
+        self.task.rearm_signal_return_work();
         self.active = false;
     }
 }
@@ -254,14 +260,18 @@ impl Task {
         self.sig_mask
             .lock()
             .set_permanent_current(self.tid(), new_mask);
+        self.rearm_signal_return_work();
     }
 
     /// Mutate the current mask for ordinary current-mask operations and return
     /// the previous mask.
     pub fn mutate_current_sig_mask(&self, f: impl FnOnce(&mut SigSet)) -> SigSet {
-        self.sig_mask
-            .lock()
-            .mutate_current(self.tid(), "mutate_current_sig_mask", f)
+        let old_mask =
+            self.sig_mask
+                .lock()
+                .mutate_current(self.tid(), "mutate_current_sig_mask", f);
+        self.rearm_signal_return_work();
+        old_mask
     }
 
     /// Restore the current mask from a committed signal frame context.
@@ -291,6 +301,7 @@ impl Task {
     pub fn begin_temporary_sig_mask(self: &Arc<Self>, new_mask: SigSet) -> TemporarySigMaskToken {
         let task_id = self.tid();
         let slot = self.sig_mask.lock().begin_temporary(task_id, new_mask);
+        self.rearm_signal_return_work();
         TemporarySigMaskToken::new(self.clone(), slot)
     }
 
@@ -313,9 +324,13 @@ impl Task {
     /// Restore a pending temporary mask before returning to user mode without a
     /// committed handler frame.
     pub fn restore_temporary_sig_mask_if_pending(&self) {
-        self.sig_mask
+        let restored = self
+            .sig_mask
             .lock()
             .restore_temporary_if_pending(self.tid());
+        if restored {
+            self.rearm_signal_return_work();
+        }
     }
 
     /// Signal delivery may install handler masks while a temporary restore is
@@ -324,10 +339,43 @@ impl Task {
         &self,
         f: impl FnOnce(&mut SigSet),
     ) -> SigSet {
-        self.sig_mask.lock().mutate_current_for_signal_delivery(f)
+        let old_mask = self.sig_mask.lock().mutate_current_for_signal_delivery(f);
+        self.rearm_signal_return_work();
+        old_mask
     }
 
     pub(super) fn is_current_sig_mask_blocking(&self, no: SigNo) -> bool {
         self.snapshot_current_sig_mask().get(no)
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn mask_owner_mutation_rearms_return_work() {
+        let task = get_current_task();
+        let original = task.snapshot_current_sig_mask();
+
+        // Establish the fast-path state, then mutate through the real mask
+        // owner instead of toggling the cache directly.
+        let _ = task.take_signal_return_work();
+        assert!(!task.take_signal_return_work());
+        task.mutate_current_sig_mask(|mask| {
+            if mask.get(SigNo::SIGUSR1) {
+                mask.clear(SigNo::SIGUSR1);
+            } else {
+                mask.set(SigNo::SIGUSR1);
+            }
+        });
+        assert!(task.take_signal_return_work());
+
+        task.set_permanent_sig_mask(original);
+        assert_eq!(task.snapshot_current_sig_mask(), original);
+        assert!(task.take_signal_return_work());
+        // Do not leave a false cache after the test consumed the restoration
+        // publication; the next real user-entry pass must remain conservative.
+        task.rearm_signal_return_work();
     }
 }

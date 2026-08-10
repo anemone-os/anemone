@@ -1,19 +1,20 @@
 # Build Configuration 当前契约
 
-**Owner：** canonical build configuration objects 与 `scripts/xtask` system resolver
+**Owner：** canonical build configuration objects、`scripts/xtask` system resolver 与 kernel consumers
 **覆盖范围：** Platform / SystemTarget / KernelConfig / BuildPreset 的配置事实分层，以及本次
-system action 的 resolved selection snapshot
+system action 的 resolved selection snapshot、kernel 参数语义合法性
 **不覆盖：** Platform DT/QEMU delivery、kernel output、app/rootfs build、Boot Protocol runtime、
-具体 build action workflow 或尚未生效的 network deployment schema
-**最后核验：** 2026-07-29
+具体 build action workflow 或 runtime 输入校验
+**最后核验：** 2026-08-05
 
-本目录只登记已经由 System Target Model 实现、并在后续 RFC 首次复用时按触达提取的最小共享规则；
-不批量迁移该 RFC 的全部 build、DT、workflow 或 repository-surface invariant。
+本目录登记已经生效、会被后续配置与 kernel consumer 工作共同依赖的最小共享规则；不把 build、DT、
+workflow 或 repository surface 的全部局部约束批量提升为 contract。
 
 ## Contract Surfaces
 
 - [System target 与 resolved selection](./system-target.md)：`STM-OWNER-001`、
   `STM-TARGET-001` 与 `STM-RESOLVE-001`。
+- [Kernel 参数合法性](./kernel-parameter-validation.md)：`KCONFIG-VALIDATION-001`。
 
 ## 邻接契约
 

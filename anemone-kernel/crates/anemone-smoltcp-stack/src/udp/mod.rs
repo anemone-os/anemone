@@ -1,5 +1,6 @@
 mod datagram;
 mod endpoint;
+mod error;
 mod namespace;
 
 // Preserve the pre-split crate-private paths, including paths used only by

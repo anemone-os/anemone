@@ -30,7 +30,7 @@ pub(super) const LOCAL_IP: [u8; 4] = [127, 0, 0, 1];
 pub(super) const ENDPOINT_PAYLOAD_CAPACITY: usize = 128;
 
 pub(super) fn lifecycle_limits() -> UdpEndpointLimits {
-    UdpEndpointLimits::new(1, 1, 32)
+    UdpEndpointLimits::new(1, 1, 1, 32)
 }
 
 pub(super) fn host_stack(capacity: usize, first: u16, last: u16) -> Stack {

@@ -9,7 +9,9 @@ pub(super) use control_plane::{
     SelectionError,
 };
 use interfaces::LogicalInterfaces;
-pub(super) use interfaces::{LogicalInterfaceReservation, LogicalInterfaceSnapshot};
+pub(super) use interfaces::{
+    LogicalInterfaceKind, LogicalInterfaceReservation, LogicalInterfaceSnapshot,
+};
 pub(super) use stack::{DomainStack, ExternalMapping, ExternalPumpPort, LocalPumpPort};
 
 use crate::prelude::*;
@@ -27,6 +29,7 @@ impl InitialDomain {
         let stack = Arc::new(DomainStack::new(
             crate::net::udp::UDP_NAMESPACE_POLICY,
             crate::net::icmp_raw::ICMP_RAW_NAMESPACE_POLICY,
+            crate::net::tcp::TCP_POLICY,
         ));
         let local_port = stack
             .attach_local(crate::net::worker::network_now())
@@ -52,6 +55,10 @@ impl InitialDomain {
         &mut self.logical
     }
 
+    pub(in crate::net) fn logical_diagnostic_members(&self) -> Vec<LogicalInterfaceSnapshot> {
+        self.logical.diagnostic_members()
+    }
+
     pub(super) fn stack(&self) -> Arc<DomainStack> {
         self.stack.clone()
     }
@@ -64,12 +71,8 @@ impl InitialDomain {
         if self.control_plane.is_some() {
             return Err(ControlPlaneActivationError::AlreadyPublished);
         }
-        let control_plane = Ipv4ControlPlane::prepare(
-            deployment,
-            self.local_path.interface(),
-            self.local_path.control().pump_wake(),
-            external,
-        )?;
+        let control_plane =
+            Ipv4ControlPlane::prepare(deployment, self.local_path.interface(), external)?;
         self.stack
             .install_ipv4_projection(control_plane.external_projection())
             .expect("validated IPv4 projection must fit the global Stack");
@@ -81,6 +84,13 @@ impl InitialDomain {
 
     pub(super) fn control_plane(&self) -> Option<&Ipv4ControlPlane> {
         self.control_plane.as_ref()
+    }
+
+    pub(super) fn local_progression_control(
+        &self,
+        interface: anemone_net_api::InterfaceId,
+    ) -> Option<Arc<crate::net::worker::PumpControl>> {
+        (self.local_path.interface() == interface).then(|| self.local_path.control())
     }
 
     pub(super) fn withdraw_control_plane(

@@ -56,7 +56,7 @@ fn sys_mremap(
     };
 
     let usp = get_current_task().clone_uspace_handle();
-    let (addr, _guard) = usp
+    let addr = usp
         .remap_range(&RemapMapping {
             old_range,
             new_npages,

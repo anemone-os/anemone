@@ -7,6 +7,7 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/mmap.2.html
 
+use super::{DestructiveUserTlbChange, UserTlbRetirement};
 use crate::prelude::{
     vma::{ForkPolicy, Protection, VmArea, VmFlags},
     vmo::{VmObject, anon::AnonObject, shadow::ShadowObject},
@@ -153,10 +154,10 @@ impl UserSpace {
     /// Map an anonymous memory region for the user space.
     ///
     /// Created [VmArea] will be backed by an [AnonObject].
-    pub fn map_anonymous(
+    pub(super) fn map_anonymous(
         &mut self,
         mapping: &AnonymousMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+    ) -> Result<(VirtAddr, Option<DestructiveUserTlbChange>), SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
@@ -202,10 +203,10 @@ impl UserSpace {
         Ok((vpn.to_virt_addr(), guard))
     }
 
-    pub fn map_file(
+    pub(super) fn map_file(
         &mut self,
         mapping: &FileMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+    ) -> Result<(VirtAddr, Option<DestructiveUserTlbChange>), SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
@@ -262,7 +263,7 @@ impl UserSpace {
     pub(in crate::mm::uspace) fn map_object(
         &mut self,
         mapping: &ObjectMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+    ) -> Result<(VirtAddr, Option<DestructiveUserTlbChange>), SysError> {
         let fixed = mapping.hint.is_some_and(|(_, fixed)| fixed);
         let vpn = match mapping.hint {
             Some((hint, true)) => hint,
@@ -315,48 +316,103 @@ impl UserSpace {
     ///
     /// TODO: explain the semantics of unmapping, especially when the range
     /// partially intersects with existing mappings.
-    pub fn unmap(&mut self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
+    pub(super) fn unmap_inner(
+        &mut self,
+        range: VirtPageRange,
+    ) -> Result<DestructiveUserTlbChange, SysError> {
         let tx = self.compose_unmap_range(range)?;
-        let guard = unsafe { self.run_transaction(tx) };
+        let change = unsafe { self.run_transaction(tx, true) };
 
         kdebugln!("unmapped region {:#x?}", range);
 
-        Ok(guard)
+        Ok(change)
     }
 
     /// Change protection on a fully-mapped range.
     ///
     /// If any page in the target range falls into a hole, the whole operation
     /// fails without modifying any VMA or PTE state.
-    pub fn protect_range(
+    pub(super) fn protect_range(
         &mut self,
         range: VirtPageRange,
         prot: Protection,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
+    ) -> Result<Option<DestructiveUserTlbChange>, SysError> {
         let heap_range = *self.heap_vma().range();
         if heap_range.covers(&range) && range.end() <= self.heap.brk.page_up() {
-            let new_flags = PteFlags::from(prot) | PteFlags::USER;
+            let permission_mask = PteFlags::READ | PteFlags::WRITE | PteFlags::EXECUTE;
+            let new_permissions = PteFlags::from(prot);
+            let mut changed = false;
+            let mut destructive = false;
             let mut mapper = self.table.mapper();
             unsafe {
-                mapper.change_flags(range, |_, _| Some(new_flags), TraverseOrder::PreOrder);
+                mapper.change_flags(
+                    range,
+                    |_, old_flags| {
+                        let old_permissions = old_flags & permission_mask;
+                        if old_permissions == new_permissions {
+                            return None;
+                        }
+                        changed = true;
+                        destructive |= !new_permissions.contains(old_permissions);
+                        // VALID, USER and architecture-owned cache/global bits
+                        // are not protection policy and must survive mprotect.
+                        Some((old_flags & !permission_mask) | new_permissions)
+                    },
+                    TraverseOrder::PreOrder,
+                );
             }
-            PagingArch::tlb_shootdown_all();
+            if changed {
+                PagingArch::tlb_shootdown_all();
+            }
             kdebugln!(
                 "changed heap protection on range {:#x?} to {:?}",
                 range,
                 prot
             );
-            return Ok(RemoteUspFenceGuard::new(Some(range)));
+            return Ok(destructive.then(DestructiveUserTlbChange::without_retirement));
         }
 
+        let relation = self.protection_change_relation(range, prot)?;
+        let Some(destructive) = relation else {
+            return Ok(None);
+        };
         let tx = self.compose_protect_range(range, prot)?;
-        let guard = unsafe { self.run_transaction(tx) };
+        // A relaxation invalidates leaves so private/COW mappings refault
+        // through their backing policy, but it must not detach empty page
+        // tables without a remote retirement obligation.
+        let change = unsafe { self.run_transaction(tx, destructive) };
         kdebugln!("changed protection on range {:#x?} to {:?}", range, prot);
-        Ok(guard)
+        Ok(destructive.then_some(change))
     }
 
     pub fn validate_mapped_range(&self, range: VirtPageRange) -> Result<(), SysError> {
         self.find_intersection_starts_covering(range).map(|_| ())
+    }
+
+    /// Return `None` for no change, `Some(false)` for permission-only
+    /// relaxation, and `Some(true)` when any covered VMA is restricted.
+    fn protection_change_relation(
+        &self,
+        range: VirtPageRange,
+        prot: Protection,
+    ) -> Result<Option<bool>, SysError> {
+        let starts = self.find_intersection_starts_covering(range)?;
+        let mut changed = false;
+        let mut destructive = false;
+        for start in starts {
+            let old = self
+                .vmas
+                .get(&start)
+                .expect("intersection key must resolve to a VMA")
+                .prot();
+            if old != prot {
+                changed = true;
+                if !prot.contains(old) {
+                    destructive = true;
+                }
+            }
+        }
+        Ok(changed.then_some(destructive))
     }
 
     fn collect_sync_ranges(
@@ -390,10 +446,10 @@ impl UserSpace {
         Ok(ranges)
     }
 
-    pub fn remap_range(
+    pub(super) fn remap_range(
         &mut self,
         mapping: &RemapMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
+    ) -> Result<(VirtAddr, Option<DestructiveUserTlbChange>), SysError> {
         self.validate_range(mapping.old_range)?;
         if mapping.new_npages == 0 {
             return Err(SysError::InvalidArgument);
@@ -413,8 +469,8 @@ impl UserSpace {
                 let tail_start = mapping.old_range.start() + mapping.new_npages as u64;
                 let tail =
                     VirtPageRange::new(tail_start, old_npages as u64 - mapping.new_npages as u64);
-                let guard = self.unmap(tail)?;
-                return Ok((mapping.old_range.start().to_virt_addr(), Some(guard)));
+                let change = self.unmap_inner(tail)?;
+                return Ok((mapping.old_range.start().to_virt_addr(), Some(change)));
             }
 
             let tail = VirtPageRange::new(
@@ -473,64 +529,42 @@ impl UserSpace {
             tx.insert(vma);
         }
 
-        let guard = unsafe { self.run_transaction(tx) };
-        Ok((target_start.to_virt_addr(), Some(guard)))
+        let change = unsafe { self.run_transaction(tx, true) };
+        Ok((target_start.to_virt_addr(), Some(change)))
     }
 }
 
 impl UserSpaceHandle {
-    pub fn map_anonymous(
-        &self,
-        mapping: &AnonymousMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.map_anonymous(mapping);
-        drop(usp);
-        res
+    pub fn map_anonymous(&self, mapping: &AnonymousMapping) -> Result<VirtAddr, SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(None, |inner| inner.map_anonymous(mapping))
     }
 
-    pub fn map_file(
-        &self,
-        mapping: &FileMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.map_file(mapping);
-        drop(usp);
-        res
+    pub fn map_file(&self, mapping: &FileMapping) -> Result<VirtAddr, SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(None, |inner| inner.map_file(mapping))
     }
 
-    pub fn unmap(&self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.unmap(range);
-        drop(usp);
-        res
+    pub fn unmap(&self, range: VirtPageRange) -> Result<(), SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(Some(range), |inner| {
+            inner.unmap_inner(range).map(|change| ((), Some(change)))
+        })
     }
 
-    pub fn protect_range(
-        &self,
-        range: VirtPageRange,
-        prot: Protection,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.protect_range(range, prot);
-        drop(usp);
-        res
+    pub fn protect_range(&self, range: VirtPageRange, prot: Protection) -> Result<(), SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(Some(range), |inner| {
+            inner.protect_range(range, prot).map(|change| ((), change))
+        })
     }
 
     pub fn validate_mapped_range(&self, range: VirtPageRange) -> Result<(), SysError> {
-        let usp = self.usp.lock();
-        let res = usp.validate_mapped_range(range);
-        drop(usp);
-        res
+        self.lock().validate_mapped_range(range)
     }
 
     pub fn sync_range(&self, range: VirtPageRange) -> Result<(), SysError> {
-        let sync_ranges = {
-            let usp = self.usp.lock();
-            let res = usp.collect_sync_ranges(range);
-            drop(usp);
-            res?
-        };
+        let sync_ranges = { self.lock().collect_sync_ranges(range)? };
 
         for (backing, range) in sync_ranges {
             backing.sync_range(range)?;
@@ -539,21 +573,18 @@ impl UserSpaceHandle {
         Ok(())
     }
 
-    pub fn discard_range(&self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.discard_range(range);
-        drop(usp);
-        res
+    pub fn discard_range(&self, range: VirtPageRange) -> Result<(), SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(Some(range), |inner| {
+            inner
+                .discard_range_inner(range)
+                .map(|change| ((), Some(change)))
+        })
     }
 
-    pub fn remap_range(
-        &self,
-        mapping: &RemapMapping,
-    ) -> Result<(VirtAddr, Option<RemoteUspFenceGuard>), SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.remap_range(mapping);
-        drop(usp);
-        res
+    pub fn remap_range(&self, mapping: &RemapMapping) -> Result<VirtAddr, SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(None, |inner| inner.remap_range(mapping))
     }
 }
 
@@ -568,7 +599,7 @@ impl UserSpace {
         &mut self,
         range: VirtPageRange,
         new: VmArea,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
+    ) -> Result<DestructiveUserTlbChange, SysError> {
         if *new.range() != range {
             return Err(SysError::InvalidArgument);
         }
@@ -578,13 +609,14 @@ impl UserSpace {
 
         let mut tx = self.compose_unmap_range(range)?;
         tx.ops.push(VmOperation::Insert { vma: new });
-        let guard = unsafe { self.run_transaction(tx) };
-
-        Ok(guard)
+        Ok(unsafe { self.run_transaction(tx, true) })
     }
 
     /// Discard the contents of a mapped range without changing its VMAs.
-    pub fn discard_range(&mut self, range: VirtPageRange) -> Result<RemoteUspFenceGuard, SysError> {
+    fn discard_range_inner(
+        &mut self,
+        range: VirtPageRange,
+    ) -> Result<DestructiveUserTlbChange, SysError> {
         self.validate_mapped_range(range)?;
 
         let mut ops = Vec::new();
@@ -609,22 +641,26 @@ impl UserSpace {
             ops.push((vma.backing().clone(), obj_range, cut_range));
         }
 
+        let mut retirement = UserTlbRetirement::default();
         for (backing, obj_range, _) in &ops {
-            backing.discard_range(obj_range.clone())?;
+            backing.discard_range(obj_range.clone(), retirement.frames());
         }
 
         {
             let mut mapper = self.table.mapper();
             for (_, _, cut_range) in &ops {
                 unsafe {
-                    mapper.try_unmap(Unmapping { range: *cut_range });
+                    mapper.try_unmap_retiring_page_tables(
+                        Unmapping { range: *cut_range },
+                        retirement.page_tables(),
+                    );
                 }
             }
         }
 
         PagingArch::tlb_shootdown_all();
 
-        Ok(RemoteUspFenceGuard::new(Some(range)))
+        Ok(DestructiveUserTlbChange::new(retirement))
     }
 }
 
@@ -914,9 +950,13 @@ impl UserSpace {
     /// In almost all cases, you should not call this method directly, but use
     /// higher-level APIs like `replace_range` instead, which guarantees the
     /// validity of the composed transaction.
-    pub(super) unsafe fn run_transaction(&mut self, tx: VmTransaction) -> RemoteUspFenceGuard {
+    pub(super) unsafe fn run_transaction(
+        &mut self,
+        tx: VmTransaction,
+        retire_page_tables: bool,
+    ) -> DestructiveUserTlbChange {
+        let mut retirement = UserTlbRetirement::default();
         let mut unmaps = Vec::new();
-
         for op in tx.ops {
             match op {
                 VmOperation::Remove { start } => {
@@ -925,6 +965,7 @@ impl UserSpace {
                         .remove(&start)
                         .expect("remove op must target an existing VMA");
                     assert!(removed.reservation().is_none());
+                    retirement.keep_vma(removed);
                 },
                 VmOperation::TrimStart { start, npages } => {
                     let mut vma = self
@@ -973,7 +1014,12 @@ impl UserSpace {
                 },
                 VmOperation::Insert { vma } => {
                     assert!(vma.reservation().is_none());
-                    assert!(self.is_range_avail(*vma.range()));
+                    assert!(
+                        !self
+                            .vmas
+                            .values()
+                            .any(|current| current.range().intersects(vma.range()))
+                    );
                     assert!(self.vmas.insert(vma.range().start(), vma).is_none());
                 },
                 VmOperation::Unmap { range } => unmaps.push(range),
@@ -986,20 +1032,28 @@ impl UserSpace {
 
             for range in unmaps {
                 unsafe {
-                    mapper.try_unmap(Unmapping { range });
+                    if retire_page_tables {
+                        mapper.try_unmap_retiring_page_tables(
+                            Unmapping { range },
+                            retirement.page_tables(),
+                        );
+                    } else {
+                        mapper.try_unmap_keep_page_tables(Unmapping { range });
+                    }
                 }
             }
 
             PagingArch::tlb_shootdown_all();
         }
 
-        RemoteUspFenceGuard::new(None)
+        DestructiveUserTlbChange::new(retirement)
     }
 }
 
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::mm::uspace::PageAccessContinuation;
 
     fn fixed_mapping(
         svpn: VirtPageNum,
@@ -1043,7 +1097,7 @@ mod kunits {
             .expect("anonymous mapping should succeed");
 
         uspace
-            .unmap(VirtPageRange::new(base + 3, 2))
+            .unmap_inner(VirtPageRange::new(base + 3, 2))
             .expect("middle unmap should succeed");
 
         assert_eq!(
@@ -1076,7 +1130,11 @@ mod kunits {
             ))
             .expect("anonymous mapping should succeed");
         uspace
-            .inject_page_fault((base + 3).to_virt_addr(), PageFaultType::Read)
+            .resolve_page_access(
+                (base + 3).to_virt_addr(),
+                PageFaultType::Read,
+                PageAccessContinuation::Immediate,
+            )
             .expect("faulting mapped page should succeed");
         assert!(
             uspace
@@ -1114,6 +1172,52 @@ mod kunits {
     }
 
     #[kunit]
+    fn heap_protection_preserves_valid_leaf_and_non_permission_flags() {
+        let mut uspace = UserSpace::new().expect("user space setup should succeed");
+        let vpn = uspace.heap.svpn;
+        uspace
+            .set_brk_inner((vpn + 1).to_virt_addr())
+            .expect("heap growth should succeed");
+        uspace
+            .resolve_page_access(
+                vpn.to_virt_addr(),
+                PageFaultType::Write,
+                PageAccessContinuation::Immediate,
+            )
+            .expect("heap write fault should install a valid leaf");
+
+        assert!(
+            uspace
+                .protect_range(VirtPageRange::new(vpn, 1), Protection::READ)
+                .expect("heap restriction should succeed")
+                .is_some()
+        );
+        let restricted = uspace
+            .page_table_mut()
+            .mapper()
+            .translate(vpn)
+            .expect("heap mprotect must preserve the valid leaf");
+        assert!(restricted.flags.contains(PteFlags::READ));
+        assert!(!restricted.flags.contains(PteFlags::WRITE));
+
+        assert!(
+            uspace
+                .protect_range(
+                    VirtPageRange::new(vpn, 1),
+                    Protection::READ | Protection::WRITE,
+                )
+                .expect("heap relaxation should succeed")
+                .is_none()
+        );
+        let relaxed = uspace
+            .page_table_mut()
+            .mapper()
+            .translate(vpn)
+            .expect("heap permission relaxation must preserve the valid leaf");
+        assert!(relaxed.flags.contains(PteFlags::READ | PteFlags::WRITE));
+    }
+
+    #[kunit]
     fn protect_range_rejects_holes_and_reservations() {
         let mut uspace = UserSpace::new().expect("user space setup should succeed");
         let base = uspace.stack_vma().range().start() - 64;
@@ -1128,10 +1232,10 @@ mod kunits {
             ))
             .expect("anonymous mapping should succeed");
 
-        assert_eq!(
+        assert!(matches!(
             uspace.protect_range(VirtPageRange::new(base + 1, 4), Protection::READ),
             Err(SysError::RangeNotMapped)
-        );
+        ));
         // assert_eq!(
         //     uspace.protect_range(VirtPageRange::new(heap_start, 1),
         // Protection::READ),     Err(SysError::PermissionDenied)
@@ -1157,10 +1261,10 @@ mod kunits {
             ))
             .expect("initial anonymous mapping should succeed");
 
-        assert_eq!(
+        assert!(matches!(
             uspace.map_anonymous(&fixed_mapping(base + 2, 4, Protection::READ, false, false)),
             Err(SysError::AlreadyMapped)
-        );
+        ));
 
         uspace
             .map_anonymous(&fixed_mapping(base + 2, 4, Protection::READ, false, true))
@@ -1207,7 +1311,7 @@ mod kunits {
             ))
             .expect("private anonymous mapping should succeed");
 
-        let child = parent.fork().expect("fork should succeed").0;
+        let child = parent.fork_inner().expect("fork should succeed").0;
 
         let parent_shared = parent
             .find_vma(shared_base.to_virt_addr())

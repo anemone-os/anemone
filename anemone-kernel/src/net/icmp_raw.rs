@@ -226,7 +226,6 @@ impl IcmpRawEndpointPort {
                 message,
             )
             .map_err(SendError::Stack)?;
-        selection.0.request_pump();
         Ok(())
     }
 
@@ -240,8 +239,8 @@ impl IcmpRawEndpointPort {
 }
 
 /// Immutable control-plane handoff retained by one Socket send operation.
-/// It carries the selected route/source/interface and a recheck capability,
-/// but no mutable control-plane, Endpoint, queue, or readiness truth.
+/// It carries only the selected route/source/interface. Protocol progression
+/// policy belongs to the Stack owner that commits the later send.
 pub(crate) struct IcmpRawSendSelection(super::domain::Ipv4Selection);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

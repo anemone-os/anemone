@@ -29,6 +29,7 @@ test-symtab:
 test-net-host:
     @cargo test -p anemone-net-api -p anemone-smoltcp-stack
     @cargo test -p smoltcp --lib --no-default-features --features std,medium-ethernet,medium-ip,proto-ipv4,proto-ipv4-fragmentation,socket-raw,socket-udp,auto-icmp-echo-reply iface::interface::tests::ipv4
+    @cargo test -p smoltcp --lib --no-default-features --features std,medium-ip,proto-ipv4,socket-tcp socket::tcp::test::
     @cargo test -p anemone-smoltcp-stack --no-default-features --no-run
     @cargo check -p anemone-smoltcp-stack --no-default-features
 
@@ -77,10 +78,10 @@ xref *args:
 rootfs *args:
     @just xtask rootfs {{ args }}
 
-[doc("generate the kconfig file from .defconfig")]
+[doc("generate kconfig from the tracked default KernelConfig")]
 defconfig:
-    @just log "DEFCONFIG" "Copying .defconfig to kconfig"
-    @cp conf/.defconfig ./kconfig
+    @just log "DEFCONFIG" "Copying the default KernelConfig to kconfig"
+    @cp conf/kconfs/default.toml ./kconfig
 
 [private]
 log topic msg:

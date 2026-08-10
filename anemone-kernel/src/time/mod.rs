@@ -10,7 +10,7 @@ pub use api::*;
 mod timekeeper;
 pub use timekeeper::*;
 mod instant;
-pub use instant::Instant;
+pub use instant::{MonotonicInstant, RealtimeInstant};
 
 pub fn on_timer_interrupt() {
     timekeeper::on_timer_interrupt();

@@ -25,7 +25,7 @@ pub struct ITimers {
 pub struct RealITimer {
     /// Authoritative target for getitimer and periodic advancement. Callback
     /// execution time must not replace it or periodic delivery would drift.
-    expire_at: Instant,
+    expire_at: MonotonicInstant,
     /// If [Some], then this is a periodic timer.
     interval: Option<Duration>,
     /// If false, then a stale timer completion will not send a signal to the
@@ -91,11 +91,11 @@ impl ThreadGroup {
             // a matching queued request.
             // Linux's ktime conversion saturates representable deadlines. Keep
             // the same fail-forward behavior for user-controlled timeval
-            // values instead of letting Instant's infallible Add panic on a
+            // values instead of letting MonotonicInstant's infallible Add panic on a
             // timeout beyond the monotonic u64 domain.
-            let expire_at = Instant::now()
+            let expire_at = MonotonicInstant::now()
                 .checked_add(timeout)
-                .unwrap_or(Instant::from_mono(u64::MAX));
+                .unwrap_or(MonotonicInstant::from_mono(u64::MAX));
             let request = schedule_real_itimer_callback(tg, callback_validness, timeout);
             real.replace(RealITimer {
                 expire_at,
@@ -130,7 +130,9 @@ impl ThreadGroup {
     pub fn real_itimer_snapshot(&self) -> Option<(Duration, Option<Duration>)> {
         let real = self.itimers.real.lock();
         if let Some(real) = real.as_ref() {
-            let rem = real.expire_at.saturating_duration_since(Instant::now());
+            let rem = real
+                .expire_at
+                .saturating_duration_since(MonotonicInstant::now());
             Some((rem, real.interval))
         } else {
             None
@@ -156,7 +158,11 @@ fn schedule_real_itimer_callback(
     )
 }
 
-fn next_periodic_expiration(expire_at: Instant, interval: Duration, now: Instant) -> Instant {
+fn next_periodic_expiration(
+    expire_at: MonotonicInstant,
+    interval: Duration,
+    now: MonotonicInstant,
+) -> MonotonicInstant {
     assert!(
         now >= expire_at,
         "ITIMER_REAL completion ran before its owner deadline"
@@ -170,11 +176,7 @@ fn next_periodic_expiration(expire_at: Instant, interval: Duration, now: Instant
     // timer-worker delay into permanent phase drift.
     let periods = (elapsed / interval_mono).saturating_add(1);
     let advance = interval_mono.saturating_mul(periods);
-    Instant::from_mono(
-        expire_at
-            .mono()
-            .saturating_add(advance),
-    )
+    MonotonicInstant::from_mono(expire_at.mono().saturating_add(advance))
 }
 
 fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>) {
@@ -195,7 +197,7 @@ fn real_itimer_expire_callback(tg: Arc<ThreadGroup>, validness: Arc<AtomicBool>)
 
         match timer.interval {
             Some(interval) => {
-                let now = Instant::now();
+                let now = MonotonicInstant::now();
                 timer.expire_at = next_periodic_expiration(timer.expire_at, interval, now);
                 let timeout = timer.expire_at.saturating_duration_since(now);
                 timer.request = Some(schedule_real_itimer_callback(
@@ -272,7 +274,7 @@ mod kunits {
         let request = schedule_threaded_timer_event(Duration::from_secs(3600), Box::new(|| {}));
         let timers = ITimers {
             real: NoIrqSpinLock::new(Some(RealITimer {
-                expire_at: Instant::now() + Duration::from_secs(3600),
+                expire_at: MonotonicInstant::now() + Duration::from_secs(3600),
                 interval: None,
                 validness: Arc::new(AtomicBool::new(true)),
                 request: Some(request),
@@ -288,8 +290,8 @@ mod kunits {
         let interval = Duration::from_millis(10);
         let interval_mono = duration_to_mono(interval).unwrap();
         assert_ne!(interval_mono, 0);
-        let expire_at = Instant::from_mono(100);
-        let now = Instant::from_mono(100 + interval_mono * 3 + interval_mono / 2);
+        let expire_at = MonotonicInstant::from_mono(100);
+        let now = MonotonicInstant::from_mono(100 + interval_mono * 3 + interval_mono / 2);
         let next = next_periodic_expiration(expire_at, interval, now);
         assert_eq!(next.mono(), 100 + interval_mono * 4);
         assert!(next > now);
@@ -298,11 +300,11 @@ mod kunits {
     #[kunit]
     fn unrepresentable_periodic_interval_saturates_without_panicking() {
         let next = next_periodic_expiration(
-            Instant::from_mono(1),
+            MonotonicInstant::from_mono(1),
             Duration::from_secs(u64::MAX),
-            Instant::from_mono(2),
+            MonotonicInstant::from_mono(2),
         );
-        assert_eq!(next, Instant::from_mono(u64::MAX));
+        assert_eq!(next, MonotonicInstant::from_mono(u64::MAX));
     }
 
     #[kunit]

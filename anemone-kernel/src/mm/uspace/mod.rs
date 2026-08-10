@@ -11,10 +11,11 @@
 //! [UserSpace] should might be something like `GuardedUserSpace`.
 
 use crate::{
-    mm::kptable::KERNEL_PTABLE,
+    exception::ipi::user_tlb::UserTlbShootdownSet,
+    mm::{kptable::KERNEL_PTABLE, paging::LeafPteCommit},
     prelude::{
         vma::{ForkPolicy, Protection, VmFlags},
-        vmo::{RetiredFrames, anon::AnonObject, empty::EmptyObject},
+        vmo::{anon::AnonObject, empty::EmptyObject},
         *,
     },
     sync::r#final::Final,
@@ -24,12 +25,48 @@ use vma::{VmArea, VmReservation};
 mod api;
 pub use api::*;
 
+mod fence;
+mod heap;
+pub use fence::UserSpaceGuard;
+use fence::{DestructiveUserTlbChange, UserTlbRetirement};
+mod residency;
+use residency::UserTlbResidency;
+pub(crate) use residency::{TemporaryUserSpaceActivation, activate_mapping_transition};
+
 pub mod fault;
 pub mod mmap;
 pub mod shm;
 pub mod vma;
 pub mod vmo;
 // TODO: vdso
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageAccessContinuation {
+    /// The resolver returns to user mode, where hardware retries the access.
+    UserReturn,
+    /// The kernel retries or directly accesses the page immediately on return.
+    Immediate,
+}
+
+impl PageAccessContinuation {
+    fn requires_local_completion(self, commit: LeafPteCommit) -> bool {
+        // Only an operation-local additive user fault may return without eager
+        // local completion. If hardware retains an invalid or more restrictive
+        // translation and the installed leaf remains, the retried user access
+        // faults again; that invocation no longer commits `Added` and therefore
+        // completes locally.
+        //
+        // This operation-local relation does not itself prove an earlier
+        // destructive remote invalidation. `UserSpaceGuard` supplies that
+        // address-space predecessor ordering and does not release the fault
+        // continuation until the earlier acknowledgement is complete.
+        // Immediate kernel access cannot rely on a future user-mode refault.
+        match (self, commit) {
+            (Self::UserReturn, LeafPteCommit::Added) => false,
+            (Self::UserReturn, _) | (Self::Immediate, _) => true,
+        }
+    }
+}
 
 // TODO: these constants should be in KB, not in pages.
 
@@ -55,7 +92,12 @@ pub const INIT_USER_STACK_PAGES: u64 = const {
         INIT_USER_STACK_BYTES % PagingArch::PAGE_SIZE_BYTES as u64 == 0,
         "initial user stack size must be a multiple of page size"
     );
-    INIT_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64
+    const INIT_USER_STACK_PAGES: u64 = INIT_USER_STACK_BYTES / PagingArch::PAGE_SIZE_BYTES as u64;
+    const_assert!(
+        INIT_USER_STACK_PAGES <= MAX_USER_STACK_PAGES,
+        "initial user stack size must not exceed maximum user stack size"
+    );
+    INIT_USER_STACK_PAGES
 };
 
 /// Maximum number of pages the user heap may grow to.
@@ -75,7 +117,15 @@ pub struct UserSpaceHandle {
     /// Root page number of the page table for this user space.
     table_ppn: PhysPageNum,
     exe: PathRef,
-    usp: Mutex<UserSpace>,
+    pub(super) usp: Mutex<UserSpace>,
+    /// The sole address-space completion-ordering truth. Every mutable guard
+    /// holds this across inner-mutex release and remote acknowledgement.
+    pub(super) completion_ordering: Mutex<()>,
+    /// Stable, preallocated transport storage; this is a capability owned by
+    /// the completion domain and does not cache mapping or CPU residency.
+    pub(super) user_tlb_shootdown: UserTlbShootdownSet,
+    /// Sole target-selection truth for CPUs that may retain this mapping.
+    tlb_residency: UserTlbResidency,
 }
 
 #[derive(Debug)]
@@ -123,81 +173,86 @@ struct Heap {
 }
 
 impl UserSpaceHandle {
-    pub fn new(usp: UserSpace, exe: PathRef) -> Self {
+    pub fn new(usp: UserSpace, exe: PathRef) -> Result<Self, SysError> {
+        let user_tlb_shootdown =
+            UserTlbShootdownSet::try_new().map_err(|_| SysError::OutOfMemory)?;
+        Ok(Self::from_prepared_transport(usp, exe, user_tlb_shootdown))
+    }
+
+    fn from_prepared_transport(
+        usp: UserSpace,
+        exe: PathRef,
+        user_tlb_shootdown: UserTlbShootdownSet,
+    ) -> Self {
         let table_ppn = usp.table.root_ppn();
         Self {
             table_ppn,
             exe,
             usp: Mutex::new(usp),
+            completion_ordering: Mutex::new(()),
+            user_tlb_shootdown,
+            tlb_residency: UserTlbResidency::new(),
         }
-    }
-
-    pub fn activate(&self) {
-        unsafe {
-            PagingArch::activate_addr_space(self.table_ppn);
-        }
-    }
-
-    pub fn root_ppn(&self) -> PhysPageNum {
-        self.table_ppn
     }
 
     pub fn exe(&self) -> &PathRef {
         &self.exe
     }
 
-    /// Invoke a closure with mutable access to the inner [UserSpace].
+    /// Invoke a closure through this address space's completion owner.
     pub fn with_usp<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut UserSpace) -> R,
+        F: FnOnce(&mut UserSpaceGuard<'_>) -> R,
     {
-        let mut usp = self.usp.lock();
+        let mut usp = self.lock();
         f(&mut usp)
     }
 
-    /// TODO: remove this. it's really unsafe.
     #[track_caller]
-    pub fn lock(&self) -> MutexGuard<'_, UserSpace> {
-        self.usp.lock()
+    pub fn lock(&self) -> UserSpaceGuard<'_> {
+        UserSpaceGuard::new(self)
     }
 }
 
 // encapsulations to ensure remote fencing is done after mutex released.
 impl UserSpaceHandle {
-    pub fn set_brk(&self, brk: VirtAddr) -> Result<Option<RemoteUspFenceGuard>, SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.set_brk(brk);
-        drop(usp);
-        res
+    pub fn set_brk(&self, brk: VirtAddr) -> Result<(), SysError> {
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(None, |inner| {
+            inner.set_brk_inner(brk).map(|change| ((), change))
+        })
     }
 
-    pub fn fork(&self) -> Result<(UserSpaceHandle, RemoteUspFenceGuard), SysError> {
-        let mut usp = self.usp.lock();
-        let (new_usp, guard) = usp.fork()?;
-        drop(usp);
-        Ok((UserSpaceHandle::new(new_usp, self.exe.clone()), guard))
+    pub fn fork(&self) -> Result<UserSpaceHandle, SysError> {
+        // Child transport allocation must fail before parent COW permissions
+        // are restricted; after the parent mutation no fallible handoff may
+        // escape before remote completion.
+        let child_transport = UserTlbShootdownSet::try_new().map_err(|_| SysError::OutOfMemory)?;
+        let mut usp = self.lock();
+        let new_usp = usp.run_tlb_transaction(None, UserSpace::fork_inner)?;
+        Ok(Self::from_prepared_transport(
+            new_usp,
+            self.exe.clone(),
+            child_transport,
+        ))
     }
 
-    pub fn handle_page_fault(&self, info: &PageFaultInfo) -> Result<RemoteUspFenceGuard, SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.handle_page_fault(info);
-        drop(usp);
-        res
-    }
-
-    pub fn inject_page_fault(
-        &self,
-        fault_addr: VirtAddr,
-        fault_type: PageFaultType,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
-        let mut usp = self.usp.lock();
-        let res = usp.inject_page_fault(fault_addr, fault_type);
-        drop(usp);
-        res
+    pub(crate) fn resolve_user_page_fault(&self, info: &PageFaultInfo) -> Result<(), SysError> {
+        let mut usp = self.lock();
+        let range = Some(VirtPageRange::new(info.fault_addr().page_down(), 1));
+        usp.run_tlb_transaction(range, |inner| {
+            inner
+                .resolve_page_access(
+                    info.fault_addr(),
+                    info.fault_type(),
+                    PageAccessContinuation::UserReturn,
+                )
+                .map(|change| ((), change))
+        })
     }
 
     pub fn detach_all_sysv_shm_for(&self, tgid: Tid) {
-        let mut usp = self.usp.lock();
+        let mut usp = self.lock();
         usp.detach_all_sysv_shm_for(tgid)
     }
 
@@ -211,14 +266,13 @@ impl UserSpaceHandle {
     /// running on this page table until the scheduler switches it out, so this
     /// must not drop or replace the [PageTable] itself.
     pub unsafe fn clear(&self) {
-        let mut usp = self.usp.lock();
-        unsafe {
-            usp.clear();
-        }
+        let mut usp = self.lock();
+        usp.run_tlb_transaction(None, |inner| Ok(((), Some(unsafe { inner.clear_inner() }))))
+            .expect("clearing an owned address space is infallible after preparation");
     }
 
     pub fn exclusive_physical_pages_snapshot(&self) -> usize {
-        self.usp.lock().exclusive_physical_pages_snapshot()
+        self.lock().exclusive_physical_pages_snapshot()
     }
 }
 
@@ -256,7 +310,7 @@ impl UserSpace {
             Protection::READ | Protection::WRITE,
             ForkPolicy::CopyOnWrite,
             // note that stack vma is not marked with [VmFlags::GROW_DOWN]. it's managed
-            // separately and explicitly in [UserSpace::handle_page_fault].
+            // separately and explicitly in [UserSpace::resolve_user_page_fault].
             VmFlags::empty(),
             VmReservation::Stack,
             stack_vmo,
@@ -464,9 +518,10 @@ impl UserSpace {
     /// executing with this page table active, so this method unmaps user leaves
     /// and drops VMA-owned frames but deliberately preserves the [PageTable]
     /// object and its root page-directory frame for normal `UserSpace` drop.
-    pub unsafe fn clear(&mut self) {
+    unsafe fn clear_inner(&mut self) -> DestructiveUserTlbChange {
+        let mut retirement = UserTlbRetirement::default();
         unsafe {
-            self.table.mapper().try_unmap(Unmapping {
+            self.table.mapper().try_unmap_keep_page_tables(Unmapping {
                 range: VirtPageRange::new(VirtPageNum::new(0), KernelLayout::USPACE_TOP_VPN.get()),
             });
         }
@@ -476,7 +531,8 @@ impl UserSpace {
             self.sysv_shm.is_empty(),
             "UserSpace::clear must run after SysV shm attachments are detached"
         );
-        self.vmas.clear();
+        retirement.keep_vmas(core::mem::take(&mut self.vmas));
+        DestructiveUserTlbChange::new(retirement)
     }
 }
 
@@ -515,62 +571,6 @@ impl UserSpace {
             },
             Err(err) => Err(err),
         }
-    }
-
-    /// Get the program break
-    pub fn brk(&self) -> VirtAddr {
-        self.heap.brk
-    }
-
-    /// Adjust the program break for this address space.
-    ///
-    /// This function grows or shrinks the heap tracked in `uheap` to make
-    /// `brk` the new program break. It returns an error if the requested
-    /// break is out of range or if the backing cannot decommit a shrink range.
-    pub fn set_brk(&mut self, brk: VirtAddr) -> Result<Option<RemoteUspFenceGuard>, SysError> {
-        let heap_range = *self.heap_vma().range();
-
-        if brk < heap_range.start().to_virt_addr() {
-            return Err(SysError::OutOfMemory); // see reference https://www.man7.org/linux/man-pages/man2/brk.2.html
-        }
-        if brk > heap_range.end().to_virt_addr() {
-            return Err(SysError::OutOfMemory);
-        }
-
-        let old_brk_vpn = self.heap.brk.page_up();
-        let new_brk_vpn = brk.page_up();
-        let guard = if self.heap.brk > brk {
-            let count = old_brk_vpn - new_brk_vpn;
-            let range = VirtPageRange::new(new_brk_vpn, count);
-            if count == 0 {
-                None
-            } else {
-                let retired = {
-                    let heap_vma = self.heap_vma();
-                    let start = heap_vma.vmo_pidx(new_brk_vpn);
-                    let end = start
-                        .checked_add(count as usize)
-                        .ok_or(SysError::InvalidArgument)?;
-                    heap_vma.backing().decommit_range(start..end)?
-                };
-
-                let mut mapper = self.table.mapper();
-                unsafe {
-                    mapper.try_unmap(Unmapping { range });
-                }
-                for vpn in range.iter() {
-                    PagingArch::tlb_shootdown(vpn);
-                }
-
-                Some(RemoteUspFenceGuard::with_retired(Some(range), retired))
-            }
-        } else {
-            None
-        };
-        self.heap.brk = brk;
-        kdebugln!("brk of {} set to {}", current_task_id(), brk);
-
-        Ok(guard)
     }
 
     /// Push data onto the user init stack and return a pointer to the copied
@@ -613,7 +613,7 @@ impl UserSpace {
 
         let stack_base = self.stack_vma().range().start().to_virt_addr();
         let stack_offset = (sp - stack_base) as usize;
-        self.stack_vma().backing().write(stack_offset, data)?;
+        self.stack_vma().backing().write_bytes(stack_offset, data)?;
         self.stack.init_sp = sp;
         Ok(sp)
     }
@@ -749,17 +749,21 @@ impl UserSpace {
     }
 
     /// Fork a new [UserSpace] from this one with copy-on-write semantics.
-    pub fn fork(&mut self) -> Result<(Self, RemoteUspFenceGuard), SysError> {
+    fn fork_inner(&mut self) -> Result<(Self, Option<DestructiveUserTlbChange>), SysError> {
         // well... there is no need to map pages here. page fault handler will handle
         // everything lazily...
         let mut new_table = PageTable::new()?;
         KERNEL_PTABLE.copy_to_ptable(&mut new_table);
 
         let mut new_vmas = BTreeMap::new();
+        let mut restricted = false;
         let mut mapper = self.table.mapper();
-        for (start, vma) in self.vmas.iter_mut() {
-            new_vmas.insert(*start, vma.fork(&mut mapper));
+        for (start, vma) in &mut self.vmas {
+            let (child, parent_restricted) = vma.fork(&mut mapper);
+            assert!(new_vmas.insert(*start, child).is_none());
+            restricted |= parent_restricted;
         }
+        drop(mapper);
 
         let new_inner = UserSpace {
             table: new_table,
@@ -775,10 +779,14 @@ impl UserSpace {
             attachment.segment.inherit_attachment_for_fork();
         }
 
-        // local tlb shootdown
-        PagingArch::tlb_shootdown_all();
+        if restricted {
+            PagingArch::tlb_shootdown_all();
+        }
 
-        Ok((new_inner, RemoteUspFenceGuard::new(None)))
+        Ok((
+            new_inner,
+            restricted.then(DestructiveUserTlbChange::without_retirement),
+        ))
     }
 
     /// Check if the given virtual page has the requested permissions.
@@ -838,22 +846,23 @@ impl UserSpace {
 }
 
 impl UserSpace {
-    pub fn handle_page_fault(
+    fn resolve_page_access(
         &mut self,
-        fault_info: &PageFaultInfo,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
-        // again, stack and heap must be handled specially since they have special
-        // semantics.
+        addr: VirtAddr,
+        access: PageFaultType,
+        continuation: PageAccessContinuation,
+    ) -> Result<Option<DestructiveUserTlbChange>, SysError> {
+        // Stack and heap reservations impose accessibility bounds in addition
+        // to ordinary VMA membership.
 
-        let fault_addr = fault_info.fault_addr();
         let reservation = self
-            .find_vma(fault_addr)
+            .find_vma(addr)
             .ok_or(SysError::NotMapped)?
             .reservation();
 
-        match reservation {
+        let commit = match reservation {
             Some(VmReservation::Stack) => {
-                if !self.stack_accessible(fault_addr) {
+                if !self.stack_accessible(addr) {
                     return Err(SysError::NotMapped);
                 }
 
@@ -868,13 +877,14 @@ impl UserSpace {
                     .get_mut(&stack.svpn)
                     .expect("stack reservation must stay registered");
 
-                stack_vma.handle_page_fault(&mut mapper, fault_info)?;
-                if fault_addr.page_down() < stack.committed_bottom {
-                    stack.committed_bottom = fault_addr.page_down();
+                let commit = stack_vma.resolve_page_access(&mut mapper, addr, access)?;
+                if addr.page_down() < stack.committed_bottom {
+                    stack.committed_bottom = addr.page_down();
                 }
+                commit
             },
             Some(VmReservation::Heap) => {
-                if !self.heap_accessible(fault_addr) {
+                if !self.heap_accessible(addr) {
                     return Err(SysError::NotMapped);
                 }
 
@@ -889,7 +899,7 @@ impl UserSpace {
                     .get_mut(&heap.svpn)
                     .expect("heap reservation must stay registered");
 
-                heap_vma.handle_page_fault(&mut mapper, fault_info)?;
+                heap_vma.resolve_page_access(&mut mapper, addr, access)?
             },
             Some(VmReservation::Guard) => return Err(SysError::NotMapped),
             None => {
@@ -899,94 +909,19 @@ impl UserSpace {
                     ..
                 } = *self;
                 let mut mapper = table.mapper();
-                let other_vma =
-                    Self::find_vma_raw_mut(vmas, fault_addr).ok_or(SysError::NotMapped)?;
+                let other_vma = Self::find_vma_raw_mut(vmas, addr).ok_or(SysError::NotMapped)?;
 
-                other_vma.handle_page_fault(&mut mapper, fault_info)?;
+                other_vma.resolve_page_access(&mut mapper, addr, access)?
             },
+        };
+
+        let vpn = addr.page_down();
+        if continuation.requires_local_completion(commit) {
+            PagingArch::tlb_shootdown(vpn);
         }
 
-        Ok(RemoteUspFenceGuard::new(Some(VirtPageRange::new(
-            fault_addr.page_down(),
-            1,
-        ))))
-    }
-
-    /// Explicitly inject a page fault on the given address with the given
-    /// access type.
-    ///
-    /// This is useful when syscall handlers receive an pointer from user, which
-    /// may not be accessed before and thus may not be mapped yet. By injecting
-    /// a page fault, we can trigger the lazy mapping logic in page fault
-    /// handler to map the page if it's valid, or return an error if it's
-    /// invalid.
-    pub fn inject_page_fault(
-        &mut self,
-        fault_addr: VirtAddr,
-        fault_type: PageFaultType,
-    ) -> Result<RemoteUspFenceGuard, SysError> {
-        let fault_info = PageFaultInfo::new(VirtAddr::new(42), fault_addr, fault_type);
-        self.handle_page_fault(&fault_info)
-    }
-}
-
-/// Mainly for preventing sending synchronous IPI while holding the user space
-/// mutex, which may cause deadlock.
-#[derive(Debug)]
-pub struct RemoteUspFenceGuard {
-    vpn: Option<VirtPageRange>,
-    retired: RetiredFrames,
-}
-
-impl RemoteUspFenceGuard {
-    fn new(vpn: Option<VirtPageRange>) -> Self {
-        Self {
-            vpn,
-            retired: RetiredFrames::default(),
-        }
-    }
-
-    fn with_retired(vpn: Option<VirtPageRange>, retired: RetiredFrames) -> Self {
-        Self { vpn, retired }
-    }
-}
-
-// Equality describes only the invalidation scope. Retired frames are a linear
-// cleanup capability and deliberately do not participate in comparisons.
-impl PartialEq for RemoteUspFenceGuard {
-    fn eq(&self, other: &Self) -> bool {
-        self.vpn == other.vpn
-    }
-}
-
-impl Eq for RemoteUspFenceGuard {}
-
-impl Drop for RemoteUspFenceGuard {
-    fn drop(&mut self) {
-        let mut fence_failed = false;
-        if let Some(vpns) = &self.vpn {
-            for vpn in vpns.iter() {
-                if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: Some(vpn) }) {
-                    fence_failed = true;
-                    kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
-                }
-            }
-        } else {
-            if let Err(e) = broadcast_ipi(IpiPayload::TlbShootdown { vpn: None }) {
-                fence_failed = true;
-                kalertln!("failed to broadcast user TLB shootdown IPI: {e:?}");
-            }
-        }
-
-        if fence_failed && !self.retired.is_empty() {
-            let npages = self.retired.len();
-            let retired = core::mem::take(&mut self.retired);
-            // Fail-close bridge: Drop cannot return an IPI transport failure. Keep
-            // the old frames out of the allocator until shootdown completion has
-            // an infallible or retryable owner API, then remove this leak fallback.
-            core::mem::forget(retired);
-            kalertln!("retaining {npages} decommitted user frames after failed TLB shootdown");
-        }
+        Ok(matches!(commit, LeafPteCommit::ReplacedOrRestricted)
+            .then(DestructiveUserTlbChange::without_retirement))
     }
 }
 
@@ -994,103 +929,27 @@ impl Drop for RemoteUspFenceGuard {
 mod kunits {
     use super::*;
 
-    fn write_first_byte(ppn: PhysPageNum, value: u8) {
-        unsafe {
-            *ppn.to_phys_addr().to_hhdm().as_ptr_mut::<u8>() = value;
-        }
-    }
-
-    fn first_byte(ppn: PhysPageNum) -> u8 {
-        unsafe { *ppn.to_phys_addr().to_hhdm().as_ptr::<u8>() }
-    }
-
     #[kunit]
-    fn brk_shrink_decommits_full_pages_and_preserves_partial_page() {
-        let mut uspace = UserSpace::new().expect("user space setup should succeed");
-        let heap_start = uspace.heap.svpn;
-        let target_vpn = heap_start + 1;
-        let grown_brk = (heap_start + 2).to_virt_addr();
-
+    fn only_additive_user_return_may_defer_local_completion() {
         assert!(
-            uspace
-                .set_brk(grown_brk)
-                .expect("heap growth should succeed")
-                .is_none()
+            !PageAccessContinuation::UserReturn.requires_local_completion(LeafPteCommit::Added)
         );
-        drop(
-            uspace
-                .inject_page_fault(target_vpn.to_virt_addr(), PageFaultType::Write)
-                .expect("heap write fault should allocate a page"),
-        );
-        let old_ppn = uspace
-            .page_table_mut()
-            .mapper()
-            .translate(target_vpn)
-            .expect("faulted heap page should be mapped")
-            .ppn;
-        write_first_byte(old_ppn, 0xa5);
 
-        let mut guard = uspace
-            .set_brk(target_vpn.to_virt_addr())
-            .expect("full-page heap shrink should succeed")
-            .expect("full-page heap shrink should require remote fencing");
-        assert!(
-            uspace
-                .page_table_mut()
-                .mapper()
-                .translate(target_vpn)
-                .is_none()
-        );
-        assert_eq!(guard.retired.len(), 1);
-        assert_eq!(unsafe { get_frame_raw(old_ppn) }.rc(), 1);
+        for commit in [
+            LeafPteCommit::Unchanged,
+            LeafPteCommit::Relaxed,
+            LeafPteCommit::ReplacedOrRestricted,
+        ] {
+            assert!(PageAccessContinuation::UserReturn.requires_local_completion(commit));
+        }
 
-        // KUnit does not need a stale user TLB. Preserve production ordering by
-        // completing the guard first, then releasing its extracted retirement hold.
-        let retired = core::mem::take(&mut guard.retired);
-        drop(guard);
-        drop(retired);
-        assert_eq!(unsafe { get_frame_raw(old_ppn) }.rc(), 0);
-
-        assert!(
-            uspace
-                .set_brk(grown_brk)
-                .expect("heap regrowth should succeed")
-                .is_none()
-        );
-        drop(
-            uspace
-                .inject_page_fault(target_vpn.to_virt_addr(), PageFaultType::Write)
-                .expect("regrown heap page should fault from zero"),
-        );
-        let regrown_ppn = uspace
-            .page_table_mut()
-            .mapper()
-            .translate(target_vpn)
-            .expect("regrown heap page should be mapped")
-            .ppn;
-        assert_eq!(first_byte(regrown_ppn), 0);
-        write_first_byte(regrown_ppn, 0x5a);
-
-        let partial_old = target_vpn.to_virt_addr() + 0x800;
-        let partial_new = target_vpn.to_virt_addr() + 0x100;
-        assert!(
-            uspace
-                .set_brk(partial_old)
-                .expect("partial-page shrink should succeed")
-                .is_none()
-        );
-        assert!(
-            uspace
-                .set_brk(partial_new)
-                .expect("same-page shrink should succeed")
-                .is_none()
-        );
-        let preserved = uspace
-            .page_table_mut()
-            .mapper()
-            .translate(target_vpn)
-            .expect("same-page shrink must preserve the boundary page");
-        assert_eq!(preserved.ppn, regrown_ppn);
-        assert_eq!(first_byte(preserved.ppn), 0x5a);
+        for commit in [
+            LeafPteCommit::Added,
+            LeafPteCommit::Unchanged,
+            LeafPteCommit::Relaxed,
+            LeafPteCommit::ReplacedOrRestricted,
+        ] {
+            assert!(PageAccessContinuation::Immediate.requires_local_completion(commit));
+        }
     }
 }

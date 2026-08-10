@@ -9,7 +9,12 @@ use anemone_abi::{
     capability::linux::{
         _KERNEL_CAPABILITY_U32S, _KERNEL_CAPABILITY_VERSION, UserCapData, UserCapHeader,
     },
-    process::linux::{clone, mmap, resource::RLimit, signal::SIGCHLD, wait},
+    process::linux::{
+        clone, mmap,
+        resource::{RLimit, RUsage, RUSAGE_CHILDREN},
+        signal::SIGCHLD,
+        wait,
+    },
 };
 use bitflags::bitflags;
 
@@ -447,7 +452,7 @@ impl WaitFor {
     }
 }
 
-/// rusage is not yet implemented.
+/// This convenience wrapper does not request rusage.
 pub fn wait4(
     target: WaitFor,
     wstatus: Option<&mut WStatusRaw>,
@@ -462,6 +467,12 @@ pub fn wait4(
         0,
     )
     .and_then(|x| Ok(if x == 0 { None } else { Some(x as Tid) }))
+}
+
+/// Return cumulative CPU usage for children reaped by this process.
+pub fn getrusage_children() -> Result<RUsage, Errno> {
+    let mut usage = RUsage::default();
+    process::getrusage(RUSAGE_CHILDREN, &mut usage as *mut RUsage as u64).map(|_| usage)
 }
 
 #[cfg(target_arch = "riscv64")]

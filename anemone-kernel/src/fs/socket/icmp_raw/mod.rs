@@ -27,7 +27,8 @@ use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
     SocketDatagramSendOperation, SocketIoOps, SocketOps, SocketOptionError, SocketOptionMutation,
     SocketOptionQuery, SocketOptionValue, SocketPreparation, SocketQueryError, SocketReceiveError,
-    SocketReceiveOutcome, SocketReceiveRequest, SocketSendError, SocketSendRequest, SocketType,
+    SocketReceiveOutcome, SocketReceiveRequest, SocketReleaseReason, SocketSendError,
+    SocketSendRequest, SocketType,
 };
 use source::IcmpRawSocketSource;
 
@@ -195,7 +196,9 @@ fn connect_icmp_raw_socket(
             operation.peer_port_projection = Some(port);
             Ok(())
         },
-        SocketAddress::UnixPathname(_) => Err(SocketConnectError::Unsupported),
+        SocketAddress::UnixPathname(_) | SocketAddress::Netlink { .. } => {
+            Err(SocketConnectError::Unsupported)
+        },
     }
 }
 
@@ -272,7 +275,11 @@ fn send_icmp_raw_socket(
     let explicit_destination = match destination {
         Some(SocketAddress::Ipv4 { address, .. }) => Some(address),
         None => None,
-        Some(SocketAddress::Unspecified | SocketAddress::UnixPathname(_)) => {
+        Some(
+            SocketAddress::Unspecified
+            | SocketAddress::UnixPathname(_)
+            | SocketAddress::Netlink { .. },
+        ) => {
             return Err(SocketSendError::Unsupported);
         },
     };
@@ -381,6 +388,7 @@ fn query_icmp_raw_option(
             let filter = endpoint.config().map_err(map_option_query_error)?.filter();
             Ok(SocketOptionValue::IcmpTypeFilter(filter.blocked_types()))
         },
+        _ => Err(SocketOptionError::Unsupported),
     }
 }
 
@@ -404,6 +412,7 @@ fn mutate_icmp_raw_option(
         SocketOptionMutation::IcmpTypeFilter(blocked_types) => endpoint
             .set_filter(IcmpRawTypeFilter::from_blocked_types(blocked_types))
             .map_err(map_option_mutation_error),
+        _ => Err(SocketOptionError::Unsupported),
     }
 }
 
@@ -414,7 +423,7 @@ fn poll_icmp_raw_socket(
     raw_private(private).source.poll(request)
 }
 
-fn final_release_icmp_raw_socket(private: &AnyOpaque) {
+fn final_release_icmp_raw_socket(private: &AnyOpaque, _reason: SocketReleaseReason) {
     // Source retirement first withdraws association, reverse publication, and
     // routes. No sleeping operation mutex or fd-table lock participates.
     let result = raw_private(private).source.retire();
@@ -523,6 +532,7 @@ pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     accepting: raw_is_accepting,
     query_option: Some(query_icmp_raw_option),
     mutate_option: Some(mutate_icmp_raw_option),
+    detach_ipv4_extended_error: None,
     poll: poll_icmp_raw_socket,
     final_release: final_release_icmp_raw_socket,
 };

@@ -1,8 +1,6 @@
 //! Syscall argument validation helpers for user-controlled data.
-//!
-//! TODO: tlb shootdown, out of mutex lock.
-
 use core::{mem::MaybeUninit, str};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::{
     arch::UserPtrAccessor,
@@ -48,7 +46,7 @@ fn validate_user_range(start: VirtAddr, len: usize) -> Result<(), SysError> {
 }
 
 fn fault_in_user_range(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     start: VirtAddr,
     len: usize,
     access: PageFaultType,
@@ -62,10 +60,8 @@ fn fault_in_user_range(
     let svpn = start.page_down();
     let evpn = end.page_up();
     for vpn in VirtPageRange::new(svpn, evpn - svpn).iter() {
-        let fence = usp
-            .inject_page_fault(vpn.to_virt_addr(), access)
+        usp.fault_in_page(vpn.to_virt_addr(), access)
             .map_err(user_memory_error)?;
-        drop(fence);
     }
     Ok(())
 }
@@ -75,7 +71,7 @@ fn map_user_pointer_error(error: UserPtrAccessError) -> UserPtrAccessError {
 }
 
 fn read_user_bytes(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     dst: &mut [u8],
     src: VirtAddr,
 ) -> Result<usize, UserPtrAccessError> {
@@ -87,7 +83,7 @@ fn read_user_bytes(
 }
 
 fn write_user_bytes(
-    usp: &mut UserSpace,
+    usp: &mut UserSpaceGuard<'_>,
     dst: VirtAddr,
     src: &[u8],
 ) -> Result<usize, UserPtrAccessError> {
@@ -102,22 +98,22 @@ mod ptrs {
     use super::*;
 
     #[derive(Debug)]
-    pub struct UserReadPtr<'a, T: ?Sized> {
+    pub struct UserReadPtr<'a, 'h, T: ?Sized> {
         pub(super) ptr: *const T,
-        pub(super) usp: &'a mut UserSpace,
+        pub(super) usp: &'a mut UserSpaceGuard<'h>,
     }
 
     #[derive(Debug)]
-    pub struct UserWritePtr<'a, T: ?Sized> {
+    pub struct UserWritePtr<'a, 'h, T: ?Sized> {
         pub(super) ptr: *mut T,
-        pub(super) usp: &'a mut UserSpace,
+        pub(super) usp: &'a mut UserSpaceGuard<'h>,
     }
 
-    pub type UserReadSlice<'a, T> = UserReadPtr<'a, [T]>;
-    pub type UserWriteSlice<'a, T> = UserWritePtr<'a, [T]>;
+    pub type UserReadSlice<'a, 'h, T> = UserReadPtr<'a, 'h, [T]>;
+    pub type UserWriteSlice<'a, 'h, T> = UserWritePtr<'a, 'h, [T]>;
 
-    impl<'a, T: Copy> UserReadPtr<'a, T> {
-        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
+    impl<'a, 'h, T> UserReadPtr<'a, 'h, T> {
+        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceGuard<'h>) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             validate_user_range(addr, size_of::<T>())?;
 
@@ -126,9 +122,15 @@ mod ptrs {
                 usp,
             })
         }
+    }
 
+    impl<T: FromBytes> UserReadPtr<'_, '_, T> {
         pub fn read(&mut self) -> Result<T, SysError> {
             let mut value = MaybeUninit::<T>::zeroed();
+            // `FromBytes` proves that every initialized byte pattern is a
+            // valid `T`. Zeroing makes the temporary byte view initialized;
+            // the exact-copy path then overwrites the entire object
+            // representation, and failure returns before `assume_init`.
             let bytes = unsafe {
                 core::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>())
             };
@@ -138,23 +140,14 @@ mod ptrs {
         }
     }
 
-    impl<'a, T: Copy> UserWritePtr<'a, T> {
-        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpace) -> Result<Self, SysError> {
+    impl<'a, 'h, T> UserWritePtr<'a, 'h, T> {
+        pub fn try_new(addr: VirtAddr, usp: &'a mut UserSpaceGuard<'h>) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             validate_user_range(addr, size_of::<T>())?;
             Ok(UserWritePtr {
                 ptr: addr.as_ptr_mut(),
                 usp,
             })
-        }
-
-        pub fn write(&mut self, val: T) -> Result<(), SysError> {
-            let bytes = unsafe {
-                core::slice::from_raw_parts((&val as *const T).cast::<u8>(), size_of::<T>())
-            };
-            write_user_bytes(self.usp, VirtAddr::new(self.ptr as u64), bytes)
-                .map_err(|error| error.error())?;
-            Ok(())
         }
 
         /// Resolve and validate the complete write range before a syscall
@@ -170,11 +163,19 @@ mod ptrs {
         }
     }
 
-    impl<'a, T: Copy> UserReadPtr<'a, [T]> {
+    impl<T: IntoBytes + Immutable> UserWritePtr<'_, '_, T> {
+        pub fn write(&mut self, val: T) -> Result<(), SysError> {
+            write_user_bytes(self.usp, VirtAddr::new(self.ptr as u64), val.as_bytes())
+                .map_err(|error| error.error())?;
+            Ok(())
+        }
+    }
+
+    impl<'a, 'h, T> UserReadPtr<'a, 'h, [T]> {
         pub fn try_new(
             addr: VirtAddr,
             len: usize,
-            usp: &'a mut UserSpace,
+            usp: &'a mut UserSpaceGuard<'h>,
         ) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             let byte_len = len
@@ -187,24 +188,33 @@ mod ptrs {
                 usp,
             })
         }
+    }
 
+    impl<T: FromBytes + IntoBytes + Immutable> UserReadPtr<'_, '_, [T]> {
         /// Panics if kernel buffer is too small to hold the slice.
         ///
         /// We don't return a [SysError::BufferTooSmall]. We want callers to
         /// explicitly check the buffer size.
         pub fn copy_to_slice(&mut self, dst: &mut [T]) -> Result<(), SysError> {
-            debug_assert!(self.ptr.len() <= dst.len(), "kernel buffer is too small");
+            let dst = dst
+                .get_mut(..self.ptr.len())
+                .expect("kernel buffer is too small");
 
-            let byte_len = self.ptr.len() * size_of::<T>();
-            let bytes =
-                unsafe { core::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), byte_len) };
-            read_user_bytes(self.usp, bytes, VirtAddr::new(self.ptr.cast::<T>() as u64))
-                .map_err(|error| error.error())?;
+            // Unlike scalar copyin, a typed slice reuses existing `T` storage.
+            // `IntoBytes` excludes padding so its mutable byte view cannot
+            // expose uninitialized object representation while `FromBytes`
+            // keeps every replacement byte pattern valid.
+            read_user_bytes(
+                self.usp,
+                dst.as_mut_bytes(),
+                VirtAddr::new(self.ptr.cast::<T>() as u64),
+            )
+            .map_err(|error| error.error())?;
             Ok(())
         }
     }
 
-    impl<'a> UserReadPtr<'a, [u8]> {
+    impl UserReadPtr<'_, '_, [u8]> {
         /// Ordinary byte-stream I/O needs the architecture-reported prefix so
         /// its cursor can publish short progress instead of erasing it as an
         /// exact typed-copy failure.
@@ -212,20 +222,18 @@ mod ptrs {
             &mut self,
             dst: &mut [u8],
         ) -> Result<usize, UserPtrAccessError> {
-            debug_assert!(self.ptr.len() <= dst.len(), "kernel buffer is too small");
-            read_user_bytes(
-                self.usp,
-                &mut dst[..self.ptr.len()],
-                VirtAddr::new(self.ptr.cast::<u8>() as u64),
-            )
+            let dst = dst
+                .get_mut(..self.ptr.len())
+                .expect("kernel buffer is too small");
+            read_user_bytes(self.usp, dst, VirtAddr::new(self.ptr.cast::<u8>() as u64))
         }
     }
 
-    impl<'a, T: Copy> UserWritePtr<'a, [T]> {
+    impl<'a, 'h, T> UserWritePtr<'a, 'h, [T]> {
         pub fn try_new(
             addr: VirtAddr,
             len: usize,
-            usp: &'a mut UserSpace,
+            usp: &'a mut UserSpaceGuard<'h>,
         ) -> Result<Self, SysError> {
             let addr = user_pointer_addr(addr.get())?;
             let byte_len = len
@@ -237,20 +245,6 @@ mod ptrs {
                 ptr: core::ptr::slice_from_raw_parts_mut(addr.as_ptr_mut(), len),
                 usp,
             })
-        }
-
-        /// Panics if kernel buffer is too large for user slice to hold.
-        ///
-        /// We don't return a [SysError::BufferTooSmall]. We want callers to
-        /// explicitly check the buffer size.
-        pub fn copy_from_slice(&mut self, src: &[T]) -> Result<(), SysError> {
-            debug_assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
-
-            let byte_len = src.len() * size_of::<T>();
-            let bytes = unsafe { core::slice::from_raw_parts(src.as_ptr().cast::<u8>(), byte_len) };
-            write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<T>() as u64), bytes)
-                .map_err(|error| error.error())?;
-            Ok(())
         }
 
         /// See [UserWritePtr::fault_in]. This deliberately retains the old MM
@@ -270,14 +264,32 @@ mod ptrs {
         }
     }
 
-    impl<'a> UserWritePtr<'a, [u8]> {
+    impl<T: IntoBytes + Immutable> UserWritePtr<'_, '_, [T]> {
+        /// Panics if kernel buffer is too large for user slice to hold.
+        ///
+        /// We don't return a [SysError::BufferTooSmall]. We want callers to
+        /// explicitly check the buffer size.
+        pub fn copy_from_slice(&mut self, src: &[T]) -> Result<(), SysError> {
+            assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
+
+            write_user_bytes(
+                self.usp,
+                VirtAddr::new(self.ptr.cast::<T>() as u64),
+                src.as_bytes(),
+            )
+            .map_err(|error| error.error())?;
+            Ok(())
+        }
+    }
+
+    impl UserWritePtr<'_, '_, [u8]> {
         /// See [`UserReadPtr::copy_to_slice_partial`]. This byte-only entry
         /// keeps partial progress out of scalar and structured copy APIs.
         pub(crate) fn copy_from_slice_partial(
             &mut self,
             src: &[u8],
         ) -> Result<usize, UserPtrAccessError> {
-            debug_assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
+            assert!(self.ptr.len() >= src.len(), "kernel buffer is too large");
             write_user_bytes(self.usp, VirtAddr::new(self.ptr.cast::<u8>() as u64), src)
         }
 
@@ -286,10 +298,10 @@ mod ptrs {
         ///
         /// A null-terminator will be appended after the string automatically.
         pub fn write_utf8_str(&mut self, s: &str) -> Result<(), SysError> {
-            debug_assert!(
-                s.as_bytes().len() + 1 <= self.ptr.len(),
+            assert!(
+                s.len() < self.ptr.len(),
                 "string too long for user slice: {} bytes, but slice length is {}",
-                s.as_bytes().len(),
+                s.len(),
                 self.ptr.len()
             );
             self.copy_from_slice(s.as_bytes())?;
@@ -304,8 +316,8 @@ mod ptrs {
         /// A null-terminator will be appended after the bytes automatically. So
         /// passed-in `bytes` don't need to have a null terminator.
         pub fn write_bytes_with_null_terminator(&mut self, bytes: &[u8]) -> Result<(), SysError> {
-            debug_assert!(
-                bytes.len() + 1 <= self.ptr.len(),
+            assert!(
+                bytes.len() < self.ptr.len(),
                 "bytes too long for user slice: {} bytes, but slice length is {}",
                 bytes.len(),
                 self.ptr.len()
@@ -374,8 +386,8 @@ mod validators {
     ///
     /// In fact, this function almost always only serves as a helper for parsing
     /// C strings and arrays of C strings.
-    fn c_readonly_array_from_addr<const MAX_LEN: usize, T: Eq + Copy>(
-        usp: &mut UserSpace,
+    fn c_readonly_array_from_addr<const MAX_LEN: usize, T: Eq + Copy + FromBytes>(
+        usp: &mut UserSpaceGuard<'_>,
         start: VirtAddr,
         terminator: T,
         include_terminator: bool,
@@ -506,3 +518,73 @@ mod validators {
     }
 }
 pub use validators::*;
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use anemone_abi::{
+        RawUserAddr64,
+        net::linux::MsgHdr,
+        process::linux::signal::{SigAction, SigInfoWrapper, SigStack},
+        system::linux::SysInfo,
+    };
+
+    fn require_copyin<T: FromBytes>() {}
+
+    fn require_copyout<T: IntoBytes + Immutable>() {}
+
+    trait AmbiguousIfFromBytes<A> {}
+    impl<T: ?Sized> AmbiguousIfFromBytes<()> for T {}
+    impl<T: ?Sized + FromBytes> AmbiguousIfFromBytes<u8> for T {}
+
+    trait AmbiguousIfIntoBytes<A> {}
+    impl<T: ?Sized> AmbiguousIfIntoBytes<()> for T {}
+    impl<T: ?Sized + IntoBytes + Immutable> AmbiguousIfIntoBytes<u8> for T {}
+
+    fn require_not_copyin<T, A>()
+    where
+        T: AmbiguousIfFromBytes<A>,
+    {
+    }
+
+    fn require_not_copyout<T, A>()
+    where
+        T: AmbiguousIfIntoBytes<A>,
+    {
+    }
+
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    struct PaddedCopyout {
+        byte: u8,
+        word: u32,
+    }
+
+    #[kunit]
+    fn typed_copy_capabilities_are_directional() {
+        require_copyin::<RawUserAddr64>();
+        require_copyin::<MsgHdr>();
+        require_copyin::<SigAction>();
+        require_copyin::<SigInfoWrapper>();
+        require_copyout::<RawUserAddr64>();
+        require_copyout::<MsgHdr>();
+        require_copyout::<SigStack>();
+        require_copyout::<SigInfoWrapper>();
+        require_copyout::<SysInfo>();
+
+        // Restricted bit patterns and implicit padding must not satisfy the
+        // corresponding typed-copy capability.
+        require_not_copyin::<bool, _>();
+        require_not_copyout::<PaddedCopyout, _>();
+    }
+
+    #[kunit]
+    fn raw_user_address_is_bits_not_a_pointer_capability() {
+        let address = RawUserAddr64::from_bits(0x1234_5678_9abc_def0);
+        assert_eq!(address.bits(), 0x1234_5678_9abc_def0);
+        assert!(!address.is_null());
+        assert!(RawUserAddr64::NULL.is_null());
+        assert_eq!(size_of::<RawUserAddr64>(), size_of::<u64>());
+        assert_eq!(align_of::<RawUserAddr64>(), align_of::<u64>());
+    }
+}

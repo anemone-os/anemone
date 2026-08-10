@@ -9,6 +9,7 @@ mod host_validation;
 mod icmp_raw;
 mod interfaces;
 mod protocols;
+mod tcp;
 mod udp;
 
 #[cfg(feature = "host-test")]
@@ -17,9 +18,10 @@ pub use host_validation::{
     HostPeer, HostReceivedDatagram, HostRetireError, HostSelection, HostSendError,
 };
 
+pub use crate::tcp::TcpPolicy;
 pub(crate) use interfaces::{InterfaceEntry, PumpOrder};
-pub use protocols::StackInvalidations;
 pub(crate) use protocols::{ActiveEgress, InterfaceProtocols, Protocols};
+pub use protocols::{ProtocolProgression, StackInvalidations};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Ipv4ConfigError {
@@ -38,11 +40,16 @@ pub enum PumpError {
 pub struct StackPolicy {
     udp: UdpNamespacePolicy,
     icmp_raw: IcmpRawNamespacePolicy,
+    tcp: TcpPolicy,
 }
 
 impl StackPolicy {
-    pub const fn new(udp: UdpNamespacePolicy, icmp_raw: IcmpRawNamespacePolicy) -> Self {
-        Self { udp, icmp_raw }
+    pub const fn new(
+        udp: UdpNamespacePolicy,
+        icmp_raw: IcmpRawNamespacePolicy,
+        tcp: TcpPolicy,
+    ) -> Self {
+        Self { udp, icmp_raw, tcp }
     }
 }
 
@@ -66,7 +73,7 @@ impl Stack {
         Self {
             interfaces: Vec::new(),
             local: None,
-            protocols: Protocols::new(policy.udp, policy.icmp_raw),
+            protocols: Protocols::new(policy.udp, policy.icmp_raw, policy.tcp),
             next_interface_id: 0,
         }
     }
@@ -83,13 +90,18 @@ impl Stack {
         Self::with_policy(StackPolicy::new(
             UdpNamespacePolicy::new(64, 32768, 60999),
             IcmpRawNamespacePolicy::new(64),
+            TcpPolicy::new(64, 128, 16, 16384, 16384, 128, 60_000, 60_000, 32768, 60999),
         ))
     }
 
     /// Host-only configuration path for deterministic namespace-policy tests.
     #[cfg(feature = "host-test")]
     pub fn new_for_host_validation(policy: UdpNamespacePolicy) -> Self {
-        Self::with_policy(StackPolicy::new(policy, IcmpRawNamespacePolicy::new(64)))
+        Self::with_policy(StackPolicy::new(
+            policy,
+            IcmpRawNamespacePolicy::new(64),
+            TcpPolicy::new(64, 128, 16, 16384, 16384, 128, 60_000, 60_000, 32768, 60999),
+        ))
     }
 }
 

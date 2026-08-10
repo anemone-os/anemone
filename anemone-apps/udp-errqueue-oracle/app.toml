@@ -1,0 +1,19 @@
+name = "udp-errqueue-oracle"
+targets = ["riscv64", "host"]
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/riscv64/udp-errqueue-glibc"
+targets = ["riscv64"]
+
+[[artifacts]]
+path = "out/riscv64/udp-errqueue-musl"
+targets = ["riscv64"]
+
+[[artifacts]]
+path = "out/host/udp-errqueue-host"
+targets = ["host"]

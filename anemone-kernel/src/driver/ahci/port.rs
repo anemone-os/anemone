@@ -39,7 +39,7 @@ struct AtaReadCommand {
 /// Watchdog state for a synchronous ATA read.
 struct AtaReadWatch {
     command: AtaReadCommand,
-    start: Instant,
+    start: MonotonicInstant,
     warned: bool,
 }
 
@@ -48,7 +48,7 @@ impl AtaReadWatch {
     fn new(command: AtaReadCommand) -> Self {
         Self {
             command,
-            start: Instant::now(),
+            start: MonotonicInstant::now(),
             warned: false,
         }
     }
@@ -357,7 +357,7 @@ impl AhciPort {
         let baseline = self.regs.read_port(self.port, PortRegister::SataControl) & !0x0f;
         self.regs
             .write_port(self.port, PortRegister::SataControl, baseline | 1);
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         while start.elapsed() < Duration::from_millis(COMRESET_ASSERT_MS) {
             core::hint::spin_loop();
         }
@@ -442,7 +442,7 @@ impl AhciPort {
             CommandIssue::SLOT_ZERO.bits(),
         );
 
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(AHCI_COMMAND_TIMEOUT_MS);
         let completion = loop {
             let interrupts = PortInterrupt::from_bits_retain(
@@ -626,7 +626,7 @@ impl AhciPort {
 
     /// Busy-polls a controller predicate for a configured bounded interval.
     fn poll_until(&self, timeout_ms: u64, mut predicate: impl FnMut() -> bool) -> bool {
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(timeout_ms);
         loop {
             if predicate() {

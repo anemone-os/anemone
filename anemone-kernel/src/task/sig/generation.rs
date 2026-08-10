@@ -4,8 +4,8 @@ use crate::{
         Task, ThreadGroup, ThreadGroupInner,
         jobctl::group::ContinueEpoch,
         sig::{
-            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, SigNo, Signal,
-            disposition::SignalDisposition, pending::TimerSignalSlotId, set::SigSet,
+            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, PosixTimerSignalRegistration,
+            SigNo, Signal, disposition::SignalDisposition, set::SigSet,
         },
     },
 };
@@ -61,6 +61,8 @@ impl Task {
         }
 
         self.sig_pending.lock().push_signal(signal);
+        // Publish private pending before making the conservative cache visible.
+        self.rearm_signal_return_work();
 
         if self.is_current_sig_mask_blocking(no) && !matches!(no, SigNo::SIGKILL | SigNo::SIGSTOP) {
             // signal masked. nothing to do now, just wait for the task to
@@ -82,7 +84,7 @@ impl Task {
     /// generation transaction while retaining private occurrence ownership.
     pub(super) fn enqueue_private_timer_job_control_signal(
         self: &Arc<Self>,
-        slot: TimerSignalSlotId,
+        registration: &PosixTimerSignalRegistration,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -93,7 +95,7 @@ impl Task {
         };
         tg.enqueue_timer_job_control_signal_to(
             TimerJobControlSignalRoute::Private(self),
-            slot,
+            registration,
             no,
             generation,
             episode,
@@ -153,6 +155,13 @@ impl ThreadGroup {
         {
             let inner = self.inner.read();
             inner.sig_pending.lock().push_signal(signal);
+        }
+
+        // Snapshot after publication. A member present now is rearmed below;
+        // one joining later starts armed and cannot miss this shared pending.
+        let members = self.get_members();
+        for member in &members {
+            member.rearm_signal_return_work();
         }
 
         for member in members {
@@ -368,6 +377,11 @@ impl ThreadGroup {
         else {
             return;
         };
+        // Pending and job-control phase publication precede rearm, which in
+        // turn precedes the existing job-control wake and notification.
+        for member in &notify_targets {
+            member.rearm_signal_return_work();
+        }
         self.finish_job_control_transition(transition);
         // Opposite-class cleanup may retire POSIX timer occurrences sharing a
         // control signal number. Complete their owner callbacks only after the
@@ -387,7 +401,7 @@ impl ThreadGroup {
     /// stays in the timer's preallocated signal slot.
     pub(super) fn enqueue_timer_job_control_signal(
         &self,
-        slot: TimerSignalSlotId,
+        registration: &PosixTimerSignalRegistration,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -395,7 +409,7 @@ impl ThreadGroup {
     ) -> PosixTimerSignalEnqueue {
         self.enqueue_timer_job_control_signal_to(
             TimerJobControlSignalRoute::Shared,
-            slot,
+            registration,
             no,
             generation,
             episode,
@@ -406,7 +420,7 @@ impl ThreadGroup {
     fn enqueue_timer_job_control_signal_to(
         &self,
         route: TimerJobControlSignalRoute<'_>,
-        slot: TimerSignalSlotId,
+        registration: &PosixTimerSignalRegistration,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -444,12 +458,12 @@ impl ThreadGroup {
                 }
 
                 let registration_no = match route {
-                    TimerJobControlSignalRoute::Shared => {
-                        inner.sig_pending.lock().timer_signal_no(slot)
-                    },
+                    TimerJobControlSignalRoute::Shared => registration
+                        .registered_no_locked(&inner.sig_pending.lock())
+                        .expect("shared timer signal registration is no longer active"),
                     TimerJobControlSignalRoute::Private(target) => {
                         let pending = target.sig_pending.lock();
-                        let Some(no) = pending.admitted_timer_signal_no(slot) else {
+                        let Some(no) = registration.registered_no_locked(&pending) else {
                             return (
                                 (
                                     PosixTimerSignalEnqueue::TargetExited,
@@ -535,33 +549,27 @@ impl ThreadGroup {
                 let outcome = match route {
                     TimerJobControlSignalRoute::Shared => {
                         let mut pending = inner.sig_pending.lock();
-                        let outcome = pending
-                            .enqueue_timer_signal(slot, generation, episode, overrun, discard);
-                        if let Some(epoch) = stop_epoch
-                            && matches!(
-                                outcome,
-                                PosixTimerSignalEnqueue::Queued
-                                    | PosixTimerSignalEnqueue::AlreadyPending
-                            )
-                        {
-                            pending.set_timer_signal_default_stop_epoch(slot, epoch);
-                        }
-                        outcome
+                        registration.enqueue_job_control_locked(
+                            &mut pending,
+                            no,
+                            generation,
+                            episode,
+                            overrun,
+                            discard,
+                            stop_epoch,
+                        )
                     },
                     TimerJobControlSignalRoute::Private(target) => {
                         let mut pending = target.sig_pending.lock();
-                        let outcome = pending
-                            .enqueue_timer_signal(slot, generation, episode, overrun, discard);
-                        if let Some(epoch) = stop_epoch
-                            && matches!(
-                                outcome,
-                                PosixTimerSignalEnqueue::Queued
-                                    | PosixTimerSignalEnqueue::AlreadyPending
-                            )
-                        {
-                            pending.set_timer_signal_default_stop_epoch(slot, epoch);
-                        }
-                        outcome
+                        registration.enqueue_job_control_locked(
+                            &mut pending,
+                            no,
+                            generation,
+                            episode,
+                            overrun,
+                            discard,
+                            stop_epoch,
+                        )
                     },
                 };
                 let notify_targets = if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
@@ -578,6 +586,11 @@ impl ThreadGroup {
             return PosixTimerSignalEnqueue::TargetExited;
         };
 
+        // Pending publication precedes rearm; every target is armed before
+        // job-control completion can wake a task or expose the new phase.
+        for member in &notify_targets {
+            member.rearm_signal_return_work();
+        }
         self.finish_job_control_transition(transition);
         // Opposite-class cleanup spans shared and private owners. Each owner
         // extracts callbacks under its own leaf lock and completes them here.

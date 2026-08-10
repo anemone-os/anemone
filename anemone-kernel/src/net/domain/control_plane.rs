@@ -5,25 +5,15 @@ use anemone_net_api::{InterfaceId, Ipv4Address, Ipv4Cidr};
 use crate::{network_defs::StaticIpv4Deployment, prelude::*};
 
 use super::LogicalInterfaceSnapshot;
-use crate::net::worker::PumpWake;
 
 pub(in crate::net) struct ExternalControlInput {
     logical: LogicalInterfaceSnapshot,
     interface: InterfaceId,
-    wake: PumpWake,
 }
 
 impl ExternalControlInput {
-    pub(in crate::net) fn new(
-        logical: LogicalInterfaceSnapshot,
-        interface: InterfaceId,
-        wake: PumpWake,
-    ) -> Self {
-        Self {
-            logical,
-            interface,
-            wake,
-        }
+    pub(in crate::net) fn new(logical: LogicalInterfaceSnapshot, interface: InterfaceId) -> Self {
+        Self { logical, interface }
     }
 
     pub(in crate::net) fn name(&self) -> &str {
@@ -37,13 +27,22 @@ struct ExternalIpv4 {
     interface: InterfaceId,
     cidr: Ipv4Cidr,
     default_gateway: Option<Ipv4Address>,
-    wake: PumpWake,
 }
 
 pub(in crate::net) struct Ipv4ControlPlane {
     local_interface: InterfaceId,
-    local_wake: PumpWake,
     external: Option<ExternalIpv4>,
+}
+
+#[derive(Clone)]
+pub(in crate::net) struct Ipv4ControlPlaneDiagnostic {
+    pub(in crate::net) local_interface: InterfaceId,
+    pub(in crate::net) external: Option<(
+        LogicalInterfaceSnapshot,
+        InterfaceId,
+        Ipv4Cidr,
+        Option<Ipv4Address>,
+    )>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,7 +62,6 @@ pub(in crate::net) enum SelectionError {
 pub(in crate::net) struct Ipv4Selection {
     interface: InterfaceId,
     source: Ipv4Address,
-    wake: PumpWake,
 }
 
 impl Ipv4Selection {
@@ -74,13 +72,23 @@ impl Ipv4Selection {
     pub(in crate::net) const fn source(&self) -> Ipv4Address {
         self.source
     }
-
-    pub(in crate::net) fn request_pump(&self) {
-        self.wake.request_work();
-    }
 }
 
 impl Ipv4ControlPlane {
+    pub(in crate::net) fn diagnostic_snapshot(&self) -> Ipv4ControlPlaneDiagnostic {
+        Ipv4ControlPlaneDiagnostic {
+            local_interface: self.local_interface,
+            external: self.external.as_ref().map(|external| {
+                (
+                    external.logical.clone(),
+                    external.interface,
+                    external.cidr,
+                    external.default_gateway,
+                )
+            }),
+        }
+    }
+
     pub(in crate::net) fn publish(
         slot: &mut Option<Self>,
         control_plane: Self,
@@ -95,7 +103,6 @@ impl Ipv4ControlPlane {
     pub(in crate::net) fn prepare(
         deployment: Option<StaticIpv4Deployment>,
         local_interface: InterfaceId,
-        local_wake: PumpWake,
         inputs: &[ExternalControlInput],
     ) -> Result<Self, ControlPlaneActivationError> {
         let external = match deployment {
@@ -117,14 +124,12 @@ impl Ipv4ControlPlane {
                     interface: input.interface,
                     cidr,
                     default_gateway: deployment.default_gateway.map(Ipv4Address::new),
-                    wake: input.wake.clone(),
                 })
             },
         };
 
         Ok(Self {
             local_interface,
-            local_wake,
             external,
         })
     }
@@ -174,7 +179,6 @@ impl Ipv4ControlPlane {
             return Ok(Ipv4Selection {
                 interface: self.local_interface,
                 source,
-                wake: self.local_wake.clone(),
             });
         }
 
@@ -191,7 +195,6 @@ impl Ipv4ControlPlane {
         Ok(Ipv4Selection {
             interface: external.interface,
             source,
-            wake: external.wake.clone(),
         })
     }
 }
@@ -199,14 +202,10 @@ impl Ipv4ControlPlane {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{device::net::NetdevId, net::worker::PumpControl};
+    use crate::device::net::NetdevId;
 
     fn external_snapshot(name: &str) -> LogicalInterfaceSnapshot {
         LogicalInterfaceSnapshot::for_control_plane_kunit(name, NetdevId::for_kunit(9))
-    }
-
-    fn wake() -> PumpWake {
-        Arc::new(PumpControl::new()).pump_wake()
     }
 
     fn deployment(interface: &'static str) -> StaticIpv4Deployment {
@@ -220,15 +219,11 @@ mod kunits {
 
     #[kunit]
     fn ipv4_control_plane_table_and_source_matrix() {
-        let external = ExternalControlInput::new(
-            external_snapshot("eth0"),
-            InterfaceId::from_index(1),
-            wake(),
-        );
+        let external =
+            ExternalControlInput::new(external_snapshot("eth0"), InterfaceId::from_index(1));
         let control = Ipv4ControlPlane::prepare(
             Some(deployment("eth0")),
             InterfaceId::from_index(0),
-            wake(),
             &[external],
         )
         .unwrap();
@@ -260,34 +255,21 @@ mod kunits {
 
     #[kunit]
     fn missing_interface_fails_before_control_publication() {
-        let result = Ipv4ControlPlane::prepare(
-            Some(deployment("eth0")),
-            InterfaceId::from_index(0),
-            wake(),
-            &[],
-        );
+        let result =
+            Ipv4ControlPlane::prepare(Some(deployment("eth0")), InterfaceId::from_index(0), &[]);
         assert!(matches!(
             result,
             Err(ControlPlaneActivationError::MissingInterface)
         ));
 
         let duplicate = [
-            ExternalControlInput::new(
-                external_snapshot("eth0"),
-                InterfaceId::from_index(1),
-                wake(),
-            ),
-            ExternalControlInput::new(
-                external_snapshot("eth0"),
-                InterfaceId::from_index(2),
-                wake(),
-            ),
+            ExternalControlInput::new(external_snapshot("eth0"), InterfaceId::from_index(1)),
+            ExternalControlInput::new(external_snapshot("eth0"), InterfaceId::from_index(2)),
         ];
         assert!(matches!(
             Ipv4ControlPlane::prepare(
                 Some(deployment("eth0")),
                 InterfaceId::from_index(0),
-                wake(),
                 &duplicate,
             ),
             Err(ControlPlaneActivationError::DuplicateInterface)
@@ -297,11 +279,9 @@ mod kunits {
     #[kunit]
     fn control_plane_publication_is_one_time() {
         let mut slot = None;
-        let first =
-            Ipv4ControlPlane::prepare(None, InterfaceId::from_index(0), wake(), &[]).unwrap();
+        let first = Ipv4ControlPlane::prepare(None, InterfaceId::from_index(0), &[]).unwrap();
         Ipv4ControlPlane::publish(&mut slot, first).unwrap();
-        let second =
-            Ipv4ControlPlane::prepare(None, InterfaceId::from_index(0), wake(), &[]).unwrap();
+        let second = Ipv4ControlPlane::prepare(None, InterfaceId::from_index(0), &[]).unwrap();
         assert!(matches!(
             Ipv4ControlPlane::publish(&mut slot, second),
             Err(ControlPlaneActivationError::AlreadyPublished)

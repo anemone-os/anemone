@@ -41,26 +41,16 @@ pub fn frame_allocator_stats() -> allocator::FrameAllocatorStats {
     FRAME_ALLOCATOR.stats()
 }
 
-fn wake_oom_killer_if_needed() {
-    if frame_allocator_stats().exceeds_oom_kill_threshold() {
-        crate::mm::oom::wake_oom_killer();
-    }
-}
-
 /// Allocates a contiguous range of physical pages.
 pub fn alloc_frames(npages: usize) -> Option<OwnedFolio> {
     assert_ne!(npages, 0, "Internal error: cannot allocate zero pages");
 
-    let folio = FRAME_ALLOCATOR.alloc(npages)?;
-    wake_oom_killer_if_needed();
-    Some(folio)
+    FRAME_ALLOCATOR.alloc(npages)
 }
 
 /// Allocates a single physical page.
 pub fn alloc_frame() -> Option<OwnedFrameHandle> {
-    let frame = FRAME_ALLOCATOR.alloc_one()?;
-    wake_oom_killer_if_needed();
-    Some(frame)
+    FRAME_ALLOCATOR.alloc_one()
 }
 
 /// Allocates a contiguous range of physical pages and zeroes them.

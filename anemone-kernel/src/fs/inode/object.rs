@@ -20,8 +20,11 @@ pub(in crate::fs) struct Inode {
     /// index. Unlinked-but-still-alive inodes are resident ghosts with this
     /// flag cleared.
     indexed: AtomicBool,
-    /// Logical memory mapping for this inode, if any.
-    mapping: Option<Arc<dyn VmObject>>,
+    /// The sole resident-page owner for regular files that support mappings.
+    address_space: Option<Arc<AddressSpace>>,
+    /// Sole mutable logical-size truth. Address spaces receive a clone of this
+    /// cell only so their admission and writeback decisions read inode state.
+    size: Arc<AtomicU64>,
     /// Sole local whole-file flock grant and wait-notification domain.
     flock: FlockDomain,
     /// Sole local POSIX byte-range grant and conflict domain.
@@ -31,7 +34,32 @@ pub(in crate::fs) struct Inode {
     /// operations like `stat` and `write`.
     ///
     /// TODO: dirty flag
-    meta: RwLock<InodeMeta>,
+    meta: RwLock<InodeMetaFields>,
+}
+
+/// Inode metadata fields serialized by the metadata lock. Logical size is
+/// intentionally absent: `Inode::size` is its sole mutable storage.
+#[derive(Clone, Copy)]
+struct InodeMetaFields {
+    nlink: u64,
+    perm: InodePerm,
+    uid: Uid,
+    gid: Gid,
+    atime: Duration,
+    mtime: Duration,
+    ctime: Duration,
+}
+
+impl InodeMetaFields {
+    const ZERO: Self = Self {
+        nlink: 0,
+        perm: InodePerm::empty(),
+        uid: Uid::new(0),
+        gid: Gid::new(0),
+        atime: Duration::ZERO,
+        mtime: Duration::ZERO,
+        ctime: Duration::ZERO,
+    };
 }
 
 /// Immutable resident kind plus the narrowly typed runtime anchor owned by
@@ -126,7 +154,7 @@ impl Inode {
         sb: Arc<SuperBlock>,
         prv: AnyOpaque,
     ) -> Self {
-        let meta = InodeMeta::ZERO;
+        let meta = InodeMetaFields::ZERO;
         Self {
             ino,
             kind: InodeKind::new(ty),
@@ -135,7 +163,8 @@ impl Inode {
             prv,
             rc: AtomicUsize::new(0),
             indexed: AtomicBool::new(false),
-            mapping: None,
+            address_space: None,
+            size: Arc::new(AtomicU64::new(0)),
             flock: FlockDomain::new(),
             posix_locks: PosixLockDomain::new(),
             meta: RwLock::new(meta),
@@ -153,7 +182,17 @@ impl Inode {
     /// This method can be used when we want to update multiple fields in `meta`
     /// at once, to avoid intermediate states that violate invariants.
     pub(in crate::fs) fn meta_snapshot(&self) -> InodeMeta {
-        *self.meta.read()
+        let meta = *self.meta.read();
+        InodeMeta {
+            nlink: meta.nlink,
+            size: self.size.load(Ordering::Acquire),
+            perm: meta.perm,
+            uid: meta.uid,
+            gid: meta.gid,
+            atime: meta.atime,
+            mtime: meta.mtime,
+            ctime: meta.ctime,
+        }
     }
 
     pub(in crate::fs) fn indexed(&self) -> bool {
@@ -178,7 +217,7 @@ impl Inode {
 
         let mut m = self.meta.write();
         m.nlink = meta.nlink;
-        m.size = meta.size;
+        self.size.store(meta.size, Ordering::Release);
         m.perm = meta.perm;
         m.uid = meta.uid;
         m.gid = meta.gid;
@@ -207,12 +246,33 @@ impl Inode {
         }
     }
 
-    pub(in crate::fs) fn mapping(&self) -> Option<&Arc<dyn VmObject>> {
-        self.mapping.as_ref()
+    pub(in crate::fs) fn mapping(&self) -> Option<Arc<dyn VmObject>> {
+        self.address_space
+            .as_ref()
+            .map(|address_space| address_space.clone() as Arc<dyn VmObject>)
     }
 
-    pub(in crate::fs) fn set_mapping(&mut self, mapping: Option<Arc<dyn VmObject>>) {
-        self.mapping = mapping;
+    pub(in crate::fs) fn address_space(&self) -> Option<&Arc<AddressSpace>> {
+        self.address_space.as_ref()
+    }
+
+    pub(in crate::fs) fn init_volatile_address_space(&mut self) {
+        assert!(
+            self.address_space.is_none(),
+            "inode address space initialized twice"
+        );
+        self.address_space = Some(AddressSpace::new_volatile(self.size.clone()));
+    }
+
+    pub(in crate::fs) fn init_backed_address_space(
+        &mut self,
+        backend: Arc<dyn AddressSpaceBackend>,
+    ) {
+        assert!(
+            self.address_space.is_none(),
+            "inode address space initialized twice"
+        );
+        self.address_space = Some(AddressSpace::new_backed(self.size.clone(), backend));
     }
 
     pub(in crate::fs) fn ty(&self) -> InodeType {
@@ -236,12 +296,11 @@ impl Inode {
     }
 
     pub(in crate::fs) fn set_size(&self, size: u64) {
-        self.meta.write().size = size;
+        self.size.store(size, Ordering::Release);
     }
 
     pub(in crate::fs) fn update_size_max(&self, size: u64) {
-        let mut meta = self.meta.write();
-        meta.size = meta.size.max(size);
+        self.size.fetch_max(size, Ordering::AcqRel);
     }
 
     /// When more than one time field needs to be updated, it's better to update
@@ -442,12 +501,12 @@ impl InodeRef {
         self.inode().meta.read().gid
     }
 
-    pub fn mapping(&self) -> Option<&Arc<dyn VmObject>> {
+    pub fn mapping(&self) -> Option<Arc<dyn VmObject>> {
         self.inode().mapping()
     }
 
     pub fn size(&self) -> u64 {
-        self.inode().meta.read().size
+        self.inode().size.load(Ordering::Acquire)
     }
 
     pub fn atime(&self) -> Duration {
@@ -556,7 +615,11 @@ impl InodeRef {
             InodeType::Dir => Err(SysError::IsDir),
             InodeType::Regular => {
                 (self.inode().ops.truncate)(self, size)?;
-                self.after_modified(cred, ModifType::Modify, realtime());
+                self.after_modified(
+                    cred,
+                    ModifType::Modify,
+                    RealtimeInstant::now().to_duration(),
+                );
                 Ok(())
             },
             _ => Err(SysError::NotReg),

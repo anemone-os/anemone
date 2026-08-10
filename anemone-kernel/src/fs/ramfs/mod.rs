@@ -5,7 +5,7 @@ use crate::{
         filesystem::FileSystemMountOps,
         inode::Inode,
         ramfs::{
-            inode::{RAMFS_DIR_INODE_OPS, RamfsDir, RamfsReg, RamfsSymlink},
+            inode::{RAMFS_DIR_INODE_OPS, RamfsDir, RamfsSymlink},
             superblock::{RAMFS_SB_OPS, RamfsSb},
         },
         register_filesystem,
@@ -32,15 +32,6 @@ fn ramfs_dir(inode: &InodeRef) -> Result<&RamfsDir, SysError> {
         .prv()
         .cast::<RamfsDir>()
         .ok_or(SysError::NotDir)
-}
-
-#[inline(always)]
-fn ramfs_reg(inode: &InodeRef) -> Result<&RamfsReg, SysError> {
-    inode
-        .inode()
-        .prv()
-        .cast::<RamfsReg>()
-        .ok_or(SysError::NotReg)
 }
 
 #[inline(always)]

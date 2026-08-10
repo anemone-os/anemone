@@ -486,7 +486,7 @@ fn negotiate_ocr(
     if version_two {
         request |= SdOperatingConditions::CAPACITY_STATUS;
     }
-    let start = Instant::now();
+    let start = MonotonicInstant::now();
     let timeout = Duration::from_millis(MMC_CARD_INIT_TIMEOUT_MS);
 
     loop {
@@ -710,7 +710,7 @@ pub(crate) fn command_argument(
 }
 
 fn busy_delay(duration: Duration) {
-    let start = Instant::now();
+    let start = MonotonicInstant::now();
     while start.elapsed() < duration {
         core::hint::spin_loop();
     }

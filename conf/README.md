@@ -9,7 +9,7 @@
   either compiles a physical normative DTS with `dtc`, or asks the selected QEMU provider to dump a
   build-local DTB using only machine, CPU, SMP, memory and optional BIOS. It never consumes ordinary
   QEMU args, runtime disk/network inputs or bind values to obtain a device tree.
-- `conf/.defconfig` and local `kconfig` contain only kernel features, policy and capacity. System
+- `conf/kconfs/default.toml` and local `kconfig` contain only kernel features, policy and capacity. System
   selection, kernel Cargo profile and action-local presentation do not belong to KernelConfig.
 - `conf/build-presets/<slug>.toml` names a closed target, workspace-relative KernelConfig and
   kernel-only Cargo profile tuple. Presets contain no action presentation defaults.

@@ -6,7 +6,7 @@
 **参与领域：** time/timer、threaded timer completion、scheduler wait-core、timerfd、`ThreadGroup::ITIMER_REAL`
 **覆盖范围：** 一次排队请求、opaque 排队句柄、物理删除、IRQ 出队与已出队 stale completion 交接
 **不覆盖：** realtime mutation/step notification、absolute realtime timer、`TFD_TIMER_CANCEL_ON_SET`、POSIX timer ID/overrun/signal pending、tickless 或 high-resolution timer
-**实现位置：** `anemone-kernel/src/{time/timer,fs/timerfd/mod.rs,task/itimer.rs,sched/mod.rs}`
+**实现位置：** `anemone-kernel/src/{time/timer,fs/timerfd,task/itimer.rs,sched/mod.rs}`
 **依赖：** [`TIMEKEEPER-CLOCK-001`](./clock-derivation.md#timekeeper-clock-001--所有-clock-读取来自一条整数推导链)
 **最后核验：** 2026-08-04
 

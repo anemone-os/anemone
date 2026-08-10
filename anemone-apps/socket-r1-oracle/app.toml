@@ -1,0 +1,19 @@
+name = "socket-r1-oracle"
+targets = ["riscv64", "loongarch64", "host"]
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/socket-r1-glibc"
+targets = ["riscv64", "loongarch64"]
+
+[[artifacts]]
+path = "out/${ARCH}/socket-r1-musl"
+targets = ["riscv64", "loongarch64"]
+
+[[artifacts]]
+path = "out/host/socket-r1-host"
+targets = ["host"]

@@ -134,7 +134,7 @@ fn sleep_absolute_realtime(task: &Arc<Task>, deadline_ns: u64) -> Result<u64, Sy
         true,
         |trigger| {
             schedule_realtime_threaded_timer_event(
-                deadline_ns,
+                RealtimeInstant::from_nanos(deadline_ns),
                 None,
                 Box::new(move || trigger.expire()),
                 None,

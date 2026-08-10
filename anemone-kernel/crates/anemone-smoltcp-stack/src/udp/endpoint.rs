@@ -2,7 +2,10 @@ use alloc::{collections::VecDeque, vec, vec::Vec};
 
 use anemone_net_api::{
     InterfaceId,
-    udp::{UdpEndpointFacts, UdpEndpointId, UdpEndpointLimits, UdpLocalBinding, UdpPeer},
+    udp::{
+        UdpEndpointFacts, UdpEndpointId, UdpEndpointLimits, UdpErrorCause, UdpErrorRecord,
+        UdpLocalBinding, UdpPeer,
+    },
 };
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
@@ -29,6 +32,12 @@ pub(crate) struct Endpoint {
     engines: Vec<EngineResource>,
     pub(super) tx: TxPhase,
     pub(super) received: VecDeque<ReceivedDatagram>,
+    /// Sole opt-in truth for ICMP-origin extended errors.
+    pub(super) receive_errors: bool,
+    /// Ordered records consumed only by `MSG_ERRQUEUE`.
+    pub(super) errors: VecDeque<UdpErrorRecord>,
+    /// Latest ordinary error, consumed once by I/O or `SO_ERROR`.
+    pub(super) pending_error: Option<UdpErrorCause>,
     pub(super) limits: UdpEndpointLimits,
 }
 
@@ -36,6 +45,7 @@ impl Endpoint {
     pub(super) fn new(id: UdpEndpointId, limits: UdpEndpointLimits) -> Self {
         assert!(limits.tx_datagram_capacity() > 0);
         assert!(limits.rx_datagram_capacity() > 0);
+        assert!(limits.error_record_capacity() > 0);
         assert!(limits.max_payload_bytes() > 0);
         Self {
             id,
@@ -44,6 +54,9 @@ impl Endpoint {
             engines: Vec::new(),
             tx: TxPhase::Idle,
             received: VecDeque::with_capacity(limits.rx_datagram_capacity()),
+            receive_errors: false,
+            errors: VecDeque::with_capacity(limits.error_record_capacity()),
+            pending_error: None,
             limits,
         }
     }
@@ -162,6 +175,7 @@ impl Endpoint {
         UdpEndpointFacts::from_owner_snapshot(
             !self.received.is_empty(),
             matches!(self.tx, TxPhase::Idle),
+            self.pending_error.is_some() || !self.errors.is_empty(),
         )
     }
 }

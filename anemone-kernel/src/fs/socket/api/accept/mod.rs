@@ -58,6 +58,7 @@ fn accept_with_flags(
             Err(SocketAcceptError::Unsupported) => return Err(SysError::NotSupported),
             Err(SocketAcceptError::Retired) => return Err(SysError::BadFileDescriptor),
             Err(SocketAcceptError::InvalidState) => return Err(SysError::InvalidArgument),
+            Err(SocketAcceptError::ResourceExhausted) => return Err(SysError::NoBufferSpace),
         }
     };
 

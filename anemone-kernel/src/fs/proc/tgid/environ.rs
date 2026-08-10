@@ -16,7 +16,7 @@ fn tgid_environ_open(inode: &InodeRef) -> Result<OpenedFile, SysError> {
 fn tgid_environ_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let _binding = validate_tgid_sub_inode(inode)?;
     let meta = inode.inode().meta_snapshot();
-    let now = realtime();
+    let now = RealtimeInstant::now().to_duration();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,
@@ -71,9 +71,8 @@ fn tgid_environ_read(
 
     let cur_task = get_current_task();
     let cur_usp_handle = cur_task.clone_uspace_handle();
-    if usp_handle != cur_usp_handle {
-        usp_handle.activate();
-    }
+    let _temporary_activation = (usp_handle != cur_usp_handle)
+        .then(|| TemporaryUserSpaceActivation::new(cur_usp_handle.as_ref(), usp_handle.as_ref()));
 
     // now we can access target user space directly.
     // since environment range are guaranteed to be mapped when a user space is
@@ -89,11 +88,6 @@ fn tgid_environ_read(
     }
 
     *pos += to_read;
-
-    if usp_handle != cur_usp_handle {
-        // return to original user space.
-        cur_usp_handle.activate();
-    }
 
     Ok(to_read)
 }

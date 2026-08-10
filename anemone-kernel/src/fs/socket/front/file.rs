@@ -14,6 +14,7 @@ use super::{
     SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
     SocketWriteSource,
     operation::{retry_socket_receive, retry_socket_send},
+    pending_error_to_sys_error,
 };
 
 pub(super) fn prepare_socket_file(
@@ -254,7 +255,12 @@ fn map_file_receive_error(error: SocketReceiveError) -> SysError {
         SocketReceiveError::WouldBlock => SysError::Again,
         SocketReceiveError::Unsupported => SysError::NotSupported,
         SocketReceiveError::Retired => SysError::BadFileDescriptor,
+        SocketReceiveError::NotConnected => SysError::NotConnected,
         SocketReceiveError::InvalidState => SysError::InvalidArgument,
+        SocketReceiveError::ConnectionRefused => SysError::ConnectionRefused,
+        SocketReceiveError::ConnectionReset => SysError::ConnectionReset,
+        SocketReceiveError::ConnectionTimedOut => SysError::Timeout,
+        SocketReceiveError::Pending(error) => pending_error_to_sys_error(error),
         SocketReceiveError::Copy(error) => error,
     }
 }
@@ -340,10 +346,15 @@ fn map_file_send_error(error: SocketSendError) -> SysError {
         SocketSendError::AddressInUse => SysError::AddressInUse,
         SocketSendError::AddressUnavailable => SysError::AddressNotAvailable,
         SocketSendError::ResourceExhausted => SysError::Again,
+        SocketSendError::NoBufferSpace => SysError::NoBufferSpace,
         SocketSendError::NetworkUnreachable => SysError::NetworkUnreachable,
         SocketSendError::DestinationRequired => SysError::DestinationAddressRequired,
         SocketSendError::InvalidDestination => SysError::InvalidArgument,
         SocketSendError::MessageTooLong => SysError::MessageTooLong,
+        SocketSendError::ConnectionRefused => SysError::ConnectionRefused,
+        SocketSendError::ConnectionReset => SysError::ConnectionReset,
+        SocketSendError::ConnectionTimedOut => SysError::Timeout,
+        SocketSendError::Pending(error) => pending_error_to_sys_error(error),
         SocketSendError::Copy(error) => error,
     }
 }
@@ -424,3 +435,33 @@ static SOCKET_INODE_OPS: InodeOps = InodeOps {
     read_link: |_| Err(SysError::NotSymlink),
     get_attr: socket_get_attr,
 };
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    use crate::fs::socket::{TCP_SOCKET_OPS, prepare_socket, socket_file_desc_ops};
+
+    #[kunit]
+    fn tcp_file_read_preserves_not_connected_errno() {
+        let (file, creation) =
+            prepare_socket(&TCP_SOCKET_OPS).expect("KUnit TCP Endpoint must fit");
+        creation.commit();
+
+        let mut bytes = [0; 1];
+        assert_eq!(
+            socket_read_with_ctx(
+                &file,
+                &mut SliceReadSink { bytes: &mut bytes },
+                FileOpStatusFlags::NONBLOCK,
+            ),
+            Err(SysError::NotConnected)
+        );
+
+        (socket_file_desc_ops().final_release.unwrap())(OpenedFileFinalReleaseCtx {
+            file: &file,
+            access: crate::task::files::OpenAccessMode::ReadWrite,
+            notification_suppressed: true,
+        });
+    }
+}

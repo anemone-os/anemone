@@ -161,5 +161,5 @@ pub fn rt_sigtimedwait(
         timeout.map_or(0, |timeout| timeout as *const TimeSpec as u64),
         size_of::<SigSet>() as u64,
     )?;
-    Ok(unsafe { info.info })
+    Ok(info.info)
 }

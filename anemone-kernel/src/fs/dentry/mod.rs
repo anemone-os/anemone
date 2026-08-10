@@ -1,0 +1,167 @@
+use core::fmt::Debug;
+
+use crate::prelude::*;
+
+mod residency;
+
+pub(super) use residency::{DentryResidencyTicket, PositiveDentryResidency};
+
+/// A [Dentry] determines the location of a file in a mounted filesystem.
+///
+/// See [PathRef] for absolute location in the entire namespace.
+pub struct Dentry {
+    parent: Option<Arc<Dentry>>,
+    inode: InodeRef,
+    inner: RwLock<DentryInner>,
+}
+
+struct DentryInner {
+    name: String,
+    /// For directories this is [Some], otherwise [None].
+    children: Option<HashMap<String, Weak<Dentry>>>,
+}
+
+impl Debug for Dentry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Dentry")
+            .field("name", &self.name())
+            .finish()
+    }
+}
+
+impl Dentry {
+    /// Create a new dentry with an inode.
+    ///
+    /// If the inode represents a directory, `children` will be initialized as
+    /// an empty map, otherwise [None].
+    pub fn new(name: String, parent: Option<Arc<Dentry>>, inode: InodeRef) -> Self {
+        Self {
+            parent,
+            inner: RwLock::new(DentryInner {
+                name,
+                children: if inode.ty() == InodeType::Dir {
+                    Some(HashMap::new())
+                } else {
+                    None
+                },
+            }),
+            inode,
+        }
+    }
+
+    /// Get the name of this dentry.
+    ///
+    /// For the root dentry of a mounted filesystem, this will be "/".
+    pub fn name(&self) -> String {
+        self.inner.read().name.clone()
+    }
+
+    /// Get the inode of this dentry.
+    pub fn inode(&self) -> &InodeRef {
+        &self.inode
+    }
+
+    /// Parent dentry, if any. `None` for the root dentry (i.e. the root of
+    /// a mounted filesystem, not the root of the entire namespace).
+    pub fn parent(&self) -> Option<Arc<Dentry>> {
+        self.parent.as_ref().map(Arc::clone)
+    }
+
+    /// Reuse a live child or publish `dentry` under the given name.
+    pub fn lookup_or_insert_child(
+        &self,
+        name: String,
+        dentry: &Arc<Dentry>,
+    ) -> Result<Arc<Dentry>, SysError> {
+        let mut inner = self.inner.write();
+        let children = inner.children.as_mut().ok_or(SysError::NotDir)?;
+
+        // Upgrade while holding the publication lock so a successful lookup
+        // also returns the strong lifetime capability to the caller.
+        if let Some(existing) = children.get(&name).and_then(Weak::upgrade) {
+            return Ok(existing);
+        }
+
+        // Replacing a stale weak reference and publishing a new child are one
+        // operation; the candidate is borrowed so its Drop cannot run under
+        // this parent lock on the reuse path.
+        children.insert(name, Arc::downgrade(dentry));
+        Ok(Arc::clone(dentry))
+    }
+
+    /// Remove a child dentry with the given name.
+    pub fn remove_child(&self, name: &str) -> Result<(), SysError> {
+        let removed = self.take_child(name)?;
+        // Dentry::drop may re-enter the parent map, so release the map lock
+        // before dropping the removed lifetime capability.
+        drop(removed);
+        Ok(())
+    }
+
+    /// Unpublish and return a live child without dropping it under the parent
+    /// map lock. VFS namespace mutation uses the returned identity to retire
+    /// superblock-local residency after unpublication.
+    pub(super) fn take_child(&self, name: &str) -> Result<Arc<Dentry>, SysError> {
+        if let Some(children) = self.inner.write().children.as_mut() {
+            if let Some(existing) = children.get(name).and_then(|weak| weak.upgrade()) {
+                children.remove(name);
+                Ok(existing)
+            } else {
+                // though the weak reference exists, it's not counted as a child if it can't be
+                // upgraded.
+                // TODO: remove the stale weak reference.
+                Err(SysError::NotFound)
+            }
+        } else {
+            Err(SysError::NotDir)
+        }
+    }
+
+    /// Look up a child dentry with the given name.
+    pub fn lookup_child(&self, name: &str) -> Result<Arc<Dentry>, SysError> {
+        if let Some(children) = self.inner.write().children.as_mut() {
+            if let Some(record) = children.get(name) {
+                if let Some(child) = record.upgrade() {
+                    Ok(child)
+                } else {
+                    children.remove(name);
+                    Err(SysError::NotFound)
+                }
+            } else {
+                Err(SysError::NotFound)
+            }
+        } else {
+            Err(SysError::NotDir)
+        }
+    }
+}
+
+impl Drop for Dentry {
+    fn drop(&mut self) {
+        let Some(parent) = self.parent.as_ref() else {
+            return;
+        };
+
+        // eagerly remove weak reference.
+
+        // TODO: explain the necessity. if we don't take this step, system will
+        // extremely slow down after large number of files are created and deleted,
+        // because the stale weak references will accumulate and cause the lookup to
+        // iterate over many dead entries before finding the target one.
+
+        // parent's lock is acquired here in Drop, which is not that good. but for now
+        // this works.
+
+        let name = self.inner.read().name.clone();
+        let self_ptr = self as *const Dentry;
+
+        if let Some(children) = parent.inner.write().children.as_mut() {
+            let should_remove = children
+                .get(&name)
+                .is_some_and(|weak| weak.as_ptr() == self_ptr);
+            if should_remove {
+                children.remove(&name);
+            }
+        }
+    }
+}

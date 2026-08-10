@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/crates/{anemone-net-api,anemone-smoltcp-stack}`、`anemone-kernel/src/{device/net,driver/net,net}`
 **依赖：** 本页内部依赖按条目声明
 **Pending Successor：** None
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-05；`NET-PROTOCOL-PROGRESSION-CUTOVER` Effective
 
 ## 状态与能力所有权
 
@@ -18,7 +18,7 @@
 | shared semantic types | `anemone-net-api` | values、move-only token traits | 跨provider/stack表达同一handoff，不拥有runtime state |
 | backing、queue token、DMA与completion | concrete frame provider | callback-scoped frame token、recheck edge | frame I/O与资源回收 |
 | link/resource durable truth | concrete provider；规范化publication snapshot由`device/net`拥有 | snapshot + edge-only wake | worker醒来后重读owner fact |
-| smoltcp object、`InterfaceId` mapping与deadline | initial-domain唯一`DomainStack`内的concrete Stack instance | narrow per-interface pump port、wake/work capability | 串行bounded protocol progression |
+| smoltcp object、`InterfaceId` mapping、protocol effect与deadline | initial-domain唯一`DomainStack`内的concrete Stack instance | move-only progression obligation | 串行bounded protocol progression |
 | worker admission与explicit work | kernel attach/worker owner | stateless wake capability | 安排pump，不复制provider或stack truth |
 
 notification、wake edge、统计与diagnostic label都不是行为真相源。当前production source不保留
@@ -112,17 +112,29 @@ protocol mutation通过该独占边界串行化。pump使用调用者提供的mo
 都受finite budget约束，并返回work remaining/immediate recheck与next deadline。IRQ、timer、wake与kernel
 attach authority只请求推进，不在owner外修改smoltcp object或发布Linux readiness。
 
+UDP、ICMP raw与TCP各自的Stack-side owner只在pump外mutation真实commit后产生move-only、`must_use`的
+progression obligation；该值只携带affected interface，不携带packet、deadline、errno、readiness、completion或
+protocol effect truth。kernel attach composition消费它并通过既有local/external association向相关worker提交
+stateless、可合并的request；request在Stack commit和attach guard释放后提交。当前in-flight pump可以覆盖已可见
+commit，否则request必须保证后续bounded round重读Stack truth。具体effect类型、wake carrier、存储、去重和worker
+拓扑不是本规则的一部分；各protocol owner不得共享effect/readiness truth，Socket caller与control plane不得持有
+mutation wake policy。
+
 **Owner：** concrete `anemone-smoltcp-stack::Stack` instance。
 
 **依赖：** `NET-FRAME-OWN-001`、`NET-FRAME-PROGRESS-001`。
 
 **违反表现：** 两个worker并发poll同一stack；IRQ进入smoltcp；kernel缓存smoltcp handle；ordinary worker
-调用无界poll；deadline读取wall clock或另一条隐藏时间线。
+调用无界poll；deadline读取wall clock或另一条隐藏时间线；caller/control plane逐operation补wake；request先于
+commit；worker依据旧状态park后吞掉最后一个mutation；progression value成为packet/deadline/error或ready truth。
 
 **验证 / Enforcement：** host serialization、exact budget、deadline/owner-blocked、multi-instance与one-Stack/
-two-provider tests；kernel source audit确认worker只持narrow per-interface port且每轮受静态budget/repoll上界约束，
-domain Stack lock在round间释放；Stage 5 final RV64/LA64 remote-external guest/peer双marker分别证明virtio-mmio与
-virtio-pci provider ingress/egress、worker/timer wiring和normal shutdown markers。
+two-provider tests；Stage 1 deterministic race tests覆盖park、in-flight pump、request coalescing与late stop，source
+audit确认`ProtocolProgression`为move-only/`must_use`、worker只持narrow per-interface port、Stack guard内commit、
+attach guard外request，且`PumpWake`/caller `request_pump()`已经删除。RV64/LA64 focused UDP/ICMP raw local与
+external回归证明virtio-mmio/virtio-pci provider ingress/egress和worker/timer wiring；RV64 wrapper exit 0，LA64在
+完整shutdown顺序后受既有power-off handler缺口停在halt，不能作为exit-0证据。future Stage 5仍需TCP
+remote-external与final architecture-capstone runtime proof。
 
 **最初来源：** [Network Frame Path RFC R1](../../rfcs/net-frame-path/index.md)。
 
@@ -131,7 +143,9 @@ virtio-pci provider ingress/egress、worker/timer wiring和normal shutdown marke
 
 **当前 enforcement 更新：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
 `NET-UDP-DOMAIN-CUTOVER`将production从per-netdev Stack迁移为initial-domain唯一Stack与per-provider narrow pump
-port；本ID的单instance唯一推进语义保持不变。
+port；本ID的单instance唯一推进语义保持不变。[IPv4 TCP RFC Stage 1 closure](../../rfcs/net-tcp/implementation.md#639-stage-1-execution-result--closed)的
+`NET-PROTOCOL-PROGRESSION-CUTOVER`进一步把UDP/ICMP raw pump外mutation迁入Stack owner，并建立共同但不共享
+effect truth的reliable progression handoff。
 
 ## 当前接受边界
 

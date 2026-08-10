@@ -1,26 +1,22 @@
 //! Global singleton /dev publish layer.
 
-use crate::{fs::filesystem::FileSystemMountOps, prelude::*, utils::any_opaque::NilOpaque};
+use crate::{fs::filesystem::FileSystemMountOps, prelude::*};
 
-use self::{
-    inode::{devfs_new_node_inode, devfs_new_root_inode},
-    superblock::{DEVFS_SB_OPS, alloc_ino},
-};
+use self::namespace::DevfsNamespace;
 
 mod file;
 mod inode;
+mod namespace;
 mod superblock;
+
+pub use namespace::DevfsDirectory;
 
 const DEVFS_ROOT_INO: Ino = Ino::new(1);
 const DEVFS_SHM_DIR_NAME: &str = "shm";
 
 static DEVFS: MonoOnce<Arc<FileSystem>> = unsafe { MonoOnce::new() };
 
-static DEVFS_SB: MonoOnce<Arc<SuperBlock>> = unsafe { MonoOnce::new() };
-
-// Static-publish-only registry for the singleton /dev instance.
-static DEVFS_REGISTRY: Lazy<RwLock<DevfsRegistry>> =
-    Lazy::new(|| RwLock::new(DevfsRegistry::new()));
+static DEVFS_NAMESPACE: MonoOnce<DevfsNamespace> = unsafe { MonoOnce::new() };
 
 #[derive(Debug, Clone, Copy)]
 pub struct DevfsNodeAttr {
@@ -38,139 +34,34 @@ pub trait DevfsNodeOps: Send + Sync {
     fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DevfsNodeKind {
-    Dir,
-    Leaf,
-}
-
 pub struct DevfsPublish {
     pub name: String,
     pub attr: DevfsNodeAttr,
-    // The singleton devfs registry stores this handle for the lifetime of the
+    // The singleton devfs namespace stores this handle for the lifetime of the
     // published node, so implementations must be stable long-lived objects.
     pub ops: Arc<dyn DevfsNodeOps>,
 }
 
-// Unlike procfs tgid bindings, this is not a second lifetime protocol. It is
-// just the stable publish record shared by the registry and the leaf inode.
-struct DevfsNode {
-    name: String,
-    ino: Ino,
-    kind: DevfsNodeKind,
-    attr: DevfsNodeAttr,
-    ops: Option<Arc<dyn DevfsNodeOps>>,
-}
-
-struct DevfsRegistry {
-    by_name: HashMap<String, Arc<DevfsNode>>,
-    ordered: Vec<Arc<DevfsNode>>,
-}
-
-impl DevfsRegistry {
-    fn new() -> Self {
-        Self {
-            by_name: HashMap::new(),
-            ordered: Vec::new(),
-        }
-    }
-}
-
-fn devfs_sb() -> Arc<SuperBlock> {
-    DEVFS_SB.get().clone()
-}
-
-fn published_node_by_name(name: &str) -> Option<Arc<DevfsNode>> {
-    DEVFS_REGISTRY.read().by_name.get(name).cloned()
-}
-
-fn published_node_at(index: usize) -> Option<Arc<DevfsNode>> {
-    DEVFS_REGISTRY.read().ordered.get(index).cloned()
+fn devfs_namespace() -> &'static DevfsNamespace {
+    DEVFS_NAMESPACE.get()
 }
 
 // Publish allocates a stable inode number and seeds the singleton icache
-// before the name becomes visible in the registry. Lookup therefore never
-// needs to synthesize leaf inodes on demand.
+// before the name becomes visible in the root namespace. Lookup therefore
+// never needs to synthesize leaf inodes on demand.
 pub fn publish(desc: DevfsPublish) -> Result<Ino, SysError> {
-    devfs_publish_node(desc.name, DevfsNodeKind::Leaf, desc.attr, Some(desc.ops))
+    root_directory().publish(desc)
 }
 
-fn devfs_publish_node(
-    name: String,
-    kind: DevfsNodeKind,
-    attr: DevfsNodeAttr,
-    ops: Option<Arc<dyn DevfsNodeOps>>,
-) -> Result<Ino, SysError> {
-    if name.is_empty() || name.contains('/') || matches!(name.as_str(), "." | "..") {
-        return Err(SysError::InvalidArgument);
-    }
-
-    // Socket inodes are anonymous VFS objects in the current socket stage.
-    // Admit them here only after named socket nodes gain an explicit devfs
-    // owner, open contract, and lifecycle.
-    if attr.ty == InodeType::Socket {
-        return Err(SysError::NotSupported);
-    }
-
-    if matches!(kind, DevfsNodeKind::Dir) && attr.ty != InodeType::Dir {
-        return Err(SysError::InvalidArgument);
-    }
-
-    if matches!(kind, DevfsNodeKind::Leaf) && attr.ty == InodeType::Dir {
-        return Err(SysError::InvalidArgument);
-    }
-
-    if matches!(kind, DevfsNodeKind::Leaf) && ops.is_none() {
-        return Err(SysError::InvalidArgument);
-    }
-
-    let sb = devfs_sb();
-    let mut registry = DEVFS_REGISTRY.write();
-
-    if registry.by_name.contains_key(name.as_str()) {
-        return Err(SysError::AlreadyExists);
-    }
-
-    let node = Arc::new(DevfsNode {
-        name,
-        ino: alloc_ino(),
-        kind,
-        attr,
-        ops,
-    });
-
-    let inode = devfs_new_node_inode(sb.clone(), node.clone());
-    sb.seed_inode(inode);
-
-    if matches!(kind, DevfsNodeKind::Dir) {
-        sb.root_inode().inode().inc_nlink();
-    }
-
-    registry.by_name.insert(node.name.clone(), node.clone());
-    registry.ordered.push(node.clone());
-
-    kdebugln!("devfs: published {} with ino {}", node.name, node.ino);
-
-    Ok(node.ino)
-}
-
-fn devfs_publish_static_dir(name: &str) -> Result<Ino, SysError> {
-    devfs_publish_node(
-        name.to_string(),
-        DevfsNodeKind::Dir,
-        DevfsNodeAttr {
-            ty: InodeType::Dir,
-            perm: InodePerm::all_rwx(),
-            rdev: DeviceId::None,
-        },
-        None,
-    )
+/// Return the publication capability for the persistent production root.
+pub fn root_directory() -> DevfsDirectory {
+    devfs_namespace().root()
 }
 
 fn devfs_mount(data: MountData) -> Result<Arc<SuperBlock>, SysError> {
     data.reject_nonempty_for("devfs")?;
 
-    Ok(DEVFS_SB.get().clone())
+    Ok(devfs_namespace().superblock())
 }
 
 fn devfs_sync_fs(_sb: &SuperBlock) -> Result<(), SysError> {
@@ -198,22 +89,13 @@ fn init() {
         },
     }
 
-    let fs = DEVFS.get().clone();
-    let sb = Arc::new(SuperBlock::new(
-        fs,
-        &DEVFS_SB_OPS,
-        NilOpaque::new(),
-        DEVFS_ROOT_INO,
-        MountSource::Pseudo,
-    ));
-    let root_inode = devfs_new_root_inode(sb.clone());
-    sb.seed_inode(root_inode);
-
-    DEVFS_SB.init(|slot| {
-        slot.write(sb);
+    let namespace = DevfsNamespace::new(DEVFS.get().clone())
+        .unwrap_or_else(|err| panic!("failed to initialize devfs namespace: {:?}", err));
+    DEVFS_NAMESPACE.init(|slot| {
+        slot.write(namespace);
     });
 
-    if let Err(err) = devfs_publish_static_dir(DEVFS_SHM_DIR_NAME) {
+    if let Err(err) = root_directory().publish_directory(DEVFS_SHM_DIR_NAME.to_string()) {
         panic!(
             "failed to register devfs static mountpoint {}: {:?}",
             DEVFS_SHM_DIR_NAME, err
@@ -224,19 +106,79 @@ fn init() {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::utils::any_opaque::NilOpaque;
 
     const DEVFS_TEST_SINK_CAPACITY: usize = 64;
 
-    struct UnreachableSocketNodeOps;
+    struct TestLeafNodeOps;
 
-    impl DevfsNodeOps for UnreachableSocketNodeOps {
+    impl DevfsNodeOps for TestLeafNodeOps {
         fn open(&self, _inode: &InodeRef) -> Result<OpenedFile, SysError> {
-            unreachable!("rejected devfs socket node must not be opened")
+            Ok(OpenedFile::new(&DEVFS_TEST_LEAF_FILE_OPS, NilOpaque::new()))
         }
 
-        fn get_attr(&self, _inode: &InodeRef, _attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
-            unreachable!("rejected devfs socket node must not expose attributes")
+        fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
+            let meta = inode.inode().meta_snapshot();
+            Ok(InodeStat {
+                fs_dev: DeviceId::None,
+                ino: inode.ino(),
+                mode: InodeMode::new(attr.ty, meta.perm),
+                nlink: meta.nlink,
+                uid: meta.uid,
+                gid: meta.gid,
+                rdev: attr.rdev,
+                size: 7,
+                atime: meta.atime,
+                mtime: meta.mtime,
+                ctime: meta.ctime,
+            })
         }
+    }
+
+    static DEVFS_TEST_LEAF_FILE_OPS: FileOps = FileOps {
+        read: |_, _, _, _| Ok(0),
+        write: |_, _, buf, _| Ok(buf.len()),
+        read_at: |_, _, _, _| Ok(0),
+        write_at: |_, _, buf, _| Ok(buf.len()),
+        read_user_at: None,
+        write_user_at: None,
+        check_status_flags: accept_file_op_status_flags,
+        seek: |file, pos, from| seek_with_fixed_size(file, pos, from, 7),
+        read_dir: |_, _, _| Err(SysError::NotDir),
+        poll: |_, req| Ok(req.ready_or_unsupported(PollEvent::READABLE & req.interests())),
+        fcntl: None,
+        ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+    };
+
+    fn test_leaf_publish(name: &str, ty: InodeType) -> DevfsPublish {
+        DevfsPublish {
+            name: name.to_string(),
+            attr: DevfsNodeAttr {
+                ty,
+                perm: InodePerm::IRUSR | InodePerm::IWUSR,
+                rdev: DeviceId::None,
+            },
+            ops: Arc::new(TestLeafNodeOps),
+        }
+    }
+
+    fn isolated_namespace() -> DevfsNamespace {
+        let fs = Arc::new(FileSystem::new(&DEVFS_FS_OPS));
+        DevfsNamespace::new(fs).unwrap()
+    }
+
+    fn isolated_dir_entries(sb: Arc<SuperBlock>, inode: InodeRef) -> Vec<DirEntry> {
+        let root = Arc::new(Dentry::new("/".to_string(), None, inode));
+        let mount = Arc::new(Mount::new(root.clone(), sb, MountAttrFlags::empty()));
+        let file = PathRef::new(mount, root).open().unwrap();
+        devfs_read_dir_entries(&file)
+    }
+
+    fn entry_projection(entries: Vec<DirEntry>) -> Vec<(String, Ino, InodeType)> {
+        entries
+            .into_iter()
+            .map(|entry| (entry.name, entry.ino, entry.ty))
+            .collect()
     }
 
     fn devfs_read_dir_entries(root: &File) -> Vec<DirEntry> {
@@ -287,20 +229,127 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_devfs_rejects_socket_inode_publication() {
+    fn test_devfs_hierarchy_projection() {
+        let namespace = isolated_namespace();
+        let sb = namespace.superblock();
+        let weak_sb = Arc::downgrade(&sb);
+        let root_dir = namespace.root();
+        let bus_dir = root_dir.publish_directory("bus".to_string()).unwrap();
+        let platform_dir = bus_dir.publish_directory("platform".to_string()).unwrap();
+        let leaf_ino = platform_dir
+            .publish(test_leaf_publish("device", InodeType::Regular))
+            .unwrap();
+
+        let root = sb.root_inode();
+        let bus = root.lookup("bus").unwrap();
+        let platform = bus.lookup("platform").unwrap();
+        let leaf = platform.lookup("device").unwrap();
+
+        assert_eq!(root.lookup(".").unwrap(), root);
+        assert_eq!(root.lookup("..").unwrap(), root);
+        assert_eq!(bus.lookup(".").unwrap(), bus);
+        assert_eq!(bus.lookup("..").unwrap(), root);
+        assert_eq!(platform.lookup("..").unwrap(), bus);
+        assert_eq!(platform.lookup("device").unwrap(), leaf);
+        assert_eq!(leaf.ino(), leaf_ino);
+
+        let root_attr = root.get_attr().unwrap();
+        let bus_attr = bus.get_attr().unwrap();
+        let platform_attr = platform.get_attr().unwrap();
+        assert_eq!(root_attr.nlink, 3);
+        assert_eq!(bus_attr.nlink, 3);
+        assert_eq!(platform_attr.nlink, 2);
+
+        let leaf_attr = leaf.get_attr().unwrap();
+        assert_eq!(leaf_attr.mode.ty(), InodeType::Regular);
+        assert_eq!(leaf_attr.mode.perm(), InodePerm::IRUSR | InodePerm::IWUSR);
+        assert_eq!(leaf_attr.ino, leaf_ino);
+        assert_eq!(leaf_attr.size, 7);
+        assert!(core::ptr::eq(
+            leaf.open().unwrap().file_ops,
+            &DEVFS_TEST_LEAF_FILE_OPS
+        ));
+
+        let root_entries = isolated_dir_entries(sb.clone(), root.clone());
+        assert_eq!(root_entries[0].name, ".");
+        assert_eq!(root_entries[0].ino, root.ino());
+        assert_eq!(root_entries[1].name, "..");
+        assert_eq!(root_entries[1].ino, root.ino());
+        assert_eq!(root_entries[2].name, "bus");
+        assert_eq!(root_entries[2].ino, bus.ino());
+
+        let platform_entries = isolated_dir_entries(sb.clone(), platform.clone());
+        assert_eq!(platform_entries[0].ino, platform.ino());
+        assert_eq!(platform_entries[1].ino, bus.ino());
+        assert_eq!(platform_entries[2].name, "device");
+        assert_eq!(platform_entries[2].ino, leaf.ino());
+
+        drop(leaf);
+        drop(platform);
+        drop(bus);
+        drop(root);
+        drop(platform_dir);
+        drop(bus_dir);
+        drop(root_dir);
+        drop(sb);
+        drop(namespace);
+        assert!(weak_sb.upgrade().is_none());
+    }
+
+    #[kunit]
+    fn test_devfs_parent_local_admission() {
+        let namespace = isolated_namespace();
+        let sb = namespace.superblock();
+        let root_dir = namespace.root();
+        let left_dir = root_dir.publish_directory("left".to_string()).unwrap();
+        let right_dir = root_dir.publish_directory("right".to_string()).unwrap();
+        let left_ino = left_dir
+            .publish(test_leaf_publish("same", InodeType::Regular))
+            .unwrap();
+        let right_ino = right_dir
+            .publish(test_leaf_publish("same", InodeType::Regular))
+            .unwrap();
+        assert!(left_ino != right_ino);
+
+        let root = sb.root_inode();
+        let left = root.lookup("left").unwrap();
+        let right = root.lookup("right").unwrap();
+        assert_eq!(left.lookup("same").unwrap().ino(), left_ino);
+        assert_eq!(right.lookup("same").unwrap().ino(), right_ino);
+
+        let before_entries = entry_projection(isolated_dir_entries(sb.clone(), left.clone()));
+        let before_nlink = left.get_attr().unwrap().nlink;
         assert_eq!(
-            publish(DevfsPublish {
-                name: "kunit-socket".to_string(),
-                attr: DevfsNodeAttr {
-                    ty: InodeType::Socket,
-                    perm: InodePerm::all_rwx(),
-                    rdev: DeviceId::None,
-                },
-                ops: Arc::new(UnreachableSocketNodeOps),
-            })
-            .unwrap_err(),
+            left_dir
+                .publish(test_leaf_publish("same", InodeType::Regular))
+                .unwrap_err(),
+            SysError::AlreadyExists
+        );
+        assert_eq!(
+            entry_projection(isolated_dir_entries(sb.clone(), left.clone())),
+            before_entries
+        );
+        assert_eq!(left.get_attr().unwrap().nlink, before_nlink);
+
+        for invalid in ["", ".", "..", "nested/name"] {
+            assert_eq!(
+                root_dir.publish_directory(invalid.to_string()).err(),
+                Some(SysError::InvalidArgument)
+            );
+        }
+        assert_eq!(
+            root_dir
+                .publish(test_leaf_publish("directory-leaf", InodeType::Dir))
+                .unwrap_err(),
+            SysError::InvalidArgument
+        );
+        assert_eq!(
+            root_dir
+                .publish(test_leaf_publish("socket", InodeType::Socket))
+                .unwrap_err(),
             SysError::NotSupported
         );
+        assert_eq!(root.get_attr().unwrap().nlink, 4);
     }
 
     #[kunit]

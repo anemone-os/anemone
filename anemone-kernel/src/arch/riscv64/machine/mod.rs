@@ -1,6 +1,10 @@
 //! Machine-specific code for early boot.
 
-use crate::device::discovery::open_firmware::of_with_root;
+use crate::{
+    arch::MachineBootPolicy,
+    device::discovery::{fwnode::FwNode, open_firmware::of_with_root},
+    prelude::*,
+};
 
 pub trait MachineDesc: Sync {
     /// Open firmware compatible string for this machine.
@@ -22,16 +26,22 @@ pub trait MachineDesc: Sync {
     /// Discover machine-provided reset controllers before platform probing.
     /// Machines without a reset provider intentionally keep this as a no-op.
     unsafe fn early_init_reset_controllers(&self) {}
+
+    /// Optional stable firmware identity preferred as this boot's RTC source.
+    fn preferred_rtc_origin(&self) -> Option<Arc<dyn FwNode>> {
+        None
+    }
 }
 
 impl dyn MachineDesc {
-    unsafe fn init(&self) {
+    unsafe fn init(&self) -> MachineBootPolicy {
         unsafe {
             self.early_init_intc();
             self.early_init_timer();
             self.early_init_clock_controllers();
             self.early_init_reset_controllers();
         }
+        MachineBootPolicy::new(self.preferred_rtc_origin())
     }
 }
 
@@ -49,7 +59,7 @@ static MACHINES: &[&dyn MachineDesc] = &[&qemu_virt::QemuVirt, &starfive::StarFi
 /// - Root interrupt controllers initialization.
 /// - Timer initialization.
 /// - Machine clock/reset-controller discovery.
-pub unsafe fn machine_init() {
+pub unsafe fn machine_init() -> MachineBootPolicy {
     of_with_root(|root| {
         for compatible in root
             .compatible()
@@ -58,14 +68,13 @@ pub unsafe fn machine_init() {
             for machine in MACHINES {
                 if machine.compatible().contains(&compatible) {
                     unsafe {
-                        machine.init();
+                        return machine.init();
                     }
-                    return;
                 }
             }
         }
         panic!("unsupported machine");
-    });
+    })
 }
 
 mod descs {

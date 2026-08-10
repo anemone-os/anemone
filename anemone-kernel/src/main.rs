@@ -129,13 +129,35 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     let init_stdio = unsafe {
         kinfoln!("BSP {} kinit running on {}...", bsp_id, current_task_id());
         syscall::register_syscall_handlers();
+        #[cfg(feature = "perf_observe")]
+        debug::perf::validate_registry();
         fs::register_filesystem_drivers();
         driver::register_builtin_drivers();
         unflatten_device_tree(fdt_va);
         parse_bootargs();
-        machine_init();
+        let machine_policy = machine_init();
         of_platform_discovery();
         probe_virtual_devices();
+        if let Some(rtc_epoch) =
+            device::rtc::finalize_boot(machine_policy.into_preferred_rtc_origin())
+        {
+            match time::seed_boot_realtime(rtc_epoch) {
+                Ok(offset_ns) => {
+                    kinfoln!(
+                        "RTC boot seed committed: epoch_ns={} offset_ns={}",
+                        rtc_epoch.as_nanos(),
+                        offset_ns
+                    );
+                },
+                Err(error) => {
+                    kwarningln!(
+                        "RTC boot seed rejected: epoch_ns={} reason={:?}",
+                        rtc_epoch.as_nanos(),
+                        error
+                    );
+                },
+            }
+        }
 
         program_first_timer();
         percpu_login();
@@ -152,6 +174,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         // Ordinary kthreads may round-robin onto any CPU, so wait until every CPU
         // has completed local init and marked itself online before late services
         // publish their workers. `kthreadd` remains a hand-built boot invariant.
+        task::kworker::activate_system_workers();
         run_initcalls(InitCallLevel::Late);
         // `Late` is a shared provider window and deliberately gives consumers
         // no relative ordering. Network activation may arm threaded deadlines,

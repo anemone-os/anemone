@@ -5,7 +5,17 @@ pub mod linux {
     pub type Cc = u8;
     pub const NCCS: usize = 19;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Termios {
         pub c_iflag: TcFlag,
@@ -16,7 +26,17 @@ pub mod linux {
         pub c_cc: [Cc; NCCS],
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Default,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
     #[repr(C)]
     pub struct Winsize {
         pub ws_row: u16,
@@ -75,6 +95,12 @@ pub mod linux {
     );
     pub const OPOST: TcFlag = 0x0001;
     pub const ONLCR: TcFlag = 0x0004;
+    pub const TABDLY: TcFlag = 0x1800;
+    pub const TAB0: TcFlag = 0x0000;
+    pub const TAB1: TcFlag = 0x0800;
+    pub const TAB2: TcFlag = 0x1000;
+    pub const TAB3: TcFlag = 0x1800;
+    pub const XTABS: TcFlag = TAB3;
     pub const ISIG: TcFlag = 0x0001;
     pub const ICANON: TcFlag = 0x0002;
     pub const ECHO: TcFlag = 0x0008;

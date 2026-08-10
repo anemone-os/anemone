@@ -1,0 +1,10 @@
+name = "anemone-bench"
+targets = ["riscv64", "loongarch64", "host"]
+
+[build]
+workdir = "."
+driver = "command"
+argv = ["./build.sh"]
+
+[[artifacts]]
+path = "out/${ARCH}/anemone-bench"

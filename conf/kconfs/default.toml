@@ -1,0 +1,124 @@
+#! Default KernelConfig for Anemone OS.
+#! This file owns default kernel features, policy, and capacity.
+
+# Kernel tailoring options
+[features]
+kunit = true # Enable KUnit testing
+fs_ext4 = true # Enable ext4 filesystem support
+kernel_preempt = false # Enable trap-exit kernel preemption
+spin_lock_irqsave = true # Make ordinary spin locks disable local interrupts
+soft_unaligned_access = true # Emulate supported unaligned user-memory accesses in architecture trap handlers
+kernel_symbols = true # Embed checked text/function symbols for kernel backtraces
+perf_observe = true # Enable native kernel performance observation; runtime recording starts disabled
+# virtio_gpu = true # Enable Virtio GPU support
+# smp = true # Enable Symmetric Multiprocessing support
+# intr_stack = true # Enable Interrupt Stack support
+
+# Parameters for kernel and loader
+[parameters]
+bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
+log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
+log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
+print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
+record_log_level = 0 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
+kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
+riscv64_tlb_flush_all_threshold_pages = 64 # Full local TLB flush threshold for RV64 page ranges; larger ranges use one full flush.
+remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
+max_logical_cpus = 1 # Maximum number of logical CPUs enabled by this kernel
+max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
+max_path_len_bytes = 4096 # Maximum length of file paths in bytes
+execve_max_string_count = 256 # Maximum strings accepted in each execve argv or envp vector; the initial stack remains the total byte budget.
+max_processes = 32768 # Maximum number of processes
+epoll_file_max_waiters = 64 # Fixed waiter-route capacity per epoll instance.
+timerfd_file_max_waiters = 16 # Fixed blocking-read and poll-route capacity per timerfd file.
+max_iovec_count = 1024 # Maximum vectors imported by one ordinary vector I/O request; must not exceed IOV_MAX.
+getdents64_buffer_bytes = 2097152 # Maximum kernel staging buffer used by one getdents64 call.
+ext4_sync_io_batch_pages = 16 # Maximum pages staged in one synchronous ext4 read or writeback request.
+vfs_positive_dentry_residency_capacity = 1024 # Maximum positive dentries retained by each opt-in superblock.
+pipe_capacity_pages = 2 # Default anonymous-pipe capacity in pages; must be a power of two and at least two.
+pipe_max_capacity_pages = 16 # Maximum anonymous-pipe capacity in pages; must be a power of two and at least the default.
+unix_stream_direction_capacity_bytes = 65536 # Fixed byte capacity of each AF_UNIX stream direction.
+unix_listener_max_backlog = 128 # Maximum normalized listen backlog for AF_UNIX connection-oriented listeners.
+unix_seqpacket_max_payload_bytes = 65536 # Maximum payload bytes in one AF_UNIX seqpacket record.
+unix_seqpacket_direction_capacity_bytes = 65536 # Fixed byte capacity of each AF_UNIX seqpacket direction.
+unix_seqpacket_direction_max_records = 128 # Maximum committed records in each AF_UNIX seqpacket direction.
+tid_alloc_policy = "oneshot" # Ordinary TID allocation policy: "bitmap" recycles IDs; "oneshot" never reuses them.
+system_hz = 100 # System timer frequency in hertz, i.e. number of timer interrupts per second
+sched_default_policy = "fair" # Default policy for fresh non-idle tasks: "fair", "rt_rr", or "rt_fifo".
+rt_rr_timeslice_ms = 100 # RT/RR timeslice target in milliseconds; converted to ticks using system_hz.
+backtrace_depth = 16 # Maximum depth of captured backtrace
+user_stack_shift_kb = 13 # Max user stack size as a power of 2 in KB
+user_init_stack_shift_kb = 7 # Initial user stack size as a power of 2 in KB
+user_heap_shift_mb = 12 # Max user heap size as a power of 2 in MB
+shmmax_bytes = 9223372036837998591 # Default max bytes for a single SysV shm segment, within TOML's signed integer range.
+shmall_pages = 9223372036837998591 # Default max pages for SysV shm accounting, within TOML's signed integer range.
+shmmni = 4096 # Default maximum number of System V shared memory segments.
+io_shrink_threshold = 50 # Physical memory usage percentage above which the inode shrinker worker runs a scan.
+oom_kill_threshold = 90 # Physical memory usage percentage above which the OOM killer worker runs one victim-selection round.
+oom_kill_sample_interval_ms = 50 # Fixed delay between OOM killer frame-usage samples, in milliseconds.
+symlink_resolve_limit = 16 # Maximum number of symbolic links to resolve in a single path resolution
+max_fd_per_process = 1024 # Build-time fd-table capacity and system ceiling; syscalls only change per-process policy.
+initial_umask = 18 # Initial file creation mask for user filesystem contexts (octal 0022).
+ramdisk_count = 16 # Number of static ramdisk block devices to publish at boot.
+loop_device_count = 8 # Number of static loop block devices to publish at boot.
+ns16550a_default_baud = 115200 # Default baud when stdout-path has no serial options.
+ns16550a_fallback_clock_hz = 24000000 # UART input clock used when firmware omits clock-frequency.
+tty_raw_rx_capacity_bytes = 4096 # Per-port fixed raw RX FIFO capacity.
+tty_canonical_line_capacity_bytes = 4096 # Maximum canonical line size including its delimiter.
+tty_input_capacity_bytes = 4096 # Per-Terminal committed input capacity.
+tty_output_capacity_bytes = 4096 # Per-Terminal transformed output capacity.
+tty_worker_batch_bytes = 256 # Maximum RX/TX bytes advanced by one endpoint worker batch.
+ns16550a_irq_rx_budget_bytes = 256 # Maximum RX bytes drained by one UART IRQ handler invocation.
+ns16550a_tx_batch_bytes = 16 # Maximum bytes submitted while holding the UART TX lock.
+ns16550a_tx_poll_iterations = 65536 # Maximum readiness polls for each UART TX byte.
+dw_mshc_poll_timeout_ms = 500 # Bounded DW-MSHC register polling timeout in milliseconds.
+ahci_hba_reset_timeout_ms = 1000 # AHCI global reset deadline in milliseconds.
+ahci_engine_timeout_ms = 500 # AHCI command-list/FIS engine transition deadline in milliseconds.
+ahci_port_timeout_ms = 5000 # AHCI link and device-ready deadline in milliseconds.
+ahci_command_timeout_ms = 30000 # AHCI ATA command completion deadline in milliseconds.
+ahci_read_warn_ms = 100 # Warn when an ATA read remains incomplete for this many milliseconds.
+ahci_read_timeout_ms = 10000 # Panic when an ATA read remains incomplete for this many milliseconds.
+ahci_bounce_kb = 128 # Per-port AHCI DMA bounce buffer size in KiB.
+eevdf_base_slice_us = 3000 # EEVDF-lite base slice in microseconds.
+eevdf_wake_clamp_us = 3000 # EEVDF-lite wake placement clamp window in microseconds.
+eevdf_yield_penalty_us = 3000 # EEVDF-lite bounded yield penalty window in microseconds.
+eevdf_anomaly_threshold = 8 # Consecutive EEVDF no-eligible fallbacks before an extra error summary.
+virtio_net_queue_size = 64 # Descriptor capacity of each VirtIO-Net RX/TX queue; kernel requires a power of two in 4..=1024.
+virtio_net_frame_capacity_bytes = 2048 # Per-slot backing bytes including the VirtIO-Net header; kernel requires at least 1526.
+jh7110_gmac_ring_size = 64 # Descriptor capacity of each JH7110 GMAC RX/TX ring; kernel requires a power of two in 64..=1024.
+jh7110_gmac_frame_capacity_bytes = 2048 # Per-slot JH7110 GMAC frame backing; kernel requires at least 1536 and at most 16383.
+jh7110_gmac_reset_timeout_ms = 1000 # DWMAC internal software-reset deadline in milliseconds.
+jh7110_gmac_phy_timeout_ms = 5000 # Maximum probe-time wait for JH7110 PHY link resolution.
+net_pump_ingress_budget_frames = 32 # Maximum ingress frames advanced by one stack pump.
+net_pump_egress_budget_steps = 32 # Maximum egress steps advanced by one stack pump.
+net_worker_repoll_rounds = 8 # Maximum immediate repoll rounds before the network worker yields.
+net_local_link_packet_capacity = 64 # Shared ingress+egress packet slots owned by the local software link.
+net_local_link_mtu_bytes = 2048 # Maximum IP-medium packet size owned by the local software link.
+netlink_port_capacity = 1024 # Maximum live sockets in each supported netlink protocol port namespace.
+netlink_request_max_bytes = 65536 # Maximum bytes accepted in one netlink request datagram.
+netlink_pending_reply_max_bytes = 1048576 # Maximum serialized reply bytes pending on one netlink socket.
+netlink_reply_datagram_max_bytes = 32768 # Maximum bytes emitted in one serialized netlink reply datagram.
+net_udp_endpoint_capacity = 64 # Maximum live UDP endpoints in the initial domain.
+net_udp_tx_datagram_capacity = 8 # Per-endpoint transmit datagram slots.
+net_udp_rx_datagram_capacity = 64 # Per-endpoint receive datagram slots.
+net_udp_error_record_capacity = 16 # Per-endpoint IPv4 UDP extended-error records.
+net_udp_max_payload_bytes = 1472 # Maximum UDP payload storage per datagram; protocol ceiling is 65507.
+net_udp_ephemeral_port_first = 32768 # First deterministic ephemeral UDP port.
+net_udp_ephemeral_port_last = 60999 # Last deterministic ephemeral UDP port.
+net_icmp_raw_endpoint_capacity = 64 # Maximum live IPv4 ICMP raw endpoints in the initial domain.
+net_icmp_raw_tx_packet_capacity = 8 # Per-endpoint committed transmit packet slots.
+net_icmp_raw_tx_byte_capacity = 65536 # Per-endpoint committed transmit packet bytes.
+net_icmp_raw_rx_packet_capacity = 64 # Per-endpoint detached receive packet slots.
+net_icmp_raw_rx_byte_capacity = 262144 # Per-endpoint detached receive packet bytes.
+net_icmp_raw_default_ttl = 64 # Default IPv4 TTL for ICMP raw Socket sends.
+net_icmp_raw_default_tos = 0 # Default IPv4 TOS for ICMP raw Socket sends.
+net_tcp_endpoint_capacity = 64 # Maximum live private TCP endpoints in the initial domain.
+net_tcp_engine_timer_capacity = 128 # Shared upper bound for TCP protocol engines and their embedded timers.
+net_tcp_listener_completed_capacity = 16 # Completed-child engine slots retained by one private listener.
+net_tcp_rx_buffer_bytes = 16384 # Receive bytes owned by each private TCP engine.
+net_tcp_tx_buffer_bytes = 16384 # Transmit bytes owned by each private TCP engine.
+net_tcp_deferred_reclaim_capacity = 128 # Pre-reserved cleanup entries; must cover every TCP engine.
+net_tcp_connect_timeout_ms = 60000 # Maximum unanswered active-open interval.
+net_tcp_orphan_timeout_ms = 60000 # Maximum peer-silence window bounding orphaned graceful close.
+net_tcp_ephemeral_port_first = 32768 # First deterministic ephemeral TCP port.
+net_tcp_ephemeral_port_last = 60999 # Last deterministic ephemeral TCP port.

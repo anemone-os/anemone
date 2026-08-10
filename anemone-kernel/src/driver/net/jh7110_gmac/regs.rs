@@ -1,4 +1,4 @@
-use crate::{mm::remap::IoRemap, prelude::*};
+use crate::{mm::remap::IoRemap, prelude::*, time::MonotonicInstant};
 
 // Fixed DWMAC 5.20 register facts are cross-checked against
 // xref:linux-6.6.32:drivers/net/ethernet/stmicro/stmmac/{dwmac4.h,dwmac4_dma.h,
@@ -326,7 +326,7 @@ impl GmacRegs {
     /// The external reset controller does not replace this self-clearing DMA
     /// reset required by the DWMAC initialization protocol.
     pub(super) fn reset_dma(&self) -> Result<(), SysError> {
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(JH7110_GMAC_RESET_TIMEOUT_MS);
         let mut mode = DmaBusMode::from_bits_retain(self.read(offsets::DMA_BUS_MODE));
         mode.insert(DmaBusMode::SOFTWARE_RESET);
@@ -451,7 +451,7 @@ impl GmacRegs {
     }
 
     fn wait_for_mdio_idle(&self) -> Result<(), SysError> {
-        let start = Instant::now();
+        let start = MonotonicInstant::now();
         let timeout = Duration::from_millis(JH7110_GMAC_RESET_TIMEOUT_MS);
         loop {
             let address = MdioAddress::from_bits_retain(self.read(offsets::GMAC_MDIO_ADDRESS));

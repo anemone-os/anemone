@@ -1,0 +1,42 @@
+[build]
+name = "anemone-bench-rv64"
+arch = "riscv64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+extra-size = "64M"
+
+[init]
+path = "/sbin/busybox-init"
+
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/proc"
+
+[[dirs]]
+path = "/root"
+
+[[dirs]]
+path = "/run"
+
+[[dirs]]
+path = "/tmp"
+
+[[apps]]
+name = "busybox-init"
+installed_dir = "/sbin"
+
+[[apps]]
+name = "anemone-bench"
+installed_dir = "/bin"
+
+[[apps]]
+name = "perfctl"
+installed_dir = "/bin"
+
+[[apps]]
+name = "shutdown"
+installed_dir = "/bin"

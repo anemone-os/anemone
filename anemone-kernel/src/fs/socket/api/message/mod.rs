@@ -9,6 +9,7 @@ use anemone_abi::net::linux::MsgHdr;
 
 use crate::{
     fs::api::read_write::request::{CheckedIoVec, IoVecDirection, load_message_iovecs},
+    kconfig_defs::MAX_IOVEC_COUNT,
     prelude::*,
     syscall::user_access::{UserReadPtr, user_addr},
 };
@@ -27,13 +28,21 @@ pub(super) fn message_iovecs(
     header: MsgHdr,
     direction: IoVecDirection,
 ) -> Result<Vec<CheckedIoVec>, SysError> {
-    let count = usize::try_from(header.msg_iovlen).map_err(|_| SysError::MessageTooLong)?;
+    let count = message_iovec_count(header)?;
     load_message_iovecs(
         uspace,
-        VirtAddr::new(header.msg_iov as u64),
+        VirtAddr::new(header.msg_iov.bits()),
         count,
         direction,
     )
+}
+
+fn message_iovec_count(header: MsgHdr) -> Result<usize, SysError> {
+    let count = usize::try_from(header.msg_iovlen).map_err(|_| SysError::MessageTooLong)?;
+    if count > MAX_IOVEC_COUNT {
+        return Err(SysError::MessageTooLong);
+    }
+    Ok(count)
 }
 
 pub(super) fn normalized_name_len(header: MsgHdr) -> Result<usize, SysError> {
@@ -49,16 +58,45 @@ pub(super) fn normalized_name_len(header: MsgHdr) -> Result<usize, SysError> {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+    use crate::fs::socket::SocketStreamDestination;
 
     #[kunit]
-    fn null_name_ignores_negative_length_but_nonnull_name_rejects_it() {
+    fn message_header_count_name_and_segment_bounds_are_checked_before_operation() {
         let mut header = MsgHdr {
             msg_namelen: -1,
             ..MsgHdr::default()
         };
         assert_eq!(normalized_name_len(header), Ok(0));
-
-        header.msg_name = 1usize as *mut _;
+        header.msg_name = anemone_abi::RawUserAddr64::from_bits(1);
         assert_eq!(normalized_name_len(header), Err(SysError::InvalidArgument));
+
+        header.msg_iovlen = (MAX_IOVEC_COUNT + 1) as u64;
+        assert_eq!(message_iovec_count(header), Err(SysError::MessageTooLong));
+        header.msg_iovlen = MAX_IOVEC_COUNT as u64;
+        assert_eq!(message_iovec_count(header), Ok(MAX_IOVEC_COUNT));
+
+        let iovecs = [
+            CheckedIoVec {
+                base: VirtAddr::new(0),
+                len: usize::MAX,
+            },
+            CheckedIoVec {
+                base: VirtAddr::new(0),
+                len: 1,
+            },
+        ];
+        assert!(matches!(
+            sendmsg::message_segments(&iovecs),
+            Err(SysError::MessageTooLong)
+        ));
+        assert_eq!(
+            sendmsg::stream_destination(true),
+            SocketStreamDestination::Present
+        );
+        assert_eq!(sendmsg::validate_send_control(0), Ok(()));
+        assert_eq!(
+            sendmsg::validate_send_control(1),
+            Err(SysError::NotSupported)
+        );
     }
 }

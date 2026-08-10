@@ -160,8 +160,9 @@ user bytes本身不受该mutex保护，不能把mapping稳定误写成content sn
 **违反表现：** VMA在validation/retry中被并发移除却继续使用旧PTE；或形成`UserSpace -> backend -> UserSpace`
 递归锁序。
 
-**已知依赖边界：** 当前page-fault路径仍在该mutex内drop `RemoteUspFenceGuard`。这是早于R0的已知偏差，
-不被本条包装成正确锁序；见[UACCESS-KETER-001](./tracking-issues.md#uaccess-keter-001---remote-fence-仍在-userspace-mutex-内完成)。
+**当前依赖边界：** page-fault mutation仍在该mutex内完成，但`UserSpaceGuard`在同步remote completion前释放
+inner mutex，并只在ack后重新取得mapping owner进入retry；见
+[`MM-TLB-REMOTE-001`](../../contracts/mm/user-fault-local-tlb.md#mm-tlb-remote-001--destructive-user-mapping在dependent-continuation与retirement前完成remote-ack)。
 
 ### UACCESS-CONTEXT-001 - Fault resolution只能发生在ordinary task context
 

@@ -1,7 +1,7 @@
 use anemone_abi::{syscall::SYS_TIMERFD_SETTIME, time::linux::ITimerSpec};
 
 use crate::{
-    fs::timerfd::{settime, validate_settime_value},
+    fs::timerfd::{abi::TimerFdSpec, settime},
     prelude::{
         user_access::{SyscallArgValidatorExt as _, UserReadPtr, UserWritePtr, user_addr},
         *,
@@ -24,10 +24,10 @@ fn sys_timerfd_settime(
         let mut usp = uspace.lock();
         UserReadPtr::<ITimerSpec>::try_new(new_value, &mut usp)?.read()?
     };
-    validate_settime_value(new_value)?;
+    let new_value = TimerFdSpec::try_from(new_value)?;
 
     let file = task.get_fd(fd)?;
-    let old_snapshot = settime(file.vfs_file(), flags.into(), new_value)?;
+    let old_snapshot: ITimerSpec = settime(file.vfs_file(), flags.into(), new_value)?.into();
 
     if let Some(old_value) = old_value {
         let mut usp = uspace.lock();

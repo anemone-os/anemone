@@ -118,7 +118,7 @@ fn proc_pde_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {
 fn proc_pde_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let pde = pde_inode_private(inode).pde;
     let meta = inode.inode().meta_snapshot();
-    let now = realtime();
+    let now = RealtimeInstant::now().to_duration();
 
     Ok(InodeStat {
         fs_dev: DeviceId::None,
@@ -411,9 +411,9 @@ fn seed_pde_tree(sb: &Arc<SuperBlock>, pde: &'static ProcDirEntry, parent_ino: I
         perm: pde.mode.perm(),
         uid: Uid::ROOT,
         gid: Gid::ROOT,
-        atime: Instant::ZERO.to_duration(),
-        mtime: Instant::ZERO.to_duration(),
-        ctime: Instant::ZERO.to_duration(),
+        atime: Duration::ZERO,
+        mtime: Duration::ZERO,
+        ctime: Duration::ZERO,
     });
     pde.ino.init(|slot| {
         slot.write(inode.ino());

@@ -1,5 +1,8 @@
-//! This module is responsible for handling the top level
-//! kernel configuration file `conf/kconfig.toml`.
+//! Deserializes KernelConfig input, materializes omitted defaults, and renders
+//! generated kernel definitions.
+//!
+//! Semantic validity belongs to kernel consumers. This module deliberately
+//! does not range-check, clamp, or otherwise reinterpret parameter values.
 
 use std::collections::HashMap;
 
@@ -52,6 +55,7 @@ pub struct Parameters {
     pub print_log_level: Option<u8>,
     pub record_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
+    pub riscv64_tlb_flush_all_threshold_pages: Option<usize>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
@@ -59,8 +63,11 @@ pub struct Parameters {
     pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
+    pub timerfd_file_max_waiters: Option<usize>,
     pub max_iovec_count: Option<usize>,
     pub getdents64_buffer_bytes: Option<usize>,
+    pub ext4_sync_io_batch_pages: Option<usize>,
+    pub vfs_positive_dentry_residency_capacity: Option<usize>,
     pub pipe_capacity_pages: Option<usize>,
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
@@ -81,6 +88,7 @@ pub struct Parameters {
     pub shmmni: Option<usize>,
     pub io_shrink_threshold: Option<u8>,
     pub oom_kill_threshold: Option<u8>,
+    pub oom_kill_sample_interval_ms: Option<u64>,
     pub symlink_resolve_limit: Option<usize>,
     pub max_fd_per_process: Option<usize>,
     pub initial_umask: Option<u16>,
@@ -119,9 +127,14 @@ pub struct Parameters {
     pub net_worker_repoll_rounds: Option<usize>,
     pub net_local_link_packet_capacity: Option<usize>,
     pub net_local_link_mtu_bytes: Option<usize>,
+    pub netlink_port_capacity: Option<usize>,
+    pub netlink_request_max_bytes: Option<usize>,
+    pub netlink_pending_reply_max_bytes: Option<usize>,
+    pub netlink_reply_datagram_max_bytes: Option<usize>,
     pub net_udp_endpoint_capacity: Option<usize>,
     pub net_udp_tx_datagram_capacity: Option<usize>,
     pub net_udp_rx_datagram_capacity: Option<usize>,
+    pub net_udp_error_record_capacity: Option<usize>,
     pub net_udp_max_payload_bytes: Option<usize>,
     pub net_udp_ephemeral_port_first: Option<u16>,
     pub net_udp_ephemeral_port_last: Option<u16>,
@@ -132,12 +145,22 @@ pub struct Parameters {
     pub net_icmp_raw_rx_byte_capacity: Option<usize>,
     pub net_icmp_raw_default_ttl: Option<u8>,
     pub net_icmp_raw_default_tos: Option<u8>,
+    pub net_tcp_endpoint_capacity: Option<usize>,
+    pub net_tcp_engine_timer_capacity: Option<usize>,
+    pub net_tcp_listener_completed_capacity: Option<usize>,
+    pub net_tcp_rx_buffer_bytes: Option<usize>,
+    pub net_tcp_tx_buffer_bytes: Option<usize>,
+    pub net_tcp_deferred_reclaim_capacity: Option<usize>,
+    pub net_tcp_connect_timeout_ms: Option<usize>,
+    pub net_tcp_orphan_timeout_ms: Option<usize>,
+    pub net_tcp_ephemeral_port_first: Option<u16>,
+    pub net_tcp_ephemeral_port_last: Option<u16>,
 }
 
 impl Parameters {
     /// Materialize the optional parameter syntax into the complete value owned
     /// by a resolved KernelConfig. Build consumers must not consult
-    /// `.defconfig` after this boundary.
+    /// the default KernelConfig after this boundary.
     pub(super) fn materialize_defaults(&mut self, defaults: Option<&Self>) -> anyhow::Result<()> {
         macro_rules! materialize {
             ($field:ident) => {
@@ -160,6 +183,7 @@ impl Parameters {
         materialize!(print_log_level);
         materialize!(record_log_level);
         materialize!(kstack_shift_kb);
+        materialize!(riscv64_tlb_flush_all_threshold_pages);
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
@@ -167,8 +191,11 @@ impl Parameters {
         materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
+        materialize!(timerfd_file_max_waiters);
         materialize!(max_iovec_count);
         materialize!(getdents64_buffer_bytes);
+        materialize!(ext4_sync_io_batch_pages);
+        materialize!(vfs_positive_dentry_residency_capacity);
         materialize!(pipe_capacity_pages);
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
@@ -189,6 +216,7 @@ impl Parameters {
         materialize!(shmmni);
         materialize!(io_shrink_threshold);
         materialize!(oom_kill_threshold);
+        materialize!(oom_kill_sample_interval_ms);
         materialize!(symlink_resolve_limit);
         materialize!(max_fd_per_process);
         materialize!(initial_umask);
@@ -227,9 +255,14 @@ impl Parameters {
         materialize!(net_worker_repoll_rounds);
         materialize!(net_local_link_packet_capacity);
         materialize!(net_local_link_mtu_bytes);
+        materialize!(netlink_port_capacity);
+        materialize!(netlink_request_max_bytes);
+        materialize!(netlink_pending_reply_max_bytes);
+        materialize!(netlink_reply_datagram_max_bytes);
         materialize!(net_udp_endpoint_capacity);
         materialize!(net_udp_tx_datagram_capacity);
         materialize!(net_udp_rx_datagram_capacity);
+        materialize!(net_udp_error_record_capacity);
         materialize!(net_udp_max_payload_bytes);
         materialize!(net_udp_ephemeral_port_first);
         materialize!(net_udp_ephemeral_port_last);
@@ -240,6 +273,16 @@ impl Parameters {
         materialize!(net_icmp_raw_rx_byte_capacity);
         materialize!(net_icmp_raw_default_ttl);
         materialize!(net_icmp_raw_default_tos);
+        materialize!(net_tcp_endpoint_capacity);
+        materialize!(net_tcp_engine_timer_capacity);
+        materialize!(net_tcp_listener_completed_capacity);
+        materialize!(net_tcp_rx_buffer_bytes);
+        materialize!(net_tcp_tx_buffer_bytes);
+        materialize!(net_tcp_deferred_reclaim_capacity);
+        materialize!(net_tcp_connect_timeout_ms);
+        materialize!(net_tcp_orphan_timeout_ms);
+        materialize!(net_tcp_ephemeral_port_first);
+        materialize!(net_tcp_ephemeral_port_last);
         Ok(())
     }
 
@@ -283,6 +326,9 @@ pub const PRINT_LOG_LEVEL: u8 = {};
 pub const RECORD_LOG_LEVEL: u8 = {};
 /// Kernel stack size as a power of 2 in KB
 pub const KSTACK_SHIFT_KB: u64 = {};
+/// RV64 page-range length above which one full local TLB flush replaces
+/// per-page invalidation.
+pub const RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES: usize = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum number of logical CPUs enabled by this kernel
@@ -302,10 +348,16 @@ pub const EXECVE_MAX_STRING_COUNT: usize = {};
 pub const MAX_PROCESSES: u64 = {};
 /// Fixed waiter-route capacity per epoll instance.
 pub const EPOLL_FILE_MAX_WAITERS: usize = {};
+/// Fixed blocking-read and poll-route capacity per timerfd file.
+pub const TIMERFD_FILE_MAX_WAITERS: usize = {};
 /// Maximum number of vectors imported by one ordinary vector I/O request.
 pub const MAX_IOVEC_COUNT: usize = {};
 /// Maximum kernel staging buffer used by one getdents64 call.
 pub const GETDENTS64_BUFFER_BYTES: usize = {};
+/// Maximum pages staged in one synchronous ext4 read or writeback request.
+pub const EXT4_SYNC_IO_BATCH_PAGES: usize = {};
+/// Maximum positive dentries retained by each opt-in superblock.
+pub const VFS_POSITIVE_DENTRY_RESIDENCY_CAPACITY: usize = {};
 /// Default anonymous-pipe capacity in pages.
 pub const PIPE_CAPACITY_PAGES: usize = {};
 /// Maximum anonymous-pipe capacity in pages.
@@ -362,8 +414,10 @@ pub const SHMMNI: usize = {};
 /// runs a scan.
 pub const IO_SHRINK_THRESHOLD: u8 = {};
 /// Physical memory usage percentage above which the OOM killer worker
-/// is woken.
+/// runs one victim-selection round.
 pub const OOM_KILL_THRESHOLD: u8 = {};
+/// Fixed delay between OOM killer frame-usage samples, in milliseconds.
+pub const OOM_KILL_SAMPLE_INTERVAL_MS: u64 = {};
 /// Maximum number of symbolic links to resolve in a single path resolution
 pub const SYMLINK_RESOLVE_LIMIT: usize = {};
 /// Build-time file-table capacity and system-wide fd-number ceiling.
@@ -441,12 +495,22 @@ pub const NET_WORKER_REPOLL_ROUNDS: usize = {};
 pub const NET_LOCAL_LINK_PACKET_CAPACITY: usize = {};
 /// Maximum IP-medium packet size of the production local software link.
 pub const NET_LOCAL_LINK_MTU_BYTES: usize = {};
+/// Maximum live sockets in each supported netlink protocol port namespace.
+pub const NETLINK_PORT_CAPACITY: usize = {};
+/// Maximum bytes accepted in one netlink request datagram.
+pub const NETLINK_REQUEST_MAX_BYTES: usize = {};
+/// Maximum serialized reply bytes pending on one netlink Socket.
+pub const NETLINK_PENDING_REPLY_MAX_BYTES: usize = {};
+/// Maximum bytes emitted in one serialized netlink reply datagram.
+pub const NETLINK_REPLY_DATAGRAM_MAX_BYTES: usize = {};
 /// Maximum number of live UDP endpoints in the initial domain.
 pub const NET_UDP_ENDPOINT_CAPACITY: usize = {};
 /// Per-endpoint UDP transmit datagram capacity.
 pub const NET_UDP_TX_DATAGRAM_CAPACITY: usize = {};
 /// Per-endpoint UDP receive datagram capacity.
 pub const NET_UDP_RX_DATAGRAM_CAPACITY: usize = {};
+/// Per-endpoint IPv4 UDP extended-error record capacity.
+pub const NET_UDP_ERROR_RECORD_CAPACITY: usize = {};
 /// Maximum UDP payload bytes reserved by one protocol engine datagram.
 pub const NET_UDP_MAX_PAYLOAD_BYTES: usize = {};
 /// First port in the deterministic UDP ephemeral allocation range.
@@ -467,6 +531,26 @@ pub const NET_ICMP_RAW_RX_BYTE_CAPACITY: usize = {};
 pub const NET_ICMP_RAW_DEFAULT_TTL: u8 = {};
 /// Default IPv4 TOS for ICMP raw Socket sends.
 pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
+/// Maximum live private TCP endpoints in the initial domain.
+pub const NET_TCP_ENDPOINT_CAPACITY: usize = {};
+/// Shared upper bound for TCP engines and their embedded protocol timers.
+pub const NET_TCP_ENGINE_TIMER_CAPACITY: usize = {};
+/// Completed-child engine slots retained by one private TCP listener.
+pub const NET_TCP_LISTENER_COMPLETED_CAPACITY: usize = {};
+/// Receive bytes owned by each private TCP engine.
+pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
+/// Transmit bytes owned by each private TCP engine.
+pub const NET_TCP_TX_BUFFER_BYTES: usize = {};
+/// TCP engines awaiting final protocol cleanup after retirement.
+pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
+/// Maximum unanswered active-open interval.
+pub const NET_TCP_CONNECT_TIMEOUT_MS: usize = {};
+/// Maximum peer-silence window bounding orphaned graceful close.
+pub const NET_TCP_ORPHAN_TIMEOUT_MS: usize = {};
+/// First port in the deterministic TCP ephemeral allocation range.
+pub const NET_TCP_EPHEMERAL_PORT_FIRST: u16 = {};
+/// Last port in the deterministic TCP ephemeral allocation range.
+pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
             resolved!(log_buffer_shift_kb),
@@ -474,6 +558,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(print_log_level),
             resolved!(record_log_level),
             resolved!(kstack_shift_kb),
+            resolved!(riscv64_tlb_flush_all_threshold_pages),
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
@@ -481,8 +566,11 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
+            resolved!(timerfd_file_max_waiters),
             resolved!(max_iovec_count),
             resolved!(getdents64_buffer_bytes),
+            resolved!(ext4_sync_io_batch_pages),
+            resolved!(vfs_positive_dentry_residency_capacity),
             resolved!(pipe_capacity_pages),
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
@@ -503,6 +591,7 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(shmmni),
             resolved!(io_shrink_threshold),
             resolved!(oom_kill_threshold),
+            resolved!(oom_kill_sample_interval_ms),
             resolved!(symlink_resolve_limit),
             resolved!(max_fd_per_process),
             resolved!(initial_umask),
@@ -541,9 +630,14 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(net_worker_repoll_rounds),
             resolved!(net_local_link_packet_capacity),
             resolved!(net_local_link_mtu_bytes),
+            resolved!(netlink_port_capacity),
+            resolved!(netlink_request_max_bytes),
+            resolved!(netlink_pending_reply_max_bytes),
+            resolved!(netlink_reply_datagram_max_bytes),
             resolved!(net_udp_endpoint_capacity),
             resolved!(net_udp_tx_datagram_capacity),
             resolved!(net_udp_rx_datagram_capacity),
+            resolved!(net_udp_error_record_capacity),
             resolved!(net_udp_max_payload_bytes),
             resolved!(net_udp_ephemeral_port_first),
             resolved!(net_udp_ephemeral_port_last),
@@ -554,6 +648,16 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(net_icmp_raw_rx_byte_capacity),
             resolved!(net_icmp_raw_default_ttl),
             resolved!(net_icmp_raw_default_tos),
+            resolved!(net_tcp_endpoint_capacity),
+            resolved!(net_tcp_engine_timer_capacity),
+            resolved!(net_tcp_listener_completed_capacity),
+            resolved!(net_tcp_rx_buffer_bytes),
+            resolved!(net_tcp_tx_buffer_bytes),
+            resolved!(net_tcp_deferred_reclaim_capacity),
+            resolved!(net_tcp_connect_timeout_ms),
+            resolved!(net_tcp_orphan_timeout_ms),
+            resolved!(net_tcp_ephemeral_port_first),
+            resolved!(net_tcp_ephemeral_port_last),
         )
     }
 }
@@ -583,13 +687,12 @@ pub struct KernelConfig {
     pub features: HashMap<String, bool>,
     pub parameters: Parameters,
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn defaults() -> Parameters {
-        Config::from_str(include_str!("../../../../conf/.defconfig"))
+        Config::from_str(include_str!("../../../../conf/kconfs/default.toml"))
             .unwrap()
             .parameters
     }

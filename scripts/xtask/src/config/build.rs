@@ -4,9 +4,11 @@ use std::{path::Path, process::Command};
 use crate::config::{platform::*, rootfs::FsType};
 use crate::tasks::utils::{cmd_echo, log_progress};
 
+pub const RUST_OBJDUMP: &str = "rust-objdump";
+
 impl TargetTriple {
     pub fn objdump(&self) -> &'static str {
-        "rust-objdump"
+        RUST_OBJDUMP
     }
 
     pub fn objcopy(&self) -> &'static str {

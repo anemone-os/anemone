@@ -19,10 +19,10 @@ error() {
 
 usage() {
     cat <<'EOF'
-Usage: run-user-test-la64.sh <sdcard-image> [log-file]
+Usage: run-user-test-la64.sh [--rootfs-sudo] <sdcard-image> [log-file]
 
 Runs the la64 test chain:
-  1. build the rootfs with sudo
+  1. build the rootfs directly, or through sudo when --rootfs-sudo is given
   2. stage the provided sdcard image as a build-local temporary copy
   3. build the generic QEMU target with the preliminary topology
   4. launch QEMU with the complete tracked bind map and tee the output to a log file
@@ -30,6 +30,12 @@ Runs the la64 test chain:
 Uses conf/rootfs/pretest-la64.toml as the public pretest rootfs manifest.
 EOF
 }
+
+rootfs_mode=direct
+if [[ ${1:-} == --rootfs-sudo ]]; then
+    rootfs_mode=sudo
+    shift
+fi
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
     usage >&2
@@ -46,6 +52,10 @@ runtime_dir=build/runtime/pretest-la64
 sdcard_target=$runtime_dir/disk-x1.img
 rootfs_target=build/rootfs/pretest-la64/rootfs.img
 provider_bindings=(--bind smp=1 --bind memory=1G)
+rootfs_mkfs_args=(-c "$rootfs_config")
+if [[ $rootfs_mode == sudo ]]; then
+    rootfs_mkfs_args+=(--sudo)
+fi
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
@@ -77,11 +87,12 @@ mkdir -p -- "$(dirname -- "$log_file")"
 log_progress "PRETEST" "preset $preset ($target_arch)"
 log_progress "PRETEST" "topology smp=1 memory=1G"
 log_progress "PRETEST" "rootfs config $rootfs_config"
+log_progress "PRETEST" "rootfs privilege $rootfs_mode"
 log_progress "PRETEST" "sdcard image $sdcard_image"
 log_progress "PRETEST" "log file $log_file"
 
 log_progress "PRETEST" "rebuilding rootfs"
-just rootfs mkfs -c "$rootfs_config" --sudo
+just rootfs mkfs "${rootfs_mkfs_args[@]}"
 
 if [[ ! -f "$rootfs_target" ]]; then
     error "rootfs output not found: $rootfs_target"

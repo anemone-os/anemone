@@ -1,0 +1,15 @@
+platform = "qemu-virt-rv64"
+
+[root]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+[network.ipv4]
+interface = "eth0"
+address = "10.0.2.15"
+prefix = 24
+default-gateway = "10.0.2.2"
+
+[initial-program]
+type = "embedded-app"
+app = "final-entry"

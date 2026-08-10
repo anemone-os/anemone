@@ -63,7 +63,17 @@ pub mod linux {
     pub mod resource {
         use crate::time::linux::TimeVal;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Default,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct RUsage {
             pub ru_utime: TimeVal,
@@ -84,7 +94,17 @@ pub mod linux {
             pub ru_nivcsw: u64,
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Default,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct RLimit {
             pub rlim_cur: u64,
@@ -179,7 +199,16 @@ pub mod linux {
         ///
         /// The raw affinity syscalls also accept shorter or longer buffers;
         /// this type owns the userspace layout, not their `cpusetsize` policy.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct CpuSet {
             bits: [CpuSetWord; CPU_SET_WORDS],
@@ -366,8 +395,6 @@ pub mod linux {
     }
 
     pub mod signal {
-        use core::ffi::c_void;
-
         use crate::process::linux::signal::sifields::SigInfoFields;
         /// Hangup (POSIX).
         pub const SIGHUP: u32 = 1;
@@ -450,31 +477,51 @@ pub mod linux {
 
         pub const NRTSIG: usize = (SIGRTMAX - SIGRTMIN + 1) as usize;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct SigSet {
             pub bits: u64,
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct SigSetArgPack {
-            pub p: *const SigSet,
+            pub p: crate::RawUserAddr64,
             pub size: u64,
         }
 
-        #[derive(Debug, Clone, Copy)]
+        #[derive(
+            Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct SigAction {
             // pub sighandler: unsafe extern "C" fn(c_int) -> (),
-            pub sighandler: *const (),
+            pub sighandler: crate::RawUserAddr64,
             pub sa_flags: u64,
             /// deprecated in nowadays Linux. our testsuits assume an old uapi,
             /// set this temporarily here.
             ///
             /// TODO: introduce conditional compilation for better compatibility
             /// with modern Linux.
-            pub sa_restorer: *const (),
+            pub sa_restorer: crate::RawUserAddr64,
             pub sa_mask: SigSet,
         }
 
@@ -492,27 +539,29 @@ pub mod linux {
 
         pub const SI_MAX_SIZE: usize = 128;
 
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes)]
         #[repr(C)]
-        pub union SigInfoWrapper {
+        pub struct SigInfoWrapper {
             pub info: SigInfo,
-            si_pad: [u8; SI_MAX_SIZE],
         }
 
         impl Default for SigInfoWrapper {
             fn default() -> Self {
                 Self {
-                    si_pad: [0; SI_MAX_SIZE],
+                    info: SigInfo::default(),
                 }
             }
         }
 
-        #[derive(Clone, Copy)]
+        #[derive(
+            Clone, Copy, Default, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct SigInfo {
             pub si_signo: i32,
             pub si_errno: i32,
             pub si_code: i32,
+            pub __pad0: u32,
             pub fields: SigInfoFields,
         }
 
@@ -545,37 +594,97 @@ pub mod linux {
 
             use super::*;
 
-            #[derive(Clone, Copy)]
-            #[repr(C)]
-            pub union SigInfoFields {
-                pub kill: Kill,
-                pub rt: Rt,
-                pub chld: Chld,
-                pub fault: Fault,
-                pub timer: Timer,
-            }
+            #[derive(
+                Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
+            /// Canonical storage for Linux `_sifields`; alignment eight keeps
+            /// the layout of the former union's 64-bit members.
+            #[repr(C, align(8))]
+            pub struct SigInfoFields([u8; SI_MAX_SIZE - 16]);
 
             impl Default for SigInfoFields {
                 fn default() -> Self {
-                    Self {
-                        kill: Kill { pid: 0, uid: 0 },
-                    }
+                    Self([0; SI_MAX_SIZE - 16])
                 }
             }
 
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            impl SigInfoFields {
+                fn write<T: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, value: T) {
+                    self.0.fill(0);
+                    let bytes = zerocopy::IntoBytes::as_bytes(&value);
+                    self.0[..bytes.len()].copy_from_slice(bytes);
+                }
+
+                fn read<T: zerocopy::FromBytes>(&self) -> T {
+                    // `T: FromBytes` accepts every initialized byte pattern;
+                    // the codec deliberately does not make its generic member
+                    // reads depend on the storage wrapper's ABI alignment.
+                    assert!(size_of::<T>() <= self.0.len());
+                    unsafe { self.0.as_ptr().cast::<T>().read_unaligned() }
+                }
+
+                pub fn set_kill(&mut self, value: Kill) {
+                    self.write(value);
+                }
+
+                pub fn kill(&self) -> Kill {
+                    self.read()
+                }
+
+                pub fn set_rt(&mut self, value: Rt) {
+                    self.write(value);
+                }
+
+                pub fn rt(&self) -> Rt {
+                    self.read()
+                }
+
+                pub fn set_chld(&mut self, value: Chld) {
+                    self.write(value);
+                }
+
+                pub fn chld(&self) -> Chld {
+                    self.read()
+                }
+
+                pub fn set_fault(&mut self, value: Fault) {
+                    self.write(value);
+                }
+
+                pub fn fault(&self) -> Fault {
+                    self.read()
+                }
+
+                pub fn set_timer(&mut self, value: Timer) {
+                    self.write(value);
+                }
+
+                pub fn timer(&self) -> Timer {
+                    self.read()
+                }
+            }
+
+            #[derive(
+                Debug,
+                Clone,
+                Copy,
+                PartialEq,
+                Eq,
+                zerocopy::FromBytes,
+                zerocopy::Immutable,
+                zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Kill {
                 pub pid: i32,
                 pub uid: u32,
             }
 
-            #[derive(Clone, Copy)]
-            #[repr(C)]
-            pub union SigVal {
-                pub sival_int: i32,
-                pub sival_ptr: *mut c_void,
-            }
+            #[derive(
+                Clone, Copy, Default, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
+            #[repr(transparent)]
+            pub struct SigVal(crate::RawUserAddr64);
 
             impl Debug for SigVal {
                 fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -584,12 +693,22 @@ pub mod linux {
             }
 
             impl SigVal {
+                pub const fn from_int(value: i32) -> Self {
+                    Self(crate::RawUserAddr64::from_bits(value as u32 as u64))
+                }
+
+                pub const fn from_bits(value: u64) -> Self {
+                    Self(crate::RawUserAddr64::from_bits(value))
+                }
+
                 pub fn as_u64(self) -> u64 {
-                    unsafe { self.sival_ptr as u64 }
+                    self.0.bits()
                 }
             }
 
-            #[derive(Clone, Copy)]
+            #[derive(
+                Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Rt {
                 pub pid: i32,
@@ -597,24 +716,45 @@ pub mod linux {
                 pub sigval: SigVal,
             }
 
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(
+                Debug,
+                Clone,
+                Copy,
+                PartialEq,
+                Eq,
+                zerocopy::FromBytes,
+                zerocopy::Immutable,
+                zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Chld {
                 pub pid: i32,
                 pub uid: u32,
                 pub status: i32,
+                pub __pad0: u32,
                 pub utime: u64,
                 pub stime: u64,
             }
 
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(
+                Debug,
+                Clone,
+                Copy,
+                PartialEq,
+                Eq,
+                zerocopy::FromBytes,
+                zerocopy::Immutable,
+                zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Fault {
-                pub addr: *mut c_void,
+                pub addr: crate::RawUserAddr64,
                 // TODO
             }
 
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Timer {
                 /// timer id
@@ -623,6 +763,7 @@ pub mod linux {
                 pub sigval: SigVal,
                 /// Not to be passed to user.
                 pub sys_private: i32,
+                pub __pad0: u32,
             }
 
             // TODO
@@ -639,6 +780,17 @@ pub mod linux {
 
         pub const SS_AUTODISARM: i32 = (1u32 << 31) as i32;
 
+        const _: () = assert!(size_of::<SigSet>() == 8);
+        const _: () = assert!(size_of::<SigSetArgPack>() == 16);
+        const _: () = assert!(size_of::<SigAction>() == 32);
+        const _: () = assert!(core::mem::offset_of!(SigAction, sa_mask) == 24);
+        const _: () = assert!(size_of::<SigInfo>() == SI_MAX_SIZE);
+        const _: () = assert!(core::mem::align_of::<SigInfo>() == 8);
+        const _: () = assert!(size_of::<SigInfoWrapper>() == SI_MAX_SIZE);
+        const _: () = assert!(core::mem::align_of::<SigInfoWrapper>() == 8);
+        const _: () = assert!(core::mem::offset_of!(SigInfo, fields) == 16);
+        const _: () = assert!(core::mem::align_of::<SigInfoFields>() == 8);
+
         // TODO: native signal
     }
 
@@ -651,37 +803,42 @@ pub mod linux {
         mod __riscv64 {
             use crate::process::linux::signal::SigSet;
 
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct UContext {
                 pub uc_flags: u64,
-                pub uc_link: *mut UContext,
+                pub uc_link: crate::RawUserAddr64,
                 pub uc_stack: Stack,
                 pub uc_sigmask: SigSet,
                 pub __unused: [u8; 1024 / 8 - size_of::<SigSet>()],
+                pub __pad0: [u8; 8],
                 pub uc_mcontext: SigContext,
             }
 
             /// The same as `struct sigaltstack` in Linux kernel.
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Stack {
-                pub ss_sp: *mut u8,
+                pub ss_sp: crate::RawUserAddr64,
                 pub ss_flags: i32,
+                pub __pad0: u32,
                 pub ss_size: usize,
             }
 
             /// This one is not put in [super::super::signal] module, since in
             /// POSIX this type is named `struct mcontext`. Linux calls it
             /// `struct sigcontext`.
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C, align(16))]
             pub struct SigContext {
                 pub sc_regs: UserRegsStruct,
-                /// We only care about riscv64 with D extension for now. That
-                /// huge union in Linux is too complicated to deal with...
-                pub sc_fpregs: [u64; 32],
-                pub fcsr: u64,
+                pub sc_fpregs: RiscvFpState,
             }
 
             impl SigContext {
@@ -690,13 +847,74 @@ pub mod linux {
                 }
             }
 
-            #[derive(Debug, Clone, Copy)]
+            const RISCV_D_REGS_SIZE: usize = size_of::<[u64; 32]>();
+            const RISCV_D_FCSR_OFFSET: usize = RISCV_D_REGS_SIZE;
+            const RISCV_FP_STATE_SIZE: usize =
+                size_of::<[u64; 64]>() + size_of::<u32>() + 3 * size_of::<u32>();
+
+            /// Canonical storage for Linux `union __riscv_fp_state`.
+            ///
+            /// Anemone currently saves and restores only the D-extension
+            /// member. The Q member still determines the fixed UAPI size, so
+            /// the inactive tail remains present and zeroed rather than
+            /// shrinking the signal frame around the implemented member. Its
+            /// final bytes also overlay Linux's reserved field and END context
+            /// header, which must remain zero until another extension is
+            /// published there.
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
+            #[repr(C, align(16))]
+            pub struct RiscvFpState([u8; RISCV_FP_STATE_SIZE]);
+
+            impl RiscvFpState {
+                pub fn clear(&mut self) {
+                    self.0.fill(0);
+                }
+
+                pub fn set_d(&mut self, regs: &[u64; 32], fcsr: u32) {
+                    self.clear();
+                    self.0[..RISCV_D_REGS_SIZE]
+                        .copy_from_slice(zerocopy::IntoBytes::as_bytes(regs));
+                    self.0[RISCV_D_FCSR_OFFSET..RISCV_D_FCSR_OFFSET + size_of::<u32>()]
+                        .copy_from_slice(&fcsr.to_ne_bytes());
+                }
+
+                pub fn d_regs(&self) -> [u64; 32] {
+                    // Every initialized byte pattern is valid for the register
+                    // array; use an unaligned read so this codec does not rely
+                    // on the byte storage's internal alignment.
+                    unsafe { self.0.as_ptr().cast::<[u64; 32]>().read_unaligned() }
+                }
+
+                pub fn d_fcsr(&self) -> u32 {
+                    u32::from_ne_bytes(
+                        self.0[RISCV_D_FCSR_OFFSET..RISCV_D_FCSR_OFFSET + size_of::<u32>()]
+                            .try_into()
+                            .unwrap(),
+                    )
+                }
+            }
+
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct UserRegsStruct {
                 pub pc: u64,
                 /// except x0.
                 pub gprs: [u64; 31],
             }
+
+            const _: () = assert!(size_of::<Stack>() == 24);
+            const _: () = assert!(core::mem::offset_of!(Stack, ss_size) == 16);
+            const _: () = assert!(size_of::<RiscvFpState>() == 528);
+            const _: () = assert!(core::mem::align_of::<RiscvFpState>() == 16);
+            const _: () = assert!(size_of::<SigContext>() == 784);
+            const _: () = assert!(core::mem::align_of::<SigContext>() == 16);
+            const _: () = assert!(core::mem::offset_of!(SigContext, sc_fpregs) == 256);
+            const _: () = assert!(core::mem::offset_of!(UContext, uc_mcontext) == 176);
+            const _: () = assert!(size_of::<UContext>() == 960);
         }
         #[cfg(target_arch = "riscv64")]
         pub use __riscv64::*;
@@ -705,40 +923,51 @@ pub mod linux {
         mod __loongarch64 {
             use crate::process::linux::signal::SigSet;
 
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct UContext {
                 pub uc_flags: u64,
-                pub uc_link: *mut UContext,
+                pub uc_link: crate::RawUserAddr64,
                 pub uc_stack: Stack,
                 pub uc_sigmask: SigSet,
                 pub __unused: [u8; 1024 / 8 - size_of::<SigSet>()],
+                pub __pad0: [u8; 8],
                 pub uc_mcontext: SigContext,
                 pub uc_extcontext: ExtContext,
             }
 
             /// The same as `struct sigaltstack` in Linux kernel.
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct Stack {
-                pub ss_sp: *mut u8,
+                pub ss_sp: crate::RawUserAddr64,
                 pub ss_flags: i32,
+                pub __pad0: u32,
                 pub ss_size: usize,
             }
 
             /// This one is not put in [super::super::signal] module, since in
             /// POSIX this type is named `struct mcontext`. Linux calls it
             /// `struct sigcontext`.
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             #[repr(align(16))]
             pub struct SigContext {
                 pub sc_pc: u64,
                 pub sc_regs: [u64; 32],
                 pub sc_flags: u32,
+                pub __reserved: [u8; 4],
             }
 
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct SctxInfo {
                 pub magic: u32,
@@ -750,7 +979,9 @@ pub mod linux {
             pub const FPU_CTX_MAGIC: u32 = 0x4650_5501;
             pub const LSX_CTX_MAGIC: u32 = 0x5358_0001;
 
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct FpuContext {
                 pub regs: [u64; 32],
@@ -759,7 +990,9 @@ pub mod linux {
                 pub reserved: u32,
             }
 
-            #[derive(Debug, Clone, Copy)]
+            #[derive(
+                Debug, Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C)]
             pub struct LsxContext {
                 pub regs: [[u64; 2]; 32],
@@ -768,14 +1001,42 @@ pub mod linux {
                 pub reserved: u32,
             }
 
-            #[derive(Clone, Copy)]
-            #[repr(C)]
-            pub union FpContextPayload {
-                pub fpu: FpuContext,
-                pub lsx: LsxContext,
+            #[derive(
+                Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
+            /// Canonical storage for the Linux FP/LSX union; alignment eight
+            /// preserves the layout owned by its 64-bit context members.
+            #[repr(C, align(8))]
+            pub struct FpContextPayload([u8; size_of::<LsxContext>()]);
+
+            impl FpContextPayload {
+                pub fn set_fpu(&mut self, value: FpuContext) {
+                    self.0.fill(0);
+                    self.0[..size_of::<FpuContext>()]
+                        .copy_from_slice(zerocopy::IntoBytes::as_bytes(&value));
+                }
+
+                pub fn fpu(&self) -> FpuContext {
+                    // `FpuContext: FromBytes`; use an unaligned read so the
+                    // codec does not rely on the payload wrapper's alignment.
+                    unsafe { self.0.as_ptr().cast::<FpuContext>().read_unaligned() }
+                }
+
+                pub fn set_lsx(&mut self, value: LsxContext) {
+                    self.0
+                        .copy_from_slice(zerocopy::IntoBytes::as_bytes(&value));
+                }
+
+                pub fn lsx(&self) -> LsxContext {
+                    // `LsxContext: FromBytes`; use an unaligned read so the
+                    // codec does not rely on the payload wrapper's alignment.
+                    unsafe { self.0.as_ptr().cast::<LsxContext>().read_unaligned() }
+                }
             }
 
-            #[derive(Clone, Copy)]
+            #[derive(
+                Clone, Copy, zerocopy::FromBytes, zerocopy::Immutable, zerocopy::IntoBytes,
+            )]
             #[repr(C, align(16))]
             pub struct ExtContext {
                 pub info: SctxInfo,
@@ -795,7 +1056,12 @@ pub mod linux {
             const _: () = assert!(size_of::<SctxInfo>() == 16);
             const _: () = assert!(size_of::<FpuContext>() == 272);
             const _: () = assert!(size_of::<LsxContext>() == 528);
+            const _: () = assert!(size_of::<FpContextPayload>() == 528);
+            const _: () = assert!(core::mem::align_of::<FpContextPayload>() == 8);
             const _: () = assert!(size_of::<SigContext>() == 272);
+            const _: () = assert!(size_of::<Stack>() == 24);
+            const _: () = assert!(core::mem::offset_of!(Stack, ss_size) == 16);
+            const _: () = assert!(core::mem::offset_of!(UContext, uc_mcontext) == 176);
             const _: () = assert!(
                 core::mem::offset_of!(UContext, uc_extcontext)
                     == core::mem::offset_of!(UContext, uc_mcontext) + size_of::<SigContext>()
@@ -839,19 +1105,41 @@ pub mod linux {
         pub const FUTEX_PRIVATE_FLAG: i32 = 128;
         pub const FUTEX_CLOCK_REALTIME: i32 = 256;
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct RobustList {
-            pub next: *mut RobustList,
+            pub next: crate::RawUserAddr64,
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct RobustListHead {
             pub list: RobustList,
             pub futex_offset: i64,
-            pub list_op_pending: *mut RobustList,
+            pub list_op_pending: crate::RawUserAddr64,
         }
+
+        const _: () = assert!(size_of::<RobustList>() == 8);
+        const _: () = assert!(size_of::<RobustListHead>() == 24);
+        const _: () = assert!(core::mem::offset_of!(RobustListHead, list_op_pending) == 16);
 
         pub const FUTEX_WAITERS: u32 = 0x80000000;
         pub const FUTEX_OWNER_DIED: u32 = 0x40000000;
@@ -918,7 +1206,16 @@ pub mod linux {
         ///
         /// riscv64 and loongarch64 both use the asm-generic SysV IPC UAPI
         /// layout, where these fields are unsigned long-sized.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct ShmInfo {
             pub shmmax: u64,
@@ -932,10 +1229,20 @@ pub mod linux {
             pub __unused4: u64,
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct Shm_Info {
             pub used_ids: i32,
+            pub __pad0: u32,
             pub shm_tot: u64,
             pub shm_rss: u64,
             pub shm_swp: u64,
@@ -943,7 +1250,16 @@ pub mod linux {
             pub swap_successes: u64,
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct ShmIdDs {
             pub shm_perm: IpcPerm,
@@ -959,7 +1275,16 @@ pub mod linux {
         }
 
         /// Linux `struct ipc64_perm` layout for asm-generic 64-bit targets.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
         #[repr(C)]
         pub struct IpcPerm {
             pub key: i32,
@@ -970,6 +1295,7 @@ pub mod linux {
             pub mode: u32,
             pub __seq: u16,
             pub __pad2: u16,
+            pub __pad3: u32,
             pub __unused1: u64,
             pub __unused2: u64,
         }

@@ -367,7 +367,7 @@ impl Scheduler for Stride {
         true
     }
 
-    fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: MonotonicInstant) {
         let current_pass = self.assert_current(&task);
         let requeue_pass = if let Some(peer) = self.ready.peek() {
             assert!(
@@ -389,26 +389,26 @@ impl Scheduler for Stride {
         self.refresh_placement_floor();
     }
 
-    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: MonotonicInstant) {
         let pass = self.assert_current(&task);
         self.clear_current(&task);
         self.enqueue_ready(task, pass);
         self.refresh_placement_floor();
     }
 
-    fn handoff_woken_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn handoff_woken_current(&mut self, task: Arc<Task>, _now: MonotonicInstant) {
         let pass = self.assert_current(&task);
         self.clear_current(&task);
         self.enqueue_ready(task, pass);
         self.refresh_placement_floor();
     }
 
-    fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         self.clear_current(task);
         self.refresh_placement_floor();
     }
 
-    fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         self.clear_current(task);
         self.refresh_placement_floor();
     }
@@ -427,7 +427,7 @@ impl Scheduler for Stride {
         Some(entry.task)
     }
 
-    fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn set_next_task(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         assert!(
             self.current.is_none(),
             "Fair set-next would replace an active current"
@@ -441,7 +441,7 @@ impl Scheduler for Stride {
         self.refresh_placement_floor();
     }
 
-    fn task_tick(&mut self, task: &Arc<Task>, _now: Instant) -> TickAction {
+    fn task_tick(&mut self, task: &Arc<Task>, _now: MonotonicInstant) -> TickAction {
         let _ = self.assert_current(task);
         // Each timer tick is the accounting truth even when a coalesced Tick
         // reschedule request is consumed later. Observe nice once per charge.
@@ -459,7 +459,7 @@ impl Scheduler for Stride {
         &mut self,
         current: &Arc<Task>,
         candidate: &Arc<Task>,
-        _now: Instant,
+        _now: MonotonicInstant,
     ) -> PreemptDecision {
         let _ = self.assert_current(current);
         let (_, candidate_on_runq) = Self::entity_pass(candidate);
@@ -545,17 +545,17 @@ mod kunits {
 
     fn pick_and_set(stride: &mut Stride) -> Arc<Task> {
         let task = pick(stride);
-        stride.set_next_task(&task, Instant::now());
+        stride.set_next_task(&task, MonotonicInstant::now());
         task
     }
 
     fn publish_preempted(stride: &mut Stride, task: Arc<Task>) {
-        stride.requeue_preempted_current(task.clone(), Instant::now());
+        stride.requeue_preempted_current(task.clone(), MonotonicInstant::now());
         set_on_runq(&task, true);
     }
 
     fn publish_handoff(stride: &mut Stride, task: Arc<Task>) {
-        stride.handoff_woken_current(task.clone(), Instant::now());
+        stride.handoff_woken_current(task.clone(), MonotonicInstant::now());
         set_on_runq(&task, true);
     }
 
@@ -569,10 +569,10 @@ mod kunits {
         let current = pick_and_set(&mut stride);
         assert!(Arc::ptr_eq(&current, &charged));
         assert_eq!(
-            stride.task_tick(&charged, Instant::now()),
+            stride.task_tick(&charged, MonotonicInstant::now()),
             TickAction::RequestResched
         );
-        stride.put_prev_blocked(&charged, Instant::now());
+        stride.put_prev_blocked(&charged, MonotonicInstant::now());
 
         let current = pick_and_set(&mut stride);
         assert!(Arc::ptr_eq(&current, &low));
@@ -672,14 +672,17 @@ mod kunits {
         let sleeper = fresh_task(Nice::ZERO);
         publish_new(&mut stride, sleeper.clone());
         let sleeper = pick_and_set(&mut stride);
-        stride.put_prev_blocked(&sleeper, Instant::now());
+        stride.put_prev_blocked(&sleeper, MonotonicInstant::now());
 
         let runner = fresh_task(Nice::ZERO);
         publish_new(&mut stride, runner.clone());
         let runner = pick_and_set(&mut stride);
-        assert_eq!(stride.task_tick(&runner, Instant::now()), TickAction::None);
+        assert_eq!(
+            stride.task_tick(&runner, MonotonicInstant::now()),
+            TickAction::None
+        );
         assert_eq!(stride.placement_floor, PASS_SCALE);
-        stride.put_prev_blocked(&runner, Instant::now());
+        stride.put_prev_blocked(&runner, MonotonicInstant::now());
         assert_eq!(stride.placement_floor, PASS_SCALE);
 
         publish_woken(&mut stride, sleeper.clone());
@@ -696,10 +699,10 @@ mod kunits {
         publish_new(&mut stride, anchor.clone());
         let runner = pick_and_set(&mut stride);
         assert_eq!(
-            stride.task_tick(&runner, Instant::now()),
+            stride.task_tick(&runner, MonotonicInstant::now()),
             TickAction::RequestResched
         );
-        stride.put_prev_blocked(&runner, Instant::now());
+        stride.put_prev_blocked(&runner, MonotonicInstant::now());
         dequeue(&mut stride, &anchor);
         assert_eq!(stride.placement_floor, PASS_SCALE);
         publish_woken(&mut stride, runner.clone());
@@ -718,7 +721,7 @@ mod kunits {
         let selected = pick(&mut stride);
         assert!(Arc::ptr_eq(&selected, &low));
         assert_eq!(stride.placement_floor, 0);
-        stride.set_next_task(&selected, Instant::now());
+        stride.set_next_task(&selected, MonotonicInstant::now());
         assert_eq!(stride.placement_floor, 0);
 
         let fresh = fresh_task(Nice::ZERO);
@@ -749,9 +752,12 @@ mod kunits {
         publish_new(&mut stride, task.clone());
         assert_eq!(pass(&task), 0);
         let task = pick_and_set(&mut stride);
-        assert_eq!(stride.task_tick(&task, Instant::now()), TickAction::None);
+        assert_eq!(
+            stride.task_tick(&task, MonotonicInstant::now()),
+            TickAction::None
+        );
         let placed = pass(&task);
-        stride.put_prev_blocked(&task, Instant::now());
+        stride.put_prev_blocked(&task, MonotonicInstant::now());
         publish_woken(&mut stride, task.clone());
         assert_eq!(pass(&task), placed);
         dequeue(&mut stride, &task);
@@ -768,7 +774,10 @@ mod kunits {
         assert_eq!(stride.ready.peek().unwrap().pass_snapshot, snapshot);
 
         let task = pick_and_set(&mut stride);
-        assert_eq!(stride.task_tick(&task, Instant::now()), TickAction::None);
+        assert_eq!(
+            stride.task_tick(&task, MonotonicInstant::now()),
+            TickAction::None
+        );
         assert_eq!(pass(&task), stride_delta(Nice::MAX));
     }
 
@@ -789,7 +798,7 @@ mod kunits {
             assert!(Arc::ptr_eq(&current, expected));
             let before = pass(&current);
             assert_eq!(
-                stride.task_tick(&current, Instant::now()),
+                stride.task_tick(&current, MonotonicInstant::now()),
                 TickAction::RequestResched
             );
             let charged = pass(&current);
@@ -805,7 +814,10 @@ mod kunits {
         let only = fresh_task(Nice::ZERO);
         publish_new(&mut alone, only.clone());
         let only = pick_and_set(&mut alone);
-        assert_eq!(alone.task_tick(&only, Instant::now()), TickAction::None);
+        assert_eq!(
+            alone.task_tick(&only, MonotonicInstant::now()),
+            TickAction::None
+        );
         assert_eq!(pass(&only), PASS_SCALE);
 
         let mut delayed = Stride::new();
@@ -816,7 +828,7 @@ mod kunits {
         let current = pick_and_set(&mut delayed);
         for tick in 1..=3 {
             assert_eq!(
-                delayed.task_tick(&current, Instant::now()),
+                delayed.task_tick(&current, MonotonicInstant::now()),
                 TickAction::RequestResched
             );
             assert_eq!(pass(&current), PASS_SCALE * tick);
@@ -833,14 +845,14 @@ mod kunits {
         let only = fresh_task(Nice::ZERO);
         publish_new(&mut alone, only.clone());
         let only = pick_and_set(&mut alone);
-        alone.requeue_yielded_current(only.clone(), Instant::now());
+        alone.requeue_yielded_current(only.clone(), MonotonicInstant::now());
         set_on_runq(&only, true);
         assert_eq!(pass(&only), 0);
         assert!(Arc::ptr_eq(&pick(&mut alone), &only));
 
         let (mut stride, current, peer) = setup_low_current_high_peer(Nice::MIN);
         assert!(stride_delta(Nice::MIN) < pass(&peer));
-        stride.requeue_yielded_current(current.clone(), Instant::now());
+        stride.requeue_yielded_current(current.clone(), MonotonicInstant::now());
         set_on_runq(&current, true);
         assert_eq!(pass(&current), pass(&peer));
         assert!(Arc::ptr_eq(&pick(&mut stride), &peer));
@@ -852,14 +864,14 @@ mod kunits {
         let task = fresh_task(Nice::ZERO);
         publish_new(&mut blocked, task.clone());
         let task = pick_and_set(&mut blocked);
-        blocked.put_prev_blocked(&task, Instant::now());
+        blocked.put_prev_blocked(&task, MonotonicInstant::now());
         assert!(blocked.current.is_none());
 
         let mut exiting = Stride::new();
         let task = fresh_task(Nice::ZERO);
         publish_new(&mut exiting, task.clone());
         let task = pick_and_set(&mut exiting);
-        exiting.put_prev_exiting(&task, Instant::now());
+        exiting.put_prev_exiting(&task, MonotonicInstant::now());
         assert!(exiting.current.is_none());
 
         let mut arrival = Stride::new();
@@ -869,7 +881,7 @@ mod kunits {
         let current = pick_and_set(&mut arrival);
         publish_new(&mut arrival, candidate.clone());
         assert_eq!(
-            arrival.decide_preempt_current(&current, &candidate, Instant::now()),
+            arrival.decide_preempt_current(&current, &candidate, MonotonicInstant::now()),
             PreemptDecision::KeepCurrent
         );
     }

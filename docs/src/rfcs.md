@@ -50,6 +50,13 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   matching JH7110 GMAC 节点交付 per-node one-time driver、命名 `macirq`、coherent DMA、boot-time Motorcomm
   PHY 初始化、成功 publication candidate 在 attach admission 时连续消费的 `eth<N>` 和现有单接口 static IPv4
   接入。Gate 0--3、VisionFive 2 双 GMAC 实机验收与 `IRQ-FLOW-001` cutover 已完成。
+- [RFC-20260809-user-tlb-residency-targeting](./rfcs/user-tlb-residency-targeting/index.md)：Closed / R1；为全部user
+  page-table activation建立唯一residency handoff，使destructive TLB shootdown在稳定状态只覆盖仍可能观察旧translation
+  的CPU，同时保留现有同步ack、retirement与dependent continuation边界。
+- [RFC-20260808-user-tlb-completion](./rfcs/user-tlb-completion/index.md)：Closed / R2；把 user address-space
+  remote fence从每次fault的无条件Drop broadcast收敛为completion ordering：monotonic PTE change不创建自己的
+  remote obligation，destructive commit的dependent continuation/exposure与retired cleanup均在锁外remote ack之后；
+  `MM-TLB-LOCAL-001`已Refine、`MM-TLB-REMOTE-001`已Introduce。
 - [RFC-20260803-clock-timekeeping-posix-timers](./rfcs/clock-timekeeping-posix-timers/index.md)：R0 已实现并关闭；建立从硬件计数和
   Hertz 计算的 monotonic/raw、由内存偏移得到的 realtime、按真实更新周期计算的 coarse clock，以及可物理删除
   排队请求的 soft timer；目标是在 RV64/LA64 native 64 位 ABI 上实现五个 clock syscall 和五个 POSIX timer
@@ -67,7 +74,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 - [RFC-20260801-exception-userptr-access](./rfcs/exception-userptr-access/index.md)：R0已实现并由用户验收关闭；
   RV64/LA64通过page-bounded bytewise assembly、per-CPU exact-PC recovery window和一次page-fault retry提供
   fallible copyin/copyout，typed exact access与VFS partial progress边界已经固化。早于本RFC的
-  `RemoteUspFenceGuard`锁内同步shootdown问题保持明确follow-up，不被R0 closure写成已修复。
+  `RemoteUspFenceGuard`锁内同步shootdown问题后来由User TLB Completion RFC关闭；R0 closure仍保留其历史边界。
 - [RFC-20260801-loongarch-lsx-context](./rfcs/loongarch-lsx-context/index.md)：R0已实现并关闭；以per-task
   sticky-lazy policy和唯一interleaved trapframe backing保护32个128-bit LSX register及共享FCC/FCSR，
   clone/exec与Linux-compatible signal extcontext已闭合，2K1000实机验收由用户确认通过。LASX、
@@ -140,6 +147,37 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   `UDP-EXT-R1-CUTOVER`已Refine三项current contract。两架构当前musl工具链构建的repository-owned C consumer、
   未修改musl resolver与临时external acceptance均通过；临时host orchestration已删除，glibc resolver保持
   Not Supported / Not Cut Over，physical hardware、`smp>1`、full network LTP与final harness保持Not Run。
+- [RFC-20260805-net-tcp](./rfcs/net-tcp/index.md)：Closed R0 / Stage 1--5 Closed / TCP Effective；目标为
+  initial-domain IPv4 TCP Socket capability，并以同一closure同时验证TCP target与既有网络架构封顶。
+  TCP也是Socket framework的反馈consumer：自然shared obligation经RFC review回到共同owner，不能为维持
+  current shape塞入TCP-local hack，也不预建没有真实复用义务的generic framework。
+  Stage 1已通过`NET-PROTOCOL-PROGRESSION-CUTOVER` Refine `NET-CONTROL-PLANE-001`与
+  `NET-STACK-PUMP-001`，把UDP、ICMP raw及future TCP统一到各protocol owner驱动、既有worker承接的
+  progression handoff，但不共享effect policy，也不冻结effect/wake表示、存储、锁或worker拓扑。
+  crate-only P0已证明窄async cause与bounded listener composition路线，临时probe与feature启用均已删除。
+  Stage 1已交付production handoff、UDP/ICMP raw原子迁移与Stack-private TCP foundation；双架构focused回归通过，
+  LA64只证明完整shutdown顺序、不宣称wrapper exit 0。Stage 2的CKPT 2A/2B已分别关闭：先建立kernel窄TCP owner
+  capability，再接入syscall-unreachable Socket front。Stage 3的CKPT 3A已闭合Stack owner fact/lifecycle，CKPT 3B
+  已完成仍不可达的Socket/ABI completion与同owner TCP family目录化；RV64/LA64 release build、RV64 KUnit `459/459`、
+  既有Socket consumer回归与独立review通过。CKPT 4A随后以Stack owner facts、recheck-only invalidation、weak reverse
+  route和shared production source闭合TCP readiness/connect/accept wait与lifecycle；host TCP owner `20/20`、focused
+  smoltcp TCP `178/178`、RV64 KUnit `465/465`、RV64/LA64 release build与独立复审通过。CKPT 4B通过唯一normal
+  resolver发布完整TCP creation tuple，闭合connect errno、`SO_ERROR` single-consumer/rearm与binding/local分离；
+  exact-source RV64 KUnit `466/466`、双libc TCP oracle、socket LTP `8/8`、shared regression、LA64 release build与
+  最终独立review通过。Stage 5随后以单一Checkpoint 5A完成长期`socket-test` TCP suite、双架构双libc focused
+  consumer、self/remote-external、established RST、CAgent、shared regression与architecture capstone；独立review
+  最终为`0 Apollyon / 0 Keter / 0 Euclid / 0 Safe`。`NET-TCP-CUTOVER`已Introduce三项TCP current contract并Refine
+  `SOCKET-ABI-001`，transaction None；physical hardware、`smp>1`、其它NIC/platform、full network LTP、完整final
+  harness与条件性deployment probe保持Not Run。
+  当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
+  [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current effective规则见Network与Socket contract，
+  register没有新增当前问题。
+- [RFC-20260809-read-only-network-diagnostics](./rfcs/read-only-network-diagnostics/index.md)：Closed R0；交付
+  initial-domain、IPv4-only、request-time snapshot的只读netlink子集，使未修改`ip link/addr/route show`与
+  `ss -tan`可读取logical interface、static control plane与TCP owner facts。既有网络owner不迁移；新增netlink
+  transport只拥有port、budget state与bounded pending reply work，诊断snapshot不得反向驱动网络行为。
+  `NETLINK-DIAGNOSTICS-CUTOVER`已Introduce三项netlink current contract并Refine `SOCKET-ABI-001`；双架构
+  KUnit、raw oracle与未修改BusyBox/iproute2工具通过，独立review为全0，supporting pages与transaction未创建。
 - [RFC-20260726-system-power](./rfcs/system-power/index.md)：R0 已实现并关闭；`power` 唯一拥有 terminal
   episode，orderly 当前以静态 `filesystem -> network -> device -> machine` plan fail-forward，panic/emergency 跳过
   ordinary plan并共用 machine-handler fallback。四个 ID 已原子写入
@@ -175,7 +213,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 - [RFC-20260616-kthread-core](./rfcs/kthread-core/index.md)：已接受、阶段 6 implementation gate 已关闭；纠偏 kthread core，定义 procfs-visible singleton thread group、固定 `kthreadd` TID 2、strong handle、专用 exit、user-facing API fail-closed，以及移除 service/park 的迁移 gate。
 - [RFC-20260614-kthread](./rfcs/kthread/index.md)：历史基线；记录已落地的轻量 kthread 创建代理、typed entry、stop/park 生命周期和 `KThreadService` 后台 worker 合同，已由 `kthread-core` supersede。
 - [RFC-20260614-inode-shrinker](./rfcs/inode-shrinker/index.md)：自循环 `io_shrink_threshold` gate 的 inode cache shrinker、superblock eviction path 和 ext4 backing file cache 计数合同。
-- [RFC-20260615-oom-killer](./rfcs/oom-killer/index.md)：物理页阈值触发的 OOM killer、按独占物理页选择用户进程和 clone 内存压力 user-app-test 计划。
+- [RFC-20260615-oom-killer](./rfcs/oom-killer/index.md)：Terminated历史proposal；allocation-success wake target未闭合runtime acceptance，当前OOM trigger与policy由[`MM-OOM-001`](./contracts/mm/oom-policy.md#mm-oom-001--oom-worker自有fixed-delay采样与victim-round)定义。
 - [RFC-20260602-cred-merge](./rfcs/cred-merge/index.md)：credentials feature merge 的 canonical 执行计划和审查合同。
 - [RFC-20260606-signal-temp-mask-restore](./rfcs/signal-temp-mask-restore/index.md)：`rt_sigsuspend`、`ppoll`、`pselect6` 临时 signal mask delayed restore 协议、trap-return delivery handoff 和 staged 实施计划。
 - [RFC-20260605-fileops-seek-char-ioctl](./rfcs/fileops-seek-char-ioctl/index.md)：`FileOps::seek`、positioned I/O 分层和字符设备 ioctl 默认分发计划。

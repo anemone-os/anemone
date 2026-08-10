@@ -3,6 +3,6 @@
 # Canonical SystemTarget filename slug.
 target = "example"
 # Workspace-relative KernelConfig input.
-kernel-config = "conf/.defconfig"
+kernel-config = "conf/kconfs/default.toml"
 # Kernel Cargo build profile only; app and rootfs tasks do not consume it.
 profile = "release"

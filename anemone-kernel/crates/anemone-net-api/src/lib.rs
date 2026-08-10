@@ -7,6 +7,7 @@ pub mod icmp_raw;
 mod interface;
 mod ipv4;
 mod pump;
+pub mod tcp;
 mod time;
 pub mod udp;
 

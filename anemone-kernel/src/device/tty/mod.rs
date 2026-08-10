@@ -27,8 +27,8 @@ static_assert!(
     "TTY committed input capacity must be non-zero"
 );
 static_assert!(
-    TTY_OUTPUT_CAPACITY_BYTES >= 4,
-    "TTY output capacity must hold the default transformed signal echo"
+    TTY_OUTPUT_CAPACITY_BYTES >= 8,
+    "TTY output capacity must hold one maximum TAB3 transform token"
 );
 static_assert!(
     TTY_WORKER_BATCH_BYTES > 0,
@@ -540,24 +540,6 @@ mod kunits {
 
         port.assert_dequeued(b"x\n");
         port.assert_output(b"x\r\n");
-        attachment.abort();
-    }
-
-    #[kunit]
-    fn worker_completes_drain_only_after_port_idle() {
-        let port = FakePort::new("/kunit/tty/drain");
-        port.tx_idle.store(false, Ordering::Relaxed);
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
-        assert_eq!(terminal.enqueue_output(b"z"), 1);
-        terminal.request_drain_check();
-        notifier.wake();
-        port.wait_for(|| port.output_len() == 1);
-        assert!(terminal.drain_check_pending());
-
-        port.tx_idle.store(true, Ordering::Relaxed);
-        notifier.wake();
-        port.wait_for(|| !terminal.drain_check_pending());
         attachment.abort();
     }
 

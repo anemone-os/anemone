@@ -52,7 +52,7 @@ pub fn kernel_execve_from_pathref(
     ) {
         Ok(meta) => {
             let new_cred = meta.cred;
-            let usp = Arc::new(UserSpaceHandle::new(usp, meta.exe));
+            let usp = Arc::new(UserSpaceHandle::new(usp, meta.exe)?);
             unsafe {
                 if !task.flags().is_kernel() {
                     if let Err(e) = exit_robust_list() {
@@ -82,9 +82,14 @@ pub fn kernel_execve_from_pathref(
                 task.sig_altstack.lock().take();
                 // mask, pending stay unchanged.
 
-                if let Some(old_uspace) = old_uspace.take() {
-                    if task.is_last_user_of_uspace(&old_uspace) {
+                if let Some(old_uspace) = &old_uspace {
+                    if task.is_last_user_of_uspace(old_uspace) {
                         old_uspace.detach_all_sysv_shm_for(tgid);
+                        // The current CPU still runs on the old page table.
+                        // Retire its mappings through the address-space
+                        // completion owner before activating and publishing the
+                        // replacement image.
+                        old_uspace.clear();
                     }
                 }
 
@@ -101,7 +106,10 @@ pub fn kernel_execve_from_pathref(
                 // this operation must be placed after dethreading.
                 // dethreading possibly triggers yield, which will change mapping to old
                 // uspace!!!
-                usp.activate();
+                activate_mapping_transition(old_uspace.as_deref(), Some(&usp));
+                // The old mapping is no longer resident on this CPU. Drop this
+                // extra reference before the no-return context handoff.
+                drop(old_uspace.take());
                 task.reset_arch_properties_for_exec();
                 task.switch_exec_ctx(name, usp, flags, false);
 

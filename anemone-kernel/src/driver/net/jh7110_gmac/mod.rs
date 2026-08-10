@@ -27,6 +27,7 @@ use crate::{
     exception::intr::request_irq_selected,
     mm::remap::ioremap,
     prelude::*,
+    time::MonotonicInstant,
     utils::{any_opaque::AnyOpaque, identity::AnyIdentity},
 };
 
@@ -374,7 +375,7 @@ impl DriverOps for JH7110GmacDriver {
 fn wait_for_reset_stabilization() {
     // Linux stmmac waits 10 us after pulsing stmmaceth and deasserting the
     // shared AHB reset before touching the DWMAC register file.
-    let start = Instant::now();
+    let start = MonotonicInstant::now();
     let delay = Duration::from_micros(10);
     while start.elapsed() < delay {
         core::hint::spin_loop();

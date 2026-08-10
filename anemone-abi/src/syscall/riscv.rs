@@ -237,6 +237,7 @@ pub mod linux {
     pub const SYS_SENDMSG: u64 = 211;
     pub const SYS_RECVMSG: u64 = 212;
     pub const SYS_ACCEPT4: u64 = 242;
+    pub const SYS_SENDMMSG: u64 = 269;
 
     pub const SYS_READAHEAD: u64 = 213;
 

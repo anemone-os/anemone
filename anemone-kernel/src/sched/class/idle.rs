@@ -23,23 +23,23 @@ impl Scheduler for Idle {
         panic!("idle scheduler should not be dequeued with any task");
     }
 
-    fn requeue_yielded_current(&mut self, _task: Arc<Task>, _now: Instant) {
+    fn requeue_yielded_current(&mut self, _task: Arc<Task>, _now: MonotonicInstant) {
         panic!("idle scheduler should not requeue current task");
     }
 
-    fn requeue_preempted_current(&mut self, _task: Arc<Task>, _now: Instant) {
+    fn requeue_preempted_current(&mut self, _task: Arc<Task>, _now: MonotonicInstant) {
         panic!("idle scheduler should not requeue current task");
     }
 
-    fn handoff_woken_current(&mut self, _task: Arc<Task>, _now: Instant) {
+    fn handoff_woken_current(&mut self, _task: Arc<Task>, _now: MonotonicInstant) {
         panic!("idle scheduler should not requeue current task");
     }
 
-    fn put_prev_blocked(&mut self, _task: &Arc<Task>, _now: Instant) {
+    fn put_prev_blocked(&mut self, _task: &Arc<Task>, _now: MonotonicInstant) {
         panic!("idle task should not block");
     }
 
-    fn put_prev_exiting(&mut self, _task: &Arc<Task>, _now: Instant) {
+    fn put_prev_exiting(&mut self, _task: &Arc<Task>, _now: MonotonicInstant) {
         panic!("idle task should not exit");
     }
 
@@ -47,11 +47,11 @@ impl Scheduler for Idle {
         Some(IDLE_TASK.with(|task| (**task).clone()))
     }
 
-    fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn set_next_task(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         assert!(matches!(task.sched_class_kind(), SchedClassKind::Idle));
     }
 
-    fn task_tick(&mut self, cur_task: &Arc<Task>, _now: Instant) -> TickAction {
+    fn task_tick(&mut self, cur_task: &Arc<Task>, _now: MonotonicInstant) -> TickAction {
         assert!(matches!(cur_task.sched_class_kind(), SchedClassKind::Idle));
         TickAction::RequestResched
     }
@@ -60,7 +60,7 @@ impl Scheduler for Idle {
         &mut self,
         _current: &Arc<Task>,
         candidate: &Arc<Task>,
-        _now: Instant,
+        _now: MonotonicInstant,
     ) -> PreemptDecision {
         assert!(matches!(candidate.sched_class_kind(), SchedClassKind::Idle));
         PreemptDecision::KeepCurrent

@@ -53,10 +53,26 @@ mod primitives {
     use super::*;
 
     fn init_new_inode_metadata(inode: &InodeRef, perm: InodePerm, uid: Uid, gid: Gid) {
-        let ctime = realtime();
+        let ctime = RealtimeInstant::now().to_duration();
 
         inode.chown(Some(uid), Some(gid), ctime);
         inode.chmod(perm, ctime);
+    }
+
+    fn unpublish_and_forget_child(
+        sb: &Arc<SuperBlock>,
+        parent: &Arc<Dentry>,
+        name: &str,
+    ) -> Result<(), SysError> {
+        match parent.take_child(name) {
+            Ok(child) => {
+                // Namespace visibility is withdrawn before extra residency.
+                sb.forget_positive_dentry(&child);
+                Ok(())
+            },
+            Err(SysError::NotFound) => Ok(()),
+            Err(err) => Err(err),
+        }
     }
 
     /// Mount a filesystem at the specified mountpoint.
@@ -130,10 +146,12 @@ mod primitives {
     ) -> Result<PathRef, SysError> {
         parent.mount().ensure_writable()?;
 
+        let sb = parent.inode().sb();
+        let admission = sb.prepare_positive_dentry_admission();
         let inode = parent.inode().touch(name, perm)?;
         init_new_inode_metadata(&inode, perm, uid, gid);
 
-        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode, admission)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -148,8 +166,10 @@ mod primitives {
         }
         parent.mount().ensure_writable()?;
 
+        let sb = parent.inode().sb();
+        let admission = sb.prepare_positive_dentry_admission();
         let inode = parent.inode().make_node(name, description)?;
-        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode, admission)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -191,10 +211,12 @@ mod primitives {
     ) -> Result<PathRef, SysError> {
         parent.mount().ensure_writable()?;
 
+        let sb = parent.inode().sb();
+        let admission = sb.prepare_positive_dentry_admission();
         let inode = parent.inode().mkdir(name, perm)?;
         init_new_inode_metadata(&inode, perm, uid, gid);
 
-        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode, admission)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -253,9 +275,11 @@ mod primitives {
         }
 
         parent.mount().ensure_writable()?;
+        let sb = parent.inode().sb();
+        let admission = sb.prepare_positive_dentry_admission();
         let inode = parent.inode().symlink(name, target)?;
         init_new_inode_metadata(&inode, InodePerm::all_rwx(), uid, gid);
-        let dentry = materialize_child_dentry(parent.dentry(), name, inode)?;
+        let dentry = materialize_child_dentry(parent.dentry(), name, inode, admission)?;
 
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
@@ -272,13 +296,12 @@ mod primitives {
         let (parent, name) = resolve_parent_from(dir, rel_path, ResolveFlags::empty())?;
         parent.mount().ensure_writable()?;
         parent.inode().unlink(&name)?;
+        let sb = parent.inode().sb();
+        sb.invalidate_positive_dentry_admissions();
 
         // remove the dentry from the cache to prevent stale lookups. the child
         // may never have been cached, which is not an error.
-        match parent.dentry().remove_child(&name) {
-            Ok(()) | Err(SysError::NotFound) => (),
-            Err(err) => return Err(err),
-        }
+        unpublish_and_forget_child(&sb, parent.dentry(), &name)?;
 
         Ok(())
     }
@@ -340,16 +363,11 @@ mod primitives {
         old_parent
             .inode()
             .rename(&old_name, new_dir.inode(), new_name, flags)?;
+        let sb = old_parent.inode().sb();
+        sb.invalidate_positive_dentry_admissions();
 
-        match old_parent.remove_child(&old_name) {
-            Ok(()) | Err(SysError::NotFound) => (),
-            Err(err) => return Err(err),
-        }
-
-        match new_dir.dentry().remove_child(new_name) {
-            Ok(()) | Err(SysError::NotFound) => (),
-            Err(err) => return Err(err),
-        }
+        unpublish_and_forget_child(&sb, &old_parent, &old_name)?;
+        unpublish_and_forget_child(&sb, new_dir.dentry(), new_name)?;
 
         Ok(())
     }
@@ -392,13 +410,12 @@ mod primitives {
         parent.mount().ensure_writable()?;
 
         parent.inode().rmdir(&name)?;
+        let sb = parent.inode().sb();
+        sb.invalidate_positive_dentry_admissions();
 
         // remove the dentry from the cache to prevent stale lookups. the child
         // may never have been cached, which is not an error.
-        match parent.dentry().remove_child(&name) {
-            Ok(()) | Err(SysError::NotFound) => (),
-            Err(err) => return Err(err),
-        }
+        unpublish_and_forget_child(&sb, parent.dentry(), &name)?;
 
         Ok(())
     }

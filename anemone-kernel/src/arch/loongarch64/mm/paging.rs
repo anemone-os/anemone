@@ -285,7 +285,13 @@ impl PteArch for LA64PageTableEntry {
     }
 
     fn ppn(&self) -> PhysPageNum {
-        PhysPageNum::new((self.0 & !Self::FLAG_MASK) >> Self::PPN_OFFSET)
+        let mut paddr = self.0 & !Self::FLAG_MASK;
+        if !self.la_is_in_leaf_table() && self.is_leaf() {
+            // Bit 12 is G in a huge PTE, but remains physical-address bit 12
+            // in ordinary leaf and branch entries.
+            paddr &= !LA64PteFlags::LA_HUGE_GLOBAL.bits();
+        }
+        PhysPageNum::new(paddr >> Self::PPN_OFFSET)
     }
 
     fn is_leaf(&self) -> bool {
@@ -449,5 +455,23 @@ impl LA64PteFlags {
             flags |= PteFlags::GLOBAL;
         }
         flags
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn ordinary_leaf_ppn_preserves_physical_bit_twelve() {
+        let ppn = PhysPageNum::new(0x80801);
+        let pte = LA64PageTableEntry::new(
+            ppn,
+            PteFlags::VALID | PteFlags::READ | PteFlags::GLOBAL,
+            0,
+        );
+
+        assert_ne!(pte.get() & LA64PteFlags::LA_HUGE_GLOBAL.bits(), 0);
+        assert_eq!(pte.ppn(), ppn);
     }
 }

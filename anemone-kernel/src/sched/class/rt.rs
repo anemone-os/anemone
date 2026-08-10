@@ -390,22 +390,22 @@ impl Scheduler for Realtime {
         removed
     }
 
-    fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn requeue_yielded_current(&mut self, task: Arc<Task>, _now: MonotonicInstant) {
         Self::clear_current_rotation(&task);
         self.enqueue_at(task, QueuePlacement::Back);
     }
 
-    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn requeue_preempted_current(&mut self, task: Arc<Task>, _now: MonotonicInstant) {
         let placement = Self::consume_preempted_placement(&task);
         self.enqueue_at(task, placement);
     }
 
-    fn handoff_woken_current(&mut self, task: Arc<Task>, _now: Instant) {
+    fn handoff_woken_current(&mut self, task: Arc<Task>, _now: MonotonicInstant) {
         Self::clear_current_rotation(&task);
         self.enqueue_at(task, QueuePlacement::Back);
     }
 
-    fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn put_prev_blocked(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         let (_, _, on_runq) = Self::entity_snapshot(task);
         assert!(
             !on_runq,
@@ -414,7 +414,7 @@ impl Scheduler for Realtime {
         Self::clear_current_rotation(task);
     }
 
-    fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn put_prev_exiting(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         let (_, _, on_runq) = Self::entity_snapshot(task);
         assert!(
             !on_runq,
@@ -436,13 +436,13 @@ impl Scheduler for Realtime {
         Some(task)
     }
 
-    fn set_next_task(&mut self, task: &Arc<Task>, _now: Instant) {
+    fn set_next_task(&mut self, task: &Arc<Task>, _now: MonotonicInstant) {
         let (_, _, on_runq) = Self::entity_snapshot(task);
         assert!(!on_runq, "next RT task must not be marked on the run queue");
         Self::assert_rotation_clear(task);
     }
 
-    fn task_tick(&mut self, task: &Arc<Task>, _now: Instant) -> TickAction {
+    fn task_tick(&mut self, task: &Arc<Task>, _now: MonotonicInstant) -> TickAction {
         let (mode, priority, _) = Self::entity_snapshot(task);
         let has_peer = self.has_peer_at(priority);
         let committed = task.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
@@ -485,7 +485,7 @@ impl Scheduler for Realtime {
         &mut self,
         current: &Arc<Task>,
         candidate: &Arc<Task>,
-        _now: Instant,
+        _now: MonotonicInstant,
     ) -> PreemptDecision {
         let (_, current_priority, current_on_runq) = Self::entity_snapshot(current);
         let (_, candidate_priority, candidate_on_runq) = Self::entity_snapshot(candidate);
@@ -555,7 +555,7 @@ mod kunits {
     fn exhaust_quantum(rt: &mut Realtime, current: &Arc<Task>) -> TickAction {
         let mut action = TickAction::None;
         for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
-            action = rt.task_tick(current, Instant::now());
+            action = rt.task_tick(current, MonotonicInstant::now());
         }
         action
     }
@@ -567,7 +567,7 @@ mod kunits {
     }
 
     fn tick_after_committed_rotation(rt: &mut Realtime, current: &Arc<Task>) -> u32 {
-        let action = rt.task_tick(current, Instant::now());
+        let action = rt.task_tick(current, MonotonicInstant::now());
         let expected_remaining = if RT_RR_FULL_QUANTUM_TICKS == 1 {
             assert_eq!(action, TickAction::RequestResched);
             RT_RR_FULL_QUANTUM_TICKS
@@ -660,7 +660,7 @@ mod kunits {
                 entity.on_runq = true;
             });
             assert_eq!(
-                rt.decide_preempt_current(&current, candidate, Instant::now()),
+                rt.decide_preempt_current(&current, candidate, MonotonicInstant::now()),
                 expected
             );
         }
@@ -676,7 +676,7 @@ mod kunits {
 
         rt.enqueue_woken(peer.clone());
         rt.enqueue_new(higher.clone());
-        rt.requeue_preempted_current(current.clone(), Instant::now());
+        rt.requeue_preempted_current(current.clone(), MonotonicInstant::now());
 
         assert_next_is(&mut rt, &higher);
         assert_next_is(&mut rt, &current);
@@ -698,7 +698,7 @@ mod kunits {
             TickAction::RequestResched
         );
         assert!(runtime(&current).rotation_due());
-        rt.requeue_preempted_current(current.clone(), Instant::now());
+        rt.requeue_preempted_current(current.clone(), MonotonicInstant::now());
         assert!(!runtime(&current).rotation_due());
 
         assert_next_is(&mut rt, &higher);
@@ -721,7 +721,7 @@ mod kunits {
         let expected_remaining = tick_after_committed_rotation(&mut rt, &current);
 
         assert!(runtime(&current).rotation_due());
-        rt.requeue_preempted_current(current.clone(), Instant::now());
+        rt.requeue_preempted_current(current.clone(), MonotonicInstant::now());
 
         assert_next_is(&mut rt, &peer);
         assert_next_is(&mut rt, &current);
@@ -746,7 +746,7 @@ mod kunits {
         );
         assert!(runtime(&current).rotation_due());
 
-        rt.requeue_preempted_current(current.clone(), Instant::now());
+        rt.requeue_preempted_current(current.clone(), MonotonicInstant::now());
         assert!(!runtime(&current).rotation_due());
     }
 
@@ -756,7 +756,7 @@ mod kunits {
 
         assert_next_is(&mut rt, &peer);
         assert!(rt.pick_next_task().is_none());
-        rt.requeue_preempted_current(current.clone(), Instant::now());
+        rt.requeue_preempted_current(current.clone(), MonotonicInstant::now());
 
         assert!(!runtime(&current).rotation_due());
         assert_next_is(&mut rt, &current);
@@ -766,7 +766,7 @@ mod kunits {
     fn test_yield_handoff_block_and_exit_clear_rotation_obligation() {
         let (mut yielded_rt, yielded, _) = setup_committed_rotation();
         let yielded_remaining = tick_after_committed_rotation(&mut yielded_rt, &yielded);
-        yielded_rt.requeue_yielded_current(yielded.clone(), Instant::now());
+        yielded_rt.requeue_yielded_current(yielded.clone(), MonotonicInstant::now());
         assert_eq!(
             runtime(&yielded),
             RtRuntime::RoundRobin {
@@ -777,7 +777,7 @@ mod kunits {
 
         let (mut handoff_rt, handoff, _) = setup_committed_rotation();
         let handoff_remaining = tick_after_committed_rotation(&mut handoff_rt, &handoff);
-        handoff_rt.handoff_woken_current(handoff.clone(), Instant::now());
+        handoff_rt.handoff_woken_current(handoff.clone(), MonotonicInstant::now());
         assert_eq!(
             runtime(&handoff),
             RtRuntime::RoundRobin {
@@ -788,7 +788,7 @@ mod kunits {
 
         let (mut blocked_rt, blocked, _) = setup_committed_rotation();
         let blocked_remaining = tick_after_committed_rotation(&mut blocked_rt, &blocked);
-        blocked_rt.put_prev_blocked(&blocked, Instant::now());
+        blocked_rt.put_prev_blocked(&blocked, MonotonicInstant::now());
         assert_eq!(
             runtime(&blocked),
             RtRuntime::RoundRobin {
@@ -807,7 +807,7 @@ mod kunits {
 
         let (mut exiting_rt, exiting, _) = setup_committed_rotation();
         let exiting_remaining = tick_after_committed_rotation(&mut exiting_rt, &exiting);
-        exiting_rt.put_prev_exiting(&exiting, Instant::now());
+        exiting_rt.put_prev_exiting(&exiting, MonotonicInstant::now());
         assert_eq!(
             runtime(&exiting),
             RtRuntime::RoundRobin {
@@ -825,7 +825,10 @@ mod kunits {
         let mut rt = Realtime::new();
         rt.enqueue_new(peer);
 
-        assert_eq!(rt.task_tick(&current, Instant::now()), TickAction::None);
+        assert_eq!(
+            rt.task_tick(&current, MonotonicInstant::now()),
+            TickAction::None
+        );
         current.with_sched_entity_mut(SchedEntityMutToken::new(), |entity| {
             assert_eq!(entity.realtime().runtime, RtRuntime::Fifo);
         });
@@ -870,10 +873,10 @@ mod kunits {
         let mut runq = RunQueue::new();
         runq.enqueue_new(current.clone());
         let current = runq.pick_next_task();
-        runq.set_next_task(&current, Instant::now());
+        runq.set_next_task(&current, MonotonicInstant::now());
         runq.enqueue_new(peer.clone());
         for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
-            let _ = runq.task_tick(&current, Instant::now());
+            let _ = runq.task_tick(&current, MonotonicInstant::now());
         }
         let committed = runtime(&current);
         assert!(committed.rotation_due());
@@ -903,7 +906,7 @@ mod kunits {
         );
         assert_eq!(runtime(&current), committed);
 
-        runq.requeue_preempted_current(current.clone(), Instant::now());
+        runq.requeue_preempted_current(current.clone(), MonotonicInstant::now());
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &peer));
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &current));
     }
@@ -918,11 +921,11 @@ mod kunits {
         let mut runq = RunQueue::new();
         runq.enqueue_new(current.clone());
         let current = runq.pick_next_task();
-        runq.set_next_task(&current, Instant::now());
+        runq.set_next_task(&current, MonotonicInstant::now());
         runq.enqueue_new(old_peer.clone());
         runq.enqueue_new(new_peer.clone());
         for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
-            let _ = runq.task_tick(&current, Instant::now());
+            let _ = runq.task_tick(&current, MonotonicInstant::now());
         }
         let RtRuntime::RoundRobin {
             remaining_ticks,
@@ -954,7 +957,7 @@ mod kunits {
             }
         );
 
-        runq.requeue_preempted_current(current.clone(), Instant::now());
+        runq.requeue_preempted_current(current.clone(), MonotonicInstant::now());
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &old_peer));
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &current));
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &new_peer));
@@ -968,10 +971,10 @@ mod kunits {
         let mut runq = RunQueue::new();
         runq.enqueue_new(current.clone());
         let current = runq.pick_next_task();
-        runq.set_next_task(&current, Instant::now());
+        runq.set_next_task(&current, MonotonicInstant::now());
         runq.enqueue_new(peer.clone());
         for _ in 0..RT_RR_FULL_QUANTUM_TICKS {
-            let _ = runq.task_tick(&current, Instant::now());
+            let _ = runq.task_tick(&current, MonotonicInstant::now());
         }
         assert!(runtime(&current).rotation_due());
 
@@ -991,7 +994,7 @@ mod kunits {
             Ok(true)
         );
         assert_eq!(runtime(&current), RtRuntime::Fifo);
-        runq.requeue_preempted_current(current.clone(), Instant::now());
+        runq.requeue_preempted_current(current.clone(), MonotonicInstant::now());
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &current));
         assert!(Arc::ptr_eq(&runq.pick_next_task(), &peer));
     }
