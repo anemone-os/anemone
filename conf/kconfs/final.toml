@@ -6,7 +6,7 @@ fs_ext4 = true
 kernel_preempt = false
 spin_lock_irqsave = true
 soft_unaligned_access = false
-kernel_symbols = true
+kernel_symbols = false
 perf_observe = false
 
 [parameters]
