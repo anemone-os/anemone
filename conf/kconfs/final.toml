@@ -5,7 +5,7 @@ kunit = false
 fs_ext4 = true
 kernel_preempt = false
 spin_lock_irqsave = true
-soft_unaligned_access = true
+soft_unaligned_access = false
 kernel_symbols = true
 perf_observe = false
 
