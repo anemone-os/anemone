@@ -56,6 +56,7 @@ pub struct Parameters {
     pub record_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub riscv64_tlb_flush_all_threshold_pages: Option<usize>,
+    pub loongarch64_tlb_flush_all_min_pages: Option<usize>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
@@ -181,6 +182,7 @@ impl Parameters {
         materialize!(record_log_level);
         materialize!(kstack_shift_kb);
         materialize!(riscv64_tlb_flush_all_threshold_pages);
+        materialize!(loongarch64_tlb_flush_all_min_pages);
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
@@ -323,6 +325,9 @@ pub const KSTACK_SHIFT_KB: u64 = {};
 /// RV64 page-range length above which one full local TLB flush replaces
 /// per-page invalidation.
 pub const RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES: usize = {};
+/// Minimum LA64 page-range length at which one full local TLB flush replaces
+/// per-page invalidation.
+pub const LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES: usize = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum number of logical CPUs enabled by this kernel
@@ -547,6 +552,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(record_log_level),
             resolved!(kstack_shift_kb),
             resolved!(riscv64_tlb_flush_all_threshold_pages),
+            resolved!(loongarch64_tlb_flush_all_min_pages),
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
