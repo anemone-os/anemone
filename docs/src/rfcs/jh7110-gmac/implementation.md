@@ -1,15 +1,15 @@
 # JH7110 GMAC 实施路线
 
-**状态：** Accepted / R4
-**最后更新：** 2026-08-09
+**状态：** Closed / R5
+**最后更新：** 2026-08-10
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**当前修订：** R4
+**当前修订：** R5
 
 ## 全局 Implementation Boundary
 
 - **Target / non-goals：** 任意有限数量 JH7110 matching nodes 的 one-time boot driver、命名 IRQ、
-  coherent DMA、per-node provider、success-order `eth<N>` 与既有单接口 static IPv4；不实现板级
-  clock/reset/syscon/PHY owner、runtime lifecycle、offload、多 queue 或多 IP。初始化或 publication
+  coherent DMA、per-node provider、boot-time Motorcomm PHY 初始化、success-order `eth<N>` 与既有单接口
+  static IPv4；不实现板级 clock/reset/syscon owner、generic PHY framework、runtime lifecycle、offload、多 queue 或多 IP。初始化或 publication
   失败的 candidate 不进入 logical identity owner；现有 VirtIO publication/attach path保持不变。
 - **Owner / handoff / failure / cleanup：** generic clock/reset providers 拥有 consumer admission transaction，
   已 enable clock 与已完成 reset 不回滚，reset failure 只隔离当前 node；per-node provider拥有 hardware
@@ -20,16 +20,15 @@
   path与 shutdown order 不变。只有 `IRQ-FLOW-001` 在最终 `JH7110-GMAC-CUTOVER` Refine；
   `NET-IFACE-DOMAIN-001` 与 `NET-ATTACH-001` 作为 unchanged dependencies 沿用。QEMU 永远不是本 RFC
   acceptance。
-- **Validation claim：** 每 Gate 后只形成 source/build/targeted-test 检查；所有 Gate 完成后才运行
-  VisionFive 2 完整验收。在此之前最终硬件 acceptance 事实保持 Not Run；Gate-specific board
-  diagnostics 只作为诊断证据，不改变该边界。
+- **Validation claim：** 每 Gate 后形成 source/build/targeted-test 检查；所有 Gate 完成后运行
+  VisionFive 2 完整验收。用户已确认静态审计与上板运行通过，最终 hardware acceptance 在本次 closure
+  完成；QEMU 仍只作为 regression-only evidence。
 - **Stop conditions：** 发现需要改变 target/owner/handoff/failure/cleanup/ABI/contract/acceptance，
   需要扩大 generic controller API/contract、让 GMAC 保存 clock/reset 状态、fence 被误当作 coherency
   保证，或不能保持 per-node isolation，
   必须停止并回 RFC review / Target Renegotiation。
 
-Gate 0--3 是同一 RFC 实现的有序阶段，不是独立产品 release。用户后续若只授权某一个 Gate，完成其
-post-gate check 后必须停止。本文当前只规划路线，不授权实现。
+Gate 0--3 是同一 RFC 实现的有序阶段，不是独立产品 release；四个 Gate 现已关闭。
 
 ## Gate 0 — Per-node discovery、resource、IRQ 与 controller/firmware handoff
 
@@ -220,7 +219,7 @@ Gate 3授权。
 
 ## Gate 3 — Production publication、attach 与 single IPv4 deployment
 
-**状态：** Planned / Not Run
+**状态：** Closed (software checks + user-run VisionFive 2 production acceptance)
 **Purpose：** 删除实施期占位/禁用路径，完成 ready netdev publication、现有 attach/worker/global Stack、
 单接口 static IPv4 和 terminal shutdown 的 production wiring。
 **Prerequisites：** Gate 2 post-gate check 关闭；所有 temporary probe/activation path 的退出条件已定位。
@@ -256,16 +255,17 @@ control-plane selection、provider retention 和 `filesystem -> network -> devic
   标记 `regression-only`，不能作为 JH7110 acceptance。
 - Architecture Friction Scan：检查 second truth、owner穿透、driver special-case control plane、隐含
   cleanup顺序、无退出条件 bridge以及通过弱化 test oracle 换取通过。
-- **Hardware status：** Not Run。Gate 3 post-gate check 完成后，四个实现 Gate 才共同满足进入板级验收
-  的前置条件；本检查本身不关闭 RFC 或 contract。
+- **Hardware status：** Passed (user-run VisionFive 2 production acceptance)。用户确认双节点 publication、
+  success-order identity、single IPv4 deployment、真实 RX/TX、PHY handoff、queue/ring progression、
+  IRQ/device-cause path 与 control-plane selection 通过；QEMU 不计入该硬件 claim。
 
-**Cutover：** None。
-**Stop / Exit：** source/build/tests/architecture review通过且 implementation tree 中没有临时路径后关闭
-Gate 3。若任何硬件相关 claim 被写成已通过，先纠正为 Not Run。随后才允许进入最终板级验收。
+**Cutover：** `JH7110-GMAC-CUTOVER`。
+**Stop / Exit：** source/build/tests/architecture review 与用户板级验收均通过；Gate 3 已关闭并进入最终
+RFC closure。
 
 ## 最终板级验收
 
-**状态：** Not Run
+**状态：** Passed / Closed
 **Purpose：** 在全部 Gate 实现和 post-gate check 完成后，以 VisionFive 2 对同一 production build
 一次性验证完整 target；这是唯一 JH7110 acceptance，不是第五个实现 Gate。
 **Prerequisites：** Gate 0--3 均关闭；无 blocking Architecture Friction；production build无 probe占位、
@@ -298,16 +298,17 @@ coherency bypass或test-only activation；测试所需两路外部 peer 与可�
   无新的 worker reactivation，device step抑制每个 GMAC 的 IRQ/DMA，未证明 quiesce 的 backing保持到
   reset/power-off。
 
-QEMU、host fake DMA/order backend和KUnit结果作为前置/回归证据附带记录，但不能替代以上任一板级项。
+QEMU、host fake DMA/order backend 和 KUnit 结果作为前置/回归证据附带记录，但不能替代以上任一板级项。
 若板级失败暴露 route correction，可在不改变 target/owner/acceptance 的前提下修复并重新执行完整 matrix；
 若要求改变这些边界，进入 Target Renegotiation，不能只豁免失败项。
 
 ### Cutover 与 closure
 
-全部 matrix 在同一可审查 production revision 上通过后，执行单个 `JH7110-GMAC-CUTOVER`：
+全部 matrix 在同一可审查 production revision 上通过，已执行单个 `JH7110-GMAC-CUTOVER`：
 
 - Refine `IRQ-FLOW-001`，纳入 name/index 单项 firmware interrupt resource selection；
 - 更新 RFC closure，记录 agent-run、user-run、Not Run、commit/PR 和仍开放的真正非目标；
-- 对最终 diff 执行 Architecture Friction Scan。Euclid 可带证据收口；Keter/Apollyon 阻止 cutover/closure。
+- 对最终 diff 执行 Architecture Friction Scan，未发现 blocking Keter/Apollyon；generic PHY、runtime link
+  management、hotplug、free_irq 和完整 device removal 保持非目标。
 
-任一 acceptance item 缺失时 `IRQ-FLOW-001` 保持旧规则，RFC 保持未关闭；不允许部分 cutover。
+本次 acceptance item 已由用户确认通过，`IRQ-FLOW-001` 已完成 cutover，RFC 关闭。

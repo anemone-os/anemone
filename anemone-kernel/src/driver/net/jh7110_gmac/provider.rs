@@ -10,7 +10,7 @@ use crate::{
 
 use super::irq::GmacIrqContext;
 
-/// Gate 2's per-node frame capability. The IRQ context is the sole owner of
+/// Per-node frame capability. The IRQ context is the sole owner of
 /// rings and MMIO, while this provider owns the frame-token protocol surface.
 pub(super) struct JH7110GmacProvider {
     context: Arc<GmacIrqContext>,
@@ -29,10 +29,6 @@ impl JH7110GmacProvider {
 
     pub(super) const fn ethernet_address(&self) -> EthernetAddress {
         self.mac
-    }
-
-    pub(super) fn suppress_device_causes(&self) {
-        self.context.suppress_device_causes();
     }
 
     fn reclaim_tx(&self) {

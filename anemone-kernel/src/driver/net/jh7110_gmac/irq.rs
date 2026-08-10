@@ -80,9 +80,15 @@ impl GmacIrqContext {
         })
     }
 
-    pub(super) fn suppress_device_causes(&self) {
+    pub(super) fn suppress_device(&self) {
         self.regs.disable_device_interrupts();
         self.regs.acknowledge_dma_causes();
+        self.regs.stop_dma();
+    }
+
+    pub(super) fn start_device(&self) {
+        self.regs.start_dma();
+        self.regs.enable_dma_interrupts();
     }
 
     pub(super) fn take_pending(&self) -> u32 {

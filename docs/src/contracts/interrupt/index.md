@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/exception/intr/irq/`、`anemone-kernel/src/driver/intc/`、注册IRQ的concrete device drivers
 **依赖：** None
 **Pending Successor：** None
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-10
 
 ## `IRQ-FLOW-001` - Controller flow与device cause handoff
 
@@ -26,6 +26,12 @@ IRQ core拥有从已解析descriptor进入flow到handler正常返回后完成con
 成功claim且已映射的source，正常返回路径必须exactly once执行所选flow要求的每个controller操作。当前mapping在
 descriptor发布后才unmask；翻译失败、重复request或descriptor建立失败不得启用source。当前不支持`free_irq`或
 runtime removal，因此mapping与handler能力持续到reset/power-off。
+
+在 descriptor 建立前，firmware-node / IRQ resource owner 必须按唯一的 interrupt name 或合法 index 选择
+恰好一个 firmware specifier；name 缺失、重复、长度不匹配、index 越界或 specifier 截取失败都必须在
+mapping/unmask 前返回错误。irqchip 只接收选中的单项 specifier，device driver 不解析 controller raw cells，
+也不把当前硬件 IRQ 数值提升为 ABI。该规则由 JH7110 GMAC 的 `macirq` production consumer 在最终
+VisionFive 2 验收中完成 cutover。
 
 device driver唯一拥有device-side cause。启用中断的driver必须在handler内、任何尾部eoi/complete/unmask之前清除、
 消费或以设备协议认可的方式撤销cause；IRQ core和irqchip不得猜测设备寄存器语义。纯polling设备或尚未实现
@@ -55,11 +61,13 @@ runtime proof。
 **Cutover前baseline：** IRQ core只保存trigger，并由edge/level固定推断flow；PLIC把source翻译成level以获得
 complete，Goldfish RTC在alarm未实现时仍注册空handler。该baseline从未形成stable current contract ID。
 
-**最初来源 / 当前来源：** [IRQ flow protocol小迭代](../../devlog/changes/2026-07-31-irq-flow-protocol.md)。
+**最初来源 / 当前来源：** [IRQ flow protocol小迭代](../../devlog/changes/2026-07-31-irq-flow-protocol.md)；
+JH7110 GMAC `JH7110-GMAC-CUTOVER`（2026-08-10）。
 
 ## 当前接受边界
 
-- 当前runtime proof只覆盖RV64 QEMU SiFive PLIC与LA64 QEMU PCH-PIC/EIOINTC上的单CPU VirtIO-Net traffic；
-  hardware、`smp>1`、2K1000 runtime和其它irqchip/device组合均Not Run。
+- 当前runtime proof覆盖RV64 QEMU SiFive PLIC与LA64 QEMU PCH-PIC/EIOINTC上的单CPU VirtIO-Net traffic，
+  以及用户确认的 VisionFive 2 JH7110 GMAC named-`macirq`/device-cause production path；`smp>1`、
+  2K1000 runtime和其它irqchip/device组合仍Not Run。
 - controller flow不代替设备driver的cause协议；未来RTC alarm、异步block或新driver必须自行证明enable/ack/disable。
 - 当前一次CPU external interrupt入口只claim一个source；bounded drain、公平性和storm containment不在本契约内。

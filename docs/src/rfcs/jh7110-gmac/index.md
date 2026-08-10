@@ -1,38 +1,38 @@
 # RFC-20260808-jh7110-gmac
 
-**状态：** Accepted
-**修订：** R4
+**状态：** Closed
+**修订：** R5
 **负责人：** Anemone maintainers
-**最后更新：** 2026-08-09
+**最后更新：** 2026-08-10
 **领域：** driver / net / irq / mm
 **影响契约：** `IRQ-FLOW-001`
-**执行记录：** Git commit（R0 acceptance；Gate 0/1 closure；R2--R4 target renegotiation）
+**执行记录：** Git commit（R0 acceptance；Gate 0--2 closure；R2--R5 target renegotiation；最终板级验收）
 
 ## 摘要
 
-本 RFC 提议为 JH7110 的 DWMAC 5.20 GMAC 节点实现 boot-time、one-time-initialized 的
+本 RFC 为 JH7110 的 DWMAC 5.20 GMAC 节点实现 boot-time、one-time-initialized 的
 以太网驱动。所有 `status = "okay"` 且 compatible 匹配的节点都按 DT discovery 顺序独立
 probe；每个节点拥有自己的 MMIO、DMA-coherent backing、descriptor ring、IRQ context、
 `FrameProvider`、worker 和 recheck edge，不建立 GMAC bus、GMAC 全局 registry 或固定双实例表。
 
 通用 clock/reset provider 拥有控制寄存器与 enable/reset transaction；GMAC 只按本节点 DT name 请求
 boot-time consumer admission，不保存 provider 状态，也不执行失败回滚。firmware 继续拥有 clock
-rate/mux、syscon/RGMII path 与 PHY handoff。本 RFC 不建立这些通用 owner，也不接管运行时 link
-management。驱动只在硬件 DMA coherency、ordering、
+rate/mux 与 syscon/RGMII path；GMAC 仅在 probe 中按板型配置通过 MDIO 完成一次性 Motorcomm PHY
+初始化并读取 link snapshot，不建立 generic PHY/MDIO owner，也不接管运行时 link management。驱动只在硬件 DMA coherency、ordering、
 DMA ownership、`macirq` 和 per-node resource 均成立后发布 netdev。多个已发布
 GMAC 进入现有 initial domain 与唯一 global Stack；沿用现有单个 `[network.ipv4]` 配置，只给
 配置选中的成功顺序 `eth<N>` 分配 IPv4 和唯一 default route。
 
-QEMU 没有该设备，不能提供本 RFC 的实现验收。四个实现 Gate 各自完成 source/build/targeted-test
-检查，但不产生硬件通过结论；只有所有 Gate 实现并检查后，才在 VisionFive 2 上执行一次完整
-板级验收。板级验收通过前不做 current-contract cutover，也不关闭 RFC。
+QEMU 没有该设备，不能提供本 RFC 的硬件验收；QEMU 仅承担既有 VirtIO/network regression。
+四个实现 Gate 完成 source/build/targeted-test 检查后，最终在 VisionFive 2 上完成双 GMAC 实机验收，
+并在本次 closure 执行 current-contract cutover。
 
 ## 背景
 
 仓库中的 VisionFive 2 DT 同时描述 `ethernet@16030000` 与 `ethernet@16040000`，两者具有独立
 MMIO 和三项中断，`interrupt-names` 顺序为 `macirq`、`eth_wake_irq`、`eth_lpi`。当前运行时
-观察已经确认 `ethernet@16040000` 提供 `local-mac-address`；GMAC0 仍必须在最终板级验收中
-独立确认，不能从 GMAC1 推导。
+观察已经确认两个节点分别提供独立 `local-mac-address`；最终板级验收确认了两者的独立
+MMIO、`macirq`、PHY、DMA 和 publication path，不能相互推导。
 
 当前 platform discovery 按 DT child order 同步注册设备；built-in platform driver 已在 DT
 展开前注册，因此每个匹配节点都会独立进入 `probe()`。这个路径已经满足 per-node discovery
@@ -62,6 +62,8 @@ visibility；现有 fence 仍只承担 ordering，不能替代 descriptor owners
 - 在 publication 前完成 coherent DMA visibility 的调用语义、memory/MMIO ordering、DMA address
   representation 与 descriptor/frame ownership proof；不以 coherency 假设掩盖 ordering 或 ownership
   错误。
+- 在 publication 前完成本板型 Motorcomm PHY 的 MDIO reset、RGMII 参数、自动协商和 link snapshot；不
+  将该一次性路径扩张为通用 PHY framework 或 runtime link manager。
 - 只有完成 clock/reset、MMIO/capability、rings、IRQ context、device-cause baseline 和 provider
   construction 的节点才允许 publish；初始化或 publication 失败不消费 `eth<N>`。
 - 沿用现有 publication 后 attach-time reservation：成功 publisher 按 publication/attach 顺序连续取得
@@ -77,8 +79,8 @@ runtime hotplug。
 
 ## 非目标
 
-- 新建或扩张通用 clock/reset/syscon/pinctrl/MDIO/PHY framework，以及 GMAC 直接解析 provider ID、写
-  controller register 或缓存 controller 状态。
+- 新建或扩张通用 clock/reset/syscon/pinctrl/MDIO/PHY framework，以及 GMAC 直接解析 syscon provider ID、
+  写 syscon controller register 或缓存 controller 状态。
 - 运行时 link renegotiation、cable hotplug policy、PHY interrupt、runtime detach/retry/restart。
 - Wake-on-LAN、EEE/LPI interrupt、TSO、checksum offload、PTP、Jumbo Frame 或多 queue。
 - 通用 DWMAC family、其它 SoC glue、SGMII、1000BASE-X 或非 `rgmii-id` 板型。
@@ -96,8 +98,9 @@ runtime hotplug。
 | interrupt name/index 解析与单项 specifier | firmware-node / IRQ resource layer | 解析后的单个 specifier 交给 irqchip `xlate()` |
 | controller mapping 与 dispatch flow | IRQ core / irqchip | handler 前后遵循 `IRQ-FLOW-001` |
 | clock gate 与 reset transaction | generic clock/reset provider | GMAC 按本节点 DT name 请求 one-time consumer admission |
-| clock rate/mux、syscon/RGMII path 与 PHY | firmware/board environment | GMAC 消费既有 board handoff，不建立运行时管理 |
-| MAC/DMA registers、rings、frames、completion、current link truth | per-node JH7110 provider | callback-scoped frame capability与durable recheck edge |
+| clock rate/mux 与 syscon/RGMII path | firmware/board environment | GMAC 消费既有 board handoff，不建立运行时管理 |
+| boot-time Motorcomm PHY reset/config/link snapshot | per-node JH7110 GMAC | MDIO transactions remain inside the node probe; no runtime renegotiation |
+| MAC/DMA registers、rings、frames、completion 与 probe-time link configuration | per-node JH7110 provider | callback-scoped frame capability与durable recheck edge；runtime link state保持`Unknown` |
 | netdev identity与publication record | `device/net` | published capability交给 attach authority |
 | logical identity、ifindex、`eth<N>` reservation与membership | initial-domain `LogicalInterfaces` | attach authority 在成功 publication 后创建并提交 reservation |
 | protocol `InterfaceId`与mapping | global `DomainStack` | worker只持自己的 narrow pump port |
@@ -125,6 +128,9 @@ runtime hotplug。
   已完成的 reset 也不因后续 probe 失败而重放或回滚。
 - provider ready/publication 前的 MAC、MMIO、IRQ、DMA 或 provider failure 不发布 netdev，也不消费 logical
   identity。已启用 clock/reset 仍按上述单向 admission 规则保留。
+- PHY ID、MDIO reset/config 失败只隔离当前 node；link 在 probe deadline 内未解析时，驱动以 warning 和已验收
+  的 1000/full MAC-configuration fallback 继续 publication，对外 link state 保持 `Unknown`；runtime
+  cable/link renegotiation 仍不在本 target。
 - IRQ 注册前的失败释放 owner-local allocations。IRQ 注册后因当前没有 `free_irq`，provider 必须
   disable device-side interrupt/DMA 并保留仍可被 IRQ/device 访问的 context/backing 到 reset/power-off。
 - publication 后 attach 失败按 `Stack mapping -> logical reservation` 顺序回滚，并保留 provider 为
@@ -164,8 +170,8 @@ identity/ifindex/name 与 protocol `InterfaceId` 继续是不同 identity domain
 | --- | --- | --- | --- | --- |
 | `IRQ-FLOW-001` | Refine | [controller flow 与 device cause handoff](../../contracts/interrupt/index.md#irq-flow-001---controller-flow与device-cause-handoff) | descriptor 建立前由 IRQ resource owner 按 name/index 唯一选择单项 firmware specifier；既有 controller/device cause 顺序不变 | `JH7110-GMAC-CUTOVER` |
 
-该 Refine 只在最终板级验收通过后 cut over。Gate 0--3 的局部检查不提前修改 current
-contract。
+该 Refine 已在最终板级验收通过后完成 `JH7110-GMAC-CUTOVER`；Gate 0--3 的局部检查此前没有修改
+current contract。
 
 ### Dependencies
 
@@ -179,26 +185,25 @@ contract。
 
 ## Implementation Boundary
 
-- **允许改变：** JH7110 net driver；按 name/index 选择单项 interrupt 的 FwNode/IRQ resource surface；
-  RISC-V/JH7110 coherent DMA sync/order capability；per-device staged provider state；owner-local tests、
-  target config/Kconfig 与必要 module registration。
+- **允许改变：** JH7110 net driver（含本板型 boot-time PHY 初始化）；按 name/index 选择单项 interrupt 的
+  FwNode/IRQ resource surface；RISC-V/JH7110 coherent DMA sync/order capability；per-device staged provider
+  state；owner-local tests、target config/Kconfig 与必要 module registration。
 - **必须保持：** per-node provider 是 queue/DMA/IRQ truth 的唯一 owner；driver 不拥有 logical
   namespace、route 或 Stack；现有 SystemTarget schema、socket ABI、single-control-plane 语义、
   VirtIO 的可见单接口行为与现有 publication/attach reservation path、frame callback boundary 和
   shutdown participant order。
 - **实现提示：** 预计涉及 `driver/net`、`exception/intr/irq`、firmware-node DT parsing、`mm/dma`、
   `device/net` 与 `net/domain`；这些是非穷举提示，不是逐文件 write set。
-- **验证 claim：** Gate 检查只证明 source/build/targeted semantics；JH7110 IRQ、coherency/order、PHY handoff、
-  双口收发和相同成功集合下的跨启动 identity 只能由最终 VisionFive 2 acceptance 证明。
-- **停止条件：** 任何证据要求 driver 接管 clock/reset/syscon/PHY owner，改变 SystemTarget 为多 IP，
+- **验证 claim：** Gate 检查证明 source/build/targeted semantics；JH7110 IRQ、coherency/order、boot-time PHY、
+  双口收发和 success-order identity 已由最终 VisionFive 2 acceptance 补齐。QEMU 不承担 JH7110 硬件 claim。
+- **停止条件：** 任何证据要求 driver 接管 clock/reset/syscon owner 或扩张为 generic PHY/runtime link owner，改变 SystemTarget 为多 IP，
   让 driver 保存 `eth<N>`/route/Stack truth，把 fence-only 当作硬件 coherency 保证，未证明 ordering、
   ownership 或 quiesce，使用固定 GMAC 数组，改变 frame ownership，或降低最终板级验收时，必须回到
   RFC review / Target Renegotiation。
 
 ## Acceptance 与 Validation
 
-接受本 R4 RFC 只表示同意上述 target、owner、contract delta 与实施路线，不表示 Gate 1 或完整硬件能力已经
-交付。实现 closure 必须依次满足：
+接受本 R5 RFC 表示上述 target、owner、contract delta 与实施路线已经完成。实现 closure 满足：
 
 1. Gate 0--3 全部实现，并在每个 Gate 后完成其 source audit、build、targeted tests 和
    Architecture Friction Scan。
@@ -208,9 +213,8 @@ contract。
 4. 只有上述证据同时成立，才执行单个 `JH7110-GMAC-CUTOVER`、更新 `IRQ-FLOW-001` 并将
    RFC 关闭。
 
-QEMU 可用于保护既有 VirtIO/network regression，但结果必须标记为 regression-only，不能计入本
-RFC acceptance。Gate 0 implementation 与用户确认通过的 VisionFive 2 Gate 0 board diagnostic 已关闭；
-完整 board acceptance 与 contract cutover 仍为 Not Run。
+QEMU 仅作为 regression-only 证据；Gate 0--3 的 source/build/targeted checks 已通过。用户确认静态审计
+和 VisionFive 2 双 GMAC 实机运行验收通过，完整 board acceptance 与 contract cutover 已在本次 closure 完成。
 
 ## 风险与反馈
 
@@ -226,8 +230,8 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
 - [目标与不变量](./invariants.md)
 - [实施路线](./implementation.md)
 - [RFC 前定位材料](./positioning.md)（非规范）
-- commit / PR / optional transaction：Git commits（R0 acceptance；Gate 0 closure；R2--R4 target
-  renegotiation；Gate 1 closure 与 review follow-up）；optional transaction 为 None，本 RFC 的执行证据
+- commit / PR / optional transaction：Git commits（R0 acceptance；Gate 0--2 closure；R2--R5 target
+  renegotiation；Gate 3 与最终板级 closure）；optional transaction 为 None，本 RFC 的执行证据
   由 Git 与本页 closure 保存。
 - 外部源码证据：固定 `xref:linux-6.6.32:arch/riscv/Kconfig#ARCH_DMA_DEFAULT_COHERENT`、
   `xref:linux-6.6.32:drivers/of/address.c#of_dma_is_coherent`、
@@ -254,15 +258,17 @@ acceptance，必须先回到 RFC review，不能把较弱路径记作完成。
   control plane 仍只匹配 exact committed name，不主动扫描 fallback。Gate 2 以 per-device `drv_state`
   保留未发布 provider 并成功 bind，Gate 3 再迁移到 production publication/worker owner；删除
   `NET-IFACE-DOMAIN-001` 与 `NET-ATTACH-001` target Refine，保留它们为 unchanged dependencies。
+- `R5`：接受本板型 boot-time Motorcomm PHY 的 MDIO reset/config/auto-negotiation/link snapshot 由
+  per-node GMAC 在 publication 前完成；generic PHY/MDIO framework 与 runtime link management 仍为非目标。
+  Gate 3 production publication、single IPv4 deployment、双 GMAC 实机收发和 `JH7110-GMAC-CUTOVER`
+  已完成。
 
 ## Closure
 
-Not Closed。R4 target 已接受；Gate 0 implementation/board diagnostic 与 Gate 1 software implementation
-均已关闭。Gate 0 诊断确认两
-个 GMAC 节点都能独立读取 DWMAC capability，但 Gate 0 仍按设计在 DMA/IRQ/attach 前返回
-`NotYetImplemented`；Gate 1 已建立 stopped RX/TX rings、coherent ordering、40-bit address validation、
-device-cause handler 与 registered-IRQ retention，并继续在 publication 前返回临时错误。QEMU 不含
-JH7110。用户板级证据已闭合 coherency 前提，R3 已闭合 clock/reset consumer admission owner 与
-no-rollback failure semantics；R4 已接受 success-order `eth<N>` 与 Gate 2 per-device staged bind。
-Gate 1 硬件 DMA/ring traffic 状态仍为 Not Run；Gate 2 软件检查与用户运行的双节点 board staged-bind
-验收已关闭。Gate 3、真实 DMA/IRQ traffic、最终 VisionFive 2 验收与 current-contract cutover 均未完成。
+Closed。R5 target、Gate 0--3、双 GMAC provider/publication、success-order `eth<N>`、single IPv4
+deployment、boot-time PHY 初始化与 VisionFive 2 实机验收均已完成。用户确认静态审计和上板运行通过；
+agent-run 的 `just fmt kernel --check`、`just test net-host`、`just build --preset visionfive2-rv64-release`
+和 `git diff --check` 通过。QEMU 继续只承担 VirtIO/network regression，不提供 JH7110 硬件证据。
+本次执行 `JH7110-GMAC-CUTOVER`，将 name/index 单项 firmware interrupt resource selection 纳入
+`IRQ-FLOW-001`；剩余 generic PHY、runtime link management、hotplug、free_irq 和完整 device removal
+仍是明确非目标。

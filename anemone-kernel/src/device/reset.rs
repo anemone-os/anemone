@@ -31,6 +31,9 @@ impl<'a> ResetSpecifier<'a> {
 /// register layout.
 pub trait ResetController: Send + Sync {
     fn reset(&self, specifier: ResetSpecifier<'_>) -> Result<(), SysError>;
+
+    /// Leave the selected reset line deasserted without first asserting it.
+    fn deassert(&self, specifier: ResetSpecifier<'_>) -> Result<(), SysError>;
 }
 
 pub struct ResetDomain {
@@ -201,6 +204,40 @@ fn map_reset_error(error: ResetResourceError) -> SysError {
 
 /// Perform one synchronous assert/deassert transaction for a named reset.
 pub fn require_reset(dev: &dyn Device, name: &str) -> Result<(), SysError> {
+    let (domain, cells) = resolve_named_reset(dev, name)?;
+    if let Err(error) = domain.controller.reset(ResetSpecifier { cells: &cells }) {
+        kerrln!(
+            "reset: {} reset {} transaction failed: {:?}",
+            dev.name(),
+            name,
+            error
+        );
+        return Err(error);
+    }
+    kdebugln!("reset: {} reset {} complete", dev.name(), name);
+    Ok(())
+}
+
+/// Ensure a named reset is deasserted without issuing an assert pulse.
+pub fn require_reset_deasserted(dev: &dyn Device, name: &str) -> Result<(), SysError> {
+    let (domain, cells) = resolve_named_reset(dev, name)?;
+    if let Err(error) = domain.controller.deassert(ResetSpecifier { cells: &cells }) {
+        kerrln!(
+            "reset: {} reset {} deassert failed: {:?}",
+            dev.name(),
+            name,
+            error
+        );
+        return Err(error);
+    }
+    kdebugln!("reset: {} reset {} deasserted", dev.name(), name);
+    Ok(())
+}
+
+fn resolve_named_reset(
+    dev: &dyn Device,
+    name: &str,
+) -> Result<(Arc<ResetDomain>, Vec<u32>), SysError> {
     let fwnode = match dev.fwnode() {
         Some(fwnode) => fwnode,
         None => {
@@ -220,17 +257,7 @@ pub fn require_reset(dev: &dyn Device, name: &str) -> Result<(), SysError> {
             return Err(map_reset_error(error));
         },
     };
-    if let Err(error) = domain.controller.reset(ResetSpecifier { cells: &cells }) {
-        kerrln!(
-            "reset: {} reset {} transaction failed: {:?}",
-            dev.name(),
-            name,
-            error
-        );
-        return Err(error);
-    }
-    kdebugln!("reset: {} reset {} complete", dev.name(), name);
-    Ok(())
+    Ok((domain, cells))
 }
 
 #[cfg(feature = "kunit")]

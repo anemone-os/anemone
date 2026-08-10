@@ -112,6 +112,8 @@ pub struct Parameters {
     pub virtio_net_frame_capacity_bytes: Option<usize>,
     pub jh7110_gmac_ring_size: Option<usize>,
     pub jh7110_gmac_frame_capacity_bytes: Option<usize>,
+    pub jh7110_gmac_reset_timeout_ms: Option<u64>,
+    pub jh7110_gmac_phy_timeout_ms: Option<u64>,
     pub net_pump_ingress_budget_frames: Option<usize>,
     pub net_pump_egress_budget_steps: Option<usize>,
     pub net_worker_repoll_rounds: Option<usize>,
@@ -218,6 +220,8 @@ impl Parameters {
         materialize!(virtio_net_frame_capacity_bytes);
         materialize!(jh7110_gmac_ring_size);
         materialize!(jh7110_gmac_frame_capacity_bytes);
+        materialize!(jh7110_gmac_reset_timeout_ms);
+        materialize!(jh7110_gmac_phy_timeout_ms);
         materialize!(net_pump_ingress_budget_frames);
         materialize!(net_pump_egress_budget_steps);
         materialize!(net_worker_repoll_rounds);
@@ -423,6 +427,10 @@ pub const VIRTIO_NET_FRAME_CAPACITY_BYTES: usize = {};
 pub const JH7110_GMAC_RING_SIZE: usize = {};
 /// Bytes owned by each JH7110 GMAC RX/TX frame backing.
 pub const JH7110_GMAC_FRAME_CAPACITY_BYTES: usize = {};
+/// DWMAC internal software-reset deadline in milliseconds.
+pub const JH7110_GMAC_RESET_TIMEOUT_MS: u64 = {};
+/// Maximum probe-time wait for PHY link resolution.
+pub const JH7110_GMAC_PHY_TIMEOUT_MS: u64 = {};
 /// Maximum ingress frames advanced by one stack pump.
 pub const NET_PUMP_INGRESS_BUDGET_FRAMES: usize = {};
 /// Maximum egress steps advanced by one stack pump.
@@ -526,6 +534,8 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
             resolved!(virtio_net_frame_capacity_bytes),
             resolved!(jh7110_gmac_ring_size),
             resolved!(jh7110_gmac_frame_capacity_bytes),
+            resolved!(jh7110_gmac_reset_timeout_ms),
+            resolved!(jh7110_gmac_phy_timeout_ms),
             resolved!(net_pump_ingress_budget_frames),
             resolved!(net_pump_egress_budget_steps),
             resolved!(net_worker_repoll_rounds),
@@ -611,8 +621,12 @@ mod tests {
         let generated = parameters.gen_kconfig_defs();
         assert_eq!(parameters.jh7110_gmac_ring_size, Some(64));
         assert_eq!(parameters.jh7110_gmac_frame_capacity_bytes, Some(2048));
+        assert_eq!(parameters.jh7110_gmac_reset_timeout_ms, Some(1000));
+        assert_eq!(parameters.jh7110_gmac_phy_timeout_ms, Some(5000));
         assert!(generated.contains("pub const JH7110_GMAC_RING_SIZE: usize = 64;"));
         assert!(generated.contains("pub const JH7110_GMAC_FRAME_CAPACITY_BYTES: usize = 2048;"));
+        assert!(generated.contains("pub const JH7110_GMAC_RESET_TIMEOUT_MS: u64 = 1000;"));
+        assert!(generated.contains("pub const JH7110_GMAC_PHY_TIMEOUT_MS: u64 = 5000;"));
     }
 
     #[test]

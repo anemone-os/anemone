@@ -226,10 +226,8 @@ impl Jh7110ResetController {
                 .get()
         }
     }
-}
 
-impl ResetController for Jh7110ResetController {
-    fn reset(&self, specifier: ResetSpecifier<'_>) -> Result<(), SysError> {
+    fn set_asserted(&self, specifier: ResetSpecifier<'_>, asserted: bool) -> Result<(), SysError> {
         let cells = specifier.cells();
         if cells.len() != 1 {
             kerrln!("jh7110-reset: expected one reset cell, got {}", cells.len());
@@ -249,26 +247,30 @@ impl ResetController for Jh7110ResetController {
         let status_offset = layout.status_offset + word * 4;
         let _guard = self.lock.lock_irqsave();
 
-        self.modify(layout.window, assert_offset, |value| value | bit);
-        if !self.wait_status(layout.window, status_offset, bit, true) {
+        self.modify(layout.window, assert_offset, |value| {
+            if asserted { value | bit } else { value & !bit }
+        });
+        if !self.wait_status(layout.window, status_offset, bit, asserted) {
             kerrln!(
-                "jh7110-reset: reset id {:#x} assert timeout base={:#x}",
+                "jh7110-reset: reset id {:#x} {} timeout base={:#x}",
                 id,
-                self.base(layout.window)
-            );
-            return Err(SysError::Timeout);
-        }
-
-        self.modify(layout.window, assert_offset, |value| value & !bit);
-        if !self.wait_status(layout.window, status_offset, bit, false) {
-            kerrln!(
-                "jh7110-reset: reset id {:#x} deassert timeout base={:#x}",
-                id,
+                if asserted { "assert" } else { "deassert" },
                 self.base(layout.window)
             );
             return Err(SysError::Timeout);
         }
         Ok(())
+    }
+}
+
+impl ResetController for Jh7110ResetController {
+    fn reset(&self, specifier: ResetSpecifier<'_>) -> Result<(), SysError> {
+        self.set_asserted(specifier, true)?;
+        self.set_asserted(specifier, false)
+    }
+
+    fn deassert(&self, specifier: ResetSpecifier<'_>) -> Result<(), SysError> {
+        self.set_asserted(specifier, false)
     }
 }
 

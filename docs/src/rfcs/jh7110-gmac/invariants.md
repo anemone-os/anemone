@@ -1,13 +1,12 @@
 # JH7110 GMAC 目标与不变量
 
-**状态：** Accepted / R4
-**最后更新：** 2026-08-09
+**状态：** Closed / R5
+**最后更新：** 2026-08-10
 **父 RFC：** [RFC-20260808-jh7110-gmac](./index.md)
-**适用修订：** R4
+**适用修订：** R5
 
-本文只定义本 RFC 的 target 与 proof obligations。当前 effective 规则以
-[`docs/src/contracts/`](../../contracts.md) 为准；本页不能在最终板级验收和
-`JH7110-GMAC-CUTOVER` 前覆盖 current contract。
+本文定义本 RFC 的 target 与 proof obligations。当前 effective 规则以
+[`docs/src/contracts/`](../../contracts.md) 为准；`JH7110-GMAC-CUTOVER` 已在最终板级验收后完成。
 
 ## 规则分类
 
@@ -38,11 +37,13 @@
 **规则：** driver 必须按本节点 DT name 通过 generic providers 请求所需 clock enable 与 reset
 transaction；不得解析 raw provider ID、写 controller register 或缓存 controller 状态。Clock enable 是
 boot-lifetime 单调 admission，后续失败不回滚；reset failure 只让当前 node fail closed，已完成 reset 不
-重放或补偿。firmware/board environment 继续拥有 clock rate/mux、syscon/RGMII path 与 PHY 初始化；不能
-证明 link 时必须报告 `Unknown`。
+重放或补偿。firmware/board environment 继续拥有 clock rate/mux 与 syscon/RGMII path；per-node GMAC
+在 publication 前拥有本板型 Motorcomm PHY 的 MDIO reset/config/auto-negotiation 和 link snapshot。probe
+deadline 内无法解析 link 时，显式记录 warning 并以已接受的 1000/full fallback 发布；不提供 runtime
+renegotiation，对外 link state 保持 `Unknown`。
 **Owner：** generic clock/reset providers 唯一拥有 register 与 transaction truth；firmware/board
-environment 拥有 rate/mux、syscon/RGMII/PHY handoff；per-node provider 拥有 admission 后的 MAC/DMA
-current truth。
+environment 拥有 rate/mux、syscon/RGMII handoff；per-node GMAC/provider 拥有 boot-time PHY transaction、
+probe-time MAC link configuration与 admission 后的 MAC/DMA truth，不宣称 runtime link truth。
 **违反表现：** GMAC 直接 RMW controller；保存 `clock_enabled`/`reset_done` 第二份 truth；probe failure
 关闭已启用 clock或重放已完成 reset；一个 node 的失败补偿另一个 node；没有 PHY/link 证据却发布 `Up`。
 **Proof：** source audit确认所有 clock/reset 操作只走 generic providers，failure path 无 rollback/补偿；
@@ -251,6 +252,6 @@ descriptor completion 字段本身也由 device 写回，CPU 必须在正确的 
 - 在没有硬件 coherency 证据时用 volatile access、compiler fence 或 CPU memory fence 冒充 coherency；
   或以 coherency 假设替代 ordering、ownership 和 quiesce proof。
 - 用硬编码 IRQ/MMIO/MAC、driver-local ordinal map或 U-Boot 的 `eth0/eth1` 名称代替 DT/resource owner。
-- 将 GMAC0 MAC 缺失、PHY handoff失败或双口不能收发改写为 accepted limitation；这些都在 target 内，
-  必须失败并回到 review。
+- 将 GMAC0 MAC 缺失、PHY ID/MDIO initialization failure 或双口不能收发改写为 accepted limitation；这些
+  都在 target 内，必须失败并回到 review。
 - 在任何 Gate 检查后提前更新 current contract、声称硬件通过或把 RFC 标为 Closed。

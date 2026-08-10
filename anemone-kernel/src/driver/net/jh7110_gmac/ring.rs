@@ -17,6 +17,7 @@ const MIN_RING_SIZE: usize = 64;
 const MAX_RING_SIZE: usize = 1024;
 const MIN_FRAME_CAPACITY: usize = 1536;
 const MAX_FRAME_CAPACITY: usize = 0x3fff;
+const ETHERNET_FCS_BYTES: usize = 4;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,7 +303,7 @@ impl GmacRings {
     }
 
     pub(super) fn tx_tail_phys(&self) -> u64 {
-        self.tx_descriptor_phys() + (self.layout.ring_size * size_of::<GmacDescriptor>()) as u64
+        self.tx_descriptor_phys()
     }
 
     pub(super) fn submit_tx(&mut self, frame: &[u8]) -> Result<u32, RingError> {
@@ -463,16 +464,16 @@ impl GmacRings {
         self.dma.sync_for_cpu();
         let descriptor = self.read_descriptor(false, index);
         let flags = RxDescriptorFlags::from_bits_retain(descriptor.des3);
-        let length = (descriptor.des3 & 0x7fff) as usize;
+        let wire_length = (descriptor.des3 & 0x7fff) as usize;
         let length = if !flags.contains(RxDescriptorFlags::FIRST)
             || !flags.contains(RxDescriptorFlags::LAST)
-            || length == 0
-            || length > self.layout.frame_capacity
+            || wire_length <= ETHERNET_FCS_BYTES
+            || wire_length > self.layout.frame_capacity
             || flags.contains(RxDescriptorFlags::ERROR_SUMMARY)
         {
             None
         } else {
-            Some(length)
+            Some(wire_length - ETHERNET_FCS_BYTES)
         };
         let reservation = RxReservation { index, length };
         self.rx_reserved = Some(reservation);
@@ -722,7 +723,9 @@ mod kunits {
         rings.write_descriptor_owner(
             false,
             0,
-            RxDescriptorFlags::FIRST.bits() | RxDescriptorFlags::LAST.bits() | payload.len() as u32,
+            RxDescriptorFlags::FIRST.bits()
+                | RxDescriptorFlags::LAST.bits()
+                | (payload.len() + ETHERNET_FCS_BYTES) as u32,
         );
         let rx = rings.reserve_rx().unwrap();
         let tx = rings.reserve_tx().unwrap();
@@ -743,6 +746,11 @@ mod kunits {
     #[kunit]
     fn jh7110_production_ring_transitions_wrap_refill_and_reclaim() {
         let mut rings = GmacRings::new().unwrap();
+        assert_eq!(rings.tx_tail_phys(), rings.tx_descriptor_phys());
+        assert_eq!(
+            rings.rx_tail_phys(),
+            rings.rx_descriptor_phys() + (rings.ring_size() * size_of::<GmacDescriptor>()) as u64
+        );
         let payload = [0x5a; 64];
         let first_tail = rings.submit_tx(&payload).unwrap();
         let first_descriptor = rings.read_descriptor(true, 0);
@@ -798,7 +806,7 @@ mod kunits {
             0,
             RxDescriptorFlags::FIRST.bits()
                 | RxDescriptorFlags::LAST.bits()
-                | rx_payload.len() as u32,
+                | (rx_payload.len() + ETHERNET_FCS_BYTES) as u32,
         );
         let completion = rings
             .with_rx_frame(|frame| frame.iter().copied().sum::<u8>())
@@ -820,7 +828,7 @@ mod kunits {
             RxDescriptorFlags::FIRST.bits()
                 | RxDescriptorFlags::LAST.bits()
                 | RxDescriptorFlags::ERROR_SUMMARY.bits()
-                | rx_payload.len() as u32,
+                | (rx_payload.len() + ETHERNET_FCS_BYTES) as u32,
         );
         let dropped = rings
             .with_rx_frame(|_| panic!("malformed RX frame must not reach the consumer"))
