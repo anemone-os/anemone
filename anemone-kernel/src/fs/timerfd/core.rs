@@ -16,7 +16,7 @@ use file::TimerFdFile;
 pub(super) use file::create_timerfd;
 use timer::schedule_timerfd_callback;
 #[cfg(feature = "kunit")]
-use timer::{timerfd_clock_changed_callback, timerfd_expire_callback};
+use timer::timerfd_clock_changed_callback;
 
 static_assert!(
     TIMERFD_FILE_MAX_WAITERS > 0,
