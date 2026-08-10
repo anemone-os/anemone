@@ -38,14 +38,13 @@ static_assert!(
 static UNPUBLISHED_PORTS: Lazy<SpinLock<BTreeMap<TtyPortId, Weak<TtyEndpoint>>>> =
     Lazy::new(|| SpinLock::new(BTreeMap::new()));
 
-/// Unpublished composition of one physical transport and one semantic owner.
+/// Stable semantic terminal capability shared by FileOps and relation owners.
 ///
-/// The endpoint deliberately holds neither a worker handle nor a notifier.
-/// The attachment owns the only long-lived strong wake source, so the worker
-/// argument cannot complete an `endpoint -> handle -> worker -> endpoint`
-/// reference cycle.
+/// The allocation identity of this object is the exact terminal identity used
+/// by the relation owner. It deliberately contains no physical-port identity,
+/// transport state, worker handle, or readiness cache. The weak wake edge only
+/// lets an open operation request that its attachment recheck owner predicates.
 struct TtyEndpoint {
-    port: Arc<dyn TtyPort>,
     terminal: Arc<Terminal>,
     /// Weak projection only; the driver attachment remains the sole
     /// long-lived strong owner of the worker wake source.
@@ -54,6 +53,7 @@ struct TtyEndpoint {
 
 #[derive(Opaque)]
 struct TtyWorker {
+    port: Arc<dyn TtyPort>,
     endpoint: Arc<TtyEndpoint>,
 }
 
@@ -84,28 +84,12 @@ impl TtyWakeHandle {
 /// registry visibility, then requests worker stop and joins without holding the
 /// registry, Terminal, or port-owned guard.
 pub(crate) struct TtyPortAttachment {
+    port: Arc<dyn TtyPort>,
     endpoint: Arc<TtyEndpoint>,
     wake_source: Option<Arc<TtyWakeSource>>,
 }
 
 impl TtyPortAttachment {
-    pub(crate) fn terminal(&self) -> &Arc<Terminal> {
-        &self.endpoint.terminal
-    }
-
-    pub(crate) fn opened_file(&self) -> OpenedFile {
-        file::opened_file(
-            self.endpoint.clone(),
-            TtyWakeHandle {
-                source: self
-                    .wake_source
-                    .as_ref()
-                    .expect("detached TTY attachment opened a file")
-                    .clone(),
-            },
-        )
-    }
-
     pub(crate) fn abort(mut self) {
         self.detach();
     }
@@ -115,7 +99,7 @@ impl TtyPortAttachment {
             return;
         };
 
-        let removed = remove_unpublished_endpoint(&self.endpoint);
+        let removed = remove_unpublished_endpoint(self.port.id(), &self.endpoint);
         let worker = wake_source
             .worker
             .lock()
@@ -166,19 +150,19 @@ impl TtyRxNotifier {
 
 pub(crate) fn attach_unpublished_port(
     port: Arc<dyn TtyPort>,
+    line_snapshot: TtyLineSnapshot,
 ) -> Result<(TtyPortAttachment, TtyRxNotifier), SysError> {
-    let terminal = Terminal::try_new(port.line_snapshot())?;
+    let terminal = Terminal::try_new(line_snapshot)?;
     let wake_source = Arc::try_new(TtyWakeSource {
         worker: SpinLock::new(None),
     })
     .map_err(|_| SysError::OutOfMemory)?;
     let endpoint = Arc::try_new(TtyEndpoint {
-        port,
         terminal,
         wake_source: Arc::downgrade(&wake_source),
     })
     .map_err(|_| SysError::OutOfMemory)?;
-    let id = endpoint.port.id().clone();
+    let id = port.id().clone();
 
     {
         let mut ports = UNPUBLISHED_PORTS.lock();
@@ -193,15 +177,26 @@ pub(crate) fn attach_unpublished_port(
         );
     }
 
-    let worker = match KThreadBuilder::new(format!("tty:{}", endpoint.port.id())).spawn(
+    let worker = KThreadBuilder::new(format!("tty:{}", port.id())).spawn(
         tty_worker_entry,
         AnyOpaque::new(TtyWorker {
+            port: port.clone(),
             endpoint: endpoint.clone(),
         }),
-    ) {
+    );
+    finish_unpublished_port_attach(port, endpoint, wake_source, worker)
+}
+
+fn finish_unpublished_port_attach(
+    port: Arc<dyn TtyPort>,
+    endpoint: Arc<TtyEndpoint>,
+    wake_source: Arc<TtyWakeSource>,
+    worker: Result<KThreadHandle, SysError>,
+) -> Result<(TtyPortAttachment, TtyRxNotifier), SysError> {
+    let worker = match worker {
         Ok(worker) => worker,
         Err(error) => {
-            let removed = remove_unpublished_endpoint(&endpoint);
+            let removed = remove_unpublished_endpoint(port.id(), &endpoint);
             assert!(removed, "failed TTY attach lost its registry reservation");
             return Err(error);
         },
@@ -214,6 +209,7 @@ pub(crate) fn attach_unpublished_port(
     };
     Ok((
         TtyPortAttachment {
+            port,
             endpoint,
             wake_source: Some(wake_source),
         },
@@ -221,8 +217,7 @@ pub(crate) fn attach_unpublished_port(
     ))
 }
 
-fn remove_unpublished_endpoint(endpoint: &Arc<TtyEndpoint>) -> bool {
-    let id = endpoint.port.id();
+fn remove_unpublished_endpoint(id: &TtyPortId, endpoint: &Arc<TtyEndpoint>) -> bool {
     let mut ports = UNPUBLISHED_PORTS.lock();
     let Some(registered) = ports.get(id) else {
         return false;
@@ -238,10 +233,11 @@ fn remove_unpublished_endpoint(endpoint: &Arc<TtyEndpoint>) -> bool {
 }
 
 fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
-    let endpoint = &arg
+    let worker = arg
         .cast::<TtyWorker>()
-        .expect("TTY worker received invalid private data")
-        .endpoint;
+        .expect("TTY worker received invalid private data");
+    let port = &worker.port;
+    let endpoint = &worker.endpoint;
     let mut rx_batch = [TtyRxUnit::Byte(0); TTY_WORKER_BATCH_BYTES];
     let mut rx_cursor = 0;
     let mut rx_len = 0;
@@ -250,7 +246,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
     loop {
         ctx.wait_until(|| {
             rx_cursor != rx_len
-                || endpoint.port.rx_pending()
+                || port.rx_pending()
                 || endpoint.terminal.output_pending()
                 || endpoint.terminal.drain_check_pending()
         });
@@ -258,8 +254,8 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
             break;
         }
 
-        if rx_cursor == rx_len && endpoint.port.rx_pending() {
-            rx_len = endpoint.port.dequeue_rx(&mut rx_batch);
+        if rx_cursor == rx_len && port.rx_pending() {
+            rx_len = port.dequeue_rx(&mut rx_batch);
             rx_cursor = 0;
             assert!(
                 rx_len <= rx_batch.len(),
@@ -267,7 +263,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
             );
             if rx_len == 0 {
                 assert!(
-                    !endpoint.port.rx_pending(),
+                    !port.rx_pending(),
                     "TTY port reported pending RX without dequeue progress"
                 );
             }
@@ -297,7 +293,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
 
         let prepared = endpoint.terminal.peek_output(&mut tx_batch);
         if prepared != 0 {
-            let accepted = endpoint.port.submit_tx(&tx_batch[..prepared]);
+            let accepted = port.submit_tx(&tx_batch[..prepared]);
             assert!(
                 accepted <= prepared,
                 "TTY port accepted more TX bytes than supplied"
@@ -311,7 +307,7 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
         }
 
         if endpoint.terminal.drain_check_pending() {
-            let port_idle = !endpoint.terminal.output_pending() && endpoint.port.tx_idle();
+            let port_idle = !endpoint.terminal.output_pending() && port.tx_idle();
             endpoint.terminal.complete_drain_if(port_idle);
         }
 
@@ -415,14 +411,6 @@ mod kunits {
             &self.id
         }
 
-        fn line_snapshot(&self) -> TtyLineSnapshot {
-            TtyLineSnapshot {
-                baud: 115200,
-                parity: TtyParity::None,
-                data_bits: 8,
-            }
-        }
-
         fn rx_pending(&self) -> bool {
             self.predicate_checks.fetch_add(1, Ordering::Relaxed);
             !self.input.lock().is_empty()
@@ -458,7 +446,15 @@ mod kunits {
     }
 
     fn attach(port: &Arc<FakePort>) -> (TtyPortAttachment, TtyRxNotifier) {
-        attach_unpublished_port(port.clone()).unwrap()
+        attach_unpublished_port(port.clone(), line()).unwrap()
+    }
+
+    fn line() -> TtyLineSnapshot {
+        TtyLineSnapshot {
+            baud: 115200,
+            parity: TtyParity::None,
+            data_bits: 8,
+        }
     }
 
     #[kunit]
@@ -468,7 +464,7 @@ mod kunits {
         let (attachment, _) = attach(&first);
 
         assert_eq!(
-            attach_unpublished_port(duplicate.clone()).err(),
+            attach_unpublished_port(duplicate.clone(), line()).err(),
             Some(SysError::DevAlreadyRegistered)
         );
         attachment.abort();
@@ -481,7 +477,7 @@ mod kunits {
     fn notification_before_worker_wait_keeps_rx_progress() {
         let port = FakePort::new("/kunit/tty/wake-before-wait");
         let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
+        let terminal = attachment.endpoint.terminal.clone();
         port.enqueue(b"before-wait\n");
         notifier.wake();
 
@@ -494,7 +490,7 @@ mod kunits {
     fn notification_after_worker_wait_keeps_rx_progress() {
         let port = FakePort::new("/kunit/tty/wake-after-wait");
         let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
+        let terminal = attachment.endpoint.terminal.clone();
         port.wait_for_predicate_check();
 
         port.enqueue(b"after-wait\n");
@@ -509,7 +505,7 @@ mod kunits {
     fn persistent_raw_predicate_transfers_fifo_batches_once() {
         let port = FakePort::new("/kunit/tty/persistent-predicate");
         let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
+        let terminal = attachment.endpoint.terminal.clone();
         let mut input = vec![b'a'; TTY_WORKER_BATCH_BYTES * 3 + 7];
         input.push(b'\n');
 
@@ -532,7 +528,7 @@ mod kunits {
         let port = FakePort::new("/kunit/tty/partial-tx");
         port.tx_limit.store(1, Ordering::Relaxed);
         let (attachment, notifier) = attach(&port);
-        let terminal = attachment.terminal().clone();
+        let terminal = attachment.endpoint.terminal.clone();
 
         port.enqueue(b"x\n");
         notifier.wake();
@@ -547,11 +543,41 @@ mod kunits {
     fn prepublish_abort_drops_weak_notifier_and_joins_worker() {
         let port = FakePort::new("/kunit/tty/abort");
         let (attachment, notifier) = attach(&port);
+        let endpoint = Arc::downgrade(&attachment.endpoint);
         assert!(notifier.is_live());
 
         attachment.abort();
         assert!(!notifier.is_live());
+        assert!(endpoint.upgrade().is_none());
         notifier.wake();
+
+        let (replacement, _) = attach(&port);
+        replacement.abort();
+    }
+
+    #[kunit]
+    fn worker_spawn_failure_releases_identity_reservation() {
+        let port = FakePort::new("/kunit/tty/spawn-failure");
+        let terminal = Terminal::try_new(line()).unwrap();
+        let wake_source = Arc::new(TtyWakeSource {
+            worker: SpinLock::new(None),
+        });
+        let endpoint = Arc::new(TtyEndpoint {
+            terminal,
+            wake_source: Arc::downgrade(&wake_source),
+        });
+        let old = UNPUBLISHED_PORTS
+            .lock()
+            .insert(port.id().clone(), Arc::downgrade(&endpoint));
+        assert!(old.is_none());
+
+        let result = finish_unpublished_port_attach(
+            port.clone(),
+            endpoint,
+            wake_source,
+            Err(SysError::OutOfMemory),
+        );
+        assert_eq!(result.err(), Some(SysError::OutOfMemory));
 
         let (replacement, _) = attach(&port);
         replacement.abort();

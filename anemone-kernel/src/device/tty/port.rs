@@ -64,8 +64,6 @@ impl TtyPortId {
 pub(crate) trait TtyPort: Send + Sync {
     fn id(&self) -> &TtyPortId;
 
-    fn line_snapshot(&self) -> TtyLineSnapshot;
-
     fn rx_pending(&self) -> bool;
 
     /// Dequeue up to `dst.len()` receive units in FIFO order.

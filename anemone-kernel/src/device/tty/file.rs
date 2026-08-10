@@ -564,51 +564,7 @@ static TTY_FILE_OPS: FileOps = FileOps {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{
-        device::tty::{TtyPort, TtyPortId, TtyRxUnit, TtyWakeSource},
-        fs::anony_open_with,
-    };
-
-    struct DrainPort {
-        id: TtyPortId,
-        submitted: AtomicUsize,
-    }
-
-    impl DrainPort {
-        fn new(id: &str) -> Arc<Self> {
-            Arc::new(Self {
-                id: TtyPortId::try_from(id).unwrap(),
-                submitted: AtomicUsize::new(0),
-            })
-        }
-    }
-
-    impl TtyPort for DrainPort {
-        fn id(&self) -> &TtyPortId {
-            &self.id
-        }
-
-        fn line_snapshot(&self) -> TtyLineSnapshot {
-            line()
-        }
-
-        fn rx_pending(&self) -> bool {
-            false
-        }
-
-        fn dequeue_rx(&self, _dst: &mut [TtyRxUnit]) -> usize {
-            0
-        }
-
-        fn submit_tx(&self, src: &[u8]) -> usize {
-            self.submitted.fetch_add(src.len(), Ordering::Relaxed);
-            src.len()
-        }
-
-        fn tx_idle(&self) -> bool {
-            true
-        }
-    }
+    use crate::{device::tty::TtyWakeSource, fs::anony_open_with};
 
     fn line() -> TtyLineSnapshot {
         TtyLineSnapshot {
@@ -623,7 +579,6 @@ mod kunits {
             worker: SpinLock::new(None),
         });
         let endpoint = Arc::new(TtyEndpoint {
-            port: DrainPort::new("/kunit/tty/file-no-worker"),
             terminal,
             wake_source: Arc::downgrade(&source),
         });

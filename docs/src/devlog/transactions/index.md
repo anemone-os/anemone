@@ -6,6 +6,8 @@
 
 ## Active
 
+- [PTY / devpts](./2026-08-11-pty-devpts.md)：Stage 1 Checkpoint 1已关闭，semantic endpoint与physical serial
+  attachment生产路径完成分离；Checkpoint 2及后续Stage未授权，全部target contract仍Not Effective。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)

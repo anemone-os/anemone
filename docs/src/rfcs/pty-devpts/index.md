@@ -6,12 +6,12 @@
 **最后更新：** 2026-08-11
 **领域：** TTY / PTY / devpts / VFS / task opened-description lifecycle / job control
 **影响契约：** Accepted Target；见 [Contract Impact](#contract-impact)，尚未 cut over
-**执行记录：** None
+**执行记录：** [PTY / devpts transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)
 
 本 RFC 是 PTY / devpts R1 Accepted Target 的 public canonical source。它不覆盖 current contract，也不授权实现或
 cutover。R1 acceptance轮只接受target、owner、ABI、resource guarantee、contract delta与acceptance boundary；后续
-[实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点，当前仍没有任何Stage execution authorization或
-transaction。
+[实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点。Stage 1 Checkpoint 1已在独立授权下关闭，未产生
+contract cutover；Checkpoint 2及Stage 2--4仍未获execution authorization。
 
 ## 摘要
 
@@ -379,7 +379,8 @@ workload。
   `xref:linux-6.6.32:drivers/tty/tty_io.c#do_tty_hangup`、
   `xref:linux-6.6.32:drivers/tty/tty_jobctrl.c#tty_signal_session_leader`
 
-当前没有tracking page或transaction。R1 review的已接受结论已经折回canonical target/contract/acceptance；
+当前没有tracking page；[transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)只记录已执行checkpoint、
+review、validation与handoff。R1 review的已接受结论已经折回canonical target/contract/acceptance；
 `implementation.md`只组织Stage依赖与执行停止点，不保留第二份decision状态表。
 
 ## 修订记录
@@ -393,6 +394,7 @@ workload。
 
 - Accepted Target / R1。
 - Implementation route：Draft；Stage解析状态由[实施路线](./implementation.md)统一拥有。
-- Implementation authorization：None。
+- Implementation authorization：Stage 1 Checkpoint 1已消费并关闭；Checkpoint 2及Stage 2--4为None。
 - Contract cutover：None。
-- Build、KUnit、QEMU、LTP、sshd、tmux、RV64 runtime、LA64 runtime：Not Run（本轮 docs-only R1 acceptance）。
+- Stage 1 Checkpoint 1：RV64 build、618项KUnit、TTY auto/vi/ash与正常关机已通过；详见transaction。
+- LA64 build/runtime、PTY test app、LTP、sshd、tmux：Not Run。

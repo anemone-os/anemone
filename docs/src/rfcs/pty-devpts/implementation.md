@@ -4,13 +4,13 @@
 **最后更新：** 2026-08-11
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
 **当前修订：** R1
-**实现授权：** None
+**实现授权：** Stage 1 Checkpoint 1 only / Closed
 **Contract Cutover：** None
 
 本页只组织父 RFC R1 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
-Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析，仍未获任何
-执行授权；Stage 2--4 保持 Future。维护者后续可以一次授权整个 Stage 1，也可以只授权其中一个 checkpoint；只授权
-Checkpoint 1 时，完成其验证与 review 后必须停止。
+Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析；Checkpoint 1
+已在独立授权下关闭，Checkpoint 2未授权。Stage 2--4 保持 Future。维护者后续只有在新的明确授权下才能进入
+Checkpoint 2；当前执行已按只授权Checkpoint 1的停止合同停下。
 
 ## 全局 Implementation Boundary
 
@@ -49,7 +49,7 @@ write set；同owner内部类型、模块、算法与行为保持型拆分由对
 
 | Stage | 解析程度 | 目的 | 可见语义 / Cutover |
 | --- | --- | --- | --- |
-| Stage 1 | Resolved / Awaiting Authorization | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
+| Stage 1 | Checkpoint 1 Closed / Checkpoint 2 Awaiting Authorization | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
 | Stage 2 | Future | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
 | Stage 3 | Future | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
 | Stage 4 | Future | 公开激活、完成mandatory acceptance并原子cut over | `PTY-DEVPTS-CUTOVER` |
@@ -106,9 +106,9 @@ provenance。长期owner-local KUnit放在被测语义文件末尾的inline `kun
 
 ## Stage 1 — Runtime semantic endpoint substrate
 
-**解析状态：** Resolved / Awaiting Authorization
+**解析状态：** Resolved / Checkpoint 1 Closed / Checkpoint 2 Awaiting Authorization
 
-**Execution Authorization：** None
+**Execution Authorization：** Checkpoint 1 only；已消费并关闭。Checkpoint 2：None
 
 **Contract Cutover：** None
 
@@ -209,6 +209,12 @@ participant shape。该中间态独立安全、由existing serial endpoint全部
 **Cutover / Exit：** None。所有existing serial production caller都使用新形状、上述验证通过且review无未关闭的
 Apollyon/Keter后，Checkpoint 1可关闭；这不表示Stage 1或任何PTY能力完成。若只授权Checkpoint 1，立即停止，不进入
 Checkpoint 2。
+
+**Execution Result（2026-08-11）：** Closed。semantic endpoint、serial attachment/worker、line profile与opened-file
+progress capability已按本checkpoint分离；production source/bypass audit、618项KUnit、RV64 TTY auto/vi/ash oracle、
+正常关机与独立review均通过。没有contract cutover或register变化；LA64、PTY app、LTP、tmux与sshd保持Not Run。
+完整执行事实与review更正见[transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)。本轮停止于此，
+Checkpoint 2未授权。
 
 ### Checkpoint 2 — Runtime relation participant lifecycle
 
