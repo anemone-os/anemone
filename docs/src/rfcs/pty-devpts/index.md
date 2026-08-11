@@ -1,18 +1,20 @@
 # RFC-20260810-pty-devpts
 
-**状态：** Accepted
-**修订：** R3
+**状态：** Closed
+**修订：** R4
 **负责人：** doruche
 **最后更新：** 2026-08-11
 **领域：** TTY / PTY / devpts / VFS / task opened-description lifecycle / job control
-**影响契约：** Accepted Target；见 [Contract Impact](#contract-impact)，尚未 cut over
+**影响契约：** `PTY-DEVPTS-CUTOVER` Effective；见 [Contract Impact](#contract-impact)
 **执行记录：** [PTY / devpts transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)
 
-本 RFC 是 PTY / devpts R3 Accepted Target 的 public canonical source。它不覆盖 current contract，也不授权实现或
-cutover。R3 acceptance轮只接受target、owner、ABI、resource guarantee、contract delta与acceptance boundary；后续
+本 RFC 是 PTY / devpts R4 Accepted Target 与closure的 public canonical source；effective rules由
+[TTY current contracts](../../contracts/tty/index.md)拥有。R4 acceptance轮冻结target、owner、ABI、resource guarantee、
+contract delta与acceptance boundary；后续
 [实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点。Stage 1的两个execution checkpoint、Stage 2与
 Stage 3的两个checkpoint均已在各自授权下关闭，且未产生contract cutover；Stage 4已解析为两个execution checkpoint，
-Checkpoint 1已在独立授权下关闭且保持contract-neutral，Checkpoint 2仍未获execution authorization。
+Checkpoint 1在独立授权下关闭且保持contract-neutral，Checkpoint 2随后获授权、完成mandatory evidence并执行唯一一次
+`PTY-DEVPTS-CUTOVER`；本RFC已关闭，不授权后续gate。
 
 ## 摘要
 
@@ -21,7 +23,7 @@ system-wide devpts instance 为边界：`/dev/ptmx` 分配独立 PTY pair，`/de
 endpoint；slave 复用现有 `Terminal` data plane、controlling relation 与 job-control protocol，master 只作为 pair
 另一侧的数据与 lifecycle endpoint，不成为 controlling terminal，也不伪装 physical serial port。
 
-R3把devpts定位为由generic `mount(2)`公开的no-device pseudo filesystem。具备`CAP_SYS_ADMIN`的用户进程可以把它挂载
+R4把devpts定位为由generic `mount(2)`公开的no-device pseudo filesystem。具备`CAP_SYS_ADMIN`的用户进程可以把它挂载
 到任意已有目录；每次mount产生独立VFS view，但所有view都复用同一个persistent system instance、superblock、index/
 binding namespace与inode projection。devfs只预发布canonical `/dev/pts`空mountpoint和static `/dev/ptmx`，persistent
 system init负责把同一devpts instance显式mount到`/dev/pts`。这保留Linux“devpts可挂载到普通目录”的外形，但有意不复制
@@ -31,7 +33,7 @@ Linux 6.6.32每次mount形成private instance及path-local `ptmx`选择实例的
 该app使用`anemone-rs`，形状与`socket-test`相同，不调用或保证任何libc PTY wrapper，也不以userspace wrapper、
 libc版本或调用链定义Anemone target。tmux create/attach/detach/exit 是必须尝试但不阻塞 core closure 的建议性集成验证；
 sshd 只作为条件性诊断 consumer，不进入验收标准，因为其 network、transport、authentication 与
-crypto prerequisite 不能归因于 PTY。R3进一步明确当前工程期的heap-allocation failure boundary：显式建模为
+crypto prerequisite 不能归因于 PTY。R4进一步明确当前工程期的heap-allocation failure boundary：显式建模为
 `Result`的capacity、fd、VFS index与enrollment prepare必须保持诚实errno和publication前rollback；自然的少量
 `Box`/`Arc`/`String` backing allocation可以沿kernel global allocator policy在极端OOM时panic，不为强制注入
 `ENOMEM`扭曲owner、API或commit形状。Linux 内部`tty_driver`层次、锁和引用模型不构成兼容目标；
@@ -58,7 +60,7 @@ relation-disassociation signal。PTY 因而是 follow-up target，不重新打�
   devfs不支持userspace `mkdir`，也不拥有dynamic PTY namespace、provider teardown、mount view或pair lifecycle。其它
   devpts mountpoint由调用者在对应ordinary filesystem中预先创建；这些边界见
   [devfs hierarchy 小迭代](../../devlog/changes/2026-08-08-devfs-hierarchical-publication.md)。
-- 当前 `openat` 把 `O_NOCTTY` 作为可观测效果为空的兼容 flag。本 R3 target 要求 pathname 与 `TIOCGPTPEER`
+- 当前 `openat` 把 `O_NOCTTY` 作为可观测效果为空的兼容 flag。本 R4 target 要求 pathname 与 `TIOCGPTPEER`
   两条 slave-open route 都按下文的 Linux-compatible implicit acquisition 语义消费该 operation-local flag；在 cutover
   前，current contract 与 live behavior 仍保持 no-op baseline。
 - [`ANE-20260604-IOCTL-LTP-STAGE1-GAPS`](../../register/current-limitations.md#ane-20260604-ioctl-ltp-stage1-gaps)
@@ -93,7 +95,8 @@ review 状态。
 - legacy BSD PTY name/device。
 - multiple/private devpts instances、`newinstance`、mount namespace isolation、devpts `uid=`/`gid=`/`mode=`/`ptmxmode=`
   mount options、每个mount root下的`ptmx` node、按`ptmx` pathname选择instance，以及distribution-style fixed `tty`
-  group profile。R3中的additional mounts只是同一system instance的额外slave namespace view。
+  group profile、legacy `TCGETA`/`TCSETA*` termio ABI，以及`TCSBRK`/`TCSBRKP` break-control ABI。R4中的additional
+  mounts只是同一system instance的额外slave namespace view。
 - Linux 内部 `tty_driver`、flip buffer、ldisc worker、锁序、引用模型或 allocator 层次的同形复制。
 - packet mode、remote mode、额外 line disciplines、virtual console 或 PTY/physical UART hangup 的统一抽象。
 - 未被首版 workload 证明必要的 `TIOCPKT`、`FIONREAD/TIOCINQ`、`TIOCOUTQ`、`TIOCGPTLCK` 等扩展 ioctl。
@@ -142,7 +145,7 @@ liveness、retirement或reuse。
 devfs在cutover时预发布canonical empty `/dev/pts` mountpoint；persistent system init在启动workload前显式mount同一instance。
 temporary pre-chroot devfs consumer不自动获得devpts mount，kernel也不因devfs mount事件修改VFS mount tree。其它mountpoint
 由`CAP_SYS_ADMIN`调用者在对应filesystem中创建。static `/dev/ptmx`始终分配system instance，不按自身pathname或某个mount
-view选择instance；mount root内的additional `ptmx` node不属于R3 surface。
+view选择instance；mount root内的additional `ptmx` node不属于R4 surface。
 
 ### Allocation episode
 
@@ -217,21 +220,21 @@ readable/writable/HUP truth。notification 只触发完整 predicate recheck；r
 首版不在 kernel 中建立独立 grant mutation 或历史 `pt_chown` helper。slave metadata 在
 `/dev/ptmx` allocation 时已经按上述 profile 完成，解锁的唯一 kernel ABI 是修改 pair-owned lock state 的
 `TIOCSPTLCK`。PTY test app直接核验valid/invalid master、`TIOCGPTN`、`TIOCSPTLCK`、`TIOCGPTPEER`、
-pathname discovery 与对应 errno；用户态 PTY helper 的版本、内部调用链和可见返回值不是本 R3 target 或
+pathname discovery 与对应 errno；用户态 PTY helper 的版本、内部调用链和可见返回值不是本 R4 target 或
 acceptance claim。
 
 ### Mount ABI 与 view lifecycle
 
-R3的mount ABI只公开一个persistent system instance。不同mount operation产生不同VFS mount identity，但必须返回同一
+R4的mount ABI只公开一个persistent system instance。不同mount operation产生不同VFS mount identity，但必须返回同一
 superblock/root并观察相同`st_dev`/inode projection、directory contents与`N -> pair`binding。一个view中的`<mount>/N`
 和另一个view中的同编号pathname必须绑定同一episode；它们仍分别经过各自pathname traversal与相同resident inode DAC。
 
 unmount只撤销目标view，不成为devpts cleanup或pair lifecycle事件。一个view卸载后其它view继续工作；最后一个view卸载后
 system instance与backend binding继续存在，remount重新取得同一current namespace。完整cached-positive、late
 materialization、readdir cursor与retire/reuse并发下的multi-view pathname linearizability继续是VFS Not Proven边界；
-R3只要求fresh/basic view对同一instance与episode identity一致，不允许借该限制创建每mount backend或第二份binding truth。
+R4只要求fresh/basic view对同一instance与episode identity一致，不允许借该限制创建每mount backend或第二份binding truth。
 
-Linux 6.6.32的`devpts_mount()`为每次mount创建private instance，并在每个mount root建立`ptmx`；Anemone R3只复用其
+Linux 6.6.32的`devpts_mount()`为每次mount创建private instance，并在每个mount root建立`ptmx`；Anemone R4只复用其
 user-mountable pseudo-filesystem外形，明确选择single persistent instance、global `/dev/ptmx`且不提供mount-local `ptmx`。
 这是accepted target差异，不是implementation偶然行为或待补Linux capability。
 
@@ -260,6 +263,11 @@ capacity/quota 无可用 slot 返回 `ENOSPC`。显式fallible backing prepare�
 - slave 复用现有 `TIOCSCTTY`、`TIOCNOTTY`、`TIOCGSID`、`TIOCGPGRP`、`TIOCSPGRP`、caller-relative `/dev/tty`、
   foreground/background access 和 terminal-generated signal。
 - master 不成为 controlling terminal；explicit `TIOCSCTTY` 继续使用现有 errno 与 relation protocol。
+
+首版termios/ioctl surface只承诺上述`TCGETS`/`TCSETS*`与winsize/relation/PTY ioctl。历史`termio`结构对应的
+`TCGETA`/`TCSETA`/`TCSETAW`/`TCSETAF`，以及break-control `TCSBRK`/`TCSBRKP`不属于R4 ABI；它们继续诚实返回
+unsupported errno。若后续workload证明需要这些兼容面，必须在独立边界中定义layout、observable effect、errno与验证，
+不能为了让legacy LTP子项通过而把无实现的命令静默接受。
 
 pathname 与 `TIOCGPTPEER` 成功打开 slave 时都采用 Linux 6.6.32 的 implicit controlling-terminal acquisition
 语义。未设置 `O_NOCTTY`、opened description 具有 read access、current caller 是 session leader、caller session
@@ -295,14 +303,14 @@ job-control owner继续分别决定 occurrence 与 continue phase，pair/relatio
 
 ## Contract Impact
 
-下表是 R3 Accepted Target 的 delta，不是 effective contract。只有完成对应 cutover 后才更新 current contract。
+下表是 R4 Accepted Target 已由`PTY-DEVPTS-CUTOVER`发布的delta；effective rule以链接的current contracts为准。
 
-| Contract ID | 变化 | 当前规则 | R3 target 摘要 | Cutover |
+| Contract ID | 变化 | Cutover前规则 | R4 target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `PTY-PAIR-001` / `PTY-ADMISSION-001` / `PTY-ABI-001` | Introduce | None | pair lifecycle、single lifecycle-admission owner with route-scoped preconditions、Unix98 ABI 与 Linux-compatible hangup surface | future atomic `PTY-DEVPTS-CUTOVER` |
-| `DEVPTS-001` | Introduce | None | CAP_SYS_ADMIN user-mountable no-device filesystem、single persistent instance/multiple VFS views、canonical devfs mountpoint、safe-reuse binding、Kconfig capacity、fixed metadata、route-scoped admission与mount-neutral logical retirement | future atomic `PTY-DEVPTS-CUTOVER` |
-| `TTY-TERM-001` / `TTY-INPUT-001` / `TTY-OUTPUT-001` | Refine | serial-only Terminal/port attachment | shared Terminal semantics extend to PTY slave/master attachment without moving truth ownership | future atomic `PTY-DEVPTS-CUTOVER` |
-| `TTY-REL-001` / `TTY-LIFE-001` / `TTY-JOBCTL-001` / `TTY-ABI-001` | Refine | PTY/hangup excluded | runtime slave endpoint participation、Linux-compatible implicit acquisition / `O_NOCTTY`、master-hangup relation revoke与session-leader `SIGHUP`/`SIGCONT`、accepted PTY ABI profile | future atomic `PTY-DEVPTS-CUTOVER` |
+| `PTY-PAIR-001` / `PTY-ADMISSION-001` / `PTY-ABI-001` | Introduce | None | pair lifecycle、single lifecycle-admission owner with route-scoped preconditions、Unix98 ABI 与 Linux-compatible hangup surface | Effective；[PTY/devpts contract](../../contracts/tty/pty-devpts.md) |
+| `DEVPTS-001` | Introduce | None | CAP_SYS_ADMIN user-mountable no-device filesystem、single persistent instance/multiple VFS views、canonical devfs mountpoint、safe-reuse binding、Kconfig capacity、fixed metadata、route-scoped admission与mount-neutral logical retirement | Effective；[PTY/devpts contract](../../contracts/tty/pty-devpts.md) |
+| `TTY-TERM-001` / `TTY-INPUT-001` / `TTY-OUTPUT-001` | Refine | serial-only Terminal/port attachment | shared Terminal semantics extend to PTY slave/master attachment without moving truth ownership | Effective；[TTY data plane](../../contracts/tty/data-plane.md) |
+| `TTY-REL-001` / `TTY-LIFE-001` / `TTY-JOBCTL-001` / `TTY-ABI-001` | Refine | PTY/hangup excluded | runtime slave endpoint participation、Linux-compatible implicit acquisition / `O_NOCTTY`、master-hangup relation revoke与session-leader `SIGHUP`/`SIGCONT`、accepted PTY ABI profile | Effective；[TTY relation/job control](../../contracts/tty/job-control.md) |
 
 ### Dependencies
 
@@ -312,7 +320,7 @@ job-control owner继续分别决定 occurrence 与 continue phase，pair/relatio
   flock retirement 继续先于 creation-time final-release effects。
 - [`OPENED-DESC-003`](../../contracts/task/opened-description-lifecycle.md#opened-desc-003--当前-final-release-callback-是创建时固定的单-hook)：
   PTY 必须在当前 creation-time 单 static hook 边界内 owner-locally composition pair participation 与既有 fanotify
-  close effect；R3 不引入 final-release plan、多个 observer 或新的 task::files shared contract。
+  close effect；R4 不引入 final-release plan、多个 observer 或新的 task::files shared contract。
 - [`TTY-PORT-001` / `TTY-ENDPOINT-001`](../../contracts/tty/data-plane.md)：physical serial owner 与 stable serial
   publication 不因 PTY 改变。
 - [IOMUX poll-wait](../../contracts/iomux/poll-wait.md)与[Epoll](../../contracts/epoll/protocol.md)：readiness
@@ -323,16 +331,16 @@ job-control owner继续分别决定 occurrence 与 continue phase，pair/relatio
   generic pathname freshness 缺口继续由 VFS core/register 拥有；PTY 不增加 owner-local workaround 或独立 acceptance criterion，
   也不把 PTY closure 外推为完整 namespace linearizability 证明。
 
-## Implementation Boundary
+## Cutover Implementation Boundary
 
-本节只定义未来实现授权必须保护的语义边界，不构成本轮实现授权。
+本节记录`PTY-DEVPTS-CUTOVER`执行授权所保护的语义边界；closure后继续作为实现与review provenance，不授权后续工作。
 
 - **允许改变：** TTY owner 内为 PTY attachment/runtime endpoint 所需的 internal capability；new PTY pair owner；
   new devpts backend与mountable filesystem；PTY UAPI codec；VFS/devfs 的窄 handoff；persistent init consumer；current
   `OPENED-DESC-003` 内的 owner-local static final-release composition；targeted tests 和同 owner behavior-preserving splits。
 - **必须保持：** physical UART/console owner、existing serial ABI、`Terminal` semantic truth、relation/task/Signal/
   job-control owner、opened-description published-ref truth与single-static-hook contract、VFS inode/dentry/cache owner、
-  current contract 在 cutover 前的 effective status，以及本 RFC 的 non-goals/acceptance。
+  cutover前current contract的effective status，以及本 RFC 的 non-goals/acceptance。
 - **禁止形状：** second liveness/readiness/refcount truth、pair 读取 fd-table/VFS private state、devpts 拥有 pair data
   plane、dynamic lifecycle observer registry、PTY-local dentry freshness workaround、wake count 驱动行为、
   per-mount backend/binding truth、mount count驱动pair lifecycle、kernel因devfs mount自动修改mount tree、按mount target或
@@ -344,8 +352,8 @@ job-control owner继续分别决定 occurrence 与 continue phase，pair/relatio
 
 ## Acceptance 与 Validation
 
-R3 acceptance 代表 target、owner、ABI、contract delta、proof boundary 与 closure claim 已经确定，不代表实现完成。
-未来 cutover 至少需要以下 claim-scoped evidence：
+R4 acceptance冻结target、owner、ABI、contract delta、proof boundary与closure claim，本身不代表实现完成；随后完成的
+cutover按以下claim-scoped evidence关闭：
 
 - **Source/proof：** owner/bypass audit；singleton mount operation、empty-data validation、persistent superblock/last-view
   lifetime、mount-neutral pair/binding cleanup、allocator credential snapshot、initial metadata publication、route-scoped
@@ -361,8 +369,8 @@ R3 acceptance 代表 target、owner、ABI、contract delta、proof boundary 与 
   `xref:linux-6.6.32:drivers/tty/tty_jobctrl.c#tty_open_proc_set_tty`、
   `xref:linux-6.6.32:drivers/tty/tty_io.c#do_tty_hangup`、
   `xref:linux-6.6.32:drivers/tty/tty_jobctrl.c#tty_signal_session_leader` 建立 observable ABI matrix；上游
-  implementation 不替代 Anemone target。`devpts_mount`只证明Linux per-mount private-instance source fact，不能覆盖R3
-  single-instance decision。源码不能唯一决定、且确实影响R3 target的observable corner只在实际需要时
+  implementation 不替代 Anemone target。`devpts_mount`只证明Linux per-mount private-instance source fact，不能覆盖R4
+  single-instance decision。源码不能唯一决定、且确实影响R4 target的observable corner只在实际需要时
   做定向reference comparison并记录环境；此类comparison只是执行证据，不形成独立harness或gate。
 - **Owner-local / test app：** canonical `/dev/pts`与另一个ordinary-directory mount共享superblock/inode/binding、unsupported
   mount data fail closed、single-view unmount不影响其它view、last-view unmount/remount保留system instance，及allocator
@@ -379,33 +387,38 @@ R3 acceptance 代表 target、owner、ABI、contract delta、proof boundary 与 
   allocation或只验证happy path不满足该claim。该app是长期guest-local test app，不链接libc，也不是独立probe或
   kernel semantic authority；`anemone-rs`只按真实测试需要提供窄ABI常量和wrapper。
 - **Compatibility / LTP：** `pty01`、`ioctl01`，以及由 accepted Linux-compatible surface选取的 `ptem01`、
-  `hangup01`；额外 line-discipline/virtual-console cases 不自动成为 acceptance requirement。PTY target 内失败必须修复或触发 target
-  renegotiation；非 PTY prerequisite 必须独立归因，不能改写core test app结论。LTP 的 userspace 链接/运行
-  环境只是 case prerequisite，不形成 libc wrapper compatibility claim。
-- **Advisory tmux：** future cutover 必须尝试 selected tmux create/attach/detach/exit，但结果本身不阻塞 core
+  `hangup01`；额外 line-discipline/virtual-console cases 不自动成为 acceptance requirement。四项仍必须实际运行并逐项记录，
+  PTY target 内失败必须修复或触发 target renegotiation；但`pty01`要求distribution-style `020620`的mode断言不属于
+  `fsuid:fsgid`/`0600` target，及其导致该legacy binary以`Remaining cases broken`跳过的后续子项均不阻塞cutover，也不得
+  伪装为PASS。`ioctl01`/`ptem01`中直接要求`TCGETA`/`TCSETA*`或`TCSBRK`/`TCSBRKP`的legacy子项同样位于R4 ABI之外；
+  它们仍必须实际尝试并按原始结果记录，但不阻塞cutover、不得计为PASS，也不得用兼容stub伪造支持。对应target语义继续
+  由普通`pty-test`的exact metadata/DAC、`TCGETS`/`TCSETS*`、winsize、relation/PTY ioctl与其余public PTY matrix证明。
+  非 PTY prerequisite必须独立归因，不能改写core test app结论。LTP 的 userspace 链接/运行环境只是 case prerequisite，
+  不形成 libc wrapper compatibility claim。
+- **Advisory tmux：** 本次cutover必须尝试selected tmux create/attach/detach/exit，但结果本身不阻塞core
   closure。QEMU serial presentation 或其它非 PTY prerequisite 使其不适用时记录 Not Run / Inconclusive；若失败暴露
-  本 R3 target 内且能自然闭合的 PTY 缺口，则在实现边界内修复；若需要 tmux feature、terminal presentation 或其它
+  本 R4 target 内且能自然闭合的 PTY 缺口，则在实现边界内修复；若需要 tmux feature、terminal presentation 或其它
   non-goal，则保留归因证据并接受不做。target 内但无法自然闭合的缺口仍必须回到 target renegotiation，不能借
   “advisory”隐藏。
 - **Diagnostic sshd：** sshd interactive session 不是 acceptance criterion，也不要求为 core closure 运行。若条件具备而
   运行，只能作为诊断证据，必须把 network、transport、authentication、crypto 与 PTY failure 分开归因；不得为通过
   sshd 扩张本 RFC。
-- **Architecture：** RV64 与 LA64 build/runtime evidence 分开记录，单架构结果不得外推。core cutover 要求两种架构
+- **Architecture：** RV64 与 LA64 build/runtime evidence 分开记录，单架构结果不得外推。本次core cutover要求两种架构
   build，并在至少一种架构完成mandatory PTY test app runtime；只有实际运行的架构可以取得
   runtime-proven claim，另一架构明确记录 Not Run。若实现出现 architecture-specific UAPI、user-copy 或
   ioctl 路径差异，对应架构 runtime evidence 升为 mandatory。
 
-本 RFC 不冻结 build/QEMU command、artifact hash 或 stage 顺序，也不因文档接受运行 kernel、QEMU、LTP 或 product
-workload。
+本 RFC 不冻结 build/QEMU command、artifact hash 或 stage 顺序；R4文档acceptance本身不构成kernel、QEMU、LTP或
+product workload运行证据，实际closure evidence见transaction。
 
 ## 风险与反馈
 
-- 多Stage实施依赖、全局实现输入与停止边界见[实施路线](./implementation.md)；路线存在不表示Stage已获execution
-  authorization，也不规定测试与production实现的编写先后。
+- 多Stage实施依赖、全局实现输入、逐checkpoint授权与停止边界见已关闭的[实施路线](./implementation.md)；执行期间
+  route存在不表示Stage已获authorization，也不规定测试与production实现的编写先后。closure不回溯扩大任何授权。
 
 - user-mountable不表示ordinary user或每mount private instance：generic `CAP_SYS_ADMIN`仍是mount admission owner，devpts
   只返回同一persistent instance。若实现需要根据mount path、mount namespace、mount count或`ptmx`所在view选择backend，
-  必须回到RFC review；不能把Linux per-mount instance语义悄悄带入R3。
+  必须回到RFC review；不能把Linux per-mount instance语义悄悄带入R4。
 
 - current VFS dynamic positive-dentry revocation gap 可能让 retired pathname 继续 `stat` 到 inert inode，或让迟到
   materialization/cached positive 暂时遮蔽复用编号的新 binding。该通用 pathname availability/freshness 缺口继续由
@@ -423,7 +436,11 @@ workload。
   retirement 与 stale-capability safety，不外推为 generic pathname linearizability 证明。
 - fixed `fsuid:fsgid`/`0600` profile 不承诺 distribution-style `tty:0620`。若 product workload
   证明需要 system `tty` group、其它 mode 或 devpts mount configuration，必须回到 RFC review 改变 target/profile 与
-  configuration source，不能在实现中硬编码私人 rootfs 的 numeric GID。
+  configuration source，不能在实现中硬编码私人 rootfs 的 numeric GID。该差异是首版accepted limitation；上游
+  `pty01`的`020620`断言及由其提前终止而未运行的子项不形成`0600` target的失败证据，cutover时按实际结果写入register。
+- 首版不承诺legacy `termio`与break-control ioctl。`ioctl01`/`ptem01`中直接要求`TCGETA`/`TCSETA*`、`TCSBRK`或
+  `TCSBRKP`的子项是accepted limitation；若product workload需要它们，必须单独定义数据布局、drain/flush/break语义、
+  errno与source/runtime proof，不能用silent-success或test-specific translation绕过ABI owner。
 - tmux 的 terminal presentation prerequisite 可能使建议性验证 Not Run / Inconclusive；sshd 还可能先暴露 network、
  transport、authentication 或 crypto 缺口。两者都必须区分 PTY failure 与 environment prerequisite，不能为通过
  workload 扩张本 RFC。
@@ -444,7 +461,7 @@ workload。
   `xref:linux-6.6.32:drivers/tty/tty_jobctrl.c#tty_signal_session_leader`
 
 当前没有tracking page；[transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)只记录已执行checkpoint、
-review、validation与handoff。R3 review的已接受结论已经折回canonical target/contract/acceptance；
+review、validation与handoff。R4 review的已接受结论已经折回canonical target/contract/acceptance；
 `implementation.md`只组织Stage依赖与执行停止点，不保留第二份decision状态表。
 
 ## 修订记录
@@ -455,13 +472,14 @@ review、validation与handoff。R3 review的已接受结论已经折回canonical
 | R1 | 2026-08-11 | 保留 reusable index 与跨 episode identity safety；generic dentry freshness/revocation 继续由 VFS register 独立拥有，不形成 PTY 的额外 implementation/cutover Stage，且禁止 PTY-local workaround 或 monotonic fallback。mandatory core validation收敛为仓库内普通Rust + `anemone-rs` PTY test app，不选择、依赖或验证libc PTY wrapper profile。 | maintainer review；docs-only，runtime Not Run |
 | R2 | 2026-08-11 | 明确devpts是`CAP_SYS_ADMIN`可挂载到任意existing directory的no-device filesystem；所有mount复用同一persistent system instance/superblock/binding，devfs预发布canonical `/dev/pts`且persistent init显式mount。排除Linux per-mount private instance、mount-local `ptmx`与mount option；mount lifetime不驱动pair/binding lifecycle。 | maintainer review；docs-only，runtime Not Run |
 | R3 | 2026-08-11 | 明确当前工程期允许少量自然heap backing allocation沿kernel global allocator policy在极端OOM时panic；显式capacity/fd/VFS index/enrollment等fallible prepare仍保持errno、publication前rollback与不失败success tail。不得为了把所有OOM强制映射`ENOMEM`而扩大shared API或扭曲owner/commit形状。 | maintainer在Stage 3 Checkpoint 2 review中明确接受；不改变ABI、owner、Contract Impact或acceptance |
+| R4 | 2026-08-11 | 保留`fsuid:fsgid`/`0600` fixed metadata，不引入distribution-style system `tty` group、`0620`或mount configuration；首版ABI保留`TCGETS`/`TCSETS*`、winsize、relation与PTY ioctl，不新增legacy `TCGETA`/`TCSETA*`或`TCSBRK`/`TCSBRKP`。这些差异记为accepted limitations；对应`pty01`/`ioctl01`/`ptem01`子项仍必须尝试并如实记录，但不阻塞cutover、也不计为PASS。 | maintainer在Stage 4 Checkpoint 2 LTP反馈中明确选择`0600`并同意保持首版legacy ioctl ABI不变；不改变owner或Contract Impact，收窄accepted ABI/acceptance |
 
 ## 当前状态
 
-- Accepted Target / R3。
-- Implementation route：Draft；Stage解析状态由[实施路线](./implementation.md)统一拥有，Stage 4已解析。
-- Implementation authorization：Stage 1--3与Stage 4 Checkpoint 1已消费并关闭；Stage 4 Checkpoint 2为None。
-- Contract cutover：None。
+- Accepted Target / R4。
+- Implementation route：Closed；Stage 1--4均已关闭。
+- Implementation authorization：全部已消费并关闭；无后续gate授权。
+- Contract cutover：`PTY-DEVPTS-CUTOVER` Effective。
 - Stage 1：Closed。最终candidate的RV64 build、622项KUnit、TTY 50/50、auto/vi/ash与正常关机已通过；详见
   transaction。
 - Stage 2：Closed。最终candidate的RV64 build、616项KUnit、TTY 50/50、auto/vi/ash与正常关机通过，LA64 build
@@ -469,9 +487,14 @@ review、validation与handoff。R3 review的已接受结论已经折回canonical
 - Stage 3：Closed。Checkpoint 2已完成hidden devpts、allocation/open/admission与cross-owner cleanup production route；
   final review为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe。RV64 wrapper通过623项KUnit、existing TTY 50/50、vi/ash、
   host byte oracle与正常关机，LA64 repository build通过；详见transaction。
-- Stage 4：Checkpoint 1 Closed / Checkpoint 2 Resolved，Awaiting Authorization。单一`pty-test`、真实使用的
-  `anemone-rs`窄wrapper与repository-owned RV64/LA64 build/package入口已经闭合；Checkpoint 2才公开激活并独占
-  `PTY-DEVPTS-CUTOVER`。devpts registration、devfs namespace publication、persistent init mount与contract cutover均未发生。
-- RV64/LA64 `pty-test` runtime、public PTY pathname/ioctl runtime、LTP、sshd、tmux：Not Run。generic VFS
-  cached-positive freshness、late materialization、完整multi-view linearizability与concurrent runtime interleavings：
-  Not Proven。
+- Stage 4：Closed。Checkpoint 2注册single persistent `devpts`、发布devfs `/dev/ptmx`与empty `/dev/pts`，并由
+  persistent post-chroot consumer显式mount canonical view；公开route只消费Stage 3既有instance/allocation/open/cleanup。
+  RV64 public runtime通过623/623 KUnit、`PTYTEST:SUMMARY:PASS:12`与orderly shutdown；existing serial wrapper通过
+  623/623 KUnit、`TTYTEST:SUMMARY:PASS:50`、BusyBox vi/ash与host byte oracle。LA64 app/rootfs/kernel build通过，runtime
+  Not Run；未发现architecture-specific UAPI/user-copy/ioctl差异。
+- focused RV64 LTP在glibc/musl上结果一致：`hangup01`通过；`ioctl01`各7/9 subtests通过，两个legacy `TCGETA`
+  pointer-error子项按R4 accepted limitation记录；`pty01`因实际`020600`与distribution-style `020620`要求不同而BROK；
+  `ptem01`首先停在legacy `TCGETA`，后续还要求out-of-target `TCSETA*`/`TCSBRK`。四项都已尝试，只有实际PASS计入证据。
+- tmux create/attach/detach/exit因提供的RV64 rootfs没有target tmux executable而Not Run / Inconclusive；sshd按设计Not Run。
+  generic VFS cached-positive freshness、late materialization、完整multi-view linearizability与concurrent runtime
+  interleavings保持Not Proven，register issue不因PTY cutover关闭。

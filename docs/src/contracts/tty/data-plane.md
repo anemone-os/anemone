@@ -1,15 +1,15 @@
-# Serial TTY Data Plane 当前契约
+# TTY Data Plane 当前契约
 
 **Contract ID：** `TTY-PORT-001` / `TTY-TERM-001` / `TTY-INPUT-001` / `TTY-OUTPUT-001` / `TTY-ENDPOINT-001`
 **状态：** Active
 **Owner：** `device::tty` data-plane protocol；UART physical state 仍由 serial driver 唯一拥有
 **参与领域：** serial driver / console / TTY / devfs / VFS / boot stdio
-**覆盖范围：** boot-applied serial capability、ordered RX condition handoff、共享 Terminal truth、canonical/raw input、termios input conditioning、byte output、readiness、termios/winsize data-plane 与稳定 `/dev/ttyS<N>` publication
-**不覆盖：** controlling-terminal relation、caller-relative `/dev/tty`、foreground/background access、terminal-generated signal、relation cleanup、runtime line reconfiguration、hangup、hotplug 或 PTY
+**覆盖范围：** boot-applied serial capability、ordered RX condition handoff、serial与PTY共享 Terminal truth、canonical/raw input、termios input conditioning、byte output、readiness、termios/winsize data-plane 与稳定 serial endpoint publication
+**不覆盖：** controlling-terminal relation、caller-relative `/dev/tty`、foreground/background access、terminal-generated signal、relation cleanup、physical runtime line reconfiguration或hotplug；PTY pair/hangup由companion contract定义
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{boot_io,console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
 **Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
-**最后核验：** 2026-08-08
+**最后核验：** 2026-08-11
 
 ## 状态与能力所有权
 
@@ -72,6 +72,9 @@ output列truth、失败update部分可见，或ioctl成功但丢弃用户状态�
 
 **当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)。
 
+**PTY refine：** PTY slave与master attachment复用同一个Terminal；pair只拥有lifecycle/peer predicate，不复制termios、
+winsize、discipline、stream或readiness truth。该refine来自[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)。
+
 ## TTY-INPUT-001 — Input ownership、record boundary与readiness同源
 
 **规则：** raw dequeue是port到worker-local batch的ownership transfer；discipline提交后，editable/committed input与
@@ -99,6 +102,10 @@ register-plus-recheck与worker batch assertion/KUnit；人工`VERASE/VKILL/VEOF`
 
 **当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)。
 
+**PTY refine：** master write按同一input-conditioning/discipline规则直接提交ordered bytes；master hangup清除committed
+slave input。readiness仍由Terminal input与pair peer predicate组合，pair不建立第二队列。该refine来自
+[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)。
+
 ## TTY-OUTPUT-001 — 输出按用户byte计量并由port最终序列化
 
 **规则：** TTY write接受任意bytes。`OPOST`关闭时原样提交；启用transform时，partial progress按已经消费的
@@ -122,6 +129,10 @@ byte oracle；TAB3列推进、完整token backpressure与readiness inline KUnit 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
 **当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)。
+
+**PTY refine：** slave write与echo经过同一output processing进入Terminal queue并由master消费；partial progress、drain和
+writability保持Terminal-owned，master不是physical port且不伪造`TtyPort`。该refine来自
+[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)。
 
 ## TTY-ENDPOINT-001 — Endpoint publication是稳定的单向transaction
 
@@ -156,7 +167,7 @@ registry/port bypass audit。
   [companion contract](./job-control.md)定义，不能从本页单独推断。
 - build/runtime acceptance只在RV64验证；LA64 compile/runtime、实体UART parity/framing injection与hardware均Not Run，
   classifier/KUnit和RV64 QEMU break结果不得外推。
-- runtime line reconfiguration、hardware hangup/backend fatal、hotplug/unpublish、完整`VMIN/VTIME`、PTY/devpts/ptmx
-  与完整Linux termios/ioctl corner不在本页。
+- runtime line reconfiguration、physical hardware hangup/backend fatal、hotplug/unpublish、完整`VMIN/VTIME`与完整Linux
+  termios/ioctl corner不在本页；PTY pair、devpts与master hangup见[companion contract](./pty-devpts.md)。
 - post-validation user-copy fault不提供TTY-local rollback/replay；普通有效buffer read、record boundary与未选后缀仍受
   `TTY-INPUT-001`约束。

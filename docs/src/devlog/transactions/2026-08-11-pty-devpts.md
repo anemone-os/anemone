@@ -1,17 +1,19 @@
 # 2026-08-11 - PTY / devpts
 
-**Status:** Active / R3 / Stage 3 Closed
+**Status:** Completed / R4 / Stage 4 Closed
 **Owners:** doruche, Codex
-**Canonical Target:** [RFC-20260810-pty-devpts R3](../../rfcs/pty-devpts/index.md)
+**Canonical Target:** [RFC-20260810-pty-devpts R4](../../rfcs/pty-devpts/index.md)
 **Implementation Route:** [Stage 1--4](../../rfcs/pty-devpts/implementation.md)
-**Contract Delta:** None；`PTY-DEVPTS-CUTOVER`与父RFC列出的全部Introduce/Refine ID仍Not Effective
+**Contract Delta:** `PTY-DEVPTS-CUTOVER` Effective；`PTY-PAIR-001` / `PTY-ADMISSION-001` / `PTY-ABI-001` /
+`DEVPTS-001` Introduce，`TTY-TERM-001` / `TTY-INPUT-001` / `TTY-OUTPUT-001` / `TTY-REL-001` / `TTY-LIFE-001` /
+`TTY-JOBCTL-001` / `TTY-ABI-001` Refine
 
 ## Scope
 
 本transaction为长期、多Stage RFC保存checkpoint execution、review、validation与下一授权handoff。target、owner、
 ABI、Contract Impact、acceptance与Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划或
-current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2、Stage 2与Stage 3的两个checkpoint；五个授权
-均已消费并关闭。Stage 4与任何contract cutover仍未授权。
+current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2、Stage 2、Stage 3的两个checkpoint与Stage 4
+的两个checkpoint；全部授权均已消费并关闭。只有Stage 4 Checkpoint 2执行一次`PTY-DEVPTS-CUTOVER`，没有后续gate授权。
 
 ## Checkpoint Log
 
@@ -279,11 +281,82 @@ materialization与full multi-view linearizability继续Not Proven。
 **Next / Stop:** Stage 4 Checkpoint 1 Closed。执行严格停止；Checkpoint 2与`PTY-DEVPTS-CUTOVER`仍未获authorization，
 不得由本次build/package/source review自动进入public activation或runtime acceptance。
 
+### 2026-08-11 - Stage 4 Checkpoint 2 public activation与PTY-DEVPTS-CUTOVER
+
+**Change:** 从`dev/drc/alpha@86e38e8b`激活Checkpoint 2。`devpts`在fs init中进入generic filesystem registry，并从该
+registered filesystem构造唯一persistent system instance；全部fs initcall返回后，显式public activation先在devfs发布
+empty `pts` directory，再发布global `ptmx` character node，避免依赖sibling initcall link order。repository-owned
+user-test consumer只在chroot后的persistent `/dev` mount完成后显式把同一devpts instance挂到`/dev/pts`；pre-chroot
+temporary devfs transport保持不变。
+
+public activation没有新增kernel ABI或第二条allocation/open route。`/dev/ptmx`、pathname slave与`TIOCGPTPEER`继续消费
+Stage 3已经关闭的single instance、binding、pair admission、fd reservation、relation enrollment与static final-release
+composition；master retirement继续先提交pair state，再在guards-out撤销exact binding/relation并唤醒waiters。public
+`pty-test`针对Linux 6.6.32 hangup source fact修正oracle：N_TTY hangup清除committed slave input，read返回EOF，termios/
+winsize query与mutation返回`EIO`；generic relation child忽略只由case cleanup产生的`SIGHUP`，dedicated hangup case仍安装
+handler并验证`SIGHUP`/`SIGCONT`。这些修正没有改变kernel visible behavior或降低coverage。
+
+**Accepted R4 feedback:** focused LTP暴露两个不属于首版target的compatibility profile。维护者明确选择保留
+`fsuid:fsgid`/`0600`，不引入system `tty` group、`0620`、mount options或`pt_chown`；随后明确同意保持首版现代
+`TCGETS`/`TCSETS*`、winsize、relation/PTY ioctl surface，不新增legacy `TCGETA`/`TCSETA*`、`TCSBRK`/`TCSBRKP`。
+四个selected LTP cases仍必须尝试并保留原始结果；直接对应上述accepted limitations的子项不阻塞closure，也不计为PASS。
+R4只收窄accepted ABI/acceptance，没有移动owner、cleanup或Contract Impact。
+
+**Source / owner / bypass audit:** boot route只有“all fs providers initialized -> devpts static namespace activation ->
+persistent userspace mount -> workload”一条依赖链；devpts registry和instance各一份，mount只取得同一superblock/binding
+projection，mount count不参与pair lifecycle。temporary consumer没有devpts特判。allocation/open的fallible prepare与
+infallible success tail、opened-description final release、exact binding retire/reuse、stale capability、relation/hangup
+guards-out cleanup、poll route-first/final predicate recheck均保持Stage 3 owner边界；public code没有test-only bypass、
+second state truth、kernel ABI expansion或VFS private-cache workaround。generic VFS cached-positive revocation、late
+materialization、readdir与forced concurrent multi-view linearizability仍为Not Proven。
+
+**Validation:** final RV64 public PTY candidate log为`build/pty-devpts-stage4-ckpt2-pty-rv64-candidate.log`：repository build
+完成，623/623 KUnit通过，guest `PTYTEST:SUMMARY:PASS:12`并orderly shutdown。12项覆盖allocation/identity/capacity、
+mount views、stream/termios/readiness、description/fork/final release、两条slave-open route、implicit negative matrix、
+relation/job-control/hangup与reuse。一次复用发生过KUnit `/kunit-openat-readonly-trunc` `EEXIST`，归因为复用writable
+acceptance image留下旧fixture；重新生成rootfs后同candidate完整通过，不归因PTY。
+
+LA64分别通过`just app build --arch loongarch64 pty-test`、`just rootfs mkfs -c
+conf/rootfs/pty-acceptance-la64.toml`与`just build --preset qemu-virt-la64-release --bind smp=8 --bind memory=8G`，final
+symbol table为6632 entries。没有architecture-specific UAPI/user-copy/ioctl差异，因此LA64 runtime保持Not Run，不从RV64
+外推。
+
+existing serial regression log为`build/pty-devpts-stage4-ckpt2-tty-rv64.log`：canonical SMP1/1G wrapper通过623/623
+KUnit、`TTYTEST:SUMMARY:PASS:50`、BusyBox vi/ash、host byte oracle与orderly shutdown。该结果只证明existing serial
+regression，不伪装成SMP8 public PTY topology evidence。
+
+focused LTP log为`build/pty-devpts-stage4-ckpt2-ltp-rv64.log`；temporary profile修改已完整恢复。glibc与musl结果一致：
+`hangup01` PASS；`ioctl01`各7/9 subtests PASS，两个legacy `TCGETA` pointer-error subtests返回`ENOTTY`而不是`EFAULT`；
+`pty01`因actual `020600`不满足distribution-style `020620`而BROK，legacy binary随后把remaining cases标为broken；
+`ptem01`首先在unsupported `TCGETA`失败，后续还要求`TCSETA*`与`TCSBRK`。合计attempted 8 case instances、passed 2、
+failed/non-pass 6、infra_failed 0；只有实际PASS计入证据，未执行子项不外推。
+
+tmux create/attach/detach/exit已尝试满足environment prerequisite：preliminary/final RV64 roots及build artifacts均没有
+target tmux executable；final root只有tmux terminfo与editor support文件。因此workload为Not Run / Inconclusive，归因
+缺少consumer而非PTY failure。sshd按R4设计为Not Run。
+
+**Architecture Friction Scan:** 未发现第二份pair/binding/readiness/relation truth、owner穿透、private representation
+泄漏、为局部需求扩大public API、caller/architecture/test特判、无退出条件bridge、隐含failure/cleanup逆序或降低
+validation/ABI诚实性。public activation是同owner窄入口，post-chroot mount是既有persistent consumer的显式依赖；
+accepted LTP limitations进入register而未以stub或弱oracle绕过。没有需要保留的Euclid/Keter/Apollyon。
+
+**Review / Feedback:** independent final-candidate review首先确认源码activation、single instance、owner/lifecycle、
+guards-out cleanup、final release、predicate/recheck与oracle均无Apollyon/Keter，随后指出三组Euclid：current contract的
+transaction anchor顺序会断链；Closed/R4 RFC与invariants仍残留未标历史的future/R3 authority措辞；`ioctl01` 7/9一度
+被误写成accepted-surface denominator。分别改为date-first heading anchor、retrospective R4/closure wording，以及
+`overall 7/9 + two legacy pointer probes non-PASS`的逐项口径。最终复核为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe。
+
+**Contract Cutover:** mandatory evidence和final review关闭后已一次性执行`PTY-DEVPTS-CUTOVER`：新增
+[Unix98 PTY与devpts current contract](../../contracts/tty/pty-devpts.md)，refine TTY data plane/relation/job-control，更新
+register中的distribution metadata与legacy termio/break accepted limitations，并按真实结果缩减原ioctl LTP gap。
+`OPENED-DESC-*`、VFS owner/current contracts与generic dynamic-positive issue不变。
+
+**Next / Stop:** Stage 4 Checkpoint 2、Stage 4与RFC Closed；transaction Completed。执行严格停止，不进入任何后续gate。
+
 ## Current Handoff
 
-当前live source已经关闭runtime semantic endpoint substrate、owner-private PTY pair/data-plane/description effect、
-TTY-owner-local结构拆分，以及hidden devpts/allocation/open/cleanup production route；existing serial caller继续使用semantic
-endpoint/physical attachment单一路径，Stage 3 capability仍不可由userspace发现。Stage 4 Checkpoint 1又关闭了单一
-`pty-test` acceptance consumer、窄`anemone-rs` wrapper与双架构repository build/package入口，但没有运行该app或公开
-namespace。transaction保持Active只因为Stage 4 Checkpoint 2尚未执行；本记录不授权自动继续，也不把serial userspace、
-KUnit计数、双架构build/package或source review外推为公开PTY ABI/runtime acceptance或contract cutover。
+Unix98 PTY/devpts已成为effective current capability。后续工作必须从current contracts和live source出发：首版保持single
+persistent instance、`fsuid:fsgid`/`0600`、现代termios/winsize/relation/PTY ioctl，以及pair/description/relation/VFS各自
+唯一owner。distribution-style `tty:0620`与legacy termio/break ioctl是accepted limitations；generic VFS cached-positive
+freshness、late materialization与完整multi-view concurrency仍Open / Not Proven。LA64 PTY runtime、tmux与sshd保持Not Run，
+不得从RV64或build evidence外推。本transaction不授权下一gate。

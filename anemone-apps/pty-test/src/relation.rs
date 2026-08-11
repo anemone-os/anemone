@@ -109,12 +109,26 @@ fn expect_no_controlling_terminal() -> Result<(), Errno> {
 }
 
 fn finish_child(result: Result<(), Errno>) -> ! {
-    exit(if result.is_ok() { 0 } else { 1 })
+    match result {
+        Ok(()) => exit(0),
+        Err(errno) => {
+            println!("PTYTEST:CHILD-FAIL:{errno}");
+            exit(1)
+        },
+    }
 }
 
 fn run_new_session(body: fn() -> Result<(), Errno>) -> Result<(), Errno> {
     match fork()? {
-        None => finish_child(setsid().and_then(|_| body())),
+        None => finish_child(
+            setsid()
+                // Most relation cases validate acquisition rather than the
+                // dedicated master-hangup signal effect below. Ignore the
+                // cleanup SIGHUP so a successful case can report its result;
+                // `hangup_body` replaces this disposition with its handler.
+                .and_then(|_| ignore_signal(SigNo::SIGHUP))
+                .and_then(|_| body()),
+        ),
         Some(child) => wait_child(child),
     }
 }
@@ -318,7 +332,7 @@ fn hangup_body() -> Result<(), Errno> {
     ensure(TERMINAL_SIGNALS.load(Ordering::SeqCst) & 8 != 0)?;
     foreground_and_background(&pair, slave.raw(), leader)?;
 
-    write_all(pair.master.raw(), b"tail")?;
+    write_all(pair.master.raw(), b"discarded-on-hangup")?;
     let epfd = epoll_create1(EpollCreateFlags::empty())?;
     epoll_ctl(
         epfd,
@@ -333,8 +347,8 @@ fn hangup_body() -> Result<(), Errno> {
     master.close()?;
     ensure(TERMINAL_SIGNALS.load(Ordering::SeqCst) & 3 == 3)?;
     expect_no_controlling_terminal()?;
-    ensure(tcgetattr(slave.raw())? == termios)?;
-    ensure(get_winsize(slave.raw())? == size)?;
+    expect_errno(tcgetattr(slave.raw()), EIO)?;
+    expect_errno(get_winsize(slave.raw()), EIO)?;
     expect_errno(tcsetattr(slave.raw(), SetTermiosWhen::Now, &termios), EIO)?;
     expect_errno(set_winsize(slave.raw(), &size), EIO)?;
 
@@ -356,10 +370,8 @@ fn hangup_body() -> Result<(), Errno> {
     )?;
     close(epfd)?;
 
-    let mut tail = [0u8; 4];
-    read_exact(slave.raw(), &mut tail)?;
-    ensure(&tail == b"tail")?;
-    ensure(read(slave.raw(), &mut tail)? == 0)?;
+    let mut buffer = [0u8; 4];
+    ensure(read(slave.raw(), &mut buffer)? == 0)?;
     expect_errno(write(slave.raw(), b"after-hangup"), EIO)
 }
 

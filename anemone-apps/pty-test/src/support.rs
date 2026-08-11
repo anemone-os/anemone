@@ -82,14 +82,31 @@ impl Pair {
     }
 }
 
+#[track_caller]
 pub fn ensure(condition: bool) -> Result<(), Errno> {
-    if condition { Ok(()) } else { Err(EIO) }
+    if condition {
+        Ok(())
+    } else {
+        let caller = core::panic::Location::caller();
+        println!("PTYTEST:ASSERT:{}:{}", caller.file(), caller.line());
+        Err(EIO)
+    }
 }
 
+#[track_caller]
 pub fn expect_errno<T>(result: Result<T, Errno>, expected: Errno) -> Result<(), Errno> {
     match result {
         Err(actual) if actual == expected => Ok(()),
-        _ => Err(EIO),
+        _ => {
+            let caller = core::panic::Location::caller();
+            println!(
+                "PTYTEST:ERRNO-MISMATCH:{}:{}:expected={}",
+                caller.file(),
+                caller.line(),
+                expected
+            );
+            Err(EIO)
+        },
     }
 }
 

@@ -1,9 +1,4 @@
-//! Hidden system devpts instance and Unix98 PTY allocation transaction.
-//!
-//! Stage 3 deliberately does not register this filesystem or publish its
-//! devfs entry points. The prebuilt instance is nevertheless the production
-//! owner of allocation, binding, and mount projection so Stage 4 only has to
-//! connect the static namespace consumers.
+//! System devpts instance and Unix98 PTY allocation transaction.
 
 use crate::{
     device::{
@@ -14,9 +9,10 @@ use crate::{
         },
     },
     fs::{
-        devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish},
+        devfs::{self, DevfsNodeAttr, DevfsNodeOps, DevfsPublish},
         filesystem::FileSystemMountOps,
         inode::Inode,
+        register_filesystem,
         superblock::{FsMagic, FsStat, SuperBlockOps},
     },
     prelude::*,
@@ -629,10 +625,7 @@ impl DevfsNodeOps for PtmxNodeOps {
     }
 }
 
-/// Dormant Stage 4 publication descriptor. Merely constructing this value
-/// does not register devpts or publish `/dev/ptmx`.
-#[allow(dead_code)]
-pub(crate) fn ptmx_publication() -> DevfsPublish {
+fn ptmx_publication() -> DevfsPublish {
     DevfsPublish {
         name: "ptmx".to_string(),
         attr: DevfsNodeAttr {
@@ -644,11 +637,26 @@ pub(crate) fn ptmx_publication() -> DevfsPublish {
     }
 }
 
+/// Publish the static devfs side of the public PTY activation.
+///
+/// This runs only after every fs initcall has returned, so it depends on the
+/// initialized devfs namespace explicitly rather than on sibling-initcall
+/// link order. Publishing the empty mountpoint first also prevents a usable
+/// `/dev/ptmx` from escaping when the boot-fatal namespace transaction fails.
+pub(super) fn activate_public_namespace() {
+    devfs::root_directory()
+        .publish_directory("pts".to_string())
+        .unwrap_or_else(|err| panic!("failed to publish /dev/pts mountpoint: {:?}", err));
+    devfs::publish(ptmx_publication())
+        .unwrap_or_else(|err| panic!("failed to publish /dev/ptmx: {:?}", err));
+}
+
 #[initcall(fs)]
 fn init() {
-    let fs = Arc::new(FileSystem::new(&DEVPTS_FS_OPS));
+    let fs = register_filesystem(&DEVPTS_FS_OPS)
+        .unwrap_or_else(|err| panic!("failed to register devpts: {:?}", err));
     let instance = DevptsInstance::try_new(fs, PTY_SYSTEM_CAPACITY)
-        .unwrap_or_else(|err| panic!("failed to initialize hidden devpts instance: {:?}", err));
+        .unwrap_or_else(|err| panic!("failed to initialize system devpts instance: {:?}", err));
     DEVPTS_INSTANCE.init(|slot| {
         slot.write(instance);
     });

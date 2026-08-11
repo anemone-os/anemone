@@ -89,3 +89,8 @@ pub fn register_filesystem_drivers() {
         run_initcalls(InitCallLevel::Fs);
     }
 }
+
+/// Activate public filesystem namespaces whose providers span fs initcalls.
+pub(crate) fn activate_public_filesystems() {
+    devpts::activate_public_namespace();
+}

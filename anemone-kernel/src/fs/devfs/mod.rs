@@ -106,7 +106,10 @@ fn init() {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::utils::any_opaque::NilOpaque;
+    use crate::{
+        device::devnum::{DeviceNumber, MajorNum, MinorNum},
+        utils::any_opaque::NilOpaque,
+    };
 
     const DEVFS_TEST_SINK_CAPACITY: usize = 64;
 
@@ -362,10 +365,16 @@ mod kunits {
         let shm_path = format!("{mountpoint}/shm");
         let shm_ref = vfs_lookup(Path::new(shm_path.as_str())).unwrap();
         assert_eq!(shm_ref.to_string(), shm_path);
+        let pts_path = format!("{mountpoint}/pts");
+        let pts_ref = vfs_lookup(Path::new(pts_path.as_str())).unwrap();
+        assert_eq!(pts_ref.to_string(), pts_path);
+        let ptmx_path = format!("{mountpoint}/ptmx");
+        let ptmx_ref = vfs_lookup(Path::new(ptmx_path.as_str())).unwrap();
+        assert_eq!(ptmx_ref.to_string(), ptmx_path);
 
         let root_attr = vfs_get_attr(Path::new(mountpoint.as_str())).unwrap();
         assert_eq!(root_attr.mode.ty(), InodeType::Dir);
-        assert_eq!(root_attr.nlink, 3);
+        assert_eq!(root_attr.nlink, 4);
         assert_eq!(root_attr.rdev, DeviceId::None);
 
         let shm_attr = vfs_get_attr(Path::new(shm_path.as_str())).unwrap();
@@ -373,11 +382,25 @@ mod kunits {
         assert_eq!(shm_attr.nlink, 2);
         assert_eq!(shm_attr.rdev, DeviceId::None);
 
+        let pts_attr = vfs_get_attr(Path::new(pts_path.as_str())).unwrap();
+        assert_eq!(pts_attr.mode.ty(), InodeType::Dir);
+        assert_eq!(pts_attr.nlink, 2);
+        assert_eq!(pts_attr.rdev, DeviceId::None);
+
+        let ptmx_attr = vfs_get_attr(Path::new(ptmx_path.as_str())).unwrap();
+        assert_eq!(ptmx_attr.mode.ty(), InodeType::Char);
+        assert_eq!(
+            ptmx_attr.rdev,
+            DeviceId::Number(DeviceNumber::new(MajorNum::new(5), MinorNum::new(2)))
+        );
+
         assert_eq!(
             vfs_lookup(Path::new("/kunit-devfs-mount/missing")).unwrap_err(),
             SysError::NotFound
         );
 
+        drop(ptmx_ref);
+        drop(pts_ref);
         drop(shm_ref);
         drop(root_ref);
         unmount_devfs(&mountpoint);
@@ -391,6 +414,8 @@ mod kunits {
         assert_eq!(entries[0], ".");
         assert_eq!(entries[1], "..");
         assert!(entries.iter().any(|name| name == "shm"));
+        assert!(entries.iter().any(|name| name == "pts"));
+        assert!(entries.iter().any(|name| name == "ptmx"));
         assert!(entries.iter().any(|name| name == "null"));
         assert!(entries.iter().any(|name| name == "zero"));
         assert!(entries.iter().any(|name| name.starts_with("ram")));
