@@ -4,14 +4,15 @@
 **最后更新：** 2026-08-11
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
 **当前修订：** R3
-**Stage 状态：** Stage 1--3 / Closed；Stage 4 / Future
-**Execution Authorization：** Stage 1--3已消费并关闭；Stage 4：None
+**Stage 状态：** Stage 1--3 / Closed；Stage 4 / Resolved，Awaiting Authorization
+**Execution Authorization：** Stage 1--3已消费并关闭；Stage 4 Checkpoint 1--2：None
 **Contract Cutover：** None
 
 本页只组织父 RFC R3 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
 Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析并在各自授权下
 关闭。Stage 2与Stage 3的两个checkpoint也已在各自独立授权下完成并关闭，均未产生contract cutover；当前执行严格停在
-Stage 3 closure。既有路线或Stage 3 handoff不构成Stage 4 execution authorization；Stage 4保持Future。
+Stage 3 closure。Stage 4现已解析为两个execution checkpoint，但解析本身、既有路线或Stage 3 handoff均不构成
+Checkpoint 1、Checkpoint 2或`PTY-DEVPTS-CUTOVER`的execution authorization。
 
 ## 全局 Implementation Boundary
 
@@ -57,7 +58,7 @@ write set；同owner内部类型、模块、算法与行为保持型拆分由对
 | Stage 1 | Closed | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
 | Stage 2 | Closed | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
 | Stage 3 | Closed | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
-| Stage 4 | Future | 公开激活、完成mandatory acceptance并原子cut over | `PTY-DEVPTS-CUTOVER` |
+| Stage 4 | Resolved | 公开激活、完成mandatory acceptance并原子cut over | Checkpoint 1：None；Checkpoint 2：`PTY-DEVPTS-CUTOVER` |
 
 普通commit不自动形成新Stage。只有独立安全的review/授权停止点、probe、不安全中间态或contract cutover才调整
 Stage路线；若后续证据要求重新解析target/owner/ABI/acceptance，则进入RFC review或Target Renegotiation，不能由
@@ -666,19 +667,171 @@ publication、persistent init consumer、current contract/register与`PTY-DEVPTS
 
 ## Stage 4 — Public activation、acceptance 与 `PTY-DEVPTS-CUTOVER`
 
-**Purpose：** 原子注册user-mountable devpts filesystem，由devfs公开static `/dev/ptmx`与empty `/dev/pts` mountpoint，
-persistent init显式mount canonical system view，并公开完整R3 operation surface；运行mandatory
-source/owner、PTY Rust test app、LTP和architecture evidence，尝试并归因tmux，随后一次性完成父RFC列出的
-PTY/DEVPTS/TTY contract Introduce/Refine并关闭RFC；sshd仅在条件具备时作为诊断consumer。
+**解析状态：** Resolved
 
-**Prerequisites：** Stage 3关闭；全部production path、rollback/cleanup和acceptance consumer已在同一可review状态；
-维护者另行授权Stage 4与`PTY-DEVPTS-CUTOVER`。
+**Execution Authorization：** Checkpoint 1--2均为None
 
-**Protected Boundary：** core claim缺失时不得部分cut over或用tmux/sshd环境结果改写target；RV64/LA64 build/runtime分别
-记录，只有实际运行的架构取得runtime-proven claim；generic VFS pathname freshness继续留在register，current limitation
-只按真实LTP/ABI证据缩减。Stage 4必须证明canonical与一个ordinary-directory fresh view共享instance/binding；system-mount
-consumer修改只落在persistent init，不触达temporary pre-chroot consumer。不要求full cached/reuse multi-view
-linearizability。到达Stage 4前不冻结artifact identity、精确命令或未要求的额外runtime范围。
+**Contract Cutover：** None；只允许Checkpoint 2在全部mandatory core evidence满足后执行一次
+`PTY-DEVPTS-CUTOVER`
+
+**Purpose：** 先闭合一个长期保留的普通`pty-test` acceptance app与repository-owned验收入口，再原子注册
+user-mountable devpts filesystem，由devfs公开static `/dev/ptmx`与empty `/dev/pts` mountpoint，persistent init显式mount
+canonical system view并公开完整R3 operation surface。最终运行mandatory source/owner、`pty-test`、LTP与architecture
+evidence，尝试并归因tmux，随后一次性完成父RFC列出的PTY/DEVPTS/TTY contract Introduce/Refine并关闭RFC；sshd仅在条件
+具备时作为诊断consumer。
+
+**Prerequisites：** Stage 3关闭，父RFC R3、current TTY/opened-description/VFS/iomux/epoll contracts、register与live
+Stage 3 handoff没有语义漂移。Checkpoint 1关闭后，全部production path、rollback/cleanup、acceptance app与验收入口必须在
+同一candidate中可review，维护者才可以另行授权Checkpoint 2与`PTY-DEVPTS-CUTOVER`。本次docs-only解析不授权任一
+checkpoint。
+
+### Stage 4 Implementation Boundary
+
+- **Target / non-goals：** Checkpoint 1建立单一普通`pty-test`与其repository-owned build/package/acceptance入口；该app是
+  长期guest-local acceptance consumer，只通过`anemone-rs`直接使用syscall/ioctl，不链接或调用libc PTY wrapper，不新增
+  C实现、dual-libc profile或net风格`*-oracle`资产。Checkpoint 2连接Stage 3已经关闭的static activation point，公开完整
+  R3 surface、取得mandatory evidence并原子cut over。multiple/private devpts instance、mount-local `ptmx`、额外PTY ioctl/
+  line discipline、generic VFS pathname freshness、完整job-control residual、libc wrapper compatibility和sshd prerequisite
+  保持非目标。
+- **Owner / handoff：** `pty-test`只拥有测试流程、显式输入与结果判断，不成为kernel ABI或semantic authority；
+  `anemone-abi`继续拥有raw UAPI常量/布局，`anemone-rs`只提供测试真实需要的窄typed wrapper。`Terminal`、PTY pair、devpts、
+  VFS、`task::files`、relation、Signal与job-control owner保持父RFC边界。boot activation按“hidden devpts instance ready ->
+  filesystem registration与devfs namespace ready -> persistent devfs mounted -> persistent init mount `/dev/pts` -> PTY workload”
+  的显式依赖推进；同级initcall的偶然顺序不能充当依赖证明。temporary pre-chroot devfs consumer不自动mount devpts。
+- **Failure / cleanup：** Checkpoint 1的app/wrapper/build/package失败不改变kernel可见面或current contract。Checkpoint 2的
+  filesystem/devfs boot publication若失败必须在进入依赖PTY的userspace workload前fail closed；persistent init mount失败
+  也不得静默继续到PTY consumer。mandatory core test失败时不执行contract cutover、不关闭RFC、不把candidate写成current
+  capability；只允许保持R3的route correction，或在需要改变target/acceptance时停止并进入Target Renegotiation。LTP的非PTY
+  prerequisite、tmux presentation prerequisite与sshd环境失败必须独立归因，不得触发虚假kernel cleanup或target扩张。
+- **Protected API / ABI / contract：** Checkpoint 1不得注册devpts、发布`/dev/ptmx`/`/dev/pts`、修改persistent init mount
+  行为或更新current contract/register。Checkpoint 2以前，existing serial ABI、generic serial `O_NOCTTY` baseline、
+  `OPENED-DESC-*`、current `TTY-*`、VFS pathname owner与全部R3 non-goals保持有效。LTP是独立compatibility evidence；其既有
+  userspace/libc运行环境不为`pty-test`引入libc依赖，也不建立libc PTY wrapper target。不得部分cut over、发布success stub、
+  为测试增加production特判，或让test app/harness成为第二份pair/readiness/relation truth。
+- **Acceptance / validation claim：** Checkpoint 1只取得`pty-test`与`anemone-rs`窄wrapper的source/coverage review、
+  repository-native RV64/LA64 app build和package-path claim；全部public PTY runtime、LTP、tmux、sshd与contract cutover保持
+  Not Run/None。Checkpoint 2取得父RFC要求的source/owner/bypass proof、public mount/path/ioctl/data-plane/lifecycle/
+  relation/hangup coverage、selected LTP、existing serial regression与architecture-separated evidence。RV64/LA64 kernel及
+  `pty-test`均需build，至少一种架构完成mandatory `pty-test` runtime；只有实际运行的架构取得runtime-proven claim，若出现
+  architecture-specific UAPI/user-copy/ioctl差异则对应架构runtime升级为mandatory。
+- **Stop conditions：** 需要改变R3 target/non-goals、owner/handoff/failure/cleanup、public ABI、Contract Impact、acceptance
+  或validation strength；`pty-test`只能通过libc wrapper、多个专用oracle、隐藏输入或削弱覆盖才能运行；公开启动链必须依赖
+  temporary pre-chroot consumer、同级initcall偶然顺序、per-mount backend/binding或mount count lifecycle；mandatory app/LTP
+  暴露target内缺口但无法在当前边界自然修复；需要建立devpts-local VFS freshness、移动`Terminal` truth、扩大
+  `OPENED-DESC-003`或顺带启用非目标job-control residual。上述任一情况都必须在completion/cutover前停止。
+
+预计实现自然涉及普通`pty-test` app、`anemone-rs`窄syscall/ioctl wrapper、repository app/rootfs/acceptance入口、devpts
+filesystem registration、devfs static publication与persistent init mount consumer；current contract与RFC/transaction/register
+只在Checkpoint 2 closure按真实证据更新。这些是非穷举提示，不是逐文件write set；不得借Stage 4清理相邻net oracle、libc、
+TTY、VFS或rootfs代码。
+
+### Resolved activation 与 acceptance route
+
+1. **单一acceptance consumer。** `pty-test`采用与`socket-test`相同的普通`no_std` / `no_main` Rust app形状，以
+   `anemone-rs`完成启动、fd、mount、process、signal、poll/epoll与TTY ioctl调用。测试结果来自app对R3显式输入和可观察结果
+   的直接判断；不新建`*-oracle`命名、C/libc binary family、host-vs-guest dual implementation或第二套ABI定义。
+2. **Coverage先于公开激活闭合。** Checkpoint 1把父RFC矩阵映射到单一app内的稳定case family：public mount/discovery；
+   allocation/lock/metadata与两route admission；双向stream/readiness/partial progress；multiple open/dup/fork/final close与
+   retire/reuse identity；implicit relation、foreground/background policy与master hangup。case可以按owner职责拆模块，但
+   不按每项能力拆成多个app或validation facade；allocation-only/happy-path结果不能冒充完整coverage。
+3. **验收入口仍走repository pipeline。** app、必要的`anemone-rs`wrapper与rootfs/runner选择通过现有repository app/build
+   编排进入candidate；Checkpoint 1只证明build、package与coverage shape，不执行或声称public PTY runtime。artifact路径、
+   hash与精确命令在执行时记录，不硬编码成ABI条件，也不读取developer-private路径作为公共配置。
+4. **公开启动链只有一条。** Checkpoint 2消费Stage 3的dormant system instance、filesystem ops与`ptmx`publication
+   capability，注册`devpts`并由devfs预发布`ptmx`和empty `pts`；publication失败可以fail-stop整个boot，但不能让依赖PTY的
+   workload在半发布状态继续。repository-owned persistent init consumer在长期`/dev` ready后显式mount canonical
+   `/dev/pts`；board/user-test等temporary pre-chroot devfs阶段保持原职责，不因“看到devfs”机械mount devpts。
+5. **Core acceptance按claim分层。** source/owner/linearization review继续证明不能由单任务test覆盖的open-vs-retire、
+   final-release composition、relation/signal ordering、lost-wake与lock order；`pty-test`证明public R3 behavior；selected LTP
+   只证明对应compatibility case并区分非PTY prerequisite；existing TTY wrapper证明serial/current-contract regression。tmux
+   create/attach/detach/exit必须尝试和归因但不单独阻塞core closure，sshd只在条件具备时作为诊断consumer。
+6. **Mount与identity claim保持窄而真实。** runtime必须覆盖canonical `/dev/pts`与一个ordinary-directory fresh view共享
+   system instance/binding、single-view unmount保持另一view、last-view unmount/remount保持instance，以及retire/reuse后旧
+   inode/open capability fail closed且current binding取得new pair。generic cached-positive、late materialization、readdir
+   cursor与forced concurrent multi-view linearizability继续由VFS register拥有并明确Not Proven。
+7. **Cutover只在最终candidate发生。** mandatory core evidence、stage-wide review与Architecture Friction Scan全部满足后，
+   一次性把父RFC列出的`PTY-PAIR-001` / `PTY-ADMISSION-001` / `PTY-ABI-001`、`DEVPTS-001`与`TTY-*` Refine写入最小current
+   contract surface，更新必要导航、RFC closure与transaction evidence。`ANE-20260604-IOCTL-LTP-STAGE1-GAPS`只按真实LTP
+   结果缩减；VFS dynamic-positive issue不因PTY closure关闭。contract page的自然拆分由实际owner surface决定，不复制父
+   RFC target正文。
+
+### Checkpoint 1 — `pty-test` acceptance consumer 与入口闭合
+
+**Purpose：** 在公开任何PTY ABI前，先把唯一mandatory guest-local acceptance consumer、窄`anemone-rs`调用面与
+repository-owned build/package入口放到同一可review candidate。该checkpoint保持kernel、persistent init、current contract
+与全部外部可见语义不变；只授权本checkpoint时，关闭后立即停止。
+
+**Deliverable：**
+
+- 新增一个普通`pty-test` Rust app；它只通过`anemone-rs`使用kernel ABI，不链接/调用libc PTY wrapper，不新增C或
+  `*-oracle`资产，也不依赖developer-private artifact；
+- `anemone-rs`只增加app真实使用的窄常量、结构与syscall/ioctl wrapper，raw command/layout继续由`anemone-abi`唯一拥有，
+  不建立泛化PTY helper、libc-compatible facade或未使用API；
+- app case完整映射父RFC mandatory core matrix，并通过现有repository app/rootfs pipeline可被选择、构建和打包；测试配置
+  不提前注册devpts、不修改persistent init、不运行public PTY path，也不把app assertion写成kernel production condition；
+- source/dependency review确认只有一个acceptance app、一条ABI调用路径和一份case结果判断；Stage 3 hidden production route、
+  existing serial behavior、public namespace与current contracts不变。
+
+**Validation：**
+
+1. `git diff --check`、相关Rust formatting/check与`mdbook build docs`；
+2. repository-native RV64与LA64 `pty-test` app build通过，现有app/rootfs pipeline能选择并打包该app；
+3. source/coverage/dependency audit逐项映射父RFCmatrix，确认app不链接或调用libc PTY wrapper、不建立`*-oracle`family、不读取
+   private artifact provenance，`anemone-rs`新增surface均有真实case consumer；
+4. Architecture Friction Scan检查test-only production API、重复UAPI、第二semantic authority、无consumer wrapper、app/arch
+   特判与为方便测试扩大kernel/public surface；Apollyon/Keter必须在closure前消除，未消除Euclid按workflow写回；
+5. public PTY runtime、kernel activation、persistent init mount、LTP、tmux、sshd、current contract与register均保持
+   Not Run/None/unchanged，不从compile或coverage review外推runtime acceptance。
+
+**Cutover / Exit：** None。app、wrapper、build/package入口与coverage review全部关闭后，Checkpoint 1可记为Closed并立即
+停止；Checkpoint 2仍需维护者新的明确授权。若app shape需要libc/多oracle、kernel test hook、提前公开namespace或改变R3
+acceptance，停止并回到RFC review，不能把它带入Checkpoint 2。
+
+### Checkpoint 2 — Public activation、mandatory acceptance 与 contract cutover
+
+**Purpose：** 在Checkpoint 1的单一acceptance consumer上，连接Stage 3唯一static activation route，公开完整R3 PTY/devpts
+surface并取得所有mandatory core evidence；只有最终candidate满足closure条件时才原子执行`PTY-DEVPTS-CUTOVER`。
+
+**Deliverable：**
+
+- `devpts`进入public filesystem registry，devfs预发布static `/dev/ptmx`与empty `/dev/pts`，所有入口只取得Stage 3
+  persistent system instance；boot依赖显式且publication/mount失败在PTY workload前fail closed；
+- repository-owned persistent init consumer在长期`/dev`上显式mount canonical `/dev/pts`，temporary pre-chroot devfs
+  consumer保持不变；generic `CAP_SYS_ADMIN`仍允许在ordinary existing directory建立additional view；
+- `pty-test`通过public pathname/ioctl/mount route完整运行，Stage 3 hidden allocation/open/cleanup不保留test-only bypass或
+  第二条激活路径；selected LTP、serial regression与architecture evidence按各自claim运行，tmux/sshd按accepted归因规则
+  处理；
+- mandatory evidence满足后，current contracts、RFC/implementation状态、transaction与必要register/navigation在同一
+  cutover candidate中更新；未实际运行或未证明的architecture/workload/VFS范围明确记录Not Run/Not Proven。
+
+### Validation 与 closure
+
+1. `git diff --check`、相关kernel/app/Rust formatting check与`mdbook build docs`；repository canonical RV64/LA64 kernel及
+   `pty-test` build通过；
+2. source/owner/bypass review覆盖boot activation dependency、single-instance registration/publication、persistent-vs-
+   temporary mount consumer、allocation/open success tail、opened-description final release、retire/reuse、relation/hangup、
+   predicate/recheck与全部guards-out cleanup；不把KUnit或单任务app外推为并发线性化证明；
+3. 至少一种架构完成repository-owned`pty-test` runtime，全部mandatory case通过并正常关机；RV64/LA64结果分别记录，出现
+   architecture-specific UAPI/user-copy/ioctl路径时两种架构均须完成对应runtime；
+4. runtime证明canonical与ordinary-directory fresh view共享instance/binding、view unmount/remount lifetime、public
+   allocation/discovery/metadata/permission、两route admission、stream/readiness、description lifecycle、identity reuse、
+   relation/job-control与hangup；generic cached-positive/full multi-view concurrency继续明确Not Proven；
+5. existing canonical TTY regression通过，确认serial endpoint、`/dev/tty`、termios/job-control与boot stdio没有因public
+   activation退化；
+6. 运行父RFC选定的`pty01`、`ioctl01`以及与accepted surface对应的`ptem01`、`hangup01`。target内失败必须修复或触发
+   Target Renegotiation；userspace链接、fixture或其它非PTY prerequisite独立归因，不能改写`pty-test`结论，也不建立libc
+   wrapper compatibility claim；
+7. 尝试selected tmux create/attach/detach/exit并按core PTY gap、terminal presentation或environment prerequisite归因；sshd
+   只在条件具备时运行，network/transport/authentication/crypto失败不扩张本Stage；
+8. stage-wide review与Architecture Friction Scan检查第二份pair/binding/readiness/relation truth、owner穿透、init-order隐式
+   依赖、temporary-consumer特判、test-only bypass、无退出条件bridge与通过降低validation/ABI诚实性换取通过。Apollyon/
+   Keter必须在closure前消除或触发停止，未在边界内消除的Euclid按workflow写回。
+
+**Cutover / Exit：** 只有Checkpoint 1先独立关闭，且Checkpoint 2的mandatory core evidence、review与Architecture Friction
+Scan全部满足，才执行一次`PTY-DEVPTS-CUTOVER`：发布父RFC列出的Introduce/Refine current contracts，关闭Stage 4与RFC，
+完成transaction并按真实LTP/ABI结果维护register。tmux结果本身不阻塞core closure，sshd不是acceptance；但二者暴露的R3
+target内缺口仍必须修复或进入Target Renegotiation。任一mandatory core claim缺失时，current contracts保持不变，RFC不得
+关闭，public candidate不得被写成effective capability；不得部分cut over或自动降低acceptance。
 
 ## 证据与反馈路由
 
