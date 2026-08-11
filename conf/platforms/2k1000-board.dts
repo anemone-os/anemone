@@ -369,6 +369,7 @@
 			phy_addr = <0xffffffff>;
 			phy-handle = <0x0e>;
 			dma-mask = <0xffffffff 0xffffffff>;
+			local-mac-address = [fa 9c 5b e6 27 68];
 			status = "okay";
 
 			mdio@0 {
@@ -396,6 +397,7 @@
 			phy_addr = <0xffffffff>;
 			phy-handle = <0x10>;
 			dma-mask = <0xffffffff 0xffffffff>;
+			local-mac-address = [3e f2 46 6c 3c f5];
 			status = "okay";
 
 			mdio@1 {
