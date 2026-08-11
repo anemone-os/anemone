@@ -422,19 +422,52 @@ impl Dtb {
 }
 
 #[cfg(test)]
+pub(crate) const TEST_QEMU_PLATFORM: &str = r#"
+[build]
+arch = "riscv64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x80000000
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_phys_cpu_id = 3
+frame_section_shift_mb = 7
+
+[qemu]
+machine = "virt"
+cpu = "rv64"
+smp = "1"
+memory = "1G"
+bios = "default"
+args = []
+
+[[qemu.bind]]
+name = "kernel-image"
+optional = false
+template = ["-kernel", "{{kernel-image}}"]
+
+[dtb]
+delivery = "firmware"
+authority = "provider-derived"
+provider = "qemu"
+"#;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn qemu_cpu_is_required_and_nonempty() {
-        let valid = example_platform_text();
+        let valid = TEST_QEMU_PLATFORM;
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"\n", "")).is_err());
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"", "cpu = \"\"")).is_err());
     }
 
     #[test]
     fn rejects_incoherent_dtb_contracts() {
-        let valid = example_platform_text();
+        let valid = TEST_QEMU_PLATFORM;
 
         for invalid in [
             valid.replace("provider = \"qemu\"\n", ""),
@@ -449,7 +482,7 @@ mod tests {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
 
-        let mut embedded = example_platform();
+        let mut embedded = test_platform();
         embedded.build.arch = Arch::LoongArch64;
         embedded.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
         let embedded = toml::to_string(&embedded).unwrap();
@@ -493,7 +526,7 @@ mod tests {
 
     #[test]
     fn validates_qemu_bind_declarations() {
-        let valid = example_platform_text()
+        let valid = TEST_QEMU_PLATFORM.to_string()
             + r#"
 
 [[qemu.bind]]
@@ -522,7 +555,7 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
 
     #[test]
     fn provider_bind_expansion_is_named_and_single_pass() {
-        let mut qemu = example_platform().qemu.unwrap();
+        let mut qemu = test_platform().qemu.unwrap();
         qemu.smp = "{{smp}}".to_string();
         qemu.memory = "{{memory}}".to_string();
         qemu.args = vec!["value={{runtime}}".to_string()];
@@ -546,13 +579,16 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
         assert_eq!(runtime_consumed.len(), 3);
     }
 
-    fn example_platform_text() -> String {
-        std::fs::read_to_string("../../conf/platforms/example.toml")
-            .expect("failed to read example Platform")
+    #[test]
+    fn repository_example_platform_parses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conf/platforms/example.toml");
+        let content = std::fs::read_to_string(path).expect("failed to read example Platform");
+        Config::from_str(&content).expect("repository example Platform must parse");
     }
 
-    fn example_platform() -> Config {
-        Config::from_str(&example_platform_text()).unwrap()
+    fn test_platform() -> Config {
+        Config::from_str(TEST_QEMU_PLATFORM).unwrap()
     }
 
     fn physical_platform(
@@ -561,7 +597,7 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
         authority: DtAuthority,
         provider: Option<DtbProvider>,
     ) -> String {
-        let mut platform = example_platform();
+        let mut platform = test_platform();
         platform.build.arch = arch;
         platform.qemu = None;
         let dtb = platform.dtb.as_mut().unwrap();

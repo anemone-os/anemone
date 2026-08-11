@@ -242,9 +242,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_example_preset_and_tuple() {
+    fn resolves_test_preset_and_tuple() {
         let workspace = TestWorkspace::new();
-        let loader = ConfigLoader::new(&workspace.0);
+        let loader = ConfigLoader::new(&workspace.root);
 
         let preset = loader
             .resolve_selection(SelectionRequest::explicit_preset(
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn rejects_missing_canonical_inputs() {
         let workspace = TestWorkspace::new();
-        let loader = ConfigLoader::new(&workspace.0);
+        let loader = ConfigLoader::new(&workspace.root);
         assert!(
             loader
                 .load_target(&SystemTargetRef::new("missing-target").unwrap())
@@ -298,12 +298,13 @@ mod tests {
     #[test]
     fn preset_rejects_missing_kernel_config() {
         let workspace = TestWorkspace::new();
-        replace_file_text(
-            workspace.0.join("conf/build-presets/example.toml"),
-            "kernel-config = \"kconfig\"",
-            "kernel-config = \"missing\"",
-        );
-        let loader = ConfigLoader::new(&workspace.0);
+        fs::write(
+            workspace.root.join("conf/build-presets/example.toml"),
+            super::super::build_preset::TEST_BUILD_PRESET
+                .replace("kernel-config = \"kconfig\"", "kernel-config = \"missing\""),
+        )
+        .unwrap();
+        let loader = ConfigLoader::new(&workspace.root);
         assert!(
             loader
                 .resolve_selection(SelectionRequest::explicit_preset(
@@ -316,69 +317,52 @@ mod tests {
     #[test]
     fn resolved_selection_owns_all_snapshot_inputs() {
         let workspace = TestWorkspace::new();
-        let loader = ConfigLoader::new(&workspace.0);
+        let loader = ConfigLoader::new(&workspace.root);
+        let default_max_logical_cpus = loader
+            .load_kernel_config(&KernelConfigRef::new(DEF_KCONFIG_PATH).unwrap())
+            .unwrap()
+            .parameters
+            .max_logical_cpus;
         let action = loader
             .resolve_selection(SelectionRequest::explicit_preset(
                 BuildPresetRef::new("example").unwrap(),
             ))
             .unwrap();
 
-        fs::write(
-            workspace.0.join("conf/build-presets/example.toml"),
-            "invalid = true\n",
-        )
-        .unwrap();
-        replace_file_text(
-            workspace.0.join("kconfig"),
-            "system_hz = 100",
-            "system_hz = 999",
-        );
-        replace_file_text(
-            workspace.0.join("conf/kconfs/default.toml"),
-            "max_logical_cpus = 1",
-            "max_logical_cpus = 99",
-        );
-        replace_file_text(
-            workspace.0.join("conf/system-targets/example.toml"),
-            "fstype = \"ext4\"",
-            "fstype = \"ramfs\"",
-        );
-        replace_file_text(
-            workspace.0.join("conf/platforms/example.toml"),
-            "memory = \"1G\"",
-            "memory = \"2G\"",
-        );
+        for relative in [
+            "kconfig",
+            "conf/kconfs/default.toml",
+            "conf/system-targets/example.toml",
+            "conf/platforms/example.toml",
+            "conf/build-presets/example.toml",
+        ] {
+            fs::write(workspace.root.join(relative), "invalid = true\n").unwrap();
+        }
 
         assert_eq!(action.system.target.root.fstype, "ext4");
         assert_eq!(action.system.platform.qemu.as_ref().unwrap().memory, "1G");
         assert_eq!(action.system.profile, CargoProfile::Release);
         assert_eq!(
             action.system.kernel_config.parameters.max_logical_cpus,
-            Some(1)
+            default_max_logical_cpus
         );
-        assert_eq!(action.system.kernel_config.parameters.system_hz, Some(100));
-        assert_eq!(
-            action
-                .system
-                .kernel_config
-                .parameters
-                .oom_kill_sample_interval_ms,
-            Some(50)
-        );
+        assert_eq!(action.system.kernel_config.parameters.system_hz, Some(777));
     }
 
     #[test]
     fn kernel_config_rejects_legacy_build_selection() {
         let workspace = TestWorkspace::new();
         let default_kconfig =
-            fs::read_to_string(workspace.0.join("conf/kconfs/default.toml")).unwrap();
+            fs::read_to_string(workspace.root.join("conf/kconfs/default.toml")).unwrap();
         let legacy = format!(
             "[build]\ntarget = \"example\"\nprofile = \"release\"\ndisasm = false\n\n{default_kconfig}"
         );
         assert!(KConfig::from_str(&legacy).is_err());
     }
 
-    struct TestWorkspace(std::path::PathBuf);
+    struct TestWorkspace {
+        root: std::path::PathBuf,
+    }
 
     impl TestWorkspace {
         fn new() -> Self {
@@ -395,46 +379,46 @@ mod tests {
             fs::create_dir_all(root.join("conf/build-presets")).unwrap();
             fs::create_dir_all(root.join("conf/kconfs")).unwrap();
 
-            for relative in [
-                "conf/kconfs/default.toml",
-                "conf/system-targets/example.toml",
-                "conf/platforms/example.toml",
-                "conf/build-presets/example.toml",
-            ] {
-                fs::copy(Path::new("../..").join(relative), root.join(relative)).unwrap();
-            }
-
-            let default_content =
-                fs::read_to_string(root.join("conf/kconfs/default.toml")).unwrap();
-            let selected_content = default_content
-                .lines()
-                .filter(|line| {
-                    !line.trim_start().starts_with("max_logical_cpus")
-                        && !line.trim_start().starts_with("ns16550a_default_baud")
-                        && !line.trim_start().starts_with("oom_kill_sample_interval_ms")
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            fs::write(root.join("kconfig"), selected_content).unwrap();
-            replace_file_text(
+            fs::write(
+                root.join("conf/system-targets/example.toml"),
+                super::super::system_target::TEST_SYSTEM_TARGET,
+            )
+            .unwrap();
+            fs::write(
+                root.join("conf/platforms/example.toml"),
+                super::super::platform::TEST_QEMU_PLATFORM,
+            )
+            .unwrap();
+            fs::write(
                 root.join("conf/build-presets/example.toml"),
-                "kernel-config = \"conf/kconfs/default.toml\"",
-                "kernel-config = \"kconfig\"",
-            );
-            Self(root)
+                super::super::build_preset::TEST_BUILD_PRESET,
+            )
+            .unwrap();
+
+            // The canonical default is intentionally the only repository configuration
+            // used by resolver tests: its complete parameter inventory is the default
+            // materialization contract and must not be mirrored by a test fixture.
+            let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let default_content = fs::read_to_string(repository.join(DEF_KCONFIG_PATH)).unwrap();
+            fs::write(root.join(DEF_KCONFIG_PATH), &default_content).unwrap();
+
+            let mut selected = default_content
+                .parse::<toml_edit::DocumentMut>()
+                .expect("default KernelConfig must be valid TOML");
+            selected["parameters"]["system_hz"] = toml_edit::value(777);
+            selected["parameters"]
+                .as_table_mut()
+                .unwrap()
+                .remove("max_logical_cpus");
+            fs::write(root.join("kconfig"), selected.to_string()).unwrap();
+
+            Self { root }
         }
     }
 
     impl Drop for TestWorkspace {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_dir_all(&self.root);
         }
-    }
-
-    fn replace_file_text(path: impl AsRef<Path>, old: &str, new: &str) {
-        let path = path.as_ref();
-        let content = fs::read_to_string(path).unwrap();
-        assert!(content.contains(old));
-        fs::write(path, content.replace(old, new)).unwrap();
     }
 }

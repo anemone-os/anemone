@@ -234,7 +234,7 @@ fn remove_file_if_present(path: &Path) -> anyhow::Result<()> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use crate::config::platform::Arch;
+    use crate::config::platform::{Arch, TEST_QEMU_PLATFORM};
 
     use super::*;
 
@@ -244,7 +244,7 @@ mod tests {
         let output = workspace.path.join("platform.dtb");
         fs::write(&output, b"stale").unwrap();
         fs::write(temporary_path(&output).unwrap(), b"partial").unwrap();
-        let platform = example_platform();
+        let platform = test_platform();
 
         materialize_at(&platform, &output, OsStr::new("/bin/false")).unwrap();
 
@@ -256,8 +256,12 @@ mod tests {
     fn physical_embedded_source_is_compiled() {
         let workspace = TestWorkspace::new();
         let temporary = workspace.path.join("platform.dtb.tmp");
-        let repository = Path::new("../..").canonicalize().unwrap();
-        compile_source_from_root(&repository, "conf/platforms/example.dts", &temporary).unwrap();
+        fs::write(
+            workspace.path.join("platform.dts"),
+            "/dts-v1/;\n/ { compatible = \"anemone,test\"; };\n",
+        )
+        .unwrap();
+        compile_source_from_root(&workspace.path, "platform.dts", &temporary).unwrap();
 
         validate_dtb(&temporary).unwrap();
     }
@@ -266,7 +270,7 @@ mod tests {
     fn qemu_provider_uses_only_topology_and_cleans_failures() {
         let workspace = TestWorkspace::new();
         let output = workspace.path.join("platform.dtb");
-        let platform = embedded_example_platform();
+        let platform = embedded_test_platform();
         let qemu = platform.qemu.as_ref().unwrap();
         let command = qemu_provider_command(qemu, OsStr::new("qemu-test"), &output).unwrap();
         assert_eq!(
@@ -301,7 +305,7 @@ mod tests {
     fn qemu_provider_rejects_invalid_output_and_atomically_publishes_valid_dtb() {
         let workspace = TestWorkspace::new();
         let output = workspace.path.join("platform.dtb");
-        let platform = embedded_example_platform();
+        let platform = embedded_test_platform();
         let invalid = workspace.provider_script("printf invalid > \"${2#*,dumpdtb=}\"");
 
         let error = materialize_at(&platform, &output, invalid.as_os_str()).unwrap_err();
@@ -321,16 +325,12 @@ mod tests {
         assert!(!temporary_path(&output).unwrap().exists());
     }
 
-    fn example_platform() -> Config {
-        Config::from_str(
-            &fs::read_to_string("../../conf/platforms/example.toml")
-                .expect("failed to read example Platform"),
-        )
-        .unwrap()
+    fn test_platform() -> Config {
+        Config::from_str(TEST_QEMU_PLATFORM).unwrap()
     }
 
-    fn embedded_example_platform() -> Config {
-        let mut platform = example_platform();
+    fn embedded_test_platform() -> Config {
+        let mut platform = test_platform();
         platform.build.arch = Arch::LoongArch64;
         platform.qemu.as_mut().unwrap().smp = "3".to_string();
         platform.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;

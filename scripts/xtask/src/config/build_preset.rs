@@ -55,14 +55,21 @@ impl FromStr for CargoProfile {
 }
 
 #[cfg(test)]
+pub(crate) const TEST_BUILD_PRESET: &str = r#"
+target = "example"
+kernel-config = "kconfig"
+profile = "release"
+"#;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parses_closed_build_preset() {
-        let preset = BuildPreset::from_str(&example_preset()).unwrap();
+        let preset = BuildPreset::from_str(TEST_BUILD_PRESET).unwrap();
         assert_eq!(preset.target.as_str(), "example");
-        assert_eq!(preset.kernel_config.to_string(), "conf/kconfs/default.toml");
+        assert_eq!(preset.kernel_config.to_string(), "kconfig");
         assert_eq!(preset.profile, CargoProfile::Release);
         assert_eq!(CargoProfile::Dev.as_cargo_arg(), ["--profile", "dev"]);
         assert_eq!(CargoProfile::Release.as_cargo_arg(), ["--release"]);
@@ -70,7 +77,7 @@ mod tests {
 
     #[test]
     fn rejects_non_preset_fields_and_profiles() {
-        let valid = example_preset();
+        let valid = TEST_BUILD_PRESET;
         for invalid in [
             valid.replace("profile = \"release\"", "profile = \"other\""),
             format!("{valid}\ndisasm = true\n"),
@@ -87,8 +94,11 @@ mod tests {
         assert!(BuildPresetRef::new("../preset").is_err());
     }
 
-    fn example_preset() -> String {
-        std::fs::read_to_string("../../conf/build-presets/example.toml")
-            .expect("failed to read example build preset")
+    #[test]
+    fn repository_example_build_preset_parses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conf/build-presets/example.toml");
+        let content = std::fs::read_to_string(path).expect("failed to read example build preset");
+        BuildPreset::from_str(&content).expect("repository example build preset must parse");
     }
 }

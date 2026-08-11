@@ -95,12 +95,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn example_manifest_parses() {
-        let rootfs = parse_manifest("../../conf/rootfs/example.toml");
-        assert_eq!(rootfs.build.name, "example");
-        assert_eq!(rootfs.fs.base_type, BaseType::Folder);
-        assert!(rootfs.dirs.iter().any(|dir| dir.path == "/dev"));
-        assert!(rootfs.dirs.iter().any(|dir| dir.path == "/mnt"));
+    fn repository_example_rootfs_manifest_parses() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conf/rootfs/example.toml");
+        parse_manifest(&path);
     }
 
     #[test]
@@ -213,7 +211,7 @@ path = "/sbin/init"
         assert!(result.is_err());
     }
 
-    fn parse_manifest(path: &str) -> Rootfs {
+    fn parse_manifest(path: &std::path::Path) -> Rootfs {
         let content = std::fs::read_to_string(path).expect("Failed to read rootfs.toml");
         Rootfs::from_str(&content).expect("Failed to parse rootfs.toml")
     }

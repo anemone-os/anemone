@@ -194,12 +194,24 @@ impl InitialProgramSource {
 }
 
 #[cfg(test)]
+pub(crate) const TEST_SYSTEM_TARGET: &str = r#"
+platform = "example"
+
+[root]
+fstype = "ext4"
+source = { type = "block", path = "vda" }
+
+[initial-program]
+type = "rootfs-entry"
+"#;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parses_example_rootfs_entry_target() {
-        let config = Config::from_str(&example_target()).unwrap();
+    fn parses_rootfs_entry_target() {
+        let config = Config::from_str(TEST_SYSTEM_TARGET).unwrap();
         assert_eq!(config.platform.as_str(), "example");
         assert_eq!(config.root.fstype, "ext4");
         assert!(matches!(config.root.source, RootSource::Block { .. }));
@@ -212,7 +224,7 @@ mod tests {
 
     #[test]
     fn parses_optional_static_ipv4_network() {
-        let content = example_target().replace(
+        let content = TEST_SYSTEM_TARGET.replace(
             "[initial-program]",
             "[network.ipv4]\ninterface = \"eth0\"\naddress = \"10.0.2.15\"\nprefix = 24\ndefault-gateway = \"10.0.2.2\"\n\n[initial-program]",
         );
@@ -226,7 +238,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_static_ipv4_network() {
-        let valid = example_target().replace(
+        let valid = TEST_SYSTEM_TARGET.replace(
             "[initial-program]",
             "[network.ipv4]\ninterface = \"eth0\"\naddress = \"10.0.2.15\"\nprefix = 24\n\n[initial-program]",
         );
@@ -257,13 +269,13 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_initial_program_tag() {
-        let content = example_target().replace("rootfs-entry", "unknown");
+        let content = TEST_SYSTEM_TARGET.replace("rootfs-entry", "unknown");
         assert!(Config::from_str(&content).is_err());
     }
 
     #[test]
     fn parses_embedded_app_target() {
-        let valid = example_target();
+        let valid = TEST_SYSTEM_TARGET;
         let content = valid.replace(
             "type = \"rootfs-entry\"",
             "type = \"embedded-app\"\napp = \"init\"",
@@ -286,7 +298,7 @@ mod tests {
 
     #[test]
     fn initial_program_argv_is_complete_and_nonempty_when_present() {
-        let valid = example_target();
+        let valid = TEST_SYSTEM_TARGET;
         for replacement in [
             "type = \"rootfs-entry\"\nargv = [\"busybox\", \"sh\"]",
             "type = \"embedded-app\"\napp = \"init\"\nargv = [\"init\", \"--test\"]",
@@ -309,7 +321,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_root_source() {
-        let valid = example_target();
+        let valid = TEST_SYSTEM_TARGET;
         let empty_fstype = valid.replace("fstype = \"ext4\"", "fstype = \"\"");
         assert!(Config::from_str(&empty_fstype).is_err());
 
@@ -319,7 +331,7 @@ mod tests {
 
     #[test]
     fn rejects_fields_owned_by_other_layers() {
-        let valid = example_target();
+        let valid = TEST_SYSTEM_TARGET;
         for field in [
             "preset = \"dev\"",
             "profile = \"release\"",
@@ -335,8 +347,11 @@ mod tests {
         }
     }
 
-    fn example_target() -> String {
-        std::fs::read_to_string("../../conf/system-targets/example.toml")
-            .expect("failed to read example SystemTarget")
+    #[test]
+    fn repository_example_system_target_parses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conf/system-targets/example.toml");
+        let content = std::fs::read_to_string(path).expect("failed to read example SystemTarget");
+        Config::from_str(&content).expect("repository example SystemTarget must parse");
     }
 }

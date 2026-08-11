@@ -483,8 +483,9 @@ mod tests {
     }
 
     #[test]
-    fn preset_and_tuple_resolve_the_same_network_target() {
-        let loader = ConfigLoader::new(Path::new("../.."));
+    fn repository_rv64_preset_and_tuple_resolve_the_same_network_target() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let loader = ConfigLoader::new(&repository);
         let preset = loader
             .resolve_selection(SelectionRequest::explicit_preset(
                 BuildPresetRef::new("qemu-virt-rv64-release").unwrap(),
