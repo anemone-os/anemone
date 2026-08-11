@@ -1,9 +1,9 @@
 # RFC-20260811-dwmac
 
-**状态：** Accepted / Gate 1 Active
-**修订：** R0
+**状态：** Revised / Gate 1 Active
+**修订：** R1
 **负责人：** Anemone maintainers
-**最后更新：** 2026-08-11
+**最后更新：** 2026-08-12
 **领域：** driver / net / irq / mm / phy
 **影响契约：** Accepted target：Refine `IRQ-FLOW-001`；Introduce `DWMAC-DESCRIPTOR-001`、`DWMAC-DMA-ADDR-001`、`DWMAC-CAUSE-001`、`DWMAC-NODE-001`
 **执行记录：** [2026-08-11 DWMAC transaction](../../devlog/transactions/2026-08-11-dwmac.md)
@@ -11,9 +11,11 @@
 ## 摘要
 
 本 RFC 把现有 JH7110 GMAC 驱动提升为 DWMAC owner，保留现有 JH7110 DWMAC4/5.20 行为，并新增按
-DT `compatible` 匹配的 DWMAC1000 backend，用于 Loongson 2K1000 的 DWMAC 3.70a。共享层只拥有
-per-node discovery、frame capability、IRQ/publication handoff 和既有 network attach；DWMAC4 与
-DWMAC1000 分别拥有自己的寄存器、descriptor、DMA addressability、device-cause 和板级 glue。
+DT `compatible` 匹配的 DWMAC1000 backend，用于 Loongson 2K1000 的 DWMAC 3.70a。`net::dwmac` 只拥有
+共享的 per-node discovery、frame capability、IRQ/publication handoff 和既有 network attach；
+`net::dwmac::dwmac4` 与 `net::dwmac::dwmac1000` 分别拥有并注册自己的 `Driver`、match table 和
+concrete backend。DWMAC4 与 DWMAC1000 各自拥有寄存器、descriptor、DMA addressability、device-cause
+和板级 glue。
 
 本 RFC 明确不修改仓库当前 2K1000 DTB。该 DTB 的 ICU 使用 one-cell interrupt specifier，因此
 2K1000 irqchip 依据手册建立完整 `IrqSense` source table，同时让 `request_irq()` 接受可选的
@@ -39,8 +41,8 @@ GMAC1 显式包含 pinctrl。这些 resource 缺失不证明硬件无需初始�
 
 ## 目标
 
-- 将 `driver/net/jh7110_gmac` 整理为 DWMAC owner，外置可共享的 frame、progression、publication
-  adapter 和 IRQ resource 选择；建立 DWMAC4 与 DWMAC1000 两个 concrete backend。
+- 将 `driver/net/dwmac` 整理为 shared DWMAC owner，外置可共享的 frame、progression、publication
+  adapter 和 IRQ resource 选择；由 `dwmac4` 与 `dwmac1000` 子模块分别注册 concrete `Driver`。
 - 所有匹配且 enabled 的 node 独立 probe。驱动不固定 GMAC0/GMAC1 数组或数量上限；实际数量仍受
   memory、IRQ、DMA addressability 和 identity resource 限制。
 - 严格按照 DT `compatible` 匹配 backend，不按 MMIO base、IRQ 数字、node ordinal 或 aliases 猜测
@@ -218,9 +220,10 @@ Agent 未运行 2K1000/JH7110 hardware evidence；QEMU 只能承担既有 regres
 | --- | --- | --- | --- |
 | Draft | 2026-08-11 | 将 DWMAC4 owner migration、DWMAC1000 R0、2K1000 IRQ/DMA/PHY/Route A 边界形成正式 RFC 草案；DTB 保持不变。 | 本 RFC review；尚无实现 evidence |
 | R0 | 2026-08-11 | 接受 Draft target、owner、Implementation Boundary、contract delta、Gate 顺序和停止条件；只授权 Gate 1。 | [R0 acceptance](../../devlog/transactions/2026-08-11-dwmac.md#r0-acceptance-and-gate-1-authorization---2026-08-11) |
+| R1 | 2026-08-12 | 接受 owner 形状修订：`net::dwmac::dwmac4` 与 `net::dwmac::dwmac1000` 各自拥有并注册 `Driver`/match table；`net::dwmac` 只保留 shared probe/frame/publication helper。target contract、ABI、DTB、visible semantics、Gate 顺序和 validation strength 不变；重新授权 Gate 1。 | [R1 revision and Gate 1 re-authorization](../../devlog/transactions/2026-08-11-dwmac.md#r1-revision-and-gate-1-re-authorization---2026-08-12) |
 
 ## Closure
 
-当前未 closure、未 cutover、未更新 current contracts。R0 已接受且只授权 Gate 1；实现必须按
+当前未 closure、未 cutover、未更新 current contracts。R1 已接受且只授权 Gate 1；实现必须按
 [实施路线](./implementation.md) 的 Gate 顺序推进，Gate 1 完成后停止。任一停止条件触发时保持 Not Cut
 Over，并把 target/owner/acceptance 变化带回 RFC review。

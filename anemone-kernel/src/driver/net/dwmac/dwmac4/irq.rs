@@ -1,6 +1,10 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
+    super::{
+        DwmacDeviceControl,
+        frame::{DwmacFrameQueue, RxFrameReservation},
+    },
     regs::GmacRegs,
     ring::{GmacRings, RingError, RxReservation, TxCompletion},
 };
@@ -10,7 +14,7 @@ use crate::{device::net::RecheckWake, prelude::*, utils::any_opaque::AnyOpaque};
 /// no `free_irq()`; a registered handler can outlive a failed probe or attach
 /// attempt until device reset/power-off. `pending` is the durable recheck fact
 /// published after the device cause has been acknowledged.
-pub(super) struct GmacIrqContext {
+pub(in crate::driver::net::dwmac) struct GmacIrqContext {
     regs: Arc<GmacRegs>,
     rings: SpinLock<GmacRings>,
     pending: RecheckSignal,
@@ -180,6 +184,84 @@ impl GmacIrqContext {
         // Refill publishes OWN before the MMIO tail update.
         self.regs.update_rx_tail(tail);
         Ok(result)
+    }
+}
+
+impl DwmacDeviceControl for GmacIrqContext {
+    fn suppress_device(&self) {
+        GmacIrqContext::suppress_device(self);
+    }
+
+    fn start_device(&self) {
+        GmacIrqContext::start_device(self);
+    }
+}
+
+impl DwmacFrameQueue for GmacIrqContext {
+    type Error = RingError;
+
+    fn frame_capacity(&self) -> usize {
+        GmacIrqContext::frame_capacity(self)
+    }
+
+    fn ring_size(&self) -> usize {
+        GmacIrqContext::ring_size(self)
+    }
+
+    fn reserve_tx(&self) -> Option<usize> {
+        GmacIrqContext::reserve_tx(self)
+    }
+
+    fn cancel_tx(&self, index: usize) -> Result<(), Self::Error> {
+        GmacIrqContext::cancel_tx(self, index)
+    }
+
+    fn commit_tx_with<R>(
+        &self,
+        index: usize,
+        length: usize,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, Self::Error> {
+        GmacIrqContext::commit_tx_with(self, index, length, fill)
+    }
+
+    fn reclaim_tx(&self) -> Result<bool, Self::Error> {
+        GmacIrqContext::reclaim_tx(self).map(|completion| completion.is_some())
+    }
+
+    fn reserve_rx(&self) -> Option<RxFrameReservation> {
+        GmacIrqContext::reserve_rx(self).map(|reservation| RxFrameReservation {
+            index: reservation.index,
+            frame_ready: reservation.length.is_some(),
+        })
+    }
+
+    fn cancel_rx(&self, index: usize) -> Result<(), Self::Error> {
+        GmacIrqContext::cancel_rx(self, index)
+    }
+
+    fn discard_rx(&self, index: usize) -> Result<(), Self::Error> {
+        GmacIrqContext::discard_rx(self, index)
+    }
+
+    fn consume_rx<R>(
+        &self,
+        index: usize,
+        consume: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, Self::Error> {
+        GmacIrqContext::consume_rx(self, index, consume)
+    }
+
+    fn install_recheck_wake(&self, wake: Weak<dyn RecheckWake>) {
+        GmacIrqContext::install_recheck_wake(self, wake);
+    }
+
+    fn recheck_requested(&self) -> bool {
+        GmacIrqContext::recheck_requested(self)
+    }
+
+    fn take_recheck_requested(&self) -> bool {
+        GmacIrqContext::take_pending(self) != 0
     }
 }
 

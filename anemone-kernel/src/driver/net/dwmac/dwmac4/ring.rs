@@ -61,7 +61,7 @@ static_assert!(
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RingError {
+pub(in crate::driver::net::dwmac) enum RingError {
     InvalidLayout,
     FrameTooLarge,
     QueueFull,

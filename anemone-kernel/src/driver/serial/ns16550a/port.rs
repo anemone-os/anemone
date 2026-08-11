@@ -414,6 +414,7 @@ impl Uart16550Device {
         if let Err(error) = request_irq_selected(
             device,
             InterruptSelector::Index(0),
+            None,
             &IRQ_HANDLER,
             Some(irq_context),
         ) {

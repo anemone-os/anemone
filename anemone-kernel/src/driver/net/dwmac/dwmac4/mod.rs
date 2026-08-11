@@ -1,79 +1,96 @@
-//! JH7110 GMAC discovery, DMA rings, IRQ causes, and netdev publication.
+//! StarFive JH7110 DWMAC4/5.20 concrete backend.
 
 mod fwnode;
 mod irq;
 mod phy;
-mod provider;
 mod regs;
 mod ring;
 
 use fwnode::GmacFwConfig;
 use irq::{GmacIrqContext, IRQ_HANDLER};
-use provider::JH7110GmacProvider;
 use regs::GmacRegs;
 use ring::GmacRings;
 
-use anemone_net_api::FrameProvider;
-
 use crate::{
     device::{
-        bus::platform::{self, PlatformDriver},
+        bus::platform::{self, PlatformDevice, PlatformDriver},
         clock_controller::require_clock,
-        discovery::fwnode::{InterruptSelector, select_interrupt_resource},
+        discovery::fwnode::InterruptResource,
         kobject::{KObjIdent, KObjectBase, KObjectOps},
-        net::{PublishError, ReadyNetdev, publish},
         reset::{require_reset, require_reset_deasserted},
     },
-    exception::intr::request_irq_selected,
     mm::remap::ioremap,
     prelude::*,
     time::MonotonicInstant,
-    utils::{any_opaque::AnyOpaque, identity::AnyIdentity},
+    utils::any_opaque::AnyOpaque,
 };
 
-#[derive(Opaque)]
-struct JH7110GmacState {
-    /// Non-owning shutdown capability. The published provider and registered
-    /// IRQ private data retain the context until reset or power-off.
-    context: Weak<GmacIrqContext>,
-}
+use super::{common_probe_inputs, publish_node, shutdown};
+
+const COMPATIBLES: [&str; 2] = ["starfive,jh7110-eqos-5.20", "starfive,jh7110-dwmac"];
 
 #[derive(Debug, KObject, Driver)]
-struct JH7110GmacDriver {
+struct Driver {
     #[kobject]
     kobj_base: KObjectBase,
     #[driver]
     drv_base: DriverBase,
 }
 
-impl KObjectOps for JH7110GmacDriver {}
+impl KObjectOps for Driver {}
 
-impl DriverOps for JH7110GmacDriver {
+impl DriverOps for Driver {
     fn probe(&self, device: Arc<dyn Device>) -> Result<(), SysError> {
-        let pdev = match device.as_platform_device() {
-            Some(pdev) => pdev,
-            None => {
-                kerrln!(
-                    "jh7110-gmac {}: platform-device conversion failed",
-                    device.name()
-                );
-                return Err(SysError::DriverIncompatible);
-            },
-        };
-        let fwnode = match pdev.fwnode() {
-            Some(fwnode) => fwnode,
-            None => {
-                kerrln!("jh7110-gmac {}: firmware node missing", device.name());
-                return Err(SysError::MissingFwNode);
-            },
-        };
-        let node = match fwnode.as_of_node() {
-            Some(node) => node,
-            None => {
-                kerrln!("jh7110-gmac {}: OF node lookup failed", device.name());
-                return Err(SysError::FwNodeLookupFailed);
-            },
-        };
+        let pdev = device
+            .as_platform_device()
+            .ok_or(SysError::DriverIncompatible)?;
+        let (node_path, origin, interrupt) = common_probe_inputs(pdev, &COMPATIBLES)?;
+        let prepared = PreparedDwmac4::prepare(device.as_ref(), pdev, &node_path, interrupt)?;
+        publish_node(
+            device,
+            origin,
+            prepared.context().clone(),
+            prepared.mac(),
+            prepared.irq_handler(),
+            prepared.irq_private(),
+        )
+    }
+
+    fn shutdown(&self, device: &dyn Device) {
+        shutdown(device);
+    }
+
+    fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
+        Some(self)
+    }
+}
+
+impl PlatformDriver for Driver {
+    fn match_table(&self) -> &[&str] {
+        &COMPATIBLES
+    }
+}
+
+#[initcall(driver)]
+fn init() {
+    platform::register_driver(Arc::new(Driver {
+        kobj_base: KObjectBase::new(KObjIdent::try_from("dwmac4").unwrap()),
+        drv_base: DriverBase::new(),
+    }));
+}
+
+pub(super) struct PreparedDwmac4 {
+    context: Arc<GmacIrqContext>,
+    mac: [u8; 6],
+}
+
+impl PreparedDwmac4 {
+    pub(super) fn prepare(
+        device: &dyn Device,
+        pdev: &PlatformDevice,
+        node_path: &str,
+        interrupt: InterruptResource<'_>,
+    ) -> Result<Self, SysError> {
         let config = match GmacFwConfig::parse(pdev) {
             Ok(config) => config,
             Err(error) => {
@@ -85,20 +102,8 @@ impl DriverOps for JH7110GmacDriver {
                 return Err(error);
             },
         };
-        let node_path = node.node().path();
-        let origin = match AnyIdentity::try_from(node_path.as_str()) {
-            Ok(origin) => origin,
-            Err(error) => {
-                kerrln!(
-                    "jh7110-gmac {}: firmware path cannot identify a netdev: {:?}",
-                    device.name(),
-                    error
-                );
-                return Err(SysError::DriverIncompatible);
-            },
-        };
         for clock_name in ["stmmaceth", "pclk", "gtx", "tx", "ptp_ref", "gtxc"] {
-            if let Err(error) = require_clock(device.as_ref(), clock_name) {
+            if let Err(error) = require_clock(device, clock_name) {
                 kerrln!(
                     "jh7110-gmac {}: clock {} failed: {:?}",
                     device.name(),
@@ -108,7 +113,7 @@ impl DriverOps for JH7110GmacDriver {
                 return Err(error);
             }
         }
-        if let Err(error) = require_reset(device.as_ref(), "stmmaceth") {
+        if let Err(error) = require_reset(device, "stmmaceth") {
             kerrln!(
                 "jh7110-gmac {}: reset stmmaceth failed: {:?}",
                 device.name(),
@@ -116,7 +121,7 @@ impl DriverOps for JH7110GmacDriver {
             );
             return Err(error);
         }
-        if let Err(error) = require_reset_deasserted(device.as_ref(), "ahb") {
+        if let Err(error) = require_reset_deasserted(device, "ahb") {
             kerrln!(
                 "jh7110-gmac {}: reset ahb deassert failed: {:?}",
                 device.name(),
@@ -125,19 +130,9 @@ impl DriverOps for JH7110GmacDriver {
             return Err(error);
         }
         wait_for_reset_stabilization();
-        let interrupt =
-            match select_interrupt_resource(fwnode.as_ref(), InterruptSelector::Name("macirq")) {
-                Ok(interrupt) => interrupt,
-                Err(error) => {
-                    kerrln!(
-                        "jh7110-gmac {}: macirq selection failed: {:?}",
-                        device.name(),
-                        error
-                    );
-                    return Err(SysError::InvalidInterruptInfo);
-                },
-            };
-        // The mapping is established before any device-side cause is touched.
+
+        // The common owner selected the named IRQ before any device-side
+        // cause is touched. This backend owns only the DWMAC4 MMIO state.
         let remap = match unsafe { ioremap(config.mmio.0, config.mmio.1) } {
             Ok(remap) => remap,
             Err(error) => {
@@ -171,8 +166,6 @@ impl DriverOps for JH7110GmacDriver {
                 return Err(error);
             },
         };
-        // Quiesce firmware-left causes and reset the internal DMA before
-        // allocating device-owned backing.
         regs.disable_device_interrupts();
         if let Err(error) = regs.reset_dma() {
             kerrln!(
@@ -254,7 +247,7 @@ impl DriverOps for JH7110GmacDriver {
             full_duplex: true,
         });
         regs.configure_link(phy_link.speed_mbps, phy_link.full_duplex);
-        let irq_context = GmacIrqContext::prepare(regs.clone(), rings);
+        let context = GmacIrqContext::prepare(regs.clone(), rings);
 
         kinfoln!(
             "jh7110-gmac {}: path={} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} source=local-mac-address mmio={:#x}+{:#x} macirq=index{} specifier-bytes={} phy-mode=rgmii-id phy-address={} link={}Mbps/{} dwmac={:#x} dma-bits={} rxq={} txq={} hw0={:#x} hw1={:#x} hw2={:#x} hw3={:#x}",
@@ -283,92 +276,26 @@ impl DriverOps for JH7110GmacDriver {
             capabilities.hw_feature3,
         );
 
-        if let Err(error) = request_irq_selected(
-            device.as_ref(),
-            InterruptSelector::Name("macirq"),
-            &IRQ_HANDLER,
-            Some(irq_context.private()),
-        ) {
-            kerrln!(
-                "jh7110-gmac {}: macirq registration failed: {:?}",
-                device.name(),
-                error
-            );
-            return Err(error);
-        }
-        // Keep the device-side source suppressed through IRQ registration.
-        // Publication below is the one-way owner handoff; the
-        // durable pending predicate covers the short interval before attach
-        // installs the worker wake edge.
-        irq_context.suppress_device();
-        device.set_drv_state(AnyOpaque::new(JH7110GmacState {
-            context: Arc::downgrade(&irq_context),
-        }));
-        let provider = JH7110GmacProvider::new(irq_context, config.mac);
-        let ready = ReadyNetdev::new(
-            origin,
-            Some(provider.ethernet_address()),
-            provider.capabilities(),
-            provider.link_state(),
-            provider,
-        );
-        let snapshot = match publish(ready) {
-            Ok(snapshot) => snapshot,
-            Err((error, ready)) => {
-                let state = device
-                    .drv_state()
-                    .cast::<JH7110GmacState>()
-                    .expect("JH7110 GMAC publication must retain shutdown state");
-                if let Some(context) = state.context.upgrade() {
-                    context.suppress_device();
-                }
-                // IRQ registration is not removable. Retain the ready provider
-                // so its DMA backing stays valid until reset or power-off.
-                core::mem::forget(ready);
-                match error {
-                    PublishError::DuplicateOrigin => {
-                        kerrln!(
-                            "jh7110-gmac {}: firmware origin was published twice",
-                            device.name()
-                        );
-                    },
-                    PublishError::IdentityExhausted => {
-                        kerrln!("jh7110-gmac {}: netdev identity exhausted", device.name());
-                    },
-                }
-                return Err(SysError::ProbeFailed);
-            },
-        };
-        let state = device
-            .drv_state()
-            .cast::<JH7110GmacState>()
-            .expect("JH7110 GMAC publication must retain shutdown state");
-        state
-            .context
-            .upgrade()
-            .expect("published JH7110 GMAC lost its hardware context")
-            .start_device();
-        kinfoln!(
-            "jh7110-gmac {} published as netdev {} (MAC {:?}, frame capacity {}); device causes enabled; DMA started",
-            device.name(),
-            snapshot.id().index(),
-            snapshot.facts().ethernet_address,
-            snapshot.facts().max_frame_len,
-        );
-        Ok(())
+        Ok(Self {
+            context,
+            mac: config.mac,
+        })
     }
 
-    fn shutdown(&self, device: &dyn Device) {
-        let Some(state) = device.drv_state().cast::<JH7110GmacState>() else {
-            return;
-        };
-        if let Some(context) = state.context.upgrade() {
-            context.suppress_device();
-        }
+    pub(super) fn context(&self) -> &Arc<GmacIrqContext> {
+        &self.context
     }
 
-    fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
-        Some(self)
+    pub(super) const fn mac(&self) -> [u8; 6] {
+        self.mac
+    }
+
+    pub(super) const fn irq_handler(&self) -> &'static IrqHandler {
+        &IRQ_HANDLER
+    }
+
+    pub(super) fn irq_private(&self) -> AnyOpaque {
+        self.context.private()
     }
 }
 
@@ -380,18 +307,4 @@ fn wait_for_reset_stabilization() {
     while start.elapsed() < delay {
         core::hint::spin_loop();
     }
-}
-
-impl PlatformDriver for JH7110GmacDriver {
-    fn match_table(&self) -> &[&str] {
-        &["starfive,jh7110-eqos-5.20", "starfive,jh7110-dwmac"]
-    }
-}
-
-#[initcall(driver)]
-fn init() {
-    platform::register_driver(Arc::new(JH7110GmacDriver {
-        kobj_base: KObjectBase::new(KObjIdent::try_from("jh7110-gmac").unwrap()),
-        drv_base: DriverBase::new(),
-    }));
 }

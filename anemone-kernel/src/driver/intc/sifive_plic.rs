@@ -176,7 +176,7 @@ impl IrqChip for SiFivePlic {
             // The PLIC gateway presents a level-like source to software, but
             // claim already acknowledges it. Completion must therefore follow
             // the handler without a generic level mask/unmask transaction.
-            trigger: IrqTriggerType::Level,
+            sense: IrqSense::LevelHigh,
             flow: IrqFlowType::FastEoi,
         })
     }

@@ -1,9 +1,9 @@
 # DWMAC RFC 实施路线
 
-**状态：** Accepted / Gate 1 Active
-**最后更新：** 2026-08-11
+**状态：** Revised / Gate 1 Active
+**最后更新：** 2026-08-12
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**当前修订：** R0
+**当前修订：** R1
 
 本文保存本 RFC 的实现 Gate、probe、验证和停止边界；不冻结逐文件 write set，也不授权未审查的后续
 Gate。事实调查属于 RFC 正文和 backgrounds，不单独占 Gate；Gate 1--3 必须各自产生可审查的实现，
@@ -19,9 +19,10 @@ source/hardware regression 是对应实现 Gate 的退出验证。只有 Gate 4 
 
 ## Gate 1 - DWMAC owner migration and IRQ foundation
 
-**Purpose:** 将现有 JH7110 module 实现为 common + DWMAC4 concrete backend，同时实现 2K1000 irqchip
-`IrqSense` 表和 optional request expectation。该 Gate 只建立 DWMAC/IRQ 的共享前提，不接入 DWMAC1000
-node，也不发布新的 netdev 能力。
+**Purpose:** 按 R1 owner 形状将现有实现收口为 `net::dwmac` shared layer、
+`net::dwmac::dwmac4` concrete driver module 和 `net::dwmac::dwmac1000` registration module，同时实现
+2K1000 irqchip `IrqSense` 表和 optional request expectation。该 Gate 只建立 DWMAC/IRQ 的共享前提，不接入
+DWMAC1000 node，也不发布新的 netdev 能力。
 
 **Prerequisites:** RFC 正文/backgrounds 已记录当前 DT、Linux 6.6.32、Loongson manual/PMON、IRQ/network
 contract 和 JH7110 live-source baseline；尚未关闭的 Route A、PHY、DMA 和 normal-mode 硬件问题留给 Gate 2。
@@ -31,15 +32,17 @@ DWMAC4 register/descriptor/clock/reset/PHY behavior、public network ABI 和 cur
 
 **Deliverable:**
 
-- common frame/progression/publication adapter 与 DWMAC4 concrete backend；JH7110-only clock/reset/PHY/DT
-  glue 留在 DWMAC4，common 不拥有 concrete register/descriptor truth。
-- compatible-driven per-node dispatch 形状，但只启用既有 JH7110 DWMAC4 match，不提供 DWMAC1000 fallback。
+- `net::dwmac` common frame/progression/publication adapter；JH7110-only clock/reset/PHY/DT glue 留在
+  `net::dwmac::dwmac4`，common 不拥有 concrete register/descriptor truth。
+- `net::dwmac::dwmac4` 自己拥有 `Driver`/match table/registration 并启用既有 JH7110 match；
+  `net::dwmac::dwmac1000` 自己拥有 `Driver`/match table/registration，但 Gate 1 只做 fail-closed
+  registration，不执行 DWMAC1000 hardware transaction。
 - 2K1000 `IrqSense` table：12/13/14/15 `LevelLow`，44..48 edge/pulse；表同时决定 `EDGE/POL` 和
   controller flow，reserved/GPIO/MSI 不伪造成已支持能力。
 - `request_irq(expected: Option<IrqSense>)` 与 `request_irq_selected` named-resource path；`None` 保持现有
   caller 行为，`Some` mismatch 在 mapping/descriptor/unmask 前失败且不写 controller。
 
-**Validation:** kernel build、owner-local KUnit、compatible/module source audit、IRQ `None`/match/mismatch、
+**Validation:** kernel build、owner-local KUnit、variant-local Driver registration/compatible source audit、IRQ `None`/match/mismatch、
 2K1000 masked-source `EDGE/POL` readback，以及 VisionFive 2 双节点 DWMAC4 descriptor/PHY/IRQ/frame path/
 shutdown regression。JH7110 regression 是本实现 Gate 的退出验证，不是独立 Gate。
 
@@ -47,8 +50,9 @@ shutdown regression。JH7110 regression 是本实现 Gate 的退出验证，不�
 Over 到 Gate 4。
 
 **Stop / Exit:** migration 需要改变 JH7110 visible behavior、public API、IRQ/PHY semantics 或建立 shared raw
-register abstraction；`IrqSense` 不能由 concrete irqchip 单一拥有；expectation 需要变成 caller-owned
-configuration；任一 JH7110 hardware regression 未解释。停止并回 RFC review。
+register abstraction；variant-local Driver registration 不能保持 single compatible owner；`IrqSense` 不能由
+concrete irqchip 单一拥有；expectation 需要变成 caller-owned configuration；任一 JH7110 hardware regression
+未解释。停止并回 RFC review。
 
 ## Gate 2 - DWMAC1000 backend and bounded bring-up
 

@@ -1,7 +1,7 @@
 # DWMAC RFC Tracking Issues
 
 **状态：** Active
-**最后更新：** 2026-08-11
+**最后更新：** 2026-08-12
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
 
 这些问题仍影响 Gate、停止边界或 acceptance；它们不是普通 TODO。解决后的 target 语义必须折回 RFC 正文，
@@ -57,9 +57,15 @@ board memory is below 4 GiB but allocator is global。
 ## ISSUE-006 — Request expectation shared API implementation
 
 **等级：** Open / Gate 1 implementation blocker
-**状态：** Open
+**状态：** Closed / Gate 1 software implementation
 **证据：** current `request_irq` has no expected type；target adds `Option<IrqSense>` to public kernel-internal
 request and crate-local named-resource request。
 **影响：** implementation must validate before mapping/descriptor/unmask, preserve `None` callers, and not create a
 second controller type truth；`IRQ-FLOW-001` remains a target delta until final closure review。
 **修复位置：** Gate 1 IRQ API implementation/source/KUnit；not a userspace ABI change。
+
+**Resolution (2026-08-12):** `request_irq` 与 named-resource `request_irq_selected` 现在都接受
+`Option<IrqSense>`；prepare -> sense validation -> commit/unmask 顺序在 mapping/descriptor/unmask 前 fail
+closed。`None` callers 保持既有行为，mismatch KUnit 验证不会留下 mapping 或 unmask，且 mismatch log 记录
+真实 hwirq/expected/actual。R1 的 variant-local Driver owner 修订不改变该 API 的 kernel-internal scope；
+`IRQ-FLOW-001` 仍保持 Not Cut Over，待 Gate 4。

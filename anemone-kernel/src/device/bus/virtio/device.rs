@@ -108,6 +108,7 @@ impl VirtIODevice {
         request_irq_selected(
             transport_dev,
             InterruptSelector::Index(0),
+            None,
             handler,
             prv_data,
         )

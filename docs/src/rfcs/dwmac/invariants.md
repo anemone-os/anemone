@@ -1,9 +1,9 @@
 # DWMAC 多后端与 2K1000 目标与不变量
 
 **状态：** Accepted
-**最后更新：** 2026-08-11
+**最后更新：** 2026-08-12
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**适用修订：** R0
+**适用修订：** R1
 
 本文只定义本 RFC 的 target/proof obligations。当前 effective rule 仍以 `docs/src/contracts/` 为准；
 实现类型、helper、文件布局和内部算法不由本文冻结。
@@ -11,14 +11,14 @@
 ## 规则分类
 
 - **Correctness invariant：** owner、并发、生命周期、cleanup、内存安全、IRQ ordering 和 ABI 诚实性，不能以工程妥协降低。
-- **Target guarantee：** R0 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力；只能由 RFC review 修订。
+- **Target guarantee：** R1 保持 R0 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力；只能由 RFC review 修订。
 - **Implementation preference：** `IrqSense` 的具体 Rust 形状、ring helper、backend module layout 和 log wording。
 
 ## Target Invariants
 
 ### TARGET-001 — Per-node concrete ownership
 
-**规则：** 每个 matching Ethernet node 独立拥有 MMIO window、DWMAC backend state、descriptor ring、DMA backing、IRQ context、PHY transaction、worker 和 failure state；common layer 不持有 concrete register/descriptor truth。
+**规则：** 每个 matching Ethernet node 独立拥有 MMIO window、DWMAC backend state、descriptor ring、DMA backing、IRQ context、PHY transaction、worker 和 failure state；`dwmac4`/`dwmac1000` variant module 各自拥有并注册对应 `Driver` 与 match table；`net::dwmac` common layer 不持有 concrete register/descriptor truth，也不制造第二份 variant registration state。
 
 **Owner：** concrete DWMAC node provider。
 

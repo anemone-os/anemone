@@ -100,11 +100,7 @@ pub(crate) fn select_interrupt_resource<'a>(
         .interrupt_info()
         .ok_or(InterruptResourceError::MissingInterrupts)?;
 
-    let Some(of_parent) = fwnode.interrupt_parent().and_then(|parent| {
-        parent
-            .as_of_node()
-            .map(|node| node.node().interrupt_cells())
-    }) else {
+    let Some(parent) = fwnode.interrupt_parent() else {
         // PCIe interrupt routing already carries one fully translated parent
         // specifier. It has no DT interrupt-names property to select from.
         return match selector {
@@ -117,7 +113,13 @@ pub(crate) fn select_interrupt_resource<'a>(
         };
     };
 
-    let cells = of_parent.ok_or(InterruptResourceError::MissingParentCells)?;
+    // OF nodes expose the parsed cell count directly; other firmware-node
+    // implementations may expose the same standard property instead.
+    let cells = parent
+        .as_of_node()
+        .and_then(|node| node.node().interrupt_cells())
+        .or_else(|| parent.prop_read_u32("#interrupt-cells"))
+        .ok_or(InterruptResourceError::MissingParentCells)?;
     select_interrupt_specifier(
         raw,
         cells,

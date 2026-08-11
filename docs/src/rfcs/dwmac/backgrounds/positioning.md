@@ -35,7 +35,7 @@ vendor fixup 的 P1 transaction。完整 runtime PHY/link framework 不是这个
 ## 为什么这是新的 RFC
 
 现有 [JH7110 GMAC RFC](../../jh7110-gmac/index.md) 已经 Closed，并且明确把通用 DWMAC family、
-其它 SoC glue 和 generic PHY framework 列为非目标。将 `driver/net/jh7110_gmac` 改组为
+其它 SoC glue 和 generic PHY framework 列为非目标。将 `driver/net/dwmac` 改组为
 `driver/net/dwmac`，同时引入 DWMAC4 与 DWMAC1000 两个 backend，会新增或重新解析：
 
 - common frame/IRQ/publication 与 concrete hardware backend 的 owner 边界；
@@ -53,7 +53,7 @@ checkpoint 边界。本文只建立定位目录；正式 RFC 是否接受以及�
 
 ### JH7110 driver 是 DWMAC4/5.20 加板级 glue
 
-当前 [`jh7110_gmac`](../../../../../anemone-kernel/src/driver/net/jh7110_gmac/mod.rs) 在 probe 中：
+当前 [`dwmac`](../../../../../anemone-kernel/src/driver/net/dwmac/mod.rs) 在 probe 中：
 
 - 按 DT name 请求 `stmmaceth`、`pclk`、`gtx`、`tx`、`ptp_ref`、`gtxc` clock；
 - 请求 `stmmaceth` reset 并 deassert shared `ahb` reset；
@@ -67,8 +67,8 @@ checkpoint 边界。本文只建立定位目录；正式 RFC 是否接受以及�
 JH7110 的经验不是“所有 DWMAC 都需要相同 clocks/resets”，而是：在访问 core register 前，必须
 能够说明谁拥有外部可达性；外部 reset 也不能替代 core 自己的 DMA reset。
 
-当前 [`fwnode.rs`](../../../../../anemone-kernel/src/driver/net/jh7110_gmac/fwnode.rs) 与
-[`phy.rs`](../../../../../anemone-kernel/src/driver/net/jh7110_gmac/phy.rs) 还包含 JH7110/VisionFive 2
+当前 [`dwmac4/fwnode.rs`](../../../../../anemone-kernel/src/driver/net/dwmac/dwmac4/fwnode.rs) 与
+[`dwmac4/phy.rs`](../../../../../anemone-kernel/src/driver/net/dwmac/dwmac4/phy.rs) 还包含 JH7110/VisionFive 2
 专用事实：只接受 `rgmii-id`、要求 `local-mac-address`、直接扫描 PHY child，并按 Motorcomm
 extended registers 配置 delay、drive strength 和 TX clock inversion。这些不能提升为 DWMAC
 common 规则。
@@ -417,7 +417,7 @@ Linux 分两步判断：
 false”。
 
 当前 JH7110 ring 中 `des0/des1` 存 64-bit frame address，`des2` 存控制，`des3` 存 OWN/status，这是
-DWMAC4/5 的位布局（见 [`ring.rs`](../../../../../anemone-kernel/src/driver/net/jh7110_gmac/ring.rs)）。
+DWMAC4/5 的位布局（见 [`ring.rs`](../../../../../anemone-kernel/src/driver/net/dwmac/dwmac4/ring.rs)）。
 DWMAC1000 normal descriptor 的地址和 OWN/status 位置不同，所以可以共享“descriptor ownership 的抽象约束”，
 不能共享这四个 word 的具体读写函数。
 
@@ -617,7 +617,7 @@ irqchip 兼容桥，必须在代码注释中写明退出条件：只有未来 DT
 2. IRQ core 根据 ICU 给出的 flow 先执行 controller `mask(hwirq)`。这只暂时阻止同一个 source 重入，
    不改变 DWMAC status。
 3. `macirq` handler 读取 DWMAC status 和 interrupt-enable，取出真正启用且可 W1C 的 cause。当前 JH7110
-   的 [`take_enabled_dma_causes()`](../../../../../anemone-kernel/src/driver/net/jh7110_gmac/regs.rs) 就只写回
+   的 [`take_enabled_dma_causes()`](../../../../../anemone-kernel/src/driver/net/dwmac/dwmac4/regs.rs) 就只写回
    `status & enabled & W1C_MASK`，DWMAC1000 需要自己的 legacy status mask。
 4. handler 在 IRQ flow 返回前向 DWMAC status 写入这些 cause bits。这个写入才让设备撤销 level；同时把
    cause 发布成 durable recheck/wake，供 worker 回收 TX 或消费 RX descriptor。

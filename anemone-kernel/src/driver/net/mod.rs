@@ -1,2 +1,2 @@
-mod jh7110_gmac;
+mod dwmac;
 mod virtio;
