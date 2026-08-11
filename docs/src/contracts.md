@@ -111,6 +111,8 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
 
 契约层从本规则生效后按触达迁移。当前不批量把既有 RFC 的不变量搬入 `docs/src/contracts/`；首个需要跨 RFC 修改或复用既有共享规则的 RFC 或合格的 contract-bearing small change，应按本页提取最小 contract 闭包，并把新入口加入本节和 `docs/src/SUMMARY.md`。
 
+- [KUnit当前契约](./contracts/kunit/index.md)
+  - [Execution and proof](./contracts/kunit/execution-and-proof.md)
 - [VFS 当前契约](./contracts/vfs/index.md)
   - [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)
   - [Creation policy、make node 与 filesystem-backed rdev](./contracts/vfs/make-node.md)

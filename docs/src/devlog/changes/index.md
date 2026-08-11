@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-11 - KUnit execution and proof](./2026-08-11-kunit-execution-proof.md)
 - [2026-08-10 - LA64 software-unaligned HWCAP](./2026-08-10-la64-soft-unaligned-hwcap.md)
 - [2026-08-09 - VFS open request](./2026-08-09-vfs-open-request.md)
 - [2026-08-09 - Positive dentry residency](./2026-08-09-positive-dentry-residency.md)

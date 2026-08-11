@@ -94,6 +94,14 @@
 
 ### KUnit 与 validation 模块
 
+KUnit的执行、并发握手、证明外推、cleanup和production shape以
+[`KUNIT-EXEC` / `KUNIT-CONCURRENCY` / `KUNIT-PROOF` / `KUNIT-SHAPE`](docs/src/contracts/kunit/execution-and-proof.md)
+为唯一规范。普通KUnit默认不触达live scheduling；只有scheduler/wait/kthread/kworker/timer/timekeeping/IPI等并发机制
+本身是被测语义时才允许例外，并必须通过production lifecycle和显式phase/predicate/Event/token/completion/join闭合。
+不得用固定次数的yield、schedule、tick等待或wall-clock sleep模拟happens-before；timer/timekeeping/timed-wait或
+scheduler tick测试中的时间可以是被测语义，其它timeout只能作为failure bound。不得让production state/control flow/API
+理解KUnit测试协议。
+
 除 KUnit framework 本身外，不默认为一组测试新建 `kunit.rs`、`tests.rs` 或 `kunit_support.rs`。owner-local
 KUnit 应放在被测语义文件末尾的 inline `#[cfg(feature = "kunit")] mod kunits`；跨多个子模块的 composition
 测试放在其最低共同 owner 的 `mod.rs` 中。只有拥有独立编译边界、外部 consumer 或明确阶段生命周期的

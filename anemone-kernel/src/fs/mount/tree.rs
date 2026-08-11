@@ -1828,53 +1828,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn test_vfs_move_mount_lookup_generation_retry_returns_new_state() {
-        let source_dir = Path::new("/kunit-vfs-move-retry-src");
-        let source_file = Path::new("/kunit-vfs-move-retry-src/file");
-        let target_dir = Path::new("/kunit-vfs-move-retry-target");
-        let target_file = Path::new("/kunit-vfs-move-retry-target/file");
-
-        vfs_mkdir_as_root(source_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mkdir_as_root(target_dir, InodePerm::all_rwx()).unwrap();
-        vfs_mount_at(
-            "ramfs",
-            MountSource::Pseudo,
-            MountAttrFlags::empty(),
-            source_dir,
-        )
-        .unwrap();
-        let file = vfs_touch_as_root(source_file, InodePerm::all_rwx()).unwrap();
-
-        let source = vfs_lookup(source_dir).unwrap();
-        let target = vfs_lookup(target_dir).unwrap();
-        let moved_mount = source.mount().clone();
-
-        let retried = crate::fs::namei::resolve_with_mount_retry_hook_for_kunit(
-            target_file,
-            ResolveFlags::empty(),
-            || {
-                move_mount(&source, &target).unwrap();
-            },
-        )
-        .unwrap();
-
-        assert!(Arc::ptr_eq(retried.mount(), &moved_mount));
-        assert_eq!(retried.inode(), file.inode());
-        assert_eq!(retried.to_string(), "/kunit-vfs-move-retry-target/file");
-        assert_eq!(vfs_lookup(source_file).unwrap_err(), SysError::NotFound);
-
-        drop(retried);
-        drop(moved_mount);
-        drop(target);
-        drop(source);
-        drop(file);
-        vfs_unlink(target_file).unwrap();
-        vfs_unmount(target_dir).unwrap();
-        vfs_rmdir(source_dir).unwrap();
-        vfs_rmdir(target_dir).unwrap();
-    }
-
-    #[kunit]
     fn test_vfs_move_mount_rejects_cycle_and_non_root_source() {
         let source_dir = Path::new("/kunit-vfs-move-cycle-src");
         let nested_dir = Path::new("/kunit-vfs-move-cycle-src/nested");
