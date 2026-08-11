@@ -4,13 +4,12 @@
 **最后更新：** 2026-08-11
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
 **当前修订：** R1
-**实现授权：** Stage 1 Checkpoint 1 only / Closed
+**实现授权：** Stage 1 / Closed；Stage 2--4：None
 **Contract Cutover：** None
 
 本页只组织父 RFC R1 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
-Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析；Checkpoint 1
-已在独立授权下关闭，Checkpoint 2未授权。Stage 2--4 保持 Future。维护者后续只有在新的明确授权下才能进入
-Checkpoint 2；当前执行已按只授权Checkpoint 1的停止合同停下。
+Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析并在各自授权下
+关闭。Stage 2--4 保持 Future；当前执行已按停止合同停在Stage 1 closure，不得自动进入Stage 2。
 
 ## 全局 Implementation Boundary
 
@@ -49,7 +48,7 @@ write set；同owner内部类型、模块、算法与行为保持型拆分由对
 
 | Stage | 解析程度 | 目的 | 可见语义 / Cutover |
 | --- | --- | --- | --- |
-| Stage 1 | Checkpoint 1 Closed / Checkpoint 2 Awaiting Authorization | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
+| Stage 1 | Closed | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
 | Stage 2 | Future | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
 | Stage 3 | Future | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
 | Stage 4 | Future | 公开激活、完成mandatory acceptance并原子cut over | `PTY-DEVPTS-CUTOVER` |
@@ -106,9 +105,9 @@ provenance。长期owner-local KUnit放在被测语义文件末尾的inline `kun
 
 ## Stage 1 — Runtime semantic endpoint substrate
 
-**解析状态：** Resolved / Checkpoint 1 Closed / Checkpoint 2 Awaiting Authorization
+**解析状态：** Closed
 
-**Execution Authorization：** Checkpoint 1 only；已消费并关闭。Checkpoint 2：None
+**Execution Authorization：** Stage 1两个checkpoint均已消费并关闭；Stage 2：None
 
 **Contract Cutover：** None
 
@@ -213,8 +212,8 @@ Checkpoint 2。
 **Execution Result（2026-08-11）：** Closed。semantic endpoint、serial attachment/worker、line profile与opened-file
 progress capability已按本checkpoint分离；production source/bypass audit、618项KUnit、RV64 TTY auto/vi/ash oracle、
 正常关机与独立review均通过。没有contract cutover或register变化；LA64、PTY app、LTP、tmux与sshd保持Not Run。
-完整执行事实与review更正见[transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)。本轮停止于此，
-Checkpoint 2未授权。
+完整执行事实与review更正见[transaction](../../devlog/transactions/2026-08-11-pty-devpts.md)。该轮在Checkpoint 1停止；
+Checkpoint 2后来由维护者另行授权。
 
 ### Checkpoint 2 — Runtime relation participant lifecycle
 
@@ -249,6 +248,15 @@ Checkpoint 2。
 停止；Stage 2仍为Future且未获解析或执行授权。LA64 build/runtime、PTY app、LTP、tmux、sshd保持Not Run。若runtime
 registry只能靠generic lifecycle observer、第二份endpoint liveness、pair/PTY-specific branch、task/Signal owner改动或
 serial ABI变化才能成立，必须在Stage 1完成声明前停止并回到RFC review / Target Renegotiation。
+
+**Execution Result（2026-08-11）：** Closed。relation registry现支持pre-visibility runtime enrollment、exact/idempotent
+retirement与participant/relation双generation revalidation；serial boot transaction在其它fallible prepare完成后才消费
+enrollment，并把成功participant保留到reboot。duplicate、partial prepare rollback、retire-no-entry/exact cleanup与
+distinct replacement endpoint stale-cleanup KUnit均通过。source/lock/bypass audit确认registry仍是membership与session
+relation的唯一truth，旧snapshot不能越过endpoint identity与双generation核验，retirement先撤销discoverability再在
+guard外drop。最终RV64 wrapper完成repository build，622/622 KUnit、TTY relation/data-plane/vi/ash与50/50 guest oracle
+全部通过并正常关机；独立review无Apollyon/Keter。没有contract cutover或register变化；LA64 build/runtime、PTY app、
+LTP、tmux与sshd保持Not Run。Stage 1关闭，执行立即停止，Stage 2仍未授权。
 
 ## Stage 2 — PTY pair、data plane 与 opened-description lifecycle
 

@@ -1,6 +1,6 @@
 # 2026-08-11 - PTY / devpts
 
-**Status:** Active / R1 / Stage 1 Checkpoint 1 Closed
+**Status:** Active / R1 / Stage 1 Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260810-pty-devpts R1](../../rfcs/pty-devpts/index.md)
 **Implementation Route:** [Stage 1--4](../../rfcs/pty-devpts/implementation.md)
@@ -10,7 +10,8 @@
 
 本transaction为长期、多Stage RFC保存checkpoint execution、review、validation与下一授权handoff。target、owner、
 ABI、Contract Impact、acceptance与Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划或
-current contract。开发者本轮只授权完成Stage 1 Checkpoint 1，不授权Checkpoint 2、Stage 2--4或任何contract cutover。
+current contract。开发者先后独立授权Stage 1 Checkpoint 1与Checkpoint 2；两个授权均已消费并关闭。Stage 2--4与任何
+contract cutover仍未授权。
 
 ## Checkpoint Log
 
@@ -55,8 +56,56 @@ LA64 build/runtime、PTY test app、LTP、tmux与sshd均Not Run，且不得从�
 **Next / Stop:** Checkpoint 1 Closed。执行严格停止在本checkpoint；Stage 1 Checkpoint 2仍Awaiting Authorization，
 Stage 2--4保持Future，`PTY-DEVPTS-CUTOVER`仍Not Effective。下一步只能在维护者新的明确授权下进入Checkpoint 2。
 
+### 2026-08-11 - Stage 1 Checkpoint 2 activation and closure
+
+**Change:** 从`dev/drc/alpha@4fc8237d`激活Checkpoint 2。relation owner把boot-fixed slots替换为runtime registry：
+`RelationEnrollment`是endpoint visibility前的一次性commit authority，`RelationParticipant`是绑定exact semantic endpoint与
+participant generation的幂等retirement capability；registry仍唯一拥有participant membership、session binding、foreground
+selector与relation generation。snapshot mutation同时核验endpoint exact identity、participant generation与relation
+generation。retirement先从registry移除slot，再在guard外释放endpoint/session/foreground capability。
+
+serial attach为每个unpublished semantic endpoint准备一次enrollment。boot transaction先完成devfs、file、vector capacity等
+其它fallible prepare，再从unpublished owner取得authority并commit；partial commit失败由已提交participant的`Drop`回滚，
+尚未发布的attachment cleanup也在registry removal后drop。成功publication把participant capability保留到reboot，不改变
+`/dev/ttyS<N>`、`/dev/tty`、boot fd、devnum、console owner或existing relation/job-control行为。
+
+inline relation-owner KUnit覆盖duplicate enrollment且不消费generation、partial prepare rollback、exact/idempotent
+retire-no-entry，以及旧participant cleanup不能命中distinct replacement endpoint。全部测试直接走production registry
+transition，没有validation-only facade。
+
+**Review / Feedback:** 独立subagent review为0 Apollyon / 0 Keter，指出一个Euclid：最初stale-cleanup KUnit用同一个
+endpoint的新generation，只证明generation轴，没有显式证明distinct replacement endpoint身份轴。测试改为旧endpoint
+retire后enroll不同`Arc<TtyEndpoint>`，再drop旧participant并断言新membership仍在，关闭该证据缺口。review同时确认
+`tty-test`只在`wait4`或pacing sleep返回`EINTR`时重验authoritative child status/predicate，PID、状态、bounded timeout与失败
+cleanup均未放宽，oracle没有弱化。
+
+首次使用`build/apps/busybox/busybox`的wrapper尝试在guest capability check停止，原因为该输入缺少验收所需BusyBox applet，
+不是kernel failure。挂载盘可用后改用其RV64 static BusyBox；首轮guest暴露旧harness把快速child exit产生的预期`SIGCHLD`
+`EINTR`误判为22项失败。修正仅重试`EINTR`，最终同一50项矩阵全通过，没有改变TTY状态、errno、超时或字节oracle。
+
+source/lock/bypass audit确认：membership与session relation只有registry一份truth；endpoint、Session、Terminal、physical port、
+unpublished/published vectors只持semantic capability或pre-visibility/retirement authority，不镜像relation状态；relation guard内
+没有task/Signal/Event/worker调用或payload drop；physical `TtyPort`仍只由driver/attachment/worker持有；没有public API、
+shared contract、serial ABI或PTY-specific branch扩张。
+
+**Contract Cutover:** None。current TTY、opened-description、VFS、task/Signal/job-control contracts和register均未修改；
+`PTY-DEVPTS-CUTOVER`仍Not Effective。
+
+**Validation:** `git diff --check`、`just fmt kernel --check`与`just fmt tty-test --check`通过。canonical
+`./scripts/run-tty-test-rv64.sh --busybox <mounted-rv64-busybox> --sdcard <preliminary-rv64-sdcard-master> --mode auto
+--log build/pty-devpts-stage1-ckpt2-rv64.log`在最终candidate以direct rootfs mode通过：repository RV64 release build完成，
+622/622 KUnit通过，其中4项relation lifecycle tests均为`ok`；guest
+`TTYTEST:SUMMARY:PASS:50`，BusyBox vi/ash、relation/data-plane与字节oracle通过，正常关机；host报告
+`TTY-HARNESS:PASS:auto-byte-checks`与最终PASS。
+
+LA64 build/runtime、PTY test app、LTP、tmux与sshd均Not Run，且不得从本次RV64证据外推。
+
+**Next / Stop:** Stage 1 Closed。执行严格停止；Stage 2--4保持Future且未获execution authorization，
+`PTY-DEVPTS-CUTOVER`仍Not Effective。
+
 ## Current Handoff
 
-当前live source已经让全部existing serial production caller使用semantic endpoint / physical attachment分离后的单一路径，
-并保持serial ABI、devnum、boot fd、console owner、Terminal和relation行为。transaction保持Active只因为父RFC的后续
-checkpoints/stages尚未执行；本记录不授权自动继续，也不把Checkpoint 1证据写成Stage 1或PTY target closure。
+当前live source已经关闭runtime semantic endpoint substrate：全部existing serial production caller使用semantic endpoint /
+physical attachment单一路径，并通过runtime relation enrollment/retirement保持serial ABI、devnum、boot fd、console owner、
+Terminal和relation行为。transaction保持Active只因为父RFC的Stage 2--4尚未执行；本记录不授权自动继续，也不把Stage 1
+证据写成PTY target或contract closure。

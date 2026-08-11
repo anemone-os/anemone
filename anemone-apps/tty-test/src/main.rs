@@ -254,12 +254,18 @@ fn wait_child_bounded(pid: u32, options: WaitOptions) -> Result<WStatus, Errno> 
                 kill_and_reap_child_bounded(pid);
                 return Err(EIO);
             },
-            Ok(None) => {
-                if let Err(errno) = nanosleep(CHILD_WAIT_TICK) {
+            Ok(None) => match nanosleep(CHILD_WAIT_TICK) {
+                Ok(()) | Err(EINTR) => {},
+                Err(errno) => {
                     kill_and_reap_child_bounded(pid);
                     return Err(errno);
-                }
+                },
             },
+            // SIGCHLD or another handled signal can interrupt the wait before
+            // the target status is collected. Recheck the authoritative wait
+            // result instead of turning a correct fast child exit into a test
+            // failure.
+            Err(EINTR) => {},
             Err(errno) => {
                 kill_and_reap_child_bounded(pid);
                 return Err(errno);
@@ -271,21 +277,24 @@ fn wait_child_bounded(pid: u32, options: WaitOptions) -> Result<WStatus, Errno> 
 }
 
 fn wait_child_blocking(pid: u32) -> Result<WStatus, Errno> {
-    let mut status = WStatusRaw::EMPTY;
-    match wait4(
-        WaitFor::ChildWithTgid(pid),
-        Some(&mut status),
-        WaitOptions::empty(),
-    ) {
-        Ok(Some(waited)) if waited == pid => Ok(status.read()),
-        Ok(Some(_)) | Ok(None) => {
-            kill_and_reap_child_bounded(pid);
-            Err(EIO)
-        },
-        Err(errno) => {
-            kill_and_reap_child_bounded(pid);
-            Err(errno)
-        },
+    loop {
+        let mut status = WStatusRaw::EMPTY;
+        match wait4(
+            WaitFor::ChildWithTgid(pid),
+            Some(&mut status),
+            WaitOptions::empty(),
+        ) {
+            Ok(Some(waited)) if waited == pid => return Ok(status.read()),
+            Ok(Some(_)) | Ok(None) => {
+                kill_and_reap_child_bounded(pid);
+                return Err(EIO);
+            },
+            Err(EINTR) => {},
+            Err(errno) => {
+                kill_and_reap_child_bounded(pid);
+                return Err(errno);
+            },
+        }
     }
 }
 

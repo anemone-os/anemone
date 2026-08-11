@@ -35,7 +35,14 @@ static_assert!(
     "TTY worker batch must be non-zero"
 );
 
-static UNPUBLISHED_PORTS: Lazy<SpinLock<BTreeMap<TtyPortId, Weak<TtyEndpoint>>>> =
+struct UnpublishedEndpoint {
+    endpoint: Weak<TtyEndpoint>,
+    /// One-shot relation commit authority. It is transferred to the boot
+    /// publication transaction only after every other fallible prepare step.
+    enrollment: Option<relation::RelationEnrollment>,
+}
+
+static UNPUBLISHED_PORTS: Lazy<SpinLock<BTreeMap<TtyPortId, UnpublishedEndpoint>>> =
     Lazy::new(|| SpinLock::new(BTreeMap::new()));
 
 /// Stable semantic terminal capability shared by FileOps and relation owners.
@@ -162,15 +169,22 @@ pub(crate) fn attach_unpublished_port(
         wake_source: Arc::downgrade(&wake_source),
     })
     .map_err(|_| SysError::OutOfMemory)?;
+    let enrollment = relation::RelationEnrollment::new(endpoint.clone());
     let id = port.id().clone();
 
     {
         let mut ports = UNPUBLISHED_PORTS.lock();
-        ports.retain(|_, endpoint| endpoint.upgrade().is_some());
+        ports.retain(|_, pending| pending.endpoint.upgrade().is_some());
         if ports.contains_key(&id) {
             return Err(SysError::DevAlreadyRegistered);
         }
-        let old = ports.insert(id, Arc::downgrade(&endpoint));
+        let old = ports.insert(
+            id,
+            UnpublishedEndpoint {
+                endpoint: Arc::downgrade(&endpoint),
+                enrollment: Some(enrollment),
+            },
+        );
         assert!(
             old.is_none(),
             "duplicate TTY port passed registry validation"
@@ -218,17 +232,23 @@ fn finish_unpublished_port_attach(
 }
 
 fn remove_unpublished_endpoint(id: &TtyPortId, endpoint: &Arc<TtyEndpoint>) -> bool {
-    let mut ports = UNPUBLISHED_PORTS.lock();
-    let Some(registered) = ports.get(id) else {
-        return false;
+    let removed = {
+        let mut ports = UNPUBLISHED_PORTS.lock();
+        let Some(registered) = ports.get(id) else {
+            return false;
+        };
+        if !registered
+            .endpoint
+            .upgrade()
+            .is_some_and(|registered| Arc::ptr_eq(&registered, endpoint))
+        {
+            return false;
+        }
+        ports.remove(id)
     };
-    if !registered
-        .upgrade()
-        .is_some_and(|registered| Arc::ptr_eq(&registered, endpoint))
-    {
-        return false;
-    }
-    ports.remove(id);
+    // The pending enrollment may hold the last endpoint reference. Release it
+    // only after registry visibility has been withdrawn.
+    drop(removed);
     true
 }
 
@@ -566,9 +586,13 @@ mod kunits {
             terminal,
             wake_source: Arc::downgrade(&wake_source),
         });
-        let old = UNPUBLISHED_PORTS
-            .lock()
-            .insert(port.id().clone(), Arc::downgrade(&endpoint));
+        let old = UNPUBLISHED_PORTS.lock().insert(
+            port.id().clone(),
+            UnpublishedEndpoint {
+                endpoint: Arc::downgrade(&endpoint),
+                enrollment: Some(relation::RelationEnrollment::new(endpoint.clone())),
+            },
+        );
         assert!(old.is_none());
 
         let result = finish_unpublished_port_attach(

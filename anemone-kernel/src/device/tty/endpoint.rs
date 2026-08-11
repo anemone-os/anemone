@@ -70,6 +70,9 @@ struct PublishedEndpoint {
 
 struct PublishedEndpoints {
     endpoints: Vec<PublishedEndpoint>,
+    /// Retirement capabilities kept for the publish-until-reboot serial
+    /// lifecycle. Membership and relation state remain registry-owned.
+    _relations: Vec<relation::RelationParticipant>,
     /// Stable selected-endpoint snapshot used by the anonymous boot inode for
     /// inherited `fstat`/reopen behavior. The indexed endpoint remains the
     /// authoritative source of terminal identity and published device number.
@@ -133,7 +136,7 @@ fn select_endpoint<'a>(
 
 pub(crate) struct TtyBootPublication {
     controlling_publish: DevfsPublish,
-    relations: relation::PreparedRelations,
+    relations: Vec<relation::RelationParticipant>,
     endpoints: Vec<PreparedEndpoint>,
     published: Vec<PublishedEndpoint>,
     boot_index: usize,
@@ -159,18 +162,17 @@ pub(crate) fn prepare_system_boot(
         port_count,
         "TTY attachments changed during boot publication preparation"
     );
-    for (identity, endpoint) in ports.iter() {
+    for (identity, pending) in ports.iter() {
         assert!(
             endpoints.len() < endpoints.capacity() && identities.len() < identities.capacity(),
             "TTY attachment snapshot exceeded its reserved capacity"
         );
-        let endpoint = endpoint.upgrade().ok_or(SysError::NotFound)?;
+        let endpoint = pending.endpoint.upgrade().ok_or(SysError::NotFound)?;
         identities.push(identity.clone());
         endpoints.push(endpoint);
     }
     drop(ports);
 
-    let relations = relation::prepare(&endpoints)?;
     let controlling_ops: Arc<dyn DevfsNodeOps> =
         Arc::try_new(ControllingTtyNodeOps).map_err(|_| SysError::OutOfMemory)?;
     let mut controlling_name = String::new();
@@ -250,6 +252,40 @@ pub(crate) fn prepare_system_boot(
             devnum: endpoint.devnum,
         });
     }
+
+    let mut enrollments = Vec::new();
+    enrollments
+        .try_reserve_exact(prepared.len())
+        .map_err(|_| SysError::OutOfMemory)?;
+    let mut relations = Vec::new();
+    relations
+        .try_reserve_exact(prepared.len())
+        .map_err(|_| SysError::OutOfMemory)?;
+    {
+        let mut ports = super::UNPUBLISHED_PORTS.lock();
+        for prepared in &prepared {
+            let pending = ports
+                .get_mut(&prepared.physical_id)
+                .expect("prepared TTY endpoint lost its attachment registration");
+            assert!(
+                pending
+                    .endpoint
+                    .upgrade()
+                    .is_some_and(|endpoint| { Arc::ptr_eq(&endpoint, &prepared.endpoint) }),
+                "TTY attachment registration changed before relation enrollment"
+            );
+            enrollments.push(
+                pending
+                    .enrollment
+                    .take()
+                    .expect("TTY endpoint relation enrollment consumed twice"),
+            );
+        }
+    }
+
+    for enrollment in enrollments {
+        relations.push(enrollment.commit()?);
+    }
     Ok(TtyBootPublication {
         controlling_publish,
         relations,
@@ -275,7 +311,6 @@ impl TtyBootPublication {
             boot_files,
         } = self;
 
-        relation::install(relations);
         devfs_publish(controlling_publish)?;
 
         for prepared in endpoints {
@@ -300,6 +335,7 @@ impl TtyBootPublication {
         PUBLISHED_ENDPOINTS.init(|slot| {
             slot.write(PublishedEndpoints {
                 endpoints: published,
+                _relations: relations,
                 boot_index,
             });
         });
