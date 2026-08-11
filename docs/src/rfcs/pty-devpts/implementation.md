@@ -3,25 +3,28 @@
 **状态：** Draft
 **最后更新：** 2026-08-11
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
-**当前修订：** R1
-**Stage 状态：** Stage 1--2 / Closed；Stage 3--4 / Future
+**当前修订：** R2
+**Stage 状态：** Stage 1--2 / Closed；Stage 3 / Resolved / Ready / Not Active；Stage 4 / Future
 **Execution Authorization：** Stage 1--2已消费并关闭；Stage 3--4：None
 **Contract Cutover：** None
 
-本页只组织父 RFC R1 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
+本页只组织父 RFC R2 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
 Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析并在各自授权下
-关闭。Stage 2已在独立授权下完成并关闭；当前执行严格停在Stage 2 closure。Stage 3--4保持Future，不能从既有路线或
-Stage 2 handoff推导新的execution authorization。
+关闭。Stage 2已在独立授权下完成并关闭；Stage 3现已完成docs-only解析，处于Ready / Not Active，当前执行仍严格停在
+Stage 2 closure。Stage 3解析不构成execution authorization，也不能从既有路线或Stage 2 handoff推导Stage 3 checkpoint
+授权；Stage 4保持Future。
 
 ## 全局 Implementation Boundary
 
-- **Target / non-goals：** 交付父 RFC 定义的单实例 Unix98 PTY / devpts、dynamic slave semantic endpoint、
+- **Target / non-goals：** 交付父 RFC 定义的user-mountable single-persistent-instance Unix98 PTY / devpts、dynamic slave semantic endpoint、
   safe-reuse identity、opened-description final release、Linux-compatible open/hangup surface 与 claim-scoped
-  acceptance；multiple devpts instances、legacy BSD PTY、额外 line discipline/PTY ioctl、完整 job-control residual、
-  generic VFS pathname freshness 和 sshd prerequisite 均保持非目标。
+  acceptance；additional mount只形成同一instance的VFS view；multiple/private devpts instances、mount-local `ptmx`、
+  legacy BSD PTY、额外line discipline/PTY ioctl、完整job-control residual、generic VFS pathname freshness和sshd
+  prerequisite均保持非目标。
 - **Owner / handoff / failure / cleanup：** `Terminal`继续唯一拥有termios、winsize、line discipline与slave stream；
-  PTY pair拥有identity、master liveness、slave admission/participation、peer absence与retirement；devpts拥有index与
-  live binding；VFS拥有resident inode/dentry/mount projection；`task::files`拥有opened-description publication与
+  PTY pair拥有identity、master liveness、slave admission/participation、peer absence与retirement；devpts拥有persistent
+  system instance、index与live binding；VFS拥有singleton superblock/inode/dentry与distinct mount-view projection；
+  `task::files`拥有opened-description publication与
   final release；TTY relation、task topology、Signal和ThreadGroup job control继续各自拥有relation、membership、
   signal occurrence与stop/continue truth。跨owner effect必须先提交owner-local不可逆状态，再在guard外通过窄、
   幂等handoff推进，普通失败不得要求恢复已经退休的pair或已经发布的relation effect。
@@ -35,9 +38,11 @@ Stage 2 handoff推导新的execution authorization。
 - **Stop conditions：** 需要改变target/non-goals、owner/handoff/failure/cleanup、public ABI、Contract Impact、
   acceptance或validation claim；无法在current single static final-release hook内自然组合PTY与fanotify effect；
   需要移动`Terminal` stream truth、建立devpts-local dentry freshness、以monotonic exhaustion规避safe reuse、
-  顺带启用非目标job-control residual，或只能通过伪造环境/削弱test app覆盖运行mandatory core acceptance。
+  需要per-mount backend/binding、按mount path选择instance、让mount count驱动pair lifecycle、顺带启用非目标job-control
+  residual，或只能通过伪造环境/削弱test app覆盖运行mandatory core acceptance。
 
-预计涉及`device::tty`、new PTY/devpts owner、VFS open/mount窄handoff、`task::files`既有static hook consumer、
+预计涉及`device::tty`、new PTY/devpts owner、VFS open/mount窄handoff、devfs static mountpoint、persistent init consumers、
+`task::files`既有static hook consumer、
 `anemone-abi`、kernel Kconfig、普通PTY test app与实际system-devfs mount consumer。这些只是非穷举提示，不是逐文件
 write set；同owner内部类型、模块、算法与行为保持型拆分由对应Stage实现自然闭合。
 
@@ -52,12 +57,12 @@ write set；同owner内部类型、模块、算法与行为保持型拆分由对
 | --- | --- | --- | --- |
 | Stage 1 | Closed | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
 | Stage 2 | Closed | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
-| Stage 3 | Future | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
+| Stage 3 | Resolved / Ready / Not Active | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
 | Stage 4 | Future | 公开激活、完成mandatory acceptance并原子cut over | `PTY-DEVPTS-CUTOVER` |
 
 普通commit不自动形成新Stage。只有独立安全的review/授权停止点、probe、不安全中间态或contract cutover才调整
 Stage路线；若后续证据要求重新解析target/owner/ABI/acceptance，则进入RFC review或Target Renegotiation，不能由
-实现者自行弱化R1。
+实现者自行弱化R2。
 
 ## 全局实现输入
 
@@ -65,13 +70,13 @@ Stage路线；若后续证据要求重新解析target/owner/ABI/acceptance，则
 
 | Seam | 当前事实 | 后续路线约束 |
 | --- | --- | --- |
-| TTY semantic/data plane | `TtyEndpoint`直接组合physical `TtyPort`、shared `Terminal`与worker wake；worker直接在port RX/TX和Terminal queue之间搬运 | Stage 1先在TTY owner内分开semantic endpoint与physical attachment participation；PTY不得实现假`TtyPort`或建立第二个`Terminal` |
-| Controlling relation | relation registry在boot publication前按serial endpoint预建固定slot，并以endpoint `Arc`作为terminal identity | Stage 1提供runtime endpoint enrollment/retirement与stable identity，同时保持relation generation、topology revalidation和guards-out effect owner不变 |
-| Opened description | `task::files`以published slot refcount决定final release，固定先执行flock retirement，再运行creation-time单`FileDescOps::final_release`；ordinary pathname open已把该hook用于fanotify close | PTY open owner只能在创建时把pair participation/retirement与既有fanotify effect静态组合；不得增加observer registry、多个task-owned hook或改变flock-before-hook顺序 |
+| TTY semantic/data plane | `TtyEndpoint`只组合stable identity、shared `Terminal`与weak progress source；physical serial attachment/worker独立持有`TtyPort`，Stage 2 PTY pair通过同一`Terminal`与progress capability闭合双向data plane | Stage 3保持`Terminal`、physical port与pair truth边界，不恢复serial-bound endpoint、不实现假`TtyPort`或建立第二个`Terminal` |
+| Controlling relation | relation registry已支持runtime exact enrollment/retirement与participant/relation双generation重验；serial participant在boot publication前commit并保留到reboot，Stage 2 pair仍持uncommitted enrollment authority | Stage 3 allocation在pair/binding/fd visibility前fallibly commit exact participant；retirement只通过该participant与旧relation generation形成guards-out cleanup effect，不让pair复制relation truth |
+| Opened description | `task::files`以published slot refcount决定final release，固定先执行flock retirement，再运行creation-time单`FileDescOps::final_release`；Stage 2 PTY master/slave effect已在该单hook内转发既有base effect | Stage 3只在创建时静态补齐devpts/relation/Signal cleanup capability并保留fanotify base effect；不得增加observer registry、多个task-owned hook或改变flock-before-hook顺序 |
 | Pathname open与`O_NOCTTY` | `openat`在VFS DAC后进入`vfs_open_description()`，当前把`O_NOCTTY`记录为compat no-op而不向backend传递operation-local effect | Stage 3只为PTY slave-open success episode携带typed operation-local `O_NOCTTY`；generic serial open与opened-description status truth不得被顺带改变 |
 | `TIOCGPTPEER` fd publication | ioctl FileOps当前只接收target access、userspace与arg-fd lookup；`Task::reserve_fd()` / `FdReservation::commit()`已经提供fallible reservation与infallible visibility tail | peer-open route在任何pair enrollment/relation effect前完成fd与opened-description的fallible prepare，随后只允许pair commit、conditional relation commit与fd commit组成不失败success tail；不得在FileOps内先enroll再调用可失败的普通`open_fd()` |
-| Namespace与mount | devfs是persistent append-only hierarchy并已支持static directory；VFS已有no-device pseudo-filesystem与mount owner；实际init profiles在挂载devfs后建立`/dev`子mount | devfs只发布static `/dev/ptmx`和`/dev/pts` mountpoint；dynamic `N -> pair`由single-instance devpts backend拥有。Stage 3集成前必须枚举真实system-devfs mount consumers并确认同一devpts instance的mount时序，不能把dynamic namespace塞进devfs |
-| ABI与capacity | `anemone-abi::tty::linux`尚无R1 PTY ioctl codec；现有Kconfig pipeline已拥有TTY/Unix等重要容量参数 | Stage 3在唯一ABI owner加入asm-generic PTY codec，并由kernel Kconfig拥有current reserved/live PTY capacity；具体默认值必须由resource/acceptance证据决定，不凭偏好预先冻结 |
+| Namespace与mount | devfs是persistent append-only hierarchy、支持static directory且拒绝userspace `mkdir`；VFS允许filesystem mount callback复用同一superblock，并以`PERSISTENT_SB`保留last-unmount lifetime；generic `mount(2)`已有`CAP_SYS_ADMIN` admission | Stage 3形成mount-ready single persistent instance，empty data的任意target mount都返回同一superblock/root；Stage 4由devfs发布static `/dev/ptmx`与`/dev/pts` mountpoint并让persistent init显式mount。additional view不创建instance，temporary devfs不自动mount |
+| ABI与capacity | `anemone-abi::tty::linux`尚无R2 PTY ioctl codec；现有Kconfig pipeline已拥有TTY/Unix等重要容量参数 | Stage 3在唯一ABI owner加入asm-generic PTY codec，并由kernel Kconfig拥有current reserved/live PTY capacity；具体默认值必须由resource/acceptance证据决定，不凭偏好预先冻结 |
 
 这些约束只冻结自然handoff与禁止形状，不冻结Rust trait、struct、锁、container、buffer placement、模块布局或
 allocator算法。进入实际Stage时若live source已经变化，应重新核验同一语义seam；只要owner与protected boundary
@@ -93,10 +98,12 @@ allocator算法。进入实际Stage时若live source已经变化，应重新核�
   terminal signals、master-hangup先撤销relation可发现性再向旧session leader thread group提交`SIGHUP`、`SIGCONT`，
   以及excluded residual不被意外启用。
 - **Identity / resource：** failure rollback、capacity exhaustion、retire/reuse、旧inode/open capability和迟到operation
-  fail-close、current binding取得new pair；generic cached-positive、late materialization和multi-view pathname
-  linearizability继续明确标为Not Proven。
+  fail-close、current binding取得new pair；两个fresh mount view必须取得同一superblock/inode/binding，single-view
+  unmount不影响另一view，last-view unmount/remount保留system instance；generic cached-positive、late materialization、
+  readdir与retire/reuse的完整multi-view pathname linearizability继续明确标为Not Proven。
 
-Linux-visible参考以父RFC列出的tracked Linux 6.6.32 locators为主。实现中若遇到源码不能唯一确定且确实影响R1 target的
+Linux-visible参考以父RFC列出的tracked Linux 6.6.32 locators为主。Linux `devpts_mount`的per-mount private instance只
+是差异参考，不能覆盖R2 single-instance decision。实现中若遇到源码不能唯一确定且确实影响R2 target的
 observable corner，可以按需做定向reference comparison并记录实际环境与结果；此类comparison只是执行证据，不形成
 独立harness或gate，也不能覆盖fixed source或Accepted Target。
 
@@ -389,7 +396,7 @@ Stage能力。
 **Cutover / Exit：** None。prepared pair capability、master/slave production FileOps、pair-local lifecycle、真实
 opened-description final-release participation、stream/peer-state observable matrix、双架构build floor与RV64 serial/pure KUnit
 回归全部关闭，且review/Architecture Friction Scan满足上项条件后，Stage 2才可记为Closed。关闭不发布PTY namespace/
-ABI、不更新current contract或register，并立即停止；Stage 3仍为Future且需要新的解析/执行授权。
+ABI、不更新current contract或register，并立即停止；Stage 2关闭当时Stage 3仍为Future，需要新的解析与执行授权。
 
 **Execution Result（2026-08-11）：** Closed。新增owner-private `pty`模块形成prepared/live pair、master/slave FileOps、
 shared Terminal双向data plane、peer absence/reopen、master retirement、mandatory HUP/ERR与static final-release effect；
@@ -411,20 +418,214 @@ Not Run。current contract、register与`PTY-DEVPTS-CUTOVER`保持不变；Stage
 
 ## Stage 3 — System devpts、allocation/admission 与跨 owner cleanup
 
+**解析状态：** Resolved / Ready / Not Active
+
+**Execution Authorization：** None；Checkpoint 1与Checkpoint 2均未授权
+
+**Contract Cutover：** None
+
 **Purpose：** 组合single-instance devpts index/binding与VFS projection，闭合prepare-before-publish allocation、Kconfig
 capacity/safe reuse、initial metadata、pathname与`TIOCGPTPEER`两条route、PTY ioctl、implicit acquisition success tail、
-static final-release composition和master-retirement的devpts/relation/Signal/waiter handoff；完成但暂不公开激活R1 surface。
+static final-release composition和master-retirement的devpts/relation/Signal/waiter handoff；完成但暂不公开激活R2 surface。
 
 **Prerequisites：** Stage 2关闭；pair capability、observable matrix、opened-description effect与system-devfs mount consumer
-均已可供集成；维护者另行授权Stage 3。
+均已完成live-source核验；父RFC R2与current TTY、opened-description、VFS、iomux/epoll contracts未漂移；维护者按下述
+停止点另行授权对应checkpoint。解析本节或授权Checkpoint 1都不自动授权Checkpoint 2。
 
-**Protected Boundary：** devpts不读取VFS private dentry/cache，不以numeric index替代episode identity，不改变
-`OPENED-DESC-003`或generic serial `O_NOCTTY`语义，不启用excluded job-control residual，不注册可由普通用户发现的半套
-PTY surface。到达Stage 3前不冻结allocator、incarnation、inode/container或mount-integration的具体表示。
+### Stage 3 Implementation Boundary
+
+- **Target / non-goals：** 先在TTY owner内完成Stage 3新增职责所必需的行为保持型模块拆分，再关闭一个仍不可由用户发现的
+  production集成状态：single persistent devpts instance拥有capacity reservation、index/live binding、accepted initial
+  metadata source与logical retirement，并提供empty-data mount总是返回同一prebuilt superblock/root的production route；
+  `/dev/ptmx` allocation、pathname slave open与`TIOCGPTPEER` peer open都消费Stage 2的
+  prepared pair/description capability；PTY ioctl、implicit controlling acquisition与master-retirement cleanup走真实owner
+  handoff。Stage 3不把devpts filesystem注册进public registry，不向devfs发布`/dev/ptmx`或`/dev/pts`，不修改init/
+  rootfs mount consumer，也不运行或声称PTY userspace acceptance；公开激活、system mount与mandatory app/LTP/tmux留给
+  Stage 4原子完成。
+- **Owner / handoff：** `Terminal`继续唯一拥有termios、winsize、line discipline、slave stream与对应readiness；PTY pair
+  继续拥有episode identity、slave lock、master liveness、description participation、peer absence、hangup与retirement；new
+  `fs::devpts`唯一拥有system instance、numeric index、current `N -> pair` binding、metadata input与logical binding
+  retirement；VFS继续拥有singleton superblock/inode/dentry/cache、distinct mount view与DAC；`task::files`继续拥有fd
+  reservation/publication和opened-description final release；TTY
+  relation、task topology、Signal与ThreadGroup job control保持原owner。跨owner只传prepared capability、exact episode/
+  binding capability、operation-local open effect与cleanup snapshot，不传完整`Task`、file table、VFS private cache或pair
+  private guard。
+- **Failure / cleanup：** allocation先完成credential snapshot、capacity/index reservation、pair/master description、
+  metadata/binding projection与relation participant enrollment等全部fallible prepare，随后才进入pair commit、binding/fd
+  publication组成的不失败success tail；失败只撤销未发布的本episode capability。两条slave-open route都先完成fd
+  reservation、flags/access/admission与opened-description等fallible prepare，pair participation是最后一个可能失败的
+  transition，随后conditional relation effect与fd commit不得再失败。master final release先在pair owner内不可逆retire，
+  再在pair guard外以每pair唯一、exact且幂等的cleanup capability依次关闭devpts binding、撤销exact relation并形成旧session
+  leader effect snapshot、提交`SIGHUP`/`SIGCONT`、唤醒各wait owner；不得跨owner rollback或恢复live state。
+- **Protected API / ABI / contract：** `PTY-DEVPTS-CUTOVER`前，existing serial ABI与physical UART/console owner、
+  `Terminal` truth、current `TTY-*`/`OPENED-DESC-*`/VFS/iomux/epoll contracts和generic serial `O_NOCTTY` baseline均保持
+  不变。PTY UAPI codec只进入既有唯一ABI owner，kernel owner-local surface按真实consumer给最窄visibility；mount route
+  必须保留generic `CAP_SYS_ADMIN` admission、任意existing-directory target与empty-data profile。不得注册半套namespace、
+  建立dynamic final-release observer、per-mount backend/binding、devpts-local dentry freshness、第二份pair/readiness/refcount
+  truth、success no-op ioctl或test-only production branch。
+- **Acceptance / validation claim：** source/owner/lock/bypass review证明allocation/open/retirement的线性化、fallible prepare
+  与guards-out effect；owner-local deterministic KUnit只证明singleton mount callback、data rejection、persistent
+  last-view lifetime、capacity、rollback、safe reuse、stale episode、binding/metadata/admission与flag/ABI codec等纯语义，
+  不把单任务测试外推为concurrent open-vs-retire、final-close、fd publication、signal
+  ordering或generic pathname freshness证明。canonical RV64 TTY wrapper只证明existing serial与owner-local KUnit回归；LA64
+  只取得repository kernel build claim。PTY test app、LTP、tmux、sshd与两架构PTY runtime均保持Not Run，留给Stage 4按父
+  RFC acceptance取得实际证据。
+- **Stop conditions：** 需要改变target/non-goals、owner/handoff/failure/cleanup、public ABI、visibility/shared contract、
+  Contract Impact、acceptance或validation strength；结构拆分必须移动owner surface、扩大public API或建立新抽象层；VFS必须
+  识别PTY private representation，pair/FileOps必须取得`Task`、file table或private VFS state；mount必须按target/path选择
+  instance、建立per-mount binding或用mount count决定pair cleanup；safe reuse只能靠monotonic exhaustion或devpts-local
+  dentry generation；implicit acquire必须让eligible/open failure混为一体；static final-release
+  composition无法同时保留fanotify与PTY effect；cleanup必须恢复live state、持跨owner锁或启用excluded job-control residual；
+  或必须提前公开半套namespace才能验证Stage 3。
+
+预计实现自然涉及`device::tty`内的PTY pair/file/relation seam、new `fs::devpts`、VFS open activation的窄handoff、
+`IoctlCtx`的窄fd installer capability、`task::files`既有reservation/static final-release consumer、`anemone-abi::tty`与kernel
+Kconfig；devfs static publication和persistent init consumer只作为Stage 4 handoff做read-only seam核验，不属于Stage 3修改面。
+这些是非穷举提示，不是逐文件write set；同owner新文件、必要import/re-export、inline KUnit与行为保持型拆分可自然闭合，
+但不得借此清理相邻TTY/VFS代码或提前修改Stage 4 mount consumer。
+
+### Resolved module boundary
+
+1. **拆分`tty/pty.rs`，不拆owner。** 当前文件同时包含pair phase/participation、prepared/live lifecycle、master/slave
+   description、FileOps、poll/read/write/ioctl与final-release composition；Stage 3继续加入lock/ioctl/cleanup会把state owner与
+   opened-file adapter固化在同一文件。Checkpoint 1按pair lifecycle、opened-description/FileOps和composition root等稳定
+   职责目录化，保持`device::tty` owner、现有consumer与visibility不变。具体文件名与private type placement由实现选择，
+   不预建devpts callback、Stage 4 adapter或standalone test facade。
+2. **拆分`tty/file.rs`的稳定角色。** generic TTY FileOps/operation、relation ioctl与termios/winsize ABI conversion已经是三类
+   可独立review的职责；Checkpoint 1允许按这些角色目录化，使PTY-specific ioctl接入明确的owner-local dispatch seam。
+   conversion仍服从`anemone-abi::tty`这个UAPI常量/布局owner，relation state仍只在relation registry；拆文件不复制codec或
+   relation truth。
+3. **不按行数扩散拆分。** `terminal.rs`仍围绕单一Terminal semantic owner，`anemone-abi/src/tty.rs`仍是单一TTY UAPI
+   owner，serial attachment已经由endpoint/port边界表达；除非实现证据出现新的职责冲突，本Stage不为整齐继续拆这些文件，
+   也不新建默认`tests.rs`/`kunit.rs`。owner-local KUnit继续inline放在被测语义末尾，跨子模块composition测试只放最低共同
+   owner的`mod.rs`。
+
+### Resolved integration route 与不变量
+
+1. **Devpts instance、capacity、binding与episode identity。** new `fs::devpts`提供一个prebuilt persistent system instance、
+   singleton superblock/root及current reserved/live episode capacity；capacity由kernel Kconfig的重要配置项拥有，具体默认值在实现时根据resource/acceptance证据选择，kernel必须
+   验证非零且不超出accepted device-minor表示范围，外部构建工具不得clamp或重新解释语义。allocator只对current reservation
+   计数；失败和retirement释放slot，capacity内反复allocate-close不能因历史churn耗尽。numeric index可以复用，但binding、
+   inode/open capability和cleanup token都捕获immutable pair episode identity；旧capability只命中旧pair并fail closed，
+   current binding解析new pair。devpts不读取、复制或推断VFS dentry freshness，generic cached-positive与late
+   materialization继续由VFS register拥有。
+2. **Allocation transaction先prepare后publish。** `/dev/ptmx` route先保留fd与capacity/index，捕获allocator operation-local
+   `fsuid:fsgid`，prepare locked pair、master opened description、`0600`/character/`136:N` metadata与unpublished binding。
+   所有可能返回`ENOMEM`、`ENOSPC`、fd/resource或enrollment错误的步骤都发生在pair/binding/fd visibility前；relation
+   participant enrollment也必须在visibility前完成并由abort cleanup exact撤销。此后pair commit是第一个不可失败步骤，
+   binding publication与master fd commit构成静态success tail；任一步prepare失败都不留下live pair、slave node、relation、
+   participant或waiter。umask不改变accepted metadata profile，quota与ordinary allocation failure分别保持`ENOSPC`与
+   `ENOMEM`。
+3. **Pathname open通过one-shot backend activation。** VFS继续完成pathname search、current credential inode-mode DAC、
+   access/status decode与generic opened-description prepare；devpts inode只提供绑定exact episode的backend open capability。
+   VFS open activation向`finish_open`携带一个窄、one-shot、backend-produced的publication capability，使FileDesc与static
+   final-release effect全部prepare后才能提交pair participation；它不是dynamic hook registry，也不允许VFS识别PTY private
+   type。`O_NOCTTY`作为typed operation-local slave-open effect只沿此route交给relation success tail，不进入File status
+   truth，不改变generic serial baseline。
+4. **`TIOCGPTPEER`通过窄fd installer。** `IoctlCtx`只增加reserve/commit本次新fd所需的capability，不暴露完整`Task`或
+   file-table；PTY master FileOps先验证live master与accepted flags，peer route以master fd为capability，绕过pathname
+   traversal与ordinary inode DAC，但与pathname route共享pair-owned lock/liveness/retirement和description participation。
+   `O_CLOEXEC`、`O_NONBLOCK`、access mode与operation-local `O_NOCTTY`从validated flags形成；fd reservation、FileDesc、
+   description/static hook与caller effect snapshot先prepare，pair participation最后fallibly commit，conditional implicit
+   acquire与fd publication组成不失败tail。unsupported flag、bad master、locked/retired pair或fd exhaustion都不得留下
+   participant/relation。
+5. **PTY ioctl与implicit acquisition保持owner-local。** `TIOCGPTN`读取immutable allocation index，`TIOCSPTLCK`只修改
+   pair-owned admission，`TIOCGPTPEER`使用上项route；asm-generic command/layout/flag codec只在`anemone-abi::tty::linux`
+   定义一次，kernel不复制raw number。relation owner提供successful slave-open专用的conditional effect：只有未设置
+   `O_NOCTTY`、readable、current caller是session leader、caller session无controlling terminal且endpoint未绑定其它session
+   时原子建立relation并设置caller current process group为foreground；不eligible、竞争失败或已存在关系都只形成no-op，
+   不让已经成功的slave open失败，也不改变后续explicit `TIOCSCTTY`。
+6. **Master retirement使用固定cleanup capability。** allocation时为每pair静态组合唯一cleanup capability，并继续在
+   current single `FileDescOps::final_release`内组合既有fanotify base effect；不增加observer registry或第二个task-owned
+   hook。master final release先让pair不可逆retired、禁止admission并发布hangup predicate，随后在pair guard外exact retire
+   devpts binding；relation owner按旧generation与stable session-leader identity先撤销`/dev/tty`/foreground discoverability，
+   再返回不可变effect snapshot；Signal与ThreadGroup owner依次接收`SIGHUP`、`SIGCONT`，最后各read/write/poll wait route
+   被提示重验durable predicate。cleanup重复、迟到或与index reuse竞争时只能命中旧episode，不能撤销new binding/relation或
+   恢复old pair。
+7. **Mount operation只投影singleton。** Stage 3的unregistered production mount callback只接受empty data，并总是返回同一
+   prebuilt persistent superblock/root；它不读取target pathname、current credential、mount namespace或mount count，也不
+   创建per-mount allocator/binding。distinct `Mount` identity及view attach/detach由VFS拥有；single-view unmount不影响其它
+   view，last-view unmount不kill instance，remount取得current namespace。`newinstance`与其它nonempty option稳定返回
+   `EINVAL`；global `/dev/ptmx`不按path选择instance，mount root不增加`ptmx`node。
+8. **Stage 4 mount handoff只自动配置persistent system `/dev`。** live consumer audit区分了长期system-devfs与临时
+   pre-chroot devfs：`final-entry`、`busybox-init`、`user-test` chroot后的测试环境与`tty-test`属于persistent consumer；
+   `board-init` pre-chroot磁盘发现和`user-test` pre-chroot测试盘挂载属于temporary consumer。Stage 3只交付尚未注册的
+   mount-ready instance与static publication capability；Stage 4才注册filesystem、让devfs预发布`ptmx`/empty `pts`并由
+   persistent init显式mount `/dev/pts`。其它`CAP_SYS_ADMIN`调用者可在任意existing directory建立additional view；kernel
+   不把所有devfs mount点机械改成devpts consumer，也不自动创建ordinary-filesystem mountpoint。
+
+### Checkpoint 1 — TTY / PTY owner-local structural split
+
+**Purpose：** 在引入devpts、VFS activation与新ioctl前，把现有TTY/PTY职责按上文稳定角色目录化，为后续review建立清楚的
+state owner与adapter边界。该checkpoint独立安全并保持全部production行为；只授权本checkpoint时，关闭后立即停止。
+
+**Deliverable：**
+
+- `pty`模块清楚区分pair lifecycle/participation与master/slave opened-description/FileOps，`file`模块清楚区分generic
+  operation、relation ioctl与termios/winsize conversion；existing production caller全部切到新布局；
+- private visibility、public/re-export surface、type/trait semantics、lock/lifecycle/final-release顺序、KUnit placement与serial/
+  PTY behavior保持不变；不增加unused facade、compat wrapper、old/new双路径或只为Checkpoint 2预留的抽象层；
+- source review确认拆分后`Terminal`、pair、relation与opened-description仍各有一份truth，模块依赖方向没有让FileOps读取
+  pair guard、relation private state或task/VFS owner。
+
+**Validation：**
+
+1. `git diff --check`、`just fmt kernel --check`与`mdbook build docs`；
+2. repository RV64 kernel/KUnit与canonical TTY wrapper通过existing serial `50/50`、vi/ash、host byte oracle及正常关机；
+3. canonical LA64 repository kernel build通过；source/module/bypass audit证明diff只改变同owner布局，external behavior、
+   visibility/shared contract与Stage 2 capability均未改变。
+
+**Cutover / Exit：** None。全部existing consumer迁移到单一路径、validation与Architecture Friction Scan关闭后，Checkpoint 1
+可记为Closed并立即停止；Stage 3尚未关闭，Checkpoint 2仍需单独授权。若拆分暴露必须改变owner/public API/contract
+或保留过渡adapter才能工作，停止并上报，不把它伪装成结构维护。
+
+### Checkpoint 2 — Hidden devpts / open / cleanup integration
+
+**Purpose：** 在Checkpoint 1的新布局上实现全部Stage 3 production route与跨owner handoff，同时保持devpts未注册、
+`/dev/ptmx`与`/dev/pts`未发布，为Stage 4留下单一、可review的公开激活点。
+
+**Deliverable：**
+
+- single persistent devpts instance/superblock、empty-data mount callback、last-view lifetime、capacity/index/live binding、
+  safe reuse、accepted initial metadata与mount-ready VFS projection关闭；
+- hidden `/dev/ptmx` allocation composition、PTY ioctl codec、pathname one-shot activation、`TIOCGPTPEER` fd installer、shared
+  pair admission/participation与implicit relation effect全部走production owner path，失败rollback无残留；
+- master final release静态组合fanotify与pair cleanup，retirement后exact完成devpts/relation/Signal/job-control/waiter handoff，
+  stale episode不能命中新binding或relation；
+- devpts filesystem registration、devfs `ptmx`/empty `pts` publication和persistent mount consumer均不激活；Stage 4只需连接这些static
+  activation point并运行public acceptance，不保留另一路径或重新实现allocation/open policy。
+
+### Validation 与 closure
+
+1. `git diff --check`、`just fmt kernel --check`与`mdbook build docs`；
+2. source/owner/lock/bypass audit逐条追踪singleton mount callback、superblock/last-view lifetime、mount-neutral pair cleanup、
+   allocation rollback与success tail、pathname/peer route-specific precondition与shared admission、fd publication、
+   implicit-acquire no-fail tail、static final-release composition、relation effect snapshot、retire/reuse/stale capability及
+   guards-out cleanup；明确generic VFS cached-positive/late-materialization/full multi-view linearizability仍为Not Proven；
+3. inline owner-local deterministic KUnit覆盖same-superblock mount、empty/nonempty data、persistent last-view lifetime、capacity
+   exhaustion/release、failed allocation rollback、index reuse、old episode
+   fail-close、exact binding retirement、metadata/admission、两route flag codec与纯snapshot/transition；测试不进入live
+   scheduling、timer、sleep或wait，不新建standalone test facade，也不扩大production visibility；
+4. concurrent allocation/open-vs-retire、final close、fd-publication race、relation/signal ordering、lost-wake与lock order只由
+   source/linearization review证明；不得用单任务KUnit、固定yield/sleep或repository KUnit总数声称runtime interleaving proof；
+5. canonical RV64 TTY wrapper完成repository build、符合第3项边界的KUnit、existing serial `50/50`、BusyBox vi/ash、host
+   byte oracle与正常关机；结果不外推为未公开PTY runtime proof；
+6. canonical LA64 repository kernel build通过；LA64 runtime、PTY Rust test app、LTP、tmux、sshd与所有public PTY pathname/
+   ioctl runtime保持Not Run，且不得从source、KUnit、RV64 serial或双架构build外推；
+7. stage-wide review与Architecture Friction Scan检查第二份pair/binding/readiness/refcount truth、owner穿透、VFS或caller/arch/
+   test特判、dynamic hook、无退出条件bridge、隐含cleanup顺序与用弱化oracle换取隐藏集成；Apollyon/Keter必须在closure前消除
+   或触发停止，未在边界内消除的Euclid按workflow写回。
+
+**Cutover / Exit：** None。只有Checkpoint 1先按独立授权关闭，且随后devpts、allocation/admission、两条slave-open route、
+PTY ioctl、implicit acquisition、static final-release与cross-owner cleanup全部满足上述production/source/KUnit/build证据，
+Checkpoint 2与Stage 3才可记为Closed并立即停止。关闭不注册devpts、不发布PTY namespace、不修改current contract/register，
+也不自动授权Stage 4；public activation与mandatory PTY test app/LTP/tmux evidence仍需维护者单独授权Stage 4。若隐藏集成无法
+在无半套publication下证明，或Stage 4必须重写而非连接static activation point，必须在Stage 3完成声明前回到RFC review。
 
 ## Stage 4 — Public activation、acceptance 与 `PTY-DEVPTS-CUTOVER`
 
-**Purpose：** 原子公开static `/dev/ptmx`、system `/dev/pts` view与完整R1 operation surface，运行mandatory
+**Purpose：** 原子注册user-mountable devpts filesystem，由devfs公开static `/dev/ptmx`与empty `/dev/pts` mountpoint，
+persistent init显式mount canonical system view，并公开完整R2 operation surface；运行mandatory
 source/owner、PTY Rust test app、LTP和architecture evidence，尝试并归因tmux，随后一次性完成父RFC列出的
 PTY/DEVPTS/TTY contract Introduce/Refine并关闭RFC；sshd仅在条件具备时作为诊断consumer。
 
@@ -433,7 +634,9 @@ PTY/DEVPTS/TTY contract Introduce/Refine并关闭RFC；sshd仅在条件具备时
 
 **Protected Boundary：** core claim缺失时不得部分cut over或用tmux/sshd环境结果改写target；RV64/LA64 build/runtime分别
 记录，只有实际运行的架构取得runtime-proven claim；generic VFS pathname freshness继续留在register，current limitation
-只按真实LTP/ABI证据缩减。到达Stage 4前不冻结artifact identity、精确命令或未要求的额外runtime范围。
+只按真实LTP/ABI证据缩减。Stage 4必须证明canonical与一个ordinary-directory fresh view共享instance/binding；system-mount
+consumer修改只落在persistent init，不触达temporary pre-chroot consumer。不要求full cached/reuse multi-view
+linearizability。到达Stage 4前不冻结artifact identity、精确命令或未要求的额外runtime范围。
 
 ## 证据与反馈路由
 
