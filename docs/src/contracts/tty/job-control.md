@@ -8,8 +8,8 @@
 **不覆盖：** orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、非PTY relation-disassociation signal、physical hardware hangup、runtime line reconfiguration或procfs TTY字段
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/task/{jobctl,sig}/`
 **依赖：** [TTY data plane](./data-plane.md)、[process-group signaling](../task/process-group-signaling.md)、[Signal pending/action](../signal/pending-routing.md)、[Unix job control](../task/job-control.md)、[task lifecycle](../task/thread-group-lifecycle.md)、[user entry](../task/user-entry.md)
-**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)
-**最后核验：** 2026-08-11
+**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)
+**最后核验：** 2026-08-12
 
 ## 状态与能力所有权
 
@@ -73,12 +73,20 @@ group生成signal并返回idempotent restart，本次不消费input；blocked/ig
 Terminal、relation、port与topology guard外才允许Signal publication、Event wake、echo TX与复杂drop。effect request
 不进入持久队列；`SIGCONT` wake只触发重新仲裁，不能携带restart permit或反向驱动relation/job-control truth。
 
+PTY slave read、relation ioctl、master-input control signal与changed winsize signal还必须先在pair owner取得bounded
+effect permit。permit与pair retirement共享仲裁点，但不保存relation、target或signal truth；它可以跨guards-out
+relation/topology/Signal调用，只覆盖一个有界effect operation，并必须在任何blocking wait前释放。retirement先提交时
+slave read按PTY ABI返回EOF，不能使用尚未撤销的relation发布`SIGTTIN`或返回background `EIO`；operation先提交时才允许
+完成本轮job-control effect，master retirement必须等permit排空后再发布hangup `SIGHUP/SIGCONT`。serial TTY不参与该
+pair lifecycle协议。
+
 **违反表现：** session外group收到terminal signal、TTY保存或推进jobctl phase、background policy使用opener/global
 PGID、持TTY guard进入Signal/topology、background read提前消费input，或signal result反向改写relation。
 
 **验证 / Enforcement：** foreground/background `TIOCSPGRP`三分支、`VINTR/VQUIT/VSUSP`、QEMU serial break在
 `ISIG=0`下的flush与foreground `SIGINT`、changed-only winsize、actionable/blocked/ignored background read、
-detach-no-effect与BusyBox ash RV64 matrix；19项Unix job-control focused回归；guard/identity/restart capability source audit。
+detach-no-effect与BusyBox ash RV64 matrix；PTY permit-first/retirement-first KUnit与SMP8 master-close/background-read；
+19项Unix job-control focused回归；guard/identity/restart capability source audit。
 
 ## TTY-LIFE-001 — Relation cleanup先撤销可发现性再执行外部效果
 
@@ -93,15 +101,17 @@ endpoint、devfs node与Terminal不因relation cleanup销毁。
 ThreadGroup terminal lifecycle、first terminal code、job-control terminal precedence与newly orphaned stopped-group
 transition仍由task/jobctl owner持有。hardware hangup/backend fatal不得用node消失、编号复用或Terminal销毁伪装。
 
-PTY master final close是窄例外：pair先不可逆retire，relation owner再用旧generation与stable session-leader identity撤销
-discoverability，并在guards-out按序向旧session leader thread group提交`SIGHUP`、`SIGCONT`。没有live relation时不生成
-替代target，也不向整个旧foreground process group额外广播；该规则不改变session-leader exit与`TIOCNOTTY`的首版边界。
+PTY master final close是窄例外：pair先不可逆retire并禁止新bounded-effect permit，relation owner再用旧generation与
+stable session-leader identity撤销discoverability。master release不持pair/relation guard等待此前已提交的permit全部
+结束，然后才在guards-out按序向旧session leader thread group提交`SIGHUP`、`SIGCONT`。没有live relation时不生成替代
+target，也不向整个旧foreground process group额外广播；该规则不改变session-leader exit与`TIOCNOTTY`的首版边界。
 
 **违反表现：** detach后`/dev/tty`仍取得旧relation、两个owner重复cleanup effect、TTY覆盖first exit code、foreground
 group消失误删endpoint，或last close销毁仍受session控制的Terminal。
 
 **验证 / Enforcement：** detach后`/dev/tty`与old-effect失效、reacquire、session-leader exit reuse、foreground group
-clear与endpoint persistence RV64 matrix；eager/lazy cleanup、generation与guards-out source/lifecycle audit。
+clear与endpoint persistence RV64 matrix；PTY effect-drain KUnit与SMP8 late-stop recovery oracle；eager/lazy cleanup、
+generation与guards-out source/lifecycle audit。
 
 ## TTY-ABI-001 — 首版兼容包络必须真实可观察
 

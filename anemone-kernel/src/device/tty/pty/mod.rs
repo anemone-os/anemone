@@ -24,8 +24,8 @@ use file::{
     PTY_MASTER_FILE_OPS, PtyMasterFile, master_file, master_final_release, slave_final_release,
 };
 pub(crate) use pair::PtyPairState;
-pub(super) use pair::PtySlaveDescription;
 use pair::{DESCRIPTION_PREPARED, PtyMasterDescription};
+pub(super) use pair::{PtyEffectPermit, PtySlaveDescription};
 
 pub(crate) struct PreparedPtyPair {
     pair: Arc<PtyPairState>,

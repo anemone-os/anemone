@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{super::relation, TtyFile, read_ioctl_value, write_ioctl_value};
+use super::{super::relation, TtyFile, TtyOperation, begin_external_effect, read_ioctl_value};
 
 fn current_tty_caller() -> Result<crate::task::jobctl::TtyCaller, SysError> {
     crate::task::jobctl::TtyCaller::current().map_err(|_| SysError::UnsupportedIoctl)
@@ -35,17 +35,17 @@ pub(super) fn detach_controlling_tty(tty: &TtyFile) -> Result<(), SysError> {
     relation::detach(&tty.endpoint, &current_tty_caller()?)
 }
 
-pub(super) fn get_controlling_sid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+pub(super) fn controlling_sid(tty: &TtyFile) -> Result<i32, SysError> {
     loop {
         let caller = current_tty_caller()?;
         let snapshot = controlling_snapshot(tty, &caller)?;
         if caller.revalidate() && snapshot.is_current() {
-            return write_ioctl_value(ctx, snapshot.session().sid().get() as i32);
+            return Ok(snapshot.session().sid().get() as i32);
         }
     }
 }
 
-pub(super) fn get_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+pub(super) fn foreground_pgid(tty: &TtyFile) -> Result<i32, SysError> {
     loop {
         let caller = current_tty_caller()?;
         let snapshot = controlling_snapshot(tty, &caller)?;
@@ -53,12 +53,22 @@ pub(super) fn get_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(
             .foreground()
             .map_or(0, |foreground| foreground.pgid().get() as i32);
         if caller.revalidate() && snapshot.is_current() {
-            return write_ioctl_value(ctx, pgid);
+            return Ok(pgid);
         }
     }
 }
 
-pub(super) fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
+fn begin_set_foreground_effect(
+    operation: Option<&dyn TtyOperation>,
+) -> Result<Option<super::PtyEffectPermit>, SysError> {
+    begin_external_effect(operation).map_err(|_| SysError::UnsupportedIoctl)
+}
+
+pub(super) fn set_foreground_pgid(
+    tty: &TtyFile,
+    operation: Option<&dyn TtyOperation>,
+    ctx: &IoctlCtx<'_>,
+) -> Result<(), SysError> {
     loop {
         let caller = current_tty_caller()?;
         let snapshot = controlling_snapshot(tty, &caller)?;
@@ -70,6 +80,7 @@ pub(super) fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(
             caller.sigttou_decision(snapshot.foreground()),
             crate::task::jobctl::TtySigttouDecision::Signal
         ) {
+            let _effect = begin_set_foreground_effect(operation)?;
             if !caller.revalidate() || !snapshot.is_current() {
                 continue;
             }
@@ -79,11 +90,14 @@ pub(super) fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(
             continue;
         }
 
+        // Preserve the POSIX access-check ordering above, but keep user-memory
+        // access outside the PTY permit that master final release must drain.
         let raw_pgid = read_ioctl_value::<i32>(ctx)?;
         if raw_pgid < 0 {
             return Err(SysError::InvalidArgument);
         }
         let foreground = caller.resolve_process_group(Tid::new(raw_pgid as u32))?;
+        let _effect = begin_set_foreground_effect(operation)?;
         if !caller.revalidate()
             || !foreground.is_live_in(caller.session())
             || !snapshot.is_current()

@@ -8,7 +8,10 @@ use crate::{
 };
 
 use super::{
-    TtyEndpoint, TtyWakeHandle, discipline::InputRead, pty::PtySlaveDescription, relation,
+    TtyEndpoint, TtyWakeHandle,
+    discipline::InputRead,
+    pty::{PtyEffectPermit, PtySlaveDescription},
+    relation,
     terminal::TtyWinsize,
 };
 
@@ -22,11 +25,15 @@ pub(super) struct TtyFile {
     pty_description: Option<Arc<PtySlaveDescription>>,
 }
 
-/// Orders only a bounded Terminal snapshot or commit against a PTY episode's
-/// final release. User memory access, drain waits, relation operations and
-/// notification stay outside this window.
+/// Orders bounded Terminal work and effect admission against PTY final release.
+///
+/// Relation, topology, Signal, user-memory and notification work runs without
+/// the pair guard. Only `run_effect_if_live` lets that bounded tail retain a
+/// permit, and no permit may survive into a blocking wait.
 pub(super) trait TtyOperation {
     fn run_if_live(&self, operation: &mut dyn FnMut()) -> Result<(), SysError>;
+
+    fn run_effect_if_live(&self, operation: &mut dyn FnMut()) -> Result<PtyEffectPermit, SysError>;
 }
 
 fn run_terminal_operation<R>(
@@ -47,6 +54,37 @@ fn run_terminal_operation<R>(
         run();
     }
     Ok(result.expect("TTY bounded operation was not executed"))
+}
+
+fn run_terminal_effect_operation<R>(
+    operation: Option<&dyn TtyOperation>,
+    commit: impl FnOnce() -> R,
+) -> Result<(R, Option<PtyEffectPermit>), SysError> {
+    let mut commit = Some(commit);
+    let mut result = None;
+    let mut run = || {
+        result = Some(commit
+            .take()
+            .expect("TTY bounded effect operation executed more than once")(
+        ));
+    };
+    let permit = if let Some(operation) = operation {
+        Some(operation.run_effect_if_live(&mut run)?)
+    } else {
+        run();
+        None
+    };
+    Ok((
+        result.expect("TTY bounded effect operation was not executed"),
+        permit,
+    ))
+}
+
+fn begin_external_effect(
+    operation: Option<&dyn TtyOperation>,
+) -> Result<Option<PtyEffectPermit>, SysError> {
+    let ((), permit) = run_terminal_effect_operation(operation, || ())?;
+    Ok(permit)
 }
 
 pub(super) fn terminal_file(endpoint: Arc<TtyEndpoint>, wake: TtyWakeHandle) -> TtyFile {
@@ -104,6 +142,17 @@ fn tty_read(
     }
     let tty = tty_file(file);
     loop {
+        let effect = if let Some(description) = tty.pty_description.as_deref() {
+            match begin_external_effect(Some(description as &dyn TtyOperation)) {
+                Ok(permit) => permit,
+                // Pair retirement won the common arbitration point. Slave
+                // read projects that committed lifecycle result as EOF.
+                Err(SysError::IO) => return Ok(0),
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
         check_read_access(tty)?;
         if let Some(description) = &tty.pty_description {
             match description.read_once(&tty.endpoint.terminal, buf) {
@@ -112,8 +161,12 @@ fn tty_read(
                 InputRead::Empty if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) => {
                     return Err(SysError::Again);
                 },
-                InputRead::Empty => description.wait_readable(&tty.endpoint.terminal)?,
+                InputRead::Empty => {},
             }
+            // The next operation is a blocking wait. The wake only requests a
+            // fresh policy/effect admission round after it returns.
+            drop(effect);
+            description.wait_readable(&tty.endpoint.terminal)?;
             // A foreground process may become background while sleeping. Return
             // to the TTY policy owner before any newly readable input is consumed.
             continue;
@@ -288,7 +341,7 @@ pub(super) fn terminal_ioctl(
         },
         abi::TIOCSWINSZ => {
             let winsize = read_ioctl_value::<abi::Winsize>(&ctx)?;
-            let changed = run_terminal_operation(operation, || {
+            let (changed, _effect) = run_terminal_effect_operation(operation, || {
                 let winsize = TtyWinsize {
                     rows: winsize.ws_row,
                     cols: winsize.ws_col,
@@ -313,11 +366,32 @@ pub(super) fn terminal_ioctl(
                 tty.wake.wake();
             }
         },
-        abi::TIOCSCTTY if relation_operations => relation_ioctl::set_controlling_tty(tty, &ctx)?,
-        abi::TIOCNOTTY if relation_operations => relation_ioctl::detach_controlling_tty(tty)?,
-        abi::TIOCGSID if relation_operations => relation_ioctl::get_controlling_sid(tty, &ctx)?,
-        abi::TIOCGPGRP if relation_operations => relation_ioctl::get_foreground_pgid(tty, &ctx)?,
-        abi::TIOCSPGRP if relation_operations => relation_ioctl::set_foreground_pgid(tty, &ctx)?,
+        abi::TIOCSCTTY if relation_operations => {
+            let _effect = begin_external_effect(operation)?;
+            relation_ioctl::set_controlling_tty(tty, &ctx)?;
+        },
+        abi::TIOCNOTTY if relation_operations => {
+            let _effect = begin_external_effect(operation)?;
+            relation_ioctl::detach_controlling_tty(tty)?;
+        },
+        abi::TIOCGSID if relation_operations => {
+            let effect = begin_external_effect(operation)?;
+            let sid = relation_ioctl::controlling_sid(tty)?;
+            // User copy may fault or wait on userspace state. The relation
+            // snapshot is already committed, so do not retain a PTY permit.
+            drop(effect);
+            write_ioctl_value(&ctx, sid)?;
+        },
+        abi::TIOCGPGRP if relation_operations => {
+            let effect = begin_external_effect(operation)?;
+            let pgid = relation_ioctl::foreground_pgid(tty)?;
+            // See TIOCGSID: copyout is outside the bounded PTY operation.
+            drop(effect);
+            write_ioctl_value(&ctx, pgid)?;
+        },
+        abi::TIOCSPGRP if relation_operations => {
+            relation_ioctl::set_foreground_pgid(tty, operation, &ctx)?;
+        },
         _ => return Err(SysError::UnsupportedIoctl),
     }
     Ok(0)

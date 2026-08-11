@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use anemone_rs::{
     abi::{
@@ -7,7 +10,11 @@ use anemone_rs::{
             open::{O_NOCTTY, O_NONBLOCK, O_RDONLY, O_RDWR, O_WRONLY},
             poll::{POLLERR, POLLHUP, POLLIN, POLLOUT, PollFd},
         },
-        process::linux::signal::{self as linux_signal, SigAction, SigSet},
+        process::linux::{
+            sched::{CPU_SETSIZE, CpuSet},
+            signal::{self as linux_signal, SigAction, SigSet},
+        },
+        syscall::{linux::*, syscall},
         time::linux::TimeSpec,
         tty::linux::{ICANON, ISIG, VINTR, Winsize},
     },
@@ -43,6 +50,7 @@ const SIGNAL_WAIT_TICK: TimeSpec = TimeSpec {
     tv_nsec: 10_000_000,
 };
 const SIGNAL_WAIT_RETRIES: usize = 300;
+const RETIREMENT_RACE_ROUNDS: usize = 128;
 
 static TERMINAL_SIGNALS: AtomicUsize = AtomicUsize::new(0);
 
@@ -82,6 +90,67 @@ fn ignore_signal(signo: SigNo) -> Result<(), Errno> {
         }),
         None,
     )
+}
+
+fn sched_setaffinity(mask: &CpuSet) -> Result<(), Errno> {
+    unsafe {
+        syscall(
+            SYS_SCHED_SETAFFINITY,
+            0,
+            size_of::<CpuSet>() as u64,
+            mask as *const CpuSet as u64,
+            0,
+            0,
+            0,
+        )
+    }
+    .map(|_| ())
+}
+
+fn sched_getaffinity() -> Result<CpuSet, Errno> {
+    let mut mask = CpuSet::empty();
+    let copied = unsafe {
+        syscall(
+            SYS_SCHED_GETAFFINITY,
+            0,
+            size_of::<CpuSet>() as u64,
+            &mut mask as *mut CpuSet as u64,
+            0,
+            0,
+            0,
+        )
+    }?;
+    ensure(copied as usize == size_of::<usize>())?;
+    Ok(mask)
+}
+
+fn singleton(cpu: usize) -> CpuSet {
+    let mut mask = CpuSet::empty();
+    mask.set(cpu);
+    mask
+}
+
+fn require_smp8() -> Result<CpuSet, Errno> {
+    let available = sched_getaffinity()?;
+    ensure(available.count() >= 8)?;
+    for cpu in 0..8 {
+        ensure(cpu < CPU_SETSIZE && available.contains(cpu))?;
+    }
+    Ok(available)
+}
+
+fn fixed_owner_cpu(available: &CpuSet) -> Result<usize, Errno> {
+    for cpu in 0..8 {
+        match sched_setaffinity(&singleton(cpu)) {
+            Ok(()) => {
+                sched_setaffinity(available)?;
+                return Ok(cpu);
+            },
+            Err(EINVAL) => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+    Err(EIO)
 }
 
 fn wait_for_signal(bit: usize) -> Result<(), Errno> {
@@ -481,4 +550,179 @@ fn hangup_body() -> Result<(), Errno> {
 
 pub fn test_master_hangup_relation() -> Result<(), Errno> {
     run_new_session(hangup_body)
+}
+
+fn wait_for_read_or_recover_late_stop(parent: u32, done_fd: u32) -> Result<u8, Errno> {
+    fcntl_setfl(done_fd, fcntl_getfl(done_fd)? | O_NONBLOCK)?;
+    let mut done = [0u8; 1];
+    for _ in 0..SIGNAL_WAIT_RETRIES {
+        match read(done_fd, &mut done) {
+            Ok(1) => return Ok(0),
+            Ok(0) => return Err(EIO),
+            Ok(_) => unreachable!(),
+            Err(EAGAIN) => {},
+            Err(EINTR) => continue,
+            Err(errno) => return Err(errno),
+        }
+        if proc_state(parent)? == b'T' {
+            // Recovery is test-only: without it the historical late SIGTTIN
+            // leaves the session leader stopped after hangup and hangs QEMU.
+            kill(parent as i32, SigNo::SIGCONT)?;
+            return Ok(1);
+        }
+        match nanosleep(SIGNAL_WAIT_TICK) {
+            Ok(()) | Err(EINTR) => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+    let _ = kill(parent as i32, SigNo::SIGCONT);
+    Ok(2)
+}
+
+fn retirement_background_read_round(
+    available: &CpuSet,
+    leader_cpu: usize,
+    closer_cpu: usize,
+) -> Result<(), Errno> {
+    sched_setaffinity(available)?;
+    let leader = getpid()?;
+    let pair = Pair::allocate()?;
+    pair.unlock()?;
+    let slave = pair.open_peer(O_RDONLY)?;
+    let master_fd = pair.master.raw();
+
+    let (foreground_wait_read, foreground_wait_write) = pipe2(PipeFlags::empty())?;
+    let (foreground_ready_read, foreground_ready_write) = pipe2(PipeFlags::empty())?;
+    let foreground = match fork()? {
+        None => finish_child((|| {
+            close(foreground_wait_write)?;
+            close(foreground_ready_read)?;
+            close(master_fd)?;
+            setpgid(0, 0)?;
+            ensure(write(foreground_ready_write, &[1])? == 1)?;
+            close(foreground_ready_write)?;
+            let mut finish = [0u8; 1];
+            read_exact(foreground_wait_read, &mut finish)
+        })()),
+        Some(child) => child,
+    };
+    close(foreground_wait_read)?;
+    close(foreground_ready_write)?;
+    let mut ready = [0u8; 1];
+    read_exact(foreground_ready_read, &mut ready)?;
+    close(foreground_ready_read)?;
+    ensure(ready == [1])?;
+    tcsetpgrp(slave.raw(), foreground as i32)?;
+
+    let (start_read, start_write) = pipe2(PipeFlags::empty())?;
+    let (closer_ready_read, closer_ready_write) = pipe2(PipeFlags::empty())?;
+    let (done_read, done_write) = pipe2(PipeFlags::empty())?;
+    let (report_read, report_write) = pipe2(PipeFlags::empty())?;
+    let mut closer = None;
+    for _ in 0..16 {
+        let candidate = match fork()? {
+            None => {
+                close(start_write)?;
+                close(closer_ready_read)?;
+                close(done_write)?;
+                close(report_read)?;
+                close(foreground_wait_write)?;
+                close(slave.raw())?;
+                // The background reader's SIGTTIN targets its whole process group.
+                // Move the final-close actor out before announcing readiness, or a
+                // valid operation-first ordering can stop both sides and self-deadlock.
+                setpgid(0, 0)?;
+                match sched_setaffinity(&singleton(closer_cpu)) {
+                    Ok(()) => {},
+                    Err(EINVAL) => {
+                        let _ = write(closer_ready_write, &[0]);
+                        exit(2);
+                    },
+                    Err(errno) => finish_child(Err(errno)),
+                }
+                ensure(write(closer_ready_write, &[1])? == 1)?;
+                close(closer_ready_write)?;
+                let mut start = [0u8; 1];
+                read_exact(start_read, &mut start)?;
+                close(start_read)?;
+                close(master_fd)?;
+                let outcome = wait_for_read_or_recover_late_stop(leader, done_read)?;
+                finish_child(ensure(write(report_write, &[outcome])? == 1));
+            },
+            Some(child) => child,
+        };
+        let mut placed = [0u8; 1];
+        read_exact(closer_ready_read, &mut placed)?;
+        if placed == [1] {
+            closer = Some(candidate);
+            break;
+        }
+        ensure(placed == [0])?;
+        ensure(matches!(
+            wait_status(candidate, WaitOptions::empty())?,
+            WStatus::Exited(2)
+        ))?;
+    }
+    let Some(closer) = closer else {
+        let _ = kill(foreground as i32, SigNo::SIGKILL);
+        let _ = wait_status(foreground, WaitOptions::empty());
+        return Err(EIO);
+    };
+    close(start_read)?;
+    close(closer_ready_write)?;
+    close(done_read)?;
+    close(report_write)?;
+
+    let result = (|| {
+        let Pair { master, .. } = pair;
+        master.close()?;
+        close(closer_ready_read)?;
+        sched_setaffinity(&singleton(leader_cpu))?;
+        ensure(write(start_write, &[1])? == 1)?;
+        close(start_write)?;
+
+        let mut byte = [0u8; 1];
+        loop {
+            match read(slave.raw(), &mut byte) {
+                Ok(0) => break,
+                Ok(_) => return Err(EIO),
+                Err(EINTR) => {},
+                Err(errno) => return Err(errno),
+            }
+        }
+        ensure(write(done_write, &[1])? == 1)?;
+        close(done_write)?;
+
+        let mut outcome = [0u8; 1];
+        read_exact(report_read, &mut outcome)?;
+        close(report_read)?;
+        wait_child(closer)?;
+        ensure(outcome == [0])
+    })();
+
+    let _ = write(foreground_wait_write, &[1]);
+    let _ = close(foreground_wait_write);
+    if result.is_ok() {
+        wait_child(foreground)?;
+    } else {
+        let _ = kill(closer as i32, SigNo::SIGKILL);
+        let _ = kill(foreground as i32, SigNo::SIGKILL);
+        let _ = wait_status(closer, WaitOptions::empty());
+        let _ = wait_status(foreground, WaitOptions::empty());
+    }
+    result
+}
+
+fn retirement_background_read_body() -> Result<(), Errno> {
+    let available = require_smp8()?;
+    let leader_cpu = fixed_owner_cpu(&available)?;
+    let closer_cpu = (leader_cpu + 1) % 8;
+    for _ in 0..RETIREMENT_RACE_ROUNDS {
+        retirement_background_read_round(&available, leader_cpu, closer_cpu)?;
+    }
+    Ok(())
+}
+
+pub fn test_retirement_background_read_smp8() -> Result<(), Errno> {
+    run_new_session(retirement_background_read_body)
 }

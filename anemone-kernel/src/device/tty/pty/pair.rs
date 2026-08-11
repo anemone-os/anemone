@@ -31,16 +31,30 @@ struct PairInner {
     phase: PairPhase,
     slave_locked: bool,
     slave_descriptions: usize,
+    /// Number of live, non-cloneable bounded-effect permits.
+    active_effects: usize,
 }
 
 /// Sole owner of one PTY episode's liveness and peer participation.
 ///
-/// `operation` only orders a bounded Terminal commit against description
-/// release. It is not state truth and is never held while an operation waits.
+/// `operation` orders bounded Terminal commits and effect admission against
+/// description release. It is not state truth and is never held while an
+/// operation waits.
 pub(crate) struct PtyPairState {
     terminal: Arc<Terminal>,
     operation: Mutex<()>,
     inner: SpinLock<PairInner>,
+    /// Notification storage only; `inner.active_effects` is the drain truth.
+    effects_drained: Event,
+}
+
+/// Proof that one bounded guards-out PTY effect committed before retirement.
+///
+/// The permit carries no liveness truth and must not cross a blocking wait.
+/// Retirement blocks new permits at the pair owner, then waits for the old
+/// permits before publishing its hangup effects.
+pub(in crate::device::tty) struct PtyEffectPermit {
+    pair: Arc<PtyPairState>,
 }
 
 impl PtyPairState {
@@ -52,7 +66,9 @@ impl PtyPairState {
                 phase: PairPhase::Prepared,
                 slave_locked: true,
                 slave_descriptions: 0,
+                active_effects: 0,
             }),
+            effects_drained: Event::new(),
         })
         .map_err(|_| SysError::OutOfMemory)
     }
@@ -132,7 +148,7 @@ impl PtyPairState {
         self.notify_state_change();
     }
 
-    fn retire_master(&self, description_phase: &AtomicU8) -> bool {
+    fn commit_master_retirement(&self, description_phase: &AtomicU8) -> bool {
         {
             let _operation = self.operation.lock();
             if description_phase.swap(DESCRIPTION_RELEASED, Ordering::AcqRel) != DESCRIPTION_LIVE {
@@ -146,11 +162,49 @@ impl PtyPairState {
             );
             inner.phase = PairPhase::Retired;
         }
+        true
+    }
+
+    fn retire_master(&self, description_phase: &AtomicU8) -> bool {
+        if !self.commit_master_retirement(description_phase) {
+            return false;
+        }
         // Pair retirement is already irreversible before Terminal cleanup.
         // Buffer cleanup happens with no pair guard held; the master owner
         // sends the final waiter hint only after cross-owner hangup effects.
         self.terminal.pty_hangup();
         true
+    }
+
+    fn run_effect_if_live(
+        self: &Arc<Self>,
+        description_phase: &AtomicU8,
+        operation: &mut dyn FnMut(),
+    ) -> Result<PtyEffectPermit, SysError> {
+        let _operation = self.operation.lock();
+        if description_phase.load(Ordering::Acquire) != DESCRIPTION_LIVE {
+            return Err(SysError::IO);
+        }
+        let mut inner = self.inner.lock();
+        if inner.phase != PairPhase::Live {
+            return Err(SysError::IO);
+        }
+        inner.active_effects = inner
+            .active_effects
+            .checked_add(1)
+            .expect("PTY bounded effect count overflow");
+        let permit = PtyEffectPermit { pair: self.clone() };
+        drop(inner);
+        operation();
+        Ok(permit)
+    }
+
+    fn wait_effects_drained(&self) {
+        if self.inner.lock().active_effects == 0 {
+            return;
+        }
+        self.effects_drained
+            .listen_uninterruptible(false, || self.inner.lock().active_effects == 0);
     }
 
     pub(super) fn live_slave_count(&self) -> Option<usize> {
@@ -192,6 +246,23 @@ impl PtyPairState {
         // route registry is notification storage only; readiness and lifecycle
         // truth remain in Terminal and pair respectively.
         self.terminal.publish_progress();
+    }
+}
+
+impl Drop for PtyEffectPermit {
+    fn drop(&mut self) {
+        let drained = {
+            let mut inner = self.pair.inner.lock();
+            assert!(
+                inner.active_effects != 0,
+                "PTY bounded effect count underflow"
+            );
+            inner.active_effects -= 1;
+            inner.active_effects == 0
+        };
+        if drained {
+            self.pair.effects_drained.publish(usize::MAX, true);
+        }
     }
 }
 
@@ -293,7 +364,12 @@ impl PtyMasterDescription {
             .take()
             .expect("live PTY master missing static cleanup capability");
         cleanup.binding.retire();
-        if let Some(effect) = cleanup.relation.retire_for_hangup() {
+        let hangup = cleanup.relation.retire_for_hangup();
+        // Relation discoverability is gone before waiting, so a pre-retirement
+        // operation can finish only the effect for which it already holds a
+        // permit. Hangup SIGHUP/SIGCONT are published after all such effects.
+        self.pair.wait_effects_drained();
+        if let Some(effect) = hangup {
             effect.deliver();
         }
         self.pair.notify_state_change();
@@ -338,24 +414,25 @@ impl PtyMasterDescription {
     ) -> Result<usize, SysError> {
         let mut written = 0;
         while written < source.len() {
-            let effect = {
-                let _operation = self.pair.operation.lock();
-                if !self.is_live() {
-                    return if written == 0 {
-                        Err(SysError::IO)
-                    } else {
-                        Ok(written)
-                    };
+            let mut effect = None;
+            let permit = match self.run_effect_if_live(&mut || {
+                if self.pair.live_slave_count() != Some(0) {
+                    effect = Some(
+                        self.pair
+                            .terminal
+                            .receive_pty_rx_unit_effect(TtyRxUnit::Byte(source[written])),
+                    );
                 }
-                if self.pair.live_slave_count() == Some(0) {
-                    // Linux accepts master writes while the slave has no opened
-                    // description, but the bytes are not retained for a later
-                    // reopen. This is an intentional ABI result, not a success stub.
-                    return Ok(source.len());
-                }
-                self.pair
-                    .terminal
-                    .receive_pty_rx_unit_effect(TtyRxUnit::Byte(source[written]))
+            }) {
+                Ok(permit) => permit,
+                Err(error) if written == 0 => return Err(error),
+                Err(_) => return Ok(written),
+            };
+            let Some(effect) = effect else {
+                // Linux accepts master writes while the slave has no opened
+                // description, but the bytes are not retained for a later
+                // reopen. This is an intentional ABI result, not a success stub.
+                return Ok(source.len());
             };
             if effect.consumed() {
                 written += 1;
@@ -367,6 +444,8 @@ impl PtyMasterDescription {
                 }
                 continue;
             }
+            // A bounded effect permit must never survive into a capacity wait.
+            drop(permit);
             if written != 0 {
                 return Ok(written);
             }
@@ -434,6 +513,10 @@ impl TtyOperation for PtyMasterDescription {
         }
         operation();
         Ok(())
+    }
+
+    fn run_effect_if_live(&self, operation: &mut dyn FnMut()) -> Result<PtyEffectPermit, SysError> {
+        self.pair.run_effect_if_live(&self.phase, operation)
     }
 }
 
@@ -556,5 +639,62 @@ impl TtyOperation for PtySlaveDescription {
         }
         operation();
         Ok(())
+    }
+
+    fn run_effect_if_live(&self, operation: &mut dyn FnMut()) -> Result<PtyEffectPermit, SysError> {
+        self.pair.run_effect_if_live(&self.phase, operation)
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::device::tty::port::{TtyLineSnapshot, TtyParity};
+
+    fn live_pair() -> (Arc<PtyPairState>, AtomicU8) {
+        let terminal = Terminal::try_new(TtyLineSnapshot {
+            baud: 115200,
+            parity: TtyParity::None,
+            data_bits: 8,
+        })
+        .unwrap();
+        let pair = PtyPairState::try_new(terminal).unwrap();
+        let phase = AtomicU8::new(DESCRIPTION_PREPARED);
+        pair.commit_master(&phase);
+        (pair, phase)
+    }
+
+    #[kunit]
+    fn effect_permit_first_blocks_new_effects_until_old_permit_drains() {
+        let (pair, master_phase) = live_pair();
+        let mut ran = false;
+        let permit = pair
+            .run_effect_if_live(&master_phase, &mut || ran = true)
+            .unwrap();
+        assert!(ran);
+        assert_eq!(pair.inner.lock().active_effects, 1);
+
+        assert!(pair.commit_master_retirement(&master_phase));
+        let still_live_description = AtomicU8::new(DESCRIPTION_LIVE);
+        assert!(
+            pair.run_effect_if_live(&still_live_description, &mut || {})
+                .is_err()
+        );
+        assert_eq!(pair.inner.lock().active_effects, 1);
+
+        drop(permit);
+        assert_eq!(pair.inner.lock().active_effects, 0);
+    }
+
+    #[kunit]
+    fn retirement_first_denies_effect_permit() {
+        let (pair, master_phase) = live_pair();
+        assert!(pair.commit_master_retirement(&master_phase));
+        let still_live_description = AtomicU8::new(DESCRIPTION_LIVE);
+        assert!(
+            pair.run_effect_if_live(&still_live_description, &mut || {})
+                .is_err()
+        );
+        assert_eq!(pair.inner.lock().active_effects, 0);
     }
 }

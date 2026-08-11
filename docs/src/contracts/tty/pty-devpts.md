@@ -8,14 +8,14 @@
 **不覆盖：** multiple/private devpts instance、mount-local `ptmx`、mount options、distribution-style `tty:0620`、legacy `termio`/break ioctl、generic VFS cached-positive freshness或完整multi-view concurrency
 **实现位置：** `anemone-kernel/src/device/tty/pty/`、`anemone-kernel/src/fs/devpts/`、`anemone-kernel/src/fs/devfs/`、`anemone-kernel/src/fs/mod.rs`、`anemone-kernel/src/main.rs`
 **依赖：** [TTY data plane](./data-plane.md)、[TTY relation 与 job control](./job-control.md)、[opened-description lifecycle](../task/opened-description-lifecycle.md)、[poll wait](../iomux/poll-wait.md)、[epoll](../epoll/protocol.md)、[mount admission](../vfs/mount-admission.md)
-**当前来源：** [`PTY-DEVPTS-CUTOVER` transaction](../../devlog/transactions/2026-08-11-pty-devpts.md#2026-08-11---stage-4-checkpoint-2-public-activation与pty-devpts-cutover)
-**最后核验：** 2026-08-11
+**当前来源：** [`PTY-DEVPTS-CUTOVER` transaction](../../devlog/transactions/2026-08-11-pty-devpts.md#2026-08-11---stage-4-checkpoint-2-public-activation与pty-devpts-cutover)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)
+**最后核验：** 2026-08-12
 
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 |
 | --- | --- | --- |
-| pair identity、master liveness、slave lock、description participation、peer presence、hangup与retirement | PTY pair | master/slave FileOps持operation-local capability；wake只要求predicate recheck |
+| pair identity、master liveness、slave lock、description participation、peer presence、bounded-effect admission、hangup与retirement | PTY pair | master/slave FileOps持不可克隆的operation-local permit；wake只要求predicate recheck |
 | persistent system instance、capacity/index reservation、live `N -> pair` binding、initial metadata与logical retirement | devpts | allocation transaction持prepared pair与credential snapshot；mount只取得同一instance projection |
 | inode/dentry、mount view、pathname traversal/DAC与cache freshness | VFS | devpts提供binding、inode projection与metadata；不读取VFS private cache |
 | termios、winsize、discipline、input/output stream与data-plane readiness | shared `Terminal` | pair只组合attachment、peer predicate与progress route |
@@ -30,13 +30,17 @@ dentry、fd数或短命`Arc`都不能替代该truth。master write进入Terminal
 Terminal output并由master读取；readiness由Terminal capacity/data和pair peer predicate即时组合，不缓存第三份
 readable/writable/HUP/ERR状态。
 
-master opened description final release是唯一retirement trigger。它先在pair owner内禁止新admission并发布hangup，
-随后在guard外撤销exact devpts binding、relation与wait participation。master live时last-slave-description close只形成可
-reopen的peer absence；dup/fork alias不提前触发final release。notification只要求完整predicate recheck，wait、signal、
-VFS cleanup与复杂drop均不得持pair operation guard。
+master opened description final release是唯一retirement trigger。它先在pair owner内提交retirement并禁止新admission，
+随后在guard外完成Terminal cleanup并撤销exact devpts binding与relation。pair phase与bounded guards-out effect admission
+在同一个owner临界区仲裁：retirement先提交时不再产生permit；operation先提交时取得不可克隆permit，retirement必须在
+relation撤销后等待该operation结束，才允许发布hangup `SIGHUP/SIGCONT`和最终wait notification。permit只证明一个有界
+effect operation先于retirement提交，不携带liveness truth，也不得跨blocking wait。master live时last-slave-description
+close只形成可reopen的peer absence；dup/fork alias不提前触发final release。notification只要求完整predicate recheck，
+wait、signal、VFS cleanup与复杂drop均不得持pair operation guard。
 
 **验证 / Enforcement：** owner-local pair/description KUnit；public `pty-test`的双向stream、partial progress、poll/select/
-epoll、multiple open、dup/fork/final close、peer reopen、hangup与retire/reuse matrix；source/lock/linearization review。
+epoll、multiple open、dup/fork/final close、peer reopen、hangup与retire/reuse matrix；permit-first/retirement-first KUnit；
+SMP8 master-close/background-read race；source/lock/linearization review。
 
 ## PTY-ADMISSION-001 — 两条open route共享lifecycle仲裁但保留各自前置条件
 
@@ -63,7 +67,7 @@ master final close flushes committed slave input；slave read在buffer清空后�
 mutation返回`EIO`，`TIOCSPGRP`保持现有`ENOTTY`边界，poll/select/epoll必须暴露terminal HUP/ERR outcome。首版不支持
 legacy `TCGETA`/`TCSETA*`、`TCSBRK`/`TCSBRKP`，也不以silent success伪造这些命令。
 
-**验证 / Enforcement：** RV64 public `pty-test` 12/12；focused glibc/musl `hangup01`通过，`ioctl01` overall 7/9，
+**验证 / Enforcement：** RV64 public `pty-test` 13/13；focused glibc/musl `hangup01`通过，`ioctl01` overall 7/9，
 两个legacy `TCGETA` pointer-error子项非PASS；legacy probes与distribution metadata差异按register逐项归因，只有实际
 PASS计入证据。
 

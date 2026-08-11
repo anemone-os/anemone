@@ -87,6 +87,10 @@ fn run_cases(results: &mut Results) {
     results.case("implicit-peer", relation::test_peer_implicit_acquire);
     results.case("implicit-negative", relation::test_implicit_negative_matrix);
     results.case("hangup-relation", relation::test_master_hangup_relation);
+    results.case(
+        "retire-background-read-smp8",
+        relation::test_retirement_background_read_smp8,
+    );
     results.case("capacity-reuse", allocation::test_capacity_reuse);
 }
 
