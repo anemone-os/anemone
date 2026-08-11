@@ -537,6 +537,7 @@ pub mod linux {
     pub mod fcntl {
         use core::mem::{align_of, offset_of, size_of};
 
+        pub const FD_CLOEXEC: u32 = 1;
         pub const F_DUPFD: u32 = 0;
         pub const F_GETFD: u32 = 1;
         pub const F_SETFD: u32 = 2;

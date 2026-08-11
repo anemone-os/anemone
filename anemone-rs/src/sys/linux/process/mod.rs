@@ -124,6 +124,18 @@ pub fn getppid() -> Result<u64, Errno> {
     unsafe { syscall(SYS_GETPPID, 0, 0, 0, 0, 0, 0) }
 }
 
+pub fn getuid() -> Result<u64, Errno> {
+    unsafe { syscall(SYS_GETUID, 0, 0, 0, 0, 0, 0) }
+}
+
+pub fn getgid() -> Result<u64, Errno> {
+    unsafe { syscall(SYS_GETGID, 0, 0, 0, 0, 0, 0) }
+}
+
+pub fn setuid(uid: u32) -> Result<u64, Errno> {
+    unsafe { syscall(SYS_SETUID, uid as u64, 0, 0, 0, 0, 0) }
+}
+
 pub fn setpgid(pid: i32, pgid: i32) -> Result<u64, Errno> {
     unsafe {
         syscall(

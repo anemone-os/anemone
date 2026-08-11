@@ -12,7 +12,7 @@
 cutover。R3 acceptance轮只接受target、owner、ABI、resource guarantee、contract delta与acceptance boundary；后续
 [实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点。Stage 1的两个execution checkpoint、Stage 2与
 Stage 3的两个checkpoint均已在各自授权下关闭，且未产生contract cutover；Stage 4已解析为两个execution checkpoint，
-但两者均未获execution authorization。
+Checkpoint 1已在独立授权下关闭且保持contract-neutral，Checkpoint 2仍未获execution authorization。
 
 ## 摘要
 
@@ -460,7 +460,7 @@ review、validation与handoff。R3 review的已接受结论已经折回canonical
 
 - Accepted Target / R3。
 - Implementation route：Draft；Stage解析状态由[实施路线](./implementation.md)统一拥有，Stage 4已解析。
-- Implementation authorization：Stage 1--3已消费并关闭；Stage 4为None。
+- Implementation authorization：Stage 1--3与Stage 4 Checkpoint 1已消费并关闭；Stage 4 Checkpoint 2为None。
 - Contract cutover：None。
 - Stage 1：Closed。最终candidate的RV64 build、622项KUnit、TTY 50/50、auto/vi/ash与正常关机已通过；详见
   transaction。
@@ -469,9 +469,9 @@ review、validation与handoff。R3 review的已接受结论已经折回canonical
 - Stage 3：Closed。Checkpoint 2已完成hidden devpts、allocation/open/admission与cross-owner cleanup production route；
   final review为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe。RV64 wrapper通过623项KUnit、existing TTY 50/50、vi/ash、
   host byte oracle与正常关机，LA64 repository build通过；详见transaction。
-- Stage 4：Resolved / unauthorized。Checkpoint 1只闭合单一`pty-test`、`anemone-rs`窄wrapper与repository-owned验收
-  入口；Checkpoint 2才公开激活并独占`PTY-DEVPTS-CUTOVER`。两者均未执行，devpts registration、devfs namespace
-  publication、persistent init mount与contract cutover均未发生。
-- LA64 runtime、PTY test app、public PTY pathname/ioctl runtime、LTP、sshd、tmux：Not Run。generic VFS
+- Stage 4：Checkpoint 1 Closed / Checkpoint 2 Resolved，Awaiting Authorization。单一`pty-test`、真实使用的
+  `anemone-rs`窄wrapper与repository-owned RV64/LA64 build/package入口已经闭合；Checkpoint 2才公开激活并独占
+  `PTY-DEVPTS-CUTOVER`。devpts registration、devfs namespace publication、persistent init mount与contract cutover均未发生。
+- RV64/LA64 `pty-test` runtime、public PTY pathname/ioctl runtime、LTP、sshd、tmux：Not Run。generic VFS
   cached-positive freshness、late materialization、完整multi-view linearizability与concurrent runtime interleavings：
   Not Proven。

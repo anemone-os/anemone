@@ -4,15 +4,16 @@
 **最后更新：** 2026-08-11
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
 **当前修订：** R3
-**Stage 状态：** Stage 1--3 / Closed；Stage 4 / Resolved，Awaiting Authorization
-**Execution Authorization：** Stage 1--3已消费并关闭；Stage 4 Checkpoint 1--2：None
+**Stage 状态：** Stage 1--3 / Closed；Stage 4 Checkpoint 1 / Closed，Checkpoint 2 / Resolved，Awaiting Authorization
+**Execution Authorization：** Stage 1--3与Stage 4 Checkpoint 1已消费并关闭；Stage 4 Checkpoint 2：None
 **Contract Cutover：** None
 
 本页只组织父 RFC R3 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
 Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析并在各自授权下
-关闭。Stage 2与Stage 3的两个checkpoint也已在各自独立授权下完成并关闭，均未产生contract cutover；当前执行严格停在
-Stage 3 closure。Stage 4现已解析为两个execution checkpoint，但解析本身、既有路线或Stage 3 handoff均不构成
-Checkpoint 1、Checkpoint 2或`PTY-DEVPTS-CUTOVER`的execution authorization。
+关闭。Stage 2与Stage 3的两个checkpoint也已在各自独立授权下完成并关闭，均未产生contract cutover。Stage 4已解析为
+两个execution checkpoint；Checkpoint 1在独立授权下关闭且没有contract cutover，
+当前执行严格停在该checkpoint。既有路线、Stage 3 handoff或Checkpoint 1 closure均不构成Checkpoint 2或
+`PTY-DEVPTS-CUTOVER`的execution authorization。
 
 ## 全局 Implementation Boundary
 
@@ -58,7 +59,7 @@ write set；同owner内部类型、模块、算法与行为保持型拆分由对
 | Stage 1 | Closed | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
 | Stage 2 | Closed | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
 | Stage 3 | Closed | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
-| Stage 4 | Resolved | 公开激活、完成mandatory acceptance并原子cut over | Checkpoint 1：None；Checkpoint 2：`PTY-DEVPTS-CUTOVER` |
+| Stage 4 | Checkpoint 1 Closed；Checkpoint 2 Resolved | 公开激活、完成mandatory acceptance并原子cut over | Checkpoint 1：None；Checkpoint 2：`PTY-DEVPTS-CUTOVER` |
 
 普通commit不自动形成新Stage。只有独立安全的review/授权停止点、probe、不安全中间态或contract cutover才调整
 Stage路线；若后续证据要求重新解析target/owner/ABI/acceptance，则进入RFC review或Target Renegotiation，不能由
@@ -669,7 +670,7 @@ publication、persistent init consumer、current contract/register与`PTY-DEVPTS
 
 **解析状态：** Resolved
 
-**Execution Authorization：** Checkpoint 1--2均为None
+**Execution Authorization：** Checkpoint 1已消费并关闭；Checkpoint 2为None
 
 **Contract Cutover：** None；只允许Checkpoint 2在全部mandatory core evidence满足后执行一次
 `PTY-DEVPTS-CUTOVER`
@@ -786,6 +787,33 @@ repository-owned build/package入口放到同一可review candidate。该checkpo
 **Cutover / Exit：** None。app、wrapper、build/package入口与coverage review全部关闭后，Checkpoint 1可记为Closed并立即
 停止；Checkpoint 2仍需维护者新的明确授权。若app shape需要libc/多oracle、kernel test hook、提前公开namespace或改变R3
 acceptance，停止并回到RFC review，不能把它带入Checkpoint 2。
+
+**Execution Result（2026-08-11）：** Closed。新增单一普通`no_std` / `no_main` `pty-test`，按owner职责拆为mount、
+allocation/admission、bidirectional stream/readiness/partial progress、opened-description/identity lifecycle与
+relation/job-control/hangup case family；统一`Results`与summary/drain/shutdown路径仍是唯一结果判定。app只经
+`anemone-rs`调用syscall/ioctl；新增`mount_with_data`、credential syscall与PTY ioctl窄wrapper均有真实case consumer，
+raw UAPI constant/layout继续只由`anemone-abi`拥有。RV64/LA64 rootfs manifest都通过existing app exporter与rootfs
+composition pipeline安装`/sbin/pty-test`，没有C/libc PTY wrapper、`*-oracle`、developer-private input或旁路runner。
+
+独立review先后发现并关闭三组Keter：job-control reclaim会以默认`SIGTTOU`自停且signal/stop负路径无failure bound；
+retire/reuse case误触generic VFS cached-positive Not Proven路径并冻结first-free allocator策略；双向partial/readiness、
+last-slave-close HUP、hangup mutating ioctl、implicit relation negative matrix及setup/summary drain/shutdown覆盖不完整。
+最终实现显式处理`SIGTTOU`并以predicate加failure bound闭合等待，以fresh second view证明current reused binding且不规定
+next-index顺序，并用fill-to-`EAGAIN`/drain-one/partial-retry方法在不假设Kconfig queue capacity的前提下覆盖双向queue。
+最终独立review为0 Apollyon / 0 Keter / 0 Euclid；Architecture Friction Scan未发现第二份truth、test-only kernel API、
+重复UAPI、app/architecture特判、无consumer wrapper或无退出临时bridge。
+
+final candidate通过`git diff --check`与`just fmt all --check`；`just app build --arch riscv64 pty-test`和
+`just app build --arch loongarch64 pty-test`均通过。两份`just rootfs mkfs -c`入口成功生成并实际包含对应静态ELF
+`/sbin/pty-test`：RV64 binary SHA-256为`aca5cda4a97f1d6c8fb36c2b6eeafa15886e7077d17fa3dd01738c188bb93299`，
+image为`51a43f194b9674bb44b62c6947278658402242f1b3d373db181a0444b233bc1b`；LA64 binary为
+`4168b7b52d03c66dbb66c4025949e4357b710ea8450c60452a71a0224cd64ec4`，image为
+`48ec398ca6353767b912bcca39135614351bbf14a9e7c98cf0c675b222a0b270`。两架构binary均无dynamic section。
+
+kernel、devpts registration、devfs `/dev/ptmx`/`/dev/pts` publication、persistent init、current contracts与register均
+未修改。RV64/LA64 `pty-test` runtime、全部public PTY path/ioctl/mount behavior、LTP、tmux、sshd与contract cutover均
+保持Not Run/None；generic VFS cached-positive/late-materialization/full multi-view linearizability继续为Not Proven。
+执行在Checkpoint 1 closure立即停止，Checkpoint 2仍需维护者新的明确授权。
 
 ### Checkpoint 2 — Public activation、mandatory acceptance 与 contract cutover
 

@@ -536,18 +536,31 @@ pub fn pipe2(flags: PipeFlags) -> Result<(Fd, Fd), Errno> {
         .map(|_| (pipefd[0] as Fd, pipefd[1] as Fd))
 }
 
-/// flags and data are currently not supported.
 pub fn mount(source: &Path, target: &Path, fstype: &str) -> Result<(), Errno> {
+    mount_with_data(source, target, fstype, None)
+}
+
+/// Mount with the legacy Linux data string supplied by the caller.
+///
+/// This remains a narrow syscall wrapper: each filesystem still owns whether
+/// an empty or non-empty data payload is valid and how it is interpreted.
+pub fn mount_with_data(
+    source: &Path,
+    target: &Path,
+    fstype: &str,
+    data: Option<&str>,
+) -> Result<(), Errno> {
     let source_cstr = CString::new(source.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
     let target_cstr = CString::new(target.to_str().ok_or(EINVAL)?).map_err(|_| EINVAL)?;
     let fstype_cstr = CString::new(fstype).map_err(|_| EINVAL)?;
+    let data_cstr = data.map(CString::new).transpose().map_err(|_| EINVAL)?;
 
     fs::mount(
         source_cstr.as_ptr() as u64,
         target_cstr.as_ptr() as u64,
         fstype_cstr.as_ptr() as u64,
         0,
-        0,
+        data_cstr.as_ref().map_or(0, |data| data.as_ptr() as u64),
     )
     .map(|_| ())
 }

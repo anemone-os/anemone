@@ -232,10 +232,58 @@ open-vs-retire、final close、fd publication、relation/signal ordering、lost-
 **Next / Stop:** Stage 3 Checkpoint 2与Stage 3 Closed。执行严格停止；Stage 4保持Future且未获execution authorization，
 `PTY-DEVPTS-CUTOVER`仍Not Effective。下一步只能在维护者新的明确授权下进入Stage 4 public activation与acceptance。
 
+### 2026-08-11 - Stage 4 Checkpoint 1 acceptance consumer and entry closure
+
+**Change:** 从`dev/drc/alpha@59946c43`激活Checkpoint 1。新增唯一普通`pty-test`，由同一binary内的mount、allocation、
+stream、lifecycle与relation模块直接判断R3显式输入和observable结果；覆盖single-instance multi-view mount、metadata/
+lock/two-route admission、双向stream/termios/winsize/blocking/nonblocking/poll/select/epoll/partial progress、multiple
+open/dup/fork/final release/reopen、retire/reuse fresh identity、implicit/explicit relation negative matrix、foreground/
+background terminal signal、master hangup与capacity/churn。setup失败、case结果、summary drain与shutdown共享一条收口路径。
+
+`anemone-rs`只新增app真实使用的`mount_with_data`、`getuid`/`getgid`/`setuid`与`TIOCGPTN`/`TIOCSPTLCK`/
+`TIOCGPTPEER`窄wrapper；`anemone-abi`只补实际用于`F_GETFD`验证的`FD_CLOEXEC` raw constant。RV64/LA64
+`pty-acceptance-*.toml`均通过existing rootfs composer选择`pty-test`并安装为`/sbin/pty-test`；两份init input都只指向该
+binary，没有libc PTY wrapper、C实现、`*-oracle`、private artifact或旁路runner。
+
+**Review / Feedback:** 独立review初轮发现三组Keter。第一组是foreground交给child后leader reclaim会被默认`SIGTTOU`
+停止，foreground signal与background stop负路径又可能无限等待；修正为明确ignore `SIGTTOU`、predicate加failure bound，
+并让background read在未触发job-control时以nonblocking结果fail closed。第二组是identity case在同一cached canonical
+pathname上retire/reuse并假设first-free index，会越入generic VFS Not Proven边界并冻结allocator policy；修正为旧episode
+只在canonical view materialize、持有其它live index直到目标index复用，再从此前未lookup该N的additional fresh view解析
+current binding，capacity/churn只验证释放集合可复用。第三组补齐双向queue partial/readiness、master HUP出现/撤销、
+post-hangup mutating ioctl、caller已有CTTY/endpoint已被其它session占用，以及setup/summary drain/shutdown；partial oracle
+改为fill-to-`EAGAIN`、drain one byte、two-byte partial与suffix retry，不假设TTY Kconfig capacity。
+
+最终独立review为0 Apollyon / 0 Keter / 0 Euclid；Architecture Friction Scan未发现第二份pair/readiness/relation truth、
+test-only production API、重复UAPI、kernel/private owner穿透、app/architecture特判、无consumer wrapper、无退出bridge或
+用弱化oracle换取build通过。一个app、一条`anemone-rs` ABI route与一份case result authority保持成立。
+
+**Contract Cutover:** None。kernel、devpts registration、devfs `/dev/ptmx`/empty `/dev/pts` publication、persistent init、
+current TTY/opened-description/VFS/iomux/epoll/task/Signal/job-control contracts与register均未修改；existing serial ABI、
+generic serial `O_NOCTTY` baseline和`PTY-DEVPTS-CUTOVER`保持不变。
+
+**Validation:** final candidate通过`git diff --check`与`just fmt all --check`。repository-native
+`just app build --arch riscv64 pty-test`及`--arch loongarch64`均通过；
+`just rootfs mkfs -c conf/rootfs/pty-acceptance-rv64.toml`与LA64 counterpart均通过并生成fresh staging/image。
+RV64 `/sbin/pty-test`为12,554,824-byte static ELF，SHA-256
+`aca5cda4a97f1d6c8fb36c2b6eeafa15886e7077d17fa3dd01738c188bb93299`，image SHA-256
+`51a43f194b9674bb44b62c6947278658402242f1b3d373db181a0444b233bc1b`；LA64 binary为6,513,496-byte static ELF，SHA-256
+`4168b7b52d03c66dbb66c4025949e4357b710ea8450c60452a71a0224cd64ec4`，image SHA-256
+`48ec398ca6353767b912bcca39135614351bbf14a9e7c98cf0c675b222a0b270`。两者均无dynamic section，rootfs init均精确指向
+`/sbin/pty-test`。
+
+RV64/LA64 `pty-test` runtime、public PTY mount/path/ioctl/data-plane/lifecycle/relation/hangup、kernel activation、LTP、
+tmux与sshd均Not Run；current contract/register与cutover为None/unchanged。generic VFS cached-positive freshness、late
+materialization与full multi-view linearizability继续Not Proven。
+
+**Next / Stop:** Stage 4 Checkpoint 1 Closed。执行严格停止；Checkpoint 2与`PTY-DEVPTS-CUTOVER`仍未获authorization，
+不得由本次build/package/source review自动进入public activation或runtime acceptance。
+
 ## Current Handoff
 
 当前live source已经关闭runtime semantic endpoint substrate、owner-private PTY pair/data-plane/description effect、
 TTY-owner-local结构拆分，以及hidden devpts/allocation/open/cleanup production route；existing serial caller继续使用semantic
-endpoint/physical attachment单一路径，Stage 3 capability仍不可由userspace发现。transaction保持Active只因为Stage 4尚未
-执行；本记录不授权自动继续，也不把serial userspace、KUnit计数、双架构build或source review外推为公开PTY ABI/runtime
-acceptance或contract cutover。
+endpoint/physical attachment单一路径，Stage 3 capability仍不可由userspace发现。Stage 4 Checkpoint 1又关闭了单一
+`pty-test` acceptance consumer、窄`anemone-rs` wrapper与双架构repository build/package入口，但没有运行该app或公开
+namespace。transaction保持Active只因为Stage 4 Checkpoint 2尚未执行；本记录不授权自动继续，也不把serial userspace、
+KUnit计数、双架构build/package或source review外推为公开PTY ABI/runtime acceptance或contract cutover。
