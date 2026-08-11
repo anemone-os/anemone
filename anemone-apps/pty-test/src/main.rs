@@ -61,6 +61,8 @@ fn ensure_dir(path: &str) -> Result<(), Errno> {
 fn prepare_mounts() -> Result<(), Errno> {
     ensure_dir("/dev")?;
     mount(Path::new("devfs"), Path::new("/dev"), "devfs")?;
+    ensure_dir("/proc")?;
+    mount(Path::new("proc"), Path::new("/proc"), "proc")?;
     ensure_dir("/tmp")?;
     ensure_dir(ADDITIONAL_VIEW)?;
     mount(Path::new("devpts"), Path::new(CANONICAL_VIEW), "devpts")?;

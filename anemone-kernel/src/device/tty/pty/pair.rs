@@ -456,37 +456,30 @@ impl PtySlaveDescription {
         !self.phase_is_live() || self.pair.is_retired()
     }
 
-    pub(in crate::device::tty) fn read(
+    pub(in crate::device::tty) fn read_once(
         &self,
         terminal: &Terminal,
         dst: &mut [u8],
-        ctx: FileIoCtx,
-    ) -> Result<usize, SysError> {
-        loop {
-            let result = {
-                let _operation = self.pair.operation.lock();
-                if !self.phase_is_live() || self.pair.is_retired() {
-                    return Ok(0);
-                }
-                terminal.read_pty_input(dst)
-            };
-            match result {
-                InputRead::Bytes(count) => {
-                    self.pair.notify_state_change();
-                    return Ok(count);
-                },
-                InputRead::Eof => {
-                    self.pair.notify_state_change();
-                    return Ok(0);
-                },
-                InputRead::Empty if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) => {
-                    return Err(SysError::Again);
-                },
-                InputRead::Empty => self
-                    .pair
-                    .wait_until(|| self.is_released_or_hung_up() || terminal.readable())?,
+    ) -> InputRead {
+        let result = {
+            let _operation = self.pair.operation.lock();
+            if !self.phase_is_live() || self.pair.is_retired() {
+                return InputRead::Eof;
             }
+            terminal.read_pty_input(dst)
+        };
+        if result != InputRead::Empty {
+            self.pair.notify_state_change();
         }
+        result
+    }
+
+    pub(in crate::device::tty) fn wait_readable(
+        &self,
+        terminal: &Terminal,
+    ) -> Result<(), SysError> {
+        self.pair
+            .wait_until(|| self.is_released_or_hung_up() || terminal.readable())
     }
 
     pub(in crate::device::tty) fn write(

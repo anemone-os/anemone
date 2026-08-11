@@ -106,7 +106,17 @@ fn tty_read(
     loop {
         check_read_access(tty)?;
         if let Some(description) = &tty.pty_description {
-            return description.read(&tty.endpoint.terminal, buf, ctx);
+            match description.read_once(&tty.endpoint.terminal, buf) {
+                InputRead::Bytes(count) => return Ok(count),
+                InputRead::Eof => return Ok(0),
+                InputRead::Empty if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) => {
+                    return Err(SysError::Again);
+                },
+                InputRead::Empty => description.wait_readable(&tty.endpoint.terminal)?,
+            }
+            // A foreground process may become background while sleeping. Return
+            // to the TTY policy owner before any newly readable input is consumed.
+            continue;
         }
         match tty.endpoint.terminal.read_input(buf) {
             InputRead::Bytes(count) => {

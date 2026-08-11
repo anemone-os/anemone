@@ -30,7 +30,9 @@ use anemone_rs::{
     prelude::*,
 };
 
-use crate::support::{Pair, ensure, expect_errno, raw_termios, read_exact, wait_child, write_all};
+use crate::support::{
+    OwnedFd, Pair, ensure, expect_errno, raw_termios, read_exact, wait_child, write_all,
+};
 
 const ZERO_TIMEOUT: TimeSpec = TimeSpec {
     tv_sec: 0,
@@ -256,6 +258,107 @@ fn wait_status(child: u32, options: WaitOptions) -> Result<WStatus, Errno> {
     }
 }
 
+fn proc_state(pid: u32) -> Result<u8, Errno> {
+    let path = format!("/proc/{pid}/status");
+    let status = OwnedFd::new(openat(AtFd::Cwd, Path::new(path.as_str()), O_RDONLY, 0)?);
+    let mut data = [0u8; 512];
+    let mut used = 0;
+    loop {
+        if let Ok(text) = core::str::from_utf8(&data[..used])
+            && let Some(state) = text
+                .lines()
+                .find_map(|line| line.strip_prefix("State:"))
+                .map(|state| state.trim())
+                .and_then(|state| state.as_bytes().first())
+        {
+            return Ok(*state);
+        }
+        if used == data.len() {
+            return Err(EIO);
+        }
+        match read(status.raw(), &mut data[used..]) {
+            Ok(0) => return Err(EIO),
+            Ok(count) => used += count,
+            Err(EINTR) => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+}
+
+fn wait_until_sleeping(pid: u32) -> Result<(), Errno> {
+    // `/proc` task state is the synchronization predicate. Time only bounds a
+    // broken test instead of guessing when the child entered the blocking read.
+    for _ in 0..SIGNAL_WAIT_RETRIES {
+        if proc_state(pid)? == b'S' {
+            return Ok(());
+        }
+        match nanosleep(SIGNAL_WAIT_TICK) {
+            Ok(()) | Err(EINTR) => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+    Err(ETIMEDOUT)
+}
+
+fn blocking_read_rechecks_background(pair: &Pair, slave_fd: u32, leader: u32) -> Result<(), Errno> {
+    let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
+    let (start_read, start_write) = pipe2(PipeFlags::empty())?;
+    let child = match fork()? {
+        None => finish_child((|| {
+            close(ready_read)?;
+            close(start_write)?;
+            setpgid(0, 0)?;
+            ensure(write(ready_write, &[1])? == 1)?;
+            let mut start = [0u8; 1];
+            read_exact(start_read, &mut start)?;
+            close(start_read)?;
+            ensure(write(ready_write, &[2])? == 1)?;
+            close(ready_write)?;
+            let mut byte = [0u8; 1];
+            let _ = read(slave_fd, &mut byte)?;
+            Err(EIO)
+        })()),
+        Some(child) => child,
+    };
+    close(ready_write)?;
+    close(start_read)?;
+
+    let result = (|| {
+        let mut ready = [0u8; 1];
+        read_exact(ready_read, &mut ready)?;
+        ensure(ready == [1])?;
+        tcsetpgrp(slave_fd, child as i32)?;
+        ensure(write(start_write, &[1])? == 1)?;
+        close(start_write)?;
+        read_exact(ready_read, &mut ready)?;
+        ensure(ready == [2])?;
+        close(ready_read)?;
+        wait_until_sleeping(child)?;
+
+        tcsetpgrp(slave_fd, leader as i32)?;
+        write_all(pair.master.raw(), b"R")?;
+        let stopped = wait_status(child, WaitOptions::UNTRACED)?;
+        ensure(matches!(
+            stopped,
+            WStatus::Stopped(signo) if signo == SigNo::SIGTTIN.as_usize() as i8
+        ))?;
+        kill(child as i32, SigNo::SIGKILL)?;
+        ensure(matches!(
+            wait_status(child, WaitOptions::empty())?,
+            WStatus::Signal(_)
+        ))?;
+
+        let mut byte = [0u8; 1];
+        read_exact(slave_fd, &mut byte)?;
+        ensure(byte == *b"R")
+    })();
+    if result.is_err() {
+        let _ = kill(child as i32, SigNo::SIGKILL);
+        let _ = wait_status(child, WaitOptions::empty());
+    }
+    result
+}
+
 fn foreground_and_background(pair: &Pair, slave_fd: u32, leader: u32) -> Result<(), Errno> {
     ignore_signal(SigNo::SIGTTOU)?;
     let (ready_read, ready_write) = pipe2(PipeFlags::empty())?;
@@ -305,7 +408,8 @@ fn foreground_and_background(pair: &Pair, slave_fd: u32, leader: u32) -> Result<
     kill(background as i32, SigNo::SIGKILL)?;
     let reaped = wait_status(background, WaitOptions::empty())?;
     fcntl_setfl(slave_fd, original_flags)?;
-    ensure(matches!(reaped, WStatus::Signal(_)))
+    ensure(matches!(reaped, WStatus::Signal(_)))?;
+    blocking_read_rechecks_background(pair, slave_fd, leader)
 }
 
 fn hangup_body() -> Result<(), Errno> {

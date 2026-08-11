@@ -484,18 +484,6 @@ impl Terminal {
     pub(crate) fn try_new(line: TtyLineSnapshot) -> Result<Arc<Self>, SysError> {
         let discipline = TtyDiscipline::try_new()?;
         let output = TerminalOutput::try_new()?;
-        let mut poll_routes = Vec::new();
-        // Poll registration fails closed when this pre-publish allocation is
-        // exhausted. Routes are notification capabilities rather than
-        // readiness truth, so the Terminal never merges registrations by
-        // route identity.
-        poll_routes
-            .try_reserve_exact(MAX_PROCESSES as usize)
-            .map_err(|_| SysError::OutOfMemory)?;
-        let mut poll_spare = Vec::new();
-        poll_spare
-            .try_reserve_exact(MAX_PROCESSES as usize)
-            .map_err(|_| SysError::OutOfMemory)?;
         Arc::try_new(Self {
             inner: SpinLock::new(TerminalInner {
                 line,
@@ -506,8 +494,8 @@ impl Terminal {
                 last_drain_generation: 0,
                 termios_generation: 0,
                 winsize: TtyWinsize::default(),
-                poll_routes,
-                poll_spare,
+                poll_routes: Vec::new(),
+                poll_spare: Vec::new(),
                 poll_handoff_active: false,
                 poll_dirty: false,
             }),
@@ -911,25 +899,24 @@ impl Terminal {
     fn install_poll_route(&self, route: &PollRoute) -> bool {
         let mut stale = None;
         let mut capacity_exhausted = false;
+        let mut allocation_failed = false;
         let installed = {
             let mut inner = self.inner.lock();
-            assert!(
-                inner.poll_routes.capacity() >= MAX_PROCESSES as usize,
-                "TTY poll registry lost its preallocated capacity"
-            );
-            if inner.poll_routes.len() < MAX_PROCESSES as usize {
-                inner.poll_routes.push(TtyPollRoute::new(route));
-                true
-            } else if let Some(index) = inner.poll_routes.iter().position(TtyPollRoute::is_prunable)
-            {
+            if let Some(index) = inner.poll_routes.iter().position(TtyPollRoute::is_prunable) {
                 stale = Some(core::mem::replace(
                     &mut inner.poll_routes[index],
                     TtyPollRoute::new(route),
                 ));
                 true
-            } else {
+            } else if inner.poll_routes.len() >= MAX_PROCESSES as usize {
                 capacity_exhausted = true;
                 false
+            } else if inner.poll_routes.try_reserve(1).is_err() {
+                allocation_failed = true;
+                false
+            } else {
+                inner.poll_routes.push(TtyPollRoute::new(route));
+                true
             }
         };
         drop(stale);
@@ -938,6 +925,9 @@ impl Terminal {
                 "tty: poll route capacity exhausted capacity={}",
                 MAX_PROCESSES,
             );
+        }
+        if allocation_failed {
+            kwarningln!("tty: poll route allocation failed");
         }
         installed
     }
@@ -971,9 +961,9 @@ impl Terminal {
         // Poll-route notifications are hints; every waiter rechecks
         // Terminal-owned predicates. Wake all registered poll rounds on any
         // state change so no waiter can miss a brief ready transition while
-        // another task consumes the newly available input/output capacity. Two
-        // pre-reserved vectors provide a guard-out handoff without allocating
-        // or dropping a PollRoute under the Terminal guard.
+        // another task consumes the newly available input/output capacity. A
+        // reusable scratch vector reserves enough room before cloning routes;
+        // notification and route destruction remain outside the Terminal guard.
         let mut handoff = {
             let mut inner = self.inner.lock();
             if inner.poll_handoff_active {
@@ -1022,16 +1012,15 @@ impl Terminal {
             inner.poll_spare.is_empty(),
             "TTY poll handoff scratch was reused before drain"
         );
-        assert!(
-            inner.poll_spare.capacity() >= MAX_PROCESSES as usize,
-            "TTY poll handoff lost its preallocated capacity"
-        );
+        // An installed route carries a wake obligation. Silently dropping a
+        // handoff on allocation failure could strand its waiter, so bounded
+        // scratch growth follows the kernel allocator's fail-stop policy.
+        inner
+            .poll_spare
+            .try_reserve(inner.poll_routes.len())
+            .expect("TTY poll handoff allocation failed");
         let mut index = 0;
         while index < inner.poll_routes.len() {
-            assert!(
-                inner.poll_spare.len() < MAX_PROCESSES as usize,
-                "TTY poll handoff exceeded preallocated capacity"
-            );
             if inner.poll_routes[index].is_prunable() {
                 let stale = inner.poll_routes.swap_remove(index);
                 inner.poll_spare.push(stale);
