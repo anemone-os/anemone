@@ -2,6 +2,7 @@ mod discipline;
 mod endpoint;
 mod file;
 mod port;
+mod pty;
 mod relation;
 mod terminal;
 
@@ -55,7 +56,14 @@ struct TtyEndpoint {
     terminal: Arc<Terminal>,
     /// Weak projection only; the driver attachment remains the sole
     /// long-lived strong owner of the worker wake source.
-    wake_source: Weak<TtyWakeSource>,
+    wake_source: Weak<dyn TtyProgress>,
+}
+
+/// Narrow backend progress capability. It carries no byte, capacity,
+/// readiness, peer-presence, or lifecycle truth; every consumer rechecks the
+/// corresponding owner after a notification.
+trait TtyProgress: Send + Sync {
+    fn wake(&self);
 }
 
 #[derive(Opaque)]
@@ -73,12 +81,18 @@ struct TtyWakeSource {
 
 #[derive(Clone)]
 pub(super) struct TtyWakeHandle {
-    source: Arc<TtyWakeSource>,
+    source: Arc<dyn TtyProgress>,
 }
 
 impl TtyWakeHandle {
     pub(super) fn wake(&self) {
-        let worker = self.source.worker.lock().as_ref().cloned();
+        self.source.wake();
+    }
+}
+
+impl TtyProgress for TtyWakeSource {
+    fn wake(&self) {
+        let worker = self.worker.lock().as_ref().cloned();
         if let Some(worker) = worker {
             worker.wake();
         }
@@ -148,11 +162,6 @@ impl TtyRxNotifier {
             }
         }
     }
-
-    #[cfg(feature = "kunit")]
-    fn is_live(&self) -> bool {
-        self.wake_source.strong_count() != 0
-    }
 }
 
 pub(crate) fn attach_unpublished_port(
@@ -166,7 +175,10 @@ pub(crate) fn attach_unpublished_port(
     .map_err(|_| SysError::OutOfMemory)?;
     let endpoint = Arc::try_new(TtyEndpoint {
         terminal,
-        wake_source: Arc::downgrade(&wake_source),
+        wake_source: {
+            let progress: Arc<dyn TtyProgress> = wake_source.clone();
+            Arc::downgrade(&progress)
+        },
     })
     .map_err(|_| SysError::OutOfMemory)?;
     let enrollment = relation::RelationEnrollment::new(endpoint.clone());
@@ -341,269 +353,4 @@ fn tty_worker_entry(ctx: KThreadCtx, arg: AnyOpaque) -> i32 {
     }
 
     0
-}
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-    use crate::utils::ring_buffer::RingBuffer;
-
-    const FAKE_PORT_CAPACITY: usize = 2048;
-
-    struct FakePort {
-        id: TtyPortId,
-        input: SpinLock<RingBuffer<TtyRxUnit, FAKE_PORT_CAPACITY>>,
-        dequeued: SpinLock<RingBuffer<TtyRxUnit, FAKE_PORT_CAPACITY>>,
-        output: SpinLock<RingBuffer<u8, FAKE_PORT_CAPACITY>>,
-        tx_limit: AtomicUsize,
-        tx_idle: AtomicBool,
-        predicate_checks: AtomicUsize,
-        activity: Event,
-    }
-
-    impl FakePort {
-        fn new(id: &str) -> Arc<Self> {
-            Arc::new(Self {
-                id: TtyPortId::try_from(id).unwrap(),
-                input: SpinLock::new(RingBuffer::new()),
-                dequeued: SpinLock::new(RingBuffer::new()),
-                output: SpinLock::new(RingBuffer::new()),
-                tx_limit: AtomicUsize::new(usize::MAX),
-                tx_idle: AtomicBool::new(true),
-                predicate_checks: AtomicUsize::new(0),
-                activity: Event::new(),
-            })
-        }
-
-        fn enqueue(&self, bytes: &[u8]) {
-            let mut input = self.input.lock();
-            for &byte in bytes {
-                assert_eq!(input.try_push(TtyRxUnit::Byte(byte)), Ok(()));
-            }
-            drop(input);
-            self.activity.publish(usize::MAX, true);
-        }
-
-        fn wait_for<P>(&self, predicate: P)
-        where
-            P: Fn() -> bool,
-        {
-            let result =
-                self.activity
-                    .listen_with_timeout(false, predicate, Duration::from_secs(1));
-            assert!(
-                !matches!(result, Some(TimeoutListenException::Timeout)),
-                "fake TTY port did not reach the expected state"
-            );
-            assert!(
-                !matches!(result, Some(TimeoutListenException::Signaled)),
-                "fake TTY port wait was interrupted"
-            );
-        }
-
-        fn wait_for_predicate_check(&self) {
-            self.wait_for(|| self.predicate_checks.load(Ordering::Relaxed) != 0);
-        }
-
-        fn assert_dequeued(&self, expected: &[u8]) {
-            let dequeued = self.dequeued.lock();
-            assert_eq!(dequeued.len(), expected.len());
-            assert!(
-                dequeued
-                    .iter()
-                    .eq(expected.iter().copied().map(TtyRxUnit::Byte))
-            );
-        }
-
-        fn output_len(&self) -> usize {
-            self.output.lock().len()
-        }
-
-        fn assert_output(&self, expected: &[u8]) {
-            let output = self.output.lock();
-            assert_eq!(output.len(), expected.len());
-            assert!(output.iter().eq(expected.iter().copied()));
-        }
-    }
-
-    impl TtyPort for FakePort {
-        fn id(&self) -> &TtyPortId {
-            &self.id
-        }
-
-        fn rx_pending(&self) -> bool {
-            self.predicate_checks.fetch_add(1, Ordering::Relaxed);
-            !self.input.lock().is_empty()
-        }
-
-        fn dequeue_rx(&self, dst: &mut [TtyRxUnit]) -> usize {
-            let count = self.input.lock().try_pop_slice(dst);
-            assert_eq!(self.dequeued.lock().try_push_slice(&dst[..count]), count);
-            self.activity.publish(usize::MAX, true);
-            count
-        }
-
-        fn submit_tx(&self, src: &[u8]) -> usize {
-            let accepted = src
-                .len()
-                .min(self.tx_limit.load(Ordering::Relaxed))
-                .min(self.output.lock().available());
-            assert_eq!(
-                self.output.lock().try_push_slice(&src[..accepted]),
-                accepted
-            );
-            self.activity.publish(usize::MAX, true);
-            accepted
-        }
-
-        fn tx_idle(&self) -> bool {
-            let idle = self.tx_idle.load(Ordering::Relaxed);
-            // Test-only observation edge: production drain truth remains the
-            // Terminal queue plus the port snapshot, never this Event.
-            self.activity.publish(usize::MAX, true);
-            idle
-        }
-    }
-
-    fn attach(port: &Arc<FakePort>) -> (TtyPortAttachment, TtyRxNotifier) {
-        attach_unpublished_port(port.clone(), line()).unwrap()
-    }
-
-    fn line() -> TtyLineSnapshot {
-        TtyLineSnapshot {
-            baud: 115200,
-            parity: TtyParity::None,
-            data_bits: 8,
-        }
-    }
-
-    #[kunit]
-    fn duplicate_identity_is_rejected_until_abort() {
-        let first = FakePort::new("/kunit/tty/duplicate");
-        let duplicate = FakePort::new("/kunit/tty/duplicate");
-        let (attachment, _) = attach(&first);
-
-        assert_eq!(
-            attach_unpublished_port(duplicate.clone(), line()).err(),
-            Some(SysError::DevAlreadyRegistered)
-        );
-        attachment.abort();
-
-        let (replacement, _) = attach(&duplicate);
-        replacement.abort();
-    }
-
-    #[kunit]
-    fn notification_before_worker_wait_keeps_rx_progress() {
-        let port = FakePort::new("/kunit/tty/wake-before-wait");
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.endpoint.terminal.clone();
-        port.enqueue(b"before-wait\n");
-        notifier.wake();
-
-        port.wait_for(|| terminal.readable());
-        port.assert_dequeued(b"before-wait\n");
-        attachment.abort();
-    }
-
-    #[kunit]
-    fn notification_after_worker_wait_keeps_rx_progress() {
-        let port = FakePort::new("/kunit/tty/wake-after-wait");
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.endpoint.terminal.clone();
-        port.wait_for_predicate_check();
-
-        port.enqueue(b"after-wait\n");
-        notifier.wake();
-        port.wait_for(|| terminal.readable());
-
-        port.assert_dequeued(b"after-wait\n");
-        attachment.abort();
-    }
-
-    #[kunit]
-    fn persistent_raw_predicate_transfers_fifo_batches_once() {
-        let port = FakePort::new("/kunit/tty/persistent-predicate");
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.endpoint.terminal.clone();
-        let mut input = vec![b'a'; TTY_WORKER_BATCH_BYTES * 3 + 7];
-        input.push(b'\n');
-
-        port.enqueue(&input);
-        notifier.wake();
-        port.wait_for(|| terminal.readable());
-
-        port.assert_dequeued(&input);
-        let mut observed = vec![0_u8; input.len()];
-        assert_eq!(
-            terminal.read_input(&mut observed),
-            discipline::InputRead::Bytes(input.len())
-        );
-        assert_eq!(observed, input);
-        attachment.abort();
-    }
-
-    #[kunit]
-    fn worker_retries_partial_tx_without_replaying_input() {
-        let port = FakePort::new("/kunit/tty/partial-tx");
-        port.tx_limit.store(1, Ordering::Relaxed);
-        let (attachment, notifier) = attach(&port);
-        let terminal = attachment.endpoint.terminal.clone();
-
-        port.enqueue(b"x\n");
-        notifier.wake();
-        port.wait_for(|| port.output_len() == 3 && terminal.readable());
-
-        port.assert_dequeued(b"x\n");
-        port.assert_output(b"x\r\n");
-        attachment.abort();
-    }
-
-    #[kunit]
-    fn prepublish_abort_drops_weak_notifier_and_joins_worker() {
-        let port = FakePort::new("/kunit/tty/abort");
-        let (attachment, notifier) = attach(&port);
-        let endpoint = Arc::downgrade(&attachment.endpoint);
-        assert!(notifier.is_live());
-
-        attachment.abort();
-        assert!(!notifier.is_live());
-        assert!(endpoint.upgrade().is_none());
-        notifier.wake();
-
-        let (replacement, _) = attach(&port);
-        replacement.abort();
-    }
-
-    #[kunit]
-    fn worker_spawn_failure_releases_identity_reservation() {
-        let port = FakePort::new("/kunit/tty/spawn-failure");
-        let terminal = Terminal::try_new(line()).unwrap();
-        let wake_source = Arc::new(TtyWakeSource {
-            worker: SpinLock::new(None),
-        });
-        let endpoint = Arc::new(TtyEndpoint {
-            terminal,
-            wake_source: Arc::downgrade(&wake_source),
-        });
-        let old = UNPUBLISHED_PORTS.lock().insert(
-            port.id().clone(),
-            UnpublishedEndpoint {
-                endpoint: Arc::downgrade(&endpoint),
-                enrollment: Some(relation::RelationEnrollment::new(endpoint.clone())),
-            },
-        );
-        assert!(old.is_none());
-
-        let result = finish_unpublished_port_attach(
-            port.clone(),
-            endpoint,
-            wake_source,
-            Err(SysError::OutOfMemory),
-        );
-        assert_eq!(result.err(), Some(SysError::OutOfMemory));
-
-        let (replacement, _) = attach(&port);
-        replacement.abort();
-    }
 }

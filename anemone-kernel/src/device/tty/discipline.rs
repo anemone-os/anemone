@@ -142,18 +142,51 @@ impl TtyDiscipline {
         ReceiveResult::Consumed
     }
 
+    /// Check whether the exact byte can be admitted without changing either
+    /// input or output state. Blocking PTY writers use this same predicate
+    /// before retrying `receive`, so a wake hint never substitutes for owner
+    /// capacity truth.
+    pub(super) fn can_receive(
+        &self,
+        byte: u8,
+        termios: TtyTermios,
+        output: &TerminalOutput,
+    ) -> bool {
+        if termios.signal_control(byte).is_some() {
+            return true;
+        }
+
+        if !termios.icanon {
+            return self.committed_len() < TTY_INPUT_CAPACITY_BYTES
+                && output.can_enqueue(&termios.echo_for_byte(byte), termios);
+        }
+
+        if termios.matches_control(termios.erase, byte) {
+            return self.canonical_pending_len == 0
+                || output.can_enqueue(&termios.erase_echo(), termios);
+        }
+        if termios.matches_control(termios.kill, byte) {
+            return output.can_enqueue(&termios.kill_echo(), termios);
+        }
+        if termios.matches_control(termios.eof, byte) {
+            return self.can_commit_record(self.canonical_pending_len);
+        }
+        if byte == b'\n' {
+            let record_len = self.canonical_pending_len.saturating_add(1);
+            return self.can_commit_record(record_len)
+                && output.can_enqueue(&termios.echo_for_byte(byte), termios);
+        }
+
+        self.canonical_pending_len < TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
+            && output.can_enqueue(&termios.echo_for_byte(byte), termios)
+    }
+
     /// Admit one condition-generated literal token without interpreting any
     /// byte as a control character, delimiter, transform, or echo request.
     /// Capacity is checked for the complete token before the first byte moves,
     /// so worker retry cannot expose a prefix or duplicate a marker.
     pub(super) fn receive_literal(&mut self, literal: &[u8], termios: TtyTermios) -> ReceiveResult {
-        if termios.icanon {
-            if self.canonical_pending_len.saturating_add(literal.len())
-                > TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
-            {
-                return ReceiveResult::Backpressured;
-            }
-        } else if self.committed_len().saturating_add(literal.len()) > TTY_INPUT_CAPACITY_BYTES {
+        if !self.can_receive_literal(literal.len(), termios) {
             return ReceiveResult::Backpressured;
         }
 
@@ -168,6 +201,15 @@ impl TtyDiscipline {
             self.canonical_pending_len += literal.len();
         }
         ReceiveResult::Consumed
+    }
+
+    pub(super) fn can_receive_literal(&self, len: usize, termios: TtyTermios) -> bool {
+        if termios.icanon {
+            self.canonical_pending_len.saturating_add(len)
+                <= TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
+        } else {
+            self.committed_len().saturating_add(len) <= TTY_INPUT_CAPACITY_BYTES
+        }
     }
 
     pub(super) fn readable(&self, termios: TtyTermios) -> bool {

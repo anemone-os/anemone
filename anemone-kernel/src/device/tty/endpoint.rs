@@ -475,11 +475,17 @@ mod kunits {
         let endpoints = [
             Arc::new(TtyEndpoint {
                 terminal: first_terminal,
-                wake_source: Arc::downgrade(&source),
+                wake_source: {
+                    let progress: Arc<dyn super::super::TtyProgress> = source.clone();
+                    Arc::downgrade(&progress)
+                },
             }),
             Arc::new(TtyEndpoint {
                 terminal: selected_terminal.clone(),
-                wake_source: Arc::downgrade(&source),
+                wake_source: {
+                    let progress: Arc<dyn super::super::TtyProgress> = source.clone();
+                    Arc::downgrade(&progress)
+                },
             }),
         ];
         let identities = [

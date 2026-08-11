@@ -11,22 +11,82 @@ use super::{
     TtyEndpoint, TtyWakeHandle,
     discipline::InputRead,
     port::{TtyLineSnapshot, TtyParity},
+    pty::PtySlaveDescription,
     relation,
     terminal::{Terminal, TtyTermios, TtyWinsize},
 };
 
 #[derive(Opaque)]
-struct TtyFile {
-    endpoint: Arc<TtyEndpoint>,
-    wake: TtyWakeHandle,
+pub(super) struct TtyFile {
+    pub(super) endpoint: Arc<TtyEndpoint>,
+    pub(super) wake: TtyWakeHandle,
+    pty_description: Option<Arc<PtySlaveDescription>>,
+}
+
+/// Orders only a bounded Terminal snapshot or commit against a PTY episode's
+/// final release. User memory access, drain waits, relation operations and
+/// notification stay outside this window.
+pub(super) trait TtyOperation {
+    fn run_if_live(&self, operation: &mut dyn FnMut()) -> Result<(), SysError>;
+}
+
+fn run_terminal_operation<R>(
+    operation: Option<&dyn TtyOperation>,
+    commit: impl FnOnce() -> R,
+) -> Result<R, SysError> {
+    let mut commit = Some(commit);
+    let mut result = None;
+    let mut run = || {
+        result = Some(commit
+            .take()
+            .expect("TTY bounded operation executed more than once")(
+        ));
+    };
+    if let Some(operation) = operation {
+        operation.run_if_live(&mut run)?;
+    } else {
+        run();
+    }
+    Ok(result.expect("TTY bounded operation was not executed"))
+}
+
+pub(super) fn terminal_file(endpoint: Arc<TtyEndpoint>, wake: TtyWakeHandle) -> TtyFile {
+    TtyFile {
+        endpoint,
+        wake,
+        pty_description: None,
+    }
 }
 
 pub(super) fn opened_file(endpoint: Arc<TtyEndpoint>, wake: TtyWakeHandle) -> OpenedFile {
     OpenedFile::with_mode(
         &TTY_FILE_OPS,
         FileMode::STREAM,
-        AnyOpaque::new(TtyFile { endpoint, wake }),
+        AnyOpaque::new(terminal_file(endpoint, wake)),
     )
+}
+
+pub(super) fn opened_pty_slave_file(
+    endpoint: Arc<TtyEndpoint>,
+    wake: TtyWakeHandle,
+    description: Arc<PtySlaveDescription>,
+) -> OpenedFile {
+    OpenedFile::with_mode(
+        &TTY_FILE_OPS,
+        FileMode::STREAM,
+        AnyOpaque::new(TtyFile {
+            endpoint,
+            wake,
+            pty_description: Some(description),
+        }),
+    )
+}
+
+pub(super) fn pty_slave_description(file: &File) -> &PtySlaveDescription {
+    tty_file(file)
+        .pty_description
+        .as_deref()
+        .expect("PTY slave final release received a serial TTY file")
 }
 
 fn tty_file(file: &File) -> &TtyFile {
@@ -46,6 +106,9 @@ fn tty_read(
     let tty = tty_file(file);
     loop {
         check_read_access(tty)?;
+        if let Some(description) = &tty.pty_description {
+            return description.read(&tty.endpoint.terminal, buf, ctx);
+        }
         match tty.endpoint.terminal.read_input(buf) {
             InputRead::Bytes(count) => {
                 if count != 0 {
@@ -110,6 +173,9 @@ fn tty_write(file: &File, _pos: &mut usize, buf: &[u8], ctx: FileIoCtx) -> Resul
         return Ok(0);
     }
     let tty = tty_file(file);
+    if let Some(description) = &tty.pty_description {
+        return description.write(&tty.endpoint.terminal, buf, ctx);
+    }
     loop {
         let written = tty.endpoint.terminal.enqueue_output(buf);
         if written != 0 {
@@ -131,7 +197,12 @@ fn tty_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(), 
 }
 
 fn tty_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
-    Ok(tty_file(file).endpoint.terminal.poll(request))
+    let tty = tty_file(file);
+    if let Some(description) = &tty.pty_description {
+        Ok(description.poll(&tty.endpoint.terminal, request))
+    } else {
+        Ok(tty.endpoint.terminal.poll(request))
+    }
 }
 
 fn read_ioctl_value<T: zerocopy::FromBytes>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
@@ -158,13 +229,38 @@ enum SetMode {
 
 fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     let tty = tty_file(file);
+    if let Some(description) = &tty.pty_description {
+        if description.is_released_or_hung_up() {
+            return if ctx.cmd() == abi::TIOCSPGRP {
+                Err(SysError::UnsupportedIoctl)
+            } else {
+                Err(SysError::IO)
+            };
+        }
+    }
+    terminal_ioctl(
+        tty,
+        true,
+        tty.pty_description
+            .as_deref()
+            .map(|description| description as &dyn TtyOperation),
+        ctx,
+    )
+}
+
+pub(super) fn terminal_ioctl(
+    tty: &TtyFile,
+    relation_operations: bool,
+    operation: Option<&dyn TtyOperation>,
+    ctx: IoctlCtx<'_>,
+) -> Result<u64, SysError> {
     match ctx.cmd() {
         abi::TCGETS => {
-            let (termios, _) = tty.endpoint.terminal.termios_snapshot();
-            write_ioctl_value(
-                &ctx,
-                project_termios(termios, tty.endpoint.terminal.line_snapshot())?,
-            )?;
+            let (termios, line) = run_terminal_operation(operation, || {
+                let (termios, _) = tty.endpoint.terminal.termios_snapshot();
+                (termios, tty.endpoint.terminal.line_snapshot())
+            })?;
+            write_ioctl_value(&ctx, project_termios(termios, line)?)?;
         },
         abi::TCSETS | abi::TCSETSW | abi::TCSETSF => {
             let candidate = read_ioctl_value::<abi::Termios>(&ctx)?;
@@ -174,10 +270,10 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
                 abi::TCSETSF => SetMode::DrainFlush,
                 _ => unreachable!(),
             };
-            set_termios(tty, candidate, mode)?;
+            set_termios(tty, operation, candidate, mode)?;
         },
         abi::TIOCGWINSZ => {
-            let winsize = tty.endpoint.terminal.winsize();
+            let winsize = run_terminal_operation(operation, || tty.endpoint.terminal.winsize())?;
             write_ioctl_value(
                 &ctx,
                 abi::Winsize {
@@ -190,12 +286,19 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
         },
         abi::TIOCSWINSZ => {
             let winsize = read_ioctl_value::<abi::Winsize>(&ctx)?;
-            let changed = tty.endpoint.terminal.set_winsize(TtyWinsize {
-                rows: winsize.ws_row,
-                cols: winsize.ws_col,
-                xpixel: winsize.ws_xpixel,
-                ypixel: winsize.ws_ypixel,
-            });
+            let changed = run_terminal_operation(operation, || {
+                let winsize = TtyWinsize {
+                    rows: winsize.ws_row,
+                    cols: winsize.ws_col,
+                    xpixel: winsize.ws_xpixel,
+                    ypixel: winsize.ws_ypixel,
+                };
+                if operation.is_some() {
+                    tty.endpoint.terminal.set_pty_winsize(winsize)
+                } else {
+                    tty.endpoint.terminal.set_winsize(winsize)
+                }
+            })?;
             if changed
                 && !relation::signal_foreground(
                     &tty.endpoint,
@@ -204,12 +307,15 @@ fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
             {
                 tty.endpoint.terminal.record_no_foreground_winsize();
             }
+            if changed {
+                tty.wake.wake();
+            }
         },
-        abi::TIOCSCTTY => set_controlling_tty(tty, &ctx)?,
-        abi::TIOCNOTTY => detach_controlling_tty(tty)?,
-        abi::TIOCGSID => get_controlling_sid(tty, &ctx)?,
-        abi::TIOCGPGRP => get_foreground_pgid(tty, &ctx)?,
-        abi::TIOCSPGRP => set_foreground_pgid(tty, &ctx)?,
+        abi::TIOCSCTTY if relation_operations => set_controlling_tty(tty, &ctx)?,
+        abi::TIOCNOTTY if relation_operations => detach_controlling_tty(tty)?,
+        abi::TIOCGSID if relation_operations => get_controlling_sid(tty, &ctx)?,
+        abi::TIOCGPGRP if relation_operations => get_foreground_pgid(tty, &ctx)?,
+        abi::TIOCSPGRP if relation_operations => set_foreground_pgid(tty, &ctx)?,
         _ => return Err(SysError::UnsupportedIoctl),
     }
     Ok(0)
@@ -315,7 +421,12 @@ fn set_foreground_pgid(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError
     }
 }
 
-fn set_termios(tty: &TtyFile, candidate: abi::Termios, mode: SetMode) -> Result<(), SysError> {
+fn set_termios(
+    tty: &TtyFile,
+    operation: Option<&dyn TtyOperation>,
+    candidate: abi::Termios,
+    mode: SetMode,
+) -> Result<(), SysError> {
     loop {
         let (current, generation) = tty.endpoint.terminal.termios_snapshot();
         let updated = validate_termios(candidate, current, tty.endpoint.terminal.line_snapshot())?;
@@ -326,12 +437,23 @@ fn set_termios(tty: &TtyFile, candidate: abi::Termios, mode: SetMode) -> Result<
         } else {
             None
         };
-        if tty.endpoint.terminal.commit_termios_if_generation(
-            generation,
-            drained_output_generation,
-            updated,
-            matches!(mode, SetMode::DrainFlush),
-        ) {
+        if run_terminal_operation(operation, || {
+            if operation.is_some() {
+                tty.endpoint.terminal.commit_pty_termios_if_generation(
+                    generation,
+                    drained_output_generation,
+                    updated,
+                    matches!(mode, SetMode::DrainFlush),
+                )
+            } else {
+                tty.endpoint.terminal.commit_termios_if_generation(
+                    generation,
+                    drained_output_generation,
+                    updated,
+                    matches!(mode, SetMode::DrainFlush),
+                )
+            }
+        })? {
             tty.wake.wake();
             return Ok(());
         }
@@ -580,7 +702,10 @@ mod kunits {
         });
         let endpoint = Arc::new(TtyEndpoint {
             terminal,
-            wake_source: Arc::downgrade(&source),
+            wake_source: {
+                let progress: Arc<dyn super::super::TtyProgress> = source.clone();
+                Arc::downgrade(&progress)
+            },
         });
         let wake = TtyWakeHandle { source };
         let placeholder = crate::device::console::open_console_stdin();
@@ -591,11 +716,10 @@ mod kunits {
     fn file_read_preserves_records_eof_nonblock_and_zero_length() {
         let terminal = Terminal::try_new(line()).unwrap();
         let file = no_worker_file(terminal.clone());
-        let blocking = FileIoCtx::new(FileOpStatusFlags::empty());
         let nonblocking = FileIoCtx::new(FileOpStatusFlags::NONBLOCK);
         let mut pos = 0;
 
-        assert_eq!(tty_read(&file, &mut pos, &mut [], blocking), Ok(0));
+        assert_eq!(tty_read(&file, &mut pos, &mut [], nonblocking), Ok(0));
         assert_eq!(
             tty_read(&file, &mut pos, &mut [0_u8; 1], nonblocking),
             Err(SysError::Again)
@@ -605,16 +729,25 @@ mod kunits {
             assert!(terminal.receive_rx_byte(*byte));
         }
         let mut first = [0_u8; 2];
-        assert_eq!(tty_read(&file, &mut pos, &mut first, blocking), Ok(2));
+        assert_eq!(tty_read(&file, &mut pos, &mut first, nonblocking), Ok(2));
         assert_eq!(&first, b"ab");
         let mut delimiter = [0_u8; 8];
-        assert_eq!(tty_read(&file, &mut pos, &mut delimiter, blocking), Ok(1));
+        assert_eq!(
+            tty_read(&file, &mut pos, &mut delimiter, nonblocking),
+            Ok(1)
+        );
         assert_eq!(&delimiter[..1], b"\n");
-        assert_eq!(tty_read(&file, &mut pos, &mut delimiter, blocking), Ok(3));
+        assert_eq!(
+            tty_read(&file, &mut pos, &mut delimiter, nonblocking),
+            Ok(3)
+        );
         assert_eq!(&delimiter[..3], b"cd\n");
 
         assert!(terminal.receive_rx_byte(TtyTermios::default().eof));
-        assert_eq!(tty_read(&file, &mut pos, &mut delimiter, blocking), Ok(0));
+        assert_eq!(
+            tty_read(&file, &mut pos, &mut delimiter, nonblocking),
+            Ok(0)
+        );
         assert_eq!(
             tty_read(&file, &mut pos, &mut delimiter, nonblocking),
             Err(SysError::Again)
@@ -625,13 +758,12 @@ mod kunits {
     fn file_write_is_binary_reports_short_progress_and_zero_length() {
         let terminal = Terminal::try_new(line()).unwrap();
         let file = no_worker_file(terminal.clone());
-        let blocking = FileIoCtx::new(FileOpStatusFlags::empty());
         let nonblocking = FileIoCtx::new(FileOpStatusFlags::NONBLOCK);
         let mut pos = 0;
 
-        assert_eq!(tty_write(&file, &mut pos, &[], blocking), Ok(0));
+        assert_eq!(tty_write(&file, &mut pos, &[], nonblocking), Ok(0));
         assert_eq!(
-            tty_write(&file, &mut pos, &[0xff, 0, b'\n'], blocking),
+            tty_write(&file, &mut pos, &[0xff, 0, b'\n'], nonblocking),
             Ok(3)
         );
         let mut binary = [0_u8; 4];
@@ -641,7 +773,7 @@ mod kunits {
 
         let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES - 1];
         assert_eq!(terminal.enqueue_output(&fill), fill.len());
-        assert_eq!(tty_write(&file, &mut pos, b"a\n", blocking), Ok(1));
+        assert_eq!(tty_write(&file, &mut pos, b"a\n", nonblocking), Ok(1));
         assert_eq!(
             tty_write(&file, &mut pos, b"\n", nonblocking),
             Err(SysError::Again)

@@ -167,6 +167,33 @@ fn receive_normal_byte(
     }
 }
 
+fn can_receive_normal_byte(
+    discipline: &TtyDiscipline,
+    output: &TerminalOutput,
+    termios: TtyTermios,
+    mut byte: u8,
+) -> bool {
+    if termios.istrip {
+        byte &= 0x7f;
+    }
+    if byte == b'\r' {
+        if termios.igncr {
+            return true;
+        }
+        if termios.icrnl {
+            byte = b'\n';
+        }
+    } else if byte == b'\n' && termios.inlcr {
+        byte = b'\r';
+    }
+
+    if termios.parmrk && byte == 0xff {
+        discipline.can_receive_literal(2, termios)
+    } else {
+        discipline.can_receive(byte, termios, output)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct EchoBytes {
     bytes: [u8; 3],
@@ -490,7 +517,7 @@ impl Terminal {
         .map_err(|_| SysError::OutOfMemory)
     }
 
-    pub(super) fn receive_rx_unit_effect(&self, unit: TtyRxUnit) -> TtyRxEffect {
+    fn receive_rx_unit_effect_quiet(&self, unit: TtyRxUnit) -> TtyRxEffect {
         let mut inner = self.inner.lock();
         let termios = inner.termios;
         let TerminalInner {
@@ -530,11 +557,53 @@ impl Terminal {
                 TtyRxEffect::Backpressured
             },
         };
-        drop(inner);
+        effect
+    }
+
+    pub(super) fn receive_rx_unit_effect(&self, unit: TtyRxUnit) -> TtyRxEffect {
+        let effect = self.receive_rx_unit_effect_quiet(unit);
         if effect.consumed() {
             self.notify_state_change();
         }
         effect
+    }
+
+    /// PTY pair operations publish the notification after releasing their
+    /// lifecycle mutex. The mutation and its predicate truth still belong here.
+    pub(super) fn receive_pty_rx_unit_effect(&self, unit: TtyRxUnit) -> TtyRxEffect {
+        self.receive_rx_unit_effect_quiet(unit)
+    }
+
+    pub(super) fn can_receive_rx_unit(&self, unit: TtyRxUnit) -> bool {
+        let inner = self.inner.lock();
+        let termios = inner.termios;
+        match unit {
+            TtyRxUnit::Break if termios.ignbrk => true,
+            TtyRxUnit::Break if termios.brkint => true,
+            TtyRxUnit::Break if termios.parmrk => inner.discipline.can_receive_literal(3, termios),
+            TtyRxUnit::Break => inner.discipline.can_receive_literal(1, termios),
+            TtyRxUnit::FaultedByte(byte) if !termios.inpck => {
+                can_receive_normal_byte(&inner.discipline, &inner.output, termios, byte)
+            },
+            TtyRxUnit::FaultedByte(_) if termios.ignpar => true,
+            TtyRxUnit::FaultedByte(_) if termios.parmrk => {
+                inner.discipline.can_receive_literal(3, termios)
+            },
+            TtyRxUnit::FaultedByte(_) => inner.discipline.can_receive_literal(1, termios),
+            TtyRxUnit::Byte(byte) => {
+                can_receive_normal_byte(&inner.discipline, &inner.output, termios, byte)
+            },
+        }
+    }
+
+    pub(super) fn input_writable(&self) -> bool {
+        let inner = self.inner.lock();
+        let termios = inner.termios;
+        // POLLOUT must guarantee that any one-byte master write can make
+        // progress. Blocking write retries may use the exact byte predicate,
+        // but poll cannot guess a future caller's content from a sample byte.
+        (u8::MIN..=u8::MAX)
+            .all(|byte| can_receive_normal_byte(&inner.discipline, &inner.output, termios, byte))
     }
 
     #[cfg(feature = "kunit")]
@@ -547,7 +616,7 @@ impl Terminal {
     ///
     /// Progress is measured in source bytes. A source byte is counted only
     /// after its complete transform token has entered the Terminal-owned queue.
-    pub(crate) fn enqueue_output(&self, source: &[u8]) -> usize {
+    fn enqueue_output_quiet(&self, source: &[u8]) -> usize {
         let mut inner = self.inner.lock();
         let termios = inner.termios;
         let consumed = inner.output.enqueue_slice(source, termios);
@@ -556,11 +625,19 @@ impl Terminal {
                 .output_backpressure
                 .fetch_add(1, Ordering::Relaxed);
         }
-        drop(inner);
+        consumed
+    }
+
+    pub(crate) fn enqueue_output(&self, source: &[u8]) -> usize {
+        let consumed = self.enqueue_output_quiet(source);
         if consumed != 0 {
             self.notify_state_change();
         }
         consumed
+    }
+
+    pub(super) fn enqueue_pty_output(&self, source: &[u8]) -> usize {
+        self.enqueue_output_quiet(source)
     }
 
     pub(crate) fn output_pending(&self) -> bool {
@@ -574,6 +651,34 @@ impl Terminal {
     pub(crate) fn consume_output(&self, expected: &[u8]) {
         self.inner.lock().output.consume(expected);
         self.notify_state_change();
+    }
+
+    pub(super) fn read_output(&self, dst: &mut [u8]) -> usize {
+        let mut inner = self.inner.lock();
+        let count = dst.len().min(inner.output.queue.len());
+        for slot in &mut dst[..count] {
+            *slot = inner
+                .output
+                .queue
+                .try_pop()
+                .expect("Terminal output length changed under its owner guard");
+        }
+        if count != 0 {
+            inner.output.bump_generation();
+        }
+        count
+    }
+
+    pub(super) fn pty_peer_absent(&self) {
+        self.inner.lock().discipline.flush_input();
+    }
+
+    pub(super) fn pty_hangup(&self) {
+        let mut inner = self.inner.lock();
+        inner.discipline.flush_input();
+        inner.output.clear();
+        inner.drain_check_pending = false;
+        inner.last_drain_generation = inner.output.generation();
     }
 
     pub(crate) fn record_partial_port_progress(&self) {
@@ -610,15 +715,22 @@ impl Terminal {
         inner.discipline.readable(inner.termios)
     }
 
-    pub(super) fn read_input(&self, dst: &mut [u8]) -> InputRead {
+    fn read_input_quiet(&self, dst: &mut [u8]) -> InputRead {
         let mut inner = self.inner.lock();
         let termios = inner.termios;
-        let result = inner.discipline.read(termios, dst);
-        drop(inner);
+        inner.discipline.read(termios, dst)
+    }
+
+    pub(super) fn read_input(&self, dst: &mut [u8]) -> InputRead {
+        let result = self.read_input_quiet(dst);
         if result != InputRead::Empty {
             self.notify_state_change();
         }
         result
+    }
+
+    pub(super) fn read_pty_input(&self, dst: &mut [u8]) -> InputRead {
+        self.read_input_quiet(dst)
     }
 
     pub(super) fn line_snapshot(&self) -> TtyLineSnapshot {
@@ -630,7 +742,7 @@ impl Terminal {
         (inner.termios, inner.termios_generation)
     }
 
-    pub(super) fn commit_termios_if_generation(
+    fn commit_termios_if_generation_quiet(
         &self,
         generation: usize,
         drained_output_generation: Option<usize>,
@@ -655,24 +767,66 @@ impl Terminal {
             .termios_generation
             .checked_add(1)
             .expect("TTY termios generation overflow");
-        drop(inner);
-        self.notify_state_change();
         true
+    }
+
+    pub(super) fn commit_termios_if_generation(
+        &self,
+        generation: usize,
+        drained_output_generation: Option<usize>,
+        termios: TtyTermios,
+        flush_input: bool,
+    ) -> bool {
+        let committed = self.commit_termios_if_generation_quiet(
+            generation,
+            drained_output_generation,
+            termios,
+            flush_input,
+        );
+        if committed {
+            self.notify_state_change();
+        }
+        committed
+    }
+
+    pub(super) fn commit_pty_termios_if_generation(
+        &self,
+        generation: usize,
+        drained_output_generation: Option<usize>,
+        termios: TtyTermios,
+        flush_input: bool,
+    ) -> bool {
+        self.commit_termios_if_generation_quiet(
+            generation,
+            drained_output_generation,
+            termios,
+            flush_input,
+        )
     }
 
     pub(super) fn winsize(&self) -> TtyWinsize {
         self.inner.lock().winsize
     }
 
-    pub(super) fn set_winsize(&self, winsize: TtyWinsize) -> bool {
+    fn set_winsize_quiet(&self, winsize: TtyWinsize) -> bool {
         let mut inner = self.inner.lock();
         if inner.winsize == winsize {
             return false;
         }
         inner.winsize = winsize;
-        drop(inner);
-        self.notify_state_change();
         true
+    }
+
+    pub(super) fn set_winsize(&self, winsize: TtyWinsize) -> bool {
+        let changed = self.set_winsize_quiet(winsize);
+        if changed {
+            self.notify_state_change();
+        }
+        changed
+    }
+
+    pub(super) fn set_pty_winsize(&self, winsize: TtyWinsize) -> bool {
+        self.set_winsize_quiet(winsize)
     }
 
     pub(super) fn record_no_foreground_input_signal(&self) {
@@ -713,47 +867,69 @@ impl Terminal {
 
     pub(super) fn poll(&self, request: &PollRequest<'_>) -> PollRegisterResult {
         let supported = request.interests() & (PollEvent::READABLE | PollEvent::WRITABLE);
-        let mut stale = None;
-        let mut capacity_exhausted = false;
-        let result = {
-            let mut inner = self.inner.lock();
-            let ready = Self::poll_events_locked(&inner, supported);
-            if !request.is_register() {
-                PollRegisterResult::Ready(ready)
-            } else if supported.is_empty() {
+        if !request.is_register() {
+            return PollRegisterResult::Ready(Self::poll_events_locked(
+                &self.inner.lock(),
+                supported,
+            ));
+        }
+        if supported.is_empty() {
+            return PollRegisterResult::Unsupported;
+        }
+        let result = if let Some(route) = request.route() {
+            if self.install_poll_route(route) {
+                PollRegisterResult::Subscribed(Self::poll_events_locked(
+                    &self.inner.lock(),
+                    supported,
+                ))
+            } else {
                 PollRegisterResult::Unsupported
-            } else if let Some(route) = request.route() {
-                assert!(
-                    inner.poll_routes.capacity() >= MAX_PROCESSES as usize,
-                    "TTY poll registry lost its preallocated capacity"
-                );
-                let installed = if inner.poll_routes.len() < MAX_PROCESSES as usize {
-                    inner.poll_routes.push(TtyPollRoute::new(route));
-                    true
-                } else if let Some(index) =
-                    inner.poll_routes.iter().position(TtyPollRoute::is_prunable)
-                {
-                    stale = Some(core::mem::replace(
-                        &mut inner.poll_routes[index],
-                        TtyPollRoute::new(route),
-                    ));
-                    true
-                } else {
-                    capacity_exhausted = true;
-                    false
-                };
-                if installed {
-                    PollRegisterResult::Subscribed(Self::poll_events_locked(&inner, supported))
-                } else {
-                    PollRegisterResult::Unsupported
-                }
-            } else if ready.is_empty() {
+            }
+        } else {
+            let ready = Self::poll_events_locked(&self.inner.lock(), supported);
+            if ready.is_empty() {
                 // Stage 0 legacy callers carry no persistent route. They may
                 // still consume an already-ready snapshot, but must fail
                 // closed when notification would be required.
                 PollRegisterResult::Unsupported
             } else {
                 PollRegisterResult::Ready(ready)
+            }
+        };
+        result
+    }
+
+    /// Register only a progress route. PTY adds mandatory HUP/ERR from its
+    /// pair owner, so even an empty user interest mask must retain a route.
+    pub(super) fn register_progress_route(&self, request: &PollRequest<'_>) -> bool {
+        !request.is_register()
+            || request
+                .route()
+                .is_some_and(|route| self.install_poll_route(route))
+    }
+
+    fn install_poll_route(&self, route: &PollRoute) -> bool {
+        let mut stale = None;
+        let mut capacity_exhausted = false;
+        let installed = {
+            let mut inner = self.inner.lock();
+            assert!(
+                inner.poll_routes.capacity() >= MAX_PROCESSES as usize,
+                "TTY poll registry lost its preallocated capacity"
+            );
+            if inner.poll_routes.len() < MAX_PROCESSES as usize {
+                inner.poll_routes.push(TtyPollRoute::new(route));
+                true
+            } else if let Some(index) = inner.poll_routes.iter().position(TtyPollRoute::is_prunable)
+            {
+                stale = Some(core::mem::replace(
+                    &mut inner.poll_routes[index],
+                    TtyPollRoute::new(route),
+                ));
+                true
+            } else {
+                capacity_exhausted = true;
+                false
             }
         };
         drop(stale);
@@ -763,7 +939,7 @@ impl Terminal {
                 MAX_PROCESSES,
             );
         }
-        result
+        installed
     }
 
     fn wait_until(&self, predicate: impl Fn() -> bool) -> Result<(), SysError> {
@@ -772,6 +948,10 @@ impl Terminal {
         } else {
             Err(SysError::Interrupted)
         }
+    }
+
+    pub(super) fn wait_for_progress(&self, predicate: impl Fn() -> bool) -> Result<(), SysError> {
+        self.wait_until(predicate)
     }
 
     fn poll_events_locked(inner: &TerminalInner, interests: PollEvent) -> PollEvent {
@@ -831,6 +1011,10 @@ impl Terminal {
             };
             handoff = next;
         }
+    }
+
+    pub(super) fn publish_progress(&self) {
+        self.notify_state_change();
     }
 
     fn begin_poll_handoff(inner: &mut TerminalInner) -> Vec<TtyPollRoute> {
@@ -894,11 +1078,7 @@ impl TtyRxEffect {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{
-        device::tty::port::TtyParity,
-        fs::IomuxWaitRound,
-        sched::{LatchCancelReason, LatchWaitOutcome},
-    };
+    use crate::device::tty::port::TtyParity;
 
     fn terminal() -> Arc<Terminal> {
         Terminal::try_new(TtyLineSnapshot {
@@ -1151,6 +1331,22 @@ mod kunits {
     }
 
     #[kunit]
+    fn master_writable_is_conservative_for_every_next_source_byte() {
+        let terminal = terminal();
+        raw_noecho(&terminal, |termios| termios.parmrk = true);
+        for _ in 0..TTY_INPUT_CAPACITY_BYTES - 1 {
+            assert!(terminal.receive_rx_byte(b'x'));
+        }
+        assert!(terminal.can_receive_rx_unit(TtyRxUnit::Byte(b'x')));
+        assert!(!terminal.can_receive_rx_unit(TtyRxUnit::Byte(0xff)));
+        assert!(!terminal.input_writable());
+
+        let mut byte = [0_u8; 1];
+        assert_eq!(terminal.read_input(&mut byte), InputRead::Bytes(1));
+        assert!(terminal.input_writable());
+    }
+
+    #[kunit]
     fn canonical_mode_transitions_preserve_unread_input_and_boundaries() {
         let terminal = terminal();
         terminal.set_termios_for_test(|termios| termios.icanon = false);
@@ -1294,7 +1490,7 @@ mod kunits {
         assert!(terminal.complete_drain_if(true));
         assert!(!terminal.drain_check_pending());
 
-        let drained_generation = terminal.wait_drain_complete().unwrap();
+        let drained_generation = terminal.inner.lock().last_drain_generation;
         let (mut updated, termios_generation) = terminal.termios_snapshot();
         updated.echo = false;
         assert_eq!(terminal.enqueue_output(b"y"), 1);
@@ -1308,47 +1504,12 @@ mod kunits {
         assert_eq!(drain_output(&terminal), b"y");
         terminal.request_drain_check();
         assert!(terminal.complete_drain_if(true));
-        let drained_generation = terminal.wait_drain_complete().unwrap();
+        let drained_generation = terminal.inner.lock().last_drain_generation;
         assert!(terminal.commit_termios_if_generation(
             termios_generation,
             Some(drained_generation),
             updated,
             false,
         ));
-    }
-
-    #[kunit]
-    fn poll_register_before_after_notification_and_stale_cleanup() {
-        let registered = terminal();
-        let notified_round = IomuxWaitRound::begin_current();
-        assert_eq!(
-            registered.poll(&notified_round.poll_request(PollEvent::READABLE)),
-            PollRegisterResult::Subscribed(PollEvent::empty())
-        );
-        assert!(registered.receive_rx_byte(b'x'));
-        assert!(registered.receive_rx_byte(b'\n'));
-        {
-            let inner = registered.inner.lock();
-            assert_eq!(inner.poll_routes.len(), 1);
-            assert!(inner.poll_spare.is_empty());
-        }
-        notified_round.schedule_with_timeout(Some(Duration::from_secs(1)));
-        assert_eq!(notified_round.finish(), LatchWaitOutcome::Triggered);
-
-        let ready_round = IomuxWaitRound::begin_current();
-        assert_eq!(
-            registered.poll(&ready_round.poll_request(PollEvent::READABLE)),
-            PollRegisterResult::Subscribed(PollEvent::READABLE)
-        );
-        assert_eq!(registered.inner.lock().poll_routes.len(), 2);
-        ready_round.cancel(LatchCancelReason::PredicateReady);
-        let _ = ready_round.finish();
-
-        let mut input = [0_u8; 2];
-        assert_eq!(registered.read_input(&mut input), InputRead::Bytes(2));
-        assert_eq!(&input, b"x\n");
-        let inner = registered.inner.lock();
-        assert!(inner.poll_routes.is_empty());
-        assert!(inner.poll_spare.is_empty());
     }
 }

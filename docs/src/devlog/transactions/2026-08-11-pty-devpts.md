@@ -1,6 +1,6 @@
 # 2026-08-11 - PTY / devpts
 
-**Status:** Active / R1 / Stage 1 Closed
+**Status:** Active / R1 / Stage 2 Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260810-pty-devpts R1](../../rfcs/pty-devpts/index.md)
 **Implementation Route:** [Stage 1--4](../../rfcs/pty-devpts/implementation.md)
@@ -10,8 +10,8 @@
 
 本transaction为长期、多Stage RFC保存checkpoint execution、review、validation与下一授权handoff。target、owner、
 ABI、Contract Impact、acceptance与Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划或
-current contract。开发者先后独立授权Stage 1 Checkpoint 1与Checkpoint 2；两个授权均已消费并关闭。Stage 2--4与任何
-contract cutover仍未授权。
+current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2与Stage 2；三个授权均已消费并关闭。Stage 3--4
+与任何contract cutover仍未授权。
 
 ## Checkpoint Log
 
@@ -103,9 +103,52 @@ LA64 build/runtime、PTY test app、LTP、tmux与sshd均Not Run，且不得从�
 **Next / Stop:** Stage 1 Closed。执行严格停止；Stage 2--4保持Future且未获execution authorization，
 `PTY-DEVPTS-CUTOVER`仍Not Effective。
 
+### 2026-08-11 - Stage 2 activation and closure
+
+**Change:** 从`dev/drc/alpha@c39bb65c`激活Stage 2。新增owner-private PTY pair capability：`Terminal`继续唯一拥有
+termios/winsize/line discipline与stream buffers；pair只拥有phase、master liveness与slave-description participation。
+master write进入shared Terminal RX conditioning，slave write/echo进入同一output并由master读取；zero slave descriptions
+只形成可reopen peer absence，master final release形成不可复活retirement。prepared master/slave description把全部fallible
+prepare放在participation前，并由infallible success tail消费exact `Arc<FileDesc>`，避免ghost participant。
+
+description lifecycle复用creation-time single `FileDescOps::final_release`且保持flock-before-hook；`operation: Mutex<()>`只
+串行化bounded Terminal commit与final release，不拥有stream或pair truth，也不跨wait、relation effect或notification持有。
+poll register路径先安装Terminal progress route并保持non-sleeping；snapshot/final scan在iomux round退役后取得`operation`，
+从同一pair/Terminal predicates投影READABLE/WRITABLE/HUP/ERR。master不是semantic endpoint，不取得relation operation，
+Stage 2没有提交relation enrollment，也没有建立devpts、ptmx、index、pathname或PTY UAPI。
+
+**Review / Feedback:** 首轮独立review依次关闭notification-under-operation、prepared-description ghost commit、empty-interest
+HUP subscription、sample-byte writability与unused test fixture等blocker。runtime暴露poll在active iomux wait中取得sleepable
+mutex；route correction把register保留为route-first non-sleeping读取，并让最终snapshot在round retire后串行化pair/Terminal
+truth。随后source review发现snapshot也不能无锁跨retirement/flush组合，最终形成上述register/snapshot双路径。
+
+维护者进一步明确KUnit不得触碰scheduler、timer、sleep、wait或人为interleaving，也不承担并发证明。最终删除TTY
+worker/KThread/Event-timeout、PTY/Terminal iomux wait-round及跨owner file-table fixture/alias-fork-cloexec composition测试，
+共移除12项；TTY FileOps与PTY remaining KUnit全部使用NONBLOCK，Terminal drain test直接检查owner state。当前TTY/PTY
+KUnit只证明pure deterministic transform/buffer/data-plane/snapshot。concurrent participate-vs-retire、final close、
+close-vs-poll、lost-wake与锁序仅由source/lock/linearization review证明；没有runtime interleaving proof。最终独立review
+为0 Apollyon / 0 Keter / 0 Euclid，Architecture Friction Scan未发现需保留的具体摩擦。
+
+**Contract Cutover:** None。current TTY、opened-description、iomux/epoll、VFS、task/Signal/job-control contracts与register均
+未修改；`PTY-DEVPTS-CUTOVER`仍Not Effective。
+
+**Validation:** `just fmt kernel --check`与`git diff --check`通过。最终canonical
+`./scripts/run-tty-test-rv64.sh --rootfs-sudo --busybox <mounted-rv64-busybox> --sdcard
+<preliminary-rv64-sdcard-master> --mode auto --log build/pty-devpts-stage2-rv64.log`通过：repository RV64 release build完成，
+616/616 KUnit通过；remaining TTY/PTY pure tests均为`ok`；guest `TTYTEST:SUMMARY:PASS:50`，BusyBox vi/ash与existing serial
+data-plane/relation oracle通过，host报告`TTY-HARNESS:PASS:auto-byte-checks`并正常关机。repository-wide KUnit总数只作
+build/regression事实，不承担并发证明；本次serial userspace结果不外推未公开PTY runtime。
+
+`just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`通过，final symbol table为6255 entries。LA64
+runtime、PTY test app、LTP、tmux与sshd均Not Run。direct rootfs mode曾在进入kernel/QEMU前因libguestfs/supermin读取
+host `/boot`失败；最终按wrapper支持路径使用`--rootfs-sudo`通过，不作为kernel failure。
+
+**Next / Stop:** Stage 2 Closed。执行严格停止；Stage 3--4保持Future且未获execution authorization，current contracts、
+register与`PTY-DEVPTS-CUTOVER`保持不变。
+
 ## Current Handoff
 
-当前live source已经关闭runtime semantic endpoint substrate：全部existing serial production caller使用semantic endpoint /
-physical attachment单一路径，并通过runtime relation enrollment/retirement保持serial ABI、devnum、boot fd、console owner、
-Terminal和relation行为。transaction保持Active只因为父RFC的Stage 2--4尚未执行；本记录不授权自动继续，也不把Stage 1
-证据写成PTY target或contract closure。
+当前live source已经关闭runtime semantic endpoint substrate与owner-private PTY pair/data-plane/description effect：existing
+serial caller继续使用semantic endpoint/physical attachment单一路径，Stage 2 capability仍不可由userspace发现。transaction
+保持Active只因为父RFC的Stage 3--4尚未执行；本记录不授权自动继续，也不把serial userspace、KUnit计数或source review
+外推为公开PTY ABI/runtime acceptance或contract cutover。

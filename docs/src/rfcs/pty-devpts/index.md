@@ -11,7 +11,7 @@
 本 RFC 是 PTY / devpts R1 Accepted Target 的 public canonical source。它不覆盖 current contract，也不授权实现或
 cutover。R1 acceptance轮只接受target、owner、ABI、resource guarantee、contract delta与acceptance boundary；后续
 [实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点。Stage 1的两个execution checkpoint已在各自授权下
-关闭，未产生contract cutover；Stage 2--4仍未获execution authorization。
+关闭，Stage 2也已在独立授权下关闭，均未产生contract cutover；Stage 3--4仍未获execution authorization。
 
 ## 摘要
 
@@ -394,8 +394,10 @@ review、validation与handoff。R1 review的已接受结论已经折回canonical
 
 - Accepted Target / R1。
 - Implementation route：Draft；Stage解析状态由[实施路线](./implementation.md)统一拥有。
-- Implementation authorization：Stage 1已消费并关闭；Stage 2--4为None。
+- Implementation authorization：Stage 1--2已消费并关闭；Stage 3--4为None。
 - Contract cutover：None。
 - Stage 1：Closed。最终candidate的RV64 build、622项KUnit、TTY 50/50、auto/vi/ash与正常关机已通过；详见
   transaction。
-- LA64 build/runtime、PTY test app、LTP、sshd、tmux：Not Run。
+- Stage 2：Closed。最终candidate的RV64 build、616项KUnit、TTY 50/50、auto/vi/ash与正常关机通过，LA64 build
+  通过；KUnit计数只作build/regression事实，并发、lost-wake与锁序只由source review证明；详见transaction。
+- LA64 runtime、PTY test app、LTP、sshd、tmux：Not Run。

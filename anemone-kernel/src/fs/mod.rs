@@ -36,8 +36,6 @@ mod socket;
 
 pub mod api;
 
-#[cfg(feature = "kunit")]
-pub(crate) use self::iomux::IomuxWaitRound;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
