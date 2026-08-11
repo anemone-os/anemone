@@ -418,9 +418,9 @@ Not Run。current contract、register与`PTY-DEVPTS-CUTOVER`保持不变；Stage
 
 ## Stage 3 — System devpts、allocation/admission 与跨 owner cleanup
 
-**解析状态：** Resolved / Ready / Not Active
+**解析状态：** Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Active
 
-**Execution Authorization：** None；Checkpoint 1与Checkpoint 2均未授权
+**Execution Authorization：** Checkpoint 1已消费并关闭；Checkpoint 2未授权
 
 **Contract Cutover：** None
 
@@ -578,6 +578,20 @@ state owner与adapter边界。该checkpoint独立安全并保持全部production
 **Cutover / Exit：** None。全部existing consumer迁移到单一路径、validation与Architecture Friction Scan关闭后，Checkpoint 1
 可记为Closed并立即停止；Stage 3尚未关闭，Checkpoint 2仍需单独授权。若拆分暴露必须改变owner/public API/contract
 或保留过渡adapter才能工作，停止并上报，不把它伪装成结构维护。
+
+**Execution Result（2026-08-11）：** Closed。`tty/pty.rs`按composition root、pair lifecycle/participation与opened-description/
+FileOps拆为目录模块；`tty/file.rs`按generic operation、relation ioctl与termios/winsize ABI职责拆为目录模块。existing
+module entry、consumer、有效visibility、type/trait semantics、pair/Terminal/relation/opened-description truth与
+final-release顺序保持；master FileOps只消费description capability，不再穿透pair guard或private fields。原
+`PtySlaveDescription`的`Opaque` marker保留，termios-only KUnit随被测语义移入`file/termios.rs`，PTY composition KUnit仍在
+最低共同owner。
+
+source/module/bypass audit与独立review最终为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe；Architecture Friction Scan未发现需
+保留的具体摩擦。final candidate通过`git diff --check`、`just fmt kernel --check`与`mdbook build docs`；canonical RV64
+wrapper完成609/609 KUnit、existing serial `TTYTEST:SUMMARY:PASS:50`、BusyBox vi/ash、host byte oracle与orderly shutdown；
+canonical LA64 repository build通过，final symbol table为6451 entries。没有devpts/ptmx/UAPI、Checkpoint 2 dormant surface、
+contract cutover或register变化；LA64 runtime、PTY app、LTP、tmux与sshd保持Not Run。执行在Checkpoint 1停止，Checkpoint 2
+仍需维护者单独授权。
 
 ### Checkpoint 2 — Hidden devpts / open / cleanup integration
 

@@ -10,8 +10,9 @@
 
 本 RFC 是 PTY / devpts R2 Accepted Target 的 public canonical source。它不覆盖 current contract，也不授权实现或
 cutover。R2 acceptance轮只接受target、owner、ABI、resource guarantee、contract delta与acceptance boundary；后续
-[实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点。Stage 1的两个execution checkpoint已在各自授权下
-关闭，Stage 2也已在独立授权下关闭，均未产生contract cutover；Stage 3--4仍未获execution authorization。
+[实施路线](./implementation.md)只组织Stage 1--4的依赖与停止点。Stage 1的两个execution checkpoint与Stage 2已在各自
+授权下关闭，Stage 3 Checkpoint 1也已在独立授权下关闭，均未产生contract cutover；Stage 3 Checkpoint 2与Stage 4仍未获
+execution authorization。
 
 ## 摘要
 

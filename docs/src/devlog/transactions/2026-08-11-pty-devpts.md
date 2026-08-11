@@ -1,8 +1,8 @@
 # 2026-08-11 - PTY / devpts
 
-**Status:** Active / R1 / Stage 2 Closed
+**Status:** Active / R2 / Stage 3 Checkpoint 1 Closed
 **Owners:** doruche, Codex
-**Canonical Target:** [RFC-20260810-pty-devpts R1](../../rfcs/pty-devpts/index.md)
+**Canonical Target:** [RFC-20260810-pty-devpts R2](../../rfcs/pty-devpts/index.md)
 **Implementation Route:** [Stage 1--4](../../rfcs/pty-devpts/implementation.md)
 **Contract Delta:** None；`PTY-DEVPTS-CUTOVER`与父RFC列出的全部Introduce/Refine ID仍Not Effective
 
@@ -10,8 +10,8 @@
 
 本transaction为长期、多Stage RFC保存checkpoint execution、review、validation与下一授权handoff。target、owner、
 ABI、Contract Impact、acceptance与Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划或
-current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2与Stage 2；三个授权均已消费并关闭。Stage 3--4
-与任何contract cutover仍未授权。
+current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2、Stage 2与Stage 3 Checkpoint 1；四个授权均已
+消费并关闭。Stage 3 Checkpoint 2、Stage 4与任何contract cutover仍未授权。
 
 ## Checkpoint Log
 
@@ -146,9 +146,51 @@ host `/boot`失败；最终按wrapper支持路径使用`--rootfs-sudo`通过，�
 **Next / Stop:** Stage 2 Closed。执行严格停止；Stage 3--4保持Future且未获execution authorization，current contracts、
 register与`PTY-DEVPTS-CUTOVER`保持不变。
 
+### 2026-08-11 - Stage 3 Checkpoint 1 activation and closure
+
+**Change:** 从`dev/drc/alpha@1e7676c6`激活Checkpoint 1。`device::tty::pty`按composition root、pair
+lifecycle/participation与opened-description/FileOps拆为目录模块；`device::tty::file`按generic TTY operation、relation ioctl
+与termios/winsize ABI职责拆为目录模块。existing module entry、consumer与有效visibility保持，`PtyPairState`原
+crate-visible路径和`PtySlaveDescription`原TTY-owner-visible路径经窄re-export继续成立；没有public API、trait语义或
+shared contract扩张。
+
+master read/write/poll的既有逻辑收回`PtyMasterDescription`窄operation API，使FileOps adapter不再读取pair guard、
+pair-owned Terminal或private fields。Terminal effect仍在`operation` guard内完成；notification、foreground relation
+callback与callback-false accounting仍按原顺序在guard外执行；wait不持`operation`，poll register先安装route且不取mutex，
+final snapshot才取mutex，final release仍先pair release再执行base/fanotify effect。relation callback只取得semantic
+endpoint。`PtySlaveDescription`原`Opaque` marker保留，termios-only KUnit移到被测`file/termios.rs`末尾，PTY composition
+KUnit保留在最低共同owner的`pty/mod.rs`。
+
+**Review / Feedback:** 本地module-dependency audit发现初版拆分后的master FileOps仍直接读取pair guard；实现没有把该
+owner penetration写成新常态，而是以上述description capability关闭。独立subagent首轮review为0 Apollyon / 0 Keter并指出
+2个Euclid：拆分时遗漏`PtySlaveDescription`的`Opaque` marker，以及termios-only KUnit仍从parent module回引private helper。
+两项均按原type semantics与KUnit placement规则修正。最终复核为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe；Architecture
+Friction Scan未发现第二份truth、owner穿透、private representation泄漏、public surface增长、caller/arch/test特判、临时
+bridge、隐含cleanup顺序或用弱化oracle换取拆分闭合。
+
+source/mechanical audit确认所有既有consumer迁移到唯一目录模块路径；`Terminal`、pair、relation与opened-description仍各有
+一份truth；pair/file/relation依赖方向没有引入完整Task、file table、VFS private state或relation private state；没有
+devpts/ptmx/UAPI、VFS activation、unused facade、compat wrapper、old/new双路径或Checkpoint 2 dormant production surface。
+
+**Contract Cutover:** None。current TTY、opened-description、VFS、iomux/epoll、task/Signal/job-control contracts与register均
+未修改；existing serial ABI、generic serial `O_NOCTTY` baseline和`PTY-DEVPTS-CUTOVER`保持不变。
+
+**Validation:** `git diff --check`、`just fmt kernel --check`与`mdbook build docs`通过。final candidate的canonical
+`./scripts/run-tty-test-rv64.sh --busybox <mounted-rv64-busybox> --sdcard <preliminary-rv64-sdcard-master> --mode auto
+--log build/pty-devpts-stage3-ckpt1-rv64.log`以direct rootfs mode通过：repository RV64 release build完成，609/609 KUnit
+通过；TTY/PTY owner-local tests继续以原语义路径运行；guest `TTYTEST:SUMMARY:PASS:50`，BusyBox vi/ash、host byte oracle与
+orderly shutdown通过。canonical `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`通过，final symbol
+table为6451 entries。
+
+RV64结果只证明existing serial与owner-local KUnit回归，不外推未公开PTY runtime。LA64 runtime、PTY Rust test app、LTP、
+tmux与sshd均Not Run。
+
+**Next / Stop:** Stage 3 Checkpoint 1 Closed。执行严格停止；Stage 3 Checkpoint 2与Stage 4仍未获execution authorization，
+Stage 3整体尚未关闭，current contracts、register与`PTY-DEVPTS-CUTOVER`保持不变。
+
 ## Current Handoff
 
-当前live source已经关闭runtime semantic endpoint substrate与owner-private PTY pair/data-plane/description effect：existing
-serial caller继续使用semantic endpoint/physical attachment单一路径，Stage 2 capability仍不可由userspace发现。transaction
-保持Active只因为父RFC的Stage 3--4尚未执行；本记录不授权自动继续，也不把serial userspace、KUnit计数或source review
-外推为公开PTY ABI/runtime acceptance或contract cutover。
+当前live source已经关闭runtime semantic endpoint substrate、owner-private PTY pair/data-plane/description effect与
+TTY-owner-local结构拆分：existing serial caller继续使用semantic endpoint/physical attachment单一路径，Stage 2 capability
+仍不可由userspace发现。transaction保持Active只因为Stage 3 Checkpoint 2与Stage 4尚未执行；本记录不授权自动继续，也不把
+serial userspace、KUnit计数或source review外推为公开PTY ABI/runtime acceptance或contract cutover。
