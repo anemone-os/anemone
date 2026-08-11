@@ -6,8 +6,8 @@
     "properties": {
         "target": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Canonical SystemTarget filename slug."
+            "minLength": 1,
+            "description": "Canonical SystemTarget name or workspace-relative path."
         },
         "kernel-config": {
             "type": "string",

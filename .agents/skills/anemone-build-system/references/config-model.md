@@ -21,15 +21,21 @@ Root `kconfig` and `conf/kconfs/default.toml` own kernel feature, policy, and ca
 
 ### Explicit Build Input
 
-`conf/build-presets/` names a SystemTarget, workspace-relative KernelConfig, and kernel-only Cargo
-profile. Build and ordinary QEMU share one resolver and require either an explicit preset or a
-complete low-level tuple. There is no developer-local or tracked default selection source, and
-presets do not carry presentation defaults.
+`conf/build-presets/` contains canonical named combinations of a SystemTarget, workspace-relative
+KernelConfig, and kernel-only Cargo profile. Build and ordinary QEMU share one resolver and require
+either an explicit preset or a complete low-level tuple. A plain canonical preset name resolves
+there first and falls back to the exact workspace-relative input only when the canonical path does
+not exist; `./` forces exact workspace lookup. There is no developer-local or tracked default
+selection source, and presets do not carry presentation defaults.
 
 ### System Target
 
-`conf/system-targets/` owns the selected Platform reference, root mount/source, and closed initial-program source:
-rootfs metadata or a referenced embedded app. Either variant may carry a complete non-empty argv including argv[0];
+`conf/system-targets/` contains canonical SystemTargets that own the selected Platform reference,
+root mount/source, and closed initial-program source. SystemTarget and Platform locators use the
+same canonical-first/workspace-fallback rule as BuildPreset locators, including inside manifests;
+nested paths remain workspace-root-relative rather than manifest-relative. A present canonical file
+that is invalid, unreadable, not regular or resolves outside the workspace fails closed. The target's
+closed initial-program source is rootfs metadata or a referenced embedded app. Either variant may carry a complete non-empty argv including argv[0];
 omission uses the resolved executable path as the sole argument. An embedded app reference names an existing app manifest; kernel build
 uses the common app exporter and rejects identity mismatch, non-singleton output, non-regular output, or an artifact
 without an execute bit before kernel compilation. A SystemTarget does not own machine constants, kernel parameters,

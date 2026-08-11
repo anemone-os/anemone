@@ -13,6 +13,11 @@
   selection, kernel Cargo profile and action-local presentation do not belong to KernelConfig.
 - `conf/build-presets/<slug>.toml` names a closed target, workspace-relative KernelConfig and
   kernel-only Cargo profile tuple. Presets contain no action presentation defaults.
+- BuildPreset, SystemTarget and Platform references first resolve a plain canonical slug under the
+  corresponding directory above. If that canonical file does not exist, the same input is resolved
+  exactly as a workspace-relative path; a leading `./` skips canonical lookup. Existing canonical
+  files fail closed on resolution, file-type, read or parse errors rather than falling back. Paths in
+  nested manifests remain relative to the workspace root, not to the referring manifest.
 - Each configuration layer keeps its format example under the `example` identity; parser and
   resolver tests consume those examples instead of treating the changing production inventory as
   a test-owned support list.

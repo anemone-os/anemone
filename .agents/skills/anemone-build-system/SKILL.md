@@ -41,6 +41,12 @@ Keep each concern in its owning layer:
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
 
+Tracked BuildPreset, SystemTarget and Platform objects remain canonical under their `conf/`
+directories. Their typed locators may also select an explicit workspace-relative file: a plain slug
+tries the canonical object first and falls back only when that path does not exist, while `./` forces
+the workspace path. Nested locator paths are workspace-root-relative. Do not reinterpret a present
+but invalid canonical object as permission to fall back.
+
 Kernel build owns the generated initial-program input. `RootfsEntry` emits its typed tag and optional complete argv;
 `EmbeddedApp` resolves the referenced app through the same architecture-specific `build_app()` exporter used by
 ordinary app/rootfs actions, requires exactly one executable regular artifact, and emits an ignored typed Rust

@@ -82,8 +82,12 @@ mod tests {
     }
 
     #[test]
-    fn build_preset_ref_remains_filename_identity() {
-        assert!(BuildPresetRef::new("example").is_ok());
+    fn build_preset_ref_accepts_bounded_workspace_paths() {
+        assert_eq!(BuildPresetRef::new("example").unwrap().as_str(), "example");
+        assert_eq!(
+            BuildPresetRef::new("local/preset.toml").unwrap().as_str(),
+            "local/preset.toml"
+        );
         assert!(BuildPresetRef::new("../preset").is_err());
     }
 

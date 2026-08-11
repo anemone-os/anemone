@@ -35,6 +35,8 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm whether the command creates or overwrites root `kconfig`.
 - Resolve the explicitly selected target and Platform through the shared resolver.
+- For a path-backed preset, target or Platform, confirm the resolver reports the selected
+  workspace-relative path. A present canonical file must fail closed; only absence permits fallback.
 - Reject bare, partial, or mixed preset/tuple input instead of filling it from local state.
 
 ### Kernel Build

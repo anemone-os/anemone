@@ -65,10 +65,17 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     log_progress!(
         "RESOLVE",
         &format!(
-            "selection source={} target={} platform={} kernel-config={} profile={} platform-output={} network={}",
+            "selection source={}{} target={} target-config={} platform={} platform-config={} kernel-config={} profile={} platform-output={} network={}",
             action.selection_source.as_str(),
+            action
+                .selection_source
+                .config_path()
+                .map(|path| format!(" preset-config={}", path.display()))
+                .unwrap_or_default(),
             action.system.target_ref,
+            action.system.target_path.display(),
             action.system.platform_ref,
+            action.system.platform_path.display(),
             action.system.kernel_config_ref,
             action.system.profile.as_str(),
             action
