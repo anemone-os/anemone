@@ -1,9 +1,8 @@
-# 研究附录
+# 优化研究附录
 
-本目录保存围绕代表性优化整理的公开研究附录。
-附录必须能够独立阅读，并由 BuildStorm 优化报告正文按需引用。
+本目录保存三项代表性优化的详细设计、对照方法和结果。每篇附录都可以独立阅读，正文只保留评委理解优化所需的核心内容。
 
 - [TLB 优化研究](./tlb-optimization.md)
-- [Positive dentry residency](./positive-dentry-residency.md)
-- [Page-bounded C-string copy](./page-bounded-c-string-copy.md)
+- [复用已解析的目录项](./positive-dentry-residency.md)
+- [按页批量读取用户字符串](./page-bounded-c-string-copy.md)
 - [候选筛选记录](./candidate-screening.md)

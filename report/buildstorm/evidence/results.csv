@@ -64,6 +64,6 @@ P02,rv64-smp1-cstring,clean Cargo,baseline,A2-5,3.64,s,f2613a836fc15c7b2fd920b22
 P02,rv64-smp1-cstring,clean Cargo,baseline,A2-6,3.67,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
 P02,rv64-smp1-cstring,clean Cargo,baseline,A2-7,3.73,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
 T05,rv64-smp8-buildstorm,BuildStorm elapsed,final,R1,1788.00,s,27110b6973c597912edd17f12be59db1c98b17d7,git-commit,final-2026 b5ec6ef8; competition-final-rv64-release; final.toml; artifact oracle passed
-T05,rv64-smp8-buildstorm,BuildStorm artifact,final,R1,1681000,byte,27110b6973c597912edd17f12be59db1c98b17d7,git-commit,ELF sha256 0222137d7ce1537b87329e36d4df3e5976ffb1f04b6d4970f1e9e10807893c0c
+T05,rv64-smp8-buildstorm,BuildStorm artifact,final,R1,1681000,byte,27110b6973c597912edd17f12be59db1c98b17d7,git-commit,artifact oracle passed
 T05,la64-smp8-buildstorm,BuildStorm elapsed,supporting,R1,1153.00,s,a0c7bbe6b811da3d68b3be1ac24f851f7c3af8d8,git-commit,complete-run support; final-2026 b5ec6ef8; default.toml
 T05,la64-smp8-buildstorm,BuildStorm artifact,supporting,R1,1714568,byte,a0c7bbe6b811da3d68b3be1ac24f851f7c3af8d8,git-commit,complete-run support; log sha256 8a63a6c58caf490ea790b9987c1f97f61f10a509f9331af2394b76740ead4958

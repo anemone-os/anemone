@@ -8,6 +8,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 
+plt.rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "WenQuanYi Micro Hei", "DejaVu Sans"]
+plt.rcParams["axes.unicode_minus"] = False
+
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parents[1] / "evidence" / "results.csv"
 OUTPUT = HERE / "production-optimizations.svg"
@@ -35,8 +38,8 @@ def panel(ax, profile, title, improvement):
         ax.text(x, median + 0.015, f"{median:.2f}", ha="center", va="bottom",
                 color=color, fontsize=9, fontweight="bold")
     ax.set_xticks(range(4), boots)
-    ax.set_xlabel("fresh-boot ABBA order")
-    ax.set_ylabel("clean Cargo elapsed (s)")
+    ax.set_xlabel("四次独立启动顺序（A 为原版本，B 为优化版本）")
+    ax.set_ylabel("Cargo 耗时（s）", labelpad=16)
     ax.set_title(title, loc="left", fontsize=12, fontweight="bold")
     ax.text(0.98, 0.95, improvement, transform=ax.transAxes, ha="right", va="top",
             fontsize=10, color=CANDIDATE, fontweight="bold")
@@ -45,7 +48,7 @@ def panel(ax, profile, title, improvement):
 
 
 fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.4), constrained_layout=True)
-panel(axes[0], "rv64-smp1-dentry", "A  Positive dentry residency", "A/B trend −8.48%")
-panel(axes[1], "rv64-smp1-cstring", "B  Page-bounded C-string copy", "A/B trend −3.71%")
-fig.suptitle("Production acceptance: raw samples and boot medians", fontsize=13, fontweight="bold")
+panel(axes[0], "rv64-smp1-dentry", "A  复用已解析的目录项", "总体趋势改善 8.48%")
+panel(axes[1], "rv64-smp1-cstring", "B  按页批量读取用户字符串", "总体趋势改善 3.71%")
+fig.suptitle("正式版本对照：全部样本与每次启动中位数", fontsize=13, fontweight="bold")
 fig.savefig(OUTPUT, format="svg", metadata={"Date": None})
