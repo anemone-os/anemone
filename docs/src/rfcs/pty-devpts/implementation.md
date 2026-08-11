@@ -4,12 +4,14 @@
 **最后更新：** 2026-08-11
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
 **当前修订：** R1
-**实现授权：** Stage 1 / Closed；Stage 2--4：None
+**Stage 状态：** Stage 1 / Closed；Stage 2 / Resolved / Ready / Not Active；Stage 3--4 / Future
+**Execution Authorization：** Stage 1已消费并关闭；Stage 2--4：None
 **Contract Cutover：** None
 
 本页只组织父 RFC R1 Accepted Target 的实施依赖、Stage 停止点与证据路线，不重新定义 target、owner、ABI、
 Contract Impact 或 acceptance。Stage 1 的 Implementation Boundary 与两个 execution checkpoint 已解析并在各自授权下
-关闭。Stage 2--4 保持 Future；当前执行已按停止合同停在Stage 1 closure，不得自动进入Stage 2。
+关闭。Stage 2的Implementation Boundary现已解析为Ready，但execution authorization仍为None；当前执行仍停在
+Stage 1 closure，不得因本次docs-only解析自动进入Stage 2。Stage 3--4保持Future。
 
 ## 全局 Implementation Boundary
 
@@ -49,7 +51,7 @@ write set；同owner内部类型、模块、算法与行为保持型拆分由对
 | Stage | 解析程度 | 目的 | 可见语义 / Cutover |
 | --- | --- | --- | --- |
 | Stage 1 | Closed | 把serial-bound endpoint/relation收成runtime semantic endpoint substrate | 保持current serial行为；None |
-| Stage 2 | Future | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
+| Stage 2 | Resolved / Ready / Not Active | 闭合未发布的PTY pair、双向data plane、readiness与description lifecycle | 不发布PTY namespace；None |
 | Stage 3 | Future | 闭合system devpts、allocation/admission、两条slave-open route与cleanup handoff | 保持PTY ABI不可发现；None |
 | Stage 4 | Future | 公开激活、完成mandatory acceptance并原子cut over | `PTY-DEVPTS-CUTOVER` |
 
@@ -245,7 +247,8 @@ Checkpoint 2。
    取得或提交relation。
 
 **Cutover / Exit：** None。两项Stage target、validation与Architecture Friction Scan均关闭后，Stage 1记为Closed并立即
-停止；Stage 2仍为Future且未获解析或执行授权。LA64 build/runtime、PTY app、LTP、tmux、sshd保持Not Run。若runtime
+停止；本checkpoint关闭时Stage 2仍为Future且未获解析或执行授权，后续docs-only解析不回溯扩大该授权。LA64
+build/runtime、PTY app、LTP、tmux、sshd保持Not Run。若runtime
 registry只能靠generic lifecycle observer、第二份endpoint liveness、pair/PTY-specific branch、task/Signal owner改动或
 serial ABI变化才能成立，必须在Stage 1完成声明前停止并回到RFC review / Target Renegotiation。
 
@@ -260,16 +263,125 @@ LTP、tmux与sshd保持Not Run。Stage 1关闭，执行立即停止，Stage 2仍
 
 ## Stage 2 — PTY pair、data plane 与 opened-description lifecycle
 
+**解析状态：** Resolved / Ready / Not Active
+
+**Execution Authorization：** None；本次只解析实施边界，不授权代码、验证或Stage 3解析
+
+**Contract Cutover：** None
+
 **Purpose：** 在未发布namespace内闭合PTY pair identity、master/slave FileOps、双向Terminal data plane、peer
 presence/absence、readiness、hangup/retirement与master/slave opened-description final-release participation，形成可由
 Stage 3 allocation/open transaction消费的完整owner-private capability。
 
 **Prerequisites：** Stage 1关闭；runtime semantic endpoint与relation enrollment substrate已证明保持serial行为；
-维护者另行授权Stage 2。
+父RFC R1继续Accepted，current TTY、opened-description、iomux/epoll与VFS contracts未漂移；维护者另行明确授权Stage 2。
 
-**Protected Boundary：** pair不取得Terminal/relation/fd-table truth，FileOps不缓存第三份readiness/HUP状态，master不加入
-controlling relation，final release不依赖`Arc`/fd/inode引用，Stage 2不注册devpts或发布任何部分PTY ABI。到达Stage 2前
-不冻结buffer placement、worker模型、pair container或内部callback形状。
+### Stage 2 Implementation Boundary
+
+- **Target / non-goals：** 关闭一个route-neutral、owner-private的PTY pair capability：每个pair有不可跨episode复活的
+  identity、一个带未提交one-shot relation enrollment的slave semantic endpoint、master/slave production FileOps、
+  route-neutral slave-description participation、双向stream/readiness以及pair-local peer absence、hangup和retirement。
+  master不是semantic TTY endpoint且不产生relation enrollment。Stage 2不建立devpts index/binding、`/dev/ptmx`或
+  `/dev/pts/N`，不实现initial lock、pathname/`TIOCGPTPEER` route policy、PTY-specific ioctl、
+  implicit controlling-terminal acquisition、safe-reuse allocator、metadata/DAC或任何用户可发现的PTY ABI；这些仍由
+  Stage 3组合。PTY test app、LTP、tmux和sshd不能访问本Stage capability，不属于closure oracle。
+- **Owner / handoff：** `Terminal`继续唯一拥有termios、winsize、line discipline、conditioned input和processed output；
+  pair owner唯一拥有pair identity、master liveness、slave-description participation、peer absence与retirement。
+  relation registry继续唯一拥有terminal membership与session relation；prepared pair只持Stage 1定义的pre-visibility
+  enrollment authority，Stage 2不提交它或从它推断membership。
+  `task::files`的published-slot count继续是opened-description final release唯一真相，只通过creation-time固定的
+  `FileDescOps::final_release`向pair提交master retirement或slave participant release。master/slave FileOps只组合本次
+  operation所需的Terminal/pair snapshot与progress capability，不取得relation、fd-table或future devpts truth。
+- **Failure / cleanup：** pair、Terminal、semantic endpoint、FileOps private capability及description participation所需的
+  fallible prepare必须发生在pair/description visibility或participation commit之前。未提交的master/slave description
+  只撤销本次prepared capability；slave participation commit与master retirement在pair owner内线性化。master final
+  release先不可逆地禁止新participation并发布pair-local retired/hangup predicate，再释放pair guard；Stage 2只形成供
+  Stage 3消费的窄、幂等cleanup事实，不调用devpts、relation、Signal、ThreadGroup或VFS cleanup，也不通过恢复live状态
+  回滚外部失败。last-slave-description release只形成可重新participate的peer absence，不退休pair。
+- **Protected API / ABI / contract：** 新surface保持TTY/PTY owner-local、按真实Stage 2/3 consumer给最窄visibility；
+  physical serial attachment/worker、existing `/dev/ttyS<N>`、`/dev/tty`、boot fd、console、termios/winsize/job-control、
+  current `TTY-*`、`OPENED-DESC-*`与iomux/epoll contracts均保持不变。Stage 2不得修改`anemone-abi`、devfs/VFS
+  namespace、generic open/`O_NOCTTY`路径或current contract，也不得把pair final-release effect实现成dynamic observer
+  registry、第二个task-owned hook或`Arc`/fd/inode refcount推断。
+- **Acceptance / validation claim：** owner-local production-path tests与source/lock audit证明pair identity、participation、
+  peer state和retirement只有pair owner一份truth；master write进入shared Terminal input/line-discipline，slave write与echo
+  进入同一Terminal output并由master消费；master/slave对既有termios/winsize profile观察同一Terminal truth，master不因此
+  取得controlling-relation operation surface；blocking/nonblocking、partial progress、poll subscription/recheck与hangup
+  结果使用同一durable predicates。真实`task::files` publication/final-release路径证明dup/fork alias、multiple independent
+  descriptions、close-on-exec/table teardown与concurrent final close只提交正确的一次pair effect。RV64 canonical TTY
+  wrapper同时证明新增KUnit与existing serial 50/50、vi/ash、正常关机无回归；LA64只要求repository kernel build，不由此
+  取得runtime-proven claim。
+- **Stop conditions：** 需要移动或复制`Terminal` stream/readiness truth、以fake `TtyPort`承载PTY、用wake count或
+  upgradeable weak handle决定liveness、让pair读取fd-table/relation/private VFS state、改变single-static-hook或
+  flock-before-hook规则、无法在Stage 3继续owner-locally组合pair与fanotify effect、必须提前接入devpts/PTY UAPI才能证明
+  core语义、需要改变Linux-default observable matrix、父RFC target/owner/ABI/Contract Impact/acceptance，或只能通过
+  validation-only facade、test branch、success stub和降低race/readiness oracle完成本Stage。
+
+预计实现自然涉及`device::tty`内的semantic endpoint、Terminal、serial file seam与new PTY pair/master/slave owner，
+以及`task::files`既有static final-release consumer和owner-local KUnit。这些只是非穷举提示，不是逐文件write set。
+现有TTY文件已混合serial FileOps、ABI、relation与Terminal操作；若继续加入PTY职责会混淆owner，可在同一TTY owner内按
+pair、file/ops或lifecycle等稳定职责做行为保持型拆分，但不得扩大public API、visibility contract或制造通用callback层。
+
+### Resolved route 与 proof obligations
+
+1. **Pair episode与prepared capability。** 每次构造产生新的immutable pair/slave-terminal identity；全部内部allocation
+   在返回prepared pair前完成。prepared master/slave description capability只能被消费一次，abort不增加participant、
+   不发布hangup或留下waiter。Stage 3可以编排该capability，但不能取得pair runtime truth或把numeric PTY index变成
+   identity。Stage 2不实现index/incarnation；测试用distinct pair episode证明旧capability不能命中新pair。
+2. **双向Terminal data plane。** master write必须通过现有Terminal RX conditioning/line discipline进入slave input；
+   slave write、echo和output processing继续进入同一Terminal output，由master read消费。PTY不伪造physical port或建立
+   parallel input/output queue。master/slave FileOps共享父RFC已接受的termios/winsize truth和对应ordinary operation，
+   但master不暴露或转发`TIOCSCTTY`等controlling-relation operation；PTY-specific ioctl仍由Stage 3实现。backend
+   progress只请求对应owner重验predicate；buffer placement、是否需要worker及具体callback/type由实现选择，但serial
+   production path必须保持单一路径和现有行为。
+3. **Opened-description participation。** pair owner提供route-neutral的slave participation prepare/commit/release与master
+   retirement effect；Stage 3再在pathname/peer route完成lock、permission和fd publication编排。Stage 2测试必须通过真实
+   `FileDesc`/file-table publication与final release触发effect，不能直接调用private decrement冒充证明。dup/fork aliases
+   共享同一description participation；独立opens分别participate；transient syscall `Arc`、File storage、inode/dentry ref
+   不延迟或触发semantic release。
+4. **Peer absence与retirement。** master live时zero slave descriptions只形成peer absence，后续route-neutral participation
+   可以使peer重新出现。master description final release是唯一pair retirement trigger：先禁止新participation并发布
+   retired/hangup，再在guard外wake/recheck。concurrent participate-vs-retire只能得到完整participant或fail-closed，late
+   participant release与重复cleanup均不能复活pair或影响distinct pair。
+5. **Readiness与observable matrix。** Stage 2从父RFC全局matrix中关闭stream/peer-state子集：master/slave两方向的
+   buffered/unbuffered、blocking/nonblocking、partial progress、last-slave-close/reopen、master-first/slave-first close、
+   shared termios/winsize round-trip、master relation-ioctl rejection、EOF/`EIO`/write errno以及poll/select/epoll
+   READABLE/WRITABLE/HUP/ERR投影。具体逐格结果按tracked Linux 6.6.32 source与定向测试形成implementation evidence；
+   FileOps、blocking wait与poll route必须组合同一Terminal/pair predicates，notification只触发snapshot/register/recheck/
+   final snapshot。
+6. **Stage 3 handoff保持窄。** Stage 2 closure只保证prepared pair、slave endpoint的uncommitted relation enrollment、
+   FileOps、description effect与pair-local retirement fact可被后续allocation/open transaction消费；不预建devpts/VFS/
+   relation/Signal callback，不提交relation enrollment，也不冻结allocator、index、metadata、mount、ioctl codec或
+   implicit-acquire success tail。Stage 3若不能在这些owner-private capability之上自然完成static composition，必须回到
+   RFC review，不能在Stage 2预留dynamic bridge。
+
+### Execution shape
+
+Stage 2作为一个formal stage整体授权、review和关闭，不增加execution checkpoint或semantic cutover。实现可以按
+“pair/data-plane production path -> opened-description participation -> concurrency/observable validation”排序并形成普通
+commit，但这些顺序不建立独立Ready/Active/Closed状态，也不允许只完成前一部分就把dormant pair core声明为Stage能力。
+若实际证据表明必须设置独立probe、不安全中间态或额外授权停止点，先更新本页并review其必要性，不在实现中临时发明gate。
+
+### Validation 与 closure
+
+1. `git diff --check`、`just fmt kernel --check`与`mdbook build docs`；
+2. source/owner/lock/bypass audit确认Terminal、pair、opened-description三份truth边界，pair guard内无fd-table、relation、
+   Signal、VFS、Event notification或复杂drop，serial与PTY没有old/new双路径、fake port或缓存readiness/HUP；
+3. inline owner-local KUnit或最低共同owner composition tests通过production constructor、master/slave FileOps、poll route和
+   real file-table final release覆盖上述pair/data-plane/description/race matrix；不新建独立`kunit.rs`/`tests.rs`或
+   validation-only production facade；
+4. canonical RV64 TTY wrapper完成repository build、全部KUnit、existing TTY `50/50`、BusyBox vi/ash、host byte oracle与
+   正常关机；本Stage不要求公开PTY namespace，因此不能以PTY userspace smoke替代owner-local coverage；
+5. canonical LA64 repository kernel build通过；LA64 runtime、PTY test app、LTP、tmux与sshd保持Not Run，且不得从RV64
+   runtime或双架构build外推；
+6. stage-wide review与Architecture Friction Scan检查第二份stream/peer/refcount truth、owner穿透、static-hook扩张、
+   caller/test/architecture特判、无退出条件bridge和隐含cleanup顺序；Apollyon/Keter必须在closure前消除或触发停止，
+   未在边界内消除的Euclid按workflow写回。
+
+**Cutover / Exit：** None。prepared pair capability、master/slave production FileOps、pair-local lifecycle、真实
+opened-description final-release participation、stream/peer-state observable matrix、双架构build floor与RV64 serial/KUnit
+回归全部关闭，且review/Architecture Friction Scan满足上项条件后，Stage 2才可记为Closed。关闭不发布PTY namespace/
+ABI、不更新current contract或register，并立即停止；Stage 3仍为Future且需要新的解析/执行授权。
 
 ## Stage 3 — System devpts、allocation/admission 与跨 owner cleanup
 
