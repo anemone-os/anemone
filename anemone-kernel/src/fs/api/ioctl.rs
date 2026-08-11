@@ -22,6 +22,10 @@ fn lookup_ioctl_arg_fd(raw_fd: u64) -> Result<IoctlArgFile, SysError> {
     ))
 }
 
+fn reserve_ioctl_result_fd() -> Result<crate::task::files::FdReservation, SysError> {
+    get_current_task().reserve_fd()
+}
+
 #[syscall(SYS_IOCTL)]
 fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
     kdebugln!("sys_ioctl: fd={:?}, cmd={:#x}, arg={:#x}", fd, cmd, arg);
@@ -48,6 +52,7 @@ fn sys_ioctl(fd: Fd, cmd: u32, arg: u64) -> Result<u64, SysError> {
     drop(task);
 
     let arg_fd_lookup = IoctlArgFdLookup::new(lookup_ioctl_arg_fd);
-    let ctx = IoctlCtx::new(cmd, arg, target_access, usp, &arg_fd_lookup);
+    let fd_installer = IoctlFdInstaller::new(reserve_ioctl_result_fd);
+    let ctx = IoctlCtx::new(cmd, arg, target_access, usp, &arg_fd_lookup, &fd_installer);
     vfs_file.ioctl(ctx)
 }

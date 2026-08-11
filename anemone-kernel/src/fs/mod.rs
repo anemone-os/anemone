@@ -25,6 +25,7 @@ mod uio;
 
 // filesystem drivers
 pub mod devfs;
+mod devpts;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
 mod pipe;
@@ -63,8 +64,11 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub(crate) use self::{
-    file::{FileOpenAccess, FileOpenRequest},
-    inode::{RenameFlags, reject_make_node},
+    file::{FileOpenAccess, FileOpenRequest, IoctlFdInstaller},
+    inode::{
+        OpenDescriptionActivation, OpenDescriptionCommit, PreparedOpenDescription, RenameFlags,
+        reject_make_node,
+    },
     iomux::PollRoute,
     lock::{
         FlockMode, FlockOperation, FlockOutcome, PosixLockMode, PosixLockQueryOutcome,

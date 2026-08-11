@@ -46,7 +46,7 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 ### 其它领域
 
-- [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R2；在已关闭的Serial TTY R1之上接受user-mountable
+- [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
   directory上的additional view、dynamic slave semantic endpoint、safe-reuse pair/opened-description lifecycle、
   Linux-default ABI与master-hangup协议；generic dentry freshness继续由VFS register独立拥有，不形成PTY额外Stage或
@@ -54,7 +54,8 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   [目标与不变量](./rfcs/pty-devpts/invariants.md)展开owner/lifecycle proof，[实施路线](./rfcs/pty-devpts/implementation.md)
   组织Stage 1--4与全局实现输入，普通PTY Rust test app使用`anemone-rs`并参照`socket-test`形状；pre-RFC定位已归档为
   [背景材料](./rfcs/pty-devpts/backgrounds/index.md)。tmux为
-  建议性必试、sshd不进入验收标准；Stage 3已完成docs-only解析但尚未激活，当前没有Stage执行授权或contract cutover。
+  建议性必试、sshd不进入验收标准；Stage 1--3已关闭且未公开PTY namespace，Stage 4 public activation/acceptance仍为
+  Future，当前没有Stage执行授权或contract cutover。
 - [RFC-20260809-user-tlb-residency-targeting](./rfcs/user-tlb-residency-targeting/index.md)：Closed / R1；为全部user
   page-table activation建立唯一residency handoff，使destructive TLB shootdown在稳定状态只覆盖仍可能观察旧translation
   的CPU，同时保留现有同步ack、retirement与dependent continuation边界。

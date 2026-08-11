@@ -103,6 +103,7 @@ pub struct Parameters {
     pub tty_input_capacity_bytes: Option<usize>,
     pub tty_output_capacity_bytes: Option<usize>,
     pub tty_worker_batch_bytes: Option<usize>,
+    pub pty_system_capacity: Option<usize>,
     pub ns16550a_irq_rx_budget_bytes: Option<usize>,
     pub ns16550a_tx_batch_bytes: Option<usize>,
     pub ns16550a_tx_poll_iterations: Option<usize>,
@@ -229,6 +230,7 @@ impl Parameters {
         materialize!(tty_input_capacity_bytes);
         materialize!(tty_output_capacity_bytes);
         materialize!(tty_worker_batch_bytes);
+        materialize!(pty_system_capacity);
         materialize!(ns16550a_irq_rx_budget_bytes);
         materialize!(ns16550a_tx_batch_bytes);
         materialize!(ns16550a_tx_poll_iterations);
@@ -444,6 +446,8 @@ pub const TTY_INPUT_CAPACITY_BYTES: usize = {};
 pub const TTY_OUTPUT_CAPACITY_BYTES: usize = {};
 /// Maximum RX/TX bytes advanced by one endpoint worker batch.
 pub const TTY_WORKER_BATCH_BYTES: usize = {};
+/// Maximum reserved or live Unix98 PTY episodes in the system devpts instance.
+pub const PTY_SYSTEM_CAPACITY: usize = {};
 /// Maximum RX bytes drained by one NS16550A IRQ handler invocation.
 pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = {};
 /// Maximum bytes submitted while holding the NS16550A TX lock.
@@ -599,6 +603,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(tty_input_capacity_bytes),
             resolved!(tty_output_capacity_bytes),
             resolved!(tty_worker_batch_bytes),
+            resolved!(pty_system_capacity),
             resolved!(ns16550a_irq_rx_budget_bytes),
             resolved!(ns16550a_tx_batch_bytes),
             resolved!(ns16550a_tx_poll_iterations),

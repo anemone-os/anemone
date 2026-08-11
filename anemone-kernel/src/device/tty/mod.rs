@@ -8,6 +8,10 @@ mod terminal;
 
 pub(crate) use endpoint::prepare_system_boot;
 pub(crate) use port::{TtyLineSnapshot, TtyParity, TtyPort, TtyPortId, TtyRxUnit};
+pub(crate) use pty::{
+    LivePtyPair, PreparedPtyPair, PreparedPtySlaveDescription, PtyBindingCapability, PtyBindingOps,
+    PtyImplicitAcquire, prepare_pair,
+};
 pub(crate) use relation::detach_exiting_session;
 
 use crate::{

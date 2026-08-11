@@ -26,7 +26,10 @@ mod object;
 mod ops;
 
 pub(super) use self::object::Inode;
-pub(crate) use self::ops::{RenameFlags, reject_make_node};
+pub(crate) use self::ops::{
+    OpenDescriptionActivation, OpenDescriptionCommit, PreparedOpenDescription, RenameFlags,
+    reject_make_node,
+};
 pub use self::{
     metadata::*,
     object::InodeRef,

@@ -4,12 +4,16 @@ use crate::{
     task::files::OpenedFileFinalReleaseCtx,
 };
 
-use super::super::{
-    TtyProgress,
-    discipline::{InputRead, TtySignalControl},
-    file::TtyOperation,
-    port::TtyRxUnit,
-    terminal::Terminal,
+use super::{
+    super::{
+        TtyProgress,
+        discipline::{InputRead, TtySignalControl},
+        file::TtyOperation,
+        port::TtyRxUnit,
+        relation,
+        terminal::Terminal,
+    },
+    PtyBindingCapability,
 };
 
 pub(super) const DESCRIPTION_PREPARED: u8 = 0;
@@ -25,6 +29,7 @@ enum PairPhase {
 
 struct PairInner {
     phase: PairPhase,
+    slave_locked: bool,
     slave_descriptions: usize,
 }
 
@@ -45,6 +50,7 @@ impl PtyPairState {
             operation: Mutex::new(()),
             inner: SpinLock::new(PairInner {
                 phase: PairPhase::Prepared,
+                slave_locked: true,
                 slave_descriptions: 0,
             }),
         })
@@ -77,6 +83,9 @@ impl PtyPairState {
             let _operation = self.operation.lock();
             let mut inner = self.inner.lock();
             if inner.phase != PairPhase::Live {
+                return Err(SysError::IO);
+            }
+            if inner.slave_locked {
                 return Err(SysError::IO);
             }
             assert_eq!(
@@ -123,11 +132,11 @@ impl PtyPairState {
         self.notify_state_change();
     }
 
-    fn retire_master(&self, description_phase: &AtomicU8) {
+    fn retire_master(&self, description_phase: &AtomicU8) -> bool {
         {
             let _operation = self.operation.lock();
             if description_phase.swap(DESCRIPTION_RELEASED, Ordering::AcqRel) != DESCRIPTION_LIVE {
-                return;
+                return false;
             }
             let mut inner = self.inner.lock();
             assert_eq!(
@@ -138,9 +147,10 @@ impl PtyPairState {
             inner.phase = PairPhase::Retired;
         }
         // Pair retirement is already irreversible before Terminal cleanup.
-        // Flush and wake happen with no pair guard held.
+        // Buffer cleanup happens with no pair guard held; the master owner
+        // sends the final waiter hint only after cross-owner hangup effects.
         self.terminal.pty_hangup();
-        self.notify_state_change();
+        true
     }
 
     pub(super) fn live_slave_count(&self) -> Option<usize> {
@@ -150,6 +160,20 @@ impl PtyPairState {
 
     pub(super) fn is_retired(&self) -> bool {
         self.inner.lock().phase == PairPhase::Retired
+    }
+
+    pub(super) fn slave_locked(&self) -> bool {
+        self.inner.lock().slave_locked
+    }
+
+    pub(super) fn set_slave_locked(&self, locked: bool) -> Result<(), SysError> {
+        let _operation = self.operation.lock();
+        let mut inner = self.inner.lock();
+        if inner.phase != PairPhase::Live {
+            return Err(SysError::IO);
+        }
+        inner.slave_locked = locked;
+        Ok(())
     }
 
     pub(super) fn wait_until(&self, predicate: impl Fn() -> bool) -> Result<(), SysError> {
@@ -179,20 +203,80 @@ impl TtyProgress for PtyPairState {
 
 pub(super) struct PtyMasterDescription {
     pair: Arc<PtyPairState>,
+    index: u32,
     pub(super) phase: AtomicU8,
-    pub(super) base_final_release: Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>,
+    /// Outer `None` means the creation-time hook has not been composed yet;
+    /// the inner value is the pre-existing owner hook, if any.
+    pub(super) base_final_release:
+        SpinLock<Option<Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>>>,
+    cleanup: SpinLock<Option<PtyMasterCleanup>>,
+}
+
+struct PtyMasterCleanup {
+    binding: PtyBindingCapability,
+    relation: relation::RelationParticipant,
 }
 
 impl PtyMasterDescription {
-    pub(super) fn new(
-        pair: Arc<PtyPairState>,
-        base_final_release: Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>,
-    ) -> Self {
+    pub(super) fn new(pair: Arc<PtyPairState>, index: u32) -> Self {
         Self {
             pair,
+            index,
             phase: AtomicU8::new(DESCRIPTION_PREPARED),
-            base_final_release,
+            base_final_release: SpinLock::new(None),
+            cleanup: SpinLock::new(None),
         }
+    }
+
+    pub(super) fn install_cleanup(
+        &self,
+        binding: PtyBindingCapability,
+        participant: relation::RelationParticipant,
+    ) {
+        let old = self.cleanup.lock().replace(PtyMasterCleanup {
+            binding,
+            relation: participant,
+        });
+        assert!(old.is_none(), "PTY master cleanup installed more than once");
+    }
+
+    pub(super) fn abort_prepared_cleanup(&self) {
+        assert_eq!(
+            self.phase.load(Ordering::Acquire),
+            DESCRIPTION_PREPARED,
+            "live PTY master cleanup cannot be aborted"
+        );
+        let cleanup = self
+            .cleanup
+            .lock()
+            .take()
+            .expect("prepared PTY master missing installed cleanup");
+        // Relation and binding capabilities may run cross-owner destructors;
+        // the master cleanup slot is already undiscoverable before they drop.
+        drop(cleanup);
+    }
+
+    pub(super) fn index(&self) -> u32 {
+        self.index
+    }
+
+    pub(super) fn slave_locked(&self) -> bool {
+        self.pair.slave_locked()
+    }
+
+    pub(super) fn set_slave_locked(&self, locked: bool) -> Result<(), SysError> {
+        self.pair.set_slave_locked(locked)
+    }
+
+    pub(super) fn binding(&self) -> Option<PtyBindingCapability> {
+        self.cleanup
+            .lock()
+            .as_ref()
+            .map(|cleanup| cleanup.binding.clone())
+    }
+
+    pub(super) fn pair(&self) -> Arc<PtyPairState> {
+        self.pair.clone()
     }
 
     pub(super) fn is_live(&self) -> bool {
@@ -200,7 +284,19 @@ impl PtyMasterDescription {
     }
 
     pub(super) fn release(&self) {
-        self.pair.retire_master(&self.phase);
+        if !self.pair.retire_master(&self.phase) {
+            return;
+        }
+        let cleanup = self
+            .cleanup
+            .lock()
+            .take()
+            .expect("live PTY master missing static cleanup capability");
+        cleanup.binding.retire();
+        if let Some(effect) = cleanup.relation.retire_for_hangup() {
+            effect.deliver();
+        }
+        self.pair.notify_state_change();
     }
 
     pub(super) fn read(&self, dst: &mut [u8], ctx: FileIoCtx) -> Result<usize, SysError> {
@@ -345,7 +441,10 @@ impl TtyOperation for PtyMasterDescription {
 pub(in crate::device::tty) struct PtySlaveDescription {
     pub(super) pair: Arc<PtyPairState>,
     pub(super) phase: AtomicU8,
-    pub(super) base_final_release: Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>,
+    /// Outer `None` means the creation-time hook has not been composed yet;
+    /// the inner value is the pre-existing owner hook, if any.
+    pub(super) base_final_release:
+        SpinLock<Option<Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>>>,
 }
 
 impl PtySlaveDescription {

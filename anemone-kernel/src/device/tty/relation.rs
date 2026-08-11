@@ -54,6 +54,17 @@ pub(super) struct RelationParticipant {
     key: ParticipantKey,
 }
 
+pub(super) struct ImplicitAcquire {
+    endpoint: Arc<TtyEndpoint>,
+    caller: Option<TtyCaller>,
+    readable: bool,
+    no_ctty: bool,
+}
+
+pub(super) struct RelationHangupEffect {
+    session: TtySession,
+}
+
 struct ParticipantKey {
     endpoint: Arc<TtyEndpoint>,
     generation: u64,
@@ -116,21 +127,22 @@ impl RelationRegistry {
         })
     }
 
-    fn retire(&self, key: &ParticipantKey) -> bool {
+    fn retire(&self, key: &ParticipantKey) -> Option<Option<RelationEntry>> {
         let removed = {
             let mut inner = self.inner.lock();
             let Some(index) = inner.slots.iter().position(|slot| {
                 slot.participant_generation == key.generation
                     && Arc::ptr_eq(&slot.endpoint, &key.endpoint)
             }) else {
-                return false;
+                return None;
             };
             inner.slots.remove(index)
         };
         // Endpoint, session, and foreground capabilities may run non-trivial
         // destructors. The registry is already undiscoverable before they drop.
-        drop(removed);
-        true
+        let entry = removed.entry;
+        drop(removed.endpoint);
+        Some(entry)
     }
 }
 
@@ -147,7 +159,20 @@ impl RelationEnrollment {
 
 impl RelationParticipant {
     pub(super) fn retire(&self) -> bool {
-        registry().retire(&self.key)
+        let Some(entry) = registry().retire(&self.key) else {
+            return false;
+        };
+        drop(entry);
+        true
+    }
+
+    pub(super) fn retire_for_hangup(self) -> Option<RelationHangupEffect> {
+        let entry = registry().retire(&self.key).flatten()?;
+        let effect = RelationHangupEffect {
+            session: entry.session,
+        };
+        drop(entry.foreground);
+        Some(effect)
     }
 }
 
@@ -159,6 +184,155 @@ impl Drop for RelationParticipant {
 
 fn registry() -> &'static RelationRegistry {
     &RELATIONS
+}
+
+impl RelationHangupEffect {
+    pub(super) fn deliver(self) {
+        self.session.signal_leader_hangup_continue();
+    }
+}
+
+pub(super) fn prepare_implicit_acquire(
+    endpoint: Arc<TtyEndpoint>,
+    readable: bool,
+    no_ctty: bool,
+) -> ImplicitAcquire {
+    let caller = TtyCaller::current_user_or_kernel().ok().flatten();
+    ImplicitAcquire {
+        endpoint,
+        caller,
+        readable,
+        no_ctty,
+    }
+}
+
+fn implicit_acquire_eligible(
+    readable: bool,
+    no_ctty: bool,
+    session_leader: bool,
+    caller_current: bool,
+) -> bool {
+    readable && !no_ctty && session_leader && caller_current
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImplicitConflictTransition {
+    Finish,
+    RemoveAndRetry,
+}
+
+fn implicit_conflict_transition(conflicting_session_live: bool) -> ImplicitConflictTransition {
+    if conflicting_session_live {
+        ImplicitConflictTransition::Finish
+    } else {
+        ImplicitConflictTransition::RemoveAndRetry
+    }
+}
+
+impl ImplicitAcquire {
+    /// Conditional implicit acquisition is part of an already-successful open
+    /// tail. Ineligibility and races therefore resolve to a no-op rather than
+    /// changing the open result.
+    pub(super) fn commit(self) {
+        if self.no_ctty || !self.readable {
+            return;
+        }
+        let Some(caller) = self.caller else {
+            return;
+        };
+        if !implicit_acquire_eligible(
+            self.readable,
+            self.no_ctty,
+            caller.is_session_leader(),
+            caller.revalidate(),
+        ) {
+            return;
+        }
+
+        loop {
+            // Topology owners may have changed after a stale conflicting
+            // relation was removed. Revalidate before every commit attempt;
+            // never call back into task topology while holding the relation
+            // registry guard.
+            if !caller.revalidate() {
+                return;
+            }
+            enum Inspection {
+                Commit,
+                Existing,
+                Conflict(RelationSnapshot),
+            }
+
+            let (inspection, committed_generation) = {
+                let mut inner = registry().inner.lock();
+                let Some(endpoint_index) = inner
+                    .slots
+                    .iter()
+                    .position(|slot| Arc::ptr_eq(&slot.endpoint, &self.endpoint))
+                else {
+                    return;
+                };
+
+                let mut inspection = Inspection::Commit;
+                for slot in &inner.slots {
+                    let Some(entry) = &slot.entry else {
+                        continue;
+                    };
+                    if entry.session.same_identity(caller.session())
+                        && Arc::ptr_eq(&slot.endpoint, &self.endpoint)
+                    {
+                        inspection = Inspection::Existing;
+                        break;
+                    }
+                    if entry.session.same_identity(caller.session())
+                        || Arc::ptr_eq(&slot.endpoint, &self.endpoint)
+                    {
+                        inspection = Inspection::Conflict(RelationSnapshot {
+                            endpoint: slot.endpoint.clone(),
+                            session: entry.session.clone(),
+                            foreground: entry.foreground.clone(),
+                            participant_generation: slot.participant_generation,
+                            relation_generation: slot.relation_generation,
+                        });
+                        break;
+                    }
+                }
+
+                let committed_generation = if matches!(inspection, Inspection::Commit) {
+                    let slot = &mut inner.slots[endpoint_index];
+                    slot.relation_generation = next_generation(slot.relation_generation);
+                    slot.entry = Some(RelationEntry {
+                        session: caller.session().clone(),
+                        foreground: Some(caller.process_group().clone()),
+                    });
+                    Some(slot.relation_generation)
+                } else {
+                    None
+                };
+                (inspection, committed_generation)
+            };
+            if let Some(generation) = committed_generation {
+                kinfoln!(
+                    "TTY: implicit controlling relation sid={} pgid={} generation={}",
+                    caller.session().sid(),
+                    caller.process_group().pgid(),
+                    generation
+                );
+            }
+            match inspection {
+                Inspection::Commit | Inspection::Existing => return,
+                Inspection::Conflict(snapshot) => {
+                    match implicit_conflict_transition(snapshot.session.is_live()) {
+                        ImplicitConflictTransition::Finish => return,
+                        ImplicitConflictTransition::RemoveAndRetry => {
+                            let removed = remove_if(&snapshot);
+                            drop(removed);
+                        },
+                    }
+                },
+            }
+        }
+    }
 }
 
 fn raw_endpoint_snapshot(endpoint: &Arc<TtyEndpoint>) -> Option<RelationSnapshot> {
@@ -619,5 +793,33 @@ mod kunits {
         assert!(contains(&new.key));
 
         assert!(new.retire());
+    }
+
+    #[kunit]
+    fn implicit_acquire_snapshot_and_conflict_transition_matrix() {
+        assert!(implicit_acquire_eligible(true, false, true, true));
+        assert!(!implicit_acquire_eligible(false, false, true, true));
+        assert!(!implicit_acquire_eligible(true, true, true, true));
+        assert!(!implicit_acquire_eligible(true, false, false, true));
+        assert!(!implicit_acquire_eligible(true, false, true, false));
+        assert_eq!(
+            implicit_conflict_transition(true),
+            ImplicitConflictTransition::Finish
+        );
+        assert_eq!(
+            implicit_conflict_transition(false),
+            ImplicitConflictTransition::RemoveAndRetry
+        );
+    }
+
+    #[kunit]
+    fn hangup_retirement_without_relation_removes_only_exact_participant() {
+        let participant = RelationEnrollment::new(endpoint()).commit().unwrap();
+        let key = ParticipantKey {
+            endpoint: participant.key.endpoint.clone(),
+            generation: participant.key.generation,
+        };
+        assert!(participant.retire_for_hangup().is_none());
+        assert!(!contains(&key));
     }
 }

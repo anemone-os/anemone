@@ -2,13 +2,13 @@
 
 **状态：** Accepted Target
 **父 RFC：** [RFC-20260810-pty-devpts](./index.md)
-**适用修订：** R2
+**适用修订：** R3
 **最后更新：** 2026-08-11
 
 本页只展开父 RFC 已提出的 non-trivial correctness 和 contract proof obligations，不增加 target、ABI、stage 或
 implementation authorization。slave initial metadata、route-scoped permission profile、implicit controlling-terminal
 acquisition、Linux-default hangup surface、master-hangup relation effect、safe-reuse resource guarantee、final-release
-composition boundary、single-instance mount profile与claim-scoped acceptance均以父RFC R2为准。
+composition boundary、single-instance mount profile与claim-scoped acceptance均以父RFC R3为准。
 
 ## PTY-IDENTITY-001 — Pair、terminal 与 pathname identity 不得跨 episode 复活
 
@@ -19,7 +19,7 @@ pair live。VFS dentry只投影其持有的inode，不取得pair liveness或nume
 
 master final close 提交 retirement 后，该 pair identity 永不重新进入 live。若 index 复用，新的 pair 必须具有由
 devpts live binding、slave inode/open capability 与 pair admission共同核验的新 identity/incarnation；旧 inode、handle
-或 operation snapshot 永远不能接入新 pair。R2 要求 current configured capacity 内 repeated allocate-close 不因历史
+或 operation snapshot 永远不能接入新 pair。R3 要求 current configured capacity 内 repeated allocate-close 不因历史
 churn 累计耗尽。generic VFS pathname freshness/revocation 缺口继续由对应 register issue拥有，不是 PTY
 implementation/cutover Stage；devpts 不得读取 VFS private cache、建立 owner-local dentry freshness truth，或退成
 monotonic boot-lifetime exhaustion。
@@ -43,9 +43,14 @@ initial slave inode 必须在 publication 前一次形成 allocator `fsuid:fsgid
 resident uid/gid/mode/rdev 仍由 VFS inode metadata owner 保存和投影，不在 pair 中缓存第二份行为 truth。
 
 成功返回master fd前，pair、master description与locked slave binding必须形成自洽backend episode，并能从每个current
-mounted view按同一`N`发现。所有fallible prepare发生在visibility commit前；commit后不得再存在需要通过撤销已返回
+mounted view按同一`N`发现。所有显式建模为`Result`的fallible prepare发生在visibility commit前；commit后不得再存在需要通过撤销已返回
 master fd或留下half-published node恢复的普通失败。失败cleanup只回收本次未发布capability和reservation，不影响其它
 live pair。零mount view只表示pathname projection暂时不存在，不成为allocation、binding或pair lifecycle truth。
+
+当前工程期不要求把每个自然heap backing allocation都改造成可注入的`ENOMEM`分支。少量`Box`/`Arc`/`String`
+allocation可以沿kernel global allocator policy在极端OOM时panic，包括合理的abort/decommit cleanup形状；这不属于
+可恢复的transaction failure。该约束不得反向削弱显式capacity/fd/VFS index/enrollment错误、exact rollback、
+visibility-before-commit或不失败success tail，也不得成为扩大shared API和扭曲owner shape的理由。
 
 fd publication仍服从 `task::files` reservation/commit truth；backend binding publication、VFS dentry materialization 与
 fd slot publication不需要共享一个 global lock，但必须有明确的先后和失败边界，使任何 concurrent observer 只看到
@@ -170,7 +175,7 @@ late materialization、readdir cursor、retire/reuse与multiple views的完整pa
 
 ## DEVPTS-MOUNT-001 — Mount view共享system instance且不拥有PTY lifecycle
 
-R2 devpts是generic `CAP_SYS_ADMIN` mount admission之后的no-device filesystem；devpts backend不读取current credential、
+R3 devpts是generic `CAP_SYS_ADMIN` mount admission之后的no-device filesystem；devpts backend不读取current credential、
 mount target pathname或mount namespace。mount data必须为空，`newinstance`及其它unsupported option返回`EINVAL`。devfs
 只预发布canonical `/dev/pts`空mountpoint，persistent init负责显式mount；其它target由调用者在对应ordinary filesystem中
 创建，kernel不因devfs mount事件自动修改VFS mount tree。
@@ -182,7 +187,7 @@ lifecycle state。
 
 unmount只撤销目标VFS view。卸载一个view不得retire pair、释放index/capacity、删除binding、触发hangup或影响其它view；
 最后一个view卸载也不得kill system instance，remount重新取得current namespace。static `/dev/ptmx`始终分配该system
-instance，不按pathname或mount view选择backend；mount root内的additional `ptmx`不属于R2。
+instance，不按pathname或mount view选择backend；mount root内的additional `ptmx`不属于R3。
 
 **违反表现：** 同一`N`在两个fresh view命中不同pair、mount创建private allocator/superblock、unmount触发pair cleanup、
 last unmount清空binding、backend按`/dev/pts`特判target、devfs mount自动叠加devpts、接受`newinstance`却静默共享，或
@@ -234,9 +239,10 @@ explicitly unsupported feature返回稳定、诚实errno；只有用户观察结
 仓库规则保留ABI取舍注释与诊断。slave initial metadata必须在allocation episode内真实形成，kernel不建立
 额外grant mutation或历史`pt_chown` helper；不得用错误的fixed-root metadata、fake ioctl readback、虚构的
 grant transition、shell prompt或test-specific branch替代目标能力。用户态PTY helper的版本、调用链和返回值不是
-本R2 target或acceptance claim。
+本R3 target或acceptance claim。
 
-quota/index exhaustion返回`ENOSPC`，ordinary backing allocation failure返回`ENOMEM`；locked/permission/retired/invalid
+quota/index exhaustion返回`ENOSPC`，显式fallible backing prepare的allocator failure返回`ENOMEM`；自然heap allocation
+在极端OOM时可按上述工程约束panic。locked/permission/retired/invalid
 flag与hangup errno遵循accepted Linux-default rule和implementation validation matrix。任何partial progress先返回已提交
 用户单位，未提交suffix保持可重试；copy fault不得通过重复queue或回滚已发布cross-owner effect伪造原子性。
 

@@ -4,6 +4,7 @@ use crate::{
         uio::{UserBufferSink, UserBufferSource},
     },
     prelude::*,
+    task::files::FdReservation,
     utils::any_opaque::{AnyOpaque, NilOpaque, Opaque},
 };
 
@@ -62,13 +63,19 @@ impl FileOpenAccess {
 pub(crate) struct FileOpenRequest {
     access: FileOpenAccess,
     status_flags: FileOpStatusFlags,
+    no_ctty: bool,
 }
 
 impl FileOpenRequest {
-    pub(crate) const fn new(access: FileOpenAccess, status_flags: FileOpStatusFlags) -> Self {
+    pub(crate) const fn new(
+        access: FileOpenAccess,
+        status_flags: FileOpStatusFlags,
+        no_ctty: bool,
+    ) -> Self {
         Self {
             access,
             status_flags,
+            no_ctty,
         }
     }
 
@@ -78,6 +85,10 @@ impl FileOpenRequest {
 
     pub(crate) const fn status_flags(self) -> FileOpStatusFlags {
         self.status_flags
+    }
+
+    pub(crate) const fn no_ctty(self) -> bool {
+        self.no_ctty
     }
 }
 
@@ -250,21 +261,37 @@ impl IoctlArgFdLookup {
     }
 }
 
+pub(crate) struct IoctlFdInstaller {
+    reserve: fn() -> Result<FdReservation, SysError>,
+}
+
+impl IoctlFdInstaller {
+    pub(crate) const fn new(reserve: fn() -> Result<FdReservation, SysError>) -> Self {
+        Self { reserve }
+    }
+
+    fn reserve(&self) -> Result<FdReservation, SysError> {
+        (self.reserve)()
+    }
+}
+
 pub struct IoctlCtx<'a> {
     cmd: u32,
     arg: u64,
     target_access: IoctlFileAccess,
     uspace: Arc<UserSpaceHandle>,
     arg_fd_lookup: &'a IoctlArgFdLookup,
+    fd_installer: &'a IoctlFdInstaller,
 }
 
 impl<'a> IoctlCtx<'a> {
-    pub fn new(
+    pub(crate) fn new(
         cmd: u32,
         arg: u64,
         target_access: IoctlFileAccess,
         uspace: Arc<UserSpaceHandle>,
         arg_fd_lookup: &'a IoctlArgFdLookup,
+        fd_installer: &'a IoctlFdInstaller,
     ) -> Self {
         Self {
             cmd,
@@ -272,6 +299,7 @@ impl<'a> IoctlCtx<'a> {
             target_access,
             uspace,
             arg_fd_lookup,
+            fd_installer,
         }
     }
 
@@ -297,6 +325,13 @@ impl<'a> IoctlCtx<'a> {
 
     pub fn lookup_fd_arg(&self, raw_fd: u64) -> Result<IoctlArgFile, SysError> {
         self.arg_fd_lookup.lookup(raw_fd)
+    }
+
+    /// Reserve one fd in the calling table without exposing the table or task.
+    /// The backend must prepare the complete description before consuming the
+    /// returned reservation's infallible commit operation.
+    pub(crate) fn reserve_fd(&self) -> Result<FdReservation, SysError> {
+        self.fd_installer.reserve()
     }
 }
 

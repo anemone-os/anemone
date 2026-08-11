@@ -204,12 +204,12 @@ fn tty_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult
     }
 }
 
-fn read_ioctl_value<T: zerocopy::FromBytes>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
+pub(super) fn read_ioctl_value<T: zerocopy::FromBytes>(ctx: &IoctlCtx<'_>) -> Result<T, SysError> {
     ctx.uspace()
         .with_usp(|usp| UserReadPtr::<T>::try_new(VirtAddr::new(ctx.arg()), usp)?.read())
 }
 
-fn write_ioctl_value<T: zerocopy::IntoBytes + zerocopy::Immutable>(
+pub(super) fn write_ioctl_value<T: zerocopy::IntoBytes + zerocopy::Immutable>(
     ctx: &IoctlCtx<'_>,
     value: T,
 ) -> Result<(), SysError> {

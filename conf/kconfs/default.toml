@@ -70,6 +70,7 @@ tty_canonical_line_capacity_bytes = 4096 # Maximum canonical line size including
 tty_input_capacity_bytes = 4096 # Per-Terminal committed input capacity.
 tty_output_capacity_bytes = 4096 # Per-Terminal transformed output capacity.
 tty_worker_batch_bytes = 256 # Maximum RX/TX bytes advanced by one endpoint worker batch.
+pty_system_capacity = 256 # Maximum reserved or live Unix98 PTY episodes in the system devpts instance.
 ns16550a_irq_rx_budget_bytes = 256 # Maximum RX bytes drained by one UART IRQ handler invocation.
 ns16550a_tx_batch_bytes = 16 # Maximum bytes submitted while holding the UART TX lock.
 ns16550a_tx_poll_iterations = 65536 # Maximum readiness polls for each UART TX byte.

@@ -1,8 +1,8 @@
 # 2026-08-11 - PTY / devpts
 
-**Status:** Active / R2 / Stage 3 Checkpoint 1 Closed
+**Status:** Active / R3 / Stage 3 Closed
 **Owners:** doruche, Codex
-**Canonical Target:** [RFC-20260810-pty-devpts R2](../../rfcs/pty-devpts/index.md)
+**Canonical Target:** [RFC-20260810-pty-devpts R3](../../rfcs/pty-devpts/index.md)
 **Implementation Route:** [Stage 1--4](../../rfcs/pty-devpts/implementation.md)
 **Contract Delta:** None；`PTY-DEVPTS-CUTOVER`与父RFC列出的全部Introduce/Refine ID仍Not Effective
 
@@ -10,8 +10,8 @@
 
 本transaction为长期、多Stage RFC保存checkpoint execution、review、validation与下一授权handoff。target、owner、
 ABI、Contract Impact、acceptance与Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划或
-current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2、Stage 2与Stage 3 Checkpoint 1；四个授权均已
-消费并关闭。Stage 3 Checkpoint 2、Stage 4与任何contract cutover仍未授权。
+current contract。开发者先后独立授权Stage 1 Checkpoint 1、Checkpoint 2、Stage 2与Stage 3的两个checkpoint；五个授权
+均已消费并关闭。Stage 4与任何contract cutover仍未授权。
 
 ## Checkpoint Log
 
@@ -188,9 +188,54 @@ tmux与sshd均Not Run。
 **Next / Stop:** Stage 3 Checkpoint 1 Closed。执行严格停止；Stage 3 Checkpoint 2与Stage 4仍未获execution authorization，
 Stage 3整体尚未关闭，current contracts、register与`PTY-DEVPTS-CUTOVER`保持不变。
 
+### 2026-08-11 - Stage 3 Checkpoint 2 activation and closure
+
+**Change:** 从`dev/drc/alpha@3490c0db`激活Checkpoint 2。新增尚未注册的single persistent `fs::devpts` instance，拥有
+prebuilt persistent superblock/root、empty-data mount route、Kconfig capacity、reusable index、exact episode binding、
+accepted metadata与retired inode reclaim；VFS继续唯一拥有mount view、inode/dentry与pathname cache。hidden ptmx
+allocation在任何visibility前完成fd/index reservation、pair/master description、relation enrollment、inode/binding与static
+final-release composition，随后以pair、binding和fd commit形成不失败success tail。pathname one-shot activation与
+`TIOCGPTPEER`窄fd installer复用pair admission/participation和implicit relation effect；PTY ioctl raw codec只进入既有TTY
+UAPI owner。
+
+master final release先在pair owner内不可逆retire，再在pair guard外exact撤销devpts binding、回收retired inode、retire
+relation并提交`SIGHUP`/`SIGCONT`及waiter recheck。cleanup capability捕获immutable episode/binding/relation identity，重复、
+迟到或index reuse都不能影响新pair。devpts mount callback不读取target、namespace、credential或mount count；single-view与
+last-view unmount都不驱动instance、binding或pair lifecycle。
+
+**Review / Feedback:** 首轮stage-wide review暴露natural heap allocation被机械转成fallible API、fanotify raw-kernel open
+无法安全消费activation、last-view测试未走真实mount tree、retired inode无法回收、relation guard内存在跨owner effect，以及
+locked admission/冗余phase/test-only helper等问题。维护者接受R3工程约束：少量自然heap allocation在极端OOM时可按global
+allocator policy panic，显式capacity/fd/VFS index/enrollment与fallible backing prepare仍保持errno和exact rollback。
+
+实现据此保持自然owner shape；raw kernel `PathRef::open()`遇到activation稳定返回`NotSupported`并撤销prepare，fanotify映射为
+`FAN_NOFD`；last-view KUnit改走真实mount tree；retired inode eviction变为exact、guards-out且可重试；relation logging、drop、
+topology lookup与signal delivery全部移到relation guard外；locked admission只读取committed live pair，并删除冗余phase与
+test-only production helper。最终独立review为0 Apollyon / 0 Keter / 0 Euclid / 0 Safe，Architecture Friction Scan未发现
+需要保留的具体摩擦。generic VFS cached-positive freshness、late materialization、完整multi-view linearizability与并发runtime
+interleaving没有被该review外推为已证明。
+
+**Contract Cutover:** None。devpts filesystem registration、devfs `ptmx`/empty `pts` publication、persistent init mount与
+public PTY namespace均未激活；current TTY、opened-description、VFS、iomux/epoll、task/Signal/job-control contracts、register与
+`PTY-DEVPTS-CUTOVER`保持不变。
+
+**Validation:** final candidate通过`git diff --check`、`just fmt kernel --check`与`mdbook build docs`。canonical RV64 TTY
+wrapper通过repository build、623/623 KUnit、existing serial `TTYTEST:SUMMARY:PASS:50`、BusyBox vi/ash、host byte oracle与
+orderly shutdown；结果只证明owner-local deterministic KUnit与existing serial regression，不外推未公开PTY runtime。
+canonical `just build --preset qemu-virt-la64-release --bind smp=1 --bind memory=1G`通过，final symbol table为6588 entries。
+
+LA64 runtime、PTY Rust test app、LTP、tmux、sshd与所有public PTY pathname/ioctl runtime均Not Run。generic VFS
+cached-positive freshness、late materialization、完整multi-view pathname linearizability，以及concurrent allocation/
+open-vs-retire、final close、fd publication、relation/signal ordering、lost-wake与lock order的runtime interleaving均Not Proven；
+后者只由source/lock/linearization review覆盖。
+
+**Next / Stop:** Stage 3 Checkpoint 2与Stage 3 Closed。执行严格停止；Stage 4保持Future且未获execution authorization，
+`PTY-DEVPTS-CUTOVER`仍Not Effective。下一步只能在维护者新的明确授权下进入Stage 4 public activation与acceptance。
+
 ## Current Handoff
 
-当前live source已经关闭runtime semantic endpoint substrate、owner-private PTY pair/data-plane/description effect与
-TTY-owner-local结构拆分：existing serial caller继续使用semantic endpoint/physical attachment单一路径，Stage 2 capability
-仍不可由userspace发现。transaction保持Active只因为Stage 3 Checkpoint 2与Stage 4尚未执行；本记录不授权自动继续，也不把
-serial userspace、KUnit计数或source review外推为公开PTY ABI/runtime acceptance或contract cutover。
+当前live source已经关闭runtime semantic endpoint substrate、owner-private PTY pair/data-plane/description effect、
+TTY-owner-local结构拆分，以及hidden devpts/allocation/open/cleanup production route；existing serial caller继续使用semantic
+endpoint/physical attachment单一路径，Stage 3 capability仍不可由userspace发现。transaction保持Active只因为Stage 4尚未
+执行；本记录不授权自动继续，也不把serial userspace、KUnit计数、双架构build或source review外推为公开PTY ABI/runtime
+acceptance或contract cutover。

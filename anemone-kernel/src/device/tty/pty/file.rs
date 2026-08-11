@@ -59,6 +59,25 @@ fn master_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     if !master.description.is_live() {
         return Err(SysError::IO);
     }
+    match ctx.cmd() {
+        anemone_abi::tty::linux::TIOCGPTN => {
+            tty_file::write_ioctl_value(&ctx, master.description.index())?;
+            return Ok(0);
+        },
+        anemone_abi::tty::linux::TIOCSPTLCK => {
+            let locked = tty_file::read_ioctl_value::<i32>(&ctx)? != 0;
+            master.description.set_slave_locked(locked)?;
+            return Ok(0);
+        },
+        anemone_abi::tty::linux::TIOCGPTPEER => {
+            return super::open_peer(
+                &master.description,
+                master.terminal_file.endpoint.clone(),
+                &ctx,
+            );
+        },
+        _ => {},
+    }
     // Master and slave observe the same Terminal truth, but the master never
     // forwards controlling-terminal operations to the relation owner.
     let result = tty_file::terminal_ioctl(
@@ -73,7 +92,13 @@ fn master_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
 pub(super) fn master_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
     let master = master_file(ctx.file);
     master.description.release();
-    if let Some(base) = master.description.base_final_release {
+    let base = *master
+        .description
+        .base_final_release
+        .lock()
+        .as_ref()
+        .expect("live PTY master missing static final-release composition");
+    if let Some(base) = base {
         base(ctx);
     }
 }
@@ -81,7 +106,12 @@ pub(super) fn master_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
 pub(super) fn slave_final_release(ctx: OpenedFileFinalReleaseCtx<'_>) {
     let description = tty_file::pty_slave_description(ctx.file);
     description.release();
-    if let Some(base) = description.base_final_release {
+    let base = *description
+        .base_final_release
+        .lock()
+        .as_ref()
+        .expect("live PTY slave missing static final-release composition");
+    if let Some(base) = base {
         base(ctx);
     }
 }

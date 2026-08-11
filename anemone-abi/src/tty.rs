@@ -162,4 +162,7 @@ pub mod linux {
     pub const TIOCSWINSZ: u32 = 0x5414;
     pub const TIOCNOTTY: u32 = 0x5422;
     pub const TIOCGSID: u32 = 0x5429;
+    pub const TIOCGPTN: u32 = 0x8004_5430;
+    pub const TIOCSPTLCK: u32 = 0x4004_5431;
+    pub const TIOCGPTPEER: u32 = 0x5441;
 }
