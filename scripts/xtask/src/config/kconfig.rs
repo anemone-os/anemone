@@ -122,6 +122,8 @@ pub struct Parameters {
     pub jh7110_gmac_frame_capacity_bytes: Option<usize>,
     pub jh7110_gmac_reset_timeout_ms: Option<u64>,
     pub jh7110_gmac_phy_timeout_ms: Option<u64>,
+    pub dwmac1000_reset_timeout_ms: Option<u64>,
+    pub dwmac1000_mdio_timeout_ms: Option<u64>,
     pub net_pump_ingress_budget_frames: Option<usize>,
     pub net_pump_egress_budget_steps: Option<usize>,
     pub net_worker_repoll_rounds: Option<usize>,
@@ -250,6 +252,8 @@ impl Parameters {
         materialize!(jh7110_gmac_frame_capacity_bytes);
         materialize!(jh7110_gmac_reset_timeout_ms);
         materialize!(jh7110_gmac_phy_timeout_ms);
+        materialize!(dwmac1000_reset_timeout_ms);
+        materialize!(dwmac1000_mdio_timeout_ms);
         materialize!(net_pump_ingress_budget_frames);
         materialize!(net_pump_egress_budget_steps);
         materialize!(net_worker_repoll_rounds);
@@ -485,6 +489,10 @@ pub const JH7110_GMAC_FRAME_CAPACITY_BYTES: usize = {};
 pub const JH7110_GMAC_RESET_TIMEOUT_MS: u64 = {};
 /// Maximum probe-time wait for PHY link resolution.
 pub const JH7110_GMAC_PHY_TIMEOUT_MS: u64 = {};
+/// DWMAC1000 internal DMA software-reset deadline during Gate 2 probe.
+pub const DWMAC1000_RESET_TIMEOUT_MS: u64 = {};
+/// DWMAC1000 MDIO transaction deadline during Gate 2 probe.
+pub const DWMAC1000_MDIO_TIMEOUT_MS: u64 = {};
 /// Maximum ingress frames advanced by one stack pump.
 pub const NET_PUMP_INGRESS_BUDGET_FRAMES: usize = {};
 /// Maximum egress steps advanced by one stack pump.
@@ -625,6 +633,8 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(jh7110_gmac_frame_capacity_bytes),
             resolved!(jh7110_gmac_reset_timeout_ms),
             resolved!(jh7110_gmac_phy_timeout_ms),
+            resolved!(dwmac1000_reset_timeout_ms),
+            resolved!(dwmac1000_mdio_timeout_ms),
             resolved!(net_pump_ingress_budget_frames),
             resolved!(net_pump_egress_budget_steps),
             resolved!(net_worker_repoll_rounds),
