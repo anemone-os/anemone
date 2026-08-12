@@ -112,6 +112,21 @@ pub struct Dtb {
     pub delivery: DtbDelivery,
     pub authority: DtAuthority,
     pub provider: Option<DtbProvider>,
+    #[serde(rename = "submission-switch")]
+    pub submission_switch: Option<SubmissionDtbSwitch>,
+}
+
+/// One-off QEMU topology switch used by the frozen contest submission.
+///
+/// This is deliberately not a general runtime hardware-description model. It
+/// admits exactly one alternate topology and must be removed with the
+/// `final-submit` contest adapter.
+#[derive(Deserialize, Debug, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SubmissionDtbSwitch {
+    pub fw_cfg_mmio_base: u64,
+    pub alternate_smp: String,
+    pub alternate_memory: String,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -392,33 +407,89 @@ impl Dtb {
             },
         }
 
-        match (
-            has_qemu,
-            self.delivery,
-            self.authority,
-            self.provider,
-            self.source.is_some(),
-        ) {
+        let valid_contract = matches!(
+            (
+                has_qemu,
+                self.delivery,
+                self.authority,
+                self.provider,
+                self.source.is_some(),
+            ),
             (
                 true,
                 DtbDelivery::Firmware | DtbDelivery::Embedded,
                 DtAuthority::ProviderDerived,
                 Some(DtbProvider::Qemu),
                 false,
-            )
-            | (
+            ) | (
                 false,
                 DtbDelivery::Firmware,
                 DtAuthority::ProviderDerived,
                 Some(DtbProvider::Firmware),
                 true,
+            ) | (
+                false,
+                DtbDelivery::Embedded,
+                DtAuthority::Normative,
+                None,
+                true
             )
-            | (false, DtbDelivery::Embedded, DtAuthority::Normative, None, true) => Ok(()),
-            _ => anyhow::bail!(
+        );
+        if !valid_contract {
+            anyhow::bail!(
                 "invalid DT contract: QEMU Platforms require provider-derived provider=qemu without source; physical firmware baselines require provider-derived provider=firmware with source; physical embedded Platforms require normative source"
-            ),
+            );
         }
+
+        if let Some(runtime) = &self.submission_switch {
+            if !has_qemu
+                || *arch != Arch::LoongArch64
+                || self.delivery != DtbDelivery::Embedded
+                || self.authority != DtAuthority::ProviderDerived
+                || self.provider != Some(DtbProvider::Qemu)
+            {
+                anyhow::bail!(
+                    "DT submission switch requires a LoongArch64 embedded provider-derived QEMU DT"
+                );
+            }
+            if runtime.fw_cfg_mmio_base == 0 {
+                anyhow::bail!("DT submission switch requires a nonzero fw_cfg MMIO base");
+            }
+            parse_qemu_smp(&runtime.alternate_smp)?;
+            parse_qemu_memory(&runtime.alternate_memory)?;
+        }
+        Ok(())
     }
+}
+
+pub fn parse_qemu_smp(value: &str) -> anyhow::Result<u16> {
+    let cpus = value
+        .parse::<u16>()
+        .map_err(|_| anyhow::anyhow!("QEMU SMP value `{value}` is not a plain CPU count"))?;
+    if cpus == 0 {
+        anyhow::bail!("QEMU SMP value must be nonzero");
+    }
+    Ok(cpus)
+}
+
+pub fn parse_qemu_memory(value: &str) -> anyhow::Result<u64> {
+    let (digits, multiplier) = match value.as_bytes().last().copied() {
+        Some(b'K' | b'k') => (&value[..value.len() - 1], 1_u64 << 10),
+        Some(b'M' | b'm') => (&value[..value.len() - 1], 1_u64 << 20),
+        Some(b'G' | b'g') => (&value[..value.len() - 1], 1_u64 << 30),
+        Some(b'T' | b't') => (&value[..value.len() - 1], 1_u64 << 40),
+        _ => (value, 1),
+    };
+    let amount = digits
+        .parse::<u64>()
+        .map_err(|_| anyhow::anyhow!("QEMU memory value `{value}` is not an integer size"))?;
+    let bytes = amount
+        .checked_mul(multiplier)
+        .ok_or_else(|| anyhow::anyhow!("QEMU memory value `{value}` overflows bytes"))?;
+    if bytes == 0 {
+        anyhow::bail!("QEMU memory value must be nonzero");
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -522,6 +593,25 @@ mod tests {
             Config::from_str(&normative.replace("source = \"conf/platforms/example.dts\"\n", ""))
                 .is_err()
         );
+
+        let mut submission = embedded_test_platform();
+        submission.dtb.as_mut().unwrap().submission_switch = Some(SubmissionDtbSwitch {
+            fw_cfg_mmio_base: 0x1e02_0000,
+            alternate_smp: "1".to_string(),
+            alternate_memory: "1G".to_string(),
+        });
+        let submission = toml::to_string(&submission).unwrap();
+        Config::from_str(&submission).unwrap();
+        assert!(
+            Config::from_str(&submission.replace("arch = \"loongarch64\"", "arch = \"riscv64\""))
+                .is_err()
+        );
+        assert!(
+            Config::from_str(
+                &submission.replace("delivery = \"embedded\"", "delivery = \"firmware\"")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -587,8 +677,25 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
         Config::from_str(&content).expect("repository example Platform must parse");
     }
 
+    #[test]
+    fn parses_submission_topology_values() {
+        assert_eq!(parse_qemu_smp("8").unwrap(), 8);
+        assert_eq!(parse_qemu_memory("1G").unwrap(), 1 << 30);
+        assert_eq!(parse_qemu_memory("8192M").unwrap(), 8 << 30);
+        assert!(parse_qemu_smp("0").is_err());
+        assert!(parse_qemu_smp("1,maxcpus=8").is_err());
+        assert!(parse_qemu_memory("1.5G").is_err());
+    }
+
     fn test_platform() -> Config {
         Config::from_str(TEST_QEMU_PLATFORM).unwrap()
+    }
+
+    fn embedded_test_platform() -> Config {
+        let mut platform = test_platform();
+        platform.build.arch = Arch::LoongArch64;
+        platform.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
+        platform
     }
 
     fn physical_platform(

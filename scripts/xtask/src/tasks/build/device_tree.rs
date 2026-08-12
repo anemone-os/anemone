@@ -9,11 +9,15 @@ use std::{
 use anyhow::Context;
 
 use crate::{
-    config::platform::{Config, DtAuthority, DtbDelivery, DtbProvider, Qemu},
+    config::platform::{
+        Config, DtAuthority, DtbDelivery, DtbProvider, Qemu, parse_qemu_memory, parse_qemu_smp,
+    },
     tasks::{qemu::qemu_program, utils::cmd_echo},
 };
 
 pub const DEVICE_TREE_OUTPUT_PATH: &str = "build/generated/device-tree/platform.dtb";
+pub const ALTERNATE_DEVICE_TREE_OUTPUT_PATH: &str =
+    "build/generated/device-tree/platform-alternate.dtb";
 const FDT_MAGIC: u32 = 0xd00d_feed;
 const FDT_HEADER_SIZE: u64 = 40;
 
@@ -22,7 +26,107 @@ pub fn materialize(platform: &Config) -> anyhow::Result<()> {
         platform,
         Path::new(DEVICE_TREE_OUTPUT_PATH),
         OsStr::new(qemu_program(&platform.build.arch)),
-    )
+    )?;
+
+    let alternate = Path::new(ALTERNATE_DEVICE_TREE_OUTPUT_PATH);
+    if let Some(runtime) = platform
+        .dtb
+        .as_ref()
+        .and_then(|dtb| dtb.submission_switch.as_ref())
+    {
+        let mut qemu = platform
+            .qemu
+            .as_ref()
+            .expect("validated submission switch must have QEMU")
+            .clone();
+        qemu.smp.clone_from(&runtime.alternate_smp);
+        qemu.memory.clone_from(&runtime.alternate_memory);
+        materialize_qemu_at(
+            &qemu,
+            alternate,
+            OsStr::new(qemu_program(&platform.build.arch)),
+        )?;
+    } else {
+        cleanup_outputs(alternate, &temporary_path(alternate)?)?;
+    }
+    Ok(())
+}
+
+fn materialize_qemu_at(qemu: &Qemu, output: &Path, provider_program: &OsStr) -> anyhow::Result<()> {
+    let temporary = temporary_path(output)?;
+    let output_dir = output
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("device-tree output must have a parent"))?;
+    fs::create_dir_all(output_dir).context("failed to create device-tree output directory")?;
+    cleanup_outputs(output, &temporary)?;
+    if let Err(error) = materialize_qemu_provider(qemu, provider_program, &temporary) {
+        return match cleanup_outputs(output, &temporary) {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(anyhow::anyhow!(
+                "{error:#}; failed to clean device-tree outputs: {cleanup:#}"
+            )),
+        };
+    }
+    fs::rename(&temporary, output).context("failed to publish alternate platform DTB")
+}
+
+pub(super) fn render_kernel_defs(platform: &Config) -> anyhow::Result<String> {
+    if !matches!(
+        platform.dtb.as_ref().map(|dtb| dtb.delivery),
+        Some(DtbDelivery::Embedded)
+    ) {
+        return Ok(String::new());
+    }
+
+    let runtime = platform
+        .dtb
+        .as_ref()
+        .and_then(|dtb| dtb.submission_switch.as_ref());
+    let switch = if let Some(runtime) = runtime {
+        let qemu = platform
+            .qemu
+            .as_ref()
+            .expect("validated submission switch must have QEMU");
+        let primary_cpus = parse_qemu_smp(&qemu.smp)?;
+        let primary_memory = parse_qemu_memory(&qemu.memory)?;
+        let alternate_cpus = parse_qemu_smp(&runtime.alternate_smp)?;
+        let alternate_memory = parse_qemu_memory(&runtime.alternate_memory)?;
+        format!(
+            r#"Some(SubmissionDtbSwitch {{
+    fw_cfg_mmio_base: {:#x},
+    primary_cpus: {primary_cpus},
+    primary_memory: {primary_memory},
+    alternate_cpus: {alternate_cpus},
+    alternate_memory: {alternate_memory},
+    alternate_dtb: crate::include_bytes_aligned_as!(
+        crate::utils::align::PhantomAligned8,
+        "../../build/generated/device-tree/platform-alternate.dtb"
+    ),
+}})"#,
+            runtime.fw_cfg_mmio_base,
+        )
+    } else {
+        "None".to_string()
+    };
+
+    Ok(format!(
+        r#"pub(crate) static PRIMARY_DTB_BYTES: &[u8] = crate::include_bytes_aligned_as!(
+    crate::utils::align::PhantomAligned8,
+    "../../build/generated/device-tree/platform.dtb"
+);
+
+pub(crate) struct SubmissionDtbSwitch {{
+    pub(crate) fw_cfg_mmio_base: u64,
+    pub(crate) primary_cpus: u16,
+    pub(crate) primary_memory: u64,
+    pub(crate) alternate_cpus: u16,
+    pub(crate) alternate_memory: u64,
+    pub(crate) alternate_dtb: &'static [u8],
+}}
+
+pub(crate) static SUBMISSION_DTB_SWITCH: Option<SubmissionDtbSwitch> = {switch};
+"#
+    ))
 }
 
 fn materialize_at(
@@ -234,7 +338,7 @@ fn remove_file_if_present(path: &Path) -> anyhow::Result<()> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use crate::config::platform::{Arch, TEST_QEMU_PLATFORM};
+    use crate::config::platform::{Arch, SubmissionDtbSwitch, TEST_QEMU_PLATFORM};
 
     use super::*;
 
@@ -323,6 +427,37 @@ mod tests {
 
         assert_eq!(fs::read(&output).unwrap(), minimal_fdt());
         assert!(!temporary_path(&output).unwrap().exists());
+    }
+
+    #[test]
+    fn submission_switch_renders_both_frozen_topologies() {
+        let mut platform = embedded_test_platform();
+        let qemu = platform.qemu.as_mut().unwrap();
+        qemu.smp = "8".to_string();
+        qemu.memory = "8G".to_string();
+        platform.dtb.as_mut().unwrap().submission_switch = Some(SubmissionDtbSwitch {
+            fw_cfg_mmio_base: 0x1e02_0000,
+            alternate_smp: "1".to_string(),
+            alternate_memory: "1G".to_string(),
+        });
+
+        let rendered = render_kernel_defs(&platform).unwrap();
+        for expected in [
+            "crate::include_bytes_aligned_as!(\n    crate::utils::align::PhantomAligned8",
+            "fw_cfg_mmio_base: 0x1e020000",
+            "primary_cpus: 8",
+            "primary_memory: 8589934592",
+            "alternate_cpus: 1",
+            "alternate_memory: 1073741824",
+            "platform-alternate.dtb",
+        ] {
+            assert!(rendered.contains(expected), "missing `{expected}`");
+        }
+
+        platform.dtb.as_mut().unwrap().submission_switch = None;
+        let ordinary = render_kernel_defs(&platform).unwrap();
+        assert!(ordinary.contains("SUBMISSION_DTB_SWITCH: Option<SubmissionDtbSwitch> = None"));
+        assert!(!ordinary.contains("platform-alternate.dtb"));
     }
 
     fn test_platform() -> Config {

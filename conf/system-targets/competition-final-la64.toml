@@ -1,4 +1,4 @@
-platform = "qemu-virt-la64"
+platform = "qemu-virt-la64-submission"
 
 [root]
 fstype = "ext4"
@@ -12,4 +12,4 @@ default-gateway = "10.0.2.2"
 
 [initial-program]
 type = "embedded-app"
-app = "final-entry"
+app = "final-submit"

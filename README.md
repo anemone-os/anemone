@@ -9,6 +9,8 @@
 
 [English](./docs/README.en.md) | 简体中文
 
+*本项目在[GitHub](https://github.com/anemone-os/anemone)进行开发.*
+
 > 在边界对齐 Linux UAPI，在内核中保持 Anemone 自己的秩序。
 
 Anemone 是一个使用 Rust 实现的多核类 Unix 宏内核，支持 RISC-V64 与 LoongArch64。它以兼容 Linux 用户态为目标，但不复制 Linux 的内部对象模型：进程、调度、虚拟内存、VFS、设备、Socket 与网络协议仍由职责清晰的 Anemone 子系统拥有。
@@ -44,7 +46,7 @@ Anemone 让内存、异常、调度、信号等使用方子系统定义所需的
 
 ### 从内核机制到完整系统
 
-Anemone 不只交付一个 ELF。仓库同时组织内核、共享 ABI、用户态支持库、应用、rootfs、平台描述与构建配置，并由 `Justfile` 和 Rust `xtask` 从显式系统描述生成可启动产物。
+Anemone 不只交付一个 ELF——我们给出的是一个完整的、从内核到用户态、从五种配置文件到整个构建系统的整个生态。仓库同时组织内核、共享 ABI、用户态支持库、应用、rootfs、平台描述与构建配置，并由 `Justfile` 和 Rust `xtask` 从显式系统描述生成可启动产物。
 
 当前系统可以承载交互式 shell、glibc 用户环境、进程与文件工具、`ping`、原生 iproute2、`apt install`、HTTPS `git clone` 以及大型软件编译。决赛测例与 BuildStorm 编译负载用于检验这些机制能否在完整路径中共同工作，而不只是证明孤立接口存在。
 
@@ -68,8 +70,9 @@ Anemone 不只交付一个 ELF。仓库同时组织内核、共享 ABI、用户�
 
 - [内核技术报告](./report/kernel-report/anemone-report.pdf)
 - [BuildStorm 设计与优化报告](./report/buildstorm/)
-- 决赛演示文稿：待补充
-- 决赛演示视频：待补充
+- [决赛演示文稿](./report/ppt/Anemone决赛演示文稿.pptx)
+- [初赛演示视频](https://pan.baidu.com/s/1rhglWFYPBpUGX7G0ZbcY1A?pwd=kafu) 提取码：kafu
+- [决赛演示视频](https://pan.baidu.com/s/1MfxBOvz7EhgwaB0HWIXTzw?pwd=kafu) 提取码：kafu
 
 ## 使用 `just` 构建
 

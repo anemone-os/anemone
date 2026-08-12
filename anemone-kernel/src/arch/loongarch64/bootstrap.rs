@@ -55,12 +55,6 @@ static_assert!(
     "cache padding must not change the bootstrap stack stride"
 );
 
-/// Flattened device tree blob generated from the selected Platform's normative DTS.
-static DTB_BYTES: &[u8] = include_bytes_aligned_as!(
-    PhantomAligned8,
-    "../../../../build/generated/device-tree/platform.dtb"
-);
-
 /// # Note
 /// LoongArch64 boots without SBI, so the entry point is fixed and [`__nun`]
 /// would otherwise be considered unused by the compiler.
@@ -211,10 +205,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
 
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;
-            bsp_setup(
-                PhysCpuId::new(hart_id),
-                VirtAddr::new(DTB_BYTES.as_ptr() as u64),
-            )
+            bsp_setup(PhysCpuId::new(hart_id))
         } else {
             // ap
             ap_setup(PhysCpuId::new(hart_id))
@@ -267,7 +258,7 @@ pub fn register_debugcon() {
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("registering init task");
 
-unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
+unsafe fn bsp_setup(bsp_physical_id: PhysCpuId) -> ! {
     unsafe {
         clear_bss();
     }
@@ -276,6 +267,8 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
     install_ktrap_handler();
 
     register_debugcon();
+
+    let fdt_va = select_boot_fdt();
 
     kdebugln!(
         "bootstrap {} started, fdt at {:#x}",
@@ -351,6 +344,71 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
 
         sched::init_routines::local_enqueue_first_new_task(bsp_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
+    }
+}
+
+/// Selects the hardware description before CPU topology and physical memory
+/// are initialized.
+///
+/// The alternate path is a one-off bridge for the frozen contest QEMU tuples:
+/// preliminary uses 1 CPU/1 GiB while final uses 8 CPUs/8 GiB. It deliberately
+/// rejects every other tuple and must be removed together with `final-submit`;
+/// it is not a general LoongArch runtime-DT protocol.
+fn select_boot_fdt() -> VirtAddr {
+    let Some(runtime) = &SUBMISSION_DTB_SWITCH else {
+        return VirtAddr::new(PRIMARY_DTB_BYTES.as_ptr() as u64);
+    };
+
+    let cpus = unsafe { fw_cfg_read_u16(runtime.fw_cfg_mmio_base, 0x05) };
+    let memory = unsafe { fw_cfg_read_u64(runtime.fw_cfg_mmio_base, 0x03) };
+    let bytes = if (cpus, memory) == (runtime.primary_cpus, runtime.primary_memory) {
+        PRIMARY_DTB_BYTES
+    } else if (cpus, memory) == (runtime.alternate_cpus, runtime.alternate_memory) {
+        runtime.alternate_dtb
+    } else {
+        panic!(
+            "unsupported submission QEMU topology: cpus={}, memory={:#x}",
+            cpus, memory
+        );
+    };
+    kinfoln!(
+        "selected submission device tree for {} CPUs and {:#x} bytes of RAM",
+        cpus,
+        memory
+    );
+    VirtAddr::new(bytes.as_ptr() as u64)
+}
+
+/// Reads a little-endian 16-bit standard item from the LoongArch QEMU fw_cfg
+/// byte stream.
+unsafe fn fw_cfg_read_u16(base: u64, selector: u16) -> u16 {
+    let mut bytes = [0_u8; 2];
+    unsafe { fw_cfg_read(base, selector, &mut bytes) };
+    u16::from_le_bytes(bytes)
+}
+
+/// Reads a little-endian 64-bit standard item from the LoongArch QEMU fw_cfg
+/// byte stream.
+unsafe fn fw_cfg_read_u64(base: u64, selector: u16) -> u64 {
+    let mut bytes = [0_u8; 8];
+    unsafe { fw_cfg_read(base, selector, &mut bytes) };
+    u64::from_le_bytes(bytes)
+}
+
+unsafe fn fw_cfg_read(base: u64, selector: u16, output: &mut [u8]) {
+    const CONTROL_OFFSET: u64 = 8;
+    let mapped = LA64KernelLayout::TEMPORARY_IO_ADDR + base;
+    let data = mapped as *const u8;
+    let control = (mapped + CONTROL_OFFSET) as *mut u16;
+
+    // fw_cfg-mmio defines a big-endian selector register followed by a byte
+    // stream. Volatile byte reads preserve the stream order and avoid any
+    // guest/device wide-access endian ambiguity.
+    unsafe {
+        core::ptr::write_volatile(control, selector.to_be());
+        for byte in output {
+            *byte = core::ptr::read_volatile(data);
+        }
     }
 }
 
