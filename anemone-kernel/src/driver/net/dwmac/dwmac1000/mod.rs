@@ -1,5 +1,7 @@
 //! Synopsys legacy DWMAC1000 concrete backend registration.
 
+mod protocol;
+
 use crate::{
     device::{
         bus::platform::{self, PlatformDriver},
