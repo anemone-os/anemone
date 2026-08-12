@@ -8,7 +8,7 @@
   team-name: [ヰ世界电子开发部],
   teammates: ([张正翰], [陈函申]),
   teachers: ([夏文], [仇洁婷]),
-  date: (2026, 6, 30),
+  date: (2026, 8, 12),
   logo-path: "assets/school.jpg",
 )[
   #frontmatter(title: [Anemone])[
@@ -24,9 +24,10 @@
     #include "content/05-ipc.typ"
     #include "content/06-filesystem.typ"
     #include "content/07-device-driver-model.typ"
-    #include "content/08-time.typ"
-    #include "content/09-arch-hal.typ"
-    #include "content/10-summary.typ"
+    #include "content/08-network-stack.typ"
+    #include "content/09-time.typ"
+    #include "content/10-arch-hal.typ"
+    #include "content/11-summary.typ"
 
     #appendices[
       #include "content/a-engineering-ai.typ"

@@ -2,16 +2,16 @@
 
 = 摘 要
 
-Anemone 是一个使用 Rust 实现、支持 RISC-V64 与 LoongArch64 平台的操作系统内核。
+Anemone 是一个使用 Rust 实现、支持 RISC-V64 与 LoongArch64 平台的宏内核。
 
 在开发过程中，我们始终避免为了对特定测例进行特化适配而妥协系统设计。Anemone 的目标是：在 Linux ABI 兼容性、进程线程管理、虚拟内存、VFS 与文件系统、设备驱动模型、IPC、同步和体系结构适配等核心能力域上形成*可解释、可维护、可持续演进*的系统实现。
 
 Anemone 的开发全程独立自主。在架构上，我们抛弃了历史包袱，完全从零设计。我们还编写了基于侵入式结构的 buddy 内存分配器以解决页分配器对堆反向依赖的问题，以及同样基于侵入式结构的、对堆无依赖的设备树解析库以便内核早期使用，以及LoongArch64 硬件支持库等，它们都独立于且被抽离了内核，形成单独的 crate，经过了 Miri、cargo-fuzz 等工具的验证，我们期望这些 crate 能为未来的开源社区贡献更多的基础设施。
 
-截至本文档编写时，Anemone 已经通过初赛测例的大部分测例，并通过了大量 LTP 测例点。
+截至本文档编写时，Anemone 已经通过所有决赛测例，并在Buildstorm编译测例上取得了可观的性能成绩。
 
 #report-figure(
-  image("../assets/rank.png", width: 90%),
+  image("../assets/final-rank.png", width: 90%),
   caption: [Anemone 当前榜单截图。],
 )
 
@@ -34,6 +34,9 @@ Anemone 各个模块完成情况概览如下。
     [IPC], [覆盖 signal、pipe、System V IPC、event/timer 类文件对象、poll/select 等等待组合路径。],
     [文件系统], [实现 VFS、路径查找、mount view、opened file object、procfs、devfs 和多类文件后端的统一接入。],
     [设备驱动模型], [实现设备发布、字符/块设备、devfs bridge、ioctl 分发和若干具体设备对象。],
+    [网络栈],
+    [实现 IPv4 TCP / UDP / ICMP raw、VirtIO-Net、Socket、poll / epoll 接入与只读 Netlink 诊断，可运行包管理器、HTTPS Git 和原生 iproute2 查询。],
+
     [时间], [围绕 clock、tick、IRQ / threaded soft timer、timerfd 和 itimer 组织时间线、超时与定时通知。],
     [架构硬件抽象层], [支持 RISC-V64 与 LoongArch64 的启动、trap、中断、上下文保存和平台差异收束。],
   ),
