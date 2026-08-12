@@ -1,9 +1,9 @@
 # RFC-20260811-dwmac
 
-**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Stopped / Not Cut Over
-**修订：** R2
+**状态：** Accepted / R3 / Gate 1 Closed; Gate 2 Authorized / Not Cut Over
+**修订：** R3
 **负责人：** Anemone maintainers
-**最后更新：** 2026-08-12
+**最后更新：** 2026-08-13
 **领域：** driver / net / irq / mm / phy
 **影响契约：** Accepted target：Refine `IRQ-FLOW-001`；Introduce `DWMAC-DESCRIPTOR-001`、`DWMAC-DMA-ADDR-001`、`DWMAC-CAUSE-001`、`DWMAC-NODE-001`
 **执行记录：** [2026-08-11 DWMAC transaction](../../devlog/transactions/2026-08-11-dwmac.md)
@@ -97,21 +97,45 @@ GMAC1 显式包含 pinctrl。这些 resource 缺失不证明硬件无需初始�
 | `IrqSense` source table、`EDGE/POL`、route、mask、controller flow | Loongson 2K1000 irqchip | DTB one-cell 下由 SoC table 拥有；readback 失败阻止 IRQ admission |
 | IRQ dispatch order | IRQ core / irqchip | `LevelMaskEoi` 为 `mask -> handler -> eoi -> unmask` |
 | `request_irq` expected type | IRQ request owner | actual 由 irqchip table 给出；mismatch 在 mapping/publication/unmask 前失败 |
-| DWMAC MAC/DMA registers、descriptor、DMA address | concrete DWMAC4/DWMAC1000 backend | 自己 reset、program、quiesce；不共享另一 family 的 MMIO/bit layout |
-| DWMAC CSR5 RI/TI/AIS/W1C | concrete backend device handler | IRQ tail `eoi/unmask` 前清合法 W1C mask，再发布 recheck |
+| DWMAC MAC/DMA registers、descriptor、DMA address | concrete DWMAC4/DWMAC1000 per-node owner | 自己 reset、program、quiesce；不共享另一 family 的 MMIO/bit layout；DWMAC1000 backing 只在 process-state quiescence 已证明后释放 |
+| DWMAC CSR5 RI/TI/AIS/W1C | concrete backend per-node owner and device handler | IRQ tail `eoi/unmask` 前清合法 W1C mask；Gate 2 handler/context 由同一 owner 保留，Gate 3 原位采用 |
 | clock/reset/pinctrl external access | firmware in Route A；future provider only after review | handoff 失败不写 raw SoC register；node fail before publication |
 | PHY identity/reset/fixup/link snapshot | per-node PHY transaction | transaction 失败释放 node-local MDIO state；不建 global PHY owner |
 | MAC address fact | boot-time live DT / DWMAC probe | `local-mac-address` 非法或缺失时 node fail |
-| frame capability / worker / recheck | existing network owners + per-node provider | DWMAC only hands off narrow capability |
+| Gate 2 IRQ context、MMIO、rings 和 DMA backing | DWMAC1000 per-node owner retained by bound platform device | IRQ commit 后不 retire、不重新 request；bounded probe 后保持 device/CSR7 disabled，Gate 3 只能原位 adopt；失败且无法证明 DMA quiescence时保留 backing |
+| frame capability / worker / recheck | existing network owners + adopted per-node owner | Gate 3 在同一 owner 上补齐 narrow capability；不重建 rings 或复制 device state |
 | netdev publication / active logical identity | device/net + attach authority | publication success 后按成功顺序分配 `eth<N>`；失败不占号 |
 
 ### Initialization and IRQ handoff
 
-每个 node 顺序必须为：compatible admission -> resource/MMIO/capability -> Route A handoff check -> DWMAC
-internal DMA reset -> per-node MDIO/PHY transaction -> descriptor/DMA backing 和 32-bit checks ->
-`IrqSense`/controller admission -> device-cause baseline and interrupt enable -> `FrameProvider`/worker ->
-`request_irq(..., Some(LevelLow))` -> publication/attach。可能失败的步骤必须在 IRQ unmask 和 netdev publication
-前完成，避免现有系统缺少 runtime removal 时留下 enabled orphan。
+每个 node 的 Gate 2 顺序必须为：compatible admission -> resource/MMIO/capability -> Route A handoff check ->
+DWMAC internal DMA reset -> per-node MDIO/PHY transaction -> 创建唯一 long-lived per-node owner ->
+descriptor/DMA backing 和完整 32-bit checks -> `ATDS=0`/ring/base programming -> CSR5 baseline ->
+`request_irq(..., Some(LevelLow))` -> bounded TX/RX/CSR5/IRQ characterization -> device/CSR7 mask ->
+TX/RX process-state quiescence proof -> retain owner。IRQ request 之前的失败只有在设备未持有 backing，或已证明
+TX/RX quiescent 后，才可释放 node-local 资源并返回普通 probe failure。
+
+`request_irq` commit 是不可退休边界。越过该边界后，platform `probe()` 的成功只表示 concrete driver 已绑定并
+接管该 node 的长期资源生命周期，不表示 bounded characterization 通过或 netdev 已发布。无论 characterization
+通过还是失败，MMIO、IRQ context/mapping、rings、DMA backing 和明确的 characterization result 都由同一 owner
+保存在 bound device 上；owner 必须先 mask CSR7、停止 MAC/DMA，并记录 TX/RX process-state quiescence结果。
+若 quiescence 未证明，backing 不得释放。Gate 3 只能原位 adopt 通过 Gate 2 的 owner，并在该对象上建立
+`FrameProvider`/worker/publication/attach；不得重新 request IRQ、重建 rings 或创建并列 backend state。
+
+为了覆盖 request commit 内的首次 unmask 与 level-flow handler tail 的后续 unmask，Loongson concrete irqchip
+必须在每次真实 `EnableSet` 前读取并输出该 hwirq 的 controller pending 状态。该 observation 是 Gate 2 的
+临时、owner-local validation trace，退出条件是 Gate 2 实机日志已经关闭 pending-clear oracle；它不增加
+DWMAC 可调用的 pending API，也不让 DWMAC 保存 controller truth。owner 的 strong-reference 顺序必须为：
+local `Arc` 进入 request -> IRQ descriptor private data在unmask前取得clone -> commit/unmask -> request返回后
+立即把同一`Arc`写入device `drv_state` -> bounded characterization。commit期间handler由descriptor引用保活；
+commit前request失败则没有已发布IRQ，local owner可按quiescence规则释放。commit后即使 IRQ 在device state
+安装前到达，handler context仍然可达；安装后所有characterization结果都返回`Ok(())`让bus完成bind。结果
+本身只存于owner并通过结构化日志表达。
+
+Gate 3 的“原位 adopt”不是另一次 reprobe，也不假设 owner 跨 reboot 存活。Gate 3-enabled kernel 的同一次
+platform `probe()` 只创建一次 owner、只 commit 一次 IRQ；Gate 2 characterization通过后，private continuation
+在该 owner 上增加 provider/worker/publication capability，最后由 bus bind。Gate 2-only kernel 则在同一点以
+disabled、unpublished owner 返回并完成 bind。两条构建阶段都不允许替换 `drv_state` 中的一次性 owner。
 
 ```text
 ICU source pending
@@ -133,6 +157,8 @@ ICU ack/mask/eoi 不清 CSR5；DWMAC W1C 不清 ICU source。旧 cause 在 unmas
   和现有 network attach 语义是唯一可见 surface。
 - `request_irq`/`request_irq_selected` 是 kernel-internal API surface，不是 userspace ABI；旧 caller
   传 `None` 保持行为，DWMAC1000 显式传 `Some(IrqSense::LevelLow)`。
+- Gate 2 的 bound-but-unpublished device 不产生 netdev、Stack membership 或 `eth<N>`；platform bind success
+  不是用户可见 network capability success，characterization failure 必须由结构化日志明确输出。
 - `eth<N>` 只表示成功 active publication 顺序，不承诺与 physical node、MMIO base、IRQ source 或 DT alias
   对应。失败 node 不产生可见 netdev、不占用 name。
 - `local-mac-address` 是板级输入；非法/缺失时 fail closed，不随机补 MAC。
@@ -171,7 +197,8 @@ ICU ack/mask/eoi 不清 CSR5；DWMAC W1C 不清 ICU source。旧 cause 在 unmas
 
 - 当前 DTB 字节内容、compatible/resource/name 形状、existing JH7110 visible behavior 和 current network/socket ABI。
 - IRQ core owner/handoff：device driver 清 device cause，irqchip 不猜 CSR5，DWMAC 不写 ICU registers。
-- per-node state ownership、failure-before-publication、success-order `eth<N>` 和既有 attach/Stack/worker semantics。
+- per-node state ownership、failure-before-publication、success-order `eth<N>` 和既有 attach/Stack/worker semantics；
+  Gate 2 IRQ commit 后由 bound device 长期保留同一 owner，Gate 3 只能原位 adopt。
 - DWMAC family 的寄存器/descriptor owner isolation；不能为了共享抽象暴露大而全的 raw register trait。
 
 ### 停止条件
@@ -181,6 +208,10 @@ ICU ack/mask/eoi 不清 CSR5；DWMAC W1C 不清 ICU source。旧 cause 在 unmas
 - Route A 证明 clock/reset/pinctrl handoff 不成立，或 PHY reset/fixup owner 无法闭合；回到 RFC review 决定 Route B。
 - allocator 无法满足 32-bit admission 且需要 DMA32/bounce/IOMMU；不降低 correctness invariant，停止并提出新 target。
 - `IrqSense`/request expectation 需要扩大成新的通用 interrupt ABI，或出现第二份 electrical/flow truth。
+- Gate 3 无法从 bound device 原位取得唯一 Gate 2 owner，或必须重新 request IRQ、重建 rings、复制 DMA/device
+  state；这需要重新进行 owner/handoff review，不能用全局旁路 registry 制造第二份真相。
+- 严格 pending-clear oracle 需要增加 DWMAC 可调用的 pending API、改变 generic IRQ flow，或不能由 concrete
+  Loongson irqchip 在每次实际 unmask 前完成 observation；停止并回 IRQ owner review。
 
 ## Acceptance 与 Validation
 
@@ -227,12 +258,12 @@ hardware acceptance。
 | R0 | 2026-08-11 | 接受 Draft target、owner、Implementation Boundary、contract delta、Gate 顺序和停止条件；只授权 Gate 1。 | [R0 acceptance](../../devlog/transactions/2026-08-11-dwmac.md#r0-acceptance-and-gate-1-authorization---2026-08-11) |
 | R1 | 2026-08-12 | 接受 owner 形状修订：`net::dwmac::dwmac4` 与 `net::dwmac::dwmac1000` 各自拥有并注册 `Driver`/match table；`net::dwmac` 只保留 shared probe/frame/publication helper。target contract、ABI、DTB、visible semantics、Gate 顺序和 validation strength 不变；重新授权 Gate 1。 | [R1 revision and Gate 1 re-authorization](../../devlog/transactions/2026-08-11-dwmac.md#r1-revision-and-gate-1-re-authorization---2026-08-12) |
 | R2 | 2026-08-12 | 接受 Gate 1 validation staging 修订：以 source/KUnit/build/review、2K1000 双 node compatible dispatch + expected `NotSupported` fail-closed，以及精确 `EDGE/POL` readback实机证据关闭 Gate 1；RiscV/JH7110 regression 保持 Not Run并移交 Gate 3/final closure，不降低最终 proof。target、owner、ABI、DTB、visible semantics、Contract Impact 和 current contracts 不变；Gate 2 未授权。 | [R2 Gate 1 closure](../../devlog/transactions/2026-08-11-dwmac.md#r2-gate-1-validation-revision-and-closure---2026-08-12) |
+| R3 | 2026-08-13 | 接受 Gate 2/3 lifecycle 修订：Gate 2 在 IRQ request 前创建 DWMAC1000 唯一长期 per-node owner；IRQ commit 后由 bound platform device 保留 MMIO、IRQ context/mapping、rings、DMA backing 与 characterization result，Gate 3 只能原位 adopt。失败 cleanup 只有在 TX/RX process-state quiescence 已证明后才可释放 backing；否则保留到 shutdown/power-off。userspace ABI、DTB、target capability、visible net semantics、Contract Impact、current contracts 和最终 validation strength 不变。 | [R3 ownership revision](../../devlog/transactions/2026-08-11-dwmac.md#r3-persistent-gate-2-irq-ownership---2026-08-13) |
 
 ## Closure
 
-RFC 当前未 closure、未 cutover、未更新 current contracts。R2 已关闭 Gate 1。用户随后授权执行 Gate 2，
-但该 Gate 因 Route A、PHY reset-effect、normal descriptor 和 32-bit DMA admission 的 Open blocker
-以及缺少 2K1000 bounded hardware evidence 而停止；实现保持 registration-only、Not Cut Over。不得从
-Gate 1 的 expected `NotSupported` 日志、build 或 QEMU 外推 DWMAC1000 runtime correctness；RiscV/JH7110
-regression 仍必须在 Gate 3/final closure 补齐。后续重新进入 Gate 2 需要补齐 tracking issues 所要求的
-权威硬件事实；任一 target/owner/acceptance 变化仍须回 RFC review。
+RFC 当前未 closure、未 cutover、未更新 current contracts。R2 已关闭 Gate 1。R3 已接受 Gate 2 的长期
+per-node IRQ owner 和 Gate 3 原位接管模型，并重新授权继续 Gate 2。Gate 2 仍必须用 source/KUnit/build、
+独立 review 与 2K1000 bounded hardware evidence 关闭 Route A、PHY reset-effect、normal descriptor、32-bit DMA、
+CSR5/IRQ oracle 和 quiescence义务；platform bind success、Gate 1 expected `NotSupported`、build 或 QEMU 均不能
+外推这些 correctness claims。Gate 3 未授权，RiscV/JH7110 regression 仍必须在 Gate 3/final closure 补齐。

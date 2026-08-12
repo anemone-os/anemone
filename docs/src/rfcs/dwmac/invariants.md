@@ -1,9 +1,9 @@
 # DWMAC 多后端与 2K1000 目标与不变量
 
 **状态：** Accepted
-**最后更新：** 2026-08-12
+**最后更新：** 2026-08-13
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**适用修订：** R2
+**适用修订：** R3
 
 本文只定义本 RFC 的 target/proof obligations。当前 effective rule 仍以 `docs/src/contracts/` 为准；
 实现类型、helper、文件布局和内部算法不由本文冻结。
@@ -11,18 +11,18 @@
 ## 规则分类
 
 - **Correctness invariant：** owner、并发、生命周期、cleanup、内存安全、IRQ ordering 和 ABI 诚实性，不能以工程妥协降低。
-- **Target guarantee：** R2 保持 R0/R1 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力；只能由 RFC review 修订。R2 只调整 Gate 1 与 Gate 3 的 RiscV hardware validation staging，不降低最终 proof obligations。
+- **Target guarantee：** R3 保持 R0/R1 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力，以及 R2 的 validation staging；只能由 RFC review 修订。R3 只修订 Gate 2/3 的长期 IRQ/resource owner、handoff 与 cleanup，不降低最终 proof obligations。
 - **Implementation preference：** `IrqSense` 的具体 Rust 形状、ring helper、backend module layout 和 log wording。
 
 ## Target Invariants
 
 ### TARGET-001 — Per-node concrete ownership
 
-**规则：** 每个 matching Ethernet node 独立拥有 MMIO window、DWMAC backend state、descriptor ring、DMA backing、IRQ context、PHY transaction、worker 和 failure state；`dwmac4`/`dwmac1000` variant module 各自拥有并注册对应 `Driver` 与 match table；`net::dwmac` common layer 不持有 concrete register/descriptor truth，也不制造第二份 variant registration state。
+**规则：** 每个 matching Ethernet node 独立拥有 MMIO window、DWMAC backend state、descriptor ring、DMA backing、IRQ context、PHY transaction、worker 和 failure state；`dwmac4`/`dwmac1000` variant module 各自拥有并注册对应 `Driver` 与 match table；`net::dwmac` common layer 不持有 concrete register/descriptor truth，也不制造第二份 variant registration state。DWMAC1000 owner 在 Gate 2 IRQ request 前创建，IRQ commit 后由 bound platform device 长期保留；Gate 3 只能原位采用该 owner。
 
 **Owner：** concrete DWMAC node provider。
 
-**违反表现：** 两个 node 共享 ring/PHY/register state，固定 GMAC ordinal 分支，或一个 node 的失败/cleanup 改变另一个 node 的 publication。
+**违反表现：** 两个 node 共享 ring/PHY/register state，固定 GMAC ordinal 分支，一个 node 的失败/cleanup 改变另一个 node 的 publication，Gate 2 返回后留下不可达 IRQ context，或 Gate 3 重新 request/rebuild 并形成并列 state。
 
 **Proof：** Gate 1 implementation/source audit、Gate 3 JH7110 dual-node regression and independent 2K1000 port evidence。
 
@@ -108,11 +108,11 @@
 
 ### TARGET-010 — Publication identity and cleanup
 
-**规则：** 只有所有 node-local admission、DMA、IRQ、PHY、provider 和 worker prerequisites 成功后才 publication；成功 active reservation 按 publication/attach success order 连续分配 `eth<N>`，失败 candidate 不占号。所有 pre-publication failure 清理 node-local allocations and disabled resources。
+**规则：** 只有所有 node-local admission、DMA、IRQ、PHY、provider 和 worker prerequisites 成功后才 publication；成功 active reservation 按 publication/attach success order 连续分配 `eth<N>`，失败 candidate 不占号。Gate 2 的 platform bind 只提交长期 lifecycle owner，不构成 network publication。IRQ commit 前的失败只有在未发布 DMA backing 或已证明 TX/RX process-state quiescence 后才释放资源；IRQ commit 后的任何结果都由 bound owner 保留，且 device/CSR7 必须 disabled。未证明 quiescence 时 backing 保留到后续原位 adoption、shutdown 或 terminal power-off。
 
 **Owner：** device/net publication + attach authority；node provider owns local cleanup attempt。
 
-**违反表现：** failed node consumes name、IRQ enabled without provider、publication observes incomplete link/MAC/DMA state，或 cleanup 依赖不存在的 runtime removal。
+**违反表现：** failed node consumes name、Gate 2 bound node 产生 netdev、IRQ commit 后 context 不可达、disabled owner 仍使能 CSR7/MAC/DMA、未证明 quiescence 即释放 backing、publication observes incomplete link/MAC/DMA state，或 cleanup 依赖不存在的 runtime removal。
 
 **Proof：** failure injection、success-order multi-node implementation test、Gate 3 shutdown/reboot evidence；Gate 4 只复核 closure evidence。
 
@@ -120,14 +120,18 @@
 
 1. `IrqSense` table owns electrical/controller configuration；`request_irq` expectation is a one-shot caller assertion，不是缓存的第二份 state。
 2. DWMAC backend owns descriptor ownership transitions and device-cause clear；worker consumes recheck hint and revalidates ring state，不反向拥有 CSR5 truth。
-3. Node-local state must reach a quiescent disabled state before any failure is returned after MMIO/DMA setup；because current kernel has no general `free_irq`/runtime removal, all failure-prone work precedes first unmask/publication。
-4. `local-mac-address`、PHY snapshot、DMA address admission 和 logical `eth<N>` identity 属于不同 fact domains；不能用一个 domain 的 fallback 伪造另一个 domain 的 success。
+3. `request_irq` commit 是不可退休边界。Gate 2 在该边界前创建唯一 local owner；request按 IRQ descriptor private-data strong ref -> commit/unmask发布同一`Arc`，返回后driver立即把同一owner写入device的一次性`drv_state`，再开始bounded characterization。commit期间handler由descriptor保活；commit前request失败则local owner可按quiescence规则释放。commit后platform `probe()`必须返回成功以完成bind，无论characterization result如何；bind success只表达lifecycle ownership，不表达Gate 2 proof success或network publication。
+4. Gate 2 每次 bounded event 后先 mask CSR7/device cause，再停止 MAC/DMA，并读取 CSR5 TX/RX process state。只有 process state 已 quiescent 才允许释放 DMA backing；不能证明时 owner/backing fail-forward retained，不能由 `Drop` 隐式回收。
+5. Gate 3 只允许在同一次 platform `probe()` 中通过 private continuation，让同一 owner 由 `Characterized`/disabled 转为 production attach；不得依赖 reprobe、重新 request IRQ、重建 ring、替换一次性 `drv_state`、复制 MMIO/CSR5 truth，或采用旁路全局 registry 形成第二份状态源。
+6. `local-mac-address`、PHY snapshot、DMA address admission、characterization result 和 logical `eth<N>` identity 属于不同 fact domains；不能用 platform bind 或一个 domain 的 fallback 伪造另一个 domain 的 success。
 
 ## RFC-local Proof Obligations
 
 - DWMAC4 extraction preserves existing JH7110 visible behavior before DWMAC1000 semantic work begins。
 - A normal descriptor probe must perform at least one bounded TX and RX OWN/length/status transition without netdev publication。
 - IRQ probe must distinguish controller pending from CSR5 cause and record the sequence `mask -> read/W1C -> pending clear -> unmask`。
+- Loongson concrete irqchip must observe/log pending immediately before every actual unmask, including request commit's first unmask and level-flow tail unmask；this trace must not become a DWMAC-callable controller API or DWMAC-owned state。
+- Gate 2 ownership tests must distinguish pre-commit release、post-commit retained success、post-commit retained failure and quiesce-timeout retained backing；Gate 3 adoption tests must prove no second IRQ request or ring construction。
 - Route A and PHY P1 probes must define failure signal, write-back and exit before any probe code is retained in production。
 
 ## 禁止退化项
