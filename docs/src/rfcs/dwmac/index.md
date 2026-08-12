@@ -1,6 +1,6 @@
 # RFC-20260811-dwmac
 
-**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Not Authorized
+**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Stopped / Not Cut Over
 **修订：** R2
 **负责人：** Anemone maintainers
 **最后更新：** 2026-08-12
@@ -230,7 +230,9 @@ hardware acceptance。
 
 ## Closure
 
-RFC 当前未 closure、未 cutover、未更新 current contracts。R2 已关闭 Gate 1，并按用户授权停止；Gate 2
-仍未授权。后续如获授权，不得从 Gate 1 的 expected `NotSupported` 日志外推 DWMAC1000 runtime
-correctness；RiscV/JH7110 regression 仍必须在 Gate 3/final closure 补齐。任一停止条件触发时
-保持 Not Cut Over，并把 target/owner/acceptance 变化带回 RFC review。
+RFC 当前未 closure、未 cutover、未更新 current contracts。R2 已关闭 Gate 1。用户随后授权执行 Gate 2，
+但该 Gate 因 Route A、PHY reset-effect、normal descriptor 和 32-bit DMA admission 的 Open blocker
+以及缺少 2K1000 bounded hardware evidence 而停止；实现保持 registration-only、Not Cut Over。不得从
+Gate 1 的 expected `NotSupported` 日志、build 或 QEMU 外推 DWMAC1000 runtime correctness；RiscV/JH7110
+regression 仍必须在 Gate 3/final closure 补齐。后续重新进入 Gate 2 需要补齐 tracking issues 所要求的
+权威硬件事实；任一 target/owner/acceptance 变化仍须回 RFC review。

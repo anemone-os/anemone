@@ -1,6 +1,6 @@
 # DWMAC RFC 实施路线
 
-**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Not Authorized
+**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Stopped / Not Cut Over
 **最后更新：** 2026-08-12
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
 **当前修订：** R2
