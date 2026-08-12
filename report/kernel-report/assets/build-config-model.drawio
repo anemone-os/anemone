@@ -1,0 +1,94 @@
+<mxfile host="Electron">
+  <diagram name="配置所有权与统一解析" id="build-config-model">
+    <mxGraphModel dx="1716" dy="1251" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1440" pageHeight="780" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontFamily=Noto Sans CJK SC;fontSize=24;fontStyle=1;fontColor=#263238;sketch=1;curveFitting=1;jiggle=2;" value="配置所有权与统一解析关系" vertex="1">
+          <mxGeometry height="40" width="600" x="420" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="entry" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f7fa;swimlaneFillColor=#ffffff;strokeColor=#78909c;fontColor=#37474f;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="统一入口与编排" vertex="1">
+          <mxGeometry height="620" width="250" x="40" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="justfile" parent="entry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#5b8db8;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.4;sketch=1;curveFitting=1;jiggle=2;" value="Justfile&#xa;&lt;font color=&quot;#607d8b&quot;&gt;面向开发者的简洁命令入口&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="200" x="25" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="xtask" parent="entry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#6aa56b;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="scripts/xtask&#xa;&lt;font color=&quot;#607d8b&quot;&gt;类型化解析 · 校验 · 编排&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="200" x="25" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="entry-note" parent="entry" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontFamily=Noto Sans CJK SC;fontSize=14;fontColor=#607d8b;sketch=1;curveFitting=1;jiggle=2;" value="构建 · 应用 · rootfs&#xa;运行 · 测试 · 清理" vertex="1">
+          <mxGeometry height="70" width="200" x="25" y="455" as="geometry" />
+        </mxCell>
+        <mxCell id="e-just-xtask" edge="1" parent="entry" source="justfile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#546e7a;strokeWidth=1.7;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;sketch=1;curveFitting=1;jiggle=2;" target="xtask" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="system-lane" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf3ff;swimlaneFillColor=#fbfdff;strokeColor=#5b8db8;fontColor=#274c77;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="完整系统配置" vertex="1">
+          <mxGeometry height="350" width="1060" x="340" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="preset" parent="system-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#c59b2a;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="BuildPreset&#xa;&lt;font color=&quot;#607d8b&quot;&gt;固化一组可复用构建选择&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="210" x="40" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="target" parent="system-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="SystemTarget&#xa;&lt;font color=&quot;#607d8b&quot;&gt;完整系统及启动语义&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="230" x="360" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="platform" parent="system-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="Platform&#xa;&lt;font color=&quot;#607d8b&quot;&gt;架构 · 机器 · DTB · 输出要求&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="260" x="750" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="kconfig" parent="system-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="KernelConfig&#xa;&lt;font color=&quot;#607d8b&quot;&gt;功能 · 策略 · 容量配置&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="230" x="360" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="profile" parent="system-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="Cargo profile&#xa;&lt;font color=&quot;#607d8b&quot;&gt;编译与优化策略&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="260" x="750" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="e-preset-target" edge="1" parent="system-lane" source="preset" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.5;endArrow=block;endFill=1;exitX=1;exitY=0.3;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="target" value="选择">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-target-platform" edge="1" parent="system-lane" source="target" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.5;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="platform" value="绑定平台">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-preset-kconfig" edge="1" parent="system-lane" source="preset" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.5;endArrow=block;endFill=1;exitX=1;exitY=0.7;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="kconfig" value="选择">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="user-lane" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#edf8ed;swimlaneFillColor=#fcfffc;strokeColor=#6aa56b;fontColor=#37633a;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="用户环境配置" vertex="1">
+          <mxGeometry height="230" width="1060" x="340" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="app-manifests" parent="user-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="App manifests&#xa;&lt;font color=&quot;#607d8b&quot;&gt;应用构建与导出声明&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="230" x="70" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="app-artifacts" parent="user-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#c59b2a;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="应用产物&#xa;&lt;font color=&quot;#607d8b&quot;&gt;ELF · 资源文件 · 安装输入&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="230" x="420" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rootfs-manifest" parent="user-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="Rootfs manifest&#xa;&lt;font color=&quot;#607d8b&quot;&gt;完整用户环境与文件布局&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="240" x="770" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e-app-artifacts" edge="1" parent="user-lane" source="app-manifests" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.5;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="app-artifacts" value="构建并导出">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-artifacts-rootfs" edge="1" parent="user-lane" source="app-artifacts" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.5;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="rootfs-manifest" value="按声明安装">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-xtask-preset" edge="1" parent="1" source="xtask" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#5b8db8;fontColor=#466b8a;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.7;endArrow=block;endFill=1;exitX=1;exitY=0.35;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="preset" value="解析系统选择">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-xtask-app" edge="1" parent="1" source="xtask" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6aa56b;fontColor=#4c7c4e;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.7;endArrow=block;endFill=1;exitX=1;exitY=0.75;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="app-manifests" value="编排应用与 rootfs">
+          <mxGeometry relative="1" x="0.4838" y="15" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="265.03" y="615" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-preset-profile" edge="1" parent="1" source="preset" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.5;endArrow=block;endFill=1;exitX=1;exitY=0.9;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="profile" value="选择">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600.06" y="291" />
+              <mxPoint x="600.06" y="410.06" />
+              <mxPoint x="1069.94" y="410.06" />
+              <mxPoint x="1069.94" y="345" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

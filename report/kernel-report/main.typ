@@ -27,6 +27,7 @@
     #include "content/08-network-stack.typ"
     #include "content/09-time.typ"
     #include "content/10-arch-hal.typ"
+    #include "content/11-build-system.typ"
     #include "content/11-summary.typ"
 
     #appendices[

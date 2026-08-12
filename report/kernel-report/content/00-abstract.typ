@@ -39,6 +39,8 @@ Anemone 各个模块完成情况概览如下。
 
     [时间], [围绕 clock、tick、IRQ / threaded soft timer、timerfd 和 itimer 组织时间线、超时与定时通知。],
     [架构硬件抽象层], [支持 RISC-V64 与 LoongArch64 的启动、trap、中断、上下文保存和平台差异收束。],
+    [构建系统],
+    [以类型化配置和统一编排闭合内核、应用、rootfs、设备树、QEMU 与实机产物，支持双架构、多平台和端到端验证。],
   ),
   caption: [Anemone 模块完成情况概览],
   kind: table,
