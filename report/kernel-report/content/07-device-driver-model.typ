@@ -4,7 +4,7 @@
 
 Anemone 的设备驱动模型参考了 Linux 的 device / driver / bus 分层，但没有把设备发现、驱动绑定和用户态文件接口混在 VFS 内部。设备模型负责发现硬件、匹配驱动、保存驱动私有状态；VFS 只处理路径、inode 和 opened file object；`devfs` 作为中间桥，把已经注册的字符设备和块设备发布为 `/dev` 下的节点。这样，设备驱动模型与 VFS 对彼此的内部状态保持解耦，设备语义仍由对应的 driver owner 决定。
 
-初赛测例中，许多 I/O 相关测例会同时经过路径查找、设备节点、file operation、ioctl 和后端驱动。如果这些职责直接堆在 open 或 ioctl 的 syscall 层，后续增加块设备、串口、随机数设备、loop 设备和 PCIe 设备时很容易变成特判集合，或者大幅污染内核代码的边界，导致后续维护很困难。
+许多 I/O 操作会同时经过路径查找、设备节点、file operation、ioctl 和后端驱动。如果这些职责直接堆在 open 或 ioctl 的 syscall 层，增加块设备、串口、随机数设备、SD 卡和 PCIe 设备时很容易变成特判集合，或者大幅污染内核代码的边界，导致后续维护很困难。
 
 为了解决这种问题，我们把“设备如何被发现和绑定”与“设备如何以文件形式暴露”分开，使同一套驱动模型可以服务 RISC-V、LoongArch、VirtIO MMIO、VirtIO PCIe 等不同平台和传输方式。
 
@@ -111,9 +111,15 @@ PCIe bus 的匹配和初始化更复杂。它既可以按 vendor / device id 匹
   lang: "rust",
 )
 
-字符设备侧，比如`/dev/null`、`/dev/zero`、`/dev/full`、`/dev/urandom` 和串口都通过同一类 `CharDev` 接口暴露读写语义。统一的 char devfs file ops 只负责从 inode 的 `rdev` 找到对应设备，再把 read、write、seek 和 ioctl 分发给 `CharDev`。这样，内存类字符设备的 seek 行为、串口的读写行为、随机数设备的读取行为都留在具体设备 owner 内部，而不是写成 devfs 的设备号特判。
+字符设备侧，比如`/dev/null`、`/dev/zero`、`/dev/full` 和 `/dev/urandom` 都通过同一类 `CharDev` 接口暴露读写语义。统一的 char devfs file ops 只负责从 inode 的 `rdev` 找到对应设备，再把 read、write、seek 和 ioctl 分发给 `CharDev`。这样，内存类字符设备的 seek 行为和随机数设备的读取行为都留在具体设备内部，而不是写成 devfs 的设备号特判。交互式串口则在决赛阶段由专门的 TTY 子系统接管。
 
 块设备侧，后端 `BlockDev` 只承诺按 block size 对齐的块读写。用户态通过 `/dev/vda`、`/dev/loop0` 等块特殊文件访问时，devfs 的 block file ops 在前端提供封装后的、字节级读写（这一点也是为了对齐Linux）和seek：对非对齐读写使用中间缓冲做 read-modify-write，对 `BLKGETSIZE64`、`BLKSSZGET` 等通用 `BLK*` ioctl 先在 block subsystem 内处理，剩余私有命令再交给具体 `BlockDev::ioctl`。这使后端驱动可以保持清晰的块设备契约，同时让 Linux 用户态看到接近普通块特殊文件的字节接口。
+
+== TTY 与交互式终端
+
+初期的串口只承担控制台输出和非常简单的输入，足以观察启动过程，却不能支撑真正的交互式 shell。决赛阶段，我们在 UART 之上建立了独立的 TTY 子系统：串口驱动只负责收发原始字节，Terminal 对象处理 canonical/raw 输入、回显、控制字符、输出转换、termios、窗口大小和 poll/epoll readiness。
+
+TTY 会把稳定的 `/dev/ttyS0` 发布到 devfs，并让 `/dev/tty` 根据调用进程返回其 controlling terminal。结合进程管理章节介绍的 session、process group 和作业控制，shell 可以切换前台作业，Ctrl-C 与 Ctrl-Z 可以发送给正确的进程组，BusyBox `vi` 等全屏程序也可以通过 termios 使用终端。我们没有为 shell 或某个应用编写输入特判，而是形成了一条从 UART 中断、TTY 行规、文件对象到进程组信号的完整路径。
 
 == 设备树与平台初始化
 
@@ -139,6 +145,12 @@ Anemone 的平台发现以设备树为主要入口。启动早期，内核从固
 
 相比不少往届作品中常见的板级硬编码初始化，这套抽象让迁移新平台的改动更集中。新的平台通常需要补充机器描述、设备树节点和少量 driver match table，而不是在主初始化流程里散布新的条件分支。对 Anemone 来说，这正好满足当前阶段的需求：复杂度可控，同时具备向更多 QEMU machine 或真实开发板迁移的空间。
 
+== 从虚拟机到真实开发板
+
+决赛阶段，设备模型开始真正服务多种机器，而不再只围绕 QEMU。RISC-V 一侧加入了 VisionFive 2 所需的 PLIC、DesignWare MSHC 和 SD Memory 路径；LoongArch 一侧适配了 Loongson 2K1000、LS7A RTC、中断控制器和板级设备。VirtIO MMIO、VirtIO PCIe、SD 卡与其它块设备最终都接入同一套 block/VFS 接口，上层文件系统不需要知道启动盘来自哪一种控制器。
+
+为了管理这些组合，我们还把 platform、system target、kernel configuration、rootfs 与 QEMU invocation 分开描述。同一份内核机制可以面向虚拟机、竞赛环境或真实开发板选择不同的设备树、启动程序和根文件系统，而不必在内核源码中加入“决赛模式”一类分支。这让双架构和多平台从代码目录上的支持，进一步变成了可以重复构建和启动的系统产品。
+
 == Devfs 桥接
 
 `devfs` 是设备模型与 VFS 之间的桥。设备子系统完成注册后，可以可选地把设备发布到设备文件系统；`devfs` 保存稳定的名字、inode 编号、权限和 `rdev`，但不拥有具体设备语义。打开设备节点时，`devfs` 调用发布记录中的 `DevfsNodeOps::open()`，由字符或块设备子系统返回真正的文件操作表。
@@ -157,4 +169,4 @@ Anemone 的平台发现以设备树为主要入口。启动早期，内核从固
 
 简单来说——driver probe 产生设备后端，char / block subsystem 注册设备号和名字，devfs 发布 inode，VFS open 得到设备子系统提供的 `FileOps`。之后 read、write、seek、ioctl 都沿着 `FileOps` 回到对应的 `CharDev` 或 `BlockDev`。因此，`/dev` 看起来是文件系统命名空间的一部分，但设备行为仍然由设备 owner 决定。
 
-这种设计就把文件系统和设备驱动漂亮地解了耦。VFS 负责路径、挂载、inode 和 opened file description；设备驱动模型负责硬件发现、驱动绑定和设备能力；`devfs` 只承担发布和分发，不把 VFS 变成驱动框架，也不把驱动框架变成路径查找系统。对于后续扩展 sysfs、更多字符设备、更多块设备或热插拔协议，这个边界也为我们保留了继续演进的空间。
+这种设计就把文件系统和设备驱动漂亮地解了耦。VFS 负责路径、挂载、inode 和 opened file description；设备驱动模型负责硬件发现、驱动绑定和设备能力；`devfs` 只承担发布和分发，不把 VFS 变成驱动框架，也不把驱动框架变成路径查找系统。决赛阶段的 devfs 还支持层级目录发布，使设备可以按稳定结构出现在 `/dev` 下，而不必把所有节点都挤在根目录。对于后续扩展 sysfs、更多字符设备、更多块设备或热插拔协议，这个边界也为我们保留了继续演进的空间。

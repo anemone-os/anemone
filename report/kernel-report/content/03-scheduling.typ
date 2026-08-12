@@ -54,37 +54,34 @@ Anemone没有像Linux那样，不存在一个中间的调度上下文。这的�
 
 == 多调度类共存
 
-Anemone 的运行队列借鉴 Linux sched class 的分层思路：每个 task 持有一个调度实体，调度实体记录它属于哪个调度类；每个 CPU 的运行队列按调度类组织 ready task。调度器挑选下一个 task 时，先从普通调度类取 task，若没有可运行 task，再落到 idle task。
+Anemone 的运行队列借鉴 Linux sched class 的分层思路：每个 task 持有一个调度实体，调度实体记录它属于哪个调度类；每个 CPU 的运行队列按调度类组织 ready task。调度器挑选下一个 task 时，按照实时、公平和 idle 的优先级寻找下一个执行者，而每个调度类只维护自己的队列与时间记账。
 
 #code-block(
   ```rust
-  pub trait Scheduler: Send + Sync {
-      fn enqueue(&mut self, task: Arc<Task>);
-      fn dequeue(&mut self, task: &Arc<Task>) -> bool;
-      fn pick_next(&mut self) -> Option<Arc<Task>>;
-      fn on_tick(&mut self, cur_task: &Arc<Task>) -> Option<OnTickAction>;
-  }
-
   pub struct RunQueue {
       ntasks: usize,
-      rr: RoundRobin,
+      realtime: Realtime,
+      fair: Fair,
       idle: Idle,
   }
 
   pub enum SchedClassPrv {
-      RoundRobin(()),
+      Realtime(RtEntity),
+      Fair(FairEntity),
       Idle(()),
   }
   ```.text,
-  caption: [调度类接口、每 CPU 运行队列和当前已落地的调度类],
+  caption: [每 CPU 运行队列同时容纳实时、公平和 idle 调度类],
   lang: "rust",
 )
 
-目前我们已经实现了`RoundRobin` 和 `Idle` 两个调度类。`RoundRobin` 是简单的FIFO，而`Idle` 是兜底调度类；当普通运行队列为空时，本地 idle task 被选中执行。
+普通任务使用基于 Stride 的公平调度。我们把 Linux nice 值映射为权重，权重越高的任务获得越大的 CPU 份额；调度器通过 pass 值持续选择当前获得服务最少的任务。与简单轮转相比，这一机制既保留了实现上的直接性，也能让编译、shell 和后台服务等不同负载按照优先级公平共享处理器。
 
-这里值得一提的是，idle 循环也必须检查 `need_resched`，这样即使内核抢占关闭，也能在有新 task 变为 ready 后回到调度器。否则内核会整个死在idle上下文，不再让出Cpu！
+实时调度类实现了 Linux 风格的 `SCHED_FIFO` 与 `SCHED_RR`。不同实时优先级严格分层，同优先级的 FIFO 任务可以持续运行到主动阻塞、让出或被更高优先级任务抢占；RR 则在此基础上增加时间片轮转。实时类始终位于公平类之前，而当系统没有普通任务可运行时，本地 idle task 才会接管 CPU。
 
-这个框架具备不弱的扩展能力，我们可以在后续实现 CFS、EEVDF、Deadline 或实时调度类。每个调度类只需要实现自己的 `enqueue`、`dequeue`、`pick_next` 和 `on_tick`，不需要关心其它调度类的内部逻辑。CPU 运行队列只负责按调度类顺序挑选下一个 task。
+在用户接口上，我们支持 `sched_setscheduler`、`sched_setparam`、`sched_setattr`、nice 与 CPU affinity 等常用调度配置。策略切换并不只是修改一个整数：task 可能正在运行队列上，也可能正在某个 CPU 执行，因此配置变化、调度实体变化与重新排队需要作为一次完整操作完成。我们把这些动作收敛到调度器内部，使用户态可以动态调整策略和优先级，而不会让某个 task 同时出现在两个调度类中。
+
+这里值得一提的是，idle 循环也必须检查 `need_resched`，这样即使内核抢占关闭，也能在有新 task 变为 ready 后回到调度器。否则内核会停留在 idle 上下文，不再让出 CPU。对我们而言，多调度类的价值并不只在于接口数量，而在于普通负载、实时任务和空闲处理能够共享同一套状态转换、抢占与等待基础设施。
 
 == Event 与条件等待
 
@@ -100,13 +97,13 @@ Event 适合“源对象拥有等待队列”的场景，例如 mutex、futex、
 
 为了解决 `poll` / `select` 的 OR 等待，Anemone 创造性地实现了一个新同步源于： `Latch`，意为闸门。 `Latch` 表示一轮的等待：等待方创建一个不可复制的 `Latch`，再派生出*多个可复制*的 `LatchTrigger` 分发给 fd source。任意 source 的第一发有效 trigger 都可以完成本轮等待；旧 trigger 迟到时，将不会发生任何效果。
 
-最初，我们引入`Latch`的核心诉求是正确地实现 `ppoll` 和 `pselect6`，替换了早期的 busy polling。这里可以用pipe举个例子。VFS对pipe进行轮询/poll时， pipe会检查读写是否可行；如果暂时无数据，就保存对应方向的 trigger；读写端状态变化或关闭时，pipe就通过trigger唤醒正等待在latch上的task。
+最初，我们引入`Latch`的核心诉求是正确地实现 `ppoll` 和 `pselect6`，替换早期的 busy polling。这里可以用 pipe 举个例子。VFS 对 pipe 进行轮询时，pipe 会检查读写是否可行；如果暂时无数据，就保存对应方向的 trigger；读写端状态变化或关闭时，pipe 就通过 trigger 唤醒正等待在 latch 上的 task。决赛阶段加入的 epoll、TTY 和 Socket 也复用了同一套“读取状态—登记通知—再次确认”的等待思路。
 
 == 多核分配与负载均衡
 
-Anemone 是多核内核，调度器采用“创建时分配 CPU，运行期固定 CPU”的绑核策略，这可以减少线程在不同CPU之间切换的开销，提高缓存命中率。每个 task 创建时会选择一个目标 CPU；task 之后只在这个 CPU 的本地运行队列中被调度。跨 CPU 唤醒不是迁移 task，而是向目标 CPU *发送 IPI*，让目标 CPU 把已经属于它的 task 放回自己的运行队列。
+Anemone 是多核内核，调度器采用“创建时分配 CPU，运行期固定 CPU”的策略，这可以减少线程在不同 CPU 之间切换的开销，提高缓存命中率。每个 task 创建时会选择一个目标 CPU；task 之后只在这个 CPU 的本地运行队列中被调度。跨 CPU 唤醒不是由当前 CPU 直接修改远端运行队列，而是向目标 CPU 投递异步唤醒请求并发送 IPI，让目标 CPU 在自己的边界内完成入队。
 
-如果唤醒方CPU直接访问目标CPU的运行队列，会破坏 per-CPU 的数据一致性。使用IPI正是为了避免竞态，从而维护调度队列的一致性。
+如果唤醒方 CPU 直接访问目标 CPU 的运行队列，会破坏 per-CPU 数据的一致性。异步投递让唤醒方不必等待远端立即完成，也让每个运行队列始终只由所属 CPU 修改；这对八核编译一类频繁创建、阻塞和唤醒任务的负载尤其重要。
 
 我们实现了负载均衡策略。每当新task创建时，我们会使用负载均衡算法决定将其分配到哪个CPU上运行。负载均衡算法会考虑当前各个CPU的负载情况，尽量将新task分配到负载较低的CPU上，以提高系统整体的性能和响应速度。
 

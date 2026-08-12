@@ -149,6 +149,8 @@ Anemone 的 VFS 对象采用接近 Linux VFS 的 operation table 形态：通用
   lang: "rust",
 )
 
+进入决赛后，Cargo 和编译器带来了数量巨大的重复路径查询。我们为已经成功解析的目录项增加了有界驻留：最近使用的 positive dentry 可以继续由 VFS 复用，而不必每次都进入 Ext4 查找同一个名字。缓存仍然只是路径解析的加速层，文件身份与内容继续由 inode 和后端文件系统维护。这项改进既缩短了复杂构建中的公共路径，也让 Dentry 从一个结构设计真正成长为能够服务大型工作负载的缓存机制。
+
 === File
 
 `File` 表示一次打开后的文件对象，它保存打开时的 `PathRef`、文件操作表、文件模式、后端私有数据和文件光标。普通文件读写使用 VFS 管理的光标；Anemone还支持stream 类对象，允许后端文件系统可以在打开时标记自己的文件模式，让后端自行维护读写位置。
@@ -185,6 +187,8 @@ Anemone 的 VFS 对象采用接近 Linux VFS 的 operation table 形态：通用
   lang: "rust",
 )
 
+我们还把文件描述符表中的 descriptor 与真正的 opened file description 明确区分。`dup` 与 `fork` 可以让多个 fd 共享同一个打开文件对象，因此文件偏移、状态标志和 POSIX record lock 等行为必须跟随正确的生命周期。这个区分支撑了 `flock`、POSIX byte-range lock、close-on-exec、fd duplication 和 Unix Socket 等决赛阶段能力，也让用户程序看到的文件语义更接近完整的 Unix 环境。
+
 == 挂载树
 
 Anemone 用全局 VFS 子系统维护可见挂载树和匿名挂载树。可见挂载树承载根文件系统、用户可见的磁盘文件系统、ramfs、procfs 和 devfs；匿名挂载树用于 pipe、eventfd、timerfd 等不需要路径查找的内核内部文件对象。路径查找后，得到 `PathRef`，其中同时包含当前挂载点和 dentry，因此同一个 inode 经由不同 bind mount 被访问时仍能保留路径视图差异。
@@ -198,10 +202,14 @@ Anemone 用全局 VFS 子系统维护可见挂载树和匿名挂载树。可见�
 
 == VMO 形式的页缓存
 
-Ext4 普通文件的缓存直接复用内存管理章节介绍过的 VMO 机制。每个 Ext4 regular inode 的私有状态中维护按页编号索引的缓存页，`Ext4RegMapping` 实现 `VmObject`：普通 `read` / `write` 通过同一个 mapping 复制数据，文件 `mmap` 的缺页路径也通过 `resolve_frame` 取得同一批物理页。
+普通文件的缓存直接复用内存管理章节介绍过的 VMO 机制。每个 regular inode 拥有一份 address space，普通 `read` / `write` 通过它复制数据，文件 `mmap` 的缺页路径也从同一批缓存页取得物理内存。Ext4 与 ramfs 只需要实现如何填充和写回页面，不需要各自维护一套 mmap 缓存。
 
-举个例子。读路径第一次访问某页时，从硬盘读取文件内容并填入新分配的 frame；后续读或映射访问就能直接命中缓存。而写路径会在必要时先加载旧页，修改 frame 后把页标记为 dirty。`sync_range`、`sync_all` 和文件系统同步路径再把脏页写回 Ext4 后端。文件截断时，Anemone 会使可见范围发生变化的缓存页失效，下一次访问再从后端重新载入，避免旧页内容跨越新的文件大小边界。
+举个例子。读路径第一次访问某页时，从硬盘读取文件内容并填入新分配的 frame；后续读或映射访问就能直接命中缓存。而写路径会在必要时先加载旧页，修改 frame 后把页标记为 dirty。`sync_range`、`sync_all` 和文件系统同步路径再把脏页写回后端。文件截断时，Anemone 会使可见范围发生变化的缓存页失效，下一次访问再从后端重新载入，避免旧页内容跨越新的文件大小边界。
+
+针对编译场景中连续读取源码、元数据与中间产物的特点，我们又加入了有界批量 I/O。连续缺失的缓存页可以一次从 Ext4 填充，连续脏页也可以成批写回，减少反复进入文件系统和块设备的开销。用户缓冲区的读写则可以通过专门的 direct-user 路径按页推进，保留 Linux 风格的短读、短写和部分完成语义。
 
 == Ext4 支持
 
-当前，Anemone已经通过引入lwext4这个经典的C库，为自身接入了Ext4支持，从而为用户态兼容提供强大的保障。
+Anemone 通过经典的 lwext4 C 库接入 Ext4，但我们没有把 C 接口直接暴露给整个内核，而是在 Rust 侧建立安全封装，再由 VFS 与 address space 使用。文件与目录操作由可睡眠的文件系统互斥机制串行化，使一次 rename、unlink、create 或 metadata 更新不会被拆成彼此交错的零散调用。
+
+在决赛阶段，我们继续补齐了 umask 与节点创建、rename、named FIFO、`flock`、POSIX record lock、同步与页缓存等能力。最终，Ext4 不再只是“能够挂载和读写文件”的后端，而是可以支撑 shell、glibc、Cargo、rustc 和链接器长期协同工作的主文件系统。

@@ -2,19 +2,21 @@
 
 = 时间
 
-截至初赛结束，Anemone 的时间子系统已经实现了系统时间线、周期 tick、软定时器、POSIX Clock、`timerfd` 和基本 `itimer` 能力等。它在内核中处于多个模块的交汇处：调度器依赖 tick 推进抢占，等待路径依赖 timeout 唤醒，文件对象和信号机制则通过定时器向用户态暴露可观察事件。
+Anemone 的时间子系统同时服务调度器、超时等待和用户态时间接口。我们既要维护不会倒退的单调时间，也要给 shell、编译工具和标准库提供真实日历时间；在此之上，软定时器、POSIX timer、timerfd 和 itimer 又以不同方式把未来事件交付给内核对象或用户程序。
 
 == 时间线与 tick
 
 Anemone 把架构相关的计时能力抽象成 clock source 和 clock event。clock source 负责读取单调递增的硬件计数，clock event 负责把下一次 timer interrupt 编程到指定 deadline。
 
-内核启动时会记录每个 CPU 的启动时刻，并用 BSP 的启动计数作为共同基线。这样，即使不同 CPU 读取的是本地硬件计数，通用 timekeeper 也可以把它们投影到同一条自启动以来的单调时间线上。`Instant` 是这条时间线上的内核表示，支持和 `Duration` 之间的转换、相对时间计算，以及按 tick 粒度的换算。
+内核启动时会把各 CPU 的硬件计数投影到同一条单调时间线上。`MonotonicInstant` 表示自系统启动以来不会因校时而倒退的时间，适合调度、timeout 和性能计时；`RealtimeInstant` 则在单调时间上叠加日历偏移，供用户态观察现实时间。我们用不同类型区分它们，避免把可调整的 realtime deadline 误当作稳定的单调 deadline。
+
+系统启动时，RTC 驱动读取一次硬件日历，为 realtime 建立初值。QEMU 平台可以使用 Goldfish RTC，Loongson 2K1000 则使用 LS7A RTC provider。运行过程中，`clock_settime` 与 `clock_adjtime` 调整的是 timekeeper 中的 realtime 映射，不会破坏 monotonic 的连续性。
 
 周期 tick 由 timer interrupt 推进。每次中断到来时，timekeeper 更新全局 tick 计数，并重新编程下一次中断。调度器、软定时器和若干用户可见时间接口都建立在这条单调时间线上。
 
 == 软定时器
 
-软定时器负责在未来某个时刻执行一次回调。Anemone 的 timer core 使用按到期 tick 排序的 per-CPU 队列保存事件；timer interrupt 到来后，内核从队列中取出已经到期的事件，再根据事件选择的路径执行或投递回调。
+软定时器负责在未来某个时刻执行一次回调。Anemone 的 timer core 使用按 deadline 排序的 per-CPU 队列保存请求；timer interrupt 到来后，内核取出已经到期的请求，再根据事件选择的路径执行或投递回调。请求可以被替换或取消，因此文件关闭、重新设定 timer 和进程退出不必等待一个已经失效的旧回调继续修改对象。
 
 #code-block(
   ```rust
@@ -53,7 +55,7 @@ Anemone 把架构相关的计时能力抽象成 clock source 和 clock event。c
 
 == POSIX Clock
 
-Anemone 为用户态暴露了 POSIX 风格的 clock 框架。截至初赛结束，每个 clock 对象提供时间分辨率和当前时间两个查询接口；系统调用层根据用户传入的 clock id 找到对应对象，再把纳秒时间转换成 Linux ABI 使用的 `timespec` 形式写回用户空间。
+Anemone 为用户态暴露了 POSIX 风格的 clock 框架。每个 clock 对象提供时间分辨率和当前时间查询；系统调用层根据用户传入的 clock id 找到对应对象，再把纳秒时间转换成 Linux ABI 使用的 `timespec` 形式写回用户空间。
 
 #code-block(
   ```rust
@@ -69,10 +71,10 @@ Anemone 为用户态暴露了 POSIX 风格的 clock 框架。截至初赛结束�
   lang: "rust",
 )
 
-目前这套框架覆盖了常用的实时钟、单调钟、粗粒度 clock，以及进程和线程 CPU 时间等 clock id。`clock_gettime` 和 `clock_getres` 复用同一套分发表；`nanosleep` 则作为 Linux 兼容接口接到单调时间线上，使普通用户程序能够用标准时间 API 表达休眠需求。
+这套框架覆盖常用的实时钟、单调钟、粗粒度 clock，以及进程和线程 CPU 时间等 clock id。`clock_gettime`、`clock_getres`、`clock_settime`、`clock_adjtime` 和 `clock_nanosleep` 复用统一的时间来源。相对休眠与绝对 deadline 都能按指定 clock 解释，因此 libc 和应用程序不需要依赖内核私有接口。
 
 == 用户可见定时对象
 
-在 clock 和软定时器之上，Anemone 还实现了基本的 `timerfd` 和 `itimer` 能力。`timerfd` 以匿名文件描述符的形式暴露定时事件，支持读取到期次数、非阻塞访问和 poll/select 可读事件；它适合被事件循环统一管理。`itimer` 则沿用传统进程定时器接口，定时到期后通过信号机制通知线程组。
+在 clock 和软定时器之上，Anemone 实现了 POSIX timer、`timerfd` 和 `itimer`。POSIX timer 支持创建、查询、重新设定和删除，既可以向进程发送定时信号，也可以按 Linux ABI 选择目标线程；周期 timer 会统计错过的到期次数。`timerfd` 则以匿名文件描述符暴露定时事件，支持读取到期次数、非阻塞访问和 poll/epoll 可读事件，适合被事件循环统一管理。`itimer` 沿用传统进程定时器接口，继续通过信号通知线程组。
 
 它们都没有把自己的语义下沉到时间系统的基础设施层。软定时器只负责在合适的时间投递回调；文件对象的可读状态、到期次数、周期重排，以及进程定时器的 signal 投递和重新计时，都由各自对象在自己的状态锁下维护。这样，我们的时间子系统既能支撑 Linux 兼容接口，又保持了和 VFS、信号、调度等待路径之间清晰的职责分工。
