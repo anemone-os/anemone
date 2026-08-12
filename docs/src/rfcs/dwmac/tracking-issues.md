@@ -28,13 +28,17 @@
 
 ## ISSUE-003 — ICU polarity under one-cell DTB
 
-**等级：** Open / Gate 1 and Gate 3 blocker
-**状态：** Open
-**证据：** current DTB does not carry interrupt flags；Anemone currently writes global `POLARITY=0`；2K1000
-manual and Linux 6.6 integration identify GMAC 12/13/14/15 as level-low (`EDGE=0`, `POL=1`)。
+**等级：** Closed / Gate 1 hardware readback
+**状态：** Closed
+**证据：** current DTB does not carry interrupt flags；Gate 1 software 已改为由 owner-local `IrqSense` table
+program `EDGE/POL`。用户提供的 2K1000 Gate 1 实机 readback 为 `EDGE=0x1f00000000000`、`POL=0xf000`：
+前者精确覆盖 source 44..48，后者精确覆盖 source 12..15。2K1000 manual and Linux 6.6 integration identify
+GMAC 12/13/14/15 as level-low (`EDGE=0`, `POL=1`)；实机值与 target 一致。
 **影响：** flow class can be `LevelMaskEoi` while electrical polarity remains wrong；可能造成 idle pending、IRQ
 storm 或 lost event。
-**修复位置：** concrete Loongson irqchip `IrqSense` table and readback；DWMAC must not write ICU。
+**Resolution (2026-08-12):** concrete Loongson irqchip `IrqSense` table 是唯一 source truth，init-time
+program/readback assert 与用户实机日志共同关闭本 issue；DWMAC 没有写 ICU。Gate 2/3 的真实
+device-cause/pending/unmask sequence仍按各 Gate validation执行，不由本静态 readback替代。
 
 ## ISSUE-004 — DWMAC1000 normal descriptor capability
 
@@ -56,7 +60,7 @@ board memory is below 4 GiB but allocator is global。
 
 ## ISSUE-006 — Request expectation shared API implementation
 
-**等级：** Open / Gate 1 implementation blocker
+**等级：** Closed / Gate 1 software implementation
 **状态：** Closed / Gate 1 software implementation
 **证据：** current `request_irq` has no expected type；target adds `Option<IrqSense>` to public kernel-internal
 request and crate-local named-resource request。
@@ -67,5 +71,5 @@ second controller type truth；`IRQ-FLOW-001` remains a target delta until final
 **Resolution (2026-08-12):** `request_irq` 与 named-resource `request_irq_selected` 现在都接受
 `Option<IrqSense>`；prepare -> sense validation -> commit/unmask 顺序在 mapping/descriptor/unmask 前 fail
 closed。`None` callers 保持既有行为，mismatch KUnit 验证不会留下 mapping 或 unmask，且 mismatch log 记录
-真实 hwirq/expected/actual。R1 的 variant-local Driver owner 修订不改变该 API 的 kernel-internal scope；
+真实 hwirq/expected/actual。R2 保持 R1 variant-local Driver owner，不改变该 API 的 kernel-internal scope；
 `IRQ-FLOW-001` 仍保持 Not Cut Over，待 Gate 4。

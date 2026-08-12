@@ -1,9 +1,9 @@
 # DWMAC RFC 实施路线
 
-**状态：** Revised / Gate 1 Active
+**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Not Authorized
 **最后更新：** 2026-08-12
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**当前修订：** R1
+**当前修订：** R2
 
 本文保存本 RFC 的实现 Gate、probe、验证和停止边界；不冻结逐文件 write set，也不授权未审查的后续
 Gate。事实调查属于 RFC 正文和 backgrounds，不单独占 Gate；Gate 1--3 必须各自产生可审查的实现，
@@ -19,7 +19,7 @@ source/hardware regression 是对应实现 Gate 的退出验证。只有 Gate 4 
 
 ## Gate 1 - DWMAC owner migration and IRQ foundation
 
-**Purpose:** 按 R1 owner 形状将现有实现收口为 `net::dwmac` shared layer、
+**Purpose:** 按 R2 保留的 owner 形状将现有实现收口为 `net::dwmac` shared layer、
 `net::dwmac::dwmac4` concrete driver module 和 `net::dwmac::dwmac1000` registration module，同时实现
 2K1000 irqchip `IrqSense` 表和 optional request expectation。该 Gate 只建立 DWMAC/IRQ 的共享前提，不接入
 DWMAC1000 node，也不发布新的 netdev 能力。
@@ -42,12 +42,19 @@ DWMAC4 register/descriptor/clock/reset/PHY behavior、public network ABI 和 cur
 - `request_irq(expected: Option<IrqSense>)` 与 `request_irq_selected` named-resource path；`None` 保持现有
   caller 行为，`Some` mismatch 在 mapping/descriptor/unmask 前失败且不写 controller。
 
-**Validation:** kernel build、owner-local KUnit、variant-local Driver registration/compatible source audit、IRQ `None`/match/mismatch、
-2K1000 masked-source `EDGE/POL` readback，以及 VisionFive 2 双节点 DWMAC4 descriptor/PHY/IRQ/frame path/
-shutdown regression。JH7110 regression 是本实现 Gate 的退出验证，不是独立 Gate。
+**R2 Validation:** kernel build、owner-local KUnit、variant-local Driver registration/compatible source audit、
+IRQ `None`/match/mismatch，以及用户提供的 2K1000 双 node 实机日志。该日志必须同时证明两个 enabled node
+都由 `dwmac1000` Driver 匹配，并按 Gate 1 设计在任何 DWMAC1000 hardware transaction/publication 前返回
+`NotSupported`。RiscV/JH7110 hardware regression 允许明确记录为 Not Run；2K1000 masked-source
+`EDGE/POL` readback 必须精确为 edge bits 44..48 与 active-low bits 12..15。VisionFive 2 双节点 DWMAC4
+regression 不被取消，移交 Gate 3 exit 与最终 closure proof。
 
 **Cutover:** None；owner migration 对 existing visible semantics 保持中性，IRQ target delta 保持 Not Cut
 Over 到 Gate 4。
+
+**R2 Closure:** Gate 1 已由用户授权关闭。关闭只证明 owner migration、variant-local Driver dispatch、IRQ
+software foundation、ICU electrical programming readback 和 DWMAC1000 fail-closed boundary；不证明
+DWMAC1000 register/descriptor/PHY/traffic 或 JH7110 runtime regression。Gate 2 未授权。
 
 **Stop / Exit:** migration 需要改变 JH7110 visible behavior、public API、IRQ/PHY semantics 或建立 shared raw
 register abstraction；variant-local Driver registration 不能保持 single compatible owner；`IrqSense` 不能由
@@ -60,8 +67,9 @@ concrete irqchip 单一拥有；expectation 需要变成 caller-owned configurat
 publication 的 bounded hardware slice 验证寄存器、descriptor、DMA、MDIO 和 device-cause 协议，再把
 probe 代码删除或吸收到 production backend。
 
-**Prerequisites:** Gate 1 实现和退出验证关闭；RFC 中 live MAC、memory/DMA、IRQ、Route A、PHY ID/RGMII
-delay 和 normal-mode facts 足以支撑实现。缺失事实是本 Gate 的启动/停止条件，不是新的事实 Gate。
+**Prerequisites:** Gate 1 实现和 R2 validation closure 已完成。RFC 中 live MAC、memory/DMA、IRQ、Route A、
+PHY ID/RGMII delay 和 normal-mode facts还必须足以支撑实现。缺失事实是本 Gate 的启动/停止条件，不是新的
+事实 Gate。
 
 **Protected Boundary:** DWMAC1000 backend 不改变 DWMAC4；不改变 DTB；不注册 active netdev、Stack
 membership 或 `eth<N>`；probe 不形成长期 public API 或第二条 production path。
@@ -78,7 +86,8 @@ membership 或 `eth<N>`；probe 不形成长期 public API 或第二条 producti
 
 **Validation:** owner-local KUnit/source tests、kernel build、cold/warm/bootloader-used bounded hardware bring-up；
 记录 version/capability、DMA reset deadline、DMA addresses、MDIO/PHY/RGMII state、CSR5 before/after、
-`EDGE/POL`/pending readback 和 failure logs；同时重跑 Gate 1 的 DWMAC4 regression。
+`EDGE/POL`/pending readback 和 failure logs；Gate 1 的 exact `EDGE/POL` readback作为 baseline，不替代
+Gate 2 device-cause/pending/unmask sequence。
 
 **Cutover:** `DWMAC1000-CUTOVER` 仍 Not Cut Over；不写 current contracts。
 
@@ -110,7 +119,7 @@ Probe code is deleted or absorbed into the production backend before Gate 2 exit
 独立 Gate 或 single-port-only production target。
 
 **Prerequisites:** Gate 2 backend/bounded bring-up closure；Route A、PHY、MAC、IRQ、DMA 和 normal descriptor
-evidence 已关闭；Gate 1 DWMAC4 regression remains green。
+evidence 已关闭；R2 延期的 DWMAC4 regression 必须在本 Gate 取得并保持 green。
 
 **Protected Boundary:** failure node does not consume `eth<N>`；其它 matching node 独立继续 probe；DTB、
 existing network ABI、global Stack、attach owner 和 DWMAC4 behavior 不变。
@@ -127,7 +136,8 @@ existing network ABI、global Stack、attach owner 和 DWMAC4 behavior 不变。
 
 **Validation:** 先执行单端口 cold/warm boot、link snapshot、RX/TX/abnormal IRQ 和 shutdown，再在同一 Gate
 执行双端口 cold/warm boot、concurrent traffic、success-order identity、one-node failure isolation、shutdown/
-reboot；确认无 unchanged-status immediate IRQ repeat，并重跑 VisionFive 2 双端口 regression。
+reboot；确认无 unchanged-status immediate IRQ repeat，并取得 R2 延期的 VisionFive 2 双节点 DWMAC4
+descriptor/PHY/IRQ/frame path/shutdown regression。RiscV regression失败必须停止，不能以 R2 Gate 1 closure覆盖。
 
 **Cutover:** production implementation 完成，但 target contracts 仍保持 Not Cut Over，等待 Gate 4 独立闭合
 审查；不得把单端口中间结果描述为 RFC target closure。

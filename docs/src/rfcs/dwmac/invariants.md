@@ -3,7 +3,7 @@
 **状态：** Accepted
 **最后更新：** 2026-08-12
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**适用修订：** R1
+**适用修订：** R2
 
 本文只定义本 RFC 的 target/proof obligations。当前 effective rule 仍以 `docs/src/contracts/` 为准；
 实现类型、helper、文件布局和内部算法不由本文冻结。
@@ -11,7 +11,7 @@
 ## 规则分类
 
 - **Correctness invariant：** owner、并发、生命周期、cleanup、内存安全、IRQ ordering 和 ABI 诚实性，不能以工程妥协降低。
-- **Target guarantee：** R1 保持 R0 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力；只能由 RFC review 修订。
+- **Target guarantee：** R2 保持 R0/R1 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力；只能由 RFC review 修订。R2 只调整 Gate 1 与 Gate 3 的 RiscV hardware validation staging，不降低最终 proof obligations。
 - **Implementation preference：** `IrqSense` 的具体 Rust 形状、ring helper、backend module layout 和 log wording。
 
 ## Target Invariants
@@ -24,7 +24,7 @@
 
 **违反表现：** 两个 node 共享 ring/PHY/register state，固定 GMAC ordinal 分支，或一个 node 的失败/cleanup 改变另一个 node 的 publication。
 
-**Proof：** Gate 1 implementation/source audit and JH7110 dual-node regression、Gate 3 independent 2K1000 port evidence。
+**Proof：** Gate 1 implementation/source audit、Gate 3 JH7110 dual-node regression and independent 2K1000 port evidence。
 
 ### TARGET-002 — Compatible-only backend admission
 

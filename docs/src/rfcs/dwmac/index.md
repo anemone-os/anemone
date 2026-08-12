@@ -1,7 +1,7 @@
 # RFC-20260811-dwmac
 
-**状态：** Revised / Gate 1 Active
-**修订：** R1
+**状态：** Accepted / R2 / Gate 1 Closed; Gate 2 Not Authorized
+**修订：** R2
 **负责人：** Anemone maintainers
 **最后更新：** 2026-08-12
 **领域：** driver / net / irq / mm / phy
@@ -193,7 +193,12 @@ RFC 被接受只表示 target/owner/boundary/contract delta 获得 review，不�
 - 2K1000 runtime：single-port attach/traffic first, then independent two-port traffic, success-order `eth<N>`、shutdown/reboot 和 no immediate unchanged-status IRQ repeat；
 - JH7110 hardware regression：existing dual-port behavior remains unchanged after owner migration。
 
-Agent 未运行 2K1000/JH7110 hardware evidence；QEMU 只能承担既有 regression，不计为 DWMAC acceptance。
+用户提供的 2K1000 Gate 1 实机日志证明两个 enabled DWMAC1000 node 都按 compatible 进入 variant-local
+`dwmac1000` Driver，并在任何 Gate 2 hardware transaction 或 netdev publication 前以 `NotSupported`
+fail closed。同次启动的 ICU readback 为 `EDGE=0x1f00000000000`、`POL=0xf000`，精确对应 edge bits
+44..48 与 active-low bits 12..15，关闭 Gate 1 的 controller programming proof。该日志不证明 DWMAC1000
+register/descriptor/PHY/traffic。RiscV/JH7110 hardware regression 仍为 Not Run；QEMU 不能替代这些
+hardware acceptance。
 每个 node 的失败、DMA 越界、PHY/MDIO timeout、IRQ type mismatch 和 handoff failure 都必须在 publication 前
 可观察并保持其它 candidate 独立继续 probe。
 
@@ -221,9 +226,11 @@ Agent 未运行 2K1000/JH7110 hardware evidence；QEMU 只能承担既有 regres
 | Draft | 2026-08-11 | 将 DWMAC4 owner migration、DWMAC1000 R0、2K1000 IRQ/DMA/PHY/Route A 边界形成正式 RFC 草案；DTB 保持不变。 | 本 RFC review；尚无实现 evidence |
 | R0 | 2026-08-11 | 接受 Draft target、owner、Implementation Boundary、contract delta、Gate 顺序和停止条件；只授权 Gate 1。 | [R0 acceptance](../../devlog/transactions/2026-08-11-dwmac.md#r0-acceptance-and-gate-1-authorization---2026-08-11) |
 | R1 | 2026-08-12 | 接受 owner 形状修订：`net::dwmac::dwmac4` 与 `net::dwmac::dwmac1000` 各自拥有并注册 `Driver`/match table；`net::dwmac` 只保留 shared probe/frame/publication helper。target contract、ABI、DTB、visible semantics、Gate 顺序和 validation strength 不变；重新授权 Gate 1。 | [R1 revision and Gate 1 re-authorization](../../devlog/transactions/2026-08-11-dwmac.md#r1-revision-and-gate-1-re-authorization---2026-08-12) |
+| R2 | 2026-08-12 | 接受 Gate 1 validation staging 修订：以 source/KUnit/build/review、2K1000 双 node compatible dispatch + expected `NotSupported` fail-closed，以及精确 `EDGE/POL` readback实机证据关闭 Gate 1；RiscV/JH7110 regression 保持 Not Run并移交 Gate 3/final closure，不降低最终 proof。target、owner、ABI、DTB、visible semantics、Contract Impact 和 current contracts 不变；Gate 2 未授权。 | [R2 Gate 1 closure](../../devlog/transactions/2026-08-11-dwmac.md#r2-gate-1-validation-revision-and-closure---2026-08-12) |
 
 ## Closure
 
-当前未 closure、未 cutover、未更新 current contracts。R1 已接受且只授权 Gate 1；实现必须按
-[实施路线](./implementation.md) 的 Gate 顺序推进，Gate 1 完成后停止。任一停止条件触发时保持 Not Cut
-Over，并把 target/owner/acceptance 变化带回 RFC review。
+RFC 当前未 closure、未 cutover、未更新 current contracts。R2 已关闭 Gate 1，并按用户授权停止；Gate 2
+仍未授权。后续如获授权，不得从 Gate 1 的 expected `NotSupported` 日志外推 DWMAC1000 runtime
+correctness；RiscV/JH7110 regression 仍必须在 Gate 3/final closure 补齐。任一停止条件触发时
+保持 Not Cut Over，并把 target/owner/acceptance 变化带回 RFC review。
