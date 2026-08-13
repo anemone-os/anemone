@@ -6,12 +6,12 @@
 
 ## 核心原则
 
-- 一个事实只有一个权威落点：代码和测试表达实际行为，current contract 表达已生效共享规则，RFC 表达 accepted target 与 delta，执行证据放在最接近实现的记录或 Git/PR 中，register 只表达当前开放问题和接受限制。
+- 一个事实只有一个权威落点：代码和测试表达实际行为，current contract 表达已生效共享规则，活动 RFC 表达 accepted target 与 delta，执行证据放在最接近实现的记录或 Git/PR 中，register 只表达当前开放问题和接受限制；Closed RFC 只保存历史 target、理由与来源关系。
 - 文档成本与不可逆性、跨 owner 风险和长期复用价值成比例，不按改动天数、文件数或 commit 数升级流程。
 - 编码前先闭合用户可见 target、非目标、owner、handoff、failure、cleanup、ABI 和接受边界；类型、helper、文件布局和内部 API 在这些边界内由实现自然决定。
 - checkpoint 数量本身不是语义风险。`execution checkpoint` 只是在同一已闭合边界内设置 review、commit 或授权停止点；`semantic gate` 才承担独立 cutover、ABI 发布、owner 迁移、高风险 probe 或不安全中间态。普通 commit 和 execution checkpoint 都不需要 resolution、activation、closure 三套动作。
 - 验证证据只记录一次，并区分 agent 运行、用户运行和 Not Run；其它页面只链接，不复制整套矩阵。
-- Git 保存文本和实现历史。Closed RFC、Completed transaction 与历史 change record 不因新规则批量改写。
+- Git 保存文本和实现历史。Closed RFC 是不可重新打开或修订的完成终态；Completed transaction 与历史 change record 同样不因新规则批量改写。
 
 ## 三档开发分级
 
@@ -75,7 +75,7 @@ Implementation Boundary 是实现授权边界，取代默认逐文件 write set�
 
 ## Current contract 与 RFC target
 
-`docs/src/contracts/` 只保存已经生效、会被多个 RFC/模块依赖的共享规则。RFC 保存 target 和实际 contract delta，不能在 cutover 前把目标写成当前事实。
+`docs/src/contracts/` 只保存已经生效、会被多个 RFC/模块依赖的共享规则。活动 RFC 保存 target 和实际 contract delta，不能在 cutover 前把目标写成当前事实；RFC Closed 后，已经 cutover 的共享语义只由 current contract 表达，RFC 退化为历史来源。
 
 `Contract Impact` 只列语义真实发生变化的 ID：`Introduce`、`Refine`、`Replace`、`Remove` 或 `Scoped Exception`。未变化规则放在 `Dependencies` 中链接，不登记 `Preserve` 流水，也不复制正文。
 
@@ -112,16 +112,24 @@ resolved finding 折回 canonical target/implementation；普通 neutralized fin
 
 整个仓库 Git 保存物理文本历史。不要创建 per-RFC 仓库、`index-v1.md`、默认 amendment 或并列 canonical 副本。
 
-Draft 修订写 `Draft`，第一次接受记为 `R0`。只有目标、非目标、target invariant、owner、ABI/visible semantics、contract delta 或 acceptance boundary 的已接受变化才递增 `R<n>`；措辞、证据、内部路线、文件布局和验证命令调整不递增。
+Draft 修订写 `Draft`，第一次接受记为 `R0`。只有在 RFC 尚未 Closed 的设计、实现和验收过程中，目标、非目标、target invariant、owner、ABI/visible semantics、contract delta 或 acceptance boundary 的已接受变化才递增 `R<n>`；措辞、证据、内部路线、文件布局和验证命令调整不递增。
 
 RFC 状态使用 `Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`、`Terminated`。状态表达当前修订，
 不代替用户对当前任务的实现授权。`Terminated`只用于维护者明确永久取消尚未满足acceptance/closure的RFC：
 它没有active gate或current-contract cutover，未运行证据保持Not Run，supporting implementation/tracking只能
 保留为historical，且不得恢复。未来相关工作必须作为独立任务重新分类并取得新的授权/Implementation Boundary；
 只有按三档规则仍属于RFC时才新建RFC。临时暂停仍使用`Review Hold`，由其它
-accepted RFC替代则使用`Superseded`，不能用`Terminated`伪装`Closed`。Closed RFC 的新语义修订原地更新
-当前target；只有确实需要独立长期执行历史时才建立新transaction。核心目标、主要owner、总体方案或大部分
-证明边界改变时，新建follow-up RFC。
+accepted RFC替代则使用`Superseded`，不能用`Terminated`伪装`Closed`。
+
+`Closed`表示该 RFC 的设计、实现、验收与 contract cutover / Not Cut Over 已整体收口，是不可逆的完成终态。
+Closed RFC 的修订号、target、supporting pages、gate 与 closure 全部冻结为历史资料；不得恢复为`Accepted`或
+`Review Hold`，不得增加新修订、gate或以新transaction续跑。Closed RFC 中预写的“回到本RFC”“修订本RFC”
+“必须建立follow-up RFC”等未来流程措辞只说明当时预期，不约束后续工作，也不构成实现授权。
+
+RFC Closed 后的相关工作必须从live source、current contract和register重新建立独立任务与Implementation Boundary，
+再按当前三档规则分类为Patch、小迭代或新RFC；历史RFC可以作为provenance或设计证据链接，但不能决定新任务的
+分级、target、owner、acceptance或验证强度。只有新任务自身仍命中RFC条件时才建立新RFC；它与旧RFC可以有
+related/successor关系，但不是旧RFC的重开或修订。
 
 ## 生命周期
 
@@ -131,7 +139,7 @@ accepted RFC替代则使用`Superseded`，不能用`Terminated`伪装`Closed`。
 
 ### 公共 RFC 与 review
 
-方案进入共享决策或需要公共长期引用时，提升到 `docs/src/rfcs/<short-slug>/`。公共 RFC 立即成为提案/accepted target 的 canonical source，但不会覆盖 current contract。
+方案进入共享决策或需要公共长期引用时，提升到 `docs/src/rfcs/<short-slug>/`。公共 RFC 在活动生命周期内成为提案/accepted target 的 canonical source，但不会覆盖 current contract；Closed 后只作为历史资料保留。
 
 公共入口只同步必要导航：`docs/src/rfcs.md`、`docs/src/SUMMARY.md` 和 RFC 内链接。导航只提供链接与简短范围，不复制阶段、验证和问题状态。
 
@@ -157,7 +165,7 @@ probe 代码不能因“已经能跑”自然沉淀。长期保留前必须把�
 
 ## 实现反馈与 Target Renegotiation
 
-保持 accepted target 和 Implementation Boundary 的路线修正可由 agent 直接完成。若证据要求改变 target invariant、owner、ABI、visible semantics、contract delta、acceptance 或验证 claim，必须在 cutover/完成声明前停止。
+RFC Closed 前，保持 accepted target 和 Implementation Boundary 的路线修正可由 agent 直接完成。若证据要求改变 target invariant、owner、ABI、visible semantics、contract delta、acceptance 或验证 claim，必须在 cutover/完成声明前停止。RFC Closed 后不再进入 Target Renegotiation；相关发现按新的独立任务重新分类。
 
 Target Renegotiation 至少记录真实成本/失败证据、已完成 slice 与代码处置、受影响 target/contract/acceptance、correctness invariants，以及可比较的处理路线。review 只形成：
 
@@ -204,7 +212,7 @@ Patch 中发现需要长期保留的摩擦，是升级为小迭代的信号；�
 | Patch | 已确定语义的实现、测试和验证 | 默认最小单位；无过程文档 |
 | Small change record | 局部决策、调查结论、至多两个 execution checkpoint、至多一次最终 cutover 与证据 | 仅有长期追溯价值时 |
 | Current contract | 已生效的跨 RFC/模块共享规则 | 按真实复用/变化提取 |
-| RFC `index.md` | accepted target、delta、边界、acceptance 与 closure | RFC 唯一默认文件 |
+| RFC `index.md` | 活动期 accepted target、delta、边界与 acceptance；完成后保存历史 closure | RFC 唯一默认文件 |
 | `invariants.md` | 非平凡 target/contract proof obligations | 按需 |
 | `implementation.md` | 多阶段/probe/cutover 实施路线 | 按需 |
 | `tracking-issues.md` | 仍影响实现或 acceptance 的设计问题 | 按需；不保存普通历史 |
@@ -214,6 +222,6 @@ Patch 中发现需要长期保留的摩擦，是升级为小迭代的信号；�
 
 ## 新旧规则边界
 
-本规则适用于新任务，以及活跃 RFC 的下一个尚未开始 gate。既有 RFC、Completed transaction、历史 manifest、change record 和 devlog 均作为 legacy history 保留，不补写、不重排、不批量迁移。
+本规则适用于新任务，以及活跃 RFC 的下一个尚未开始 gate。既有 Closed RFC、Completed transaction、历史 manifest、change record 和 devlog 均作为 legacy history 保留，不补写、不重排、不批量迁移；其中指向未来 RFC/revision/transaction 的措辞不覆盖本规则，也不构成当前任务的流程约束。
 
 Agent 处理具体任务时先读取 live source、current contracts、活动 RFC/记录和 register；历史文档只作为来源证据。若用户显式给出 checkpoint、停止条件或更窄写入限制，以该任务约束为准。

@@ -20,11 +20,14 @@ docs/src/rfcs/<short-slug>/
 - RFC target 在 cutover 前不能覆盖[当前契约](./contracts.md)。
 - `Contract Impact` 只列 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve` 流水。
 - RFC 单向链接 current baseline；current contract 不为 pending proposal 维护默认 backlink。
-- Git 保存物理文本历史；RFC `R0`、`R1` 只标记已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
+- Git 保存物理文本历史；RFC `R0`、`R1` 只标记 Closed 前已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
 - 状态使用`Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`、`Terminated`；它不代替用户对当前
   实现任务的授权。`Terminated`表示维护者永久取消未满足acceptance/closure的RFC：无active gate、无current
   contract、不得恢复。未来相关工作必须独立重新分类并取得新的授权/Implementation Boundary；只有仍命中RFC
   分级时才新建RFC。
+- `Closed`是不可重新打开或修订的完成终态。RFC目录在closure后冻结为历史资料，不再增加修订、gate或续接
+  transaction；生效共享规则由current contract拥有。后续工作从live source、current contract和register重新建立
+  独立边界并按当前规则分类，旧RFC内要求未来“回到本RFC”、修订或建立follow-up RFC的措辞不具有流程权威。
 
 ## 实现与反馈
 
@@ -34,13 +37,13 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 每次实现收口前都进行架构摩擦扫描。没有具体摩擦或只剩 Safe 时不写占位结论；Euclid 在仍残留时简短报告；Keter/Apollyon 必须在完成声明或 cutover 前停止。不要建立 `friction.md` 或全局摩擦台账。
 
-实现反馈可以在 accepted target 内修正路线；改变 target invariant、owner、ABI、contract、acceptance 或 validation claim 时，必须停止并由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。agent 不能批准自己的 reduced target。
+RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 target invariant、owner、ABI、contract、acceptance 或 validation claim 时，必须停止并由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。agent 不能批准自己的 reduced target。Closed 后的发现属于新的独立任务，不再触发原 RFC 的 review 或 revision。
 
 ## 导航与历史
 
 新 RFC 更新本页、`docs/src/SUMMARY.md` 和 RFC 内必要链接，使页面可达；导航只提供链接与范围，不复制阶段、验证和问题状态。既有 RFC、transaction、manifest 和历史状态作为 legacy history 保留，不批量迁移。
 
-旧文档可能仍出现 `Accepted for Implementation`、Ready/Active/Closed、逐文件 manifest、强制 transaction 或 `P0/P1/P2/P3` 等历史形状；它们说明当时流程，不覆盖当前[开发工作流](./development-workflow.md)。
+旧文档可能仍出现 `Accepted for Implementation`、Ready/Active/Closed、逐文件 manifest、强制 transaction、`P0/P1/P2/P3`，以及要求未来修订原 RFC / 建立 follow-up RFC 等历史形状；它们说明当时流程，不覆盖当前[开发工作流](./development-workflow.md)。
 
 ## 当前 RFC
 

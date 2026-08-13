@@ -158,7 +158,7 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 正式 semantic gate 只用于独立 contract cutover、ABI 发布、owner 迁移、高风险 probe、不安全中间态或用户明确要求的 semantic gate；小迭代 execution checkpoint 仅按上文形成轻量停止点。未来 stage 只需保留目的、依赖和受保护边界；不得仅因缺少具体类型、算法、逐文件路径或精确命令形成 finding。probe 计划放在按需 `implementation.md`，说明 hypothesis、protected boundary、failure signal、write-back 和退出条件；probe 代码不能因“已经能跑”自然沉淀为长期抽象。
 
-实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。真实证据表明原目标代价过高或只能形成较弱能力时，review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC 或保持 Not Cut Over。agent 可以提交证据和 reduced-target 提案，不能自行批准；新 target 接受并完成对应 cutover 前，不得把更弱实现写成当前事实、accepted limitation 或原 target closure。
+RFC Closed 前，实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。真实证据表明原目标代价过高或只能形成较弱能力时，review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC 或保持 Not Cut Over。agent 可以提交证据和 reduced-target 提案，不能自行批准；新 target 接受并完成对应 cutover 前，不得把更弱实现写成当前事实、accepted limitation 或原 target closure。RFC Closed 后不再进入原 RFC 的 review 或 revision，相关发现必须作为独立任务重新分类和授权。
 
 correctness invariant 约束唯一 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性，不能作为工程妥协项；target guarantee/capability 可以经 target renegotiation 修订；类型、helper、内部模块和数据结构属于 implementation preference。accepted limitation 必须位于新 target 之外，新 target 范围内的错误仍进入 open issues。
 
@@ -168,7 +168,7 @@ correctness invariant 约束唯一 owner、并发、生命周期、cleanup、内
 
 没有具体摩擦或只剩 Safe 时不输出占位结论。未在当前边界内消除的 Euclid 在收口时简短报告证据、模型偏差、影响和最小修正方向；Keter/Apollyon 必须立即停止，不得声明完成或 cutover，并报告当前 diff/代码处置和需要的 owner/RFC/target 决策。Patch 中需要长期保留的摩擦提示升级为小迭代；小迭代中的未决 owner/contract/protocol 摩擦提示升级 RFC。
 
-RFC 文本历史由仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。`R0`、`R1` 只标记已接受 target 语义修订；措辞、证据、内部路线和文件布局调整不递增。历史 RFC、Completed transaction、manifest 和 change record 不批量迁移，新规则从新任务及活跃 RFC 的下一个未开始 gate 生效。
+RFC 文本历史由仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。`R0`、`R1` 只标记 RFC Closed 前已接受的 target 语义修订；措辞、证据、内部路线和文件布局调整不递增。Closed 是不可重新打开或修订的完成终态：RFC 的 target、supporting pages、gate 与 closure 冻结为历史资料，不能恢复为 Accepted/Review Hold、增加修订或由新 transaction 续跑。后续工作从 live source、current contract、register 和新的 Implementation Boundary 独立分级；旧 RFC 中要求未来修订原 RFC 或建立 follow-up RFC 的措辞不具有流程权威。历史 RFC、Completed transaction、manifest 和 change record 不批量迁移，新规则从新任务及活跃 RFC 的下一个未开始 gate 生效。
 
 Contract 文档按 owner 和共同变化/共同证明的协议边界组织。`Contract Impact` 只列真实变化的 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve`。Draft/Accepted target 不得提前覆盖 effective contract；只有达到 cutover 的验证和停止条件后才更新 current contract，证据可以来自原子 change record、RFC closure、Git/PR 或按需 transaction。
 

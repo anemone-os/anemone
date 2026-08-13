@@ -86,10 +86,12 @@ execution checkpoints.
 If a user authorizes only one checkpoint or stage, stop after it. Do not infer
 authorization for the next gate from an existing plan.
 
-Keep route corrections that preserve the accepted target in the implementation
-plan when one exists. Send target/owner/ABI/contract/acceptance changes through
-RFC review or Target Renegotiation. An agent may propose a reduced target but
-cannot approve it.
+Before RFC closure, keep route corrections that preserve the accepted target in
+the implementation plan when one exists. Send target/owner/ABI/contract/
+acceptance changes through RFC review or Target Renegotiation. An agent may
+propose a reduced target but cannot approve it. After closure, never reopen or
+revise the RFC; classify related work from live source, current contracts, and
+the register under a new Implementation Boundary.
 
 Probe code needs a hypothesis, protected boundary, failure signal, validation,
 write-back, and exit condition. It does not become a permanent abstraction just
@@ -115,6 +117,10 @@ Do not create `friction.md` or a global friction ledger.
   RFC; start directly with `index.md` when the target is already resolved.
 - Git owns RFC text history; do not create per-RFC repositories, versioned
   canonical copies, or default amendment files.
+- Treat Closed as an irreversible terminal state. Freeze the RFC as historical
+  target/provenance; do not add revisions, gates, or continuation transactions.
+  Future-work routing written in a Closed RFC is historical, not authority for
+  classifying or authorizing a new task.
 - Keep historical RFCs, completed transactions, manifests, and old terminology
   as history. Apply the current workflow to new tasks and the next unstarted
   gate of active work.
