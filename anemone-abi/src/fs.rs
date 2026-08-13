@@ -113,6 +113,15 @@ pub mod linux {
         pub const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;
     }
 
+    pub mod sync_file_range {
+        pub const SYNC_FILE_RANGE_WAIT_BEFORE: u32 = 1;
+        pub const SYNC_FILE_RANGE_WRITE: u32 = 2;
+        pub const SYNC_FILE_RANGE_WAIT_AFTER: u32 = 4;
+        pub const SYNC_FILE_RANGE_VALID_FLAGS: u32 = SYNC_FILE_RANGE_WAIT_BEFORE
+            | SYNC_FILE_RANGE_WRITE
+            | SYNC_FILE_RANGE_WAIT_AFTER;
+    }
+
     pub mod mode {
         pub const S_IFMT: u32 = 0o170000;
         pub const S_IFSOCK: u32 = 0o140000;

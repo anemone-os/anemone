@@ -120,6 +120,7 @@ pub mod linux {
     pub const SYS_SYNC: u64 = 81;
     pub const SYS_FSYNC: u64 = 82;
     pub const SYS_FDATASYNC: u64 = 83;
+    pub const SYS_SYNC_FILE_RANGE: u64 = 84;
 
     pub const SYS_TIMERFD_CREATE: u64 = 85;
     pub const SYS_TIMERFD_SETTIME: u64 = 86;

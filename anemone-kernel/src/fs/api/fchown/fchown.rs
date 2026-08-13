@@ -6,7 +6,7 @@ use crate::{
 
 #[syscall(SYS_FCHOWN)]
 fn sys_fchown(fd: Fd, owner: Uid, group: Gid) -> Result<u64, SysError> {
-    knoticeln!("fchown: fd={:?}, owner={}, group={}", fd, owner, group);
+    kdebugln!("fchown: fd={:?}, owner={}, group={}", fd, owner, group);
 
     let task = get_current_task();
     let file_desc = task.get_fd(fd)?;
