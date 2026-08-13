@@ -1,4 +1,4 @@
-platform = "qemu-virt-la64-submission"
+platform = "qemu-virt-la64"
 
 [root]
 fstype = "ext4"

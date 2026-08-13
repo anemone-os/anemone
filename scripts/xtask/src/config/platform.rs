@@ -112,21 +112,6 @@ pub struct Dtb {
     pub delivery: DtbDelivery,
     pub authority: DtAuthority,
     pub provider: Option<DtbProvider>,
-    #[serde(rename = "submission-switch")]
-    pub submission_switch: Option<SubmissionDtbSwitch>,
-}
-
-/// One-off QEMU topology switch used by the frozen contest submission.
-///
-/// This is deliberately not a general runtime hardware-description model. It
-/// admits exactly one alternate topology and must be removed with the
-/// `final-submit` contest adapter.
-#[derive(Deserialize, Debug, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct SubmissionDtbSwitch {
-    pub fw_cfg_mmio_base: u64,
-    pub alternate_smp: String,
-    pub alternate_memory: String,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -221,6 +206,16 @@ impl Config {
             })
             .unwrap_or_default();
 
+        let platform_fdt = match self.dtb.as_ref().map(|dtb| dtb.delivery) {
+            Some(DtbDelivery::Embedded) => {
+                r#"PlatformFdt::Embedded(crate::include_bytes_aligned_as!(
+    crate::utils::align::PhantomAligned8,
+    "../../build/generated/device-tree/platform.dtb"
+))"#
+            },
+            Some(DtbDelivery::Firmware) | None => "PlatformFdt::Firmware",
+        };
+
         format!(
             r#"//! Auto-generated platform constants, do not edit manually.
 #![allow(unused)]
@@ -245,6 +240,15 @@ pub const ROOTFS_FS_TYPE: &str = {:?};
 pub const ROOTFS_SOURCE_KIND: &str = {:?};
 /// Root filesystem source path
 pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
+
+/// Platform-selected flattened-device-tree delivery.
+#[derive(Clone, Copy)]
+pub(crate) enum PlatformFdt {{
+    Embedded(&'static [u8]),
+    Firmware,
+}}
+
+pub(crate) static PLATFORM_FDT: PlatformFdt = {platform_fdt};
 "#,
             self.constants.phys_ram_start,
             self.constants.max_phys_ram_size,
@@ -397,13 +401,10 @@ impl Dtb {
         }
 
         match (arch, self.delivery) {
-            (Arch::RiscV64, DtbDelivery::Firmware) | (Arch::LoongArch64, DtbDelivery::Embedded) => {
-            },
+            (Arch::RiscV64, DtbDelivery::Firmware)
+            | (Arch::LoongArch64, DtbDelivery::Embedded | DtbDelivery::Firmware) => {},
             (Arch::RiscV64, DtbDelivery::Embedded) => {
                 anyhow::bail!("riscv64 Platform requires firmware DT delivery")
-            },
-            (Arch::LoongArch64, DtbDelivery::Firmware) => {
-                anyhow::bail!("loongarch64 Platform requires embedded DT delivery")
             },
         }
 
@@ -441,55 +442,8 @@ impl Dtb {
             );
         }
 
-        if let Some(runtime) = &self.submission_switch {
-            if !has_qemu
-                || *arch != Arch::LoongArch64
-                || self.delivery != DtbDelivery::Embedded
-                || self.authority != DtAuthority::ProviderDerived
-                || self.provider != Some(DtbProvider::Qemu)
-            {
-                anyhow::bail!(
-                    "DT submission switch requires a LoongArch64 embedded provider-derived QEMU DT"
-                );
-            }
-            if runtime.fw_cfg_mmio_base == 0 {
-                anyhow::bail!("DT submission switch requires a nonzero fw_cfg MMIO base");
-            }
-            parse_qemu_smp(&runtime.alternate_smp)?;
-            parse_qemu_memory(&runtime.alternate_memory)?;
-        }
         Ok(())
     }
-}
-
-pub fn parse_qemu_smp(value: &str) -> anyhow::Result<u16> {
-    let cpus = value
-        .parse::<u16>()
-        .map_err(|_| anyhow::anyhow!("QEMU SMP value `{value}` is not a plain CPU count"))?;
-    if cpus == 0 {
-        anyhow::bail!("QEMU SMP value must be nonzero");
-    }
-    Ok(cpus)
-}
-
-pub fn parse_qemu_memory(value: &str) -> anyhow::Result<u64> {
-    let (digits, multiplier) = match value.as_bytes().last().copied() {
-        Some(b'K' | b'k') => (&value[..value.len() - 1], 1_u64 << 10),
-        Some(b'M' | b'm') => (&value[..value.len() - 1], 1_u64 << 20),
-        Some(b'G' | b'g') => (&value[..value.len() - 1], 1_u64 << 30),
-        Some(b'T' | b't') => (&value[..value.len() - 1], 1_u64 << 40),
-        _ => (value, 1),
-    };
-    let amount = digits
-        .parse::<u64>()
-        .map_err(|_| anyhow::anyhow!("QEMU memory value `{value}` is not an integer size"))?;
-    let bytes = amount
-        .checked_mul(multiplier)
-        .ok_or_else(|| anyhow::anyhow!("QEMU memory value `{value}` overflows bytes"))?;
-    if bytes == 0 {
-        anyhow::bail!("QEMU memory value must be nonzero");
-    }
-    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -557,13 +511,6 @@ mod tests {
         embedded.build.arch = Arch::LoongArch64;
         embedded.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
         let embedded = toml::to_string(&embedded).unwrap();
-        assert!(
-            Config::from_str(
-                &embedded.replace("delivery = \"embedded\"", "delivery = \"firmware\"")
-            )
-            .is_err()
-        );
-
         let physical = physical_platform(
             Arch::RiscV64,
             DtbDelivery::Firmware,
@@ -594,24 +541,8 @@ mod tests {
                 .is_err()
         );
 
-        let mut submission = embedded_test_platform();
-        submission.dtb.as_mut().unwrap().submission_switch = Some(SubmissionDtbSwitch {
-            fw_cfg_mmio_base: 0x1e02_0000,
-            alternate_smp: "1".to_string(),
-            alternate_memory: "1G".to_string(),
-        });
-        let submission = toml::to_string(&submission).unwrap();
-        Config::from_str(&submission).unwrap();
-        assert!(
-            Config::from_str(&submission.replace("arch = \"loongarch64\"", "arch = \"riscv64\""))
-                .is_err()
-        );
-        assert!(
-            Config::from_str(
-                &submission.replace("delivery = \"embedded\"", "delivery = \"firmware\"")
-            )
-            .is_err()
-        );
+        let qemu_firmware = embedded.replace("delivery = \"embedded\"", "delivery = \"firmware\"");
+        Config::from_str(&qemu_firmware).unwrap();
     }
 
     #[test]
@@ -678,13 +609,30 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
     }
 
     #[test]
-    fn parses_submission_topology_values() {
-        assert_eq!(parse_qemu_smp("8").unwrap(), 8);
-        assert_eq!(parse_qemu_memory("1G").unwrap(), 1 << 30);
-        assert_eq!(parse_qemu_memory("8192M").unwrap(), 8 << 30);
-        assert!(parse_qemu_smp("0").is_err());
-        assert!(parse_qemu_smp("1,maxcpus=8").is_err());
-        assert!(parse_qemu_memory("1.5G").is_err());
+    fn repository_la64_delivery_contracts_generate_distinct_fdt_sources() {
+        let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = Root {
+            fstype: "ext4".to_string(),
+            source: super::super::system_target::RootSource::Block {
+                path: "vda".to_string(),
+            },
+        };
+        let qemu = Config::from_str(
+            &std::fs::read_to_string(repository.join("conf/platforms/qemu-virt-la64.toml"))
+                .unwrap(),
+        )
+        .unwrap()
+        .gen_platform_defs(&root);
+        assert!(qemu.contains("PLATFORM_FDT: PlatformFdt = PlatformFdt::Firmware"));
+        assert!(!qemu.contains("platform.dtb"));
+
+        let board = Config::from_str(
+            &std::fs::read_to_string(repository.join("conf/platforms/2k1000-la64.toml")).unwrap(),
+        )
+        .unwrap()
+        .gen_platform_defs(&root);
+        assert!(board.contains("PlatformFdt::Embedded"));
+        assert!(board.contains("platform.dtb"));
     }
 
     fn test_platform() -> Config {

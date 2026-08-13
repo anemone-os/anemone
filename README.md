@@ -84,8 +84,8 @@ just --list
 just conf list
 
 # 构建 RISC-V64 / LoongArch64 QEMU release 内核
-just build --preset qemu-virt-rv64-release --bind smp=8 --bind memory=1G
-just build --preset qemu-virt-la64-release --bind smp=8 --bind memory=1G
+just build --preset qemu-virt-rv64-release
+just build --preset qemu-virt-la64-release
 ```
 
 默认内核产物发布到 `build/anemone.elf`。rootfs、QEMU、真实开发板以及比赛端到端复现需要显式选择相应平台和磁盘输入，详见[构建系统说明](./scripts/xtask/README.md)、[配置说明](./conf/README.md)与[端到端脚本](./scripts/README.md)。

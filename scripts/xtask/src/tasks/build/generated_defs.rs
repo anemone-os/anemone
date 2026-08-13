@@ -7,7 +7,7 @@ use xshell::Shell;
 
 use crate::{config::system_target::StaticIpv4, log_progress};
 
-use super::{BuildContext, device_tree};
+use super::BuildContext;
 
 impl BuildContext {
     pub(super) fn gen_rust_defs(&self) -> anyhow::Result<()> {
@@ -24,8 +24,6 @@ impl BuildContext {
                 .as_ref()
                 .map(|value| &value.ipv4),
         );
-        let platform_dtb_defs = device_tree::render_kernel_defs(&self.resolved.platform)?;
-        let platform_defs = format!("{platform_defs}\n{platform_dtb_defs}");
         // write to both loader and kernel src directories
         let kconfig_defs_path = format!("anemone-kernel/src/kconfig_defs.rs",);
         let platform_defs_path = format!("anemone-kernel/src/platform_defs.rs",);

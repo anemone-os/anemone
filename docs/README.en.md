@@ -81,8 +81,8 @@ just --list
 just conf list
 
 # Build RISC-V64 and LoongArch64 QEMU release kernels
-just build --preset qemu-virt-rv64-release --bind smp=8 --bind memory=1G
-just build --preset qemu-virt-la64-release --bind smp=8 --bind memory=1G
+just build --preset qemu-virt-rv64-release
+just build --preset qemu-virt-la64-release
 ```
 
 The default kernel artifact is published as `build/anemone.elf`. Root filesystems, QEMU runs, physical boards, and competition end-to-end reproduction require explicit platform and disk inputs. See the [build-system guide](../scripts/xtask/README.md), [configuration guide](../conf/README.md), and [end-to-end scripts](../scripts/README.md).

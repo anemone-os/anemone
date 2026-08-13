@@ -17,9 +17,9 @@ use xshell::Shell;
 use crate::{
     config::{
         build_preset::CargoProfile,
-        platform::resolve_qemu_provider,
+        platform::{Config as PlatformConfig, DtbDelivery, DtbProvider, resolve_qemu_provider},
         resolve::{ConfigLoader, ResolvedSystemBuild},
-        selection::{BindArgs, SelectionArgs, reject_unconsumed_bindings},
+        selection::{BindArgs, BindValues, SelectionArgs, reject_unconsumed_bindings},
         system_target::InitialProgramSource,
     },
     log_progress,
@@ -55,13 +55,7 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     let mut action =
         ConfigLoader::new(Path::new(".")).resolve_selection(args.selection.into_request()?)?;
     let bindings = args.bindings.into_values()?;
-    if let Some(qemu) = action.system.platform.qemu.as_ref() {
-        let (resolved, consumed) = resolve_qemu_provider(qemu, &bindings, false)?;
-        reject_unconsumed_bindings(&bindings, &consumed)?;
-        action.system.platform.qemu = Some(resolved);
-    } else if let Some(name) = bindings.keys().next() {
-        anyhow::bail!("unknown bind `{name}`");
-    }
+    resolve_build_bindings(&mut action.system.platform, &bindings)?;
     log_progress!(
         "RESOLVE",
         &format!(
@@ -101,6 +95,30 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     let context = BuildContext::new(action.system, args.disasm);
     context.build()?;
 
+    Ok(())
+}
+
+fn resolve_build_bindings(
+    platform: &mut PlatformConfig,
+    bindings: &BindValues,
+) -> anyhow::Result<()> {
+    let materializes_qemu_dtb = matches!(
+        platform.dtb.as_ref(),
+        Some(dtb)
+            if dtb.delivery == DtbDelivery::Embedded
+                && dtb.provider == Some(DtbProvider::Qemu)
+    );
+    if materializes_qemu_dtb {
+        let qemu = platform
+            .qemu
+            .as_ref()
+            .expect("validated embedded QEMU DT contract must have a provider");
+        let (resolved, consumed) = resolve_qemu_provider(qemu, &bindings, false)?;
+        reject_unconsumed_bindings(&bindings, &consumed)?;
+        platform.qemu = Some(resolved);
+    } else if let Some(name) = bindings.keys().next() {
+        anyhow::bail!("unknown or unconsumed bind `{name}`");
+    }
     Ok(())
 }
 
@@ -410,10 +428,14 @@ impl BuildContext {
 mod tests {
     use super::*;
     use crate::config::{
+        platform::{Config as PlatformConfig, TEST_QEMU_PLATFORM},
         reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef},
         selection::SelectionRequest,
     };
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        collections::HashMap,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     struct TestDirectory(std::path::PathBuf);
 
@@ -452,6 +474,31 @@ mod tests {
     fn kernel_symbol_feature_selects_exactly_one_or_two_link_passes() {
         assert_eq!(kernel_link_passes(false), 1);
         assert_eq!(kernel_link_passes(true), 2);
+    }
+
+    #[test]
+    fn firmware_build_rejects_runtime_topology_bindings_without_requiring_them() {
+        let mut firmware = PlatformConfig::from_str(
+            &TEST_QEMU_PLATFORM
+                .replace("smp = \"1\"", "smp = \"{{smp}}\"")
+                .replace("memory = \"1G\"", "memory = \"{{memory}}\""),
+        )
+        .unwrap();
+        resolve_build_bindings(&mut firmware, &HashMap::new()).unwrap();
+
+        let bindings = HashMap::from([
+            ("smp".to_string(), "8".to_string()),
+            ("memory".to_string(), "8G".to_string()),
+        ]);
+        assert!(resolve_build_bindings(&mut firmware, &bindings).is_err());
+
+        let mut embedded = firmware;
+        embedded.build.arch = crate::config::platform::Arch::LoongArch64;
+        embedded.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
+        resolve_build_bindings(&mut embedded, &bindings).unwrap();
+        let qemu = embedded.qemu.unwrap();
+        assert_eq!(qemu.smp, "8");
+        assert_eq!(qemu.memory, "8G");
     }
 
     #[test]

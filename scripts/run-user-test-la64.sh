@@ -24,7 +24,7 @@ Usage: run-user-test-la64.sh [--rootfs-sudo] <sdcard-image> [log-file]
 Runs the la64 test chain:
   1. build the rootfs directly, or through sudo when --rootfs-sudo is given
   2. stage the provided sdcard image as a build-local temporary copy
-  3. build the generic QEMU target with the preliminary topology
+  3. build the topology-neutral generic QEMU target
   4. launch QEMU with the complete tracked bind map and tee the output to a log file
 
 Uses conf/rootfs/pretest-la64.toml as the public pretest rootfs manifest.
@@ -110,7 +110,7 @@ fi
 cp --remove-destination -- "$sdcard_image" "$sdcard_target"
 
 log_progress "PRETEST" "building kernel"
-just build --preset "$preset" "${provider_bindings[@]}"
+just build --preset "$preset"
 
 log_progress "PRETEST" "running qemu"
 just qemu --preset "$preset" "${provider_bindings[@]}" \
