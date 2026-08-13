@@ -49,6 +49,12 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260814-static-sysfs](./rfcs/static-sysfs/index.md)：Accepted R0；接受注册 canonical `sysfs`
+  no-device filesystem，以 persistent singleton static tree 和 `/sys/kernel/{address_bits,cpu_byteorder}`
+  两个只读文本 consumer 原子验证目录、读取与 multi-mount lifetime；明确不接入现有 kobject、动态
+  namespace、device model 或 loop sysfs。实现代码参考 procfs 按职责目录化，但不复用 procfs private
+  entry，也不提前抽取 generic pseudo-filesystem framework；Accepted 状态本身不构成实现授权，当前也
+  没有 contract cutover。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
   directory上的additional view、dynamic slave semantic endpoint、safe-reuse pair/opened-description lifecycle、

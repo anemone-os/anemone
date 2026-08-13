@@ -207,6 +207,7 @@
 	- [旧 RFC 工作流路径（兼容入口）](./rfc-workflow.md)
 - [公开草案与 RFC](./rfcs.md)
 		- [RFC 模板与实例](./rfc-template.md)
+			- [Static sysfs](./rfcs/static-sysfs/index.md)
 			- [User TLB Residency Targeting](./rfcs/user-tlb-residency-targeting/index.md)
 			- [User Address-Space TLB Completion](./rfcs/user-tlb-completion/index.md)
 			- [POSIX Timer Thread-ID Notification](./rfcs/posix-timer-thread-id-notification/index.md)
