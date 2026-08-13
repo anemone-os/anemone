@@ -85,6 +85,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-13 - Char device readiness](./devlog/changes/2026-08-13-char-device-readiness.md)
 		- [2026-08-13 - Unix peer credentials](./devlog/changes/2026-08-13-unix-peer-credentials.md)
 		- [2026-08-13 - TTY IUTF8与明确compatibility set](./devlog/changes/2026-08-13-tty-iutf8-compat.md)
 		- [2026-08-13 - PTY logical cflag profile](./devlog/changes/2026-08-13-pty-logical-cflag.md)
