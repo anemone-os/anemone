@@ -39,6 +39,7 @@ pub mod linux {
     pub const SO_ERROR: i32 = 4;
     pub const SO_SNDBUF: i32 = 7;
     pub const SO_RCVBUF: i32 = 8;
+    pub const SO_PEERCRED: i32 = 17;
     pub const SO_ACCEPTCONN: i32 = 30;
     pub const SO_PROTOCOL: i32 = 38;
     pub const SO_DOMAIN: i32 = 39;
@@ -108,6 +109,25 @@ pub mod linux {
 
     #[allow(non_camel_case_types)]
     pub type socklen_t = u32;
+
+    /// Linux `struct ucred` returned by `SO_PEERCRED`.
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        zerocopy::FromBytes,
+        zerocopy::Immutable,
+        zerocopy::IntoBytes,
+    )]
+    #[repr(C)]
+    pub struct UCred {
+        pub pid: i32,
+        pub uid: u32,
+        pub gid: u32,
+    }
 
     #[derive(
         Clone,
@@ -530,6 +550,11 @@ pub mod linux {
     const _: [(); 2] = [(); align_of::<SockAddrUn>()];
     const _: [(); 0] = [(); offset_of!(SockAddrUn, sun_family)];
     const _: [(); 2] = [(); offset_of!(SockAddrUn, sun_path)];
+    const _: [(); 12] = [(); size_of::<UCred>()];
+    const _: [(); 4] = [(); align_of::<UCred>()];
+    const _: [(); 0] = [(); offset_of!(UCred, pid)];
+    const _: [(); 4] = [(); offset_of!(UCred, uid)];
+    const _: [(); 8] = [(); offset_of!(UCred, gid)];
     const _: [(); 56] = [(); size_of::<MsgHdr>()];
     const _: [(); 8] = [(); align_of::<MsgHdr>()];
     const _: [(); 0] = [(); offset_of!(MsgHdr, msg_name)];

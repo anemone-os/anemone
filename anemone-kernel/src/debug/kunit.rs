@@ -1,5 +1,10 @@
 //! In-kernel unit testing framework.
 //!
+//! The normative execution, concurrency, proof and production-shape rules are
+//! owned by `docs/src/contracts/kunit/execution-and-proof.md`. This module
+//! documents the live runner implementation; it does not define a second test
+//! policy.
+//!
 //! Registered cases run once and serially on the BSP `kinit` task after all
 //! configured CPUs have completed local initialization, Late initcalls and
 //! device attachment have finished, and the root filesystem has been mounted.

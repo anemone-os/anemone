@@ -41,6 +41,12 @@ Keep each concern in its owning layer:
 - `conf/rootfs/`: rootfs composition and installed apps/files;
 - Justfile and `scripts/xtask/src/tasks/`: orchestration and command behavior.
 
+Tracked BuildPreset, SystemTarget and Platform objects remain canonical under their `conf/`
+directories. Their typed locators may also select an explicit workspace-relative file: a plain slug
+tries the canonical object first and falls back only when that path does not exist, while `./` forces
+the workspace path. Nested locator paths are workspace-root-relative. Do not reinterpret a present
+but invalid canonical object as permission to fall back.
+
 Kernel build owns the generated initial-program input. `RootfsEntry` emits its typed tag and optional complete argv;
 `EmbeddedApp` resolves the referenced app through the same architecture-specific `build_app()` exporter used by
 ordinary app/rootfs actions, requires exactly one executable regular artifact, and emits an ignored typed Rust
@@ -51,7 +57,8 @@ and `clean` must remove the generated boot definition.
 Build and ordinary QEMU require an explicit `--preset` or a complete `--target` / `--kernel-config`
 / `--profile` tuple. Bare invocation has no local or repository-default fallback. Build/QEMU bind values are opaque
 action inputs supplied as `--bind name=value`, not tracked configuration. Provider-field placeholders are consumed by
-build and QEMU; fixed QEMU args and required/optional argv groups are QEMU-only.
+QEMU and, only for embedded QEMU DT materialization, by build; fixed QEMU args and required/optional argv groups are
+QEMU-only.
 
 Formatting also requires an explicit scope: `all`, `kernel`, or an app name.
 Rootfs manifests require an explicit filesystem base type. Folder roots use `virt-make-fs` automatic

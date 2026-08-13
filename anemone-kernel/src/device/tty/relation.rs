@@ -14,16 +14,60 @@ struct RelationEntry {
 
 struct RelationSlot {
     endpoint: Arc<TtyEndpoint>,
-    generation: u64,
+    participant_generation: u64,
+    relation_generation: u64,
     entry: Option<RelationEntry>,
 }
 
-struct RelationRegistry {
-    slots: SpinLock<Vec<RelationSlot>>,
+impl RelationSlot {
+    fn matches_version(
+        &self,
+        endpoint: &Arc<TtyEndpoint>,
+        participant_generation: u64,
+        relation_generation: u64,
+    ) -> bool {
+        Arc::ptr_eq(&self.endpoint, endpoint)
+            && self.participant_generation == participant_generation
+            && self.relation_generation == relation_generation
+    }
 }
 
-pub(super) struct PreparedRelations {
+struct RelationRegistry {
+    inner: SpinLock<RelationRegistryInner>,
+}
+
+struct RelationRegistryInner {
     slots: Vec<RelationSlot>,
+    next_participant_generation: u64,
+}
+
+/// One-shot authority created with a semantic endpoint and consumed before
+/// that endpoint becomes visible. It carries no registry liveness truth.
+pub(super) struct RelationEnrollment {
+    endpoint: Arc<TtyEndpoint>,
+}
+
+/// Exact retirement capability for one committed registry participation.
+/// Registry membership remains authoritative; this key is only a stable
+/// operation capability and may be stale after an earlier retirement.
+pub(super) struct RelationParticipant {
+    key: ParticipantKey,
+}
+
+pub(super) struct ImplicitAcquire {
+    endpoint: Arc<TtyEndpoint>,
+    caller: Option<TtyCaller>,
+    readable: bool,
+    no_ctty: bool,
+}
+
+pub(super) struct RelationHangupEffect {
+    session: TtySession,
+}
+
+struct ParticipantKey {
+    endpoint: Arc<TtyEndpoint>,
+    generation: u64,
 }
 
 #[derive(Clone)]
@@ -31,10 +75,11 @@ pub(super) struct RelationSnapshot {
     endpoint: Arc<TtyEndpoint>,
     session: TtySession,
     foreground: Option<TtyProcessGroup>,
-    generation: u64,
+    participant_generation: u64,
+    relation_generation: u64,
 }
 
-static RELATIONS: MonoOnce<RelationRegistry> = unsafe { MonoOnce::new() };
+static RELATIONS: Lazy<RelationRegistry> = Lazy::new(RelationRegistry::new);
 
 fn next_generation(generation: u64) -> u64 {
     generation
@@ -42,36 +87,258 @@ fn next_generation(generation: u64) -> u64 {
         .expect("TTY relation generation overflow")
 }
 
-pub(super) fn prepare(endpoints: &[Arc<TtyEndpoint>]) -> Result<PreparedRelations, SysError> {
-    let mut slots = Vec::new();
-    slots
-        .try_reserve_exact(endpoints.len())
-        .map_err(|_| SysError::OutOfMemory)?;
-    for endpoint in endpoints {
-        slots.push(RelationSlot {
-            endpoint: endpoint.clone(),
-            generation: 0,
-            entry: None,
-        });
+impl RelationRegistry {
+    fn new() -> Self {
+        Self {
+            inner: SpinLock::new(RelationRegistryInner {
+                slots: Vec::new(),
+                next_participant_generation: 1,
+            }),
+        }
     }
-    Ok(PreparedRelations { slots })
+
+    fn enroll(&self, endpoint: Arc<TtyEndpoint>) -> Result<ParticipantKey, SysError> {
+        let generation = {
+            let mut inner = self.inner.lock();
+            if inner
+                .slots
+                .iter()
+                .any(|slot| Arc::ptr_eq(&slot.endpoint, &endpoint))
+            {
+                return Err(SysError::DevAlreadyRegistered);
+            }
+            inner
+                .slots
+                .try_reserve(1)
+                .map_err(|_| SysError::OutOfMemory)?;
+            let generation = inner.next_participant_generation;
+            inner.next_participant_generation = next_generation(generation);
+            inner.slots.push(RelationSlot {
+                endpoint: endpoint.clone(),
+                participant_generation: generation,
+                relation_generation: 0,
+                entry: None,
+            });
+            generation
+        };
+        Ok(ParticipantKey {
+            endpoint,
+            generation,
+        })
+    }
+
+    fn retire(&self, key: &ParticipantKey) -> Option<Option<RelationEntry>> {
+        let removed = {
+            let mut inner = self.inner.lock();
+            let Some(index) = inner.slots.iter().position(|slot| {
+                slot.participant_generation == key.generation
+                    && Arc::ptr_eq(&slot.endpoint, &key.endpoint)
+            }) else {
+                return None;
+            };
+            inner.slots.remove(index)
+        };
+        // Endpoint, session, and foreground capabilities may run non-trivial
+        // destructors. The registry is already undiscoverable before they drop.
+        let entry = removed.entry;
+        drop(removed.endpoint);
+        Some(entry)
+    }
 }
 
-pub(super) fn install(prepared: PreparedRelations) {
-    RELATIONS.init(|slot| {
-        slot.write(RelationRegistry {
-            slots: SpinLock::new(prepared.slots),
-        });
-    });
+impl RelationEnrollment {
+    pub(super) fn new(endpoint: Arc<TtyEndpoint>) -> Self {
+        Self { endpoint }
+    }
+
+    pub(super) fn commit(self) -> Result<RelationParticipant, SysError> {
+        let key = registry().enroll(self.endpoint)?;
+        Ok(RelationParticipant { key })
+    }
+}
+
+impl RelationParticipant {
+    pub(super) fn retire(&self) -> bool {
+        let Some(entry) = registry().retire(&self.key) else {
+            return false;
+        };
+        drop(entry);
+        true
+    }
+
+    pub(super) fn retire_for_hangup(self) -> Option<RelationHangupEffect> {
+        let entry = registry().retire(&self.key).flatten()?;
+        let effect = RelationHangupEffect {
+            session: entry.session,
+        };
+        drop(entry.foreground);
+        Some(effect)
+    }
+}
+
+impl Drop for RelationParticipant {
+    fn drop(&mut self) {
+        let _ = self.retire();
+    }
 }
 
 fn registry() -> &'static RelationRegistry {
-    RELATIONS.get()
+    &RELATIONS
+}
+
+impl RelationHangupEffect {
+    pub(super) fn deliver(self) {
+        self.session.signal_leader_hangup_continue();
+    }
+}
+
+pub(super) fn prepare_implicit_acquire(
+    endpoint: Arc<TtyEndpoint>,
+    readable: bool,
+    no_ctty: bool,
+) -> ImplicitAcquire {
+    let caller = TtyCaller::current_user_or_kernel().ok().flatten();
+    ImplicitAcquire {
+        endpoint,
+        caller,
+        readable,
+        no_ctty,
+    }
+}
+
+fn implicit_acquire_eligible(
+    readable: bool,
+    no_ctty: bool,
+    session_leader: bool,
+    caller_current: bool,
+) -> bool {
+    readable && !no_ctty && session_leader && caller_current
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImplicitConflictTransition {
+    Finish,
+    RemoveAndRetry,
+}
+
+fn implicit_conflict_transition(conflicting_session_live: bool) -> ImplicitConflictTransition {
+    if conflicting_session_live {
+        ImplicitConflictTransition::Finish
+    } else {
+        ImplicitConflictTransition::RemoveAndRetry
+    }
+}
+
+impl ImplicitAcquire {
+    /// Conditional implicit acquisition is part of an already-successful open
+    /// tail. Ineligibility and races therefore resolve to a no-op rather than
+    /// changing the open result.
+    pub(super) fn commit(self) {
+        if self.no_ctty || !self.readable {
+            return;
+        }
+        let Some(caller) = self.caller else {
+            return;
+        };
+        if !implicit_acquire_eligible(
+            self.readable,
+            self.no_ctty,
+            caller.is_session_leader(),
+            caller.revalidate(),
+        ) {
+            return;
+        }
+
+        loop {
+            // Topology owners may have changed after a stale conflicting
+            // relation was removed. Revalidate before every commit attempt;
+            // never call back into task topology while holding the relation
+            // registry guard.
+            if !caller.revalidate() {
+                return;
+            }
+            enum Inspection {
+                Commit,
+                Existing,
+                Conflict(RelationSnapshot),
+            }
+
+            let (inspection, committed_generation) = {
+                let mut inner = registry().inner.lock();
+                let Some(endpoint_index) = inner
+                    .slots
+                    .iter()
+                    .position(|slot| Arc::ptr_eq(&slot.endpoint, &self.endpoint))
+                else {
+                    return;
+                };
+
+                let mut inspection = Inspection::Commit;
+                for slot in &inner.slots {
+                    let Some(entry) = &slot.entry else {
+                        continue;
+                    };
+                    if entry.session.same_identity(caller.session())
+                        && Arc::ptr_eq(&slot.endpoint, &self.endpoint)
+                    {
+                        inspection = Inspection::Existing;
+                        break;
+                    }
+                    if entry.session.same_identity(caller.session())
+                        || Arc::ptr_eq(&slot.endpoint, &self.endpoint)
+                    {
+                        inspection = Inspection::Conflict(RelationSnapshot {
+                            endpoint: slot.endpoint.clone(),
+                            session: entry.session.clone(),
+                            foreground: entry.foreground.clone(),
+                            participant_generation: slot.participant_generation,
+                            relation_generation: slot.relation_generation,
+                        });
+                        break;
+                    }
+                }
+
+                let committed_generation = if matches!(inspection, Inspection::Commit) {
+                    let slot = &mut inner.slots[endpoint_index];
+                    slot.relation_generation = next_generation(slot.relation_generation);
+                    slot.entry = Some(RelationEntry {
+                        session: caller.session().clone(),
+                        foreground: Some(caller.process_group().clone()),
+                    });
+                    Some(slot.relation_generation)
+                } else {
+                    None
+                };
+                (inspection, committed_generation)
+            };
+            if let Some(generation) = committed_generation {
+                kinfoln!(
+                    "TTY: implicit controlling relation sid={} pgid={} generation={}",
+                    caller.session().sid(),
+                    caller.process_group().pgid(),
+                    generation
+                );
+            }
+            match inspection {
+                Inspection::Commit | Inspection::Existing => return,
+                Inspection::Conflict(snapshot) => {
+                    match implicit_conflict_transition(snapshot.session.is_live()) {
+                        ImplicitConflictTransition::Finish => return,
+                        ImplicitConflictTransition::RemoveAndRetry => {
+                            let removed = remove_if(&snapshot);
+                            drop(removed);
+                        },
+                    }
+                },
+            }
+        }
+    }
 }
 
 fn raw_endpoint_snapshot(endpoint: &Arc<TtyEndpoint>) -> Option<RelationSnapshot> {
-    let slots = registry().slots.lock();
-    let slot = slots
+    let inner = registry().inner.lock();
+    let slot = inner
+        .slots
         .iter()
         .find(|slot| Arc::ptr_eq(&slot.endpoint, endpoint))?;
     let entry = slot.entry.as_ref()?;
@@ -79,13 +346,14 @@ fn raw_endpoint_snapshot(endpoint: &Arc<TtyEndpoint>) -> Option<RelationSnapshot
         endpoint: slot.endpoint.clone(),
         session: entry.session.clone(),
         foreground: entry.foreground.clone(),
-        generation: slot.generation,
+        participant_generation: slot.participant_generation,
+        relation_generation: slot.relation_generation,
     })
 }
 
 fn raw_session_snapshot(session: &TtySession) -> Option<RelationSnapshot> {
-    let slots = registry().slots.lock();
-    let slot = slots.iter().find(|slot| {
+    let inner = registry().inner.lock();
+    let slot = inner.slots.iter().find(|slot| {
         slot.entry
             .as_ref()
             .is_some_and(|entry| entry.session.same_identity(session))
@@ -98,37 +366,46 @@ fn raw_session_snapshot(session: &TtySession) -> Option<RelationSnapshot> {
         endpoint: slot.endpoint.clone(),
         session: entry.session.clone(),
         foreground: entry.foreground.clone(),
-        generation: slot.generation,
+        participant_generation: slot.participant_generation,
+        relation_generation: slot.relation_generation,
     })
 }
 
 fn remove_if(snapshot: &RelationSnapshot) -> Option<RelationEntry> {
-    let mut slots = registry().slots.lock();
-    let slot = slots
+    let mut inner = registry().inner.lock();
+    let slot = inner
+        .slots
         .iter_mut()
         .find(|slot| Arc::ptr_eq(&slot.endpoint, &snapshot.endpoint))?;
-    if slot.generation != snapshot.generation
-        || !slot
-            .entry
-            .as_ref()
-            .is_some_and(|entry| entry.session.same_identity(&snapshot.session))
+    if !slot.matches_version(
+        &snapshot.endpoint,
+        snapshot.participant_generation,
+        snapshot.relation_generation,
+    ) || !slot
+        .entry
+        .as_ref()
+        .is_some_and(|entry| entry.session.same_identity(&snapshot.session))
     {
         return None;
     }
-    slot.generation = next_generation(slot.generation);
+    slot.relation_generation = next_generation(slot.relation_generation);
     slot.entry.take()
 }
 
 fn clear_stale_foreground(snapshot: &RelationSnapshot) -> Option<TtyProcessGroup> {
-    let mut slots = registry().slots.lock();
-    let slot = slots
+    let mut inner = registry().inner.lock();
+    let slot = inner
+        .slots
         .iter_mut()
         .find(|slot| Arc::ptr_eq(&slot.endpoint, &snapshot.endpoint))?;
-    if slot.generation != snapshot.generation
-        || !slot
-            .entry
-            .as_ref()
-            .is_some_and(|entry| entry.session.same_identity(&snapshot.session))
+    if !slot.matches_version(
+        &snapshot.endpoint,
+        snapshot.participant_generation,
+        snapshot.relation_generation,
+    ) || !slot
+        .entry
+        .as_ref()
+        .is_some_and(|entry| entry.session.same_identity(&snapshot.session))
     {
         return None;
     }
@@ -136,10 +413,9 @@ fn clear_stale_foreground(snapshot: &RelationSnapshot) -> Option<TtyProcessGroup
         .entry
         .as_mut()
         .expect("matched TTY relation disappeared");
-    slot.generation = next_generation(slot.generation);
+    slot.relation_generation = next_generation(slot.relation_generation);
     entry.foreground.take()
 }
-
 fn validate_snapshot(snapshot: RelationSnapshot) -> Option<RelationSnapshot> {
     if !snapshot.session.is_live() {
         let removed = remove_if(&snapshot);
@@ -147,7 +423,7 @@ fn validate_snapshot(snapshot: RelationSnapshot) -> Option<RelationSnapshot> {
             knoticeln!(
                 "TTY: lazily detached stale session {} generation {}",
                 snapshot.session.sid(),
-                snapshot.generation
+                snapshot.relation_generation
             );
         }
         drop(removed);
@@ -215,7 +491,8 @@ impl RelationSnapshot {
         let Some(current) = endpoint_snapshot(&self.endpoint) else {
             return false;
         };
-        current.generation == self.generation
+        current.participant_generation == self.participant_generation
+            && current.relation_generation == self.relation_generation
             && current.session.same_identity(&self.session)
             && match (&current.foreground, &self.foreground) {
                 (Some(current), Some(snapshot)) => current.same_identity(snapshot),
@@ -242,10 +519,10 @@ pub(super) fn acquire(
         }
 
         let inspection = {
-            let slots = registry().slots.lock();
+            let inner = registry().inner.lock();
             let mut endpoint_slot = None;
             let mut conflict = None;
-            for slot in slots.iter() {
+            for slot in inner.slots.iter() {
                 if Arc::ptr_eq(&slot.endpoint, endpoint) {
                     endpoint_slot = Some(slot);
                 }
@@ -257,7 +534,8 @@ pub(super) fn acquire(
                             endpoint: slot.endpoint.clone(),
                             session: entry.session.clone(),
                             foreground: entry.foreground.clone(),
-                            generation: slot.generation,
+                            participant_generation: slot.participant_generation,
+                            relation_generation: slot.relation_generation,
                         };
                         if entry.session.same_identity(caller.session())
                             && Arc::ptr_eq(&slot.endpoint, endpoint)
@@ -269,7 +547,9 @@ pub(super) fn acquire(
                     }
                 }
             }
-            let _ = endpoint_slot.expect("unpublished endpoint used for TTY relation");
+            if endpoint_slot.is_none() {
+                return Err(SysError::UnsupportedIoctl);
+            }
             conflict.unwrap_or(Inspection::Empty)
         };
 
@@ -294,8 +574,8 @@ pub(super) fn acquire(
         }
 
         let committed_generation = {
-            let mut slots = registry().slots.lock();
-            if slots.iter().any(|slot| {
+            let mut inner = registry().inner.lock();
+            if inner.slots.iter().any(|slot| {
                 slot.entry.as_ref().is_some_and(|entry| {
                     entry.session.same_identity(caller.session())
                         || Arc::ptr_eq(&slot.endpoint, endpoint)
@@ -303,16 +583,19 @@ pub(super) fn acquire(
             }) {
                 None
             } else {
-                let slot = slots
+                let Some(slot) = inner
+                    .slots
                     .iter_mut()
                     .find(|slot| Arc::ptr_eq(&slot.endpoint, endpoint))
-                    .expect("unpublished endpoint used for TTY relation");
-                slot.generation = next_generation(slot.generation);
+                else {
+                    return Err(SysError::UnsupportedIoctl);
+                };
+                slot.relation_generation = next_generation(slot.relation_generation);
                 slot.entry = Some(RelationEntry {
                     session: caller.session().clone(),
                     foreground: Some(caller.process_group().clone()),
                 });
-                Some(slot.generation)
+                Some(slot.relation_generation)
             }
         };
         if let Some(generation) = committed_generation {
@@ -329,18 +612,22 @@ pub(super) fn acquire(
 
 pub(super) fn commit_foreground(snapshot: &RelationSnapshot, foreground: TtyProcessGroup) -> bool {
     let old = {
-        let mut slots = registry().slots.lock();
-        let Some(slot) = slots
+        let mut inner = registry().inner.lock();
+        let Some(slot) = inner
+            .slots
             .iter_mut()
             .find(|slot| Arc::ptr_eq(&slot.endpoint, &snapshot.endpoint))
         else {
             return false;
         };
-        if slot.generation != snapshot.generation
-            || !slot
-                .entry
-                .as_ref()
-                .is_some_and(|entry| entry.session.same_identity(&snapshot.session))
+        if !slot.matches_version(
+            &snapshot.endpoint,
+            snapshot.participant_generation,
+            snapshot.relation_generation,
+        ) || !slot
+            .entry
+            .as_ref()
+            .is_some_and(|entry| entry.session.same_identity(&snapshot.session))
         {
             return false;
         }
@@ -348,7 +635,7 @@ pub(super) fn commit_foreground(snapshot: &RelationSnapshot, foreground: TtyProc
             .entry
             .as_mut()
             .expect("matched TTY relation disappeared");
-        slot.generation = next_generation(slot.generation);
+        slot.relation_generation = next_generation(slot.relation_generation);
         entry.foreground.replace(foreground)
     };
     drop(old);
@@ -378,7 +665,7 @@ pub(super) fn detach(endpoint: &Arc<TtyEndpoint>, caller: &TtyCaller) -> Result<
         kinfoln!(
             "TTY: explicitly detached sid={} generation={}",
             snapshot.session.sid(),
-            snapshot.generation
+            snapshot.relation_generation
         );
         drop(removed);
         return Ok(());
@@ -399,9 +686,140 @@ pub(crate) fn detach_exiting_session(leader: TtySessionLeader) {
         kinfoln!(
             "TTY: exit detached sid={} generation={}",
             snapshot.session.sid(),
-            snapshot.generation
+            snapshot.relation_generation
         );
         drop(removed);
         return;
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::{super::terminal::Terminal, *};
+    use crate::device::tty::{TtyLineSnapshot, TtyParity, TtyProgress};
+
+    struct NoopProgress;
+
+    impl TtyProgress for NoopProgress {
+        fn wake(&self) {}
+    }
+
+    fn endpoint() -> Arc<TtyEndpoint> {
+        let progress: Arc<dyn TtyProgress> = Arc::new(NoopProgress);
+        Arc::new(TtyEndpoint {
+            terminal: Terminal::try_new(TtyLineSnapshot {
+                baud: 115200,
+                parity: TtyParity::None,
+                data_bits: 8,
+            })
+            .unwrap(),
+            wake_source: Arc::downgrade(&progress),
+        })
+    }
+
+    fn contains(key: &ParticipantKey) -> bool {
+        registry().inner.lock().slots.iter().any(|slot| {
+            slot.participant_generation == key.generation
+                && Arc::ptr_eq(&slot.endpoint, &key.endpoint)
+        })
+    }
+
+    fn commit_batch(
+        enrollments: Vec<RelationEnrollment>,
+    ) -> Result<Vec<RelationParticipant>, SysError> {
+        let mut participants = Vec::new();
+        participants
+            .try_reserve_exact(enrollments.len())
+            .map_err(|_| SysError::OutOfMemory)?;
+        for enrollment in enrollments {
+            participants.push(enrollment.commit()?);
+        }
+        Ok(participants)
+    }
+
+    #[kunit]
+    fn duplicate_enrollment_fails_without_changing_membership() {
+        let endpoint = endpoint();
+        let participant = RelationEnrollment::new(endpoint.clone()).commit().unwrap();
+        let next_generation = registry().inner.lock().next_participant_generation;
+
+        assert_eq!(
+            RelationEnrollment::new(endpoint).commit().err(),
+            Some(SysError::DevAlreadyRegistered)
+        );
+        assert!(contains(&participant.key));
+        assert_eq!(
+            registry().inner.lock().next_participant_generation,
+            next_generation
+        );
+    }
+
+    #[kunit]
+    fn failed_prepare_rolls_back_committed_participants() {
+        let endpoint = endpoint();
+        let weak = Arc::downgrade(&endpoint);
+        let enrollments = vec![
+            RelationEnrollment::new(endpoint.clone()),
+            RelationEnrollment::new(endpoint.clone()),
+        ];
+        drop(endpoint);
+
+        assert_eq!(
+            commit_batch(enrollments).err(),
+            Some(SysError::DevAlreadyRegistered)
+        );
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[kunit]
+    fn retirement_is_exact_and_idempotent() {
+        let participant = RelationEnrollment::new(endpoint()).commit().unwrap();
+        assert!(participant.retire());
+        assert!(!participant.retire());
+        assert!(!contains(&participant.key));
+    }
+
+    #[kunit]
+    fn stale_participant_cleanup_cannot_hit_reenrollment() {
+        let old_endpoint = endpoint();
+        let old = RelationEnrollment::new(old_endpoint).commit().unwrap();
+        assert!(old.retire());
+
+        let new_endpoint = endpoint();
+        assert!(!Arc::ptr_eq(&old.key.endpoint, &new_endpoint));
+        let new = RelationEnrollment::new(new_endpoint).commit().unwrap();
+        assert_ne!(old.key.generation, new.key.generation);
+        drop(old);
+        assert!(contains(&new.key));
+
+        assert!(new.retire());
+    }
+
+    #[kunit]
+    fn implicit_acquire_snapshot_and_conflict_transition_matrix() {
+        assert!(implicit_acquire_eligible(true, false, true, true));
+        assert!(!implicit_acquire_eligible(false, false, true, true));
+        assert!(!implicit_acquire_eligible(true, true, true, true));
+        assert!(!implicit_acquire_eligible(true, false, false, true));
+        assert!(!implicit_acquire_eligible(true, false, true, false));
+        assert_eq!(
+            implicit_conflict_transition(true),
+            ImplicitConflictTransition::Finish
+        );
+        assert_eq!(
+            implicit_conflict_transition(false),
+            ImplicitConflictTransition::RemoveAndRetry
+        );
+    }
+
+    #[kunit]
+    fn hangup_retirement_without_relation_removes_only_exact_participant() {
+        let participant = RelationEnrollment::new(endpoint()).commit().unwrap();
+        let key = ParticipantKey {
+            endpoint: participant.key.endpoint.clone(),
+            generation: participant.key.generation,
+        };
+        assert!(participant.retire_for_hangup().is_none());
+        assert!(!contains(&key));
     }
 }

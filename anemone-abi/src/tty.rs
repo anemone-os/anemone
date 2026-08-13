@@ -82,6 +82,8 @@ pub mod linux {
     pub const INLCR: TcFlag = 0x0040;
     pub const IGNCR: TcFlag = 0x0080;
     pub const ICRNL: TcFlag = 0x0100;
+    pub const IMAXBEL: TcFlag = 0x2000;
+    pub const IUTF8: TcFlag = 0x4000;
     const _: () = assert!(
         IGNBRK == 0o000001
             && BRKINT == 0o000002
@@ -95,29 +97,58 @@ pub mod linux {
     );
     pub const OPOST: TcFlag = 0x0001;
     pub const ONLCR: TcFlag = 0x0004;
+    pub const OFILL: TcFlag = 0x0040;
+    pub const OFDEL: TcFlag = 0x0080;
+    pub const NLDLY: TcFlag = 0x0100;
+    pub const NL0: TcFlag = 0x0000;
+    pub const NL1: TcFlag = 0x0100;
+    pub const CRDLY: TcFlag = 0x0600;
+    pub const CR0: TcFlag = 0x0000;
+    pub const CR1: TcFlag = 0x0200;
+    pub const CR2: TcFlag = 0x0400;
+    pub const CR3: TcFlag = 0x0600;
     pub const TABDLY: TcFlag = 0x1800;
     pub const TAB0: TcFlag = 0x0000;
     pub const TAB1: TcFlag = 0x0800;
     pub const TAB2: TcFlag = 0x1000;
     pub const TAB3: TcFlag = 0x1800;
     pub const XTABS: TcFlag = TAB3;
+    pub const BSDLY: TcFlag = 0x2000;
+    pub const BS0: TcFlag = 0x0000;
+    pub const BS1: TcFlag = 0x2000;
+    pub const VTDLY: TcFlag = 0x4000;
+    pub const VT0: TcFlag = 0x0000;
+    pub const VT1: TcFlag = 0x4000;
+    pub const FFDLY: TcFlag = 0x8000;
+    pub const FF0: TcFlag = 0x0000;
+    pub const FF1: TcFlag = 0x8000;
     pub const ISIG: TcFlag = 0x0001;
     pub const ICANON: TcFlag = 0x0002;
+    pub const XCASE: TcFlag = 0x0004;
     pub const ECHO: TcFlag = 0x0008;
     pub const ECHOE: TcFlag = 0x0010;
     pub const ECHOK: TcFlag = 0x0020;
     pub const ECHONL: TcFlag = 0x0040;
+    pub const FLUSHO: TcFlag = 0x1000;
+    pub const PENDIN: TcFlag = 0x4000;
 
     pub const CBAUD: TcFlag = 0x0000_100f;
+    pub const BOTHER: TcFlag = 0x0000_1000;
     pub const CSIZE: TcFlag = 0x0030;
     pub const CS5: TcFlag = 0x0000;
     pub const CS6: TcFlag = 0x0010;
     pub const CS7: TcFlag = 0x0020;
     pub const CS8: TcFlag = 0x0030;
+    pub const CSTOPB: TcFlag = 0x0040;
     pub const CREAD: TcFlag = 0x0080;
     pub const PARENB: TcFlag = 0x0100;
     pub const PARODD: TcFlag = 0x0200;
+    pub const HUPCL: TcFlag = 0x0400;
     pub const CLOCAL: TcFlag = 0x0800;
+    pub const CIBAUD: TcFlag = 0x100f_0000;
+    pub const ADDRB: TcFlag = 0x2000_0000;
+    pub const CMSPAR: TcFlag = 0x4000_0000;
+    pub const CRTSCTS: TcFlag = 0x8000_0000;
 
     pub const B0: TcFlag = 0x0000;
     pub const B50: TcFlag = 0x0001;
@@ -162,4 +193,7 @@ pub mod linux {
     pub const TIOCSWINSZ: u32 = 0x5414;
     pub const TIOCNOTTY: u32 = 0x5422;
     pub const TIOCGSID: u32 = 0x5429;
+    pub const TIOCGPTN: u32 = 0x8004_5430;
+    pub const TIOCSPTLCK: u32 = 0x4004_5431;
+    pub const TIOCGPTPEER: u32 = 0x5441;
 }

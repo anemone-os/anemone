@@ -19,14 +19,16 @@ perf_observe = true # Enable native kernel performance observation; runtime reco
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
-print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
-record_log_level = 0 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
+print_log_level = 5 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
+record_log_level = 5 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 riscv64_tlb_flush_all_threshold_pages = 64 # Full local TLB flush threshold for RV64 page ranges; larger ranges use one full flush.
+loongarch64_tlb_flush_all_min_pages = 128 # Minimum LA64 page-range length that uses one full local TLB flush.
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
-max_logical_cpus = 1 # Maximum number of logical CPUs enabled by this kernel
+max_logical_cpus = 8 # Maximum number of logical CPUs enabled by this kernel
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
 max_path_len_bytes = 4096 # Maximum length of file paths in bytes
+c_string_batch_bytes = 256 # Maximum bytes copied per page-bounded direct C-string user-access window
 execve_max_string_count = 256 # Maximum strings accepted in each execve argv or envp vector; the initial stack remains the total byte budget.
 max_processes = 32768 # Maximum number of processes
 epoll_file_max_waiters = 64 # Fixed waiter-route capacity per epoll instance.
@@ -34,7 +36,7 @@ timerfd_file_max_waiters = 16 # Fixed blocking-read and poll-route capacity per 
 max_iovec_count = 1024 # Maximum vectors imported by one ordinary vector I/O request; must not exceed IOV_MAX.
 getdents64_buffer_bytes = 2097152 # Maximum kernel staging buffer used by one getdents64 call.
 ext4_sync_io_batch_pages = 16 # Maximum pages staged in one synchronous ext4 read or writeback request.
-vfs_positive_dentry_residency_capacity = 1024 # Maximum positive dentries retained by each opt-in superblock.
+vfs_positive_dentry_residency_capacity = 4096 # Maximum positive dentries retained by each opt-in superblock.
 pipe_capacity_pages = 2 # Default anonymous-pipe capacity in pages; must be a power of two and at least two.
 pipe_max_capacity_pages = 16 # Maximum anonymous-pipe capacity in pages; must be a power of two and at least the default.
 unix_stream_direction_capacity_bytes = 65536 # Fixed byte capacity of each AF_UNIX stream direction.
@@ -68,6 +70,7 @@ tty_canonical_line_capacity_bytes = 4096 # Maximum canonical line size including
 tty_input_capacity_bytes = 4096 # Per-Terminal committed input capacity.
 tty_output_capacity_bytes = 4096 # Per-Terminal transformed output capacity.
 tty_worker_batch_bytes = 256 # Maximum RX/TX bytes advanced by one endpoint worker batch.
+pty_system_capacity = 256 # Maximum reserved or live Unix98 PTY episodes in the system devpts instance.
 ns16550a_irq_rx_budget_bytes = 256 # Maximum RX bytes drained by one UART IRQ handler invocation.
 ns16550a_tx_batch_bytes = 16 # Maximum bytes submitted while holding the UART TX lock.
 ns16550a_tx_poll_iterations = 65536 # Maximum readiness polls for each UART TX byte.

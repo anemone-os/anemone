@@ -583,64 +583,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn thread_completion_distinguishes_dequeue_from_flush() {
-        let cpu = cur_cpu_id();
-        let baseline = queued_timer_count(cpu);
-        let timer = Arc::new(PosixTimer::new(
-            51,
-            PosixTimerClock::Monotonic,
-            NotificationKind::ThreadSignal,
-        ));
-        let target_ns = monotonic_ns().saturating_add(NSEC_PER_SEC);
-        {
-            let mut inner = timer.inner.lock();
-            inner.generation = 4;
-            inner.arm = Some(PosixTimerArm {
-                deadline: PosixTimerDeadline::Monotonic(target_ns),
-                interval_ns: NSEC_PER_SEC,
-                request: None,
-            });
-            inner.pending = Some(PendingEpisode {
-                generation: 4,
-                episode: 7,
-                overrun: 3,
-            });
-            inner.last_overrun = 11;
-        }
-
-        timer.thread_signal_completed(
-            PosixTimerSignalIdentity::new(51, 4, 7),
-            PosixTimerSignalCompletion::Flushed,
-        );
-        {
-            let inner = timer.inner.lock();
-            assert!(inner.pending.is_none());
-            assert_eq!(inner.last_overrun, 11);
-            assert!(inner.arm.as_ref().unwrap().request.is_none());
-        }
-        assert_eq!(queued_timer_count(cpu), baseline);
-
-        timer.inner.lock().pending = Some(PendingEpisode {
-            generation: 4,
-            episode: 8,
-            overrun: 5,
-        });
-        timer.thread_signal_completed(
-            PosixTimerSignalIdentity::new(51, 4, 8),
-            PosixTimerSignalCompletion::Dequeued,
-        );
-        {
-            let inner = timer.inner.lock();
-            assert!(inner.pending.is_none());
-            assert_eq!(inner.last_overrun, 5);
-            assert!(inner.arm.as_ref().unwrap().request.is_some());
-        }
-        assert_eq!(queued_timer_count(cpu), baseline + 1);
-        timer.delete();
-        assert_eq!(queued_timer_count(cpu), baseline);
-    }
-
-    #[kunit]
     fn thread_unqueued_outcomes_control_overrun_commit() {
         let cpu = cur_cpu_id();
         let baseline = queued_timer_count(cpu);

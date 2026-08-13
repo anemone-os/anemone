@@ -630,37 +630,6 @@ mod higher_level {
         token: WakeToken,
         timeout: Option<Duration>,
     ) -> Duration {
-        schedule_wait_with_timeout_inner(task, token, timeout, |_| {}, |_, _| {})
-    }
-
-    #[cfg(feature = "kunit")]
-    /// Observe the exact request installed and cancelled by this wait round.
-    /// These hooks are diagnostic-only and must not decide wait behavior.
-    pub(super) fn schedule_wait_with_timeout_observed<I, C>(
-        task: &Arc<Task>,
-        token: WakeToken,
-        timeout: Option<Duration>,
-        on_installed: I,
-        on_cancelled: C,
-    ) -> Duration
-    where
-        I: FnOnce(&TimerHandle),
-        C: FnOnce(&TimerHandle, bool),
-    {
-        schedule_wait_with_timeout_inner(task, token, timeout, on_installed, on_cancelled)
-    }
-
-    fn schedule_wait_with_timeout_inner<I, C>(
-        task: &Arc<Task>,
-        token: WakeToken,
-        timeout: Option<Duration>,
-        on_installed: I,
-        on_cancelled: C,
-    ) -> Duration
-    where
-        I: FnOnce(&TimerHandle),
-        C: FnOnce(&TimerHandle, bool),
-    {
         let current = get_current_task();
         assert!(
             Arc::ptr_eq(task, &current),
@@ -729,7 +698,6 @@ mod higher_level {
                     wait_id,
                     timeout,
                 );
-                on_installed(&request);
                 Some(request)
             } else {
                 kdebugln!(
@@ -753,8 +721,7 @@ mod higher_level {
             // The wait outcome is already authoritative. Remove a still-queued
             // timeout to bound resources; if dequeue won, WakeToken identity
             // makes its later callback a harmless stale completion.
-            let removed = cancel_timer_event(&request);
-            on_cancelled(&request, removed);
+            cancel_timer_event(&request);
         }
 
         if let Some(timeout) = timeout {

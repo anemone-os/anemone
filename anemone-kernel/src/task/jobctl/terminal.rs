@@ -86,6 +86,29 @@ impl TtySession {
                 ThreadGroupLifeCycle::Alive
             )
     }
+
+    /// Deliver the accepted terminal-hangup effect to the exact old session
+    /// leader. Relation ownership has already been withdrawn before this
+    /// guards-out handoff; signal generation remains owned by `ThreadGroup`.
+    pub(crate) fn signal_leader_hangup_continue(&self) {
+        if !self.is_live() {
+            return;
+        }
+        let sender = SigKill {
+            pid: Tid::new(0),
+            uid: Uid::new(0),
+        };
+        self.leader.recv_signal(Signal::new(
+            SigNo::SIGHUP,
+            SiCode::Kernel,
+            SigInfoFields::Kill(sender),
+        ));
+        self.leader.recv_signal(Signal::new(
+            SigNo::SIGCONT,
+            SiCode::Kernel,
+            SigInfoFields::Kill(sender),
+        ));
+    }
 }
 
 impl TtyProcessGroup {

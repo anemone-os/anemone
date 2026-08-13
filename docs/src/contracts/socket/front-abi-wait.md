@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/fs/socket/{front,api,udp,icmp_raw,tcp,unix,netlink}/`、`anemone-abi/src/net.rs`、`anemone-rs/src/{os,sys}/linux/net.rs`
 **依赖：** `OPENED-DESC-001..003`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`、`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`、`NET-SOCKET-WAIT-001`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-09
+**最后核验：** 2026-08-13
 
 ## 状态与能力所有权
 
@@ -52,6 +52,11 @@ datagram commit前完成验证。
 clamp到1024。adapter不建立batch queue、shared commit、family state或跨message原子性。
 
 `SOCK_NONBLOCK`进入shared opened-description status，`SOCK_CLOEXEC`进入fd-local flags。descriptor直接回答`SO_DOMAIN`、`SO_TYPE`、`SO_PROTOCOL`，family role回答`SO_ACCEPTCONN`。ICMP raw额外支持`IP_TTL`、`IP_TOS`与`ICMP_FILTER`的Linux optlen/value/copy policy；TCP发布`SO_REUSEADDR`、`TCP_NODELAY`与真实consuming `SO_ERROR`，option fact与async cause仍由TCP owner唯一保存，common adapter只分发normalized mutation/query，不建立mutable option/error bag。没有对应producer的family与其它未支持option返回`ENOPROTOOPT`，不得以恒零值或pending-error bag冒充支持。
+
+Unix stream/seqpacket的`SO_PEERCRED`由family owner返回normalized `{tgid,euid,egid}` snapshot；adapter独占Linux
+`struct ucred`布局、tgid到signed pid的可表示性检查、native-endian encoding及optlen/copyout policy。成功复制
+`min(requested, sizeof(struct ucred))` bytes并把optlen写为实际复制长度；value fault发生时不先改写optlen。
+非连接Unix role的typed rejection映射`ENOTCONN`，没有peer-credential producer的family映射`ENOPROTOOPT`。
 
 UDP发布真实`IP_RECVERR` scalar option、consuming `SO_ERROR`与`MSG_ERRQUEUE` ancillary projection。raw option/header、
 Linux errno、`sock_extended_err`、sockaddr/cmsg alignment与copy ordering只存在于adapter；UDP owner只接收normalized
@@ -105,7 +110,8 @@ rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc re
 `UDP-EXT-R1-CUTOVER` Refine；随后由[IPv4 TCP Socket RFC R0](../../rfcs/net-tcp/index.md)的
 `NET-TCP-CUTOVER`及[IPv4 UDP ICMP extended error小迭代](../../devlog/changes/2026-08-06-ipv4-udp-icmp-extended-error.md)
 Refine；[Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-diagnostics/index.md)的
-`NETLINK-DIAGNOSTICS-CUTOVER`随后增加AF_NETLINK tuple与wire containment。
+`NETLINK-DIAGNOSTICS-CUTOVER`随后增加AF_NETLINK tuple与wire containment；[Unix peer credentials小迭代](../../devlog/changes/2026-08-13-unix-peer-credentials.md)
+的`SOCKET-UNIX-PEERCRED-CUTOVER`增加`SO_PEERCRED` layout/copyout containment。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 

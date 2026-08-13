@@ -312,10 +312,6 @@ impl TtyPort for Uart16550TtyPort {
         self.port.id()
     }
 
-    fn line_snapshot(&self) -> TtyLineSnapshot {
-        self.port.applied_line.tty_snapshot()
-    }
-
     fn rx_pending(&self) -> bool {
         !self.port.raw_rx.lock_irqsave().fifo.is_empty()
     }
@@ -403,7 +399,8 @@ impl Uart16550Device {
         );
 
         let tty_port: Arc<dyn TtyPort> = self.tty_port.clone();
-        let (attachment, notifier) = attach_unpublished_port(tty_port)?;
+        let (attachment, notifier) =
+            attach_unpublished_port(tty_port, self.port.applied_line.tty_snapshot())?;
         let irq_context = AnyOpaque::new(Uart16550IrqContext {
             port: self.port.clone(),
             notifier,

@@ -110,7 +110,7 @@ fi
 cp --remove-destination -- "$sdcard_image" "$sdcard_target"
 
 log_progress "PRETEST" "building kernel"
-just build --preset "$preset" "${provider_bindings[@]}"
+just build --preset "$preset"
 
 log_progress "PRETEST" "running qemu"
 just qemu --preset "$preset" "${provider_bindings[@]}" \

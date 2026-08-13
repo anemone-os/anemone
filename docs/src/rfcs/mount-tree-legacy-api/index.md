@@ -206,3 +206,9 @@ unmount transaction 还必须给 mount / filesystem identity consumer 留出明�
 - `tracking-issues.md` 无 active design blocker。
 - `current-limitations` 明确保留 shared/slave/unbindable propagation、mount flag matrix、fstype alias bridge、ROFS mmap/writeback、unmount cleanup / `MNT_EXPIRE` 和 fanotify observer cleanup 等 accepted limitations。
 - `mount-legacy` LTP group 保持宽覆盖，用于保留 TPASS 分数和观测面；结果分类以 transaction devlog 和 register 为准。
+
+2026-08-11 validation-shape维护说明：阶段5 transaction中记录的generation-retry KUnit及其运行结果仍是历史事实，
+但其KUnit-only forced-interleaving hook会让production namei retry helper理解test harness，已按
+[`KUNIT-SHAPE-001`](../../contracts/kunit/execution-and-proof.md#kunit-shape-001--production不得理解kunit测试协议)删除。
+当前generation retry的正确性由直接production loop、placement generation/writer transaction源码审查和其余mount
+runtime覆盖承担；本说明不改变第一版mount target、owner、visible semantics或历史closure。

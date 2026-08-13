@@ -93,19 +93,29 @@ architecture、KernelConfig、kernel-only Cargo profile、app/root source refere
 requirements。该结果不是用户配置、artifact cache key或provenance，不得提交为canonical manifest，也不得
 在action之间被局部重写。
 
-Canonical reference必须解析到实际object；consumer不得只靠display name、输出文件名或固定路径拼装另一份
-selection。Resolver/materializer可以从snapshot生成有限typed input，但generated projection不建立runtime
-deployment truth、fallback selector或第二份canonical配置。
+`BuildPresetRef`、`SystemTargetRef`与`PlatformRef`是typed config locator。没有显式`./`的合法slug先解析到
+对应`conf/{build-presets,system-targets,platforms}/<slug>.toml`；只有该canonical目录项不存在时，才把原输入
+精确解释为workspace-root-relative路径。`./`显式跳过canonical lookup。canonical目录项只要存在，即使是
+dangling symlink、目录、越界symlink、不可读文件或无效TOML，也必须fail closed，不得退回同名workspace路径。
+所有路径拒绝绝对路径与词法或symlink workspace逃逸；nested target/platform路径也相对workspace root，不随
+referring manifest位置重定基准。`conf list`只发现tracked canonical SystemTarget，不枚举显式path输入。
+
+每个locator必须解析到实际object；consumer不得只靠display name、输出文件名或固定路径拼装另一份selection。
+Resolver在immutable snapshot中保留实际选择的workspace-relative preset/target/Platform路径用于诊断，但行为只由
+同次解析得到的owned config value驱动。Resolver/materializer可以从snapshot生成有限typed input，但generated
+projection不建立runtime deployment truth、fallback selector或第二份canonical配置。
 
 **违反表现：** build与QEMU分别重读或拼接不同selection；用户修改generated resolution；consumer只凭输出
 文件名推导target；materializer把一次projection当作长期配置owner；为了runtime错配恢复建立alternate selector。
 
 **验证 / Enforcement：** selection tests覆盖显式preset与完整low-level tuple进入同一resolver；resolver tests
-覆盖canonical reference load、snapshot字段与invalid reference；system actions只接收resolved result及各自的
+覆盖canonical优先、workspace fallback、`./`强制路径、nested private graph、present-invalid canonical
+fail-closed、workspace逃逸、实际路径诊断与immutable snapshot；system actions只接收resolved result及各自的
 invocation-local input。
 
 **最初来源：** [System Target Model RFC R6](../../rfcs/system-target-model/invariants.md#stm-resolve-001---resolved-build-是不可手写的派生-snapshot)。
 
-**当前来源：** [System Target Model R0-R2 transaction](../../devlog/transactions/2026-07-22-system-target-model.md)与
-[R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)；
-本页于2026-07-29从已生效语义做docs-only baseline提取。
+**当前来源：** [System Target Model R0-R2 transaction](../../devlog/transactions/2026-07-22-system-target-model.md)、
+[R3 explicit-input cleanup](../../devlog/transactions/2026-07-24-system-target-model-r3-explicit-inputs.md)与
+[workspace config locator小迭代](../../devlog/changes/2026-08-12-workspace-config-locators.md)；本页于2026-07-29
+从已生效语义做docs-only baseline提取，并于2026-08-12扩展typed locator输入而不改变配置owner。

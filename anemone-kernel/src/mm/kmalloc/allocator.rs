@@ -1,4 +1,8 @@
-use core::{alloc::GlobalAlloc, ptr::NonNull, sync::atomic::AtomicBool};
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    ptr::NonNull,
+    sync::atomic::AtomicBool,
+};
 
 use talc::{OomHandler, Span, Talc};
 
@@ -23,17 +27,41 @@ struct HeapOomHandler {
     bootstrap_heap_claimed: AtomicBool,
 }
 
+fn expansion_npages(layout: Layout) -> Option<usize> {
+    let page_size = PagingArch::PAGE_SIZE_BYTES;
+
+    // A newly claimed Talc arena must hold more than the requested payload:
+    // its base can require alignment padding, and Talc keeps arena/chunk
+    // bookkeeping outside that payload. Reserve one page for allocator
+    // bookkeeping instead of duplicating Talc's private tag layout here.
+    let arena_bytes = layout
+        .size()
+        .checked_add(layout.align() - 1)?
+        .checked_add(page_size)?;
+    let pages = arena_bytes.checked_add(page_size - 1)? / page_size;
+    pages.checked_next_power_of_two()
+}
+
 impl OomHandler for HeapOomHandler {
-    fn handle_oom(talc: &mut Talc<Self>, layout: core::alloc::Layout) -> Result<(), ()> {
+    fn handle_oom(talc: &mut Talc<Self>, layout: Layout) -> Result<(), ()> {
         unsafe {
             if !talc
                 .oom_handler
                 .bootstrap_heap_claimed
                 .swap(true, Ordering::SeqCst)
             {
-                let used = talc
-                    .claim(Span::from_array(&raw mut BOOTSTRAP_HEAP.bytes))
-                    .expect("bootstrap heap should be claimable");
+                let used = match talc.claim(Span::from_array(&raw mut BOOTSTRAP_HEAP.bytes)) {
+                    Ok(used) => used,
+                    Err(()) => {
+                        // Claim is the publication point for this one-shot
+                        // arena. A failed attempt must not make a later retry
+                        // skip the only bootstrap memory.
+                        talc.oom_handler
+                            .bootstrap_heap_claimed
+                            .store(false, Ordering::SeqCst);
+                        return Err(());
+                    },
+                };
                 kinfoln!(noprint, "HeapOomHandler: claimed bootstrap heap {}", used);
                 return Ok(());
             } else {
@@ -43,58 +71,19 @@ impl OomHandler for HeapOomHandler {
                 );
                 // if pmm is not yet initialized, this will fail and return Err(()).
 
-                // the folio we requested here won't be deallocated until the end of the
-                // kernel's execution, so we don't need to worry about freeing it.
-
-                // 1. the minimum number of pages we need to allocate to satisfy the request.
-                let min_npages =
-                    (layout.size() + PagingArch::PAGE_SIZE_BYTES) / PagingArch::PAGE_SIZE_BYTES;
-
-                // 2. we tend to allocate a power of two number of pages to reduce
-                //    fragmentation, so we round up to the next power of two.
-                let npages = min_npages.next_power_of_two();
-
-                // NOTE
-                // In a serious OOM (Out of Memory) handler, we should avoid calling expect or
-                // panic here because the frame allocator itself might be completely exhausted,
-                // and attempting to handle a panic could trigger further allocations, leading
-                // to a recursive kernel fault.
-                //
-                // A robust kernel implementation would instead treat memory exhaustion as a
-                // recoverable state. For user-space processes, memory
-                // interaction is mediated through page allocation, which is
-                // inherently a fallible operation. The kernel can maintain system stability by
-                // monitoring page allocator watermarks. When free memory drops below a critical
-                // threshold, the kernel can proactively invoke an OOM killer to terminate
-                // non-essential user processes, thereby reclaiming physical frames to satisfy
-                // internal demands.
-                //
-                // Internal kernel OOM panics typically occur
-                // when the kernel's own data structures grow beyond available capacity.
-                // Ideally, instead of panicking, the allocator should allow the current thread
-                // to sleep until memory is reclaimed, or terminate the offending thread if the
-                // allocation is deemed non-critical. The reason we currently
-                // resort to a simple panic is largely due to the current state of the Rust
-                // ecosystem.
-                //
-                // The default alloc crate is designed around infallible allocations,
-                // meaning it assumes memory is always available and panics by default when it
-                // is not. While support for fallible allocation (such as the try_alloc family
-                // of methods) is evolving, it remains relatively immature and difficult to
-                // integrate throughout a complex kernel codebase. Consequently, this panic
-                // serves as a temporary compromise until more sophisticated fallible allocation
-                // patterns are fully supported.
-                let folio = alloc_frames(npages).expect(
-                    "frame allocator has no free memory to satisfy HeapOomHandler's request",
-                );
-                let range = folio.leak();
+                let npages = expansion_npages(layout).ok_or(())?;
+                let folio = alloc_frames(npages).ok_or(())?;
+                let range = folio.range();
 
                 let len = range.npages() as usize * PagingArch::PAGE_SIZE_BYTES;
                 let ptr = range.start().to_hhdm().to_virt_addr();
                 let slice: *mut [u8] = core::ptr::slice_from_raw_parts_mut(ptr.as_ptr_mut(), len);
-                let _used = talc
-                    .claim(Span::from_slice(slice))
-                    .expect("should be able to claim folio from frame allocator");
+                let _used = talc.claim(Span::from_slice(slice)).map_err(|_| ())?;
+
+                // Talc now owns the claimed bytes. Transfer the folio only
+                // after that commit so every earlier failure returns it to the
+                // frame allocator instead of leaking an unusable arena.
+                let range = folio.leak();
                 knoticeln!(
                     noprint,
                     "HeapOomHandler: claimed folio {:?} from frame allocator",
@@ -117,9 +106,16 @@ impl KernelAllocator {
 }
 
 unsafe impl GlobalAlloc for KernelAllocator {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        let mut talc = self.talc.lock();
-        match unsafe { talc.malloc(layout) } {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // A null result can enter Rust's infallible allocation failure path,
+        // whose panic diagnostics may allocate fallibly for StopExecution.
+        // Release the Talc guard first so that path cannot recursively spin on
+        // the allocator lock held by the failed allocation itself.
+        let result = {
+            let mut talc = self.talc.lock();
+            unsafe { talc.malloc(layout) }
+        };
+        match result {
             Ok(ptr) => {
                 let res = ptr.as_ptr();
                 res
@@ -130,10 +126,76 @@ unsafe impl GlobalAlloc for KernelAllocator {
         }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let mut talc = self.talc.lock();
         unsafe {
             talc.free(NonNull::new_unchecked(ptr), layout);
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use talc::ErrOnOom;
+
+    const REGRESSION_SIZE: usize = u16::MAX as usize;
+    const OLD_ARENA_PAGES: usize = 16;
+    const PROGRESS_ARENA_PAGES: usize = 32;
+
+    static mut METADATA_ARENA: AlignedBytes<PhantomAligned4096, [u8; PagingArch::PAGE_SIZE_BYTES]> =
+        AlignedBytes::ZEROED;
+    static mut EXPANSION_ARENA: AlignedBytes<
+        PhantomAligned4096,
+        [u8; PROGRESS_ARENA_PAGES * PagingArch::PAGE_SIZE_BYTES],
+    > = AlignedBytes::ZEROED;
+
+    #[kunit]
+    fn expansion_arena_makes_the_triggering_layout_allocatable() {
+        let layout = Layout::from_size_align(REGRESSION_SIZE, 1).unwrap();
+        assert_eq!(expansion_npages(layout), Some(PROGRESS_ARENA_PAGES));
+
+        unsafe {
+            {
+                let mut old = Talc::new(ErrOnOom);
+                old.claim(Span::from_array(&raw mut METADATA_ARENA.bytes))
+                    .unwrap();
+                let old_arena = core::ptr::slice_from_raw_parts_mut(
+                    (&raw mut EXPANSION_ARENA.bytes).cast::<u8>(),
+                    OLD_ARENA_PAGES * PagingArch::PAGE_SIZE_BYTES,
+                );
+                old.claim(Span::from_slice(old_arena)).unwrap();
+                assert!(old.malloc(layout).is_err());
+            }
+
+            let mut progress = Talc::new(ErrOnOom);
+            progress
+                .claim(Span::from_array(&raw mut METADATA_ARENA.bytes))
+                .unwrap();
+            progress
+                .claim(Span::from_array(&raw mut EXPANSION_ARENA.bytes))
+                .unwrap();
+            assert!(progress.malloc(layout).is_ok());
+        }
+    }
+
+    #[kunit]
+    fn expansion_budget_covers_page_edges_and_alignment() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        assert_eq!(
+            expansion_npages(Layout::from_size_align(page_size - 1, 1).unwrap()),
+            Some(2)
+        );
+        assert_eq!(
+            expansion_npages(Layout::from_size_align(page_size, 1).unwrap()),
+            Some(2)
+        );
+        assert_eq!(
+            expansion_npages(Layout::from_size_align(page_size, page_size).unwrap()),
+            Some(4)
+        );
+
+        let largest = Layout::from_size_align(isize::MAX as usize, 1).unwrap();
+        assert!(expansion_npages(largest).is_some());
     }
 }

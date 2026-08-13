@@ -31,6 +31,14 @@
 
 ## 当前记录
 
+- [2026-08-13 - Unix peer credentials](./2026-08-13-unix-peer-credentials.md)
+- [2026-08-13 - TTY IUTF8与明确compatibility set](./2026-08-13-tty-iutf8-compat.md)
+- [2026-08-13 - `/dev/console` shared Terminal](./2026-08-13-dev-console-shared-terminal.md)
+- [2026-08-13 - PTY logical cflag profile](./2026-08-13-pty-logical-cflag.md)
+- [2026-08-13 - LA64 runtime firmware FDT](./2026-08-13-la64-runtime-fdt.md)
+- [2026-08-12 - Workspace config locators](./2026-08-12-workspace-config-locators.md)
+- [2026-08-12 - PTY retirement and job-control ordering](./2026-08-12-pty-retirement-job-control-ordering.md)
+- [2026-08-11 - KUnit execution and proof](./2026-08-11-kunit-execution-proof.md)
 - [2026-08-10 - LA64 software-unaligned HWCAP](./2026-08-10-la64-soft-unaligned-hwcap.md)
 - [2026-08-09 - VFS open request](./2026-08-09-vfs-open-request.md)
 - [2026-08-09 - Positive dentry residency](./2026-08-09-positive-dentry-residency.md)

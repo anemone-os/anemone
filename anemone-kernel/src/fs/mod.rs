@@ -25,6 +25,7 @@ mod uio;
 
 // filesystem drivers
 pub mod devfs;
+mod devpts;
 #[cfg(feature = "fs_ext4")]
 mod ext4;
 mod pipe;
@@ -36,8 +37,6 @@ mod socket;
 
 pub mod api;
 
-#[cfg(feature = "kunit")]
-pub(crate) use self::iomux::IomuxWaitRound;
 pub use self::{
     anonymous::*,
     dentry::Dentry,
@@ -65,8 +64,11 @@ pub use self::{
     superblock::SuperBlock,
 };
 pub(crate) use self::{
-    file::{FileOpenAccess, FileOpenRequest},
-    inode::{RenameFlags, reject_make_node},
+    file::{FileOpenAccess, FileOpenRequest, IoctlFdInstaller},
+    inode::{
+        OpenDescriptionActivation, OpenDescriptionCommit, PreparedOpenDescription, RenameFlags,
+        reject_make_node,
+    },
     iomux::PollRoute,
     lock::{
         FlockMode, FlockOperation, FlockOutcome, PosixLockMode, PosixLockQueryOutcome,
@@ -86,4 +88,9 @@ pub fn register_filesystem_drivers() {
     unsafe {
         run_initcalls(InitCallLevel::Fs);
     }
+}
+
+/// Activate public filesystem namespaces whose providers span fs initcalls.
+pub(crate) fn activate_public_filesystems() {
+    devpts::activate_public_namespace();
 }

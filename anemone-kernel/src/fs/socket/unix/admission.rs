@@ -12,7 +12,8 @@ use super::{
     },
     endpoint::{
         BindingPublication, ConnectionAdmission, EndpointAssociation, EndpointSide, UnixConnection,
-        UnixEndpointCore, UnixPollRoute, private_from_core, replacement_poll_routes,
+        UnixEndpointCore, UnixPeerCredentials, UnixPollRoute, private_from_core,
+        replacement_poll_routes,
     },
     namespace::{BindingAdmissionError, resolve_live_binding},
 };
@@ -68,10 +69,14 @@ pub(super) struct UnixListener {
     /// Sole owner of backlog, pending children, and the two operation-specific
     /// predicates. Route lists only carry recheck capabilities, never facts.
     state: SpinLock<ListenerState>,
+    /// Snapshot captured on the first successful transition into listening.
+    /// Repeated `listen` only changes backlog and deliberately does not create
+    /// a second mutable credential protocol.
+    credentials: UnixPeerCredentials,
 }
 
 impl UnixListener {
-    fn new(backlog: usize) -> Arc<Self> {
+    fn new(backlog: usize, credentials: UnixPeerCredentials) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(ListenerState {
                 backlog,
@@ -80,7 +85,13 @@ impl UnixListener {
                 accept_routes: Arc::new(Vec::new()),
                 closed: false,
             }),
+            credentials,
         })
+    }
+
+    #[cfg(feature = "kunit")]
+    fn new_for_validation(backlog: usize) -> Arc<Self> {
+        Self::new(backlog, UnixPeerCredentials::for_validation(1, 0, 0))
     }
 
     fn has_connect_capacity(state: &ListenerState) -> bool {
@@ -363,7 +374,7 @@ pub(super) fn listen(
     let backlog = normalized_backlog(backlog);
     // Preallocate the maximum queue before the endpoint becomes a listener.
     // Repeated listen calls discard this candidate and update the existing owner.
-    let candidate = UnixListener::new(backlog);
+    let candidate = UnixListener::new(backlog, UnixPeerCredentials::for_current());
     let empty_lifecycle_routes = Arc::new(Vec::new());
     let notify = with_admission_commit(|| {
         let mut state = endpoint.state.lock();
@@ -419,14 +430,20 @@ pub(super) fn connect(
     // shares only the listener's immutable name capability, never registration.
     let accepted =
         UnixEndpointCore::new_with_profile_and_name(client.profile, admission.local_name());
-    let connection =
-        UnixConnection::new(client.profile, [client.name.clone(), accepted.name.clone()]);
+    let listener = admission
+        .current_listener()
+        .ok_or(SocketConnectError::ConnectionRefused)?;
+    let connection = UnixConnection::new(
+        client.profile,
+        [client.name.clone(), accepted.name.clone()],
+        [UnixPeerCredentials::for_current(), listener.credentials],
+    );
     let empty_client_routes = Arc::new(Vec::new());
 
     let result = with_admission_commit(|| {
-        let listener = admission
-            .current_listener()
-            .ok_or(SocketConnectError::ConnectionRefused)?;
+        if !admission.listener_is_current(&listener) {
+            return Err(SocketConnectError::ConnectionRefused);
+        }
         {
             let state = client.state.lock();
             match state.association {
@@ -627,7 +644,7 @@ mod kunits {
 
     #[kunit]
     fn backlog_zero_admits_one_child_and_pop_restores_capacity() {
-        let listener = UnixListener::new(0);
+        let listener = UnixListener::new_for_validation(0);
         let first = UnixEndpointCore::new_unconnected();
         let second = UnixEndpointCore::new_unconnected();
         assert!(listener.try_push(first.clone()).is_ok());
@@ -638,7 +655,8 @@ mod kunits {
 
     #[kunit]
     fn backlog_growth_and_shrink_recheck_the_single_queue_owner() {
-        let listener = UnixListener::new(1);
+        let credentials = UnixPeerCredentials::for_validation(101, 201, 301);
+        let listener = UnixListener::new(1, credentials);
         let first = UnixEndpointCore::new_unconnected();
         let second = UnixEndpointCore::new_unconnected();
         let third = UnixEndpointCore::new_unconnected();
@@ -655,12 +673,13 @@ mod kunits {
             .update_backlog(1)
             .expect("backlog growth must expose the full-to-ready transition");
         assert!(routes.is_empty());
+        assert_eq!(listener.credentials, credentials);
         assert!(listener.try_push(third).is_ok());
     }
 
     #[kunit]
     fn close_withdraws_both_predicates_and_drains_children_once() {
-        let listener = UnixListener::new(1);
+        let listener = UnixListener::new_for_validation(1);
         let first = UnixEndpointCore::new_unconnected();
         let second = UnixEndpointCore::new_unconnected();
         assert!(listener.try_push(first.clone()).is_ok());
@@ -687,7 +706,7 @@ mod kunits {
 
     #[kunit]
     fn subscribed_connect_wait_observes_client_connection_commit() {
-        let listener = UnixListener::new(0);
+        let listener = UnixListener::new_for_validation(0);
         listener
             .try_push(UnixEndpointCore::new_unconnected())
             .unwrap();
@@ -704,7 +723,7 @@ mod kunits {
         );
 
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new(
+        let connection = UnixConnection::new_for_validation(
             UnixProfile::Stream,
             [client.name.clone(), peer.name.clone()],
         );
@@ -722,7 +741,7 @@ mod kunits {
 
     #[kunit]
     fn subscribed_connect_wait_observes_capacity_and_listener_close() {
-        let listener = UnixListener::new(0);
+        let listener = UnixListener::new_for_validation(0);
         listener
             .try_push(UnixEndpointCore::new_unconnected())
             .unwrap();
@@ -768,7 +787,7 @@ mod kunits {
 
     #[kunit]
     fn subscribed_accept_wait_observes_admission_and_listener_close() {
-        let listener = UnixListener::new(0);
+        let listener = UnixListener::new_for_validation(0);
         let listener_endpoint = listening_endpoint(&listener);
         let observer = Arc::new(CountingObserver::default());
         let admission_route = route(&observer);
@@ -789,7 +808,7 @@ mod kunits {
             PollRegisterResult::Ready(PollEvent::READABLE)
         );
 
-        let close_listener = UnixListener::new(0);
+        let close_listener = UnixListener::new_for_validation(0);
         let close_endpoint = listening_endpoint(&close_listener);
         let close_observer = Arc::new(CountingObserver::default());
         let close_route = route(&close_observer);
@@ -810,7 +829,7 @@ mod kunits {
 
     #[kunit]
     fn public_listener_poll_reuses_accept_predicate_and_routes() {
-        let listener = UnixListener::new(0);
+        let listener = UnixListener::new_for_validation(0);
         let listener_endpoint = listening_endpoint(&listener);
         assert_eq!(
             poll_unix_listener(
@@ -864,12 +883,12 @@ mod kunits {
 
     #[kunit]
     fn terminal_register_returns_ready_without_claiming_subscription() {
-        let listener = UnixListener::new(0);
+        let listener = UnixListener::new_for_validation(0);
         let listener_endpoint = listening_endpoint(&listener);
         let listener_admission = stream_admission(&listener_endpoint);
         let client = UnixEndpointCore::new_unconnected();
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new(
+        let connection = UnixConnection::new_for_validation(
             UnixProfile::Stream,
             [client.name.clone(), peer.name.clone()],
         );
@@ -885,7 +904,7 @@ mod kunits {
         assert_eq!(connect_observer.notifications(), 0);
         super::super::endpoint::retire_endpoint_core(&listener_endpoint);
 
-        let accept_listener = UnixListener::new(0);
+        let accept_listener = UnixListener::new_for_validation(0);
         let accept_endpoint = listening_endpoint(&accept_listener);
         super::super::endpoint::retire_endpoint_core(&accept_endpoint);
         let accept_observer = Arc::new(CountingObserver::default());

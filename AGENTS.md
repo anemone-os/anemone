@@ -74,6 +74,7 @@
 * **诊断字段要显式标注。** `owner`、`wait_id`、token id、debug label 等如果只用于日志、panic、review 或排障，字段旁必须说明它们不参与行为决策。纯诊断字段不得反向驱动状态机；一旦参与行为，它就是协议状态，必须进入类型设计、不变量说明或 RFC 文档。
 * **状态所有权只能有一个中心。** 一个状态转换只能由一个 owner 负责。其它结构应持有能力对象、弱引用、token、handle 或 snapshot，不能制造并列真相源。`Latch`、`WaitState`、`Event::Listener`、fd/file/device state 等结构尤其要避免“task 里一份，辅助对象里又一份”的双重语义。
 * **窄接口优先。** 下层只需要唤醒能力、文件能力、任务身份或上下文窗口时，不要传完整 `Task`、`File`、`FileDesc`、私有锁或内部容器。优先定义窄的 ctx、token、handle 或 owner API，让调用者无法依赖不属于它的内部状态。
+* **内存分配服从自然代码形状。** 当前工程阶段不追求内核全局 allocation-free，也不追求所有内存分配都通过 fallible API 逐层传播。IRQ / IRQ-off 上下文允许简单、适度且有界的内核堆分配；适度内核堆分配失败时立即 panic 是可接受策略，调用者不必为了形式上的可恢复性机械增加错误分支。不得仅为消除分配或 OOM panic 引入侵入式容器、预分配池、镜像状态、额外 owner，或扭曲生命周期与控制流；优先选择所有权自然、容易分析的直接实现。只有具体的容量、时延、重入或 allocator side effect 风险才能成为收紧分配的理由；不可睡眠上下文仍不得引入 blocking / synchronous reclaim、普通锁、remote placement、复杂 `Drop` / callback 或日志格式化。ABI 已规定的资源耗尽、容量背压和其它明确可恢复结果仍按其 contract 返回，不得偷换为 panic。
 * **断言策略要按 correctness 区分。** 轻量、局部、表示正确性不变量的检查使用 `assert!`，不要用 `debug_assert!`。`debug_assert!` 只用于昂贵扫描、统计诊断，或 release 路径不能承受的检查。cleanup / `Drop` 路径应先退订、释放或撤销发布状态，再用断言暴露 bug，避免 panic 放大泄漏或悬挂状态。如果fail-close会反过来要求内核实现新的功能或者代价很高，可以在注释中说明为什么不 fail-close，并做注释标记，便于后续 review。
 * **临时桥和兼容层必须带退出条件。** 为阶段迁移、LTP 兼容或 ABI 缺口引入的临时字段、fallback、双路径分发和兼容 wrapper，必须说明保留原因、行为边界和移除条件，不能让后续开发者误以为它是长期抽象。
 * **结构性拆分是设计维护，不是默认越界。** 简单小修不要为了整洁随手拆文件；但当一个文件已经混合 syscall ABI、核心状态机、设备/文件后端、测试兼容桥、锁/生命周期规则或多套 UAPI/internal 转换时，继续把新职责塞进去会固化错误 owner boundary。此时应先做模块边界判断：同一 owner 内、行为保持的目录化拆分（例如 `foo.rs` 拆成 `foo/{mod.rs, abi.rs, state.rs, ops.rs}`）是允许的结构维护；涉及 owner surface、public API、可见性策略或 shared contract 变化时，必须按 Implementation Boundary 的停止条件上报。
@@ -93,6 +94,14 @@
 如果拆分会移动 owner surface、改变公共接口、越过 Implementation Boundary、改变共享 contract 或引入新抽象层，必须先停止并上报理由、范围和验证计划。
 
 ### KUnit 与 validation 模块
+
+KUnit的执行、并发握手、证明外推、cleanup和production shape以
+[`KUNIT-EXEC` / `KUNIT-CONCURRENCY` / `KUNIT-PROOF` / `KUNIT-SHAPE`](docs/src/contracts/kunit/execution-and-proof.md)
+为唯一规范。普通KUnit默认不触达live scheduling；只有scheduler/wait/kthread/kworker/timer/timekeeping/IPI等并发机制
+本身是被测语义时才允许例外，并必须通过production lifecycle和显式phase/predicate/Event/token/completion/join闭合。
+不得用固定次数的yield、schedule、tick等待或wall-clock sleep模拟happens-before；timer/timekeeping/timed-wait或
+scheduler tick测试中的时间可以是被测语义，其它timeout只能作为failure bound。不得让production state/control flow/API
+理解KUnit测试协议。
 
 除 KUnit framework 本身外，不默认为一组测试新建 `kunit.rs`、`tests.rs` 或 `kunit_support.rs`。owner-local
 KUnit 应放在被测语义文件末尾的 inline `#[cfg(feature = "kunit")] mod kunits`；跨多个子模块的 composition
@@ -149,7 +158,7 @@ utils（工具）、misc（杂项）或某人的姓名首字母缩写
 
 正式 semantic gate 只用于独立 contract cutover、ABI 发布、owner 迁移、高风险 probe、不安全中间态或用户明确要求的 semantic gate；小迭代 execution checkpoint 仅按上文形成轻量停止点。未来 stage 只需保留目的、依赖和受保护边界；不得仅因缺少具体类型、算法、逐文件路径或精确命令形成 finding。probe 计划放在按需 `implementation.md`，说明 hypothesis、protected boundary、failure signal、write-back 和退出条件；probe 代码不能因“已经能跑”自然沉淀为长期抽象。
 
-实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。真实证据表明原目标代价过高或只能形成较弱能力时，review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC 或保持 Not Cut Over。agent 可以提交证据和 reduced-target 提案，不能自行批准；新 target 接受并完成对应 cutover 前，不得把更弱实现写成当前事实、accepted limitation 或原 target closure。
+RFC Closed 前，实现反馈不得自行改写 accepted target，但可以触发 `Target Renegotiation Gate`。真实证据表明原目标代价过高或只能形成较弱能力时，review 决定保持原目标、接受较弱但自洽的新修订、拆 follow-up RFC 或保持 Not Cut Over。agent 可以提交证据和 reduced-target 提案，不能自行批准；新 target 接受并完成对应 cutover 前，不得把更弱实现写成当前事实、accepted limitation 或原 target closure。RFC Closed 后不再进入原 RFC 的 review 或 revision，相关发现必须作为独立任务重新分类和授权。
 
 correctness invariant 约束唯一 owner、并发、生命周期、cleanup、内存安全和 ABI 诚实性，不能作为工程妥协项；target guarantee/capability 可以经 target renegotiation 修订；类型、helper、内部模块和数据结构属于 implementation preference。accepted limitation 必须位于新 target 之外，新 target 范围内的错误仍进入 open issues。
 
@@ -159,7 +168,7 @@ correctness invariant 约束唯一 owner、并发、生命周期、cleanup、内
 
 没有具体摩擦或只剩 Safe 时不输出占位结论。未在当前边界内消除的 Euclid 在收口时简短报告证据、模型偏差、影响和最小修正方向；Keter/Apollyon 必须立即停止，不得声明完成或 cutover，并报告当前 diff/代码处置和需要的 owner/RFC/target 决策。Patch 中需要长期保留的摩擦提示升级为小迭代；小迭代中的未决 owner/contract/protocol 摩擦提示升级 RFC。
 
-RFC 文本历史由仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。`R0`、`R1` 只标记已接受 target 语义修订；措辞、证据、内部路线和文件布局调整不递增。历史 RFC、Completed transaction、manifest 和 change record 不批量迁移，新规则从新任务及活跃 RFC 的下一个未开始 gate 生效。
+RFC 文本历史由仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。`R0`、`R1` 只标记 RFC Closed 前已接受的 target 语义修订；措辞、证据、内部路线和文件布局调整不递增。Closed 是不可重新打开或修订的完成终态：RFC 的 target、supporting pages、gate 与 closure 冻结为历史资料，不能恢复为 Accepted/Review Hold、增加修订或由新 transaction 续跑。后续工作从 live source、current contract、register 和新的 Implementation Boundary 独立分级；旧 RFC 中要求未来修订原 RFC 或建立 follow-up RFC 的措辞不具有流程权威。历史 RFC、Completed transaction、manifest 和 change record 不批量迁移，新规则从新任务及活跃 RFC 的下一个未开始 gate 生效。
 
 Contract 文档按 owner 和共同变化/共同证明的协议边界组织。`Contract Impact` 只列真实变化的 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve`。Draft/Accepted target 不得提前覆盖 effective contract；只有达到 cutover 的验证和停止条件后才更新 current contract，证据可以来自原子 change record、RFC closure、Git/PR 或按需 transaction。
 

@@ -12,7 +12,7 @@ VFS materialization与ordinary exec handoff
 **依赖：** `USER-ENTRY-002`、[`TTY-ENDPOINT-001`](../tty/data-plane.md#tty-endpoint-001--endpoint-publication是稳定的单向transaction)
 与现有 VFS / exec-binfmt contract
 **Pending Successor：** None
-**最后核验：** 2026-07-24
+**最后核验：** 2026-08-13
 
 ## BOOT-PROTOCOL-001 — typed initial-program source统一收口到普通 VFS exec
 
@@ -41,8 +41,9 @@ rollback已经boot-fatal的ramfs/temp；后续boot挂载新的ramfs，不能把�
 
 **唯一owner与局部义务：** SystemTarget拥有source与app reference；build resolver/materializer拥有
 reference、export与有限generated input；rootfs manifest/materializer只拥有`RootfsEntry` metadata值与原样
-publication；console拥有boot selection，TTY按该immutable selection重验并准备三份real Terminal File，boot
-coordinator按console -> TTY顺序完成单向publication并移交窄`InitStdio` capability；kernel Boot Protocol拥有
+publication；console拥有boot selection与`/dev/console`节点，TTY按该immutable selection重验并准备selected
+Terminal open capability与三份real Terminal File，console用该capability完成node prepare，boot coordinator按
+console -> TTY顺序完成单向publication并移交窄`InitStdio` capability；kernel Boot Protocol拥有
 runtime source resolution、EmbeddedApp publication、初始stdio安装、root/cwd准备和ordinary exec handoff；
 VFS / exec-binfmt / user-entry各自拥有handoff后的路径、格式与用户态进入语义。
 任一参与方不得缓存另一份可变selection、建立第二materializer/loader或把anonymous bytes直接交给exec。
@@ -63,4 +64,5 @@ artifact后kernel bytes/hash变化；latest-byte independent review为Apollyon 0
 **当前来源：** [RFC-20260722-system-target-model R6](../../rfcs/system-target-model/index.md)；
 [Checkpoint R6A cutover transaction](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)；
 [Checkpoint 5A baseline transaction](../../devlog/transactions/2026-07-22-system-target-model.md#checkpoint-5a-closure-and-boot-protocol-cutover---2026-07-24)；
-[alpha/omega RFC结果合流小迭代](../../devlog/changes/2026-07-24-alpha-omega-integration.md)。
+[alpha/omega RFC结果合流小迭代](../../devlog/changes/2026-07-24-alpha-omega-integration.md)；
+[`/dev/console` shared Terminal小迭代](../../devlog/changes/2026-08-13-dev-console-shared-terminal.md)。

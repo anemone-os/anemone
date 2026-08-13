@@ -187,7 +187,17 @@ fn run_comp_tests(run_tcp_stage5: bool) {
 pub fn main() -> Result<(), Errno> {
     let mut args = anemone_rs::env::args();
     let _program = args.next();
-    let tcp_stage5_peer = match args.next() {
+    let first = args.next();
+    if first == Some("--socket-test") {
+        if args.next().is_some() {
+            return Err(EINVAL);
+        }
+        local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
+        println!("user-test: focused socket test finished, shutting down.");
+        shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
+        unreachable!("user-test: shutdown returned unexpectedly");
+    }
+    let tcp_stage5_peer = match first {
         None => None,
         Some("--tcp-stage5") => {
             let peer = args.next().ok_or(EINVAL)?;

@@ -6,7 +6,7 @@ use crate::{
 
 #[syscall(SYS_FCHMOD)]
 fn sys_fchmod(fd: Fd, linux_perm: LinuxInodePerm) -> Result<u64, SysError> {
-    knoticeln!("fchmod: fd={:?}, perm={:#o}", fd, linux_perm.bits());
+    kdebugln!("fchmod: fd={:?}, perm={:#o}", fd, linux_perm.bits());
 
     let task = get_current_task();
     let file_desc = task.get_fd(fd)?;

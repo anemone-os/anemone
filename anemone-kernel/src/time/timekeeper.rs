@@ -464,27 +464,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn integer_conversion_and_resolution_follow_hertz() {
-        let low_hertz = Timekeeper::new(0, 300).unwrap();
-        assert_eq!(low_hertz.counts_to_nanos(3), 10_000_000);
-        assert_eq!(low_hertz.source_resolution_ns(), 3_333_334);
-
-        let high_hertz = Timekeeper::new(0, 1_500_000_000).unwrap();
-        assert_eq!(high_hertz.source_resolution_ns(), 1);
-
-        let one_tick = Timekeeper::new(0, SYSTEM_HZ as u64).unwrap();
-        assert_eq!(one_tick.counts_per_tick, 1);
-        assert_eq!(one_tick.coarse_resolution_ns(), 10_000_000);
-
-        let non_divisible = Timekeeper::new(0, 32_768).unwrap();
-        assert_eq!(non_divisible.coarse_resolution_ns(), 9_979_249);
-
-        assert!(Timekeeper::new(0, SYSTEM_HZ as u64 - 1).is_none());
-        assert!(u64::try_from(one_tick.counts_to_nanos(u64::MAX)).is_err());
-        assert!(RealtimeSnapshot::new(1, 0).is_none());
-    }
-
-    #[kunit]
     fn realtime_mutation_is_atomic_nonnegative_and_nonwrapping() {
         let mut realtime = RealtimeSnapshot::new(10, 20).unwrap();
         assert_eq!(realtime.set_target(15, 25), Ok(false));

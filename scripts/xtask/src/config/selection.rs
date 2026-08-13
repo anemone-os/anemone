@@ -73,11 +73,13 @@ pub struct SelectionRequest {
 #[derive(Args, Debug)]
 pub struct SelectionArgs {
     #[arg(long, value_name = "PRESET")]
-    #[arg(help = "Select a tracked build preset")]
+    #[arg(help = "Select a build preset by canonical name or workspace-relative path")]
     preset: Option<String>,
 
     #[arg(long, value_name = "TARGET")]
-    #[arg(help = "Select a system target as part of a complete low-level tuple")]
+    #[arg(
+        help = "Select a system target by canonical name or workspace-relative path as part of a complete low-level tuple"
+    )]
     target: Option<String>,
 
     #[arg(long, value_name = "PATH")]

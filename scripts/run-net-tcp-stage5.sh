@@ -66,8 +66,7 @@ echo "TCPSTAGE5:RUNNER:SOURCE:$(git rev-parse HEAD)"
 echo "TCPSTAGE5:RUNNER:DISK:$(sha256sum "$validation_disk" | cut -d' ' -f1)"
 just rootfs mkfs -c "$rootfs_config"
 cp --remove-destination -- "$validation_disk" "$runtime_disk"
-just build --target "$target" --kernel-config conf/kconfs/default.toml --profile release \
-    --bind smp=1 --bind memory=1G
+just build --target "$target" --kernel-config conf/kconfs/default.toml --profile release
 
 python3 scripts/net-tcp-stage5-peer.py \
     --port "$peer_port" --sessions "$peer_sessions" >"$peer_log" 2>&1 &

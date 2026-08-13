@@ -87,7 +87,7 @@ impl dyn MachineDesc {
 /// Machine descriptions compiled into the kernel.
 static MACHINES: &[&dyn MachineDesc] = &[&Loongson2K1000, &Qemu3A5000];
 
-/// The embedded DTB selects one machine before the BSP starts any AP.
+/// The Platform-selected FDT selects one machine before the BSP starts any AP.
 ///
 /// This is the single behavioral owner of machine identity. Initialization is
 /// completed by the BSP before `wake_secondary()` publishes execution to
@@ -98,7 +98,7 @@ fn selected_machine() -> &'static dyn MachineDesc {
     *SELECTED_MACHINE.get()
 }
 
-/// Select the machine from the embedded flattened device tree.
+/// Select the machine from the Platform-selected flattened device tree.
 ///
 /// This must run before any machine-specific bootstrap operation, notably AP
 /// mailbox publication and IPI delivery.
@@ -157,7 +157,7 @@ pub fn wake_secondary(target: PhysCpuId, entry: PhysAddr) {
 /// Call this right after unflattening the device tree and before any other
 /// platform-specific initialization.
 ///
-/// Machine identity was already selected from the same embedded DTB during
+/// Machine identity was already selected from the same FDT during
 /// bootstrap, before AP startup. This function only performs the later
 /// allocator-dependent device initialization.
 ///

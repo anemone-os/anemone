@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/mm/{paging/mapper.rs,uspace/}`、`anemone-kernel/src/{sched/switch.rs,task/api/execve/kernel.rs,fs/proc/tgid/}`、`anemone-kernel/src/exception/ipi/user_tlb.rs`、`anemone-kernel/src/arch/{riscv64,loongarch64}/mm/`
 **依赖：** `USER-ENTRY-001/002`
 **Pending Successor：** None
-**最后核验：** 2026-08-09
+**最后核验：** 2026-08-11
 
 ## 状态与能力所有权
 
@@ -54,9 +54,11 @@ success路径。operation-local `Added`不再承担、也不需要伪装成全�
 或任何production caller绕过address-space ordering，使dependent continuation越过未完成的destructive predecessor。
 
 **验证 / Enforcement：** 源码审查闭合Mapper classification、published `UserSpaceHandle` mutation caller和
-`UserSpaceGuard` continuation路径，并核对同一ordering owner覆盖mutex unlock、remote ack与relock。owner-local KUnit
-覆盖relation/local policy及五条代表性ordering路径；2026-08-09 RV64/LA64 SMP=8 release QEMU中597项KUnit与六组
-`userptr`均通过。运行结果只说明这些路径未回归，不替代owner/caller/happens-before源码审查，也不穷举所有并发交错。
+`UserSpaceGuard` continuation路径，并核对同一ordering owner覆盖mutex unlock、remote ack与relock。owner-local
+deterministic KUnit覆盖relation/local policy；dependent-continuation ordering由上述owner/caller/happens-before源码审查
+enforce。2026-08-09 RV64/LA64 SMP=8 release QEMU中曾有五条forced-interleaving ordering KUnit与六组`userptr`通过；
+这些历史运行事实保持，但对应KUnit因依赖production pause hook和固定yield次数已在2026-08-11删除，不再是当前回归
+机制或并发证明。见[KUnit execution and proof小迭代](../../devlog/changes/2026-08-11-kunit-execution-proof.md)。
 
 **最初来源：** [User fault local TLB completion小迭代](../../devlog/changes/2026-08-08-user-fault-local-tlb.md)。
 
@@ -106,9 +108,11 @@ residency锁发送/等待同步IPI；destructive commit后向caller返回allocat
 **验证 / Enforcement：** bounded source review从全部`activate_addr_space()`与user activation facade caller闭合scheduler、
 exec、temporary restore、same-mapping、kernel/user handoff、唯一residency truth、join/leave/snapshot、锁序、boot-fixed target、
 fork/SysV/Anon/Shadow/page-table retirement及`mutation -> snapshot -> unlock -> ack -> release/retry`顺序。owner-local/transport
-KUnit覆盖稳定resident set、leave收敛、selected remote target与source-only零remote target；既有ordering KUnit继续覆盖fixed
-replace、permission restriction、fork COW、heap decommit及monotonic/no-change路径。2026-08-09双架构SMP=8 release QEMU
-中600项KUnit与六组`userptr`均通过；运行只说明被执行路径未回归，不替代owner/caller/happens-before源码审查。
+KUnit覆盖稳定resident set、leave收敛、selected remote target与source-only零remote target。fixed replace、permission
+restriction、fork COW、heap decommit及monotonic/no-change的dependent ordering当前由production-path source review enforce；
+2026-08-09双架构SMP=8历史runtime曾执行对应forced-interleaving cases与六组`userptr`，但这些cases已在2026-08-11因
+违反`KUNIT-CONCURRENCY-001`和`KUNIT-SHAPE-001`删除，不再计入current validation inventory。运行证据从不替代
+owner/caller/happens-before源码审查。
 
 **最初来源：** [User TLB Completion RFC R2 closure](../../rfcs/user-tlb-completion/index.md#closure)，
 `USER-TLB-COMPLETION-CUTOVER`（2026-08-09）。

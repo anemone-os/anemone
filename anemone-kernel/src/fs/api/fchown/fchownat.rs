@@ -35,7 +35,7 @@ fn sys_fchownat(
     group: Gid,
     flags: FchownAtFlags,
 ) -> Result<u64, SysError> {
-    knoticeln!(
+    kdebugln!(
         "fchownat: dirfd={:?}, pathname={:?}, owner={}, group={}, flags={:?}",
         dirfd,
         pathname,

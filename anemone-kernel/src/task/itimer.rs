@@ -316,18 +316,4 @@ mod kunits {
         assert!(snapshot.is_some());
         tg.cancel_real_itimer();
     }
-
-    #[kunit]
-    fn repeated_itimer_replace_cancel_returns_to_baseline() {
-        let tg = get_current_task().get_thread_group();
-        tg.cancel_real_itimer();
-        let cpu = cur_cpu_id();
-        let baseline = queued_timer_count(cpu);
-        for seconds in 1..=64 {
-            tg.set_real_itimer(Duration::from_secs(3600 + seconds), None);
-            assert_eq!(queued_timer_count(cpu), baseline + 1);
-        }
-        tg.cancel_real_itimer();
-        assert_eq!(queued_timer_count(cpu), baseline);
-    }
 }

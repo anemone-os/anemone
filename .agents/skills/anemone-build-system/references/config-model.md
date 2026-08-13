@@ -21,15 +21,21 @@ Root `kconfig` and `conf/kconfs/default.toml` own kernel feature, policy, and ca
 
 ### Explicit Build Input
 
-`conf/build-presets/` names a SystemTarget, workspace-relative KernelConfig, and kernel-only Cargo
-profile. Build and ordinary QEMU share one resolver and require either an explicit preset or a
-complete low-level tuple. There is no developer-local or tracked default selection source, and
-presets do not carry presentation defaults.
+`conf/build-presets/` contains canonical named combinations of a SystemTarget, workspace-relative
+KernelConfig, and kernel-only Cargo profile. Build and ordinary QEMU share one resolver and require
+either an explicit preset or a complete low-level tuple. A plain canonical preset name resolves
+there first and falls back to the exact workspace-relative input only when the canonical path does
+not exist; `./` forces exact workspace lookup. There is no developer-local or tracked default
+selection source, and presets do not carry presentation defaults.
 
 ### System Target
 
-`conf/system-targets/` owns the selected Platform reference, root mount/source, and closed initial-program source:
-rootfs metadata or a referenced embedded app. Either variant may carry a complete non-empty argv including argv[0];
+`conf/system-targets/` contains canonical SystemTargets that own the selected Platform reference,
+root mount/source, and closed initial-program source. SystemTarget and Platform locators use the
+same canonical-first/workspace-fallback rule as BuildPreset locators, including inside manifests;
+nested paths remain workspace-root-relative rather than manifest-relative. A present canonical file
+that is invalid, unreadable, not regular or resolves outside the workspace fails closed. The target's
+closed initial-program source is rootfs metadata or a referenced embedded app. Either variant may carry a complete non-empty argv including argv[0];
 omission uses the resolved executable path as the sole argument. An embedded app reference names an existing app manifest; kernel build
 uses the common app exporter and rejects identity mismatch, non-singleton output, non-regular output, or an artifact
 without an execute bit before kernel compilation. A SystemTarget does not own machine constants, kernel parameters,
@@ -81,7 +87,7 @@ Before executing or accepting a configuration change, verify:
 - app build target, declared target support, driver output, and declared export agree;
 - an embedded initial app reference matches its manifest identity and resolves to one executable regular export;
 - rootfs architecture and installed apps agree with the intended kernel;
-- every build/QEMU bind value is consumed by a selected Platform placeholder and matches the intended wrapper mapping;
+- every action bind value is consumed by that action's selected Platform placeholder and matches the intended wrapper mapping;
 - fixed-path consumers run after their documented producer and stop when it fails;
 - cleanup and wrapper behavior does not invalidate another layer's required input;
 - validation observes outputs from the current invocation, not stale conditional artifacts.
@@ -98,6 +104,7 @@ Normal kernel build removes stale DTB output for firmware delivery. For embedded
 compiles a physical normative source, or asks the selected QEMU provider to dump a build-local DTB
 using only resolved machine, CPU, SMP, memory, and optional BIOS. It may consume bindings referenced by those
 provider fields, but never consumes ordinary QEMU args, runtime disks, or runtime bind groups for DT materialization.
+Firmware-delivery builds consume no QEMU bindings because the runtime FDT owns launch topology.
 
 QEMU Platforms keep no committed provider mirror and expose no refresh/check command. A physical
 `provider = "firmware"` contract records a firmware-derived conformance baseline without making it

@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/task/kthread/{ctx,control}.rs`、`anemone-kernel/src/sched/{event,wait,mod}.rs`
 **依赖：** `SCHED-WAKE-001..004`
 **Pending Successor：** None
-**最后核验：** 2026-08-05
+**最后核验：** 2026-08-11
 
 ## 状态与能力所有权
 
@@ -42,8 +42,11 @@ schedule/cancel、listener cleanup、finish/retire exactly once闭合。timer ca
 timeout完成后续round；listener/active wait未finish；timer强持已经提前结束的task；或kthread/OOM保存第二份
 deadline/stop generation。
 
-**验证 / Enforcement：** Event/kthread source audit；常开wait-core identity/lifecycle assertions；owner-local KUnit
-覆盖timeout、长wait的stop interruption、ordinary wake和同一调用内late/stale timeout；RV64 431/431 KUnit boot。
+**验证 / Enforcement：** Event/kthread source audit与常开wait-core identity/lifecycle assertions覆盖ordinary wake重查、
+每轮retire及late/stale timeout isolation；当前owner-local KUnit覆盖timeout完成和长wait的stop interruption。2026-08-05
+closure中记录的更宽KUnit是历史运行事实；其中依赖Event production probe的early-wake timeout-request case已按
+[`KUNIT-SHAPE-001`](../kunit/execution-and-proof.md#kunit-shape-001--production不得理解kunit测试协议)于2026-08-11删除，
+不再作为current regression claim。
 
 **最初来源：** [OOM Periodic Sampling小迭代](../../devlog/changes/2026-08-05-oom-periodic-sampling.md)。
 

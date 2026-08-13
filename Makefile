@@ -14,12 +14,10 @@ all: kernel-rv kernel-la
 
 kernel-rv:
 	rm -f $@
-	$(XTASK) build --preset competition-final-rv64-release \
-		--bind smp=8 --bind memory=8G
+	$(XTASK) build --preset competition-final-rv64-release
 	cp build/anemone.elf $@
 
 kernel-la:
 	rm -f $@
-	$(XTASK) build --preset competition-final-la64-release \
-		--bind smp=8 --bind memory=8G
+	$(XTASK) build --preset competition-final-la64-release
 	cp build/anemone.elf $@

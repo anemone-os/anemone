@@ -26,6 +26,7 @@ docs/src/rfcs/<short-slug>/
 RFC 不要求先创建 positioning 或 backgrounds。target 已经闭合时直接编写 `index.md`；只有事实证据、历史上下文或被拒绝方案会妨碍正文扫读时，才增加 `backgrounds/`。
 
 RFC 文本历史由整个仓库 Git 保存，不创建 per-RFC 仓库、版本化 canonical 副本或默认 amendment。
+RFC 修订只发生在设计、实现和验收尚未整体 Closed 的生命周期内；Closed 后整个 RFC 目录冻结为历史资料。
 
 ## `index.md`
 
@@ -43,6 +44,10 @@ RFC 文本历史由整个仓库 Git 保存，不创建 per-RFC 仓库、版本�
 `Terminated`只用于维护者永久取消尚未满足acceptance/closure的RFC。它没有active gate或current-contract
 cutover，supporting pages只能保留historical状态，且不得恢复。未来相关工作必须作为独立任务重新分类并取得
 新的授权/Implementation Boundary；只有仍命中RFC分级时才新建RFC。
+
+`Closed`是不可重新打开或修订的完成终态。不得把它恢复为`Accepted`/`Review Hold`、增加`R<n>`、追加gate，
+或用新transaction续跑。后续相关工作从live source、current contract和register建立新的Implementation Boundary，
+按当前规则独立分类；旧RFC只作为provenance，不能规定新任务必须修订它或建立follow-up RFC。
 
 ## 摘要
 
@@ -116,7 +121,7 @@ cutover，supporting pages只能保留historical状态，且不得恢复。未�
 
 ## 修订记录
 
-只记录已接受的 target 语义版本；普通文字、证据、实现路线、文件布局和验证命令调整不增加修订。
+只记录 RFC Closed 前已接受的 target 语义版本；普通文字、证据、实现路线、文件布局和验证命令调整不增加修订。
 
 | 修订 | 日期 | 语义变化 | Review / Evidence |
 | --- | --- | --- | --- |
@@ -124,7 +129,7 @@ cutover，supporting pages只能保留historical状态，且不得恢复。未�
 
 ## Closure
 
-完成后记录实际交付、验证、contract cutover/Not Cut Over、仍开放问题/限制，以及有证据的 Architecture Friction。没有架构摩擦时不写占位结论。
+完成时记录实际交付、验证、contract cutover/Not Cut Over、仍开放问题/限制，以及有证据的 Architecture Friction。该次 closure 同时冻结 RFC；后续事实进入 live source、current contract、register 或新的独立任务，不再回写本 RFC。没有架构摩擦时不写占位结论。
 ```
 
 ## `invariants.md`（按需）

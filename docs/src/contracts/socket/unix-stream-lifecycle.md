@@ -1,15 +1,15 @@
-# Unix Socket State、Stream、Address 与 Lifecycle 当前契约
+# Unix Socket State、Stream、Address、Peer Credentials 与 Lifecycle 当前契约
 
-**Contract IDs：** `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-LIFECYCLE-001`
+**Contract IDs：** `UNIX-SOCKET-STATE-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-ADDRESS-001`、`UNIX-SOCKET-PEERCRED-001`、`UNIX-SOCKET-LIFECYCLE-001`
 **状态：** Active
-**Owner：** Unix endpoint role/profile/association、listener/backlog、connection-specific directional data plane与immutable address snapshot各自拥有对应state；本页拥有它们之间的handoff协议
+**Owner：** Unix endpoint role/profile/association、listener/backlog、connection-specific directional data plane、immutable address snapshot与peer-identity snapshot各自拥有对应state；本页拥有它们之间的handoff协议
 **参与领域：** Unix IPC / Socket front / VFS namespace / opened description / iomux / epoll
-**覆盖范围：** socketpair与pathname stream/seqpacket共享的role、listen/connect/accept、address snapshot与final-release lifecycle，以及stream byte data plane、shutdown/EOF/readiness
-**不覆盖：** Unix datagram/abstract namespace、credentials/fd passing、ancillary data、autobind、pre-connection shutdown persistence、pending error/`SO_ERROR`；seqpacket record transaction见`UNIX-SOCKET-SEQPACKET-001`
+**覆盖范围：** socketpair与pathname stream/seqpacket共享的role、listen/connect/accept、address与peer-identity snapshot及final-release lifecycle，以及stream byte data plane、shutdown/EOF/readiness
+**不覆盖：** Unix datagram/abstract namespace、`SO_PASSCRED`/`SCM_CREDENTIALS`、fd passing与其它ancillary data、autobind、pre-connection shutdown persistence、pending error/`SO_ERROR`；seqpacket record transaction见`UNIX-SOCKET-SEQPACKET-001`
 **实现位置：** `anemone-kernel/src/fs/socket/unix/{admission.rs,endpoint/,namespace.rs}`、`anemone-kernel/src/fs/socket/unix/endpoint/{stream.rs,record.rs}`、`anemone-kernel/src/fs/socket/api/`
 **依赖：** `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`SOCKET-WAIT-001`、`UNIX-SOCKET-NAMESPACE-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-04
+**最后核验：** 2026-08-13
 
 ## 状态与能力所有权
 
@@ -18,6 +18,7 @@
 | endpoint role、immutable profile与active association | `UnixEndpointCore` | operation取得role-scoped capability/snapshot；namespace取得窄的profile-compatible admission | bind/listen/connect/accept dispatch与retirement |
 | backlog、queued accepted child与connect/accept predicate | `UnixListener` | endpoint持listener association；waiter持non-owning route | admission、capacity与listener close |
 | peer relation与两条typed direction | 对应stream或seqpacket connection | endpoint只持typed connection与side | connected operation routing |
+| listener与connection peer identity | `UnixListener`持首次listen snapshot；connection持两侧immutable snapshot | endpoint只通过connection/side查询对端；ABI adapter只接收窄值 | `SO_PEERCRED`稳定投影 |
 | bytes、capacity、writer/reader terminal与routes | 对应directional stream | send/receive/poll取得operation-local access | prefix commit、EOF、RDHUP/HUP与wake |
 | records、byte/count capacity、terminal与routes | 对应seqpacket record direction | send/receive/poll取得operation-local access | record commit/consume、EOF、RDHUP/HUP与wake |
 | Linux-visible local/peer pathname | endpoint的immutable address snapshot | namespace只拥有live inode-to-binding association | name query与close/unlink后的visibility |
@@ -54,6 +55,36 @@ writer shutdown/final close在对应direction提交peer EOF；reader shutdown使
 
 **当前来源：** 同RFC Stage 4 `SOCKET-UNIX-CUTOVER`与Git/PR closure evidence。
 
+## UNIX-SOCKET-PEERCRED-001 — Connection拥有稳定对端身份快照
+
+**规则：** `AF_UNIX + SOCK_STREAM/SOCK_SEQPACKET`的已连接端点支持`SO_PEERCRED`。snapshot只包含建立连接时所需的
+`tgid`、effective uid与effective gid，不持有`Task`、完整credential set、PID handle或Linux ABI struct。
+unnamed socketpair在创建paired connection时为两侧采集当前调用者身份；pathname listener在首次成功进入
+listening role时采集server identity，connect admission采集client identity，并把二者交给新connection。accept只
+发布已排队的connection，不重新采集acceptor身份。
+
+connection是两侧snapshot的唯一长期owner。查询按endpoint side选择对端snapshot；peer退出、final close或后续
+credential变化均不刷新已建立连接。重复`listen()`只更新既有listener backlog，不替换首次listen snapshot；这一
+低价值Linux边角差异由register明确接受。unconnected、bound与listening role返回`ENOTCONN`，不以零值或current task
+身份冒充对端；不支持该producer的socket family返回`ENOPROTOOPT`。
+
+**Failure / cleanup：** pathname admission只有在exact listener仍current且client role/capacity recheck通过后才发布
+携带snapshot的connection；失败候选随未发布connection一起释放。retirement不额外查task table，也不使snapshot
+失效或把credential lifetime耦合到endpoint lifetime。
+
+**违反表现：** query-time task lookup或credential refresh；listener、endpoint与connection保存可分歧的并列
+peer identity；accept采用acceptor身份；ABI `struct ucred`进入Unix owner；peer close后查询从成功变为缺失；
+unconnected socket返回current caller或全零credentials。
+
+**验证 / Enforcement：** owner-local KUnit覆盖stream/seqpacket两侧选择、非连接role与peer retirement后的稳定性；
+RV64/LA64 Anemone `socket-test`覆盖socketpair、pathname fork/setuid、accept与child exit后的稳定性、ABI
+truncate/zero/fault ordering及unsupported family。Linux源码只用于静态语义审查，不作为runtime oracle。
+
+**最初来源：** [Unix peer credentials小迭代](../../devlog/changes/2026-08-13-unix-peer-credentials.md)的
+`SOCKET-UNIX-PEERCRED-CUTOVER`。
+
+**当前来源：** 同上。
+
 ## UNIX-SOCKET-ADDRESS-001 — Address snapshot独立于namespace lifetime
 
 **规则：** 成功bind在endpoint保存一份immutable local pathname snapshot；connect/accept在connection admission时取得peer-name snapshot。`getsockname`/`getpeername`只读取这些snapshot，不以当前VFS lookup或live binding为truth。rename、unlink、binding retirement与peer final close不改写已经建立的address snapshot；未命名endpoint保持明确的unnamed结果。
@@ -86,6 +117,11 @@ listener close撤销新admission并drain未接受child；unpublished preparation
 
 ## 当前接受边界
 
-- 当前成功面包括pathname `AF_UNIX + SOCK_STREAM/SOCK_SEQPACKET`及对应connected unnamed socketpair；abstract namespace、autobind、datagram、credentials/fd passing与ancillary data均不由本页推出。seqpacket data-plane细节由`UNIX-SOCKET-SEQPACKET-001`拥有。
-- non-UTF-8 pathname、retired bind留下inert inode及pre-connection shutdown差异由register记录；VFS common-create publication问题仍由VFS owner拥有。
-- closure evidence覆盖RV64/LA64真实guest、focused libc/owner proof与RV64 `smp=4` focused runtime。physical hardware、LA64 `smp>1`、其它SMP拓扑、full socket/network LTP与final harness Not Run。
+- 当前成功面包括pathname `AF_UNIX + SOCK_STREAM/SOCK_SEQPACKET`及对应connected unnamed socketpair；其中
+  `SO_PEERCRED`发布稳定`{tgid,euid,egid}`对端snapshot。abstract namespace、autobind、datagram、
+  `SO_PASSCRED`/`SCM_CREDENTIALS`、fd passing与其它ancillary data均不由本页推出。seqpacket data-plane细节由
+  `UNIX-SOCKET-SEQPACKET-001`拥有。
+- non-UTF-8 pathname、retired bind留下inert inode、pre-connection shutdown及peercred重复listen/非连接role差异由
+  register记录；VFS common-create publication问题仍由VFS owner拥有。
+- peercred增量closure evidence覆盖RV64/LA64 SMP1 KUnit与Anemone `socket-test`真实guest。host Linux runtime
+  oracle、LTP、final harness、physical hardware与SMP>1均Not Run；既有Unix能力的历史证据不由本增量重新声明。

@@ -136,7 +136,7 @@ sdcard_destination=$(realpath -m -- "$sdcard_target")
 cp --remove-destination -- "$sdcard" "$sdcard_target"
 
 progress "build-kernel"
-just build --preset "$preset" "${provider_bindings[@]}" 2>&1 | tee -a "$log_file"
+just build --preset "$preset" 2>&1 | tee -a "$log_file"
 
 if [[ $mode == auto ]]; then
     progress "qemu-auto"
@@ -171,6 +171,7 @@ inputs = {
     b"@@TTY READY input-modes-parmrk-ff@@": b"\xff",
     b"@@TTY READY input-modes-crnl-ignore@@": b"\r\n",
     b"@@TTY READY input-modes-crnl-map@@": b"\r\n",
+    b"@@TTY READY iutf8-canonical-erase@@": b"\xe4\xb8\xad\x7f\n",
     b"@@TTY READY noncanonical-vmin1-vtime0@@": b"\x00A",
     b"@@TTY READY tcsetsf-flush@@": b"dropme\n",
     b"@@TTY READY readiness@@": b"ready\n",
@@ -329,6 +330,14 @@ if returncode != 0:
     raise SystemExit(f"TTY-HARNESS:FAIL:qemu-exit:{returncode}")
 if b"TTYTEST:SUMMARY:PASS:" not in data or b"TTYTEST:FAIL:" in data:
     raise SystemExit("TTY-HARNESS:FAIL:guest-summary")
+iutf8_start = data.find(b"@@TTY OUTPUT iutf8-tab3-begin@@")
+iutf8_end = data.find(b"@@TTY OUTPUT iutf8-tab3-end@@", iutf8_start + 1)
+if (
+    iutf8_start < 0
+    or iutf8_end < 0
+    or b"\xe4\xb8\xad       " not in data[iutf8_start:iutf8_end]
+):
+    raise SystemExit("TTY-HARNESS:FAIL:iutf8-tab3-byte-oracle")
 ash_start = data.find(ash_marker)
 ash_end = data.find(b"TTYTEST:PASS:busybox-ash-auto", ash_start + 1)
 if (
@@ -355,6 +364,15 @@ binary_start = data.find(b"@@TTY OUTPUT binary-begin@@")
 binary_end = data.find(b"@@TTY OUTPUT binary-end@@", binary_start + 1)
 if binary_start < 0 or binary_end < 0 or b"\x00\xffA" not in data[binary_start:binary_end]:
     raise SystemExit("TTY-HARNESS:FAIL:binary-write-bytes")
+
+console_binary_start = data.find(b"@@TTY OUTPUT console-binary-begin@@")
+console_binary_end = data.find(b"@@TTY OUTPUT console-binary-end@@", console_binary_start + 1)
+if (
+    console_binary_start < 0
+    or console_binary_end < 0
+    or b"\x00\xffC" not in data[console_binary_start:console_binary_end]
+):
+    raise SystemExit("TTY-HARNESS:FAIL:console-binary-write-bytes")
 onlcr_start = data.find(b"@@TTY OUTPUT onlcr-begin@@")
 onlcr_end = data.find(b"@@TTY OUTPUT onlcr-end@@", onlcr_start + 1)
 if onlcr_start < 0 or onlcr_end < 0 or b"X\r\nY" not in data[onlcr_start:onlcr_end]:

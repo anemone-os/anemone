@@ -17,8 +17,8 @@ use anemone_rs::{
         },
         net::linux::{
             AF_INET, AF_UNIX, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, SHUT_RD,
-            SHUT_RDWR, SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PROTOCOL, SO_TYPE,
-            SOCK_DGRAM, SOCK_STREAM, SockAddrUn, socklen_t,
+            SHUT_RDWR, SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PEERCRED, SO_PROTOCOL,
+            SO_TYPE, SOCK_DGRAM, SOCK_STREAM, SockAddrUn, UCred, socklen_t,
         },
         process::linux::signal::{SigAction, SigSet},
         syscall::{
@@ -40,7 +40,8 @@ use anemone_rs::{
             unix_stream_socket,
         },
         process::{
-            WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, sched_yield,
+            WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, getgid, getpid, getuid,
+            sched_yield,
             signal::{SigNo, kill, sigaction},
             wait4,
         },
@@ -80,6 +81,7 @@ const PARALLEL_PATH_A: &str = "/mnt/socket-test-2b-parallel-a";
 const PARALLEL_PATH_B: &str = "/mnt/socket-test-2b-parallel-b";
 const STAGE3A_PATH: &str = "/mnt/socket-test-3a-stream";
 const STAGE3B_PATH: &str = "/mnt/socket-test-3b-readiness";
+const PEERCRED_PATH: &str = "/mnt/socket-test-peercred";
 
 extern "C" fn sigpipe_handler(_signo: i32) {
     SIGPIPE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -1128,6 +1130,21 @@ fn query_socket_option(fd: Fd, option: i32) -> Result<i32, Errno> {
     Ok(value)
 }
 
+fn query_peer_credentials(fd: Fd) -> Result<UCred, Errno> {
+    let mut credentials = UCred::default();
+    let mut len = size_of::<UCred>() as i32;
+    unsafe {
+        getsockopt_raw(
+            fd as i32,
+            SO_PEERCRED,
+            (&mut credentials as *mut UCred).cast(),
+            &mut len,
+        )?;
+    }
+    ensure(len == size_of::<UCred>() as i32)?;
+    Ok(credentials)
+}
+
 fn test_connected_message_peek_flags_and_fail_forward() -> Result<(), Errno> {
     let (first, second) = unix_stream_pair(SocketFlags::empty())?;
     let (first_raw, second_raw) = (first as i32, second as i32);
@@ -1440,6 +1457,111 @@ fn test_socket_option_queries_and_pathname_stream() -> Result<(), Errno> {
     unlink_if_present(STAGE3A_PATH, 0)?;
     close(first)?;
     close(second)
+}
+
+fn test_peer_credentials_socketpair_abi_and_lifetime() -> Result<(), Errno> {
+    let current = UCred {
+        pid: getpid()? as i32,
+        uid: getuid()?,
+        gid: getgid()?,
+    };
+    let (first, second) = unix_stream_pair(SocketFlags::empty())?;
+    ensure(query_peer_credentials(first)? == current)?;
+    ensure(query_peer_credentials(second)? == current)?;
+
+    let expected = unsafe {
+        core::slice::from_raw_parts((&current as *const UCred).cast::<u8>(), size_of::<UCred>())
+    };
+    let mut truncated = [0xa5u8; size_of::<UCred>()];
+    let mut truncated_len = 5i32;
+    unsafe {
+        getsockopt_raw(
+            first as i32,
+            SO_PEERCRED,
+            truncated.as_mut_ptr(),
+            &mut truncated_len,
+        )?;
+    }
+    ensure(truncated_len == 5 && truncated[..5] == expected[..5])?;
+    ensure(truncated[5..].iter().all(|byte| *byte == 0xa5))?;
+
+    let mut zero_len = 0i32;
+    unsafe {
+        getsockopt_raw(
+            first as i32,
+            SO_PEERCRED,
+            core::ptr::null_mut(),
+            &mut zero_len,
+        )?;
+    }
+    ensure(zero_len == 0)?;
+    let mut full_len = size_of::<UCred>() as i32 + 4;
+    expect_errno(
+        unsafe {
+            getsockopt_raw(
+                first as i32,
+                SO_PEERCRED,
+                core::ptr::null_mut(),
+                &mut full_len,
+            )
+        },
+        EFAULT,
+    )?;
+    ensure(full_len == size_of::<UCred>() as i32 + 4)?;
+
+    close(second)?;
+    ensure(query_peer_credentials(first)? == current)?;
+    close(first)?;
+
+    let unconnected = unix_stream_socket(SocketFlags::empty())?;
+    expect_errno(query_peer_credentials(unconnected), ENOTCONN)?;
+    close(unconnected)?;
+    let udp = udp_socket(SocketFlags::empty())?;
+    expect_errno(query_peer_credentials(udp), ENOPROTOOPT)?;
+    close(udp)
+}
+
+fn test_peer_credentials_pathname_admission_snapshot() -> Result<(), Errno> {
+    unlink_if_present(PEERCRED_PATH, 0)?;
+    let listener = unix_stream_socket(SocketFlags::empty())?;
+    bind_unix_path(listener, PEERCRED_PATH.as_bytes())?;
+    chmod(PEERCRED_PATH, 0o777)?;
+    expect_errno(query_peer_credentials(listener), ENOTCONN)?;
+    let server = UCred {
+        pid: getpid()? as i32,
+        uid: getuid()?,
+        gid: getgid()?,
+    };
+    listen(listener, 1)?;
+    expect_errno(query_peer_credentials(listener), ENOTCONN)?;
+
+    let child = match fork()? {
+        None => {
+            let _ = close(listener);
+            let ok = setuid(65534)
+                .and_then(|_| unix_stream_socket(SocketFlags::empty()))
+                .and_then(|client| {
+                    connect_unix_path(client, PEERCRED_PATH.as_bytes())?;
+                    let observed = query_peer_credentials(client)?;
+                    close(client)?;
+                    ensure(observed == server)
+                })
+                .is_ok();
+            exit(if ok { 0 } else { 1 })
+        },
+        Some(pid) => pid,
+    };
+
+    let accepted = accept_unix(listener)?;
+    wait_child(child)?;
+    let observed = query_peer_credentials(accepted)?;
+    ensure(observed.pid == child as i32)?;
+    ensure(observed.uid == 65534 && observed.gid == server.gid)?;
+    ensure(query_peer_credentials(accepted)? == observed)?;
+
+    close(accepted)?;
+    close(listener)?;
+    unlink_if_present(PEERCRED_PATH, 0)
 }
 
 fn test_listener_stream_poll_select_epoll_readiness() -> Result<(), Errno> {
@@ -1776,6 +1898,14 @@ pub(crate) fn run() -> Result<(), Errno> {
     results.case(
         "socket-option-query-pathname-stream",
         test_socket_option_queries_and_pathname_stream,
+    );
+    results.case(
+        "peercred-socketpair-abi-lifetime",
+        test_peer_credentials_socketpair_abi_and_lifetime,
+    );
+    results.case(
+        "peercred-pathname-admission-snapshot",
+        test_peer_credentials_pathname_admission_snapshot,
     );
     results.case(
         "listener-stream-poll-select-epoll-readiness",

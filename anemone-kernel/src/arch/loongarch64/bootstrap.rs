@@ -26,7 +26,9 @@ use crate::{
             },
         },
     },
-    device::discovery::open_firmware::{EarlyMemoryScanner, early_scan_clock_freq},
+    device::discovery::open_firmware::{
+        EarlyMemoryScanner, early_scan_clock_freq, early_scan_fdt_size,
+    },
     mm::{kptable::kmap, layout::KernelLayoutTrait, stack::RawKernelStack},
     prelude::*,
     sched::class::SchedEntity,
@@ -55,12 +57,6 @@ static_assert!(
     "cache padding must not change the bootstrap stack stride"
 );
 
-/// Flattened device tree blob generated from the selected Platform's normative DTS.
-static DTB_BYTES: &[u8] = include_bytes_aligned_as!(
-    PhantomAligned8,
-    "../../../../build/generated/device-tree/platform.dtb"
-);
-
 /// # Note
 /// LoongArch64 boots without SBI, so the entry point is fixed and [`__nun`]
 /// would otherwise be considered unused by the compiler.
@@ -80,6 +76,9 @@ pub unsafe extern "C" fn __nun() -> ! {
     naked_asm!(
         // Enable address mapping
         "
+            // Preserve the firmware system-table pointer before reusing a2.
+            move    $s0, $a2
+
             li.d    $t0, {boot_dmw0}
             csrwr   $t0, {cr_dmw0}
             
@@ -147,6 +146,7 @@ pub unsafe extern "C" fn __nun() -> ! {
             ibar    0
 
             csrrd       $a0, {cr_cpuid} // arg0: hart_id
+            move        $a1, $s0        // arg1: firmware system-table PA
             la.local   $t0, 4f
             add.d       $t0, $t0, $t2
             jirl        $zero,$t0,0
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn __nun() -> ! {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn rusty_nun(hart_id: usize) -> ! {
+extern "C" fn rusty_nun(hart_id: usize, system_table_pa: u64) -> ! {
     #[unsafe(link_section = ".data")]
     static mut BSP_ARRIVED: bool = false;
     unsafe {
@@ -211,10 +211,7 @@ extern "C" fn rusty_nun(hart_id: usize) -> ! {
 
         if !BSP_ARRIVED {
             BSP_ARRIVED = true;
-            bsp_setup(
-                PhysCpuId::new(hart_id),
-                VirtAddr::new(DTB_BYTES.as_ptr() as u64),
-            )
+            bsp_setup(PhysCpuId::new(hart_id), PhysAddr::new(system_table_pa))
         } else {
             // ap
             ap_setup(PhysCpuId::new(hart_id))
@@ -267,7 +264,7 @@ pub fn register_debugcon() {
 
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("registering init task");
 
-unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
+unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, system_table_pa: PhysAddr) -> ! {
     unsafe {
         clear_bss();
     }
@@ -276,6 +273,8 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
     install_ktrap_handler();
 
     register_debugcon();
+
+    let (fdt_va, external_fdt_pa) = select_boot_fdt(system_table_pa);
 
     kdebugln!(
         "bootstrap {} started, fdt at {:#x}",
@@ -305,6 +304,25 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
         TimeArch::init_shared_counter_offset();
 
         let mut scanner = EarlyMemoryScanner::new(fdt_va);
+
+        if let Some(fdt_pa) = external_fdt_pa {
+            // Firmware FDTs reside outside the kernel image. Keep every page
+            // they touch unavailable for this boot. `unflatten_device_tree()`
+            // later copies the blob into kernel-owned memory, but the current
+            // PMM has no reclaim path for an early reserved zone.
+            let fdt_end = fdt_pa
+                .get()
+                .checked_add(early_scan_fdt_size(fdt_va) as u64)
+                .map(PhysAddr::new)
+                .expect("firmware FDT address range overflowed");
+            let fdt_start_ppn = fdt_pa.page_down();
+            let fdt_end_ppn = fdt_end.page_up();
+            scanner.mark_as_reserved(
+                fdt_start_ppn,
+                fdt_end_ppn.get() - fdt_start_ppn.get(),
+                RsvMemFlags::FDT,
+            );
+        }
 
         percpu::bsp_init(bsp_id, |npages| scanner.early_alloc_folio(npages as u64));
         kinfoln!("percpu data initialized");
@@ -351,6 +369,17 @@ unsafe fn bsp_setup(bsp_physical_id: PhysCpuId, fdt_va: VirtAddr) -> ! {
 
         sched::init_routines::local_enqueue_first_new_task(bsp_kinit);
         switch_to_guarded(VirtAddr::new(scheduler as *const () as u64))
+    }
+}
+
+/// Selects the Platform-declared FDT delivery before hardware discovery.
+fn select_boot_fdt(system_table_pa: PhysAddr) -> (VirtAddr, Option<PhysAddr>) {
+    match PLATFORM_FDT {
+        PlatformFdt::Embedded(bytes) => (VirtAddr::new(bytes.as_ptr() as u64), None),
+        PlatformFdt::Firmware => {
+            let fdt_pa = unsafe { super::boot_params::find_fdt(system_table_pa) };
+            (fdt_pa.to_hhdm(), Some(fdt_pa))
+        },
     }
 }
 

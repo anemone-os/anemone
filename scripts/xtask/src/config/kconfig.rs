@@ -56,10 +56,12 @@ pub struct Parameters {
     pub record_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub riscv64_tlb_flush_all_threshold_pages: Option<usize>,
+    pub loongarch64_tlb_flush_all_min_pages: Option<usize>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
+    pub c_string_batch_bytes: Option<usize>,
     pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
@@ -101,6 +103,7 @@ pub struct Parameters {
     pub tty_input_capacity_bytes: Option<usize>,
     pub tty_output_capacity_bytes: Option<usize>,
     pub tty_worker_batch_bytes: Option<usize>,
+    pub pty_system_capacity: Option<usize>,
     pub ns16550a_irq_rx_budget_bytes: Option<usize>,
     pub ns16550a_tx_batch_bytes: Option<usize>,
     pub ns16550a_tx_poll_iterations: Option<usize>,
@@ -180,10 +183,12 @@ impl Parameters {
         materialize!(record_log_level);
         materialize!(kstack_shift_kb);
         materialize!(riscv64_tlb_flush_all_threshold_pages);
+        materialize!(loongarch64_tlb_flush_all_min_pages);
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
         materialize!(max_path_len_bytes);
+        materialize!(c_string_batch_bytes);
         materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
@@ -225,6 +230,7 @@ impl Parameters {
         materialize!(tty_input_capacity_bytes);
         materialize!(tty_output_capacity_bytes);
         materialize!(tty_worker_batch_bytes);
+        materialize!(pty_system_capacity);
         materialize!(ns16550a_irq_rx_budget_bytes);
         materialize!(ns16550a_tx_batch_bytes);
         materialize!(ns16550a_tx_poll_iterations);
@@ -321,6 +327,9 @@ pub const KSTACK_SHIFT_KB: u64 = {};
 /// RV64 page-range length above which one full local TLB flush replaces
 /// per-page invalidation.
 pub const RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES: usize = {};
+/// Minimum LA64 page-range length at which one full local TLB flush replaces
+/// per-page invalidation.
+pub const LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES: usize = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum number of logical CPUs enabled by this kernel
@@ -334,6 +343,8 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
+/// Maximum bytes copied per page-bounded direct C-string user-access window.
+pub const C_STRING_BATCH_BYTES: usize = {};
 /// Maximum number of strings accepted in each execve argv or envp vector.
 pub const EXECVE_MAX_STRING_COUNT: usize = {};
 /// Maximum number of processes
@@ -435,6 +446,8 @@ pub const TTY_INPUT_CAPACITY_BYTES: usize = {};
 pub const TTY_OUTPUT_CAPACITY_BYTES: usize = {};
 /// Maximum RX/TX bytes advanced by one endpoint worker batch.
 pub const TTY_WORKER_BATCH_BYTES: usize = {};
+/// Maximum reserved or live Unix98 PTY episodes in the system devpts instance.
+pub const PTY_SYSTEM_CAPACITY: usize = {};
 /// Maximum RX bytes drained by one NS16550A IRQ handler invocation.
 pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = {};
 /// Maximum bytes submitted while holding the NS16550A TX lock.
@@ -543,10 +556,12 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(record_log_level),
             resolved!(kstack_shift_kb),
             resolved!(riscv64_tlb_flush_all_threshold_pages),
+            resolved!(loongarch64_tlb_flush_all_min_pages),
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
             resolved!(max_path_len_bytes),
+            resolved!(c_string_batch_bytes),
             resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
@@ -588,6 +603,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(tty_input_capacity_bytes),
             resolved!(tty_output_capacity_bytes),
             resolved!(tty_worker_batch_bytes),
+            resolved!(pty_system_capacity),
             resolved!(ns16550a_irq_rx_budget_bytes),
             resolved!(ns16550a_tx_batch_bytes),
             resolved!(ns16550a_tx_poll_iterations),
