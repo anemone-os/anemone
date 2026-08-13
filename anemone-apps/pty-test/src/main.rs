@@ -79,6 +79,11 @@ fn run_cases(results: &mut Results) {
     results.case("mount-views", mount::test_mount_views);
     results.case("stream-termios", stream::test_stream_and_terminal_state);
     results.case("termios-cflag-profile", termios::test_cflag_profile);
+    results.case("termios-iutf8-compat", termios::test_iutf8_compatibility);
+    results.case(
+        "iutf8-discipline-column",
+        termios::test_iutf8_discipline_column,
+    );
     results.case("nonblock-readiness", stream::test_nonblocking_and_readiness);
     results.case(
         "description-lifecycle",

@@ -18,8 +18,9 @@ use anemone_rs::{
         system::native::power::SHUTDOWN_MAGIC,
         time::linux::TimeSpec,
         tty::linux::{
-            BRKINT, ECHO, ICANON, ICRNL, IGNBRK, IGNCR, IGNPAR, INLCR, INPCK, ISIG, ISTRIP, ONLCR,
-            OPOST, PARMRK, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VTIME, Winsize,
+            BRKINT, BS1, CR3, ECHO, FF1, FLUSHO, ICANON, ICRNL, IGNBRK, IGNCR, IGNPAR, IMAXBEL,
+            INLCR, INPCK, ISIG, ISTRIP, IUTF8, NL1, OFDEL, OFILL, ONLCR, OPOST, PARMRK, PENDIN,
+            TAB2, TAB3, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VT1, VTIME, Winsize, XCASE,
         },
     },
     os::{
@@ -1361,6 +1362,46 @@ fn test_input_mode_roundtrip(baseline: &Baseline) -> Result<(), Errno> {
     expect(tcgetattr(STDIN_FILENO)? == changed)
 }
 
+fn test_iutf8_compat_roundtrip(baseline: &Baseline) -> Result<(), Errno> {
+    let shared = tty_serial(O_RDWR)?;
+    let mut changed = baseline.termios;
+    changed.c_iflag |= IUTF8;
+    changed.c_oflag |= OFILL | OFDEL | NL1 | CR3 | TAB2 | BS1 | VT1 | FF1;
+    changed.c_lflag |= XCASE | FLUSHO | PENDIN;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Drain, &changed)?;
+    expect(tcgetattr(shared)? == changed)?;
+
+    let mut unsupported = changed;
+    unsupported.c_iflag |= IMAXBEL;
+    expect(matches!(
+        tcsetattr(shared, SetTermiosWhen::Now, &unsupported),
+        Err(EINVAL)
+    ))?;
+    expect(tcgetattr(STDIN_FILENO)? == changed)
+}
+
+fn test_iutf8_canonical_erase(baseline: &Baseline) -> Result<(), Errno> {
+    let mut termios = baseline.canonical_noecho();
+    termios.c_iflag = IUTF8;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &termios)?;
+    ready("iutf8-canonical-erase");
+    let mut buffer = [0_u8; 8];
+    let count = read(STDIN_FILENO, &mut buffer)?;
+    expect(&buffer[..count] == b"\n")
+}
+
+fn test_iutf8_tab3_column(baseline: &Baseline) -> Result<(), Errno> {
+    let mut termios = baseline.termios;
+    termios.c_iflag |= IUTF8;
+    termios.c_oflag = OPOST | TAB3;
+    println!("@@TTY OUTPUT iutf8-tab3-begin@@");
+    tcsetattr(STDOUT_FILENO, SetTermiosWhen::Now, &termios)?;
+    expect(write(STDOUT_FILENO, &[0xe4, 0xb8, 0xad, b'\t'])? == 4)?;
+    tcsetattr(STDOUT_FILENO, SetTermiosWhen::Drain, &baseline.termios)?;
+    println!("@@TTY OUTPUT iutf8-tab3-end@@");
+    Ok(())
+}
+
 fn test_python_raw_termios_candidate(baseline: &Baseline) -> Result<(), Errno> {
     const IXON: u32 = 0x0000_0400;
 
@@ -1753,6 +1794,17 @@ fn run_auto(baseline: &Baseline) -> Results {
     );
     results.case("icrnl", baseline, test_icrnl);
     results.case("input-mode-roundtrip", baseline, test_input_mode_roundtrip);
+    results.case(
+        "iutf8-compat-roundtrip",
+        baseline,
+        test_iutf8_compat_roundtrip,
+    );
+    results.case(
+        "iutf8-canonical-erase",
+        baseline,
+        test_iutf8_canonical_erase,
+    );
+    results.case("iutf8-tab3-column", baseline, test_iutf8_tab3_column);
     results.case(
         "python-raw-termios-candidate",
         baseline,

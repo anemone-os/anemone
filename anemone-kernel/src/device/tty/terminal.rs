@@ -29,9 +29,14 @@ pub(super) struct TtyTermios {
     pub(super) inlcr: bool,
     pub(super) igncr: bool,
     pub(super) icrnl: bool,
+    pub(super) iutf8: bool,
     pub(super) opost: bool,
     pub(super) onlcr: bool,
-    pub(super) tab3: bool,
+    pub(super) tab_mode: TtyTabMode,
+    /// Linux 6.6.32 preserves these obsolete output/local flags but N_TTY
+    /// never reads them. They are committed ABI compatibility state only and
+    /// must not drive data-plane behavior.
+    pub(super) compatibility: TtyCompatibility,
     pub(super) icanon: bool,
     pub(super) isig: bool,
     pub(super) echo: bool,
@@ -54,6 +59,20 @@ pub(super) struct TtyTermios {
     pub(super) vtime: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TtyTabMode {
+    Literal,
+    Delay1,
+    Delay2,
+    Expand,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) struct TtyCompatibility {
+    pub(super) output: u32,
+    pub(super) local: u32,
+}
+
 impl TtyTermios {
     pub(super) fn with_control(control: TtyControlProfile) -> Self {
         Self {
@@ -67,9 +86,11 @@ impl TtyTermios {
             inlcr: false,
             igncr: false,
             icrnl: true,
+            iutf8: false,
             opost: true,
             onlcr: true,
-            tab3: false,
+            tab_mode: TtyTabMode::Literal,
+            compatibility: TtyCompatibility::default(),
             icanon: true,
             isig: true,
             echo: true,
@@ -130,6 +151,18 @@ impl TtyTermios {
         } else {
             EchoBytes::empty()
         }
+    }
+
+    pub(super) fn tab_erase_echo(self, columns: usize) -> EchoBytes {
+        if self.echo && self.echoe {
+            EchoBytes::backspaces(columns)
+        } else {
+            self.erase_echo()
+        }
+    }
+
+    pub(super) fn expands_tabs(self) -> bool {
+        matches!(self.tab_mode, TtyTabMode::Expand)
     }
 
     pub(super) fn kill_echo(self) -> EchoBytes {
@@ -208,29 +241,55 @@ fn can_receive_normal_byte(
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct EchoBytes {
-    bytes: [u8; 3],
+    bytes: [u8; 8],
     len: usize,
+    operation: EchoOperation,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EchoOperation {
+    Process,
+    /// Linux N_TTY executes ECHO_OP_ERASE_TAB outside ordinary OPOST
+    /// processing. The backspaces must therefore rewind the logical column
+    /// even when OPOST is disabled.
+    EraseTab,
 }
 
 impl EchoBytes {
     const fn empty() -> Self {
         Self {
-            bytes: [0; 3],
+            bytes: [0; 8],
             len: 0,
+            operation: EchoOperation::Process,
         }
     }
 
     const fn one(first: u8) -> Self {
         Self {
-            bytes: [first, 0, 0],
+            bytes: [first, 0, 0, 0, 0, 0, 0, 0],
             len: 1,
+            operation: EchoOperation::Process,
         }
     }
 
     const fn three(first: u8, second: u8, third: u8) -> Self {
         Self {
-            bytes: [first, second, third],
+            bytes: [first, second, third, 0, 0, 0, 0, 0],
             len: 3,
+            operation: EchoOperation::Process,
+        }
+    }
+
+    fn backspaces(columns: usize) -> Self {
+        assert!(columns <= 8);
+        let mut bytes = [0x08; 8];
+        if columns == 0 {
+            bytes = [0; 8];
+        }
+        Self {
+            bytes,
+            len: columns,
+            operation: EchoOperation::EraseTab,
         }
     }
 
@@ -257,16 +316,42 @@ impl TerminalOutput {
         })
     }
 
+    pub(super) fn column(&self) -> usize {
+        self.column
+    }
+
     pub(super) fn can_enqueue(&self, source: &EchoBytes, termios: TtyTermios) -> bool {
-        self.queue.available() >= transformed_len(source.as_slice(), termios, self.column)
+        self.queue.available() >= self.echo_output_len(source, termios)
     }
 
     pub(super) fn can_enqueue_after_clear(&self, source: &EchoBytes, termios: TtyTermios) -> bool {
-        TTY_OUTPUT_CAPACITY_BYTES >= transformed_len(source.as_slice(), termios, self.column)
+        TTY_OUTPUT_CAPACITY_BYTES >= self.echo_output_len(source, termios)
     }
 
     pub(super) fn enqueue(&mut self, source: &EchoBytes, termios: TtyTermios) -> bool {
-        self.enqueue_slice(source.as_slice(), termios) == source.as_slice().len()
+        match source.operation {
+            EchoOperation::Process => {
+                self.enqueue_slice(source.as_slice(), termios) == source.as_slice().len()
+            },
+            EchoOperation::EraseTab => {
+                if self.queue.available() < source.len {
+                    return false;
+                }
+                assert_eq!(self.queue.try_push_slice(source.as_slice()), source.len);
+                self.column = self.column.saturating_sub(source.len);
+                if source.len != 0 {
+                    self.bump_generation();
+                }
+                true
+            },
+        }
+    }
+
+    fn echo_output_len(&self, source: &EchoBytes, termios: TtyTermios) -> usize {
+        match source.operation {
+            EchoOperation::Process => transformed_len(source.as_slice(), termios, self.column),
+            EchoOperation::EraseTab => source.len,
+        }
     }
 
     fn writable(&self, termios: TtyTermios) -> bool {
@@ -274,7 +359,7 @@ impl TerminalOutput {
         if termios.opost && termios.onlcr {
             maximum_token_len = 2;
         }
-        if termios.opost && termios.tab3 {
+        if termios.opost && termios.expands_tabs() {
             maximum_token_len = maximum_token_len.max(8 - self.column % 8);
         }
         self.queue.available() >= maximum_token_len
@@ -385,15 +470,21 @@ fn transform_token(byte: u8, termios: TtyTermios, column: usize) -> OutputToken 
         b'\t' => {
             let width = 8 - column % 8;
             token.next_column = column.wrapping_add(width);
-            if termios.tab3 {
+            if termios.expands_tabs() {
                 token.bytes[..width].fill(b' ');
                 token.len = width;
             }
         },
-        _ if !byte.is_ascii_control() => token.next_column = column.wrapping_add(1),
+        _ if !byte.is_ascii_control() && !(termios.iutf8 && is_utf8_continuation(byte)) => {
+            token.next_column = column.wrapping_add(1)
+        },
         _ => {},
     }
     token
+}
+
+pub(super) const fn is_utf8_continuation(byte: u8) -> bool {
+    byte & 0xc0 == 0x80
 }
 
 fn transformed_len(source: &[u8], termios: TtyTermios, mut column: usize) -> usize {
@@ -1146,6 +1237,134 @@ mod kunits {
     }
 
     #[kunit]
+    fn iutf8_canonical_erase_matches_linux_continuation_rules() {
+        for sequence in [
+            &[b'A'][..],
+            &[0xc2, 0xa2],
+            &[0xe4, 0xb8, 0xad],
+            &[0xf0, 0x9f, 0x98, 0x80],
+        ] {
+            let terminal = terminal();
+            terminal.set_termios_for_test(|termios| {
+                termios.echo = false;
+                termios.iutf8 = true;
+            });
+            for &byte in sequence {
+                assert!(terminal.receive_rx_byte(byte));
+            }
+            assert!(terminal.receive_rx_byte(0x7f));
+            assert!(terminal.receive_rx_byte(b'\n'));
+            assert_eq!(read_available(&terminal), b"\n");
+        }
+
+        let bytewise = terminal();
+        bytewise.set_termios_for_test(|termios| {
+            termios.echo = false;
+            termios.iutf8 = false;
+        });
+        for &byte in &[0xe4, 0xb8, 0xad, 0x7f, b'\n'] {
+            assert!(bytewise.receive_rx_byte(byte));
+        }
+        assert_eq!(read_available(&bytewise), &[0xe4, 0xb8, b'\n']);
+
+        let continuation_only = terminal();
+        continuation_only.set_termios_for_test(|termios| {
+            termios.echo = false;
+            termios.iutf8 = true;
+        });
+        for &byte in &[0x80, 0x81, 0x7f, b'\n'] {
+            assert!(continuation_only.receive_rx_byte(byte));
+        }
+        assert_eq!(read_available(&continuation_only), &[0x80, 0x81, b'\n']);
+
+        let malformed_with_lead = terminal();
+        malformed_with_lead.set_termios_for_test(|termios| {
+            termios.echo = false;
+            termios.iutf8 = true;
+        });
+        for &byte in &[0xc2, 0x80, 0x81, 0x7f, b'\n'] {
+            assert!(malformed_with_lead.receive_rx_byte(byte));
+        }
+        assert_eq!(read_available(&malformed_with_lead), b"\n");
+    }
+
+    #[kunit]
+    fn iutf8_controls_output_and_tab_erase_columns() {
+        for (iutf8, spaces) in [(true, 7), (false, 5)] {
+            let output = terminal();
+            output.set_termios_for_test(|termios| {
+                termios.iutf8 = iutf8;
+                termios.tab_mode = TtyTabMode::Expand;
+            });
+            assert_eq!(output.enqueue_output(&[0xe4, 0xb8, 0xad, b'\t']), 4);
+            let mut expected = vec![0xe4, 0xb8, 0xad];
+            expected.extend(vec![b' '; spaces]);
+            assert_eq!(drain_output(&output), expected);
+
+            let echo = terminal();
+            echo.set_termios_for_test(|termios| {
+                termios.iutf8 = iutf8;
+                termios.tab_mode = TtyTabMode::Expand;
+            });
+            for &byte in &[0xe4, 0xb8, 0xad, b'\t', 0x7f] {
+                assert!(echo.receive_rx_byte(byte));
+            }
+            expected.extend(vec![0x08; spaces]);
+            assert_eq!(drain_output(&echo), expected);
+        }
+    }
+
+    #[kunit]
+    fn tab_erase_rewinds_column_without_opost_and_after_previous_tab() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| termios.tab_mode = TtyTabMode::Expand);
+        assert_eq!(terminal.enqueue_output(b"abc"), 3);
+        assert_eq!(drain_output(&terminal), b"abc");
+
+        terminal.set_termios_for_test(|termios| termios.opost = false);
+        for &byte in &[b'\t', 0x7f] {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(drain_output(&terminal), b"\t\x08\x08\x08\x08\x08");
+
+        terminal.set_termios_for_test(|termios| {
+            termios.opost = true;
+            termios.tab_mode = TtyTabMode::Expand;
+        });
+        assert_eq!(terminal.enqueue_output(b"\t"), 1);
+        assert_eq!(drain_output(&terminal), b"        ");
+
+        for &byte in &[b'\t', b'a', b'b', b'\t', 0x7f] {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(
+            drain_output(&terminal),
+            b"        ab      \x08\x08\x08\x08\x08\x08"
+        );
+    }
+
+    #[kunit]
+    fn iutf8_erase_backpressure_preserves_pending_input() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| {
+            termios.echo = false;
+            termios.iutf8 = true;
+        });
+        for &byte in &[0xe4, 0xb8, 0xad] {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES - 2];
+        assert_eq!(terminal.enqueue_output(&fill), fill.len());
+        terminal.set_termios_for_test(|termios| termios.echo = true);
+        assert!(!terminal.receive_rx_byte(0x7f));
+        assert_eq!(drain_output(&terminal), fill);
+        assert!(terminal.receive_rx_byte(0x7f));
+        terminal.set_termios_for_test(|termios| termios.echo = false);
+        assert!(terminal.receive_rx_byte(b'\n'));
+        assert_eq!(read_available(&terminal), b"\n");
+    }
+
+    #[kunit]
     fn veof_commits_pending_or_one_empty_boundary() {
         let terminal = terminal();
         for &byte in b"abc\x04\x04" {
@@ -1394,14 +1613,14 @@ mod kunits {
     #[kunit]
     fn tab3_expands_from_the_committed_logical_column() {
         let terminal = terminal();
-        terminal.set_termios_for_test(|termios| termios.tab3 = true);
+        terminal.set_termios_for_test(|termios| termios.tab_mode = TtyTabMode::Expand);
 
         assert_eq!(terminal.enqueue_output(b"abcde\tX\rabc\x08\t\n"), 14);
         assert_eq!(drain_output(&terminal), b"abcde   X\rabc\x08      \r\n");
 
-        terminal.set_termios_for_test(|termios| termios.tab3 = false);
+        terminal.set_termios_for_test(|termios| termios.tab_mode = TtyTabMode::Literal);
         assert_eq!(terminal.enqueue_output(b"abc\t"), 4);
-        terminal.set_termios_for_test(|termios| termios.tab3 = true);
+        terminal.set_termios_for_test(|termios| termios.tab_mode = TtyTabMode::Expand);
         assert_eq!(terminal.enqueue_output(b"\t"), 1);
         assert_eq!(drain_output(&terminal), b"abc\t        ");
 
@@ -1412,7 +1631,7 @@ mod kunits {
     #[kunit]
     fn tab3_backpressure_does_not_advance_the_logical_column() {
         let terminal = terminal();
-        terminal.set_termios_for_test(|termios| termios.tab3 = true);
+        terminal.set_termios_for_test(|termios| termios.tab_mode = TtyTabMode::Expand);
         let fill = vec![b'x'; TTY_OUTPUT_CAPACITY_BYTES - 3];
         assert_eq!(terminal.enqueue_output(&fill), fill.len());
         assert_eq!(terminal.enqueue_output(b"\r"), 1);

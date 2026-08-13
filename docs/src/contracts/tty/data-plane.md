@@ -61,19 +61,24 @@ token一起提交；它只描述TTY output processor已经接受的stream位置�
 不是UART、console或host terminal的物理cursor truth。opened file只保存Terminal引用；`O_NONBLOCK`每次来自通用
 open-file-description flags。`IGNBRK`、`BRKINT`、`IGNPAR`、`PARMRK`、
 `INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`只改变Terminal的input interpretation，不反向修改UART line。
+`IUTF8`同样只进入共享Terminal的N_TTY语义：它不验证或解码UTF-8，只把`10xxxxxx` byte视作continuation，
+用于canonical erase跨度和output/echo逻辑列。`XCASE`、`FLUSHO`、`PENDIN`、`NLDLY`、`CRDLY`、
+`TAB1/TAB2`、`BSDLY`、`VTDLY`、`FFDLY`、`OFILL`与`OFDEL`是tracked Linux 6.6.32中稳定保存但
+N_TTY不执行的精确compatibility set；它们可以round-trip，但不得进入数据面行为分支。`TAB3`仍是行为模式。
 用户可见属性只有在完整candidate可提交时一次性发布；invalid、不可表示或要求未支持hardware action的update失败
 并保持旧snapshot，不能success-stub。
 
 **违反表现：** 不同fd观察冲突termios/winsize/input、file缓存stale nonblock、UART/console保存或反向驱动第二份
 output列truth、失败update部分可见，或ioctl成功但丢弃用户状态。
 
-**验证 / Enforcement：** shared fd0/1/2与新开`ttyS0`交叉termios/winsize matrix；九个input flags与组合round-trip、
-`TAB0/TAB3` round-trip、unsupported rollback、`stty`、native Python 3.13 PyREPL、GNU `less 668` user run、
+**验证 / Enforcement：** shared fd0/1/2与新开`ttyS0`交叉termios/winsize matrix；九个既有input flags、`IUTF8`与
+精确no-behavior compatibility set round-trip、`TAB0/TAB1/TAB2/TAB3` round-trip、unsupported rollback、`stty`、
+native Python 3.13 PyREPL、GNU `less 668` user run、
 `TCSETSW/F`和owner/source audit；setter generation/revalidation assertion与KUnit。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[PTY logical cflag profile 小迭代](../../devlog/changes/2026-08-13-pty-logical-cflag.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[PTY logical cflag profile 小迭代](../../devlog/changes/2026-08-13-pty-logical-cflag.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)。
 
 **PTY refine：** PTY slave与master attachment复用同一个Terminal；pair只拥有lifecycle/peer predicate，不复制termios、
 winsize、discipline、stream或readiness truth。该refine来自[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)。
@@ -94,16 +99,23 @@ work truth。一次read只消费所选prefix；显式flush、已记录overflow�
 character、delimiter或echo。一个condition扩展的2/3-byte token必须先通过完整容量检查再一次提交；backpressure
 时worker cursor保留同一unit重试，不得暴露prefix、重复marker或丢失后续unit。
 
+canonical `VERASE`在`IUTF8`关闭时删除一个byte；开启时删除最后一个非continuation byte及其后的连续
+continuation suffix，不执行编码合法性检查。若pending suffix全部由continuation bytes组成，则保持完整suffix而不
+部分删除。erase必须先计算完整input跨度与完整echo token并通过容量检查，再在同一个Terminal guard中提交input、
+echo bytes与逻辑列变化；tab erase按canonical起始列或前一个tab计算退格数，并像Linux `ECHO_OP_ERASE_TAB`一样
+绕过普通`OPOST`转换。
+
 **违反表现：** lost work/wake、半行使poll readable、read跨record、wake count成为input truth、concurrent drain
 丢失可读状态，或为copy fault建立第二份rollback queue。
 
 **验证 / Enforcement：** canonical newline/erase/kill/EOF/short-record、input-conditioning matrix、literal marker
-atomic retry、raw VMIN1、nonblock EAGAIN和poll/pselect RV64 matrix；record/queue accounting、read/poll predicate、
-register-plus-recheck与worker batch assertion/KUnit；人工`VERASE/VKILL/VEOF`边界复验。
+atomic retry、IUTF8 1/2/3/4-byte与mixed/malformed erase、tab erase、raw VMIN1、nonblock EAGAIN和poll/pselect
+RV64 matrix；record/queue accounting、read/poll predicate、register-plus-recheck与worker batch assertion/KUnit；
+人工`VERASE/VKILL/VEOF`边界复验。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)。
 
 **PTY refine：** master write按同一input-conditioning/discipline规则直接提交ordered bytes；master hangup清除committed
 slave input。readiness仍由Terminal input与pair peer predicate组合，pair不建立第二队列。该refine来自
@@ -114,7 +126,9 @@ slave input。readiness仍由Terminal input与pair peer predicate组合，pair�
 **规则：** TTY write接受任意bytes。`OPOST`关闭时原样提交；启用transform时，partial progress按已经消费的
 用户输入bytes计量，单个input byte的扩展不能重复提交。`TAB0`保留literal tab，`TAB3/XTABS`按已经提交的逻辑列把
 tab原子展开到下一个8列边界，形成1至8个空格；CR、backspace、newline/`ONLCR`与ordinary/control byte按同一
-output-processing列规则推进。完整token进入Terminal queue后才同时推进源byte progress与逻辑列；backpressure不
+output-processing列规则推进。`IUTF8`开启时，`10xxxxxx` continuation byte仍原样输出，但不推进逻辑列；不解析
+Unicode codepoint、字符宽度或terminal escape。canonical tab erase的raw backspace operation独立于`OPOST`执行并
+同步回退逻辑列。完整token进入Terminal queue后才同时推进源byte progress与逻辑列；backpressure不
 提交token prefix，也不推进二者。output flush丢弃尚未提交port的backend work，但不倒退已经接受的stream位置。
 
 echo复用同一Terminal transform与port capability，但不在Terminal guard内等待hardware。blocking write与poll使用
@@ -126,12 +140,13 @@ TX truth。普通console record与整次TTY write不承诺相互原子，但都�
 write wait与poll使用冲突的writable条件、echo持Terminal guard等待、虚构drain，或console/TTY形成两套TX truth。
 
 **验证 / Enforcement：** binary NUL/`0xff`、OPOST/ONLCR、TCSETSW payload-before-marker、TCSETSF与drain RV64
-byte oracle；TAB3列推进、完整token backpressure与readiness inline KUnit compile/source audit；GNU `less 668`
+byte oracle；IUTF8 continuation列、TAB3列推进、OPOST-off tab erase、完整token backpressure与readiness inline
+KUnit及public PTY byte oracle/source audit；GNU `less 668`
 进入可用全屏界面并以`q`退出的用户运行证据；final output/summary drain后再关机。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)。
 
 **PTY refine：** slave write与echo经过同一output processing进入Terminal queue并由master消费；partial progress、drain和
 writability保持Terminal-owned，master不是physical port且不伪造`TtyPort`。该refine来自
@@ -170,6 +185,9 @@ registry/port bypass audit。
 
 - 本页只定义serial TTY data plane；`/dev/tty`、controlling relation和terminal job control由已生效的
   [companion contract](./job-control.md)定义，不能从本页单独推断。
+- 2026-08-13 IUTF8 refinement的RV64 PTY/TTY runtime分别通过633/633 KUnit与public `16/16`、`55/55`
+  matrix；双架构app与KUnit-enabled kernel build通过。LA64 runtime、LTP、tmux与实体UART/hardware为Not Run，
+  compile或RV64结果不得外推。
 - RV64 build/runtime与LA64 compile已验证；LA64 runtime、实体UART parity/framing injection与hardware仍Not Run，
   classifier/KUnit和RV64 QEMU break结果不得向这些未运行边界外推。
 - runtime line reconfiguration、physical hardware hangup/backend fatal、hotplug/unpublish、完整`VMIN/VTIME`与完整Linux

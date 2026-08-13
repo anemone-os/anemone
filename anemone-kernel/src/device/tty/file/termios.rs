@@ -5,7 +5,7 @@ use crate::prelude::*;
 use super::{
     super::{
         port::{TtyLineSnapshot, TtyParity},
-        terminal::{TtyControlProfile, TtyTermios},
+        terminal::{TtyCompatibility, TtyControlProfile, TtyTabMode, TtyTermios},
     },
     TtyFile, TtyOperation, run_terminal_operation,
 };
@@ -50,6 +50,7 @@ pub(super) fn set_termios(
                 )
             }
         })? {
+            observe_no_behavior_compatibility_change(current, updated);
             tty.wake.wake();
             return Ok(());
         }
@@ -61,7 +62,13 @@ pub(super) fn project_termios(termios: TtyTermios) -> Result<abi::Termios, SysEr
         c_iflag: 0,
         c_oflag: (if termios.opost { abi::OPOST } else { 0 })
             | (if termios.onlcr { abi::ONLCR } else { 0 })
-            | (if termios.tab3 { abi::TAB3 } else { abi::TAB0 }),
+            | match termios.tab_mode {
+                TtyTabMode::Literal => abi::TAB0,
+                TtyTabMode::Delay1 => abi::TAB1,
+                TtyTabMode::Delay2 => abi::TAB2,
+                TtyTabMode::Expand => abi::TAB3,
+            }
+            | termios.compatibility.output,
         c_cflag: project_control(termios.control)?,
         c_lflag: 0,
         c_line: 0,
@@ -77,6 +84,7 @@ pub(super) fn project_termios(termios: TtyTermios) -> Result<abi::Termios, SysEr
         (termios.inlcr, abi::INLCR),
         (termios.igncr, abi::IGNCR),
         (termios.icrnl, abi::ICRNL),
+        (termios.iutf8, abi::IUTF8),
     ] {
         if enabled {
             result.c_iflag |= flag;
@@ -94,6 +102,7 @@ pub(super) fn project_termios(termios: TtyTermios) -> Result<abi::Termios, SysEr
             result.c_lflag |= flag;
         }
     }
+    result.c_lflag |= termios.compatibility.local;
     for (index, value) in control_chars(termios) {
         result.c_cc[index] = value;
     }
@@ -114,13 +123,20 @@ pub(super) fn validate_termios(
         | abi::ISTRIP
         | abi::INLCR
         | abi::IGNCR
-        | abi::ICRNL;
+        | abi::ICRNL
+        | abi::IUTF8;
     let tab_mode = candidate.c_oflag & abi::TABDLY;
-    if !matches!(tab_mode, abi::TAB0 | abi::TAB3) {
-        return Err(SysError::InvalidArgument);
-    }
-    let allowed_oflag = abi::OPOST | abi::ONLCR | abi::TABDLY;
-    let allowed_lflag = abi::ISIG | abi::ICANON | abi::ECHO | abi::ECHOE | abi::ECHOK | abi::ECHONL;
+    let compatibility_oflag =
+        abi::OFILL | abi::OFDEL | abi::NLDLY | abi::CRDLY | abi::BSDLY | abi::VTDLY | abi::FFDLY;
+    let compatibility_lflag = abi::XCASE | abi::FLUSHO | abi::PENDIN;
+    let allowed_oflag = abi::OPOST | abi::ONLCR | abi::TABDLY | compatibility_oflag;
+    let allowed_lflag = abi::ISIG
+        | abi::ICANON
+        | abi::ECHO
+        | abi::ECHOE
+        | abi::ECHOK
+        | abi::ECHONL
+        | compatibility_lflag;
     if candidate.c_iflag & !allowed_iflag != projected.c_iflag & !allowed_iflag
         || candidate.c_oflag & !allowed_oflag != projected.c_oflag & !allowed_oflag
         || candidate.c_lflag & !allowed_lflag != projected.c_lflag & !allowed_lflag
@@ -164,9 +180,20 @@ pub(super) fn validate_termios(
         inlcr: candidate.c_iflag & abi::INLCR != 0,
         igncr: candidate.c_iflag & abi::IGNCR != 0,
         icrnl: candidate.c_iflag & abi::ICRNL != 0,
+        iutf8: candidate.c_iflag & abi::IUTF8 != 0,
         opost: candidate.c_oflag & abi::OPOST != 0,
         onlcr: candidate.c_oflag & abi::ONLCR != 0,
-        tab3: tab_mode == abi::TAB3,
+        tab_mode: match tab_mode {
+            abi::TAB0 => TtyTabMode::Literal,
+            abi::TAB1 => TtyTabMode::Delay1,
+            abi::TAB2 => TtyTabMode::Delay2,
+            abi::TAB3 => TtyTabMode::Expand,
+            _ => unreachable!("TABDLY mask produced an invalid mode"),
+        },
+        compatibility: TtyCompatibility {
+            output: candidate.c_oflag & compatibility_oflag,
+            local: candidate.c_lflag & compatibility_lflag,
+        },
         icanon: candidate.c_lflag & abi::ICANON != 0,
         isig: candidate.c_lflag & abi::ISIG != 0,
         echo: candidate.c_lflag & abi::ECHO != 0,
@@ -188,6 +215,34 @@ pub(super) fn validate_termios(
         vmin: candidate.c_cc[abi::VMIN],
         vtime: candidate.c_cc[abi::VTIME],
     })
+}
+
+fn observe_no_behavior_compatibility_change(old: TtyTermios, new: TtyTermios) {
+    let old_output = no_behavior_output_flags(old);
+    let new_output = no_behavior_output_flags(new);
+    if old_output == new_output && old.compatibility.local == new.compatibility.local {
+        return;
+    }
+    // These bits are a deliberate Linux 6.6.32 compatibility surface:
+    // TCGETS preserves them but N_TTY assigns no behavior. Keep the notice
+    // until the accepted ABI is explicitly revised; it makes silent
+    // compatibility distinguishable from accidentally ignored semantics.
+    knoticeln!(
+        "tty: no-behavior termios compatibility changed oflag={:#x}->{:#x} lflag={:#x}->{:#x}",
+        old_output,
+        new_output,
+        old.compatibility.local,
+        new.compatibility.local,
+    );
+}
+
+fn no_behavior_output_flags(termios: TtyTermios) -> u32 {
+    termios.compatibility.output
+        | match termios.tab_mode {
+            TtyTabMode::Delay1 => abi::TAB1,
+            TtyTabMode::Delay2 => abi::TAB2,
+            TtyTabMode::Literal | TtyTabMode::Expand => 0,
+        }
 }
 
 fn project_control(control: TtyControlProfile) -> Result<u32, SysError> {
@@ -389,17 +444,18 @@ mod kunits {
         less.c_oflag |= abi::XTABS;
         less.c_lflag = abi::ISIG;
         let less = validate_termios(less, current).unwrap();
-        assert!(less.tab3);
+        assert!(less.expands_tabs());
         assert_eq!(
             project_termios(less).unwrap().c_oflag & abi::TABDLY,
             abi::TAB3
         );
-        for unsupported_tab_mode in [abi::TAB1, abi::TAB2] {
-            let mut unsupported = raw;
-            unsupported.c_oflag |= unsupported_tab_mode;
+        for compatibility_tab_mode in [abi::TAB1, abi::TAB2] {
+            let mut compatibility = raw;
+            compatibility.c_oflag |= compatibility_tab_mode;
+            let compatibility = validate_termios(compatibility, current).unwrap();
             assert_eq!(
-                validate_termios(unsupported, current),
-                Err(SysError::InvalidArgument)
+                project_termios(compatibility).unwrap().c_oflag & abi::TABDLY,
+                compatibility_tab_mode
             );
         }
 
@@ -499,6 +555,37 @@ mod kunits {
         {
             let mut unsupported = committed;
             unsupported.c_cflag = (unsupported.c_cflag & !mask) | unsupported_baud;
+            assert_eq!(
+                validate_termios(unsupported, updated),
+                Err(SysError::InvalidArgument)
+            );
+            assert_eq!(project_termios(updated).unwrap(), committed);
+        }
+    }
+
+    #[kunit]
+    fn iutf8_and_linux_no_behavior_flags_round_trip_atomically() {
+        let current = pty();
+        let before = project_termios(current).unwrap();
+        let mut candidate = before;
+        candidate.c_iflag |= abi::IUTF8;
+        candidate.c_oflag |= abi::OFILL
+            | abi::OFDEL
+            | abi::NL1
+            | abi::CR3
+            | abi::TAB2
+            | abi::BS1
+            | abi::VT1
+            | abi::FF1;
+        candidate.c_lflag |= abi::XCASE | abi::FLUSHO | abi::PENDIN;
+        let updated = validate_termios(candidate, current).unwrap();
+        assert!(updated.iutf8);
+        assert_eq!(project_termios(updated).unwrap(), candidate);
+
+        for unsupported_iflag in [abi::IMAXBEL, 0x8000] {
+            let committed = project_termios(updated).unwrap();
+            let mut unsupported = committed;
+            unsupported.c_iflag |= unsupported_iflag;
             assert_eq!(
                 validate_termios(unsupported, updated),
                 Err(SysError::InvalidArgument)
