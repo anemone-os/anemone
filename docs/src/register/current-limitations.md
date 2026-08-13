@@ -1,5 +1,30 @@
 # 当前限制
 
+## ANE-20260813-UNIX-PEERCRED-EDGE-SEMANTICS
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / peer credentials / Linux ABI
+
+**Summary:** 当前`AF_UNIX + SOCK_STREAM/SOCK_SEQPACKET`在首次成功`listen()`时固定listener
+`{tgid,euid,egid}` snapshot；后续重复`listen()`只更新backlog，不按调用者当前身份刷新snapshot。pathname
+connection因此始终观察首次listen身份。另一个明确边界是unconnected、bound与listening socket上的
+`SO_PEERCRED`稳定返回`ENOTCONN`，不发布Linux可能暴露的初始化或调用时身份值。
+
+这两项差异不影响已连接socketpair或pathname connection的目标保证：connection唯一持有两侧immutable snapshot，
+peer退出、close或后续credential变化不改变结果。为复刻偏僻边角而增加listener credential更新协议、query-time
+Task lookup或role-specific伪credentials会制造第二份truth或模糊“peer”的含义，本轮明确不做。
+
+**Exit Condition:** 只有真实Anemone consumer或评分用例要求其中某项Linux边角语义时，才单独重新解析target；方案
+必须保持connection snapshot单一owner，并对重复listen的更新线性化、已有/新connection可见性和非连接role值来源
+给出明确规则及双架构guest验证。不得以动态task lookup或缓存完整credential object绕过该设计。
+
+**Owner:** Unix Socket
+**Last Verified:** 2026-08-13
+**Related:** [Unix peer credentials小迭代](../devlog/changes/2026-08-13-unix-peer-credentials.md),
+[Unix Socket当前契约](../contracts/socket/unix-stream-lifecycle.md#unix-socket-peercred-001--connection拥有稳定对端身份快照)
+
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
 ## ANE-20260809-NETLINK-EAGER-REPLY-MATERIALIZATION

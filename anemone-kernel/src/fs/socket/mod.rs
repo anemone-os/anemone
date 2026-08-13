@@ -11,13 +11,13 @@ use front::{
     SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
     SocketConnectError, SocketCreation, SocketDatagramSendOperation, SocketIoOps,
     SocketIpv4ExtendedError, SocketListenError, SocketOps, SocketOptionError, SocketOptionMutation,
-    SocketOptionQuery, SocketOptionValue, SocketPairPreparation, SocketPendingError,
-    SocketPreparation, SocketQueryError, SocketReadSink, SocketReceiveError, SocketReceiveFlags,
-    SocketReceiveOutcome, SocketReceiveRequest, SocketReceiveSink, SocketReleaseReason,
-    SocketSendError, SocketSendPayload, SocketSendRequest, SocketShutdown, SocketShutdownError,
-    SocketStreamDestination, SocketType, SocketWait, SocketWriteSource, pending_error_to_sys_error,
-    prepare_socket, prepare_socket_pair, retry_socket_receive, retry_socket_send,
-    socket_file_desc_ops, socket_from_file, wait_for_socket_operation,
+    SocketOptionQuery, SocketOptionValue, SocketPairPreparation, SocketPeerCredentials,
+    SocketPendingError, SocketPreparation, SocketQueryError, SocketReadSink, SocketReceiveError,
+    SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest, SocketReceiveSink,
+    SocketReleaseReason, SocketSendError, SocketSendPayload, SocketSendRequest, SocketShutdown,
+    SocketShutdownError, SocketStreamDestination, SocketType, SocketWait, SocketWriteSource,
+    pending_error_to_sys_error, prepare_socket, prepare_socket_pair, retry_socket_receive,
+    retry_socket_send, socket_file_desc_ops, socket_from_file, wait_for_socket_operation,
 };
 use icmp_raw::ICMP_RAW_SOCKET_OPS;
 use netlink::{NETLINK_ROUTE_SOCKET_OPS, NETLINK_SOCK_DIAG_SOCKET_OPS};

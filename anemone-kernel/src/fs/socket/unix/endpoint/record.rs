@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     EndpointAccessError, EndpointAssociation, EndpointName, EndpointSide, EndpointState,
-    UnixPollRoute, endpoint, replacement_poll_routes,
+    UnixPeerCredentials, UnixPollRoute, endpoint, replacement_poll_routes,
 };
 
 static_assert!(
@@ -117,15 +117,21 @@ pub(in crate::fs::socket::unix) struct UnixSeqpacketConnection {
     read_operations: [Mutex<()>; 2],
     write_operations: [Mutex<()>; 2],
     pub(super) names: [Arc<EndpointName>; 2],
+    /// Stable peer-query evidence only; record behavior never consults it.
+    pub(super) credentials: [UnixPeerCredentials; 2],
 }
 
 impl UnixSeqpacketConnection {
-    pub(super) fn new(names: [Arc<EndpointName>; 2]) -> Arc<Self> {
+    pub(super) fn new(
+        names: [Arc<EndpointName>; 2],
+        credentials: [UnixPeerCredentials; 2],
+    ) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(RecordConnectionState::new()),
             read_operations: [Mutex::new(()), Mutex::new(())],
             write_operations: [Mutex::new(()), Mutex::new(())],
             names,
+            credentials,
         })
     }
 
@@ -685,7 +691,7 @@ mod kunits {
     fn pair() -> (AnyOpaque, AnyOpaque) {
         let first = super::super::UnixEndpointCore::new_seqpacket();
         let second = super::super::UnixEndpointCore::new_seqpacket();
-        let connection = super::super::UnixConnection::new(
+        let connection = super::super::UnixConnection::new_for_validation(
             super::super::UnixProfile::Seqpacket,
             [first.name.clone(), second.name.clone()],
         );

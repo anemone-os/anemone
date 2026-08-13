@@ -27,6 +27,7 @@ fn map_option_error(error: SocketOptionError) -> SysError {
     match error {
         SocketOptionError::Unsupported => SysError::ProtocolOptionNotSupported,
         SocketOptionError::Retired => SysError::BadFileDescriptor,
+        SocketOptionError::NotConnected => SysError::NotConnected,
         SocketOptionError::InvalidValue => SysError::InvalidArgument,
     }
 }

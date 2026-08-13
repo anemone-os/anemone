@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     EndpointAccessError, EndpointAssociation, EndpointName, EndpointSide, EndpointState,
-    UnixPollRoute, endpoint, replacement_poll_routes,
+    UnixPeerCredentials, UnixPollRoute, endpoint, replacement_poll_routes,
 };
 
 static_assert!(
@@ -100,15 +100,22 @@ pub(in crate::fs::socket::unix) struct UnixStreamConnection {
     /// these narrow capabilities alive preserves Linux peer-name observation
     /// after the peer's final close without extending binding admission.
     pub(super) names: [Arc<EndpointName>; 2],
+    /// Immutable identity snapshots captured before connection publication.
+    /// They intentionally survive peer exit and never drive connection state.
+    pub(super) credentials: [UnixPeerCredentials; 2],
 }
 
 impl UnixStreamConnection {
-    pub(in crate::fs::socket::unix) fn new(names: [Arc<EndpointName>; 2]) -> Arc<Self> {
+    pub(in crate::fs::socket::unix) fn new(
+        names: [Arc<EndpointName>; 2],
+        credentials: [UnixPeerCredentials; 2],
+    ) -> Arc<Self> {
         Arc::new(Self {
             state: SpinLock::new(ConnectionState::new()),
             read_operations: [Mutex::new(()), Mutex::new(())],
             write_operations: [Mutex::new(()), Mutex::new(())],
             names,
+            credentials,
         })
     }
 
