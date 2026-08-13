@@ -129,6 +129,15 @@ impl ConsoleSelection {
     }
 }
 
+/// Narrow TTY-owned capability used by the console-owned devfs node.
+///
+/// Console retains the selected-console identity and `/dev/console`
+/// publication. The provider retains the selected Terminal and constructs its
+/// opened file, so console never copies terminal state or TTY FileOps policy.
+pub(crate) trait ConsoleTerminalOpen: Send + Sync {
+    fn open(&self) -> Result<OpenedFile, SysError>;
+}
+
 pub(crate) fn register_console_with_terminal_identity(
     ops: Arc<dyn Console>,
     mut flags: ConsoleFlags,
@@ -355,26 +364,13 @@ static CONSOLE_STDOUT_FILE_OPS: FileOps = FileOps {
     ioctl: |_, _| Err(SysError::UnsupportedIoctl),
 };
 
-static CONSOLE_DEVFS_FILE_OPS: FileOps = FileOps {
-    read: console_read,
-    write: console_write,
-    read_at: |_, _, _, _| Err(SysError::IllegalSeek),
-    write_at: |_, _, _, _| Err(SysError::IllegalSeek),
-    read_user_at: None,
-    write_user_at: None,
-    check_status_flags: accept_file_op_status_flags,
-    seek: |_, _, _| Err(SysError::IllegalSeek),
-    read_dir: |_, _, _| Err(SysError::NotDir),
-    poll: |_, _| Err(SysError::NotYetImplemented),
-    fcntl: None,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
-};
-
-struct ConsoleDevfsNodeOps;
+struct ConsoleDevfsNodeOps {
+    terminal: Arc<dyn ConsoleTerminalOpen>,
+}
 
 impl DevfsNodeOps for ConsoleDevfsNodeOps {
     fn open(&self, _inode: &InodeRef) -> Result<OpenedFile, SysError> {
-        Ok(OpenedFile::new(&CONSOLE_DEVFS_FILE_OPS, NilOpaque::new()))
+        self.terminal.open()
     }
 
     fn get_attr(&self, inode: &InodeRef, attr: DevfsNodeAttr) -> Result<InodeStat, SysError> {
@@ -391,12 +387,15 @@ impl ConsoleDevfsPublication {
 }
 
 /// Prepare the permanent console-owned `/dev/console` node after all Late
-/// device activation has completed. The descriptor retains console's EOF-input,
-/// UTF-8 output, and non-TTY ioctl behavior; publication happens only after
-/// the boot coordinator has also prepared every TTY endpoint and stdio file.
-pub(crate) fn prepare_devfs() -> Result<ConsoleDevfsPublication, SysError> {
+/// device activation has completed. The console owner retains the node and
+/// selected identity, while open delegates through a TTY-owned capability to
+/// the selected shared Terminal. Publication happens only after the boot
+/// coordinator has prepared every TTY endpoint and stdio file.
+pub(crate) fn prepare_devfs(
+    terminal: Arc<dyn ConsoleTerminalOpen>,
+) -> Result<ConsoleDevfsPublication, SysError> {
     let ops: Arc<dyn DevfsNodeOps> =
-        Arc::try_new(ConsoleDevfsNodeOps).map_err(|_| SysError::OutOfMemory)?;
+        Arc::try_new(ConsoleDevfsNodeOps { terminal }).map_err(|_| SysError::OutOfMemory)?;
     let mut name = String::new();
     name.try_reserve_exact("console".len())
         .map_err(|_| SysError::OutOfMemory)?;

@@ -2,7 +2,7 @@ use core::fmt::Write as _;
 
 use crate::{
     device::{
-        console::ConsoleTerminalIdentity,
+        console::{ConsoleTerminalIdentity, ConsoleTerminalOpen},
         devnum::{self, MINOR_BITS},
     },
     fs::devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish, publish as devfs_publish},
@@ -141,6 +141,17 @@ pub(crate) struct TtyBootPublication {
     published: Vec<PublishedEndpoint>,
     boot_index: usize,
     boot_files: [File; 3],
+    console_terminal: Arc<dyn ConsoleTerminalOpen>,
+}
+
+struct SelectedConsoleTerminal {
+    endpoint: Arc<TtyEndpoint>,
+}
+
+impl ConsoleTerminalOpen for SelectedConsoleTerminal {
+    fn open(&self) -> Result<OpenedFile, SysError> {
+        opened_endpoint_file(&self.endpoint)
+    }
 }
 
 pub(crate) fn prepare_system_boot(
@@ -242,6 +253,10 @@ pub(crate) fn prepare_system_boot(
         anony_open_with(&boot_path, opened_endpoint_file(&selected_endpoint)?)?,
         anony_open_with(&boot_path, opened_endpoint_file(&selected_endpoint)?)?,
     ];
+    let console_terminal: Arc<dyn ConsoleTerminalOpen> = Arc::try_new(SelectedConsoleTerminal {
+        endpoint: selected_endpoint,
+    })
+    .map_err(|_| SysError::OutOfMemory)?;
     let mut published = Vec::new();
     published
         .try_reserve_exact(prepared.len())
@@ -293,7 +308,16 @@ pub(crate) fn prepare_system_boot(
         published,
         boot_index: selected_index,
         boot_files,
+        console_terminal,
     })
+}
+
+impl TtyBootPublication {
+    /// Return the selected-terminal open capability without exposing the TTY
+    /// registry, endpoint representation, or mutable terminal truth.
+    pub(crate) fn console_terminal(&self) -> Arc<dyn ConsoleTerminalOpen> {
+        self.console_terminal.clone()
+    }
 }
 
 /// Perform the boot-only single-way publication commit in deterministic order.
@@ -309,6 +333,7 @@ impl TtyBootPublication {
             published,
             boot_index,
             boot_files,
+            console_terminal: _,
         } = self;
 
         devfs_publish(controlling_publish)?;

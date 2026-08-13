@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-13 - `/dev/console` shared Terminal](./2026-08-13-dev-console-shared-terminal.md)
 - [2026-08-13 - PTY logical cflag profile](./2026-08-13-pty-logical-cflag.md)
 - [2026-08-12 - Workspace config locators](./2026-08-12-workspace-config-locators.md)
 - [2026-08-12 - PTY retirement and job-control ordering](./2026-08-12-pty-retirement-job-control-ordering.md)

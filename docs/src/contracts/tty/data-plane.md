@@ -19,7 +19,7 @@
 | committed termios、winsize、discipline、editable/committed input、output queue、逻辑输出列与readiness predicate | endpoint共享的`Terminal` | opened file持Terminal引用；operation ctx提供live flags | read/write/poll/ioctl data plane |
 | worker-local dequeued batch | 单次deferred-consumer invocation | notification只要求predicate重验 | raw handoff到discipline的短命ownership transfer |
 | immutable port identity到`ttyS<N>`映射及published endpoint | TTY endpoint registry | devfs持open provider；boot只消费selected identity | stable node、device number与shared Terminal lookup |
-| selected-console truth与`/dev/console` | console owner | TTY只在boot finalize重验selected-terminal identity | 安装real Terminal boot fd，不转移console owner |
+| selected-console truth与`/dev/console` | console owner | TTY在boot finalize重验identity并提供selected endpoint的窄open capability | 安装real Terminal boot fd；console节点open复用同一Terminal，不转移node/selection owner |
 
 Event/wake edge、diagnostic owner/name/counter与测试 marker 都不是行为真相源；它们不得反向驱动
 input、readiness、publication或TX progress。
@@ -143,18 +143,20 @@ writability保持Terminal-owned，master不是physical port且不伪造`TtyPort`
 probe完成顺序。publish前完成identity唯一性校验、Terminal/raw handoff、deferred consumer与open provider的全部
 fallible prepare；devfs publish是可见线性化点。成功后`/dev/ttyS<N>`名称、major 4/minor `64+N`、endpoint identity
 和共享Terminal保持到重启；第一版不支持runtime unpublish、重新编号或复用。console owner独立发布major 5/minor 1
-的`/dev/console`并持selected truth；boot fd0/1/2安装被选中endpoint的真实shared Terminal，但不由此取得controlling relation。
+的`/dev/console`并持selected truth；TTY按该selection提供被选中endpoint的窄open capability，因而`/dev/console`与
+boot fd0/1/2、对应`ttyS<N>`的新开文件共享同一Terminal/FileOps语义，但不由此取得controlling relation。
 
 **违反表现：** node先于consumer可用、失败留下半发布endpoint、编号随probe顺序漂移、last close删除Terminal、TTY
-接管`/dev/console`，或boot stdio仍使用anonymous EOF console file。
+接管`/dev/console`，`/dev/console`另建I/O/termios/readiness truth，或boot stdio仍使用anonymous EOF console file。
 
 **验证 / Enforcement：** deterministic identity/duplicate/minor-overflow与prepare-before-publish KUnit；RV64 guest核对
-`ttyS0` 4:64、`console` 5:1及boot三fd/shared reopen truth；全树anonymous boot caller、duplicate publisher、direct
+`ttyS0` 4:64、`console` 5:1以及boot三fd、`ttyS0`与`console` shared reopen truth；全树anonymous boot caller、duplicate publisher、direct
 registry/port bypass audit。
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；
+[`/dev/console` shared Terminal小迭代](../../devlog/changes/2026-08-13-dev-console-shared-terminal.md)。
 
 ## 跨领域局部义务
 
@@ -162,14 +164,14 @@ registry/port bypass audit。
 | --- | --- | --- | --- | --- |
 | `TTY-PORT-001` / RX | UART / worker / discipline | UART发布bounded ordered units；worker只按predicate取走；discipline一次提交或保留当前cursor | raw dequeue -> worker batch -> Terminal atomic commit | whole-unit overflow由port计数；backpressure不推进cursor；未发布endpoint只回滚本地对象 |
 | `TTY-OUTPUT-001` / TX | Terminal / UART / console | Terminal提交converted batch；UART唯一序列化实际progress | backend accept/progress | partial按用户byte诚实返回；guard外等待drain |
-| `TTY-ENDPOINT-001` / publish | TTY registry / devfs / boot | 完成全部fallible prepare后单向发布，再安装已选Terminal boot files | devfs publication；boot finalize | publish前abort；publish后不unpublish/reuse |
+| `TTY-ENDPOINT-001` / publish | TTY registry / console / devfs / boot | TTY完成endpoint与open capability prepare，console完成node prepare后单向发布，再安装已选Terminal boot files | devfs publication；boot finalize | publish前abort；publish后不unpublish/reuse |
 
 ## 当前接受边界
 
 - 本页只定义serial TTY data plane；`/dev/tty`、controlling relation和terminal job control由已生效的
   [companion contract](./job-control.md)定义，不能从本页单独推断。
-- build/runtime acceptance只在RV64验证；LA64 compile/runtime、实体UART parity/framing injection与hardware均Not Run，
-  classifier/KUnit和RV64 QEMU break结果不得外推。
+- RV64 build/runtime与LA64 compile已验证；LA64 runtime、实体UART parity/framing injection与hardware仍Not Run，
+  classifier/KUnit和RV64 QEMU break结果不得向这些未运行边界外推。
 - runtime line reconfiguration、physical hardware hangup/backend fatal、hotplug/unpublish、完整`VMIN/VTIME`与完整Linux
   termios/ioctl corner不在本页；PTY pair、devpts与master hangup见[companion contract](./pty-devpts.md)。
 - post-validation user-copy fault不提供TTY-local rollback/replay；普通有效buffer read、record boundary与未选后缀仍受

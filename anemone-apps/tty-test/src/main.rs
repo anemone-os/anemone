@@ -327,6 +327,10 @@ fn tty_serial(flags: u32) -> Result<Fd, Errno> {
     openat(AtFd::Cwd, Path::new("/dev/ttyS0"), flags, 0)
 }
 
+fn tty_console(flags: u32) -> Result<Fd, Errno> {
+    openat(AtFd::Cwd, Path::new("/dev/console"), flags, 0)
+}
+
 fn expect_open_dev_tty(errno: Errno) -> Result<(), Errno> {
     match openat(AtFd::Cwd, Path::new("/dev/tty"), O_RDWR, 0) {
         Err(actual) if actual == errno => Ok(()),
@@ -1166,6 +1170,16 @@ fn is_readable(fd: Fd) -> Result<bool, Errno> {
     Ok(count == 1 && pollfd[0].revents & POLLIN != 0)
 }
 
+fn is_writable(fd: Fd) -> Result<bool, Errno> {
+    let mut pollfd = [PollFd {
+        fd: fd as i32,
+        events: POLLOUT,
+        revents: 0,
+    }];
+    let count = ppoll(&mut pollfd, Some(&ZERO_TIMEOUT))?;
+    Ok(count == 1 && pollfd[0].revents & POLLOUT != 0)
+}
+
 fn device_numbers(encoded: u64) -> (u64, u64) {
     let major = (encoded & 0x000f_ff00) >> 8;
     let minor = (encoded & 0xff) | ((encoded >> 12) & 0x000f_ff00);
@@ -1206,6 +1220,47 @@ fn test_boot_shared_terminal(baseline: &Baseline) -> Result<(), Errno> {
     expect(get_winsize(STDERR_FILENO)? == changed_size)?;
     expect(get_winsize(serial)? == changed_size)?;
     close(serial)
+}
+
+fn test_console_shared_terminal(baseline: &Baseline) -> Result<(), Errno> {
+    let console = tty_console(O_RDWR | O_NONBLOCK)?;
+    expect(tcgetattr(console)? == baseline.termios)?;
+    expect(get_winsize(console)? == baseline.winsize)?;
+    expect(is_writable(console)?)?;
+
+    let mut changed = baseline.termios;
+    changed.c_lflag ^= ECHO;
+    tcsetattr(console, SetTermiosWhen::Now, &changed)?;
+    expect(tcgetattr(STDIN_FILENO)? == changed)?;
+    let serial = tty_serial(O_RDWR)?;
+    expect(tcgetattr(serial)? == changed)?;
+    close(serial)?;
+
+    let changed_size = Winsize {
+        ws_row: 41,
+        ws_col: 97,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    set_winsize(console, &changed_size)?;
+    expect(get_winsize(STDIN_FILENO)? == changed_size)?;
+    tcsetattr(console, SetTermiosWhen::DrainFlush, &baseline.termios)?;
+    let mut empty = [0u8; 1];
+    expect(read(console, &mut empty) == Err(EAGAIN))?;
+    expect_open_dev_tty(ENXIO)?;
+    close(console)
+}
+
+fn test_console_binary_write(baseline: &Baseline) -> Result<(), Errno> {
+    let console = tty_console(O_WRONLY)?;
+    let mut raw_output = baseline.termios;
+    raw_output.c_oflag &= !OPOST;
+    tcsetattr(console, SetTermiosWhen::Now, &raw_output)?;
+    println!("@@TTY OUTPUT console-binary-begin@@");
+    expect(write(console, &[0, 0xff, b'C'])? == 3)?;
+    tcsetattr(console, SetTermiosWhen::Drain, &baseline.termios)?;
+    println!("@@TTY OUTPUT console-binary-end@@");
+    close(console)
 }
 
 fn test_canonical_incomplete(baseline: &Baseline) -> Result<(), Errno> {
@@ -1679,6 +1734,12 @@ fn run_auto(baseline: &Baseline) -> Results {
     }
     results.case("endpoint-identity", baseline, test_endpoint_identity);
     results.case("boot-shared-terminal", baseline, test_boot_shared_terminal);
+    results.case(
+        "console-shared-terminal",
+        baseline,
+        test_console_shared_terminal,
+    );
+    results.case("console-binary-write", baseline, test_console_binary_write);
     results.case("canonical-incomplete", baseline, test_canonical_incomplete);
     results.case("canonical-newline", baseline, test_canonical_newline);
     results.case("canonical-erase", baseline, test_canonical_erase);

@@ -355,6 +355,15 @@ binary_start = data.find(b"@@TTY OUTPUT binary-begin@@")
 binary_end = data.find(b"@@TTY OUTPUT binary-end@@", binary_start + 1)
 if binary_start < 0 or binary_end < 0 or b"\x00\xffA" not in data[binary_start:binary_end]:
     raise SystemExit("TTY-HARNESS:FAIL:binary-write-bytes")
+
+console_binary_start = data.find(b"@@TTY OUTPUT console-binary-begin@@")
+console_binary_end = data.find(b"@@TTY OUTPUT console-binary-end@@", console_binary_start + 1)
+if (
+    console_binary_start < 0
+    or console_binary_end < 0
+    or b"\x00\xffC" not in data[console_binary_start:console_binary_end]
+):
+    raise SystemExit("TTY-HARNESS:FAIL:console-binary-write-bytes")
 onlcr_start = data.find(b"@@TTY OUTPUT onlcr-begin@@")
 onlcr_end = data.find(b"@@TTY OUTPUT onlcr-end@@", onlcr_start + 1)
 if onlcr_start < 0 or onlcr_end < 0 or b"X\r\nY" not in data[onlcr_start:onlcr_end]:
