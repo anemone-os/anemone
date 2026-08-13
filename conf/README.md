@@ -7,8 +7,9 @@
   Platforms also name a committed DTS source; QEMU Platforms do not keep a provider-derived mirror.
 - Normal kernel build removes stale DTB output for firmware delivery. For embedded delivery it
   either compiles a physical normative DTS with `dtc`, or asks the selected QEMU provider to dump a
-  build-local DTB using only machine, CPU, SMP, memory and optional BIOS. It never consumes ordinary
-  QEMU args, runtime disk/network inputs or bind values to obtain a device tree.
+  build-local DTB using only machine, CPU, SMP, memory and optional BIOS. Firmware-delivery builds
+  consume no QEMU bindings; embedded QEMU builds consume only bindings referenced by those provider
+  fields, never ordinary QEMU args or runtime disk/network groups.
 - `conf/kconfs/default.toml` and local `kconfig` contain only kernel features, policy and capacity. System
   selection, kernel Cargo profile and action-local presentation do not belong to KernelConfig.
 - `conf/build-presets/<slug>.toml` names a closed target, workspace-relative KernelConfig and
@@ -27,10 +28,9 @@
   Platform's ordered `[[qemu.bind]]` declarations.
 - Every QEMU Platform names its CPU model explicitly. `bios` remains optional: omission means xtask
   emits no `-bios` option.
-- Canonical QEMU SMP machine files use `qemu-virt-<arch>-smp-{1,8}.toml`. Existing pretest Platform
-  names are relative symlinks to SMP1; existing names without a workload suffix are relative
-  symlinks to SMP8. Both variants retain the three runtime binds and persistent fixed QEMU argv,
-  including `-no-reboot`.
+- QEMU topology is supplied through runtime `smp` and `memory` bindings. Firmware-delivery
+  kernels obtain the corresponding hardware description at boot, so a build is not specialized to
+  the launch tuple. Embedded delivery remains topology-specific to its materialized DTB.
 - Every rootfs manifest names `fs.type` explicitly. Folder roots use `virt-make-fs` automatic
   sizing and may add free space with `fs.extra-size`, which is passed as an incremental
   `--size=+<value>` rather than an absolute image capacity. Image roots reject `extra-size` because

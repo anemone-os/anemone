@@ -1,5 +1,5 @@
 **/target
-build
+/build/
 **/rustc-ice-*
 **/.gdb_history
 kconfig
@@ -20,4 +20,5 @@ LOCAL.md
 .codex
 **/__pycache__
 containers
-kernel-*
+kernel-rv
+kernel-la

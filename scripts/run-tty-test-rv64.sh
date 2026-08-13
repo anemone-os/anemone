@@ -136,7 +136,7 @@ sdcard_destination=$(realpath -m -- "$sdcard_target")
 cp --remove-destination -- "$sdcard" "$sdcard_target"
 
 progress "build-kernel"
-just build --preset "$preset" "${provider_bindings[@]}" 2>&1 | tee -a "$log_file"
+just build --preset "$preset" 2>&1 | tee -a "$log_file"
 
 if [[ $mode == auto ]]; then
     progress "qemu-auto"

@@ -43,8 +43,9 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm which selection source, SystemTarget, Platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
-- Provide every binding referenced by selected QEMU provider fields; build rejects runtime-only or otherwise
-  unconsumed values before side effects.
+- For embedded QEMU DT materialization, provide every binding referenced by selected provider fields.
+  Firmware-delivery builds consume no QEMU bindings; build rejects runtime-only or otherwise unconsumed values
+  before side effects.
 - Check that the generated boot definition matches the selected initial-program variant. For `EmbeddedApp`, verify
   the app identity, single executable regular export, reported byte count, and `include_bytes!` dependency all come
   from the current invocation rather than a stale `build/apps/` artifact.

@@ -88,6 +88,7 @@
 		- [2026-08-13 - Unix peer credentials](./devlog/changes/2026-08-13-unix-peer-credentials.md)
 		- [2026-08-13 - TTY IUTF8与明确compatibility set](./devlog/changes/2026-08-13-tty-iutf8-compat.md)
 		- [2026-08-13 - PTY logical cflag profile](./devlog/changes/2026-08-13-pty-logical-cflag.md)
+		- [2026-08-13 - LA64 runtime firmware FDT](./devlog/changes/2026-08-13-la64-runtime-fdt.md)
 		- [2026-08-12 - PTY retirement and job-control ordering](./devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)
 		- [2026-08-11 - KUnit execution and proof](./devlog/changes/2026-08-11-kunit-execution-proof.md)
 		- [2026-08-09 - VFS open request](./devlog/changes/2026-08-09-vfs-open-request.md)

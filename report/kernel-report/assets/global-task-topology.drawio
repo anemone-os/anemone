@@ -1,0 +1,55 @@
+<mxfile host="Electron">
+  <diagram name="global-task-topology" id="0">
+    <mxGraphModel dx="1044" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1970" pageHeight="1560" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="task" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;sketch=1;curveFitting=1;jiggle=2;" value="Task" vertex="1">
+          <mxGeometry height="80" width="190" x="865" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="uspace" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;sketch=1;curveFitting=1;jiggle=2;" value="UserSpaceHandle" vertex="1">
+          <mxGeometry height="80" width="190" x="1090" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="files" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;sketch=1;curveFitting=1;jiggle=2;" value="FilesState" vertex="1">
+          <mxGeometry height="80" width="190" x="750" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="cred" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;sketch=1;curveFitting=1;jiggle=2;" value="CredentialSet" vertex="1">
+          <mxGeometry height="80" width="190" x="640" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="sig" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;sketch=1;curveFitting=1;jiggle=2;" value="Signal local state" vertex="1">
+          <mxGeometry height="80" width="190" x="980" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="binding" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#fff2cc;strokeColor=#d6b656;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;sketch=1;curveFitting=1;jiggle=2;" value="TaskBinding&#xa;UserLeader / Member / KThread" vertex="1">
+          <mxGeometry height="100" width="260" x="830" y="700" as="geometry" />
+        </mxCell>
+        <mxCell id="topology" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fillColor=#e1d5e7;strokeColor=#9673a6;fontFamily=Comic Sans MS;fontSize=13;fontStyle=1;sketch=1;curveFitting=1;jiggle=2;" value="TaskTopology" vertex="1">
+          <mxGeometry height="80" width="210" x="855" y="860" as="geometry" />
+        </mxCell>
+        <mxCell id="tid" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;fillColor=#f8cecc;strokeColor=#b85450;sketch=1;curveFitting=1;jiggle=2;" value="Tid -&gt; Task" vertex="1">
+          <mxGeometry height="80" width="190" x="750" y="970" as="geometry" />
+        </mxCell>
+        <mxCell id="tgid" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;fillColor=#f8cecc;strokeColor=#b85450;sketch=1;curveFitting=1;jiggle=2;" value="Tgid -&gt; ThreadGroup" vertex="1">
+          <mxGeometry height="80" width="180" x="645" y="860" as="geometry" />
+        </mxCell>
+        <mxCell id="pgid" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;fillColor=#f8cecc;strokeColor=#b85450;sketch=1;curveFitting=1;jiggle=2;" value="Pgid -&gt; ProcessGroup" vertex="1">
+          <mxGeometry height="80" width="190" x="1090" y="860" as="geometry" />
+        </mxCell>
+        <mxCell id="sid" parent="1" style="rounded=1;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Comic Sans MS;fontSize=13;fontStyle=0;fillColor=#f8cecc;strokeColor=#b85450;sketch=1;curveFitting=1;jiggle=2;" value="Sid -&gt; Session" vertex="1">
+          <mxGeometry height="80" width="200" x="985" y="970" as="geometry" />
+        </mxCell>
+        <mxCell id="7pgeWJdZsboCWSB0YQ6Z-1" edge="1" parent="1" style="endArrow=none;dashed=1;html=1;rounded=0;sketch=1;curveFitting=1;jiggle=2;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="640" y="680" as="sourcePoint" />
+            <mxPoint x="1280" y="680" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="7pgeWJdZsboCWSB0YQ6Z-2" edge="1" parent="1" style="endArrow=none;dashed=1;html=1;rounded=0;sketch=1;curveFitting=1;jiggle=2;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="640" y="840" as="sourcePoint" />
+            <mxPoint x="1280" y="840" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

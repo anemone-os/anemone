@@ -226,13 +226,26 @@ impl App {
 }
 
 #[cfg(test)]
+const TEST_APP_MANIFEST: &str = r#"
+name = "example"
+targets = ["riscv64", "loongarch64"]
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/debug/example"
+"#;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn template_parses_as_cargo_driver() {
-        let content = example_app();
-        let app = App::from_str(&content).expect("Failed to parse app.toml");
+    fn cargo_manifest_parses() {
+        let app = App::from_str(TEST_APP_MANIFEST).expect("failed to parse app manifest");
         assert!(matches!(app.build.driver, BuildDriver::Cargo(_)));
         assert_eq!(
             app.targets,
@@ -245,11 +258,12 @@ mod tests {
 
     #[test]
     fn target_list_is_required_closed_and_unique() {
-        let missing = example_app().replacen("targets = [\"riscv64\", \"loongarch64\"]\n", "", 1);
+        let missing =
+            TEST_APP_MANIFEST.replacen("targets = [\"riscv64\", \"loongarch64\"]\n", "", 1);
         let error = format!("{:#}", App::from_str(&missing).unwrap_err());
         assert!(error.contains("missing field `targets`"), "{error}");
 
-        let empty = example_app().replacen(
+        let empty = TEST_APP_MANIFEST.replacen(
             "targets = [\"riscv64\", \"loongarch64\"]",
             "targets = []",
             1,
@@ -257,7 +271,7 @@ mod tests {
         let error = format!("{:#}", App::from_str(&empty).unwrap_err());
         assert!(error.contains("target list must not be empty"), "{error}");
 
-        let duplicate = example_app().replacen(
+        let duplicate = TEST_APP_MANIFEST.replacen(
             "targets = [\"riscv64\", \"loongarch64\"]",
             "targets = [\"riscv64\", \"riscv64\"]",
             1,
@@ -268,7 +282,7 @@ mod tests {
             "{error}"
         );
 
-        let unknown = example_app().replacen("\"loongarch64\"", "\"mips64\"", 1);
+        let unknown = TEST_APP_MANIFEST.replacen("\"loongarch64\"", "\"mips64\"", 1);
         let error = format!("{:#}", App::from_str(&unknown).unwrap_err());
         assert!(
             error.contains("Unsupported app build target: mips64"),
@@ -331,7 +345,7 @@ targets = ["host"]
 
     #[test]
     fn host_target_requires_a_non_cargo_recipe_without_target_triple_paths() {
-        let cargo_host = example_app().replacen(
+        let cargo_host = TEST_APP_MANIFEST.replacen(
             "targets = [\"riscv64\", \"loongarch64\"]",
             "targets = [\"riscv64\", \"loongarch64\", \"host\"]",
             1,
@@ -355,7 +369,7 @@ targets = ["host"]
 
     #[test]
     fn source_driver_is_closed_and_has_no_manifest_args() {
-        let source = example_app()
+        let source = TEST_APP_MANIFEST
             .replacen("driver = \"cargo\"", "driver = \"source\"", 1)
             .replacen("args = [\"build\"]\n", "", 1);
         let app = App::from_str(&source).expect("source manifest should parse");
@@ -371,7 +385,7 @@ targets = ["host"]
 
     #[test]
     fn command_driver_requires_bounded_nonempty_argv() {
-        let command = example_app()
+        let command = TEST_APP_MANIFEST
             .replacen("driver = \"cargo\"", "driver = \"command\"", 1)
             .replacen("args = [\"build\"]", "argv = [\"./build.sh\"]", 1);
         let app = App::from_str(&command).expect("command manifest should parse");
@@ -401,7 +415,10 @@ targets = ["host"]
         assert!(error.contains("unknown field `env`"), "{error}");
     }
 
-    fn example_app() -> String {
-        std::fs::read_to_string("../../conf/app.toml").expect("failed to read example app manifest")
+    #[test]
+    fn repository_app_template_parses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conf/app.toml");
+        let content = std::fs::read_to_string(path).expect("failed to read app template");
+        App::from_str(&content).expect("repository app template must parse");
     }
 }

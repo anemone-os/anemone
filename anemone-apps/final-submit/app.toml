@@ -1,0 +1,10 @@
+name = "final-submit"
+targets = ["riscv64", "loongarch64"]
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build", "--release"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/release/final-submit"

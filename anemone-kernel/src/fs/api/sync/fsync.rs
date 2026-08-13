@@ -14,6 +14,9 @@ fn sys_fsync(fd: Fd) -> Result<u64, SysError> {
 
     // Preserve the current success-no-op ABI until VFS exposes a per-file sync
     // operation. The validation above must remain even while writeback is absent.
-    kdebugln!("fsync is not implemented; returning success for fd {:?}", fd);
+    kdebugln!(
+        "fsync is not implemented; returning success for fd {:?}",
+        fd
+    );
     Ok(0)
 }

@@ -4,6 +4,7 @@ pub(super) mod cpu;
 pub(super) mod exception;
 
 mod backtrace;
+mod boot_params;
 mod bootstrap;
 mod fpu;
 mod machine;

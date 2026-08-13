@@ -1,0 +1,94 @@
+<mxfile host="Electron">
+  <diagram name="端到端构建与交付流水线" id="build-pipeline">
+    <mxGraphModel dx="1774" dy="1348" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1540" pageHeight="760" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontFamily=Noto Sans CJK SC;fontSize=24;fontStyle=1;fontColor=#263238;sketch=1;curveFitting=1;jiggle=2;" value="从显式选择到完整系统交付" vertex="1">
+          <mxGeometry height="40" width="600" x="470" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="stage1" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf3ff;swimlaneFillColor=#fbfdff;strokeColor=#5b8db8;fontColor=#274c77;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="1  显式选择" vertex="1">
+          <mxGeometry height="430" width="210" x="30" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="selection" parent="stage1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=16;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="Preset&#xa;或&#xa;Target + Kconfig + Profile" vertex="1">
+          <mxGeometry height="130" width="170" x="20" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="selection-note" parent="stage1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontFamily=Noto Sans CJK SC;fontSize=14;fontColor=#607d8b;sketch=1;curveFitting=1;jiggle=2;" value="命令行给出完整构建意图" vertex="1">
+          <mxGeometry height="60" width="170" x="20" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="stage2" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#edf8ed;swimlaneFillColor=#fcfffc;strokeColor=#6aa56b;fontColor=#37633a;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="2  解析与校验" vertex="1">
+          <mxGeometry height="430" width="210" x="280" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="resolve" parent="stage2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=16;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="xtask&#xa;&lt;font color=&quot;#607d8b&quot;&gt;解析配置关系&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="170" x="20" y="95" as="geometry" />
+        </mxCell>
+        <mxCell id="validate" parent="stage2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#c59b2a;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="交叉校验&#xa;&lt;font color=&quot;#607d8b&quot;&gt;目标 · 平台 · 产物要求&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="170" x="20" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="e-resolve-validate" edge="1" parent="stage2" source="resolve" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6aa56b;strokeWidth=1.5;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;sketch=1;curveFitting=1;jiggle=2;" target="validate" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="stage3" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e4;swimlaneFillColor=#fffdfa;strokeColor=#c59b2a;fontColor=#7a5b16;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="3  生成构建输入" vertex="1">
+          <mxGeometry height="430" width="240" x="530" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="kernel-inputs" parent="stage3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="内核输入&#xa;&lt;font color=&quot;#607d8b&quot;&gt;配置定义 · 启动参数&#xa;linker · 平台输入&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="200" x="20" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="user-inputs" parent="stage3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="用户环境输入&#xa;&lt;font color=&quot;#607d8b&quot;&gt;应用导出 · 资源文件&#xa;rootfs 组装&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="200" x="20" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="stage4" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#f4ecf7;swimlaneFillColor=#fefcff;strokeColor=#9673a6;fontColor=#5c3d69;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="4  构建与平台处理" vertex="1">
+          <mxGeometry height="430" width="220" x="810" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="compile" parent="stage4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="内核编译与链接" vertex="1">
+          <mxGeometry height="75" width="180" x="20" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="postlink" parent="stage4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="平台后处理&#xa;&lt;font color=&quot;#607d8b&quot;&gt;镜像格式 · DTB&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="180" x="20" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="rootfs-build" parent="stage4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="rootfs 镜像" vertex="1">
+          <mxGeometry height="60" width="180" x="20" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="stage5" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#f4f6f8;swimlaneFillColor=#ffffff;strokeColor=#78909c;fontColor=#37474f;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="5  公开构建产物" vertex="1">
+          <mxGeometry height="430" width="200" x="1070" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="kernel-artifact" parent="stage5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="内核 ELF / 镜像" vertex="1">
+          <mxGeometry height="75" width="160" x="20" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="dtb-artifact" parent="stage5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#c59b2a;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="DTB" vertex="1">
+          <mxGeometry height="70" width="160" x="20" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="rootfs-artifact" parent="stage5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="rootfs / 应用产物" vertex="1">
+          <mxGeometry height="75" width="160" x="20" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="stage6" parent="1" style="swimlane;startSize=42;horizontal=1;rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf3ff;swimlaneFillColor=#fbfdff;strokeColor=#5b8db8;fontColor=#274c77;fontFamily=Noto Sans CJK SC;fontSize=17;fontStyle=1;strokeWidth=1.5;container=1;pointerEvents=0;sketch=1;curveFitting=1;jiggle=2;" value="6  运行与验证" vertex="1">
+          <mxGeometry height="430" width="200" x="1310" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="qemu" parent="stage6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="QEMU&#xa;&lt;font color=&quot;#607d8b&quot;&gt;共享平台解析结果&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="20" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hardware" parent="stage6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="真实硬件&#xa;&lt;font color=&quot;#607d8b&quot;&gt;平台所需交付格式&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="160" x="20" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="wrappers" parent="stage6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#263238;fontFamily=Noto Sans CJK SC;fontSize=15;fontStyle=1;strokeWidth=1.5;sketch=1;curveFitting=1;jiggle=2;" value="端到端 wrapper&#xa;&lt;font color=&quot;#607d8b&quot;&gt;rootfs · 测试盘 · QEMU&#xa;日志与结果判定&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="160" x="20" y="310" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="stage1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;strokeWidth=1.8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="stage2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e23" edge="1" parent="1" source="stage2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="stage3" value="生成确定输入">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e34" edge="1" parent="1" source="stage3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="stage4" value="构建">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e45" edge="1" parent="1" source="stage4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="stage5" value="发布">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e56" edge="1" parent="1" source="stage5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#607d8b;fontColor=#607d8b;fontFamily=Noto Sans CJK SC;fontSize=13;strokeWidth=1.8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;sketch=1;curveFitting=1;jiggle=2;" target="stage6" value="交付">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

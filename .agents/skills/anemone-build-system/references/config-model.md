@@ -87,7 +87,7 @@ Before executing or accepting a configuration change, verify:
 - app build target, declared target support, driver output, and declared export agree;
 - an embedded initial app reference matches its manifest identity and resolves to one executable regular export;
 - rootfs architecture and installed apps agree with the intended kernel;
-- every build/QEMU bind value is consumed by a selected Platform placeholder and matches the intended wrapper mapping;
+- every action bind value is consumed by that action's selected Platform placeholder and matches the intended wrapper mapping;
 - fixed-path consumers run after their documented producer and stop when it fails;
 - cleanup and wrapper behavior does not invalidate another layer's required input;
 - validation observes outputs from the current invocation, not stale conditional artifacts.
@@ -104,6 +104,7 @@ Normal kernel build removes stale DTB output for firmware delivery. For embedded
 compiles a physical normative source, or asks the selected QEMU provider to dump a build-local DTB
 using only resolved machine, CPU, SMP, memory, and optional BIOS. It may consume bindings referenced by those
 provider fields, but never consumes ordinary QEMU args, runtime disks, or runtime bind groups for DT materialization.
+Firmware-delivery builds consume no QEMU bindings because the runtime FDT owns launch topology.
 
 QEMU Platforms keep no committed provider mirror and expose no refresh/check command. A physical
 `provider = "firmware"` contract records a firmware-derived conformance baseline without making it

@@ -10,12 +10,7 @@ use crate::{
 use super::accepts_sync_file_range_stub;
 
 #[syscall(SYS_SYNC_FILE_RANGE)]
-fn sys_sync_file_range(
-    fd: Fd,
-    offset: i64,
-    nbytes: i64,
-    raw_flags: u64,
-) -> Result<u64, SysError> {
+fn sys_sync_file_range(fd: Fd, offset: i64, nbytes: i64, raw_flags: u64) -> Result<u64, SysError> {
     let task = get_current_task();
     let file = task.get_fd(fd)?;
 

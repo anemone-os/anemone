@@ -117,9 +117,8 @@ pub mod linux {
         pub const SYNC_FILE_RANGE_WAIT_BEFORE: u32 = 1;
         pub const SYNC_FILE_RANGE_WRITE: u32 = 2;
         pub const SYNC_FILE_RANGE_WAIT_AFTER: u32 = 4;
-        pub const SYNC_FILE_RANGE_VALID_FLAGS: u32 = SYNC_FILE_RANGE_WAIT_BEFORE
-            | SYNC_FILE_RANGE_WRITE
-            | SYNC_FILE_RANGE_WAIT_AFTER;
+        pub const SYNC_FILE_RANGE_VALID_FLAGS: u32 =
+            SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER;
     }
 
     pub mod mode {
