@@ -12,7 +12,6 @@ use crate::{
 
 use super::{
     TtyEndpoint, TtyProgress, TtyWakeHandle, file as tty_file,
-    port::TtyLineSnapshot,
     relation::{self, RelationEnrollment},
     terminal::Terminal,
 };
@@ -35,8 +34,8 @@ pub(crate) struct PreparedPtyPair {
     opened_master: Option<OpenedFile>,
 }
 
-pub(crate) fn prepare_pair(index: u32, line: TtyLineSnapshot) -> Result<PreparedPtyPair, SysError> {
-    let terminal = Terminal::try_new(line)?;
+pub(crate) fn prepare_pair(index: u32) -> Result<PreparedPtyPair, SysError> {
+    let terminal = Terminal::try_new_pty()?;
     let pair = PtyPairState::try_new(terminal.clone())?;
     let progress: Arc<dyn TtyProgress> = pair.clone();
     let endpoint = Arc::try_new(TtyEndpoint {
@@ -379,21 +378,13 @@ mod kunits {
         }
     }
 
-    fn line() -> TtyLineSnapshot {
-        TtyLineSnapshot {
-            baud: 115200,
-            parity: super::super::port::TtyParity::None,
-            data_bits: 8,
-        }
-    }
-
     fn materialize(opened: OpenedFile) -> File {
         let placeholder = open_console_stdin();
         anony_open_with(placeholder.path(), opened).unwrap()
     }
 
     fn live_pair() -> (LivePtyPair, Arc<PtyMasterDescription>, Arc<File>) {
-        let mut prepared = prepare_pair(0, line()).unwrap();
+        let mut prepared = prepare_pair(0).unwrap();
         prepared.compose_description_ops(FileDescOps::default());
         let master = Arc::new(materialize(prepared.take_opened_master()));
         prepared

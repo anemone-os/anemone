@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{boot_io,console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
 **Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
-**最后核验：** 2026-08-11
+**最后核验：** 2026-08-13
 
 ## 状态与能力所有权
 
@@ -52,9 +52,12 @@ repository build/QEMU自动matrix；raw 234、sideband condition、console RX、
 
 ## TTY-TERM-001 — Endpoint共享唯一terminal semantic truth
 
-**规则：** 同一serial endpoint的所有open file引用同一个`Terminal`。它唯一持有committed termios、winsize、
+**规则：** 同一endpoint的所有attachment引用同一个`Terminal`。它唯一持有committed termios、winsize、
 concrete discipline、canonical pending edit、committed/noncanonical input、output queue、逻辑output-processing列和
-readiness predicate。逻辑列与完整output token一起提交；它只描述TTY output processor已经接受的stream位置，
+readiness predicate。committed termios内含endpoint-specific control profile：serial保存driver boot-applied physical
+line的immutable projection；PTY保存不驱动物理线路的logical `c_cflag`。两者都和其它termios字段由同一个generation
+transaction读取、重验并一次提交，不得在port、pair、FileOps或devpts中建立第二份control truth。逻辑列与完整output
+token一起提交；它只描述TTY output processor已经接受的stream位置，
 不是UART、console或host terminal的物理cursor truth。opened file只保存Terminal引用；`O_NONBLOCK`每次来自通用
 open-file-description flags。`IGNBRK`、`BRKINT`、`IGNPAR`、`PARMRK`、
 `INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`只改变Terminal的input interpretation，不反向修改UART line。
@@ -70,7 +73,7 @@ output列truth、失败update部分可见，或ioctl成功但丢弃用户状态�
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[PTY logical cflag profile 小迭代](../../devlog/changes/2026-08-13-pty-logical-cflag.md)。
 
 **PTY refine：** PTY slave与master attachment复用同一个Terminal；pair只拥有lifecycle/peer predicate，不复制termios、
 winsize、discipline、stream或readiness truth。该refine来自[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)。

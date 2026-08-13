@@ -311,11 +311,9 @@ pub(super) fn terminal_ioctl(
 ) -> Result<u64, SysError> {
     match ctx.cmd() {
         abi::TCGETS => {
-            let (termios, line) = run_terminal_operation(operation, || {
-                let (termios, _) = tty.endpoint.terminal.termios_snapshot();
-                (termios, tty.endpoint.terminal.line_snapshot())
-            })?;
-            write_ioctl_value(&ctx, termios::project_termios(termios, line)?)?;
+            let termios =
+                run_terminal_operation(operation, || tty.endpoint.terminal.termios_snapshot().0)?;
+            write_ioctl_value(&ctx, termios::project_termios(termios)?)?;
         },
         abi::TCSETS | abi::TCSETSW | abi::TCSETSF => {
             let candidate = read_ioctl_value::<abi::Termios>(&ctx)?;
@@ -415,7 +413,7 @@ static TTY_FILE_OPS: FileOps = FileOps {
 #[cfg(feature = "kunit")]
 use super::{
     port::{TtyLineSnapshot, TtyParity},
-    terminal::{Terminal, TtyTermios},
+    terminal::Terminal,
 };
 #[cfg(feature = "kunit")]
 mod kunits {
@@ -477,7 +475,7 @@ mod kunits {
         );
         assert_eq!(&delimiter[..3], b"cd\n");
 
-        assert!(terminal.receive_rx_byte(TtyTermios::default().eof));
+        assert!(terminal.receive_rx_byte(terminal.termios_snapshot().0.eof));
         assert_eq!(
             tty_read(&file, &mut pos, &mut delimiter, nonblocking),
             Ok(0)

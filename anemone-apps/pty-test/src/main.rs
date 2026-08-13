@@ -7,6 +7,7 @@ mod mount;
 mod relation;
 mod stream;
 mod support;
+mod termios;
 
 use anemone_rs::{
     abi::system::native::power::SHUTDOWN_MAGIC,
@@ -77,6 +78,7 @@ fn run_cases(results: &mut Results) {
     );
     results.case("mount-views", mount::test_mount_views);
     results.case("stream-termios", stream::test_stream_and_terminal_state);
+    results.case("termios-cflag-profile", termios::test_cflag_profile);
     results.case("nonblock-readiness", stream::test_nonblocking_and_readiness);
     results.case(
         "description-lifecycle",

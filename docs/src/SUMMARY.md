@@ -85,6 +85,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-13 - PTY logical cflag profile](./devlog/changes/2026-08-13-pty-logical-cflag.md)
 		- [2026-08-12 - PTY retirement and job-control ordering](./devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)
 		- [2026-08-11 - KUnit execution and proof](./devlog/changes/2026-08-11-kunit-execution-proof.md)
 		- [2026-08-09 - VFS open request](./devlog/changes/2026-08-09-vfs-open-request.md)

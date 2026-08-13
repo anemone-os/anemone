@@ -6,7 +6,20 @@ use super::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TtyControlProfile {
+    /// Hardware-backed fields are an immutable projection of the serial
+    /// driver's boot-applied line. Runtime reconfiguration has no backend
+    /// apply/rollback protocol yet, so a changed value must fail atomically.
+    Physical(TtyLineSnapshot),
+    /// PTYs have no hardware line. These bits are committed logical ABI state;
+    /// the PTY validator normalizes the fields whose physical meaning cannot
+    /// exist while preserving the remaining supported compatibility bits.
+    Pty(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TtyTermios {
+    pub(super) control: TtyControlProfile,
     pub(super) ignbrk: bool,
     pub(super) brkint: bool,
     pub(super) ignpar: bool,
@@ -41,9 +54,10 @@ pub(super) struct TtyTermios {
     pub(super) vtime: u8,
 }
 
-impl Default for TtyTermios {
-    fn default() -> Self {
+impl TtyTermios {
+    pub(super) fn with_control(control: TtyControlProfile) -> Self {
         Self {
+            control,
             ignbrk: false,
             brkint: false,
             ignpar: false,
@@ -78,9 +92,7 @@ impl Default for TtyTermios {
             vtime: 0,
         }
     }
-}
 
-impl TtyTermios {
     pub(super) fn matches_control(self, control: u8, byte: u8) -> bool {
         // asm-generic uses NUL as _POSIX_VDISABLE. A disabled control
         // character must not turn ordinary binary NUL input into an action.
@@ -396,9 +408,6 @@ fn transformed_len(source: &[u8], termios: TtyTermios, mut column: usize) -> usi
 }
 
 struct TerminalInner {
-    /// Stable copy of the boot-applied hardware truth used to construct the
-    /// committed termios snapshot. It is intentionally immutable.
-    line: TtyLineSnapshot,
     termios: TtyTermios,
     discipline: TtyDiscipline,
     output: TerminalOutput,
@@ -482,12 +491,23 @@ impl TerminalCounters {
 
 impl Terminal {
     pub(crate) fn try_new(line: TtyLineSnapshot) -> Result<Arc<Self>, SysError> {
+        Self::try_new_with_control(TtyControlProfile::Physical(line))
+    }
+
+    pub(crate) fn try_new_pty() -> Result<Arc<Self>, SysError> {
+        Self::try_new_with_control(TtyControlProfile::Pty(
+            anemone_abi::tty::linux::B38400
+                | anemone_abi::tty::linux::CS8
+                | anemone_abi::tty::linux::CREAD,
+        ))
+    }
+
+    fn try_new_with_control(control: TtyControlProfile) -> Result<Arc<Self>, SysError> {
         let discipline = TtyDiscipline::try_new()?;
         let output = TerminalOutput::try_new()?;
         Arc::try_new(Self {
             inner: SpinLock::new(TerminalInner {
-                line,
-                termios: TtyTermios::default(),
+                termios: TtyTermios::with_control(control),
                 discipline,
                 output,
                 drain_check_pending: false,
@@ -719,10 +739,6 @@ impl Terminal {
 
     pub(super) fn read_pty_input(&self, dst: &mut [u8]) -> InputRead {
         self.read_input_quiet(dst)
-    }
-
-    pub(super) fn line_snapshot(&self) -> TtyLineSnapshot {
-        self.inner.lock().line
     }
 
     pub(super) fn termios_snapshot(&self) -> (TtyTermios, usize) {

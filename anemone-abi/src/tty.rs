@@ -109,15 +109,22 @@ pub mod linux {
     pub const ECHONL: TcFlag = 0x0040;
 
     pub const CBAUD: TcFlag = 0x0000_100f;
+    pub const BOTHER: TcFlag = 0x0000_1000;
     pub const CSIZE: TcFlag = 0x0030;
     pub const CS5: TcFlag = 0x0000;
     pub const CS6: TcFlag = 0x0010;
     pub const CS7: TcFlag = 0x0020;
     pub const CS8: TcFlag = 0x0030;
+    pub const CSTOPB: TcFlag = 0x0040;
     pub const CREAD: TcFlag = 0x0080;
     pub const PARENB: TcFlag = 0x0100;
     pub const PARODD: TcFlag = 0x0200;
+    pub const HUPCL: TcFlag = 0x0400;
     pub const CLOCAL: TcFlag = 0x0800;
+    pub const CIBAUD: TcFlag = 0x100f_0000;
+    pub const ADDRB: TcFlag = 0x2000_0000;
+    pub const CMSPAR: TcFlag = 0x4000_0000;
+    pub const CRTSCTS: TcFlag = 0x8000_0000;
 
     pub const B0: TcFlag = 0x0000;
     pub const B50: TcFlag = 0x0001;

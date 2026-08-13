@@ -3,10 +3,7 @@
 use crate::{
     device::{
         devnum::{DeviceNumber, MINOR_BITS, MajorNum, MinorNum},
-        tty::{
-            LivePtyPair, PreparedPtyPair, PtyBindingCapability, PtyBindingOps, TtyLineSnapshot,
-            TtyParity, prepare_pair,
-        },
+        tty::{LivePtyPair, PreparedPtyPair, PtyBindingCapability, PtyBindingOps, prepare_pair},
     },
     fs::{
         devfs::{self, DevfsNodeAttr, DevfsNodeOps, DevfsPublish},
@@ -440,14 +437,7 @@ impl DevptsInstance {
         let reservation = self.core.reserve()?;
         let index =
             u32::try_from(reservation.episode.index).map_err(|_| SysError::InvalidArgument)?;
-        let mut pair = prepare_pair(
-            index,
-            TtyLineSnapshot {
-                baud: 38400,
-                parity: TtyParity::None,
-                data_bits: 8,
-            },
-        )?;
+        let mut pair = prepare_pair(index)?;
         let binding = DevptsBinding::prepare(
             self,
             reservation,
@@ -680,17 +670,9 @@ mod kunits {
         DevptsInstance::try_new(Arc::new(FileSystem::new(&DEVPTS_FS_OPS)), capacity).unwrap()
     }
 
-    fn line() -> TtyLineSnapshot {
-        TtyLineSnapshot {
-            baud: 38400,
-            parity: TtyParity::None,
-            data_bits: 8,
-        }
-    }
-
     fn prepared_binding(instance: &DevptsInstance, uid: Uid, gid: Gid) -> Arc<DevptsBinding> {
         let reservation = instance.core.reserve().unwrap();
-        let pair = prepare_pair(reservation.episode.index as u32, line()).unwrap();
+        let pair = prepare_pair(reservation.episode.index as u32).unwrap();
         DevptsBinding::prepare(instance, reservation, pair.pair_handle(), uid, gid).unwrap()
     }
 

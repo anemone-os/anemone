@@ -5,7 +5,7 @@ use crate::prelude::*;
 use super::{
     super::{
         port::{TtyLineSnapshot, TtyParity},
-        terminal::TtyTermios,
+        terminal::{TtyControlProfile, TtyTermios},
     },
     TtyFile, TtyOperation, run_terminal_operation,
 };
@@ -25,7 +25,7 @@ pub(super) fn set_termios(
 ) -> Result<(), SysError> {
     loop {
         let (current, generation) = tty.endpoint.terminal.termios_snapshot();
-        let updated = validate_termios(candidate, current, tty.endpoint.terminal.line_snapshot())?;
+        let updated = validate_termios(candidate, current)?;
         let drained_output_generation = if !matches!(mode, SetMode::Now) {
             tty.endpoint.terminal.request_drain_check();
             tty.wake.wake();
@@ -56,19 +56,13 @@ pub(super) fn set_termios(
     }
 }
 
-pub(super) fn project_termios(
-    termios: TtyTermios,
-    line: TtyLineSnapshot,
-) -> Result<abi::Termios, SysError> {
+pub(super) fn project_termios(termios: TtyTermios) -> Result<abi::Termios, SysError> {
     let mut result = abi::Termios {
         c_iflag: 0,
         c_oflag: (if termios.opost { abi::OPOST } else { 0 })
             | (if termios.onlcr { abi::ONLCR } else { 0 })
             | (if termios.tab3 { abi::TAB3 } else { abi::TAB0 }),
-        c_cflag: baud_flag(line.baud).ok_or(SysError::InvalidArgument)?
-            | data_bits_flag(line.data_bits).ok_or(SysError::InvalidArgument)?
-            | abi::CREAD
-            | abi::CLOCAL,
+        c_cflag: project_control(termios.control)?,
         c_lflag: 0,
         c_line: 0,
         c_cc: [0; abi::NCCS],
@@ -87,11 +81,6 @@ pub(super) fn project_termios(
         if enabled {
             result.c_iflag |= flag;
         }
-    }
-    match line.parity {
-        TtyParity::None => {},
-        TtyParity::Even => result.c_cflag |= abi::PARENB,
-        TtyParity::Odd => result.c_cflag |= abi::PARENB | abi::PARODD,
     }
     for (enabled, flag) in [
         (termios.isig, abi::ISIG),
@@ -114,9 +103,9 @@ pub(super) fn project_termios(
 pub(super) fn validate_termios(
     candidate: abi::Termios,
     current: TtyTermios,
-    line: TtyLineSnapshot,
 ) -> Result<TtyTermios, SysError> {
-    let projected = project_termios(current, line)?;
+    let projected = project_termios(current)?;
+    let control = validate_control(candidate.c_cflag, current.control, projected.c_cflag)?;
     let allowed_iflag = abi::IGNBRK
         | abi::BRKINT
         | abi::IGNPAR
@@ -135,7 +124,6 @@ pub(super) fn validate_termios(
     if candidate.c_iflag & !allowed_iflag != projected.c_iflag & !allowed_iflag
         || candidate.c_oflag & !allowed_oflag != projected.c_oflag & !allowed_oflag
         || candidate.c_lflag & !allowed_lflag != projected.c_lflag & !allowed_lflag
-        || candidate.c_cflag != projected.c_cflag
         || candidate.c_line != projected.c_line
     {
         return Err(SysError::InvalidArgument);
@@ -166,6 +154,7 @@ pub(super) fn validate_termios(
         return Err(SysError::InvalidArgument);
     }
     Ok(TtyTermios {
+        control,
         ignbrk: candidate.c_iflag & abi::IGNBRK != 0,
         brkint: candidate.c_iflag & abi::BRKINT != 0,
         ignpar: candidate.c_iflag & abi::IGNPAR != 0,
@@ -199,6 +188,71 @@ pub(super) fn validate_termios(
         vmin: candidate.c_cc[abi::VMIN],
         vtime: candidate.c_cc[abi::VTIME],
     })
+}
+
+fn project_control(control: TtyControlProfile) -> Result<u32, SysError> {
+    match control {
+        TtyControlProfile::Physical(line) => {
+            let mut cflag = baud_flag(line.baud).ok_or(SysError::InvalidArgument)?
+                | data_bits_flag(line.data_bits).ok_or(SysError::InvalidArgument)?
+                | abi::CREAD
+                | abi::CLOCAL;
+            match line.parity {
+                TtyParity::None => {},
+                TtyParity::Even => cflag |= abi::PARENB,
+                TtyParity::Odd => cflag |= abi::PARENB | abi::PARODD,
+            }
+            Ok(cflag)
+        },
+        TtyControlProfile::Pty(cflag) => Ok(cflag),
+    }
+}
+
+fn validate_control(
+    candidate: u32,
+    current: TtyControlProfile,
+    projected: u32,
+) -> Result<TtyControlProfile, SysError> {
+    match current {
+        TtyControlProfile::Physical(line) => {
+            if candidate != projected {
+                return Err(SysError::InvalidArgument);
+            }
+            Ok(TtyControlProfile::Physical(line))
+        },
+        TtyControlProfile::Pty(_) => {
+            if candidate & abi::CBAUD == abi::BOTHER
+                || (candidate & abi::CIBAUD) >> 16 == abi::BOTHER
+            {
+                // Legacy TCSETS has no c_ispeed/c_ospeed payload, so accepting
+                // BOTHER would commit a selector whose requested speed is lost.
+                // Arbitrary speeds remain outside the ABI until TCSETS2 exists.
+                return Err(SysError::InvalidArgument);
+            }
+            let supported = abi::CBAUD
+                | abi::CSIZE
+                | abi::CSTOPB
+                | abi::CREAD
+                | abi::PARENB
+                | abi::PARODD
+                | abi::HUPCL
+                | abi::CLOCAL
+                | abi::CIBAUD
+                | abi::CMSPAR
+                | abi::CRTSCTS;
+            if candidate & !supported != projected & !supported {
+                return Err(SysError::InvalidArgument);
+            }
+            // A PTY has no baud generator, framing, receiver-enable, or parity
+            // hardware. Linux exposes those fields as logical termios state but
+            // normalizes the impossible framing request to CS8 | CREAD with
+            // parity disabled; preserving the remaining supported bits keeps
+            // ordinary read-modify-write callers ABI-visible without inventing
+            // a physical-line effect.
+            let normalized = (candidate & !(abi::CSIZE | abi::PARENB)) | abi::CS8 | abi::CREAD;
+            Ok(TtyControlProfile::Pty(normalized))
+        },
+    }
 }
 
 fn control_chars(termios: TtyTermios) -> [(usize, u8); 14] {
@@ -279,10 +333,18 @@ mod kunits {
         }
     }
 
+    fn physical() -> TtyTermios {
+        TtyTermios::with_control(TtyControlProfile::Physical(line()))
+    }
+
+    fn pty() -> TtyTermios {
+        TtyTermios::with_control(TtyControlProfile::Pty(abi::B38400 | abi::CS8 | abi::CREAD))
+    }
+
     #[kunit]
     fn asm_generic_projection_and_validation_are_atomic() {
-        let current = TtyTermios::default();
-        let raw = project_termios(current, line()).unwrap();
+        let current = physical();
+        let raw = project_termios(current).unwrap();
         assert_eq!(raw.c_cflag & abi::CBAUD, abi::B115200);
         assert_eq!(raw.c_cflag & abi::CSIZE, abi::CS8);
         assert_eq!(raw.c_cc[abi::VMIN], 1);
@@ -300,9 +362,9 @@ mod kunits {
             | abi::INLCR
             | abi::IGNCR
             | abi::ICRNL;
-        let input_modes = validate_termios(input_modes, current, line()).unwrap();
+        let input_modes = validate_termios(input_modes, current).unwrap();
         assert_eq!(
-            project_termios(input_modes, line()).unwrap().c_iflag,
+            project_termios(input_modes).unwrap().c_iflag,
             abi::IGNBRK
                 | abi::BRKINT
                 | abi::IGNPAR
@@ -316,7 +378,7 @@ mod kunits {
 
         let mut candidate = raw;
         candidate.c_lflag &= !(abi::ICANON | abi::ECHO);
-        let updated = validate_termios(candidate, current, line()).unwrap();
+        let updated = validate_termios(candidate, current).unwrap();
         assert!(!updated.icanon);
         assert!(!updated.echo);
 
@@ -326,17 +388,17 @@ mod kunits {
         let mut less = raw;
         less.c_oflag |= abi::XTABS;
         less.c_lflag = abi::ISIG;
-        let less = validate_termios(less, current, line()).unwrap();
+        let less = validate_termios(less, current).unwrap();
         assert!(less.tab3);
         assert_eq!(
-            project_termios(less, line()).unwrap().c_oflag & abi::TABDLY,
+            project_termios(less).unwrap().c_oflag & abi::TABDLY,
             abi::TAB3
         );
         for unsupported_tab_mode in [abi::TAB1, abi::TAB2] {
             let mut unsupported = raw;
             unsupported.c_oflag |= unsupported_tab_mode;
             assert_eq!(
-                validate_termios(unsupported, current, line()),
+                validate_termios(unsupported, current),
                 Err(SysError::InvalidArgument)
             );
         }
@@ -352,8 +414,8 @@ mod kunits {
         ] {
             disabled.c_cc[index] = 0;
         }
-        let disabled = validate_termios(disabled, current, line()).unwrap();
-        let projected_disabled = project_termios(disabled, line()).unwrap();
+        let disabled = validate_termios(disabled, current).unwrap();
+        let projected_disabled = project_termios(disabled).unwrap();
         for index in [
             abi::VINTR,
             abi::VQUIT,
@@ -367,7 +429,7 @@ mod kunits {
 
         candidate.c_iflag |= 0x400;
         assert_eq!(
-            validate_termios(candidate, current, line()),
+            validate_termios(candidate, current),
             Err(SysError::InvalidArgument)
         );
         assert!(current.icanon);
@@ -375,13 +437,73 @@ mod kunits {
         let mut canonical_cc = raw;
         canonical_cc.c_cc[abi::VMIN] = 7;
         canonical_cc.c_cc[abi::VTIME] = 9;
-        let canonical = validate_termios(canonical_cc, current, line()).unwrap();
+        let canonical = validate_termios(canonical_cc, current).unwrap();
         assert_eq!(canonical.vmin, 7);
         assert_eq!(canonical.vtime, 9);
         canonical_cc.c_lflag &= !abi::ICANON;
         assert_eq!(
-            validate_termios(canonical_cc, current, line()),
+            validate_termios(canonical_cc, current),
             Err(SysError::InvalidArgument)
         );
+    }
+
+    #[kunit]
+    fn physical_cflag_is_immutable_but_pty_cflag_is_logical() {
+        let physical = physical();
+        let physical_snapshot = project_termios(physical).unwrap();
+        let mut changed_physical = physical_snapshot;
+        changed_physical.c_cflag ^= abi::CLOCAL;
+        assert_eq!(
+            validate_termios(changed_physical, physical),
+            Err(SysError::InvalidArgument)
+        );
+
+        let pty = pty();
+        let mut candidate = project_termios(pty).unwrap();
+        candidate.c_cflag = abi::B115200
+            | (abi::B9600 << 16)
+            | abi::CS7
+            | abi::CSTOPB
+            | abi::PARENB
+            | abi::PARODD
+            | abi::HUPCL
+            | abi::CLOCAL
+            | abi::CMSPAR
+            | abi::CRTSCTS;
+        let updated = validate_termios(candidate, pty).unwrap();
+        assert_eq!(
+            project_termios(updated).unwrap().c_cflag,
+            abi::B115200
+                | (abi::B9600 << 16)
+                | abi::CS8
+                | abi::CSTOPB
+                | abi::CREAD
+                | abi::PARODD
+                | abi::HUPCL
+                | abi::CLOCAL
+                | abi::CMSPAR
+                | abi::CRTSCTS
+        );
+
+        let mut unsupported = project_termios(updated).unwrap();
+        unsupported.c_cflag |= abi::ADDRB;
+        assert_eq!(
+            validate_termios(unsupported, updated),
+            Err(SysError::InvalidArgument)
+        );
+        assert_eq!(project_termios(updated).unwrap().c_cflag & abi::ADDRB, 0);
+
+        let committed = project_termios(updated).unwrap();
+        for (mask, unsupported_baud) in
+            [(abi::CBAUD, abi::BOTHER), (abi::CIBAUD, abi::BOTHER << 16)]
+        {
+            let mut unsupported = committed;
+            unsupported.c_cflag = (unsupported.c_cflag & !mask) | unsupported_baud;
+            assert_eq!(
+                validate_termios(unsupported, updated),
+                Err(SysError::InvalidArgument)
+            );
+            assert_eq!(project_termios(updated).unwrap(), committed);
+        }
     }
 }

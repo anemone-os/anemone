@@ -649,15 +649,8 @@ impl TtyOperation for PtySlaveDescription {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::device::tty::port::{TtyLineSnapshot, TtyParity};
-
     fn live_pair() -> (Arc<PtyPairState>, AtomicU8) {
-        let terminal = Terminal::try_new(TtyLineSnapshot {
-            baud: 115200,
-            parity: TtyParity::None,
-            data_bits: 8,
-        })
-        .unwrap();
+        let terminal = Terminal::try_new_pty().unwrap();
         let pair = PtyPairState::try_new(terminal).unwrap();
         let phase = AtomicU8::new(DESCRIPTION_PREPARED);
         pair.commit_master(&phase);

@@ -8,8 +8,8 @@
 **不覆盖：** multiple/private devpts instance、mount-local `ptmx`、mount options、distribution-style `tty:0620`、legacy `termio`/break ioctl、generic VFS cached-positive freshness或完整multi-view concurrency
 **实现位置：** `anemone-kernel/src/device/tty/pty/`、`anemone-kernel/src/fs/devpts/`、`anemone-kernel/src/fs/devfs/`、`anemone-kernel/src/fs/mod.rs`、`anemone-kernel/src/main.rs`
 **依赖：** [TTY data plane](./data-plane.md)、[TTY relation 与 job control](./job-control.md)、[opened-description lifecycle](../task/opened-description-lifecycle.md)、[poll wait](../iomux/poll-wait.md)、[epoll](../epoll/protocol.md)、[mount admission](../vfs/mount-admission.md)
-**当前来源：** [`PTY-DEVPTS-CUTOVER` transaction](../../devlog/transactions/2026-08-11-pty-devpts.md#2026-08-11---stage-4-checkpoint-2-public-activation与pty-devpts-cutover)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)
-**最后核验：** 2026-08-12
+**当前来源：** [`PTY-DEVPTS-CUTOVER` transaction](../../devlog/transactions/2026-08-11-pty-devpts.md#2026-08-11---stage-4-checkpoint-2-public-activation与pty-devpts-cutover)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[PTY logical cflag profile小迭代](../../devlog/changes/2026-08-13-pty-logical-cflag.md)
+**最后核验：** 2026-08-13
 
 ## 状态与能力所有权
 
@@ -61,13 +61,19 @@ open-vs-retire、fd reservation与relation commit source audit。
 首版公开global character node `/dev/ptmx`、canonical `/dev/pts/N`与additional mounted view、initial slave lock、
 `TIOCGPTN`、`TIOCSPTLCK`、`TIOCGPTPEER`、`O_CLOEXEC`、`O_NONBLOCK`和operation-local `O_NOCTTY`。slave初始metadata固定为
 allocator `fsuid:fsgid`、mode `0600`、character kind与`st_rdev=136:N`。现代termios/winsize、relation与job-control ioctl
-由companion TTY contracts定义。
+由companion TTY contracts定义。PTY的Terminal-owned logical `c_cflag`初始为`B38400 | CS8 | CREAD`，master与slave
+观察同一committed snapshot。`TCSETS*`保留asm-generic speed、`CSTOPB`、`PARODD`、`HUPCL`、`CLOCAL`、input-speed、
+`CMSPAR`与`CRTSCTS`等logical compatibility bits，但每次清除`CSIZE | PARENB`并强制`CS8 | CREAD`；这些bit不驱动
+physical line、pair lifecycle或data-plane decision。legacy `TCSETS*`无法携带arbitrary speed，因而output/input
+`BOTHER`、`ADDRB`与其它首版mask之外的changed bit返回`EINVAL`并保持旧snapshot。
 
 master final close flushes committed slave input；slave read在buffer清空后返回EOF，slave write和termios/winsize query或
 mutation返回`EIO`，`TIOCSPGRP`保持现有`ENOTTY`边界，poll/select/epoll必须暴露terminal HUP/ERR outcome。首版不支持
 legacy `TCGETA`/`TCSETA*`、`TCSBRK`/`TCSBRKP`，也不以silent success伪造这些命令。
 
-**验证 / Enforcement：** RV64 public `pty-test` 13/13；focused glibc/musl `hangup01`通过，`ioctl01` overall 7/9，
+**验证 / Enforcement：** RV64 public `pty-test` 14/14，包含独立cflag初值、master/slave共享、三种`TCSETS*`、
+normalization、logical input speed/mark parity round-trip与`BOTHER`/unsupported rollback；focused glibc/musl
+`hangup01`通过，`ioctl01` overall 7/9，
 两个legacy `TCGETA` pointer-error子项非PASS；legacy probes与distribution metadata差异按register逐项归因，只有实际
 PASS计入证据。
 
