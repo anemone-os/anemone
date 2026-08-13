@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-13 - `/proc/filesystems` registry projection](./2026-08-13-proc-filesystems.md)
 - [2026-08-13 - Char device readiness](./2026-08-13-char-device-readiness.md)
 - [2026-08-13 - Unix peer credentials](./2026-08-13-unix-peer-credentials.md)
 - [2026-08-13 - TTY IUTF8与明确compatibility set](./2026-08-13-tty-iutf8-compat.md)

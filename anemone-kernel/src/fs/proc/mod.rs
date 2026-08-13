@@ -132,6 +132,7 @@ mod tgid;
 
 // pdes
 mod celf;
+mod filesystems;
 mod meminfo;
 mod mounts;
 mod uptime;
