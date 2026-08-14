@@ -208,6 +208,7 @@ pub mod linux {
     pub const SYS_UMASK: u64 = 166;
     pub const SYS_PRCTL: u64 = 167;
 
+    pub const SYS_GETCPU: u64 = 168;
     pub const SYS_GETTIMEOFDAY: u64 = 169;
 
     pub const SYS_GETPID: u64 = 172;
