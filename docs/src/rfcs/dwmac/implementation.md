@@ -141,11 +141,15 @@ Probe code is deleted or absorbed into the production backend before Gate 2 exit
 
 ## Gate 3 - Per-node production attach
 
-**Purpose:** 在 Gate 3-enabled kernel 的同一次 platform `probe()` 中，原位采用 Gate 2 已写入 device
+**Purpose:** 在每个 production kernel 的同一次 platform `probe()` 中，原位采用 Gate 2 已写入 device
 `drv_state`的 DWMAC1000 hardware owner，首次建立IRQ context并接入 existing
 FrameProvider/worker/publication/attach path，完成
 不固定实例数的 per-node production implementation。单端口 bring-up 只是该 Gate 内的第一段验证，不形成
 独立 Gate 或 single-port-only production target。
+
+**Required path:** Gate 3 是 Gate 2 成功后的必经实现路径，不提供 `gate3` Cargo/Kconfig feature，也不提供
+Gate 2-only production kernel。Gate 2 characterization 通过后，probe 必须在同一 owner 上继续完成 IRQ request、
+publication 和 attach；无法完成该 continuation 时，probe 失败并按本 Gate 的 cleanup/fail-stop 规则处理。
 
 **Prerequisites:** Gate 2 backend/bounded bring-up closure；每个可接入 node 都保留唯一、disabled、
 characterization-passed owner，Route A、PHY、MAC、DMA、enhanced/extended descriptor、CSR5 polling和quiescence evidence已关闭；

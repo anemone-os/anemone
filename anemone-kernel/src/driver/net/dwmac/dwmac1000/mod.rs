@@ -1,4 +1,6 @@
-//! Synopsys legacy DWMAC1000 concrete backend and bounded Gate 2 probe.
+//! Synopsys legacy DWMAC1000 concrete backend and mandatory Gate 2 -> Gate 3
+//! probe continuation. A successful Gate 2 admission is never exposed as a
+//! Gate 2-only production configuration or build-time feature.
 
 mod fwnode;
 mod irq;
@@ -412,6 +414,9 @@ impl DriverOps for Driver {
         );
         match characterization.disposition() {
             ProbeDisposition::BindRetained => {
+                // Gate 3 is mandatory after a retained Gate 2 pass. Keep the
+                // continuation in this probe so there is no Gate 2-only
+                // production path or feature-gated second attach.
                 device.set_drv_state(crate::utils::any_opaque::AnyOpaque::new(Dwmac1000State {
                     owner: owner.clone(),
                     runtime: SpinLock::new(None),

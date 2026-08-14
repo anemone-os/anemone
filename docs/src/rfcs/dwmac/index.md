@@ -130,10 +130,11 @@ Gate 3在同一次platform `probe()`的private continuation中从该owner首次�
 strong reference，再commit/unmask，不能重新映射MMIO、重建rings/backing、替换一次性`drv_state`或制造第二份
 CSR5 truth。pending trace、handler/W1C/level-flow、异常注入和重复启动矩阵都属于Gate 3/final acceptance。
 
-Gate 3 的“原位 adopt”不是另一次 reprobe，也不假设 owner 跨 reboot 存活。Gate 3-enabled kernel 的同一次
+Gate 3 的“原位 adopt”不是另一次 reprobe，也不假设 owner 跨 reboot 存活。每个 production kernel 的同一次
 platform `probe()` 只创建一次 owner；Gate 2 characterization通过后，private continuation在该 owner 上首次
-commit IRQ并增加provider/worker/publication capability，最后由bus bind。Gate 2-only kernel则在同一点把
-disabled、unpublished owner写入一次性`drv_state`并完成bind。两条构建阶段都不允许替换该owner。
+commit IRQ并增加provider/worker/publication capability，最后由bus bind。Gate 3 是必经路径，不存在 Gate 3
+feature 或 Gate 2-only production kernel；无法完成该 continuation 时不得以 disabled、unpublished owner
+作为成功的替代路径。两条阶段仍不允许替换该owner。
 
 ```text
 ICU source pending
