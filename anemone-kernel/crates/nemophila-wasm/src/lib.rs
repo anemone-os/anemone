@@ -61,11 +61,11 @@
 //!
 //! | Feature | Crates | Description |
 //! |:-:|:--|:--|
-//! | `std` | `wasmi`<br>`wasmi_core`<br>`wasmi_ir`<br>`wasmi_collections` | Enables usage of Rust's standard library. This may have some performance advantages when enabled. Disabling this feature makes Wasmi compile on platforms that do not provide Rust's standard library such as many embedded platforms. <br><br> Enabled by default. |
+//! | `std` | `nemophila-wasm`<br>`nemophila-wasm-core` | Enables usage of Rust's standard library. This may have some performance advantages when enabled. Disabling this feature makes the interpreter compile on platforms that do not provide Rust's standard library such as many embedded platforms. |
 //! | `wat` | `wasmi` | Enables support to parse Wat encoded Wasm modules. <br><br> Enabled by default. |
-//! | `simd` | `wasmi`<br>`wasmi_core`<br>`wasmi_ir`<br>`wasmi_cli` | Enables support for the Wasm `simd` and `relaxed-simd` proposals. Note that this may introduce execution overhead and increased memory consumption for Wasm executions that do not need Wasm `simd` functionality. <br><br> Disabled by default. |
-//! | `hash-collections` | `wasmi`<br>`wasmi_collections` | Enables use of hash-map based collections in Wasmi internals. This might yield performance improvements in some use cases. <br><br> Disabled by default. |
-//! | `prefer-btree-collections` | `wasmi`<br>`wasmi_collections` | Enforces use of btree-map based collections in Wasmi internals. This may yield performance improvements and memory consumption decreases. Also it enables Wasmi to run on platforms that have no random source. <br><br> Disabled by default. |
+//! | `simd` | `nemophila-wasm`<br>`nemophila-wasm-core` | Enables support for the Wasm `simd` and `relaxed-simd` proposals. Note that this may introduce execution overhead and increased memory consumption for Wasm executions that do not need Wasm `simd` functionality. <br><br> Disabled by default. |
+//! | `hash-collections` | `nemophila-wasm` | Enables use of hash-map based collections in interpreter internals. This might yield performance improvements in some use cases. <br><br> Disabled by default. |
+//! | `prefer-btree-collections` | `nemophila-wasm` | Enforces use of btree-map based collections in interpreter internals. This may yield performance improvements and memory consumption decreases. Also it enables the interpreter to run on platforms that have no random source. <br><br> Disabled by default. |
 //! | `extra-checks` | `wasmi` | Enables extra runtime checks in the Wasmi executor. Expected execution overhead is ~20%. Enable this if your focus is on safety. Disable this for maximum execution performance. <br><br> Disabled by default. |
 
 #![no_std]
@@ -124,13 +124,12 @@ mod core {
     };
 }
 
-/// Definitions from the `wasmi_collections` crate.
-#[doc(inline)]
-use wasmi_collections as collections;
-
-/// Definitions from the `wasmi_collections` crate.
-#[doc(inline)]
-use wasmi_ir as ir;
+// These private modules retain the imported interpreter's generic collection
+// and bytecode capabilities even when R0 does not exercise every helper.
+#[allow(dead_code)]
+mod collections;
+#[allow(dead_code)]
+mod ir;
 
 /// Defines some errors that may occur upon interaction with Wasmi.
 pub mod errors {

@@ -383,6 +383,14 @@ impl Module {
         Some(ty)
     }
 
+    /// Returns whether this module declares a Core WebAssembly start function.
+    ///
+    /// This is structural module metadata, not an admission decision. Embedders
+    /// such as Nemophila may reject an otherwise valid module based on it.
+    pub fn has_start(&self) -> bool {
+        self.module_header().start.is_some()
+    }
+
     /// Returns the [`ExternType`] for a given [`ExternIdx`].
     ///
     /// # Note

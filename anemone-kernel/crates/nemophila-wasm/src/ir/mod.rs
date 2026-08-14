@@ -1,9 +1,3 @@
-#![no_std]
-
-extern crate alloc;
-#[cfg(feature = "std")]
-extern crate std;
-
 #[macro_use]
 mod for_each_op;
 mod r#enum;
@@ -17,9 +11,8 @@ mod visit_results;
 #[cfg(test)]
 mod tests;
 
-use wasmi_core as core;
-
 #[doc(inline)]
+#[allow(unused_imports)]
 pub use self::{
     error::Error,
     immeditate::{AnyConst16, AnyConst32, Const16, Const32},

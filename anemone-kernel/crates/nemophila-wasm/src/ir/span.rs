@@ -1,4 +1,4 @@
-use crate::{Error, Slot};
+use crate::ir::{Error, Slot};
 
 /// A [`SlotSpan`] of contiguous [`Slot`] indices.
 ///

@@ -4,6 +4,7 @@
 pub mod app;
 pub mod build_preset;
 pub mod kconfig;
+pub mod nemophila_module;
 pub mod platform;
 pub mod reference;
 pub mod resolve;

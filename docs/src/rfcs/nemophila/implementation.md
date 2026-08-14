@@ -4,18 +4,18 @@
 **最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R2
-**Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Ready / Not Started；Stage 3--6 / Outline Only / Not Started
-**Execution Authorization：** None；Stage 1授权已消费，Stage 2未获授权
+**Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 3--6 / Outline Only / Not Started
+**Execution Authorization：** None；Stage 1与Stage 2授权已消费，Stage 3未获解析或执行授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R2 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
-acceptance。Stage 1 已关闭；Stage 2 已解析但未开始；Stage 3--6 仍只有 outline。当前没有 Nemophila current contract 或
+acceptance。Stage 1 与 Stage 2 已关闭；Stage 3--6 仍只有 outline。当前没有 Nemophila current contract 或
 cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
-Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，等待
-维护者另行授权执行。Stage 3--6 只保留 Purpose、Prerequisites 和 Protected Boundary，只有维护者明确授权解析对应 Stage 后
+Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，
+execution evidence同样见transaction。Stage 3--6 只保留 Purpose、Prerequisites 和 Protected Boundary，只有维护者明确授权解析对应 Stage 后
 才补充其可执行边界，不提前冻结类型、算法、文件列表、精确命令或 checkpoint。关闭一个 Stage 不自动授权下一个 Stage 的
 解析或执行。
 
@@ -61,7 +61,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage | 解析程度 | 目的 | 可见语义 / Cutover |
 | --- | --- | --- | --- |
 | Stage 1 | Resolved / Closed | 从固定 Wasmi provenance 形成可持续演进的 in-tree `nemophila-wasm` crate | None |
-| Stage 2 | Resolved / Ready / Not Started | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
+| Stage 2 | Resolved / Closed | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
 | Stage 3 | Outline Only | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
 | Stage 4 | Outline Only | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
@@ -71,7 +71,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 
 **Resolution：** Resolved / Closed
 
-**Execution Authorization：** Consumed；Stage 2未授权
+**Execution Authorization：** Consumed
 
 **Purpose：** 先 clone 固定 Wasmi `v1.1.0` 源码，再将实际 interpreter source 导入 Anemone 仓库的
 `anemone-kernel/crates/nemophila-wasm`，形成由第一方直接裁剪、适配、维护且会在后续 Stage 继续演进的 in-tree crate。
@@ -180,13 +180,13 @@ write-back、code disposition 与 exit 并取得对应授权，再执行最小 p
 
 Stage 1 已关闭，execution evidence 与 Not Run 见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。`nemophila-wasm` 已是仓库内第一方 source，Stage 2
-直接从当前 source 继续。Stage 2 已解析但未获执行授权。
+直接从当前 source 继续。Stage 2 后续已独立授权并关闭，不改变本 Stage closure evidence。
 
 ## Stage 2 — WIT、SDK 与 artifact toolchain
 
-**Resolution：** Resolved / Ready / Not Started
+**Resolution：** Resolved / Closed
 
-**Execution Authorization：** None
+**Execution Authorization：** Consumed；Stage 3未获解析或执行授权
 
 **Purpose：** 建立由同一 versioned WIT package/world 驱动的 logical interface、Rust module SDK、xtask-owned Cargo module
 build 与 canonical clone observer artifact。真实 Rust toolchain output 必须通过共同 artifact envelope 和当前
@@ -324,8 +324,22 @@ generated binding glue、manifest/file layout 或内部 type 不触发停止条�
 
 ### Result
 
-Stage 2 已解析为 Ready / Not Started；Execution Authorization 为 None，implementation 与本节 validation 均未运行。本轮只
-关闭 docs-only resolution，不产生 code、artifact、current contract 或 cutover。
+Stage 2 已关闭。canonical `anemone:nemophila@0.1.0` WIT、`no_std + alloc` Rust SDK、Cargo-built clone observer、独立
+module manifest/driver/common validation path 与 stable `build/modules/clone-observer/` artifact 已交付。WIT-derived load
+success/failure 与 point-specific registration result 保持分离；clone `Fanout` registration surface 不预置 exclusive-only
+outcome；SDK 的 callback environment 在 registration failure 先释放，成功后保留到 instance memory 被整体销毁。bindgen 的
+per-export constructor workaround 已禁用，artifact 无 Core Wasm start、WASI、Component binary、额外 Host import 或第二个
+lifecycle entry。
+
+共同 build path 每次使用新的 candidate 目录，在同一 byte snapshot 上完成 WIT envelope、当前 `nemophila-wasm` eager
+validation/translation、fake-Host execution 与原子 export。host harness 覆盖 load 前 callback trap、registration success、
+边界 `u32` TID logging、provider unavailable、pending environment release 与 failure 后 callback rejection。interpreter
+owner 同时把原独立 collections/IR implementation crates 内收到 `nemophila-wasm` 私有模块，保留 `nemophila-wasm-core`
+独立 crate；这不改变 interpreter/Nemophila owner 分工。
+
+完整命令、artifact identity、independent review、Architecture Friction Scan 与 Not Run 见
+[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。本 Stage 没有 kernel runtime、SystemTarget、management ABI、
+visible semantics、current contract 或 `NEMOPHILA-R0-CUTOVER`；Stage 3 仍为 Outline Only，未获解析或执行授权。
 
 ## Stage 3 — Kernel transactional runtime core
 

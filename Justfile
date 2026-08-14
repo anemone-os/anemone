@@ -6,13 +6,14 @@ default:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
-[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `nemophila-wasm`, `virtio-drivers`, or `lwext4`")]
+[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `nemophila-wasm`, `nemophila-module`, `virtio-drivers`, or `lwext4`")]
 test suite:
     @case {{ quote(suite) }} in \
         xtask) just test-xtask ;; \
         symtab) just test-symtab ;; \
         net-host) just test-net-host ;; \
         nemophila-wasm) just test-nemophila-wasm ;; \
+        nemophila-module) just test-nemophila-module ;; \
         virtio-drivers) just test-virtio-drivers ;; \
         lwext4) just test-lwext4 ;; \
         *) echo "unknown test suite:" {{ quote(suite) }} >&2; exit 2 ;; \
@@ -43,6 +44,10 @@ test-nemophila-wasm:
     @cargo rustc -p nemophila-wasm-embed-validation --target loongarch64-unknown-none -- -C panic=abort
 
 [private]
+test-nemophila-module:
+    @just module build clone-observer
+
+[private]
 test-virtio-drivers:
     @cargo test -p virtio-drivers --no-default-features
     @cargo test -p virtio-drivers --all-features
@@ -67,7 +72,7 @@ build *args:
 qemu *args:
     @just xtask qemu {{ args }}
 
-[doc("format Rust sources in the explicit `all`, `kernel`, or app scope")]
+[doc("format Rust sources in an explicit `all`, `kernel`, `modules`, app, or module scope")]
 fmt scope *args:
     @just xtask fmt {{ scope }} {{ args }}
 
@@ -78,6 +83,10 @@ conf *args:
 [doc("app related commands. type `just app -h` for more details.")]
 app *args:
     @just xtask app {{ args }}
+
+[doc("build and validate a Nemophila module by identity")]
+module *args:
+    @just xtask module {{ args }}
 
 [doc("manage curated external source references")]
 xref *args:

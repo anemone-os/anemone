@@ -7,7 +7,7 @@ use core::{borrow::Borrow, fmt::Debug, hash::Hash, iter::FusedIterator, ops::Ind
     not(feature = "prefer-btree-collections")
 ))]
 mod detail {
-    use crate::hash;
+    use crate::collections::hash;
     use hashbrown::hash_map;
 
     pub type MapImpl<K, V> = hash_map::HashMap<K, V, hash::RandomState>;

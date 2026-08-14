@@ -3,17 +3,17 @@ use core::fmt;
 /// An error that may be occurred when operating with some Wasmi IR primitives.
 #[derive(Debug)]
 pub enum Error {
-    /// Encountered when trying to create a [`Slot`](crate::Slot) from an out of
-    /// bounds integer.
+    /// Encountered when trying to create a [`Slot`](crate::ir::Slot) from an
+    /// out of bounds integer.
     StackSlotOutOfBounds,
     /// Encountered when trying to create a
-    /// [`BranchOffset`](crate::BranchOffset) from an out of bounds integer.
+    /// [`BranchOffset`](crate::ir::BranchOffset) from an out of bounds integer.
     BranchOffsetOutOfBounds,
-    /// Encountered when trying to create a [`Comparator`](crate::Comparator)
-    /// from an out of bounds integer.
+    /// Encountered when trying to create a
+    /// [`Comparator`](crate::ir::Comparator) from an out of bounds integer.
     ComparatorOutOfBounds,
-    /// Encountered when trying to create a [`BlockFuel`](crate::BlockFuel) from
-    /// an out of bounds integer.
+    /// Encountered when trying to create a [`BlockFuel`](crate::ir::BlockFuel)
+    /// from an out of bounds integer.
     BlockFuelOutOfBounds,
 }
 

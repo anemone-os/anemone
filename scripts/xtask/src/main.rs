@@ -31,6 +31,8 @@ enum Commands {
     Rootfs(tasks::rootfs::RootfsArgs),
     #[command(about = "App related tasks")]
     App(tasks::app::AppArgs),
+    #[command(about = "Nemophila module related tasks")]
+    Module(tasks::module::ModuleArgs),
     #[command(about = "Manage curated external source references")]
     Xref(tasks::xref::XrefArgs),
     #[command(about = "Build Anemone")]
@@ -63,6 +65,7 @@ fn run() -> anyhow::Result<()> {
         Commands::Conf(conf) => tasks::conf::run(conf),
         Commands::Rootfs(args) => tasks::rootfs::run(args),
         Commands::App(args) => tasks::app::run(args),
+        Commands::Module(args) => tasks::module::run(args),
         Commands::Xref(args) => tasks::xref::run(args),
         Commands::Build(args) => tasks::build::run(args),
         Commands::Fmt(args) => tasks::fmt::run(args),
@@ -102,6 +105,7 @@ mod tests {
             Cli::try_parse_from(["xtask", "build", "--preset", "example", "--disasm",]).is_ok()
         );
         assert!(Cli::try_parse_from(["xtask", "fmt", "all", "--check"]).is_ok());
+        assert!(Cli::try_parse_from(["xtask", "module", "build", "clone-observer"]).is_ok());
         assert!(Cli::try_parse_from(["xtask", "xref", "list"]).is_ok());
         assert!(Cli::try_parse_from(["xtask", "xref", "fetch", "linux-6.6.32"]).is_ok());
         assert!(

@@ -1,4 +1,4 @@
-use crate::arena::ArenaIndex;
+use crate::collections::arena::ArenaIndex;
 use alloc::vec::Vec;
 use core::{
     fmt::{self, Debug},

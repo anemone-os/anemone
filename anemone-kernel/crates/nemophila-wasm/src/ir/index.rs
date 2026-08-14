@@ -1,6 +1,6 @@
 //! Definitions for thin-wrapper index types.
 
-use crate::Error;
+use crate::ir::Error;
 
 macro_rules! for_each_index {
     ($mac:ident) => {

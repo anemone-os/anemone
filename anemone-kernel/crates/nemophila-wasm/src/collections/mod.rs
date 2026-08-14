@@ -23,7 +23,6 @@
 //! [`BTreeSet`]: std::collections::BTreeSet
 //! [`BTreeMap`]: std::collections::BTreeMap
 
-#![no_std]
 #![warn(
     clippy::cast_lossless,
     clippy::missing_errors_doc,
@@ -35,10 +34,6 @@
     clippy::map_unwrap_or,
     clippy::items_after_statements
 )]
-
-extern crate alloc;
-#[cfg(feature = "std")]
-extern crate std;
 
 pub mod arena;
 #[cfg(feature = "hash-collections")]
@@ -52,6 +47,7 @@ pub mod string_interner;
 mod tests;
 
 #[doc(inline)]
+#[allow(unused_imports)]
 pub use self::{
     arena::{Arena, ComponentVec, DedupArena},
     head_vec::HeadVec,

@@ -1,4 +1,7 @@
-use crate::{core::UntypedVal, immeditate::OutOfBoundsConst, Const16, Error};
+use crate::{
+    core::UntypedVal,
+    ir::{immeditate::OutOfBoundsConst, Const16, Error},
+};
 use core::marker::PhantomData;
 
 /// The sign of a value.
@@ -317,7 +320,7 @@ for_each_comparator!(define_comparator);
 ///
 /// This type can be converted from and to a `u64` or [`UntypedVal`] value.
 ///
-/// [`Op::BranchCmpFallback`]: crate::Op::BranchCmpFallback
+/// [`Op::BranchCmpFallback`]: crate::ir::Op::BranchCmpFallback
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ComparatorAndOffset {
     /// Encodes the actual binary operator for the conditional branch.

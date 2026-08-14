@@ -1,8 +1,11 @@
 #[cfg(feature = "simd")]
 use crate::core::simd::{ImmLaneIdx16, ImmLaneIdx2, ImmLaneIdx4, ImmLaneIdx8};
 #[cfg(all(feature = "simd", doc))]
-use crate::core::V128;
-use crate::{core::TrapCode, index::*, primitive::Offset64Hi, *};
+use crate::V128;
+use crate::{
+    ir::{index::*, primitive::Offset64Hi, *},
+    TrapCode,
+};
 use ::core::num::{NonZeroI32, NonZeroI64, NonZeroU32, NonZeroU64};
 
 macro_rules! define_enum {
@@ -81,7 +84,7 @@ macro_rules! define_enum {
             )*
         }
 
-        impl<'a> $crate::visit_results::ResultsVisitor for &'a mut Op {
+        impl<'a> $crate::ir::visit_results::ResultsVisitor for &'a mut Op {
             fn host_visitor<V: VisitResults>(self, visitor: &mut V) {
                 match self {
                     $(

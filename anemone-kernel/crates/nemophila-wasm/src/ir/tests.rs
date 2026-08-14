@@ -1,4 +1,4 @@
-use crate::{Slot, SlotSpan, SlotSpanIter};
+use crate::ir::{Slot, SlotSpan, SlotSpanIter};
 
 #[test]
 fn has_overlapping_copy_spans_works() {

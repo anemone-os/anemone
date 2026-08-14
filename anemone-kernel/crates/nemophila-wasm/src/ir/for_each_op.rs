@@ -155,7 +155,7 @@ macro_rules! for_each_op_grouped {
                     /// decoded into a [`ComparatorAndOffset`] before access its comparator
                     /// and 32-bit branch offset fields.
                     ///
-                    /// [`ComparatorAndOffset`]: crate::ComparatorAndOffset
+                    /// [`ComparatorAndOffset`]: crate::ir::ComparatorAndOffset
                     params: Slot,
                 },
 

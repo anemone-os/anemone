@@ -13,7 +13,7 @@ use core::{
     not(feature = "prefer-btree-collections")
 ))]
 mod detail {
-    use crate::hash;
+    use crate::collections::hash;
     use hashbrown::hash_set;
 
     pub type SetImpl<T> = hash_set::HashSet<T, hash::RandomState>;

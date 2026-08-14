@@ -1,0 +1,39 @@
+package anemone:nemophila@0.1.0;
+
+/// Point-specific clone observer registration.
+interface weave-clone {
+    /// The result of asking the Host to bind this instance to the clone point.
+    enum registration-result {
+        registered,
+        provider-unavailable,
+        already-registered,
+    }
+
+    /// The module has already stored its typed callback before this call.
+    register-observer: func() -> registration-result;
+}
+
+/// Value-only diagnostic submission to the kernel logging owner.
+interface logging {
+    enum level {
+        debug,
+        info,
+        warning,
+        error,
+    }
+
+    write: func(level: level, message: string);
+}
+
+world module {
+    import weave-clone;
+    import logging;
+
+    /// The only module lifecycle entry in the R0 artifact envelope.
+    /// Its result reports only whether module initialization succeeded; binding
+    /// state remains owned by the point-specific registration import.
+    export load: func() -> result;
+
+    /// The fixed trampoline for the task-owned clone observer point.
+    export observe-clone: func(creator-tid: u32, child-tid: u32);
+}

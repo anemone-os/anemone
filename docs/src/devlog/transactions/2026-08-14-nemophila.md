@@ -1,6 +1,6 @@
 # 2026-08-14 - Nemophila
 
-**Status:** Active / R2 / Stage 1 Closed / Stage 2 Ready / Not Started
+**Status:** Active / R2 / Stage 1 Closed / Stage 2 Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R2](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -10,8 +10,7 @@
 
 本transaction只为长期、多Stage RFC保存checkpoint execution、validation与resolution evidence。target、owner、ABI、
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
-interpreter profile/version或current contract。Stage 1已关闭；维护者本轮授权Stage 2 docs-only resolution，未授权任何Stage 2
-implementation。Stage 3--6仍未获解析或执行授权。
+interpreter profile/version或current contract。Stage 1与Stage 2均已按独立授权关闭；Stage 3--6仍未获解析或执行授权。
 
 ## Checkpoint Log
 
@@ -106,3 +105,74 @@ Not Run。
 
 **Next / Stop:** Stage 2为Ready / Not Started；本轮严格停止在resolution。只有维护者新的明确授权才能开始Stage 2
 implementation；Stage 2 closure也不会自动授权Stage 3。
+
+### 2026-08-14 - Stage 2 implementation and closure
+
+**Execution Authorization:** 维护者授权完成Stage 2；该授权已消费。Stage 3的解析与执行均未授权。
+
+**Change:** 新增canonical `anemone:nemophila@0.1.0` WIT package/world、独立`no_std + alloc` Rust SDK、
+`clone-observer` module workspace/lockfile与`wasm32v1-none` Cargo artifact。SDK公开load-scoped
+capability/provider/point hierarchy与typed callback，只在guest instance memory保存`Empty`/`Pending`/`Registered`
+callback slot；registration failure先释放pending environment，success保留environment直到instance整体销毁。module load只以
+独立unit result表达module是否接受本次load，point-specific registration result继续只表达Host binding请求；clone point为
+`Fanout`，因此其result只保留`registered`、`provider-unavailable`与`already-registered`。固定callback export在load前或
+registration failure后调用都会trap；`wit-bindgen`的per-export constructor workaround被显式禁用，避免callback entry在
+module-side `load`之前执行静态初始化。
+
+xtask新增独立module manifest/config owner、`module build` action、最小`ModuleBuildDriver` trait与唯一Cargo driver；没有复用
+app manifest/driver、SystemTarget、Platform architecture或artifact path。Cargo route固定repository toolchain、
+`wasm32v1-none`、`nemophila-module` profile、`-Z build-std=core,alloc`与`--locked`。每次invocation建立新的
+`build/modules/.candidates/clone-observer-<pid>-<sequence>`，common path拒绝missing/non-regular/multiple/stale candidate，
+区分Core/Component binary，使用canonical WIT检查metadata/import/export/helper/custom-section envelope，以当前
+`nemophila-wasm`完成eager validation/translation并运行value-only fake Host harness，最后只原子发布同一份已验证byte
+snapshot到`build/modules/clone-observer/nemophila_clone_observer.wasm`。standard clean、repository format all/module scope和
+module-specific scope均覆盖新增source/output。
+
+按维护者关于Wasmi crate shape的要求，原`nemophila-wasm-collections`与`nemophila-wasm-ir`两个独立implementation crates
+删除并机械内收到`nemophila-wasm::{collections,ir}`私有模块；`nemophila-wasm-core`仍保持独立crate。interpreter新增通用
+structural `Module::has_start()` metadata query，R0 start rejection仍由Nemophila artifact owner决定。该收缩没有改变通用
+validator/executor truth、公开embedding语义或interpreter/Nemophila owner分工。
+
+**Artifact / Dependency Audit:** 最终stable artifact为19842-byte ordinary Core Wasm file，SHA-256为
+`383a504d961c8d609822274e057143da8a2d96e1fd947399700e4e5ffff85bf6`。两次fresh candidate build得到相同hash；actual imports
+只有WIT-derived `anemone:nemophila/weave-clone@0.1.0::register-observer`与
+`anemone:nemophila/logging@0.1.0::write`，exports只有`load`、`observe-clone`、linear memory、allocator helper和
+toolchain globals，custom sections只含两份WIT component-type metadata、`name`、`producers`与`target_features`。artifact没有
+Core Wasm start、Component binary、WASI/host-libc import、额外Host service/lifecycle entry或`run_ctors_once` symbol。module
+lockfile包含`dlmalloc`对其它host target的conditional `libc`/`windows-sys`记录，但实际`wasm32v1-none` dependency graph与
+artifact没有这些runtime依赖。source tree没有nested Git、submodule或symlink；interpreter production graph只保留main/core
+implementation、`wasmparser`、`spin`、`libm`、`bitflags`及feature-selected collection dependencies。
+
+**Host Harness:** callback-before-load trap且不注册/不记录日志；successful load恰好调用一次registration，随后callback把
+`0`与`u32::MAX` TID原样记录为`clone creator=0 child=4294967295`；provider-unavailable时module收到typed failure，SDK先
+释放pending callback environment，再产生精确debug diagnostic并返回generic module load error，callback继续不可调用。
+fake Host只实现WIT value boundary，不形成production runtime/provider/lifecycle facade。
+
+**Independent Review / Architecture Friction:** 独立review最初发现并要求修正三条真实摩擦：module load result复用
+registration state且clone `Fanout` result预置exclusive-only outcome；stable export二次读取candidate而可能偏离已验证snapshot；
+bindgen默认在每个export前运行constructor workaround而绕过唯一load lifecycle。实现分别以独立unit load result和收窄的
+point-specific result、直接发布已验证bytes、显式禁用constructor workaround关闭。review复核最新diff后确认无剩余
+Apollyon、Keter、Euclid或值得记录的Safe finding。最终Architecture Friction Scan确认WIT/runtime binding、interpreter/
+artifact validation、driver/common path与candidate/export各自只有一个行为owner，没有第二份状态真相、owner穿透、public API
+扩张、test-only production path或降低oracle的桥。
+
+**Contract Cutover:** None。Stage 2只交付WIT/SDK/toolchain/canonical artifact和host evidence；没有kernel runtime、
+SystemTarget embedded selection、public management ABI、visible semantics、current contract或register baseline，也不是
+`NEMOPHILA-R0-CUTOVER`。
+
+**Validation:** `just --list`、`just xtask module --help`与`just xtask module build --help`确认production CLI；
+`just test xtask`通过105项测试；`just test nemophila-module`通过真实Cargo build、envelope与host harness，随后第二次
+`just module build clone-observer`从另一fresh candidate重复得到相同hash。`just clean`确认stable module export被删除，clean后
+重新build成功。`just test nemophila-wasm`通过production `no_std + alloc + extra-checks` check、71项unit tests、53项
+integration tests、1项doctest、定向Miri的3项Stage 1 embedding tests，以及RV64/LA64 validation staticlib build/link。
+`just build --preset qemu-virt-rv64-release`完成repository-owned RV64 release kernel双pass build；该命令只恢复/验证generated
+kernel inputs与workspace build，不是Nemophila kernel integration或runtime evidence。最终`just fmt all --check`、
+`just fmt modules --check`、`just fmt clone-observer --check`、`git diff --check`与`mdbook build docs`通过。toolchain为
+`rustc 1.96.0-nightly (48cc71ee8 2026-03-31)`、LLVM 22.1.2。
+
+kernel KUnit执行、QEMU、LTP、hardware、guest RV64/LA64 Nemophila runtime、kernel admission/lifecycle/management、
+SystemTarget embedded selection与R0双架构acceptance均Not Run；host harness、bare-metal interpreter link和普通RV64 kernel
+build不得外推这些结果。
+
+**Next / Stop:** Stage 2 Closed。current contracts与register保持不变，`NEMOPHILA-R0-CUTOVER`仍为Future。本次严格停止在
+Stage 2；Stage 3仍为Outline Only，未获解析或执行授权。

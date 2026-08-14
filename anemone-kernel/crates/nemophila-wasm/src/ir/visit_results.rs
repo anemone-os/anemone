@@ -1,4 +1,4 @@
-use crate::{index::*, *};
+use crate::ir::{index::*, *};
 
 impl Op {
     /// Visit result [`Slot`]s of `self` via the `visitor`.

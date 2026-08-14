@@ -128,6 +128,9 @@ impl<'engine> Executor<'engine> {
     fn execute(&mut self, store: &mut PrunedStore) -> Result<(), Error> {
         use Op as Instr;
         loop {
+            // Keep the imported interpreter's explicit fail-fast fallback so a
+            // newly added internal opcode cannot silently acquire semantics.
+            #[allow(unreachable_patterns)]
             match *self.ip.get() {
                 Instr::Trap { trap_code } => self.execute_trap(trap_code)?,
                 Instr::ConsumeFuel { block_fuel } => {

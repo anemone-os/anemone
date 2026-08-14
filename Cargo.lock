@@ -1016,20 +1016,12 @@ name = "nemophila-wasm"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
- "nemophila-wasm-collections",
+ "hashbrown 0.15.5",
  "nemophila-wasm-core",
- "nemophila-wasm-ir",
  "spin 0.9.9",
+ "string-interner",
  "wasmparser 0.239.0",
  "wat",
-]
-
-[[package]]
-name = "nemophila-wasm-collections"
-version = "0.1.0"
-dependencies = [
- "hashbrown 0.15.5",
- "string-interner",
 ]
 
 [[package]]
@@ -1044,13 +1036,6 @@ name = "nemophila-wasm-embed-validation"
 version = "0.0.0"
 dependencies = [
  "nemophila-wasm",
-]
-
-[[package]]
-name = "nemophila-wasm-ir"
-version = "0.1.0"
-dependencies = [
- "nemophila-wasm-core",
 ]
 
 [[package]]

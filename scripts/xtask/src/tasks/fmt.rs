@@ -10,12 +10,14 @@ use clap::Args;
 use crate::{log_progress, tasks::utils::cmd_echo};
 
 const APPS_DIR: &str = "anemone-apps";
+const MODULES_DIR: &str = "nemophila/modules";
+const NEMOPHILA_SDK_MANIFEST: &str = "nemophila/sdk/rust/Cargo.toml";
 const RUSTFMT_CONFIG: &str = "rustfmt.toml";
 
 #[derive(Args, Debug)]
 pub struct FmtArgs {
     #[arg(value_name = "SCOPE")]
-    #[arg(help = "Explicit scope: `all`, `kernel`, or an app name")]
+    #[arg(help = "Explicit scope: `all`, `kernel`, `modules`, or an app/module name")]
     pub scope: String,
 
     #[arg(long, help = "Run rustfmt in check mode without writing changes")]
@@ -31,17 +33,49 @@ pub fn run(args: FmtArgs) -> anyhow::Result<()> {
         "all" => {
             fmt_kernel_workspace(&config_path, args.check)?;
             fmt_xtask(&config_path, args.check)?;
+            fmt_nemophila_sdk(&config_path, args.check)?;
+            for module in module_names()? {
+                fmt_module(&module, &config_path, args.check)?;
+            }
             for app in app_names()? {
                 fmt_app(&app, &config_path, args.check)?;
             }
             Ok(())
         },
         "kernel" => fmt_kernel_workspace(&config_path, args.check),
-        package if app_manifest_path(package).exists() => {
-            fmt_app(package, &config_path, args.check)
+        "modules" => {
+            fmt_nemophila_sdk(&config_path, args.check)?;
+            for module in module_names()? {
+                fmt_module(&module, &config_path, args.check)?;
+            }
+            Ok(())
         },
-        package => {
-            bail!("unknown format scope `{package}`; expected `all`, `kernel`, or an app name")
+        scope if scope.starts_with("app:") => {
+            let app = &scope["app:".len()..];
+            if !app_manifest_path(app).exists() {
+                bail!("unknown app format scope `{app}`")
+            }
+            fmt_app(app, &config_path, args.check)
+        },
+        scope if scope.starts_with("module:") => {
+            let module = &scope["module:".len()..];
+            if !module_manifest_path(module).exists() {
+                bail!("unknown module format scope `{module}`")
+            }
+            fmt_module(module, &config_path, args.check)
+        },
+        package => match (
+            app_manifest_path(package).exists(),
+            module_manifest_path(package).exists(),
+        ) {
+            (true, false) => fmt_app(package, &config_path, args.check),
+            (false, true) => fmt_module(package, &config_path, args.check),
+            (true, true) => bail!(
+                "ambiguous format scope `{package}`; use `app:{package}` or `module:{package}`"
+            ),
+            (false, false) => bail!(
+                "unknown format scope `{package}`; expected `all`, `kernel`, `modules`, or an app/module name"
+            ),
         },
     }
 }
@@ -63,6 +97,38 @@ fn fmt_xtask(config_path: &Path, check: bool) -> anyhow::Result<()> {
     run_cmd(cmd, "xtask")
 }
 
+fn fmt_nemophila_sdk(config_path: &Path, check: bool) -> anyhow::Result<()> {
+    log_progress!("FMT", "Formatting Nemophila Rust SDK");
+    fmt_manifest(
+        Path::new(NEMOPHILA_SDK_MANIFEST),
+        "Nemophila Rust SDK",
+        config_path,
+        check,
+    )
+}
+
+fn fmt_module(module: &str, config_path: &Path, check: bool) -> anyhow::Result<()> {
+    log_progress!("FMT", &format!("Formatting Nemophila module '{}'", module));
+    fmt_manifest(
+        &module_manifest_path(module),
+        &format!("Nemophila module '{}'", module),
+        config_path,
+        check,
+    )
+}
+
+fn fmt_manifest(
+    manifest_path: &Path,
+    target: &str,
+    config_path: &Path,
+    check: bool,
+) -> anyhow::Result<()> {
+    let mut cmd = base_cargo_fmt_cmd(check);
+    cmd.arg("--manifest-path").arg(manifest_path);
+    add_rustfmt_config(&mut cmd, config_path);
+    run_cmd(cmd, target)
+}
+
 fn fmt_app(app: &str, config_path: &Path, check: bool) -> anyhow::Result<()> {
     log_progress!("FMT", &format!("Formatting app '{}'", app));
 
@@ -74,9 +140,17 @@ fn fmt_app(app: &str, config_path: &Path, check: bool) -> anyhow::Result<()> {
 }
 
 fn app_names() -> anyhow::Result<Vec<String>> {
+    package_names(Path::new(APPS_DIR))
+}
+
+fn module_names() -> anyhow::Result<Vec<String>> {
+    package_names(Path::new(MODULES_DIR))
+}
+
+fn package_names(root: &Path) -> anyhow::Result<Vec<String>> {
     let mut names = Vec::new();
 
-    for entry in fs::read_dir(APPS_DIR).with_context(|| format!("failed to read {}", APPS_DIR))? {
+    for entry in fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -100,6 +174,10 @@ fn app_names() -> anyhow::Result<Vec<String>> {
 
 fn app_manifest_path(app: &str) -> PathBuf {
     Path::new(APPS_DIR).join(app).join("Cargo.toml")
+}
+
+fn module_manifest_path(module: &str) -> PathBuf {
+    Path::new(MODULES_DIR).join(module).join("Cargo.toml")
 }
 
 fn base_cargo_fmt_cmd(check: bool) -> Command {
