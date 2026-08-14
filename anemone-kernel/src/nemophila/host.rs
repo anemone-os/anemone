@@ -4,11 +4,32 @@ use nemophila_wasm::{Caller, Error, Linker, errors::HostError};
 
 use crate::prelude::*;
 
+use super::{
+    runtime::{RegistrationFailure, RegistrationResult, RegistrationWindow},
+    weave::CallbackBinding,
+};
+
 pub(super) const LOGGING_MODULE: &str = "anemone:nemophila/logging@0.1.0";
 pub(super) const LOGGING_WRITE: &str = "write";
+pub(super) const WEAVE_CLONE_MODULE: &str = "anemone:nemophila/weave-clone@0.1.0";
+pub(super) const WEAVE_CLONE_REGISTER: &str = "register-observer";
+pub(super) const CLONE_OBSERVER_EXPORT: &str = "observe-clone";
 
-#[derive(Debug, Default)]
-pub(super) struct HostContext;
+pub(super) struct HostContext {
+    registration: Option<RegistrationWindow>,
+}
+
+impl HostContext {
+    pub(super) fn load(registration: RegistrationWindow) -> Self {
+        Self {
+            registration: Some(registration),
+        }
+    }
+
+    pub(super) fn close_load_window(&mut self) {
+        self.registration = None;
+    }
+}
 
 #[derive(Debug)]
 enum LoggingFailure {
@@ -32,6 +53,25 @@ impl fmt::Display for LoggingFailure {
 }
 
 impl HostError for LoggingFailure {}
+
+#[derive(Debug)]
+enum WeaveFailure {
+    MissingCallback,
+    OutsideLoad,
+}
+
+impl fmt::Display for WeaveFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingCallback => {
+                f.write_str("Nemophila clone registration has no typed callback export")
+            },
+            Self::OutsideLoad => f.write_str("Nemophila clone registration is outside module load"),
+        }
+    }
+}
+
+impl HostError for WeaveFailure {}
 
 #[derive(Debug, Clone, Copy)]
 enum GuestLogLevel {
@@ -64,6 +104,34 @@ pub(super) fn add_logging(linker: &mut Linker<HostContext>) -> Result<(), Error>
         },
     )?;
     Ok(())
+}
+
+pub(super) fn add_weave_clone(linker: &mut Linker<HostContext>) -> Result<(), Error> {
+    linker.func_wrap(
+        WEAVE_CLONE_MODULE,
+        WEAVE_CLONE_REGISTER,
+        |caller: Caller<'_, HostContext>| register_clone_observer(caller),
+    )?;
+    Ok(())
+}
+
+fn register_clone_observer(caller: Caller<'_, HostContext>) -> Result<i32, Error> {
+    let callback = caller
+        .get_export(CLONE_OBSERVER_EXPORT)
+        .and_then(|export| export.into_func())
+        .ok_or_else(|| Error::host(WeaveFailure::MissingCallback))?
+        .typed::<(i32, i32), ()>(&caller)?;
+    let registration = caller
+        .data()
+        .registration
+        .as_ref()
+        .ok_or_else(|| Error::host(WeaveFailure::OutsideLoad))?;
+    match registration.register_clone_observer(CallbackBinding::clone_observer(callback)) {
+        Ok(RegistrationResult::Registered) => Ok(0),
+        Ok(RegistrationResult::ProviderUnavailable) => Ok(1),
+        Ok(RegistrationResult::AlreadyRegistered) => Ok(2),
+        Err(RegistrationFailure::OutsideLoad) => Err(Error::host(WeaveFailure::OutsideLoad)),
+    }
 }
 
 fn write(

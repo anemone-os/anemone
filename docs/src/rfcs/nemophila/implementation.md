@@ -5,14 +5,15 @@
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
-Stage 3 / Resolved / Closed；Stage 4 / Resolved / Ready / Not Started；Stage 5--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 4 docs-only resolution授权已消费；Stage 4 Checkpoint 1/2与Stage 5--6解析/执行均未授权
+Stage 3 / Resolved / Closed；Stage 4 / Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started；
+Stage 5--6 / Outline Only / Not Started
+**Execution Authorization：** Stage 4 Checkpoint 1授权已消费；Checkpoint 2与Stage 5--6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
 两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
-两个共享完整lifecycle边界的execution checkpoint，保持Ready / Not Started；Stage 5--6仍只有outline。当前没有
+两个共享完整lifecycle边界的execution checkpoint；Checkpoint 1已关闭，Checkpoint 2保持Ready / Not Started；Stage 5--6仍只有outline。当前没有
 Nemophila current contract 或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
@@ -70,7 +71,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 2 | Resolved / Closed | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
 | Stage 2 Feedback Interlude | Resolved / Closed | 收拢SDK/config/build owner，移除xtask业务admission mirror，并以R3修正future kernel admission target | None |
 | Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
-| Stage 4 | Resolved / Ready / Not Started | 闭合 weave、并发调用与完整 instance lifecycle | None |
+| Stage 4 | Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
@@ -636,9 +637,9 @@ interpreter内部API/source调整可以留在既有crate owner并重跑受影响
 
 ## Stage 4 — Weave、并发调用与完整 lifecycle
 
-**Resolution：** Resolved / Ready / Not Started
+**Resolution：** Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started
 
-**Execution Authorization：** None；本次授权只用于docs-only resolution，Checkpoint 1与Checkpoint 2均未获执行授权
+**Execution Authorization：** Checkpoint 1 Consumed；Checkpoint 2未获执行授权
 
 **Purpose：** 在 Stage 3 transactional core 上闭合 typed point/provider handoff、registration/reservation、fanout cohort、
 per-instance serial execution、in-flight ownership、无副作用 busy try-unload、callback trap poison/cancellation 与 live/
@@ -776,6 +777,37 @@ cardinality；poison 不是自动 unbind/unload，busy failure 不做部分 clea
   Architecture Friction Scan。wrapper或QEMU success marker必须结合focused markers、完整KUnit结果与architecture-appropriate
   terminal outcome核对。Checkpoint 2关闭整个Stage 4，但不授权Stage 5、不接入task clone seam、不删除temporary Host fixture，
   也不形成public management ABI、current contract或`NEMOPHILA-R0-CUTOVER`。
+
+#### Checkpoint 1 关闭结果
+
+Checkpoint 1授权已消费。实现新增typed clone-observer provider declaration与Nemophila-owned immutable linker catalog；point
+identity来自固定kernel-internal数值而非link order或descriptor地址，descriptor只保存immutable point policy与callback shape。
+ordinary build不贡献production descriptor；conditional KUnit分别贡献clone-shaped `Fanout`与synthetic `Exclusive` provider。
+
+kernel narrow Linker现消费canonical `weave-clone.register-observer` identity并执行fixed `observe-clone(i32, i32)` typed lookup。
+`HostContext`只持load-scoped `RegistrationWindow` capability，module-side `load`返回或trap后立即关闭，不能成为published instance
+的第二份phase truth。runtime-owned transaction record是reservation唯一真相源；dynamic unavailable/duplicate/exclusive conflict
+无副作用返回typed result，module决定其是否fatal。commit在同一runtime state guard内移走transaction bindings并插入完整owning
+instance，使identity、instance与全部bindings共用一个publication线性化点且不做late policy recheck；rollback先撤销transaction
+membership，再在spin guard外销毁callback/store/interpreter entity。
+
+owner-local KUnit覆盖catalog empty/duplicate/invalid、provider unavailable、duplicate registration、`Fanout`并存、`Exclusive`
+pending/live冲突、callback缺失/错型、load-window外trap、successful commit、accepted failure零binding publication，以及成功取得
+reservation后的module error与guest trap完整rollback。独立review最初发现fatal rollback fixture使用empty catalog、没有实际取得
+reservation的一项Euclid；补充真实registration后error/trap case并核对完整runtime snapshot后已neutralize。最终分级为
+Apollyon 0 / Keter 0 / Euclid 0。
+
+`just fmt kernel --check`、`just test xtask`（103/103）、`just test nemophila-wasm`（71项unit、54项integration、1项doctest、
+4项focused Miri与双架构embedding build）、`just test nemophila-module`及`git diff --check`通过。KUnit-on
+`qemu-virt-rv64-release`与`qemu-virt-la64-release`、KUnit-off `competition-final-rv64-release`与
+`competition-final-la64-release`均build通过。KUnit-on双架构ELF的provider catalog均恰含两个16-byte conditional descriptor；
+KUnit-off LA64 ELF中catalog start/end相等，确认ordinary build为空。
+
+RV64 wrapper在`smp=1`、`memory=1G`下完成647/647 KUnit，其中15项Nemophila case全部进入并通过；当前socket LTP profile
+6/6通过，随后经ordinary machine handler进入PowerOff machine action。LA64 runtime与hardware Not Run；双架构build/ELF证据
+不外推LA64 guest execution。Checkpoint 1据此**Closed**，Contract Cutover保持None。Checkpoint 2现在Ready / Not Started且未获
+执行授权；本次严格停止，不进入cohort/in-flight、execution serialization、poison/cancellation、try-unload/retirement、Stage 5
+clone seam、management/public ABI或current contract。
 
 ### Deliverables
 

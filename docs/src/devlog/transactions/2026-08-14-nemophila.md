@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Closed / Stage 4 Ready
+Stage 3 Closed / Stage 4 Checkpoint 1 Closed / Checkpoint 2 Ready
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -13,8 +13,8 @@ Stage 3 Closed / Stage 4 Ready
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
-kernel/app compiler-target owner拆分；Stage 3两个Checkpoint的授权均已消费并关闭；Stage 4 docs-only resolution授权也已消费，
-两个execution checkpoint均未获执行授权；Stage 5--6仍未获解析或执行授权。
+kernel/app compiler-target owner拆分；Stage 3两个Checkpoint的授权均已消费并关闭；Stage 4 docs-only resolution与Checkpoint 1
+授权也已消费，Checkpoint 1已关闭，Checkpoint 2未获执行授权；Stage 5--6仍未获解析或执行授权。
 
 ## Checkpoint Log
 
@@ -416,3 +416,67 @@ Contract Impact与acceptance，Contract Cutover为None；
 不新增current contract/register、production point/task call site、management/artifact ingress、public ABI或runtime KernelConfig。
 Stage 4 code、KUnit、kernel build、QEMU、SMP、interpreter/module regression与hardware均Not Run。Stage 4保持Ready / Not Started；
 只有维护者新的明确授权才能开始Checkpoint 1。
+
+### 2026-08-14 - Stage 4 Checkpoint 1 implementation and closure
+
+**Execution Authorization:** 维护者授权完成Stage 4 Checkpoint 1；该授权已消费。Checkpoint 2、Stage 5及后续gate仍未获执行授权。
+
+**Implementation:** 新增Nemophila-owned `weave`模块与双架构`.nemophila_providers` linker catalog。最窄crate-internal
+declaration surface产生typed clone-observer point capability与16-byte immutable descriptor；固定kernel-internal point identity而非
+link order、section offset或descriptor address决定catalog身份。descriptor只含point、`Fanout`/`Exclusive` policy与callback shape，
+不保存instance、binding、reservation、in-flight或lifecycle state。ordinary build不贡献production descriptor；conditional KUnit
+分别贡献clone-shaped `Fanout`与synthetic `Exclusive` descriptor。runtime启动时校验raw descriptor layout、合法组合与duplicate point；
+invalid/duplicate是kernel invariant failure，不降格为module registration result。
+
+kernel narrow Linker在logging之外接入canonical `anemone:nemophila/weave-clone@0.1.0.register-observer` import，并从当前Caller
+执行fixed `observe-clone(i32, i32)` typed lookup。`HostContext`只持可撤销load-scoped `RegistrationWindow`；module-side `load`
+正常返回或trap后先关闭该窗口，再解释load result。late registration因此形成contained Host trap，Store不保存第二份phase truth。
+
+Stage 3 `Runtime`改为由`Arc<RuntimeState>`承载自然内部lifetime；同一个state lock继续保护唯一published collection，并新增
+runtime-minted load transaction identity与transaction record。record是全部unpublished reservation唯一真相源；Host capability只
+按identity访问，不镜像reservation或lifecycle。registration在lock内检查provider availability、same-transaction duplicate及
+point-owned policy；`Exclusive`与其它transaction reservation或live binding冲突，`Fanout`允许并存。dynamic failure无副作用返回
+canonical typed discriminant，module自行选择fatal或accepted。successful registration直接把typed callback存入transaction record，
+不延迟到commit重新检查policy。
+
+commit在一个runtime state guard下检查monotonic instance identity、移走transaction record、把bindings附着到持有同一Store的
+`RuntimeInstance`并插入published map；identity、owning instance与bindings共用一个publication线性化点。rollback先从map撤销
+transaction membership，再在临时spin guard释放后析构callback/interpreter entity。唯一production load caller把transaction、
+RegistrationWindow、当前Caller callback与最终RuntimeInstance/Store局部成对使用；没有raw pointer、shared interpreter entity、
+artifact-source状态、mutable `loaded`镜像或commit-time late conflict。
+
+**Validation:** inline owner-local KUnit新增catalog empty/duplicate/invalid与order-independence、provider unavailable、module-decided
+fatal/accepted failure、callback missing/wrong type、late registration trap、same-instance duplicate、`Fanout` reservation coexistence、
+`Exclusive` pending/live conflict，以及identity/instance/bindings atomic publication。review指出初始fatal rollback fixture使用empty
+catalog，未实际取得reservation；补充两个真实WIT registration成功后分别返回module error与执行guest `unreachable` trap的case，
+完整`RuntimeSnapshot`前后相等，直接证明transaction/reservation/publication与identity cursor全部rollback。
+
+`just fmt kernel --check`、`git diff --check`通过。本checkpoint实现完成后执行`just test xtask`（103/103）、
+`just test nemophila-wasm`（71项unit、54项integration、1项doctest、4项focused Miri与RV64/LA64 embedding build）及
+`just test nemophila-module`；canonical clone-observer build/export/host fixture继续通过。KUnit-on
+`qemu-virt-rv64-release`与`qemu-virt-la64-release`、KUnit-off `competition-final-rv64-release`与
+`competition-final-la64-release`均build通过。最终补充case后重新完成RV64与LA64 KUnit-on build。
+
+ELF audit显示KUnit-on RV64 catalog为`0xffffffff8073c8c0..0xffffffff8073c8e0`、KUnit-on LA64 catalog为
+`0xffffffff807e26e0..0xffffffff807e2700`，两者均恰含两个16-byte conditional descriptor。KUnit-off LA64 ELF中
+`__snemophila_providers == __enemophila_providers == 0xffffffff806afd38`，确认ordinary build无production/conditional descriptor。
+
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/nemophila-stage4-ckpt1-rv64.log`使用
+`qemu-virt-rv64-release`、`smp=1`、`memory=1G`与preliminary RV64 test image。最终guest完成647/647 KUnit，其中15项
+Nemophila case全部进入并通过，新增successful-reservation rollback case有直接marker；当前socket LTP profile 6/6通过，随后完成
+orderly shutdown并进入PowerOff machine action。LTP只作为同次用户态回归，不是Nemophila registration proof。LA64 runtime与
+hardware Not Run；LA64 build/ELF证据不外推guest execution。
+
+**Independent Review / Architecture Friction:** 独立review核对provider/catalog、WIT Host window、callback/Store lifetime、
+commit/rollback Drop顺序、ordinary/conditional surface与Ckpt 2边界。初始唯一Euclid是上述成功reservation后rollback的直接验证
+缺口；补case后同一reviewer复核fixture bytecode与snapshot oracle，最终分级Apollyon 0 / Keter 0 / Euclid 0。最终source scan确认
+`RuntimeState`是reservation/publication唯一truth；provider不持callback collection，Host window不驱动phase，callback handle随
+transaction record移动到owning instance，complex Drop不发生在runtime spin guard内。`LoadTransaction::commit`的owner-private类型
+表面可接收一个`RuntimeInstance`，但唯一production caller只提交本transaction刚构造的instance，KUnit直接驱动也只服务已授权的
+owner protocol proof；当前没有第二个consumer、public API或错配路径，因此未形成摩擦。没有owner穿透、私有表示泄漏、调用者/
+架构特判、无退出条件临时桥、隐含failure/cleanup顺序或以降低oracle换取通过。
+
+**Result / Next / Stop:** Stage 4 Checkpoint 1 **Closed**，Contract Cutover保持None；不更新current contract或register。
+Checkpoint 2现在Ready / Not Started且未获执行授权。本次执行严格停止，不进入point invocation、cohort/in-flight、per-instance
+execution serialization、trap poison/cancellation、try-unload/retirement、task clone seam、management/public ABI或Stage 5；这些
+能力及LA64 runtime、hardware、真实clone placement与完整R0 acceptance均Not Run / Not Proven。

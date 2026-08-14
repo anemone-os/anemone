@@ -54,6 +54,10 @@ SECTIONS {
         __sperf_metrics = .;
         KEEP(*(.perf_metrics .perf_metrics.*))
         __eperf_metrics = .;
+        . = ALIGN(8);
+        __snemophila_providers = .;
+        KEEP(*(.nemophila_providers .nemophila_providers.*))
+        __enemophila_providers = .;
         __erodata = .;
     }  > VIRT AT> RAM
 
