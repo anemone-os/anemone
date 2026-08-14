@@ -47,29 +47,27 @@ static PROC_MEMINFO_INODE_OPS: InodeOps = InodeOps {
 };
 
 fn meminfo_string() -> String {
-    // current a fake implementation.
+    const KIB: u64 = 1024;
 
-    let total_mem = format!("MemTotal:\t{} Kb\n", 393939);
-    let free_mem = format!("MemFree:\t{} Kb\n", 393939);
-    let available_mem = format!("MemAvailable:\t{} Kb\n", 393939);
-    let buffers = format!("Buffers:\t{} Kb\n", 393939);
-    let cached = format!("Cached:\t{} Kb\n", 393939);
-    let swap_total = format!("SwapTotal:\t{} Kb\n", 0);
-    let swap_free = format!("SwapFree:\t{} Kb\n", 0);
-    let swap_cached = format!("SwapCached:\t{} Kb\n", 0);
-    let shmem = format!("Shmem:\t{} Kb\n", 0);
-    let slab = format!("Slab:\t{} Kb\n", 393939);
+    const_assert!(PagingArch::PAGE_SIZE_BYTES.is_multiple_of(KIB as usize));
 
-    total_mem
-        + &free_mem
-        + &available_mem
-        + &buffers
-        + &cached
-        + &swap_total
-        + &swap_cached
-        + &swap_free
-        + &shmem
-        + &slab
+    let memory = frame_allocator_stats();
+    let kib_per_page = PagingArch::PAGE_SIZE_BYTES as u64 / KIB;
+    let total_kib = memory.total_pages * kib_per_page;
+    let free_kib = memory.free_pages * kib_per_page;
+
+    // Swap and a separate block-buffer cache are absent. Add Cached,
+    // MemAvailable, Shmem, and Slab only when their owners expose complete
+    // accounting; zero would misrepresent missing accounting as an empty
+    // category.
+    format!(
+        "MemTotal:\t{total_kib} kB\n\
+         MemFree:\t{free_kib} kB\n\
+         Buffers:\t0 kB\n\
+         SwapTotal:\t0 kB\n\
+         SwapCached:\t0 kB\n\
+         SwapFree:\t0 kB\n"
+    )
 }
 
 fn proc_meminfo_read(
