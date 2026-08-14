@@ -6,7 +6,7 @@
 **最后更新：** 2026-08-14\
 **领域：** Network / IPv4 TCP / listener / sock-diag\
 **影响契约：** Refine [`NET-TCP-ENDPOINT-001`](../../contracts/net/tcp-socket.md#net-tcp-endpoint-001--endpointlistener与connection-outcome由stack-tcp-owner统一拥有)、[`NET-CONTROL-PLANE-001`](../../contracts/net/control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)、[`NETLINK-SOCK-DIAG-001`](../../contracts/socket/netlink-diagnostics.md#netlink-sock-diag-001--tcp-owner形成normalized-one-window-record-set)；全部 Active\
-**执行记录：** Git / PR；transaction None；`TCP-LISTENER-INGRESS-CUTOVER` Effective
+**执行记录：** Git commit `42276f51`；PR / transaction None；`TCP-LISTENER-INGRESS-CUTOVER` Effective
 
 ## 摘要
 
@@ -274,7 +274,7 @@ wrapper exit 0的边界。
 - 当前baseline：[IPv4 TCP Socket](../../contracts/net/tcp-socket.md)、[IPv4 control plane](../../contracts/net/control-plane.md)、
   [Stack progression](../../contracts/net/frame-path.md)、[Read-only Netlink Diagnostics](../../contracts/socket/netlink-diagnostics.md)。
 - 历史来源：[IPv4 TCP Socket RFC](../net-tcp/index.md)、[Read-only Network Diagnostics RFC](../read-only-network-diagnostics/index.md)。
-- commit / PR / optional transaction：None。
+- commit：`42276f51`（implementation、validation wiring与contract cutover）；PR / transaction：None。
 - 外部源码证据：None；本RFC的target由Anemone live owner与current contract决定。
 
 ## 修订记录
