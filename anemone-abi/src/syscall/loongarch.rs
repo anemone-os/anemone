@@ -74,6 +74,7 @@ pub mod linux {
     pub const SYS_MOUNT: u64 = 40;
 
     pub const SYS_STATFS: u64 = 43;
+    pub const SYS_FSTATFS: u64 = 44;
 
     pub const SYS_TRUNCATE: u64 = 45;
     pub const SYS_FTRUNCATE: u64 = 46;
