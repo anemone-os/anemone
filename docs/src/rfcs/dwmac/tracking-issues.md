@@ -101,10 +101,11 @@ closed。`None` callers 保持既有行为，mismatch KUnit 验证不会留下 m
 **等级：** Open / Gate 3 validation
 **状态：** Implementation present; hardware acceptance not run
 **证据：** Gate 3 代码已在同一次 platform probe 中从 Gate 2 retained owner 创建唯一 IRQ context，使用
-`Some(IrqSense::LevelLow)` 完成 named `macirq` 的首次 request，并通过既有 publication/attach path；owner-local
-KUnit、2K1000/LoongArch build 和 VisionFive 2/RiscV build 均通过。当前没有新镜像的 2K1000 serial evidence，
-也没有 irqchip pending-before-unmask trace、handler/W1C/level-flow、single/dual-port traffic、failure isolation、
-shutdown/reboot 或 cold/warm/bootloader-used 矩阵。
+`Some(IrqSense::LevelLow)` 完成 named `macirq` 的首次 request，并通过既有 publication/attach path；LoongArch
+concrete irqchip 现在在每次 `LevelLow` unmask 前记录 controller-owned pending snapshot。owner-local KUnit、
+2K1000/LoongArch build 和 VisionFive 2/RiscV build 均通过。当前没有新镜像的 2K1000 serial evidence，也没有
+pending-before-unmask、handler/W1C/level-flow、single/dual-port traffic、failure isolation、shutdown/reboot 或
+cold/warm/bootloader-used 矩阵的运行结果。
 **影响：** 不能把 Gate 3 implementation/build evidence 写成 IRQ、traffic、lifecycle 或 Route A final acceptance；
 `DWMAC-IRQ-CUTOVER`、`DWMAC-FINAL-CUTOVER` 和 current contracts 保持 Not Cut Over。
 **修复位置：** Gate 3 实机验证与 R2 延期的 VisionFive 2 DWMAC4 regression；若 pending observation 需要扩大

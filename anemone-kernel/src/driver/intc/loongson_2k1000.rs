@@ -265,11 +265,29 @@ impl IrqChip for Loongson2K1000Intc {
 
     fn unmask(&self, irq: HwIrq) {
         let irq = irq.get();
-        if source_sense(irq).is_none() {
+        let Some(sense) = source_sense(irq) else {
             kwarningln!("2k1000-icu: refusing to unmask unsupported hwirq {}", irq);
             return;
+        };
+        let regs = self.regs();
+        if sense == IrqSense::LevelLow {
+            // Diagnostic-only Gate 3 evidence: sample the controller-owned
+            // pending window immediately before each level-source unmask.
+            // Keep this trace until Gate 3 hardware acceptance closes; any
+            // removal or log-level reduction belongs to the later closure
+            // review, not to this implementation boundary.
+            // This must stay in the concrete irqchip; DWMAC does not gain a
+            // controller API or a second pending-state owner.
+            let pending = regs.pending(cur_cpu_id().physical_id());
+            let enabled = regs.read_bank_pair(BankRegister::Enable);
+            kinfoln!(
+                "2k1000-icu: pending-before-unmask hwirq={} pending={:#x} enabled={:#x}",
+                irq,
+                pending.0,
+                enabled.0,
+            );
         }
-        self.regs().write_irq_bit(irq, BankRegister::EnableSet);
+        regs.write_irq_bit(irq, BankRegister::EnableSet);
     }
 
     fn ack(&self, irq: HwIrq) {

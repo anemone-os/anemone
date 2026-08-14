@@ -171,8 +171,10 @@ existing network ABI、global Stack、attach owner 和 DWMAC4 behavior 不变。
   disabled retained state；只有 quiescence已证明时才可释放非 IRQ-retained capability，且不阻止其它 node成功。
 
 **Implementation checkpoint (2026-08-15):** 上述 in-place adoption、首次 `Some(LevelLow)` request、owner-local
-enhanced-ring queue、CSR5/MAC cause service 和既有 publication handoff 已实现；Gate 3 hardware validation 尚未运行，
-因此本 checkpoint 不宣称 IRQ/traffic/lifecycle acceptance。详见 [ISSUE-007](./tracking-issues.md#issue-007--gate-3-irq-and-production-traffic-evidence)。
+enhanced-ring queue、CSR5/MAC cause service 和既有 publication handoff 已实现；LoongArch concrete irqchip 也已在
+每次 `LevelLow` unmask 前记录 controller-owned pending snapshot，为 first request 与 handler-tail trace 提供观测点。
+Gate 3 hardware validation 尚未运行，因此本 checkpoint 不宣称 IRQ/traffic/lifecycle acceptance。详见
+[ISSUE-007](./tracking-issues.md#issue-007--gate-3-irq-and-production-traffic-evidence)。
 
 **Validation:** 先执行单端口 cold/warm boot、link snapshot、RX/TX/abnormal IRQ 和 shutdown，再在同一 Gate
 执行双端口 cold/warm boot、concurrent traffic、success-order identity、one-node failure isolation、shutdown/
