@@ -1,6 +1,7 @@
-//! prctl credential-related operations.
+//! prctl operations.
 
 mod cap;
+mod name;
 
 use anemone_abi::capability::linux as abi;
 
@@ -13,6 +14,7 @@ use cap::{
     prctl_capbset_drop, prctl_capbset_read, prctl_get_keepcaps, prctl_get_no_new_privs,
     prctl_get_securebits, prctl_set_keepcaps, prctl_set_no_new_privs, prctl_set_securebits,
 };
+use name::{prctl_get_name, prctl_set_name};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +100,8 @@ bitflags! {
 
         const IMPLEMENTED = Self::GET_KEEPCAPS.bits()
             | Self::SET_KEEPCAPS.bits()
+            | Self::SET_NAME.bits()
+            | Self::GET_NAME.bits()
             | Self::CAPBSET_READ.bits()
             | Self::CAPBSET_DROP.bits()
             | Self::GET_SECUREBITS.bits()
@@ -183,6 +187,10 @@ fn prctl_option_from_raw(raw: u32) -> Result<PrctlOption, SysError> {
 
 fn dispatch_prctl(option: PrctlOption, args: PrctlArgs) -> Result<u64, SysError> {
     match option {
+        // Linux ignores arg3..arg5 for the name operations. SET_NAME copies at
+        // most 15 bytes up to NUL; GET_NAME always writes a padded 16-byte comm.
+        PrctlOption::SET_NAME => prctl_set_name(args.arg2),
+        PrctlOption::GET_NAME => prctl_get_name(args.arg2),
         // Purpose: report whether a capability is still in the bounding set.
         // Permission check: no extra privilege; the capability number must be valid.
         // Man page: https://man7.org/linux/man-pages/man2/PR_CAPBSET_READ.2const.html
@@ -236,7 +244,7 @@ fn dispatch_prctl(option: PrctlOption, args: PrctlArgs) -> Result<u64, SysError>
     }
 }
 
-/// Handles credential-affecting `prctl` operations.
+/// Handles supported `prctl` operations.
 ///
 /// Permission check: read-only operations do not require extra privileges.
 /// Dropping the capability bounding set and changing locked securebits require

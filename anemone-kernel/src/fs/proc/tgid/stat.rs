@@ -248,11 +248,9 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
 }
 
 pub(super) fn proc_comm(task: &Task) -> String {
-    let name = task.name();
-    let trimmed = name.strip_prefix("@user/").unwrap_or(&name);
-    let trimmed = trimmed.strip_prefix("@kernel/").unwrap_or(trimmed);
-    let comm = trimmed.rsplit('/').next().unwrap_or(trimmed);
-    comm.chars().take(15).collect()
+    // Task keeps raw comm bytes authoritative. This String-backed proc
+    // projection alone replaces invalid UTF-8 sequences for display.
+    String::from_utf8_lossy(&task.comm()).into_owned()
 }
 
 #[derive(Debug, Clone, Copy)]

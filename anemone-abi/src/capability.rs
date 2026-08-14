@@ -111,6 +111,8 @@ pub mod linux {
     pub const PR_SET_TIMING: u32 = 14;
     pub const PR_SET_NAME: u32 = 15;
     pub const PR_GET_NAME: u32 = 16;
+    /// Size of the Linux task `comm` buffer, including its trailing NUL.
+    pub const TASK_COMM_LEN: usize = 16;
     pub const PR_GET_ENDIAN: u32 = 19;
     pub const PR_SET_ENDIAN: u32 = 20;
     pub const PR_GET_SECCOMP: u32 = 21;
