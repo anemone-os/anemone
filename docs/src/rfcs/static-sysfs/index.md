@@ -1,12 +1,12 @@
 # RFC-20260814-static-sysfs
 
-**状态：** Accepted
-**修订：** R0
+**状态：** Closed
+**修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-14
 **领域：** fs / sysfs / VFS mount / architecture facts
-**影响契约：** `SYSFS-STATIC-001`、`SYSFS-MOUNT-001`（均为 Introduce，尚未生效）
-**执行记录：** None
+**影响契约：** `SYSFS-STATIC-001`、`SYSFS-MOUNT-001`（均已通过 `STATIC-SYSFS-CUTOVER` Introduce / Active）
+**执行记录：** [2026-08-14 Static sysfs transaction](../../devlog/transactions/2026-08-14-static-sysfs.md)
 
 ## 摘要
 
@@ -60,14 +60,17 @@ partial read、forward seek 和从 offset 0 重新读取。本 RFC 采用这组�
 - loop sysfs、partscan、partition node 或对现有 loop ioctl 限制的收口；
 - 修复 generic dynamic pseudo-filesystem positive-dentry freshness / revocation 协议；首版冻结树不
   创建该动态 handoff；
+- 修复 generic `chmod` / `chown` / `utimensat` 到 filesystem owner 的 metadata mutation handoff，或
+  承诺 mutation 后的 stat/DAC 同步、拒绝 errno 与 persistence；该既有缺口由 register 独立跟踪；
 - 提前形成通用 kernfs、通用 dynamic pseudo-filesystem framework，或仅为未来 consumer 预留 public
   registration API。
 
 ## Owner 与协议边界
 
-- **Protocol/state owner：** sysfs 拥有静态 namespace topology、entry metadata、inode/superblock、
-  readdir 与只读 attribute file protocol。VFS 继续拥有 pathname resolution、dentry/cache 与 mount
-  view；sysfs 不复制这些状态。
+- **Protocol/state owner：** sysfs 拥有静态 namespace topology、boot publication 时的 initial entry
+  metadata、inode/superblock、readdir 与只读 attribute file protocol。VFS 继续拥有 pathname
+  resolution、dentry/cache、mount view 与当前 generic inode-metadata syscall 路径；R1 不复制这些状态，
+  也不闭合 metadata mutation 到 filesystem owner 的既有缺口。
 - **Consumer truth：** 每个 attribute 的语义值由对应 consumer owner 唯一拥有。sysfs entry 只保存
   name、kind 和窄只读 getter capability；它在生成一次读取快照时调用 getter，不长期缓存
   `address_bits` 或 `cpu_byteorder` 的第二份状态。
@@ -92,8 +95,10 @@ partial read、forward seek 和从 offset 0 重新读取。本 RFC 采用这组�
 - filesystem type 的 canonical ABI name 是 `sysfs`；它是 no-device filesystem。raw mount source label
   由既有 VFS no-device admission 丢弃，不形成另一份 identity。
 - empty mount data 成功，non-empty mount data 返回 `EINVAL`。
-- mount 后根目录只承诺 `kernel/`；`kernel/` 首版只承诺 `address_bits` 与 `cpu_byteorder`。两个目录的
-  mode 为 `0555`，两个 attribute 的 mode 为 `0444`；目录项顺序不是 ABI。
+- mount 后根目录只承诺 `kernel/`；`kernel/` 首版只承诺 `address_bits` 与 `cpu_byteorder`。boot
+  publication / 未发生 metadata mutation 时两个目录的 mode 为 `0555`，两个 attribute 的 mode 为
+  `0444`；目录项顺序不是 ABI。R1 不承诺 `chmod` / `chown` / `utimensat` 后的 stat/DAC 同步、拒绝
+  errno 或 persistence。
 - 两个 attribute 是只读普通文件，内容分别为 `64\n` 与 `little\n`。普通 read 或 pread 每次调用 getter
   生成一份完整文本 snapshot，再按该次操作的 offset 截取；跨多次 read/pread 不承诺锁定同一份
   consumer snapshot，seek 回 offset 0 或 pread offset 0 会重新生成。首批两个 architecture facts 在本
@@ -111,8 +116,8 @@ partial read、forward seek 和从 offset 0 重新读取。本 RFC 采用这组�
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `SYSFS-STATIC-001` | Introduce | None（尚未生效） | 冻结 static tree；目录和只读 ASCII 文本属性；consumer owner 通过窄 getter 提供唯一真相 | `STATIC-SYSFS-CUTOVER` |
-| `SYSFS-MOUNT-001` | Introduce | None（尚未生效） | canonical `sysfs` no-device type；persistent singleton superblock；multi-view 与 last-unmount/remount lifetime | `STATIC-SYSFS-CUTOVER` |
+| `SYSFS-STATIC-001` | Introduce | [Active](../../contracts/sysfs/static-filesystem.md#sysfs-static-001--冻结-namespace-与只读-text-attribute) | 冻结 static tree；目录和只读 ASCII 文本属性；consumer owner 通过窄 getter 提供唯一真相 | `STATIC-SYSFS-CUTOVER`（Effective） |
+| `SYSFS-MOUNT-001` | Introduce | [Active](../../contracts/sysfs/static-filesystem.md#sysfs-mount-001--canonical-type与persistent-singleton-lifetime) | canonical `sysfs` no-device type；persistent singleton superblock；multi-view 与 last-unmount/remount lifetime | `STATIC-SYSFS-CUTOVER`（Effective） |
 
 ### Dependencies
 
@@ -126,6 +131,9 @@ partial read、forward seek 和从 offset 0 重新读取。本 RFC 采用这组�
   `/proc/filesystems` 从 registry 与 tagged mount operation 派生 `nodev` 展示。
 - [`ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`](../../register/open-issues.md#ane-20260809-vfs-dynamic-positive-dentry-revocation)：
   dynamic namespace freshness 仍由 VFS 独立拥有；本 RFC 的 frozen topology 不规避、不扩展也不关闭该问题。
+- [`ANE-20260814-VFS-METADATA-MUTATION-OWNER-HANDOFF`](../../register/open-issues.md#ane-20260814-vfs-metadata-mutation-owner-handoff)：
+  generic metadata syscall 的 owner handoff 与 mutation 后 projection/persistence 由后续独立 VFS 工作
+  解决；R1 只证明未 mutation 的 initial metadata。
 
 ## Implementation Boundary
 
@@ -134,7 +142,8 @@ partial read、forward seek 和从 offset 0 重新读取。本 RFC 采用这组�
   以及闭合这些职责所需的同 owner module registration、定向测试与 shell validation 支持。
 - **必须保持：** 现有 kobject/device model、VFS pathname/dentry/mount owner、mount admission current
   contract、procfs visible behavior、loop/partition semantics，以及“不自动挂载 `/sys`”的 userspace
-  边界。不得把 Accepted target 写成 current contract 或当前实现事实。
+  边界。不得新增 generic metadata mutation hook、fstype 特判或 sysfs-local workaround，也不得把
+  Accepted target 写成 current contract 或当前实现事实。
 - **实现提示：** 新代码放在结构化的 `anemone-kernel/src/fs/sysfs/` 目录，参考现有 procfs 按稳定职责
   拆分，例如 module root、root inode/file、static entry、superblock 和 `kernel/` consumer。该目录形状
   是非穷举提示，不是逐文件 write set，也不固定具体 Rust 类型或 helper。不得复用 procfs-owned
@@ -143,15 +152,16 @@ partial read、forward seek 和从 offset 0 重新读取。本 RFC 采用这组�
 - **原子交付：** framework 与两个 consumer 共用一次 `STATIC-SYSFS-CUTOVER`；boot transaction 可以按
   既有 VFS owner 顺序先 registration 再安装 singleton，但不得让已经注册却没有完整 consumer 的
   dormant sysfs 到达 userspace，也不得把某一个 architecture 的 partial activation 作为 cutover。
-- **停止条件：** 若实现需要 runtime mutation、kobject integration、public registration API、generic
-  dentry freshness 修改、自动挂载、writable/binary attribute、symlink、其它首批 consumer，或要改变
-  owner/handoff/failure/cleanup、ABI、contract delta、acceptance、architecture coverage / validation
-  claim，则在 cutover 前停止并回到 RFC review / Target Renegotiation。
+- **停止条件：** 若实现需要 sysfs-owned runtime namespace/attribute mutation、kobject integration、
+  public registration API、generic dentry freshness 或 metadata-mutation handoff 修改、自动挂载、
+  writable/binary attribute、symlink、其它首批 consumer，或要改变 owner/handoff/failure/cleanup、ABI、
+  contract delta、acceptance、architecture coverage / validation claim，则在 cutover 前停止并回到 RFC
+  review / Target Renegotiation。
 
 ## Acceptance 与 Validation
 
-R0 表示 target、Implementation Boundary 与 contract delta 已接受；RFC 状态本身不授权实现，也不使
-contract 生效。RFC 实现完成并关闭 `STATIC-SYSFS-CUTOVER` 时必须同时满足：
+R1 target、Implementation Boundary与contract delta已在唯一`STATIC-SYSFS-CUTOVER`中实现并验证；以下closure
+obligation均已满足：
 
 - source audit 证明 boot transaction 先校验完整描述，只使用 registration 返回的唯一 canonical
   `FileSystem` identity 构造和 seed singleton，并在 init 返回前安装完整 topology；attribute value 不被
@@ -164,13 +174,14 @@ contract 生效。RFC 实现完成并关闭 `STATIC-SYSFS-CUTOVER` 时必须同�
   seek/read，而不只用一次 `cat`；
 - 两个架构均建立第二个 mount view，确认内容一致；unmount 一个 view 后另一 view 仍可读；最后一个
   view unmount 后 remount，内容和 namespace 仍可读；
-- 两个架构均确认目录 mode 为 `0555`、attribute mode 为 `0444`，mkdir/node creation 与 attribute write
-  失败，并确认 `/proc/filesystems` 包含精确的 `nodev\tsysfs` registry projection；
+- 两个架构均在未执行 metadata mutation 时确认目录 mode 为 `0555`、attribute mode 为 `0444`，确认
+  mkdir/node creation 与 attribute write失败，并确认 `/proc/filesystems` 包含精确的
+  `nodev\tsysfs` registry projection；
 - non-empty mount data 的 `EINVAL` 由 owner-local test 或等价的定向 guest probe 证明。
 
-shell smoke 只证明本 RFC 的 static mount/read-only surface；它不证明 kobject integration、dynamic
-sysfs、device model、hotplug、loop sysfs 或 generic dentry revocation。本次 R0 接受是 docs-only 工作，
-只要求 `git diff --check` 与 `mdbook build docs`，不以未运行 kernel/QEMU 测试冒充实现证据。
+定向guest只证明本 RFC 的 static mount/read-only surface；它不证明 kobject integration、dynamic sysfs、device model、
+hotplug、loop sysfs、generic dentry revocation或metadata mutation后的owner/projection/persistence。实际双架构build/runtime、
+KUnit、source audit、R1决定与文档证据见[transaction](../../devlog/transactions/2026-08-14-static-sysfs.md)。
 
 ## 风险与反馈
 
@@ -187,15 +198,21 @@ sysfs、device model、hotplug、loop sysfs 或 generic dentry revocation。本�
   architecture/device object，或 consumer 反向依赖 sysfs private type；实现必须收敛为窄 getter。
 - **只验证 `cat` 掩盖 file-position 错误。** partial read、pread、seek 与 EOF 必须由实际 shell helper
   或小型 user test 覆盖。
+- **generic metadata mutation 缺少 filesystem owner handoff。** static procfs 已有 descriptor/meta
+  分裂，sysfs 也是受影响 consumer。R1 按维护者决定不在本 RFC 建立局部修复；失败信号、owner、影响与
+  系统退出条件由 register 的独立 VFS issue 拥有，不降低本轮 initial metadata oracle。
 
 ## 文档与证据
 
 - current mount baseline：[VFS Mount Admission 当前契约](../../contracts/vfs/mount-admission.md)。
 - 明确排除的 dynamic VFS issue：
   [`ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`](../../register/open-issues.md#ane-20260809-vfs-dynamic-positive-dentry-revocation)。
+- 明确排除的 metadata mutation owner issue：
+  [`ANE-20260814-VFS-METADATA-MUTATION-OWNER-HANDOFF`](../../register/open-issues.md#ane-20260814-vfs-metadata-mutation-owner-handoff)。
 - 明确不由本 RFC 关闭的 loop limitation：
   [`ANE-20260604-IOCTL-LTP-STAGE1-GAPS`](../../register/current-limitations.md#ane-20260604-ioctl-ltp-stage1-gaps)。
-- commit / PR / optional transaction：None。
+- commit / PR / transaction：[2026-08-14 Static sysfs transaction](../../devlog/transactions/2026-08-14-static-sysfs.md)；
+  commit由本RFC原子closure提交拥有。
 - 外部源码证据：`xref:linux-6.6.32:kernel/ksysfs.c#ksysfs_init`、
   `xref:linux-6.6.32:kernel/ksysfs.c#address_bits_show`、
   `xref:linux-6.6.32:kernel/ksysfs.c#cpu_byteorder_show`、
@@ -207,10 +224,18 @@ sysfs、device model、hotplug、loop sysfs 或 generic dentry revocation。本�
 | 修订 | 日期 | 变化 | 证据 |
 | --- | --- | --- | --- |
 | R0 | 2026-08-14 | 接受最小 static sysfs target；明确既有 VFS registration 到 singleton 安装的 pre-userspace boot transaction、每次 read/pread snapshot、EOF 后 seek/read 与 `0555` / `0444` mode。 | RFC review；`git diff --check`；`mdbook build docs` |
+| R1 | 2026-08-14 | 接受 generic metadata mutation owner handoff 不属于本 RFC；`0555` / `0444` 限定为未发生 metadata mutation 的 initial projection，post-mutation stat/DAC/errno/persistence 进入 register 独立系统解决，不阻塞 static mount/read-only cutover。 | 维护者决定；live sysfs/procfs/devfs/devpts/VFS 与 Linux procfs/kernfs source audit |
 
 ## Closure
 
-尚未进入实现或 cutover。关闭时必须记录实际交付、双架构 build/runtime 证据、
-`SYSFS-STATIC-001` / `SYSFS-MOUNT-001` current-contract cutover 或 Not Cut Over、仍开放问题/限制，以及
-仅在存在具体证据时记录的 Architecture Friction。关闭同时冻结本 RFC；后续 dynamic sysfs 或新增
-consumer 从 live source、current contract 与 register 建立新的 Implementation Boundary。
+R1已在唯一`STATIC-SYSFS-CUTOVER`中原子关闭。实现交付canonical no-device `sysfs`、persistent singleton static tree、
+目录/只读text attribute protocol以及`address_bits`/`cpu_byteorder`两个consumer；没有扩展public API或generic VFS contract。
+RV64与LA64 release build、全部enabled KUnit及定向guest acceptance通过；两架构均输出`STATIC-SYSFS:PASS`。LA64只在PASS与
+完整orderly shutdown后因既有platform没有成功power-off handler进入halt，该末尾处置不削弱sysfs acceptance。
+
+[`SYSFS-STATIC-001` / `SYSFS-MOUNT-001`](../../contracts/sysfs/static-filesystem.md)已成为Active current contract。register新增
+`ANE-20260814-VFS-METADATA-MUTATION-OWNER-HANDOFF`并保持Open / Deferred；dynamic positive-dentry issue与loop limitation也未
+关闭。dynamic sysfs、KObject/KSet、device model、hotplug、自动挂载、symlink、binary/writable attribute、其它consumer和
+generic pseudo-fs/VFS扩展均Not Cut Over。metadata owner缺口按维护者R1决定不阻塞本target，且未形成sysfs-local workaround。
+最终独立review与Architecture Friction Scan的证据及处置记录在transaction/提交中；不存在下一gate。本页从此冻结，后续工作
+必须从live source、current contract和register建立新的Implementation Boundary。

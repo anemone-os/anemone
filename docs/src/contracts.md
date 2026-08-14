@@ -134,6 +134,8 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
 - [Procfs 当前契约](./contracts/procfs/index.md)
   - [TGID task-state projection](./contracts/procfs/task-state-projection.md)
+- [Sysfs 当前契约](./contracts/sysfs/index.md)
+  - [Static filesystem](./contracts/sysfs/static-filesystem.md)
 - [Network 当前契约](./contracts/net/index.md)
   - [Frame path](./contracts/net/frame-path.md)
   - [Netdev lifecycle](./contracts/net/netdev-lifecycle.md)

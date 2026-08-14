@@ -27,6 +27,9 @@
 
 ## Completed
 
+- [Static sysfs](./2026-08-14-static-sysfs.md)：R1唯一`STATIC-SYSFS-CUTOVER`已关闭；canonical no-device
+  `sysfs`、persistent singleton static tree、两个architecture attribute与双架构production-path acceptance完成，
+  `SYSFS-STATIC-001` / `SYSFS-MOUNT-001`已原子Active；generic metadata mutation owner缺口保持register独立Open。
 - [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--6全部关闭；
   四个cutover使五项clock/time/signal contract delta生效，RV64/LA64 release SMP=2最终通过469/469与
   470/470 KUnit以及完整定向用户态oracle。
