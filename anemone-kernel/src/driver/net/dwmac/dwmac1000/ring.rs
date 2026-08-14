@@ -19,6 +19,7 @@ const MAX_RING_SIZE: usize = 1024;
 const MIN_FRAME_CAPACITY: usize = 1536;
 const MAX_FRAME_CAPACITY: usize = 0x1ffc;
 const FRAME_ALIGNMENT: usize = align_of::<u32>();
+const ETHERNET_FCS_BYTES: usize = 4;
 
 static_assert!(
     DWMAC1000_RING_SIZE.is_power_of_two()
@@ -108,6 +109,31 @@ pub(super) struct Dwmac1000Rings {
     layout: RingLayout,
     allocated_bytes: usize,
     phys_base: u64,
+    rx_next: usize,
+    rx_reserved: Option<RxReservation>,
+    tx_next: usize,
+    tx_reserved: Option<usize>,
+    tx_clean: usize,
+    tx_in_flight: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RingError {
+    FrameTooLarge,
+    DeviceOwned,
+    ReservationMismatch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RxReservation {
+    pub(super) index: usize,
+    pub(super) length: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TxCompletion {
+    pub(super) index: usize,
+    pub(super) error: bool,
 }
 
 impl Dwmac1000Rings {
@@ -133,6 +159,12 @@ impl Dwmac1000Rings {
             layout,
             allocated_bytes,
             phys_base,
+            rx_next: 0,
+            rx_reserved: None,
+            tx_next: 0,
+            tx_reserved: None,
+            tx_clean: 0,
+            tx_in_flight: 0,
         };
         if !dma_range_fits(rings.rx_desc(), rings.descriptor_bytes())
             || !dma_range_fits(rings.tx_desc(), rings.descriptor_bytes())
@@ -296,6 +328,189 @@ impl Dwmac1000Rings {
         }
         true
     }
+
+    pub(super) fn reset_runtime_state(&mut self) {
+        self.rx_next = 0;
+        self.rx_reserved = None;
+        self.tx_next = 0;
+        self.tx_reserved = None;
+        self.tx_clean = 0;
+        self.tx_in_flight = 0;
+    }
+
+    pub(super) fn reserve_tx(&mut self) -> Option<usize> {
+        if self.tx_reserved.is_some() || self.tx_in_flight == self.layout.ring_size {
+            return None;
+        }
+        let index = self.tx_next;
+        if self.read_descriptor(true, index).des0 & (1 << 31) != 0 {
+            return None;
+        }
+        self.tx_reserved = Some(index);
+        Some(index)
+    }
+
+    pub(super) fn cancel_tx(&mut self, index: usize) -> Result<(), RingError> {
+        if self.tx_reserved != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        self.tx_reserved = None;
+        Ok(())
+    }
+
+    pub(super) fn tx_frame_parts(
+        &mut self,
+        index: usize,
+        length: usize,
+    ) -> Result<(*mut u8, usize), RingError> {
+        if self.tx_reserved != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        if length == 0 || length > self.layout.frame_capacity {
+            return Err(RingError::FrameTooLarge);
+        }
+        if self.read_descriptor(true, index).des0 & (1 << 31) != 0 {
+            return Err(RingError::DeviceOwned);
+        }
+        Ok((self.frame_ptr(true, index), length))
+    }
+
+    pub(super) fn commit_tx(&mut self, index: usize, length: usize) -> Result<(), RingError> {
+        if self.tx_reserved != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        if length == 0 || length > self.layout.frame_capacity {
+            return Err(RingError::FrameTooLarge);
+        }
+        if self.read_descriptor(true, index).des0 & (1 << 31) != 0 {
+            return Err(RingError::DeviceOwned);
+        }
+        let descriptor = EnhancedDescriptor::tx(
+            index,
+            self.layout.ring_size,
+            self.phys_at(self.layout.frame_offset(true, index).unwrap()),
+            length,
+        )
+        .ok_or(RingError::FrameTooLarge)?;
+        let mut unpublished = descriptor;
+        unpublished.des0 &= !(1 << 31);
+        unsafe { write_volatile(self.descriptor_ptr(true, index), unpublished) };
+        self.dma.sync_for_device();
+        unsafe {
+            write_volatile(
+                core::ptr::addr_of_mut!((*self.descriptor_ptr(true, index)).des0),
+                descriptor.des0,
+            )
+        };
+        self.dma.sync_for_device();
+        self.tx_reserved = None;
+        self.tx_next = (index + 1) & (self.layout.ring_size - 1);
+        self.tx_in_flight += 1;
+        Ok(())
+    }
+
+    pub(super) fn reclaim_tx(&mut self) -> Result<Option<TxCompletion>, RingError> {
+        if self.tx_reserved.is_some() {
+            return Err(RingError::ReservationMismatch);
+        }
+        if self.tx_in_flight == 0 {
+            return Ok(None);
+        }
+        let index = self.tx_clean;
+        let status = self.read_descriptor(true, index).des0;
+        if status & (1 << 31) != 0 {
+            return Ok(None);
+        }
+        self.dma.sync_for_cpu();
+        let descriptor = self.read_descriptor(true, index);
+        let error = descriptor.des0 & (1 << 15) != 0;
+        let idle = EnhancedDescriptor::idle_tx(
+            index,
+            self.layout.ring_size,
+            self.phys_at(self.layout.frame_offset(true, index).unwrap()),
+        )
+        .unwrap();
+        unsafe { write_volatile(self.descriptor_ptr(true, index), idle) };
+        self.tx_clean = (index + 1) & (self.layout.ring_size - 1);
+        self.tx_in_flight -= 1;
+        Ok(Some(TxCompletion { index, error }))
+    }
+
+    pub(super) fn reserve_rx(&mut self) -> Option<RxReservation> {
+        if self.rx_reserved.is_some() {
+            return None;
+        }
+        let index = self.rx_next;
+        if self.read_descriptor(false, index).des0 & (1 << 31) != 0 {
+            return None;
+        }
+        self.dma.sync_for_cpu();
+        let descriptor = self.read_descriptor(false, index);
+        let wire_length = ((descriptor.des0 >> 16) & 0x3fff) as usize;
+        let first_last = descriptor.des0 & ((1 << 9) | (1 << 8)) == (1 << 9) | (1 << 8);
+        let length = if !first_last
+            || wire_length <= ETHERNET_FCS_BYTES
+            || wire_length > self.layout.frame_capacity
+            || descriptor.des0 & (1 << 15) != 0
+        {
+            None
+        } else {
+            Some(wire_length - ETHERNET_FCS_BYTES)
+        };
+        let reservation = RxReservation { index, length };
+        self.rx_reserved = Some(reservation);
+        Some(reservation)
+    }
+
+    pub(super) fn cancel_rx(&mut self, index: usize) -> Result<(), RingError> {
+        if self.rx_reserved.map(|reservation| reservation.index) != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        // Cancellation keeps the completed frame CPU-owned so the caller can
+        // retry after restoring its paired TX reservation; only consume or
+        // discard refills the descriptor and advances the ring.
+        self.rx_reserved = None;
+        Ok(())
+    }
+
+    pub(super) fn discard_rx(&mut self, index: usize) -> Result<(), RingError> {
+        self.finish_rx(index).map(|_| ())
+    }
+
+    pub(super) fn rx_frame_parts(&mut self, index: usize) -> Result<(*const u8, usize), RingError> {
+        let Some(reservation) = self.rx_reserved else {
+            return Err(RingError::ReservationMismatch);
+        };
+        if reservation.index != index {
+            return Err(RingError::ReservationMismatch);
+        }
+        let Some(length) = reservation.length else {
+            return Err(RingError::ReservationMismatch);
+        };
+        Ok((self.frame_ptr(false, index).cast_const(), length))
+    }
+
+    pub(super) fn finish_rx_public(&mut self, index: usize) -> Result<(), RingError> {
+        self.finish_rx(index)
+    }
+
+    fn finish_rx(&mut self, index: usize) -> Result<(), RingError> {
+        if self.rx_reserved.map(|reservation| reservation.index) != Some(index) {
+            return Err(RingError::ReservationMismatch);
+        }
+        self.rx_reserved = None;
+        let descriptor = EnhancedDescriptor::rx(
+            index,
+            self.layout.ring_size,
+            self.phys_at(self.layout.frame_offset(false, index).unwrap()),
+            self.layout.frame_capacity,
+        )
+        .unwrap();
+        unsafe { write_volatile(self.descriptor_ptr(false, index), descriptor) };
+        self.dma.sync_for_device();
+        self.rx_next = (index + 1) & (self.layout.ring_size - 1);
+        Ok(())
+    }
 }
 
 const fn align_up(value: usize, alignment: usize) -> Option<usize> {
@@ -386,5 +601,16 @@ mod kunits {
         let mut wrong = valid;
         wrong.rx.des0 = ((PROBE_TX_BYTES as u32) << 16) | (1 << 9) | (1 << 8);
         assert!(!wrong.probe_layout_valid());
+    }
+
+    #[kunit]
+    fn runtime_descriptor_handoff_keeps_own_last_and_fcs_boundary() {
+        let tx = EnhancedDescriptor::tx(0, 64, 0x2000, 128).unwrap();
+        let rx = EnhancedDescriptor::rx(63, 64, 0x4000, 1536).unwrap();
+        assert_ne!(tx.des0 & (1 << 31), 0);
+        assert_eq!(tx.des0 & (1 << 21), 0);
+        assert_ne!(rx.des0 & (1 << 31), 0);
+        assert_ne!(rx.des1 & (1 << 15), 0);
+        assert_eq!(68usize - ETHERNET_FCS_BYTES, 64);
     }
 }

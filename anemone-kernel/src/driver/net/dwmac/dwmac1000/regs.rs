@@ -9,6 +9,7 @@ use super::{
 
 const DMA_BUS_MODE: usize = 0x1000;
 const DMA_TX_POLL_DEMAND: usize = 0x1004;
+const DMA_RX_POLL_DEMAND: usize = 0x1008;
 const DMA_RX_BASE_ADDR: usize = 0x100c;
 const DMA_TX_BASE_ADDR: usize = 0x1010;
 const DMA_STATUS: usize = 0x1014;
@@ -131,6 +132,10 @@ const PHY_ID_YT8511: u32 = 0x0000_010a;
 // other defined legacy MAC sources masked. Do not write reserved bits.
 const MASK_LEGACY_MAC_INTERRUPTS_REQUESTED: u32 = 0x20f;
 const MASK_ALL_MMC_INTERRUPTS: u32 = u32::MAX;
+const DMA_NORMAL_INTERRUPT: u32 = 1 << 16;
+const DMA_ABNORMAL_INTERRUPT: u32 = 1 << 15;
+const DMA_RX_INTERRUPT: u32 = 1 << 6;
+const DMA_TX_INTERRUPT: u32 = 1;
 
 static_assert!(
     DWMAC1000_RESET_TIMEOUT_MS > 0,
@@ -739,6 +744,34 @@ impl Dwmac1000Regs {
 
     pub(super) fn demand_tx(&self) {
         self.write(DMA_TX_POLL_DEMAND, 1);
+    }
+
+    pub(super) fn demand_rx(&self) {
+        self.write(DMA_RX_POLL_DEMAND, 1);
+    }
+
+    pub(super) fn start_runtime(&self) {
+        // Gate 3 adopts the quiesced Gate 2 owner. Clear stale device causes
+        // before enabling CSR7 so the first level dispatch represents a new
+        // event, then follow Linux's RX-before-TX start order.
+        self.service_mac_interrupts();
+        self.acknowledge_causes(self.status() & super::protocol::CSR5_W1C_MASK);
+        let mut mac = self.read(MAC_CONTROL);
+        mac |= MAC_TX_ENABLE | MAC_RX_ENABLE;
+        self.write(MAC_CONTROL, mac);
+        let mut dma = self.read(DMA_CONTROL);
+        dma |= DMA_RX_START;
+        self.write(DMA_CONTROL, dma);
+        dma |= DMA_TX_START;
+        self.write(DMA_CONTROL, dma);
+        // The Gate 2 mask is a suppression baseline. Gate 3 restores the
+        // Linux host path; read-to-clear MAC/PCS/MMC causes are then drained
+        // by the same IRQ handler before level unmask.
+        self.write(MAC_INTERRUPT_MASK, 0);
+        self.write(
+            DMA_INTERRUPT_ENABLE,
+            DMA_NORMAL_INTERRUPT | DMA_ABNORMAL_INTERRUPT | DMA_RX_INTERRUPT | DMA_TX_INTERRUPT,
+        );
     }
 
     pub(super) fn status(&self) -> u32 {

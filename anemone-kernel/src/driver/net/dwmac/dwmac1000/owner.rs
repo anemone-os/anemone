@@ -4,7 +4,7 @@ use super::{
     phy::PhyState,
     protocol::{CSR5_W1C_MASK, EnhancedDescriptor, device_cause},
     regs::{Dwmac1000Regs, ProbeStartSnapshot, QuiesceSnapshot},
-    ring::{DescriptorSnapshot, Dwmac1000Rings},
+    ring::{DescriptorSnapshot, Dwmac1000Rings, RingError, RxReservation, TxCompletion},
 };
 
 const NORMAL_INTERRUPT: u32 = 1 << 16;
@@ -102,6 +102,9 @@ impl CharacterizationSnapshot {
 #[derive(Opaque)]
 pub(super) struct Dwmac1000State {
     pub(super) owner: Arc<Dwmac1000Owner>,
+    /// Gate 3's runtime context is installed exactly once after the Gate 2
+    /// owner is retained; it is a lifecycle capability, not a second owner.
+    pub(super) runtime: SpinLock<Option<Arc<super::irq::Dwmac1000IrqContext>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +144,7 @@ const fn classify_causes(status: u32, admitted: u32, recoverable: u32) -> CauseC
 /// with IRQ/runtime capability instead of rebuilding MMIO or DMA state.
 pub(super) struct Dwmac1000Owner {
     regs: Arc<Dwmac1000Regs>,
-    rings: Dwmac1000Rings,
+    rings: SpinLock<Dwmac1000Rings>,
     /// Accepted PHY snapshot retained for Gate 3 in-place adoption.
     phy: PhyState,
     /// Diagnostic-only characterization snapshot for shutdown logging. Probe
@@ -149,11 +152,19 @@ pub(super) struct Dwmac1000Owner {
     result: SpinLock<Option<CharacterizationResult>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct IrqServiceSnapshot {
+    pub(super) mac_status: u32,
+    pub(super) mac_status_after: u32,
+    pub(super) csr5: u32,
+    pub(super) csr5_after: u32,
+}
+
 impl Dwmac1000Owner {
     pub(super) fn new(regs: Arc<Dwmac1000Regs>, rings: Dwmac1000Rings, phy: PhyState) -> Arc<Self> {
         Arc::new(Self {
             regs,
-            rings,
+            rings: SpinLock::new(rings),
             phy,
             result: SpinLock::new(None),
         })
@@ -167,16 +178,26 @@ impl Dwmac1000Owner {
         self.phy
     }
 
+    pub(super) fn publication_link_state(&self) -> anemone_net_api::LinkState {
+        // Gate 2 retained this resolved PHY snapshot; Gate 3 publishes that
+        // same owner fact instead of inventing a second visible link state.
+        if matches!(self.phy.link.speed_mbps, 10 | 100 | 1000) {
+            anemone_net_api::LinkState::Up
+        } else {
+            anemone_net_api::LinkState::Down
+        }
+    }
+
     pub(super) fn characterize(&self) -> CharacterizationSnapshot {
         let probe_start = self.regs.start_probe();
         let tx_published = if probe_start.linux_sequence_valid() {
             // Linux publishes TX ownership only after MAC and both DMA paths
             // are running, then writes CSR1 to demand descriptor polling.
-            let descriptor = self.rings.publish_probe_tx();
+            let descriptor = self.rings.lock_irqsave().publish_probe_tx();
             self.regs.demand_tx();
             descriptor
         } else {
-            self.rings.probe_snapshot().tx
+            self.rings.lock_irqsave().probe_snapshot().tx
         };
 
         let start = MonotonicInstant::now();
@@ -199,7 +220,7 @@ impl Dwmac1000Owner {
             if interrupt_enable != 0 {
                 failure = Some(CharacterizationFailure::InterruptEnabled);
             }
-            let descriptor = self.rings.probe_snapshot();
+            let descriptor = self.rings.lock_irqsave().probe_snapshot();
             let classification = classify_causes(status, PROBE_CAUSE_ADMISSION, 0);
             if classification.legal != 0 {
                 legal |= classification.legal;
@@ -259,18 +280,20 @@ impl Dwmac1000Owner {
         } else if quiesce.mac_status_after != 0 {
             failure = Some(CharacterizationFailure::UnclearedCause);
         }
-        let descriptor = self.rings.probe_snapshot();
+        let descriptor = self.rings.lock_irqsave().probe_snapshot();
         // Frame bytes return to the CPU only after RX completion and DMA
         // process-state quiescence. A failed quiesce retains backing untouched.
         let payload_match = quiesce.stopped
             && descriptor.rx_complete()
             && !descriptor.rx_error()
-            && self.rings.probe_payload_matches();
+            && self.rings.lock_irqsave().probe_payload_matches();
         if failure.is_none() && !payload_match {
             failure = Some(CharacterizationFailure::Descriptor);
         }
         if failure.is_none() {
-            self.rings.prepare_production();
+            let mut rings = self.rings.lock_irqsave();
+            rings.prepare_production();
+            rings.reset_runtime_state();
         }
         let result = failure.map_or(
             CharacterizationResult::Passed,
@@ -296,6 +319,91 @@ impl Dwmac1000Owner {
 
     pub(super) fn suppress_device(&self) -> QuiesceSnapshot {
         self.regs.quiesce()
+    }
+
+    pub(super) fn start_device(&self) {
+        self.regs.start_runtime();
+    }
+
+    pub(super) fn service_irq(&self) -> IrqServiceSnapshot {
+        let (mac_status, mac_status_after) = self.regs.service_mac_interrupts();
+        let status = self.regs.status();
+        let legal = status & CSR5_W1C_MASK;
+        let csr5_after = if legal != 0 {
+            self.regs.acknowledge_causes(legal) & CSR5_W1C_MASK
+        } else {
+            status & CSR5_W1C_MASK
+        };
+        IrqServiceSnapshot {
+            mac_status,
+            mac_status_after,
+            csr5: legal,
+            csr5_after,
+        }
+    }
+
+    pub(super) fn frame_capacity(&self) -> usize {
+        self.rings.lock_irqsave().frame_capacity()
+    }
+
+    pub(super) fn ring_size(&self) -> usize {
+        self.rings.lock_irqsave().ring_size()
+    }
+
+    pub(super) fn reserve_tx(&self) -> Option<usize> {
+        self.rings.lock_irqsave().reserve_tx()
+    }
+
+    pub(super) fn cancel_tx(&self, index: usize) -> Result<(), RingError> {
+        self.rings.lock_irqsave().cancel_tx(index)
+    }
+
+    pub(super) fn commit_tx_with<R>(
+        &self,
+        index: usize,
+        length: usize,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, RingError> {
+        let (ptr, length) = {
+            let mut rings = self.rings.lock_irqsave();
+            rings.tx_frame_parts(index, length)?
+        };
+        let result = fill(unsafe { core::slice::from_raw_parts_mut(ptr, length) });
+        self.rings.lock_irqsave().commit_tx(index, length)?;
+        self.regs.demand_tx();
+        Ok(result)
+    }
+
+    pub(super) fn reclaim_tx(&self) -> Result<Option<TxCompletion>, RingError> {
+        self.rings.lock_irqsave().reclaim_tx()
+    }
+
+    pub(super) fn reserve_rx(&self) -> Option<RxReservation> {
+        self.rings.lock_irqsave().reserve_rx()
+    }
+
+    pub(super) fn cancel_rx(&self, index: usize) -> Result<(), RingError> {
+        self.rings.lock_irqsave().cancel_rx(index)
+    }
+
+    pub(super) fn discard_rx(&self, index: usize) -> Result<(), RingError> {
+        let result = self.rings.lock_irqsave().discard_rx(index);
+        if result.is_ok() {
+            self.regs.demand_rx();
+        }
+        result
+    }
+
+    pub(super) fn consume_rx<R>(
+        &self,
+        index: usize,
+        consume: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, RingError> {
+        let (ptr, length) = self.rings.lock_irqsave().rx_frame_parts(index)?;
+        let result = consume(unsafe { core::slice::from_raw_parts(ptr, length) });
+        self.rings.lock_irqsave().finish_rx_public(index)?;
+        self.regs.demand_rx();
+        Ok(result)
     }
 }
 

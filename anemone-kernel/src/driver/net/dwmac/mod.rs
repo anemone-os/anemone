@@ -12,7 +12,7 @@ use crate::{
         discovery::fwnode::{InterruptResource, InterruptSelector, select_interrupt_resource},
         net::{ReadyNetdev, publish},
     },
-    exception::intr::{IrqHandler, request_irq_selected},
+    exception::intr::{IrqHandler, IrqSense, request_irq_selected},
     prelude::*,
     utils::{any_opaque::AnyOpaque, identity::AnyIdentity},
 };
@@ -130,6 +130,66 @@ where
         .start_device();
     kinfoln!(
         "dwmac {} published as netdev {} (MAC {:?}, frame capacity {}); device causes enabled; DMA started",
+        device.name(),
+        snapshot.id().index(),
+        snapshot.facts().ethernet_address,
+        snapshot.facts().max_frame_len,
+    );
+    Ok(())
+}
+
+/// Adopt a Gate 2 owner that already owns the device `drv_state`. The IRQ
+/// request is the first non-retiring boundary; the private context therefore
+/// receives the same strong owner before commit, while publication still uses
+/// the existing registry/attach authority.
+pub(in crate::driver::net::dwmac) fn publish_adopted_node<Q>(
+    device: Arc<dyn Device>,
+    origin: AnyIdentity,
+    context: Arc<Q>,
+    mac: [u8; 6],
+    link_state: anemone_net_api::LinkState,
+    handler: &'static IrqHandler,
+    private: AnyOpaque,
+    expected: IrqSense,
+) -> Result<(), SysError>
+where
+    Q: DwmacFrameQueue + DwmacDeviceControl,
+{
+    request_irq_selected(
+        device.as_ref(),
+        InterruptSelector::Name("macirq"),
+        Some(expected),
+        handler,
+        Some(private),
+    )?;
+
+    context.suppress_device();
+    let provider = DwmacFrameProvider::with_link_state(context.clone(), mac, link_state);
+    let ready = ReadyNetdev::new(
+        origin,
+        Some(provider.ethernet_address()),
+        provider.capabilities(),
+        provider.link_state(),
+        provider,
+    );
+    let snapshot = match publish(ready) {
+        Ok(snapshot) => snapshot,
+        Err((error, ready)) => {
+            context.suppress_device();
+            // There is no free_irq path. The descriptor's private context is
+            // the retained lifetime carrier when publication is rejected.
+            core::mem::forget(ready);
+            kerrln!(
+                "dwmac {}: adopted netdev publication failed: {:?}",
+                device.name(),
+                error
+            );
+            return Err(SysError::ProbeFailed);
+        },
+    };
+    context.start_device();
+    kinfoln!(
+        "dwmac {} adopted as netdev {} (MAC {:?}, frame capacity {}); device causes enabled; DMA started",
         device.name(),
         snapshot.id().index(),
         snapshot.facts().ethernet_address,

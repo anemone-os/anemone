@@ -1,9 +1,9 @@
 # RFC-20260811-dwmac
 
-**状态：** Accepted / R6 / Gate 1--2 Closed; Gate 3 Not Authorized; RFC Not Cut Over
+**状态：** Accepted / R6 / Gate 1--2 Closed; Gate 3 Authorized / Active; RFC Not Cut Over
 **修订：** R6
 **负责人：** Anemone maintainers
-**最后更新：** 2026-08-14
+**最后更新：** 2026-08-15
 **领域：** driver / net / irq / mm / phy
 **影响契约：** Accepted target：Refine `IRQ-FLOW-001`；Introduce `DWMAC-DESCRIPTOR-001`、`DWMAC-DMA-ADDR-001`、`DWMAC-CAUSE-001`、`DWMAC-NODE-001`
 **执行记录：** [2026-08-11 DWMAC transaction](../../devlog/transactions/2026-08-11-dwmac.md)
@@ -272,5 +272,5 @@ RX length 68、single-frame、payload match、最终 quiescence 和 `owner-dispo
 包括 4 GiB descriptor admission 与 TU/AIS cause classification 回归。Gate 2 因而 Closed，但
 `DWMAC1000-CUTOVER`、`DWMAC-IRQ-CUTOVER` 和 current contracts 仍保持 Not Cut Over。
 
-Gate 3 仍未授权；IRQ request/handler/level flow、双端口 production traffic、cold/warm/bootloader 矩阵、
+Gate 3 在该 Gate 2 closure 记录时仍未授权；现已进入 Gate 3，IRQ request/handler/level flow、双端口 production traffic、cold/warm/bootloader 矩阵、
 shutdown/reboot 和 RiscV/JH7110 regression 属于后续 proof，不由 Gate 2 证据替代。

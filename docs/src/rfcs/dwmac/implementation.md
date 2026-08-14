@@ -1,7 +1,7 @@
 # DWMAC RFC 实施路线
 
-**状态：** Accepted / R6 / Gate 1--2 Closed; Gate 3 Not Authorized; RFC Not Cut Over
-**最后更新：** 2026-08-14
+**状态：** Accepted / R6 / Gate 1--2 Closed; Gate 3 Authorized / Active; RFC Not Cut Over
+**最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
 **当前修订：** R6
 
@@ -120,7 +120,7 @@ review；不能把probe留成并列backend。
 descriptor、`ATDS=1`、32-bit DMA、resolved PHY link、`RI/TI`、合法 CSR5 W1C、RX/TX descriptor、68-byte
 payload、`abnormal=0`、`uncleared=0`、quiescence 和 `BindRetained`；无链路 node 在 PHY deadline 独立失败。
 三次 KUnit runner 均输出 `All tests passed!`，覆盖修正后的 4 GiB admission 与 TU/AIS classification。
-Gate 2 现已 **Closed / Not Cut Over**：不注册 IRQ、不 publication、不更新 current contracts；Gate 3 仍未授权。
+Gate 2 现已 **Closed / Not Cut Over**：不注册 IRQ、不 publication、不更新 current contracts；该 closure 记录时 Gate 3 尚未授权，当前已进入 Gate 3。
 
 ### Probe P1 - Enhanced descriptor and device-cause slice
 
@@ -165,6 +165,10 @@ existing network ABI、global Stack、attach owner 和 DWMAC4 behavior 不变。
 - 同一 per-node path 支持两个当前 2K1000 node；不增加 GMAC0/GMAC1 特判、固定数组或 second-port adapter。
 - 任一 node 的 pre-publication failure先撤销新增的 provider/worker publication attempt，并把同一 owner恢复为
   disabled retained state；只有 quiescence已证明时才可释放非 IRQ-retained capability，且不阻止其它 node成功。
+
+**Implementation checkpoint (2026-08-15):** 上述 in-place adoption、首次 `Some(LevelLow)` request、owner-local
+enhanced-ring queue、CSR5/MAC cause service 和既有 publication handoff 已实现；Gate 3 hardware validation 尚未运行，
+因此本 checkpoint 不宣称 IRQ/traffic/lifecycle acceptance。详见 [ISSUE-007](./tracking-issues.md#issue-007--gate-3-irq-and-production-traffic-evidence)。
 
 **Validation:** 先执行单端口 cold/warm boot、link snapshot、RX/TX/abnormal IRQ 和 shutdown，再在同一 Gate
 执行双端口 cold/warm boot、concurrent traffic、success-order identity、one-node failure isolation、shutdown/

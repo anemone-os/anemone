@@ -51,13 +51,19 @@ pub(super) struct DwmacFrameProvider<Q: DwmacFrameQueue> {
     /// Immutable publication-time fact parsed from this node's firmware data;
     /// it never participates in queue admission.
     mac: EthernetAddress,
+    link_state: LinkState,
 }
 
 impl<Q: DwmacFrameQueue> DwmacFrameProvider<Q> {
     pub(super) fn new(queue: Arc<Q>, mac: [u8; 6]) -> Self {
+        Self::with_link_state(queue, mac, LinkState::Unknown)
+    }
+
+    pub(super) fn with_link_state(queue: Arc<Q>, mac: [u8; 6], link_state: LinkState) -> Self {
         Self {
             queue,
             mac: EthernetAddress::new(mac),
+            link_state,
         }
     }
 
@@ -209,7 +215,7 @@ impl<Q: DwmacFrameQueue> FrameProvider for DwmacFrameProvider<Q> {
     }
 
     fn link_state(&self) -> LinkState {
-        LinkState::Unknown
+        self.link_state
     }
 }
 

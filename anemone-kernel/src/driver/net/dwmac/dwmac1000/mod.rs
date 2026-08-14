@@ -1,6 +1,7 @@
 //! Synopsys legacy DWMAC1000 concrete backend and bounded Gate 2 probe.
 
 mod fwnode;
+mod irq;
 mod owner;
 mod phy;
 mod protocol;
@@ -15,8 +16,9 @@ use crate::{
     prelude::*,
 };
 
-use super::compatible_matches;
+use super::{compatible_matches, publish_adopted_node};
 use fwnode::Dwmac1000Config;
+use irq::{Dwmac1000IrqContext, IRQ_HANDLER};
 use owner::{CharacterizationResult, Dwmac1000Owner, Dwmac1000State, ProbeDisposition};
 use phy::initialize_yt8511;
 use regs::Dwmac1000Regs;
@@ -411,9 +413,34 @@ impl DriverOps for Driver {
         match characterization.disposition() {
             ProbeDisposition::BindRetained => {
                 device.set_drv_state(crate::utils::any_opaque::AnyOpaque::new(Dwmac1000State {
-                    owner,
+                    owner: owner.clone(),
+                    runtime: SpinLock::new(None),
                 }));
-                Ok(())
+                let origin =
+                    crate::utils::identity::AnyIdentity::try_from(config.node_path.as_str())
+                        .map_err(|_| SysError::DriverIncompatible)?;
+                let context = Dwmac1000IrqContext::new(owner);
+                let private = context.private();
+                let state = device
+                    .drv_state()
+                    .cast::<Dwmac1000State>()
+                    .expect("Gate 2 owner state must be initialized before Gate 3");
+                *state.runtime.lock_irqsave() = Some(context.clone());
+                kinfoln!(
+                    "dwmac1000 {} stage=gate3-adopt result=begin owner=gate2-retained irq-registration=first expected-sense=level-low ring-rebuild=false publication=deferred",
+                    device.name(),
+                );
+                let link_state = state.owner.publication_link_state();
+                publish_adopted_node(
+                    device,
+                    origin,
+                    context,
+                    config.mac,
+                    link_state,
+                    &IRQ_HANDLER,
+                    private,
+                    crate::exception::intr::IrqSense::LevelLow,
+                )
             },
             ProbeDisposition::ReturnFailure => Err(SysError::ProbeFailed),
             ProbeDisposition::FailStop => panic!(
