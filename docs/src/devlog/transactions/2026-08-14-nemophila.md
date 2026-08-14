@@ -1,6 +1,6 @@
 # 2026-08-14 - Nemophila
 
-**Status:** Active / R3 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed
+**Status:** Active / R3 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed / Stage 3 Ready
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R3](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -11,7 +11,8 @@
 本transaction只为长期、多Stage RFC保存checkpoint execution、validation与resolution evidence。target、owner、ABI、
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
-interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。Stage 3--6仍未获解析或执行授权。
+interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。Stage 3已完成docs-only resolution但未获执行
+授权；Stage 4--6仍未获解析或执行授权。
 
 ## Checkpoint Log
 
@@ -219,3 +220,56 @@ embedded selection与R0双架构acceptance均Not Run；module-local host fixture
 **Contract Cutover / Stop:** None。没有kernel runtime、SystemTarget、management ABI、visible semantics、current contract或
 register baseline；host fixture不能外推kernel admission/lifecycle evidence。本interlude已Closed并停在Stage 3前，Stage 3
 仍为Outline Only且未获解析或执行授权。
+
+### 2026-08-14 - Stage 3 docs-only resolution
+
+**Resolution:** 维护者授权解析Stage 3；该docs-only授权已消费。Stage 3现为Resolved / Ready / Not Started，并在同一完整
+Implementation Boundary内使用两个execution checkpoint：Checkpoint 1闭合真实kernel embedding、logging Host lowering与
+unpublished load transaction；Checkpoint 2消费该transaction，建立唯一runtime collection、kernel-private non-aliasing identity与
+atomic publication。两个checkpoint都未获执行授权，Checkpoint 1 closure不自动授权Checkpoint 2，Stage 3 closure也不授权
+Stage 4解析或执行。
+
+**Owner / Handoff Decisions:** `anemone-kernel/src/nemophila/`是新的kernel顶层subsystem，拥有Nemophila admission、load
+transaction、owning instance、runtime collection、identity publication与Host call window；`nemophila-wasm`继续唯一拥有通用
+Core Wasm parse/validation/translation/execution/trap truth。内部load handoff只接收一次调用期间稳定的kernel-owned immutable
+byte snapshot，不接收`Task`、credentials、file、user pointer或artifact-source enum；future management owner完成operation-local
+`CAP_SYS_MODULE`检查、artifact source owner形成snapshot后，embedded/supplied都调用同一load-and-publish path；Checkpoint 1
+的owner-private transaction只返回unpublished instance或typed internal failure，Checkpoint 2的最终入口才返回kernel-private
+identity或typed internal failure。Stage 3不新增KernelConfig、SystemTarget、boot initcall、syscall、errno mapping或public
+identity representation。
+
+每次load新建并由该instance独占完整Engine/Module/Linker/Store/Instance entity。runtime按checked `Module::new`、pre-
+instantiation `has_start()` rejection、Stage 3 narrow Linker、typed module-side `load` lookup的顺序admit；extra exports/custom
+sections被忽略，WIT metadata、精确imports/exports集合与custom-section allowlist不进入policy。Checkpoint 1 success只产生
+unpublished instance，error/trap直接释放完整transaction-local entity；不预建generic rollback journal/resource ledger，也不产生
+Poisoned state。Checkpoint 2 commit才分配不与已销毁instance别名的kernel-private identity，并在唯一owner publication点使完整
+instance可见。
+
+**Host / Stage Boundary Decisions:** Stage 3只真实接入canonical WIT定义的value-only logging import。Host检查level、guest
+pointer/length、range与UTF-8后向现有`debug::printk`提交borrowed value；无效lowering是contained module failure，不能panic
+kernel。printk继续拥有filtering、record bound/truncation、ring与presentation；已提交日志不rollback，也不证明publication。Stage 3
+不为canonical clone observer建立fake registration/provider；缺少Stage 4 weave capability时，该artifact只能由真实narrow linker
+拒绝。registration/reservation、callback serial/in-flight、poison、try-unload/retirement仍完整留给Stage 4，clone point与canonical
+runtime success留给Stage 5，management/artifact ingress与cutover留给Stage 6。
+
+**Proof Route:** admission/load/publication cases走真实production transaction/runtime owner。小型Core Wasm fixtures只存在于
+owner-local conditional KUnit，并按语义文件内联；跨模块composition位于`nemophila`最低共同owner的inline `kunits`，不建立
+独立`kunit.rs`/`tests.rs`、第二product module或production validation facade。Checkpoint 2 KUnit使用isolated runtime owner并在
+case结束时销毁整个test-local fixture，不能把该cleanup外推为production retirement。Checkpoint 1要求双架构KUnit-on/KUnit-off
+build与至少RV64真实KUnit boot；Checkpoint 2要求RV64/LA64真实KUnit boot、两架构KUnit-off ordinary build、interpreter/module
+regression与source/conditional-surface audit。KUnit proof只覆盖实际architecture/topology/path；LTP、hardware、management、
+weave、concurrency、unload、clone与完整R0 acceptance继续Not Run。
+
+**Live Evidence:** kernel root当前只有既有顶层subsystems且`anemone-kernel`尚未依赖`nemophila-wasm`；当前interpreter public
+embedding surface提供checked `Module::new`、`Module::has_start`、`Linker`、`Store`、typed function lookup/call与Host `Caller`。
+canonical WIT当前定义point-specific clone registration、四级logging、唯一`load`与固定`observe-clone`；Stage 2 host fixture仍手工
+实现这条边界且明确带Stage 5删除gate。live printk已经拥有structured level policy、有界UTF-8 record、truncation、ring与console
+presentation；KUnit contract要求shared-kernel case撤销publication、禁止test-driven production hook并限制proof外推。tracked
+KernelConfig当前没有Nemophila feature，repository build/QEMU要求显式preset，现有RV64/LA64 wrappers提供真实KUnit boot route。
+
+**Contract Cutover:** None。resolution没有修改父RFC R3 target、invariant semantics、Contract Impact或acceptance，不发布kernel code、
+management ABI、visible semantics、current contract或register baseline，也不是`NEMOPHILA-R0-CUTOVER`。
+
+**Validation / Next / Stop:** 本次只需`git diff --check`与`mdbook build docs`验证canonical docs。Stage 3 implementation、kernel
+dependency、KUnit、QEMU、interpreter/module regression、RV64/LA64 runtime、LTP与hardware均Not Run。Stage 3保持Ready / Not
+Started；只有维护者新的明确授权才能开始Checkpoint 1。

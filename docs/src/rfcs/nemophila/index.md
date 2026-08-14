@@ -19,7 +19,8 @@ lookup，不把 WIT metadata、精确 imports/exports 集合或 custom-section a
 current contract 或 cutover 证据。
 
 Stage 1 与 Stage 2 已按维护者分别授权并关闭；Stage 2 feedback interlude 在进入 Stage 3 前完成上述 owner/validation
-纠偏，Stage 3--6 仍只有 outline，未获解析或执行授权。pre-RFC
+纠偏；Stage 3 已完成docs-only resolution并保持Ready / Not Started，两个execution checkpoint均未获执行授权；Stage 4--6仍只有
+outline，未获解析或执行授权。pre-RFC
 [定位共识](./backgrounds/positionings.md)继续作为冻结且不再维护的历史材料。
 
 ## 摘要
@@ -350,8 +351,10 @@ source 中闭合，不属于本 RFC 当前需要冻结的 target。
   callback poison quarantine、kernel-logging-owned 日志提交、clone observer semantics 与双架构 vertical slice，不声称日志
   持久性、execution progress、unload bounded completion 或恶意 module DoS containment；
 - **实施文档：** 独立[实施路线](./implementation.md)已经解析 Stage 1 与 Stage 2 的 Implementation Boundary、Deliverables、
-  Validation、Cutover 与 Stop / Exit，且两者均已关闭；Stage 2 Feedback Interlude也已关闭R3 owner/target纠偏。Stage 3--6仍只定义 Purpose、Prerequisites 与 Protected Boundary，
-  未获解析或执行授权。Stage 解析与执行分别授权，一个 Stage 的 closure 不自动授权下一 Stage；
+  Validation、Cutover 与 Stop / Exit，且两者均已关闭；Stage 2 Feedback Interlude也已关闭R3 owner/target纠偏。Stage 3现已解析
+  完整Implementation Boundary、两个execution checkpoint、Validation、Cutover与Stop，保持Ready / Not Started且未获执行授权；
+  Stage 4--6仍只定义Purpose、Prerequisites与Protected Boundary，未获解析或执行授权。Stage解析与执行分别授权，一个
+  checkpoint或Stage的closure不自动授权下一个gate；
 - **停止条件：** 若实施设计需要允许 Core Wasm start section、引入 guest-controlled
   concurrency/shared execution state、增加第二个 module lifecycle entry，或改变 SDK registration hierarchy、binding
   cardinality、registration failure 决策权、cohort dispatch、poison admission/cancellation/exclusive occupancy、poisoned
@@ -436,11 +439,11 @@ R0 closure 至少需要证明：
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)：Stage 1、Stage 2与Stage 2 Feedback Interlude已关闭；Stage 3--6 仍为
-  outline且未获解析或执行授权
+- [实施路线](./implementation.md)：Stage 1、Stage 2与Stage 2 Feedback Interlude已关闭；Stage 3已解析为两个execution
+  checkpoint并保持Ready / Not Started，execution未授权；Stage 4--6仍为outline且未获解析或执行授权
 - [历史定位共识](./backgrounds/positionings.md)：pre-RFC 讨论快照，已冻结且不再维护
 - [Stage transaction](../../devlog/transactions/2026-08-14-nemophila.md)：Stage 1 source import/审计/验证、Stage 2 resolution/
-  implementation/closure，以及R3 feedback interlude evidence
+  implementation/closure、R3 feedback interlude evidence与Stage 3 docs-only resolution
 - 外部源码证据：[Wasmi `v1.1.0`](https://github.com/wasmi-labs/wasmi/releases/tag/v1.1.0)，固定 commit
   [`8273dfb09d493971b7bb12fe614d740cdc857175`](https://github.com/wasmi-labs/wasmi/commit/8273dfb09d493971b7bb12fe614d740cdc857175)
 - Core Wasm 语义证据：[Module instantiation](https://webassembly.github.io/spec/core/exec/modules.html#exec-instantiation)；
@@ -460,6 +463,7 @@ R0 closure 至少需要证明：
 Stage 1 已关闭，`nemophila-wasm` 是仓库内持续演进的第一方 source；完整 evidence 与 Not Run 见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。Stage 2 也已关闭，交付 WIT、Rust SDK、canonical module、
 xtask-owned artifact build/export 与 canonical host evidence；随后 feedback interlude 以 Accepted R3 收拢 SDK/module owner、
-删除 build-time API admission mirror，并把 host harness 迁为带Stage 5删除gate的module-local fixture。Stage 3--6 尚未解析。当前没有
+删除 build-time API admission mirror，并把 host harness 迁为带Stage 5删除gate的module-local fixture。Stage 3已解析但尚未开始，
+Stage 4--6尚未解析。当前没有
 Nemophila kernel runtime、effective current contract、public ABI 或 cutover；Stage 1 crate-level evidence 和 Stage 2
 host/toolchain evidence都不外推 R0 runtime acceptance。
