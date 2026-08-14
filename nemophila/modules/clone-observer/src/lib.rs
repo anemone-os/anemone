@@ -5,7 +5,10 @@ extern crate alloc;
 
 use alloc::{format, rc::Rc, string::String, vec::Vec};
 use core::{alloc::Layout, cell::Cell, panic::PanicInfo};
-use nemophila_sdk::{LoadContext, LogLevel, Module, RegistrationError};
+use nemophila_sdk::{
+    LoadContext, Module, services::logging::LogLevel,
+    weave::task::clone_observer::RegistrationError,
+};
 
 #[global_allocator]
 static ALLOCATOR: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
@@ -13,6 +16,8 @@ static ALLOCATOR: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 struct CloneObserver;
 
 impl Module for CloneObserver {
+    type Error = RegistrationError;
+
     fn load(context: &mut LoadContext<'_>) -> Result<(), RegistrationError> {
         let callback_released = Rc::new(Cell::new(false));
         let release_probe = ReleaseProbe(callback_released.clone());

@@ -1,8 +1,8 @@
 # 2026-08-14 - Nemophila
 
-**Status:** Active / R2 / Stage 1 Closed / Stage 2 Closed
+**Status:** Active / R3 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed
 **Owners:** doruche, Codex
-**Canonical Target:** [RFC-20260814-nemophila R2](../../rfcs/nemophila/index.md)
+**Canonical Target:** [RFC-20260814-nemophila R3](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
 **Contract Delta:** None effective；`NEMOPHILA-R0-CUTOVER`仍为Future
 
@@ -10,7 +10,8 @@
 
 本transaction只为长期、多Stage RFC保存checkpoint execution、validation与resolution evidence。target、owner、ABI、
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
-interpreter profile/version或current contract。Stage 1与Stage 2均已按独立授权关闭；Stage 3--6仍未获解析或执行授权。
+interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
+interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。Stage 3--6仍未获解析或执行授权。
 
 ## Checkpoint Log
 
@@ -151,7 +152,7 @@ fake Host只实现WIT value boundary，不形成production runtime/provider/life
 **Independent Review / Architecture Friction:** 独立review最初发现并要求修正三条真实摩擦：module load result复用
 registration state且clone `Fanout` result预置exclusive-only outcome；stable export二次读取candidate而可能偏离已验证snapshot；
 bindgen默认在每个export前运行constructor workaround而绕过唯一load lifecycle。实现分别以独立unit load result和收窄的
-point-specific result、直接发布已验证bytes、显式禁用constructor workaround关闭。review复核最新diff后确认无剩余
+point-specific result、直接发布已验证bytes、显式禁用constructor workaround关闭。在当时review scope内，复核认为无剩余
 Apollyon、Keter、Euclid或值得记录的Safe finding。最终Architecture Friction Scan确认WIT/runtime binding、interpreter/
 artifact validation、driver/common path与candidate/export各自只有一个行为owner，没有第二份状态真相、owner穿透、public API
 扩张、test-only production path或降低oracle的桥。
@@ -176,3 +177,45 @@ build不得外推这些结果。
 
 **Next / Stop:** Stage 2 Closed。current contracts与register保持不变，`NEMOPHILA-R0-CUTOVER`仍为Future。本次严格停止在
 Stage 2；Stage 3仍为Outline Only，未获解析或执行授权。
+
+### 2026-08-14 - Stage 2 feedback interlude and R3 closure
+
+**Target Revision:** 维护者接受R3：ordinary module build不再解析WIT、执行artifact envelope或运行canonical module；future
+kernel runtime通过interpreter validation、pre-instantiation start rejection、narrow Linker与required typed entry lookup
+enforce真实安全/兼容性义务，WIT metadata、精确imports/exports集合与custom-section allowlist不进入admission。Stage 2保持
+Closed，Stage 3仍未获解析或执行授权。
+
+**Change:** Rust SDK在同一owner内拆为bindings、lifecycle、call window、`services::logging`、
+`weave::task::clone_observer`与export glue；`Module::Error`使通用load lifecycle不再依赖clone-specific registration error。
+xtask module driver拆为`driver/mod.rs` contract与`driver/cargo.rs` implementation；manifest删除`package`，Cargo driver删除
+`--package`，新增`conf/module.toml`参考模板。ordinary build只保留manifest/path、fixed toolchain/target/profile、fresh
+ordinary candidate、single output与atomic export，删除`interface`、`envelope`、`harness`及xtask对`nemophila-wasm`、
+`wasmparser`、`wit-component`、`wit-parser`、`wat`的依赖。
+
+canonical clone observer的fake Host execution迁入module-local `host-fixture`。该fixture只在真实kernel Host wiring不存在时
+证明SDK/WIT/interpreter seam，源码与implementation均要求Stage 5真实runtime/provider路径覆盖同一load、registration
+success/failure、callback、logging与failure behavior后删除；它不是generic validator、production dependency或长期
+admission facade。module toolchain继续使用`rust-toolchain.toml`固定的builtin`wasm32v1-none`，不在`conf/arch`复制target
+spec JSON。
+
+**Independent Review / Architecture Friction:** 独立subagent review发现两项Euclid并要求即时修正：SDK根级仍re-export
+service/weave/point types，使canonical module继续依赖flat surface；driver common `BuildContext`与constant仍泄露
+`cargo_manifest`/Cargo profile。实现删除领域类型root re-export并让canonical module使用`services::logging`与
+`weave::task::clone_observer`，同时把context字段收敛为`manifest`并将profile移入`driver/cargo.rs`。review复核最新diff后
+确认无残留Apollyon、Keter、Euclid或值得记录的Safe finding。Architecture Friction Scan确认build/runtime admission、SDK
+infrastructure/service/point、driver contract/implementation与临时fixture/production replacement各有唯一owner，未留下第二份
+状态/compatibility truth、owner穿透、public surface扁平化、无退出条件bridge或test-only production dependency。
+
+**Validation:** `just test xtask`通过101项测试；`just test nemophila-module`从fresh candidate完成真实Cargo build并通过module-
+local host fixture，最终artifact为19992-byte ordinary file，SHA-256为
+`89288ff48e4162b20c3fd4b22cd9a45ccad625e775c57cab4673f2d62812f088`。`just fmt all --check`、`git diff --check`、
+`mdbook build docs`、`just --list`、`just xtask module --help`与`just xtask module build --help`通过；CLI只描述build/export。
+source/lockfile residual audit确认xtask没有WIT/API/envelope/harness入口，也不含`nemophila-wasm`、`wasmparser`、
+`wit-component`、`wit-parser`或`wat`依赖。toolchain仍为`rustc 1.96.0-nightly (48cc71ee8 2026-03-31)`、LLVM 22.1.2。
+
+kernel KUnit、QEMU、LTP、hardware、guest RV64/LA64 Nemophila runtime、kernel admission/lifecycle/management、SystemTarget
+embedded selection与R0双架构acceptance均Not Run；module-local host fixture与ordinary build不得外推这些结果。
+
+**Contract Cutover / Stop:** None。没有kernel runtime、SystemTarget、management ABI、visible semantics、current contract或
+register baseline；host fixture不能外推kernel admission/lifecycle evidence。本interlude已Closed并停在Stage 3前，Stage 3
+仍为Outline Only且未获解析或执行授权。

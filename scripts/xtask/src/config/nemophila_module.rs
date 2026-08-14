@@ -18,7 +18,6 @@ pub struct Build {
     pub workdir: String,
     pub driver: ModuleBuildDriver,
     pub manifest: String,
-    pub package: String,
     pub artifact: String,
 }
 
@@ -35,7 +34,6 @@ impl NemophilaModule {
         validate_identity(&manifest.name)?;
         validate_relative_path("build.workdir", &manifest.build.workdir)?;
         validate_relative_path("build.manifest", &manifest.build.manifest)?;
-        validate_package(&manifest.build.package)?;
         validate_artifact(&manifest.build.artifact)?;
         Ok(manifest)
     }
@@ -50,17 +48,6 @@ pub(crate) fn validate_identity(identity: &str) -> anyhow::Result<()> {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
     {
         bail!("module identity '{identity}' must be lower kebab-case");
-    }
-    Ok(())
-}
-
-fn validate_package(package: &str) -> anyhow::Result<()> {
-    if package.is_empty()
-        || !package
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        bail!("Cargo package '{package}' contains unsupported characters");
     }
     Ok(())
 }
@@ -105,7 +92,6 @@ name = "clone-observer"
 workdir = "."
 driver = "cargo"
 manifest = "Cargo.toml"
-package = "nemophila-clone-observer"
 artifact = "nemophila_clone_observer.wasm"
 "#;
 
@@ -119,6 +105,7 @@ artifact = "nemophila_clone_observer.wasm"
             "target = \"riscv64\"",
             "architecture = \"loongarch64\"",
             "argv = [\"build.sh\"]",
+            "package = \"nemophila-clone-observer\"",
         ] {
             let invalid = format!("{MANIFEST}\n{extra}\n");
             let error = format!("{:#}", NemophilaModule::from_str(&invalid).unwrap_err());
@@ -127,7 +114,7 @@ artifact = "nemophila_clone_observer.wasm"
     }
 
     #[test]
-    fn identity_paths_package_and_candidate_are_validated() {
+    fn identity_paths_and_candidate_are_validated() {
         for (old, new, expected) in [
             (
                 "name = \"clone-observer\"",
@@ -138,11 +125,6 @@ artifact = "nemophila_clone_observer.wasm"
                 "workdir = \".\"",
                 "workdir = \"../outside\"",
                 "module-relative path",
-            ),
-            (
-                "package = \"nemophila-clone-observer\"",
-                "package = \"bad package\"",
-                "unsupported characters",
             ),
             (
                 "artifact = \"nemophila_clone_observer.wasm\"",
@@ -160,6 +142,13 @@ artifact = "nemophila_clone_observer.wasm"
     fn repository_module_manifest_parses() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../nemophila/modules/clone-observer/module.toml");
+        let content = std::fs::read_to_string(path).unwrap();
+        NemophilaModule::from_str(&content).unwrap();
+    }
+
+    #[test]
+    fn repository_module_template_parses() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conf/module.toml");
         let content = std::fs::read_to_string(path).unwrap();
         NemophilaModule::from_str(&content).unwrap();
     }

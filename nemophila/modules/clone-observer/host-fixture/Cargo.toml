@@ -1,0 +1,11 @@
+[package]
+name = "nemophila-clone-observer-host-fixture"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1.0.102"
+nemophila-wasm = { path = "../../../../anemone-kernel/crates/nemophila-wasm", default-features = false, features = ["extra-checks", "std"] }
+
+[workspace]

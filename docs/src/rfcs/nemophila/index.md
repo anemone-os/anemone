@@ -1,7 +1,7 @@
 # RFC-20260814-nemophila
 
 **状态：** Accepted
-**修订：** R2
+**修订：** R3
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-14
 **领域：** kernel extension runtime / WebAssembly / task / debug logging
@@ -11,11 +11,15 @@
 
 ## 文档状态
 
-本文是 Nemophila R0 capability 的 Accepted R2 Target。R2 删除 interpreter 业务模型中的独立 Core Wasm profile/version、
-fixed configuration 和 special checked-path 概念；第一方 crate 按通用 Core Wasm interpreter 自然演进，变化由普通 Git
-历史与受影响行为 proof 记录，不建立并列 source authority。接受 R2 不形成 current contract 或 cutover 证据。
+本文是 Nemophila R0 capability 的 Accepted R3 Target。R3 将普通 module build 收回为制品构建/export owner，并把
+WIT/API conformance 与 canonical module execution proof 放回 Nemophila/module owner；Stage 2到真实kernel consumer之间的
+fake Host只是一份带Stage 5删除gate的临时fixture。future kernel
+admission 只执行有真实 runtime obligation 的 interpreter validation、start rejection、narrow linking 与 typed entry
+lookup，不把 WIT metadata、精确 imports/exports 集合或 custom-section allowlist 升格为 admission policy。接受 R3 不形成
+current contract 或 cutover 证据。
 
-Stage 1 与 Stage 2 已按维护者分别授权并关闭；Stage 3--6 仍只有 outline，未获解析或执行授权。pre-RFC
+Stage 1 与 Stage 2 已按维护者分别授权并关闭；Stage 2 feedback interlude 在进入 Stage 3 前完成上述 owner/validation
+纠偏，Stage 3--6 仍只有 outline，未获解析或执行授权。pre-RFC
 [定位共识](./backgrounds/positionings.md)继续作为冻结且不再维护的历史材料。
 
 ## 摘要
@@ -54,18 +58,19 @@ target 与 proof obligation，因而在本文冻结。具体 Wasm feature/config
   不按 canonical observer 的最低需求裁剪成专用执行器。crate 不承诺 upstream Wasmi public API/workspace compatibility 或
   自动支持所有未来 WebAssembly proposals，但不得用该声明降低当前源码实际支持的通用 Core Wasm 语义；
 - 以 WIT 定义 Nemophila Host imports、module-side `load` entry、weave point callback contract、point-specific
-  registration result、逻辑类型与接口版本，并由 SDK、module build 与 kernel 接线真实消费；
+  registration result、逻辑类型与接口版本，并由 SDK bindings、owner-local API conformance proof 与 kernel Host wiring
+  真实消费；
 - 由 interpreter 唯一负责通用 core Wasm parse、type/control-flow validation、translation、execution 与 trap
-  classification；由 Nemophila admission 负责 artifact envelope、WIT identity/version、imports、module-side `load` entry
-  与 callback ABI，由 task credentials 和 management boundary 负责 caller authorization，不再实现第二套通用 Wasm
-  validator 或第二份 capability truth；
+  classification；由 Nemophila admission 在实例化/调用的真实边界拒绝 Core Wasm start、未知或类型不匹配的 imports、
+  缺失或类型错误的 required entries，由 task credentials 和 management boundary 负责 caller authorization；不再实现
+  第二套通用 Wasm validator、WIT metadata gate、精确 imports/exports 集合检查或 custom-section policy；
 - 由 Nemophila runtime 唯一拥有 instance lifecycle、callback registrations、在途调用、宿主资源账本、load rollback、
   callback trap 后的 poison quarantine 与 unload cleanup；
 - 使每个 live instance 独占 interpreter entity、translated code、store 与 execution stack；每次 load 都重新 parse、validate
   并 eager translate，R0 不共享这些 runtime state，也不建立 compiled-artifact cache；
 - 由 control-plane load 启动一个 load transaction；instance 构造完成后恰好调用一次 module-side `load` entry，只有该
   entry 正常成功后才使 callback registrations 与 live identity 一起生效；
-- 将 Core Wasm start section 排除在 R0 artifact envelope 之外；Nemophila 的 module-side `load` entry 是唯一 module
+- 在实例化前拒绝 Core Wasm start section；Nemophila 的 module-side `load` entry 是唯一 module
   lifecycle entry，不是 Wasm 固有 start function 的别名；
 - 使高层 SDK 通过 load-scoped context，按 capability、subsystem/provider 与 extension point 分层暴露 registration；
   point-specific typed API 明确 point/callback 对应关系，原始 import、通用 point tag 与 callback callable representation
@@ -111,6 +116,8 @@ target 与 proof obligation，因而在本文冻结。具体 Wasm feature/config
 - binding priority、module-controlled exclusivity、隐式 replacement/eviction、通用 `Bounded(n)` capacity、callback
   顺序承诺或并行 fanout dispatch；
 - 为未来 consumer 预建 module kind、通用 flag bag、持久 context handle、用户态 RPC、package marketplace 或依赖系统。
+- 让普通 module build 决定当前 kernel compatibility，或要求 artifact 携带 WIT metadata、精确 imports/exports 集合及
+  custom-section allowlist；这些没有独立 runtime obligation 的静态形状不构成 R0 admission contract。
 
 ## Owner 与协议边界
 
@@ -177,11 +184,14 @@ target 与 proof obligation，因而在本文冻结。具体 Wasm feature/config
   对应 artifact/API owner 建立，不能预埋为 interpreter 业务类型或并列 source identity truth。
 - Core Wasm start function 是由 start section 指定、实例化时自动执行的 Wasm 固有机制，不是 Nemophila lifecycle hook。
   R0 admission 必须拒绝包含 start section 的 artifact；通用 interpreter validation 仍可识别其合法性，但不能以“Core
-  Wasm 合法”为由绕过 Nemophila artifact-envelope rejection。
-- Nemophila admission 拥有 artifact envelope、WIT identity/version、imports、固定 module-side `load` entry 与 callback
-  ABI。interpreter validation 成功不能替代这些检查，Nemophila policy 检查也不能替代
-  interpreter validation。当前 kernel 是否实际提供某个已知 point 以及该 point 是否已有 exclusive occupant，属于
-  module-side `load` entry 内 registration 的动态结果，不是绕过 module 决策的机械 admission failure。
+  Wasm 合法”为由执行 start。该检查必须发生在任何实例化操作之前，因为 `instantiate_and_start` 会真实执行 start。
+- Nemophila admission 以真实 runtime consumer 为边界：interpreter construction 拒绝 malformed/invalid/unsupported Core
+  Wasm；只注册 R0 capability 的 narrow Linker 在实例化时拒绝未知 import 与 signature mismatch；runtime 对 module-side
+  `load` 和实际 callback entry 做 typed lookup，缺失或类型错误时拒绝 load。额外 export 与 custom section 没有执行语义，
+  R0 忽略它们；WIT component-type metadata 不参与 authorization、compatibility 或 lifecycle 决策。只有未来出现真实
+  runtime consumer 时，才由相应 owner 引入新的格式/version obligation，而不是由 build 或 admission 预先维护 allowlist。
+  当前 kernel 是否实际提供某个已知 point 以及该 point 是否已有 exclusive occupant，仍属于 module-side `load` entry 内
+  registration 的动态结果，不是绕过 module 决策的机械 admission failure。
 - task credentials 是 effective capability set 的唯一真相源。management load 与 try-unload 在 operation boundary 检查
   当前调用者是否持有 `CAP_SYS_MODULE`，runtime 只接收已经通过该次检查的管理请求；不得根据 uid、artifact 来源、loader
   process lifetime 或 instance identity 推导 authority，也不得在 runtime 中缓存 `trusted` 状态。
@@ -310,13 +320,16 @@ source 中闭合，不属于本 RFC 当前需要冻结的 target。
   `weave`、最小日志 service 与 clone observer vertical slice，不扩展到不可信 module、
   执行限额、guest-controlled concurrency/shared execution state、shared compiled artifact、第二个 point、其它 Host service、
   resource handle 或决策型 callback；
-- **Owner / handoff：** `nemophila-wasm` crate 拥有导入后 interpreter source 和通用 Core Wasm correctness；task credentials 拥有
+- **Owner / handoff：** `nemophila-wasm` crate 拥有导入后 interpreter source 和通用 Core Wasm correctness；module build只拥有
+  manifest/toolchain/fresh candidate/export，Nemophila/module owner拥有canonical API conformance与execution proof，Stage 2
+  fake Host fixture必须在Stage 5真实路径取得同等coverage后删除；task credentials 拥有
   effective capability truth，management boundary 消费 operation-local `CAP_SYS_MODULE` 检查；Nemophila runtime 唯一拥有
   admission policy、instance lifecycle、module load call window、callback registrations/reservations、execution serialization
   和 Host resources；subsystem owner 只拥有 point semantics/call site/binding policy，kernel logging owner 保留日志
   policy/record/presentation truth；typed point invocation、typed callback registration result 与 typed log submission 都是窄
   handoff；
-- **Failure / cleanup：** mechanical admission failure 由 runtime 拒绝；registration dynamic failure 只返回 module 且不毒化
+- **Failure / cleanup：** malformed/unsupported Core Wasm、start section、link/typed-entry incompatibility由runtime在publication前
+  拒绝；registration dynamic failure 只返回 module 且不毒化
   transaction，module-side `load` entry 决定它是否导致 load error；successful registration 的 reservation 保证后续可发布，
   module load trap/error 由 runtime 回滚且不发布 instance、binding 或 reservation，也不产生 unpublished poison。
   module-caused callback trap 在释放 execution slot 前 poison instance、取消其余未进入 guest 的 admitted callbacks，fanout
@@ -331,13 +344,13 @@ source 中闭合，不属于本 RFC 当前需要冻结的 target。
   point-owned cardinality、module-decided registration failure、runtime-owned reservation/cohort、runtime-owned irreversible
   poison lifecycle、kernel-owned synchronization/capability、kernel logging truth、同一 artifact 跨架构以及 target/current-contract
   分离；interpreter 内部 API、configuration、feature choice 和 limits 不属于受保护 target；
-- **Validation claim：** 通用 core Wasm correctness 只由 interpreter validation 给出，artifact/WIT/authorization admission、
-  start-section rejection、point provider/cardinality registration 与 module load/callback ABI 只由对应 owner 给出；R0 只声称
-  interpreter validation boundary、这两层 mechanical admission、Wasm execution containment、transactional lifecycle、
+- **Validation claim：** 通用 core Wasm correctness 只由 interpreter validation 给出；WIT/API conformance、management
+  authorization、start/link/typed-entry admission、point provider/cardinality registration 与 module load/callback ABI 分别由
+  对应 owner 给出；R0 只声称 interpreter validation boundary、有真实runtime obligation的mechanical admission、Wasm execution containment、transactional lifecycle、
   callback poison quarantine、kernel-logging-owned 日志提交、clone observer semantics 与双架构 vertical slice，不声称日志
   持久性、execution progress、unload bounded completion 或恶意 module DoS containment；
 - **实施文档：** 独立[实施路线](./implementation.md)已经解析 Stage 1 与 Stage 2 的 Implementation Boundary、Deliverables、
-  Validation、Cutover 与 Stop / Exit，且两者均已关闭。Stage 3--6 仍只定义 Purpose、Prerequisites 与 Protected Boundary，
+  Validation、Cutover 与 Stop / Exit，且两者均已关闭；Stage 2 Feedback Interlude也已关闭R3 owner/target纠偏。Stage 3--6仍只定义 Purpose、Prerequisites 与 Protected Boundary，
   未获解析或执行授权。Stage 解析与执行分别授权，一个 Stage 的 closure 不自动授权下一 Stage；
 - **停止条件：** 若实施设计需要允许 Core Wasm start section、引入 guest-controlled
   concurrency/shared execution state、增加第二个 module lifecycle entry，或改变 SDK registration hierarchy、binding
@@ -351,8 +364,8 @@ source 中闭合，不属于本 RFC 当前需要冻结的 target。
 接受本 RFC 只接受上述 target、non-goals、owner/lifecycle、ABI envelope、contract delta 和 validation claim，不授权实现。
 R0 closure 至少需要证明：
 
-- WIT 被 SDK/module/kernel 接线真实消费，Nemophila-owned admission checks 被两种 artifact ingress 的 kernel load path
-  真实执行；
+- WIT 被 SDK bindings、owner-local conformance proof 与 kernel Host wiring 真实消费；普通 module build 不解析 WIT，kernel
+  admission 也不以 WIT metadata、精确 imports/exports 集合或 custom sections 作为兼容性真相；
 - `nemophila-wasm` 保持通用 Core Wasm interpreter 能力；普通 module construction 在执行前完成 validation，malformed、
   invalid 或实现不支持的输入返回 error，unchecked construction 不进入 kernel load path，canonical clone observer artifact
   可通过；
@@ -360,7 +373,8 @@ R0 closure 至少需要证明：
   `CAP_SYS_MODULE` 的调用者可以进入管理操作，缺少该 capability 的调用者在任何 transaction/lifecycle mutation 前被拒绝，
   runtime 不缓存或另行推导 `trusted` 状态；
 - embedded 与 supplied ingress 每次 load 都调用 interpreter 完成通用 core Wasm validation 与 eager translation，Nemophila
-  admission 不复制或绕过该 validator；
+  admission 不复制或绕过该 validator；narrow Linker 与 required typed entry lookup分别拒绝未知/类型不匹配的 imports及
+  缺失/类型错误的 runtime entry，额外 exports/custom sections 不改变 admission；
 - 两种 ingress 都拒绝带 Core Wasm start section 的 artifact；每次成功 load transaction 在 instance 构造后恰好调用一次
   module-side `load` entry，module load error/trap 不留下 live identity、callback registration、poisoned unpublished instance
   或 Host resource；
@@ -410,7 +424,7 @@ R0 closure 至少需要证明：
 - 第一方 fork 带来持续审计 upstream bug fix、安全修复和回归测试的维护责任。`v1.1.0` 之后的 beta 代码只能作为参考；
   改变源码基线、owner 或 validation claim 必须回到 RFC review；interpreter 内部 API、configuration、feature support 与
   limits 留给 implementation 自然演进；
-- 禁止 Core Wasm start section 要求 Rust-to-Wasm module build 明确产生 start-free artifact；若真实 Rust SDK/toolchain
+- 禁止 Core Wasm start section 要求 canonical Rust-to-Wasm module validation 明确证明 start-free artifact；若真实 Rust SDK/toolchain
   证明 start 是不可移除的语言初始化需求，必须回到 RFC review 设计受限的 constructor phase，不能静默同时运行 start
   与 module-side `load` entry；
 - Host API 扩大可能引入 same-instance nested entry；新增这种路径前必须另行闭合重入协议；
@@ -422,10 +436,11 @@ R0 closure 至少需要证明：
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)：Stage 1 与 Stage 2 已关闭；Stage 3--6 仍为 outline；当前没有 Stage 解析或执行授权
+- [实施路线](./implementation.md)：Stage 1、Stage 2与Stage 2 Feedback Interlude已关闭；Stage 3--6 仍为
+  outline且未获解析或执行授权
 - [历史定位共识](./backgrounds/positionings.md)：pre-RFC 讨论快照，已冻结且不再维护
-- [Stage transaction](../../devlog/transactions/2026-08-14-nemophila.md)：Stage 1 source import/审计/验证、Stage 2 resolution、
-  implementation、review 与 closure evidence
+- [Stage transaction](../../devlog/transactions/2026-08-14-nemophila.md)：Stage 1 source import/审计/验证、Stage 2 resolution/
+  implementation/closure，以及R3 feedback interlude evidence
 - 外部源码证据：[Wasmi `v1.1.0`](https://github.com/wasmi-labs/wasmi/releases/tag/v1.1.0)，固定 commit
   [`8273dfb09d493971b7bb12fe614d740cdc857175`](https://github.com/wasmi-labs/wasmi/commit/8273dfb09d493971b7bb12fe614d740cdc857175)
 - Core Wasm 语义证据：[Module instantiation](https://webassembly.github.io/spec/core/exec/modules.html#exec-instantiation)；
@@ -438,11 +453,13 @@ R0 closure 至少需要证明：
 | R0 | 2026-08-14 | 初始 accepted target、owner/lifecycle、ABI envelope、contract delta 与 acceptance。 | 维护者接受；初始 acceptance 时 implementation Stage 1--6 仅建立 outline，均未授权 |
 | R1 | 2026-08-14 | 将 interpreter source 的维护边界修正为 Anemone 仓库内 `anemone-kernel/crates/nemophila-wasm` 第一方 crate：从固定 Wasmi 源码导入后原地裁剪、适配和维护；明确排除 submodule、nested/外部独立 repository、`anemos` 归属和依赖 upstream `wasmi` 的 wrapper/adapter。runtime owner、R0 profile envelope、ABI、contract delta 与 acceptance 不变。 | 维护者澄清“单独维护”的仓库与源码所有权含义；docs-only，runtime Not Run |
 | R2 | 2026-08-14 | 删除独立 interpreter profile/version、fixed configuration 与 special checked-path target；`nemophila-wasm` 保持通用 Core Wasm interpreter 能力，内部 API/configuration/feature/limit 随真实 consumer 自然演进，只冻结 validation-before-execution 的安全边界与 source/owner 分工。 | 维护者接受；Stage 1 execution 恢复，runtime/current contract 仍 Not Run / Not Cut Over |
+| R3 | 2026-08-14 | 普通 module build 收回为 manifest/toolchain/fresh candidate/export owner；WIT/API conformance 与 canonical execution proof 归 module owner，Stage 2 fake Host仅作为带Stage 5删除gate的临时fixture。future kernel admission 改为 interpreter validation、pre-instantiation start rejection、narrow linking 与 required typed entry lookup，不再检查 WIT metadata、精确 import/export 集合或 custom-section allowlist。 | 维护者在 Stage 2 feedback interlude 接受纠偏；Stage 3 仍未授权，kernel runtime/current contract 仍 Not Run / Not Cut Over |
 
 ## Closure
 
-Stage 1 已按 Accepted R2 关闭，`nemophila-wasm` 是仓库内持续演进的第一方 source；完整 evidence 与 Not Run 见
+Stage 1 已关闭，`nemophila-wasm` 是仓库内持续演进的第一方 source；完整 evidence 与 Not Run 见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。Stage 2 也已关闭，交付 WIT、Rust SDK、canonical module、
-xtask-owned artifact build/envelope 与 host interpreter harness；Stage 3--6 尚未解析。当前没有 Nemophila kernel runtime、
-effective current contract、public ABI 或 cutover；Stage 1 crate-level evidence 和 Stage 2 host/toolchain evidence 都不外推
-R0 runtime acceptance。
+xtask-owned artifact build/export 与 canonical host evidence；随后 feedback interlude 以 Accepted R3 收拢 SDK/module owner、
+删除 build-time API admission mirror，并把 host harness 迁为带Stage 5删除gate的module-local fixture。Stage 3--6 尚未解析。当前没有
+Nemophila kernel runtime、effective current contract、public ABI 或 cutover；Stage 1 crate-level evidence 和 Stage 2
+host/toolchain evidence都不外推 R0 runtime acceptance。

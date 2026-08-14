@@ -2,9 +2,6 @@ use clap::{Args, Subcommand};
 
 mod build;
 mod driver;
-mod envelope;
-mod harness;
-mod interface;
 
 #[derive(Args, Debug)]
 pub struct ModuleArgs {
@@ -14,7 +11,7 @@ pub struct ModuleArgs {
 
 #[derive(Subcommand, Debug)]
 enum ModuleCommand {
-    #[command(about = "Build, validate, execute, and export a Nemophila module")]
+    #[command(about = "Build and export a Nemophila module")]
     Build(BuildArgs),
 }
 

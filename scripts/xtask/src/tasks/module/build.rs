@@ -14,11 +14,7 @@ use crate::{
     log_progress,
 };
 
-use super::{
-    driver::{BuildContext, Candidate, CargoDriver, MODULE_TARGET, ModuleBuildDriver},
-    envelope, harness,
-    interface::InterfaceContract,
-};
+use super::driver::{BuildContext, Candidate, CargoDriver, MODULE_TARGET, ModuleBuildDriver};
 
 const MODULES_DIR: &str = "nemophila/modules";
 const BUILD_DIR: &str = "build/modules";
@@ -47,8 +43,8 @@ pub fn run(identity: &str) -> anyhow::Result<()> {
     let module_dir = canonical_directory(&module_dir, "module directory")?;
     let workdir = canonical_directory(&module_dir.join(&manifest.build.workdir), "build.workdir")?;
     ensure_contained(&module_dir, &workdir, "build.workdir")?;
-    let cargo_manifest = canonical_file(&workdir.join(&manifest.build.manifest), "build.manifest")?;
-    ensure_contained(&module_dir, &cargo_manifest, "build.manifest")?;
+    let build_manifest = canonical_file(&workdir.join(&manifest.build.manifest), "build.manifest")?;
+    ensure_contained(&module_dir, &build_manifest, "build.manifest")?;
 
     let build_root = repository.join(BUILD_DIR);
     fs::create_dir_all(build_root.join(".candidates"))?;
@@ -69,7 +65,7 @@ pub fn run(identity: &str) -> anyhow::Result<()> {
         identity,
         build: &manifest.build,
         workdir: &workdir,
-        cargo_manifest: &cargo_manifest,
+        manifest: &build_manifest,
         target_dir: &target_dir,
     };
     let candidate = match manifest.build.driver {
@@ -83,22 +79,14 @@ pub fn run(identity: &str) -> anyhow::Result<()> {
             candidate.path.display()
         )
     })?;
-
-    let contract = InterfaceContract::load(&repository)?;
-    let checked = envelope::validate(&bytes, &contract)
-        .with_context(|| format!("module '{identity}' artifact envelope failed"))?;
-    harness::run(&checked.module, &contract)
-        .with_context(|| format!("module '{identity}' interpreter harness failed"))?;
     atomic_export(&bytes, &export)?;
 
     log_progress!(
         "MODULE",
         &format!(
-            "Validated WIT {}, driver {}, candidate {}, custom sections {:?}",
-            contract.identity,
+            "Built with driver {}, candidate {}",
             candidate.driver,
             candidate.path.display(),
-            checked.custom_sections
         )
     );
     log_progress!("MODULE", &format!("Exported '{}'", export.display()));
@@ -286,13 +274,15 @@ mod tests {
     }
 
     #[test]
-    fn common_export_replaces_bytes_with_an_ordinary_file() {
+    fn common_export_is_byte_transparent_and_replaces_with_an_ordinary_file() {
         let temp = TempDir::new("export");
         let export = temp.0.join("stable/module.wasm");
         fs::create_dir_all(export.parent().unwrap()).unwrap();
         fs::write(&export, b"stale").unwrap();
-        atomic_export(b"fresh", &export).unwrap();
-        assert_eq!(fs::read(&export).unwrap(), b"fresh");
+        // Build/export deliberately does not interpret module bytes. Runtime
+        // admission or an owner-local fixture may reject this payload later.
+        atomic_export(b"not validated by module build", &export).unwrap();
+        assert_eq!(fs::read(&export).unwrap(), b"not validated by module build");
         assert!(fs::symlink_metadata(&export).unwrap().file_type().is_file());
     }
 }

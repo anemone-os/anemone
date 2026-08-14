@@ -114,7 +114,18 @@ fn fmt_module(module: &str, config_path: &Path, check: bool) -> anyhow::Result<(
         &format!("Nemophila module '{}'", module),
         config_path,
         check,
-    )
+    )?;
+
+    let host_fixture = module_host_fixture_manifest_path(module);
+    if host_fixture.exists() {
+        fmt_manifest(
+            &host_fixture,
+            &format!("Nemophila module '{}' host fixture", module),
+            config_path,
+            check,
+        )?;
+    }
+    Ok(())
 }
 
 fn fmt_manifest(
@@ -178,6 +189,13 @@ fn app_manifest_path(app: &str) -> PathBuf {
 
 fn module_manifest_path(module: &str) -> PathBuf {
     Path::new(MODULES_DIR).join(module).join("Cargo.toml")
+}
+
+fn module_host_fixture_manifest_path(module: &str) -> PathBuf {
+    Path::new(MODULES_DIR)
+        .join(module)
+        .join("host-fixture")
+        .join("Cargo.toml")
 }
 
 fn base_cargo_fmt_cmd(check: bool) -> Command {

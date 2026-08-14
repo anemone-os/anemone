@@ -7,32 +7,11 @@ use std::{
 
 use anyhow::{Context, bail, ensure};
 
-use crate::{config::nemophila_module::Build, tasks::utils::cmd_echo};
+use crate::tasks::utils::cmd_echo;
 
-pub const MODULE_TARGET: &str = "wasm32v1-none";
-pub const MODULE_PROFILE: &str = "nemophila-module";
+use super::{BuildContext, Candidate, MODULE_TARGET, ModuleBuildDriver};
 
-pub struct BuildContext<'a> {
-    pub identity: &'a str,
-    pub build: &'a Build,
-    pub workdir: &'a Path,
-    pub cargo_manifest: &'a Path,
-    pub target_dir: &'a Path,
-}
-
-#[derive(Debug)]
-pub struct Candidate {
-    pub path: PathBuf,
-    pub driver: &'static str,
-}
-
-/// Executes one module toolchain and returns only this invocation's candidate.
-///
-/// Artifact policy, validation, execution, and stable export remain owned by
-/// the common module build path.
-pub trait ModuleBuildDriver {
-    fn build(&self, context: &BuildContext<'_>) -> anyhow::Result<Candidate>;
-}
+const MODULE_PROFILE: &str = "nemophila-module";
 
 pub struct CargoDriver {
     program: OsString,
@@ -63,9 +42,7 @@ impl ModuleBuildDriver for CargoDriver {
             .arg("build")
             .arg("--locked")
             .arg("--manifest-path")
-            .arg(context.cargo_manifest)
-            .arg("--package")
-            .arg(&context.build.package)
+            .arg(context.manifest)
             .arg("--target")
             .arg(MODULE_TARGET)
             .arg("--profile")
@@ -146,6 +123,8 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
+    use crate::config::nemophila_module::{Build, ModuleBuildDriver as DriverKind};
+
     use super::*;
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -173,9 +152,8 @@ mod tests {
     fn build_config() -> Build {
         Build {
             workdir: ".".into(),
-            driver: crate::config::nemophila_module::ModuleBuildDriver::Cargo,
+            driver: DriverKind::Cargo,
             manifest: "Cargo.toml".into(),
-            package: "fixture".into(),
             artifact: "fixture.wasm".into(),
         }
     }
@@ -184,13 +162,13 @@ mod tests {
     fn missing_tool_and_cargo_failure_keep_driver_context() {
         let temp = TempDir::new("cargo-errors");
         let build = build_config();
-        let cargo_manifest = temp.0.join("Cargo.toml");
+        let manifest = temp.0.join("Cargo.toml");
         let target_dir = temp.0.join("target");
         let context = BuildContext {
             identity: "fixture",
             build: &build,
             workdir: &temp.0,
-            cargo_manifest: &cargo_manifest,
+            manifest: &manifest,
             target_dir: &target_dir,
         };
 
