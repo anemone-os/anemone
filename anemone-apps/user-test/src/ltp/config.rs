@@ -137,6 +137,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../../ltp/groups/exec.txt"),
     },
     LtpGroup {
+        name: "fadvise",
+        cases: include_str!("../../ltp/groups/fadvise.txt"),
+    },
+    LtpGroup {
         name: "fanotify",
         cases: include_str!("../../ltp/groups/fanotify.txt"),
     },

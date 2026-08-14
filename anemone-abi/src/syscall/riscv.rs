@@ -250,6 +250,7 @@ pub mod linux {
     pub const SYS_CLONE: u64 = 220;
     pub const SYS_EXECVE: u64 = 221;
     pub const SYS_MMAP: u64 = 222;
+    pub const SYS_FADVISE64: u64 = 223;
     pub const SYS_MPROTECT: u64 = 226;
     pub const SYS_MSYNC: u64 = 227;
     pub const SYS_MLOCK: u64 = 228;

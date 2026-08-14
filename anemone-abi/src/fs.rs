@@ -121,6 +121,15 @@ pub mod linux {
             SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER;
     }
 
+    pub mod fadvise {
+        pub const POSIX_FADV_NORMAL: i32 = 0;
+        pub const POSIX_FADV_RANDOM: i32 = 1;
+        pub const POSIX_FADV_SEQUENTIAL: i32 = 2;
+        pub const POSIX_FADV_WILLNEED: i32 = 3;
+        pub const POSIX_FADV_DONTNEED: i32 = 4;
+        pub const POSIX_FADV_NOREUSE: i32 = 5;
+    }
+
     pub mod mode {
         pub const S_IFMT: u32 = 0o170000;
         pub const S_IFSOCK: u32 = 0o140000;
