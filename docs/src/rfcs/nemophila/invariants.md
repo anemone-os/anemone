@@ -3,7 +3,7 @@
 **状态：** Accepted Target
 **最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
-**适用修订：** R0
+**适用修订：** R1
 
 本文只定义 Nemophila R0 的 correctness 与 target proof obligations。当前没有 Nemophila effective contract；Draft 或
 Accepted target 不能提前覆盖 `docs/src/contracts/`。解释器与 Nemophila 的 owner 分工属于本页 target；内部类型、具体
@@ -32,24 +32,33 @@ instance lifetime，以独立 poison flag 和 live state 共同驱动行为，�
 
 ### NEMOPHILA-INTERPRETER-001 — Core Wasm correctness 与 instance entity 边界唯一
 
-**规则：** R0 interpreter project 位于 Anemone kernel tree 之外、独立版本化、由项目第一方维护，并以 Wasmi `v1.1.0`
-为可审计源码基线；该基线不承诺 upstream API 或 workspace compatibility。interpreter project 必须拥有单一、显式、版本化
-且 fail-closed 的 R0 Core Wasm profile definition，并且是通用 core Wasm binary parse、type/control-flow/profile validation、
+**规则：** R0 interpreter source 由 Anemone 仓库内 `anemone-kernel/crates/nemophila-wasm` 第一方 crate 拥有，并以
+Wasmi `v1.1.0` 为可审计源码基线。Stage 1 先 clone 固定 upstream source，再去除上游 Git metadata，将实际 interpreter
+source 导入该 crate 后直接裁剪、适配并持续维护；它不是 submodule、nested Git repository、外部独立 project、
+`anemone-kernel/crates/anemos` 下的 crate，也不是依赖另一个 upstream `wasmi` crate 的 wrapper/adapter。该基线只固定
+provenance，不冻结后续第一方 crate source revision，也不承诺 upstream API 或 workspace compatibility。interpreter crate
+必须拥有单一、显式、版本化且
+fail-closed 的 R0 Core Wasm profile definition，并且是
+通用 core Wasm binary parse、type/control-flow/profile validation、
 eager translation、execution 与 trap classification 的唯一行为真相。精确 proposal/opcode/type/limit/toolchain matrix 由后续
 implementation 在 profile envelope 内选择，只需承载 R0 WIT lowering 与 canonical clone observer artifact，不构成通用
 Core Wasm compatibility；它不得引入 guest-controlled concurrency、guest-visible shared execution state、跨 instance
-runtime state、新 Host capability 或额外 module lifecycle entry。module build 明确以该 profile 为目标，embedded 与
+runtime state、新 Host capability 或额外 module lifecycle entry。crate 可以在后续 Stage 持续修改，但每组 evidence/consumer
+必须记录包含精确 crate source 的 Anemone commit 与 profile identity；profile feature/limit/validation 语义变化必须形成新
+revision 并重跑受影响 proof，不能在同一 identity 下静默漂移。module build 明确以该 profile 为目标，embedded 与
 supplied kernel load path 都执行它，不能继承 interpreter 的宽松默认 feature set 或另建 feature matrix。每次 load 创建由该
 live instance 独占的完整 interpreter entity、translated code、store 与 execution stack；R0 不在 instances 或 reload 之间
 共享这些 runtime entity，也不建立 compiled-artifact cache。interpreter 不拥有 kernel synchronization policy、Host
 capability/resource ledger、provider 或 instance lifecycle state。
-**Owner：** interpreter project 拥有通用 core Wasm correctness；Nemophila runtime 拥有每次 load 的 interpreter entity、
-admission policy、execution serialization、Host resources 与 lifecycle。
+**Owner：** `nemophila-wasm` crate 拥有导入后 interpreter source 与通用 core Wasm correctness；Nemophila runtime 拥有每次
+load 的 interpreter entity、admission policy、execution serialization、Host resources 与 lifecycle。
 **违反表现：** Nemophila 复制一套通用 Wasm validator 或 feature matrix，任一 ingress 绕过/放宽 interpreter profile
 validation，具体 feature 偷渡 profile envelope 外的新 owner/capability/concurrency/lifecycle，以共享 Engine/code/cache 形成
-隐藏资源 owner，或 interpreter 持有 Task、File、kernel lock/raw pointer、provider/registration/in-flight/retirement state。
-**Cutover / Proof：** 固定源码基线、profile definition/build/load consistency、两种 ingress fail-closed validation、
-per-instance ownership 与 kernel owner boundary proof；
+隐藏资源 owner，interpreter 持有 Task、File、kernel lock/raw pointer、provider/registration/in-flight/retirement state，或
+`nemophila-wasm` 退化为 submodule/外部独立 source、`anemone-kernel/crates/anemos` dependency 或只转发 upstream `wasmi`
+的 adapter。
+**Cutover / Proof：** 固定上游源码 provenance、pinned Anemone crate-source/profile revision、profile definition/build/load
+consistency、两种 ingress fail-closed validation、per-instance ownership 与 kernel owner boundary proof；
 `NEMOPHILA-R0-CUTOVER`。
 
 ### NEMOPHILA-API-001 — WIT 是逻辑接口来源而不是 runtime policy
@@ -259,7 +268,7 @@ dispatch/containment。
 | --- | --- | --- | --- |
 | WIT logical interface | Nemophila API owner | checked/generated consumer view | accepted interface revision；不驱动 runtime lifecycle |
 | artifact source | embedded catalog 或本次 supplied input | immutable bytes / artifact identity | source 自身生命周期；不等同 live instance |
-| R0 Core Wasm profile / validation / translation / trap semantics | interpreter project | module build 明确 target；Nemophila admission 只消费结果，不复制行为真相 | interpreter baseline 或 profile revision；envelope 外变化回 RFC review |
+| R0 Core Wasm profile / validation / translation / trap semantics | `nemophila-wasm` crate | module build 明确 target；Nemophila admission 只消费结果，不复制行为真相 | crate source 或 profile revision；envelope 外变化回 RFC review |
 | management caller authorization | task credentials | management boundary 只消费 operation-local effective `CAP_SYS_MODULE` check | 单次 load/try-unload operation |
 | point semantics / call site / binding policy | 具体 subsystem owner | runtime 可解析的 typed point identity 与 immutable policy | provider availability lifetime |
 | log policy / record / retention / presentation | kernel logging owner | runtime 只持一次 value-only typed submission window | 单次提交结束；不形成 instance resource |
@@ -288,7 +297,7 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 ## RFC-local Proof Obligations
 
 - WIT 必须有真实 SDK/module/kernel consumers，不能形成第二套手写接口真相；
-- interpreter project 必须拥有单一、显式、版本化且受 envelope 约束的 profile definition；module build 与两种 kernel
+- `nemophila-wasm` crate 必须拥有单一、显式、版本化且受 envelope 约束的 profile definition；module build 与两种 kernel
   ingress 必须使用同一 profile，禁用 feature fail closed，canonical clone observer artifact 可通过。精确 feature matrix 的
   envelope 内选择与校正不属于 RFC target change；
 - embedded 与 supplied ingress 必须共享 kernel admission/runtime lifecycle，并在每次 load 真实调用 interpreter validation 与
@@ -324,9 +333,9 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - clone observer 必须经真实 Wasm entry 运行并使用日志 service；正常返回、trap 以及日志过滤、截断或覆盖均不得影响
   clone result；
 - `NEMOPHILA-R0-CUTOVER` 前不创建 effective Nemophila contract；
-- Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；具体 proof route、test/oracle 和命令只在对应 Stage
-  获得授权后解析。如果实施路线需要改变本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回
-  RFC review。
+- Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 route 当前已解析但未获执行授权，Stage 2--6
+  的具体 proof route、test/oracle 和命令只在对应 Stage 获得解析授权后补充，执行仍需单独授权。如果实施路线需要改变
+  本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 
 ## 禁止退化项
 
