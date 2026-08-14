@@ -31,8 +31,8 @@ impl HostContext {
     }
 }
 
-#[derive(Debug)]
-enum LoggingFailure {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LoggingFailure {
     InvalidLevel(i32),
     MissingMemory,
     RangeOverflow,
@@ -54,8 +54,8 @@ impl fmt::Display for LoggingFailure {
 
 impl HostError for LoggingFailure {}
 
-#[derive(Debug)]
-enum WeaveFailure {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum WeaveFailure {
     MissingCallback,
     OutsideLoad,
 }
@@ -72,6 +72,24 @@ impl fmt::Display for WeaveFailure {
 }
 
 impl HostError for WeaveFailure {}
+
+/// Immutable classification retained by poison diagnostics. It never drives
+/// lifecycle decisions; the runtime uses only its authoritative lifecycle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CallbackHostTrap {
+    Logging(LoggingFailure),
+    Weave(WeaveFailure),
+}
+
+pub(super) fn classify_callback_host_trap(error: &Error) -> Option<CallbackHostTrap> {
+    if let Some(reason) = error.downcast_ref::<LoggingFailure>() {
+        return Some(CallbackHostTrap::Logging(*reason));
+    }
+    if let Some(reason) = error.downcast_ref::<WeaveFailure>() {
+        return Some(CallbackHostTrap::Weave(*reason));
+    }
+    None
+}
 
 #[derive(Debug, Clone, Copy)]
 enum GuestLogLevel {

@@ -1,20 +1,20 @@
 # Nemophila R0 实施路线
 
 **状态：** Active
-**最后更新：** 2026-08-14
+**最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
-Stage 3 / Resolved / Closed；Stage 4 / Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started；
+Stage 3 / Resolved / Closed；Stage 4 / Resolved / Closed；
 Stage 5--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 4 Checkpoint 1授权已消费；Checkpoint 2与Stage 5--6解析/执行均未授权
+**Execution Authorization：** Stage 4两个Checkpoint授权均已消费；Stage 5--6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
 两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
-两个共享完整lifecycle边界的execution checkpoint；Checkpoint 1已关闭，Checkpoint 2保持Ready / Not Started；Stage 5--6仍只有outline。当前没有
-Nemophila current contract 或cutover。
+两个共享完整lifecycle边界的execution checkpoint，现均已关闭；Stage 5--6仍只有outline。当前没有Nemophila current contract
+或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
@@ -71,7 +71,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 2 | Resolved / Closed | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
 | Stage 2 Feedback Interlude | Resolved / Closed | 收拢SDK/config/build owner，移除xtask业务admission mirror，并以R3修正future kernel admission target | None |
 | Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
-| Stage 4 | Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started | 闭合 weave、并发调用与完整 instance lifecycle | None |
+| Stage 4 | Resolved / Closed | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
@@ -637,9 +637,9 @@ interpreter内部API/source调整可以留在既有crate owner并重跑受影响
 
 ## Stage 4 — Weave、并发调用与完整 lifecycle
 
-**Resolution：** Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started
+**Resolution：** Closed / Checkpoint 1 Closed / Checkpoint 2 Closed
 
-**Execution Authorization：** Checkpoint 1 Consumed；Checkpoint 2未获执行授权
+**Execution Authorization：** Checkpoint 1 Consumed；Checkpoint 2 Consumed
 
 **Purpose：** 在 Stage 3 transactional core 上闭合 typed point/provider handoff、registration/reservation、fanout cohort、
 per-instance serial execution、in-flight ownership、无副作用 busy try-unload、callback trap poison/cancellation 与 live/
@@ -808,6 +808,49 @@ RV64 wrapper在`smp=1`、`memory=1G`下完成647/647 KUnit，其中15项Nemophil
 不外推LA64 guest execution。Checkpoint 1据此**Closed**，Contract Cutover保持None。Checkpoint 2现在Ready / Not Started且未获
 执行授权；本次严格停止，不进入cohort/in-flight、execution serialization、poison/cancellation、try-unload/retirement、Stage 5
 clone seam、management/public ABI或current contract。
+
+#### Checkpoint 2 与 Stage 4 关闭结果
+
+Checkpoint 2授权已消费。published map继续是membership、live/poisoned lifecycle、bindings与显式in-flight accounting的唯一
+行为真相；每个entry另持独立sleepable execution mutex，Arc与mutex occupancy只保护内存lifetime和解释器串行，不决定busy或
+retirement。一次point call在同一state guard内筛选全部live bindings并为整个cohort预建ownership，随后释放guard逐项执行；
+同instance等待同一execution domain，不同instances没有global execution lock。锁序固定为execution mutex到短时runtime state
+guard，guest、Host logging与诊断格式化均不发生在state spin guard内。
+
+guest trap与已知module-caused Host trap在仍持execution slot时发布不可逆Poisoned；Host diagnostic保留具体reason以及
+instance/point identity和Guest/Host classification，但这些字段不参与admission、replacement或retirement。已经admit但排队的
+同instance invocation取得slot后重新检查lifecycle并取消，fanout中其它instances继续。`try_unload`用显式in-flight判断
+`Busy`，busy路径无副作用；零in-flight时在一个state临界区撤销membership与全部bindings，Store/interpreter/resource随后在
+guard外析构。runtime owner按稳定职责从`runtime.rs`目录化为`runtime/mod.rs`与`runtime/invocation.rs`，没有移动owner、扩大
+public ABI或建立平行runtime。
+
+新增owner-local cases覆盖cohort全部ownership、busy/not-found与retirement、guest trap poison/queued cancellation/fanout
+continuation、poisoned exclusive occupancy及replacement、真实typed callback的TID value与logging Host window，以及真实
+per-instance execution capability上的SMP independent progress。并发case只使用具名phase、Event/predicate、production
+invocation/execution capability和完整kthread join；没有sleep、固定yield/tick、timeout成功oracle、production pause hook、KUnit
+Host service或测试驱动的lifecycle字段。
+
+独立change review最初发现poisoned-exclusive fixture误调用本地`load`而不能形成Host trap，并指出Host diagnostic丢失具体reason；
+fixture改为真实late-registration import，diagnostic改为保留`OutsideLoad`等owner reason，logging case也直接断言callback返回后
+没有in-flight或poison。复核后分级为Apollyon 0 / Keter 0 / Euclid 0。Architecture Friction Scan确认没有第二份状态真相、
+provider/Host owner穿透、私有表示泄漏、为测试扩大production API、无退出条件临时桥、隐含failure/cleanup顺序或通过降低ABI
+诚实性换取通过。
+
+`just fmt kernel --check`、`just test xtask`（103/103）、`just test nemophila-wasm`（71项unit、54项integration、1项doctest与
+4项focused Miri）、`just test nemophila-module`和`git diff --check`通过。实现矩阵完成双架构KUnit-on build与双架构KUnit-off
+build；ELF audit中KUnit-on catalog均为两个16-byte conditional descriptors，KUnit-off catalog start/end相等。最后的
+Host-diagnostic refinement后重跑RV64 KUnit-on build；维护者接受LA64不为该owner-local Copy diagnostic变化重复build/runtime。
+
+`build/nemophila-stage4-ckpt2-rv64-smp2.log`使用`qemu-virt-rv64-release`、`smp=2`、`memory=1G`及wrapper生成的pretest
+rootfs与从preliminary master重新复制的worktree-local disk。QEMU报告2 HART，guest完成652/652 KUnit，其中20项Nemophila
+cases全部通过；typed callback日志marker可见，SMP case实际返回`ok`，socket LTP profile 6/6，最后进入PowerOff machine action。
+SMP case的`kinfo` ENTER/PASS受普通console policy过滤；维护者明确接受production lock/lifetime source proof、2-HART case进入与
+完整suite/terminal result，不要求为marker改变日志级别或追加运行，也不把本证据描述为直接观测mutex waiter挂队。
+
+LA64本checkpoint最终source的focused guest与hardware **Not Run**；LA64 build/ELF证据不外推guest execution。维护者在该明确
+proof limit下指示收口。Checkpoint 2与Stage 4据此**Closed**，Contract Cutover保持None；不更新current contract或register，
+也不接入task clone seam、不删除Stage 2 temporary Host fixture、不引入management/artifact ingress/public ABI。Stage 5--6仍未获
+解析或执行授权。
 
 ### Deliverables
 

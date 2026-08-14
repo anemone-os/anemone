@@ -6,13 +6,17 @@ use alloc::{
     sync::Arc,
 };
 
-use crate::prelude::SpinLock;
+use crate::prelude::{Mutex, SpinLock};
 
 use super::{
-    instance::RuntimeInstance,
+    instance::{ModuleTrap, RuntimeInstance},
     load::{LoadFailure, load_unpublished},
     weave::{BindingPolicy, CallbackBinding, PointIdentity, ProviderCatalog, provider_catalog},
 };
+
+mod invocation;
+#[cfg(feature = "kunit")]
+pub(super) use invocation::{Invocation, InvocationOutcome};
 
 const FIRST_IDENTITY: u64 = 1;
 const FIRST_TRANSACTION: u64 = 1;
@@ -30,6 +34,12 @@ pub(crate) enum PublishFailure {
     Load,
     IdentityExhausted,
     TransactionExhausted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TryUnloadFailure {
+    NotFound,
+    Busy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -54,7 +64,7 @@ struct RuntimeInner {
     next_transaction: u64,
     /// The sole publication truth: membership and the owned interpreter island
     /// become visible together under `LoadTransaction::commit`'s lock.
-    instances: BTreeMap<InstanceIdentity, RuntimeInstance>,
+    instances: BTreeMap<InstanceIdentity, PublishedInstance>,
     /// Unpublished reservations are runtime-owned protocol state. Their
     /// transaction membership is removed on every rollback or moved into the
     /// owning instance at the publication linearization point.
@@ -64,6 +74,54 @@ struct RuntimeInner {
 #[derive(Default)]
 struct TransactionRecord {
     bindings: BTreeMap<PointIdentity, CallbackBinding>,
+}
+
+struct PublishedInstance {
+    /// This variant is the only callback-admission and retirement truth. The
+    /// optional diagnostic carried by `Poisoned` is never inspected to decide
+    /// behavior.
+    lifecycle: InstanceLifecycle,
+    /// Every admitted, waiting or executing callback owns one count. Arc and
+    /// mutex state protect memory and serialization only; they never decide
+    /// busy or retirement.
+    in_flight: usize,
+    bindings: BTreeMap<PointIdentity, CallbackBinding>,
+    execution: Arc<Mutex<RuntimeInstance>>,
+}
+
+impl PublishedInstance {
+    fn new(instance: RuntimeInstance, bindings: BTreeMap<PointIdentity, CallbackBinding>) -> Self {
+        Self {
+            lifecycle: InstanceLifecycle::Live,
+            in_flight: 0,
+            bindings,
+            execution: Arc::new(Mutex::new(instance)),
+        }
+    }
+
+    fn has_binding(&self, point: PointIdentity) -> bool {
+        self.bindings.contains_key(&point)
+    }
+}
+
+enum InstanceLifecycle {
+    Live,
+    Poisoned(PoisonDiagnostic),
+}
+
+impl InstanceLifecycle {
+    fn is_live(&self) -> bool {
+        matches!(self, Self::Live)
+    }
+}
+
+/// Immutable diagnostic snapshot captured at the poison transition. These
+/// fields never participate in callback admission, unload or replacement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PoisonDiagnostic {
+    pub(super) identity: InstanceIdentity,
+    pub(super) point: PointIdentity,
+    pub(super) classification: ModuleTrap,
 }
 
 impl Runtime {
@@ -131,8 +189,18 @@ impl Runtime {
             published_bindings: inner
                 .instances
                 .values()
-                .map(RuntimeInstance::binding_count)
+                .map(|instance| instance.bindings.len())
                 .sum(),
+            in_flight: inner
+                .instances
+                .values()
+                .map(|instance| instance.in_flight)
+                .sum(),
+            poisoned: inner
+                .instances
+                .values()
+                .filter(|instance| !instance.lifecycle.is_live())
+                .count(),
             transactions: inner.transactions.len(),
             reservations: inner
                 .transactions
@@ -161,7 +229,7 @@ impl LoadTransaction {
 
     pub(super) fn commit(
         mut self,
-        mut instance: RuntimeInstance,
+        instance: RuntimeInstance,
     ) -> Result<InstanceIdentity, PublishFailure> {
         let transaction = self
             .identity
@@ -181,14 +249,14 @@ impl LoadTransaction {
             .transactions
             .remove(&transaction)
             .expect("Nemophila load transaction disappeared before commit");
-        instance.attach_bindings(record.bindings);
+        let published = PublishedInstance::new(instance, record.bindings);
         match inner.instances.entry(identity) {
             Entry::Vacant(entry) => {
                 // Removing the unpublished reservation record and inserting
                 // the complete owning instance occur under one state guard.
                 // Thus identity, instance and bindings share this publication
                 // linearization point, with no commit-time policy recheck.
-                entry.insert(instance);
+                entry.insert(published);
             },
             Entry::Occupied(_) => unreachable!(),
         }
@@ -288,6 +356,8 @@ pub(super) struct RuntimeSnapshot {
     pub(super) next_identity: u64,
     pub(super) identities: Vec<InstanceIdentity>,
     pub(super) published_bindings: usize,
+    pub(super) in_flight: usize,
+    pub(super) poisoned: usize,
     pub(super) transactions: usize,
     pub(super) reservations: usize,
 }

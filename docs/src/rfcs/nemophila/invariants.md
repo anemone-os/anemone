@@ -1,13 +1,15 @@
 # Nemophila 目标与不变量
 
 **状态：** Accepted Target
-**最后更新：** 2026-08-14
+**最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **适用修订：** R4
 
 本文只定义 Nemophila R0 的 correctness 与 target proof obligations。当前没有 Nemophila effective contract；Draft 或
 Accepted target 不能提前覆盖 `docs/src/contracts/`。解释器与 Nemophila 的 owner 分工属于本页 target；内部类型、具体
 同步原语、算法、crate/file layout 和具体测试路线由独立[实施路线](./implementation.md)在对应 Stage 获得授权后负责。
+Stage 4的kernel-internal weave与完整invocation/lifecycle protocol已关闭；该implementation proof没有使本页任何target ID
+成为effective current contract，Stage 5--6仍未获解析或执行授权。
 
 ## 规则分类
 
@@ -344,8 +346,8 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 与 Stage 2 route 均已解析并关闭，Stage 2
   feedback interlude已在Stage 3前以R3纠正build/admission owner；R4已收敛integer-only profile与kernel/app compiler-target owner；
   Stage 3的两个Checkpoint均已关闭；LA64按current System Power contract进入末尾halt后的host QEMU终止只作为该平台的
-  Stage 3 harness disposition，不形成ordinary power-off capability；Stage 4已解析为两个共享同一provider/runtime/lifecycle
-  Implementation Boundary的checkpoint，Checkpoint 1已关闭，Checkpoint 2未获执行授权；
+  Stage 3 harness disposition，不形成ordinary power-off capability；Stage 4同一provider/runtime/lifecycle Implementation
+  Boundary内的两个Checkpoint均已关闭；
   Stage 5--6的具体proof route、test/oracle和命令只在对应Stage获得解析授权后补充。如果实施路线需要改变
   本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 

@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Closed / Stage 4 Checkpoint 1 Closed / Checkpoint 2 Ready
+Stage 3 Closed / Stage 4 Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -13,8 +13,8 @@ Stage 3 Closed / Stage 4 Checkpoint 1 Closed / Checkpoint 2 Ready
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
-kernel/app compiler-target owner拆分；Stage 3两个Checkpoint的授权均已消费并关闭；Stage 4 docs-only resolution与Checkpoint 1
-授权也已消费，Checkpoint 1已关闭，Checkpoint 2未获执行授权；Stage 5--6仍未获解析或执行授权。
+kernel/app compiler-target owner拆分；Stage 3与Stage 4各两个Checkpoint的授权均已消费并关闭；Stage 5--6仍未获解析或执行
+授权。
 
 ## Checkpoint Log
 
@@ -480,3 +480,48 @@ owner protocol proof；当前没有第二个consumer、public API或错配路径
 Checkpoint 2现在Ready / Not Started且未获执行授权。本次执行严格停止，不进入point invocation、cohort/in-flight、per-instance
 execution serialization、trap poison/cancellation、try-unload/retirement、task clone seam、management/public ABI或Stage 5；这些
 能力及LA64 runtime、hardware、真实clone placement与完整R0 acceptance均Not Run / Not Proven。
+
+### 2026-08-15 - Stage 4 Checkpoint 2 implementation and Stage closure
+
+**Execution Authorization:** 维护者授权完成Stage 4 Checkpoint 2并在review/validation后指示收口提交；该授权已消费。Stage 5及
+后续gate仍未获解析或执行授权。
+
+**Implementation:** Stage 3/Checkpoint 1的published map扩展为membership、live/poisoned lifecycle、bindings与显式in-flight的
+唯一行为真相；每个published entry持独立sleepable execution mutex。runtime在一个state guard内选择完整live cohort并为全部
+callbacks预建ownership，释放guard后才逐项进入guest。同instance共享execution domain，不同instances不共享global lock；唯一
+锁序为execution mutex到短时state guard。
+
+guest trap及logging/weave已知Host trap在释放execution slot前发布Poisoned，具体Host reason与instance/point/classification只保留
+为immutable diagnostic。queued same-instance invocation取得slot后取消，fanout其它instance继续；poisoned binding/resource保持
+失活但继续占用Exclusive。kernel-private typed try-unload以显式in-flight返回无副作用Busy，零in-flight时原子撤销membership与
+bindings，再在guard外析构interpreter/resource。用户要求的模块形状同步完成：原`runtime.rs`成为
+`runtime/{mod.rs,invocation.rs}`，属于同一Runtime owner内职责拆分，没有public surface或owner迁移。
+
+owner-local KUnit新增cohort ownership/busy retirement、guest trap poison/queued cancellation/fanout continuation、poisoned
+exclusive occupancy/replacement、真实typed callback TID与logging Host handoff，以及production execution capability上的SMP
+independent progress。并发case使用Event/predicate phase、真实invocation和完整kthread join，没有sleep、固定yield/tick、timeout
+成功oracle、production pause hook、KUnit Host service或test-driven lifecycle state。
+
+**Review / Friction:** 独立change review先发现poisoned-exclusive fixture没有真实Host import trap，并指出Host diagnostic丢失具体
+reason；改用late-registration fixture、保留`OutsideLoad`等Copy reason并收紧callback non-poison oracle后复核通过。最终分级
+Apollyon 0 / Keter 0 / Euclid 0。Architecture Friction Scan确认published map是唯一state owner，Arc/mutex/diagnostic不决定
+lifecycle，provider与Host不穿透runtime private state，cleanup顺序显式，KUnit未塑造production protocol，Stage 5/task/
+management/ABI均未提前进入。
+
+**Validation:** `just fmt kernel --check`、`just test xtask`（103/103）、`just test nemophila-wasm`（71 unit、54 integration、
+1 doctest、4 focused Miri）、`just test nemophila-module`与`git diff --check`通过。实现矩阵完成KUnit-on RV64/LA64与KUnit-off
+RV64/LA64 build；KUnit-on ELF catalog各含两个16-byte conditional descriptors，KUnit-off双架构catalog为空。最后的
+Host-diagnostic refinement后重跑RV64 KUnit-on build；维护者接受LA64不因该owner-local Copy diagnostic变化重复build/runtime。
+
+`build/nemophila-stage4-ckpt2-rv64-smp2.log`记录`qemu-virt-rv64-release`、2 HART、`memory=1G`、wrapper生成的pretest rootfs与
+从preliminary master重新复制的worktree-local test disk。最终652/652 KUnit通过，其中20项Nemophila case全部通过；真实callback
+logging marker可见，SMP case返回`ok`，当前socket LTP profile 6/6，随后进入PowerOff machine action。SMP ENTER/PASS使用`kinfo`
+而受普通console policy过滤；维护者接受source lock/lifetime proof、2-HART case进入及完整suite/terminal outcome，不要求为marker
+改变日志策略或追加运行，本证据也不声称直接观测mutex waiter挂队。
+
+LA64本checkpoint最终source的focused guest与hardware **Not Run**；LA64 build/ELF证据不外推guest execution。维护者在该明确
+proof limit下指示收口。
+
+**Result / Next / Stop:** Stage 4 Checkpoint 2与Stage 4 **Closed**，Contract Cutover仍为None；不更新current contract或register。
+Stage 5--6仍未解析或授权，不接入task clone seam、不删除Stage 2 temporary Host fixture、不引入management/artifact ingress或
+public ABI，也不声称完整R0 acceptance。

@@ -3,7 +3,7 @@
 **状态：** Accepted
 **修订：** R4
 **负责人：** doruche, Codex
-**最后更新：** 2026-08-14
+**最后更新：** 2026-08-15
 **领域：** kernel extension runtime / WebAssembly / task / debug logging
 **影响契约：** 拟 Introduce `NEMOPHILA-RUNTIME-001`、`NEMOPHILA-HOST-001`、
 `NEMOPHILA-WEAVE-001`、`NEMOPHILA-CLONE-001`、`NEMOPHILA-ARTIFACT-001`；当前均未生效
@@ -23,8 +23,8 @@ current contract 或 cutover 证据。
 Stage 1 与 Stage 2 已按维护者分别授权并关闭；Stage 2 feedback interlude 在进入 Stage 3 前完成上述 owner/validation
 纠偏；维护者已接受R4，Stage 3的两个Checkpoint均已关闭。LA64按`SYSTEM-POWER-MACHINE-001`在完成orderly subsystem
 shutdown后自然进入末尾halt，维护者已明确接受host终止QEMU作为该无ordinary power-off handler平台的预期harness终点；这不
-形成LA64 power-off capability proof。Stage 4 Checkpoint 1已关闭，Checkpoint 2当前为Ready / Not Started且未获执行授权；
-Stage 5--6仍只有outline，未获解析或执行授权。pre-RFC
+形成LA64 power-off capability proof。Stage 4两个Checkpoint与整个Stage均已关闭；Stage 5--6仍只有outline，未获解析或执行
+授权。pre-RFC
 [定位共识](./backgrounds/positionings.md)继续作为冻结且不再维护的历史材料。
 
 ## 摘要
@@ -358,8 +358,7 @@ source 中闭合，不属于本 RFC 当前需要冻结的 target。
 - **实施文档：** 独立[实施路线](./implementation.md)已经解析 Stage 1 与 Stage 2 的 Implementation Boundary、Deliverables、
   Validation、Cutover 与 Stop / Exit，且两者均已关闭；Stage 2 Feedback Interlude也已关闭R3 owner/target纠偏。Stage 3现已解析
   完整Implementation Boundary、两个execution checkpoint、Validation、Cutover与Stop；两个Checkpoint与Stage 3均已关闭；
-  Stage 4也已解析完整Implementation Boundary、两个execution checkpoint、Validation、Cutover与Stop；Checkpoint 1已关闭，
-  Checkpoint 2保持Ready / Not Started且未获执行授权；
+  Stage 4也已解析并关闭完整Implementation Boundary及两个execution checkpoint；
   Stage 5--6仍只定义Purpose、Prerequisites与Protected Boundary，未获解析或执行授权。Stage解析与执行分别授权，一个
   checkpoint或Stage的closure不自动授权下一个gate；
 - **停止条件：** 若实施设计需要允许 Core Wasm start section、引入 guest-controlled
@@ -446,11 +445,11 @@ R0 closure 至少需要证明：
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)：Stage 1、Stage 2与Stage 2 Feedback Interlude已关闭；Stage 3的两个execution checkpoint
-  均已关闭；Stage 4 Checkpoint 1已关闭，Checkpoint 2已解析但未获执行授权；Stage 5--6仍为outline且未获解析或执行授权
+- [实施路线](./implementation.md)：Stage 1、Stage 2与Stage 2 Feedback Interlude已关闭；Stage 3与Stage 4的两个execution
+  checkpoint均已关闭；Stage 5--6仍为outline且未获解析或执行授权
 - [历史定位共识](./backgrounds/positionings.md)：pre-RFC 讨论快照，已冻结且不再维护
 - [Stage transaction](../../devlog/transactions/2026-08-14-nemophila.md)：Stage 1 source import/审计/验证、Stage 2 resolution/
-  implementation/closure、R3 feedback interlude evidence、Stage 3 execution、Stage 4 resolution与Checkpoint 1 closure
+  implementation/closure、R3 feedback interlude evidence，以及Stage 3--4 execution/closure
 - 外部源码证据：[Wasmi `v1.1.0`](https://github.com/wasmi-labs/wasmi/releases/tag/v1.1.0)，固定 commit
   [`8273dfb09d493971b7bb12fe614d740cdc857175`](https://github.com/wasmi-labs/wasmi/commit/8273dfb09d493971b7bb12fe614d740cdc857175)
 - Core Wasm 语义证据：[Module instantiation](https://webassembly.github.io/spec/core/exec/modules.html#exec-instantiation)；
@@ -474,6 +473,6 @@ xtask-owned artifact build/export 与 canonical host evidence；随后 feedback 
 删除 build-time API admission mirror，并把 host harness 迁为带Stage 5删除gate的module-local fixture。Stage 3的两个Checkpoint
 均已关闭，交付dormant kernel-internal runtime core、唯一publication owner与双架构focused proof。LA64完成全部guest evidence
 后按current System Power contract进入末尾halt，再由host终止QEMU；该platform-specific harness disposition不外推为LA64
-power-off capability。Stage 4 Checkpoint 1已关闭，Checkpoint 2保持Ready / Not Started且未获执行授权；Stage 5--6尚未解析。
-当前没有effective current contract、public ABI 或 cutover；Stage 1 crate-level evidence、Stage 2 host/toolchain
-evidence与Stage 3 transactional runtime evidence都不外推 R0 runtime acceptance。
+power-off capability。Stage 4两个Checkpoint与整个Stage均已关闭；Stage 5--6尚未解析。
+当前没有effective current contract、public ABI 或 cutover；Stage 1 crate-level evidence、Stage 2 host/toolchain evidence及
+Stage 3--4 kernel-internal runtime evidence都不外推 R0 runtime acceptance。

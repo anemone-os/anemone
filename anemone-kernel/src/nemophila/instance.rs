@@ -1,10 +1,8 @@
-use alloc::collections::BTreeMap;
-
-use nemophila_wasm::{Engine, Instance as WasmInstance, Module, Store};
+use nemophila_wasm::{Engine, Error, Instance as WasmInstance, Module, Store, TrapCode};
 
 use super::{
-    host::HostContext,
-    weave::{CallbackBinding, PointIdentity},
+    host::{CallbackHostTrap, HostContext, classify_callback_host_trap},
+    weave::CallbackBinding,
 };
 
 /// One complete per-load interpreter island.
@@ -18,7 +16,6 @@ pub(super) struct RuntimeInstance {
     _module: Module,
     store: Store<HostContext>,
     instance: WasmInstance,
-    bindings: BTreeMap<PointIdentity, CallbackBinding>,
 }
 
 impl RuntimeInstance {
@@ -33,22 +30,19 @@ impl RuntimeInstance {
             _module: module,
             store,
             instance,
-            bindings: BTreeMap::new(),
         }
     }
 
-    pub(super) fn attach_bindings(&mut self, bindings: BTreeMap<PointIdentity, CallbackBinding>) {
-        assert!(self.bindings.is_empty());
-        self.bindings = bindings;
-    }
-
-    pub(super) fn has_binding(&self, point: PointIdentity) -> bool {
-        self.bindings.contains_key(&point)
-    }
-
-    #[cfg(feature = "kunit")]
-    pub(super) fn binding_count(&self) -> usize {
-        self.bindings.len()
+    pub(super) fn invoke_clone_observer(
+        &mut self,
+        binding: CallbackBinding,
+        creator_tid: u32,
+        child_tid: u32,
+    ) -> Result<(), CallbackFailure> {
+        binding
+            .callback
+            .call(&mut self.store, (creator_tid as i32, child_tid as i32))
+            .map_err(classify_callback_failure)
     }
 
     #[cfg(feature = "kunit")]
@@ -69,4 +63,29 @@ impl RuntimeInstance {
             .get_typed_func::<(i32, i32), ()>(&self.store, "observe-clone")
             .map(CallbackBinding::clone_observer)
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ModuleTrap {
+    Guest(TrapCode),
+    Host(CallbackHostTrap),
+}
+
+#[derive(Debug)]
+pub(super) enum CallbackFailure {
+    Module(ModuleTrap),
+    Invariant(Error),
+}
+
+fn classify_callback_failure(error: Error) -> CallbackFailure {
+    if let Some(trap) = error.as_trap_code() {
+        return CallbackFailure::Module(ModuleTrap::Guest(trap));
+    }
+    if let Some(trap) = classify_callback_host_trap(&error) {
+        return CallbackFailure::Module(ModuleTrap::Host(trap));
+    }
+    // The callback was typed at registration and R0 links only the two Host
+    // capabilities classified above. Any other execution error is therefore
+    // an interpreter/runtime invariant failure, not module poison.
+    CallbackFailure::Invariant(error)
 }

@@ -10,7 +10,7 @@ use alloc::boxed::Box;
 
 use crate::prelude::Lazy;
 use runtime::Runtime;
-pub(crate) use runtime::{InstanceIdentity, PublishFailure};
+pub(crate) use runtime::{InstanceIdentity, PublishFailure, TryUnloadFailure};
 
 static RUNTIME: Lazy<Runtime> = Lazy::new(Runtime::new);
 
@@ -25,13 +25,26 @@ pub(crate) fn load_and_publish(artifact: Box<[u8]>) -> Result<InstanceIdentity, 
     RUNTIME.load_and_publish(artifact)
 }
 
+fn invoke_clone_observers(creator_tid: u32, child_tid: u32) {
+    RUNTIME.invoke_clone_observers(creator_tid, child_tid);
+}
+
+/// Attempts irreversible retirement without waiting for admitted callbacks.
+/// Stage 6 remains responsible for authorization and public error encoding.
+pub(crate) fn try_unload(identity: InstanceIdentity) -> Result<(), TryUnloadFailure> {
+    RUNTIME.try_unload(identity)
+}
+
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::{
-        host::{LOGGING_MODULE, LOGGING_WRITE},
-        instance::RuntimeInstance,
+        host::{CallbackHostTrap, LOGGING_MODULE, LOGGING_WRITE, WeaveFailure},
+        instance::{ModuleTrap, RuntimeInstance},
         load::{LoadFailure, load_unpublished},
-        runtime::{PublishFailure, RegistrationResult, Runtime},
+        runtime::{
+            Invocation, InvocationOutcome, PublishFailure, RegistrationResult, Runtime,
+            TryUnloadFailure,
+        },
         weave::{
             CatalogFailure, PointIdentity, ProviderCatalog, ProviderDescriptor, provider_catalog,
         },
@@ -39,6 +52,11 @@ mod kunits {
     use crate::{
         debug::printk::{LogLevel, set_policy, snapshot_policy, validate_policy},
         kunit,
+        prelude::{
+            Arc, AtomicBool, AtomicU8, CpuId, Event, Opaque, Ordering, SpinLock, kinfo, ncpus,
+        },
+        task::kthread::{KThreadBuilder, KThreadCtx},
+        utils::any_opaque::AnyOpaque,
     };
     use alloc::{boxed::Box, vec, vec::Vec};
 
@@ -133,14 +151,20 @@ mod kunits {
         payload
     }
 
-    fn import_func(module: &str, name: &str, type_index: u32) -> Vec<u8> {
+    fn import_funcs(imports: &[(&str, &str, u32)]) -> Vec<u8> {
         let mut payload = Vec::new();
-        push_u32(1, &mut payload);
-        push_name(module, &mut payload);
-        push_name(name, &mut payload);
-        payload.push(0x00);
-        push_u32(type_index, &mut payload);
+        push_u32(imports.len() as u32, &mut payload);
+        for (module, name, type_index) in imports {
+            push_name(module, &mut payload);
+            push_name(name, &mut payload);
+            payload.push(0x00);
+            push_u32(*type_index, &mut payload);
+        }
         payload
+    }
+
+    fn import_func(module: &str, name: &str, type_index: u32) -> Vec<u8> {
+        import_funcs(&[(module, name, type_index)])
     }
 
     fn exports(exports: &[(&str, u8, u32)]) -> Vec<u8> {
@@ -310,12 +334,76 @@ mod kunits {
         )
     }
 
-    fn callback_only_module() -> Box<[u8]> {
+    fn callback_only_module(callback: Vec<u8>) -> Box<[u8]> {
         module([
             (1, types(&[(&[], &[I32]), (&[I32, I32], &[])])),
             (3, functions(&[0, 1])),
             (7, exports(&[("load", 0x00, 0), ("observe-clone", 0x00, 1)])),
-            (10, code(&[return_i32(0), Vec::new()])),
+            (10, code(&[return_i32(0), callback])),
+        ])
+    }
+
+    fn logging_callback_module(message: &[u8]) -> Box<[u8]> {
+        let mut load = vec![0x10, 0x00, 0x1a];
+        load.extend(return_i32(0));
+
+        let mut callback = vec![0x20, 0x00, 0x41];
+        push_i32(-1, &mut callback);
+        callback.extend([0x47, 0x04, 0x40, 0x00, 0x0b]);
+        callback.extend([0x20, 0x01, 0x41]);
+        push_i32(0, &mut callback);
+        callback.extend([0x47, 0x04, 0x40, 0x00, 0x0b]);
+        callback.push(0x41);
+        // Error level keeps the real callback-to-Host handoff visible under
+        // the ordinary boot console policy without mutating global policy.
+        push_i32(3, &mut callback);
+        callback.push(0x41);
+        push_i32(0, &mut callback);
+        callback.push(0x41);
+        push_i32(message.len() as i32, &mut callback);
+        callback.extend([0x10, 0x01]);
+
+        let mut memory = Vec::new();
+        push_u32(1, &mut memory);
+        memory.extend([0x00, 0x01]);
+        let mut data = Vec::new();
+        push_u32(1, &mut data);
+        data.extend([0x00, 0x41, 0x00, 0x0b]);
+        push_vec(message, &mut data);
+
+        module([
+            (
+                1,
+                types(&[
+                    (&[], &[I32]),
+                    (&[I32, I32, I32], &[]),
+                    (&[], &[I32]),
+                    (&[I32, I32], &[]),
+                ]),
+            ),
+            (
+                2,
+                import_funcs(&[
+                    (
+                        super::host::WEAVE_CLONE_MODULE,
+                        super::host::WEAVE_CLONE_REGISTER,
+                        0,
+                    ),
+                    (LOGGING_MODULE, LOGGING_WRITE, 1),
+                ]),
+            ),
+            (3, functions(&[2, 3])),
+            (5, memory),
+            (
+                7,
+                exports(&[
+                    ("load", 0x00, 2),
+                    ("observe-clone", 0x00, 3),
+                    ("memory", 0x02, 0),
+                ]),
+            ),
+            (10, code(&[load, callback])),
+            (11, data),
         ])
     }
 
@@ -663,7 +751,11 @@ mod kunits {
     fn exclusive_reservation_conflicts_with_pending_and_live_binding() {
         let runtime = Runtime::new();
         let first = runtime.begin_load().unwrap();
-        let first_instance = load_without_registration(callback_only_module()).unwrap();
+        let first_instance = load_unpublished(
+            callback_only_module(Vec::new()),
+            first.registration_window(),
+        )
+        .unwrap();
         assert_eq!(
             first
                 .registration_window()
@@ -676,7 +768,11 @@ mod kunits {
         );
 
         let second = runtime.begin_load().unwrap();
-        let second_instance = load_without_registration(callback_only_module()).unwrap();
+        let second_instance = load_unpublished(
+            callback_only_module(Vec::new()),
+            second.registration_window(),
+        )
+        .unwrap();
         assert_eq!(
             second
                 .registration_window()
@@ -692,7 +788,11 @@ mod kunits {
 
         first.commit(first_instance).unwrap();
         let third = runtime.begin_load().unwrap();
-        let third_instance = load_without_registration(callback_only_module()).unwrap();
+        let third_instance = load_unpublished(
+            callback_only_module(Vec::new()),
+            third.registration_window(),
+        )
+        .unwrap();
         assert_eq!(
             third
                 .registration_window()
@@ -710,5 +810,333 @@ mod kunits {
         assert_eq!(snapshot.published_bindings, 1);
         assert_eq!(snapshot.transactions, 0);
         assert_eq!(snapshot.reservations, 0);
+    }
+
+    fn take_invocation(
+        invocations: &mut Vec<Invocation>,
+        identity: super::InstanceIdentity,
+    ) -> Invocation {
+        let index = invocations
+            .iter()
+            .position(|invocation| invocation.identity() == identity)
+            .expect("Nemophila cohort omitted an expected invocation");
+        invocations.swap_remove(index)
+    }
+
+    #[kunit]
+    fn cohort_admission_makes_unload_busy_until_all_ownership_is_released() {
+        let runtime = Runtime::new();
+        let artifact = fatal_registration(CallbackExport::Correct(Vec::new()));
+        let first = runtime.load_and_publish(artifact.clone()).unwrap();
+        let second = runtime.load_and_publish(artifact).unwrap();
+
+        let invocations = runtime
+            .select_cohort(PointIdentity::CLONE_OBSERVER)
+            .into_invocations();
+        assert_eq!(invocations.len(), 2);
+        let admitted = runtime.snapshot();
+        assert_eq!(admitted.in_flight, 2);
+        assert_eq!(runtime.try_unload(first), Err(TryUnloadFailure::Busy));
+        assert_eq!(runtime.try_unload(second), Err(TryUnloadFailure::Busy));
+        assert_eq!(runtime.snapshot(), admitted);
+
+        drop(invocations);
+        assert_eq!(runtime.snapshot().in_flight, 0);
+        assert_eq!(runtime.try_unload(first), Ok(()));
+        assert_eq!(runtime.try_unload(first), Err(TryUnloadFailure::NotFound));
+        assert_eq!(runtime.try_unload(second), Ok(()));
+        let retired = runtime.snapshot();
+        assert!(retired.identities.is_empty());
+        assert_eq!(retired.published_bindings, 0);
+        assert!(
+            runtime
+                .select_cohort(PointIdentity::CLONE_OBSERVER)
+                .into_invocations()
+                .is_empty()
+        );
+    }
+
+    #[kunit]
+    fn trap_poison_cancels_queued_invocation_and_continues_fanout() {
+        let runtime = Runtime::new();
+        let trapping = runtime
+            .load_and_publish(fatal_registration(CallbackExport::Correct(vec![0x00])))
+            .unwrap();
+        let normal = runtime
+            .load_and_publish(fatal_registration(CallbackExport::Correct(Vec::new())))
+            .unwrap();
+
+        let mut first_cohort = runtime
+            .select_cohort(PointIdentity::CLONE_OBSERVER)
+            .into_invocations();
+        let mut queued_cohort = runtime
+            .select_cohort(PointIdentity::CLONE_OBSERVER)
+            .into_invocations();
+        assert_eq!(runtime.snapshot().in_flight, 4);
+
+        let trapping_first = take_invocation(&mut first_cohort, trapping);
+        let normal_first = take_invocation(&mut first_cohort, normal);
+        assert!(first_cohort.is_empty());
+        let InvocationOutcome::Poisoned(diagnostic) = trapping_first.dispatch(1, 2) else {
+            panic!("guest trap did not poison its Nemophila instance")
+        };
+        assert!(matches!(diagnostic.classification, ModuleTrap::Guest(_)));
+        assert_eq!(normal_first.dispatch(1, 2), InvocationOutcome::Returned);
+
+        let trapping_queued = take_invocation(&mut queued_cohort, trapping);
+        let normal_queued = take_invocation(&mut queued_cohort, normal);
+        assert!(queued_cohort.is_empty());
+        assert_eq!(trapping_queued.dispatch(3, 4), InvocationOutcome::Cancelled);
+        assert_eq!(normal_queued.dispatch(3, 4), InvocationOutcome::Returned);
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.in_flight, 0);
+        assert_eq!(snapshot.poisoned, 1);
+        let only_live = runtime
+            .select_cohort(PointIdentity::CLONE_OBSERVER)
+            .into_invocations();
+        assert_eq!(only_live.len(), 1);
+        assert_eq!(only_live[0].identity(), normal);
+        drop(only_live);
+        assert_eq!(runtime.try_unload(trapping), Ok(()));
+        assert_eq!(runtime.try_unload(normal), Ok(()));
+    }
+
+    #[kunit]
+    fn poisoned_exclusive_binding_retains_occupancy_until_retirement() {
+        let runtime = Runtime::new();
+        let first = runtime.begin_load().unwrap();
+        let first_instance =
+            load_unpublished(late_registration(), first.registration_window()).unwrap();
+        assert_eq!(
+            first
+                .registration_window()
+                .register(
+                    PointIdentity::KUNIT_EXCLUSIVE,
+                    first_instance.clone_callback_binding().unwrap()
+                )
+                .unwrap(),
+            RegistrationResult::Registered
+        );
+        let poisoned = first.commit(first_instance).unwrap();
+        let mut cohort = runtime
+            .select_cohort(PointIdentity::KUNIT_EXCLUSIVE)
+            .into_invocations();
+        assert_eq!(cohort.len(), 1);
+        let InvocationOutcome::Poisoned(diagnostic) = cohort.pop().unwrap().dispatch(5, 6) else {
+            panic!("Host trap did not poison its Nemophila instance")
+        };
+        assert_eq!(
+            diagnostic.classification,
+            ModuleTrap::Host(CallbackHostTrap::Weave(WeaveFailure::OutsideLoad))
+        );
+
+        let contender = runtime.begin_load().unwrap();
+        let contender_instance = load_unpublished(
+            callback_only_module(Vec::new()),
+            contender.registration_window(),
+        )
+        .unwrap();
+        assert_eq!(
+            contender
+                .registration_window()
+                .register(
+                    PointIdentity::KUNIT_EXCLUSIVE,
+                    contender_instance.clone_callback_binding().unwrap()
+                )
+                .unwrap(),
+            RegistrationResult::ProviderUnavailable
+        );
+        drop(contender_instance);
+        drop(contender);
+
+        assert_eq!(runtime.try_unload(poisoned), Ok(()));
+        let replacement = runtime.begin_load().unwrap();
+        let replacement_instance = load_unpublished(
+            callback_only_module(Vec::new()),
+            replacement.registration_window(),
+        )
+        .unwrap();
+        assert_eq!(
+            replacement
+                .registration_window()
+                .register(
+                    PointIdentity::KUNIT_EXCLUSIVE,
+                    replacement_instance.clone_callback_binding().unwrap()
+                )
+                .unwrap(),
+            RegistrationResult::Registered
+        );
+        let replacement = replacement.commit(replacement_instance).unwrap();
+        assert_eq!(runtime.try_unload(replacement), Ok(()));
+    }
+
+    #[kunit]
+    fn typed_point_executes_real_callback_logging_window() {
+        let identity =
+            super::load_and_publish(logging_callback_module(b"NEMOPHILA-KUNIT:CALLBACK-LOGGING"))
+                .unwrap();
+        super::KUNIT_CLONE_POINT.invoke(u32::MAX, 0);
+        let returned = super::RUNTIME.snapshot();
+        assert_eq!(returned.in_flight, 0);
+        assert_eq!(returned.poisoned, 0);
+        assert_eq!(super::try_unload(identity), Ok(()));
+    }
+
+    const SERIAL_HELD: u8 = 0;
+    const SERIAL_ATTEMPTING: u8 = 1;
+    const SERIAL_RELEASED: u8 = 2;
+    const SERIAL_DONE: u8 = 3;
+
+    #[derive(Opaque)]
+    struct SerialWorker {
+        invocation: SpinLock<Option<Invocation>>,
+        phase: Arc<AtomicU8>,
+        changed: Arc<Event>,
+    }
+
+    fn serial_worker_entry(_: KThreadCtx, opaque: AnyOpaque) -> i32 {
+        let worker = opaque
+            .cast::<SerialWorker>()
+            .expect("invalid Nemophila serial worker context");
+        let invocation = worker
+            .invocation
+            .lock()
+            .take()
+            .expect("Nemophila serial worker invocation was already taken");
+        assert_eq!(
+            worker.phase.compare_exchange(
+                SERIAL_HELD,
+                SERIAL_ATTEMPTING,
+                Ordering::AcqRel,
+                Ordering::Acquire
+            ),
+            Ok(SERIAL_HELD)
+        );
+        worker.changed.publish(usize::MAX, true);
+        assert_eq!(invocation.dispatch(7, 8), InvocationOutcome::Returned);
+        assert_eq!(
+            worker.phase.compare_exchange(
+                SERIAL_RELEASED,
+                SERIAL_DONE,
+                Ordering::AcqRel,
+                Ordering::Acquire
+            ),
+            Ok(SERIAL_RELEASED)
+        );
+        worker.changed.publish(usize::MAX, true);
+        0
+    }
+
+    #[derive(Opaque)]
+    struct IndependentWorker {
+        invocation: SpinLock<Option<Invocation>>,
+        done: Arc<AtomicBool>,
+        completed: Arc<Event>,
+    }
+
+    fn independent_worker_entry(_: KThreadCtx, opaque: AnyOpaque) -> i32 {
+        let worker = opaque
+            .cast::<IndependentWorker>()
+            .expect("invalid Nemophila independent worker context");
+        let invocation = worker
+            .invocation
+            .lock()
+            .take()
+            .expect("Nemophila independent worker invocation was already taken");
+        assert_eq!(invocation.dispatch(9, 10), InvocationOutcome::Returned);
+        worker.done.store(true, Ordering::Release);
+        worker.completed.publish(usize::MAX, true);
+        0
+    }
+
+    #[kunit]
+    fn instance_serial_domain_does_not_block_another_instance_on_smp() {
+        if ncpus() < 2 {
+            kinfo!("NEMOPHILA-KUNIT:SMP2-CONCURRENCY-SKIP cpus={}", ncpus());
+            return;
+        }
+        kinfo!("NEMOPHILA-KUNIT:SMP2-CONCURRENCY-ENTER cpus={}", ncpus());
+
+        let runtime = Runtime::new();
+        let artifact = fatal_registration(CallbackExport::Correct(Vec::new()));
+        let serialized = runtime.load_and_publish(artifact.clone()).unwrap();
+        let independent = runtime.load_and_publish(artifact).unwrap();
+
+        let mut first_cohort = runtime
+            .select_cohort(PointIdentity::CLONE_OBSERVER)
+            .into_invocations();
+        let held = take_invocation(&mut first_cohort, serialized);
+        let independent_invocation = take_invocation(&mut first_cohort, independent);
+        assert!(first_cohort.is_empty());
+        let mut second_cohort = runtime
+            .select_cohort(PointIdentity::CLONE_OBSERVER)
+            .into_invocations();
+        let serialized_invocation = take_invocation(&mut second_cohort, serialized);
+        drop(second_cohort);
+
+        let serial_guard = held.enter_serial();
+        let serial_phase = Arc::new(AtomicU8::new(SERIAL_HELD));
+        let serial_changed = Arc::new(Event::new());
+        let serial_worker = KThreadBuilder::new("kunit:nemophila-serial")
+            .cpu(CpuId::new(1))
+            .spawn(
+                serial_worker_entry,
+                AnyOpaque::new(SerialWorker {
+                    invocation: SpinLock::new(Some(serialized_invocation)),
+                    phase: serial_phase.clone(),
+                    changed: serial_changed.clone(),
+                }),
+            )
+            .expect("failed to spawn Nemophila serial worker");
+        serial_changed.listen_uninterruptible(false, || {
+            serial_phase.load(Ordering::Acquire) == SERIAL_ATTEMPTING
+        });
+
+        let independent_done = Arc::new(AtomicBool::new(false));
+        let independent_completed = Arc::new(Event::new());
+        let independent_worker = KThreadBuilder::new("kunit:nemophila-independent")
+            .cpu(CpuId::new(1))
+            .spawn(
+                independent_worker_entry,
+                AnyOpaque::new(IndependentWorker {
+                    invocation: SpinLock::new(Some(independent_invocation)),
+                    done: independent_done.clone(),
+                    completed: independent_completed.clone(),
+                }),
+            )
+            .expect("failed to spawn independent Nemophila worker");
+        independent_completed
+            .listen_uninterruptible(false, || independent_done.load(Ordering::Acquire));
+        assert_eq!(
+            serial_phase.load(Ordering::Acquire),
+            SERIAL_ATTEMPTING,
+            "another instance completed only after the held serial domain was released"
+        );
+        assert!(
+            !serial_worker.has_exited(),
+            "same-instance dispatch completed while its serial domain was held"
+        );
+
+        assert_eq!(
+            serial_phase.compare_exchange(
+                SERIAL_ATTEMPTING,
+                SERIAL_RELEASED,
+                Ordering::AcqRel,
+                Ordering::Acquire
+            ),
+            Ok(SERIAL_ATTEMPTING)
+        );
+        drop(serial_guard);
+        drop(held);
+        serial_changed.listen_uninterruptible(false, || {
+            serial_phase.load(Ordering::Acquire) == SERIAL_DONE
+        });
+        assert_eq!(serial_worker.wait_exited(), 0);
+        assert_eq!(independent_worker.wait_exited(), 0);
+        assert_eq!(runtime.snapshot().in_flight, 0);
+        assert_eq!(runtime.try_unload(serialized), Ok(()));
+        assert_eq!(runtime.try_unload(independent), Ok(()));
+        kinfo!("NEMOPHILA-KUNIT:SMP2-CONCURRENCY-PASS");
     }
 }

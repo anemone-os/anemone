@@ -43,6 +43,13 @@ impl CloneObserverPoint {
     pub(crate) const fn new() -> Self {
         Self { _private: () }
     }
+
+    /// Invoke the typed point without exposing runtime or instance state to
+    /// the declaring subsystem. Callback absence, return and trap are all
+    /// observational and cannot alter the provider's business result.
+    pub(crate) fn invoke(&self, creator_tid: u32, child_tid: u32) {
+        super::invoke_clone_observers(creator_tid, child_tid);
+    }
 }
 
 /// Immutable point facts emitted by the declaring subsystem.
@@ -181,6 +188,7 @@ fn linker_descriptors() -> &'static [ProviderDescriptor] {
 ///
 /// This handle belongs to the same Store later owned by `RuntimeInstance`;
 /// reservation and publication move it without copying callback state.
+#[derive(Clone, Copy)]
 pub(super) struct CallbackBinding {
     pub(super) callback: TypedFunc<(i32, i32), ()>,
 }
