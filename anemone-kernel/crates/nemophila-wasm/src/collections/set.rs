@@ -8,28 +8,6 @@ use core::{
     ops::{BitAnd, BitOr, BitXor, Sub},
 };
 
-#[cfg(all(
-    feature = "hash-collections",
-    not(feature = "prefer-btree-collections")
-))]
-mod detail {
-    use crate::collections::hash;
-    use hashbrown::hash_set;
-
-    pub type SetImpl<T> = hash_set::HashSet<T, hash::RandomState>;
-    pub type IterImpl<'a, T> = hash_set::Iter<'a, T>;
-    pub type IntoIterImpl<T> = hash_set::IntoIter<T>;
-    pub type DifferenceImpl<'a, T> = hash_set::Difference<'a, T, hash::RandomState>;
-    pub type IntersectionImpl<'a, T> = hash_set::Intersection<'a, T, hash::RandomState>;
-    pub type SymmetricDifferenceImpl<'a, T> =
-        hash_set::SymmetricDifference<'a, T, hash::RandomState>;
-    pub type UnionImpl<'a, T> = hash_set::Union<'a, T, hash::RandomState>;
-}
-
-#[cfg(any(
-    not(feature = "hash-collections"),
-    feature = "prefer-btree-collections"
-))]
 mod detail {
     use alloc::collections::btree_set;
 
@@ -44,13 +22,12 @@ mod detail {
 
 /// A default set of values.
 ///
-/// Provides an API compatible with both [`HashSet`] and [`BTreeSet`].
+/// Provides the interpreter's internal [`BTreeSet`] API.
 ///
-/// [`HashSet`]: https://docs.rs/hashbrown/0.15.0/hashbrown/struct.HashSet.html
 /// [`BTreeSet`]: std::collections::BTreeSet
 #[derive(Debug, Clone)]
 pub struct Set<T> {
-    /// The underlying hash-set or btree-set data structure used.
+    /// The underlying btree-set data structure used.
     inner: detail::SetImpl<T>,
 }
 
@@ -113,15 +90,6 @@ where
     /// in the [`Set`].
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
-        #[cfg(all(
-            feature = "hash-collections",
-            not(feature = "prefer-btree-collections")
-        ))]
-        self.inner.reserve(additional);
-        #[cfg(any(
-            not(feature = "hash-collections"),
-            feature = "prefer-btree-collections"
-        ))]
         let _ = additional;
     }
 

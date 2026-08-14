@@ -2,32 +2,6 @@
 
 use core::{borrow::Borrow, fmt::Debug, hash::Hash, iter::FusedIterator, ops::Index};
 
-#[cfg(all(
-    feature = "hash-collections",
-    not(feature = "prefer-btree-collections")
-))]
-mod detail {
-    use crate::collections::hash;
-    use hashbrown::hash_map;
-
-    pub type MapImpl<K, V> = hash_map::HashMap<K, V, hash::RandomState>;
-    pub type EntryImpl<'a, K, V> = hash_map::Entry<'a, K, V, hash::RandomState>;
-    pub type OccupiedEntryImpl<'a, K, V> = hash_map::OccupiedEntry<'a, K, V, hash::RandomState>;
-    pub type VacantEntryImpl<'a, K, V> = hash_map::VacantEntry<'a, K, V, hash::RandomState>;
-    pub type IterImpl<'a, K, V> = hash_map::Iter<'a, K, V>;
-    pub type IterMutImpl<'a, K, V> = hash_map::IterMut<'a, K, V>;
-    pub type IntoIterImpl<K, V> = hash_map::IntoIter<K, V>;
-    pub type KeysImpl<'a, K, V> = hash_map::Keys<'a, K, V>;
-    pub type ValuesImpl<'a, K, V> = hash_map::Values<'a, K, V>;
-    pub type ValuesMutImpl<'a, K, V> = hash_map::ValuesMut<'a, K, V>;
-    pub type IntoKeysImpl<K, V> = hash_map::IntoKeys<K, V>;
-    pub type IntoValuesImpl<K, V> = hash_map::IntoValues<K, V>;
-}
-
-#[cfg(any(
-    not(feature = "hash-collections"),
-    feature = "prefer-btree-collections"
-))]
 mod detail {
     use alloc::collections::btree_map;
 
@@ -47,9 +21,8 @@ mod detail {
 
 /// A default key-value mapping.
 ///
-/// Provides an API compatible with both [`HashMap`] and [`BTreeMap`].
+/// Provides the interpreter's internal [`BTreeMap`] API.
 ///
-/// [`HashMap`]: https://docs.rs/hashbrown/0.15.0/hashbrown/struct.HashMap.html
 /// [`BTreeMap`]: std::collections::BTreeMap
 #[derive(Debug, Clone)]
 pub struct Map<K, V> {
@@ -161,15 +134,6 @@ where
     /// in the [`Map`].
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
-        #[cfg(all(
-            feature = "hash-collections",
-            not(feature = "prefer-btree-collections")
-        ))]
-        self.inner.reserve(additional);
-        #[cfg(any(
-            not(feature = "hash-collections"),
-            feature = "prefer-btree-collections"
-        ))]
         let _ = additional;
     }
 

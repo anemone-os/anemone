@@ -1,25 +1,18 @@
 //! Data structures specialized for usage in the Wasmi interpreter.
 //!
-//! All data structures provide an API that can be backed by both [`HashMap`]
-//! and [`BTreeMap`]. Users can choose which kind of backend to operate on via
-//! the `no-hash-maps` crate feature.
+//! The interpreter uses allocation-only B-tree collections so its production
+//! dependency graph does not require a random hash seed or a second backend.
 //!
 //! # Provided Data Structures
 //!
 //! - [`Arena`]: typed arena for fast allocations and accesses
-//! - [`DedupArena`]: typed arena that also deduplicates, based on either
-//!   [`HashMap`] or [`BTreeMap`]
+//! - [`DedupArena`]: typed arena that also deduplicates with [`BTreeMap`]
 //! - [`ComponentVec`]: useful to add properties to entities stored in an
 //!   [`Arena`] or [`DedupArena`]
-//! - [`Map`]: generic set of values, based on either [`HashMap`] or
-//!   [`BTreeMap`]
-//! - [`Set`]: generic key-value mapping, based on either [`HashSet`] or
-//!   [`BTreeSet`]
-//! - [`StringInterner`]: stores and deduplicates strings efficiently, based on
-//!   either [`HashSet`] or [`BTreeSet`]
+//! - [`Map`]: generic set of values based on [`BTreeMap`]
+//! - [`Set`]: generic key-value mapping based on [`BTreeSet`]
+//! - [`StringInterner`]: stores and deduplicates strings efficiently
 //!
-//! [`HashSet`]: https://docs.rs/hashbrown/0.15.0/hashbrown/struct.HashSet.html
-//! [`HashMap`]: https://docs.rs/hashbrown/0.15.0/hashbrown/struct.HashMap.html
 //! [`BTreeSet`]: std::collections::BTreeSet
 //! [`BTreeMap`]: std::collections::BTreeMap
 
@@ -36,8 +29,6 @@
 )]
 
 pub mod arena;
-#[cfg(feature = "hash-collections")]
-pub mod hash;
 mod head_vec;
 pub mod map;
 pub mod set;

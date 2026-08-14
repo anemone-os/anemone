@@ -6,9 +6,8 @@
 
 ## Active
 
-- [Nemophila](./2026-08-14-nemophila.md)：Accepted R3 Stage 1、Stage 2与feedback interlude已关闭；Stage 3已解析kernel
-  transactional runtime core的两个execution checkpoint并保持Ready / Not Started，execution未授权。kernel runtime/current
-  contract仍Not Run / Not Effective。
+- [Nemophila](./2026-08-14-nemophila.md)：Accepted R4 Stage 1、Stage 2、feedback interlude与Stage 3 Checkpoint 1已关闭；
+  Checkpoint 2保持Ready / Not Started且未获授权。kernel runtime publication/current contract仍Not Run / Not Effective。
 - [PTY / devpts](./2026-08-11-pty-devpts.md)：Stage 1--3已关闭，semantic endpoint、runtime relation、owner-private pair与
   hidden devpts/allocation/open/cleanup production route已闭合；Stage 4 public activation/acceptance未授权，全部target
   contract仍Not Effective。

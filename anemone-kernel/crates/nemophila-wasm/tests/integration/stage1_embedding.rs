@@ -50,6 +50,18 @@ fn invalid_module_does_not_reach_execution() {
 }
 
 #[test]
+fn float_bearing_modules_are_unsupported() {
+    let engine = Engine::default();
+    for module in [
+        "(module (func (param f32)))",
+        "(module (func f64.const 1.0 drop))",
+        "(module (global f32 (f32.const 0.0)))",
+    ] {
+        assert!(Module::new(&engine, module).is_err(), "{module}");
+    }
+}
+
+#[test]
 fn wasm_trap_is_reported_to_the_embedder() {
     let engine = eager_engine();
     let module = Module::new(

@@ -35,6 +35,7 @@ pub mod exception;
 pub mod fs;
 pub mod initcall;
 pub mod mm;
+mod nemophila;
 pub mod net;
 pub mod panic;
 pub mod percpu;

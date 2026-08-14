@@ -49,16 +49,15 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
-- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R3（Nemophila R0 target）；以 WIT 定义接口、由 kernel
+- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R4（Nemophila R0 target）；以 WIT 定义接口、由 kernel
   使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
   runtime-owned transactional load、per-instance serial
   callback、trap containment 与 busy try-unload，并以 task owner 的 clone observer 和同一份 Rust-to-Wasm artifact 完成
   RV64/LA64 vertical slice。
   [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
   [实施路线](./rfcs/nemophila/implementation.md)已关闭 Stage 1、Stage 2与Stage 2 feedback interlude，形成当前第一方
-  interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3已解析kernel transactional runtime core的两个
-  execution checkpoint并保持Ready / Not Started，Stage 4--6仍为outline。当前没有Stage execution authorization、current
-  contract或cutover；pre-RFC
+  interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3 Checkpoint 1已关闭，Checkpoint 2保持Ready / Not
+  Started且未获授权，Stage 4--6仍为outline。当前没有current contract或cutover；pre-RFC
   [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有

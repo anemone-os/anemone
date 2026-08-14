@@ -62,14 +62,17 @@ impl Config {
         features.set(WasmFeatures::MUTABLE_GLOBAL, true);
         features.set(WasmFeatures::MULTI_VALUE, true);
         features.set(WasmFeatures::MULTI_MEMORY, true);
-        features.set(WasmFeatures::SATURATING_FLOAT_TO_INT, true);
+        features.set(WasmFeatures::SATURATING_FLOAT_TO_INT, false);
         features.set(WasmFeatures::SIGN_EXTENSION, true);
         features.set(WasmFeatures::BULK_MEMORY, true);
         features.set(WasmFeatures::REFERENCE_TYPES, true);
         features.set(WasmFeatures::GC_TYPES, true); // required by reference-types
         features.set(WasmFeatures::TAIL_CALL, true);
         features.set(WasmFeatures::EXTENDED_CONST, true);
-        features.set(WasmFeatures::FLOATS, true);
+        // Nemophila's supported profile is integer-only. This stays fixed so
+        // checked module construction rejects float-bearing input before
+        // translation or execution.
+        features.set(WasmFeatures::FLOATS, false);
         features.set(WasmFeatures::CUSTOM_PAGE_SIZES, false);
         features.set(WasmFeatures::MEMORY64, true);
         features.set(WasmFeatures::WIDE_ARITHMETIC, false);
@@ -166,21 +169,6 @@ impl Config {
     /// [`sign-extension`]: https://github.com/WebAssembly/sign-extension-ops
     pub fn wasm_sign_extension(&mut self, enable: bool) -> &mut Self {
         self.features.set(WasmFeatures::SIGN_EXTENSION, enable);
-        self
-    }
-
-    /// Enable or disable the [`saturating-float-to-int`] Wasm proposal for the
-    /// [`Config`].
-    ///
-    /// # Note
-    ///
-    /// Enabled by default.
-    ///
-    /// [`saturating-float-to-int`]:
-    /// https://github.com/WebAssembly/nontrapping-float-to-int-conversions
-    pub fn wasm_saturating_float_to_int(&mut self, enable: bool) -> &mut Self {
-        self.features
-            .set(WasmFeatures::SATURATING_FLOAT_TO_INT, enable);
         self
     }
 
@@ -314,15 +302,6 @@ impl Config {
     #[cfg(feature = "simd")]
     pub fn wasm_relaxed_simd(&mut self, enable: bool) -> &mut Self {
         self.features.set(WasmFeatures::RELAXED_SIMD, enable);
-        self
-    }
-
-    /// Enable or disable Wasm floating point (`f32` and `f64`) instructions and
-    /// types.
-    ///
-    /// Enabled by default.
-    pub fn floats(&mut self, enable: bool) -> &mut Self {
-        self.features.set(WasmFeatures::FLOATS, enable);
         self
     }
 

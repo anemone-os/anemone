@@ -18,7 +18,7 @@ workdir = "."
 # Command runs a manifest-owned direct argv in workdir; Source runs no command
 # and exports already-existing ordinary files.
 # Currently supported drivers:
-# - cargo (Anemone targets only; uses build-std and conf/arch target JSON)
+# - cargo (Anemone targets only; uses build-std and Rust builtin bare-metal targets)
 # - command (replace args with a non-empty argv of at most 256 entries)
 # - source (omit args; caller-provided extra args are rejected)
 driver = "cargo"
@@ -30,8 +30,9 @@ args = ["build"]
 # argv = ["./build.sh"]
 # xtask appends caller-provided extra args, executes argv directly without a
 # shell, and sets the target context for this action. Anemone targets receive
-# ANEMONE_ARCH / ANEMONE_TARGET_TRIPLE. For host, ANEMONE_ARCH is `host` and
-# ANEMONE_TARGET_TRIPLE is removed because there is no Anemone compiler target.
+# ANEMONE_ARCH plus the ANEMONE_TARGET_TRIPLE artifact identity. For host,
+# ANEMONE_ARCH is `host` and ANEMONE_TARGET_TRIPLE is removed because there is
+# no Anemone artifact identity.
 # Toolchain selection and all other environment remain command-owned.
 
 # List of artifacts produced by this app. Each artifact should have a unique name.
@@ -39,8 +40,8 @@ args = ["build"]
 # Path to the built artifact relative to workdir.
 # Xtask will expand following variables in the path:
 # - ${ARCH}: replaced by the app build target, e.g., "riscv64" or "host".
-# - ${TARGET_TRIPLE}: replaced by the Anemone target triple, e.g.,
-#   "riscv64-unknown-anemone-elf". Artifacts applicable to host cannot use it.
+# - ${TARGET_TRIPLE}: replaced by the Cargo compiler target, e.g.,
+#   "riscv64gc-unknown-none-elf". Artifacts applicable to host cannot use it.
 path = "target/${TARGET_TRIPLE}/debug/example"
 # Optional non-empty subset of app targets that exports this artifact. Omit to
 # export it for every declared app target. Every app target needs an artifact.

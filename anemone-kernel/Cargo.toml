@@ -16,6 +16,7 @@ perf_observe = []
 anemone-abi = { path = "../anemone-abi" }
 anemone-net-api = { path = "crates/anemone-net-api" }
 anemone-smoltcp-stack = { path = "crates/anemone-smoltcp-stack", default-features = false }
+nemophila-wasm = { path = "crates/nemophila-wasm", default-features = false, features = ["extra-checks"] }
 bitflags = { workspace = true }
 fdt = { workspace = true }
 spin = { workspace = true }

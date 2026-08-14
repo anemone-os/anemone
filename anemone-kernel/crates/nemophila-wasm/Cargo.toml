@@ -19,20 +19,12 @@ extra-checks = []
 host-test = ["extra-checks", "wat"]
 wat = ["dep:wat", "std"]
 simd = ["wasmi_core/simd", "wasmparser/simd"]
-hash-collections = ["dep:hashbrown", "dep:string-interner"]
-prefer-btree-collections = []
 
 [dependencies]
 wasmi_core = { package = "nemophila-wasm-core", path = "crates/core", default-features = false }
 wasmparser = { version = "=0.239.0", default-features = false, features = ["validate", "features"] }
-spin = { version = "0.9", default-features = false, features = [
-    "mutex",
-    "spin_mutex",
-    "rwlock",
-] }
+spin = { workspace = true }
 wat = { version = "=1.239.0", optional = true }
-hashbrown = { version = "0.15.1", default-features = false, optional = true, features = ["default-hasher", "inline-more"] }
-string-interner = { version = "0.19", default-features = false, optional = true, features = ["inline-more", "backends"] }
 
 [dev-dependencies]
 assert_matches = "1.5"

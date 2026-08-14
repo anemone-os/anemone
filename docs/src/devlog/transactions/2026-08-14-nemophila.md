@@ -1,8 +1,9 @@
 # 2026-08-14 - Nemophila
 
-**Status:** Active / R3 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed / Stage 3 Ready
+**Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
+Stage 3 Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started
 **Owners:** doruche, Codex
-**Canonical Target:** [RFC-20260814-nemophila R3](../../rfcs/nemophila/index.md)
+**Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
 **Contract Delta:** None effective；`NEMOPHILA-R0-CUTOVER`仍为Future
 
@@ -11,8 +12,8 @@
 本transaction只为长期、多Stage RFC保存checkpoint execution、validation与resolution evidence。target、owner、ABI、
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
-interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。Stage 3已完成docs-only resolution但未获执行
-授权；Stage 4--6仍未获解析或执行授权。
+interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
+kernel/app compiler-target owner拆分；Stage 3 Checkpoint 1授权已消费并关闭，Checkpoint 2与Stage 4--6仍未获授权。
 
 ## Checkpoint Log
 
@@ -273,3 +274,67 @@ management ABI、visible semantics、current contract或register baseline，也�
 **Validation / Next / Stop:** 本次只需`git diff --check`与`mdbook build docs`验证canonical docs。Stage 3 implementation、kernel
 dependency、KUnit、QEMU、interpreter/module regression、RV64/LA64 runtime、LTP与hardware均Not Run。Stage 3保持Ready / Not
 Started；只有维护者新的明确授权才能开始Checkpoint 1。
+
+### 2026-08-14 - Stage 3 Checkpoint 1 activation and R4 target revision
+
+**Activation / Target Revision:** 维护者授权Stage 3 Checkpoint 1执行，并在首次RV64 kernel runtime证据暴露target冲突后接受R4。
+R4将`nemophila-wasm`受支持能力收敛为integer-only Core Wasm；`f32`/`f64`类型与相关指令由interpreter validator在checked
+construction期间作为unsupported input拒绝。kernel与app compiler target不再共用一份JSON：kernel使用repository-owned
+soft-float/no-native-FP target spec，Cargo app使用Rust builtin hard-float bare-metal target；Command app的
+`ANEMONE_TARGET_TRIPLE`继续表示Anemone artifact identity。LA64 app继续施加`-C target-feature=-ual`以保持2K1000部署边界，
+native userspace ABI与architecture FPU context能力不变。
+
+**Trigger Evidence:** 首次RV64 wrapper已完成KUnit-on kernel build，但在
+`anemone_kernel::nemophila::kunits::logging_lowering_contains_invalid_guest_values`执行纯整数guest路径时触发illegal instruction。
+`build/nemophila-stage3-ckpt1-rv64.log`记录fault PC `0xffffffff804ebb9c`；对应disassembly位于
+`nemophila_wasm::engine::executor::instrs::execute_instrs`，由LLVM生成`fsd fs0, 0x120(sp)`与`fsd fs1, 0x118(sp)`。因此只关闭
+guest float不足以恢复kernel invariant；kernel compiler target也必须禁止普通Rust codegen使用native FP。
+
+**Checkpoint Boundary:** Checkpoint 1继续只交付真实kernel embedding、logging Host lowering、unpublished load transaction、
+integer-only validator与compiler-target owner拆分；不建立runtime collection、identity、publication、provider caller、management
+ABI、KernelConfig/SystemTarget capability或current contract。Checkpoint 2仍为Not Started且未授权；本条activation不会自动授权
+Checkpoint 2、Stage 4或任何后续cutover。
+
+**Current State:** Closed。实现、validation、独立review与Architecture Friction Scan已按下条closure evidence闭合；R4与
+Checkpoint 1均不构成runtime publication或current-contract cutover。
+
+### 2026-08-14 - Stage 3 Checkpoint 1 implementation and review closure
+
+**Implementation:** kernel新增owner-private顶层`nemophila`subsystem与对当前第一方`nemophila-wasm`的直接dependency；真实
+transaction按checked `Module::new`、pre-instantiation start rejection、logging-only narrow Linker、typed `load` lookup/call的
+顺序构造完整unpublished instance。success只返回不可观察的owning instance，module error、trap或Host lowering failure均由
+transaction-local ownership直接释放；没有runtime collection、identity、publication、rollback ledger、provider、management
+入口或production KUnit hook。六项inline KUnit覆盖valid/error/trap、logging lowering、admission rejection与额外export/custom
+section边界。
+
+interpreter configuration固定关闭float proposal并删除可重新启用float的配置API；checked construction的regression证明
+`f32`/`f64`类型与相关指令在execution前被拒绝。kernel/app compiler target完成owner分离：RV64/LA64 kernel使用
+repository-owned soft-float JSON，Cargo app分别使用`riscv64gc-unknown-none-elf`与`loongarch64-unknown-none`，后者继续
+`-C target-feature=-ual`；Command app的`ANEMONE_TARGET_TRIPLE`只表示Anemone artifact identity。native userspace FPU ABI与
+context能力未改变。
+
+**Validation:** `just fmt all --check`、`git diff --check`、`mdbook build docs`通过。`just test xtask`通过103项；
+`just test nemophila-wasm`通过71项unit、54项integration（含float rejection）、4项focused Miri及RV64/LA64 embedding
+build；`just test nemophila-module`通过canonical clone-observer fixture。`just app build float-test --arch riscv64`与
+`--arch loongarch64`通过。KUnit-on `qemu-virt-rv64-release` / `qemu-virt-la64-release`及KUnit-off
+`competition-final-rv64-release` / `competition-final-la64-release`均build通过。
+
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/nemophila-stage3-ckpt1-rv64.log`正常关机：638/638
+KUnit通过，其中6项为Nemophila owner-local case；wrapper当前socket LTP profile为6/6。该LTP结果只作为同次用户态回归，
+不是Nemophila lifecycle或R0 acceptance proof。LA64 runtime与hardware均Not Run。
+
+双架构ELF以启用对应decoder feature的`rust-objdump`审计。RV64浮点指令只位于显式`__load_next_frs` /
+`__save_current_frs` architecture context symbols。LA64最终KUnit ELF中的FPU/LSX指令只位于
+`__load_next_lsx`、`__save_current_lsx`、`__load_fpu_control`、`__load_next_frs`、`__save_current_frs`与
+`__save_fpu_control`；普通Rust、Nemophila与lwext4 text均未命中。独立review最初发现LA64 lwext4仅使用`-mabi=lp64s`
+仍会让GCC选择`-mfpu=FPU 64`，构成Keter；toolchain flags补充`-msoft-float`后重新完成LA64 KUnit-on/off build与ELF审计，
+该finding已neutralize。review同时指出的Command app identity措辞已修正。
+
+**Architecture Friction Scan / Proof Limits:** source/visibility/conditional-surface audit确认Nemophila API最高仅
+`pub(super)`，没有initcall、syscall、config/runtime collection/identity、unchecked construction或test-driven production
+surface；只有语义文件内inline conditional KUnit。没有第二份validator/WIT/log/lifecycle truth、owner穿透、私有表示泄漏、
+无退出条件临时桥或隐含cleanup顺序；本checkpoint未留下Euclid/Keter/Apollyon。证据不外推LA64 runtime、management
+authorization、artifact ingress、weave、publication/identity、concurrency、poison、unload、clone或完整R0 acceptance。
+
+**Result / Next / Stop:** Stage 3 Checkpoint 1 **Closed**，Contract Cutover为None。Checkpoint 2现在是Ready / Not Started且未获
+执行授权；本次执行严格停止，不进入runtime collection、identity、atomic publication、Stage 4或任何后续cutover。

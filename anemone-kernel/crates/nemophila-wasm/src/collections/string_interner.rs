@@ -1,46 +1,5 @@
 //! Data structure to efficiently store and deduplicate strings.
 
-#[cfg(all(
-    feature = "hash-collections",
-    not(feature = "prefer-btree-collections")
-))]
-mod detail {
-    use super::{GetOrInternWithHint, Sym};
-    use crate::collections::hash;
-    use string_interner::{backend::BufferBackend, StringInterner, Symbol};
-
-    pub type StringInternerImpl = StringInterner<BufferBackend<Sym>, hash::RandomState>;
-
-    impl GetOrInternWithHint for StringInternerImpl {
-        #[inline]
-        fn get_or_intern_with_hint<T>(&mut self, string: T, _hint: super::InternHint) -> Sym
-        where
-            T: AsRef<str>,
-        {
-            self.get_or_intern(string)
-        }
-    }
-
-    impl Symbol for Sym {
-        #[inline]
-        fn try_from_usize(index: usize) -> Option<Self> {
-            let Ok(value) = u32::try_from(index) else {
-                return None;
-            };
-            Some(Self::from_u32(value))
-        }
-
-        #[inline]
-        fn to_usize(self) -> usize {
-            self.into_u32() as usize
-        }
-    }
-}
-
-#[cfg(any(
-    not(feature = "hash-collections"),
-    feature = "prefer-btree-collections"
-))]
 mod detail;
 
 /// Internment hint to speed-up certain use cases.

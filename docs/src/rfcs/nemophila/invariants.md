@@ -3,7 +3,7 @@
 **状态：** Accepted Target
 **最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
-**适用修订：** R3
+**适用修订：** R4
 
 本文只定义 Nemophila R0 的 correctness 与 target proof obligations。当前没有 Nemophila effective contract；Draft 或
 Accepted target 不能提前覆盖 `docs/src/contracts/`。解释器与 Nemophila 的 owner 分工属于本页 target；内部类型、具体
@@ -36,10 +36,11 @@ instance lifetime，以独立 poison flag 和 live state 共同驱动行为，�
 Wasmi `v1.1.0` 为可审计源码基线。Stage 1 先 clone 固定 upstream source，再去除上游 Git metadata，将实际 interpreter
 source 导入该 crate 后直接裁剪、适配并持续维护；它不是 submodule、nested Git repository、外部独立 project、
 `anemone-kernel/crates/anemos` 下的 crate，也不是依赖另一个 upstream `wasmi` crate 的 wrapper/adapter。该基线只固定
-provenance，不冻结后续第一方 crate source，也不承诺 upstream API 或 workspace compatibility。interpreter crate
-保持 Wasmi 派生的通用 Core Wasm interpreter 能力，并且是通用 Core Wasm binary parse、type/control-flow validation、
-translation、execution 与 trap reporting 的唯一行为真相；Stage 1 不按 canonical observer 的最低需求裁剪语义能力，也不
-冻结 configuration、feature matrix、limits 或 embedding API。普通 module construction 必须在执行前完成 validation；
+provenance，不冻结后续第一方 crate source，也不承诺 upstream API 或 workspace compatibility。R4受支持能力是
+integer-only Core Wasm profile；interpreter crate是该profile的binary parse、type/control-flow validation、translation、
+execution与trap reporting唯一行为真相。`f32`/`f64`类型及相关指令不受支持，float-bearing module必须在checked construction
+期间作为unsupported input拒绝，不能进入translation/execution。Stage 1导入时更宽的upstream regression只保留历史provenance，
+不重新定义R4 capability；profile仍不按canonical observer具体控制流裁剪，也不冻结limits或embedding API。普通module construction必须在执行前完成validation；
 malformed、invalid 或实现不支持的输入返回 error，不能作为已验证 module 进入 executor。unchecked construction 保持显式
 unsafe/internal boundary，kernel load path 不得误用。crate 可以在后续 Stage 持续修改，evidence/consumer 直接消费仓库当前
 第一方 source；crate source 修改由普通 Git 历史记录并重跑受影响 proof，不发布独立 interpreter profile/version 或并列
@@ -300,8 +301,8 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 
 - WIT 必须有真实 SDK bindings、module owner-local conformance与kernel Host wiring consumers；focused test oracle可以显式审查
   expected ABI，但普通module build和kernel lifecycle不得复制一份WIT schema或依赖artifact metadata；
-- `nemophila-wasm` crate 必须保留通用 Core Wasm interpreter regression coverage，普通 module construction 在执行前完成
-  validation，malformed/invalid/unsupported input 返回 error，unchecked construction 不进入 kernel load path；canonical
+- `nemophila-wasm` crate 必须保留integer-only Core Wasm interpreter regression coverage，普通module construction在执行前完成
+  validation，malformed/invalid/unsupported input返回error，并以float-bearing module证明R4 unsupported边界；unchecked construction不进入kernel load path；canonical
   clone observer 的owner-local validation必须把build output交给当前第一方interpreter并证明artifact可执行；普通module
   build本身不以当前kernel可加载性为成功条件；
 - embedded 与 supplied ingress 必须共享 kernel admission/runtime lifecycle，并在每次 load 真实调用 interpreter validation 与
@@ -341,8 +342,8 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
   clone result；
 - `NEMOPHILA-R0-CUTOVER` 前不创建 effective Nemophila contract；
 - Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 与 Stage 2 route 均已解析并关闭，Stage 2
-  feedback interlude已在Stage 3前以R3纠正build/admission owner；Stage 3已解析并保持Ready / Not Started，执行仍需
-  单独授权；Stage 4--6的具体proof route、test/oracle和命令只在对应Stage获得解析授权后补充。如果实施路线需要改变
+  feedback interlude已在Stage 3前以R3纠正build/admission owner；R4已收敛integer-only profile与kernel/app compiler-target owner；
+  Stage 3 Checkpoint 1已关闭，Checkpoint 2为Ready / Not Started且未授权；Stage 4--6的具体proof route、test/oracle和命令只在对应Stage获得解析授权后补充。如果实施路线需要改变
   本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 
 ## 禁止退化项
