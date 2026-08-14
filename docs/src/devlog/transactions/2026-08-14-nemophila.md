@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Closed
+Stage 3 Closed / Stage 4 Ready
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -13,7 +13,8 @@ Stage 3 Closed
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
-kernel/app compiler-target owner拆分；Stage 3两个Checkpoint的授权均已消费并关闭；Stage 4--6仍未获授权。
+kernel/app compiler-target owner拆分；Stage 3两个Checkpoint的授权均已消费并关闭；Stage 4 docs-only resolution授权也已消费，
+两个execution checkpoint均未获执行授权；Stage 5--6仍未获解析或执行授权。
 
 ## Checkpoint Log
 
@@ -386,3 +387,32 @@ success code替代guest evidence。该disposition保持R4 target、owner、ABI�
 不要求跨入LA64 platform/system-power owner。Checkpoint 2与Stage 3据此**Closed**，Contract Cutover保持None；Stage 4保持
 未解析、未授权。hardware、management authorization、embedded/supplied ingress、weave、callback concurrency/poison、
 try-unload、clone与完整R0 acceptance均Not Run / Not Proven。
+
+### 2026-08-14 - Stage 4 docs-only resolution
+
+**Resolution:** 维护者授权解析Stage 4；该docs-only授权已消费。Stage 4现为Resolved / Ready / Not Started，并在同一完整
+Implementation Boundary内使用两个execution checkpoint：Checkpoint 1闭合typed provider catalog、canonical WIT registration、
+transaction-local reservation与identity/instance/binding atomic publication；Checkpoint 2在同一owner上闭合cohort、explicit
+in-flight、per-instance serial execution、trap poison/cancellation与try-unload/retirement。两个checkpoint均未获执行授权；
+Checkpoint 1 closure不自动授权Checkpoint 2，Stage 4 closure也不授权Stage 5解析或执行。完整target/non-goals、owner/handoff、
+failure/cleanup、验证与停止条件只由[implementation](../../rfcs/nemophila/implementation.md)
+拥有，本记录不建立第二份实施计划。
+
+**Resolution Evidence:** Stage 3 final source由一个`SpinLock<RuntimeInner>`保护单调identity cursor和
+`BTreeMap<InstanceIdentity, RuntimeInstance>`；该map membership与完整interpreter island是唯一publication/lifetime truth，
+module construction/load在publication lock外完成。`RuntimeInstance`当前直接拥有Engine/Module/Store/Instance，`HostContext`
+只支持value-only logging，narrow Linker尚未注册`weave-clone`，因此canonical observer仍会因unknown import被拒绝。canonical WIT/
+SDK已经固定point-specific registration result、load-only callback storage、`observe-clone(u32,u32)` trampoline与logging callback
+window；Stage 2 module-local host fixture仍带Stage 5真实路径替换gate。
+
+ordinary `SpinLock`在当前`spin_lock_irqsave`配置下关闭本地中断，不能跨Wasm execution、Host logging或sleepable serialization；
+kernel现有`Mutex`提供ordinary task-context sleepable exclusion并拒绝IRQ/IRQ-off/preempt-disabled调用。KUnit在Late initcall之后运行，
+允许在Nemophila并发协议本身被测时使用`KThreadBuilder`、Event/predicate phase和完整join，但禁止固定yield/sleep、timeout成功oracle
+与production pause hook。现有perf registry证明双架构linker section/static descriptor可由owner扫描和校验；register没有Nemophila
+current open issue/limitation，current contracts也没有Nemophila effective ID。
+
+**Validation / Disposition:** `git diff --check`通过；`mdbook build docs`通过。resolution保持Accepted R4 target、owner、ABI envelope、
+Contract Impact与acceptance，Contract Cutover为None；
+不新增current contract/register、production point/task call site、management/artifact ingress、public ABI或runtime KernelConfig。
+Stage 4 code、KUnit、kernel build、QEMU、SMP、interpreter/module regression与hardware均Not Run。Stage 4保持Ready / Not Started；
+只有维护者新的明确授权才能开始Checkpoint 1。

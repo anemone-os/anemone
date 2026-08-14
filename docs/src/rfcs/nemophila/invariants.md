@@ -344,8 +344,9 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 与 Stage 2 route 均已解析并关闭，Stage 2
   feedback interlude已在Stage 3前以R3纠正build/admission owner；R4已收敛integer-only profile与kernel/app compiler-target owner；
   Stage 3的两个Checkpoint均已关闭；LA64按current System Power contract进入末尾halt后的host QEMU终止只作为该平台的
-  Stage 3 harness disposition，不形成ordinary power-off capability；
-  Stage 4--6的具体proof route、test/oracle和命令只在对应Stage获得解析授权后补充。如果实施路线需要改变
+  Stage 3 harness disposition，不形成ordinary power-off capability；Stage 4已解析为两个共享同一provider/runtime/lifecycle
+  Implementation Boundary且未获执行授权的checkpoint；
+  Stage 5--6的具体proof route、test/oracle和命令只在对应Stage获得解析授权后补充。如果实施路线需要改变
   本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 
 ## 禁止退化项

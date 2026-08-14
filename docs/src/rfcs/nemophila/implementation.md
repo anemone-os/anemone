@@ -5,21 +5,22 @@
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
-Stage 3 / Resolved / Closed；Stage 4--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 3 Checkpoint 1与Checkpoint 2均已消费；Stage 4--6解析/执行均未授权
+Stage 3 / Resolved / Closed；Stage 4 / Resolved / Ready / Not Started；Stage 5--6 / Outline Only / Not Started
+**Execution Authorization：** Stage 4 docs-only resolution授权已消费；Stage 4 Checkpoint 1/2与Stage 5--6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
-两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4--6仍只有outline。当前没有
+两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
+两个共享完整lifecycle边界的execution checkpoint，保持Ready / Not Started；Stage 5--6仍只有outline。当前没有
 Nemophila current contract 或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
 Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，
 execution evidence同样见transaction；feedback interlude不重开Stage 2，而是在后续Stage消费其产物前关闭已发现的owner
-摩擦与R3 target revision。Stage 3的可执行边界、两个checkpoint、validation与stop条件已在下文闭合；Stage 4--6仍只保留
-Purpose、Prerequisites和Protected Boundary，只有维护者明确授权解析对应Stage后才补充其可执行边界。关闭一个checkpoint
+摩擦与R3 target revision。Stage 3与Stage 4的可执行边界、各自两个checkpoint、validation与stop条件已在下文闭合；Stage 5--6
+仍只保留Purpose、Prerequisites和Protected Boundary，只有维护者明确授权解析对应Stage后才补充其可执行边界。关闭一个checkpoint
 不自动授权同Stage的下一个checkpoint，关闭一个Stage也不自动授权下一个Stage的解析或执行。
 
 ## 全局 Implementation Boundary
@@ -69,7 +70,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 2 | Resolved / Closed | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
 | Stage 2 Feedback Interlude | Resolved / Closed | 收拢SDK/config/build owner，移除xtask业务admission mirror，并以R3修正future kernel admission target | None |
 | Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
-| Stage 4 | Outline Only | 闭合 weave、并发调用与完整 instance lifecycle | None |
+| Stage 4 | Resolved / Ready / Not Started | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
@@ -635,16 +636,218 @@ interpreter内部API/source调整可以留在既有crate owner并重跑受影响
 
 ## Stage 4 — Weave、并发调用与完整 lifecycle
 
+**Resolution：** Resolved / Ready / Not Started
+
+**Execution Authorization：** None；本次授权只用于docs-only resolution，Checkpoint 1与Checkpoint 2均未获执行授权
+
 **Purpose：** 在 Stage 3 transactional core 上闭合 typed point/provider handoff、registration/reservation、fanout cohort、
 per-instance serial execution、in-flight ownership、无副作用 busy try-unload、callback trap poison/cancellation 与 live/
 poisoned retirement，使 runtime correctness 在接入 task owner 前独立成立。
 
 **Prerequisites：** Stage 3 关闭且 load/rollback/publication owner 已稳定；Stage 2 的 point-specific SDK contract 可由 kernel
-consumer 真实接线；维护者另行授权 Stage 4。
+consumer 真实接线；维护者另行授权对应execution checkpoint。
 
 **Protected Boundary：** provider 不持 instance、binding collection、in-flight 或 lifecycle truth；runtime 不发明 point
 cardinality；poison 不是自动 unbind/unload，busy failure 不做部分 cleanup，同一 instance 不并发解释、不同 instances 不被
 全局串行。不得为验证建立第二个 production point、无真实 consumer 的 public facade 或 KUnit-aware production protocol。
+
+### Implementation Boundary
+
+- **Target / non-goals：** 扩展Stage 3同一个kernel-internal `Runtime` owner，使module-side `load`能够通过canonical
+  `weave-clone` WIT import取得transaction-local binding reservation，并使published instance能够经typed point capability完成
+  cohort dispatch、per-instance serial execution、trap containment、poison/cancellation和显式try-unload/retirement。Stage 4
+  不修改task clone路径，不加入ordinary production provider descriptor、embedded/SystemTarget或supplied artifact ingress、
+  `CAP_SYS_MODULE`检查、syscall/errno/public identity encoding、runtime KernelConfig feature或current contract；不删除Stage 2
+  temporary Host fixture，也不声称canonical clone observer vertical slice。Stage 5拥有真实task point与fixture替换，Stage 6
+  拥有management activation、artifact ingress和最终cutover。
+- **Provider declaration / catalog：** 具体subsystem通过最窄crate-internal provider declaration静态贡献point identity、typed
+  call-window shape与immutable `Exclusive` / `Fanout` policy；贡献由Nemophila拥有的专用linker catalog汇聚，普通初始化顺序、
+  link order和descriptor地址都不形成point identity、availability或dispatch order。descriptor不包含instance、callback、binding
+  count、reservation、in-flight或lifecycle state，也不执行注册副作用。runtime唯一负责catalog校验与解析；duplicate/invalid
+  descriptor是kernel build/invariant failure，不能伪装为module registration result。具体attribute/macro拼写和catalog内部索引
+  属于implementation preference，但不得退化为字符串tag、开放`WasmValue`数组、动态initcall注册或subsystem-owned callback
+  collection。Stage 4 ordinary build允许catalog为空；Stage 5才由task owner贡献唯一R0 production point。
+- **Provider / runtime handoff：** provider consumer只持由其typed declaration导出的point invocation capability并提交一次
+  point-specific value context；它不接收`Runtime`、instance identity、binding snapshot、interpreter object或runtime lock。
+  runtime解析point-owned immutable policy、选择cohort并完成callback lowering/dispatch；provider不观察module trap或以其修改
+  subsystem业务结果。R0 typed point只允许从可睡眠、interrupt-enabled且没有owner-private guard的普通task context同步调用；
+  IRQ/IRQ-off/NMI point、decision-returning callback与异步fanout均不属于本Stage，Stage 5必须在真实clone seam复核该调用上下文。
+- **WIT / registration Host boundary：** kernel narrow Linker在Stage 3 logging基础上只增加canonical WIT的point-specific
+  `weave-clone.register-observer` import，并对fixed clone callback entry执行typed lookup；WIT source仍只拥有logical identity、
+  version、values和registration result，不在runtime被解析为catalog/policy。registration只在当前module-side `load` call window
+  合法；callback或其它entry中直接调用同一import属于module-caused Host trap，不能创建late binding。Host call window只向
+  registration lowering暴露当前load transaction的窄reservation capability，不把完整runtime、provider、task或kernel lock
+  存入interpreter；窗口在guest entry返回或trap后失效，不成为instance lifecycle的第二份phase truth。
+- **Registration / reservation：** runtime以point identity和当前unpublished instance为key检查provider availability、同一
+  instance重复registration及point-owned policy。`Exclusive`与已有live/poisoned binding或其它transaction reservation冲突；
+  `Fanout`仍为每次successful registration建立属于该transaction、publication前不可dispatch的reservation。同一instance对同一
+  point至多一个reservation/binding。provider unavailable、duplicate或exclusive occupied返回WIT typed dynamic failure且不改变
+  runtime state；module可以把它视为fatal并让load rollback，也可以接受后返回success，发布零binding instance。callback export
+  缺失/错型、非法call window或Host lowering错误是contained module failure，不降格为普通registration result。
+- **Transaction / publication / rollback：** reservation与Stage 3 unpublished interpreter entity属于同一个runtime-owned load
+  transaction。successful registration返回前已经排除commit-time occupancy conflict；module error/trap或其它pre-commit failure
+  释放本transaction全部reservations并销毁完整unpublished entity，不留下identity、binding或Poisoned state。module success后，
+  runtime在同一短临界区使identity、owning instance与全部bindings一起从unpublished变为live；不存在先发布instance再补binding、
+  先暴露binding再补instance或commit时重新拒绝已成功exclusive registration的窗口。Stage 3 monotonic identity与per-load
+  interpreter ownership保持不变，runtime不保存artifact source或mutable `loaded`镜像。
+- **Authoritative lifecycle state：** Stage 3唯一published collection继续是instance membership/lifetime truth，并由同一runtime
+  owner扩展出live/poisoned admission、bindings/reservations与显式in-flight accounting。实现可以用runtime-minted stable
+  instance/invocation capability在短临界区外保护内存lifetime，但引用计数、mutex occupancy、diagnostic reason和provider catalog
+  都不得反向决定lifecycle、busy或retirement。identity不复用；retiring可以由已经撤销collection/binding visibility的owning
+  retirement capability表达，不要求为了叙事增加可被第二处修改的镜像enum。
+- **Cohort / invocation ownership：** 一次point call在runtime state的单一cohort selection线性化点筛选该point当前全部live
+  bindings，并在执行任一callback前为每个binding建立显式invocation ownership和in-flight计数。与publication/retirement竞争的
+  binding要么不进入cohort，要么已计入in-flight；unpublished、poisoned与retiring instance不可准入。runtime随后释放catalog/
+  collection state guard，再按无contract的内部顺序逐项dispatch；正常返回只释放对应ownership，一个instance trap仍继续cohort
+  中其它instances。cohort不得同时占有多个instance execution slots，也不得逐callback重新查询而使同一次binding set漂移。
+- **Per-instance execution / lock ordering：** 每个published instance拥有独立、可睡眠的execution serialization capability，
+  保护其Store/Instance/stack等mutable interpreter island；同一instance已经admit但尚未执行的callbacks等待该串行域，不同
+  instances不共享execution lock。任何runtime catalog/collection/binding spin guard都必须在等待execution slot和进入guest前
+  释放，guest execution、Host logging与可能的诊断格式化都不能发生在`spin_lock_irqsave`临界区。trap路径允许在继续持有当前
+  instance execution slot时短暂取得runtime state guard发布poison；反向路径不得持runtime state guard等待execution slot，
+  由此固定唯一lock order。module-side `load`在unpublished transaction内完成且尚不可并发dispatch，不需要用global execution
+  lock把不同loads串行。
+- **Trap / poison / cancellation：** typed callback normal return继续live；只有interpreter明确分类的同步guest trap或由非法
+  guest value/call window造成的module-side Host trap进入module-caused callback failure。unexpected linker/type/runtime invariant
+  error、assertion或kernel panic不能按“任何`Err`”统一降格为Poisoned；若当前`nemophila-wasm`分类surface不足，可以在同一
+  interpreter owner内做最小API演进并重跑受影响proof。module-caused trap必须在释放execution slot前原子发布`live -> poisoned`
+  并保留triggering invocation直到containment/diagnostic cleanup完成；其它cohort已经admit但尚未进入guest的同instance callbacks
+  在取得串行域后重新检查authoritative lifecycle、取消并释放ownership，不得进入guest。poison不撤销binding/resource、不释放
+  `Exclusive`占位、不自动unload或恢复live；reason、instance/point identity与trap classification只能作为immutable diagnostic
+  snapshot，行为继续只由lifecycle state驱动。
+- **Try-unload / retirement：** Stage 4只提供kernel-internal typed try-unload operation，不检查credentials、不映射errno也不
+  暴露identity ABI。runtime在同一state临界区解析identity并检查authoritative lifecycle/in-flight：任一admitted/waiting/
+  executing invocation或poison cancellation/containment未完成时返回busy-class failure，且不改变lifecycle、bindings、resources、
+  exclusive occupancy或admission；零in-flight的live/poisoned instance则在同一线性化结果中关闭新admission、撤销全部bindings、
+  从published collection取出并形成owning retirement capability。可能运行复杂`Drop`的interpreter/resources在可见性撤销后、
+  runtime state guard外销毁；cleanup不进入guest、不调用`exit`/`fini`、不允许module veto，也不靠偶然最后一个引用承担状态转换。
+  not-found与busy保持不同kernel-internal结果，最终public encoding留给Stage 6。
+- **Validation shape：** deterministic registration/lifecycle cases直接消费production transaction、catalog、cohort、invocation和
+  retirement owner；owner-local conditional provider descriptors可以分别表达clone-shaped `Fanout`与synthetic `Exclusive`
+  policy，但不进入ordinary build、不建立第二个production point或另一套registry。小型Core Wasm fixtures覆盖真实registration
+  import、typed callback、normal return、guest/Host trap和logging；pure owner protocol tests可以直接驱动production内部的
+  reservation/invocation capabilities，但不得增加pause/hook/reset、fake lifecycle field或generic native-callback abstraction。
+  只有same-instance serialization、cross-instance progress和queued cancellation等被测并发语义允许使用KUnit kthreads；双方必须
+  以具名phase/predicate/Event和真实invocation/retirement capability握手，所有worker在case返回前stop/join，不以sleep、固定yield/
+  tick或host timeout作为成功oracle。actual concurrency correctness仍由state/lock/lifetime source proof闭合，SMP stress只作补充。
+- **Build / activation boundary：** Stage 4继续通过repository Justfile/xtask/preset与现有QEMU入口验证，不增加parallel wrapper。
+  ordinary kernel source包含完整internal protocol，但没有production provider descriptor、task call site、boot/management caller、
+  public ABI或current contract；KUnit-off build必须证明conditional descriptors/observations/concurrency fixtures不进入ordinary surface。
+  Stage 4 closure不删除module-local temporary Host fixture，因为它的Stage 5 replacement gate要求canonical module走真实task point。
+
+预计`anemone-kernel/src/nemophila/`内按weave declaration/catalog、registration transaction、published instance、invocation/lifecycle
+与Host lowering等稳定角色自然拆分，kernel linker catalog边界、必要的owner-local interpreter API演进、inline KUnit fixtures和
+双架构验证配置是非穷举提示，不是严格逐文件write set。若继续把catalog、load、dispatch、lifecycle和tests全部堆进现有
+`mod.rs`/`runtime.rs`会混合多套职责，可以在同一Nemophila owner内做行为保持的目录化拆分；不得借拆分扩大crate public API、
+建立通用plugin framework或提前移动task/management owner surface。
+
+### Execution Checkpoints
+
+#### Checkpoint 1 — Typed weave registration 与 transactional binding
+
+- **Purpose / deliverable：** 建立immutable provider catalog与crate-internal typed provider/runtime handoff，把canonical WIT
+  `weave-clone` registration/callback entry接入Stage 3 narrow Linker；successful registration取得transaction-local reservation，
+  module success把identity、instance与bindings原子publish，module error/trap与dynamic failure的fatal分支完整rollback。ordinary
+  build仍无production provider descriptor；provider unavailable可被module接受并形成零binding live instance。
+- **Independent safety：** 没有point invocation、callback execution/in-flight、poison、try-unload、task call site或management caller；
+  ordinary kernel不存在可触发binding的production descriptor。conditional provider fixtures只服务owner-local KUnit并在isolated
+  runtime owner内证明真实transaction，case teardown不能表述为retirement。Checkpoint 1不得为让canonical module假成功而
+  硬编码provider availability、跳过callback typed lookup或把reservation延迟到commit。
+- **Validation / stop：** owner-local proof覆盖catalog empty/duplicate boundary、provider unavailable、same-instance duplicate、
+  `Exclusive` live/reservation conflict、`Fanout`多reservation、typed callback缺失/错型、load-window外registration trap、
+  successful commit、fatal rollback与accepted failure后的零binding publication；source audit确认unpublished binding不可dispatch、
+  publication只有一个owner/线性化点且ordinary build没有conditional descriptor。重跑interpreter/module regression、双架构
+  KUnit-on/KUnit-off build与至少RV64真实KUnit boot；LA64 runtime未运行时明确Not Run。Checkpoint 1独立review/写回后停止，
+  不能自动进入Checkpoint 2。
+
+#### Checkpoint 2 — Cohort invocation、poison 与 retirement
+
+- **Purpose / deliverable：** 在Checkpoint 1 bindings上建立single-selection cohort和全部callback-before-execution的invocation
+  ownership，以独立sleepable instance serial domain执行真实typed Wasm callback；闭合normal return、trap-before-slot-release
+  poison、queued cancellation、fanout continuation、busy try-unload以及live/poisoned zero-in-flight retirement与guest-free cleanup。
+- **Independent proof：** deterministic owner-local cases覆盖publication/unload race的二选一结果、cohort稳定性、全部ownership
+  预建立、normal cleanup、trap classification、poison retained occupancy、queued cancellation和busy无副作用；真实Wasm fixtures
+  覆盖normal/trap/logging call window。live concurrency cases只通过production execution/invocation capabilities与Event/predicate
+  phase驱动，证明same-instance serial和different-instance independent progress；至少一条真实`smp=2` guest run进入这些focused
+  cases，`smp=1`或未进入case的总PASS不能冒充SMP proof。source review必须核对没有global lock跨guest、没有runtime-state-to-
+  execution反向等待、explicit in-flight而非引用计数决定busy，以及withdraw-publication-before-drop cleanup。
+- **Validation / stop：** 完成RV64与LA64 focused KUnit真实boot、两架构ordinary KUnit-off build、至少RV64 `smp=2` concurrency
+  boot、interpreter/module/xtask regression、format/docs、ELF/linker catalog、dependency/visibility/conditional-surface audit与
+  Architecture Friction Scan。wrapper或QEMU success marker必须结合focused markers、完整KUnit结果与architecture-appropriate
+  terminal outcome核对。Checkpoint 2关闭整个Stage 4，但不授权Stage 5、不接入task clone seam、不删除temporary Host fixture，
+  也不形成public management ABI、current contract或`NEMOPHILA-R0-CUTOVER`。
+
+### Deliverables
+
+- point-owner static descriptor与Nemophila-owned immutable provider catalog，以及不暴露runtime/instance/private lock的typed
+  provider invocation capability；
+- canonical WIT `weave-clone` registration Host wiring、typed callback lookup与load-only call-window enforcement，无第二份WIT/
+  policy truth；
+- runtime-owned transaction-local reservations、dynamic registration result、fatal/accepted failure分支与identity/instance/binding
+  atomic publication/rollback；
+- 唯一published lifecycle/binding/in-flight owner、stable invocation ownership、single-selection fanout cohort与per-instance
+  sleepable serial execution；
+- module-caused callback trap classification、pre-slot-release poison、queued cancellation、retained-inert bindings/resources与
+  diagnostic-only poison snapshot；
+- kernel-internal无副作用busy try-unload与live/poisoned guest-free retirement，identity继续不复用；
+- owner-local deterministic/KUnit concurrency evidence、Not Run矩阵、两个checkpoint各自的review/Architecture Friction结论与
+  最终Stage状态写回。
+
+### Validation
+
+- **Catalog / provider boundary：** source与linker audit证明descriptor只含immutable point-owned facts，catalog identity不依赖
+  link order/address，runtime而非provider拥有lookup/binding；duplicate/invalid descriptor是kernel invariant failure。ordinary build
+  无production point，conditional `Fanout`/`Exclusive` fixtures不泄漏；provider调用只提交typed values且不获得instance/runtime
+  representation。
+- **Registration / transaction：** provider unavailable、same-instance duplicate、exclusive live/poisoned/reservation occupied均为
+  无副作用typed failure；fanout允许多个instances。successful registration建立不可dispatch reservation，fatal module return/trap
+  释放全部reservation且无publication，accepted failure发布零binding instance，successful commit同时发布identity/instance/bindings
+  且不存在late conflict。
+- **WIT / callback / Host：** exact registration import与callback signature通过，missing/wrong callback、load-window外registration、
+  invalid Host value形成contained module failure；normal callback可以使用Stage 3 logging call window。kernel不解析WIT metadata/
+  exact envelope，普通export不自动注册，module-visible capability仍只有weave与value-only logging。
+- **Cohort / concurrency：** 两个fanout live instances在单一selection点都取得invocation ownership后才执行第一个callback；load/
+  retirement竞争不产生漂移或use-after-free。same-instance calls串行、different instances不由global lock串行，cohort不同时持有
+  多个execution slots，callback order不进入asserted contract。live-scheduling tests有明确phase、predicate、cleanup与实际SMP
+  disposition，source/lock proof仍是并发correctness主证据。
+- **Trap / poison：** guest trap与module-caused Host trap在execution slot释放前发布Poisoned，triggering ownership保持到containment
+  结束；同instance已经admit但未进guest的callbacks取消并释放，新的admission失败，fanout其它instances继续。kernel/interpreter
+  invariant error不降格为poison；diagnostic snapshot不驱动lifecycle，poisoned binding/resource保持失活并继续exclusive占位。
+- **Unload / cleanup：** live和poisoned instance在in-flight或cancellation/containment cleanup期间返回busy且状态、binding、resource、
+  occupancy完全不变；零in-flight在一个线性化结果中关闭admission、撤销binding和published membership，再在state guard外销毁
+  interpreter/resource。not-found与busy区分，不等待callback、不进入guest、不auto/force unload、不调用module cleanup，也不以
+  strong-count或`Drop`偶然决定retirement。
+- **Regression / repository integration：** 使用repository-owned `just test nemophila-wasm`、`just test nemophila-module`与
+  `just test xtask`保持interpreter、WIT/SDK/canonical artifact和build owner自洽；任何interpreter error-classification API变化重跑
+  受影响proof。双架构KUnit-on/KUnit-off build与RV64/LA64真实boot核对focused/full-suite/terminal outcome，至少一个RV64
+  `smp=2` run真实进入concurrency cases；不修改现有end-to-end wrapper来伪装tuple，使用repository `just qemu`显式binding时记录
+  完整preset、disk/rootfs来源和log。
+- **Proof limits：** Stage 4证明kernel-internal provider/registration/invocation/poison/unload protocol及实际执行的architecture/
+  topology，不证明真实task clone call placement、canonical observer production registration、management authorization、embedded/
+  supplied ingress、public ABI、hardware、callback progress/unload bounded completion、恶意module DoS或完整R0 acceptance。Stage 2
+  host fixture仍只证明module-local conformance，Stage 4 synthetic/conditional provider也不能冒充Stage 5 task vertical slice。
+
+### Cutover
+
+None。Stage 4交付仍无production point/caller的kernel-internal weave与完整lifecycle protocol；没有task/clone visible semantics、
+management ABI、artifact ingress、current contract、register baseline或`NEMOPHILA-R0-CUTOVER`。Checkpoint 1只扩展transactional
+publication，Checkpoint 2只关闭internal invocation/retirement correctness，二者都不是R0 semantic/contract cutover。
+
+### Exit / Stop
+
+Stage 4使用两个execution checkpoint；两者共享本节完整target/non-goals、provider/runtime handoff、transaction/lifecycle owner、
+failure/cleanup、protected surface、validation claim与Cutover。Checkpoint 1必须独立安全且不发布可调用production point；
+Checkpoint 2一次性关闭invocation、poison/cancellation与retirement，不能把会执行callback但尚无完整trap/unload protocol的
+中间态作为Stage deliverable。每个checkpoint都需要独立授权、review、execution evidence与Architecture Friction Scan；维护者
+只授权Checkpoint 1时，关闭后必须停止。
+
+如果实现需要让provider持有binding/lifecycle state、让runtime发明point policy、按link order形成callback order、以字符串/
+untyped value建立主要SPI、把global spin guard或IRQ-off窗口跨guest、用reference count/mutex/diagnostic字段决定busy/retirement、
+把任意interpreter `Err`降格为poison、在busy path做partial cleanup、引入blocking/force/auto unload、module cleanup、第二个
+production point、KUnit-only Host service/pause hook/native-callback abstraction、public management/task/ABI surface，或者需要在两个
+checkpoint间重新解析reservation、publication、cohort、poison、cancellation、retirement、owner、acceptance或validation claim，
+必须停止并回RFC review / Target Renegotiation。若真实proof只能通过降低SMP/guest oracle、修改production control flow理解测试
+协议或把Stage 5 clone seam提前引入，同样停止。Stage 4关闭后仍须等待维护者另行授权解析Stage 5。
 
 ## Stage 5 — Clone observer vertical slice
 
