@@ -187,6 +187,11 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current effective规则见Network与Socket contract，
   register没有新增当前问题。
+- [RFC-20260814-tcp-listener-ingress-publication](./rfcs/tcp-listener-ingress-publication/index.md)：Accepted R0；把active-connect
+  egress selection与listener ingress publication分开，由Stack TCP owner将一份logical listener投影到boot-static
+  local/external path，并在每次interface pump后以aggregate admission线性化pending child。target保持一个backlog、
+  opaque child handoff和all-projection cleanup，同时把unscoped logical listener诊断为`idiag_if = 0`；R0未授权实现，
+  三项current contract均未cut over。
 - [RFC-20260809-read-only-network-diagnostics](./rfcs/read-only-network-diagnostics/index.md)：Closed R0；交付
   initial-domain、IPv4-only、request-time snapshot的只读netlink子集，使未修改`ip link/addr/route show`与
   `ss -tan`可读取logical interface、static control plane与TCP owner facts。既有网络owner不迁移；新增netlink

@@ -258,6 +258,7 @@
 			- [目标与不变量](./rfcs/net-tcp/invariants.md)
 			- [实施计划](./rfcs/net-tcp/implementation.md)
 			- [背景材料：历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)
+		- [TCP Listener Ingress Publication](./rfcs/tcp-listener-ingress-publication/index.md)
 		- [Read-only Network Diagnostics](./rfcs/read-only-network-diagnostics/index.md)
 		- [Epoll](./rfcs/epoll/index.md)
 			- [目标与不变量](./rfcs/epoll/invariants.md)
