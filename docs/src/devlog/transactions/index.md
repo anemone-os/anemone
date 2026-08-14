@@ -6,6 +6,9 @@
 
 ## Active
 
+- [Nemophila](./2026-08-14-nemophila.md)：Accepted R2 Stage 1已关闭并pin第一方`nemophila-wasm` source；
+  通用Core Wasm回归、定向Miri与RV64/LA64 `no_std + alloc` staticlib build/link通过。Stage 2--6未授权，
+  runtime/current contract仍Not Run / Not Effective。
 - [PTY / devpts](./2026-08-11-pty-devpts.md)：Stage 1--3已关闭，semantic endpoint、runtime relation、owner-private pair与
   hidden devpts/allocation/open/cleanup production route已闭合；Stage 4 public activation/acceptance未授权，全部target
   contract仍Not Effective。

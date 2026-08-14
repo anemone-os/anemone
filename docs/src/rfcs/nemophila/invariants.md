@@ -331,7 +331,7 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - clone observer 必须经真实 Wasm entry 运行并使用日志 service；正常返回、trap 以及日志过滤、截断或覆盖均不得影响
   clone result；
 - `NEMOPHILA-R0-CUTOVER` 前不创建 effective Nemophila contract；
-- Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 route 当前已解析并执行中，Stage 2--6
+- Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 route 已解析并关闭，Stage 2--6
   的具体 proof route、test/oracle 和命令只在对应 Stage 获得解析授权后补充，执行仍需单独授权。如果实施路线需要改变
   本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 

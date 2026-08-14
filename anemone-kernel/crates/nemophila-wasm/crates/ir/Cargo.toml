@@ -1,0 +1,15 @@
+[package]
+name = "nemophila-wasm-ir"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+description = "Internal bytecode for the Anemone-owned WebAssembly interpreter"
+
+[dependencies]
+wasmi_core = { package = "nemophila-wasm-core", path = "../core", default-features = false }
+
+[features]
+default = []
+std = ["wasmi_core/std"]
+simd = ["wasmi_core/simd"]

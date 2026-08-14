@@ -4,14 +4,15 @@
 **最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R2
-**Stage 状态：** Stage 1 / Resolved / In Progress；Stage 2--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 1 only；维护者已恢复执行，不进入 Stage 2
+**Stage 状态：** Stage 1 / Resolved / Closed；Stage 2--6 / Outline Only / Not Started
+**Execution Authorization：** None；Stage 1授权已消费，Stage 2未获授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R2 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
-acceptance。Stage 1 已恢复执行；Stage 2--6 仍只有 outline，也没有 current contract 或 cutover。
+acceptance。Stage 1 已关闭；Stage 2--6 仍只有 outline，也没有 current contract 或 cutover。
 
-Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 原位修订并获执行授权。
+Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
+[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
 Stage 2--6 只保留 Purpose、Prerequisites 和 Protected Boundary，只有维护者明确授权解析对应 Stage 后才补充其可执行
 边界，不提前冻结类型、算法、文件列表、精确命令或 checkpoint。关闭一个 Stage 不自动授权下一个 Stage 的解析或执行。
 
@@ -57,7 +58,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 
 | Stage | 解析程度 | 目的 | 可见语义 / Cutover |
 | --- | --- | --- | --- |
-| Stage 1 | Resolved / In Progress | 从固定 Wasmi provenance 形成可持续演进的 in-tree `nemophila-wasm` crate | None |
+| Stage 1 | Resolved / Closed | 从固定 Wasmi provenance 形成可持续演进的 in-tree `nemophila-wasm` crate | None |
 | Stage 2 | Outline Only | 建立 WIT、SDK、canonical artifact，并与 interpreter integration 共同收敛 | None |
 | Stage 3 | Outline Only | 以 pinned interpreter revision 建立 kernel transactional runtime core | None |
 | Stage 4 | Outline Only | 闭合 weave、并发调用与完整 instance lifecycle | None |
@@ -66,9 +67,9 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 
 ## Stage 1 — `nemophila-wasm` 裁剪与适配
 
-**Resolution：** Resolved / In Progress
+**Resolution：** Resolved / Closed
 
-**Execution Authorization：** Stage 1 only
+**Execution Authorization：** Consumed；Stage 2未授权
 
 **Purpose：** 先 clone 固定 Wasmi `v1.1.0` 源码，再将实际 interpreter source 导入 Anemone 仓库的
 `anemone-kernel/crates/nemophila-wasm`，形成由第一方直接裁剪、适配、维护且会在后续 Stage 继续演进的 in-tree crate。
@@ -105,8 +106,8 @@ baseline；固定 Wasmi
 - **API evolution / validation boundary：** `nemophila-wasm` 保持通用 Core Wasm interpreter 形状；configuration、feature
   support、limits、module metadata 与 embedding API 根据 interpreter 自身能力和后续真实 kernel consumer 共同演进，Stage 1
   不冻结稳定外部 surface。普通 module construction 必须在执行前完成 validation；malformed、invalid 或实现不支持的输入
-  返回 error，不能作为已验证 module 进入 executor。unchecked construction 保持显式 unsafe/internal boundary，validation-only
-  consumer 不得调用它。
+  返回 error，不能作为已验证 module 进入 executor。production surface不暴露unchecked module construction；private parser
+  implementation的unsafe只由已安装Validator的owner-local路径调用，validation-only consumer无法调用它。
 - **Runtime boundary：** interpreter API 表达通用 Wasm values、module/instance/store/Host function 与 trap/error；interpreter
   不拥有 kernel call window，也不得持有 `Task`、`File`、
   kernel lock/raw pointer、provider、registration、in-flight、poison 或 retirement state。kernel allocator 下自然、适度的
@@ -141,11 +142,12 @@ baseline；固定 Wasmi
 - **Interpreter correctness：** crate owner tests 覆盖通用 Core Wasm parse/validate/translate/execute 正例、malformed/type/
   control-flow failure、Host value round trip 与 trap reporting；保留适用的 upstream regression corpus，不把“能解析”冒充
   “允许执行”，也不以 canonical observer 覆盖替代一般解释器回归。
-- **Owner surface：** source/API/dependency audit 证明 unchecked constructor 保持显式 unsafe/internal boundary，production
+- **Owner surface：** source/API/dependency audit 证明production surface没有unchecked constructor，private parser unsafe仍在
+  owner-local validation boundary内；production
   graph 不依赖 `std`、WASI、WAT、CLI/C API、host filesystem/thread/random source，
   也不出现 kernel object、同步或 lifecycle owner。
-- **Safety：** source audit 枚举 retained production unsafe boundary 及其不变量，证明 untrusted bytes 不能进入 unchecked
-  constructor，release configuration 启用 `extra-checks` 或已证明等价的 invariant checks；结合适用的 Miri、fuzz regression
+- **Safety：** source audit 枚举 retained production unsafe boundary 及其不变量，证明 untrusted bytes 不能绕过Validator进入
+  translation/execution，release configuration 启用 `extra-checks` 或已证明等价的 invariant checks；结合适用的 Miri、fuzz regression
   corpus 与 malformed module tests 覆盖 parser/translator/executor 的安全敏感路径。此证据不能外推为对全部 interpreter bug
   或恶意 module DoS 的形式化证明。
 - **Embedding：** validation-only consumer 真实调用普通 production embedding API，并覆盖至少一次 parse、validation、eager
@@ -171,6 +173,12 @@ Stage 修改 crate 时重新 pin source commit 并重跑受影响 proof，不重
 validator truth、引入无退出条件兼容桥或降低拒绝 oracle 才能成立，也必须
 停止。当前 resolution 不预设 probe；出现 source/build 无法回答的具体高风险假设时，先在本节补全 hypothesis、failure signal、
 write-back、code disposition 与 exit 并取得对应授权，再执行最小 probe。
+
+### Result / Handoff
+
+Stage 1 已关闭，execution evidence与Not Run见[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。Stage 2
+handoff pin包含当前interpreter source的Anemone commit
+`85489765a4ff57aac2d6eedd3567e98fa60b4b4c`；该pin不冻结后续crate source或API。Stage 2未获解析或执行授权。
 
 ## Stage 2 — WIT、SDK 与 artifact toolchain
 

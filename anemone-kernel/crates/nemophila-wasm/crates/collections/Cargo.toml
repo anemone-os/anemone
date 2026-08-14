@@ -1,0 +1,17 @@
+[package]
+name = "nemophila-wasm-collections"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+description = "Collections for the Anemone-owned WebAssembly interpreter"
+
+[features]
+default = []
+std = []
+hash-collections = ["dep:hashbrown", "dep:string-interner"]
+prefer-btree-collections = []
+
+[dependencies]
+hashbrown = { version = "0.15.1", default-features = false, optional = true, features = ["default-hasher", "inline-more"] }
+string-interner = { version = "0.19", default-features = false, optional = true, features = ["inline-more", "backends"] }

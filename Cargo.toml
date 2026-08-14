@@ -12,6 +12,8 @@ members = [
     "anemone-kernel/crates/idalloc",
     "anemone-kernel/crates/kernel-macros",
     "anemone-kernel/crates/la-insc",
+    "anemone-kernel/crates/nemophila-wasm",
+    "anemone-kernel/crates/nemophila-wasm/validation/embed",
     "anemone-kernel/crates/range-allocator",
     "anemone-kernel/crates/anemos/*",
 ]

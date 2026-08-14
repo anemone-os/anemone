@@ -1,0 +1,15 @@
+[package]
+name = "nemophila-wasm-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+description = "Core primitives for the Anemone-owned WebAssembly interpreter"
+
+[dependencies]
+libm = { version = "0.2.11", default-features = false }
+
+[features]
+default = []
+std = []
+simd = []

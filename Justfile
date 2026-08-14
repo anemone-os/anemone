@@ -6,12 +6,13 @@ default:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
-[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `virtio-drivers`, or `lwext4`")]
+[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `nemophila-wasm`, `virtio-drivers`, or `lwext4`")]
 test suite:
     @case {{ quote(suite) }} in \
         xtask) just test-xtask ;; \
         symtab) just test-symtab ;; \
         net-host) just test-net-host ;; \
+        nemophila-wasm) just test-nemophila-wasm ;; \
         virtio-drivers) just test-virtio-drivers ;; \
         lwext4) just test-lwext4 ;; \
         *) echo "unknown test suite:" {{ quote(suite) }} >&2; exit 2 ;; \
@@ -32,6 +33,14 @@ test-net-host:
     @cargo test -p smoltcp --lib --no-default-features --features std,medium-ip,proto-ipv4,socket-tcp socket::tcp::test::
     @cargo test -p anemone-smoltcp-stack --no-default-features --no-run
     @cargo check -p anemone-smoltcp-stack --no-default-features
+
+[private]
+test-nemophila-wasm:
+    @cargo check -p nemophila-wasm --no-default-features --features extra-checks
+    @cargo test -p nemophila-wasm --features host-test
+    @cargo miri test -p nemophila-wasm --features host-test integration::stage1_embedding
+    @cargo rustc -p nemophila-wasm-embed-validation --target riscv64gc-unknown-none-elf -- -C panic=abort
+    @cargo rustc -p nemophila-wasm-embed-validation --target loongarch64-unknown-none -- -C panic=abort
 
 [private]
 test-virtio-drivers:

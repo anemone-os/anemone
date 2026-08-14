@@ -153,6 +153,7 @@
 		- [2026-06-07 - Signal LTP Tgkill Sigqueueinfo](./devlog/changes/2026-06-07-signal-ltp-tgkill-sigqueueinfo.md)
 		- [2026-06-05 - Block Byte I/O Loop Mkfs](./devlog/changes/2026-06-05-block-byte-io-loop-mkfs.md)
 	- [事务日志](./devlog/transactions/index.md)
+		- [Nemophila](./devlog/transactions/2026-08-14-nemophila.md)
 		- [PTY / devpts](./devlog/transactions/2026-08-11-pty-devpts.md)
 		- [Clock Timekeeping 与 POSIX Timers](./devlog/transactions/2026-08-04-clock-timekeeping-posix-timers.md)
 		- [Exception-backed User Pointer Access](./devlog/transactions/2026-08-01-exception-userptr-access.md)
