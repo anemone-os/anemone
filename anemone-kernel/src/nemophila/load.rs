@@ -4,7 +4,7 @@ use nemophila_wasm::{CompilationMode, Config, Engine, Error, Linker, Module, Sto
 
 use super::{
     host::{HostContext, add_logging},
-    instance::UnpublishedInstance,
+    instance::RuntimeInstance,
 };
 
 const LOAD_EXPORT: &str = "load";
@@ -26,7 +26,7 @@ pub(super) enum LoadFailure {
 ///
 /// Taking ownership of the byte snapshot prevents artifact-source mutation
 /// during checked construction without carrying source identity into runtime.
-pub(super) fn load_unpublished(artifact: Box<[u8]>) -> Result<UnpublishedInstance, LoadFailure> {
+pub(super) fn load_unpublished(artifact: Box<[u8]>) -> Result<RuntimeInstance, LoadFailure> {
     let mut config = Config::default();
     config.compilation_mode(CompilationMode::Eager);
     let engine = Engine::new(&config);
@@ -46,7 +46,7 @@ pub(super) fn load_unpublished(artifact: Box<[u8]>) -> Result<UnpublishedInstanc
         .map_err(LoadFailure::LoadEntry)?;
 
     match load.call(&mut store, ()).map_err(LoadFailure::LoadEntry)? {
-        LOAD_SUCCESS => Ok(UnpublishedInstance::new(engine, module, store, instance)),
+        LOAD_SUCCESS => Ok(RuntimeInstance::new(engine, module, store, instance)),
         LOAD_ERROR => Err(LoadFailure::ModuleRejected),
         other => Err(LoadFailure::InvalidLoadResult(other)),
     }

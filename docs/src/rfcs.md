@@ -56,8 +56,8 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
   RV64/LA64 vertical slice。
   [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
   [实施路线](./rfcs/nemophila/implementation.md)已关闭 Stage 1、Stage 2与Stage 2 feedback interlude，形成当前第一方
-  interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3 Checkpoint 1已关闭，Checkpoint 2保持Ready / Not
-  Started且未获授权，Stage 4--6仍为outline。当前没有current contract或cutover；pre-RFC
+  interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3两个Checkpoint均已关闭，形成dormant
+  kernel-internal transactional runtime core，Stage 4--6仍为outline且未获授权。当前没有current contract或cutover；pre-RFC
   [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有

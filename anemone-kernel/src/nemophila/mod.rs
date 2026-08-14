@@ -3,12 +3,27 @@
 mod host;
 mod instance;
 mod load;
+mod runtime;
+
+use alloc::boxed::Box;
+
+use runtime::Runtime;
+pub(crate) use runtime::{InstanceIdentity, PublishFailure};
+
+static RUNTIME: Runtime = Runtime::new();
+
+/// Loads one immutable artifact snapshot through the common transaction and
+/// atomically publishes the resulting instance in the kernel runtime.
+pub(crate) fn load_and_publish(artifact: Box<[u8]>) -> Result<InstanceIdentity, PublishFailure> {
+    RUNTIME.load_and_publish(artifact)
+}
 
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::{
         host::{LOGGING_MODULE, LOGGING_WRITE},
         load::{LoadFailure, load_unpublished},
+        runtime::{PublishFailure, Runtime},
     };
     use crate::{
         debug::printk::{LogLevel, set_policy, snapshot_policy, validate_policy},
@@ -350,5 +365,43 @@ mod kunits {
                 Err(LoadFailure::LoadEntry(_))
             ));
         }
+    }
+
+    #[kunit]
+    fn runtime_atomically_publishes_independent_instances() {
+        let runtime = Runtime::new();
+        assert!(runtime.publication_snapshot().1.is_empty());
+
+        let mut custom = Vec::new();
+        push_name("ignored", &mut custom);
+        custom.extend_from_slice(b"metadata");
+        let artifact = module([
+            (0, custom),
+            (1, types(&[(&[], &[I32])])),
+            (3, functions(&[0])),
+            (7, exports(&[("load", 0x00, 0), ("extra", 0x00, 0)])),
+            (10, code(&[return_i32(0)])),
+        ]);
+
+        let first = runtime.load_and_publish(artifact.clone()).unwrap();
+        let second = runtime.load_and_publish(artifact).unwrap();
+        assert_ne!(first, second);
+
+        let (_, identities) = runtime.publication_snapshot();
+        assert_eq!(identities.len(), 2);
+        assert!(identities.contains(&first));
+        assert!(identities.contains(&second));
+    }
+
+    #[kunit]
+    fn failed_runtime_load_preserves_collection_and_identity_cursor() {
+        let runtime = Runtime::new();
+        let before = runtime.publication_snapshot();
+
+        assert!(matches!(
+            runtime.load_and_publish(simple_load(return_i32(1))),
+            Err(PublishFailure::Load)
+        ));
+        assert_eq!(runtime.publication_snapshot(), before);
     }
 }

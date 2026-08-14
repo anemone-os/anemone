@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started
+Stage 3 Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -13,7 +13,7 @@ Stage 3 Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
-kernel/app compiler-target owner拆分；Stage 3 Checkpoint 1授权已消费并关闭，Checkpoint 2与Stage 4--6仍未获授权。
+kernel/app compiler-target owner拆分；Stage 3两个Checkpoint的授权均已消费并关闭；Stage 4--6仍未获授权。
 
 ## Checkpoint Log
 
@@ -338,3 +338,51 @@ authorization、artifact ingress、weave、publication/identity、concurrency、
 
 **Result / Next / Stop:** Stage 3 Checkpoint 1 **Closed**，Contract Cutover为None。Checkpoint 2现在是Ready / Not Started且未获
 执行授权；本次执行严格停止，不进入runtime collection、identity、atomic publication、Stage 4或任何后续cutover。
+
+### 2026-08-14 - Stage 3 Checkpoint 2 implementation and closure
+
+**Execution Authorization:** 维护者授权完成Checkpoint 2；该授权已消费。Stage 4及后续gate仍未获解析或执行授权。
+
+**Implementation:** 新增owner-private `runtime`模块与唯一production `Runtime` collection。kernel-private
+`InstanceIdentity`从1开始单调分配，不因失败回退；同一个`BTreeMap`同时表达published membership并拥有完整
+`RuntimeInstance`，插入map是唯一publication线性化点。解释器checked construction、narrow linking与module-side `load`继续
+在publication lock外完成；成功后才在lock内检查identity、插入完整entity并推进cursor。load或commit前失败直接drop
+transaction-local entity，不产生identity、半published entry或第二份lifecycle truth。重复load同一artifact仍各自新建
+Engine/Module/Store/Instance并取得不同identity。
+
+两个新增inline conditional KUnit composition case直接构造隔离runtime owner：一项以含extra export/custom section的同一bytes
+完成两次真实load/commit并观察两个不同identity；另一项证明module拒绝时collection与identity cursor均不变。测试只通过
+`#[cfg(feature = "kunit")]`的owner-local只读snapshot观察私有表示，没有向ordinary production surface增加pause、inspection、
+reset或failure-injection API；fixture整体销毁只证明test-local cleanup，不外推try-unload/retirement。
+
+**Validation:** `just fmt kernel --check`、`just test xtask`（103/103）、`just test nemophila-wasm`（71项unit、54项integration、
+1项doctest、4项focused Miri以及RV64/LA64 embedding build）、`just test nemophila-module`、`git diff --check`与
+`mdbook build docs`通过。KUnit-on
+`qemu-virt-rv64-release`、`qemu-virt-la64-release`及KUnit-off `competition-final-rv64-release`、
+`competition-final-la64-release`均build通过。wrapper使用`smp=1`、`memory=1G`与开发者预先存在的
+`kernel_symbols=false` local default tuple；该config diff不是Nemophila变更，也不纳入本checkpoint write-back。
+
+RV64日志`build/nemophila-stage3-ckpt2-rv64.log`记录640/640 KUnit通过，其中8项Nemophila case均通过；当前socket LTP
+profile 6/6通过，system-power进入machine action后由SBI handler正常终止QEMU。LA64日志
+`build/nemophila-stage3-ckpt2-la64.log`记录643/643 KUnit通过，其中相同8项Nemophila case均通过；同一LTP profile 6/6通过，
+filesystem/network/device orderly shutdown也完成。LA64随后按`SYSTEM-POWER-MACHINE-001`报告
+`no power off handler succeeded, halting the system`并永久halt，再由host `Ctrl-A x`退出QEMU。wrapper marker本身不是proof；
+日志同时核对了全部guest evidence、orderly shutdown顺序与唯一末尾halt路径。
+
+**Independent Review / Architecture Friction:** source/visibility/conditional-surface audit确认production surface只有一个
+crate-internal load-and-publish capability；runtime map是唯一publication/lifetime owner，identity只作为其key，不存在mutable
+`loaded`镜像、artifact-source状态、shared interpreter entity、test hook、Stage 4 placeholder或public ABI。publication lock只
+覆盖identity检查、map insertion与cursor推进；可能调用printk的module load在lock外。独立review最初发现KUnit observation使
+`RuntimeInner`与字段在ordinary build中无条件放宽为`pub(super)`，形成一项Euclid；实现恢复私有表示，只留下conditional
+owner-local只读snapshot后neutralize。最终diff没有owner穿透、私有表示泄漏、无退出条件临时桥、隐含cleanup顺序或以降低oracle
+换取通过的Nemophila内摩擦。review识别的`conf/kconfs/default.toml`差异经核对属于pre-existing user-owned dirty state，不纳入
+Nemophila change；对应wrapper evidence按实际tuple诚实记录。
+
+**Maintainer Validation Disposition / Result / Stop:** active register entry
+`ANE-20260726-SYSTEM-POWER-ARCH-COVERAGE`与current `SYSTEM-POWER-MACHINE-001`均明确LA64没有ordinary
+power-off/reboot handler，两个intent自然到达唯一末尾halt。维护者确认在全部Nemophila/KUnit evidence与orderly subsystem
+shutdown完成后由host终止QEMU，是该平台合理且预期的Stage 3 harness终点；这不证明LA64 power-off capability，也不以wrapper
+success code替代guest evidence。该disposition保持R4 target、owner、ABI、acceptance、validation claim与current contract，
+不要求跨入LA64 platform/system-power owner。Checkpoint 2与Stage 3据此**Closed**，Contract Cutover保持None；Stage 4保持
+未解析、未授权。hardware、management authorization、embedded/supplied ingress、weave、callback concurrency/poison、
+try-unload、clone与完整R0 acceptance均Not Run / Not Proven。

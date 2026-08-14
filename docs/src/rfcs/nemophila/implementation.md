@@ -5,13 +5,13 @@
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
-Stage 3 / Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started；Stage 4--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 3 Checkpoint 1已消费；Checkpoint 2与Stage 4--6解析/执行均未授权
+Stage 3 / Resolved / Closed；Stage 4--6 / Outline Only / Not Started
+**Execution Authorization：** Stage 3 Checkpoint 1与Checkpoint 2均已消费；Stage 4--6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
-两个共享同一Implementation Boundary的execution checkpoint，Checkpoint 1已关闭，Checkpoint 2为Ready / Not Started且未获授权；Stage 4--6仍只有outline。当前没有
+两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4--6仍只有outline。当前没有
 Nemophila current contract 或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
@@ -68,7 +68,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 1 | Resolved / Closed | 从固定 Wasmi provenance 形成可持续演进的 in-tree `nemophila-wasm` crate | None |
 | Stage 2 | Resolved / Closed | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
 | Stage 2 Feedback Interlude | Resolved / Closed | 收拢SDK/config/build owner，移除xtask业务admission mirror，并以R3修正future kernel admission target | None |
-| Stage 3 | Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
+| Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
 | Stage 4 | Outline Only | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
@@ -405,9 +405,9 @@ Contract Cutover为None：没有kernel runtime、management ABI、visible semant
 
 ## Stage 3 — Kernel transactional runtime core
 
-**Resolution：** Resolved / Checkpoint 1 Closed / Checkpoint 2 Ready / Not Started
+**Resolution：** Resolved / Closed
 
-**Execution Authorization：** Checkpoint 1已消费；Checkpoint 2未获执行授权
+**Execution Authorization：** Checkpoint 1与Checkpoint 2均已消费
 
 **Purpose：** 在 kernel 内接入当前 `nemophila-wasm` 与 WIT Host consumer，建立共同 artifact
 admission、per-instance interpreter ownership、恰好一次 module-side `load` entry、值型日志 call window，以及
@@ -525,8 +525,11 @@ interpreter/kernel proof；不得把 kernel object、同步或 lifecycle state �
   不把fixture teardown表述为try-unload/retirement。source audit闭合唯一owner、publication线性化点、identity不别名、failure
   cleanup和per-load interpreter ownership。
 - **Validation / stop：** 完成RV64与LA64 KUnit真实boot、两架构ordinary KUnit-off build、interpreter/module regression、format、
-  docs、dependency/source/conditional-surface audit与Architecture Friction Scan。Checkpoint 2关闭整个Stage 3，但不授权Stage 4，
-  不形成public management ABI、visible semantics、current contract或`NEMOPHILA-R0-CUTOVER`。
+  docs、dependency/source/conditional-surface audit与Architecture Friction Scan。两个wrapper必须核对focused marker、完整KUnit与
+  architecture-appropriate terminal outcome：RV64由ordinary machine handler退出；LA64在current contract仍无ordinary handler
+  时，完成orderly subsystem shutdown并进入唯一末尾halt后由host终止QEMU。LA64 disposition不能外推为power-off capability，
+  wrapper success marker也不能替代对末尾halt路径的核对。Checkpoint 2关闭整个Stage 3，但不授权Stage 4，不形成public
+  management ABI、visible semantics、current contract或`NEMOPHILA-R0-CUTOVER`。
 
 #### Checkpoint 1 关闭结果
 
@@ -539,8 +542,35 @@ context owner的显式load/save/control symbols中发现相关指令，普通Rus
 双架构KUnit-on/KUnit-off build、interpreter/module/xtask regression、双架构native `float-test` build、RV64 repository wrapper、
 source/visibility/conditional-surface audit、format/docs/whitespace与独立review均通过；RV64运行中638项KUnit（含6项Nemophila
 case）及当前socket LTP profile 6/6通过并正常关机。LA64 runtime、hardware、management、weave、publication、concurrency、
-unload、clone与完整R0 acceptance均Not Run / Not Proven。Contract Cutover保持None；Checkpoint 2为Ready / Not Started且未获
-授权，本次关闭严格停止在Checkpoint 1。
+unload、clone与完整R0 acceptance均Not Run / Not Proven。Contract Cutover保持None；该次关闭严格停止在Checkpoint 1，
+Checkpoint 2后续另行授权后的当前状态见下节。
+
+#### Checkpoint 2 关闭结果
+
+Checkpoint 2授权已消费。实现新增唯一production `Runtime` collection与单调kernel-private identity；同一个
+`BTreeMap<InstanceIdentity, RuntimeInstance>`同时拥有publication membership与完整per-load interpreter entity，map insertion
+是唯一publication线性化点。checked construction和module-side `load`在runtime lock外完成；commit前failure不改变collection或
+identity cursor。重复load同一bytes每次重新构造解释器entity并取得不同identity。两个owner-local KUnit composition case直接
+使用隔离runtime owner，覆盖重复load的独立publication以及失败后collection/cursor保持；没有production pause、reset、snapshot
+hook或Stage 4 lifecycle placeholder。独立review最初发现KUnit observation无条件放宽`RuntimeInner`可见性的一项Euclid；最终
+实现恢复ordinary-build私有表示，只保留conditional owner-local只读snapshot，该finding已neutralize且未留下其它架构摩擦。
+
+`just fmt kernel --check`、`just test xtask`（103项）、`just test nemophila-wasm`（71项unit、54项integration、1项doctest、
+4项focused Miri与双架构embedding build）、`just test nemophila-module`、双架构KUnit-on build、双架构tracked-final KUnit-off
+build、`git diff --check`与`mdbook build docs`均通过。RV64 wrapper在`smp=1`、`memory=1G`下完成640/640 KUnit（含8项
+Nemophila）与当前socket LTP profile 6/6，随后
+通过machine handler正常退出。LA64 wrapper在相同topology下完成643/643 KUnit（含8项Nemophila）与同一LTP profile 6/6，
+随后完成orderly filesystem/network/device shutdown并按`SYSTEM-POWER-MACHINE-001`到达
+`no power off handler succeeded, halting the system`，再由host `Ctrl-A x`终止QEMU。wrapper success marker本身不是proof；
+日志同时证明全部guest evidence、orderly shutdown顺序与唯一末尾halt路径。
+
+register的`ANE-20260726-SYSTEM-POWER-ARCH-COVERAGE`与current contract都明确LA64没有ordinary power-off/reboot machine
+handler。维护者确认上述host termination是该平台合理且预期的Stage 3 harness终点；该target-preserving validation disposition
+不修改Nemophila target、owner、ABI、acceptance或current contract，也不声称LA64具备power-off capability。Checkpoint 2与
+Stage 3据此关闭，Contract Cutover仍为None，Stage 4仍未获解析或执行授权。wrapper使用当前开发者预先存在的
+`kernel_symbols=false` local default tuple；该配置改动不属于Nemophila write-back，也不纳入本checkpoint变更。hardware、
+management authorization、两种artifact ingress、weave、callback并发/poison、try-unload、clone与完整R0 acceptance仍
+Not Run / Not Proven。
 
 ### Deliverables
 
@@ -576,8 +606,9 @@ unload、clone与完整R0 acceptance均Not Run / Not Proven。Contract Cutover�
 - **Repository integration：** 只使用repository-owned format/build/QEMU/end-to-end入口。KUnit-on的
   `qemu-virt-rv64-release`与`qemu-virt-la64-release`完成双架构build；KUnit-off tracked final presets证明conditional fixture
   不进入ordinary dependency；Checkpoint 1至少运行RV64 repository wrapper，Checkpoint 2运行RV64/LA64 wrappers并核对focused
-  Nemophila marker、全套KUnit marker与正常shutdown。wrapper同时产生的用户态/LTP结果只按实际profile报告回归，不自动成为
-  Nemophila proof或完整R0 acceptance。
+  Nemophila marker、全套KUnit marker与architecture-appropriate terminal outcome。RV64必须由ordinary machine handler退出；
+  LA64当前完成orderly subsystem shutdown并进入current-contract末尾halt后由host终止。wrapper同时产生的用户态/LTP结果只按
+  实际profile报告回归，不自动成为Nemophila proof或完整R0 acceptance。
 - **Proof limits：** 每个checkpoint记录实际preset、architecture、CPU topology、feature tuple、artifact/fixture identity、命令、
   result与Not Run。Stage 3不声称management authorization、两种artifact ingress、weave registration/dispatch、instance
   concurrency、poison、unload、clone semantics、hardware、恶意module progress/DoS或最终RV64/LA64 vertical slice。

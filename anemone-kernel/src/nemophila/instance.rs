@@ -1,23 +1,26 @@
-use nemophila_wasm::{Engine, Instance, Module, Store};
+use nemophila_wasm::{Engine, Instance as WasmInstance, Module, Store};
 
 use super::host::HostContext;
 
-/// A successfully initialized instance that has not crossed a publication
-/// point. Owning the complete interpreter island here makes failure cleanup a
-/// direct drop; no identity or callback can observe this value in Checkpoint 1.
-pub(super) struct UnpublishedInstance {
+/// One complete per-load interpreter island.
+///
+/// Before publication this value is owned directly by the load transaction;
+/// after publication the runtime collection is its only owner. Moving the same
+/// value across that boundary keeps rollback and eventual teardown as direct
+/// ownership operations rather than mirrored lifecycle state.
+pub(super) struct RuntimeInstance {
     _engine: Engine,
     _module: Module,
     _store: Store<HostContext>,
-    _instance: Instance,
+    _instance: WasmInstance,
 }
 
-impl UnpublishedInstance {
+impl RuntimeInstance {
     pub(super) fn new(
         engine: Engine,
         module: Module,
         store: Store<HostContext>,
-        instance: Instance,
+        instance: WasmInstance,
     ) -> Self {
         Self {
             _engine: engine,
