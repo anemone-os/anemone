@@ -9,7 +9,7 @@
 Accepted target 不能提前覆盖 `docs/src/contracts/`。解释器与 Nemophila 的 owner 分工属于本页 target；内部类型、具体
 同步原语、算法、crate/file layout 和具体测试路线由独立[实施路线](./implementation.md)在对应 Stage 获得授权后负责。
 Stage 4的kernel-internal weave与完整invocation/lifecycle protocol已关闭；该implementation proof没有使本页任何target ID
-成为effective current contract，Stage 5--6仍未获解析或执行授权。
+成为effective current contract。Stage 5已解析为Ready / Not Started且执行未授权；Stage 6仍未获解析或执行授权。
 
 ## 规则分类
 
@@ -348,7 +348,7 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
   Stage 3的两个Checkpoint均已关闭；LA64按current System Power contract进入末尾halt后的host QEMU终止只作为该平台的
   Stage 3 harness disposition，不形成ordinary power-off capability；Stage 4同一provider/runtime/lifecycle Implementation
   Boundary内的两个Checkpoint均已关闭；
-  Stage 5--6的具体proof route、test/oracle和命令只在对应Stage获得解析授权后补充。如果实施路线需要改变
+  Stage 5的RV64-only proof route、test/oracle和命令已由实施路线解析，Stage 6仍须在获得解析授权后补充。如果实施路线需要改变
   本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 
 ## 禁止退化项

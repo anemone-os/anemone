@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed
+Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed / Stage 5 Ready / Not Started
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -13,8 +13,9 @@ Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed
 Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementation拥有；本页不建立第二份计划、
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
-kernel/app compiler-target owner拆分；Stage 3与Stage 4各两个Checkpoint的授权均已消费并关闭；Stage 5--6仍未获解析或执行
-授权。Stage 4后的单次Feedback Interlude另行授权并关闭，只重整内部owner/API/module/WIT维护边界，不进入Stage 5。
+kernel/app compiler-target owner拆分；Stage 3与Stage 4各两个Checkpoint的授权均已消费并关闭；Stage 4后的单次Feedback
+Interlude也已关闭，只重整内部owner/API/module/WIT维护边界。Stage 5现已解析但Checkpoint 5A执行未授权，Stage 6仍未获解析或
+执行授权。
 
 ## Checkpoint Log
 
@@ -577,3 +578,28 @@ case全部进入并通过；typed callback logging与poison diagnostics可见，
 LA64 guest/hardware、真实task clone placement、production descriptor/call site、canonical module真实vertical slice、Stage 2
 temporary fixture删除、management/artifact ingress/public ABI与完整R0 acceptance均Not Run / Not Proven。Stage 5--6仍未解析或
 授权。
+
+### 2026-08-15 - Stage 5 docs-only resolution
+
+**Resolution Authorization:** 维护者明确授权解析Stage 5，并指定本Stage运行RV64即可；该docs-only resolution授权已消费。
+Checkpoint 5A实现、Stage 6解析/执行及任何contract cutover仍未授权。
+
+**Preflight:** 核对Accepted R4 target/invariants、Stage 4与Feedback Interlude最终source/evidence、task共同`kernel_clone()`成功路径、
+task-owned `CloneObserver` declaration、global Nemophila runtime、canonical module/temporary Host fixture、KernelConfig/SystemTarget/
+BuildPreset owner、KUnit execution contract、`user-test`与RV64 repository wrapper。live source确认publish/enqueue后、vfork wait/return前
+已有唯一共同窗口；KUnit runner在initial userspace前执行且要求case撤销global publication，也明确不支持创建userspace task，因而
+不能让canonical live instance从KUnit case遗留到真实clone oracle。
+
+**Resolution:** Stage 5保持父RFC target、owner、ABI、failure/cleanup、Contract Impact与acceptance不变，不产生R5。实施路线把本Stage
+解析为单一Checkpoint 5A：task owner激活唯一production `Fanout` descriptor并在共同成功窗口提交creator/child TID值快照；一个
+默认关闭、RV64-only、带Stage 6删除条件的capability-named validation probe从同次repository module build取得fresh canonical
+artifact，经现有global `load_and_publish`/try-unload/runtime lifecycle闭合normal fanout、trap/poison、unload/reload，再由显式
+`user-test` focused mode和stage-owned wrapper证明真实`clone`/`clone3` seam。probe不进入default/final configuration，不提供syscall、
+public identity、第二runtime或通用artifact ingress；Stage 2 fake Host fixture只在真实组合coverage达到替换gate后删除。
+
+**Validation / Contract:** 本次只修改canonical RFC route、状态摘要与transaction；`git diff --check`、`mdbook build docs`是本次
+docs gate的validation。kernel/module/app build、KUnit、QEMU、RV64 guest、LA64、hardware、LTP/final harness、management ingress与
+Stage 2 fixture删除均Not Run。Contract Cutover为None，不更新current contracts或register，`NEMOPHILA-R0-CUTOVER`仍为Future。
+
+**Next / Stop:** Stage 5现在是**Resolved / Ready / Not Started**，只有维护者新的明确授权才能激活Checkpoint 5A。Checkpoint 5A关闭
+后也必须停止；Stage 6仍只保留outline，不能由本resolution或未来Stage 5 closure自动解析、激活或cut over。

@@ -6,23 +6,24 @@
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
 Stage 3 / Resolved / Closed；Stage 4 / Resolved / Closed；Stage 4 Feedback Interlude / Resolved / Closed；
-Stage 5--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 4两个Checkpoint与Feedback Interlude单次实施授权均已消费；Stage 5--6解析/执行均未授权
+Stage 5 / Resolved / Ready / Not Started；Stage 6 / Outline Only / Not Started
+**Execution Authorization：** Stage 5 docs-only resolution授权已消费；Checkpoint 5A与Stage 6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
 两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
 两个共享完整lifecycle边界的execution checkpoint，现均已关闭；其Feedback Interlude随后在Stage 5前完成owner surface、
-module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5--6仍只有outline。当前没有Nemophila current contract或cutover。
+module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5现已解析为单一Checkpoint 5A且尚未激活，Stage 6仍只有
+outline。当前没有Nemophila current contract或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
 Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，
 execution evidence同样见transaction；feedback interlude不重开Stage 2，而是在后续Stage消费其产物前关闭已发现的owner
-摩擦与R3 target revision。Stage 3与Stage 4的可执行边界、各自两个checkpoint、validation与stop条件已在下文闭合；Stage 5--6
-仍只保留Purpose、Prerequisites和Protected Boundary，只有维护者明确授权解析对应Stage后才补充其可执行边界。关闭一个checkpoint
-不自动授权同Stage的下一个checkpoint，关闭一个Stage也不自动授权下一个Stage的解析或执行。
+摩擦与R3 target revision。Stage 3与Stage 4的可执行边界、各自两个checkpoint、validation与stop条件已在下文闭合；Stage 5
+的单一Checkpoint 5A、RV64-only validation与stop条件也已解析，只有维护者新的明确授权才能执行。Stage 6仍只保留Purpose、
+Prerequisites和Protected Boundary，关闭Stage 5不自动授权Stage 6解析或执行。
 
 ## 全局 Implementation Boundary
 
@@ -73,7 +74,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
 | Stage 4 | Resolved / Closed | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 4 Feedback Interlude | Resolved / Closed | 收拢point/provider owner、typed SPI、Host/WIT consumer与Nemophila内部模块边界 | None |
-| Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
+| Stage 5 | Resolved / Ready / Not Started | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
 ## Stage 1 — `nemophila-wasm` 裁剪与适配
@@ -983,18 +984,141 @@ hardware仍Not Run / Not Proven。
 
 ## Stage 5 — Clone observer vertical slice
 
+**Resolution：** Resolved / Ready / Not Started / Checkpoint 5A
+
+**Execution Authorization：** Checkpoint 5A Not Authorized
+
+**Contract Cutover：** None
+
 **Purpose：** 由 task owner 在 clone/clone3 共用成功路径接入唯一 R0 typed point，并让 canonical Wasm observer 通过
 Stage 2--4 的共同路径完成 registration、callback、logging、trap isolation、poison、try-unload 与 reload 集成闭环，形成
 尚未 cut over 的 R0 candidate。
 
 **Prerequisites：** Stage 4 关闭并证明完整 invocation/lifecycle protocol；canonical artifact 与 kernel logging handoff 可用；
-task clone live seam 仍满足 child publish/enqueue 后、vfork wait/creator return 前且 owner-private guard 已释放；维护者另行
-授权 Stage 5。
+task clone live seam 仍满足 child publish/enqueue 后、vfork wait/creator return 前且 owner-private guard 已释放；Checkpoint 5A
+获得维护者新的明确执行授权。
 
 **Protected Boundary：** observer 只接收 creator/child TID values，无 task handle 和决策返回；callback absence、normal
 return、trap 及日志过滤/截断/覆盖均不能改变已提交 clone result。不得分别 hook syscall wrapper、移动 point 位置、携带
 owner-private guard 进入 interpreter，或为 Stage 5 建立绕过共同 admission/lifecycle 的 embedded fast path；本 Stage 不发布
 半套 management ABI 或 current contract。
+
+### Implementation Boundary
+
+- **Target / non-goals：** 把Stage 4的task-owned typed declaration变成唯一R0 production provider，在`kernel_clone()`的单一
+  success path触发point；再用Stage 2 fresh canonical artifact和Stage 3--4 global runtime完成真实registration、fanout callback、
+  logging、trap/poison、explicit try-unload与reload候选闭环。Stage 5不实现`CAP_SYS_MODULE`授权、management syscall、public
+  instance identity/errno、通用embedded catalog、supplied ingress、SystemTarget module schema或R0 contract cutover；不增加第二个
+  point、Host service、module lifecycle entry或task handle。
+- **Task point owner与placement：** `task::clone`继续唯一拥有`CloneObserver` identity、`Fanout` policy、typed
+  `CloneObservation`与Core Wasm lowering。production declaration取代Stage 4的KUnit-only declaration，ordinary与KUnit kernel都只
+  贡献一个16-byte immutable descriptor。`clone`与`clone3` syscall wrapper不各自接线；共同`kernel_clone()`在publish成功并把child
+  enqueue后形成`current creator TID + child TID`值快照，随后同步notify，再进入`CLONE_VFORK` wait或普通return。publish guard与
+  scheduler/topology owner-private guard必须已经释放；局部`Arc<Task>`可以只保护函数自身内存lifetime，但不能传给callback或成为
+  observation contract。
+- **Provider/runtime handoff与failure：** task owner只持typed point capability并提交一次值context；Nemophila runtime独立选择完整
+  cohort、建立全部invocation ownership并处理guest execution、logging、trap、poison与cancellation。notify没有业务返回值；empty
+  cohort、全部normal return、单instance trap、日志过滤/截断/覆盖以及poison后的admission rejection都不能改写已经提交的clone
+  result或syscall errno。同步callback会增加creator latency是父RFC已接受的R0 availability边界；本Stage不增加async queue、timeout、
+  fuel、fallback或自动unload。
+- **Fresh artifact与validation activation：** Stage 5使用一个默认关闭、按clone validation capability命名的kernel feature及专用
+  RV64 KernelConfig/SystemTarget/BuildPreset，把当前`just module build clone-observer`同次调用导出的ordinary file直接作为
+  immutable compile-time bytes交给现有`load_and_publish`。固定输出只允许由repository module action在kernel build前重新产生；
+  missing/non-regular/stale output必须直接失败，不允许读取Cargo target、复制cached fallback、手写artifact或在generic kernel build
+  中增加module-specific auto-repair。dedicated probe KernelConfig显式关闭KUnit，使activation后的global live instances不会违反
+  KUnit suite cleanup；probe-off的现有RV64 KUnit run独立承担回归。default/final KernelConfig不启用该feature，普通kernel不包含
+  artifact bytes、activation或validation markers。
+- **Temporary probe lifecycle：** feature启用时，一个private、capability-named validation module只编排现有global runtime和task-owned
+  point，不建立第二套admission、collection或lifecycle truth。它在initial userspace之前加载canonical artifact并以production
+  provider完成load/unload/reload；可以加载一个最小trap Core Wasm fixture，并以一次明确标为synthetic、不得冒充clone-seam证据的
+  typed point调用闭合poisoned try-unload/reload。随后留下两个由同一canonical artifact产生的normal live instances和一个fresh
+  trap fixture给真实init/user-test clone路径消费。probe failure在专用validation kernel中fail-fast；feature关闭时不存在该控制流。
+  Stage 6一旦提供正式embedded/supplied ingress与management consumer，必须删除feature、validation module/config/target/preset/
+  wrapper和synthetic call，不能让它沉淀为第二个boot ingress或长期管理面。
+- **真实guest oracle：** 不新增test app；`user-test`增加显式focused mode，通过现有`clone`和private raw `clone3` test adapter分别
+  创建并回收child，打印creator/returned child TID与completion marker。tracked validation SystemTarget只用完整initial-program argv
+  选择该mode；普通user-test行为与rootfs manifest保持不变。focused host wrapper只编排`just module build`、现有rootfs/build/QEMU
+  action、worktree-local disk copy与marker检查，不承载build/admission逻辑。oracle必须把user-test TID与canonical module日志关联，
+  证明两个normal instances同属一次fanout cohort；init的真实clone触发trap instance并仍成功进入user-test，后续clone3不再准入
+  已poisoned instance。synthetic point cycle、source placement或总PASS都不能单独冒充这条真实seam evidence。
+- **Fixture replacement与proof ownership：** Stage 2 module-local fake Host fixture只保留到Checkpoint 5A取得上述fresh artifact real
+  load、registration、callback、logging、dynamic failure cleanup与trap containment的同等或更强组合证据；随后删除fixture及其独立
+  host Cargo workspace，并把`just test nemophila-module`收敛为fresh build/export regression。provider-unavailable、fatal/accepted
+  registration failure、busy、queued cancellation、poisoned retirement与same/cross-instance concurrency继续由Stage 4 production-owner
+  KUnit证明；Stage 5不为在guest重复内部状态机矩阵增加runtime snapshot、pause hook或public query。
+- **Validation scope：** 本Stage的kernel/runtime只要求RV64。LA64 Stage 5 kernel build、guest与hardware，以及两种正式ingress、
+  authorization/errno/public identity、final harness和完整R0 acceptance均留给Stage 6，必须记录为Not Run / Not Proven。既有
+  `just test nemophila-wasm`可以继续执行其crate-owned LA64 embedding cross-build，但该机械回归不构成Stage 5 LA64 kernel或runtime
+  evidence；Stage 5 source proof仍须确认代码没有architecture branch，不能把RV64 evidence外推为LA64 runtime evidence。
+
+预计改动会落在task clone owner、Nemophila validation composition、kernel feature/config、canonical module fixture replacement、
+`user-test` focused oracle与一个stage-owned RV64 wrapper；同owner import/re-export、linker section audit、target/preset和inline tests是
+非穷举提示，不是严格逐文件write set。不得借validation feature扩展generic SystemTarget/module schema、默认build graph或public API。
+
+### Execution Checkpoint
+
+#### Checkpoint 5A — Production clone point与RV64 candidate closure
+
+- **Purpose / deliverable：** 原子完成production descriptor、共同clone成功点、fresh canonical artifact validation activation、两个
+  normal instance fanout、trap/poison continuation、explicit try-unload/reload、真实`clone`/`clone3`日志闭环和Stage 2 Host fixture
+  删除。Checkpoint内部可以按task seam、probe与oracle的自然实现顺序提交，但这些中间状态都不形成独立semantic gate或cutover。
+- **Independent safety：** feature关闭的ordinary kernel只有production descriptor与empty-cohort notify，既没有artifact ingress也没有
+  live instance；feature开启只存在于显式validation selection并仍调用同一admission/runtime lifecycle。Checkpoint不发布management
+  ABI/current contract，不修改clone/clone3成功或失败结果，也不要求Stage 6 consumer理解temporary probe。
+- **Review / stop：** 独立review必须核对point位置、guards-out窗口、descriptor唯一性、fresh artifact provenance、probe-off object fence、
+  global runtime单一真相、trap后fanout continuation、fixture replacement completeness和Stage 6退出条件。任何target/owner/ABI/
+  acceptance变化，或只能通过syscall、默认配置自动激活、第二runtime、persistent test-control state、task handle、weakened marker oracle
+  或Stage 6 ingress才能闭合时，停止并回RFC review / Target Renegotiation；不得把Checkpoint拆成可长期保留的半能力。
+
+### Deliverables
+
+- production task-owned `CloneObserver` descriptor与`kernel_clone()`单一success-path notify；
+- 默认关闭且不进入ordinary/final selection的RV64 validation feature/config/target/preset，以及只消费fresh exported artifact的private
+  activation/probe；
+- 复用`user-test`的显式`clone`/`clone3` focused oracle与stage-owned host wrapper；
+- canonical normal fanout、trap/poison continuation、try-unload/reload与诊断marker的真实guest evidence；
+- 删除Stage 2 temporary Host fixture并更新其repository test入口，不保留fake Host或并列WIT/schema truth。
+
+### Validation
+
+1. 运行`just fmt kernel --check`、`just fmt modules --check`、`just fmt user-test --check`、`just test xtask`、
+   `just test nemophila-wasm`与更新后的`just test nemophila-module`。module action必须从fresh candidate导出canonical artifact；删除
+   Host fixture后不得用stale binary或被删除的host workspace伪装execution proof。
+2. 用probe关闭的`qemu-virt-rv64-release`执行现有`./scripts/run-user-test-rv64.sh`，核对完整KUnit结果、init/user-test ordinary
+   clone路径、当前focused workload和PowerOff terminal outcome。该轮证明production descriptor与empty-cohort notify不改变现有行为，
+   但不冒充canonical callback evidence。
+3. 用`competition-final-rv64-release`完成KUnit-off build，并审计ELF provider section恰有一个production descriptor；binary不得包含
+   validation artifact、activation或Stage 5 marker。KUnit-on与probe candidate ELF也必须各只有同一个production descriptor，不能
+   因conditional declaration形成duplicate point。
+4. 运行stage-owned RV64 focused wrapper，输入调用者显式选择的preliminary master disk并写独立log。wrapper必须先执行fresh
+   `just module build clone-observer`，再通过repository rootfs/build/QEMU actions使用dedicated validation selection与worktree-local disk
+   copy；不得直接运行Cargo、复用master image或接受缺失artifact。log必须同时包含activation/load-unload-reload、canonical load与
+   registration、两个normal callback的相同TID、trap/poison/fanout continuation、init继续进入user-test、raw clone3 completion、focused
+   PASS及architecture-appropriate PowerOff outcome。
+5. source/lifecycle audit确认notify严格位于publish+enqueue之后、vfork wait/return之前，跨callback不持有owner-private guard；
+   `CLONE_PARENT`不改变creator snapshot，TID不变成task handle；runtime/provider/logging owner与Stage 4 lock/lifecycle/cleanup顺序不变。
+   probe source必须只有validation feature consumer、没有public API/runtime snapshot/second registry/default config enablement，并带Stage 6
+   删除条件。
+6. 完成dependency/visibility/conditional-surface、artifact freshness、fixture deletion、WIT consumer同步、Architecture Friction Scan、
+   `git diff --check`与`mdbook build docs`。只记录RV64 Stage 5 kernel/runtime结论；LA64 crate-owned cross-build若由既有interpreter
+   suite执行，必须与LA64 Stage 5 kernel/guest evidence分开，后者以及management、两种正式ingress、final harness、hardware与
+   `NEMOPHILA-R0-CUTOVER`均明确Not Run / Not Proven / Not Cut Over。
+
+### Cutover
+
+None。Checkpoint 5A只形成显式validation selection下的R0 candidate，不更新current contracts、register、management ABI或
+`NEMOPHILA-R0-CUTOVER`。production descriptor与clone notify在没有live instance时没有module-visible/public management能力；
+validation feature不构成effective contract。
+
+### Exit / Stop
+
+本次docs-only resolution已经把Stage 5解析为单一Checkpoint 5A，但没有授权执行或运行上述validation。只有维护者新的明确授权才能
+激活Checkpoint；关闭后Stage 5停止，Stage 6仍须另行解析和授权。
+
+Checkpoint 5A只有在全部deliverables、RV64 validation、fixture replacement、independent review与Architecture Friction Scan闭合后
+才能关闭。若真实source要求移动point、改变clone结果、保留task handle/private guard、公开management能力、把temporary probe加入
+default/final配置、降低fresh artifact或guest oracle，或改变父RFC target/owner/failure/cleanup/ABI/acceptance/validation claim，
+必须停止并回RFC review / Target Renegotiation。LA64未运行不阻塞本Stage，但必须留给Stage 6且不得外推。
 
 ## Stage 6 — Management activation 与 R0 cutover
 
