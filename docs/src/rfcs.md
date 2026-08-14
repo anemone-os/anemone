@@ -50,11 +50,12 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   matching JH7110 GMAC 节点交付 per-node one-time driver、命名 `macirq`、coherent DMA、boot-time Motorcomm
   PHY 初始化、成功 publication candidate 在 attach admission 时连续消费的 `eth<N>` 和现有单接口 static IPv4
   接入。Gate 0--3、VisionFive 2 双 GMAC 实机验收与 `IRQ-FLOW-001` cutover 已完成。
-- [RFC-20260811-dwmac](./rfcs/dwmac/index.md)：Accepted / R2 / Gate 1 Closed；Gate 2 Stopped / Not Cut Over。将 JH7110 GMAC 整理为 DWMAC owner，并为 Loongson 2K1000
-  接入 DWMAC1000。target 固定当前 DTB、normal 16-byte descriptor、32-bit DMA admission、CSR5 W1C、
-  one-cell DTB 下的 `IrqSense` source table、optional `request_irq` expectation、Route A firmware handoff、
-  PHY P1 和 success-order `eth<N>`。Gate 1完成variant-local Driver/common owner migration，并以2K1000双
-  node fail-closed与exact `EDGE/POL` readback实机证据关闭；RiscV regression明确Not Run并移交Gate 3。
+- [RFC-20260811-dwmac](./rfcs/dwmac/index.md)：Accepted / R6 / Gate 1--2 Closed；Gate 3 Authorized / Active；RFC
+  Not Cut Over。将 JH7110 GMAC 整理为 DWMAC owner，并为 Loongson 2K1000 接入 DWMAC1000。当前 target 固定
+  DTB、capability-admitted enhanced/extended 32-byte descriptor、32-bit DMA admission、CSR5 W1C、one-cell DTB
+  下的 `IrqSense` source table、optional `request_irq` expectation、Route A firmware handoff、PHY P1 和 success-order
+  `eth<N>`。Gate 1--2 已完成 software/hardware closure；Gate 3 已实现同一 owner 的 mandatory in-place attach，
+  IRQ/traffic/lifecycle 与 R2 延期的 VisionFive 2 regression 仍待实机 acceptance。
 - [RFC-20260809-user-tlb-residency-targeting](./rfcs/user-tlb-residency-targeting/index.md)：Closed / R1；为全部user
   page-table activation建立唯一residency handoff，使destructive TLB shootdown在稳定状态只覆盖仍可能观察旧translation
   的CPU，同时保留现有同步ack、retirement与dependent continuation边界。

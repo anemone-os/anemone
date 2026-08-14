@@ -6,9 +6,9 @@
 
 ## Active
 
-- [DWMAC 多后端与 Loongson 2K1000](./2026-08-11-dwmac.md)：R2 已关闭 Gate 1 的 variant-local Driver/common
-  owner migration与2K1000 IRQ foundation；Gate 2 因 Open blocker 与缺少硬件证据停止，尚未进入 DWMAC1000 backend
-  或 production attach。
+- [DWMAC 多后端与 Loongson 2K1000](./2026-08-11-dwmac.md)：R6 已关闭 Gate 1--2，Gate 3 在同一次 probe 中完成
+  DWMAC1000 retained owner 的 mandatory in-place attach，并新增 concrete irqchip pending-before-unmask trace；Gate 3
+  IRQ/traffic/lifecycle 实机 acceptance 仍 Open / Not Cut Over，尚未进入 Gate 4。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
