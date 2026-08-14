@@ -4,17 +4,20 @@
 **最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R2
-**Stage 状态：** Stage 1 / Resolved / Closed；Stage 2--6 / Outline Only / Not Started
+**Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Ready / Not Started；Stage 3--6 / Outline Only / Not Started
 **Execution Authorization：** None；Stage 1授权已消费，Stage 2未获授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R2 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
-acceptance。Stage 1 已关闭；Stage 2--6 仍只有 outline，也没有 current contract 或 cutover。
+acceptance。Stage 1 已关闭；Stage 2 已解析但未开始；Stage 3--6 仍只有 outline。当前没有 Nemophila current contract 或
+cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
-Stage 2--6 只保留 Purpose、Prerequisites 和 Protected Boundary，只有维护者明确授权解析对应 Stage 后才补充其可执行
-边界，不提前冻结类型、算法、文件列表、精确命令或 checkpoint。关闭一个 Stage 不自动授权下一个 Stage 的解析或执行。
+Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，等待
+维护者另行授权执行。Stage 3--6 只保留 Purpose、Prerequisites 和 Protected Boundary，只有维护者明确授权解析对应 Stage 后
+才补充其可执行边界，不提前冻结类型、算法、文件列表、精确命令或 checkpoint。关闭一个 Stage 不自动授权下一个 Stage 的
+解析或执行。
 
 ## 全局 Implementation Boundary
 
@@ -29,12 +32,11 @@ Stage 2--6 只保留 Purpose、Prerequisites 和 Protected Boundary，只有维�
   serialization、in-flight、poison 与 retirement；具体 subsystem 只拥有 point semantics/call site/binding policy，kernel
   logging owner 保留日志 truth。跨 owner 只使用父 RFC 定义的窄 typed handoff，failure 与 cleanup 继续服从 load rollback、
   callback poison quarantine 和无副作用 busy try-unload。
-- **Source / revision handoff：** 固定 Wasmi `v1.1.0` 只固定可审计的上游源码 provenance，不冻结导入到
+- **First-party source evolution：** 固定 Wasmi `v1.1.0` 只固定可审计的上游源码 provenance，不冻结导入到
   `anemone-kernel/crates/nemophila-wasm` 后的 crate source 或内部 API。该 crate 是贯穿 Stage 1--6 持续演进的第一方 source
-  owner；每个 Stage 的 evidence 和 downstream consumer 都必须记录包含精确 crate source 的 Anemone commit，不消费 branch、
-  floating tag 或环境中的 `HEAD`。后续 Stage 可以在同一 interpreter owner 内直接修改 crate；
-  任何 crate source 修改都必须重跑其影响到的既有 interpreter proof 与当前 Stage consumer proof。Stage closure 关闭当时的
-  deliverable 和 evidence，不把 crate source 永久冻结，也不建立与 source commit 并列的 interpreter profile/version truth。
+  owner；后续 Stage 直接消费仓库中的当前 source，可以在同一 interpreter owner 内修改 crate，并用普通 Git 历史保存变化与
+  execution evidence。crate source 修改后必须重跑受影响的既有 interpreter proof 与当前 Stage consumer proof。Stage closure
+  关闭当时的 deliverable 和 evidence，不建立并列的 interpreter profile/version/source identity truth。
 - **Protected ABI / contract / acceptance：** 保持 start-free artifact、唯一 module-side `load` entry、WIT 单一接口来源、
   load-scoped hierarchical SDK、per-instance interpreter ownership/serial execution、module-decided registration failure、
   runtime-owned reservation/cohort/poison lifecycle、clone observer 的 TID snapshot 与非决策语义，以及 embedded/supplied
@@ -59,8 +61,8 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage | 解析程度 | 目的 | 可见语义 / Cutover |
 | --- | --- | --- | --- |
 | Stage 1 | Resolved / Closed | 从固定 Wasmi provenance 形成可持续演进的 in-tree `nemophila-wasm` crate | None |
-| Stage 2 | Outline Only | 建立 WIT、SDK、canonical artifact，并与 interpreter integration 共同收敛 | None |
-| Stage 3 | Outline Only | 以 pinned interpreter revision 建立 kernel transactional runtime core | None |
+| Stage 2 | Resolved / Ready / Not Started | 建立 WIT、Rust SDK、Cargo module build 与 canonical artifact，并与 interpreter integration 共同收敛 | None |
+| Stage 3 | Outline Only | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
 | Stage 4 | Outline Only | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
@@ -116,9 +118,9 @@ baseline；固定 Wasmi
   validation path；production surface 不暴露 unchecked module construction。retained production unsafe code/unsafe impl 必须有
   owner-local invariant audit，release build 保留 Wasmi `extra-checks` 或等价的 executor invariant checks，不能把 translation
   bug 转化为 unchecked UB。该边界不扩大为恶意 module progress/DoS containment claim。
-- **Source rule：** Stage 1 交付一个供 Stage 2 起步、包含精确 `nemophila-wasm` source 的 Anemone commit。后续 Stage 可以在
-  interpreter owner 内直接修改 `nemophila-wasm`；crate source 改变时 downstream recorded commit 必须同步，并重跑受影响
-  proof。未来真实 artifact/WIT/admission compatibility 需要多个格式并存时，由对应 artifact/API owner 另行建立版本边界。
+- **Source rule：** Stage 1 交付仓库内可供 Stage 2 直接消费的 `nemophila-wasm` 第一方 source。后续 Stage 可以在
+  interpreter owner 内直接修改该 crate，并通过普通 Git 历史记录变化；crate source 改变时重跑受影响 proof。未来真实
+  artifact/WIT/admission compatibility 需要多个格式并存时，由对应 artifact/API owner 另行建立版本边界。
 
 ### Deliverables
 
@@ -131,8 +133,8 @@ baseline；固定 Wasmi
   建立 feature allowlist、固定 limits 或专用 wrapper；
 - crate-local host test/oracle 与 validation-only `no_std` embedding consumer；后者真实调用普通 production embedding API，
   但不进入 production dependency，也不成为未来 kernel runtime 的临时 facade；
-- Stage 2 handoff 记录，精确 pin 包含 Stage 1 crate source 的 Anemone commit、实际 build feature selection、
-  依赖审计结果及验证 evidence，不把本地 checkout path、branch 或 `HEAD` 写成 authority。
+- Stage 1 closure 记录实际 build feature selection、依赖审计结果及验证 evidence；Stage 2 直接从仓库当前第一方 source
+  继续，不建立额外的 source handoff 或并列 source authority。
 
 ### Validation
 
@@ -151,22 +153,22 @@ baseline；固定 Wasmi
   corpus 与 malformed module tests 覆盖 parser/translator/executor 的安全敏感路径。此证据不能外推为对全部 interpreter bug
   或恶意 module DoS 的形式化证明。
 - **Embedding：** validation-only consumer 真实调用普通 production embedding API，并覆盖至少一次 parse、validation、eager
-  translation mode、instance execution、Host value round trip 与 trap reporting；同一 pinned Anemone commit 以 Anemone pinned Rust
+  translation mode、instance execution、Host value round trip 与 trap reporting；同一仓库 source 以 repository Rust
   toolchain 对 `riscv64gc-unknown-none-elf` 和 `loongarch64-unknown-none` 完成 `no_std + alloc` build/link。该证据只证明
   crate-level embedding feasibility，不外推真实 kernel load path、QEMU runtime 或双架构 R0 acceptance。
-- **Reproducibility：** execution evidence 记录所有实际命令、toolchain/target identity、Anemone commit、
+- **Reproducibility：** execution evidence 记录所有实际命令、toolchain/target identity、Git state、
   result 与 Not Run；Stage 1 不运行 kernel KUnit、QEMU、LTP 或 Nemophila lifecycle tests。
 
 ### Cutover
 
-None。Stage 1 不发布 production kernel code、public ABI、visible semantics、current contract 或 register baseline；pinned
-crate source commit 只是 Stage 2 的显式输入，不是 `NEMOPHILA-R0-CUTOVER`。
+None。Stage 1 不发布 production kernel code、public ABI、visible semantics、current contract 或 register baseline；仓库内
+第一方 crate source 是 Stage 2 的普通输入，不是 `NEMOPHILA-R0-CUTOVER`。
 
 ### Exit / Stop
 
-Stage 1 在上述 deliverables、interpreter/owner/embedding proof 和 Stage 2 pinned handoff 全部闭合后关闭。当前只使用一个 Stage
-closure checkpoint；普通 import/cut/test commit 不形成额外 gate。Stage 1 closure 不冻结 `nemophila-wasm` source，后续
-Stage 修改 crate 时重新 pin source commit 并重跑受影响 proof，不重新打开 Stage 1。
+Stage 1 在上述 deliverables 与 interpreter/owner/embedding proof 全部闭合后关闭。当前只使用一个 Stage closure checkpoint；
+普通 import/cut/test commit 不形成额外 gate。Stage 1 closure 不冻结 `nemophila-wasm` source，后续 Stage 修改 crate 时重跑
+受影响 proof，不重新打开 Stage 1。
 
 如果实现需要改变 Wasmi 上游源码基线、interpreter/Nemophila owner 分工或 validation claim，必须停止并
 回到 RFC review / Target Renegotiation。如果 `no_std` 双架构 embedding 只能通过吸收 kernel synchronization/lifecycle、复制
@@ -174,43 +176,172 @@ validator truth、引入无退出条件兼容桥或降低拒绝 oracle 才能成
 停止。当前 resolution 不预设 probe；出现 source/build 无法回答的具体高风险假设时，先在本节补全 hypothesis、failure signal、
 write-back、code disposition 与 exit 并取得对应授权，再执行最小 probe。
 
-### Result / Handoff
+### Result
 
-Stage 1 已关闭，execution evidence与Not Run见[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。Stage 2
-handoff pin包含当前interpreter source的Anemone commit
-`85489765a4ff57aac2d6eedd3567e98fa60b4b4c`；该pin不冻结后续crate source或API。Stage 2未获解析或执行授权。
+Stage 1 已关闭，execution evidence 与 Not Run 见
+[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。`nemophila-wasm` 已是仓库内第一方 source，Stage 2
+直接从当前 source 继续。Stage 2 已解析但未获执行授权。
 
 ## Stage 2 — WIT、SDK 与 artifact toolchain
 
-**Purpose：** 建立由同一 WIT source 驱动的 logical interface、Rust module SDK 与 canonical clone observer artifact build，
-并让真实 toolchain output 与 `nemophila-wasm` interpreter capability 在同一 owner 边界内共同收敛，形成可供后续 kernel wiring 真实
-消费的 start-free 跨架构制品路线。
+**Resolution：** Resolved / Ready / Not Started
 
-**Prerequisites：** Stage 1 关闭并交付可复现的 in-tree crate、pinned source commit 与 handoff；进入本 Stage 时读取真实
-module toolchain 约束，并在 R0 envelope 内解析 WIT lowering、artifact identity/version、canonical build、interpreter
-共同修订与验证边界；维护者另行授权 Stage 2。
+**Execution Authorization：** None
 
-**Protected Boundary：** WIT 只拥有逻辑接口而不驱动 runtime policy；高层 SDK 保持 load-scoped、按 capability/provider/
-point 分层，不暴露 raw import、generic point tag 或 callback representation。canonical artifact 不引入 WASI、Core Wasm
-start、额外 Host service、第二个 point 或架构专用 module build；真实 artifact 需要的 interpreter 调整仍由
-`nemophila-wasm` owner 完成并形成新的 pinned Anemone commit，不把 WIT/toolchain 需求复制成第二份 feature matrix。
-本 Stage 不宣称 kernel runtime 或 management ABI 已生效。
+**Purpose：** 建立由同一 versioned WIT package/world 驱动的 logical interface、Rust module SDK、xtask-owned Cargo module
+build 与 canonical clone observer artifact。真实 Rust toolchain output 必须通过共同 artifact envelope 和当前
+`nemophila-wasm` 解释执行 proof，形成可供后续 kernel wiring 直接消费的一份 start-free、架构无关 Core Wasm 制品。
+
+**Prerequisites：** Stage 1 已关闭，`nemophila-wasm` 已是仓库内可持续演进的第一方 crate；父 RFC 保持 Accepted R2；live
+xtask 仍拥有 repository build/export orchestration，module build 尚无既有 public surface；当前 repository Rust toolchain 支持
+`wasm32v1-none`，但 tracked toolchain configuration 尚未声明该 target。开始执行仍需维护者另行授权。
+
+**Protected Boundary：** WIT 只拥有逻辑接口，不驱动 provider availability、binding policy、runtime lifecycle 或 admission。
+高层 SDK 保持 load-scoped、按 capability、subsystem/provider 与 point 分层，不暴露 raw import、generic point tag、table
+slot、callback token 或其它 callable representation。module build 是与 app build 分离的 owner；它可以借鉴 app build 的
+manifest/driver/common-export结构，但不得复用 app manifest、driver type、target/architecture model 或 artifact path。canonical
+artifact 不引入 WASI、Component binary、Core Wasm start、额外 Host service、第二个 point 或架构专用 variant。本 Stage 不
+接入 kernel runtime、SystemTarget embedded selection、management ABI、live lifecycle 或 current contract。
+
+### Implementation Boundary
+
+- **Target / non-goals：** 交付一份 canonical WIT package/world、一个只服务 Rust module author 的 typed SDK、一个由 Cargo
+  构建的 clone observer module、xtask module build/export 路径，以及用当前 `nemophila-wasm` 执行真实产物的 host harness。
+  本 Stage 不接其它语言 SDK、其它语言构建链、通用 command/source driver、自动工具链安装、module package marketplace、
+  kernel admission/runtime、embedded catalog、SystemTarget 接线或 RV64/LA64 guest execution。
+- **Interface owner：** Nemophila API owner 保存唯一 versioned WIT source。Rust SDK 私有消费由 repository-owned
+  `wit-bindgen` dependency 从该 source 生成的 bindings，只公开 Rust ergonomic projection 与 guest-side lowering；generated
+  binding module、module 和 validation harness 都不得形成第二套手写 imports/exports/value schema。artifact identity/version、
+  Host imports、固定 module-side `load` entry、clone callback entry 与 registration result 必须能机械追溯到该 WIT source。
+- **Rust callback lowering：** WIT 不表达 function value。point-specific Rust registration API 接收 typed callback，SDK 在当前
+  guest instance memory 中保存 pending callback，经 WIT-derived point-specific registration import 请求 Host registration；
+  failure 清除 pending slot、释放其中的 callback environment 并把 typed error 交还 module-side `load` 决策，success 将该 slot
+  保留到 instance 销毁。Host/runtime
+  只按 WIT 约定的固定 callback export/trampoline 调用它，不从 module 获得 raw function/table/token。module load 后不提供
+  re-registration/deregistration；failed load 的 guest memory 随整个未发布 instance 销毁，不建立 SDK cleanup protocol。
+- **Guest allocation / callback storage：** Rust module 与 SDK 可以使用当前 instance linear memory 内的 guest-local heap；R0
+  不承诺 SDK 或 module allocation-free。Rust module build 必须在真实使用 `alloc` 时使最终 artifact 链接一个兼容的 guest
+  global allocator；SDK 是否提供默认 allocator、具体 allocator、callback environment 的 inline/heap storage 与 type-erasure
+  形状均由 Stage 2 implementation 根据真实 toolchain output 决定。allocation 不得成为新的 Host import/service、kernel object/
+  resource handle、跨 instance shared allocator 或 module lifecycle phase。instance 销毁直接回收完整 guest memory，不调用
+  callback environment 的 guest `Drop` 或新增 module-side cleanup；SDK 也不要求把 allocation failure 转换为 WIT
+  registration error，load/callback 中的 allocator trap 分别服从父 RFC 已有的 load rollback 与 callback poison 边界。
+- **Load / initialization：** SDK 提供唯一显式 module-side `load` wrapper，module author 从 load-scoped context 进入 weave 与
+  logging capability。Rust/WIT toolchain 需要的静态初始化只能在该 wrapper 的合法调用路径内至多运行一次；不得生成或接受
+  Core Wasm start section、`_start`、WASI reactor/command entry 或第二个 module lifecycle entry。固定 callback trampoline 只在
+  successful load 后由后续 runtime 调用，普通 Rust/Wasm export 不自动获得 extension semantics。
+- **Module build owner：** xtask 增加独立 module manifest、module action 与真实但最小的 `ModuleBuildDriver` trait。trait 只接收
+  已验证的 module build context、执行所选工具链并返回本次 invocation 的单一 candidate 及必要诊断；Cargo 是 Stage 2 唯一
+  implementation。它不复用 app driver，也不提前抽象其它语言的 target、package manager 或 command model。module manifest
+  只声明 module identity、workdir、Cargo build input 与 candidate contract；不声明 Anemone architecture selector。每个 Rust
+  module 继续拥有自己的 Cargo package/workspace 与 lockfile，SDK 保持独立构建单元。
+- **Cargo route：** Cargo driver 由 xtask 统一选择 repository Rust toolchain、`wasm32v1-none`、固定 module profile 和
+  repository-owned `core`/`alloc` build settings，形成一个 Core Wasm candidate；module manifest 或调用者不能把它改成 WASI、host 或
+  RV64/LA64 target。缺少 toolchain component/target、Cargo failure 或找不到本次 candidate 都直接返回带 module/driver/context
+  的错误，不自动安装、不回退到环境默认 target，也不接受旧 candidate 冒充成功。
+- **Common validation / export：** driver 不决定 artifact 合法性或 public output。共同 module build path 要求当前 invocation
+  产生恰好一个 fresh ordinary Core Wasm file，使用当前 `nemophila-wasm` 完成通用 parse/validation，并以 canonical WIT
+  机械派生的 envelope 检查 interface identity/version、允许的 value-only Host imports、固定 load/callback entries 与生成器
+  所需 helper/custom metadata；拒绝 Component binary、start section、WASI/unknown Host import、缺失/额外 lifecycle/callback
+  entry 和不匹配的 interface metadata。只有全部检查成功后才导出到稳定的 module-specific `build/` 路径；candidate、export、
+  toolchain 与校验结果由共同路径统一诊断。普通 repository clean 清除该 export，format `all` 与 module-specific scope 覆盖 SDK
+  和 Rust modules。
+- **Interpreter evolution：** Stage 2 直接使用仓库当前 `nemophila-wasm` source。若真实 canonical output 暴露通用 Core Wasm
+  parser/validator/executor 缺口，可以在 interpreter owner 内直接修正并重跑受影响的 Stage 1 regression 与本 Stage proof；
+  Nemophila envelope 不能复制通用 validator，interpreter 也不能吸收 WIT policy、module manifest、build/export 或 lifecycle
+  owner。
+- **Protected semantics / validation claim：** 保持父 RFC 的 WIT single source、start-free unique load、hierarchical SDK、
+  point-specific typed registration、module-decided registration failure、value-only logging 与同一 artifact 跨架构目标。本 Stage
+  只证明 WIT/SDK/build output 自洽、canonical artifact 通过当前 interpreter 并可在 value-only fake Host 下运行；不证明
+  Stage 3 的 kernel admission、transaction publication/rollback、reservation、per-instance serialization、poison、unload、
+  management authorization 或双架构 runtime acceptance。
+
+预计目录、文件、manifest字段、Rust type 名称和精确命令是非穷举实现提示；实现可在上述 owner 与 protected surface 内自然
+决定。`ModuleBuildDriver` trait、Cargo-only implementation、driver/common-validation 分工、单一无架构 module artifact 与 WIT
+consumer关系属于本 Stage 已解析边界，不得退化为 app driver 复用、enum-only dispatch、module-local shell wrapper 或手写并列
+schema。
+
+### Deliverables
+
+- canonical versioned WIT package/world，以及由 `wit-bindgen` 私有生成、由 SDK 包装的 Rust consumer view；R0 world 只包含 point-specific clone
+  registration、value-only logging、唯一 module-side `load` entry 与固定 clone callback contract；
+- 独立 Rust SDK 构建单元，提供 load-scoped capability/provider/point hierarchy、typed registration result、guest-local callback
+  slot/trampoline 与显式 load wrapper；
+- 独立 module manifest/config owner、xtask module build action、最小 `ModuleBuildDriver` trait 和唯一 Cargo driver；repository
+  entrypoint 可按 module identity 构建并将校验后的 artifact 导出到 `build/`，format/clean 路径覆盖新增 source/output；
+- repository-owned `wasm32v1-none` Rust/Cargo configuration 与 guest-local allocation support，使真实 `core`/`alloc` consumer
+  artifact 可链接并执行；不依赖 WASI、host libc、架构 selector、Host allocation service 或 module-local build wrapper；
+- 使用 SDK 的 canonical Rust clone observer module：load 时显式注册 clone point，callback 接收 creator/child `u32` TID values
+  并通过 typed logging capability 记录它们；同一次 build 只产生一份跨 RV64/LA64 复用的 Core Wasm artifact；
+- artifact envelope inspector/validator 与 `nemophila-wasm` host harness。fake Host 只实现 WIT 定义的 value boundary，不成为
+  production runtime facade、provider catalog 或 lifecycle owner。
+
+### Validation
+
+- **WIT / generated consumer：** WIT parser/`wit-bindgen` tests 证明 package/world/version、imports/exports、registration result、
+  TID/log value shape 能由同一 source 解析并生成 private consumer view；source audit 不存在 SDK/module/harness 手写的第二套 schema。Rust SDK
+  以 `no_std + alloc` 形状对 `wasm32v1-none` 构建，module author surface 只暴露 load-scoped hierarchy 与 typed callback。
+- **Guest allocation：** 真实 Rust module artifact 至少执行一次 guest-local allocation、使用与释放，并由
+  `nemophila-wasm` host harness 观察正常结果；source/link/import audit 证明 allocator 与 callback storage 没有引入 Host
+  allocation import、kernel/resource handle、跨 instance state 或额外 lifecycle entry。若 callback environment 使用 heap
+  storage，registration failure test 还须证明 pending environment 被释放；instance teardown 不外推 guest `Drop`/cleanup proof。
+- **Callback lowering：** focused SDK/module tests 分别让 fake Host 返回 registration success/failure，证明 success 后固定 callback
+  trampoline 调用保存的 typed callback，failure 清除 slot并把结果交给 module load，普通 export 不注册 callback。callback
+  invocation 传入两个边界 `u32` TID values并观察相同日志值；测试不得借助 raw callback token、table index或第二个 lifecycle
+  entry。
+- **Build owner：** manifest/xtask tests 覆盖 identity/workdir/Cargo input、唯一 driver selection、缺失 target/toolchain、Cargo
+  failure、missing/stale/non-regular candidate、common diagnostics 与成功 export。source review 确认 trait 是 module-local small
+  boundary，Cargo 是唯一 implementation，app config/driver/architecture model 未被复用或扩大，也没有未消费的其它语言 driver。
+- **Artifact envelope：** 对真实 Cargo output 检查其为 Core module而非Component binary，且无start/WASI/unknown Host imports；
+  WIT-derived identity/version、允许 imports、固定 load/callback entries、helper/custom metadata 与candidate freshness全部匹配。
+  malformed/envelope-invalid fixtures须分别由interpreter validation或Nemophila artifact检查的正确owner拒绝，不能把两者合并为
+  一套validator。
+- **Interpreter execution：** common path把导出的canonical artifact重新交给当前`nemophila-wasm` parse/validate/instantiate；
+  value-only fake Host运行module-side `load`、registration success/failure、clone callback与logging，覆盖normal return和module-
+  visible registration error。该harness只证明真实toolchain output与interpreter/SDK ABI相容，不外推kernelcall window、
+  reservation、rollback/publication、trap poison或unload lifecycle。
+- **Repository integration：** repository-owned module build与format入口从干净candidate state成功，导出一份fresh ordinary
+  artifact到`build/`；重复build不把旧candidate当作新结果，standard clean移除export。记录toolchain/target、WIT identity、
+  candidate/export和全部实际结果及Not Run。
+
+### Cutover
+
+None。Stage 2 不发布 kernel runtime、SystemTarget embedded selection、public management ABI、visible semantics、current contract
+或 register baseline；`build/` 下的 canonical artifact 和 Rust SDK 仍是后续 Stage 的开发输入，不是
+`NEMOPHILA-R0-CUTOVER`。
+
+### Exit / Stop
+
+Stage 2 在上述 WIT/SDK、Cargo-only module build、canonical artifact envelope、真实 interpreter execution、format/clean 与 owner
+audit 全部闭合后以一个 closure checkpoint 关闭；普通 implementation commits 不形成额外 gate。Stage 2 closure 不自动授权
+Stage 3 的解析或执行。
+
+如果实现需要改变父 RFC 的 interface/lifecycle target、暴露 raw callback representation、允许 start/WASI/Component artifact、
+增加第二个 lifecycle entry/point/Host service、让 WIT 或 build metadata 驱动 runtime policy、把 app driver/architecture model
+变成 module truth、以第二套 validator 或 stale candidate 降低 oracle，必须停止并回到 RFC review / Target Renegotiation。若
+`wasm32v1-none` 与真实 Rust SDK 只能通过上述退化才可用，也必须停止；仅在既有 owner 内调整 interpreter API、Cargo flags、
+generated binding glue、manifest/file layout 或内部 type 不触发停止条件。
+
+### Result
+
+Stage 2 已解析为 Ready / Not Started；Execution Authorization 为 None，implementation 与本节 validation 均未运行。本轮只
+关闭 docs-only resolution，不产生 code、artifact、current contract 或 cutover。
 
 ## Stage 3 — Kernel transactional runtime core
 
-**Purpose：** 在 kernel 内接入 Stage 2 共同验证并精确 pin 的 `nemophila-wasm` 与 WIT consumer，建立共同 artifact
+**Purpose：** 在 kernel 内接入 Stage 2 共同验证的当前 `nemophila-wasm` 与 WIT consumer，建立共同 artifact
 admission、per-instance interpreter ownership、恰好一次 module-side `load` entry、值型日志 call window，以及
 unpublished rollback / atomic live publication 的 runtime core。
 
-**Prerequisites：** Stage 1 和 Stage 2 关闭，pinned interpreter source、WIT interface 与 canonical artifact 可被同一
+**Prerequisites：** Stage 1 和 Stage 2 关闭，当前 interpreter source、WIT interface 与 canonical artifact 可被同一
 kernel integration 消费；进入本 Stage 时从父 RFC management envelope 与 live task/ABI owner 解析 management-to-runtime
 内部 handoff 和 proof route，public management ABI 仍留待 Stage 6 激活；维护者另行授权 Stage 3。
 
 **Protected Boundary：** interpreter validation 与 Nemophila admission 不能互相替代或形成第二份 feature truth；每次 load
 独占完整 interpreter entity，不共享 Engine/code/cache。module load error/trap 只能完整 rollback，日志诊断不能伪装 live
-publication。真实 kernel embedding 暴露的 interpreter 修改仍回到 `nemophila-wasm` owner，并在本 Stage 关闭前重新 pin
-revision、重跑受影响 interpreter/kernel proof；不得把 kernel object、同步或 lifecycle state 下沉进 interpreter。本 Stage
-不公开 management ABI、不接入真实 subsystem point，也不提前建立 current contract。
+publication。真实 kernel embedding 暴露的 interpreter 修改仍回到 `nemophila-wasm` owner，并在本 Stage 关闭前重跑受影响
+interpreter/kernel proof；不得把 kernel object、同步或 lifecycle state 下沉进 interpreter。本 Stage 不公开 management ABI、
+不接入真实 subsystem point，也不提前建立 current contract。
 
 ## Stage 4 — Weave、并发调用与完整 lifecycle
 
@@ -243,7 +374,7 @@ owner-private guard 进入 interpreter，或为 Stage 5 建立绕过共同 admis
 ## Stage 6 — Management activation 与 R0 cutover
 
 **Purpose：** 激活以 current effective `CAP_SYS_MODULE` 授权的 embedded/supplied load 和按 instance identity
-try-unload，pin 最终 candidate interpreter/WIT/artifact revision set，完成同一 Wasm artifact 在 RV64/LA64 上的完整
+try-unload，以当前第一方 interpreter/WIT/artifact source 与完整 Git/validation evidence 完成同一 Wasm artifact 在 RV64/LA64 上的完整
 acceptance、最终 source/owner/ABI audit 与 Architecture Friction Scan，并在全部证据闭合后原子执行
 `NEMOPHILA-R0-CUTOVER`。
 

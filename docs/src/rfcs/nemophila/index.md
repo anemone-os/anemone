@@ -12,10 +12,10 @@
 ## 文档状态
 
 本文是 Nemophila R0 capability 的 Accepted R2 Target。R2 删除 interpreter 业务模型中的独立 Core Wasm profile/version、
-fixed configuration 和 special checked-path 概念；第一方 crate 按通用 Core Wasm interpreter 自然演进，以精确 Anemone
-source commit 和受影响行为 proof 描述源码 revision。接受 R2 不形成 current contract 或 cutover 证据。
+fixed configuration 和 special checked-path 概念；第一方 crate 按通用 Core Wasm interpreter 自然演进，变化由普通 Git
+历史与受影响行为 proof 记录，不建立并列 source authority。接受 R2 不形成 current contract 或 cutover 证据。
 
-Stage 1 已按维护者授权关闭；Stage 2--6 仍只有 outline，未获解析或执行授权。pre-RFC
+Stage 1 已按维护者授权关闭；Stage 2 已解析为 Ready / Not Started，尚未获执行授权；Stage 3--6 仍只有 outline。pre-RFC
 [定位共识](./backgrounds/positionings.md)继续作为冻结且不再维护的历史材料。
 
 ## 摘要
@@ -172,9 +172,9 @@ target 与 proof obligation，因而在本文冻结。具体 Wasm feature/config
   的唯一行为真相。普通 module construction 必须在执行前完成 validation；malformed、invalid 或实现不支持的输入返回
   error，不能作为已验证 module 进入 executor。unchecked construction 保持显式 unsafe/internal boundary，未来 kernel load
   path 不得误用。Nemophila 不复制 validator，也不把 interpreter configuration 或 feature choice 冻结为另一份 target truth。
-- 每组 interpreter evidence 和 downstream consumer 必须 pin 包含精确 `nemophila-wasm` source 的 Anemone commit，不消费
-  branch、floating tag 或环境中的 `HEAD`。crate source 修改后重跑其影响到的既有 proof；只有未来真实 artifact/WIT/
-  admission compatibility 需要多个格式并存时，版本才由对应 artifact/API owner 建立，不能预埋为 interpreter 业务类型。
+- interpreter evidence 和 downstream consumer 直接消费仓库中的当前 `nemophila-wasm` 第一方 source；source 变化由普通 Git
+  历史记录，并重跑其影响到的既有 proof。只有未来真实 artifact/WIT/admission compatibility 需要多个格式并存时，版本才由
+  对应 artifact/API owner 建立，不能预埋为 interpreter 业务类型或并列 source identity truth。
 - Core Wasm start function 是由 start section 指定、实例化时自动执行的 Wasm 固有机制，不是 Nemophila lifecycle hook。
   R0 admission 必须拒绝包含 start section 的 artifact；通用 interpreter validation 仍可识别其合法性，但不能以“Core
   Wasm 合法”为由绕过 Nemophila artifact-envelope rejection。
@@ -336,9 +336,9 @@ source 中闭合，不属于本 RFC 当前需要冻结的 target。
   interpreter validation boundary、这两层 mechanical admission、Wasm execution containment、transactional lifecycle、
   callback poison quarantine、kernel-logging-owned 日志提交、clone observer semantics 与双架构 vertical slice，不声称日志
   持久性、execution progress、unload bounded completion 或恶意 module DoS containment；
-- **实施文档：** 独立[实施路线](./implementation.md)已经解析 Stage 1 的 Deliverables、Validation、Cutover 与 Stop / Exit，
-  Stage 2--6 仍只定义 Purpose、Prerequisites 与 Protected Boundary。Stage 解析与执行分别授权；Stage 1 已关闭，
-  其 closure 不自动授权下一 Stage；
+- **实施文档：** 独立[实施路线](./implementation.md)已经解析 Stage 1 与 Stage 2 的 Implementation Boundary、Deliverables、
+  Validation、Cutover 与 Stop / Exit。Stage 1 已关闭；Stage 2 为 Ready / Not Started 且没有 execution authorization；Stage 3--6
+  仍只定义 Purpose、Prerequisites 与 Protected Boundary。Stage 解析与执行分别授权，一个 Stage 的 closure 不自动授权下一 Stage；
 - **停止条件：** 若实施设计需要允许 Core Wasm start section、引入 guest-controlled
   concurrency/shared execution state、增加第二个 module lifecycle entry，或改变 SDK registration hierarchy、binding
   cardinality、registration failure 决策权、cohort dispatch、poison admission/cancellation/exclusive occupancy、poisoned
@@ -422,9 +422,11 @@ R0 closure 至少需要证明：
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- [实施路线](./implementation.md)：Stage 1 已关闭；Stage 2--6 仍为 outline，均未获执行授权
+- [实施路线](./implementation.md)：Stage 1 已关闭；Stage 2 已解析为 Ready / Not Started；Stage 3--6 仍为 outline；当前没有
+  Stage execution authorization
 - [历史定位共识](./backgrounds/positionings.md)：pre-RFC 讨论快照，已冻结且不再维护
-- [Stage 1 transaction](../../devlog/transactions/2026-08-14-nemophila.md)：pinned source、审计、验证与Not Run
+- [Stage transaction](../../devlog/transactions/2026-08-14-nemophila.md)：Stage 1 source import/审计/验证与 Stage 2 docs-only
+  resolution
 - 外部源码证据：[Wasmi `v1.1.0`](https://github.com/wasmi-labs/wasmi/releases/tag/v1.1.0)，固定 commit
   [`8273dfb09d493971b7bb12fe614d740cdc857175`](https://github.com/wasmi-labs/wasmi/commit/8273dfb09d493971b7bb12fe614d740cdc857175)
 - Core Wasm 语义证据：[Module instantiation](https://webassembly.github.io/spec/core/exec/modules.html#exec-instantiation)；
@@ -440,7 +442,7 @@ R0 closure 至少需要证明：
 
 ## Closure
 
-Stage 1 已按Accepted R2关闭并pin包含当前`nemophila-wasm` source的Anemone commit
-`85489765a4ff57aac2d6eedd3567e98fa60b4b4c`；完整evidence与Not Run见
-[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。Stage 2--6均未解析或授权。当前没有Nemophila kernel
-runtime、effective current contract、public ABI或cutover；Stage 1 crate-level证据不外推R0 runtime acceptance。
+Stage 1 已按 Accepted R2 关闭，`nemophila-wasm` 是仓库内持续演进的第一方 source；完整 evidence 与 Not Run 见
+[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。Stage 2 已完成 docs-only resolution，状态为 Ready / Not
+Started，未获 execution authorization；Stage 3--6 尚未解析。当前没有 Nemophila kernel runtime、effective current contract、
+public ABI 或 cutover；Stage 1 crate-level evidence 和 Stage 2 resolution 都不外推 R0 runtime acceptance。

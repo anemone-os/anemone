@@ -36,13 +36,14 @@ instance lifetime，以独立 poison flag 和 live state 共同驱动行为，�
 Wasmi `v1.1.0` 为可审计源码基线。Stage 1 先 clone 固定 upstream source，再去除上游 Git metadata，将实际 interpreter
 source 导入该 crate 后直接裁剪、适配并持续维护；它不是 submodule、nested Git repository、外部独立 project、
 `anemone-kernel/crates/anemos` 下的 crate，也不是依赖另一个 upstream `wasmi` crate 的 wrapper/adapter。该基线只固定
-provenance，不冻结后续第一方 crate source revision，也不承诺 upstream API 或 workspace compatibility。interpreter crate
+provenance，不冻结后续第一方 crate source，也不承诺 upstream API 或 workspace compatibility。interpreter crate
 保持 Wasmi 派生的通用 Core Wasm interpreter 能力，并且是通用 Core Wasm binary parse、type/control-flow validation、
 translation、execution 与 trap reporting 的唯一行为真相；Stage 1 不按 canonical observer 的最低需求裁剪语义能力，也不
 冻结 configuration、feature matrix、limits 或 embedding API。普通 module construction 必须在执行前完成 validation；
 malformed、invalid 或实现不支持的输入返回 error，不能作为已验证 module 进入 executor。unchecked construction 保持显式
-unsafe/internal boundary，kernel load path 不得误用。crate 可以在后续 Stage 持续修改，但每组 evidence/consumer 必须记录
-包含精确 crate source 的 Anemone commit；crate source 修改后重跑受影响 proof，不发布独立 interpreter profile/version。
+unsafe/internal boundary，kernel load path 不得误用。crate 可以在后续 Stage 持续修改，evidence/consumer 直接消费仓库当前
+第一方 source；crate source 修改由普通 Git 历史记录并重跑受影响 proof，不发布独立 interpreter profile/version 或并列
+source identity truth。
 只有未来真实 artifact/WIT/admission compatibility 需要多个格式并存时，版本才由对应 artifact/API owner 建立。每次 load 创建由该
 live instance 独占的完整 interpreter entity、translated code、store 与 execution stack；R0 不在 instances 或 reload 之间
 共享这些 runtime entity，也不建立 compiled-artifact cache。interpreter 不拥有 kernel synchronization policy、Host
@@ -54,8 +55,8 @@ construction，以 shared Engine/code/cache 形成
 隐藏资源 owner，interpreter 持有 Task、File、kernel lock/raw pointer、provider/registration/in-flight/retirement state，或
 `nemophila-wasm` 退化为 submodule/外部独立 source、`anemone-kernel/crates/anemos` dependency 或只转发 upstream `wasmi`
 的 adapter。
-**Cutover / Proof：** 固定上游源码 provenance、pinned Anemone crate-source revision、通用 interpreter regression 与
-invalid-input rejection、canonical build output 对 pinned interpreter 的 acceptance、两种 ingress validation、per-instance
+**Cutover / Proof：** 固定上游源码 provenance、当前第一方 crate source 的通用 interpreter regression 与 invalid-input
+rejection、canonical build output 对同一仓库 interpreter 的 acceptance、两种 ingress validation、per-instance
 ownership 与 kernel owner boundary proof；
 `NEMOPHILA-R0-CUTOVER`。
 
@@ -266,7 +267,7 @@ dispatch/containment。
 | --- | --- | --- | --- |
 | WIT logical interface | Nemophila API owner | checked/generated consumer view | accepted interface revision；不驱动 runtime lifecycle |
 | artifact source | embedded catalog 或本次 supplied input | immutable bytes / artifact identity | source 自身生命周期；不等同 live instance |
-| Core Wasm parse / validation / translation / execution / trap reporting | `nemophila-wasm` crate | module build 以 pinned interpreter validation 为 oracle；Nemophila admission 不复制通用 validator | pinned crate source commit；owner/validation claim 变化回 RFC review |
+| Core Wasm parse / validation / translation / execution / trap reporting | `nemophila-wasm` crate | module build 以当前第一方 interpreter validation 为 oracle；Nemophila admission 不复制通用 validator | crate source 随 owner 自然演进并重跑受影响 proof；owner/validation claim 变化回 RFC review |
 | management caller authorization | task credentials | management boundary 只消费 operation-local effective `CAP_SYS_MODULE` check | 单次 load/try-unload operation |
 | point semantics / call site / binding policy | 具体 subsystem owner | runtime 可解析的 typed point identity 与 immutable policy | provider availability lifetime |
 | log policy / record / retention / presentation | kernel logging owner | runtime 只持一次 value-only typed submission window | 单次提交结束；不形成 instance resource |
@@ -297,7 +298,7 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - WIT 必须有真实 SDK/module/kernel consumers，不能形成第二套手写接口真相；
 - `nemophila-wasm` crate 必须保留通用 Core Wasm interpreter regression coverage，普通 module construction 在执行前完成
   validation，malformed/invalid/unsupported input 返回 error，unchecked construction 不进入 kernel load path；canonical
-  module build 的输出必须通过 pinned interpreter validation，canonical clone observer artifact 可执行；
+  module build 的输出必须通过当前第一方 interpreter validation，canonical clone observer artifact 可执行；
 - embedded 与 supplied ingress 必须共享 kernel admission/runtime lifecycle，并在每次 load 真实调用 interpreter validation 与
   eager translation；双架构必须消费同一 Wasm artifact；
 - management authorization proof 必须确认 load 与 try-unload 都只消费 task credentials 的 current effective
@@ -331,8 +332,9 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - clone observer 必须经真实 Wasm entry 运行并使用日志 service；正常返回、trap 以及日志过滤、截断或覆盖均不得影响
   clone result；
 - `NEMOPHILA-R0-CUTOVER` 前不创建 effective Nemophila contract；
-- Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 route 已解析并关闭，Stage 2--6
-  的具体 proof route、test/oracle 和命令只在对应 Stage 获得解析授权后补充，执行仍需单独授权。如果实施路线需要改变
+- Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 route 已解析并关闭，Stage 2 已解析为 Ready /
+  Not Started 且执行未授权；Stage 3--6 的具体 proof route、test/oracle 和命令只在对应 Stage 获得解析授权后补充，执行仍需
+  单独授权。如果实施路线需要改变
   本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
 
 ## 禁止退化项

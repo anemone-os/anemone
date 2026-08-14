@@ -49,14 +49,16 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
-- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R1（Nemophila R0 target）；以 WIT 定义接口、由 kernel
-  在显式版本化 profile 下解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立 runtime-owned transactional load、per-instance serial
+- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R2（Nemophila R0 target）；以 WIT 定义接口、由 kernel
+  使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
+  runtime-owned transactional load、per-instance serial
   callback、trap containment 与 busy try-unload，并以 task owner 的 clone observer 和同一份 Rust-to-Wasm artifact 完成
   RV64/LA64 vertical slice。
   [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
-  [实施路线](./rfcs/nemophila/implementation.md)已解析 Stage 1，由固定 Wasmi provenance 在
-  `anemone-kernel/crates/nemophila-wasm` 形成直接维护 interpreter source 的 in-tree crate；Stage 2--6 仍为 outline。当前没有
-  Stage execution authorization、current contract 或 cutover；pre-RFC
+  [实施路线](./rfcs/nemophila/implementation.md)已关闭 Stage 1，由固定 Wasmi provenance 在
+  `anemone-kernel/crates/nemophila-wasm` 形成直接维护 interpreter source 的 in-tree crate；Stage 2 已解析 WIT、Rust SDK、
+  Cargo-only module build driver 与 canonical artifact 边界，状态为 Ready / Not Started；Stage 3--6 仍为 outline。当前没有 Stage
+  execution authorization、current contract 或 cutover；pre-RFC
   [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
