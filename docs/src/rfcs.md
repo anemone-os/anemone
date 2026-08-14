@@ -49,6 +49,14 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R0；以 WIT 定义接口、由 kernel 在显式版本化 profile 下解释
+  执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立 runtime-owned transactional load、per-instance serial
+  callback、trap containment 与 busy try-unload，并以 task owner 的 clone observer 和同一份 Rust-to-Wasm artifact 完成
+  RV64/LA64 vertical slice。
+  [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
+  [实施路线](./rfcs/nemophila/implementation.md)只建立 Stage 1--6 outline，其中独立 Stage 1 从固定 Wasmi 基线形成
+  `nemophila-wasm` project。当前没有 Stage execution authorization、current contract 或 cutover；pre-RFC
+  [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
   directory上的additional view、dynamic slave semantic endpoint、safe-reuse pair/opened-description lifecycle、
