@@ -1,35 +1,38 @@
-//! DWMAC1000 legacy descriptor and device-cause protocol facts.
+//! DWMAC1000 legacy enhanced descriptor and device-cause protocol facts.
 //!
-//! This module deliberately contains no MMIO or publication path.  Gate 2 can
+//! This module deliberately contains no MMIO or publication path. Gate 2 can
 //! prove the wire layout and admission arithmetic in isolation; register
-//! family and normal-mode acceptance still require the bounded 2K1000 probe.
+//! family and enhanced-mode acceptance still require the bounded 2K1000 probe.
 
 use core::mem::{align_of, size_of};
 
 use crate::prelude::*;
 
 const DMA_LIMIT_EXCLUSIVE: u64 = 1u64 << 32;
-const DESCRIPTOR_ALIGNMENT: usize = 16;
-const DESCRIPTOR_BYTES: usize = 16;
+const DESCRIPTOR_ALIGNMENT: usize = 32;
+const DESCRIPTOR_BYTES: usize = 32;
 const MAX_DESCRIPTOR_COUNT: usize = 1024;
-const MAX_BUFFER_BYTES: usize = 0x7ff;
+const MAX_TX_BUFFER_BYTES: usize = 0x1fff;
+// Linux constrains legacy RX backing to an aligned value. 0x1ffc is the
+// largest four-byte-aligned value representable by enhanced RDES1.BS1.
+const MAX_RX_BUFFER_BYTES: usize = 0x1ffc;
+const RX_BUFFER_ALIGNMENT: usize = align_of::<u32>();
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    struct TxStatus: u32 {
+    struct TxControl: u32 {
         const ERROR_SUMMARY = 1 << 15;
+        const END_RING = 1 << 21;
+        const FIRST = 1 << 28;
+        const LAST = 1 << 29;
+        const INTERRUPT = 1 << 30;
         const OWN = 1 << 31;
         const _ = !0;
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct TxLength: u32 {
-        const BUFFER1_SIZE_MASK = 0x7ff;
-        const SECOND_ADDRESS_CHAINED = 1 << 24;
-        const END_RING = 1 << 25;
-        const FIRST = 1 << 29;
-        const LAST = 1 << 30;
-        const INTERRUPT = 1 << 31;
+        const BUFFER1_SIZE_MASK = 0x1fff;
         const _ = !0;
     }
 
@@ -43,29 +46,37 @@ bitflags! {
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    struct RxLength: u32 {
-        const BUFFER1_SIZE_MASK = 0x7ff;
-        const SECOND_ADDRESS_CHAINED = 1 << 24;
-        const END_RING = 1 << 25;
+    struct RxControl: u32 {
+        const BUFFER1_SIZE_MASK = 0x1fff;
+        const SECOND_ADDRESS_CHAINED = 1 << 14;
+        const END_RING = 1 << 15;
+        const DISABLE_INTERRUPT = 1 << 31;
         const _ = !0;
     }
 }
 
 /// Linux/PMON legacy CSR5 cause window. Process-state and reserved bits above
 /// bit 16 are never written back by the device handler.
-const CSR5_W1C_MASK: u32 = 0x1ffff;
+pub(super) const CSR5_W1C_MASK: u32 = 0x1ffff;
 
-#[repr(C, align(16))]
+/// Linux `struct dma_extended_desc`: a four-word enhanced descriptor followed
+/// by extended status and timestamp words. CSR0.ATDS makes the DMA advance by
+/// this complete 32-byte stride even when the cropped fields remain zero.
+#[repr(C, align(32))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct NormalDescriptor {
+pub(super) struct EnhancedDescriptor {
     pub(super) des0: u32,
     pub(super) des1: u32,
     pub(super) des2: u32,
     pub(super) des3: u32,
+    pub(super) des4: u32,
+    pub(super) des5: u32,
+    pub(super) des6: u32,
+    pub(super) des7: u32,
 }
 
-static_assert!(size_of::<NormalDescriptor>() == DESCRIPTOR_BYTES);
-static_assert!(align_of::<NormalDescriptor>() == DESCRIPTOR_ALIGNMENT);
+static_assert!(size_of::<EnhancedDescriptor>() == DESCRIPTOR_BYTES);
+static_assert!(align_of::<EnhancedDescriptor>() == DESCRIPTOR_ALIGNMENT);
 
 pub(super) const fn dma_range_fits(start: u64, len: usize) -> bool {
     if len == 0 || start >= DMA_LIMIT_EXCLUSIVE {
@@ -88,29 +99,50 @@ pub(super) const fn descriptor_ring_bytes(count: usize) -> Option<usize> {
     count.checked_mul(DESCRIPTOR_BYTES)
 }
 
-pub(super) const fn buffer_length_fits(length: usize) -> bool {
-    length != 0 && length <= MAX_BUFFER_BYTES
+const fn tx_buffer_length_fits(length: usize) -> bool {
+    length != 0 && length <= MAX_TX_BUFFER_BYTES
 }
 
-impl NormalDescriptor {
+pub(super) const fn rx_buffer_length_fits(length: usize) -> bool {
+    length != 0 && length <= MAX_RX_BUFFER_BYTES && length % RX_BUFFER_ALIGNMENT == 0
+}
+
+impl EnhancedDescriptor {
+    pub(super) const fn idle_tx(index: usize, count: usize, buffer: u64) -> Option<Self> {
+        if !descriptor_count_fits(count) || index >= count || !dma_range_fits(buffer, 1) {
+            return None;
+        }
+        Some(Self {
+            des0: if index + 1 == count {
+                TxControl::END_RING.bits()
+            } else {
+                0
+            },
+            des2: buffer as u32,
+            ..Self::zeroed()
+        })
+    }
+
     pub(super) const fn tx(index: usize, count: usize, buffer: u64, length: usize) -> Option<Self> {
         if !descriptor_count_fits(count)
             || index >= count
             || !dma_range_fits(buffer, length)
-            || !buffer_length_fits(length)
+            || !tx_buffer_length_fits(length)
         {
             return None;
         }
-        let mut length_word = (length as u32) & TxLength::BUFFER1_SIZE_MASK.bits();
-        length_word |= TxLength::FIRST.bits() | TxLength::LAST.bits() | TxLength::INTERRUPT.bits();
+        let mut control = TxControl::FIRST.bits()
+            | TxControl::LAST.bits()
+            | TxControl::INTERRUPT.bits()
+            | TxControl::OWN.bits();
         if index + 1 == count {
-            length_word |= TxLength::END_RING.bits();
+            control |= TxControl::END_RING.bits();
         }
         Some(Self {
-            des0: TxStatus::OWN.bits(),
-            des1: length_word,
+            des0: control,
+            des1: (length as u32) & TxLength::BUFFER1_SIZE_MASK.bits(),
             des2: buffer as u32,
-            des3: 0,
+            ..Self::zeroed()
         })
     }
 
@@ -118,25 +150,38 @@ impl NormalDescriptor {
         if !descriptor_count_fits(count)
             || index >= count
             || !dma_range_fits(buffer, length)
-            || !buffer_length_fits(length)
+            || !rx_buffer_length_fits(length)
         {
             return None;
         }
-        let mut length_word = (length as u32) & RxLength::BUFFER1_SIZE_MASK.bits();
+        let mut control = (length as u32) & RxControl::BUFFER1_SIZE_MASK.bits();
         if index + 1 == count {
-            length_word |= RxLength::END_RING.bits();
+            control |= RxControl::END_RING.bits();
         }
         Some(Self {
             des0: RxStatus::OWN.bits(),
-            des1: length_word,
+            des1: control,
             des2: buffer as u32,
-            des3: 0,
+            ..Self::zeroed()
         })
     }
 
-    pub(super) const fn device_cause(status: u32, enabled: u32) -> u32 {
-        status & enabled & CSR5_W1C_MASK
+    const fn zeroed() -> Self {
+        Self {
+            des0: 0,
+            des1: 0,
+            des2: 0,
+            des3: 0,
+            des4: 0,
+            des5: 0,
+            des6: 0,
+            des7: 0,
+        }
     }
+}
+
+pub(super) const fn device_cause(status: u32, admitted: u32) -> u32 {
+    status & admitted & CSR5_W1C_MASK
 }
 
 #[cfg(feature = "kunit")]
@@ -144,40 +189,61 @@ mod kunits {
     use super::*;
 
     #[kunit]
-    fn normal_descriptors_have_legacy_shape() {
-        let tx = NormalDescriptor::tx(0, 2, 0x1000, 1500).unwrap();
+    fn enhanced_descriptors_have_linux_extended_shape() {
+        let tx = EnhancedDescriptor::tx(0, 2, 0x1000, 1500).unwrap();
         assert_eq!(tx.des2, 0x1000);
         assert_eq!(tx.des1 & TxLength::BUFFER1_SIZE_MASK.bits(), 1500);
-        assert!(TxStatus::from_bits_retain(tx.des0).contains(TxStatus::OWN));
-        assert!(TxLength::from_bits_retain(tx.des1).contains(TxLength::FIRST | TxLength::LAST));
+        assert!(
+            TxControl::from_bits_retain(tx.des0).contains(
+                TxControl::OWN | TxControl::FIRST | TxControl::LAST | TxControl::INTERRUPT
+            )
+        );
+        assert_eq!(tx.des4, 0);
 
-        let rx = NormalDescriptor::rx(1, 2, 0x2000, 1536).unwrap();
+        let rx = EnhancedDescriptor::rx(1, 2, 0x2000, 1536).unwrap();
         assert!(RxStatus::from_bits_retain(rx.des0).contains(RxStatus::OWN));
-        assert!(rx.des1 & RxLength::END_RING.bits() != 0);
+        assert!(RxControl::from_bits_retain(rx.des1).contains(RxControl::END_RING));
+        assert_eq!(rx.des7, 0);
+    }
+
+    #[kunit]
+    fn enhanced_ring_marks_only_the_final_descriptor_as_end_of_ring() {
+        for index in 0..4 {
+            let tx = EnhancedDescriptor::tx(index, 4, 0x1000 + index as u64 * 0x800, 1536).unwrap();
+            let rx = EnhancedDescriptor::rx(index, 4, 0x4000 + index as u64 * 0x800, 1536).unwrap();
+            assert_eq!(tx.des0 & TxControl::END_RING.bits() != 0, index == 3);
+            assert_eq!(rx.des1 & RxControl::END_RING.bits() != 0, index == 3);
+            let idle =
+                EnhancedDescriptor::idle_tx(index, 4, 0x8000 + index as u64 * 0x800).unwrap();
+            assert_eq!(idle.des0 & !TxControl::END_RING.bits(), 0);
+            assert_eq!(idle.des0 & TxControl::END_RING.bits() != 0, index == 3);
+        }
     }
 
     #[kunit]
     fn descriptor_admission_rejects_high_or_overflowing_ranges() {
         assert!(dma_range_fits(0xffff_f000, 0x1000));
-        assert!(!dma_range_fits(0xffff_f001, 0x1000));
-        assert!(!dma_range_fits(u64::MAX, 1));
-        assert!(NormalDescriptor::tx(0, 1, 0xffff_f000, 0x7ff).is_some());
-        assert!(NormalDescriptor::tx(0, 1, 0x1_0000_0000, 64).is_none());
+        assert!(!dma_range_fits(0xffff_f000, 0x1001));
+        assert!(!dma_range_fits(0x1_0000_0000, 1));
+        assert!(EnhancedDescriptor::tx(0, 1, 0xffff_e001, MAX_TX_BUFFER_BYTES).is_some());
+        assert!(EnhancedDescriptor::tx(0, 1, 0xffff_f000, MAX_TX_BUFFER_BYTES).is_none());
+        assert!(EnhancedDescriptor::tx(0, 1, 0x1_0000_0000, 64).is_none());
     }
 
     #[kunit]
-    fn descriptor_ring_and_buffer_limits_are_checked() {
-        assert_eq!(descriptor_ring_bytes(64), Some(1024));
+    fn descriptor_ring_and_rx_buffer_limits_are_checked() {
+        assert_eq!(descriptor_ring_bytes(64), Some(2048));
         assert!(descriptor_ring_bytes(0).is_none());
         assert!(descriptor_ring_bytes(MAX_DESCRIPTOR_COUNT + 1).is_none());
-        assert!(NormalDescriptor::rx(0, 1, 0x4000, MAX_BUFFER_BYTES).is_some());
-        assert!(NormalDescriptor::rx(0, 1, 0x4000, MAX_BUFFER_BYTES + 1).is_none());
+        assert!(EnhancedDescriptor::rx(0, 1, 0x4000, MAX_RX_BUFFER_BYTES).is_some());
+        assert!(EnhancedDescriptor::rx(0, 1, 0x4000, MAX_RX_BUFFER_BYTES + 1).is_none());
+        assert!(EnhancedDescriptor::rx(0, 1, 0x4000, 1537).is_none());
     }
 
     #[kunit]
     fn csr5_cause_mask_never_acknowledges_unknown_bits() {
         let enabled = 0x101;
         let status = enabled | (1 << 31);
-        assert_eq!(NormalDescriptor::device_cause(status, enabled), enabled);
+        assert_eq!(device_cause(status, enabled), enabled);
     }
 }

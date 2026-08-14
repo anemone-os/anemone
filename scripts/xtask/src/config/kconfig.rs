@@ -124,6 +124,10 @@ pub struct Parameters {
     pub jh7110_gmac_phy_timeout_ms: Option<u64>,
     pub dwmac1000_reset_timeout_ms: Option<u64>,
     pub dwmac1000_mdio_timeout_ms: Option<u64>,
+    pub dwmac1000_phy_timeout_ms: Option<u64>,
+    pub dwmac1000_probe_timeout_ms: Option<u64>,
+    pub dwmac1000_ring_size: Option<usize>,
+    pub dwmac1000_frame_capacity_bytes: Option<usize>,
     pub net_pump_ingress_budget_frames: Option<usize>,
     pub net_pump_egress_budget_steps: Option<usize>,
     pub net_worker_repoll_rounds: Option<usize>,
@@ -254,6 +258,10 @@ impl Parameters {
         materialize!(jh7110_gmac_phy_timeout_ms);
         materialize!(dwmac1000_reset_timeout_ms);
         materialize!(dwmac1000_mdio_timeout_ms);
+        materialize!(dwmac1000_phy_timeout_ms);
+        materialize!(dwmac1000_probe_timeout_ms);
+        materialize!(dwmac1000_ring_size);
+        materialize!(dwmac1000_frame_capacity_bytes);
         materialize!(net_pump_ingress_budget_frames);
         materialize!(net_pump_egress_budget_steps);
         materialize!(net_worker_repoll_rounds);
@@ -493,6 +501,15 @@ pub const JH7110_GMAC_PHY_TIMEOUT_MS: u64 = {};
 pub const DWMAC1000_RESET_TIMEOUT_MS: u64 = {};
 /// DWMAC1000 MDIO transaction deadline during Gate 2 probe.
 pub const DWMAC1000_MDIO_TIMEOUT_MS: u64 = {};
+/// Maximum probe-time wait for DWMAC1000 PHY link resolution.
+pub const DWMAC1000_PHY_TIMEOUT_MS: u64 = {};
+/// DWMAC1000 bounded TX/RX polling and DMA-quiesce deadline during Gate 2
+/// characterization.
+pub const DWMAC1000_PROBE_TIMEOUT_MS: u64 = {};
+/// Descriptor capacity of each DWMAC1000 RX/TX ring.
+pub const DWMAC1000_RING_SIZE: usize = {};
+/// Bytes owned by each DWMAC1000 normal-descriptor frame backing.
+pub const DWMAC1000_FRAME_CAPACITY_BYTES: usize = {};
 /// Maximum ingress frames advanced by one stack pump.
 pub const NET_PUMP_INGRESS_BUDGET_FRAMES: usize = {};
 /// Maximum egress steps advanced by one stack pump.
@@ -635,6 +652,10 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(jh7110_gmac_phy_timeout_ms),
             resolved!(dwmac1000_reset_timeout_ms),
             resolved!(dwmac1000_mdio_timeout_ms),
+            resolved!(dwmac1000_phy_timeout_ms),
+            resolved!(dwmac1000_probe_timeout_ms),
+            resolved!(dwmac1000_ring_size),
+            resolved!(dwmac1000_frame_capacity_bytes),
             resolved!(net_pump_ingress_budget_frames),
             resolved!(net_pump_egress_budget_steps),
             resolved!(net_worker_repoll_rounds),

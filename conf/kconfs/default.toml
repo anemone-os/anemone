@@ -91,6 +91,10 @@ jh7110_gmac_reset_timeout_ms = 1000 # DWMAC internal software-reset deadline in 
 jh7110_gmac_phy_timeout_ms = 5000 # Maximum probe-time wait for JH7110 PHY link resolution.
 dwmac1000_reset_timeout_ms = 1000 # DWMAC1000 internal DMA software-reset deadline during Gate 2 probe.
 dwmac1000_mdio_timeout_ms = 1000 # DWMAC1000 MDIO transaction deadline during Gate 2 probe.
+dwmac1000_phy_timeout_ms = 5000 # Maximum probe-time wait for DWMAC1000 PHY link resolution.
+dwmac1000_probe_timeout_ms = 1000 # DWMAC1000 bounded TX/RX polling and DMA-quiesce deadline during Gate 2 characterization.
+dwmac1000_ring_size = 64 # Descriptor capacity of each DWMAC1000 RX/TX ring; kernel requires a power of two in 2..=1024.
+dwmac1000_frame_capacity_bytes = 1536 # Per-slot DWMAC1000 enhanced-descriptor frame backing; kernel requires four-byte alignment in 1536..=8188.
 net_pump_ingress_budget_frames = 32 # Maximum ingress frames advanced by one stack pump.
 net_pump_egress_budget_steps = 32 # Maximum egress steps advanced by one stack pump.
 net_worker_repoll_rounds = 8 # Maximum immediate repoll rounds before the network worker yields.

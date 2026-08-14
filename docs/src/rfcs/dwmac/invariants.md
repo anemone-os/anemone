@@ -1,9 +1,9 @@
 # DWMAC 多后端与 2K1000 目标与不变量
 
 **状态：** Accepted
-**最后更新：** 2026-08-13
+**最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**适用修订：** R3
+**适用修订：** R6
 
 本文只定义本 RFC 的 target/proof obligations。当前 effective rule 仍以 `docs/src/contracts/` 为准；
 实现类型、helper、文件布局和内部算法不由本文冻结。
@@ -11,18 +11,18 @@
 ## 规则分类
 
 - **Correctness invariant：** owner、并发、生命周期、cleanup、内存安全、IRQ ordering 和 ABI 诚实性，不能以工程妥协降低。
-- **Target guarantee：** R3 保持 R0/R1 承诺的 DWMAC4 migration、DWMAC1000 normal mode、32-bit DMA 和 boot-time PHY 能力，以及 R2 的 validation staging；只能由 RFC review 修订。R3 只修订 Gate 2/3 的长期 IRQ/resource owner、handoff 与 cleanup，不降低最终 proof obligations。
+- **Target guarantee：** R6保持DWMAC1000 capability-admitted Linux enhanced/extended mode、32-bit DMA、boot-time PHY和长期owner；Gate 2在CSR7=0时采用Linux legacy init与一次bounded polling hardware proof，IRQ request/handler/level-flow proof移交Gate 3/final acceptance。
 - **Implementation preference：** `IrqSense` 的具体 Rust 形状、ring helper、backend module layout 和 log wording。
 
 ## Target Invariants
 
 ### TARGET-001 — Per-node concrete ownership
 
-**规则：** 每个 matching Ethernet node 独立拥有 MMIO window、DWMAC backend state、descriptor ring、DMA backing、IRQ context、PHY transaction、worker 和 failure state；`dwmac4`/`dwmac1000` variant module 各自拥有并注册对应 `Driver` 与 match table；`net::dwmac` common layer 不持有 concrete register/descriptor truth，也不制造第二份 variant registration state。DWMAC1000 owner 在 Gate 2 IRQ request 前创建，IRQ commit 后由 bound platform device 长期保留；Gate 3 只能原位采用该 owner。
+**规则：** 每个 matching Ethernet node 独立拥有 MMIO window、DWMAC backend state、descriptor ring、DMA backing、PHY transaction、worker 和 failure state；`dwmac4`/`dwmac1000` variant module 各自拥有并注册对应 `Driver` 与 match table；`net::dwmac` common layer 不持有 concrete register/descriptor truth，也不制造第二份 variant registration state。DWMAC1000 owner 在 Gate 2 polling前创建，通过后由bound platform device长期保留；Gate 3只能原位采用该owner并首次增加IRQ context。
 
 **Owner：** concrete DWMAC node provider。
 
-**违反表现：** 两个 node 共享 ring/PHY/register state，固定 GMAC ordinal 分支，一个 node 的失败/cleanup 改变另一个 node 的 publication，Gate 2 返回后留下不可达 IRQ context，或 Gate 3 重新 request/rebuild 并形成并列 state。
+**违反表现：** 两个 node 共享 ring/PHY/register state，固定 GMAC ordinal 分支，一个 node 的失败/cleanup 改变另一个 node 的 publication，Gate 2提前注册或留下不可达IRQ context，或Gate 3重建hardware owner并形成并列state。
 
 **Proof：** Gate 1 implementation/source audit、Gate 3 JH7110 dual-node regression and independent 2K1000 port evidence。
 
@@ -36,15 +36,20 @@
 
 **Proof：** Gate 1 matching matrix and dispatch source audit、negative compatible test。
 
-### TARGET-003 — Normal descriptor protocol
+### TARGET-003 — Enhanced descriptor protocol
 
-**规则：** DWMAC1000 R0 使用 normal descriptor，`ATDS=0`，stride 为 16 bytes；OWN、length、first/last、end-ring、buffer address 和 next address 必须使用 legacy normal 位表。读取 `ENHDESSEL` 只用于 admission/logging，不自动升级 enhanced。
+**规则：** DWMAC1000 R0 只有在 `DMA_HW_FEATURE.ENHDESSEL=true` 时 admission，使用 Linux enhanced/alternate 位表与
+`dma_extended_desc` 的 32-byte stride，并置 `ATDS=1`；软件发布 descriptor 时清零extended status/timestamp
+words，当前路径不消费硬件后续RX writeback，也不启用对应 runtime offload。normal descriptor 不属于支持范围，
+也不存在 fallback。Gate 2按Kconfig合法范围分配
+Gate 3可原位采用的最终ring/backing，只借用slot 0做bounded proof；通过且quiesced后在同一backing上恢复完整
+RX device ownership、idle TX和末项EOR。
 
 **Owner：** DWMAC1000 descriptor backend。
 
-**违反表现：** 使用 JH7110 DWMAC4 descriptor word layout、normal/enhanced 位混写、stride 不匹配，或 capability 为 enhanced 时静默改模式。
+**违反表现：** 使用JH7110 DWMAC4 descriptor word layout、normal/enhanced位混写、`ATDS`与stride不匹配、EOR不只位于最后一项、`ENHDESSEL=false`仍启动、或Gate 3必须替换Gate 2的rings/backing。
 
-**Proof：** Gate 2 backend implementation/register/KUnit/loopback probe；normal probe 失败即停止并 target renegotiation。
+**Proof：** Gate 2 backend implementation/register/KUnit/loopback probe；enhanced/extended probe 失败即停止并 target renegotiation。
 
 ### TARGET-004 — 32-bit DMA address admission
 
@@ -78,13 +83,13 @@
 
 ### TARGET-007 — Device cause before level completion
 
-**规则：** DWMAC handler 在 level flow 的 `eoi/unmask` 前读取 CSR5、取 enabled and legal W1C cause、向 CSR5 写 `1` 清除，并发布 durable recheck/wake。ICU transaction 不代替 CSR5 clear。
+**规则：** DWMAC1000 owner对每个raw CSR5 sample先取完整legal W1C窗口并向CSR5写`1`清除，再独立按admitted/enabled mask分类RI/TI与异常evidence；disabled legal cause也必须清除。Gate 2在CSR7=0时轮询并完成该事务；Gate 3 handler必须在level flow的`eoi/unmask`前沿用相同raw-clear/evidence分离并发布durable recheck/wake。ICU transaction不代替CSR5 clear。
 
 **Owner：** concrete DWMAC device handler。
 
-**违反表现：** 先 unmask 后 W1C、只清 summary、向 CSR5 写 `u32::MAX`、或因旧 cause 未清形成 unchanged-status immediate repeat。
+**违反表现：** 先unmask后W1C、只清summary或enabled subset、向CSR5写`u32::MAX`、把晚到事件误判为上一事件未清，或因旧cause未清形成unchanged-status immediate repeat。
 
-**Proof：** W1C mask unit tests、RX/TX/abnormal probe、pending readback before unmask、IRQ flow trace。
+**Proof：** Gate 2 W1C mask/classification KUnit和RX/TX/abnormal polling probe；Gate 3 pending readback before unmask与IRQ flow trace。
 
 ### TARGET-008 — Route A external handoff
 
@@ -108,11 +113,11 @@
 
 ### TARGET-010 — Publication identity and cleanup
 
-**规则：** 只有所有 node-local admission、DMA、IRQ、PHY、provider 和 worker prerequisites 成功后才 publication；成功 active reservation 按 publication/attach success order 连续分配 `eth<N>`，失败 candidate 不占号。Gate 2 的 platform bind 只提交长期 lifecycle owner，不构成 network publication。IRQ commit 前的失败只有在未发布 DMA backing 或已证明 TX/RX process-state quiescence 后才释放资源；IRQ commit 后的任何结果都由 bound owner 保留，且 device/CSR7 必须 disabled。未证明 quiescence 时 backing 保留到后续原位 adoption、shutdown 或 terminal power-off。
+**规则：** 只有所有 node-local admission、DMA、IRQ、PHY、provider 和 worker prerequisites 成功后才 publication；成功 active reservation 按 publication/attach success order 连续分配 `eth<N>`，失败 candidate 不占号。Gate 2 的 platform bind 只提交通过polling且已quiesce的长期hardware owner，不构成IRQ或network publication。Gate 2 failure只有在TX/RX process-state quiescence已证明后才释放资源；未证明时必须fail-stop。Gate 3 IRQ commit后的owner/context lifecycle由同一对象继续承担。
 
 **Owner：** device/net publication + attach authority；node provider owns local cleanup attempt。
 
-**违反表现：** failed node consumes name、Gate 2 bound node 产生 netdev、IRQ commit 后 context 不可达、disabled owner 仍使能 CSR7/MAC/DMA、未证明 quiescence 即释放 backing、publication observes incomplete link/MAC/DMA state，或 cleanup 依赖不存在的 runtime removal。
+**违反表现：** failed node consumes name、Gate 2 bound node注册IRQ或产生netdev、disabled owner仍使能CSR7/MAC/DMA、未证明quiescence即释放backing、Gate 3 IRQ commit后context不可达、publication observes incomplete link/MAC/DMA state，或cleanup依赖不存在的runtime removal。
 
 **Proof：** failure injection、success-order multi-node implementation test、Gate 3 shutdown/reboot evidence；Gate 4 只复核 closure evidence。
 
@@ -120,24 +125,24 @@
 
 1. `IrqSense` table owns electrical/controller configuration；`request_irq` expectation is a one-shot caller assertion，不是缓存的第二份 state。
 2. DWMAC backend owns descriptor ownership transitions and device-cause clear；worker consumes recheck hint and revalidates ring state，不反向拥有 CSR5 truth。
-3. `request_irq` commit 是不可退休边界。Gate 2 在该边界前创建唯一 local owner；request按 IRQ descriptor private-data strong ref -> commit/unmask发布同一`Arc`，返回后driver立即把同一owner写入device的一次性`drv_state`，再开始bounded characterization。commit期间handler由descriptor保活；commit前request失败则local owner可按quiescence规则释放。commit后platform `probe()`必须返回成功以完成bind，无论characterization result如何；bind success只表达lifecycle ownership，不表达Gate 2 proof success或network publication。
-4. Gate 2 每次 bounded event 后先 mask CSR7/device cause，再停止 MAC/DMA，并读取 CSR5 TX/RX process state。只有 process state 已 quiescent 才允许释放 DMA backing；不能证明时 owner/backing fail-forward retained，不能由 `Drop` 隐式回收。
-5. Gate 3 只允许在同一次 platform `probe()` 中通过 private continuation，让同一 owner 由 `Characterized`/disabled 转为 production attach；不得依赖 reprobe、重新 request IRQ、重建 ring、替换一次性 `drv_state`、复制 MMIO/CSR5 truth，或采用旁路全局 registry 形成第二份状态源。
+3. Gate 2在CSR7=0且不调用`request_irq`的前提下运行bounded polling；每个raw legal CSR5 sample由同一owner分类、W1C并立即回读。只有characterization passed且TX/RX process state已quiescent时才把owner写入device的一次性`drv_state`并bind。
+4. Gate 2 failure只有在quiescence已证明时才能返回并释放DMA backing；不能证明时当前没有安全retention carrier，必须fail-stop，不能由`Drop`隐式回收。
+5. Gate 3只允许在同一次platform `probe()`中通过private continuation，让同一owner由`Characterized`/disabled首次增加IRQ context并转为production attach；IRQ descriptor必须在commit/unmask前取得同一owner的strong reference。不得依赖reprobe、重映射MMIO、重建ring、替换一次性`drv_state`、复制CSR5 truth，或采用旁路全局registry形成第二份状态源。
 6. `local-mac-address`、PHY snapshot、DMA address admission、characterization result 和 logical `eth<N>` identity 属于不同 fact domains；不能用 platform bind 或一个 domain 的 fallback 伪造另一个 domain 的 success。
 
 ## RFC-local Proof Obligations
 
 - DWMAC4 extraction preserves existing JH7110 visible behavior before DWMAC1000 semantic work begins。
-- A normal descriptor probe must perform at least one bounded TX and RX OWN/length/status transition without netdev publication。
-- IRQ probe must distinguish controller pending from CSR5 cause and record the sequence `mask -> read/W1C -> pending clear -> unmask`。
-- Loongson concrete irqchip must observe/log pending immediately before every actual unmask, including request commit's first unmask and level-flow tail unmask；this trace must not become a DWMAC-callable controller API or DWMAC-owned state。
-- Gate 2 ownership tests must distinguish pre-commit release、post-commit retained success、post-commit retained failure and quiesce-timeout retained backing；Gate 3 adoption tests must prove no second IRQ request or ring construction。
+- An enhanced/extended descriptor probe must perform at least one bounded TX and RX OWN/length/status transition without netdev publication。
+- Gate 2 polling must prove real RI/TI、descriptor/payload completion and immediate CSR5 legal-W1C readback while CSR7 remains zero；Gate 3 separately proves `mask -> handler/W1C -> eoi -> unmask`。
+- Any Loongson pending trace belongs only to Gate 3/final IRQ diagnosis；it must not become a DWMAC-callable controller API or DWMAC-owned state。
+- Gate 2 ownership tests must distinguish quiesced pass retained、quiesced failure released and quiesce-timeout fail-stop；Gate 3 adoption tests must prove the first/only IRQ request and no MMIO/ring reconstruction。
 - Route A and PHY P1 probes must define failure signal, write-back and exit before any probe code is retained in production。
 
 ## 禁止退化项
 
-- 不把 JH7110 DWMAC4 descriptor/register helpers作为 DWMAC1000 normal backend 的实现。
+- 不把 JH7110 DWMAC4 descriptor/register helpers作为 DWMAC1000 enhanced/extended backend 的实现。
 - 不把 `dma-mask` property、coherency fence 或当前 low-memory DTS 当作未经检查的 DMA proof。
 - 不让 DWMAC driver 通过 broad IRQ API 写 ICU polarity/flow。
 - 不以成功编译、QEMU non-empty register 或单端口结果推导双端口/实机 correctness。
-- 不在本 RFC 内偷偷加入 enhanced fallback、DMA32/bounce、clock/reset provider 或 generic PHY framework。
+- 不在本 RFC 内偷偷加入 normal fallback、DMA32/bounce、clock/reset provider 或 generic PHY framework。

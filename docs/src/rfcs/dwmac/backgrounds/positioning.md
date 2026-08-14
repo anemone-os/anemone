@@ -334,7 +334,7 @@ driver/net/dwmac
     DWMAC4/5.20 registers, descriptors, DMA and device causes
     JH7110 clock/reset/PHY/DT glue
   dwmac1000
-    DWMAC3 registers, normal/enhanced descriptors, legacy DMA and causes
+    DWMAC3 registers, enhanced/extended descriptors, legacy DMA and causes
     2K1000 firmware/resource/PHY/DT glue
 ```
 
@@ -351,7 +351,7 @@ DWMAC1000 semantic cutover混成一个无法回归的提交点。
 1. **Gate 1：DWMAC owner migration 与 IRQ foundation 实现。** 将现有 JH7110 module 整理为 common +
    DWMAC4，保持既有行为；同时实现 2K1000 `IrqSense` source 表、`EDGE/POL` 配置和
    `request_irq` expectation。JH7110 regression 是本 Gate 的退出验证。
-2. **Gate 2：DWMAC1000 backend 与 bounded bring-up 实现。** 实现 legacy normal descriptor、internal DMA
+2. **Gate 2：DWMAC1000 backend 与 bounded bring-up 实现。** 实现 capability-admitted enhanced/extended descriptor、internal DMA
    reset、32-bit DMA admission、Route A、MDIO/PHY P1、IRQ wiring 和 CSR5 W1C；先用不 publication 的
    bounded slice 验证，probe 必须在 Gate 退出前吸收到 production backend。
 3. **Gate 3：2K1000 per-node production attach 实现。** 把 DWMAC1000 接入 FrameProvider、worker、
@@ -360,8 +360,8 @@ DWMAC1000 semantic cutover混成一个无法回归的提交点。
 4. **Gate 4：最终 acceptance 与 closure review。** 只复核 Gate 1--3 的实现和证据，处理 tracking issue、
    执行 Architecture Friction Scan，并在没有实现缺口时更新真实 current contracts 和关闭 RFC。
 
-如果 Gate 2 不能关闭外部 clock/reset、PHY reset-after-fixup owner 或 normal descriptor，不应在 Gate 3
-偷偷加入 fallback；应回到 RFC review 决定 Route B、P2、enhanced 或缩减 target。
+如果 Gate 2 不能关闭外部 clock/reset、PHY reset-after-fixup owner 或 enhanced/extended descriptor，不应在 Gate 3
+偷偷加入 normal fallback；应回到 RFC review 决定 Route B、P2 或缩减 target。
 
 ## 仍待讨论的三个技术问题
 
@@ -426,49 +426,36 @@ DWMAC1000 normal descriptor 的地址和 OWN/status 位置不同，所以可以�
 Gate 2 的最小 backend/probe 证据不是“编译出一个 `Dwmac1000Descriptor`”，而是：
 
 - 记录每个 matching node 的 core version 和 `DMA_HW_FEATURE` 原值；
-- 明确选择 normal 或 enhanced 位表，并为 ring end、first/last、buffer size、OWN/status 写回建立测试；
-- 如果选择 extended，证明 allocation、stride、`des4..des7` 和 timestamp ownership；否则把 PTP/extended
-  明确列为 R0 non-goal；
+- 由 `ENHDESSEL` 明确选择 enhanced 位表，并为 ring end、first/last、buffer size、OWN/status 写回建立测试；
+- 对 3.70a 的 extended backing 证明 allocation、32-byte stride 和 `des4..des7` ownership；timestamp runtime
+  仍明确列为 R0 non-goal；
 - 用不 publication 的 loopback/probe 让 DMA 至少完成一个 TX 和一个 RX，证明 OWN 转换与 frame length
   写回符合选中的位表。
 
 如果 capability 与已实现位表不一致，probe 必须在 netdev publication 前失败。不能用一个“兼容读写”把两套
 协议混在一起。
 
-#### 7.5 硬件支持 enhanced 时能否主动配置 normal
+#### 7.5 R6 为什么选择 Linux enhanced/extended
 
-可以，但这需要把两个问题分开：
+Linux DWMAC1000 同时定义 normal 和 alternate/enhanced descriptor；`ATDS=0` 使用 normal 解码，`ATDS=1`
+使用 alternate/enhanced 解码，而 `DMA_HW_FEATURE.ENHDESSEL` 报告 alternate 能力。R6 不否认 normal 是
+Linux 协议的一部分，只把它排除在本 RFC 的支持范围之外，避免在已经观测到 TX-only 行为后保留第二条协议路径。
 
-- **协议兼容性：可以。** Linux 的 DWMAC1000 文档明确说 driver 同时处理 normal 和 alternate descriptor。
-  DWMAC1000 的 DMA Bus Mode 有 `ATDS`（Alternate Descriptor Size）选择位：`ATDS=0` 时 DMA 按 normal
-  16-byte descriptor 解码，`ATDS=1` 时按 alternate/enhanced 解码。`DMA_HW_FEATURE.ENHDESSEL=1` 是“alternate
-  能力存在”的 capability，不是“normal 被禁用”的声明。若 actual core/databook 没有 vendor 例外，支持
-  enhanced 的 core 应仍能用 normal。
-- **Linux 默认策略：不是这样。** Linux 读取 capability 后把 `plat->enh_desc` 覆盖为 `dma_cap.enh_desc`；
-  对 `snps,dwmac-3.70a`，这会使 `stmmac_dwmac1_quirks()` 选择 enhanced ops，并在 ring mode 下通过
-  `atds=1` 设置 `DMA_BUS_MODE_ATDS`。所以“选 normal”是 Linux 支持的模式，但不是 Linux 6.6 的默认
-  capability policy。
+Linux 读取 capability 后把 `plat->enh_desc` 覆盖为 `dma_cap.enh_desc`；对 `snps,dwmac-3.70a`，
+`stmmac_dwmac1_quirks()` 选择 `enh_desc_ops`，并在 ring mode 下通过 `atds=1` 设置 `DMA_BUS_MODE_ATDS`。
+Synopsys core version 至少为 3.50 时，Linux 使用 `dma_extended_desc` 作为 enhanced ring 的 32-byte
+backing；`des4..des7` 的 extended status/timestamp 由硬件写回，但当前 R0 只清零并保留这些字段，不消费
+对应 runtime offload。
 
-还要纠正“extended capability”的说法：DWMAC1000 的 `DMA_HW_FEATURE` 没有一个独立的“extended descriptor
-必选”位。Linux 通常在 `enh_desc=1` 且 Synopsys core version 至少为 3.50 时把 ring stride 扩成
-`dma_extended_desc`，再结合 timestamp capability 提供 PTPv2。也就是说，extended 是 enhanced 基础上的
-软件布局选择，不是看到一个 bit 就必须使用的第三种 DMA 协议。
+R6 的最小支持范围因此是：
 
-本轮已经决定 DWMAC1000 的最小 R0 只使用 normal descriptor：
+1. 读取 `DMA_HW_FEATURE`，只有 `ENHDESSEL=1` 才允许 DWMAC1000 admission；
+2. 设置并 readback `ATDS=1`，使用 32-byte `dma_extended_desc` stride 和 enhanced `des0..des3` 位表；
+3. 在不 publication 的 probe 中完成 enhanced TX/RX OWN、length/status、descriptor 和 payload proof；
+4. `ENHDESSEL=0`、ATDS/readback mismatch 或 enhanced layout 不被 core 接受时 fail closed，不能回退 normal。
 
-1. 读取并记录 `DMA_HW_FEATURE`；`ENHDESSEL=0` 时只能走 normal，`ENHDESSEL=1` 时仍明确选择 normal；
-2. 将 `ATDS` 保持为 0，ring stride 固定为 16 字节，使用 normal 的 `des0..des3` 位表；
-3. 不启用 extended/PTP，直到后续 target 真正需要 `des4..des7`；
-4. 在不 publication 的 probe 中完成一个 normal TX 和 RX，确认 DMA 清 OWN、写回 length/status，并确认
-   descriptor base 与 buffer address 都按 normal 规则访问；
-5. 如果 `ENHDESSEL=1` 但 normal probe 失败，不把它静默切换成 enhanced，而是停止并确认 2K1000 的
-   integration/databook 是否存在“alternate-only”约束，再决定是否增加 enhanced backend。
-
-这个决定的收益是首个 DWMAC1000 ring 更小、没有 PTP 扩展字段，也不会把 JH7110 DWMAC4 的 descriptor
-布局误复用；代价是 R0 暂不提供 enhanced 的大 buffer、扩展 status 和 PTP 能力。它仍遵守 Linux 定义的
-normal descriptor 协议，但不复制 Linux 在 capability bit 为 1 时自动升级到 enhanced 的默认 policy。
-如果 normal probe 证明 2K1000 实际为 alternate-only，这个 R0 不得偷偷切换；应停在 Gate 2，重新提交
-target renegotiation 或 follow-up RFC。
+因此 R6 的收益是单一、由 capability 派生且与 Linux 默认策略一致的 descriptor 协议；代价是 normal descriptor
+不再是 R0 能力，任何需要 normal 的 core 都必须进入 target review，而不能通过隐藏 fallback 继续启动。
 
 ### 8. 64-bit `dma-mask` 与 DWMAC1000 32-bit 地址表示如何相容
 
