@@ -1,4 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
+use core::marker::PhantomData;
 
 use crate::prelude::{Mutex, MutexGuard, kwarning};
 
@@ -8,25 +9,24 @@ use super::{
 };
 use crate::nemophila::{
     instance::CallbackFailure,
-    weave::{CallbackBinding, PointIdentity},
+    weave::{CallbackBinding, PointSpec},
 };
 
 impl Runtime {
-    pub(in crate::nemophila) fn invoke_clone_observers(&self, creator_tid: u32, child_tid: u32) {
-        self.select_cohort(PointIdentity::CLONE_OBSERVER)
-            .dispatch(creator_tid, child_tid);
+    pub(in crate::nemophila) fn invoke<P: PointSpec>(&self, context: &P::Context) {
+        self.select_cohort::<P>().dispatch(context);
     }
 
     /// Atomically selects every currently live binding and establishes all
     /// invocation ownership before any callback can enter guest execution.
-    pub(in crate::nemophila) fn select_cohort(&self, point: PointIdentity) -> InvocationCohort {
+    pub(in crate::nemophila) fn select_cohort<P: PointSpec>(&self) -> InvocationCohort<P> {
         let mut inner = self.state.inner.lock();
         let mut invocations = Vec::new();
         for (identity, instance) in &mut inner.instances {
             if !instance.lifecycle.is_live() {
                 continue;
             }
-            let Some(binding) = instance.bindings.get(&point).copied() else {
+            let Some(binding) = instance.bindings.get(&P::ID).cloned() else {
                 continue;
             };
             instance.in_flight = instance
@@ -36,10 +36,10 @@ impl Runtime {
             invocations.push(Invocation {
                 state: self.state.clone(),
                 identity: *identity,
-                point,
                 binding,
                 execution: instance.execution.clone(),
                 owned: true,
+                _point: PhantomData,
             });
         }
         InvocationCohort { invocations }
@@ -73,35 +73,35 @@ impl Runtime {
     }
 }
 
-pub(in crate::nemophila) struct InvocationCohort {
-    invocations: Vec<Invocation>,
+pub(in crate::nemophila) struct InvocationCohort<P: PointSpec> {
+    invocations: Vec<Invocation<P>>,
 }
 
-impl InvocationCohort {
-    fn dispatch(self, creator_tid: u32, child_tid: u32) {
+impl<P: PointSpec> InvocationCohort<P> {
+    fn dispatch(self, context: &P::Context) {
         for invocation in self.invocations {
-            let _ = invocation.dispatch(creator_tid, child_tid);
+            let _ = invocation.dispatch(context);
         }
     }
 
     #[cfg(feature = "kunit")]
-    pub(in crate::nemophila) fn into_invocations(self) -> Vec<Invocation> {
+    pub(in crate::nemophila) fn into_invocations(self) -> Vec<Invocation<P>> {
         self.invocations
     }
 }
 
 /// Exact ownership of one admitted callback. Its explicit runtime count, not
 /// this capability's Arc count, is the authoritative unload-busy fact.
-pub(in crate::nemophila) struct Invocation {
+pub(in crate::nemophila) struct Invocation<P: PointSpec> {
     state: Arc<RuntimeState>,
     identity: InstanceIdentity,
-    point: PointIdentity,
     binding: CallbackBinding,
     execution: Arc<Mutex<RuntimeInstance>>,
     owned: bool,
+    _point: PhantomData<fn() -> P>,
 }
 
-impl Invocation {
+impl<P: PointSpec> Invocation<P> {
     /// Enter the real per-instance serial domain. Owner-local protocol tests
     /// may hold this same capability to prove blocking and cross-instance
     /// progress; production dispatch uses no separate test pause hook.
@@ -109,11 +109,7 @@ impl Invocation {
         self.execution.lock()
     }
 
-    pub(in crate::nemophila) fn dispatch(
-        mut self,
-        creator_tid: u32,
-        child_tid: u32,
-    ) -> InvocationOutcome {
+    pub(in crate::nemophila) fn dispatch(mut self, context: &P::Context) -> InvocationOutcome {
         let outcome = {
             let mut execution = self.enter_serial();
             // Another callback may have poisoned this instance while this
@@ -123,7 +119,7 @@ impl Invocation {
             if !self.is_live() {
                 InvocationOutcome::Cancelled
             } else {
-                match execution.invoke_clone_observer(self.binding, creator_tid, child_tid) {
+                match self.binding.invoke::<P>(&mut execution, context) {
                     Ok(()) => InvocationOutcome::Returned,
                     Err(CallbackFailure::Module(classification)) => {
                         let diagnostic = self.publish_poison(classification);
@@ -173,7 +169,7 @@ impl Invocation {
         );
         let diagnostic = PoisonDiagnostic {
             identity: self.identity,
-            point: self.point,
+            point: P::ID,
             classification,
         };
         instance.lifecycle = InstanceLifecycle::Poisoned(diagnostic);
@@ -205,7 +201,7 @@ impl Invocation {
     }
 }
 
-impl Drop for Invocation {
+impl<P: PointSpec> Drop for Invocation<P> {
     fn drop(&mut self) {
         self.finish();
     }

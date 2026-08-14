@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use nemophila_wasm::{CompilationMode, Config, Engine, Error, Linker, Module, Store};
 
 use super::{
-    host::{HostContext, add_logging, add_weave_clone},
+    host::{self, HostContext},
     instance::RuntimeInstance,
     runtime::RegistrationWindow,
 };
@@ -47,8 +47,7 @@ fn load_unpublished_with_host(
     }
 
     let mut linker = Linker::new(module.engine());
-    add_logging(&mut linker).map_err(LoadFailure::HostLink)?;
-    add_weave_clone(&mut linker).map_err(LoadFailure::HostLink)?;
+    host::install(&mut linker).map_err(LoadFailure::HostLink)?;
     let mut store = Store::new(module.engine(), host);
     let instance = linker
         .instantiate_and_start(&mut store, &module)

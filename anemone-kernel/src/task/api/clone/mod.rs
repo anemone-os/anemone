@@ -4,6 +4,7 @@
 //! - https://www.man7.org/linux/man-pages/man2/clone.2.html
 
 pub mod clone3;
+pub(crate) mod nemophila;
 #[path = "clone.rs"]
 pub mod sys_clone;
 

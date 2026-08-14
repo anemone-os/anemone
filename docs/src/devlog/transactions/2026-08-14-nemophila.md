@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Closed / Stage 4 Closed
+Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -14,7 +14,7 @@ Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementatio
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
 kernel/app compiler-target owner拆分；Stage 3与Stage 4各两个Checkpoint的授权均已消费并关闭；Stage 5--6仍未获解析或执行
-授权。
+授权。Stage 4后的单次Feedback Interlude另行授权并关闭，只重整内部owner/API/module/WIT维护边界，不进入Stage 5。
 
 ## Checkpoint Log
 
@@ -525,3 +525,55 @@ proof limit下指示收口。
 **Result / Next / Stop:** Stage 4 Checkpoint 2与Stage 4 **Closed**，Contract Cutover仍为None；不更新current contract或register。
 Stage 5--6仍未解析或授权，不接入task clone seam、不删除Stage 2 temporary Host fixture、不引入management/artifact ingress或
 public ABI，也不声称完整R0 acceptance。
+
+### 2026-08-15 - Stage 4 Feedback Interlude implementation and closure
+
+**Execution Authorization:** 维护者把Stage 4后的软件工程审查与重整授权为一个实施环节，不拆checkpoint；该授权已消费。
+Stage 5及后续gate仍未获解析或执行授权。
+
+**Implementation:** 具体clone point从Nemophila通用机制移到task clone owner：`CloneObserver`拥有kernel-internal identity、
+`Fanout` policy、canonical WIT consumer names、typed `CloneObservation { Tid, Tid }`及Core Wasm lowering。Stage 4 ordinary build
+仍没有production descriptor或call site；KUnit条件下由task owner实际消费通用declaration SPI，证明sibling subsystem不需要
+Nemophila增加clone分支。
+
+Nemophila weave收敛为generic `PointSpec`/`Point<P>`、immutable provider catalog、typed-erasure binding与generic registration
+Host lowering。最小declarative macro只原子产生typed point capability和descriptor；当前没有proc-macro解析/生成义务，因而不
+增加新crate。`CallbackBinding::new::<P>`在擦除前闭合identity、callback signature与context lowering，runtime的cohort/
+invocation也改为`P: PointSpec`，不再独立传递clone identity和TID参数。Host API composition继续显式安装canonical clone
+registration contract；它不由provider catalog驱动，因此empty catalog仍能link并返回`provider-unavailable`，不会退化为
+unknown import。
+
+内部文件按稳定职责目录化：`weave/{mod,catalog,binding,host}.rs`、`host/{mod,logging}.rs`、
+`runtime/{mod,invocation,transaction}.rs`。published state/lifecycle、invocation/retirement、unpublished transaction/registration
+仍属于同一个Runtime owner，拆分没有移动state truth或扩大crate public API；跨模块composition KUnit保留在最低共同owner的
+inline `nemophila::kunits`。ordinary build发现的本轮conditional re-export warning已通过真实`cfg`边界修正；只对等待Stage 5
+production consumer的descriptor/macro re-export保留局部`allow`和退出条件。
+
+**WIT Maintenance Decision:** `nemophila/wit/nemophila.wit`继续是logical interface唯一真相；Rust SDK low-level bindings继续由
+`wit_bindgen`直接生成。kernel Host adapter因当前interpreter提供Core Wasm Linker而保持集中、手写和窄小，并在WIT、logging
+consumer与task point consumer旁记录“同一review change同步修改consumer及真实link/call test”的约束。本阶段不增加WIT hash、
+generated kernel schema mirror、admission metadata/runtime parser或完整Host codegen；后续只有在接口规模/变化率形成真实漂移
+问题时才独立评估自动生成。
+
+**Review / Architecture Friction:** 最终source audit确认clone-specific identity、policy、native context与WIT point mapping只在
+task clone owner；通用runtime/weave没有clone分支，Host composition root的唯一concrete type引用只负责WIT-visible API
+composition。published map与transaction map仍分别是published lifecycle和unpublished reservation唯一真相；type erasure不允许
+identity与typed callable独立构造，provider/Host无法取得runtime private state。module split没有产生`manager/state/utils`空壳、
+第二个registry/schema truth或无consumer facade。普通catalog为空，Stage 5 seam不存在。最终未发现Apollyon、Keter、Euclid或
+需要单独记录的Safe friction。
+
+**Validation:** `just fmt kernel --check`、`just test xtask`（103/103）、`just test nemophila-wasm`（71 unit、54 integration、
+1 doctest、4 focused Miri）、`just test nemophila-module`、`mdbook build docs`与`git diff --check`通过。KUnit-on
+`qemu-virt-rv64-release`/`qemu-virt-la64-release`和KUnit-off `competition-final-rv64-release`/
+`competition-final-la64-release`均build通过；KUnit-on catalog为一个16-byte task-owned conditional descriptor，KUnit-off
+catalog start/end相等。ordinary build没有本轮Nemophila unused import warning。
+
+`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img build/nemophila-stage4-feedback-rv64.log`使用repository
+wrapper生成rootfs、复制preliminary master disk并运行`smp=1`/`memory=1G` guest。652/652 KUnit通过，其中20项Nemophila
+case全部进入并通过；typed callback logging与poison diagnostics可见，socket LTP profile 6/6，随后完成orderly shutdown并
+进入PowerOff machine action。
+
+**Result / Next / Stop:** Stage 4 Feedback Interlude **Closed**，Contract Cutover保持None；不更新current contract或register。
+LA64 guest/hardware、真实task clone placement、production descriptor/call site、canonical module真实vertical slice、Stage 2
+temporary fixture删除、management/artifact ingress/public ABI与完整R0 acceptance均Not Run / Not Proven。Stage 5--6仍未解析或
+授权。

@@ -5,16 +5,16 @@
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
-Stage 3 / Resolved / Closed；Stage 4 / Resolved / Closed；
+Stage 3 / Resolved / Closed；Stage 4 / Resolved / Closed；Stage 4 Feedback Interlude / Resolved / Closed；
 Stage 5--6 / Outline Only / Not Started
-**Execution Authorization：** Stage 4两个Checkpoint授权均已消费；Stage 5--6解析/执行均未授权
+**Execution Authorization：** Stage 4两个Checkpoint与Feedback Interlude单次实施授权均已消费；Stage 5--6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
 两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
-两个共享完整lifecycle边界的execution checkpoint，现均已关闭；Stage 5--6仍只有outline。当前没有Nemophila current contract
-或cutover。
+两个共享完整lifecycle边界的execution checkpoint，现均已关闭；其Feedback Interlude随后在Stage 5前完成owner surface、
+module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5--6仍只有outline。当前没有Nemophila current contract或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
@@ -72,6 +72,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 2 Feedback Interlude | Resolved / Closed | 收拢SDK/config/build owner，移除xtask业务admission mirror，并以R3修正future kernel admission target | None |
 | Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
 | Stage 4 | Resolved / Closed | 闭合 weave、并发调用与完整 instance lifecycle | None |
+| Stage 4 Feedback Interlude | Resolved / Closed | 收拢point/provider owner、typed SPI、Host/WIT consumer与Nemophila内部模块边界 | None |
 | Stage 5 | Outline Only | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
@@ -923,6 +924,62 @@ production point、KUnit-only Host service/pause hook/native-callback abstractio
 checkpoint间重新解析reservation、publication、cohort、poison、cancellation、retirement、owner、acceptance或validation claim，
 必须停止并回RFC review / Target Renegotiation。若真实proof只能通过降低SMP/guest oracle、修改production control flow理解测试
 协议或把Stage 5 clone seam提前引入，同样停止。Stage 4关闭后仍须等待维护者另行授权解析Stage 5。
+
+## Stage 4 Feedback Interlude — Owner surface、模块形状与WIT维护边界
+
+**Resolution：** Resolved / Closed
+
+**Execution Authorization：** 单次实施授权已消费；不拆execution checkpoint
+
+**Purpose：** 在Stage 5消费Stage 4机制前，修正最小实现留下的软件工程摩擦：clone概念进入Nemophila通用runtime/Host，
+point声明macro固化单一point，callback identity与typed callable可被分开传递，flat `weave.rs`/`host.rs`与过载
+`runtime/mod.rs`缺少稳定职责边界，以及canonical WIT与手写kernel consumer之间的维护规则不够显式。本interlude不重开或
+修订Stage 4 target，只对保持既有registration、publication、cohort、poison与retirement语义的内部owner/API/module shape负责。
+
+### Implementation Boundary
+
+- **Point/provider owner：** 具体point的kernel identity、binding policy、native observation context、WIT consumer identity和
+  lowering属于实际subsystem；Nemophila只拥有`PointSpec`/typed `Point`机制、descriptor catalog、registration、dispatch和
+  lifecycle。task clone因此定义`CloneObserver`与包含typed `Tid`的`CloneObservation`，而不是让通用runtime理解
+  creator/child TID。Stage 4 ordinary build仍不贡献production descriptor；task owner只在KUnit条件下声明provider，以证明
+  sibling subsystem能够消费SPI。真实provider activation与clone成功路径调用仍严格属于Stage 5。
+- **Declaration/API shape：** 保留最小声明macro，只让它原子地产生typed point capability与immutable linker descriptor；
+  descriptor只编码point identity/policy，动态callback和全部lifecycle state继续由runtime拥有。当前没有需要token parser、derive、
+  代码生成诊断或跨crate发布的语法义务，因此不引入proc-macro crate。`CallbackBinding::new::<P>`把point identity、Wasm typed
+  callable和context lowering在擦除前闭合；runtime selection、cohort与invocation均以`P: PointSpec`表达，clone分支和free-function
+  TID参数不再进入通用机制。
+- **Host composition / provider availability：** canonical WIT Host contract仍由Nemophila显式composition root安装；具体point的
+  registration lowering泛化为`install_point::<P>`。Host contract不能由当前provider catalog反向决定是否安装，否则empty catalog
+  会把合法registration的`provider-unavailable`结果错误变成unknown import link failure。catalog只决定编译进kernel的provider
+  availability/policy；Host API composition与runtime availability保持两个不同职责，但不形成并列lifecycle truth。
+- **WIT maintenance：** `nemophila/wit/nemophila.wit`继续是logical interface唯一真相。Rust SDK low-level bindings继续由
+  `wit_bindgen`直接生成；kernel因当前first-party interpreter只提供Core Wasm Linker而保留集中、窄小的手写Host consumer。
+  本阶段采用同一review change内同步修改WIT、kernel consumer及真实link/call tests的人工审查策略，并在WIT与consumer旁记录
+  约束；不增加generated kernel schema mirror、WIT hash、admission metadata、runtime parser或完整Host codegen。只有后续接口
+  数量/变化率使手工映射成为可观测维护问题时，才以独立边界评估生成方案。
+- **Module/file shape：** `weave`目录按typed SPI/composition、descriptor catalog、typed callback binding与Host registration
+  lowering拆为`mod.rs`、`catalog.rs`、`binding.rs`、`host.rs`；`host`目录按API composition/context/trap classification与logging
+  lowering拆为`mod.rs`、`logging.rs`；`runtime`目录按published runtime state、invocation/retirement与unpublished
+  transaction/registration拆为`mod.rs`、`invocation.rs`、`transaction.rs`。这些都在原owner内保持行为，不扩大crate public
+  surface。跨load/Host/runtime/lifecycle的composition KUnit继续位于最低共同owner `nemophila/mod.rs`；不为减小行数机械建立
+  `tests.rs`、`kunit.rs`、`utils`或无义务facade。
+- **Protected surface / stop：** 保持canonical WIT/SDK可见surface、load/registration result、provider catalog layout约束、
+  transaction publication/rollback、cohort/in-flight/serialization、poison/cancellation、try-unload与cleanup顺序；不删除Stage 2
+  temporary Host fixture，不接入task clone seam，不引入management/artifact ingress/public ABI/current contract。若重整需要
+  owner迁移、WIT/SDK语义变化、新registry、另一份schema/状态真相或降低既有validation oracle，必须停止并重新分级。
+
+### Result / Validation / Stop
+
+实现已经把具体clone point移入task clone owner，并将通用weave、Host与runtime按上述稳定角色目录化；旧的flat
+`weave.rs`/`host.rs`和clone-specific runtime入口已消失。WIT-visible Host composition仍显式包含当前R0 logging与clone
+registration contract，而ordinary catalog仍为空；Stage 5 seam没有接入。repository format、interpreter/module regression、
+双架构KUnit-on kernel build、WIT/SDK fixture、文档与whitespace检查构成本interlude的validation；具体命令和proof limits见
+transaction。Architecture Friction Scan确认没有第二份lifecycle/schema truth、provider owner穿透、private runtime表示泄漏、
+无真实义务的抽象层、无退出条件临时桥或Stage 5特判。
+
+本interlude据此**Closed**，Contract Cutover保持None；Stage 5--6仍未解析或授权。真实task clone placement、production
+descriptor、canonical module经真实point的vertical slice、temporary fixture删除、management/ABI、双架构guest acceptance与
+hardware仍Not Run / Not Proven。
 
 ## Stage 5 — Clone observer vertical slice
 

@@ -1,5 +1,12 @@
 package anemone:nemophila@0.1.0;
 
+// This file is the logical interface truth. The Rust SDK consumes it through
+// wit-bindgen; kernel Host adapters are deliberately small handwritten
+// consumers because the in-tree interpreter exposes Core Wasm linking rather
+// than a component Host generator. Any interface change must update those
+// adapters and their real link/call tests in the same reviewed change. Do not
+// add a copied schema, hash or runtime metadata policy as another truth.
+
 /// Point-specific clone observer registration.
 interface weave-clone {
     /// The result of asking the Host to bind this instance to the clone point.

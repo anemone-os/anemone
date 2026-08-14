@@ -1,9 +1,10 @@
-use nemophila_wasm::{Engine, Error, Instance as WasmInstance, Module, Store, TrapCode};
-
-use super::{
-    host::{CallbackHostTrap, HostContext, classify_callback_host_trap},
-    weave::CallbackBinding,
+use nemophila_wasm::{
+    Engine, Error, Instance as WasmInstance, Module, Store, TrapCode, TypedFunc, WasmParams,
 };
+
+use super::host::{CallbackHostTrap, HostContext, classify_callback_host_trap};
+#[cfg(feature = "kunit")]
+use super::weave::{CallbackBinding, PointSpec};
 
 /// One complete per-load interpreter island.
 ///
@@ -33,15 +34,13 @@ impl RuntimeInstance {
         }
     }
 
-    pub(super) fn invoke_clone_observer(
+    pub(super) fn invoke_callback<Params: WasmParams>(
         &mut self,
-        binding: CallbackBinding,
-        creator_tid: u32,
-        child_tid: u32,
+        callback: TypedFunc<Params, ()>,
+        params: Params,
     ) -> Result<(), CallbackFailure> {
-        binding
-            .callback
-            .call(&mut self.store, (creator_tid as i32, child_tid as i32))
+        callback
+            .call(&mut self.store, params)
             .map_err(classify_callback_failure)
     }
 
@@ -58,10 +57,12 @@ impl RuntimeInstance {
     }
 
     #[cfg(feature = "kunit")]
-    pub(super) fn clone_callback_binding(&self) -> Result<CallbackBinding, nemophila_wasm::Error> {
+    pub(super) fn callback_binding<P: PointSpec>(
+        &self,
+    ) -> Result<CallbackBinding, nemophila_wasm::Error> {
         self.instance
-            .get_typed_func::<(i32, i32), ()>(&self.store, "observe-clone")
-            .map(CallbackBinding::clone_observer)
+            .get_typed_func::<P::Params, ()>(&self.store, P::CALLBACK_EXPORT)
+            .map(CallbackBinding::new::<P>)
     }
 }
 

@@ -4,7 +4,7 @@ mod host;
 mod instance;
 mod load;
 mod runtime;
-mod weave;
+pub(crate) mod weave;
 
 use alloc::boxed::Box;
 
@@ -14,19 +14,10 @@ pub(crate) use runtime::{InstanceIdentity, PublishFailure, TryUnloadFailure};
 
 static RUNTIME: Lazy<Runtime> = Lazy::new(Runtime::new);
 
-#[cfg(feature = "kunit")]
-weave::declare_clone_observer_provider!(KUNIT_CLONE_POINT, __KUNIT_CLONE_PROVIDER);
-#[cfg(feature = "kunit")]
-weave::declare_kunit_exclusive_provider!(__KUNIT_EXCLUSIVE_PROVIDER);
-
 /// Loads one immutable artifact snapshot through the common transaction and
 /// atomically publishes the resulting instance in the kernel runtime.
 pub(crate) fn load_and_publish(artifact: Box<[u8]>) -> Result<InstanceIdentity, PublishFailure> {
     RUNTIME.load_and_publish(artifact)
-}
-
-fn invoke_clone_observers(creator_tid: u32, child_tid: u32) {
-    RUNTIME.invoke_clone_observers(creator_tid, child_tid);
 }
 
 /// Attempts irreversible retirement without waiting for admitted callbacks.
@@ -38,7 +29,7 @@ pub(crate) fn try_unload(identity: InstanceIdentity) -> Result<(), TryUnloadFail
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::{
-        host::{CallbackHostTrap, LOGGING_MODULE, LOGGING_WRITE, WeaveFailure},
+        host::{CallbackHostTrap, LOGGING_MODULE, LOGGING_WRITE},
         instance::{ModuleTrap, RuntimeInstance},
         load::{LoadFailure, load_unpublished},
         runtime::{
@@ -46,7 +37,8 @@ mod kunits {
             TryUnloadFailure,
         },
         weave::{
-            CatalogFailure, PointIdentity, ProviderCatalog, ProviderDescriptor, provider_catalog,
+            BindingPolicy, CatalogFailure, PointIdentity, PointSpec, ProviderCatalog,
+            ProviderDescriptor, WeaveFailure, provider_catalog,
         },
     };
     use crate::{
@@ -55,7 +47,11 @@ mod kunits {
         prelude::{
             Arc, AtomicBool, AtomicU8, CpuId, Event, Opaque, Ordering, SpinLock, kinfo, ncpus,
         },
-        task::kthread::{KThreadBuilder, KThreadCtx},
+        task::{
+            Tid,
+            clone::nemophila::{CLONE_OBSERVER, CloneObservation, CloneObserver},
+            kthread::{KThreadBuilder, KThreadCtx},
+        },
         utils::any_opaque::AnyOpaque,
     };
     use alloc::{boxed::Box, vec, vec::Vec};
@@ -64,15 +60,55 @@ mod kunits {
     const F32: u8 = 0x7d;
     const V128: u8 = 0x7b;
 
+    #[derive(Clone, Copy)]
+    struct PairObservation {
+        first: i32,
+        second: i32,
+    }
+
+    struct ExclusivePoint;
+
+    impl PointSpec for ExclusivePoint {
+        type Context = PairObservation;
+        type Params = (i32, i32);
+
+        const ID: PointIdentity = PointIdentity::new(u64::MAX);
+        const POLICY: BindingPolicy = BindingPolicy::Exclusive;
+        const REGISTRATION_MODULE: &'static str = "anemone:nemophila/kunit-exclusive@0";
+        const REGISTRATION_FUNCTION: &'static str = "register-observer";
+        const CALLBACK_EXPORT: &'static str = "observe-clone";
+
+        fn lower(context: &Self::Context) -> Self::Params {
+            (context.first, context.second)
+        }
+    }
+
+    fn clone_observation(creator_tid: u32, child_tid: u32) -> CloneObservation {
+        CloneObservation::new(Tid::new(creator_tid), Tid::new(child_tid))
+    }
+
+    const fn pair_observation(first: i32, second: i32) -> PairObservation {
+        PairObservation { first, second }
+    }
+
     static EMPTY_PROVIDERS: [ProviderDescriptor; 0] = [];
     static DUPLICATE_PROVIDERS: [ProviderDescriptor; 2] = [
-        ProviderDescriptor::clone_observer(),
-        ProviderDescriptor::clone_observer(),
+        ProviderDescriptor::of::<CloneObserver>(),
+        ProviderDescriptor::of::<CloneObserver>(),
     ];
-    static INVALID_PROVIDERS: [ProviderDescriptor; 1] = [ProviderDescriptor::invalid()];
+    static INVALID_PROVIDERS: [ProviderDescriptor; 1] =
+        [ProviderDescriptor::invalid::<CloneObserver>()];
+    static EXCLUSIVE_PROVIDERS: [ProviderDescriptor; 2] = [
+        ProviderDescriptor::of::<CloneObserver>(),
+        ProviderDescriptor::of::<ExclusivePoint>(),
+    ];
 
     fn empty_catalog() -> ProviderCatalog {
         ProviderCatalog::validate(&EMPTY_PROVIDERS).unwrap()
+    }
+
+    fn exclusive_catalog() -> ProviderCatalog {
+        ProviderCatalog::validate(&EXCLUSIVE_PROVIDERS).unwrap()
     }
 
     fn load_without_registration(artifact: Box<[u8]>) -> Result<RuntimeInstance, LoadFailure> {
@@ -280,8 +316,8 @@ mod kunits {
             (
                 2,
                 import_func(
-                    super::host::WEAVE_CLONE_MODULE,
-                    super::host::WEAVE_CLONE_REGISTER,
+                    CloneObserver::REGISTRATION_MODULE,
+                    CloneObserver::REGISTRATION_FUNCTION,
                     0,
                 ),
             ),
@@ -385,8 +421,8 @@ mod kunits {
                 2,
                 import_funcs(&[
                     (
-                        super::host::WEAVE_CLONE_MODULE,
-                        super::host::WEAVE_CLONE_REGISTER,
+                        CloneObserver::REGISTRATION_MODULE,
+                        CloneObserver::REGISTRATION_FUNCTION,
                         0,
                     ),
                     (LOGGING_MODULE, LOGGING_WRITE, 1),
@@ -619,10 +655,10 @@ mod kunits {
 
     #[kunit]
     fn provider_catalog_is_typed_validated_and_order_independent() {
-        let _typed_capability = &super::KUNIT_CLONE_POINT;
+        let _typed_capability = &CLONE_OBSERVER;
         let catalog = provider_catalog();
-        assert!(catalog.policy(PointIdentity::CLONE_OBSERVER).is_some());
-        assert!(catalog.policy(PointIdentity::KUNIT_EXCLUSIVE).is_some());
+        assert!(catalog.policy(CloneObserver::ID).is_some());
+        assert!(catalog.policy(ExclusivePoint::ID).is_none());
         assert!(matches!(
             ProviderCatalog::validate(&DUPLICATE_PROVIDERS),
             Err(CatalogFailure::DuplicatePoint)
@@ -631,11 +667,7 @@ mod kunits {
             ProviderCatalog::validate(&INVALID_PROVIDERS),
             Err(CatalogFailure::InvalidDescriptor)
         ));
-        assert!(
-            empty_catalog()
-                .policy(PointIdentity::CLONE_OBSERVER)
-                .is_none()
-        );
+        assert!(empty_catalog().policy(CloneObserver::ID).is_none());
     }
 
     #[kunit]
@@ -749,7 +781,7 @@ mod kunits {
 
     #[kunit]
     fn exclusive_reservation_conflicts_with_pending_and_live_binding() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::with_catalog(exclusive_catalog());
         let first = runtime.begin_load().unwrap();
         let first_instance = load_unpublished(
             callback_only_module(Vec::new()),
@@ -759,10 +791,7 @@ mod kunits {
         assert_eq!(
             first
                 .registration_window()
-                .register(
-                    PointIdentity::KUNIT_EXCLUSIVE,
-                    first_instance.clone_callback_binding().unwrap()
-                )
+                .register(first_instance.callback_binding::<ExclusivePoint>().unwrap())
                 .unwrap(),
             RegistrationResult::Registered
         );
@@ -777,8 +806,9 @@ mod kunits {
             second
                 .registration_window()
                 .register(
-                    PointIdentity::KUNIT_EXCLUSIVE,
-                    second_instance.clone_callback_binding().unwrap()
+                    second_instance
+                        .callback_binding::<ExclusivePoint>()
+                        .unwrap()
                 )
                 .unwrap(),
             RegistrationResult::ProviderUnavailable
@@ -796,10 +826,7 @@ mod kunits {
         assert_eq!(
             third
                 .registration_window()
-                .register(
-                    PointIdentity::KUNIT_EXCLUSIVE,
-                    third_instance.clone_callback_binding().unwrap()
-                )
+                .register(third_instance.callback_binding::<ExclusivePoint>().unwrap())
                 .unwrap(),
             RegistrationResult::ProviderUnavailable
         );
@@ -812,10 +839,10 @@ mod kunits {
         assert_eq!(snapshot.reservations, 0);
     }
 
-    fn take_invocation(
-        invocations: &mut Vec<Invocation>,
+    fn take_invocation<P: PointSpec>(
+        invocations: &mut Vec<Invocation<P>>,
         identity: super::InstanceIdentity,
-    ) -> Invocation {
+    ) -> Invocation<P> {
         let index = invocations
             .iter()
             .position(|invocation| invocation.identity() == identity)
@@ -830,9 +857,7 @@ mod kunits {
         let first = runtime.load_and_publish(artifact.clone()).unwrap();
         let second = runtime.load_and_publish(artifact).unwrap();
 
-        let invocations = runtime
-            .select_cohort(PointIdentity::CLONE_OBSERVER)
-            .into_invocations();
+        let invocations = runtime.select_cohort::<CloneObserver>().into_invocations();
         assert_eq!(invocations.len(), 2);
         let admitted = runtime.snapshot();
         assert_eq!(admitted.in_flight, 2);
@@ -850,7 +875,7 @@ mod kunits {
         assert_eq!(retired.published_bindings, 0);
         assert!(
             runtime
-                .select_cohort(PointIdentity::CLONE_OBSERVER)
+                .select_cohort::<CloneObserver>()
                 .into_invocations()
                 .is_empty()
         );
@@ -866,35 +891,40 @@ mod kunits {
             .load_and_publish(fatal_registration(CallbackExport::Correct(Vec::new())))
             .unwrap();
 
-        let mut first_cohort = runtime
-            .select_cohort(PointIdentity::CLONE_OBSERVER)
-            .into_invocations();
-        let mut queued_cohort = runtime
-            .select_cohort(PointIdentity::CLONE_OBSERVER)
-            .into_invocations();
+        let mut first_cohort = runtime.select_cohort::<CloneObserver>().into_invocations();
+        let mut queued_cohort = runtime.select_cohort::<CloneObserver>().into_invocations();
         assert_eq!(runtime.snapshot().in_flight, 4);
 
         let trapping_first = take_invocation(&mut first_cohort, trapping);
         let normal_first = take_invocation(&mut first_cohort, normal);
         assert!(first_cohort.is_empty());
-        let InvocationOutcome::Poisoned(diagnostic) = trapping_first.dispatch(1, 2) else {
+        let InvocationOutcome::Poisoned(diagnostic) =
+            trapping_first.dispatch(&clone_observation(1, 2))
+        else {
             panic!("guest trap did not poison its Nemophila instance")
         };
         assert!(matches!(diagnostic.classification, ModuleTrap::Guest(_)));
-        assert_eq!(normal_first.dispatch(1, 2), InvocationOutcome::Returned);
+        assert_eq!(
+            normal_first.dispatch(&clone_observation(1, 2)),
+            InvocationOutcome::Returned
+        );
 
         let trapping_queued = take_invocation(&mut queued_cohort, trapping);
         let normal_queued = take_invocation(&mut queued_cohort, normal);
         assert!(queued_cohort.is_empty());
-        assert_eq!(trapping_queued.dispatch(3, 4), InvocationOutcome::Cancelled);
-        assert_eq!(normal_queued.dispatch(3, 4), InvocationOutcome::Returned);
+        assert_eq!(
+            trapping_queued.dispatch(&clone_observation(3, 4)),
+            InvocationOutcome::Cancelled
+        );
+        assert_eq!(
+            normal_queued.dispatch(&clone_observation(3, 4)),
+            InvocationOutcome::Returned
+        );
 
         let snapshot = runtime.snapshot();
         assert_eq!(snapshot.in_flight, 0);
         assert_eq!(snapshot.poisoned, 1);
-        let only_live = runtime
-            .select_cohort(PointIdentity::CLONE_OBSERVER)
-            .into_invocations();
+        let only_live = runtime.select_cohort::<CloneObserver>().into_invocations();
         assert_eq!(only_live.len(), 1);
         assert_eq!(only_live[0].identity(), normal);
         drop(only_live);
@@ -904,26 +934,23 @@ mod kunits {
 
     #[kunit]
     fn poisoned_exclusive_binding_retains_occupancy_until_retirement() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::with_catalog(exclusive_catalog());
         let first = runtime.begin_load().unwrap();
         let first_instance =
             load_unpublished(late_registration(), first.registration_window()).unwrap();
         assert_eq!(
             first
                 .registration_window()
-                .register(
-                    PointIdentity::KUNIT_EXCLUSIVE,
-                    first_instance.clone_callback_binding().unwrap()
-                )
+                .register(first_instance.callback_binding::<ExclusivePoint>().unwrap())
                 .unwrap(),
             RegistrationResult::Registered
         );
         let poisoned = first.commit(first_instance).unwrap();
-        let mut cohort = runtime
-            .select_cohort(PointIdentity::KUNIT_EXCLUSIVE)
-            .into_invocations();
+        let mut cohort = runtime.select_cohort::<ExclusivePoint>().into_invocations();
         assert_eq!(cohort.len(), 1);
-        let InvocationOutcome::Poisoned(diagnostic) = cohort.pop().unwrap().dispatch(5, 6) else {
+        let InvocationOutcome::Poisoned(diagnostic) =
+            cohort.pop().unwrap().dispatch(&pair_observation(5, 6))
+        else {
             panic!("Host trap did not poison its Nemophila instance")
         };
         assert_eq!(
@@ -941,8 +968,9 @@ mod kunits {
             contender
                 .registration_window()
                 .register(
-                    PointIdentity::KUNIT_EXCLUSIVE,
-                    contender_instance.clone_callback_binding().unwrap()
+                    contender_instance
+                        .callback_binding::<ExclusivePoint>()
+                        .unwrap(),
                 )
                 .unwrap(),
             RegistrationResult::ProviderUnavailable
@@ -961,8 +989,9 @@ mod kunits {
             replacement
                 .registration_window()
                 .register(
-                    PointIdentity::KUNIT_EXCLUSIVE,
-                    replacement_instance.clone_callback_binding().unwrap()
+                    replacement_instance
+                        .callback_binding::<ExclusivePoint>()
+                        .unwrap(),
                 )
                 .unwrap(),
             RegistrationResult::Registered
@@ -976,7 +1005,7 @@ mod kunits {
         let identity =
             super::load_and_publish(logging_callback_module(b"NEMOPHILA-KUNIT:CALLBACK-LOGGING"))
                 .unwrap();
-        super::KUNIT_CLONE_POINT.invoke(u32::MAX, 0);
+        CLONE_OBSERVER.notify(clone_observation(u32::MAX, 0));
         let returned = super::RUNTIME.snapshot();
         assert_eq!(returned.in_flight, 0);
         assert_eq!(returned.poisoned, 0);
@@ -990,7 +1019,7 @@ mod kunits {
 
     #[derive(Opaque)]
     struct SerialWorker {
-        invocation: SpinLock<Option<Invocation>>,
+        invocation: SpinLock<Option<Invocation<CloneObserver>>>,
         phase: Arc<AtomicU8>,
         changed: Arc<Event>,
     }
@@ -1014,7 +1043,10 @@ mod kunits {
             Ok(SERIAL_HELD)
         );
         worker.changed.publish(usize::MAX, true);
-        assert_eq!(invocation.dispatch(7, 8), InvocationOutcome::Returned);
+        assert_eq!(
+            invocation.dispatch(&clone_observation(7, 8)),
+            InvocationOutcome::Returned
+        );
         assert_eq!(
             worker.phase.compare_exchange(
                 SERIAL_RELEASED,
@@ -1030,7 +1062,7 @@ mod kunits {
 
     #[derive(Opaque)]
     struct IndependentWorker {
-        invocation: SpinLock<Option<Invocation>>,
+        invocation: SpinLock<Option<Invocation<CloneObserver>>>,
         done: Arc<AtomicBool>,
         completed: Arc<Event>,
     }
@@ -1044,7 +1076,10 @@ mod kunits {
             .lock()
             .take()
             .expect("Nemophila independent worker invocation was already taken");
-        assert_eq!(invocation.dispatch(9, 10), InvocationOutcome::Returned);
+        assert_eq!(
+            invocation.dispatch(&clone_observation(9, 10)),
+            InvocationOutcome::Returned
+        );
         worker.done.store(true, Ordering::Release);
         worker.completed.publish(usize::MAX, true);
         0
@@ -1063,15 +1098,11 @@ mod kunits {
         let serialized = runtime.load_and_publish(artifact.clone()).unwrap();
         let independent = runtime.load_and_publish(artifact).unwrap();
 
-        let mut first_cohort = runtime
-            .select_cohort(PointIdentity::CLONE_OBSERVER)
-            .into_invocations();
+        let mut first_cohort = runtime.select_cohort::<CloneObserver>().into_invocations();
         let held = take_invocation(&mut first_cohort, serialized);
         let independent_invocation = take_invocation(&mut first_cohort, independent);
         assert!(first_cohort.is_empty());
-        let mut second_cohort = runtime
-            .select_cohort(PointIdentity::CLONE_OBSERVER)
-            .into_invocations();
+        let mut second_cohort = runtime.select_cohort::<CloneObserver>().into_invocations();
         let serialized_invocation = take_invocation(&mut second_cohort, serialized);
         drop(second_cohort);
 
