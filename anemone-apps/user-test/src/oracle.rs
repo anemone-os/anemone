@@ -121,7 +121,7 @@ pub(crate) fn run_local() {
     // run_tcp_local_pair();
 }
 
-pub(crate) fn run_tcp_stage5(peer: &str, port: &str) {
+pub(crate) fn run_tcp_stage5(peer: &str, port: &str, ingress_port: &str) {
     println!(
         "TCPSTAGE5:START:arch={}:peer={peer}:port={port}",
         crate::ARCH_LABEL
@@ -130,9 +130,21 @@ pub(crate) fn run_tcp_stage5(peer: &str, port: &str) {
         panic!("user-test: TCP Stage 5 requires the tcp-r0 oracle app");
     }
 
+    crate::process::run_execve(
+        "/bin/socket-test",
+        &["socket-test", "--netlink"],
+        &[],
+        "TCP Stage 5 raw sock-diag oracle",
+    );
+    println!("TCPSTAGE5:SOCK-DIAG:PASS:idiag_if=0");
+
     for binary in TCP_R0 {
         for (mode, args) in [
             ("self-external", vec!["tcp-r0", "--self-external"]),
+            (
+                "listener-ingress",
+                vec!["tcp-r0", "--listener-ingress", peer, ingress_port],
+            ),
             (
                 "remote-external",
                 vec!["tcp-r0", "--remote-external", peer, port],

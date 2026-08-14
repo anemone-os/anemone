@@ -1,12 +1,12 @@
 # RFC-20260814-tcp-listener-ingress-publication
 
-**状态：** Accepted\
+**状态：** Closed\
 **修订：** R0\
 **负责人：** doruche, Codex\
 **最后更新：** 2026-08-14\
 **领域：** Network / IPv4 TCP / listener / sock-diag\
-**影响契约：** Refine [`NET-TCP-ENDPOINT-001`](../../contracts/net/tcp-socket.md#net-tcp-endpoint-001--endpointlistener与connection-outcome由stack-tcp-owner统一拥有)、[`NET-CONTROL-PLANE-001`](../../contracts/net/control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)、[`NETLINK-SOCK-DIAG-001`](../../contracts/socket/netlink-diagnostics.md#netlink-sock-diag-001--tcp-owner形成normalized-one-window-record-set)\
-**执行记录：** None；Accepted R0只固定target与Implementation Boundary，不构成实现授权，current contract尚未切换
+**影响契约：** Refine [`NET-TCP-ENDPOINT-001`](../../contracts/net/tcp-socket.md#net-tcp-endpoint-001--endpointlistener与connection-outcome由stack-tcp-owner统一拥有)、[`NET-CONTROL-PLANE-001`](../../contracts/net/control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)、[`NETLINK-SOCK-DIAG-001`](../../contracts/socket/netlink-diagnostics.md#netlink-sock-diag-001--tcp-owner形成normalized-one-window-record-set)；全部 Active\
+**执行记录：** Git / PR；transaction None；`TCP-LISTENER-INGRESS-CUTOVER` Effective
 
 ## 摘要
 
@@ -162,7 +162,7 @@ Connection、closing与deferred records继续报告真实interface与tuple。具
 
 ## Contract Impact
 
-三项变化只在实现、验证和review整体满足后由`TCP-LISTENER-INGRESS-CUTOVER`原子生效；此前current contract保持不变。
+三项变化已在实现、验证和review整体满足后由`TCP-LISTENER-INGRESS-CUTOVER`原子生效；下表记录本次cutover delta。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
@@ -239,6 +239,26 @@ hotplug、多external interface、IPv6及压力/长时backlog测试默认Not Run
 single-NIC QEMU外推。LA64若仍在完整shutdown顺序后因缺少power-off handler停在halt，必须记录人工终止与不能证明
 wrapper exit 0的边界。
 
+## 当前执行事实
+
+- owner host新增`tcp_listener_ingress` `10/10`，覆盖path matrix、无external deployment、aggregate/full backlog、
+  re-listen shrink/grow、publication rollback、claim/take/cancel/stale generation以及idle/half-open/pending/claimed/
+  deferred withdrawal；完整`just test net-host`、no-default check与xtask `93/93`通过。
+- `just fmt kernel`、`just fmt user-test/socket-test --check`与`git diff --check`通过；RV64、LA64 release kernel build及两架构
+  `tcp-r0-oracle`、`socket-test`、`user-test` app build通过。最终closure按维护者指示复用这些已经完成的证据，未重复
+  运行QEMU或build。
+- RV64运行`639/639` KUnit；glibc/musl均通过wildcard与external-specific local self-connect + hostfwd ingress、
+  loopback-specific hostfwd负向case、raw sock-diag `idiag_if = 0`、remote external stream/FIN/RST、`ss -tan`与
+  CAgent，orderly shutdown后QEMU exit 0，runner summary PASS。
+- LA64运行`642/642` KUnit并通过与RV64相同的双libc listener/active-connect/diagnostics/CAgent markers；guest完成
+  `filesystem -> network -> device -> PowerOff`顺序后因没有成功power-off handler停在halt，随后按维护者指示人工
+  终止。该证据证明guest语义与完整shutdown，不证明wrapper exit 0。
+- 最终独立review为`0 Apollyon / 0 Keter / 0 Euclid`。Architecture Friction Scan未发现第二份listener/backlog/
+  interface truth、owner穿透、private representation泄漏、遗漏progression或无退出条件bridge；RV64 HMP hostfwd保持
+  validation-only，并带owner原因与退出条件。
+- physical hardware、`smp > 1`、其它NIC/provider/deployment、runtime hotplug、多external interface、IPv6、full
+  network LTP、完整preliminary/final harness及压力/长时backlog均Not Run。
+
 ## 风险与反馈
 
 - 为保证任一单独path使用完整backlog，private engine上界可能随适用path数量增长。当前target只有local加至多一个
@@ -262,3 +282,16 @@ wrapper exit 0的边界。
 | 修订 | 日期 | 语义变化 | Review / Evidence |
 | --- | --- | --- | --- |
 | R0 | 2026-08-14 | 接受boot-static local/external listener projection、aggregate backlog admission、slot phase唯一occupancy truth、独立Connection handoff与单一closure checkpoint；三项contract delta保持pending直到最终原子cutover。 | 维护者决定；RFC review；文档验证 |
+| R0 closure | 2026-08-14 | target与owner不变；implementation、双架构acceptance、独立review与Architecture Friction Scan闭合，执行唯一`TCP-LISTENER-INGRESS-CUTOVER`。 | owner host `10/10`；net-host/xtask；RV64 `639/639`、LA64 `642/642` KUnit与双架构runtime；独立review全0 |
+
+## Closure
+
+Closed R0。`TCP-LISTENER-INGRESS-CUTOVER`已原子生效：`NET-TCP-ENDPOINT-001`、
+`NET-CONTROL-PLANE-001`与`NETLINK-SOCK-DIAG-001`均已Refine并保持Active。一份logical listener现在由Stack TCP owner
+投影到boot-static local/至多一个external ingress path，以`Pending/Claimed` slot phase统一aggregate backlog，opaque
+child按实际projection handoff，withdrawal闭合全部private engine；sock-diag只输出一条unscoped aggregate LISTEN。
+
+实现未改变active connect、Socket ABI、runtime topology或其它protocol owner，没有新增register issue、accepted
+limitation、supporting page、transaction或后续gate。LA64只证明完整guest marker与orderly shutdown，不证明wrapper
+exit 0；其它Not Run边界保留在“当前执行事实”。本页从此冻结，后续工作必须从live source、current contract与register
+建立新的Implementation Boundary。

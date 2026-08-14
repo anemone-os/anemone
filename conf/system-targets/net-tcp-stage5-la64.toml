@@ -12,4 +12,4 @@ default-gateway = "10.0.2.2"
 
 [initial-program]
 type = "rootfs-entry"
-argv = ["/sbin/init", "--tcp-stage5", "10.0.2.2", "25050"]
+argv = ["/sbin/init", "--tcp-stage5", "10.0.2.2", "25050", "25051"]

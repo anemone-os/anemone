@@ -90,7 +90,9 @@ impl Stack {
         Self::with_policy(StackPolicy::new(
             UdpNamespacePolicy::new(64, 32768, 60999),
             IcmpRawNamespacePolicy::new(64),
-            TcpPolicy::new(64, 128, 16, 16384, 16384, 128, 60_000, 60_000, 32768, 60999),
+            TcpPolicy::new(
+                64, 128, 16, 2, 16384, 16384, 128, 60_000, 60_000, 32768, 60999,
+            ),
         ))
     }
 
@@ -100,7 +102,9 @@ impl Stack {
         Self::with_policy(StackPolicy::new(
             policy,
             IcmpRawNamespacePolicy::new(64),
-            TcpPolicy::new(64, 128, 16, 16384, 16384, 128, 60_000, 60_000, 32768, 60999),
+            TcpPolicy::new(
+                64, 128, 16, 2, 16384, 16384, 128, 60_000, 60_000, 32768, 60999,
+            ),
         ))
     }
 }

@@ -147,6 +147,7 @@ pub struct Parameters {
     pub net_tcp_endpoint_capacity: Option<usize>,
     pub net_tcp_engine_timer_capacity: Option<usize>,
     pub net_tcp_listener_completed_capacity: Option<usize>,
+    pub net_tcp_listener_projection_capacity: Option<usize>,
     pub net_tcp_rx_buffer_bytes: Option<usize>,
     pub net_tcp_tx_buffer_bytes: Option<usize>,
     pub net_tcp_deferred_reclaim_capacity: Option<usize>,
@@ -274,6 +275,7 @@ impl Parameters {
         materialize!(net_tcp_endpoint_capacity);
         materialize!(net_tcp_engine_timer_capacity);
         materialize!(net_tcp_listener_completed_capacity);
+        materialize!(net_tcp_listener_projection_capacity);
         materialize!(net_tcp_rx_buffer_bytes);
         materialize!(net_tcp_tx_buffer_bytes);
         materialize!(net_tcp_deferred_reclaim_capacity);
@@ -532,8 +534,10 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
 pub const NET_TCP_ENDPOINT_CAPACITY: usize = {};
 /// Shared upper bound for TCP engines and their embedded protocol timers.
 pub const NET_TCP_ENGINE_TIMER_CAPACITY: usize = {};
-/// Completed-child engine slots retained by one private TCP listener.
+/// Maximum aggregate pending/claimed backlog owned by one logical TCP listener.
 pub const NET_TCP_LISTENER_COMPLETED_CAPACITY: usize = {};
+/// Maximum ingress projections owned by one logical TCP listener.
+pub const NET_TCP_LISTENER_PROJECTION_CAPACITY: usize = {};
 /// Receive bytes owned by each private TCP engine.
 pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
 /// Transmit bytes owned by each private TCP engine.
@@ -647,6 +651,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_tcp_endpoint_capacity),
             resolved!(net_tcp_engine_timer_capacity),
             resolved!(net_tcp_listener_completed_capacity),
+            resolved!(net_tcp_listener_projection_capacity),
             resolved!(net_tcp_rx_buffer_bytes),
             resolved!(net_tcp_tx_buffer_bytes),
             resolved!(net_tcp_deferred_reclaim_capacity),

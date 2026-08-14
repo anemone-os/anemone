@@ -216,7 +216,11 @@ impl Protocols {
         self.tcp.invalidate_interface(interface);
     }
 
-    pub(crate) fn reclaim_tcp(&mut self, interface: InterfaceId, sockets: &mut SocketSet<'static>) {
-        self.tcp.reclaim_interface(interface, sockets);
+    pub(crate) fn reclaim_tcp(
+        &mut self,
+        interface: InterfaceId,
+        sockets: &mut SocketSet<'static>,
+    ) -> bool {
+        self.tcp.reclaim_interface(interface, sockets)
     }
 }
