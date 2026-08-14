@@ -1,7 +1,6 @@
 use core::time::Duration;
 
 use crate::{
-    arch,
     fs::{inode::Inode, iomux::PollEvent},
     prelude::*,
     utils::any_opaque::{AnyOpaque, NilOpaque},
@@ -12,6 +11,26 @@ pub(super) struct StaticEntry {
     mode: InodeMode,
     kind: StaticEntryKind,
     ino: MonoOnce<Ino>,
+}
+
+impl StaticEntry {
+    pub(super) const fn dir(name: &'static str, children: &'static [&'static StaticEntry]) -> Self {
+        Self {
+            name,
+            mode: InodeMode::new(InodeType::Dir, InodePerm::all_rx()),
+            kind: StaticEntryKind::Dir(children),
+            ino: unsafe { MonoOnce::new() },
+        }
+    }
+
+    pub(super) const fn text(name: &'static str, getter: fn() -> String) -> Self {
+        Self {
+            name,
+            mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
+            kind: StaticEntryKind::Text(getter),
+            ino: unsafe { MonoOnce::new() },
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -25,46 +44,6 @@ struct StaticEntryPrivate {
     entry: &'static StaticEntry,
     parent_ino: Ino,
 }
-
-fn address_bits() -> String {
-    format!("{}\n", arch::address_bits())
-}
-
-fn cpu_byteorder() -> String {
-    format!("{}\n", arch::cpu_byteorder())
-}
-
-static ADDRESS_BITS: StaticEntry = StaticEntry {
-    name: "address_bits",
-    mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
-    kind: StaticEntryKind::Text(address_bits),
-    ino: unsafe { MonoOnce::new() },
-};
-
-static CPU_BYTEORDER: StaticEntry = StaticEntry {
-    name: "cpu_byteorder",
-    mode: InodeMode::new(InodeType::Regular, InodePerm::all_r()),
-    kind: StaticEntryKind::Text(cpu_byteorder),
-    ino: unsafe { MonoOnce::new() },
-};
-
-static KERNEL_CHILDREN: &[&StaticEntry] = &[&ADDRESS_BITS, &CPU_BYTEORDER];
-
-static KERNEL: StaticEntry = StaticEntry {
-    name: "kernel",
-    mode: InodeMode::new(InodeType::Dir, InodePerm::all_rx()),
-    kind: StaticEntryKind::Dir(KERNEL_CHILDREN),
-    ino: unsafe { MonoOnce::new() },
-};
-
-static ROOT_CHILDREN: &[&StaticEntry] = &[&KERNEL];
-
-pub(super) static ROOT: StaticEntry = StaticEntry {
-    name: "/",
-    mode: InodeMode::new(InodeType::Dir, InodePerm::all_rx()),
-    kind: StaticEntryKind::Dir(ROOT_CHILDREN),
-    ino: unsafe { MonoOnce::new() },
-};
 
 fn private(inode: &InodeRef) -> &StaticEntryPrivate {
     let private = inode
@@ -308,18 +287,19 @@ fn validate_entry(entry: &'static StaticEntry, seen: &mut Vec<*const StaticEntry
     }
 }
 
-pub(super) fn validate_tree() {
-    validate_entry(&ROOT, &mut Vec::new(), true);
+pub(super) fn validate_tree(root: &'static StaticEntry) {
+    validate_entry(root, &mut Vec::new(), true);
 }
 
-pub(super) fn seed_tree(sb: &Arc<SuperBlock>) {
+pub(super) fn seed_tree(sb: &Arc<SuperBlock>, root: &'static StaticEntry) {
     fn seed(
         sb: &Arc<SuperBlock>,
         entry: &'static StaticEntry,
+        root: &'static StaticEntry,
         parent_ino: Ino,
         next_ino: &mut u64,
     ) {
-        let ino = if core::ptr::eq(entry, &ROOT) {
+        let ino = if core::ptr::eq(entry, root) {
             super::ROOT_INO
         } else {
             let ino = Ino::new(*next_ino);
@@ -351,10 +331,10 @@ pub(super) fn seed_tree(sb: &Arc<SuperBlock>) {
         sb.seed_inode(Arc::new(inode));
         if let StaticEntryKind::Dir(children) = entry.kind {
             for child in children {
-                seed(sb, child, ino, next_ino);
+                seed(sb, child, root, ino, next_ino);
             }
         }
     }
 
-    seed(sb, &ROOT, super::ROOT_INO, &mut 2);
+    seed(sb, root, root, super::ROOT_INO, &mut 2);
 }

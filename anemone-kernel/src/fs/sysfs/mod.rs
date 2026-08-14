@@ -1,13 +1,25 @@
 //! Minimal static sysfs namespace.
+//!
+//! Prefer a namespace-bearing source layout aligned with the visible sysfs
+//! tree: a real directory normally gets a Rust module directory, while each
+//! non-directory entry lives in its own Rust source file. Infrastructure such
+//! as `entry` and `superblock` remains separate because it does not represent a
+//! namespace entry.
 
 use crate::{fs::filesystem::FileSystemMountOps, prelude::*, utils::any_opaque::NilOpaque};
 
 mod entry;
+mod kernel;
 mod superblock;
 
+use entry::StaticEntry;
 use superblock::SYSFS_SB_OPS;
 
 const ROOT_INO: Ino = Ino::new(1);
+
+static ROOT_CHILDREN: &[&StaticEntry] = &[&kernel::KERNEL_ENTRY];
+
+static ROOT: StaticEntry = StaticEntry::dir("/", ROOT_CHILDREN);
 
 static SYSFS_SB: MonoOnce<Arc<SuperBlock>> = unsafe { MonoOnce::new() };
 
@@ -29,7 +41,7 @@ fn init() {
     // Validate the complete topology before publishing its filesystem type.
     // Any later failure remains boot-fatal, so userspace can never observe a
     // registered but partially seeded sysfs.
-    entry::validate_tree();
+    entry::validate_tree(&ROOT);
     let fs = register_filesystem(&SYSFS_OPS)
         .unwrap_or_else(|error| panic!("failed to register sysfs: {:?}", error));
     let sb = Arc::new(SuperBlock::new(
@@ -39,7 +51,7 @@ fn init() {
         ROOT_INO,
         MountSource::Pseudo,
     ));
-    entry::seed_tree(&sb);
+    entry::seed_tree(&sb, &ROOT);
     SYSFS_SB.init(|slot| {
         slot.write(sb);
     });
