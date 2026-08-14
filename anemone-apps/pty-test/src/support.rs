@@ -1,7 +1,7 @@
 use anemone_rs::{
     abi::{
         fs::linux::{
-            open::{O_NOCTTY, O_RDWR},
+            open::{O_NOCTTY, O_RDONLY, O_RDWR},
             stat::Stat,
         },
         tty::linux::{ECHO, ICANON, ISIG, OPOST, Termios, VMIN, VTIME},
@@ -132,6 +132,35 @@ pub fn read_exact(fd: Fd, mut bytes: &mut [u8]) -> Result<(), Errno> {
         }
     }
     Ok(())
+}
+
+pub fn proc_tty_fields(pid: u32) -> Result<(i32, i64), Errno> {
+    let path = format!("/proc/{pid}/stat");
+    let stat = OwnedFd::new(openat(AtFd::Cwd, Path::new(path.as_str()), O_RDONLY, 0)?);
+    let mut data = [0u8; 512];
+    let mut used = 0;
+    loop {
+        if used == data.len() {
+            return Err(EIO);
+        }
+        match read(stat.raw(), &mut data[used..]) {
+            Ok(0) => break,
+            Ok(count) => used += count,
+            Err(EINTR) => {},
+            Err(errno) => return Err(errno),
+        }
+    }
+
+    let text = core::str::from_utf8(&data[..used]).map_err(|_| EIO)?;
+    let (_, fields) = text.rsplit_once(") ").ok_or(EIO)?;
+    let mut fields = fields.split_ascii_whitespace();
+    // state, ppid, pgrp, session precede tty_nr and tpgid.
+    for _ in 0..4 {
+        fields.next().ok_or(EIO)?;
+    }
+    let tty_nr = fields.next().ok_or(EIO)?.parse().map_err(|_| EIO)?;
+    let tpgid = fields.next().ok_or(EIO)?.parse().map_err(|_| EIO)?;
+    Ok((tty_nr, tpgid))
 }
 
 pub fn raw_termios(fd: Fd) -> Result<Termios, Errno> {

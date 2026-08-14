@@ -21,7 +21,7 @@ use anemone_rs::{
     os::linux::{
         fs::{
             AtFd, EpollCreateFlags, EpollCtlOp, PipeFlags, close, epoll_create1, epoll_ctl,
-            epoll_wait, fcntl_getfl, fcntl_setfl, openat, pipe2, ppoll, read, write,
+            epoll_wait, fcntl_getfl, fcntl_setfl, fstat, openat, pipe2, ppoll, read, write,
         },
         process::{
             WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, getpid, setpgid, setsid,
@@ -38,7 +38,8 @@ use anemone_rs::{
 };
 
 use crate::support::{
-    OwnedFd, Pair, ensure, expect_errno, raw_termios, read_exact, wait_child, write_all,
+    OwnedFd, Pair, ensure, expect_errno, proc_tty_fields, raw_termios, read_exact, wait_child,
+    write_all,
 };
 
 const ZERO_TIMEOUT: TimeSpec = TimeSpec {
@@ -232,6 +233,22 @@ fn implicit_peer_body() -> Result<(), Errno> {
 
 pub fn test_peer_implicit_acquire() -> Result<(), Errno> {
     run_new_session(implicit_peer_body)
+}
+
+fn proc_tty_projection_body() -> Result<(), Errno> {
+    let leader = getpid()?;
+    ensure(proc_tty_fields(leader)? == (0, -1))?;
+
+    let pair = Pair::allocate()?;
+    pair.unlock()?;
+    let slave = pair.open_path(O_RDWR)?;
+    let stat = fstat(slave.raw())?;
+    ensure(stat.st_rdev <= u32::MAX as u64)?;
+    ensure(proc_tty_fields(leader)? == (stat.st_rdev as u32 as i32, i64::from(leader)))
+}
+
+pub fn test_proc_tty_projection() -> Result<(), Errno> {
+    run_new_session(proc_tty_projection_body)
 }
 
 fn no_ctty_and_explicit_body() -> Result<(), Errno> {

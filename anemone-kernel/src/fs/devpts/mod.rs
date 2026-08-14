@@ -2,7 +2,7 @@
 
 use crate::{
     device::{
-        devnum::{DeviceNumber, MINOR_BITS, MajorNum, MinorNum},
+        devnum::{CharDevNum, DeviceNumber, MINOR_BITS, MajorNum, MinorNum},
         tty::{LivePtyPair, PreparedPtyPair, PtyBindingCapability, PtyBindingOps, prepare_pair},
     },
     fs::{
@@ -24,6 +24,10 @@ use inode::{DevptsInode, new_root_inode, new_slave_inode};
 const DEVPTS_ROOT_INO: Ino = Ino::new(1);
 const DEVPTS_SLAVE_MAJOR: usize = 136;
 const DEVPTS_SUPER_MAGIC: u64 = 0x1cd1;
+
+fn slave_devnum(index: usize) -> CharDevNum {
+    CharDevNum::new(MajorNum::new(DEVPTS_SLAVE_MAJOR), MinorNum::new(index))
+}
 
 static_assert!(
     PTY_SYSTEM_CAPACITY > 0,
@@ -504,7 +508,10 @@ fn prepare_ptmx_description(
         .lock()
         .take()
         .expect("devpts ptmx activation consumed more than once");
-    pair.install_cleanup(PtyBindingCapability::new(state.binding.clone()))?;
+    pair.install_cleanup(
+        PtyBindingCapability::new(state.binding.clone()),
+        slave_devnum(state.binding.episode().index),
+    )?;
     let description_ops = pair.compose_description_ops(description_ops);
     Ok(PreparedOpenDescription {
         description_ops,

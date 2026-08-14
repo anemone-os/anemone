@@ -14,6 +14,10 @@ struct RelationEntry {
 
 struct RelationSlot {
     endpoint: Arc<TtyEndpoint>,
+    /// Immutable identity supplied by the endpoint publication owner. This
+    /// stable snapshot serves procfs ABI projection only and must never drive
+    /// relation admission, mutation, or cleanup decisions.
+    devnum: CharDevNum,
     participant_generation: u64,
     relation_generation: u64,
     entry: Option<RelationEntry>,
@@ -47,6 +51,16 @@ pub(super) struct RelationEnrollment {
     endpoint: Arc<TtyEndpoint>,
 }
 
+/// Read-local procfs projection of one live controlling relation.
+///
+/// Endpoint, generation, and topology capabilities remain private to their
+/// owners; procfs receives only the values needed by its ABI boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TtyProcSnapshot {
+    pub(crate) devnum: CharDevNum,
+    pub(crate) foreground_pgid: Option<Tid>,
+}
+
 /// Exact retirement capability for one committed registry participation.
 /// Registry membership remains authoritative; this key is only a stable
 /// operation capability and may be stale after an earlier retirement.
@@ -73,6 +87,7 @@ struct ParticipantKey {
 #[derive(Clone)]
 pub(super) struct RelationSnapshot {
     endpoint: Arc<TtyEndpoint>,
+    devnum: CharDevNum,
     session: TtySession,
     foreground: Option<TtyProcessGroup>,
     participant_generation: u64,
@@ -97,7 +112,11 @@ impl RelationRegistry {
         }
     }
 
-    fn enroll(&self, endpoint: Arc<TtyEndpoint>) -> Result<ParticipantKey, SysError> {
+    fn enroll(
+        &self,
+        endpoint: Arc<TtyEndpoint>,
+        devnum: CharDevNum,
+    ) -> Result<ParticipantKey, SysError> {
         let generation = {
             let mut inner = self.inner.lock();
             if inner
@@ -115,6 +134,7 @@ impl RelationRegistry {
             inner.next_participant_generation = next_generation(generation);
             inner.slots.push(RelationSlot {
                 endpoint: endpoint.clone(),
+                devnum,
                 participant_generation: generation,
                 relation_generation: 0,
                 entry: None,
@@ -151,8 +171,8 @@ impl RelationEnrollment {
         Self { endpoint }
     }
 
-    pub(super) fn commit(self) -> Result<RelationParticipant, SysError> {
-        let key = registry().enroll(self.endpoint)?;
+    pub(super) fn commit(self, devnum: CharDevNum) -> Result<RelationParticipant, SysError> {
+        let key = registry().enroll(self.endpoint, devnum)?;
         Ok(RelationParticipant { key })
     }
 }
@@ -289,6 +309,7 @@ impl ImplicitAcquire {
                     {
                         inspection = Inspection::Conflict(RelationSnapshot {
                             endpoint: slot.endpoint.clone(),
+                            devnum: slot.devnum,
                             session: entry.session.clone(),
                             foreground: entry.foreground.clone(),
                             participant_generation: slot.participant_generation,
@@ -344,6 +365,7 @@ fn raw_endpoint_snapshot(endpoint: &Arc<TtyEndpoint>) -> Option<RelationSnapshot
     let entry = slot.entry.as_ref()?;
     Some(RelationSnapshot {
         endpoint: slot.endpoint.clone(),
+        devnum: slot.devnum,
         session: entry.session.clone(),
         foreground: entry.foreground.clone(),
         participant_generation: slot.participant_generation,
@@ -364,6 +386,7 @@ fn raw_session_snapshot(session: &TtySession) -> Option<RelationSnapshot> {
         .expect("matched TTY relation disappeared");
     Some(RelationSnapshot {
         endpoint: slot.endpoint.clone(),
+        devnum: slot.devnum,
         session: entry.session.clone(),
         foreground: entry.foreground.clone(),
         participant_generation: slot.participant_generation,
@@ -450,6 +473,18 @@ pub(super) fn endpoint_snapshot(endpoint: &Arc<TtyEndpoint>) -> Option<RelationS
     }
 }
 
+pub(crate) fn proc_snapshot(session: &TtySession) -> Option<TtyProcSnapshot> {
+    loop {
+        let snapshot = raw_session_snapshot(session)?;
+        if let Some(snapshot) = validate_snapshot(snapshot) {
+            return Some(TtyProcSnapshot {
+                devnum: snapshot.devnum,
+                foreground_pgid: snapshot.foreground.as_ref().map(TtyProcessGroup::pgid),
+            });
+        }
+    }
+}
+
 pub(super) fn signal_foreground(endpoint: &Arc<TtyEndpoint>, signal: TtyTerminalSignal) -> bool {
     let Some(snapshot) = endpoint_snapshot(endpoint) else {
         return false;
@@ -532,6 +567,7 @@ pub(super) fn acquire(
                     {
                         let snapshot = RelationSnapshot {
                             endpoint: slot.endpoint.clone(),
+                            devnum: slot.devnum,
                             session: entry.session.clone(),
                             foreground: entry.foreground.clone(),
                             participant_generation: slot.participant_generation,
@@ -717,6 +753,10 @@ mod kunits {
         })
     }
 
+    fn devnum() -> CharDevNum {
+        CharDevNum::new(MajorNum::new(4), MinorNum::new(64))
+    }
+
     fn contains(key: &ParticipantKey) -> bool {
         registry().inner.lock().slots.iter().any(|slot| {
             slot.participant_generation == key.generation
@@ -732,7 +772,7 @@ mod kunits {
             .try_reserve_exact(enrollments.len())
             .map_err(|_| SysError::OutOfMemory)?;
         for enrollment in enrollments {
-            participants.push(enrollment.commit()?);
+            participants.push(enrollment.commit(devnum())?);
         }
         Ok(participants)
     }
@@ -740,11 +780,13 @@ mod kunits {
     #[kunit]
     fn duplicate_enrollment_fails_without_changing_membership() {
         let endpoint = endpoint();
-        let participant = RelationEnrollment::new(endpoint.clone()).commit().unwrap();
+        let participant = RelationEnrollment::new(endpoint.clone())
+            .commit(devnum())
+            .unwrap();
         let next_generation = registry().inner.lock().next_participant_generation;
 
         assert_eq!(
-            RelationEnrollment::new(endpoint).commit().err(),
+            RelationEnrollment::new(endpoint).commit(devnum()).err(),
             Some(SysError::DevAlreadyRegistered)
         );
         assert!(contains(&participant.key));
@@ -773,7 +815,9 @@ mod kunits {
 
     #[kunit]
     fn retirement_is_exact_and_idempotent() {
-        let participant = RelationEnrollment::new(endpoint()).commit().unwrap();
+        let participant = RelationEnrollment::new(endpoint())
+            .commit(devnum())
+            .unwrap();
         assert!(participant.retire());
         assert!(!participant.retire());
         assert!(!contains(&participant.key));
@@ -782,12 +826,16 @@ mod kunits {
     #[kunit]
     fn stale_participant_cleanup_cannot_hit_reenrollment() {
         let old_endpoint = endpoint();
-        let old = RelationEnrollment::new(old_endpoint).commit().unwrap();
+        let old = RelationEnrollment::new(old_endpoint)
+            .commit(devnum())
+            .unwrap();
         assert!(old.retire());
 
         let new_endpoint = endpoint();
         assert!(!Arc::ptr_eq(&old.key.endpoint, &new_endpoint));
-        let new = RelationEnrollment::new(new_endpoint).commit().unwrap();
+        let new = RelationEnrollment::new(new_endpoint)
+            .commit(devnum())
+            .unwrap();
         assert_ne!(old.key.generation, new.key.generation);
         drop(old);
         assert!(contains(&new.key));
@@ -814,7 +862,9 @@ mod kunits {
 
     #[kunit]
     fn hangup_retirement_without_relation_removes_only_exact_participant() {
-        let participant = RelationEnrollment::new(endpoint()).commit().unwrap();
+        let participant = RelationEnrollment::new(endpoint())
+            .commit(devnum())
+            .unwrap();
         let key = ParticipantKey {
             endpoint: participant.key.endpoint.clone(),
             generation: participant.key.generation,

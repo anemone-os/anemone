@@ -27,8 +27,8 @@ use anemone_rs::{
         anemone::power::shutdown,
         linux::{
             fs::{
-                AtFd, Fd, PipeFlags, close, dup3, fcntl_getfl, fcntl_setfl, fstat, fstatat, mount,
-                openat, pipe2, ppoll, pselect, read, write,
+                AtFd, Fd, PipeFlags, close, dup3, fcntl_getfl, fcntl_setfl, fstat, fstatat,
+                mkdirat, mount, openat, pipe2, ppoll, pselect, read, write,
             },
             process::{
                 WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, sched_yield,
@@ -192,6 +192,21 @@ fn read_all(path: &str) -> Result<Vec<u8>, Errno> {
     }
     close(fd)?;
     Ok(result)
+}
+
+fn proc_tty_fields(pid: u32) -> Result<(i32, i64), Errno> {
+    let path = format!("/proc/{pid}/stat");
+    let data = read_all(path.as_str())?;
+    let text = str::from_utf8(&data).map_err(|_| EIO)?;
+    let (_, fields) = text.rsplit_once(") ").ok_or(EIO)?;
+    let mut fields = fields.split_ascii_whitespace();
+    // state, ppid, pgrp, session precede tty_nr and tpgid.
+    for _ in 0..4 {
+        fields.next().ok_or(EIO)?;
+    }
+    let tty_nr = fields.next().ok_or(EIO)?.parse().map_err(|_| EIO)?;
+    let tpgid = fields.next().ok_or(EIO)?.parse().map_err(|_| EIO)?;
+    Ok((tty_nr, tpgid))
 }
 
 fn write_file(path: &str, bytes: &[u8]) -> Result<(), Errno> {
@@ -423,6 +438,30 @@ fn acquire_query_idempotent_body() -> Result<(), Errno> {
 
 fn test_acquire_query_idempotent(_baseline: &Baseline) -> Result<(), Errno> {
     run_new_session(acquire_query_idempotent_body)
+}
+
+fn proc_tty_projection_body() -> Result<(), Errno> {
+    let pid = getpid()?;
+    expect(proc_tty_fields(pid)? == (0, -1))?;
+
+    let fd = tty_serial(O_RDWR)?;
+    let stat = fstat(fd)?;
+    expect(stat.st_rdev <= u32::MAX as u64)?;
+    tiocsctty(fd, 0)?;
+    expect(proc_tty_fields(pid)? == (stat.st_rdev as u32 as i32, i64::from(pid)))?;
+
+    tiocnotty(fd)?;
+    expect(proc_tty_fields(pid)? == (0, -1))?;
+    close(fd)
+}
+
+fn test_proc_tty_projection(_baseline: &Baseline) -> Result<(), Errno> {
+    match mkdirat(AtFd::Cwd, Path::new("/proc"), 0o755) {
+        Ok(()) | Err(EEXIST) => {},
+        Err(errno) => return Err(errno),
+    }
+    mount(Path::new("proc"), Path::new("/proc"), "proc")?;
+    run_new_session(proc_tty_projection_body)
 }
 
 fn rejected_acquire_body() -> Result<(), Errno> {
@@ -1839,6 +1878,11 @@ fn run_auto(baseline: &Baseline) -> Results {
         "controlling-acquire-query-idempotent",
         baseline,
         test_acquire_query_idempotent,
+    );
+    results.case(
+        "proc-controlling-projection",
+        baseline,
+        test_proc_tty_projection,
     );
     results.case(
         "controlling-rejected-acquire-paths",

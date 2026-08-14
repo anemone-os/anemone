@@ -92,6 +92,10 @@ fn run_cases(results: &mut Results) {
     results.case("fork-final-release", lifecycle::test_fork_final_release);
     results.case("implicit-path", relation::test_path_implicit_acquire);
     results.case("implicit-peer", relation::test_peer_implicit_acquire);
+    results.case(
+        "proc-controlling-projection",
+        relation::test_proc_tty_projection,
+    );
     results.case("implicit-negative", relation::test_implicit_negative_matrix);
     results.case("hangup-relation", relation::test_master_hangup_relation);
     results.case(
