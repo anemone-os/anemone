@@ -49,6 +49,13 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260815-kernel-slab-allocator](./rfcs/kernel-slab-allocator/index.md)：Accepted R0；在`mm::kmalloc`
+  owner内以slab class、bounded per-CPU local cache和shared central class替换small-object global-lock
+  common path，Talc继续承担bootstrap/span backing与large/special-layout fallback。首版允许任意CPU释放到
+  当前CPU cache，接受按class保留历史峰值span与有界per-CPU滞留，不引入owner CPU、remote-free、主动均衡、
+  span reclaim或frame allocator改造。[目标与不变量](./rfcs/kernel-slab-allocator/invariants.md)定义
+  boot/runtime同域、slot唯一owner、local/central handoff、锁/IRQ、failure与双架构cross-CPU proof obligation；
+  R0状态本身不授权实现，当前没有contract cutover。
 - [RFC-20260814-static-sysfs](./rfcs/static-sysfs/index.md)：Accepted R0；接受注册 canonical `sysfs`
   no-device filesystem，以 persistent singleton static tree 和 `/sys/kernel/{address_bits,cpu_byteorder}`
   两个只读文本 consumer 原子验证目录、读取与 multi-mount lifetime；明确不接入现有 kobject、动态

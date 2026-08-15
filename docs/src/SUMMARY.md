@@ -233,6 +233,8 @@
 				- [事务日志](./devlog/transactions/2026-07-31-vfs-make-node.md)
 				- [背景材料](./rfcs/vfs-make-node/backgrounds/index.md)
 					- [定位共识](./rfcs/vfs-make-node/backgrounds/positioning.md)
+		- [Kernel Slab Allocator](./rfcs/kernel-slab-allocator/index.md)
+			- [目标与不变量](./rfcs/kernel-slab-allocator/invariants.md)
 		- [Socket Abstraction 与 Unix Socket](./rfcs/socket-abstraction-and-unix-socket/index.md)
 			- [目标与不变量](./rfcs/socket-abstraction-and-unix-socket/invariants.md)
 			- [实施路线](./rfcs/socket-abstraction-and-unix-socket/implementation.md)
