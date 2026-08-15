@@ -54,6 +54,8 @@ pub struct Parameters {
     pub slab_max_object_bytes: Option<usize>,
     pub slab_local_capacity: Option<usize>,
     pub slab_transfer_batch: Option<usize>,
+    pub frame_magazine_capacity: Option<usize>,
+    pub frame_magazine_batch: Option<usize>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub print_log_level: Option<u8>,
@@ -188,6 +190,8 @@ impl Parameters {
         materialize!(slab_max_object_bytes);
         materialize!(slab_local_capacity);
         materialize!(slab_transfer_batch);
+        materialize!(frame_magazine_capacity);
+        materialize!(frame_magazine_batch);
         materialize!(log_buffer_shift_kb);
         materialize!(log_record_shift_bytes);
         materialize!(print_log_level);
@@ -328,6 +332,10 @@ pub const SLAB_MAX_OBJECT_BYTES: usize = {};
 pub const SLAB_LOCAL_CAPACITY: usize = {};
 /// Maximum free objects moved in one local/central handoff.
 pub const SLAB_TRANSFER_BATCH: usize = {};
+/// Maximum order-0 frames retained in each logical CPU magazine.
+pub const FRAME_MAGAZINE_CAPACITY: usize = {};
+/// Maximum order-0 frames moved in one magazine/buddy handoff.
+pub const FRAME_MAGAZINE_BATCH: usize = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
@@ -583,6 +591,8 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(slab_max_object_bytes),
             resolved!(slab_local_capacity),
             resolved!(slab_transfer_batch),
+            resolved!(frame_magazine_capacity),
+            resolved!(frame_magazine_batch),
             resolved!(log_buffer_shift_kb),
             resolved!(log_record_shift_bytes),
             resolved!(print_log_level),

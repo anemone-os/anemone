@@ -1,12 +1,12 @@
 # RFC-20260816-frame-order0-magazine
 
-**状态：** Accepted
+**状态：** Closed
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-16
 **领域：** mm / frame allocator / SMP
-**影响契约：** `MM-FRAME-001`、`MM-FRAME-002`（pending Introduce）
-**执行记录：** None（implementation Not Started）
+**影响契约：** `MM-FRAME-001`、`MM-FRAME-002`（Introduced）
+**执行记录：** None（单一cutover直接由本页记录closure）
 
 ## 摘要
 
@@ -171,8 +171,8 @@ magazine保留的页仍计入`free_pages`，因此`/proc/meminfo`、`sysinfo`和
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `MM-FRAME-001` | Introduce | None（live RAII / buddy / stats baseline尚未提取为effective ID） | `mm::frame`唯一拥有frame allocation、RAII final release与global accounting；placement transfer不改变pressure truth | `FRAME-MAGAZINE-CUTOVER` |
-| `MM-FRAME-002` | Introduce | None（live order-0 path仍由单一buddy lock串行化） | current-CPU bounded order-0 magazine、detached batch handoff、无guard嵌套与admitted buddy miss sweep/retry once | `FRAME-MAGAZINE-CUTOVER` |
+| `MM-FRAME-001` | Introduce | None（live RAII / buddy / stats baseline尚未提取为effective ID） | `mm::frame`唯一拥有frame allocation、RAII final release与global accounting；placement transfer不改变pressure truth | 2026-08-16 `FRAME-MAGAZINE-CUTOVER`完成 |
+| `MM-FRAME-002` | Introduce | None（live order-0 path仍由单一buddy lock串行化） | current-CPU bounded order-0 magazine、detached batch handoff、无guard嵌套与admitted buddy miss sweep/retry once | 2026-08-16 `FRAME-MAGAZINE-CUTOVER`完成 |
 
 ### Dependencies
 
@@ -201,8 +201,8 @@ magazine保留的页仍计入`free_pages`，因此`/proc/meminfo`、`sysinfo`和
   改变public API / ABI / shared contract、需要probe / 不安全中间态 / 多个正式stage或降低validation强度，必须在实现或
   cutover前停止并回到RFC review / Target Renegotiation。
 
-R0实现只需要一个连续implementation unit与唯一`FRAME-MAGAZINE-CUTOVER`。普通commit和owner内部工作片不构成
-独立gate；本次只完成R0 acceptance，implementation仍为Not Started，也不创建`implementation.md`或transaction。
+R0实现使用一个连续implementation unit与唯一`FRAME-MAGAZINE-CUTOVER`。普通commit和owner内部工作片不构成
+独立gate；closure没有创建`implementation.md`或transaction。
 
 ## Acceptance 与 Validation
 
@@ -269,10 +269,25 @@ cross-CPU production path与两次RV64 `SMP = 2` boot闭合，final review无Apo
 
 ## 当前执行事实
 
-- 本页为Accepted R0 target；live frame allocator仍由单一`NoIrqSpinLock<BuddyAllocator>`串行化。
-- `MM-FRAME-001/002`尚未进入current contract，`FRAME-MAGAZINE-CUTOVER`未执行。
-- implementation、KUnit、KernelConfig rejection、kernel build、QEMU boot、性能测试与contract cutover均Not Started。
-- RFC目录只有本`index.md`；没有`invariants.md`、`implementation.md`、`tracking-issues.md`、background或transaction。
+- `mm::frame`以cache-padded fixed logical-CPU table拥有order-0 magazine；capacity / batch默认`64 / 16`。local hit、
+  partial refill、full drain、all-registered-slot sweep与retry once均已落入统一allocator front，single-page frame / folio
+  final Drop共享该route；higher-order继续直接使用buddy。
+- global atomic accounting是OOM与memory observer的pressure truth，magazine和operation batch中的free frame仍计入
+  `free_pages`；buddy stats只在PMM add-range期间提供初始化增量，不参与runtime placement decision。
+- KernelConfig consumer编译期拥有非零、`batch <= capacity`、全机retention checked arithmetic及capacity-sized sweep
+  batch不超过一页stack storage的predicate。代表性`capacity = 65536`配置在`mm::frame`断言处按预期编译失败。
+- owner-local magazine与detached-backend KUnit、real frame API KUnit及RV64 SMP2 cross-CPU case已落地。最终review关闭
+  首轮stack/config与test-oracle问题后为0 Apollyon / 0 Keter / 0 Euclid；Architecture Friction Scan未发现第二份
+  membership truth、owner穿透、allocator recursion、CPU-ID alias、guard嵌套、test-only production shaping或validation
+  oracle降低。
+- `just test xtask`为`108/108`；final source完成RV64与LA64 default KernelConfig release build。此前同一production
+  实现的RV64 `SMP = 2` KUnit boot为`682/682`，focused case实际执行`source=0 target=1`并orderly shutdown；ordinary
+  non-KUnit `SMP = 2` boot进入userspace并orderly shutdown。最终新增compile-time bound与收紧test setup后，按维护者
+  指示未重跑QEMU；这些微调不改变production allocation / release path。
+- `MM-FRAME-001/002`已由[`Frame Allocation当前契约`](../../contracts/mm/frame-allocation.md)原子Introduce，
+  `FRAME-MAGAZINE-CUTOVER`完成。RFC目录仍只有本`index.md`，没有supporting page或transaction。
+- 性能A/B、参数调优、allocation stress、full LTP、完整preliminary / final harness、LA64 runtime、physical hardware、
+  CPU hotplug、NUMA、极端OOM、长时碎片与完整interleaving proof均Not Run / Not In Target。
 
 ## 修订记录
 
@@ -282,5 +297,12 @@ cross-CPU production path与两次RV64 `SMP = 2` boot闭合，final review无Apo
 
 ## Closure
 
-Not Closed。完成时只在本页记录实际交付、验证、`MM-FRAME-001/002` cutover、Not Run与有证据的残余风险；Closed后
-本RFC冻结为历史资料，后续工作从live source、current contract与register重新分类。
+2026-08-16 Closed。唯一`FRAME-MAGAZINE-CUTOVER`原子完成order-0 current-CPU magazine、bounded batch handoff、
+admitted buddy miss sweep/retry once、global pressure accounting、KernelConfig predicate、owner-local与production-path
+validation，并Introduce `MM-FRAME-001/002`。实现保持`mm::frame`单一owner、既有public Rust API / user ABI、RAII /
+refcount、higher-order contiguous allocation、OOM policy与percpu owner surface。
+
+独立final review为0 Apollyon / 0 Keter / 0 Euclid；无未决Architecture Friction finding。残余风险限于本target明确排除
+且未执行的性能、压力、完整harness、LA64 runtime、hardware、hotplug / NUMA、极端OOM、长时碎片与完整并发交错，
+以及最终test/config-only微调后未重跑QEMU这一已披露的验证时点差异。Closed后本RFC冻结为历史资料；后续工作从
+live source、current contract与register重新分类。

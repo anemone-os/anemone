@@ -21,6 +21,8 @@ slab_span_pages = 16 # Pages permanently assigned to one kernel slab size class 
 slab_max_object_bytes = 2048 # Largest size/alignment served by the kernel slab path.
 slab_local_capacity = 32 # Maximum free objects retained per CPU and slab class.
 slab_transfer_batch = 16 # Maximum free objects moved in one local/central handoff.
+frame_magazine_capacity = 64 # Maximum order-0 frames retained in each logical CPU magazine.
+frame_magazine_batch = 16 # Maximum order-0 frames moved in one magazine/buddy handoff.
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
