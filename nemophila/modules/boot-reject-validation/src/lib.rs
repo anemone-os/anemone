@@ -19,7 +19,7 @@ impl Module for BootReject {
     }
 }
 
-nemophila_sdk::export_module!(BootReject);
+nemophila_sdk::export_module!(BootReject, lifecycle);
 
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {

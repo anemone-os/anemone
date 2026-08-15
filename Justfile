@@ -46,6 +46,7 @@ test-nemophila-wasm:
 [private]
 test-nemophila-module:
     @just module build clone-observer
+    @just module build task-lineage-auditor
 
 [private]
 test-virtio-drivers:

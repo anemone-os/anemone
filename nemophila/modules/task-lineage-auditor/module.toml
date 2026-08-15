@@ -1,0 +1,7 @@
+name = "task-lineage-auditor"
+
+[build]
+workdir = "."
+driver = "cargo"
+manifest = "Cargo.toml"
+artifact = "nemophila_task_lineage_auditor.wasm"

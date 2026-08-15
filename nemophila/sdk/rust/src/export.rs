@@ -1,4 +1,7 @@
-pub use crate::__bindings::Guest;
+pub use crate::{
+    __bindings::Guest, __lifecycle_bindings::Guest as LifecycleGuest,
+    __task_lifecycle_bindings::Guest as TaskLifecycleGuest,
+};
 
 pub fn load<M: crate::Module>() -> Result<(), ()> {
     let mut context = crate::LoadContext {
@@ -15,4 +18,10 @@ pub fn observe_clone(creator_tid: u32, child_tid: u32) {
         creator_tid,
         child_tid,
     });
+}
+
+pub fn observe_thread_exit(tid: u32, signaled: bool, value: u32) {
+    crate::weave::task::thread_exit::invoke(
+        crate::weave::task::thread_exit::ThreadExitEvent::from_abi(tid, signaled, value),
+    );
 }

@@ -94,7 +94,7 @@ pub(crate) fn activate_embedded_modules() {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::{
-        host::{CallbackHostTrap, LOGGING_MODULE, LOGGING_WRITE},
+        host::{CallbackHostTrap, LOGGING_MODULE, LOGGING_PRINT, LOGGING_PRINTLN, LOGGING_WRITE},
         instance::{ModuleTrap, RuntimeInstance},
         load::{LoadFailure, load_unpublished},
         runtime::{
@@ -115,6 +115,7 @@ mod kunits {
         task::{
             Tid,
             clone::nemophila::{CLONE_OBSERVER, CloneObservation, CloneObserver},
+            exit::nemophila::{THREAD_EXIT_OBSERVER, ThreadExitObserver},
             kthread::{KThreadBuilder, KThreadCtx},
         },
         utils::any_opaque::AnyOpaque,
@@ -343,6 +344,35 @@ mod kunits {
             (3, functions(&[1])),
             (5, memory),
             (7, exports(&module_exports)),
+            (10, code(&[instructions])),
+            (11, data),
+        ])
+    }
+
+    fn raw_logging_load(function: &str, message: &[u8]) -> Box<[u8]> {
+        let mut instructions = vec![0x41];
+        push_i32(0, &mut instructions);
+        instructions.push(0x41);
+        push_i32(message.len() as i32, &mut instructions);
+        instructions.extend([0x10, 0x00]);
+        instructions.push(0x41);
+        push_i32(0, &mut instructions);
+
+        let mut memory = Vec::new();
+        push_u32(1, &mut memory);
+        memory.extend([0x00, 0x01]);
+
+        let mut data = Vec::new();
+        push_u32(1, &mut data);
+        data.extend([0x00, 0x41, 0x00, 0x0b]);
+        push_vec(message, &mut data);
+
+        module([
+            (1, types(&[(&[I32, I32], &[]), (&[], &[I32])])),
+            (2, import_func(LOGGING_MODULE, function, 0)),
+            (3, functions(&[1])),
+            (5, memory),
+            (7, exports(&[("load", 0x00, 1), ("memory", 0x02, 0)])),
             (10, code(&[instructions])),
             (11, data),
         ])
@@ -636,7 +666,7 @@ mod kunits {
 
     #[kunit]
     fn logging_import_preserves_load_result_when_recorded_or_filtered() {
-        for level in 0..=3 {
+        for level in 0..=7 {
             let message = b"NEMOPHILA-KUNIT:LOGGING-OK";
             assert!(
                 load_without_registration(logging_load(
@@ -666,9 +696,27 @@ mod kunits {
     }
 
     #[kunit]
+    fn raw_logging_imports_accept_value_only_fragments() {
+        assert!(
+            load_without_registration(raw_logging_load(
+                LOGGING_PRINT,
+                b"NEMOPHILA-KUNIT:RAW-PRINT",
+            ))
+            .is_ok()
+        );
+        assert!(
+            load_without_registration(raw_logging_load(
+                LOGGING_PRINTLN,
+                b"NEMOPHILA-KUNIT:RAW-PRINTLN",
+            ))
+            .is_ok()
+        );
+    }
+
+    #[kunit]
     fn logging_lowering_contains_invalid_guest_values() {
         for artifact in [
-            logging_load(4, 0, 0, b"", 0, true),
+            logging_load(8, 0, 0, b"", 0, true),
             logging_load(1, -1, 1, b"", 0, true),
             logging_load(1, 0, 1, b"\xff", 0, true),
             logging_load(1, 0, 0, b"", 0, false),
@@ -725,8 +773,10 @@ mod kunits {
     #[kunit]
     fn provider_catalog_is_typed_validated_and_order_independent() {
         let _typed_capability = &CLONE_OBSERVER;
+        let _second_typed_capability = &THREAD_EXIT_OBSERVER;
         let catalog = provider_catalog();
         assert!(catalog.policy(CloneObserver::ID).is_some());
+        assert!(catalog.policy(ThreadExitObserver::ID).is_some());
         assert!(catalog.policy(ExclusivePoint::ID).is_none());
         assert!(matches!(
             ProviderCatalog::validate(&DUPLICATE_PROVIDERS),

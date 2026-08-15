@@ -1,4 +1,4 @@
-//! WIT-generated lowering used by [`crate::export_module!`].
+//! WIT-generated imports and clone-only exports used by the SDK.
 //!
 //! This module is public only because Rust cross-crate macro expansion must
 //! resolve the generated export glue from the consuming module crate. It is
@@ -6,7 +6,7 @@
 
 wit_bindgen::generate!({
     path: "../../wit",
-    world: "anemone:nemophila/module@0.1.0",
+    world: "anemone:nemophila/clone-module@0.1.0",
     pub_export_macro: true,
     default_bindings_module: "$crate::__bindings",
     // Nemophila has one explicit lifecycle entry. The default bindgen

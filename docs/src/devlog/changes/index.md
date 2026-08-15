@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-15 - Nemophila task lineage auditor](./2026-08-15-nemophila-task-lineage-auditor.md)
 - [2026-08-13 - Unix peer credentials](./2026-08-13-unix-peer-credentials.md)
 - [2026-08-13 - TTY IUTF8与明确compatibility set](./2026-08-13-tty-iutf8-compat.md)
 - [2026-08-13 - `/dev/console` shared Terminal](./2026-08-13-dev-console-shared-terminal.md)

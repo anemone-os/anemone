@@ -20,19 +20,56 @@ interface weave-clone {
     register-observer: func() -> registration-result;
 }
 
+/// Point-specific user-thread exit-begin observation registration.
+interface weave-thread-exit {
+    /// The result of asking the Host to bind this instance to the thread-exit
+    /// point.
+    enum registration-result {
+        registered,
+        provider-unavailable,
+        already-registered,
+    }
+
+    /// The module has already stored its typed callback before this call.
+    register-observer: func() -> registration-result;
+}
+
 /// Value-only diagnostic submission to the kernel logging owner.
 interface logging {
+    /// Existing variants retain their canonical ABI ordinals. The remaining
+    /// kernel severities are appended so older module artifacts keep the same
+    /// four discriminants.
     enum level {
         debug,
         info,
         warning,
         error,
+        emergency,
+        alert,
+        critical,
+        notice,
     }
 
+    /// Submit one structured record to the kernel logging owner.
     write: func(level: level, message: string);
+
+    /// Emit one raw console-only fragment using kernel `kprint` semantics.
+    print: func(message: string);
+
+    /// Emit one raw console-only line using kernel `kprintln` semantics.
+    println: func(message: string);
 }
 
-world module {
+/// A module with no callback export. It can decline load or use value-only
+/// Host services without fabricating an extension-point callback.
+world lifecycle-module {
+    import logging;
+
+    export load: func() -> result;
+}
+
+/// The single-point clone observer module shape.
+world clone-module {
     import weave-clone;
     import logging;
 
@@ -43,4 +80,19 @@ world module {
 
     /// The fixed trampoline for the task-owned clone observer point.
     export observe-clone: func(creator-tid: u32, child-tid: u32);
+}
+
+/// A module observing task creation and user-thread exit through two
+/// independently registered points.
+world task-lifecycle-module {
+    import weave-clone;
+    import weave-thread-exit;
+    import logging;
+
+    export load: func() -> result;
+    export observe-clone: func(creator-tid: u32, child-tid: u32);
+
+    /// `signaled` selects the meaning of `value`: false carries an eight-bit
+    /// normal exit status widened to u32; true carries a signal number.
+    export observe-thread-exit: func(tid: u32, signaled: bool, value: u32);
 }
