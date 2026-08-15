@@ -4,5 +4,11 @@ platform = "2k1000-la64"
 fstype = "ext4"
 source = { type = "block", path = "sda3" }
 
+[network.ipv4]
+interface = "eth0"
+address = "192.168.2.3"
+prefix = 24
+default-gateway = "192.168.2.1"
+
 [initial-program]
 type = "rootfs-entry"

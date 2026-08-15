@@ -9,51 +9,111 @@ use crate::{prelude::*, time::MonotonicInstant};
 use super::regs::Dwmac1000Regs;
 
 const PHY_ID_YT8511: u32 = 0x0000_010a;
-const BMCR: u8 = 0;
-const BMSR: u8 = 1;
-const ADVERTISE: u8 = 4;
-const LPA: u8 = 5;
-const CTRL1000: u8 = 9;
-const STAT1000: u8 = 10;
-const ESTATUS: u8 = 15;
-const BMCR_ANENABLE: u16 = 1 << 12;
-const BMCR_ISOLATE: u16 = 1 << 10;
-const BMCR_RESTART_AN: u16 = 1 << 9;
-const BMSR_ESTATEN: u16 = 1 << 8;
-const BMSR_ANEG_COMPLETE: u16 = 1 << 5;
-const BMSR_ANEG_CAPABLE: u16 = 1 << 3;
-const BMSR_LINK: u16 = 1 << 2;
-const BMSR_10_HALF: u16 = 1 << 11;
-const BMSR_10_FULL: u16 = 1 << 12;
-const BMSR_100_HALF: u16 = 1 << 13;
-const BMSR_100_FULL: u16 = 1 << 14;
-const ESTATUS_1000_T_HALF: u16 = 1 << 12;
-const ESTATUS_1000_T_FULL: u16 = 1 << 13;
-const ADVERTISE_SELECTOR_MASK: u16 = 0x1f;
-const ADVERTISE_CSMA: u16 = 1;
-const ADVERTISE_10_HALF: u16 = 1 << 5;
-const ADVERTISE_10_FULL: u16 = 1 << 6;
-const ADVERTISE_100_HALF: u16 = 1 << 7;
-const ADVERTISE_100_FULL: u16 = 1 << 8;
-const ADVERTISE_PAUSE: u16 = 1 << 10;
-const ADVERTISE_ASYM_PAUSE: u16 = 1 << 11;
-const ADVERTISE_1000_HALF: u16 = 1 << 8;
-const ADVERTISE_1000_FULL: u16 = 1 << 9;
-const LPA_1000_HALF: u16 = 1 << 10;
-const LPA_1000_FULL: u16 = 1 << 11;
-const LPA_1000_MASTER_SLAVE_FAILURE: u16 = 1 << 15;
-const PAGE_SELECT: u8 = 0x1e;
-const PAGE_DATA: u8 = 0x1f;
-const PAGE_EXT_CLK_GATE: u16 = 0x000c;
-const PAGE_EXT_DELAY_DRIVE: u16 = 0x000d;
-const PAGE_EXT_SLEEP_CTRL: u16 = 0x0027;
-const CLK_125M: u16 = 0x0006;
-const DELAY_RX: u16 = 1;
-const DELAY_GE_TX_EN: u16 = 0x00f0;
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub(super) enum Clause22Register {
+    BasicControl = 0,
+    BasicStatus = 1,
+    PhyId1 = 2,
+    PhyId2 = 3,
+    Advertisement = 4,
+    LinkPartnerAbility = 5,
+    GigabitControl = 9,
+    GigabitStatus = 10,
+    ExtendedStatus = 15,
+    PageSelect = 0x1e,
+    PageData = 0x1f,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u16)]
+enum Yt8511Page {
+    ClockGate = 0x000c,
+    DelayDrive = 0x000d,
+    SleepControl = 0x0027,
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct BasicControl: u16 {
+        const AUTO_NEGOTIATION_ENABLE = 1 << 12;
+        const ISOLATE = 1 << 10;
+        const RESTART_AUTO_NEGOTIATION = 1 << 9;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct BasicStatus: u16 {
+        const LINK = 1 << 2;
+        const AUTO_NEGOTIATION_CAPABLE = 1 << 3;
+        const AUTO_NEGOTIATION_COMPLETE = 1 << 5;
+        const EXTENDED_STATUS = 1 << 8;
+        const MODE_10_HALF = 1 << 11;
+        const MODE_10_FULL = 1 << 12;
+        const MODE_100_HALF = 1 << 13;
+        const MODE_100_FULL = 1 << 14;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ExtendedStatus: u16 {
+        const MODE_1000_T_HALF = 1 << 12;
+        const MODE_1000_T_FULL = 1 << 13;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Advertisement: u16 {
+        const SELECTOR_MASK = 0x1f;
+        const CSMA = 1;
+        const MODE_10_HALF = 1 << 5;
+        const MODE_10_FULL = 1 << 6;
+        const MODE_100_HALF = 1 << 7;
+        const MODE_100_FULL = 1 << 8;
+        const PAUSE = 1 << 10;
+        const ASYMMETRIC_PAUSE = 1 << 11;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct GigabitControl: u16 {
+        const ADVERTISE_HALF = 1 << 8;
+        const ADVERTISE_FULL = 1 << 9;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct GigabitStatus: u16 {
+        const LINK_PARTNER_HALF = 1 << 10;
+        const LINK_PARTNER_FULL = 1 << 11;
+        const MASTER_SLAVE_FAILURE = 1 << 15;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ClockGate: u16 {
+        const RX_DELAY = 1;
+        const CLOCK_125MHZ = 0x0006;
+        const GE_TX_DELAY_MASK = 0x00f0;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct DelayDrive: u16 {
+        const FE_TX_DELAY_MASK = 0xf000;
+        const _ = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct SleepControl: u16 {
+        const PLL_ON_IN_SLEEP = 1 << 14;
+        const _ = !0;
+    }
+}
+
 const DELAY_GE_TX_DIS: u16 = 0x0020;
-const DELAY_FE_TX_EN: u16 = 0xf000;
 const DELAY_FE_TX_DIS: u16 = 0x2000;
-const PLLON_SLP: u16 = 1 << 14;
 
 static_assert!(
     DWMAC1000_PHY_TIMEOUT_MS > 0,
@@ -98,8 +158,8 @@ pub(super) fn initialize_yt8511(
     gmii: bool,
     half_duplex: bool,
 ) -> Result<PhyState, SysError> {
-    let id1 = regs.mdio_read(address, 2)?;
-    let id2 = regs.mdio_read(address, 3)?;
+    let id1 = regs.mdio_read(address, Clause22Register::PhyId1)?;
+    let id2 = regs.mdio_read(address, Clause22Register::PhyId2)?;
     if ((id1 as u32) << 16) | id2 as u32 != PHY_ID_YT8511 {
         return Err(SysError::DriverIncompatible);
     }
@@ -132,8 +192,8 @@ fn configure_generic_autoneg(
     gmii: bool,
     half_duplex: bool,
 ) -> Result<bool, SysError> {
-    let bmsr = regs.mdio_read(address, BMSR)?;
-    if bmsr & BMSR_ANEG_CAPABLE == 0 {
+    let bmsr = regs.mdio_read(address, Clause22Register::BasicStatus)?;
+    if bmsr & BasicStatus::AUTO_NEGOTIATION_CAPABLE.bits() == 0 {
         return Err(SysError::DriverIncompatible);
     }
     let supported_10_100 = filter_advertised_10_100(
@@ -142,20 +202,24 @@ fn configure_generic_autoneg(
         mii,
         half_duplex,
     );
-    let ctrl1000 = if bmsr & BMSR_ESTATEN != 0 {
-        let estatus = regs.mdio_read(address, ESTATUS)?;
-        let before = regs.mdio_read(address, CTRL1000)?;
+    let ctrl1000 = if bmsr & BasicStatus::EXTENDED_STATUS.bits() != 0 {
+        let estatus = regs.mdio_read(address, Clause22Register::ExtendedStatus)?;
+        let before = regs.mdio_read(address, Clause22Register::GigabitControl)?;
         let advertised = filter_advertised_1000(estatus, max_speed, gmii, half_duplex);
         Some((
             before,
-            (before & !(ADVERTISE_1000_HALF | ADVERTISE_1000_FULL)) | advertised,
+            (before
+                & !(GigabitControl::ADVERTISE_HALF.bits() | GigabitControl::ADVERTISE_FULL.bits()))
+                | advertised,
         ))
     } else {
         None
     };
     if supported_10_100 == 0
-        && ctrl1000
-            .is_none_or(|(_, value)| value & (ADVERTISE_1000_HALF | ADVERTISE_1000_FULL) == 0)
+        && ctrl1000.is_none_or(|(_, value)| {
+            value & (GigabitControl::ADVERTISE_HALF.bits() | GigabitControl::ADVERTISE_FULL.bits())
+                == 0
+        })
     {
         kerrln!(
             "dwmac1000 stage=phy-advertisement result=fail reason=no-mac-compatible-mode phy-address={} mii={} gmii={} half-duplex={} max-speed={:?}",
@@ -168,41 +232,45 @@ fn configure_generic_autoneg(
         return Err(SysError::DriverIncompatible);
     }
 
-    let advertise_before = regs.mdio_read(address, ADVERTISE)?;
+    let advertise_before = regs.mdio_read(address, Clause22Register::Advertisement)?;
     let advertise = (advertise_before
-        & !(ADVERTISE_SELECTOR_MASK
-            | ADVERTISE_10_HALF
-            | ADVERTISE_10_FULL
-            | ADVERTISE_100_HALF
-            | ADVERTISE_100_FULL))
-        | ADVERTISE_CSMA
+        & !(Advertisement::SELECTOR_MASK.bits()
+            | Advertisement::MODE_10_HALF.bits()
+            | Advertisement::MODE_10_FULL.bits()
+            | Advertisement::MODE_100_HALF.bits()
+            | Advertisement::MODE_100_FULL.bits()))
+        | Advertisement::CSMA.bits()
         | supported_10_100
         // phylib supplies both pause capabilities for a normal external PHY
         // before phylink validates them against this MAC's symmetric/asymmetric
         // pause support.
-        | ADVERTISE_PAUSE
-        | ADVERTISE_ASYM_PAUSE;
+        | Advertisement::PAUSE.bits()
+        | Advertisement::ASYMMETRIC_PAUSE.bits();
     let mut changed = advertise != advertise_before;
     if changed {
-        regs.mdio_write(address, ADVERTISE, advertise)?;
+        regs.mdio_write(address, Clause22Register::Advertisement, advertise)?;
     }
 
     if let Some((before, configured)) = ctrl1000 {
         if configured != before {
-            regs.mdio_write(address, CTRL1000, configured)?;
+            regs.mdio_write(address, Clause22Register::GigabitControl, configured)?;
             changed = true;
         }
     }
 
     // This is Linux genphy_restart_aneg: clear isolate, enable and restart
     // Clause 22 autonegotiation after advertising supported link modes.
-    let bmcr = regs.mdio_read(address, BMCR)?;
-    let restart = changed || bmcr & BMCR_ANENABLE == 0 || bmcr & BMCR_ISOLATE != 0;
+    let bmcr = regs.mdio_read(address, Clause22Register::BasicControl)?;
+    let restart = changed
+        || bmcr & BasicControl::AUTO_NEGOTIATION_ENABLE.bits() == 0
+        || bmcr & BasicControl::ISOLATE.bits() != 0;
     if restart {
         regs.mdio_write(
             address,
-            BMCR,
-            (bmcr & !BMCR_ISOLATE) | BMCR_ANENABLE | BMCR_RESTART_AN,
+            Clause22Register::BasicControl,
+            (bmcr & !BasicControl::ISOLATE.bits())
+                | BasicControl::AUTO_NEGOTIATION_ENABLE.bits()
+                | BasicControl::RESTART_AUTO_NEGOTIATION.bits(),
         )?;
     }
     Ok(restart)
@@ -219,10 +287,12 @@ const fn filter_advertised_10_100(
     }
     let mut modes = modes;
     if !half_duplex {
-        modes &= !(ADVERTISE_10_HALF | ADVERTISE_100_HALF);
+        modes &= !(Advertisement::MODE_10_HALF.bits() | Advertisement::MODE_100_HALF.bits());
     }
     match max_speed {
-        Some(10) => modes & (ADVERTISE_10_HALF | ADVERTISE_10_FULL),
+        Some(10) => {
+            modes & (Advertisement::MODE_10_HALF.bits() | Advertisement::MODE_10_FULL.bits())
+        },
         Some(100) => modes,
         _ => modes,
     }
@@ -237,12 +307,12 @@ const fn filter_advertised_1000(
     if !gmii || matches!(max_speed, Some(10 | 100)) {
         return 0;
     }
-    (if half_duplex && estatus & ESTATUS_1000_T_HALF != 0 {
-        ADVERTISE_1000_HALF
+    (if half_duplex && estatus & ExtendedStatus::MODE_1000_T_HALF.bits() != 0 {
+        GigabitControl::ADVERTISE_HALF.bits()
     } else {
         0
-    }) | (if estatus & ESTATUS_1000_T_FULL != 0 {
-        ADVERTISE_1000_FULL
+    }) | (if estatus & ExtendedStatus::MODE_1000_T_FULL.bits() != 0 {
+        GigabitControl::ADVERTISE_FULL.bits()
     } else {
         0
     })
@@ -262,18 +332,19 @@ struct GenericLinkSnapshot {
 fn wait_generic_link(regs: &Dwmac1000Regs, address: u8) -> Result<GenericLinkSnapshot, SysError> {
     let start = MonotonicInstant::now();
     loop {
-        let bmcr = regs.mdio_read(address, BMCR)?;
+        let bmcr = regs.mdio_read(address, Clause22Register::BasicControl)?;
         // BMSR link is latched low; generic phylib consumes two samples while
         // polling from an initially down state.
-        let _ = regs.mdio_read(address, BMSR)?;
-        let bmsr = regs.mdio_read(address, BMSR)?;
-        if bmcr & BMCR_RESTART_AN == 0
-            && bmsr & (BMSR_LINK | BMSR_ANEG_COMPLETE) == BMSR_LINK | BMSR_ANEG_COMPLETE
+        let _ = regs.mdio_read(address, Clause22Register::BasicStatus)?;
+        let bmsr = regs.mdio_read(address, Clause22Register::BasicStatus)?;
+        if bmcr & BasicControl::RESTART_AUTO_NEGOTIATION.bits() == 0
+            && bmsr & (BasicStatus::LINK.bits() | BasicStatus::AUTO_NEGOTIATION_COMPLETE.bits())
+                == BasicStatus::LINK.bits() | BasicStatus::AUTO_NEGOTIATION_COMPLETE.bits()
         {
-            let advertise = regs.mdio_read(address, ADVERTISE)?;
-            let lpa = regs.mdio_read(address, LPA)?;
-            let ctrl1000 = regs.mdio_read(address, CTRL1000)?;
-            let stat1000 = regs.mdio_read(address, STAT1000)?;
+            let advertise = regs.mdio_read(address, Clause22Register::Advertisement)?;
+            let lpa = regs.mdio_read(address, Clause22Register::LinkPartnerAbility)?;
+            let ctrl1000 = regs.mdio_read(address, Clause22Register::GigabitControl)?;
+            let stat1000 = regs.mdio_read(address, Clause22Register::GigabitStatus)?;
             let link = resolve_autoneg(advertise, lpa, ctrl1000, stat1000)?;
             return Ok(GenericLinkSnapshot {
                 bmcr,
@@ -300,20 +371,20 @@ fn wait_generic_link(regs: &Dwmac1000Regs, address: u8) -> Result<GenericLinkSna
 }
 
 const fn advertised_10_100_from_bmsr(bmsr: u16) -> u16 {
-    (if bmsr & BMSR_10_HALF != 0 {
-        ADVERTISE_10_HALF
+    (if bmsr & BasicStatus::MODE_10_HALF.bits() != 0 {
+        Advertisement::MODE_10_HALF.bits()
     } else {
         0
-    }) | (if bmsr & BMSR_10_FULL != 0 {
-        ADVERTISE_10_FULL
+    }) | (if bmsr & BasicStatus::MODE_10_FULL.bits() != 0 {
+        Advertisement::MODE_10_FULL.bits()
     } else {
         0
-    }) | (if bmsr & BMSR_100_HALF != 0 {
-        ADVERTISE_100_HALF
+    }) | (if bmsr & BasicStatus::MODE_100_HALF.bits() != 0 {
+        Advertisement::MODE_100_HALF.bits()
     } else {
         0
-    }) | (if bmsr & BMSR_100_FULL != 0 {
-        ADVERTISE_100_FULL
+    }) | (if bmsr & BasicStatus::MODE_100_FULL.bits() != 0 {
+        Advertisement::MODE_100_FULL.bits()
     } else {
         0
     })
@@ -325,12 +396,14 @@ const fn resolve_autoneg(
     ctrl1000: u16,
     stat1000: u16,
 ) -> Result<PhyLink, SysError> {
-    if stat1000 & LPA_1000_MASTER_SLAVE_FAILURE != 0 {
+    if stat1000 & GigabitStatus::MASTER_SLAVE_FAILURE.bits() != 0 {
         return Err(SysError::DriverIncompatible);
     }
     let (rx_pause, tx_pause) = resolve_pause(advertise, lpa);
-    let gigabit = ctrl1000 & ((stat1000 >> 2) & (ADVERTISE_1000_HALF | ADVERTISE_1000_FULL));
-    if gigabit & ADVERTISE_1000_FULL != 0 {
+    let gigabit = ctrl1000
+        & ((stat1000 >> 2)
+            & (GigabitControl::ADVERTISE_HALF.bits() | GigabitControl::ADVERTISE_FULL.bits()));
+    if gigabit & GigabitControl::ADVERTISE_FULL.bits() != 0 {
         return Ok(PhyLink {
             speed_mbps: 1000,
             full_duplex: true,
@@ -338,7 +411,7 @@ const fn resolve_autoneg(
             tx_pause,
         });
     }
-    if gigabit & ADVERTISE_1000_HALF != 0 {
+    if gigabit & GigabitControl::ADVERTISE_HALF.bits() != 0 {
         return Ok(PhyLink {
             speed_mbps: 1000,
             full_duplex: false,
@@ -347,7 +420,7 @@ const fn resolve_autoneg(
         });
     }
     let common = advertise & lpa;
-    if common & ADVERTISE_100_FULL != 0 {
+    if common & Advertisement::MODE_100_FULL.bits() != 0 {
         return Ok(PhyLink {
             speed_mbps: 100,
             full_duplex: true,
@@ -355,7 +428,7 @@ const fn resolve_autoneg(
             tx_pause,
         });
     }
-    if common & ADVERTISE_100_HALF != 0 {
+    if common & Advertisement::MODE_100_HALF.bits() != 0 {
         return Ok(PhyLink {
             speed_mbps: 100,
             full_duplex: false,
@@ -363,7 +436,7 @@ const fn resolve_autoneg(
             tx_pause: false,
         });
     }
-    if common & ADVERTISE_10_FULL != 0 {
+    if common & Advertisement::MODE_10_FULL.bits() != 0 {
         return Ok(PhyLink {
             speed_mbps: 10,
             full_duplex: true,
@@ -371,7 +444,7 @@ const fn resolve_autoneg(
             tx_pause,
         });
     }
-    if common & ADVERTISE_10_HALF != 0 {
+    if common & Advertisement::MODE_10_HALF.bits() != 0 {
         return Ok(PhyLink {
             speed_mbps: 10,
             full_duplex: false,
@@ -383,14 +456,12 @@ const fn resolve_autoneg(
 }
 
 const fn resolve_pause(advertise: u16, lpa: u16) -> (bool, bool) {
-    const PAUSE: u16 = 1 << 10;
-    const ASYM_PAUSE: u16 = 1 << 11;
-    if advertise & lpa & PAUSE != 0 {
+    if advertise & lpa & Advertisement::PAUSE.bits() != 0 {
         (true, true)
-    } else if advertise & lpa & ASYM_PAUSE != 0 {
-        if advertise & PAUSE != 0 {
+    } else if advertise & lpa & Advertisement::ASYMMETRIC_PAUSE.bits() != 0 {
+        if advertise & Advertisement::PAUSE.bits() != 0 {
             (true, false)
-        } else if lpa & PAUSE != 0 {
+        } else if lpa & Advertisement::PAUSE.bits() != 0 {
             (false, true)
         } else {
             (false, false)
@@ -406,9 +477,9 @@ fn configure_delay(
     mode: &str,
 ) -> Result<(DelayRegisters, DelayRegisters), SysError> {
     let (ge, fe) = delay_bits(mode)?;
-    let old_page = regs.mdio_read(address, PAGE_SELECT)?;
+    let old_page = regs.mdio_read(address, Clause22Register::PageSelect)?;
     let result = configure_selected_pages(regs, address, ge, fe);
-    let restore = regs.mdio_write(address, PAGE_SELECT, old_page);
+    let restore = regs.mdio_write(address, Clause22Register::PageSelect, old_page);
     finish_page_transaction(address, old_page, result, restore)
 }
 
@@ -418,23 +489,47 @@ fn configure_selected_pages(
     ge: u16,
     fe: u16,
 ) -> Result<(DelayRegisters, DelayRegisters), SysError> {
-    regs.mdio_write(address, PAGE_SELECT, PAGE_EXT_CLK_GATE)?;
-    let clk_gate = regs.mdio_read(address, PAGE_DATA)?;
-    let delay_value = modify_bits(clk_gate, DELAY_RX | DELAY_GE_TX_EN, ge);
-    regs.mdio_write(address, PAGE_DATA, delay_value)?;
-    regs.mdio_write(address, PAGE_DATA, delay_value | CLK_125M)?;
-
-    regs.mdio_write(address, PAGE_SELECT, PAGE_EXT_DELAY_DRIVE)?;
-    let delay_drive = regs.mdio_read(address, PAGE_DATA)?;
     regs.mdio_write(
         address,
-        PAGE_DATA,
-        modify_bits(delay_drive, DELAY_FE_TX_EN, fe),
+        Clause22Register::PageSelect,
+        Yt8511Page::ClockGate as u16,
+    )?;
+    let clk_gate = regs.mdio_read(address, Clause22Register::PageData)?;
+    let delay_value = modify_bits(
+        clk_gate,
+        ClockGate::RX_DELAY.bits() | ClockGate::GE_TX_DELAY_MASK.bits(),
+        ge,
+    );
+    regs.mdio_write(address, Clause22Register::PageData, delay_value)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageData,
+        delay_value | ClockGate::CLOCK_125MHZ.bits(),
     )?;
 
-    regs.mdio_write(address, PAGE_SELECT, PAGE_EXT_SLEEP_CTRL)?;
-    let sleep_ctrl = regs.mdio_read(address, PAGE_DATA)?;
-    regs.mdio_write(address, PAGE_DATA, sleep_ctrl | PLLON_SLP)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageSelect,
+        Yt8511Page::DelayDrive as u16,
+    )?;
+    let delay_drive = regs.mdio_read(address, Clause22Register::PageData)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageData,
+        modify_bits(delay_drive, DelayDrive::FE_TX_DELAY_MASK.bits(), fe),
+    )?;
+
+    regs.mdio_write(
+        address,
+        Clause22Register::PageSelect,
+        Yt8511Page::SleepControl as u16,
+    )?;
+    let sleep_ctrl = regs.mdio_read(address, Clause22Register::PageData)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageData,
+        sleep_ctrl | SleepControl::PLL_ON_IN_SLEEP.bits(),
+    )?;
 
     let before = DelayRegisters {
         clk_gate,
@@ -517,12 +612,24 @@ fn read_selected_delay_registers(
     regs: &Dwmac1000Regs,
     address: u8,
 ) -> Result<DelayRegisters, SysError> {
-    regs.mdio_write(address, PAGE_SELECT, PAGE_EXT_CLK_GATE)?;
-    let clk_gate = regs.mdio_read(address, PAGE_DATA)?;
-    regs.mdio_write(address, PAGE_SELECT, PAGE_EXT_DELAY_DRIVE)?;
-    let delay_drive = regs.mdio_read(address, PAGE_DATA)?;
-    regs.mdio_write(address, PAGE_SELECT, PAGE_EXT_SLEEP_CTRL)?;
-    let sleep_ctrl = regs.mdio_read(address, PAGE_DATA)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageSelect,
+        Yt8511Page::ClockGate as u16,
+    )?;
+    let clk_gate = regs.mdio_read(address, Clause22Register::PageData)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageSelect,
+        Yt8511Page::DelayDrive as u16,
+    )?;
+    let delay_drive = regs.mdio_read(address, Clause22Register::PageData)?;
+    regs.mdio_write(
+        address,
+        Clause22Register::PageSelect,
+        Yt8511Page::SleepControl as u16,
+    )?;
+    let sleep_ctrl = regs.mdio_read(address, Clause22Register::PageData)?;
     Ok(DelayRegisters {
         clk_gate,
         delay_drive,
@@ -537,15 +644,22 @@ const fn modify_bits(current: u16, clear: u16, set: u16) -> u16 {
 const fn delay_bits(mode: &str) -> Result<(u16, u16), SysError> {
     match mode.as_bytes() {
         b"rgmii" => Ok((DELAY_GE_TX_DIS, DELAY_FE_TX_DIS)),
-        b"rgmii-id" => Ok((DELAY_RX | DELAY_GE_TX_EN, DELAY_FE_TX_EN)),
+        b"rgmii-id" => Ok((
+            ClockGate::RX_DELAY.bits() | ClockGate::GE_TX_DELAY_MASK.bits(),
+            DelayDrive::FE_TX_DELAY_MASK.bits(),
+        )),
         _ => Err(SysError::DriverIncompatible),
     }
 }
 
 const fn delay_registers_match(registers: DelayRegisters, ge: u16, fe: u16) -> bool {
-    registers.clk_gate & (DELAY_RX | DELAY_GE_TX_EN | CLK_125M) == ge | CLK_125M
-        && registers.delay_drive & DELAY_FE_TX_EN == fe
-        && registers.sleep_ctrl & PLLON_SLP != 0
+    registers.clk_gate
+        & (ClockGate::RX_DELAY.bits()
+            | ClockGate::GE_TX_DELAY_MASK.bits()
+            | ClockGate::CLOCK_125MHZ.bits())
+        == ge | ClockGate::CLOCK_125MHZ.bits()
+        && registers.delay_drive & DelayDrive::FE_TX_DELAY_MASK.bits() == fe
+        && registers.sleep_ctrl & SleepControl::PLL_ON_IN_SLEEP.bits() != 0
 }
 
 #[cfg(feature = "kunit")]
@@ -557,7 +671,10 @@ mod kunits {
         assert_eq!(delay_bits("rgmii"), Ok((DELAY_GE_TX_DIS, DELAY_FE_TX_DIS)));
         assert_eq!(
             delay_bits("rgmii-id"),
-            Ok((DELAY_RX | DELAY_GE_TX_EN, DELAY_FE_TX_EN))
+            Ok((
+                ClockGate::RX_DELAY.bits() | ClockGate::GE_TX_DELAY_MASK.bits(),
+                DelayDrive::FE_TX_DELAY_MASK.bits(),
+            ))
         );
         assert_eq!(delay_bits("sgmii"), Err(SysError::DriverIncompatible));
     }
@@ -566,10 +683,10 @@ mod kunits {
     fn generic_resolution_prefers_fastest_common_clause22_mode() {
         assert_eq!(
             resolve_autoneg(
-                ADVERTISE_1000_FULL | ADVERTISE_100_FULL,
-                ADVERTISE_100_FULL,
-                ADVERTISE_1000_FULL,
-                LPA_1000_FULL,
+                GigabitControl::ADVERTISE_FULL.bits() | Advertisement::MODE_100_FULL.bits(),
+                Advertisement::MODE_100_FULL.bits(),
+                GigabitControl::ADVERTISE_FULL.bits(),
+                GigabitStatus::LINK_PARTNER_FULL.bits(),
             ),
             Ok(PhyLink {
                 speed_mbps: 1000,
@@ -580,8 +697,8 @@ mod kunits {
         );
         assert_eq!(
             resolve_autoneg(
-                ADVERTISE_100_FULL | ADVERTISE_10_FULL,
-                ADVERTISE_100_FULL | ADVERTISE_10_FULL,
+                Advertisement::MODE_100_FULL.bits() | Advertisement::MODE_10_FULL.bits(),
+                Advertisement::MODE_100_FULL.bits() | Advertisement::MODE_10_FULL.bits(),
                 0,
                 0,
             ),
@@ -601,33 +718,46 @@ mod kunits {
             Err(SysError::DriverIncompatible)
         );
         assert_eq!(
-            resolve_autoneg(0, 0, 0, LPA_1000_MASTER_SLAVE_FAILURE),
+            resolve_autoneg(0, 0, 0, GigabitStatus::MASTER_SLAVE_FAILURE.bits()),
             Err(SysError::DriverIncompatible)
         );
     }
 
     #[kunit]
     fn max_speed_and_mac_capability_filter_phy_advertisement() {
-        let all = ADVERTISE_10_HALF | ADVERTISE_10_FULL | ADVERTISE_100_HALF | ADVERTISE_100_FULL;
+        let all = Advertisement::MODE_10_HALF.bits()
+            | Advertisement::MODE_10_FULL.bits()
+            | Advertisement::MODE_100_HALF.bits()
+            | Advertisement::MODE_100_FULL.bits();
         assert_eq!(
             filter_advertised_10_100(all, Some(10), true, false),
-            ADVERTISE_10_FULL
+            Advertisement::MODE_10_FULL.bits()
         );
         assert_eq!(
             filter_advertised_10_100(all, Some(100), true, false),
-            ADVERTISE_10_FULL | ADVERTISE_100_FULL
+            Advertisement::MODE_10_FULL.bits() | Advertisement::MODE_100_FULL.bits()
         );
         assert_eq!(filter_advertised_10_100(all, None, false, true), 0);
         assert_eq!(
-            filter_advertised_1000(ESTATUS_1000_T_HALF | ESTATUS_1000_T_FULL, None, true, false,),
-            ADVERTISE_1000_FULL
+            filter_advertised_1000(
+                ExtendedStatus::MODE_1000_T_HALF.bits() | ExtendedStatus::MODE_1000_T_FULL.bits(),
+                None,
+                true,
+                false,
+            ),
+            GigabitControl::ADVERTISE_FULL.bits()
         );
         assert_eq!(
-            filter_advertised_1000(ESTATUS_1000_T_FULL, Some(100), true, true),
+            filter_advertised_1000(
+                ExtendedStatus::MODE_1000_T_FULL.bits(),
+                Some(100),
+                true,
+                true
+            ),
             0
         );
         assert_eq!(
-            filter_advertised_1000(ESTATUS_1000_T_FULL, None, false, true),
+            filter_advertised_1000(ExtendedStatus::MODE_1000_T_FULL.bits(), None, false, true),
             0
         );
     }
@@ -647,9 +777,9 @@ mod kunits {
     #[kunit]
     fn delay_readback_requires_clock_delay_and_sleep_bits() {
         let valid = DelayRegisters {
-            clk_gate: DELAY_GE_TX_DIS | CLK_125M,
+            clk_gate: DELAY_GE_TX_DIS | ClockGate::CLOCK_125MHZ.bits(),
             delay_drive: DELAY_FE_TX_DIS,
-            sleep_ctrl: PLLON_SLP,
+            sleep_ctrl: SleepControl::PLL_ON_IN_SLEEP.bits(),
         };
         assert!(delay_registers_match(
             valid,

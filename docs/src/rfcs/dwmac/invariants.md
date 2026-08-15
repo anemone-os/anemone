@@ -3,7 +3,7 @@
 **状态：** Accepted
 **最后更新：** 2026-08-14
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**适用修订：** R6
+**适用修订：** R7
 
 本文只定义本 RFC 的 target/proof obligations。当前 effective rule 仍以 `docs/src/contracts/` 为准；
 实现类型、helper、文件布局和内部算法不由本文冻结。
@@ -11,7 +11,7 @@
 ## 规则分类
 
 - **Correctness invariant：** owner、并发、生命周期、cleanup、内存安全、IRQ ordering 和 ABI 诚实性，不能以工程妥协降低。
-- **Target guarantee：** R6保持DWMAC1000 capability-admitted Linux enhanced/extended mode、32-bit DMA、boot-time PHY和长期owner；Gate 2在CSR7=0时采用Linux legacy init与一次bounded polling hardware proof，IRQ request/handler/level-flow proof移交Gate 3/final acceptance。
+- **Target guarantee：** R7保持DWMAC1000 capability-admitted Linux enhanced/extended mode、32-bit DMA、boot-time PHY和长期owner；per-port `no-map` reserved region通过strong-noncache映射提供最终DMA backing，GMAC 12--15使用实机证明的`LevelHigh`；Gate 1--4已闭合。
 - **Implementation preference：** `IrqSense` 的具体 Rust 形状、ring helper、backend module layout 和 log wording。
 
 ## Target Invariants
@@ -63,11 +63,11 @@ RX device ownership、idle TX和末项EOR。
 
 ### TARGET-005 — Single `IrqSense` source truth
 
-**规则：** 2K1000 irqchip 的 owner-local table 是 source electrical type、`INTEDGE/INTPOL` programming 和 controller flow 的唯一真相。GMAC 12/13/14/15 为 `LevelLow`；44..48 为 edge/pulse。不能同时保留 range-derived trigger truth 和独立 polarity mask。
+**规则：** 2K1000 irqchip 的 owner-local table 是 source electrical type、`INTEDGE/INTPOL` programming 和 controller flow 的唯一真相。实机 production IRQ 证明 GMAC 12/13/14/15 为 `LevelHigh`；44..48 为 edge/pulse。不能同时保留 range-derived trigger truth 和独立 polarity mask。
 
 **Owner：** concrete Loongson 2K1000 irqchip。
 
-**违反表现：** DWMAC 写 ICU、request caller 覆盖 table、`Level` 与 `LevelLow` 混淆，或 table/readback/flow 不一致。
+**违反表现：** DWMAC 写 ICU、request caller 覆盖 table、level trigger 与 polarity 混淆，或 table/readback/flow 不一致。
 
 **Proof：** Gate 1 irqchip implementation/table audit、ICU `EDGE/POL` readback、Gate 3 two-port runtime IRQ probe。
 

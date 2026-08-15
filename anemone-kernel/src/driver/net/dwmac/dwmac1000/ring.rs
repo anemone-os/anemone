@@ -4,7 +4,7 @@ use core::{
 };
 
 use crate::{
-    mm::dma::{DmaRegion, dma_alloc},
+    mm::remap::{IoRemap, ioremap},
     prelude::*,
 };
 
@@ -105,7 +105,11 @@ impl RingLayout {
 /// loopback, then resets every descriptor in this same allocation before the
 /// owner is retained for Gate 3 adoption.
 pub(super) struct Dwmac1000Rings {
-    dma: DmaRegion,
+    /// The reserved physical region still has a LoongArch DMW alias, but this
+    /// strong-noncache mapping is the only CPU access path used by the driver.
+    /// Keeping descriptor and frame accesses on one mapping is required for
+    /// CPU/device ownership visibility on the non-coherent 2K1000 DMA path.
+    mapping: IoRemap,
     layout: RingLayout,
     allocated_bytes: usize,
     phys_base: u64,
@@ -137,13 +141,14 @@ pub(super) struct TxCompletion {
 }
 
 impl Dwmac1000Rings {
-    pub(super) fn new() -> Result<Self, SysError> {
+    pub(super) fn new(dma_region: (PhysAddr, usize)) -> Result<Self, SysError> {
         let layout = RingLayout::new(DWMAC1000_RING_SIZE, DWMAC1000_FRAME_CAPACITY_BYTES)
             .ok_or(SysError::InvalidArgument)?;
-        let allocated_bytes = align_up(layout.total_bytes, PagingArch::PAGE_SIZE_BYTES)
-            .ok_or(SysError::InvalidArgument)?;
-        let dma = dma_alloc(layout.total_bytes)?;
-        let phys_base = dma.ppn().to_phys_addr().get();
+        let (phys, allocated_bytes) = dma_region;
+        if layout.total_bytes > allocated_bytes {
+            return Err(SysError::InvalidArgument);
+        }
+        let phys_base = phys.get();
         if !dma_range_fits(phys_base, allocated_bytes) {
             kerrln!(
                 "dwmac1000 stage=dma-address result=fail reason=range base={:#x} used={:#x} allocated={:#x} limit-exclusive={:#x}",
@@ -154,8 +159,12 @@ impl Dwmac1000Rings {
             );
             return Err(SysError::DriverIncompatible);
         }
+        // SAFETY: firmware reserves this page-aligned `no-map` region for this
+        // node, and no allocator or other driver owns it. The mapping remains
+        // alive until the ring owner has quiesced and is dropped.
+        let mapping = unsafe { ioremap(phys, allocated_bytes) }?;
         let rings = Self {
-            dma,
+            mapping,
             layout,
             allocated_bytes,
             phys_base,
@@ -166,6 +175,16 @@ impl Dwmac1000Rings {
             tx_clean: 0,
             tx_in_flight: 0,
         };
+        // Do not initialize through HHDM: dirty cache lines on the cached DMW
+        // alias would invalidate the purpose of this uncached A/B probe.
+        unsafe {
+            core::ptr::write_bytes(
+                rings.mapping.as_ptr().as_ptr().cast::<u8>(),
+                0,
+                allocated_bytes,
+            )
+        };
+        rings.sync_for_device();
         if !dma_range_fits(rings.rx_desc(), rings.descriptor_bytes())
             || !dma_range_fits(rings.tx_desc(), rings.descriptor_bytes())
             || !dma_range_fits(rings.rx_frame(0), rings.frame_bytes())
@@ -186,6 +205,10 @@ impl Dwmac1000Rings {
 
     pub(super) const fn allocated_bytes(&self) -> usize {
         self.allocated_bytes
+    }
+
+    pub(super) fn virt_base(&self) -> u64 {
+        self.mapping.virt_base().get()
     }
 
     pub(super) const fn ring_size(&self) -> usize {
@@ -224,10 +247,39 @@ impl Dwmac1000Rings {
         self.phys_base.checked_add(offset as u64).unwrap()
     }
 
+    fn sync_for_device(&self) {
+        // Match the working Cosmos driver for this comparison run. A full
+        // LoongArch DBAR avoids attributing RX ownership failure to a weaker
+        // ordering hint while the other hardware settings are being aligned.
+        #[cfg(target_arch = "loongarch64")]
+        unsafe {
+            core::arch::asm!("dbar 0", options(nostack, preserves_flags));
+        }
+        #[cfg(not(target_arch = "loongarch64"))]
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn sync_for_cpu(&self) {
+        // Cosmos uses the same full barrier for descriptor readback.
+        #[cfg(target_arch = "loongarch64")]
+        unsafe {
+            core::arch::asm!("dbar 0", options(nostack, preserves_flags));
+        }
+        #[cfg(not(target_arch = "loongarch64"))]
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+    }
+
     fn ptr<T>(&self, offset: usize) -> *mut T {
         let end = offset.checked_add(size_of::<T>()).unwrap();
         assert!(end <= self.layout.total_bytes);
-        unsafe { self.dma.as_ptr().as_ptr().cast::<u8>().add(offset).cast() }
+        unsafe {
+            self.mapping
+                .as_ptr()
+                .as_ptr()
+                .cast::<u8>()
+                .add(offset)
+                .cast()
+        }
     }
 
     fn descriptor_ptr(&self, tx: bool, index: usize) -> *mut EnhancedDescriptor {
@@ -238,8 +290,35 @@ impl Dwmac1000Rings {
         self.ptr(self.layout.frame_offset(tx, index).unwrap())
     }
 
+    /// Publish an RX descriptor with OWN as the final device-visible store.
+    /// Keep OWN as the final DMA-visible store: writing a complete descriptor
+    /// with OWN already set can let hardware fetch it before its buffer address
+    /// and control fields are visible.
+    fn publish_rx_descriptor(&self, index: usize, descriptor: EnhancedDescriptor) {
+        let ptr = self.descriptor_ptr(false, index);
+        let mut unpublished = descriptor;
+        unpublished.des0 &= !(1 << 31);
+        unsafe { write_volatile(ptr, unpublished) };
+        self.sync_for_device();
+        unsafe { write_volatile(core::ptr::addr_of_mut!((*ptr).des0), descriptor.des0) };
+        self.sync_for_device();
+    }
+
     pub(super) fn prepare_probe(&self, mac: [u8; 6]) {
-        self.initialize_descriptors();
+        // Match the working Cosmos sequence: descriptors start CPU-owned,
+        // buffers are submitted one at a time, and the final slot remains
+        // available until the prefill threshold has been reached.
+        self.initialize_descriptors(false);
+        for index in 0..self.layout.ring_size - 1 {
+            let rx = EnhancedDescriptor::rx(
+                index,
+                self.layout.ring_size,
+                self.rx_frame(index),
+                self.layout.frame_capacity,
+            )
+            .unwrap();
+            self.publish_rx_descriptor(index, rx);
+        }
         let mut frame = [0u8; PROBE_TX_BYTES];
         frame[0..6].copy_from_slice(&mac);
         frame[6..12].copy_from_slice(&mac);
@@ -249,31 +328,38 @@ impl Dwmac1000Rings {
             core::ptr::copy_nonoverlapping(frame.as_ptr(), self.frame_ptr(true, 0), frame.len());
             core::ptr::write_bytes(self.frame_ptr(false, 0), 0, self.layout.frame_capacity);
         }
-        self.dma.sync_for_device();
+        self.sync_for_device();
     }
 
     pub(super) fn prepare_production(&self) {
-        self.initialize_descriptors();
+        self.initialize_descriptors(true);
     }
 
-    fn initialize_descriptors(&self) {
+    fn initialize_descriptors(&self, rx_owned: bool) {
         for index in 0..self.layout.ring_size {
-            let rx = EnhancedDescriptor::rx(
-                index,
-                self.layout.ring_size,
-                self.rx_frame(index),
-                self.layout.frame_capacity,
-            )
-            .unwrap();
+            let rx = if rx_owned {
+                EnhancedDescriptor::rx(
+                    index,
+                    self.layout.ring_size,
+                    self.rx_frame(index),
+                    self.layout.frame_capacity,
+                )
+                .unwrap()
+            } else {
+                EnhancedDescriptor::idle_rx(index, self.layout.ring_size).unwrap()
+            };
             let tx =
                 EnhancedDescriptor::idle_tx(index, self.layout.ring_size, self.tx_frame(index))
                     .unwrap();
             unsafe {
-                write_volatile(self.descriptor_ptr(false, index), rx);
                 write_volatile(self.descriptor_ptr(true, index), tx);
             }
+            if rx_owned {
+                self.publish_rx_descriptor(index, rx);
+            } else {
+                unsafe { write_volatile(self.descriptor_ptr(false, index), rx) };
+            }
         }
-        self.dma.sync_for_device();
     }
 
     pub(super) fn publish_probe_tx(&self) -> EnhancedDescriptor {
@@ -283,11 +369,11 @@ impl Dwmac1000Rings {
         let mut prepared = tx;
         prepared.des0 &= !(1 << 31);
         unsafe { write_volatile(ptr, prepared) };
-        self.dma.sync_for_device();
+        self.sync_for_device();
         // Linux enhanced TX descriptors keep FS/LS/IC/EOR in des0. Publish the
         // complete control word only after des1..des7 and the frame are visible.
         unsafe { write_volatile(core::ptr::addr_of_mut!((*ptr).des0), tx.des0) };
-        self.dma.sync_for_device();
+        self.sync_for_device();
         // Return the committed descriptor value, not a racing hardware
         // readback: a fast DMA may clear OWN before the diagnostic snapshot.
         tx
@@ -317,7 +403,7 @@ impl Dwmac1000Rings {
         // DWMAC clears OWN only after publishing completion fields. Match
         // Linux's OWN-first read followed by dma_rmb before consuming them.
         let des0 = unsafe { read_volatile(core::ptr::addr_of!((*ptr).des0)) };
-        self.dma.sync_for_cpu();
+        self.sync_for_cpu();
         EnhancedDescriptor {
             des0,
             des1: unsafe { read_volatile(core::ptr::addr_of!((*ptr).des1)) },
@@ -331,7 +417,7 @@ impl Dwmac1000Rings {
     }
 
     pub(super) fn probe_payload_matches(&self) -> bool {
-        self.dma.sync_for_cpu();
+        self.sync_for_cpu();
         for offset in 0..PROBE_TX_BYTES {
             let rx = unsafe { read_volatile(self.frame_ptr(false, 0).add(offset)) };
             let tx = unsafe { read_volatile(self.frame_ptr(true, 0).add(offset)) };
@@ -408,14 +494,14 @@ impl Dwmac1000Rings {
         let mut unpublished = descriptor;
         unpublished.des0 &= !(1 << 31);
         unsafe { write_volatile(self.descriptor_ptr(true, index), unpublished) };
-        self.dma.sync_for_device();
+        self.sync_for_device();
         unsafe {
             write_volatile(
                 core::ptr::addr_of_mut!((*self.descriptor_ptr(true, index)).des0),
                 descriptor.des0,
             )
         };
-        self.dma.sync_for_device();
+        self.sync_for_device();
         self.tx_reserved = None;
         self.tx_next = (index + 1) & (self.layout.ring_size - 1);
         self.tx_in_flight += 1;
@@ -434,7 +520,7 @@ impl Dwmac1000Rings {
         if status & (1 << 31) != 0 {
             return Ok(None);
         }
-        self.dma.sync_for_cpu();
+        self.sync_for_cpu();
         let descriptor = self.read_descriptor(true, index);
         let error = descriptor.des0 & (1 << 15) != 0;
         let idle = EnhancedDescriptor::idle_tx(
@@ -457,7 +543,7 @@ impl Dwmac1000Rings {
         if self.read_descriptor(false, index).des0 & (1 << 31) != 0 {
             return None;
         }
-        self.dma.sync_for_cpu();
+        self.sync_for_cpu();
         let descriptor = self.read_descriptor(false, index);
         let wire_length = ((descriptor.des0 >> 16) & 0x3fff) as usize;
         let first_last = descriptor.des0 & ((1 << 9) | (1 << 8)) == (1 << 9) | (1 << 8);
@@ -519,8 +605,7 @@ impl Dwmac1000Rings {
             self.layout.frame_capacity,
         )
         .unwrap();
-        unsafe { write_volatile(self.descriptor_ptr(false, index), descriptor) };
-        self.dma.sync_for_device();
+        self.publish_rx_descriptor(index, descriptor);
         self.rx_next = (index + 1) & (self.layout.ring_size - 1);
         Ok(())
     }

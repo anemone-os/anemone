@@ -1,11 +1,11 @@
 # RFC-20260811-dwmac
 
-**状态：** Accepted / R6 / Gate 1--2 Closed; Gate 3 Authorized / Active; RFC Not Cut Over
-**修订：** R6
+**状态：** Closed / R7 / Gate 1--4 Closed; all contract cutovers effective
+**修订：** R7
 **负责人：** Anemone maintainers
 **最后更新：** 2026-08-15
 **领域：** driver / net / irq / mm / phy
-**影响契约：** Accepted target：Refine `IRQ-FLOW-001`；Introduce `DWMAC-DESCRIPTOR-001`、`DWMAC-DMA-ADDR-001`、`DWMAC-CAUSE-001`、`DWMAC-NODE-001`
+**影响契约：** Effective：Refine `IRQ-FLOW-001`；Introduce `DWMAC-DESCRIPTOR-001`、`DWMAC-DMA-ADDR-001`、`DWMAC-CAUSE-001`、`DWMAC-NODE-001`
 **执行记录：** [2026-08-11 DWMAC transaction](../../devlog/transactions/2026-08-11-dwmac.md)
 
 ## 摘要
@@ -17,7 +17,8 @@ DT `compatible` 匹配的 DWMAC1000 backend，用于 Loongson 2K1000 的 DWMAC 3
 concrete backend。DWMAC4 与 DWMAC1000 各自拥有寄存器、descriptor、DMA addressability、device-cause
 和板级 glue。
 
-本 RFC 明确不修改仓库当前 2K1000 DTB。该 DTB 的 ICU 使用 one-cell interrupt specifier，因此
+R7 接受当前 2K1000 DTB 为每个 GMAC node 提供独立 `no-map` reserved `memory-region`。该 DTB 的 ICU 使用
+one-cell interrupt specifier，因此
 2K1000 irqchip 依据手册建立完整 `IrqSense` source table，同时让 `request_irq()` 接受可选的
 `Option<IrqSense>` expectation，在 descriptor publication 和 `unmask()` 前做 fail-closed 校验。
 DWMAC1000 R0 只使用由 `DMA_HW_FEATURE.ENHDESSEL` 派生的 Linux enhanced/alternate descriptor ops；
@@ -57,11 +58,11 @@ GMAC1 显式包含 pinctrl。这些 resource 缺失不证明硬件无需初始�
 - 对所有 DWMAC1000 descriptor base、ring、chain next、TX/RX frame backing 做完整 `[start,end)`
   32-bit DMA admission。初始化时打印低于 4 GiB 的板级假设 warning；任一地址达到或超过 4 GiB，该
   node 在 IRQ/publication/`eth<N>` 前失败，不引入 DMA32 allocator 或 bounce buffer。
-- 保持当前 DTB 不变。2K1000 irqchip 按手册拥有 `IrqSense` 表：GMAC source 12/13/14/15 为
-  `LevelLow`，独立 DMA source 44..48 为 edge/pulse；表项同时导出 `INTEDGE/INTPOL` 和 controller flow。
+- 2K1000 irqchip 拥有 `IrqSense` 表：实机 production IRQ 证明 GMAC source 12/13/14/15 为
+  `LevelHigh`，独立 DMA source 44..48 为 edge/pulse；表项同时导出 `INTEDGE/INTPOL` 和 controller flow。
 - 将 `request_irq()` 与 crate-local `request_irq_selected()` 增加 `expected: Option<IrqSense>`；`Some`
   只做 actual type admission assertion，不写 controller、不决定 flow、不形成第二份真相。DWMAC1000
-  named `macirq` 使用 `Some(IrqSense::LevelLow)`。
+  named `macirq` 使用 `Some(IrqSense::LevelHigh)`。
 - 外部 clock、reset、pinctrl 首先采用路线 A：消费 firmware handoff，做 capability/readability、DMA
   reset、MDIO 和 cold-boot characterization；失败时停止并回到 owner review，不写 LoongArch raw MMIO。
 - 每个 node 以 per-node PHY transaction 从 `phy-handle`/MDIO 识别 PHY，执行 boot-time Clause 22、
@@ -77,8 +78,8 @@ GMAC1 显式包含 pinctrl。这些 resource 缺失不证明硬件无需初始�
 
 ## 非目标
 
-- 在后续 Gate 中继续修改当前已含两个板级 `local-mac-address` 的 `conf/platforms/2k1000-board.dts`，
-  或引入新的 DT compatible、interrupt cell、clock/reset/pinctrl property；实现必须在当前 DTB 输入上工作。
+- 在闭合后继续改变当前 DTB 的 compatible、interrupt cell、clock/reset/pinctrl 或 per-port reserved
+  `memory-region` contract；后续变化必须重新审查 firmware/driver handoff。
 - 新建通用 clock/reset/syscon/pinctrl/MDIO/PHY framework，或由 DWMAC 直接写 LoongArch controller
   register。路线 A 失败后的 provider 路线是后续 review，不是本 RFC 的隐式 fallback。
 - DWMAC1000 normal descriptor、descriptor fallback、PTP、timestamp、TSO、checksum offload、jumbo frame、多 queue、
@@ -125,7 +126,7 @@ characterization通过时，MMIO、rings、DMA backing、PHY snapshot和result�
 platform bind success只表达该disabled hardware owner可被Gate 3原位采用，不表示netdev已经发布。
 
 Gate 3在同一次platform `probe()`的private continuation中从该owner首次执行named `macirq`
-`request_irq(..., Some(LevelLow))`，并在同一对象上补充IRQ context、`FrameProvider`/worker/publication/attach。
+`request_irq(..., Some(LevelHigh))`，并在同一对象上补充IRQ context、`FrameProvider`/worker/publication/attach。
 `request_irq` commit从Gate 3开始才是不退休边界；Gate 3必须先让IRQ descriptor private data取得同一owner的
 strong reference，再commit/unmask，不能重新映射MMIO、重建rings/backing、替换一次性`drv_state`或制造第二份
 CSR5 truth。pending trace、handler/W1C/level-flow、异常注入和重复启动矩阵都属于Gate 3/final acceptance。
@@ -155,7 +156,7 @@ ICU ack/mask/eoi 不清 CSR5；DWMAC W1C 不清 ICU source。旧 cause 在 unmas
 - 不新增 userspace syscall、socket、netlink 或文件 ABI。`eth<N>`、MAC、link snapshot、publication failure
   和现有 network attach 语义是唯一可见 surface。
 - `request_irq`/`request_irq_selected` 是 kernel-internal API surface，不是 userspace ABI；旧 caller
-  传 `None` 保持行为，DWMAC1000 显式传 `Some(IrqSense::LevelLow)`。
+  传 `None` 保持行为，DWMAC1000 显式传 `Some(IrqSense::LevelHigh)`。
 - Gate 2 的 bound-but-unpublished device 不注册IRQ，也不产生 netdev、Stack membership 或 `eth<N>`；platform
   bind success不是用户可见network capability success，characterization failure必须由结构化日志明确输出。
 - `eth<N>` 只表示成功 active publication 顺序，不承诺与 physical node、MMIO base、IRQ source 或 DT alias
@@ -166,14 +167,14 @@ ICU ack/mask/eoi 不清 CSR5；DWMAC W1C 不清 ICU source。旧 cause 在 unmas
 
 ## Contract Impact
 
-这些是 target contract delta；在 RFC closure/cutover 前不覆盖 current contract。
+这些contract delta已在Gate 4原子cut over；effective规则以对应current contract为权威。
 
 | Contract ID | 变化 | Target 摘要 | Cutover |
 | --- | --- | --- | --- |
-| `IRQ-FLOW-001` | Refine | irqchip-owned `IrqSense` table；optional request expectation 在 mapping/publication/unmask 前 fail closed；device cause 仍由 concrete driver 清除 | `DWMAC-IRQ-CUTOVER` |
+| `IRQ-FLOW-001` | Refine | irqchip-owned `IrqSense` table；2K1000 GMAC 12--15为实机证明的`LevelHigh`；optional request expectation在mapping/publication/unmask前fail closed；device cause仍由concrete driver清除 | `DWMAC-IRQ-CUTOVER` |
 | `DWMAC-NODE-001` | Introduce | per-node DWMAC backend ownership、failure isolation、success-order active publication | `DWMAC-FINAL-CUTOVER` |
 | `DWMAC-DESCRIPTOR-001` | Introduce | DWMAC1000 capability-admitted enhanced/extended descriptor、`ATDS=1`、32-byte stride；normal descriptor和runtime PTP/timestamp excluded | `DWMAC1000-CUTOVER` |
-| `DWMAC-DMA-ADDR-001` | Introduce | 所有 legacy DWMAC1000 DMA 地址完整位于 `[0, 4GiB)`；越界 node fail before publication | `DWMAC1000-CUTOVER` |
+| `DWMAC-DMA-ADDR-001` | Introduce | per-port `no-map` reserved region只经strong-noncache mapping访问；所有legacy DWMAC1000 DMA地址完整位于`[0, 4GiB)`；越界node fail before publication | `DWMAC1000-CUTOVER` |
 | `DWMAC-CAUSE-001` | Introduce | CSR5 W1C cause clear before level IRQ completion/unmask；只写合法 cause mask | `DWMAC-IRQ-CUTOVER` |
 
 ### Dependencies
@@ -225,16 +226,16 @@ RFC 被接受只表示 target/owner/boundary/contract delta 获得 review，不�
 
 用户提供的 2K1000 Gate 1 实机日志证明两个 enabled DWMAC1000 node 都按 compatible 进入 variant-local
 `dwmac1000` Driver，并在任何 Gate 2 hardware transaction 或 netdev publication 前以 `NotSupported`
-fail closed。同次启动的 ICU readback 为 `EDGE=0x1f00000000000`、`POL=0xf000`，精确对应 edge bits
-44..48 与 active-low bits 12..15，关闭 Gate 1 的 controller programming proof。该日志不证明 DWMAC1000
-register/descriptor/PHY/traffic。RiscV/JH7110 hardware regression 仍为 Not Run；QEMU 不能替代这些
-hardware acceptance。
+fail closed。Gate 1 曾记录 `EDGE=0x1f00000000000`、`POL=0xf000`；后续 production RX 证明该 active-low
+假设会让 CSR5 `RI/NIS` 已置位但 ICU 没有 pending。R7 将 source 12--15 修正为 active-high（`POL=0`），
+随后用户确认 2K1000 IRQ、ARP/ICMP 与外部网络正常工作。VisionFive 2 实机本轮仍为 Not Run，DWMAC4 由
+保持行为的 source/build 审查与既有 hardware acceptance 保护。
 每个 node 的失败、DMA 越界、PHY/MDIO timeout、IRQ type mismatch 和 handoff failure 都必须在 publication 前
 可观察并保持其它 candidate 独立继续 probe。
 
 ## 风险与反馈
 
-- `DMA_HW_FEATURE.ENHDESSEL` 为 0、或 capability-admitted enhanced/extended mode 在 2K1000 上不可靠：Gate 2 停止，不回退 normal，回 R6 target review。
+- `DMA_HW_FEATURE.ENHDESSEL` 为 0、或 capability-admitted enhanced/extended mode 在 2K1000 上不可靠：启动前失败，不回退 normal；扩展target需新RFC。
 - 当前 DTB 不表达 polarity，vendor Linux fork 与主线 polarity 编程存在差异：以手册/mainline 对照形成 target，并以 ICU `EDGE/POL` readback 和真实 RX/TX 事件作最终证据。
 - Route A 可能在 cold boot、warm reboot 或不同 firmware 使用历史下失败：失败信号写回 tracking issue，不能添加 raw SoC fallback。
 - PHY `rgmii-id` delay 可能被 soft reset 清除：Gate 2 先完成 PHY ID/reset-effect characterization，未闭合时不执行 production reset。
@@ -261,17 +262,18 @@ hardware acceptance。
 | R4 | 2026-08-13 | 接受 Gate 2 validation 修订：硬件初始化和cause classification以Linux 6.6 legacy DWMAC1000为基线，不把单次板级observed value编码为backend policy；Gate 2保留normal descriptor、DMA32、YT8511 P1、真实RI/TI、CSR5 legal W1C、quiescence与唯一长期owner，并以至少一次2K1000 bounded sample关闭。跨启动矩阵、异常注入、逐次pending trace与严格跨dispatch重复oracle移交Gate 3/final acceptance；ABI、DTB、visible net semantics、Contract Impact和current contracts不变。 | [R4 closure revision](../../devlog/transactions/2026-08-11-dwmac.md#r4-linux-shaped-gate-2-closure-revision---2026-08-13) |
 | R5 | 2026-08-13 | 接受Gate 2启动时序修订：architecture local IRQ在physical discovery之后才启用，因此Gate 2不注册IRQ，以CSR7=0下的bounded CSR5/descriptor polling证明RI/TI、legal W1C、payload和quiescence；通过后bound device保留唯一hardware owner，Gate 3原位adopt并首次建立IRQ context。删除Gate 2不可退休IRQ commit和临时pending trace；不降低Gate 3/final IRQ proof，不改变ABI、DTB、visible net semantics、Contract Impact或current contracts。 | [R5 polling revision](../../devlog/transactions/2026-08-11-dwmac.md#r5-gate-2-polling-revision---2026-08-13) |
 | R6 | 2026-08-14 | 接受基于 Linux 6.6 capability 的 descriptor target 修订：`ENHDESSEL=true` 时选择 enhanced/alternate ops 与 32-byte `dma_extended_desc` backing，CSR0 设置 `ATDS=1`；normal descriptor 不再属于支持范围，也不保留 fallback。`ENHDESSEL=false` 或 enhanced readback 不成立时在启动前 fail closed。DMA32、PHY、CSR5 W1C、quiescence、Gate 2 polling、Gate 3 handoff、ABI、DTB 和 validation strength 不变。 | [R6 descriptor renegotiation](../../devlog/transactions/2026-08-11-dwmac.md#r6-enhanced-descriptor-target-renegotiation---2026-08-14) |
+| R7 | 2026-08-15 | 接受实机反馈修订：GMAC source 12--15 按 production pending/traffic 证据改为 `LevelHigh`；每端口使用 DT `no-map` reserved `memory-region` 的 strong-noncache mapping 作为最终 DMA backing；2K1000 实机网络验收与 source/build review 关闭 Gate 3--4。VisionFive 2 本轮复跑仍明确 Not Run，不伪造成新 pass。 | [R7 final closure](../../devlog/transactions/2026-08-11-dwmac.md#r7-gate-3-4-closure-and-contract-cutover---2026-08-15) |
 
 ## Closure
 
-RFC 尚未 final closure、未 cutover、未更新 current contracts。R2 已关闭 Gate 1；Gate 2 于 2026-08-14
+Gate 1--4 均已关闭，`DWMAC-IRQ-CUTOVER`、`DWMAC1000-CUTOVER` 和 `DWMAC-FINAL-CUTOVER` 已生效。
+Gate 2 于 2026-08-14
 依据用户提供的 `etc/log-board-la-new-35.log` 关闭：同一修复镜像连续三次启动的有线
 `ethernet@40040000` 均证明 `selected-desc=enhanced`、`descriptor-stride=32`、`atds=true`、DMA32 backing、
 PHY resolved link、`legal=0x547`、`observed=0x41`（RI/TI）、`early-tx=true`、`abnormal=0`、`uncleared=0`、
 RX length 68、single-frame、payload match、最终 quiescence 和 `owner-disposition=BindRetained`；同三次启动的
 `ethernet@40050000` 无链路超时独立失败，未隐藏首节点成功。每次启动的 KUnit runner 均输出 `All tests passed!`，
-包括 4 GiB descriptor admission 与 TU/AIS cause classification 回归。Gate 2 因而 Closed，但
-`DWMAC1000-CUTOVER`、`DWMAC-IRQ-CUTOVER` 和 current contracts 仍保持 Not Cut Over。
-
-Gate 3 在该 Gate 2 closure 记录时仍未授权；现已进入 Gate 3，IRQ request/handler/level flow、双端口 production traffic、cold/warm/bootloader 矩阵、
-shutdown/reboot 和 RiscV/JH7110 regression 属于后续 proof，不由 Gate 2 证据替代。
+包括 4 GiB descriptor admission 与 TU/AIS cause classification 回归。Gate 3 随后原位采用同一 owner；实机
+诊断推翻 active-low 假设并以 `LevelHigh` 恢复 controller pending，用户最终确认 IRQ、ARP/ICMP 和外部网络
+正常工作。Gate 4 source/owner/lifecycle review、LA64 release build、format 与 diff validation 通过；本轮未
+执行的 VisionFive 2 实机复跑保留为 Not Run。

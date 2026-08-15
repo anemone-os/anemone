@@ -15,7 +15,6 @@ const SOURCES_PER_BANK: usize = u32::BITS as usize;
 const CORE_COUNT: usize = 2;
 const CORE_PENDING_STRIDE: usize = 0x100;
 const PER_CPU_PENDING_BYTES: usize = 0x10;
-
 const REQUIRED_CONTROLLER_BYTES: usize =
     InterruptBank::High as usize + BankRegister::Auto as usize + core::mem::size_of::<u32>();
 const REQUIRED_PER_CPU_BYTES: usize =
@@ -280,7 +279,7 @@ impl IrqChip for Loongson2K1000Intc {
             // controller API or a second pending-state owner.
             let pending = regs.pending(cur_cpu_id().physical_id());
             let enabled = regs.read_bank_pair(BankRegister::Enable);
-            kinfoln!(
+            kdebugln!(
                 "2k1000-icu: pending-before-unmask hwirq={} pending={:#x} enabled={:#x}",
                 irq,
                 pending.0,
@@ -470,10 +469,13 @@ const SOURCE_SENSE: [Option<IrqSense>; SOURCE_COUNT] = {
     let mut senses = [Some(IrqSense::LevelHigh); SOURCE_COUNT];
     senses[6] = None;
     senses[11] = None;
-    senses[12] = Some(IrqSense::LevelLow);
-    senses[13] = Some(IrqSense::LevelLow);
-    senses[14] = Some(IrqSense::LevelLow);
-    senses[15] = Some(IrqSense::LevelLow);
+    // GMAC0/1 macirq and wake lines are active-high. LIOINTC POL=0 selects
+    // active-high; programming these inputs low leaves device RI/NIS asserted
+    // without ever publishing a controller pending bit.
+    senses[12] = Some(IrqSense::LevelHigh);
+    senses[13] = Some(IrqSense::LevelHigh);
+    senses[14] = Some(IrqSense::LevelHigh);
+    senses[15] = Some(IrqSense::LevelHigh);
     let mut irq = 32;
     while irq <= 37 {
         senses[irq] = None;
@@ -502,8 +504,8 @@ mod kunits {
 
     #[kunit]
     fn source_table_owns_sense_and_controller_bits() {
-        assert_eq!(source_sense(12), Some(IrqSense::LevelLow));
-        assert_eq!(source_sense(15), Some(IrqSense::LevelLow));
+        assert_eq!(source_sense(12), Some(IrqSense::LevelHigh));
+        assert_eq!(source_sense(15), Some(IrqSense::LevelHigh));
         assert_eq!(source_sense(44), Some(IrqSense::EdgeRising));
         assert_eq!(source_sense(48), Some(IrqSense::EdgeRising));
         assert_eq!(source_sense(6), None);
@@ -519,7 +521,7 @@ mod kunits {
             );
             assert_eq!(
                 config.polarity.intersection(InterruptBits::single(irq)),
-                InterruptBits::single(irq)
+                InterruptBits::NONE
             );
         }
         for irq in 44..=48 {

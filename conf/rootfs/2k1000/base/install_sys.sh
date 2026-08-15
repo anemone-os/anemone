@@ -4,8 +4,8 @@ echo Installing Anemone toolchain...
 set -eu
 
 BUSYBOX=/home/bin/busybox
-# board-init invokes this after chrooting to /linux, so the default root `/`
-# names the Linux root (the outer mount path is /linux).
+# Legacy recovery installer. The current board-init path runs init_sys.sh and
+# preserves the Alpine system tree, including its OpenRC init.
 ROOT=${1:-/}
 ROOT=${ROOT%/}
 INSTALL_MARKER="$ROOT/etc/.anemone-installed"

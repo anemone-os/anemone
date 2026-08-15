@@ -1,16 +1,16 @@
 # DWMAC RFC Tracking Issues
 
-**状态：** Active
-**最后更新：** 2026-08-14
+**状态：** Closed
+**最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
 
-这些问题仍影响 Gate、停止边界或 acceptance；它们不是普通 TODO。解决后的 target 语义必须折回 RFC 正文，
-不要在此页复制第二份 target。
+本页保留R7 closure时各tracking issue的最终处置；effective语义已折回RFC正文与current contracts，本页不再
+承担active状态或第二份target truth。
 
 ## ISSUE-001 — 2K1000 Route A external handoff
 
-**等级：** Open / Gate 3-final validation
-**状态：** Gate 2 condition closed; repeatability matrix open
+**等级：** Closed / Gate 3-final validation
+**状态：** Closed by R7 runtime acceptance
 **证据：** 当前 Ethernet node 没有 clock/reset resource；Linux 允许资源缺失，但 SoC 仍有 GMAC clock divider。
 `etc/log-board-la-28-exchanged.log` 的八次启动中，`ethernet@40040000` 三次 DMA SWR 成功、五次保持
 `SWR=1`直到超时；`ethernet@40050000`八次成功。SWR发生在PHY link characterization前，因此无链路只能说明
@@ -22,6 +22,9 @@
 
 **Resolution (2026-08-14):** `etc/log-board-la-new-35.log` 连续三次有线 node 均通过 DMA reset、PHY、
 Gate 2 polling 和 quiescence，关闭 Gate 2 blocker；矩阵验证保留为后续 Gate 3/final issue。
+
+**Final resolution (2026-08-15):** 后续Gate 3调试跨越多次独立启动并最终由用户确认2K1000网络正常可用；
+R7关闭Route A当前板级target。其它bootloader或未来clock/reset provider变化不从本结论外推。
 
 ## ISSUE-002 — PHY ID and RGMII reset-effect
 
@@ -42,15 +45,14 @@ link 和 generic Clause 22 completion；当前实现不执行 soft reset，Gate 
 
 **等级：** Closed / Gate 1 hardware readback
 **状态：** Closed
-**证据：** current DTB does not carry interrupt flags；Gate 1 software 已改为由 owner-local `IrqSense` table
-program `EDGE/POL`。用户提供的 2K1000 Gate 1 实机 readback 为 `EDGE=0x1f00000000000`、`POL=0xf000`：
-前者精确覆盖 source 44..48，后者精确覆盖 source 12..15。2K1000 manual and Linux 6.6 integration identify
-GMAC 12/13/14/15 as level-low (`EDGE=0`, `POL=1`)；实机值与 target 一致。
+**证据：** current DTB does not carry interrupt flags；Gate 1最初按manual/Linux对照将GMAC配置为active-low。
+后续production RX明确出现CSR5 `RI/NIS`而ICU没有pending；将source 12--15改为`LevelHigh`（`EDGE=0`、
+`POL=0`）后handler进入并恢复ARP/ICMP与外部网络。这一动态证据推翻了早期仅凭readback完成的polarity判断。
 **影响：** flow class can be `LevelMaskEoi` while electrical polarity remains wrong；可能造成 idle pending、IRQ
 storm 或 lost event。
-**Resolution (2026-08-12):** concrete Loongson irqchip `IrqSense` table 是唯一 source truth，init-time
-program/readback assert 与用户实机日志共同关闭本 issue；DWMAC 没有写 ICU。Gate 2的真实CSR5 polling/W1C
-和Gate 3的pending/request/handler/unmask sequence仍按各Gate validation执行，不由本静态readback替代。
+**Resolution (2026-08-15, corrected by R7):** concrete Loongson irqchip `IrqSense` table 仍是唯一source truth，
+但GMAC 12--15的effective entry为`LevelHigh`。DWMAC没有写ICU；request expectation与table一致，动态
+handler/traffic证据而非早期静态readback关闭本issue。
 
 ## ISSUE-004 — DWMAC1000 enhanced descriptor hardware acceptance
 
@@ -94,19 +96,15 @@ second controller type truth；`IRQ-FLOW-001` remains a target delta until final
 `Option<IrqSense>`；prepare -> sense validation -> commit/unmask 顺序在 mapping/descriptor/unmask 前 fail
 closed。`None` callers 保持既有行为，mismatch KUnit 验证不会留下 mapping 或 unmask，且 mismatch log 记录
 真实 hwirq/expected/actual。R2 保持 R1 variant-local Driver owner，不改变该 API 的 kernel-internal scope；
-`IRQ-FLOW-001` 仍保持 Not Cut Over，待 Gate 4。
+`IRQ-FLOW-001` 已由 Gate 4 的 `DWMAC-IRQ-CUTOVER` refine。
 
 ## ISSUE-007 — Gate 3 IRQ and production-traffic evidence
 
-**等级：** Open / Gate 3 validation
-**状态：** Implementation present; hardware acceptance not run
-**证据：** Gate 3 代码已在同一次 platform probe 中从 Gate 2 retained owner 创建唯一 IRQ context，使用
-`Some(IrqSense::LevelLow)` 完成 named `macirq` 的首次 request，并通过既有 publication/attach path；LoongArch
-concrete irqchip 现在在每次 `LevelLow` unmask 前记录 controller-owned pending snapshot。owner-local KUnit、
-2K1000/LoongArch build 和 VisionFive 2/RiscV build 均通过。当前没有新镜像的 2K1000 serial evidence，也没有
-pending-before-unmask、handler/W1C/level-flow、single/dual-port traffic、failure isolation、shutdown/reboot 或
-cold/warm/bootloader-used 矩阵的运行结果。
-**影响：** 不能把 Gate 3 implementation/build evidence 写成 IRQ、traffic、lifecycle 或 Route A final acceptance；
-`DWMAC-IRQ-CUTOVER`、`DWMAC-FINAL-CUTOVER` 和 current contracts 保持 Not Cut Over。
-**修复位置：** Gate 3 实机验证与 R2 延期的 VisionFive 2 DWMAC4 regression；若 pending observation 需要扩大
-generic IRQ/controller API，立即回 IRQ owner review，不能添加第二份 pending truth。
+**等级：** Closed / Gate 3 validation
+**状态：** Closed by R7 hardware acceptance
+**证据：** Gate 3在同一次platform probe中原位采用Gate 2 owner并首次以
+`Some(IrqSense::LevelHigh)` request named `macirq`。用户提供的网关抓包证明ARP reply返回目标MAC；修正
+polarity和RX descriptor路径后，用户确认2K1000网络正常可用。owner-local KUnit、LA64/RV64 build与source
+review通过；Gate 3专用ICU trace已按退出条件删除。
+**Resolution (2026-08-15):** `DWMAC-IRQ-CUTOVER`与`DWMAC-FINAL-CUTOVER`在Gate 4生效。VisionFive 2
+本轮hardware复跑明确Not Run，沿用既有hardware acceptance且不宣称新pass。

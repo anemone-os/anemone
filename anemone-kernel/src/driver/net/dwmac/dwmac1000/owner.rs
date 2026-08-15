@@ -2,7 +2,7 @@ use crate::{prelude::*, time::MonotonicInstant};
 
 use super::{
     phy::PhyState,
-    protocol::{CSR5_W1C_MASK, EnhancedDescriptor, device_cause},
+    protocol::{DmaStatus, EnhancedDescriptor, device_cause},
     regs::{Dwmac1000Regs, ProbeStartSnapshot, QuiesceSnapshot, RuntimeRegisterSnapshot},
     ring::{
         DescriptorSnapshot, Dwmac1000Rings, RingError, RxDiagnosticSnapshot, RxReservation,
@@ -10,42 +10,29 @@ use super::{
     },
 };
 
-const NORMAL_INTERRUPT: u32 = 1 << 16;
-const ABNORMAL_INTERRUPT: u32 = 1 << 15;
-const RX_INTERRUPT: u32 = 1 << 6;
-const TX_INTERRUPT: u32 = 1;
-const FATAL_BUS_ERROR: u32 = 1 << 13;
-const TX_UNDERFLOW: u32 = 1 << 5;
-const TX_EARLY: u32 = 1 << 10;
-const RX_WATCHDOG: u32 = 1 << 9;
-const RX_STOPPED: u32 = 1 << 8;
-const RX_UNAVAILABLE: u32 = 1 << 7;
-const RX_OVERFLOW: u32 = 1 << 4;
-const TX_JABBER: u32 = 1 << 3;
-const TX_UNAVAILABLE: u32 = 1 << 2;
-const TX_STOPPED: u32 = 1 << 1;
 // Linux records ETI statistically and only W1C-clears TU; neither produces a
 // hard-error return. Either may legitimately be the only constituent with AIS.
-const NONFATAL_ABNORMAL_CONSTITUENTS: u32 = TX_EARLY | TX_UNAVAILABLE;
+const NONFATAL_ABNORMAL_CONSTITUENTS: u32 =
+    DmaStatus::TX_EARLY.bits() | DmaStatus::TX_UNAVAILABLE.bits();
 // Match Linux's legacy DWMAC1000 RX/TX and abnormal-cause admission,
 // but do not write this mask to CSR7 during Gate 2. It only classifies the raw
 // CSR5 samples consumed by the polling characterization.
-const PROBE_CAUSE_ADMISSION: u32 = NORMAL_INTERRUPT
-    | ABNORMAL_INTERRUPT
-    | FATAL_BUS_ERROR
-    | TX_UNDERFLOW
-    | RX_INTERRUPT
-    | TX_INTERRUPT;
-const EXPECTED_CAUSES: u32 = RX_INTERRUPT | TX_INTERRUPT;
-const ABNORMAL_CONSTITUENTS: u32 = FATAL_BUS_ERROR
-    | RX_WATCHDOG
-    | RX_STOPPED
-    | RX_UNAVAILABLE
-    | TX_UNDERFLOW
-    | RX_OVERFLOW
-    | TX_JABBER
-    | TX_STOPPED;
-const QUIESCE_RECOVERABLE_CAUSES: u32 = RX_STOPPED | TX_STOPPED;
+const PROBE_CAUSE_ADMISSION: u32 = DmaStatus::NORMAL.bits()
+    | DmaStatus::ABNORMAL.bits()
+    | DmaStatus::FATAL_BUS_ERROR.bits()
+    | DmaStatus::TX_UNDERFLOW.bits()
+    | DmaStatus::RX.bits()
+    | DmaStatus::TX.bits();
+const EXPECTED_CAUSES: u32 = DmaStatus::RX.bits() | DmaStatus::TX.bits();
+const ABNORMAL_CONSTITUENTS: u32 = DmaStatus::FATAL_BUS_ERROR.bits()
+    | DmaStatus::RX_WATCHDOG.bits()
+    | DmaStatus::RX_STOPPED.bits()
+    | DmaStatus::RX_UNAVAILABLE.bits()
+    | DmaStatus::TX_UNDERFLOW.bits()
+    | DmaStatus::RX_OVERFLOW.bits()
+    | DmaStatus::TX_JABBER.bits()
+    | DmaStatus::TX_STOPPED.bits();
+const QUIESCE_RECOVERABLE_CAUSES: u32 = DmaStatus::RX_STOPPED.bits() | DmaStatus::TX_STOPPED.bits();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CharacterizationResult {
@@ -90,7 +77,7 @@ pub(super) enum ProbeDisposition {
 
 impl CharacterizationSnapshot {
     pub(super) const fn early_tx(&self) -> bool {
-        self.legal & TX_EARLY != 0
+        self.legal & DmaStatus::TX_EARLY.bits() != 0
     }
 
     pub(super) const fn disposition(&self) -> ProbeDisposition {
@@ -118,15 +105,15 @@ struct CauseClassification {
 }
 
 const fn classify_causes(status: u32, admitted: u32, recoverable: u32) -> CauseClassification {
-    let legal = status & CSR5_W1C_MASK;
+    let legal = status & DmaStatus::W1C.bits();
     let admitted_causes = device_cause(status, admitted);
     let raw_abnormal_constituents = legal & ABNORMAL_CONSTITUENTS;
     let raw_nonfatal_constituents = legal & NONFATAL_ABNORMAL_CONSTITUENTS;
     let abnormal_constituents = raw_abnormal_constituents & !recoverable;
     let summary_is_recoverable =
         (raw_abnormal_constituents | raw_nonfatal_constituents) != 0 && abnormal_constituents == 0;
-    let abnormal_summary = if legal & ABNORMAL_INTERRUPT != 0 && !summary_is_recoverable {
-        ABNORMAL_INTERRUPT
+    let abnormal_summary = if legal & DmaStatus::ABNORMAL.bits() != 0 && !summary_is_recoverable {
+        DmaStatus::ABNORMAL.bits()
     } else {
         0
     };
@@ -250,7 +237,7 @@ impl Dwmac1000Owner {
             if observed & EXPECTED_CAUSES == EXPECTED_CAUSES
                 && descriptor.tx_complete()
                 && descriptor.rx_complete()
-                && status & CSR5_W1C_MASK == 0
+                && status & DmaStatus::W1C.bits() == 0
             {
                 if !descriptor.probe_layout_valid() {
                     failure = Some(CharacterizationFailure::Descriptor);
@@ -296,9 +283,16 @@ impl Dwmac1000Owner {
             failure = Some(CharacterizationFailure::Descriptor);
         }
         if failure.is_none() {
-            let mut rings = self.rings.lock_irqsave();
-            rings.prepare_production();
-            rings.reset_runtime_state();
+            let (rx_desc, tx_desc) = {
+                let rings = self.rings.lock_irqsave();
+                rings.prepare_production();
+                (rings.rx_desc() as u32, rings.tx_desc() as u32)
+            };
+            if self.regs.rearm_descriptor_bases(rx_desc, tx_desc).is_err() {
+                failure = Some(CharacterizationFailure::Register);
+            } else {
+                self.rings.lock_irqsave().reset_runtime_state();
+            }
         }
         let result = failure.map_or(
             CharacterizationResult::Passed,
@@ -341,7 +335,7 @@ impl Dwmac1000Owner {
     pub(super) fn service_irq(&self) -> IrqServiceSnapshot {
         let (mac_status, mac_status_after) = self.regs.service_mac_interrupts();
         let status = self.regs.status();
-        let legal = status & CSR5_W1C_MASK;
+        let legal = status & DmaStatus::W1C.bits();
         let raw_after = if legal != 0 {
             self.regs.acknowledge_causes(legal)
         } else {
@@ -353,7 +347,7 @@ impl Dwmac1000Owner {
             mac_status_after,
             csr5_raw_after: raw_after,
             csr5: legal,
-            csr5_after: raw_after & CSR5_W1C_MASK,
+            csr5_after: raw_after & DmaStatus::W1C.bits(),
         }
     }
 
@@ -430,17 +424,21 @@ mod kunits {
     fn polling_admission_has_expected_linux_legacy_shape() {
         assert_eq!(EXPECTED_CAUSES & ABNORMAL_CONSTITUENTS, 0);
         assert_eq!(PROBE_CAUSE_ADMISSION & EXPECTED_CAUSES, EXPECTED_CAUSES);
-        assert_ne!(PROBE_CAUSE_ADMISSION & ABNORMAL_INTERRUPT, 0);
-        assert_eq!(PROBE_CAUSE_ADMISSION & !CSR5_W1C_MASK, 0);
+        assert_ne!(PROBE_CAUSE_ADMISSION & DmaStatus::ABNORMAL.bits(), 0);
+        assert_eq!(PROBE_CAUSE_ADMISSION & !DmaStatus::W1C.bits(), 0);
         assert_eq!(PROBE_CAUSE_ADMISSION, 0x1_a061);
     }
 
     #[kunit]
     fn raw_legal_status_is_acked_while_polling_admission_filters_evidence() {
-        let status = NORMAL_INTERRUPT | RX_INTERRUPT | TX_INTERRUPT | TX_UNAVAILABLE;
-        let classified = classify_causes(status, NORMAL_INTERRUPT | RX_INTERRUPT, 0);
+        let status = DmaStatus::NORMAL.bits()
+            | DmaStatus::RX.bits()
+            | DmaStatus::TX.bits()
+            | DmaStatus::TX_UNAVAILABLE.bits();
+        let classified =
+            classify_causes(status, DmaStatus::NORMAL.bits() | DmaStatus::RX.bits(), 0);
         assert_eq!(classified.legal, status);
-        assert_eq!(classified.expected, RX_INTERRUPT);
+        assert_eq!(classified.expected, DmaStatus::RX.bits());
         assert_eq!(classified.abnormal, 0);
     }
 
@@ -449,7 +447,11 @@ mod kunits {
         // Linux's legacy handler increments tx_early_irq for ETI but does not
         // return tx_hard_error. Keep it in legal W1C evidence without failing
         // an otherwise complete bounded transfer.
-        let status = ABNORMAL_INTERRUPT | TX_EARLY | NORMAL_INTERRUPT | RX_INTERRUPT | TX_INTERRUPT;
+        let status = DmaStatus::ABNORMAL.bits()
+            | DmaStatus::TX_EARLY.bits()
+            | DmaStatus::NORMAL.bits()
+            | DmaStatus::RX.bits()
+            | DmaStatus::TX.bits();
         let classified = classify_causes(status, PROBE_CAUSE_ADMISSION, 0);
         assert_eq!(classified.legal, status);
         assert_eq!(classified.expected, EXPECTED_CAUSES);
@@ -458,26 +460,40 @@ mod kunits {
 
     #[kunit]
     fn abnormal_summary_classifies_raw_linux_constituents() {
-        let status = ABNORMAL_INTERRUPT | RX_STOPPED | TX_UNAVAILABLE | TX_STOPPED;
-        let classified = classify_causes(status, ABNORMAL_INTERRUPT, 0);
+        let status = DmaStatus::ABNORMAL.bits()
+            | DmaStatus::RX_STOPPED.bits()
+            | DmaStatus::TX_UNAVAILABLE.bits()
+            | DmaStatus::TX_STOPPED.bits();
+        let classified = classify_causes(status, DmaStatus::ABNORMAL.bits(), 0);
         assert_eq!(classified.legal, status);
         assert_eq!(classified.expected, 0);
-        assert_eq!(classified.abnormal, status & !TX_UNAVAILABLE);
+        assert_eq!(
+            classified.abnormal,
+            status & !DmaStatus::TX_UNAVAILABLE.bits()
+        );
     }
 
     #[kunit]
     fn abnormal_constituent_does_not_require_irq_summary_while_csr7_is_zero() {
-        let status = RX_STOPPED | TX_UNAVAILABLE;
+        let status = DmaStatus::RX_STOPPED.bits() | DmaStatus::TX_UNAVAILABLE.bits();
         let classified = classify_causes(status, PROBE_CAUSE_ADMISSION, 0);
         assert_eq!(classified.legal, status);
         assert_eq!(classified.expected, 0);
-        assert_eq!(classified.abnormal, RX_STOPPED);
+        assert_eq!(classified.abnormal, DmaStatus::RX_STOPPED.bits());
     }
 
     #[kunit]
     fn tx_and_rx_samples_may_reuse_summary_without_becoming_uncleared() {
-        let tx = classify_causes(NORMAL_INTERRUPT | TX_INTERRUPT, PROBE_CAUSE_ADMISSION, 0);
-        let rx = classify_causes(NORMAL_INTERRUPT | RX_INTERRUPT, PROBE_CAUSE_ADMISSION, 0);
+        let tx = classify_causes(
+            DmaStatus::NORMAL.bits() | DmaStatus::TX.bits(),
+            PROBE_CAUSE_ADMISSION,
+            0,
+        );
+        let rx = classify_causes(
+            DmaStatus::NORMAL.bits() | DmaStatus::RX.bits(),
+            PROBE_CAUSE_ADMISSION,
+            0,
+        );
         assert_eq!(tx.expected | rx.expected, EXPECTED_CAUSES);
         assert_eq!(tx.abnormal | rx.abnormal, 0);
         assert_ne!(tx.legal & rx.legal, 0);
@@ -485,15 +501,16 @@ mod kunits {
 
     #[kunit]
     fn tx_unavailable_is_linux_w1c_evidence_not_a_hard_error() {
-        let classified = classify_causes(TX_UNAVAILABLE, PROBE_CAUSE_ADMISSION, 0);
-        assert_eq!(classified.legal, TX_UNAVAILABLE);
+        let classified =
+            classify_causes(DmaStatus::TX_UNAVAILABLE.bits(), PROBE_CAUSE_ADMISSION, 0);
+        assert_eq!(classified.legal, DmaStatus::TX_UNAVAILABLE.bits());
         assert_eq!(classified.expected, 0);
         assert_eq!(classified.abnormal, 0);
     }
 
     #[kunit]
     fn abnormal_summary_with_only_tx_unavailable_is_not_a_hard_error() {
-        let status = ABNORMAL_INTERRUPT | TX_UNAVAILABLE;
+        let status = DmaStatus::ABNORMAL.bits() | DmaStatus::TX_UNAVAILABLE.bits();
         let classified = classify_causes(status, PROBE_CAUSE_ADMISSION, 0);
         assert_eq!(classified.legal, status);
         assert_eq!(classified.abnormal, 0);
@@ -501,13 +518,16 @@ mod kunits {
 
     #[kunit]
     fn abnormal_summary_without_a_known_constituent_fails_closed() {
-        let classified = classify_causes(ABNORMAL_INTERRUPT, PROBE_CAUSE_ADMISSION, 0);
-        assert_eq!(classified.abnormal, ABNORMAL_INTERRUPT);
+        let classified = classify_causes(DmaStatus::ABNORMAL.bits(), PROBE_CAUSE_ADMISSION, 0);
+        assert_eq!(classified.abnormal, DmaStatus::ABNORMAL.bits());
     }
 
     #[kunit]
     fn deliberate_stop_causes_are_not_quiesce_failures() {
-        let status = ABNORMAL_INTERRUPT | RX_STOPPED | TX_UNAVAILABLE | TX_STOPPED;
+        let status = DmaStatus::ABNORMAL.bits()
+            | DmaStatus::RX_STOPPED.bits()
+            | DmaStatus::TX_UNAVAILABLE.bits()
+            | DmaStatus::TX_STOPPED.bits();
         let classified = classify_causes(status, PROBE_CAUSE_ADMISSION, QUIESCE_RECOVERABLE_CAUSES);
         assert_eq!(classified.legal, status);
         assert_eq!(classified.abnormal, 0);
@@ -516,19 +536,24 @@ mod kunits {
     #[kunit]
     fn cleanup_abnormal_summary_without_a_recoverable_constituent_fails() {
         let classified = classify_causes(
-            ABNORMAL_INTERRUPT,
+            DmaStatus::ABNORMAL.bits(),
             PROBE_CAUSE_ADMISSION,
             QUIESCE_RECOVERABLE_CAUSES,
         );
-        assert_eq!(classified.abnormal, ABNORMAL_INTERRUPT);
+        assert_eq!(classified.abnormal, DmaStatus::ABNORMAL.bits());
     }
 
     #[kunit]
     fn cleanup_recoverable_constituent_does_not_hide_fatal_cause() {
-        let status = ABNORMAL_INTERRUPT | RX_STOPPED | FATAL_BUS_ERROR;
+        let status = DmaStatus::ABNORMAL.bits()
+            | DmaStatus::RX_STOPPED.bits()
+            | DmaStatus::FATAL_BUS_ERROR.bits();
         let classified = classify_causes(status, PROBE_CAUSE_ADMISSION, QUIESCE_RECOVERABLE_CAUSES);
         assert_eq!(classified.legal, status);
-        assert_eq!(classified.abnormal, ABNORMAL_INTERRUPT | FATAL_BUS_ERROR);
+        assert_eq!(
+            classified.abnormal,
+            DmaStatus::ABNORMAL.bits() | DmaStatus::FATAL_BUS_ERROR.bits()
+        );
     }
 
     fn characterization(

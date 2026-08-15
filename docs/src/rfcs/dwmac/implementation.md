@@ -1,9 +1,9 @@
 # DWMAC RFC 实施路线
 
-**状态：** Accepted / R6 / Gate 1--2 Closed; Gate 3 Authorized / Active; RFC Not Cut Over
+**状态：** Closed / R7 / Gate 1--4 Closed; all contract cutovers effective
 **最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260811-dwmac](./index.md)
-**当前修订：** R6
+**当前修订：** R7
 
 本文保存本 RFC 的实现 Gate、probe、验证和停止边界；不冻结逐文件 write set，也不授权未审查的后续
 Gate。事实调查属于 RFC 正文和 backgrounds，不单独占 Gate；Gate 1--3 必须各自产生可审查的实现，
@@ -11,9 +11,9 @@ source/hardware regression 是对应实现 Gate 的退出验证。只有 Gate 4 
 
 ## 全局 Implementation Boundary
 
-- **Target / non-goals：** 见 [RFC 正文](./index.md)；DTB 保持不变，DWMAC1000 R0 仅 capability-admitted enhanced/extended descriptor、32-bit DMA、CSR5 W1C 和 boot-time PHY P1。
+- **Target / non-goals：** 见 [RFC 正文](./index.md)；R7接受current DTB的per-port reserved `memory-region`，DWMAC1000仅支持capability-admitted enhanced/extended descriptor、32-bit DMA、CSR5 W1C和boot-time PHY P1。
 - **Owner / handoff / failure / cleanup：** concrete DWMAC backend owns MAC/DMA/rings/device cause；Loongson irqchip owns `IrqSense`/`EDGE/POL`/flow；generic IRQ core owns dispatch；Route A firmware owns external clock/reset/pinctrl。DWMAC1000 Gate 2 creates one long-lived per-node hardware owner and characterizes it by polling with CSR7=0；a quiesced pass is retained by the bound platform device, while Gate 3 may only adopt it in place and perform the first IRQ request。Backing release requires proven TX/RX process-state quiescence；otherwise Gate 2 fail-stops。
-- **Protected ABI / contract / acceptance：** existing JH7110 visible behavior、network/Stack/attach、current DTB、`eth<N>` success-order semantics and userspace ABI；target contract delta remains Not Cut Over until final Gate 4。
+- **Protected ABI / contract / acceptance：** existing JH7110 visible behavior、network/Stack/attach、R7 current DTB、`eth<N>` success-order semantics and userspace ABI；target contract delta已在Gate 4 cut over。
 - **Validation claim：** source/KUnit/build can close software protocol; only 2K1000/JH7110 hardware can close core, handoff, PHY, electrical IRQ and traffic claims。
 - **Stop conditions：** target/owner/ABI/DTB boundary changes；`ENHDESSEL`/enhanced mode fails or descriptor readback disagrees；Route A/PHY owner unresolved；32-bit address invariant requires allocator/bounce；`IrqSense` expectation becomes a broader generic ABI。
 
@@ -37,7 +37,7 @@ DWMAC4 register/descriptor/clock/reset/PHY behavior、public network ABI 和 cur
 - `net::dwmac::dwmac4` 自己拥有 `Driver`/match table/registration 并启用既有 JH7110 match；
   `net::dwmac::dwmac1000` 自己拥有 `Driver`/match table/registration，但 Gate 1 只做 fail-closed
   registration，不执行 DWMAC1000 hardware transaction。
-- 2K1000 `IrqSense` table：12/13/14/15 `LevelLow`，44..48 edge/pulse；表同时决定 `EDGE/POL` 和
+- 2K1000 `IrqSense` table：12/13/14/15 `LevelHigh`，44..48 edge/pulse；表同时决定 `EDGE/POL` 和
   controller flow，reserved/GPIO/MSI 不伪造成已支持能力。
 - `request_irq(expected: Option<IrqSense>)` 与 `request_irq_selected` named-resource path；`None` 保持现有
   caller 行为，`Some` mismatch 在 mapping/descriptor/unmask 前失败且不写 controller。
@@ -46,7 +46,7 @@ DWMAC4 register/descriptor/clock/reset/PHY behavior、public network ABI 和 cur
 IRQ `None`/match/mismatch，以及用户提供的 2K1000 双 node 实机日志。该日志必须同时证明两个 enabled node
 都由 `dwmac1000` Driver 匹配，并按 Gate 1 设计在任何 DWMAC1000 hardware transaction/publication 前返回
 `NotSupported`。RiscV/JH7110 hardware regression 允许明确记录为 Not Run；2K1000 masked-source
-`EDGE/POL` readback 必须精确为 edge bits 44..48 与 active-low bits 12..15。VisionFive 2 双节点 DWMAC4
+`EDGE/POL` readback 必须精确为 edge bits 44..48 与 active-high bits 12..15。VisionFive 2 双节点 DWMAC4
 regression 不被取消，移交 Gate 3 exit 与最终 closure proof。
 
 **Cutover:** None；owner migration 对 existing visible semantics 保持中性，IRQ target delta 保持 Not Cut
@@ -95,7 +95,7 @@ characterization passed且quiescence已证明后，但仍不声明IRQ或network 
 - polling前创建唯一per-node hardware owner；characterization pass/fail都先suppress device causes、stop MAC/DMA
   并记录TX/RX process-state。只有quiesced pass才把MMIO、rings、DMA backing、PHY snapshot和result保存在bound
   device上；quiesced failure返回普通probe failure，未quiesced result fail-stop且禁止释放backing。
-- Gate 3从bound device原位取得同一owner，首次执行named `macirq` `Some(LevelLow)` request并增加IRQ context；
+- Gate 3从bound device原位取得同一owner，首次执行named `macirq` `Some(LevelHigh)` request并增加IRQ context；
   不得重映射MMIO、重建rings/backing或复制CSR5 truth。pending trace、handler/W1C/level flow、异常注入和跨启动
   重复性移交Gate 3/final acceptance。
 
@@ -170,19 +170,20 @@ existing network ABI、global Stack、attach owner 和 DWMAC4 behavior 不变。
 - 任一 node 的 pre-publication failure先撤销新增的 provider/worker publication attempt，并把同一 owner恢复为
   disabled retained state；只有 quiescence已证明时才可释放非 IRQ-retained capability，且不阻止其它 node成功。
 
-**Implementation checkpoint (2026-08-15):** 上述 in-place adoption、首次 `Some(LevelLow)` request、owner-local
+**Implementation checkpoint (2026-08-15):** 上述 in-place adoption、首次 `Some(LevelHigh)` request、owner-local
 enhanced-ring queue、CSR5/MAC cause service 和既有 publication handoff 已实现；LoongArch concrete irqchip 也已在
-每次 `LevelLow` unmask 前记录 controller-owned pending snapshot，为 first request 与 handler-tail trace 提供观测点。
-Gate 3 hardware validation 尚未运行，因此本 checkpoint 不宣称 IRQ/traffic/lifecycle acceptance。详见
-[ISSUE-007](./tracking-issues.md#issue-007--gate-3-irq-and-production-traffic-evidence)。
+controller-owned pending snapshot 中提供 first request 与 handler-tail trace。active-low 配置下出现 CSR5 RX
+cause 而 ICU 无 pending 的证据促成 `LevelHigh` 修正，随后用户确认 ARP、ICMP 与外部网络可用；Gate 3 closure
+后已删除该临时 ICU trace，[ISSUE-007](./tracking-issues.md#issue-007--gate-3-irq-and-production-traffic-evidence)
+已关闭。
 
 **Validation:** 先执行单端口 cold/warm boot、link snapshot、RX/TX/abnormal IRQ 和 shutdown，再在同一 Gate
 执行双端口 cold/warm boot、concurrent traffic、success-order identity、one-node failure isolation、shutdown/
 reboot；确认无 unchanged-status immediate IRQ repeat，并取得 R2 延期的 VisionFive 2 双节点 DWMAC4
 descriptor/PHY/IRQ/frame path/shutdown regression。RiscV regression失败必须停止，不能以 R2 Gate 1 closure覆盖。
 
-**Cutover:** production implementation 完成，但 target contracts 仍保持 Not Cut Over，等待 Gate 4 独立闭合
-审查；不得把单端口中间结果描述为 RFC target closure。
+**Cutover:** Gate 3 已 Closed；production implementation 与 2K1000 runtime acceptance 已完成，contract
+cutover 由 Gate 4 原子执行。
 
 **Stop / Exit:** owner missing/duplicated、second IRQ request、ring/backing rebuild、publication-before-admission、
 incorrect MAC/name、PHY delay/link failure、IRQ storm/loss、cleanup orphan、second-port 特判，或任一 correctness
@@ -211,6 +212,12 @@ JH7110 regression。发现实现缺口必须退回对应实现 Gate，不能在 
 
 **Stop / Exit:** 任一 correctness invariant、owner/handoff、ABI、acceptance 或 validation claim 未闭合或发生
 变化；停止并进入 Target Renegotiation/Follow-up RFC，不批准 closure。
+
+**Closure (2026-08-15):** 最终 source/owner/lifecycle 审查未发现 blocking friction；Gate 1--3 的实现、
+2K1000 enhanced descriptor/DMA32/PHY/IRQ/frame path 与用户实机网络验收闭合。R7 接受实机证明的
+`LevelHigh` polarity 与 per-port `no-map` reserved DMA region，删除 Gate 3 专用 ICU trace，并执行
+`DWMAC-IRQ-CUTOVER`、`DWMAC1000-CUTOVER` 和 `DWMAC-FINAL-CUTOVER`。VisionFive 2 本轮未复跑，保持明确
+Not Run，不被写成新的 hardware pass。
 
 ## Target Renegotiation
 

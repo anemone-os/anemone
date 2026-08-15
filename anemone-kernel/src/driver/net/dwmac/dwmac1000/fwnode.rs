@@ -22,6 +22,7 @@ pub(super) struct Dwmac1000Config {
     pub(super) phy_mode: String,
     pub(super) phy_address: u8,
     pub(super) mac: [u8; 6],
+    pub(super) dma_region: (PhysAddr, usize),
     pub(super) dma_mask: u64,
     pub(super) dma: LegacyDmaConfig,
     pub(super) axi: Option<LegacyAxiConfig>,
@@ -210,6 +211,7 @@ impl Dwmac1000Config {
         if max_mtu.is_some_and(|mtu| mtu < 1500) {
             return Err(SysError::DriverIncompatible);
         }
+        let dma_region = parse_reserved_dma_region(node.node())?;
         let firmware_mdio_clock = fwnode
             .prop_read_u32("snps,clk-csr")
             .or_else(|| fwnode.prop_read_u32("clk_csr"));
@@ -245,6 +247,7 @@ impl Dwmac1000Config {
             phy_mode,
             phy_address,
             mac,
+            dma_region,
             dma_mask,
             dma,
             axi,
@@ -257,6 +260,46 @@ impl Dwmac1000Config {
             pinctrl_present: fwnode.prop_read_present("pinctrl-0"),
         })
     }
+}
+
+fn parse_reserved_dma_region(
+    node: &device_tree::DeviceNode,
+) -> Result<(PhysAddr, usize), SysError> {
+    let phandle = node
+        .property("memory-region")
+        .and_then(|property| property.value_as_phandle())
+        .ok_or(SysError::MissingFwNode)?;
+    of_with_node_by_phandle(phandle, |region| {
+        if !region
+            .properties()
+            .any(|property| property.name() == "no-map")
+        {
+            return Err(SysError::DriverIncompatible);
+        }
+        let cells = region
+            .property("reg")
+            .and_then(|property| property.value_as_u32_array())
+            .ok_or(SysError::MissingResource)?;
+        let mut cells = cells.iter();
+        let address_hi = cells.next().ok_or(SysError::MissingResource)?;
+        let address_lo = cells.next().ok_or(SysError::MissingResource)?;
+        let length_hi = cells.next().ok_or(SysError::MissingResource)?;
+        let length_lo = cells.next().ok_or(SysError::MissingResource)?;
+        if cells.next().is_some() {
+            return Err(SysError::DriverIncompatible);
+        }
+        let base = PhysAddr::new(((address_hi as u64) << 32) | address_lo as u64);
+        let length = usize::try_from(((length_hi as u64) << 32) | length_lo as u64)
+            .map_err(|_| SysError::DriverIncompatible)?;
+        if base.page_offset() != 0
+            || length == 0
+            || !length.is_multiple_of(PagingArch::PAGE_SIZE_BYTES)
+        {
+            return Err(SysError::DriverIncompatible);
+        }
+        Ok((base, length))
+    })
+    .map_err(|_| SysError::MissingFwNode)?
 }
 
 fn parse_axi_config(node: &device_tree::DeviceNode) -> Result<Option<LegacyAxiConfig>, SysError> {

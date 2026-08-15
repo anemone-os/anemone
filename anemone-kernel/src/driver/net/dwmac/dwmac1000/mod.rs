@@ -57,8 +57,8 @@ impl DriverOps for Driver {
                 return Err(error);
             },
         };
-        kinfoln!(
-            "dwmac1000 {} stage=resources result=pass path={} compatible0={} compatible1={} mmio={:#x}+{:#x} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} phy-mode={} phy-address={} macirq-index={} specifier-bytes={} hwirq={} expected-sense=level-low registration=deferred-gate3 dma-mask={:#x} clocks-present={} resets-present={} pinctrl-present={} external-owner=firmware",
+        kdebugln!(
+            "dwmac1000 {} stage=resources result=pass path={} compatible0={} compatible1={} mmio={:#x}+{:#x} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} phy-mode={} phy-address={} macirq-index={} specifier-bytes={} hwirq={} expected-sense=level-high registration=deferred-gate3 dma-mask={:#x} clocks-present={} resets-present={} pinctrl-present={} external-owner=firmware",
             device.name(),
             config.node_path,
             config.compatible0,
@@ -81,7 +81,7 @@ impl DriverOps for Driver {
             config.resets_present,
             config.pinctrl_present,
         );
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=policy result=pass txpbl={} rxpbl={} pblx8={} fixed-burst={} mixed-burst={} aal={} operation-policy={} rx-fifo-bytes={:?} tx-fifo-bytes={:?} axi-config={} ps-speed={:?} max-speed={:?} max-mtu={:?} selected-mtu=1500",
             device.name(),
             config.dma.tx_pbl.encoded(),
@@ -145,7 +145,7 @@ impl DriverOps for Driver {
             );
             return Err(SysError::DriverIncompatible);
         }
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=capability result=pass version-raw={:#x} user-id={:#x} synopsys-id={:#x} dma-hw-feature={:#x} mii={} gmii={} half-duplex={} pcs={} mdio={} rx-channels={} tx-channels={} enhanced-desc={} rmon={} tx-checksum={} selected-desc=enhanced descriptor-stride=32 dma-bits=32",
             device.name(),
             capabilities.version,
@@ -167,12 +167,34 @@ impl DriverOps for Driver {
         // Linux allocates and initializes the final rings before DMA SWR. No
         // base or TX ownership is published here; the same backing is retained
         // for Gate 3 only after characterization and quiescence pass.
-        let rings = Dwmac1000Rings::new()?;
+        let rings = Dwmac1000Rings::new(config.dma_region)?;
         rings.prepare_probe(config.mac);
-        kinfoln!(
-            "dwmac1000 {} stage=dma-address result=pass lifecycle=final-before-reset base={:#x} used={:#x} allocated={:#x} ring-size={} descriptor-stride=32 frame-capacity={} rx-desc={:#x} tx-desc={:#x} rx-frame={:#x} tx-frame={:#x} limit-exclusive={:#x}",
+        let initial = rings.probe_snapshot();
+        kdebugln!(
+            "dwmac1000 {} stage=dma-ring-init rx={:#x},{:#x},{:#x},{:#x},{:#x},{:#x},{:#x},{:#x} tx={:#x},{:#x},{:#x},{:#x},{:#x},{:#x},{:#x},{:#x}",
+            device.name(),
+            initial.rx.des0,
+            initial.rx.des1,
+            initial.rx.des2,
+            initial.rx.des3,
+            initial.rx.des4,
+            initial.rx.des5,
+            initial.rx.des6,
+            initial.rx.des7,
+            initial.tx.des0,
+            initial.tx.des1,
+            initial.tx.des2,
+            initial.tx.des3,
+            initial.tx.des4,
+            initial.tx.des5,
+            initial.tx.des6,
+            initial.tx.des7,
+        );
+        kdebugln!(
+            "dwmac1000 {} stage=dma-address result=pass lifecycle=temporary-uncached-probe source=reserved-memory mat=strong-noncache base={:#x} cpu-map={:#x} used={:#x} allocated={:#x} ring-size={} descriptor-stride=32 frame-capacity={} rx-desc={:#x} tx-desc={:#x} rx-frame={:#x} tx-frame={:#x} limit-exclusive={:#x}",
             device.name(),
             rings.phys_base(),
+            rings.virt_base(),
             rings.used_bytes(),
             rings.allocated_bytes(),
             rings.ring_size(),
@@ -240,7 +262,7 @@ impl DriverOps for Driver {
                 return Err(error);
             },
         };
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=phy result=pass model={} phy-id={:#010x} address={} mode={} divider={} divider-source={} delay-configured=true protocol=generic-clause22 autoneg-restarted={} link=true speed-mbps={} full-duplex={} rx-pause={} tx-pause={}",
             device.name(),
             phy.model(),
@@ -289,7 +311,7 @@ impl DriverOps for Driver {
                 return Err(SysError::Timeout);
             },
         };
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=dma-reset result=pass order=after-phy-and-final-backing deadline-ms={} bus-mode-before={:#x} bus-mode-after={:#x} atds-after={}",
             device.name(),
             DWMAC1000_RESET_TIMEOUT_MS,
@@ -331,7 +353,7 @@ impl DriverOps for Driver {
                 );
             },
         };
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=init-dma result=pass atds={} mode={} mode-source={} bus-mode={:#x} axi-bus-mode={:?} csr3={:#x} csr4={:#x} csr5={:#x} csr6={:#x} csr7={:#x} rx-watchdog={:#x} rx-watchdog-programmed=false",
             device.name(),
             Dwmac1000Regs::atds(register_snapshot.bus_mode),
@@ -346,7 +368,7 @@ impl DriverOps for Driver {
             register_snapshot.interrupt_enable,
             register_snapshot.rx_watchdog,
         );
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=init-mac result=pass mac-control={:#x} flow-control={:#x} link-speed-mbps={} link-full-duplex={} frame-filter={:#x} mac-mask={:#x} mmc-control={:#x} mmc-rx-mask={:#x} mmc-tx-mask={:#x} mmc-ipc-mask={:#x} pcs-selected={} vlan={:#x} pmt={:#x} lpi={:#x} timestamp={:#x} checksum=disabled tso=false tbs=false split-header=false multi-queue=false",
             device.name(),
             register_snapshot.mac_control,
@@ -368,12 +390,13 @@ impl DriverOps for Driver {
 
         let owner = Dwmac1000Owner::new(regs, rings, phy_state);
         let characterization = owner.characterize();
+        let runtime = owner.runtime_snapshot();
         let result = match characterization.result {
             CharacterizationResult::Passed => "pass",
             CharacterizationResult::Failed(_) => "fail",
         };
-        kinfoln!(
-            "dwmac1000 {} stage=gate2-transfer result={} reason={:?} mode=poll csr7={:#x} legal={:#x} observed={:#x} ri={} ti={} early-tx={} abnormal={:#x} uncleared={:#x} polls={} w1c-samples={} tx-own-published={} tx-own={} tx-error={} rx-len={} rx-own={} rx-error={} rx-single-frame={} payload-match={}",
+        kdebugln!(
+            "dwmac1000 {} stage=gate2-transfer result={} reason={:?} mode=poll csr7={:#x} legal={:#x} observed={:#x} ri={} ti={} early-tx={} abnormal={:#x} uncleared={:#x} polls={} w1c-samples={} tx-own-published={} tx-own={} tx-error={} rx-len={} rx-own={} rx-error={} rx-single-frame={} payload-match={} cur={:#x},{:#x} miss={:#x}",
             device.name(),
             result,
             characterization.result,
@@ -395,8 +418,11 @@ impl DriverOps for Driver {
             characterization.descriptor.rx_error(),
             characterization.descriptor.rx_is_single_frame(),
             characterization.payload_match,
+            runtime.dma_current_tx_buffer,
+            runtime.dma_current_rx_buffer,
+            runtime.dma_missed_frame_counter,
         );
-        kinfoln!(
+        kdebugln!(
             "dwmac1000 {} stage=gate2-owner result={} sequence-valid={} mac-enabled={:#x} rx-start={:#x} tx-start={:#x} loopback={:#x} quiesced={} csr5={:#x} tx-process={} rx-process={} mac-status-after={:#x} owner-disposition={:?} irq-registration=deferred-gate3 publication=forbidden",
             device.name(),
             result,
@@ -431,8 +457,8 @@ impl DriverOps for Driver {
                     .cast::<Dwmac1000State>()
                     .expect("Gate 2 owner state must be initialized before Gate 3");
                 *state.runtime.lock_irqsave() = Some(context.clone());
-                kinfoln!(
-                    "dwmac1000 {} stage=gate3-adopt result=begin owner=gate2-retained irq-registration=first expected-sense=level-low ring-rebuild=false publication=deferred",
+                kdebugln!(
+                    "dwmac1000 {} stage=gate3-adopt result=begin owner=gate2-retained irq-registration=first expected-sense=level-high ring-rebuild=false publication=deferred",
                     device.name(),
                 );
                 let link_state = state.owner.publication_link_state();
@@ -444,7 +470,7 @@ impl DriverOps for Driver {
                     link_state,
                     &IRQ_HANDLER,
                     private,
-                    crate::exception::intr::IrqSense::LevelLow,
+                    crate::exception::intr::IrqSense::LevelHigh,
                 )
             },
             ProbeDisposition::ReturnFailure => Err(SysError::ProbeFailed),

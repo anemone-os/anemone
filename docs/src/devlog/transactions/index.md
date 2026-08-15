@@ -5,10 +5,6 @@
 日常开发日志仍按双周追加；事务日志只用于需要持续跟踪不变量、实现阶段、旁路审计、可观测性和验证证据的工作。
 
 ## Active
-
-- [DWMAC 多后端与 Loongson 2K1000](./2026-08-11-dwmac.md)：R6 已关闭 Gate 1--2，Gate 3 在同一次 probe 中完成
-  DWMAC1000 retained owner 的 mandatory in-place attach，并新增 concrete irqchip pending-before-unmask trace；Gate 3
-  IRQ/traffic/lifecycle 实机 acceptance 仍 Open / Not Cut Over，尚未进入 Gate 4。
 - [DW-MSHC / SD Cold Discovery](./2026-07-16-dw-mshc-sd-cold-discovery.md)：两轮 correctness findings 已修复，firmware/String/rootfs input 按用户决定完成边界处置，canonical RFC 已更正；当前处于 Runtime Validation，实机 attach/read/write/rootfs 仍待验证。
 - [Mount Tree Legacy API](./2026-06-18-mount-tree-legacy-api.md)
 - [KThread Core](./2026-06-16-kthread-core.md)
@@ -27,6 +23,9 @@
 
 ## Completed
 
+- [DWMAC 多后端与 Loongson 2K1000](./2026-08-11-dwmac.md)：R7 Gate 1--4全部关闭；实机证据修正
+  GMAC polarity为active-high，per-port reserved strong-noncache DMA backing、enhanced descriptor、CSR5 W1C、
+  production attach与三个contract cutover已生效。
 - [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--6全部关闭；
   四个cutover使五项clock/time/signal contract delta生效，RV64/LA64 release SMP=2最终通过469/469与
   470/470 KUnit以及完整定向用户态oracle。

@@ -4,138 +4,232 @@ use crate::{mm::remap::IoRemap, prelude::*, time::MonotonicInstant};
 
 use super::{
     fwnode::{DmaOperationMode, LegacyAxiConfig, LegacyDmaConfig, MdioClockRange},
-    phy::PhyLink,
+    phy::{Clause22Register, PhyLink},
+    protocol::DmaStatus,
 };
 
-const DMA_BUS_MODE: usize = 0x1000;
-const DMA_TX_POLL_DEMAND: usize = 0x1004;
-const DMA_RX_POLL_DEMAND: usize = 0x1008;
-const DMA_RX_BASE_ADDR: usize = 0x100c;
-const DMA_TX_BASE_ADDR: usize = 0x1010;
-const DMA_STATUS: usize = 0x1014;
-const DMA_CONTROL: usize = 0x1018;
-const DMA_INTERRUPT_ENABLE: usize = 0x101c;
-const DMA_RX_WATCHDOG: usize = 0x1024;
-const DMA_AXI_BUS_MODE: usize = 0x1028;
-const MAC_CONTROL: usize = 0x0000;
-const MAC_FRAME_FILTER: usize = 0x0004;
-const MAC_HASH_HIGH: usize = 0x0008;
-const MAC_HASH_LOW: usize = 0x000c;
-const MAC_MII_ADDR: usize = 0x0010;
-const MAC_MII_DATA: usize = 0x0014;
-const MAC_FLOW_CONTROL: usize = 0x0018;
-const MAC_VLAN_TAG: usize = 0x001c;
-const MAC_VERSION: usize = 0x0020;
-const MAC_PMT: usize = 0x002c;
-const MAC_LPI_CONTROL_STATUS: usize = 0x0030;
-const MAC_INTERRUPT_STATUS: usize = 0x0038;
-const MAC_INTERRUPT_MASK: usize = 0x003c;
-const MAC_AN_CONTROL: usize = 0x00c0;
-const MAC_AN_STATUS: usize = 0x00c4;
-const MAC_RGSMII_STATUS: usize = 0x00d8;
-const DMA_HW_FEATURE: usize = 0x1058;
-const MAC_ADDR_HIGH: usize = 0x0040;
-const MAC_ADDR_LOW: usize = 0x0044;
-const MMC_RX_INTERRUPT: usize = 0x0104;
-const MMC_CONTROL: usize = 0x0100;
-const MMC_TX_INTERRUPT: usize = 0x0108;
-const MMC_RX_INTERRUPT_MASK: usize = 0x010c;
-const MMC_TX_INTERRUPT_MASK: usize = 0x0110;
-const MMC_RX_IPC_INTERRUPT_MASK: usize = 0x0200;
-const MMC_RX_IPC_INTERRUPT: usize = 0x0208;
-const PTP_TIMESTAMP_CONTROL: usize = 0x0700;
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum Register {
+    MacControl = 0x0000,
+    MacFrameFilter = 0x0004,
+    MacHashHigh = 0x0008,
+    MacHashLow = 0x000c,
+    MacMiiAddress = 0x0010,
+    MacMiiData = 0x0014,
+    MacFlowControl = 0x0018,
+    MacVlanTag = 0x001c,
+    MacVersion = 0x0020,
+    MacPmt = 0x002c,
+    MacLpiControlStatus = 0x0030,
+    MacInterruptStatus = 0x0038,
+    MacInterruptMask = 0x003c,
+    MacAddressHigh = 0x0040,
+    MacAddressLow = 0x0044,
+    MacAnControl = 0x00c0,
+    MacAnStatus = 0x00c4,
+    MacRgmiiStatus = 0x00d8,
+    MmcControl = 0x0100,
+    MmcRxInterrupt = 0x0104,
+    MmcTxInterrupt = 0x0108,
+    MmcRxInterruptMask = 0x010c,
+    MmcTxInterruptMask = 0x0110,
+    // Linux expresses these counters relative to MAC + 0x100. Reset-on-read
+    // makes each value an interval snapshot between diagnostic reads.
+    MmcRxFrameCountGb = 0x0180,
+    MmcRxCrcError = 0x0194,
+    MmcRxAlignError = 0x0198,
+    MmcRxRunError = 0x019c,
+    MmcRxUnicast = 0x01c4,
+    MmcRxLengthError = 0x01c8,
+    MmcRxFifoOverflow = 0x01d4,
+    MmcRxWatchdogError = 0x01dc,
+    MmcRxIpcInterruptMask = 0x0200,
+    MmcRxIpcInterrupt = 0x0208,
+    PtpTimestampControl = 0x0700,
+    DmaBusMode = 0x1000,
+    DmaTxPollDemand = 0x1004,
+    DmaRxPollDemand = 0x1008,
+    DmaRxBaseAddress = 0x100c,
+    DmaTxBaseAddress = 0x1010,
+    DmaStatus = 0x1014,
+    DmaControl = 0x1018,
+    DmaInterruptEnable = 0x101c,
+    // Linux legacy DWMAC1000 diagnostics; these registers are read-only here.
+    DmaMissedFrameCounter = 0x1020,
+    DmaRxWatchdog = 0x1024,
+    DmaAxiBusMode = 0x1028,
+    DmaCurrentTxBuffer = 0x1050,
+    DmaCurrentRxBuffer = 0x1054,
+    DmaHardwareFeature = 0x1058,
+}
+
 const EXPECTED_CORE_VERSION: u8 = 0x37;
-const SW_RESET: u32 = 1;
-const ALTERNATE_DESCRIPTOR_SIZE: u32 = 1 << 7;
-const MII_BUSY: u32 = 1;
 const MII_CLOCK_RANGE_SHIFT: u32 = 2;
-const MII_CLOCK_RANGE_MASK: u32 = 0xf << MII_CLOCK_RANGE_SHIFT;
-const HW_MII: u32 = 1 << 0;
-const HW_GMII: u32 = 1 << 1;
-const HW_HALF_DUPLEX: u32 = 1 << 2;
-const HW_PCS: u32 = 1 << 6;
-const HW_MDIO: u32 = 1 << 8;
-const HW_REMOTE_WAKE: u32 = 1 << 9;
-const HW_MAGIC_WAKE: u32 = 1 << 10;
-const HW_MMC: u32 = 1 << 11;
-const HW_TIMESTAMP_V1: u32 = 1 << 12;
-const HW_TIMESTAMP_V2: u32 = 1 << 13;
-const HW_EEE: u32 = 1 << 14;
-const HW_TX_CHECKSUM: u32 = 1 << 16;
-const HW_RX_CHECKSUM_TYPE1: u32 = 1 << 17;
-const HW_RX_CHECKSUM_TYPE2: u32 = 1 << 18;
-const HW_RX_FIFO_OVER_2048: u32 = 1 << 19;
-const HW_RX_CHANNEL_MASK: u32 = 0x3 << 20;
-const HW_TX_CHANNEL_MASK: u32 = 0x3 << 22;
-const ENHDESSEL: u32 = 1 << 24;
-const MAC_LOOPBACK: u32 = 1 << 12;
-const MAC_FULL_DUPLEX: u32 = 1 << 11;
-const MAC_TX_ENABLE: u32 = 1 << 3;
-const MAC_RX_ENABLE: u32 = 1 << 2;
-const DMA_TX_START: u32 = 1 << 13;
-const DMA_RX_START: u32 = 1 << 1;
-const DMA_TX_STORE_FORWARD: u32 = 1 << 21;
-const DMA_RX_STORE_FORWARD: u32 = 1 << 25;
-const DMA_TX_THRESHOLD_MASK: u32 = 0x7 << 14;
-const DMA_RX_THRESHOLD_MASK: u32 = 0x3 << 3;
-const DMA_OPERATE_SECOND_FRAME: u32 = 1 << 2;
-const DMA_FLOW_CONTROL_ENABLE: u32 = 1 << 8;
-const DMA_FLOW_ACTIVATION_MASK: u32 = 0x0080_0600;
-const DMA_FLOW_DEACTIVATION_MASK: u32 = 0x0040_1800;
-const DMA_TX_PROCESS_MASK: u32 = 0x0070_0000;
 const DMA_TX_PROCESS_SHIFT: u32 = 20;
-const DMA_RX_PROCESS_MASK: u32 = 0x000e_0000;
 const DMA_RX_PROCESS_SHIFT: u32 = 17;
-const DMA_PBL_MASK: u32 = 0x3f << 8;
 const DMA_PBL_SHIFT: u32 = 8;
-const DMA_RX_PBL_MASK: u32 = 0x3f << 17;
 const DMA_RX_PBL_SHIFT: u32 = 17;
-const DMA_USE_SEPARATE_PBL: u32 = 1 << 23;
-const DMA_PBL_X8: u32 = 1 << 24;
-const DMA_ADDRESS_ALIGNED_BEATS: u32 = 1 << 25;
-const DMA_MIXED_BURST: u32 = 1 << 26;
-const DMA_FIXED_BURST: u32 = 1 << 16;
-const DMA_AXI_LPI_ENABLE: u32 = 1 << 31;
-const DMA_AXI_EXIT_FRAME: u32 = 1 << 30;
-const DMA_AXI_WRITE_LIMIT_MASK: u32 = 0xf << 20;
-const DMA_AXI_READ_LIMIT_MASK: u32 = 0xf << 16;
-const MAC_JABBER_DISABLE: u32 = 1 << 22;
-const MAC_FRAME_BURST: u32 = 1 << 21;
-const MAC_JUMBO_ENABLE: u32 = 1 << 20;
-const MAC_2K_ENABLE: u32 = 1 << 27;
-const MAC_WATCHDOG_DISABLE: u32 = 1 << 23;
-const MAC_DISABLE_CARRIER_SENSE: u32 = 1 << 16;
-const MAC_PORT_SELECT: u32 = 1 << 15;
-const MAC_FAST_ETHERNET_SPEED: u32 = 1 << 14;
-const MAC_AUTO_PAD_FCS_STRIP: u32 = 1 << 7;
-const MAC_RX_CHECKSUM: u32 = 1 << 10;
-const MAC_LINK_MASK: u32 = MAC_PORT_SELECT | MAC_FAST_ETHERNET_SPEED | MAC_FULL_DUPLEX;
-const MAC_FILTER_HASH_OR_PERFECT: u32 = 1 << 10;
-const MAC_FLOW_UNICAST_PAUSE: u32 = 1 << 3;
-const MAC_FLOW_RX_ENABLE: u32 = 1 << 2;
-const MAC_FLOW_TX_ENABLE: u32 = 1 << 1;
-const MAC_FLOW_PAUSE_TIME: u32 = 0xffff << 16;
-const MAC_PMT_ENABLE_MASK: u32 = (1 << 9) | (1 << 2) | (1 << 1) | 1;
-const MAC_LPI_ENABLE_MASK: u32 = (1 << 19) | (1 << 16);
-const MAC_AN_ENABLE_RESTART: u32 = (1 << 12) | (1 << 9);
-const MAC_INTERRUPT_RGMII: u32 = 1 << 0;
-const MAC_INTERRUPT_PCS_LINK: u32 = 1 << 1;
-const MAC_INTERRUPT_PCS_AN: u32 = 1 << 2;
-const MAC_INTERRUPT_PMT: u32 = 1 << 3;
-const MAC_INTERRUPT_MMC_RX: u32 = 1 << 5;
-const MAC_INTERRUPT_MMC_TX: u32 = 1 << 6;
-const MAC_INTERRUPT_MMC_IPC: u32 = 1 << 7;
-const MAC_INTERRUPT_LPI: u32 = 1 << 10;
-const MMC_CONTROL_LINUX_INITIAL: u32 = 0x35;
+const COSMOS_AXI_BUS_MODE: u32 = 0x0077_00ff;
 const PHY_ID_YT8511: u32 = 0x0000_010a;
-// The probe consumes RGMII status like Linux's PCS path, while keeping the
-// other defined legacy MAC sources masked. Do not write reserved bits.
-const MASK_LEGACY_MAC_INTERRUPTS_REQUESTED: u32 = 0x20f;
-const MASK_ALL_MMC_INTERRUPTS: u32 = u32::MAX;
-const DMA_NORMAL_INTERRUPT: u32 = 1 << 16;
-const DMA_ABNORMAL_INTERRUPT: u32 = 1 << 15;
-const DMA_RX_INTERRUPT: u32 = 1 << 6;
-const DMA_TX_INTERRUPT: u32 = 1;
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct DmaBusMode: u32 {
+        const SOFTWARE_RESET = 1;
+        const ALTERNATE_DESCRIPTOR_SIZE = 1 << 7;
+        const TX_PBL_MASK = 0x3f << 8;
+        const BURST_LENGTH32 = 1 << 13;
+        const FIXED_BURST = 1 << 16;
+        const RX_PBL_MASK = 0x3f << 17;
+        const USE_SEPARATE_PBL = 1 << 23;
+        const PBL_X8 = 1 << 24;
+        const ADDRESS_ALIGNED_BEATS = 1 << 25;
+        const MIXED_BURST = 1 << 26;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MdioAddress: u32 {
+        const BUSY = 1;
+        const CLOCK_RANGE_MASK = 0xf << MII_CLOCK_RANGE_SHIFT;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct HardwareFeature: u32 {
+        const MII = 1 << 0;
+        const GMII = 1 << 1;
+        const HALF_DUPLEX = 1 << 2;
+        const PCS = 1 << 6;
+        const MDIO = 1 << 8;
+        const REMOTE_WAKE = 1 << 9;
+        const MAGIC_WAKE = 1 << 10;
+        const MMC = 1 << 11;
+        const TIMESTAMP_V1 = 1 << 12;
+        const TIMESTAMP_V2 = 1 << 13;
+        const EEE = 1 << 14;
+        const TX_CHECKSUM = 1 << 16;
+        const RX_CHECKSUM_TYPE1 = 1 << 17;
+        const RX_CHECKSUM_TYPE2 = 1 << 18;
+        const RX_FIFO_OVER_2048 = 1 << 19;
+        const RX_CHANNEL_MASK = 0x3 << 20;
+        const TX_CHANNEL_MASK = 0x3 << 22;
+        const ENHANCED_DESCRIPTORS = 1 << 24;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacControl: u32 {
+        const RX_ENABLE = 1 << 2;
+        const TX_ENABLE = 1 << 3;
+        const AUTO_PAD_FCS_STRIP = 1 << 7;
+        const RX_CHECKSUM = 1 << 10;
+        const FULL_DUPLEX = 1 << 11;
+        const LOOPBACK = 1 << 12;
+        const FAST_ETHERNET_SPEED = 1 << 14;
+        const PORT_SELECT = 1 << 15;
+        const DISABLE_CARRIER_SENSE = 1 << 16;
+        const JUMBO_ENABLE = 1 << 20;
+        const FRAME_BURST = 1 << 21;
+        const JABBER_DISABLE = 1 << 22;
+        const WATCHDOG_DISABLE = 1 << 23;
+        const FRAME_2K_ENABLE = 1 << 27;
+        const LINK_MASK = Self::PORT_SELECT.bits()
+            | Self::FAST_ETHERNET_SPEED.bits()
+            | Self::FULL_DUPLEX.bits();
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct DmaControl: u32 {
+        const RX_START = 1 << 1;
+        const OPERATE_SECOND_FRAME = 1 << 2;
+        const RX_THRESHOLD_MASK = 0x3 << 3;
+        const FLOW_CONTROL_ENABLE = 1 << 8;
+        const TX_START = 1 << 13;
+        const TX_THRESHOLD_MASK = 0x7 << 14;
+        const FLOW_DEACTIVATION_MASK = 0x0040_1800;
+        const FLOW_ACTIVATION_MASK = 0x0080_0600;
+        const TX_STORE_FORWARD = 1 << 21;
+        const RX_STORE_FORWARD = 1 << 25;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacFrameFilter: u32 {
+        // Linux's legacy DWMAC1000 default with the primary address populated.
+        const HASH_OR_PERFECT = 1 << 10;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacFlowControl: u32 {
+        const TX_ENABLE = 1 << 1;
+        const RX_ENABLE = 1 << 2;
+        const UNICAST_PAUSE = 1 << 3;
+        const PAUSE_TIME_MASK = 0xffff << 16;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacPowerManagement: u32 {
+        const ENABLE_MASK = (1 << 9) | (1 << 2) | (1 << 1) | 1;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacLpiControl: u32 {
+        const ENABLE_MASK = (1 << 19) | (1 << 16);
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacAutoNegotiation: u32 {
+        const ENABLE_RESTART = (1 << 12) | (1 << 9);
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacInterrupt: u32 {
+        const RGMII = 1 << 0;
+        const PCS_LINK = 1 << 1;
+        const PCS_AUTO_NEGOTIATION = 1 << 2;
+        const POWER_MANAGEMENT = 1 << 3;
+        const MMC_RX = 1 << 5;
+        const MMC_TX = 1 << 6;
+        const MMC_IPC = 1 << 7;
+        const LPI = 1 << 10;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MacInterruptMask: u32 {
+        // The probe consumes RGMII status while masking other legacy sources.
+        const LEGACY_REQUESTED = 0x20f;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MmcControl: u32 {
+        const LINUX_INITIAL = 0x35;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct MmcInterruptMask: u32 {
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct DmaInterruptEnable: u32 {
+        const TX = 1;
+        const RX = 1 << 6;
+        const ABNORMAL = 1 << 15;
+        const NORMAL = 1 << 16;
+        const _ = !0;
+    }
+}
 
 static_assert!(
     DWMAC1000_RESET_TIMEOUT_MS > 0,
@@ -260,16 +354,23 @@ pub(super) struct ProbeStartSnapshot {
 
 impl ProbeStartSnapshot {
     pub(super) const fn linux_sequence_valid(self) -> bool {
-        self.mac_enabled_control & (MAC_TX_ENABLE | MAC_RX_ENABLE) == MAC_TX_ENABLE | MAC_RX_ENABLE
-            && self.mac_enabled_control & MAC_LOOPBACK == 0
-            && self.rx_started_control & (DMA_RX_START | DMA_TX_START) == DMA_RX_START
-            && self.tx_started_control & (DMA_RX_START | DMA_TX_START)
-                == DMA_RX_START | DMA_TX_START
+        self.mac_enabled_control & (MacControl::TX_ENABLE.bits() | MacControl::RX_ENABLE.bits())
+            == MacControl::TX_ENABLE.bits() | MacControl::RX_ENABLE.bits()
+            && self.mac_enabled_control & MacControl::LOOPBACK.bits() == 0
+            && self.rx_started_control & (DmaControl::RX_START.bits() | DmaControl::TX_START.bits())
+                == DmaControl::RX_START.bits()
+            && self.tx_started_control & (DmaControl::RX_START.bits() | DmaControl::TX_START.bits())
+                == DmaControl::RX_START.bits() | DmaControl::TX_START.bits()
             && self.hash_high == 0
             && self.hash_low == 0
-            && self.frame_filter == MAC_FILTER_HASH_OR_PERFECT
-            && self.loopback_control & (MAC_TX_ENABLE | MAC_RX_ENABLE | MAC_LOOPBACK)
-                == MAC_TX_ENABLE | MAC_RX_ENABLE | MAC_LOOPBACK
+            && self.frame_filter == MacFrameFilter::HASH_OR_PERFECT.bits()
+            && self.loopback_control
+                & (MacControl::TX_ENABLE.bits()
+                    | MacControl::RX_ENABLE.bits()
+                    | MacControl::LOOPBACK.bits())
+                == MacControl::TX_ENABLE.bits()
+                    | MacControl::RX_ENABLE.bits()
+                    | MacControl::LOOPBACK.bits()
             && self.interrupt_enable == 0
     }
 }
@@ -280,7 +381,7 @@ pub(super) struct Dwmac1000Regs {
 }
 
 impl Dwmac1000Regs {
-    const REQUIRED_MAPPING_LEN: usize = DMA_HW_FEATURE + 4;
+    const REQUIRED_MAPPING_LEN: usize = Register::DmaHardwareFeature as usize + 4;
 
     pub(super) fn new(remap: IoRemap) -> Result<Self, SysError> {
         if remap.size() < Self::REQUIRED_MAPPING_LEN as u64 {
@@ -292,39 +393,40 @@ impl Dwmac1000Regs {
         })
     }
 
-    fn ptr_at(&self, offset: usize) -> *mut u32 {
+    fn ptr_at(&self, register: Register) -> *mut u32 {
+        let offset = register as usize;
         let end = offset.checked_add(core::mem::size_of::<u32>()).unwrap();
         assert!(end <= self.remap.size() as usize);
         unsafe { self.remap.as_ptr().as_ptr().cast::<u8>().add(offset).cast() }
     }
 
-    fn read(&self, offset: usize) -> u32 {
+    fn read(&self, register: Register) -> u32 {
         core::sync::atomic::fence(Ordering::SeqCst);
-        let value = unsafe { core::ptr::read_volatile(self.ptr_at(offset)) };
+        let value = unsafe { core::ptr::read_volatile(self.ptr_at(register)) };
         core::sync::atomic::fence(Ordering::SeqCst);
         value
     }
 
-    fn write(&self, offset: usize, value: u32) {
+    fn write(&self, register: Register, value: u32) {
         core::sync::atomic::fence(Ordering::SeqCst);
-        unsafe { core::ptr::write_volatile(self.ptr_at(offset), value) }
+        unsafe { core::ptr::write_volatile(self.ptr_at(register), value) }
     }
 
     pub(super) fn capabilities(&self) -> Dwmac1000Capabilities {
-        let version = self.read(MAC_VERSION);
-        let hw_feature = self.read(DMA_HW_FEATURE);
+        let version = self.read(Register::MacVersion);
+        let hw_feature = self.read(Register::DmaHardwareFeature);
         decode_capabilities(version, hw_feature)
     }
 
     pub(super) fn reset_dma(&self) -> Result<DmaResetSnapshot, DmaResetSnapshot> {
-        let before = self.read(DMA_BUS_MODE);
+        let before = self.read(Register::DmaBusMode);
         let mut mode = before;
-        mode |= SW_RESET;
-        self.write(DMA_BUS_MODE, mode);
+        mode |= DmaBusMode::SOFTWARE_RESET.bits();
+        self.write(Register::DmaBusMode, mode);
         let start = MonotonicInstant::now();
         loop {
-            let current = self.read(DMA_BUS_MODE);
-            if current & SW_RESET == 0 {
+            let current = self.read(Register::DmaBusMode);
+            if current & DmaBusMode::SOFTWARE_RESET.bits() == 0 {
                 return Ok(DmaResetSnapshot {
                     before,
                     after: current,
@@ -341,7 +443,7 @@ impl Dwmac1000Regs {
     }
 
     pub(super) const fn atds(bus_mode: u32) -> bool {
-        bus_mode & ALTERNATE_DESCRIPTOR_SIZE != 0
+        bus_mode & DmaBusMode::ALTERNATE_DESCRIPTOR_SIZE.bits() != 0
     }
 
     pub(super) fn mdio_clock_range(&self) -> Option<MdioClockRange> {
@@ -349,7 +451,8 @@ impl Dwmac1000Regs {
     }
 
     pub(super) fn mdio_clock_range_raw(&self) -> u8 {
-        ((self.read(MAC_MII_ADDR) & MII_CLOCK_RANGE_MASK) >> MII_CLOCK_RANGE_SHIFT) as u8
+        ((self.read(Register::MacMiiAddress) & MdioAddress::CLOCK_RANGE_MASK.bits())
+            >> MII_CLOCK_RANGE_SHIFT) as u8
     }
 
     pub(super) fn set_mdio_clock_range(&self, value: MdioClockRange) {
@@ -365,31 +468,42 @@ impl Dwmac1000Regs {
 
     pub(super) fn phy_snapshot(&self, phy: u8) -> Result<PhySnapshot, SysError> {
         Ok(PhySnapshot {
-            id1: self.mdio_read(phy, 2)?,
-            id2: self.mdio_read(phy, 3)?,
-            bmcr: self.mdio_read(phy, 0)?,
-            bmsr: self.mdio_read(phy, 1)?,
+            id1: self.mdio_read(phy, Clause22Register::PhyId1)?,
+            id2: self.mdio_read(phy, Clause22Register::PhyId2)?,
+            bmcr: self.mdio_read(phy, Clause22Register::BasicControl)?,
+            bmsr: self.mdio_read(phy, Clause22Register::BasicStatus)?,
         })
     }
 
-    pub(super) fn mdio_read(&self, phy: u8, register: u8) -> Result<u16, SysError> {
+    pub(super) fn mdio_read(&self, phy: u8, register: Clause22Register) -> Result<u16, SysError> {
         self.wait_mdio_idle()?;
-        self.write(MAC_MII_ADDR, self.mdio_command(phy, register, false));
+        self.write(
+            Register::MacMiiAddress,
+            self.mdio_command(phy, register as u8, false),
+        );
         self.wait_mdio_idle()?;
-        Ok(self.read(MAC_MII_DATA) as u16)
+        Ok(self.read(Register::MacMiiData) as u16)
     }
 
-    pub(super) fn mdio_write(&self, phy: u8, register: u8, value: u16) -> Result<(), SysError> {
+    pub(super) fn mdio_write(
+        &self,
+        phy: u8,
+        register: Clause22Register,
+        value: u16,
+    ) -> Result<(), SysError> {
         self.wait_mdio_idle()?;
-        self.write(MAC_MII_DATA, value as u32);
-        self.write(MAC_MII_ADDR, self.mdio_command(phy, register, true));
+        self.write(Register::MacMiiData, value as u32);
+        self.write(
+            Register::MacMiiAddress,
+            self.mdio_command(phy, register as u8, true),
+        );
         self.wait_mdio_idle()
     }
 
     fn wait_mdio_idle(&self) -> Result<(), SysError> {
         let start = MonotonicInstant::now();
         loop {
-            if self.read(MAC_MII_ADDR) & MII_BUSY == 0 {
+            if self.read(Register::MacMiiAddress) & MdioAddress::BUSY.bits() == 0 {
                 return Ok(());
             }
             if start.elapsed() >= Duration::from_millis(DWMAC1000_MDIO_TIMEOUT_MS) {
@@ -400,7 +514,7 @@ impl Dwmac1000Regs {
     }
 
     pub(super) fn mdio_address(&self) -> u32 {
-        self.read(MAC_MII_ADDR)
+        self.read(Register::MacMiiAddress)
     }
 
     pub(super) fn prepare_probe(
@@ -414,91 +528,106 @@ impl Dwmac1000Regs {
         capabilities: Dwmac1000Capabilities,
         link: PhyLink,
     ) -> Result<ProbeRegisterSnapshot, SysError> {
-        self.write(DMA_INTERRUPT_ENABLE, 0);
-        self.write(MAC_INTERRUPT_MASK, MASK_LEGACY_MAC_INTERRUPTS_REQUESTED);
+        self.write(Register::DmaInterruptEnable, 0);
+        self.write(
+            Register::MacInterruptMask,
+            MacInterruptMask::LEGACY_REQUESTED.bits(),
+        );
         self.mask_mmc_interrupts();
-        let mut bus_mode = self.read(DMA_BUS_MODE);
-        bus_mode &= !(ALTERNATE_DESCRIPTOR_SIZE
-            | DMA_PBL_MASK
-            | DMA_RX_PBL_MASK
-            | DMA_USE_SEPARATE_PBL
-            | DMA_PBL_X8
-            | DMA_FIXED_BURST
-            | DMA_MIXED_BURST
-            | DMA_ADDRESS_ALIGNED_BEATS);
-        bus_mode |= ALTERNATE_DESCRIPTOR_SIZE
-            | DMA_USE_SEPARATE_PBL
+        let mut bus_mode = self.read(Register::DmaBusMode);
+        bus_mode &= !(DmaBusMode::ALTERNATE_DESCRIPTOR_SIZE.bits()
+            | DmaBusMode::TX_PBL_MASK.bits()
+            | DmaBusMode::RX_PBL_MASK.bits()
+            | DmaBusMode::USE_SEPARATE_PBL.bits()
+            | DmaBusMode::PBL_X8.bits()
+            | DmaBusMode::FIXED_BURST.bits()
+            | DmaBusMode::MIXED_BURST.bits()
+            | DmaBusMode::ADDRESS_ALIGNED_BEATS.bits());
+        bus_mode |= DmaBusMode::ALTERNATE_DESCRIPTOR_SIZE.bits()
+            | DmaBusMode::USE_SEPARATE_PBL.bits()
             | (dma.tx_pbl.encoded() as u32) << DMA_PBL_SHIFT
-            | (dma.rx_pbl.encoded() as u32) << DMA_RX_PBL_SHIFT;
-        if dma.pbl_x8 {
-            bus_mode |= DMA_PBL_X8;
-        }
+            | (dma.rx_pbl.encoded() as u32) << DMA_RX_PBL_SHIFT
+            // Cosmos uses mixed bursts, BLEN32 and PBLx8 on this controller.
+            // Keep ATDS/PBL from the accepted enhanced path, but force these
+            // three bus attributes for this board comparison experiment.
+            | DmaBusMode::MIXED_BURST.bits()
+            | DmaBusMode::BURST_LENGTH32.bits()
+            | DmaBusMode::PBL_X8.bits();
+        // The Cosmos comparison above intentionally overrides the firmware
+        // default for PBLx8; retain the parsed fields for diagnostics only.
+        let _ = dma.pbl_x8;
         if dma.fixed_burst {
-            bus_mode |= DMA_FIXED_BURST;
+            bus_mode |= DmaBusMode::FIXED_BURST.bits();
         }
         if dma.mixed_burst {
-            bus_mode |= DMA_MIXED_BURST;
+            bus_mode |= DmaBusMode::MIXED_BURST.bits();
         }
         if dma.address_aligned_beats {
-            bus_mode |= DMA_ADDRESS_ALIGNED_BEATS;
+            bus_mode |= DmaBusMode::ADDRESS_ALIGNED_BEATS.bits();
         }
-        self.write(DMA_BUS_MODE, bus_mode);
-        let axi_bus_mode = axi.map(|axi| self.initialize_axi(axi));
+        self.write(Register::DmaBusMode, bus_mode);
+        // Temporary comparison baseline: Cosmos programs this AXI value even
+        // when the 2K1000 DT has no snps,axi-config phandle. Do not treat this
+        // as the Linux-shaped policy until a successful hardware rerun proves
+        // that it is required.
+        let _ = axi;
+        self.write(Register::DmaAxiBusMode, COSMOS_AXI_BUS_MODE);
+        let axi_bus_mode = Some(self.read(Register::DmaAxiBusMode));
 
         let selected_dma_mode = select_dma_mode(dma.operation_mode, capabilities.tx_checksum);
-        let mut dma_control = self.read(DMA_CONTROL);
-        dma_control &= !(DMA_TX_START
-            | DMA_RX_START
-            | DMA_TX_STORE_FORWARD
-            | DMA_RX_STORE_FORWARD
-            | DMA_OPERATE_SECOND_FRAME
-            | DMA_TX_THRESHOLD_MASK
-            | DMA_RX_THRESHOLD_MASK
-            | DMA_FLOW_CONTROL_ENABLE
-            | DMA_FLOW_ACTIVATION_MASK
-            | DMA_FLOW_DEACTIVATION_MASK);
+        let mut dma_control = self.read(Register::DmaControl);
+        dma_control &= !(DmaControl::TX_START.bits()
+            | DmaControl::RX_START.bits()
+            | DmaControl::TX_STORE_FORWARD.bits()
+            | DmaControl::RX_STORE_FORWARD.bits()
+            | DmaControl::OPERATE_SECOND_FRAME.bits()
+            | DmaControl::TX_THRESHOLD_MASK.bits()
+            | DmaControl::RX_THRESHOLD_MASK.bits()
+            | DmaControl::FLOW_CONTROL_ENABLE.bits()
+            | DmaControl::FLOW_ACTIVATION_MASK.bits()
+            | DmaControl::FLOW_DEACTIVATION_MASK.bits());
         dma_control |= dma_mode_bits(selected_dma_mode);
         dma_control = configure_fifo_flow_control(dma_control, dma.rx_fifo_bytes);
-        self.write(DMA_CONTROL, dma_control);
+        self.write(Register::DmaControl, dma_control);
 
-        let mut mac_control = self.read(MAC_CONTROL);
-        mac_control &= !(MAC_TX_ENABLE
-            | MAC_RX_ENABLE
-            | MAC_LOOPBACK
-            | MAC_LINK_MASK
-            | MAC_AUTO_PAD_FCS_STRIP
-            | MAC_RX_CHECKSUM
-            | MAC_JUMBO_ENABLE
-            | MAC_2K_ENABLE
-            | MAC_WATCHDOG_DISABLE);
+        let mut mac_control = self.read(Register::MacControl);
+        mac_control &= !(MacControl::TX_ENABLE.bits()
+            | MacControl::RX_ENABLE.bits()
+            | MacControl::LOOPBACK.bits()
+            | MacControl::LINK_MASK.bits()
+            | MacControl::AUTO_PAD_FCS_STRIP.bits()
+            | MacControl::RX_CHECKSUM.bits()
+            | MacControl::JUMBO_ENABLE.bits()
+            | MacControl::FRAME_2K_ENABLE.bits()
+            | MacControl::WATCHDOG_DISABLE.bits());
         let pcs_initial_control = if capabilities.pcs {
             if let Some(speed) = pcs_initial_speed {
                 mac_control |= mac_link_bits(speed, false)?;
-                self.write(MAC_CONTROL, mac_control);
-                Some(self.read(MAC_CONTROL))
+                self.write(Register::MacControl, mac_control);
+                Some(self.read(Register::MacControl))
             } else {
                 None
             }
         } else {
             None
         };
-        mac_control &= !MAC_LINK_MASK;
+        mac_control &= !MacControl::LINK_MASK.bits();
         // Linux programs PS/FES/DM from the resolved PHY link before enabling
         // the MAC. Internal loopback still consumes that MAC clock selection.
-        mac_control |= MAC_JABBER_DISABLE
-            | MAC_FRAME_BURST
-            | MAC_DISABLE_CARRIER_SENSE
+        mac_control |= MacControl::JABBER_DISABLE.bits()
+            | MacControl::FRAME_BURST.bits()
+            | MacControl::DISABLE_CARRIER_SENSE.bits()
             | mac_link_bits(link.speed_mbps, link.full_duplex)?;
-        self.write(MAC_CONTROL, mac_control);
-        self.write(MAC_FLOW_CONTROL, mac_flow_control(link));
-        self.write(DMA_RX_BASE_ADDR, rx_desc);
-        self.write(DMA_TX_BASE_ADDR, tx_desc);
+        self.write(Register::MacControl, mac_control);
+        self.write(Register::MacFlowControl, mac_flow_control(link));
+        self.write(Register::DmaRxBaseAddress, rx_desc);
+        self.write(Register::DmaTxBaseAddress, tx_desc);
         self.write(
-            MAC_ADDR_HIGH,
+            Register::MacAddressHigh,
             ((mac[5] as u32) << 8) | mac[4] as u32 | (1 << 31),
         );
         self.write(
-            MAC_ADDR_LOW,
+            Register::MacAddressLow,
             ((mac[3] as u32) << 24)
                 | ((mac[2] as u32) << 16)
                 | ((mac[1] as u32) << 8)
@@ -507,29 +636,33 @@ impl Dwmac1000Regs {
         // Empty address lists use address 0 perfect matching. Program this
         // before any RX path can run so loopback traffic cannot observe the
         // firmware filter state.
-        self.write(MAC_HASH_HIGH, 0);
-        self.write(MAC_HASH_LOW, 0);
-        self.write(MAC_FRAME_FILTER, MAC_FILTER_HASH_OR_PERFECT);
+        self.write(Register::MacHashHigh, 0);
+        self.write(Register::MacHashLow, 0);
+        self.write(
+            Register::MacFrameFilter,
+            MacFrameFilter::HASH_OR_PERFECT.bits(),
+        );
 
-        self.write(MAC_VLAN_TAG, 0);
+        self.write(Register::MacVlanTag, 0);
         let has_pmt = capabilities.remote_wake || capabilities.magic_wake;
         let pmt = if has_pmt {
-            self.write(MAC_PMT, 0);
-            self.read(MAC_PMT)
+            self.write(Register::MacPmt, 0);
+            self.read(Register::MacPmt)
         } else {
             0
         };
         let lpi_control_status = if capabilities.eee {
-            let value = self.read(MAC_LPI_CONTROL_STATUS) & !MAC_LPI_ENABLE_MASK;
-            self.write(MAC_LPI_CONTROL_STATUS, value);
-            self.read(MAC_LPI_CONTROL_STATUS)
+            let value =
+                self.read(Register::MacLpiControlStatus) & !MacLpiControl::ENABLE_MASK.bits();
+            self.write(Register::MacLpiControlStatus, value);
+            self.read(Register::MacLpiControlStatus)
         } else {
             0
         };
         let has_timestamp = capabilities.timestamp_v1 || capabilities.timestamp_v2;
         let timestamp_control = if has_timestamp {
-            self.write(PTP_TIMESTAMP_CONTROL, 0);
-            self.read(PTP_TIMESTAMP_CONTROL)
+            self.write(Register::PtpTimestampControl, 0);
+            self.read(Register::PtpTimestampControl)
         } else {
             0
         };
@@ -537,46 +670,49 @@ impl Dwmac1000Regs {
 
         let pcs_selected = capabilities.pcs;
         let (pcs_an_control, pcs_an_status) = if pcs_selected {
-            let mut an_control = self.read(MAC_AN_CONTROL);
-            an_control |= MAC_AN_ENABLE_RESTART;
-            self.write(MAC_AN_CONTROL, an_control);
-            (self.read(MAC_AN_CONTROL), self.read(MAC_AN_STATUS))
+            let mut an_control = self.read(Register::MacAnControl);
+            an_control |= MacAutoNegotiation::ENABLE_RESTART.bits();
+            self.write(Register::MacAnControl, an_control);
+            (
+                self.read(Register::MacAnControl),
+                self.read(Register::MacAnStatus),
+            )
         } else {
             (0, 0)
         };
-        self.acknowledge_causes(self.status() & super::protocol::CSR5_W1C_MASK);
+        self.acknowledge_causes(self.status() & DmaStatus::W1C.bits());
 
         // Linux writes all mask bits. Legacy DWMAC1000 exposes only the
         // implemented counter fields on readback, so an effective mask is
         // diagnostic evidence rather than an exact u32::MAX admission value.
         let snapshot = ProbeRegisterSnapshot {
-            bus_mode: self.read(DMA_BUS_MODE),
+            bus_mode: self.read(Register::DmaBusMode),
             axi_bus_mode,
-            rx_desc: self.read(DMA_RX_BASE_ADDR),
-            tx_desc: self.read(DMA_TX_BASE_ADDR),
-            mac_high: self.read(MAC_ADDR_HIGH),
-            mac_low: self.read(MAC_ADDR_LOW),
-            dma_control: self.read(DMA_CONTROL),
-            mac_control: self.read(MAC_CONTROL),
-            flow_control: self.read(MAC_FLOW_CONTROL),
+            rx_desc: self.read(Register::DmaRxBaseAddress),
+            tx_desc: self.read(Register::DmaTxBaseAddress),
+            mac_high: self.read(Register::MacAddressHigh),
+            mac_low: self.read(Register::MacAddressLow),
+            dma_control: self.read(Register::DmaControl),
+            mac_control: self.read(Register::MacControl),
+            flow_control: self.read(Register::MacFlowControl),
             interrupt_enable: self.interrupt_enable(),
-            mac_interrupt_mask: self.read(MAC_INTERRUPT_MASK),
-            mmc_rx_interrupt_mask: self.read(MMC_RX_INTERRUPT_MASK),
-            mmc_tx_interrupt_mask: self.read(MMC_TX_INTERRUPT_MASK),
-            mmc_rx_ipc_interrupt_mask: self.read(MMC_RX_IPC_INTERRUPT_MASK),
+            mac_interrupt_mask: self.read(Register::MacInterruptMask),
+            mmc_rx_interrupt_mask: self.read(Register::MmcRxInterruptMask),
+            mmc_tx_interrupt_mask: self.read(Register::MmcTxInterruptMask),
+            mmc_rx_ipc_interrupt_mask: self.read(Register::MmcRxIpcInterruptMask),
             mmc_control: if capabilities.rmon {
-                self.read(MMC_CONTROL)
+                self.read(Register::MmcControl)
             } else {
                 0
             },
-            hash_high: self.read(MAC_HASH_HIGH),
-            hash_low: self.read(MAC_HASH_LOW),
-            frame_filter: self.read(MAC_FRAME_FILTER),
-            vlan_tag: self.read(MAC_VLAN_TAG),
+            hash_high: self.read(Register::MacHashHigh),
+            hash_low: self.read(Register::MacHashLow),
+            frame_filter: self.read(Register::MacFrameFilter),
+            vlan_tag: self.read(Register::MacVlanTag),
             pmt,
             lpi_control_status,
             timestamp_control,
-            rx_watchdog: self.read(DMA_RX_WATCHDOG),
+            rx_watchdog: self.read(Register::DmaRxWatchdog),
             pcs_selected,
             pcs_initial_speed,
             pcs_initial_control,
@@ -606,41 +742,44 @@ impl Dwmac1000Regs {
         if snapshot.mac_low != expected_mac_low {
             mismatch |= 1 << 4;
         }
-        if snapshot.dma_control & (DMA_TX_START | DMA_RX_START) != 0 {
+        if snapshot.dma_control & (DmaControl::TX_START.bits() | DmaControl::RX_START.bits()) != 0 {
             mismatch |= 1 << 5;
         }
         if snapshot.interrupt_enable != 0 {
             mismatch |= 1 << 6;
         }
         if snapshot.mac_control
-            & (MAC_TX_ENABLE
-                | MAC_RX_ENABLE
-                | MAC_LOOPBACK
-                | MAC_AUTO_PAD_FCS_STRIP
-                | MAC_RX_CHECKSUM)
+            & (MacControl::TX_ENABLE.bits()
+                | MacControl::RX_ENABLE.bits()
+                | MacControl::LOOPBACK.bits()
+                | MacControl::AUTO_PAD_FCS_STRIP.bits()
+                | MacControl::RX_CHECKSUM.bits())
             != 0
         {
             mismatch |= 1 << 7;
         }
-        if snapshot.mac_control & MAC_LINK_MASK != mac_link_bits(link.speed_mbps, link.full_duplex)?
+        if snapshot.mac_control & MacControl::LINK_MASK.bits()
+            != mac_link_bits(link.speed_mbps, link.full_duplex)?
         {
             mismatch |= 1 << 8;
         }
         if snapshot.hash_high != 0
             || snapshot.hash_low != 0
-            || snapshot.frame_filter != MAC_FILTER_HASH_OR_PERFECT
+            || snapshot.frame_filter != MacFrameFilter::HASH_OR_PERFECT.bits()
         {
             mismatch |= 1 << 9;
         }
         if snapshot.vlan_tag != 0
-            || (has_pmt && snapshot.pmt & MAC_PMT_ENABLE_MASK != 0)
-            || (capabilities.eee && snapshot.lpi_control_status & MAC_LPI_ENABLE_MASK != 0)
+            || (has_pmt && snapshot.pmt & MacPowerManagement::ENABLE_MASK.bits() != 0)
+            || (capabilities.eee
+                && snapshot.lpi_control_status & MacLpiControl::ENABLE_MASK.bits() != 0)
             || (has_timestamp && snapshot.timestamp_control != 0)
         {
             mismatch |= 1 << 10;
         }
         if snapshot.pcs_selected
-            && snapshot.pcs_an_control & MAC_AN_ENABLE_RESTART != MAC_AN_ENABLE_RESTART
+            && snapshot.pcs_an_control & MacAutoNegotiation::ENABLE_RESTART.bits()
+                != MacAutoNegotiation::ENABLE_RESTART.bits()
         {
             mismatch |= 1 << 12;
         }
@@ -691,35 +830,38 @@ impl Dwmac1000Regs {
     }
 
     pub(super) fn start_probe(&self) -> ProbeStartSnapshot {
-        self.acknowledge_causes(self.status() & super::protocol::CSR5_W1C_MASK);
+        self.acknowledge_causes(self.status() & DmaStatus::W1C.bits());
         // Gate 2 runs before the architecture enables local interrupts. Keep
         // every device interrupt source suppressed and observe CSR5 directly;
         // Gate 3 owns the first IRQ request and CSR7 enable transition.
         self.suppress_interrupts();
-        let hash_high = self.read(MAC_HASH_HIGH);
-        let hash_low = self.read(MAC_HASH_LOW);
-        let frame_filter = self.read(MAC_FRAME_FILTER);
+        let hash_high = self.read(Register::MacHashHigh);
+        let hash_low = self.read(Register::MacHashLow);
+        let frame_filter = self.read(Register::MacFrameFilter);
 
-        let mut mac = self.read(MAC_CONTROL);
-        mac &= !MAC_LOOPBACK;
-        mac |= MAC_TX_ENABLE | MAC_RX_ENABLE;
-        self.write(MAC_CONTROL, mac);
-        let mac_enabled_control = self.read(MAC_CONTROL);
+        let mut mac = self.read(Register::MacControl);
+        mac &= !MacControl::LOOPBACK.bits();
+        mac |= MacControl::TX_ENABLE.bits() | MacControl::RX_ENABLE.bits();
+        self.write(Register::MacControl, mac);
+        let mac_enabled_control = self.read(Register::MacControl);
 
-        let mut dma = self.read(DMA_CONTROL);
+        let mut dma = self.read(Register::DmaControl);
         // Linux starts the legacy RX channel before the TX channel. Keep the
         // two commits distinct so TX cannot consume a descriptor before the
         // receive ring is live.
-        dma |= DMA_RX_START;
-        self.write(DMA_CONTROL, dma);
-        let rx_started_control = self.read(DMA_CONTROL);
-        dma |= DMA_TX_START;
-        self.write(DMA_CONTROL, dma);
-        let tx_started_control = self.read(DMA_CONTROL);
+        dma |= DmaControl::RX_START.bits();
+        self.write(Register::DmaControl, dma);
+        let rx_started_control = self.read(Register::DmaControl);
+        dma |= DmaControl::TX_START.bits();
+        self.write(Register::DmaControl, dma);
+        let tx_started_control = self.read(Register::DmaControl);
+        // Cosmos explicitly kicks the RX state machine after enabling both
+        // channels; keep this write in the same start transaction.
+        self.demand_rx();
 
-        mac = self.read(MAC_CONTROL);
-        mac |= MAC_LOOPBACK;
-        self.write(MAC_CONTROL, mac);
+        mac = self.read(Register::MacControl);
+        mac |= MacControl::LOOPBACK.bits();
+        self.write(Register::MacControl, mac);
         ProbeStartSnapshot {
             mac_enabled_control,
             rx_started_control,
@@ -727,8 +869,8 @@ impl Dwmac1000Regs {
             hash_high,
             hash_low,
             frame_filter,
-            loopback_control: self.read(MAC_CONTROL),
-            flow_control: self.read(MAC_FLOW_CONTROL),
+            loopback_control: self.read(Register::MacControl),
+            flow_control: self.read(Register::MacFlowControl),
             interrupt_enable: self.interrupt_enable(),
         }
     }
@@ -743,11 +885,58 @@ impl Dwmac1000Regs {
     }
 
     pub(super) fn demand_tx(&self) {
-        self.write(DMA_TX_POLL_DEMAND, 1);
+        self.write(Register::DmaTxPollDemand, 1);
     }
 
     pub(super) fn demand_rx(&self) {
-        self.write(DMA_RX_POLL_DEMAND, 1);
+        self.write(Register::DmaRxPollDemand, 1);
+    }
+
+    /// Reload the production descriptor origins after Gate 2 advanced the
+    /// hardware cursors. Software may reset its ring indices to zero only
+    /// after this stopped-DMA transaction succeeds; otherwise hardware would
+    /// resume from the post-loopback slot while software waits on slot zero.
+    pub(super) fn rearm_descriptor_bases(
+        &self,
+        rx_desc: u32,
+        tx_desc: u32,
+    ) -> Result<(), SysError> {
+        let control_before = self.read(Register::DmaControl);
+        if control_before & (DmaControl::RX_START.bits() | DmaControl::TX_START.bits()) != 0 {
+            kerrln!(
+                "dwmac1000 stage=gate2-production-rearm result=fail reason=dma-running csr6={:#x} expected-rx={:#x} expected-tx={:#x}",
+                control_before,
+                rx_desc,
+                tx_desc,
+            );
+            return Err(SysError::ProbeFailed);
+        }
+
+        self.write(Register::DmaRxBaseAddress, rx_desc);
+        self.write(Register::DmaTxBaseAddress, tx_desc);
+        let control_after = self.read(Register::DmaControl);
+        let actual_rx = self.read(Register::DmaRxBaseAddress);
+        let actual_tx = self.read(Register::DmaTxBaseAddress);
+        if !descriptor_rearm_valid(control_after, actual_rx, actual_tx, rx_desc, tx_desc) {
+            kerrln!(
+                "dwmac1000 stage=gate2-production-rearm result=fail reason=readback csr6={:#x} expected-rx={:#x} actual-rx={:#x} expected-tx={:#x} actual-tx={:#x}",
+                control_after,
+                rx_desc,
+                actual_rx,
+                tx_desc,
+                actual_tx,
+            );
+            return Err(SysError::ProbeFailed);
+        }
+        kdebugln!(
+            "dwmac1000 stage=gate2-production-rearm result=pass csr6={:#x} rx-base={:#x} tx-base={:#x} cur-before-start={:#x},{:#x}",
+            control_after,
+            actual_rx,
+            actual_tx,
+            self.read(Register::DmaCurrentTxBuffer),
+            self.read(Register::DmaCurrentRxBuffer),
+        );
+        Ok(())
     }
 
     pub(super) fn start_runtime(&self) {
@@ -755,53 +944,68 @@ impl Dwmac1000Regs {
         // before enabling CSR7 so the first level dispatch represents a new
         // event, then follow Linux's RX-before-TX start order.
         self.service_mac_interrupts();
-        self.acknowledge_causes(self.status() & super::protocol::CSR5_W1C_MASK);
-        let mut mac = self.read(MAC_CONTROL);
-        mac |= MAC_TX_ENABLE | MAC_RX_ENABLE;
-        self.write(MAC_CONTROL, mac);
-        let mut dma = self.read(DMA_CONTROL);
-        dma |= DMA_RX_START;
-        self.write(DMA_CONTROL, dma);
-        dma |= DMA_TX_START;
-        self.write(DMA_CONTROL, dma);
+        self.acknowledge_causes(self.status() & DmaStatus::W1C.bits());
+        let mut mac = self.read(Register::MacControl);
+        mac |= MacControl::TX_ENABLE.bits() | MacControl::RX_ENABLE.bits();
+        self.write(Register::MacControl, mac);
+        let mut dma = self.read(Register::DmaControl);
+        dma |= DmaControl::RX_START.bits();
+        self.write(Register::DmaControl, dma);
+        dma |= DmaControl::TX_START.bits();
+        self.write(Register::DmaControl, dma);
+        self.demand_rx();
         // The Gate 2 mask is a suppression baseline. Gate 3 restores the
         // Linux host path; read-to-clear MAC/PCS/MMC causes are then drained
         // by the same IRQ handler before level unmask.
-        self.write(MAC_INTERRUPT_MASK, 0);
+        self.write(Register::MacInterruptMask, 0);
         self.write(
-            DMA_INTERRUPT_ENABLE,
-            DMA_NORMAL_INTERRUPT | DMA_ABNORMAL_INTERRUPT | DMA_RX_INTERRUPT | DMA_TX_INTERRUPT,
+            Register::DmaInterruptEnable,
+            DmaInterruptEnable::NORMAL.bits()
+                | DmaInterruptEnable::ABNORMAL.bits()
+                | DmaInterruptEnable::RX.bits()
+                | DmaInterruptEnable::TX.bits(),
         );
     }
 
     pub(super) fn status(&self) -> u32 {
-        self.read(DMA_STATUS)
+        self.read(Register::DmaStatus)
     }
 
     pub(super) fn interrupt_enable(&self) -> u32 {
-        self.read(DMA_INTERRUPT_ENABLE)
+        self.read(Register::DmaInterruptEnable)
     }
 
-    /// Read-only runtime controls used by Gate 3 diagnostics. These values
-    /// mirror the live MMIO owner and never participate in interrupt or DMA
-    /// decisions; remove or reduce the caller after Gate 3 acceptance.
+    /// Read-only field diagnostics. These values mirror the live MMIO owner
+    /// and never participate in interrupt or DMA decisions.
     pub(super) fn runtime_snapshot(&self) -> RuntimeRegisterSnapshot {
         RuntimeRegisterSnapshot {
             status: self.status(),
-            dma_control: self.read(DMA_CONTROL),
+            dma_control: self.read(Register::DmaControl),
             interrupt_enable: self.interrupt_enable(),
-            mac_control: self.read(MAC_CONTROL),
-            mac_interrupt_mask: self.read(MAC_INTERRUPT_MASK),
-            mac_address_high: self.read(MAC_ADDR_HIGH),
-            mac_address_low: self.read(MAC_ADDR_LOW),
-            frame_filter: self.read(MAC_FRAME_FILTER),
+            dma_current_tx_buffer: self.read(Register::DmaCurrentTxBuffer),
+            dma_current_rx_buffer: self.read(Register::DmaCurrentRxBuffer),
+            dma_missed_frame_counter: self.read(Register::DmaMissedFrameCounter),
+            mac_control: self.read(Register::MacControl),
+            mac_interrupt_mask: self.read(Register::MacInterruptMask),
+            rgmii_status: self.read(Register::MacRgmiiStatus),
+            mac_address_high: self.read(Register::MacAddressHigh),
+            mac_address_low: self.read(Register::MacAddressLow),
+            frame_filter: self.read(Register::MacFrameFilter),
+            mmc_rx_frame_count_gb: self.read(Register::MmcRxFrameCountGb),
+            mmc_rx_unicast: self.read(Register::MmcRxUnicast),
+            mmc_rx_crc_error: self.read(Register::MmcRxCrcError),
+            mmc_rx_align_error: self.read(Register::MmcRxAlignError),
+            mmc_rx_run_error: self.read(Register::MmcRxRunError),
+            mmc_rx_length_error: self.read(Register::MmcRxLengthError),
+            mmc_rx_fifo_overflow: self.read(Register::MmcRxFifoOverflow),
+            mmc_rx_watchdog_error: self.read(Register::MmcRxWatchdogError),
         }
     }
 
     pub(super) fn acknowledge_causes(&self, causes: u32) -> u32 {
         if causes != 0 {
-            assert_eq!(causes & !super::protocol::CSR5_W1C_MASK, 0);
-            self.write(DMA_STATUS, causes);
+            assert_eq!(causes & !DmaStatus::W1C.bits(), 0);
+            self.write(Register::DmaStatus, causes);
         }
         // W1C evidence is only valid when the same owner performs the
         // immediate readback. Callers may use this as their next raw sample.
@@ -809,9 +1013,12 @@ impl Dwmac1000Regs {
     }
 
     fn mask_mmc_interrupts(&self) {
-        self.write(MMC_RX_INTERRUPT_MASK, MASK_ALL_MMC_INTERRUPTS);
-        self.write(MMC_TX_INTERRUPT_MASK, MASK_ALL_MMC_INTERRUPTS);
-        self.write(MMC_RX_IPC_INTERRUPT_MASK, MASK_ALL_MMC_INTERRUPTS);
+        self.write(Register::MmcRxInterruptMask, MmcInterruptMask::all().bits());
+        self.write(Register::MmcTxInterruptMask, MmcInterruptMask::all().bits());
+        self.write(
+            Register::MmcRxIpcInterruptMask,
+            MmcInterruptMask::all().bits(),
+        );
     }
 
     fn initialize_mmc(&self, rmon: bool) {
@@ -821,30 +1028,17 @@ impl Dwmac1000Regs {
             // COUNTER_RESET/PRESET/FULL_HALF_PRESET may self-clear; only the
             // write is protocol truth, while the post-write value is retained
             // as diagnostic evidence below.
-            let control = self.read(MMC_CONTROL) | MMC_CONTROL_LINUX_INITIAL;
-            self.write(MMC_CONTROL, control);
+            let control = self.read(Register::MmcControl) | MmcControl::LINUX_INITIAL.bits();
+            self.write(Register::MmcControl, control);
         }
-    }
-
-    fn initialize_axi(&self, config: LegacyAxiConfig) -> u32 {
-        let mut mode = self.read(DMA_AXI_BUS_MODE);
-        mode &= !(DMA_AXI_WRITE_LIMIT_MASK | DMA_AXI_READ_LIMIT_MASK);
-        mode |= (config.write_outstanding_limit as u32) << 20
-            | (config.read_outstanding_limit as u32) << 16
-            | config.burst_mask as u32;
-        if config.lpi_enable {
-            mode |= DMA_AXI_LPI_ENABLE;
-        }
-        if config.exit_frame {
-            mode |= DMA_AXI_EXIT_FRAME;
-        }
-        self.write(DMA_AXI_BUS_MODE, mode);
-        self.read(DMA_AXI_BUS_MODE)
     }
 
     pub(super) fn suppress_interrupts(&self) {
-        self.write(DMA_INTERRUPT_ENABLE, 0);
-        self.write(MAC_INTERRUPT_MASK, MASK_LEGACY_MAC_INTERRUPTS_REQUESTED);
+        self.write(Register::DmaInterruptEnable, 0);
+        self.write(
+            Register::MacInterruptMask,
+            MacInterruptMask::LEGACY_REQUESTED.bits(),
+        );
         self.mask_mmc_interrupts();
     }
 
@@ -852,29 +1046,30 @@ impl Dwmac1000Regs {
     /// read-to-clear register. Gate 2 keeps these sources masked, but must not
     /// hand stale device state to Gate 3's first unmask.
     pub(super) fn service_mac_interrupts(&self) -> (u32, u32) {
-        let status = self.read(MAC_INTERRUPT_STATUS);
-        if status & (MAC_INTERRUPT_PCS_LINK | MAC_INTERRUPT_PCS_AN) != 0 {
-            self.read(MAC_AN_STATUS);
+        let status = self.read(Register::MacInterruptStatus);
+        if status & (MacInterrupt::PCS_LINK.bits() | MacInterrupt::PCS_AUTO_NEGOTIATION.bits()) != 0
+        {
+            self.read(Register::MacAnStatus);
         }
-        if status & MAC_INTERRUPT_RGMII != 0 {
-            self.read(MAC_RGSMII_STATUS);
+        if status & MacInterrupt::RGMII.bits() != 0 {
+            self.read(Register::MacRgmiiStatus);
         }
-        if status & MAC_INTERRUPT_PMT != 0 {
-            self.read(MAC_PMT);
+        if status & MacInterrupt::POWER_MANAGEMENT.bits() != 0 {
+            self.read(Register::MacPmt);
         }
-        if status & MAC_INTERRUPT_LPI != 0 {
-            self.read(MAC_LPI_CONTROL_STATUS);
+        if status & MacInterrupt::LPI.bits() != 0 {
+            self.read(Register::MacLpiControlStatus);
         }
-        if status & MAC_INTERRUPT_MMC_RX != 0 {
-            self.read(MMC_RX_INTERRUPT);
+        if status & MacInterrupt::MMC_RX.bits() != 0 {
+            self.read(Register::MmcRxInterrupt);
         }
-        if status & MAC_INTERRUPT_MMC_TX != 0 {
-            self.read(MMC_TX_INTERRUPT);
+        if status & MacInterrupt::MMC_TX.bits() != 0 {
+            self.read(Register::MmcTxInterrupt);
         }
-        if status & MAC_INTERRUPT_MMC_IPC != 0 {
-            self.read(MMC_RX_IPC_INTERRUPT);
+        if status & MacInterrupt::MMC_IPC.bits() != 0 {
+            self.read(Register::MmcRxIpcInterrupt);
         }
-        (status, self.read(MAC_INTERRUPT_STATUS))
+        (status, self.read(Register::MacInterruptStatus))
     }
 
     pub(super) fn quiesce(&self) -> QuiesceSnapshot {
@@ -884,42 +1079,44 @@ impl Dwmac1000Regs {
         // causes observed after that stop linearization may use the cleanup
         // classification for TPS/RPS.
         let active_status = self.status();
-        let active_legal = active_status & super::protocol::CSR5_W1C_MASK;
+        let active_legal = active_status & DmaStatus::W1C.bits();
         let mut w1c_samples = 0u32;
         if active_legal != 0 {
             self.acknowledge_causes(active_legal);
             w1c_samples = 1;
         }
         // Match Linux's legacy stop_all_dma ordering: RX first, then TX.
-        let mut dma = self.read(DMA_CONTROL);
-        dma &= !DMA_RX_START;
-        self.write(DMA_CONTROL, dma);
-        dma &= !DMA_TX_START;
-        self.write(DMA_CONTROL, dma);
-        let mut mac = self.read(MAC_CONTROL);
-        mac &= !(MAC_TX_ENABLE | MAC_RX_ENABLE | MAC_LOOPBACK);
-        self.write(MAC_CONTROL, mac);
+        let mut dma = self.read(Register::DmaControl);
+        dma &= !DmaControl::RX_START.bits();
+        self.write(Register::DmaControl, dma);
+        dma &= !DmaControl::TX_START.bits();
+        self.write(Register::DmaControl, dma);
+        let mut mac = self.read(Register::MacControl);
+        mac &= !(MacControl::TX_ENABLE.bits()
+            | MacControl::RX_ENABLE.bits()
+            | MacControl::LOOPBACK.bits());
+        self.write(Register::MacControl, mac);
 
         let start = MonotonicInstant::now();
         let mut cleanup_legal = 0;
         loop {
             let before = self.status();
-            let legal = before & super::protocol::CSR5_W1C_MASK;
+            let legal = before & DmaStatus::W1C.bits();
             cleanup_legal |= legal;
             if legal != 0 {
                 self.acknowledge_causes(legal);
                 w1c_samples = w1c_samples.saturating_add(1);
             }
             let status = self.status();
-            let tx_process = (status & DMA_TX_PROCESS_MASK) >> DMA_TX_PROCESS_SHIFT;
-            let rx_process = (status & DMA_RX_PROCESS_MASK) >> DMA_RX_PROCESS_SHIFT;
-            let control = self.read(DMA_CONTROL);
-            let mac_control = self.read(MAC_CONTROL);
+            let tx_process = (status & DmaStatus::TX_PROCESS_MASK.bits()) >> DMA_TX_PROCESS_SHIFT;
+            let rx_process = (status & DmaStatus::RX_PROCESS_MASK.bits()) >> DMA_RX_PROCESS_SHIFT;
+            let control = self.read(Register::DmaControl);
+            let mac_control = self.read(Register::MacControl);
             let stopped = tx_process == 0
                 && rx_process == 0
-                && control & (DMA_TX_START | DMA_RX_START) == 0
-                && mac_control & (MAC_TX_ENABLE | MAC_RX_ENABLE) == 0;
-            if (stopped && status & super::protocol::CSR5_W1C_MASK == 0)
+                && control & (DmaControl::TX_START.bits() | DmaControl::RX_START.bits()) == 0
+                && mac_control & (MacControl::TX_ENABLE.bits() | MacControl::RX_ENABLE.bits()) == 0;
+            if (stopped && status & DmaStatus::W1C.bits() == 0)
                 || start.elapsed() >= Duration::from_millis(DWMAC1000_PROBE_TIMEOUT_MS)
             {
                 let (_, mac_status_after) = self.service_mac_interrupts();
@@ -945,16 +1142,16 @@ impl Dwmac1000Regs {
 
 const fn quiesce_uncleared(status: u32, stopped: bool) -> u32 {
     if stopped {
-        status & super::protocol::CSR5_W1C_MASK
+        status & DmaStatus::W1C.bits()
     } else {
         0
     }
 }
 
 fn mdio_command(clock_range: u32, phy: u8, register: u8, write: bool) -> u32 {
-    assert!(clock_range & !MII_CLOCK_RANGE_MASK == 0);
+    assert!(clock_range & !MdioAddress::CLOCK_RANGE_MASK.bits() == 0);
     assert!(phy <= 0x1f && register <= 0x1f);
-    MII_BUSY
+    MdioAddress::BUSY.bits()
         | if write { 1 << 1 } else { 0 }
         | (register as u32) << 6
         | (phy as u32) << 11
@@ -974,18 +1171,20 @@ const fn dma_mode_bits(mode: SelectedDmaMode) -> u32 {
     match mode {
         SelectedDmaMode::ThresholdBoth => 0,
         SelectedDmaMode::StoreForwardBoth => {
-            DMA_TX_STORE_FORWARD | DMA_RX_STORE_FORWARD | DMA_OPERATE_SECOND_FRAME
+            DmaControl::TX_STORE_FORWARD.bits()
+                | DmaControl::RX_STORE_FORWARD.bits()
+                | DmaControl::OPERATE_SECOND_FRAME.bits()
         },
-        SelectedDmaMode::ThresholdTxStoreForwardRx => DMA_RX_STORE_FORWARD,
+        SelectedDmaMode::ThresholdTxStoreForwardRx => DmaControl::RX_STORE_FORWARD.bits(),
     }
 }
 
 const fn dma_mode_mask() -> u32 {
-    DMA_TX_STORE_FORWARD
-        | DMA_RX_STORE_FORWARD
-        | DMA_OPERATE_SECOND_FRAME
-        | DMA_TX_THRESHOLD_MASK
-        | DMA_RX_THRESHOLD_MASK
+    DmaControl::TX_STORE_FORWARD.bits()
+        | DmaControl::RX_STORE_FORWARD.bits()
+        | DmaControl::OPERATE_SECOND_FRAME.bits()
+        | DmaControl::TX_THRESHOLD_MASK.bits()
+        | DmaControl::RX_THRESHOLD_MASK.bits()
 }
 
 const fn fifo_flow_control_expected(rx_fifo_bytes: Option<u32>) -> bool {
@@ -994,30 +1193,32 @@ const fn fifo_flow_control_expected(rx_fifo_bytes: Option<u32>) -> bool {
 
 const fn configure_fifo_flow_control(control: u32, rx_fifo_bytes: Option<u32>) -> u32 {
     let control = control
-        & !(DMA_FLOW_CONTROL_ENABLE | DMA_FLOW_ACTIVATION_MASK | DMA_FLOW_DEACTIVATION_MASK);
+        & !(DmaControl::FLOW_CONTROL_ENABLE.bits()
+            | DmaControl::FLOW_ACTIVATION_MASK.bits()
+            | DmaControl::FLOW_DEACTIVATION_MASK.bits());
     if fifo_flow_control_expected(rx_fifo_bytes) {
         // Linux DWMAC1000 selects full-minus-1K activation and
         // full-minus-2K deactivation for every exact FIFO >= 4 KiB.
-        control | DMA_FLOW_CONTROL_ENABLE | 0x0000_0800
+        control | DmaControl::FLOW_CONTROL_ENABLE.bits() | 0x0000_0800
     } else {
         control
     }
 }
 
 const fn fifo_flow_control_enabled(control: u32) -> bool {
-    control & DMA_FLOW_CONTROL_ENABLE != 0
+    control & DmaControl::FLOW_CONTROL_ENABLE.bits() != 0
 }
 
 const fn effective_mac_interrupt_mask(capabilities: Dwmac1000Capabilities) -> u32 {
-    let mut mask = MASK_LEGACY_MAC_INTERRUPTS_REQUESTED;
+    let mut mask = MacInterruptMask::LEGACY_REQUESTED.bits();
     // DWMAC1000 drops mask bits for absent optional interrupt sources on
-    // readback. Derive the effective value from DMA_HW_FEATURE rather than a
-    // board-observed constant.
+    // readback. Derive the effective value from Register::DmaHardwareFeature rather
+    // than a board-observed constant.
     if !capabilities.pcs {
-        mask &= !(MAC_INTERRUPT_PCS_LINK | MAC_INTERRUPT_PCS_AN);
+        mask &= !(MacInterrupt::PCS_LINK.bits() | MacInterrupt::PCS_AUTO_NEGOTIATION.bits());
     }
     if !(capabilities.remote_wake || capabilities.magic_wake) {
-        mask &= !MAC_INTERRUPT_PMT;
+        mask &= !MacInterrupt::POWER_MANAGEMENT.bits();
     }
     if !(capabilities.timestamp_v1 || capabilities.timestamp_v2) {
         mask &= !(1 << 9);
@@ -1025,25 +1226,50 @@ const fn effective_mac_interrupt_mask(capabilities: Dwmac1000Capabilities) -> u3
     mask
 }
 
+const fn descriptor_rearm_valid(
+    dma_control: u32,
+    actual_rx: u32,
+    actual_tx: u32,
+    expected_rx: u32,
+    expected_tx: u32,
+) -> bool {
+    dma_control & (DmaControl::RX_START.bits() | DmaControl::TX_START.bits()) == 0
+        && actual_rx == expected_rx
+        && actual_tx == expected_tx
+}
+
 const fn mac_flow_control(link: PhyLink) -> u32 {
-    MAC_FLOW_UNICAST_PAUSE
+    MacFlowControl::UNICAST_PAUSE.bits()
         | if link.full_duplex {
-            MAC_FLOW_PAUSE_TIME
+            MacFlowControl::PAUSE_TIME_MASK.bits()
         } else {
             0
         }
-        | if link.rx_pause { MAC_FLOW_RX_ENABLE } else { 0 }
-        | if link.tx_pause { MAC_FLOW_TX_ENABLE } else { 0 }
+        | if link.rx_pause {
+            MacFlowControl::RX_ENABLE.bits()
+        } else {
+            0
+        }
+        | if link.tx_pause {
+            MacFlowControl::TX_ENABLE.bits()
+        } else {
+            0
+        }
 }
 
 const fn mac_link_bits(speed_mbps: u32, full_duplex: bool) -> Result<u32, SysError> {
     let speed = match speed_mbps {
         1000 => 0,
-        100 => MAC_PORT_SELECT | MAC_FAST_ETHERNET_SPEED,
-        10 => MAC_PORT_SELECT,
+        100 => MacControl::PORT_SELECT.bits() | MacControl::FAST_ETHERNET_SPEED.bits(),
+        10 => MacControl::PORT_SELECT.bits(),
         _ => return Err(SysError::InvalidArgument),
     };
-    Ok(speed | if full_duplex { MAC_FULL_DUPLEX } else { 0 })
+    Ok(speed
+        | if full_duplex {
+            MacControl::FULL_DUPLEX.bits()
+        } else {
+            0
+        })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1087,35 +1313,47 @@ pub(super) struct RuntimeRegisterSnapshot {
     pub(super) status: u32,
     pub(super) dma_control: u32,
     pub(super) interrupt_enable: u32,
+    pub(super) dma_current_tx_buffer: u32,
+    pub(super) dma_current_rx_buffer: u32,
+    pub(super) dma_missed_frame_counter: u32,
     pub(super) mac_control: u32,
     pub(super) mac_interrupt_mask: u32,
+    pub(super) rgmii_status: u32,
     pub(super) mac_address_high: u32,
     pub(super) mac_address_low: u32,
     pub(super) frame_filter: u32,
+    pub(super) mmc_rx_frame_count_gb: u32,
+    pub(super) mmc_rx_unicast: u32,
+    pub(super) mmc_rx_crc_error: u32,
+    pub(super) mmc_rx_align_error: u32,
+    pub(super) mmc_rx_run_error: u32,
+    pub(super) mmc_rx_length_error: u32,
+    pub(super) mmc_rx_fifo_overflow: u32,
+    pub(super) mmc_rx_watchdog_error: u32,
 }
 
 const fn decode_capabilities(version: u32, hw_feature: u32) -> Dwmac1000Capabilities {
     Dwmac1000Capabilities {
         version,
         hw_feature,
-        enhanced_descriptors: hw_feature & ENHDESSEL != 0,
-        mii: hw_feature & HW_MII != 0,
-        gmii: hw_feature & HW_GMII != 0,
-        half_duplex: hw_feature & HW_HALF_DUPLEX != 0,
-        pcs: hw_feature & HW_PCS != 0,
-        mdio: hw_feature & HW_MDIO != 0,
-        remote_wake: hw_feature & HW_REMOTE_WAKE != 0,
-        magic_wake: hw_feature & HW_MAGIC_WAKE != 0,
-        rmon: hw_feature & HW_MMC != 0,
-        timestamp_v1: hw_feature & HW_TIMESTAMP_V1 != 0,
-        timestamp_v2: hw_feature & HW_TIMESTAMP_V2 != 0,
-        eee: hw_feature & HW_EEE != 0,
-        tx_checksum: hw_feature & HW_TX_CHECKSUM != 0,
-        rx_checksum_type1: hw_feature & HW_RX_CHECKSUM_TYPE1 != 0,
-        rx_checksum_type2: hw_feature & HW_RX_CHECKSUM_TYPE2 != 0,
-        rx_fifo_over_2048: hw_feature & HW_RX_FIFO_OVER_2048 != 0,
-        rx_channels: (((hw_feature & HW_RX_CHANNEL_MASK) >> 20) + 1) as u8,
-        tx_channels: (((hw_feature & HW_TX_CHANNEL_MASK) >> 22) + 1) as u8,
+        enhanced_descriptors: hw_feature & HardwareFeature::ENHANCED_DESCRIPTORS.bits() != 0,
+        mii: hw_feature & HardwareFeature::MII.bits() != 0,
+        gmii: hw_feature & HardwareFeature::GMII.bits() != 0,
+        half_duplex: hw_feature & HardwareFeature::HALF_DUPLEX.bits() != 0,
+        pcs: hw_feature & HardwareFeature::PCS.bits() != 0,
+        mdio: hw_feature & HardwareFeature::MDIO.bits() != 0,
+        remote_wake: hw_feature & HardwareFeature::REMOTE_WAKE.bits() != 0,
+        magic_wake: hw_feature & HardwareFeature::MAGIC_WAKE.bits() != 0,
+        rmon: hw_feature & HardwareFeature::MMC.bits() != 0,
+        timestamp_v1: hw_feature & HardwareFeature::TIMESTAMP_V1.bits() != 0,
+        timestamp_v2: hw_feature & HardwareFeature::TIMESTAMP_V2.bits() != 0,
+        eee: hw_feature & HardwareFeature::EEE.bits() != 0,
+        tx_checksum: hw_feature & HardwareFeature::TX_CHECKSUM.bits() != 0,
+        rx_checksum_type1: hw_feature & HardwareFeature::RX_CHECKSUM_TYPE1.bits() != 0,
+        rx_checksum_type2: hw_feature & HardwareFeature::RX_CHECKSUM_TYPE2.bits() != 0,
+        rx_fifo_over_2048: hw_feature & HardwareFeature::RX_FIFO_OVER_2048.bits() != 0,
+        rx_channels: (((hw_feature & HardwareFeature::RX_CHANNEL_MASK.bits()) >> 20) + 1) as u8,
+        tx_channels: (((hw_feature & HardwareFeature::TX_CHANNEL_MASK.bits()) >> 22) + 1) as u8,
     }
 }
 
@@ -1124,10 +1362,36 @@ mod kunits {
     use super::*;
 
     #[kunit]
+    fn production_descriptor_rearm_requires_stopped_dma_and_exact_bases() {
+        let rx = 0x0e80_0000;
+        let tx = 0x0e80_0800;
+        assert!(descriptor_rearm_valid(0, rx, tx, rx, tx));
+        assert!(!descriptor_rearm_valid(
+            DmaControl::RX_START.bits(),
+            rx,
+            tx,
+            rx,
+            tx
+        ));
+        assert!(!descriptor_rearm_valid(
+            DmaControl::TX_START.bits(),
+            rx,
+            tx,
+            rx,
+            tx
+        ));
+        assert!(!descriptor_rearm_valid(0, rx + 32, tx, rx, tx));
+        assert!(!descriptor_rearm_valid(0, rx, tx + 32, rx, tx));
+    }
+
+    #[kunit]
     fn gate2_admission_requires_linux_enhanced_descriptor_capability() {
-        let base = HW_MII | HW_MDIO;
+        let base = HardwareFeature::MII.bits() | HardwareFeature::MDIO.bits();
         assert!(!decode_capabilities(0x37, base).supported_gate2());
-        assert!(decode_capabilities(0x37, base | ENHDESSEL).supported_gate2());
+        assert!(
+            decode_capabilities(0x37, base | HardwareFeature::ENHANCED_DESCRIPTORS.bits())
+                .supported_gate2()
+        );
     }
 
     #[kunit]
@@ -1162,19 +1426,19 @@ mod kunits {
         )));
         let enabled = configure_fifo_flow_control(0, Some(4096));
         assert!(fifo_flow_control_enabled(enabled));
-        assert_eq!(enabled & DMA_FLOW_DEACTIVATION_MASK, 0x800);
+        assert_eq!(enabled & DmaControl::FLOW_DEACTIVATION_MASK.bits(), 0x800);
     }
 
     #[kunit]
     fn capability_decode_preserves_linux_channel_and_optional_feature_facts() {
         let capabilities = decode_capabilities(
             EXPECTED_CORE_VERSION as u32,
-            HW_MII
-                | HW_GMII
-                | HW_MDIO
-                | HW_MMC
-                | HW_TX_CHECKSUM
-                | ENHDESSEL
+            HardwareFeature::MII.bits()
+                | HardwareFeature::GMII.bits()
+                | HardwareFeature::MDIO.bits()
+                | HardwareFeature::MMC.bits()
+                | HardwareFeature::TX_CHECKSUM.bits()
+                | HardwareFeature::ENHANCED_DESCRIPTORS.bits()
                 | (2 << 20)
                 | (1 << 22),
         );
@@ -1187,7 +1451,10 @@ mod kunits {
 
     #[kunit]
     fn mac_interrupt_mask_readback_tracks_optional_capabilities() {
-        let base = HW_MII | HW_MDIO | HW_REMOTE_WAKE | HW_TIMESTAMP_V2;
+        let base = HardwareFeature::MII.bits()
+            | HardwareFeature::MDIO.bits()
+            | HardwareFeature::REMOTE_WAKE.bits()
+            | HardwareFeature::TIMESTAMP_V2.bits();
         assert_eq!(
             effective_mac_interrupt_mask(decode_capabilities(EXPECTED_CORE_VERSION as u32, base)),
             0x209
@@ -1195,34 +1462,34 @@ mod kunits {
         assert_eq!(
             effective_mac_interrupt_mask(decode_capabilities(
                 EXPECTED_CORE_VERSION as u32,
-                base | HW_PCS
+                base | HardwareFeature::PCS.bits()
             )),
-            MASK_LEGACY_MAC_INTERRUPTS_REQUESTED
+            MacInterruptMask::LEGACY_REQUESTED.bits()
         );
         assert_eq!(
             effective_mac_interrupt_mask(decode_capabilities(
                 EXPECTED_CORE_VERSION as u32,
-                HW_MII | HW_MDIO
+                HardwareFeature::MII.bits() | HardwareFeature::MDIO.bits()
             )),
-            MAC_INTERRUPT_RGMII
+            MacInterrupt::RGMII.bits()
         );
     }
 
     #[kunit]
     fn mdio_read_command_keeps_divider_phy_and_register_fields_separate() {
         let command = mdio_command(2 << MII_CLOCK_RANGE_SHIFT, 3, 2, false);
-        assert_eq!(command & 1, MII_BUSY);
-        assert_eq!(command & MII_CLOCK_RANGE_MASK, 2 << MII_CLOCK_RANGE_SHIFT);
+        assert_eq!(command & 1, MdioAddress::BUSY.bits());
+        assert_eq!(
+            command & MdioAddress::CLOCK_RANGE_MASK.bits(),
+            2 << MII_CLOCK_RANGE_SHIFT
+        );
         assert_eq!((command >> 6) & 0x1f, 2);
         assert_eq!((command >> 11) & 0x1f, 3);
     }
 
     #[kunit]
     fn quiesce_timeout_without_stop_does_not_claim_w1c_failure() {
-        assert_eq!(
-            quiesce_uncleared(super::super::protocol::CSR5_W1C_MASK, false),
-            0
-        );
+        assert_eq!(quiesce_uncleared(DmaStatus::W1C.bits(), false), 0);
     }
 
     #[kunit]
@@ -1239,17 +1506,22 @@ mod kunits {
     #[kunit]
     fn atds_readback_is_derived_from_dma_bus_mode() {
         assert!(!Dwmac1000Regs::atds(0));
-        assert!(Dwmac1000Regs::atds(ALTERNATE_DESCRIPTOR_SIZE));
+        assert!(Dwmac1000Regs::atds(
+            DmaBusMode::ALTERNATE_DESCRIPTOR_SIZE.bits()
+        ));
     }
 
     #[kunit]
     fn legacy_mac_link_bits_cover_only_clause_22_speeds() {
-        assert_eq!(mac_link_bits(1000, true), Ok(MAC_FULL_DUPLEX));
+        assert_eq!(
+            mac_link_bits(1000, true),
+            Ok(MacControl::FULL_DUPLEX.bits())
+        );
         assert_eq!(
             mac_link_bits(100, false),
-            Ok(MAC_PORT_SELECT | MAC_FAST_ETHERNET_SPEED)
+            Ok(MacControl::PORT_SELECT.bits() | MacControl::FAST_ETHERNET_SPEED.bits())
         );
-        assert_eq!(mac_link_bits(10, false), Ok(MAC_PORT_SELECT));
+        assert_eq!(mac_link_bits(10, false), Ok(MacControl::PORT_SELECT.bits()));
         assert_eq!(mac_link_bits(2500, true), Err(SysError::InvalidArgument));
     }
 }

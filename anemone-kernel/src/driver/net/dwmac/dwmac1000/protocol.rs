@@ -20,6 +20,31 @@ const RX_BUFFER_ALIGNMENT: usize = align_of::<u32>();
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) struct DmaStatus: u32 {
+        const TX = 1;
+        const TX_STOPPED = 1 << 1;
+        const TX_UNAVAILABLE = 1 << 2;
+        const TX_JABBER = 1 << 3;
+        const RX_OVERFLOW = 1 << 4;
+        const TX_UNDERFLOW = 1 << 5;
+        const RX = 1 << 6;
+        const RX_UNAVAILABLE = 1 << 7;
+        const RX_STOPPED = 1 << 8;
+        const RX_WATCHDOG = 1 << 9;
+        const TX_EARLY = 1 << 10;
+        const FATAL_BUS_ERROR = 1 << 13;
+        const EARLY_RX = 1 << 14;
+        const ABNORMAL = 1 << 15;
+        const NORMAL = 1 << 16;
+        const RX_PROCESS_MASK = 0x000e_0000;
+        const TX_PROCESS_MASK = 0x0070_0000;
+        /// Linux/PMON legacy CSR5 cause window. Process-state and reserved
+        /// bits above bit 16 are never written back by the device handler.
+        const W1C = 0x1ffff;
+        const _ = !0;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct TxControl: u32 {
         const ERROR_SUMMARY = 1 << 15;
         const END_RING = 1 << 21;
@@ -54,10 +79,6 @@ bitflags! {
         const _ = !0;
     }
 }
-
-/// Linux/PMON legacy CSR5 cause window. Process-state and reserved bits above
-/// bit 16 are never written back by the device handler.
-pub(super) const CSR5_W1C_MASK: u32 = 0x1ffff;
 
 /// Linux `struct dma_extended_desc`: a four-word enhanced descriptor followed
 /// by extended status and timestamp words. CSR0.ATDS makes the DMA advance by
@@ -166,6 +187,23 @@ impl EnhancedDescriptor {
         })
     }
 
+    /// CPU-owned RX slot used while the ring is being filled.  Cosmos keeps
+    /// the final descriptor CPU-owned until the prefill threshold is reached;
+    /// preserve its end-of-ring marker without publishing a buffer to DMA.
+    pub(super) const fn idle_rx(index: usize, count: usize) -> Option<Self> {
+        if !descriptor_count_fits(count) || index >= count {
+            return None;
+        }
+        Some(Self {
+            des1: if index + 1 == count {
+                RxControl::END_RING.bits()
+            } else {
+                0
+            },
+            ..Self::zeroed()
+        })
+    }
+
     const fn zeroed() -> Self {
         Self {
             des0: 0,
@@ -181,7 +219,7 @@ impl EnhancedDescriptor {
 }
 
 pub(super) const fn device_cause(status: u32, admitted: u32) -> u32 {
-    status & admitted & CSR5_W1C_MASK
+    status & admitted & DmaStatus::W1C.bits()
 }
 
 #[cfg(feature = "kunit")]

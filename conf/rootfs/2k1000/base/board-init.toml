@@ -9,10 +9,10 @@
 "fs" = "ext4"
 
 [[run]]
-"path" = "/home/install_sys.sh"
-"args" = ["install_sys.sh"]
+"path" = "/home/init_sys.sh"
+"args" = ["init_sys.sh"]
 
 [init]
 "root" = "/linux"
-"path" = "/usr/sbin/init"
+"path" = "/sbin/init"
 "args" = ["init"]
