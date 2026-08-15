@@ -734,6 +734,9 @@ fn retirement_background_read_body() -> Result<(), Errno> {
     let available = require_smp8()?;
     let leader_cpu = fixed_owner_cpu(&available)?;
     let closer_cpu = (leader_cpu + 1) % 8;
+    println!(
+        "PTYTEST:SMP8:retire-background-read:allocate_cpu={leader_cpu}:final_close_cpu={closer_cpu}:rounds={RETIREMENT_RACE_ROUNDS}"
+    );
     for _ in 0..RETIREMENT_RACE_ROUNDS {
         retirement_background_read_round(&available, leader_cpu, closer_cpu)?;
     }

@@ -53,6 +53,7 @@
 		- [Global rendezvous](./contracts/membarrier/global-rendezvous.md)
 	- [MM 当前契约](./contracts/mm/index.md)
 		- [User Address-Space TLB Completion](./contracts/mm/user-fault-local-tlb.md)
+		- [Kernel Heap](./contracts/mm/kernel-heap.md)
 		- [OOM policy](./contracts/mm/oom-policy.md)
 	- [Scheduler 当前契约](./contracts/scheduler/index.md)
 		- [Asynchronous wake delivery](./contracts/scheduler/wake-delivery.md)

@@ -50,6 +50,10 @@ impl TidAllocPolicy {
 #[derive(Deserialize, Debug, Serialize, PartialEq, Eq)]
 pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
+    pub slab_span_pages: Option<usize>,
+    pub slab_max_object_bytes: Option<usize>,
+    pub slab_local_capacity: Option<usize>,
+    pub slab_transfer_batch: Option<usize>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub print_log_level: Option<u8>,
@@ -178,6 +182,10 @@ impl Parameters {
         }
 
         materialize!(bootstrap_heap_shift_kb);
+        materialize!(slab_span_pages);
+        materialize!(slab_max_object_bytes);
+        materialize!(slab_local_capacity);
+        materialize!(slab_transfer_batch);
         materialize!(log_buffer_shift_kb);
         materialize!(log_record_shift_bytes);
         materialize!(print_log_level);
@@ -308,6 +316,14 @@ impl Parameters {
 
 /// Size of bootstrap heap as a power of 2 in KB
 pub const BOOTSTRAP_HEAP_SHIFT_KB: u64 = {};
+/// Pages permanently assigned to one kernel slab size class per span.
+pub const SLAB_SPAN_PAGES: usize = {};
+/// Largest size/alignment served by the kernel slab path.
+pub const SLAB_MAX_OBJECT_BYTES: usize = {};
+/// Maximum free objects retained per CPU and slab class.
+pub const SLAB_LOCAL_CAPACITY: usize = {};
+/// Maximum free objects moved in one local/central handoff.
+pub const SLAB_TRANSFER_BATCH: usize = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
@@ -554,6 +570,10 @@ pub const NET_TCP_EPHEMERAL_PORT_FIRST: u16 = {};
 pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
+            resolved!(slab_span_pages),
+            resolved!(slab_max_object_bytes),
+            resolved!(slab_local_capacity),
+            resolved!(slab_transfer_batch),
             resolved!(log_buffer_shift_kb),
             resolved!(log_record_shift_bytes),
             resolved!(print_log_level),

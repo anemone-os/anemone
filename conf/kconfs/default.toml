@@ -17,6 +17,10 @@ perf_observe = true # Enable native kernel performance observation; runtime reco
 # Parameters for kernel and loader
 [parameters]
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
+slab_span_pages = 16 # Pages permanently assigned to one kernel slab size class per span.
+slab_max_object_bytes = 2048 # Largest size/alignment served by the kernel slab path.
+slab_local_capacity = 32 # Maximum free objects retained per CPU and slab class.
+slab_transfer_batch = 16 # Maximum free objects moved in one local/central handoff.
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 print_log_level = 5 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level

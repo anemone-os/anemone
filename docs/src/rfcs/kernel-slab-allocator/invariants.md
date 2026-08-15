@@ -1,13 +1,12 @@
 # Kernel Slab Allocator 目标与不变量
 
-**状态：** Accepted Target
+**状态：** R0 Closed / Effective via `KERNEL-SLAB-CUTOVER`
 **最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260815-kernel-slab-allocator](./index.md)
 **适用修订：** R0
 
-本文只定义父RFC的target与contract proof obligations。当前effective规则以
-[MM current contract](../../contracts/mm/index.md)及live source为准；`MM-KMALLOC-001/002`在
-`KERNEL-SLAB-CUTOVER`前均未生效。
+本文保存父RFC R0的历史target与contract proof obligations。`KERNEL-SLAB-CUTOVER`后，当前effective规则以
+[Kernel Heap current contract](../../contracts/mm/kernel-heap.md)及live source为准。
 
 ## 规则分类
 
@@ -237,8 +236,8 @@ xtask只传输resolved values；不得复制上述predicate、修正非法值或
   expected string作为guest语义oracle；不从另一architecture、SMP=1、仅配置多CPU但worker未跨CPU执行或external
   model外推。
 
-性能A/B由维护者独立运行。它可以触发保持target、缩小eligible class、Target Renegotiation或Not Cut Over，但不得替代
-上述correctness proof，也不能把混合其它MM优化的结果全部归因于slab。
+性能A/B未进入本次closure。cutover前它可以触发保持target、缩小eligible class、Target Renegotiation或Not Cut Over，
+但不得替代上述correctness proof，也不能把混合其它MM优化的结果全部归因于slab；RFC Closed后的性能工作另立边界。
 
 ## 禁止退化项
 

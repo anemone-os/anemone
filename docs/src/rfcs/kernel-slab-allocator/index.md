@@ -1,12 +1,12 @@
 # RFC-20260815-kernel-slab-allocator
 
-**状态：** Accepted
+**状态：** Closed
 **修订：** R0
 **负责人：** doruche
 **最后更新：** 2026-08-15
 **领域：** mm / kmalloc / kernel heap / SMP
-**影响契约：** `MM-KMALLOC-001`、`MM-KMALLOC-002`（均为 pending Introduce）
-**执行记录：** None
+**影响契约：** `MM-KMALLOC-001`、`MM-KMALLOC-002`（均由`KERNEL-SLAB-CUTOVER` Introduce Active）
+**执行记录：** `KERNEL-SLAB-CUTOVER`；Git / RFC closure；transaction None
 
 ## 摘要
 
@@ -35,9 +35,9 @@ refill / drain 变成长共享临界区。本 RFC 只吸收其中可由 Anemone 
 backing 一次交接完整 span，slot carve 在尚未发布的私有 span 上完成，local / central 只交换已经形成的
 同 class free objects。外部报告不定义 Anemone target，也不证明本 RFC 的性能收益。
 
-当前 [MM current contract](../../contracts/mm/index.md) 只覆盖 user TLB completion、frame pressure sampling与
-OOM policy，没有 kernel heap operational contract。本 RFC 计划在唯一 cutover 时引入最小 `MM-KMALLOC-*`
-规则；Draft / Accepted target 在 cutover 前不覆盖 live implementation 或 current contract。
+cutover前的[MM current contract](../../contracts/mm/index.md)只覆盖user TLB completion、frame pressure sampling与
+OOM policy，没有kernel heap operational contract。本RFC在唯一cutover引入最小`MM-KMALLOC-*`规则；Draft / Accepted
+target在cutover前没有覆盖live implementation或current contract。
 
 ## 目标
 
@@ -141,8 +141,8 @@ layout对齐、非重叠live allocation、匹配deallocation与null-on-allocatio
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| `MM-KMALLOC-001` | Introduce | None（尚未生效；live baseline为单一global Talc lock） | `mm::kmalloc`唯一拥有layout dispatch、boot/runtime同域、Talc backing handoff与失败/cleanup；small slab与large fallback保持可判定 | `KERNEL-SLAB-CUTOVER` |
-| `MM-KMALLOC-002` | Introduce | None（尚未生效） | eligible small-object hit在current CPU local noirq path完成；任意CPU free进入当前CPU cache，bounded central exchange，不提供主动均衡或span reclaim | `KERNEL-SLAB-CUTOVER` |
+| `MM-KMALLOC-001` | Introduce | None（cutover前live baseline为单一global Talc lock） | `mm::kmalloc`唯一拥有layout dispatch、boot/runtime同域、Talc backing handoff与失败/cleanup；small slab与large fallback保持可判定 | `KERNEL-SLAB-CUTOVER` |
+| `MM-KMALLOC-002` | Introduce | None（cutover前尚无effective ID） | eligible small-object hit在current CPU local noirq path完成；任意CPU free进入当前CPU cache，bounded central exchange，不提供主动均衡或span reclaim | `KERNEL-SLAB-CUTOVER` |
 
 ### Dependencies
 
@@ -175,8 +175,8 @@ path；最后收集双架构source/KUnit/build/runtime证据并进行final revie
 实现可合并或重排内部工作。若实际工作要求probe、不安全中间态、正式stage或多个cutover，则命中上述停止条件并回到
 RFC review，而不是在实现中自行扩展路线。
 
-R0只接受本文target、non-goals、owner/handoff、failure/cleanup、Contract Impact与validation boundary；状态本身不授权
-实现、当前契约更新或`KERNEL-SLAB-CUTOVER`。进入实现需要维护者另行明确授权。
+R0 acceptance只固定本文target、non-goals、owner/handoff、failure/cleanup、Contract Impact与validation boundary；
+维护者随后另行授权一个连续implementation unit，并在全部proof与review闭合后执行唯一`KERNEL-SLAB-CUTOVER`。
 
 ## Acceptance 与 Validation
 
@@ -229,13 +229,38 @@ R0只接受本文target、non-goals、owner/handoff、failure/cleanup、Contract
 Apollyon / Keter、Architecture Friction Scan未发现第二份free truth、owner穿透、remote per-CPU mutation、隐含锁序
 或无退出条件bridge后，才能原子Introduce `MM-KMALLOC-001/002`并关闭RFC。
 
+## 当前执行事实
+
+- `mm::kmalloc`按完整`Layout`确定small slab或Talc fallback，allocation/deallocation共用同一predicate。8--2048-byte
+  power-of-two class使用16-page Talc-backed span、per-class central noirq lock与每CPU容量32 / batch 16的local list；
+  published span永久留在一个class。local、central、Talc guard不嵌套，span在private carve完成后以O(1) chain splice发布。
+- `percpu::storage_ready()`只发布全部per-CPU storage已经复制/登记的一次性boot handoff。RV64 AP在任何allocator caller前
+  执行`ap_init`；LA64在`ap_init`前只有boot barrier、allocation-free debug输出与trap安装，task/allocation路径均在其后。
+- tracked `conf/kconfs/slab-acceptance.toml`的class-size总和为`4,088` bytes；每CPU
+  stranded-free上界为`130,816` bytes，8 CPU为`1,046,528` bytes。bootstrap heap为`1,048,576` bytes，首个
+  `65,536`-byte span后余量为`983,040` bytes，consumer编译期要求的最低alignment/Talc metadata headroom为
+  `8,192` bytes。代表性非法配置在xtask成功解析/生成后由`mm::kmalloc::slab` static assertion以E0080拒绝。
+- final review补齐成功span publication KUnit并标注`FreeList::len`为links的exact、不得stale的O(1) cardinality cache。
+  精确post-review源码在RV64运行`646/646`、LA64运行`649/649` KUnit，七项slab case全部通过；双架构release build通过。
+- 完整runtime candidate在RV64运行`645/645` KUnit、PTY `17/17`，记录
+  `allocate_cpu=1:final_close_cpu=2:rounds=128`并正常PowerOff；LA64运行`648/648` KUnit、PTY `17/17`，记录
+  `allocate_cpu=4:final_close_cpu=5:rounds=128`，完成filesystem/network/device shutdown后到达
+  `no power off handler succeeded, halting the system`并人工终止QEMU。post-review改动仅为上述KUnit与字段注释；按维护者
+  指示只重跑双架构KUnit，不重复完整PTY smoke。
+- 唯一独立final review为`0 Apollyon / 0 Keter`，提出的两个Euclid均在cutover前闭合。Architecture Friction Scan未发现
+  第二份free truth、owner穿透、remote per-CPU mutation、private representation/public API扩张、隐含反向锁序、
+  production test hook或无退出条件bridge。
+- `just fmt all --check`、`just test xtask`（`93/93`）、`git diff --check`通过。full LTP、完整preliminary/final
+  harness、BuildStorm数值门槛、physical hardware、CPU hotplug、NUMA、极端OOM、长时碎片、reclaim/跨class再利用、
+  完整interleaving proof与性能A/B均Not Run。
+
 ## 风险与反馈
 
 - slab按class永久保留span会降低跨尺寸复用。若实现或验收证据表明contest workload也会因class-stranded memory出现
   allocator failure、不可接受增长或需要回收才能完成smoke，必须带实际峰值与失败证据进入Target Renegotiation；不得
   未经review悄然增加owner CPU、bitmap、remote-free或shrinker。
-- tiny layout的class rounding、IRQ guard和local bookkeeping可能抵消单核收益。该结果不改变correctness invariant，
-  但维护者性能A/B可以决定保持target、缩窄eligible class或Not Cut Over；agent不能自行用未测猜测修改target。
+- tiny layout的class rounding、IRQ guard和local bookkeeping可能抵消单核收益。cutover前该结果可触发保持target、缩窄
+  eligible class或Not Cut Over；本次性能A/B未运行。RFC Closed后的性能工作必须建立新的Implementation Boundary。
 - bootstrap heap必须自然容纳首个合法span及其alignment/metadata。若配置约束无法在kmalloc owner内编译期闭合，或必须
   改变boot/frame owner才能取得首个span，应停止而不是引入另一套early allocator或不可释放compat bridge。
 - 若central batch仍在central guard内执行与batch大小成比例的复杂allocator操作、长扫描或日志，说明实现退化回已拒绝的
@@ -244,9 +269,12 @@ Apollyon / Keter、Architecture Friction Scan未发现第二份free truth、owne
 ## 文档与证据
 
 - [目标与不变量](./invariants.md)
-- 当前baseline：[MM current contract](../../contracts/mm/index.md)、[KUnit execution and proof](../../contracts/kunit/execution-and-proof.md)、
+- 当前规则：[Kernel Heap current contract](../../contracts/mm/kernel-heap.md)；依赖
+  [KUnit execution and proof](../../contracts/kunit/execution-and-proof.md)、
   [IRQ-off heap allocation open issue](../../register/open-issues.md#ane-20260622-irq-off-heap-allocation)。
-- commit / PR / transaction：None。
+- runtime evidence：`build/slab-acceptance-{rv64,la64}-final.log`；精确post-review KUnit evidence：
+  `build/slab-kunit-{rv64,la64}-postreview.log`。
+- commit：当前`slab: kernel slab allocator` closure提交；PR / transaction：None。
 - 外部源码证据：None；外部比较材料只用于提出候选方向，不定义Anemone target或validation claim。
 
 ## 修订记录
@@ -254,9 +282,16 @@ Apollyon / Keter、Architecture Friction Scan未发现第二份free truth、owne
 | 修订 | 日期 | 语义变化 | Review / Evidence |
 | --- | --- | --- | --- |
 | R0 | 2026-08-15 | 接受首版kernel slab target、local/central guard边界、cross-CPU ownership/free proof、retention事实验收与pending `MM-KMALLOC-001/002` delta。 | 维护者接受；RFC review；`git diff --check`；`mdbook build docs` |
+| R0 closure | 2026-08-15 | target与owner不变；implementation、双架构acceptance、独立review与Architecture Friction Scan闭合，执行唯一`KERNEL-SLAB-CUTOVER`。 | RV64 `646/646`、LA64 `649/649` final KUnit；双架构PTY `17/17` cross-CPU smoke；独立review无blocker |
 
 ## Closure
 
-R0 target已接受，但尚未授权或进入实现、runtime validation与contract cutover。`MM-KMALLOC-001/002`仍为pending
-RFC target，当前kernel heap与[MM current contract](../../contracts/mm/index.md)保持不变；`KERNEL-SLAB-CUTOVER`
-Not Run，RFC未关闭。
+Closed R0。`KERNEL-SLAB-CUTOVER`已原子生效并Introduce Active `MM-KMALLOC-001/002`：`mm::kmalloc`现在唯一拥有
+small/large layout dispatch、boot/runtime slab domain、Talc span backing handoff与failure cleanup；eligible small-object
+local hit在current-CPU noirq transaction内完成，任意CPU free只进入执行释放的current-CPU cache，并通过bounded batch
+与per-class central domain被动交换。
+
+实现未改变syscall ABI、frame accounting、OOM policy、scheduler placement或通用per-CPU public surface，没有增加
+register issue、accepted limitation、transaction或后续gate。LA64缺少power-off driver是既有platform事实；其完整guest
+shutdown与随后人工终止不阻碍本RFC。Not Run边界保留在“当前执行事实”。本页从此冻结，后续工作必须从live source、
+current contract与register建立新的Implementation Boundary。

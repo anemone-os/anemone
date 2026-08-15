@@ -7,19 +7,20 @@ use core::{
 use talc::{OomHandler, Span, Talc};
 
 use crate::{
+    mm::kmalloc::slab::{
+        BOOTSTRAP_HEAP_BYTES, PreparedSpan, SlabAllocator, SlabClass, slab_span_layout,
+    },
     prelude::*,
     utils::align::{AlignedBytes, PhantomAligned4096},
 };
 
 #[unsafe(link_section = ".bss.bootstrap_heap")]
-static mut BOOTSTRAP_HEAP: AlignedBytes<
-    PhantomAligned4096,
-    [u8; (1 << BOOTSTRAP_HEAP_SHIFT_KB) as usize * 1024],
-> = AlignedBytes::ZEROED;
+static mut BOOTSTRAP_HEAP: AlignedBytes<PhantomAligned4096, [u8; BOOTSTRAP_HEAP_BYTES]> =
+    AlignedBytes::ZEROED;
 
 #[derive(Debug)]
 pub struct KernelAllocator {
-    // TODO: switch to IrqSaveSpinLock to prevent deadlocks in OOM handler.
+    slab: SlabAllocator,
     talc: NoIrqSpinLock<Talc<HeapOomHandler>>,
 }
 
@@ -98,38 +99,61 @@ impl OomHandler for HeapOomHandler {
 impl KernelAllocator {
     pub const fn new() -> Self {
         Self {
+            slab: SlabAllocator::new(),
             talc: NoIrqSpinLock::new(Talc::new(HeapOomHandler {
                 bootstrap_heap_claimed: AtomicBool::new(false),
             })),
         }
     }
-}
 
-unsafe impl GlobalAlloc for KernelAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // A null result can enter Rust's infallible allocation failure path,
-        // whose panic diagnostics may allocate fallibly for StopExecution.
-        // Release the Talc guard first so that path cannot recursively spin on
-        // the allocator lock held by the failed allocation itself.
+    fn talc_alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
+        // Keep the failure handoff outside the Talc guard: Rust's infallible
+        // allocation failure diagnostics may themselves allocate.
         let result = {
             let mut talc = self.talc.lock();
             unsafe { talc.malloc(layout) }
         };
-        match result {
-            Ok(ptr) => {
-                let res = ptr.as_ptr();
-                res
-            },
-            // No need to handle OOM here since the OOM handler will be invoked by `malloc` when
-            // allocation fails. We can simply return null pointer to indicate allocation failure.
-            Err(()) => core::ptr::null_mut(),
+        result.ok()
+    }
+
+    unsafe fn talc_dealloc(&self, ptr: NonNull<u8>, layout: Layout) {
+        let mut talc = self.talc.lock();
+        unsafe { talc.free(ptr, layout) };
+    }
+
+    fn grow_slab(&self, class: SlabClass) -> Option<NonNull<u8>> {
+        let span_layout = slab_span_layout();
+        let span = self.talc_alloc(span_layout)?;
+        let Some(prepared) = PreparedSpan::new(span, class) else {
+            // Preparation is private and has not published a slot. Returning
+            // this allocation to Talc is therefore the only cleanup owner.
+            unsafe { self.talc_dealloc(span, span_layout) };
+            return None;
+        };
+        Some(self.slab.publish(prepared))
+    }
+}
+
+unsafe impl GlobalAlloc for KernelAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if let Some(class) = SlabClass::for_layout(layout) {
+            return self
+                .slab
+                .allocate(class)
+                .or_else(|| self.grow_slab(class))
+                .map_or(core::ptr::null_mut(), NonNull::as_ptr);
         }
+
+        self.talc_alloc(layout)
+            .map_or(core::ptr::null_mut(), NonNull::as_ptr)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let mut talc = self.talc.lock();
-        unsafe {
-            talc.free(NonNull::new_unchecked(ptr), layout);
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        if let Some(class) = SlabClass::for_layout(layout) {
+            unsafe { self.slab.deallocate(class, ptr) };
+        } else {
+            unsafe { self.talc_dealloc(ptr, layout) };
         }
     }
 }
