@@ -6,9 +6,9 @@
 
 ## Active
 
-- [Nemophila](./2026-08-14-nemophila.md)：Accepted R4 Stage 1--4均已关闭；LA64在
-  无ordinary power-off handler的current-contract边界下完成guest evidence与orderly subsystem shutdown后进入末尾halt，再由
-  host终止QEMU。Stage 5--6未获解析或执行授权，current contract与cutover仍None / Not Effective。
+- [Nemophila](./2026-08-14-nemophila.md)：Accepted R5 Stage 1--5均已关闭；Stage 6已完成docs-only解析，覆盖SystemTarget
+  ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection与最终双架构cutover，现为
+  Resolved / Ready / Not Started且execution未授权。current contract与cutover仍None / Not Effective。
 - [PTY / devpts](./2026-08-11-pty-devpts.md)：Stage 1--3已关闭，semantic endpoint、runtime relation、owner-private pair与
   hidden devpts/allocation/open/cleanup production route已闭合；Stage 4 public activation/acceptance未授权，全部target
   contract仍Not Effective。

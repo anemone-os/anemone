@@ -3,39 +3,43 @@
 **状态：** Active
 **最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
-**当前修订：** R4
+**当前修订：** R5
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
 Stage 3 / Resolved / Closed；Stage 4 / Resolved / Closed；Stage 4 Feedback Interlude / Resolved / Closed；
-Stage 5 / Resolved / Closed；Stage 6 / Outline Only / Not Started
-**Execution Authorization：** Checkpoint 5A授权已消费；Stage 6解析/执行均未授权
+Stage 5 / Resolved / Closed；Stage 6 / Resolved / Ready / Not Started
+**Resolution Authorization：** Stage 6 docs-only解析授权已消费
+**Execution Authorization：** None；Stage 6 implementation未授权
 **Contract Cutover：** None
 
-本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
+本页组织父 RFC Accepted R5 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
 两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
 两个共享完整lifecycle边界的execution checkpoint，现均已关闭；其Feedback Interlude随后在Stage 5前完成owner surface、
-module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5单一Checkpoint 5A现已关闭，Stage 6仍只有
-outline。当前没有Nemophila current contract或cutover。
+module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5单一Checkpoint 5A现已关闭；Stage 6已解析为一个原子formal
+Stage，Ready / Not Started且execution未授权。当前没有Nemophila current contract或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
 [transaction](../../devlog/transactions/2026-08-14-nemophila.md)。
 Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，
 execution evidence同样见transaction；feedback interlude不重开Stage 2，而是在后续Stage消费其产物前关闭已发现的owner
 摩擦与R3 target revision。Stage 3与Stage 4的可执行边界、各自两个checkpoint、validation与stop条件已在下文闭合；Stage 5
-的单一Checkpoint 5A、RV64-only validation与stop条件也已闭合。Stage 6仍只保留Purpose、
-Prerequisites和Protected Boundary，关闭Stage 5不自动授权Stage 6解析或执行。
+的单一Checkpoint 5A、RV64-only validation与stop条件也已闭合。Stage 6的完整Implementation Boundary、Deliverables、
+Validation、Cutover与Exit / Stop已按R5闭合；本次resolution不授权implementation。
 
 ## 全局 Implementation Boundary
 
 - **Target / non-goals：** 交付父 RFC 定义的 in-tree 第一方integer-only Core Wasm interpreter crate、WIT/SDK/artifact toolchain、
-  kernel runtime、`weave`、值型日志 service、clone observer vertical slice 与管理面。trusted/good-faith
+  kernel runtime、`weave`、值型日志service、clone observer vertical slice、SystemTarget embedded boot activation、
+  single-load/fd-snapshot management、只读proc projection与最小CLI。trusted/good-faith
   module 边界、无 fuel/preemption/force-unload、无 guest-controlled concurrency/shared execution state、无 shared
   compiled artifact、无第二个 point 或其它 Host service、无 module-side cleanup 等 non-goals 保持不变。
 - **Owner / handoff / failure / cleanup：** `anemone-kernel/crates/nemophila-wasm` crate 只拥有导入后 interpreter source、
   integer-only Core Wasm parse、validation、translation、execution 与 trap reporting；Nemophila API owner 拥有 WIT logical
-  interface，普通module build只拥有manifest/toolchain/fresh candidate/export，canonical module conformance在真实kernel
-  consumer出现前由module-local临时fixture证明；task credentials 拥有
-  effective `CAP_SYS_MODULE` truth；Nemophila runtime 唯一拥有 admission、instance、registration/reservation、execution
+  interface，普通module build只拥有manifest/toolchain/fresh candidate/export；Stage 2临时fixture已由Stage 5真实consumer
+  replacement gate删除。SystemTarget拥有boot selection，build resolver/materializer拥有immutable generated projection，boot
+  owner拥有initial-userspace前的ordered/fatal activation；task credentials拥有management effective `CAP_SYS_MODULE` truth；
+  `anemone-abi`拥有wire layout/tags，VFS/file owner提供positioned-read source capability，KernelConfig拥有artifact-size上限，
+  procfs只presentation runtime value snapshots；Nemophila runtime 唯一拥有 admission、instance、registration/reservation、execution
   serialization、in-flight、poison 与 retirement；具体 subsystem 只拥有 point semantics/call site/binding policy，kernel
   logging owner 保留日志 truth。跨 owner 只使用父 RFC 定义的窄 typed handoff，failure 与 cleanup 继续服从 load rollback、
   callback poison quarantine 和无副作用 busy try-unload。
@@ -46,16 +50,20 @@ Prerequisites和Protected Boundary，关闭Stage 5不自动授权Stage 6解析�
   关闭当时的 deliverable 和 evidence，不建立并列的 interpreter profile/version/source identity truth。
 - **Protected ABI / contract / acceptance：** 保持 start-free artifact、唯一 module-side `load` entry、WIT 单一接口来源、
   load-scoped hierarchical SDK、per-instance interpreter ownership/serial execution、module-decided registration failure、
-  runtime-owned reservation/cohort/poison lifecycle、clone observer 的 TID snapshot 与非决策语义，以及 embedded/supplied
-  common path 和同一 artifact 的 RV64/LA64 acceptance。`NEMOPHILA-R0-CUTOVER` 前没有 Nemophila effective contract；
-  Stage outline 和 RFC Accepted 状态都不发布部分 ABI 或 current semantics。
+  runtime-owned reservation/cohort/poison lifecycle、clone observer 的 TID snapshot 与非决策语义、SystemTarget ordered
+  required boot selection/boot-fatal policy、single tagged-source load、supplied-fd immutable snapshot、procfs projection，以及
+  embedded/supplied common path 和同一 artifact 的 RV64/LA64 acceptance。`NEMOPHILA-R0-CUTOVER` 前没有 Nemophila effective contract；
+  Stage plan 和 RFC Accepted 状态都不发布部分 ABI 或 current semantics。
 - **Validation claim：** interpreter crate只证明R4 integer-only Core Wasm correctness、float-bearing input rejection与kernel embedding feasibility；
-  普通module build不证明当前kernel compatibility，canonical module fixture只提供阶段性SDK/WIT/interpreter conformance；
-  Nemophila runtime分别证明authorization、start/link/typed-entry admission、transactional lifecycle、weave registration/dispatch、trap containment、
-  logging handoff 与 clone semantics；最终 Stage 以同一 artifact 的双架构 vertical slice 闭合父 RFC acceptance。R0 不
+  普通module build不证明当前kernel compatibility；canonical module owner-local conformance与真实kernel consumer分别证明自己的
+  SDK/WIT/interpreter及runtime obligations；
+  Nemophila runtime及参与owner分别证明boot selection/fatality、management authorization、fd snapshot、ABI、proc projection、
+  start/link/typed-entry admission、transactional lifecycle、weave registration/dispatch、trap containment、logging handoff
+  与clone semantics；最终Stage以同一artifact的双架构vertical slice闭合父RFC acceptance。R0 不
   外推 execution progress、unload bounded completion、恶意 module DoS containment 或日志持久性。
 - **Stop conditions：** 需要改变父 RFC 的 target/non-goals、interpreter/runtime/provider owner、WIT/SDK
-  hierarchy、management authority、instance serial model、registration/cohort/poison/unload 语义、clone point、public ABI、
+  hierarchy、boot/management authority、SystemTarget selection/fatality、fd snapshot lifetime、proc observation、instance serial
+  model、registration/cohort/poison/unload 语义、clone point、public ABI、
   Contract Impact、acceptance 或 validation claim；需要允许 Core Wasm start、第二个 lifecycle entry、额外 Host service/
   resource handle、guest-controlled concurrency/shared state、shared compiled artifact，或只能通过第二份行为真相、无退出
   条件的兼容桥、test-only production API 或降低 oracle 才能推进。出现这些情况时停止并回到 RFC review / Target
@@ -75,7 +83,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 4 | Resolved / Closed | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 4 Feedback Interlude | Resolved / Closed | 收拢point/provider owner、typed SPI、Host/WIT consumer与Nemophila内部模块边界 | None |
 | Stage 5 | Resolved / Closed | 接入真实 clone observer vertical slice | None |
-| Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
+| Stage 6 | Resolved / Ready / Not Started | 激活boot/management/proc observation、完成双架构acceptance并原子cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
 ## Stage 1 — `nemophila-wasm` 裁剪与适配
 
@@ -986,7 +994,7 @@ hardware仍Not Run / Not Proven。
 
 **Resolution：** Resolved / Closed / Checkpoint 5A Closed
 
-**Execution Authorization：** Consumed；Stage 6解析/执行未授权
+**Execution Authorization：** Consumed；Stage 6后续docs-only解析授权已消费，implementation未授权
 
 **Contract Cutover：** None
 
@@ -1112,7 +1120,7 @@ validation feature不构成effective contract。
 
 ### Exit / Stop
 
-维护者已经授权并关闭单一Checkpoint 5A；Stage 5在此停止，Stage 6仍须另行解析和授权。
+维护者已经授权并关闭单一Checkpoint 5A；Stage 5在此停止。Stage 6后续docs-only解析已由独立授权完成，execution仍须另行授权。
 
 Checkpoint 5A只有在全部deliverables、RV64 validation、fixture replacement、independent review与Architecture Friction Scan闭合后
 才能关闭。若真实source要求移动point、改变clone结果、保留task handle/private guard、公开management能力、把temporary probe加入
@@ -1141,20 +1149,165 @@ final build、三个RV64 ELF的单一16-byte descriptor audit、format/interpret
 Contract Cutover保持None；current contracts与register未更新。LA64 Stage 5 kernel build/guest/hardware、management authorization、
 正式embedded/supplied ingress、public identity/errno、final harness、hardware与完整R0 acceptance均Not Run / Not Proven，
 `NEMOPHILA-R0-CUTOVER`仍Not Cut Over。temporary validation feature/module/config/target/preset/wrapper及synthetic call必须在Stage 6
-正式ingress与management consumer出现时删除；Stage 6保持Outline Only / Not Started / Not Authorized。
+正式ingress与management consumer出现时删除。Stage 5 closure当时严格停止于Stage 6之前；后续docs-only resolution authorization
+已由下节消费，implementation仍Not Started / Not Authorized。
 
-## Stage 6 — Management activation 与 R0 cutover
+## Stage 6 — Boot、management activation 与 R0 cutover
 
-**Purpose：** 激活以 current effective `CAP_SYS_MODULE` 授权的 embedded/supplied load 和按 instance identity
-try-unload，以当前第一方 interpreter/WIT/artifact source 与完整 Git/validation evidence 完成同一 Wasm artifact 在 RV64/LA64 上的完整
-acceptance、最终 source/owner/ABI audit 与 Architecture Friction Scan，并在全部证据闭合后原子执行
+**Resolution：** Resolved / Ready / Not Started
+
+**Resolution Authorization：** Consumed；本节的docs-only解析授权已经消费
+
+**Execution Authorization：** None
+
+**Purpose：** 以SystemTarget有序required selection在initial userspace前自动load embedded modules，发布由current effective
+`CAP_SYS_MODULE`授权的single tagged-source load与按instance identity try-unload，提供只读`/proc/nemophila`与最小CLI；删除
+Stage 5 temporary validation path，以当前第一方interpreter/WIT/artifact source与完整Git/validation evidence完成同一Wasm
+artifact在RV64/LA64上的R5 acceptance、最终source/owner/ABI audit与Architecture Friction Scan，并在全部证据闭合后原子执行
 `NEMOPHILA-R0-CUTOVER`。
 
-**Prerequisites：** Stage 1--5 全部关闭；management ABI、两种 ingress 的 common-path handoff、canonical artifact、runtime
-lifecycle、clone observer 与双架构验证环境均可解析为最终 acceptance；不存在未关闭的 Keter/Apollyon；维护者另行授权
-Stage 6。
+**Prerequisites：** Stage 1--5全部关闭；唯一production `CloneObserver` point、global runtime、canonical module build、两种
+architecture build/guest环境、current `STM-TARGET-001`、task capability owner、VFS positioned-read与procfs dynamic backend均已
+核对；register中的
+[`ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`](../../register/open-issues.md#ane-20260809-vfs-dynamic-positive-dentry-revocation)
+保持独立VFS owner。Stage 6 implementation只有维护者
+新的明确授权才能启动。
 
-**Protected Boundary：** 两种 ingress 必须经过同一 kernel admission/runtime lifecycle，instance identity 不是 bearer
-authority，缺少 capability 的请求在任何 mutation 前失败。只有父 RFC 的全部 mandatory evidence 闭合后才能发布 ABI、
-提取最小 current contracts 并关闭 RFC；单架构、单 ingress、smoke、host check 或部分 lifecycle 证据不能换取 cutover，
-未运行项必须诚实记录为 Not Run / Not Cut Over。
+Stage 6是一个原子formal Stage，不拆分为boot、syscall、proc或cutover checkpoints。实现可以有多个普通commit，但在ABI、
+SystemTarget selection、boot activation、两种ingress、proc projection、temporary-probe deletion、双架构evidence与current-contract
+更新全部闭合前，不发布半套capability，也不执行中间cutover。
+
+### Implementation Boundary
+
+- **Target / non-goals：** 只交付R5定义的ordered required embedded boot load、single tagged-source management load、独立
+  try-unload、bounded supplied-fd snapshot、instance-oriented只读proc projection、最小`nemophila` CLI与最终双架构closure。
+  不加入source priority、implicit replacement/eviction、force/auto unload、path-based kernel ABI、file pinning、并发writer原子
+  snapshot、proc mutation、catalog listing/package manager或第二个point/service。
+- **SystemTarget / build handoff：** SystemTarget closed schema增加有序且不重复的embedded module identity list；identity沿用
+  canonical `nemophila/modules/<identity>/module.toml`的lower-kebab-case `name`。resolver把selection纳入同一次immutable
+  `ResolvedSystemBuild`，system build按selection顺序解析现有module-owner export，核对manifest identity、freshness、regular file与
+  KernelConfig artifact-size上限，再生成只含identity/order/immutable bytes的kernel input。missing/stale export fail closed并要求
+  调用者先经`just module build <identity>`取得fresh artifact；system build不复制ModuleBuildDriver或偷偷repair。SystemTarget不
+  拥有module recipe，generated input不成为canonical config或loaded registry；没有selected modules时生成空catalog并正常启动。
+- **Boot authority / failure：** BSP在provider catalog和global runtime可用、rootfs/KUnit阶段结束且initial userspace尚未开始的
+  窗口消费唯一generated selection，按序调用共同source-to-runtime load。boot入口没有userspace caller，不伪造current task或
+  capability；每个失败transaction先完整rollback unpublished state，再以selected identity、ordinal与failure phase记录诊断并
+  boot-fatal，不能跳过、回退到supplied fd或继续initial userspace。较早成功publication不要求在fatal path建立新rollback
+  protocol。boot order只决定attempt/diagnostic order，不改变binding policy或建立source priority。
+- **Management ABI：** 激活`Capability::SYS_MODULE`并加入implemented capability set；management boundary在copy user payload、
+  读取fd或开始runtime mutation前先检查current effective set。`anemone-abi`拥有两个Anemone-native syscall numbers及
+  fixed-width wire contract：一个size-delimited load request包含closed `source_kind`、tagged payload、R0 zero flags/reserved；
+  一个try-unload接受nonzero published identity与R0 zero flags。wire source tag不是bitflags，不直接暴露Rust enum/union或
+  `usize` layout。embedded payload使用显式length的ASCII lower-kebab identity，supplied payload只含fd；success load返回
+  nonzero `u64` identity，try-unload返回zero。`anemone-rs`可以提供两个source-specific convenience wrappers，但kernel仍只有
+  一个load syscall。
+- **Public failure classes：** `EPERM`表示缺少effective `CAP_SYS_MODULE`；`EFAULT`表示user request/embedded identity memory不可
+  访问；`EINVAL`表示size/tag/payload/identity syntax/non-zero flags/reserved或non-regular source不合法；`ENOENT`表示embedded
+  identity或published instance不存在；`EBADF`表示invalid、unreadable或`O_PATH` fd；`EFBIG`表示snapshot越过KernelConfig上限；
+  source read failure保留对应I/O errno；`ENOEXEC`统一表示interpreter/admission/module-side load拒绝或trap；runtime identity/
+  transaction counter耗尽返回`EOVERFLOW`；有in-flight的try-unload返回`EBUSY`。authorization优先于后续source/control错误，
+  busy与其它failure都不产生部分lifecycle mutation。若live source无法诚实维持此closed mapping，必须在implementation前回RFC
+  review，不能临时泄漏interpreter-private errors。
+- **Supplied snapshot / cleanup：** fd必须引用readable、non-`O_PATH` regular file。kernel取得operation-local file reference，
+  使用positioned reads从offset 0读至首次EOF，不改变shared file offset，并在共同KernelConfig上限内形成owned `Box<[u8]>`；
+  acquisition failure不开始load transaction。snapshot完成后在进入interpreter admission前释放file reference；runtime instance
+  只持bytes和source-kind diagnostic，不持`FileDesc`、inode、path或namespace object。完成点之后的write/truncate/rename/unlink
+  不影响本次load。R0不锁source，也不保证复制期间并发writer的linearizable view；CLI在syscall返回后关闭自己的fd，调用者
+  负责copy窗口的source稳定。
+- **Common runtime / origin diagnostic：** embedded boot、embedded management与supplied management都把owned immutable bytes
+  交给现有`load_and_publish` transaction，不建立fast path或第二runtime。runtime为published instance保存最小只读origin
+  diagnostic：source kind与仅embedded存在的catalog identity；该snapshot和poison diagnostic一样不得驱动admission、binding、
+  unload或replacement。catalog仍不保存loaded bit；同一embedded artifact可以产生多个instance，实际conflict只由point policy
+  决定。
+- **Procfs / CLI handoff：** runtime增加窄snapshot能力，在owner-local临界区复制identity、origin、lifecycle与in-flight values，
+  不暴露locks、`PublishedInstance`、interpreter或binding map。`/proc/nemophila`每个opened directory形成instance-id枚举snapshot；
+  decimal nonzero identity是child filename。每个opened child形成immutable文本snapshot，稳定字段为`instance`、`source`、
+  `artifact`（supplied为`-`）、`lifecycle`与`in_flight`；既有open description可在retirement后继续读取自己的诊断bytes，但不能
+  mutation。retirement撤销backend mapping；generic cached-positive dentry freshness不在本Stage加强。`anemone-apps/nemophila`
+  只组合`anemone-rs` wrappers、path open/close和proc读取，提供embedded load、path-backed supplied load、try-unload与list/show；
+  命令拼写与纯presentation属于implementation preference。
+- **Temporary bridge deletion：** 正式SystemTarget catalog、boot activation、management consumer与focused validation接管后，
+  删除Stage 5 `nemophila_clone_validation` feature、private activation module、专用KernelConfig/SystemTarget/BuildPreset、wrapper、
+  user-test flag/synthetic trap call与freshness fence；default/final build只保留production point、正式catalog/ABI/proc paths，不得
+  让probe与production双路径共存。canonical module不恢复Stage 2 fake Host fixture。
+- **Protected ABI / contract / acceptance：** 父RFC R5的interpreter、WIT/SDK、lifecycle、clone semantics、authority、single-load
+  source model、boot-fatal policy、proc owner、failure classes与dual-architecture same-artifact acceptance全部保持；current
+  `STM-TARGET-001`在最终cutover前不提前改写。hardware、full LTP、SMP>1、其它module/point、恶意module DoS与generic VFS
+  namespace linearizability不是Stage acceptance，若未运行必须列为Not Run而不是扩大claim。
+
+预计实现会自然触达`anemone-abi`/`anemone-rs`、Nemophila runtime与API、task capability/syscall registration、procfs、
+SystemTarget/resolver/generated input、KernelConfig、module/system build、`anemone-apps/nemophila`、focused validation selections与
+最终current-contract/transaction/RFC文档；这些只是non-exhaustive owner提示，不是逐文件write set。同owner内按ABI、source、
+boot、snapshot或proc稳定职责进行行为保持型目录拆分是允许的；不得扩大无关public API或让proc/build读取runtime私有表示。
+
+### Deliverables
+
+1. SystemTarget schema、resolver、module export resolution/freshness fence与generated immutable catalog共同拥有ordered required embedded selection，
+   并以tracked empty/non-empty/duplicate/missing/invalid/oversized cases闭合fail-closed materialization。
+2. general boot activation替代Stage 5 private activation，在initial userspace前按序load，成功路径发布instances，negative target以
+   精确identity/phase oracle证明失败boot-fatal且initial userspace未运行。
+3. `anemone-abi`发布single-load/try-unload numbers、tags、wire structs/constants和layout assertions；kernel syscall boundary、
+   `Capability::SYS_MODULE`、`anemone-rs` wrappers与`nemophila` CLI按上述authority/payload/errno contract接通。
+4. supplied fd acquisition形成bounded kernel-owned snapshot，不改变cursor、不保留file/path，并把embedded management、supplied
+   management与boot bytes统一送入一个runtime publication owner。
+5. runtime窄instance snapshot与`/proc/nemophila/<instance-id>`只读projection闭合list/show、live/poisoned/in-flight与retirement
+   backend mapping；register中的generic dentry limitation保持显式且不产生local workaround。
+6. 删除全部Stage 5 temporary feature/config/target/preset/module/wrapper/user-test/synthetic activation，default/final graph没有残留
+   marker、private consumer或第二catalog/runtime。
+7. 同一fresh canonical clone-observer artifact完成RV64/LA64两种ingress与完整lifecycle acceptance；最终review无未关闭
+   Apollyon/Keter，Architecture Friction Scan闭合后原子更新Nemophila current contracts、Refine `STM-TARGET-001`、记录证据并
+   关闭Stage/RFC。
+
+### Validation
+
+1. **ABI / authorization focused：** 对RV64/LA64共享wire layout运行size/offset/alignment assertions；覆盖unknown request size/
+   source tag、tag-payload mismatch、zero/nonzero flags/reserved、bad pointers、invalid identity、closed errno mapping与identity
+   non-reuse。authorized/unauthorized embedded/supplied load和live/poisoned try-unload必须证明effective `CAP_SYS_MODULE`在任何
+   source I/O/mutation前生效；boot path单独证明不依赖task credentials。
+2. **Source acquisition：** focused kernel/app cases覆盖embedded identity lookup、bad/unreadable/`O_PATH`/directory/pipe/device fd、
+   zero/valid/oversized regular file、short/partial reads与I/O failure、shared cursor unchanged、snapshot后write/truncate/rename/unlink
+   隔离和file reference释放。并发writer只验证不会破坏memory/lifecycle safety，不把所得bytes声明为原子snapshot。
+3. **Boot / build：** xtask tests覆盖SystemTarget closed schema、order、duplicate/missing/invalid identity、missing/stale/non-regular
+   module export、same-invocation fresh artifact consumption、generated catalog与KernelConfig size fence；每个architecture至少一个ordered-success target和一个
+   dedicated boot-fatal negative target，后者必须看到selected identity/phase且看不到initial-userspace marker。
+4. **Runtime / proc：** owner-local KUnit覆盖origin diagnostic不驱动行为、snapshot coherence、live/poisoned/in-flight fields、
+   list snapshot与retirement mapping；并发lifecycle case复用production invocation/retirement protocol，不新增production test
+   control API。focused guest覆盖`ls`/`cat`或CLI list/show、open snapshot跨retirement、unknown identity与只读拒绝；generic
+   cached-positive dentry revocation保持Not Proven并链接register。
+5. **Dual-architecture vertical slice：** 同一次`just module build clone-observer`产生的fresh ordinary Wasm artifact必须由RV64与
+   LA64各自作为SystemTarget embedded bytes启动，并从guest同一文件副本经supplied fd再次load；覆盖embedded unload/reload、
+   supplied load/unload、两个normal fanout instances、clone与raw clone3 callback/log、trap/poison、poisoned busy与成功
+   try-unload、reload，以及proc lifecycle投影。source proof继续覆盖vfork/`CLONE_PARENT`规则，不要求为无新增风险的组合重复
+   所有guest case。
+6. **Regression / bridge audit：** 运行repository-ownedformat、interpreter/module/xtask/ABI/app/kernel build与KUnit gates、RV64/
+   LA64 focused wrappers及适当probe-off/default/final build；source/ELF/config scan确认只有一个production descriptor/global runtime、
+   `CAP_SYS_MODULE`已从NYI集合激活、Stage 5全部temporary symbol/marker/selection/consumer消失。硬件、full LTP、final harness或
+   SMP若不由父RFC mandatory evidence要求，可明确Not Run，不能替代或削弱上述oracles。
+7. **Final review / docs：** 审查single truth、boot/management authority、wire containment、snapshot/file lifetime、proc projection、
+   fatal/rollback ordering、temporary bridge deletion与dual-architecture claim；运行`git diff --check`和`mdbook build docs`。只有
+   code、focused runtime evidence、current-contract delta、transaction与RFC closure同一最终slice一致时才能cut over。
+
+### Cutover
+
+单一`NEMOPHILA-R0-CUTOVER`，且必须原子完成：
+
+- 发布single-load/try-unload Anemone-native ABI、SystemTarget selected embedded boot behavior、只读proc projection与R5 visible
+  semantics；
+- 从live semantics提取最小`NEMOPHILA-RUNTIME-001`、`NEMOPHILA-HOST-001`、`NEMOPHILA-WEAVE-001`、
+  `NEMOPHILA-CLONE-001`、`NEMOPHILA-ARTIFACT-001` current contracts，并Refine现有`STM-TARGET-001`；
+- 同步最终transaction evidence、register disposition与RFC Closure，将Stage 6和父RFC关闭。
+
+在全部mandatory evidence与temporary bridge deletion闭合前，Contract Cutover保持None / Not Effective；不得只因ABI能调用、
+单架构boot成功或proc可见就提前更新current contracts。
+
+### Exit / Stop
+
+本次docs-only resolution到此停止：Stage 6为Resolved / Ready / Not Started，kernel、ABI、app、config、proc、test与current-contract
+实现均未运行，`NEMOPHILA-R0-CUTOVER`仍Future。
+
+未来execution必须作为整个Stage单独获得维护者授权。若实现需要改变R5 target/non-goals、SystemTarget/build/boot/task/runtime/
+proc owner、ordered/required或boot-fatal semantics、single-load tagged-source ABI、errno classes、fd snapshot/source-stability
+boundary、origin/proc diagnostic role、failure/cleanup、public surface、Contract Impact、acceptance或validation claim，必须在完成或
+cutover前停止并回RFC review / Target Renegotiation。若只能保留Stage 5 probe、建立第二runtime/catalog/lifecycle truth、保存
+supplied pathname/file、用proc写入mutation、引入source priority/replace/force，或以单架构/单ingress/smoke降低oracle推进，
+同样停止；不得把partial implementation称为R0 capability。

@@ -49,7 +49,7 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
-- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R4（Nemophila R0 target）；以 WIT 定义接口、由 kernel
+- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Accepted R5（Nemophila R0 target）；以 WIT 定义接口、由 kernel
   使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
   runtime-owned transactional load、per-instance serial
   callback、trap containment 与 busy try-unload，并以 task owner 的 clone observer 和同一份 Rust-to-Wasm artifact 完成
@@ -57,8 +57,9 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
   [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
   [实施路线](./rfcs/nemophila/implementation.md)已关闭 Stage 1、Stage 2与Stage 2 feedback interlude，形成当前第一方
   interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3与Stage 4各两个Checkpoint均已关闭，形成dormant
-  kernel-internal transactional runtime与完整weave/lifecycle；Stage 5单一Checkpoint 5A已解析且Ready / Not Started，Stage 6仍为
-  outline；Checkpoint 5A执行与Stage 6解析/执行均未授权。当前没有current contract或cutover；pre-RFC
+  kernel-internal transactional runtime与完整weave/lifecycle；Stage 5单一Checkpoint 5A已关闭，Stage 6已解析为SystemTarget
+  ordered boot-fatal embedded load、single tagged-source management/fd snapshot与只读proc projection的原子最终Stage，现为
+  Resolved / Ready / Not Started且execution未授权。当前没有Nemophila current contract、`STM-TARGET-001` refine或cutover；pre-RFC
   [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
