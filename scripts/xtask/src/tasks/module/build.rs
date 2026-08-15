@@ -102,6 +102,10 @@ pub(crate) fn build(identity: &str) -> anyhow::Result<ModuleExport> {
         )
     );
     log_progress!("MODULE", &format!("Exported '{}'", export.display()));
+    // The immutable byte handoff and stable export now own this successful
+    // result. Keep failed builds for diagnosis, but do not retain a completed
+    // Cargo target tree under the user-facing build output.
+    cleanup_candidate_dir(&target_dir)?;
     Ok(ModuleExport {
         path: export
             .strip_prefix(&repository)
@@ -194,6 +198,15 @@ fn verify_fresh_candidate(target_dir: &Path, candidate: Candidate) -> anyhow::Re
         target_dir.display()
     );
     Ok(Candidate { path, ..candidate })
+}
+
+fn cleanup_candidate_dir(target_dir: &Path) -> anyhow::Result<()> {
+    fs::remove_dir_all(target_dir).with_context(|| {
+        format!(
+            "failed to clean completed module candidate directory '{}'",
+            target_dir.display()
+        )
+    })
 }
 
 fn atomic_export(bytes: &[u8], export: &Path) -> anyhow::Result<()> {
@@ -302,5 +315,17 @@ mod tests {
         atomic_export(b"not validated by module build", &export).unwrap();
         assert_eq!(fs::read(&export).unwrap(), b"not validated by module build");
         assert!(fs::symlink_metadata(&export).unwrap().file_type().is_file());
+    }
+
+    #[test]
+    fn completed_candidate_cleanup_removes_the_whole_target_tree() {
+        let temp = TempDir::new("candidate-cleanup");
+        let candidate = temp.0.join("candidate");
+        fs::create_dir_all(candidate.join("wasm32v1-none/deps")).unwrap();
+        fs::write(candidate.join("wasm32v1-none/deps/stale.rmeta"), b"stale").unwrap();
+
+        cleanup_candidate_dir(&candidate).unwrap();
+
+        assert!(!candidate.exists());
     }
 }
