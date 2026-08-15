@@ -1,0 +1,10 @@
+name = "static-sysfs-test"
+targets = ["riscv64", "loongarch64"]
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/debug/static-sysfs-test"

@@ -9,16 +9,16 @@
 **实现位置：** `anemone-kernel/crates/anemone-net-api/src/tcp.rs`、`anemone-kernel/crates/anemone-smoltcp-stack/src/tcp/`、`anemone-kernel/src/fs/socket/tcp/`
 **依赖：** `NET-CONTROL-PLANE-001`、`NET-STACK-PUMP-001`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-WAIT-001`、`SOCKET-FRONT-001`、`SOCKET-ABI-001`、`SOCKET-WAIT-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-06
+**最后核验：** 2026-08-14；`TCP-LISTENER-INGRESS-CUTOVER` Effective
 
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 非 owner持有什么 | 行为用途 |
 | --- | --- | --- | --- |
 | local binding、port reservation、role与connection outcome | Stack TCP owner | opaque Endpoint identity、typed request/outcome | bind/listen/connect与query |
-| listener protocol resource、pending child与backlog admission | Stack TCP owner | accept predicate与一次性child handoff capability | bounded passive-open与accept rollback |
+| logical listener、private ingress projection、pending/claimed child与aggregate backlog admission | Stack TCP owner | accept predicate与一次性child handoff capability | bounded passive-open与accept rollback |
 | RX/TX bytes、FIN/RST、shutdown direction、async cause与option fact | Stack TCP owner | point-in-time facts与operation-local reservation | stream commit、error与readiness |
-| route、source与interface selection | IPv4 control plane | operation-local immutable selection | bind/connect前的唯一path decision |
+| local-address validation及active route、source与interface selection | IPv4 control plane | operation-local immutable selection | bind validation与active egress的唯一policy decision |
 | Linux tuple、sockaddr、flags、copy、errno与signal | Socket ABI adapter | normalized request/value与typed outcome | Linux-visible projection |
 | fd publication与semantic final release | opened-description owner | static final-release hook与unpublished reservation | rollback、dup/fork与exactly-once retirement |
 | engine slot、timer、TIME_WAIT与deferred reclaim | Stack TCP owner | opaque invalidation/progression obligation | protocol progression与bounded reuse |
@@ -28,31 +28,42 @@ slot或generation来推进TCP行为；Stack不得取得task、fd、user pointer�
 
 ## NET-TCP-ENDPOINT-001 — Endpoint、listener与connection outcome由Stack TCP owner统一拥有
 
-**规则：** Stack TCP owner唯一拥有Endpoint identity、explicit/implicit bind、port reservation、role、listener
-resource、pending child、active connection outcome与accepted-child lifecycle。IPv4 control plane只为当前operation提供
-local-address验证或route/source/interface selection；Socket只投影Linux address、fd与blocking语义，不复制binding、
-listener queue、connected state或async cause。
+**规则：** Stack TCP owner唯一拥有Endpoint identity、explicit/implicit bind、port reservation、role、logical
+listener、private ingress projection、pending/claimed child、active connection outcome与accepted-child lifecycle。IPv4
+control plane只提供local-address验证或active operation的route/source/interface selection；listener ingress path由
+Domain Stack从已经committed的boot-static topology解析。Socket只投影Linux address、fd与blocking语义，不选择listener
+interface，也不复制binding、listener queue、connected state或async cause。
 
-`listen(backlog)`使用Linux-normalized backlog并受owner-local capacity上界约束；accept predicate只由pending child
-fact产生。child从listener移交给Socket后，peer-address copy或fd publication失败必须消费该handoff并清理child，不能
-重新插队或留下不可达association。nonblocking connect保留started/in-progress/connected/failed真实outcome；blocking
-connect等待并重读同一outcome，不建立第二状态机。handshake RST、transport timeout与local selection/admission failure
-保持可区分typed cause，不从merged closed state猜测结果。
+`listen(backlog)`不执行active egress selection；wildcard binding投影到local与已配置external path，loopback-specific
+只投影到local，configured external specific同时投影到local self-connect与对应external ingress。没有external
+deployment时wildcard退化为local-only。每条private engine完成transport handshake只形成candidate；只有Stack TCP owner在
+同一guard内把candidate转换为`Pending`时才消费aggregate backlog，`Pending + Claimed` slot phase是occupancy唯一真相。
+repeated listen只更新同一个Linux-normalized limit；shrink不驱逐既有child，新candidate在occupancy回落前被拒绝。
+
+accept predicate只由aggregate pending child fact产生；opaque child capability每次claim/take/cancel都重新校验实际
+projection、slot与generation。child从listener移交给Socket后，peer-address copy或fd publication失败必须消费该handoff
+并清理child，不能重新插队或留下不可达association。nonblocking connect保留started/in-progress/connected/failed真实
+outcome；blocking connect等待并重读同一outcome，不建立第二状态机。handshake RST、transport timeout与local
+selection/admission failure保持可区分typed cause，不从merged closed state猜测结果。
 
 `SO_REUSEADDR`是TCP owner option fact，并参与后续bind admission；它不允许duplicate live listener、绕过完整4-tuple
 uniqueness或模拟`SO_REUSEPORT`。capacity full、stale identity与invalid role均返回typed rejection/backpressure，不能
 panic、busy-spin、fallback到private handle或建立第二registry。
 
-**违反表现：** Socket缓存local/peer/role或connect result；control plane拥有port reservation；listener与accept分别维护
-pending count；copyout失败后child仍可accept；timeout/RST合并后猜errno；或test/caller直接选择engine slot。
+**违反表现：** Socket缓存local/peer/role或connect result；control plane拥有port reservation或为listen伪造destination
+selection；per-interface projection分别维护backlog/queue/credit；engine completed state直接成为pending truth；copyout失败后
+child仍可accept；timeout/RST合并后猜errno；或test/caller直接选择engine slot。
 
-**验证 / Enforcement：** owner host tests与focused smoltcp TCP覆盖capacity、cause、generation reuse、pending-child
-rollback和deferred reclaim；kernel KUnit、长期`socket-test` TCP suite及RV64/LA64 glibc/musl oracle覆盖tuple、bind、
-listen、blocking/nonblocking connect、accept/accept4、name/query、fault与fd rollback。
+**验证 / Enforcement：** owner host tests与focused smoltcp TCP覆盖path matrix、aggregate backlog、capacity、cause、
+generation reuse、pending-child rollback和all-projection deferred reclaim；kernel KUnit、长期`socket-test` TCP suite及
+RV64/LA64 glibc/musl oracle覆盖tuple、bind、listen、local self-connect、hostfwd ingress、blocking/nonblocking
+connect、accept/accept4、name/query、fault与fd rollback。
 
 **最初来源：** [IPv4 TCP Socket RFC R0](../../rfcs/net-tcp/index.md)的`NET-TCP-CUTOVER`。
 
-**当前来源：** 同上；Checkpoint 5A closure与focused Git/PR evidence。
+**当前来源：** 同上；Checkpoint 5A closure，以及
+[TCP listener ingress publication RFC R0](../../rfcs/tcp-listener-ingress-publication/index.md)的
+`TCP-LISTENER-INGRESS-CUTOVER`与focused Git/PR evidence。
 
 ## NET-TCP-STREAM-001 — 字节流commit、terminal precedence与readiness读取owner fact
 
@@ -107,6 +118,8 @@ invalidation、generation reuse、orphan/TIME_WAIT/deferred reclaim与shutdown-o
 
 ## 当前接受边界
 
-- effective tuple为initial-domain IPv4 `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`；覆盖loopback、configured self-external与remote-external。
-- closure evidence覆盖owner host `20/20`、focused smoltcp TCP `178/178`、RV64 KUnit `466/466`、LA64 KUnit `471/471`、四份glibc/musl C consumer、双架构`socket-test` TCP `8/8`、remote peer stream/RST `4/4`、并发CAgent与shared Socket/UDP/ICMP raw/Unix回归。
-- physical hardware、`smp > 1`、其它NIC/platform、IPv6、full network LTP、完整final harness及条件性deployment probe均Not Run。
+- effective tuple为initial-domain IPv4 `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`；覆盖loopback、configured self-external与remote-external。boot-static listener path上限为local加至多一个configured external projection。
+- 原TCP closure evidence覆盖owner host `20/20`、focused smoltcp TCP `178/178`、RV64 KUnit `466/466`、LA64 KUnit `471/471`、四份glibc/musl C consumer、双架构`socket-test` TCP `8/8`、remote peer stream/RST `4/4`、并发CAgent与shared Socket/UDP/ICMP raw/Unix回归。
+- listener-ingress closure新增owner host `10/10`，并通过完整`just test net-host`与xtask `93/93`；RV64 `639/639`、LA64 `642/642` KUnit及双架构双libc focused consumer均通过wildcard/external-specific local self-connect与hostfwd ingress、loopback hostfwd负向case、raw sock-diag、`ss -tan`、remote stream/FIN/RST和CAgent回归。
+- RV64 orderly shutdown且wrapper exit 0；LA64完成`filesystem -> network -> device -> PowerOff`后因无成功power-off handler停在halt并人工终止，不能作为wrapper exit-0证据。
+- physical hardware、`smp > 1`、其它NIC/provider/deployment、runtime hotplug、多external interface、IPv6、full network LTP、完整final harness及压力/长时backlog均Not Run。

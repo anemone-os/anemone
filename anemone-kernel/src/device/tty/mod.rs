@@ -12,7 +12,7 @@ pub(crate) use pty::{
     LivePtyPair, PreparedPtyPair, PreparedPtySlaveDescription, PtyBindingCapability, PtyBindingOps,
     PtyImplicitAcquire, prepare_pair,
 };
-pub(crate) use relation::detach_exiting_session;
+pub(crate) use relation::{detach_exiting_session, proc_snapshot};
 
 use crate::{
     prelude::*,

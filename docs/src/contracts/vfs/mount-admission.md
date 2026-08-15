@@ -3,19 +3,20 @@
 **Contract ID：** `VFS-MOUNT-ADMISSION`
 **状态：** Active
 **Owner：** VFS mount-admission protocol
-**参与领域：** filesystem registry / legacy mount syscall / filesystem backends / procfs mount projection / anemone-rs
-**覆盖范围：** plain new mount 的 canonical fstype、no-device / block-device source admission、typed backend handoff 与 fstype alias containment
-**不覆盖：** bind/move/remount/propagation、mount attrs、unmount cleanup、filesystem-private data、`/proc/filesystems`、省略 `-t` 的 probe、network/file/UUID/LABEL source
-**实现位置：** `anemone-kernel/src/fs/{filesystem.rs,api/mount/mount.rs,proc,ramfs,devfs,ext4,anonymous}`、`anemone-rs/src/os/linux.rs`
+**参与领域：** filesystem registry / legacy mount syscall / filesystem backends / procfs filesystem projection / anemone-rs
+**覆盖范围：** plain new mount 的 canonical fstype、no-device / block-device source admission、typed backend handoff、fstype alias containment 与 `/proc/filesystems` registry projection
+**不覆盖：** bind/move/remount/propagation、mount attrs、unmount cleanup、filesystem-private data、省略 `-t` 的 probe、network/file/UUID/LABEL source
+**实现位置：** `anemone-kernel/src/fs/{filesystem.rs,vfs,api/mount/mount.rs,proc,ramfs,devfs,ext4,anonymous}`、`anemone-rs/src/os/linux.rs`
 **依赖：** None
 **Pending Successor：** None
-**最后核验：** 2026-08-01
+**最后核验：** 2026-08-13
 
 ## 状态与能力所有权
 
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
 | canonical fstype identity | filesystem registry / filesystem type | syscall adapter 持 lookup 结果；procfs 只读投影 | registry lookup、mount ABI fstype 与展示 |
+| registered filesystem publication | filesystem registry | procfs 持一次读取的短生命周期 `Arc<FileSystem>` snapshot | `/proc/filesystems` 展示 |
 | filesystem source requirement | source-kind-tagged filesystem mount operation | syscall adapter 读取即时派生分类 | 将 raw source 收敛为 typed source |
 | raw fstype alias 与 raw source 解析 | legacy mount syscall adapter | VFS/backend 只收到 canonical fstype 与 typed source | 用户 ABI admission、errno 与诊断 |
 | superblock backing | filesystem backend / `SuperBlock` | mount view 持 `Arc<SuperBlock>` | backing identity 与 backend lifetime |
@@ -57,3 +58,22 @@
 **最初来源：** Closed [mount-tree-legacy-api RFC](../../rfcs/mount-tree-legacy-api/invariants.md) 的 syscall-adapter containment边界。
 
 **当前来源：** [mount fstype/source compatibility 小迭代](../../devlog/changes/2026-07-24-mount-fstype-source-compat.md)完成 baseline提取；规则语义保持不变。
+
+## VFS-MOUNT-ADMISSION-004 — Registered filesystem projection
+
+**规则：** `/proc/filesystems`只读投影filesystem registry中已经成功注册的canonical type，registry registration是唯一
+publication事实和顺序来源；filesystem backend不得向procfs维护第二份列表。每次读取先取得短生命周期registry snapshot，
+释放registry lock后再格式化。`FileSystemMountOps::NoDevice`显示为`nodev\t<canonical-name>`，`BlockDevice`显示为
+`\t<canonical-name>`；该分类从现有tagged mount operation即时派生，不保存第二份requires-device字段。
+
+`KERNEL_FS`只限制用户mount admission，不撤销registered-type身份，因此仍参与展示。syscall-only scoring alias不在registry
+中注册，不得进入输出。当前实现保持registration order，但不把顺序提升为用户ABI保证。
+
+**违反表现：** backend额外调用procfs publication API；注册成功但因独立列表漏项；注册失败或未编译的type仍出现；
+`nodev`来自名称特判、缓存字段或mount实例；输出raw alias；或持registry lock跨字符串格式化与分配。
+
+**验证 / Enforcement：** registry snapshot API与procfs PDE source audit；owner-local KUnit用真实`FileSystemOps` fixture锁定
+NoDevice、BlockDevice、canonical name与`KERNEL_FS`投影；双架构release build；至少一个guest直接读取
+`/proc/filesystems`并核对已注册type及`nodev`分类。
+
+**最初来源 / 当前来源：** [`/proc/filesystems` registry projection小迭代](../../devlog/changes/2026-08-13-proc-filesystems.md)。

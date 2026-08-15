@@ -34,6 +34,7 @@ pub mod proc;
 
 mod ramfs;
 mod socket;
+mod sysfs;
 
 pub mod api;
 

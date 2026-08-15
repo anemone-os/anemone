@@ -86,7 +86,7 @@ impl Stack {
         let protocol_egress_may_remain =
             self.protocols
                 .complete_egress(active, id, &local.protocols, &local.sockets);
-        self.protocols.reclaim_tcp(id, &mut local.sockets);
+        let tcp_progression = self.protocols.reclaim_tcp(id, &mut local.sockets);
         // Match external pump semantics: timers can mutate endpoint facts even
         // when the device cannot emit the packet that would report a change.
         self.protocols.invalidate_tcp_interface(id);
@@ -104,6 +104,7 @@ impl Stack {
             || ingress_may_remain
             || egress_may_remain
             || protocol_egress_may_remain
+            || tcp_progression
             || transferred != 0
         {
             RoundContinuation::Runnable

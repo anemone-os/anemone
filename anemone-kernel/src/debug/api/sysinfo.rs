@@ -3,8 +3,6 @@
 //! Reference:
 //! - https://www.man7.org/linux/man-pages/man2/sysinfo.2.html
 
-// currently a stub.
-
 use anemone_abi::system::linux::SysInfo;
 
 use crate::{
@@ -14,17 +12,20 @@ use crate::{
 
 #[syscall(SYS_SYSINFO)]
 fn sys_sysinfo(#[validate_with(user_addr)] info: VirtAddr) -> Result<u64, SysError> {
-    kdebugln!("[NYI] sys_sysinfo: info={}", info);
-
     let task = get_current_task();
     {
         let mut sys_info = SysInfo::default();
+        let uptime = uptime();
+        let memory = frame_allocator_stats();
 
-        {
-            let uptime = uptime();
-            sys_info.uptime = uptime.to_duration().as_secs() as i64;
-            // TODO: fill other system info.
-        }
+        sys_info.uptime = uptime.to_duration().as_secs() as i64;
+        // Memory values use allocator page units; mem_unit supplies the byte
+        // scale required by the Linux ABI. Loads and shared-memory accounting
+        // remain zero until their owners provide complete statistics.
+        sys_info.totalram = memory.total_pages;
+        sys_info.freeram = memory.free_pages;
+        sys_info.mem_unit = u32::try_from(PagingArch::PAGE_SIZE_BYTES)
+            .expect("page size does not fit the sysinfo ABI");
 
         let usp_handle = task.clone_uspace_handle();
         let mut usp = usp_handle.lock();

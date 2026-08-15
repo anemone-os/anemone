@@ -168,7 +168,9 @@ pub(crate) fn tcp_diagnostics() -> Vec<TcpDiagnostic> {
         .tcp_diagnostic_records()
         .into_iter()
         .map(|record| TcpDiagnostic {
-            ifindex: logical_ifindex(record.interface(), &mappings),
+            ifindex: record
+                .interface()
+                .map_or(0, |interface| logical_ifindex(interface, &mappings)),
             record,
         })
         .collect()

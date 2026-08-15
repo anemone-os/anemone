@@ -29,6 +29,12 @@ impl CharDev for URandom {
     fn write(&self, buf: &[u8]) -> Result<usize, SysError> {
         Ok(buf.len())
     }
+
+    fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        Ok(request.ready_or_unsupported(
+            request.interests() & (PollEvent::READABLE | PollEvent::WRITABLE),
+        ))
+    }
 }
 
 #[initcall(probe)]

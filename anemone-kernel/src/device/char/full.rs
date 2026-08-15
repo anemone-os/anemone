@@ -1,5 +1,5 @@
 use crate::{
-    device::char::{CharDev, CharSeekCtx, register_char_device},
+    device::char::{CharDev, CharSeekCtx, devfs::publish_char_device, register_char_device},
     prelude::*,
 };
 
@@ -30,13 +30,29 @@ impl CharDev for Full {
         ctx.set_pos(0);
         Ok(0)
     }
+
+    fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        // Linux reports the default writable mask for /dev/full even though a
+        // write completes with ENOSPC: readiness means it will not block, not
+        // that the operation will succeed.
+        Ok(request.ready_or_unsupported(
+            request.interests() & (PollEvent::READABLE | PollEvent::WRITABLE),
+        ))
+    }
 }
 
 #[initcall(probe)]
 fn init() {
     match register_char_device("full".to_string(), Arc::new(Full)) {
         Ok(()) => {
-            knoticeln!("full device registered");
+            if let Err(err) = publish_char_device(FULL_DEVNUM) {
+                knoticeln!(
+                    "full device registered, but devfs publish failed: {:?}",
+                    err
+                );
+            } else {
+                knoticeln!("full device registered");
+            }
         },
         Err(e) => {
             knoticeln!("failed to register full device: {:?}", e);

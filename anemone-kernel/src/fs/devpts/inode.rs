@@ -1,16 +1,11 @@
 use crate::{
-    device::{
-        devnum::{DeviceNumber, MajorNum, MinorNum},
-        tty::PreparedPtySlaveDescription,
-    },
+    device::tty::PreparedPtySlaveDescription,
     fs::inode::{Inode, RenameFlags},
     prelude::*,
     utils::any_opaque::{AnyOpaque, NilOpaque},
 };
 
-use super::{
-    DEVPTS_ROOT_INO, DEVPTS_SLAVE_MAJOR, DevptsBinding, devpts_sb, file::DEVPTS_DIR_FILE_OPS,
-};
+use super::{DEVPTS_ROOT_INO, DevptsBinding, devpts_sb, file::DEVPTS_DIR_FILE_OPS, slave_devnum};
 
 #[derive(Opaque)]
 pub(super) enum DevptsInode {
@@ -202,10 +197,9 @@ fn devpts_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let meta = inode.inode().meta_snapshot();
     let rdev = match private(inode) {
         DevptsInode::Root => DeviceId::None,
-        DevptsInode::Slave { episode, .. } => DeviceId::Number(DeviceNumber::new(
-            MajorNum::new(DEVPTS_SLAVE_MAJOR),
-            MinorNum::new(episode.index),
-        )),
+        DevptsInode::Slave { episode, .. } => {
+            DeviceId::Number(slave_devnum(episode.index).number())
+        },
     };
     Ok(InodeStat {
         fs_dev: DeviceId::None,

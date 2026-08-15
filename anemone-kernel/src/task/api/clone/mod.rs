@@ -289,7 +289,7 @@ pub fn kernel_clone(
 
     unsafe {
         new_task.switch_exec_ctx(
-            current_task.name(),
+            current_task.name_snapshot(),
             new_uspace,
             current_task.flags(),
             current_task.fpu_used(),

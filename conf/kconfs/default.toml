@@ -17,6 +17,10 @@ perf_observe = true # Enable native kernel performance observation; runtime reco
 # Parameters for kernel and loader
 [parameters]
 bootstrap_heap_shift_kb = 10 # Size of bootstrap heap as a power of 2 in KB
+slab_span_pages = 16 # Pages permanently assigned to one kernel slab size class per span.
+slab_max_object_bytes = 2048 # Largest size/alignment served by the kernel slab path.
+slab_local_capacity = 32 # Maximum free objects retained per CPU and slab class.
+slab_transfer_batch = 16 # Maximum free objects moved in one local/central handoff.
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
 print_log_level = 5 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
@@ -114,7 +118,8 @@ net_icmp_raw_default_ttl = 64 # Default IPv4 TTL for ICMP raw Socket sends.
 net_icmp_raw_default_tos = 0 # Default IPv4 TOS for ICMP raw Socket sends.
 net_tcp_endpoint_capacity = 64 # Maximum live private TCP endpoints in the initial domain.
 net_tcp_engine_timer_capacity = 128 # Shared upper bound for TCP protocol engines and their embedded timers.
-net_tcp_listener_completed_capacity = 16 # Completed-child engine slots retained by one private listener.
+net_tcp_listener_completed_capacity = 16 # Maximum aggregate pending/claimed backlog owned by one logical TCP listener.
+net_tcp_listener_projection_capacity = 2 # Maximum boot-static ingress paths owned by one logical TCP listener.
 net_tcp_rx_buffer_bytes = 16384 # Receive bytes owned by each private TCP engine.
 net_tcp_tx_buffer_bytes = 16384 # Transmit bytes owned by each private TCP engine.
 net_tcp_deferred_reclaim_capacity = 128 # Pre-reserved cleanup entries; must cover every TCP engine.

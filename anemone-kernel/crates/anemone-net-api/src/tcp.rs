@@ -21,6 +21,7 @@ impl TcpEndpointId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TcpPendingChild {
     listener: TcpEndpointId,
+    projection: usize,
     slot: usize,
     generation: u64,
 }
@@ -29,19 +30,21 @@ impl TcpPendingChild {
     #[doc(hidden)]
     pub const fn from_owner_observation(
         listener: TcpEndpointId,
+        projection: usize,
         slot: usize,
         generation: u64,
     ) -> Self {
         Self {
             listener,
+            projection,
             slot,
             generation,
         }
     }
 
     #[doc(hidden)]
-    pub const fn owner_parts(self) -> (TcpEndpointId, usize, u64) {
-        (self.listener, self.slot, self.generation)
+    pub const fn owner_parts(self) -> (TcpEndpointId, usize, usize, u64) {
+        (self.listener, self.projection, self.slot, self.generation)
     }
 }
 
@@ -147,7 +150,7 @@ pub enum TcpDiagnosticState {
 /// One immutable TCP fact projected by the Stack owner for a single dump.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TcpDiagnosticRecord {
-    interface: InterfaceId,
+    interface: Option<InterfaceId>,
     state: TcpDiagnosticState,
     local: TcpLocalBinding,
     peer: Option<TcpPeer>,
@@ -158,7 +161,7 @@ pub struct TcpDiagnosticRecord {
 impl TcpDiagnosticRecord {
     #[doc(hidden)]
     pub const fn from_owner_snapshot(
-        interface: InterfaceId,
+        interface: Option<InterfaceId>,
         state: TcpDiagnosticState,
         local: TcpLocalBinding,
         peer: Option<TcpPeer>,
@@ -175,7 +178,7 @@ impl TcpDiagnosticRecord {
         }
     }
 
-    pub const fn interface(self) -> InterfaceId {
+    pub const fn interface(self) -> Option<InterfaceId> {
         self.interface
     }
 

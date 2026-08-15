@@ -202,17 +202,18 @@ pub fn main() -> Result<(), Errno> {
         Some("--tcp-stage5") => {
             let peer = args.next().ok_or(EINVAL)?;
             let port = args.next().ok_or(EINVAL)?;
+            let ingress_port = args.next().ok_or(EINVAL)?;
             if args.next().is_some() {
                 return Err(EINVAL);
             }
-            Some((peer, port))
+            Some((peer, port, ingress_port))
         },
         Some(_) => return Err(EINVAL),
     };
     let drain_tcp_stage5_markers = tcp_stage5_peer.is_some();
     run_local_tests();
-    if let Some((peer, port)) = tcp_stage5_peer {
-        oracle::run_tcp_stage5(peer, port);
+    if let Some((peer, port, ingress_port)) = tcp_stage5_peer {
+        oracle::run_tcp_stage5(peer, port, ingress_port);
     }
 
     run_comp_tests(drain_tcp_stage5_markers);

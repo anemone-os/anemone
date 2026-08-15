@@ -8,7 +8,7 @@ use anemone_net_api::{
 };
 use smoltcp::{iface::SocketSet, socket::tcp};
 
-use super::{EndpointRole, TcpEndpoints, completed_child_state, engine_connection_tuple};
+use super::{EndpointRole, ListenerSlotPhase, TcpEndpoints, engine_connection_tuple};
 
 impl TcpEndpoints {
     /// Copies one coherent diagnostic record set while the caller holds the
@@ -24,22 +24,14 @@ impl TcpEndpoints {
         for endpoint in &self.endpoints {
             match &endpoint.role {
                 EndpointRole::Listener(listener) => {
-                    let sockets = sockets_for(listener.interface)
-                        .expect("live TCP listener must retain its interface owner");
                     let completed = listener
-                        .slots
+                        .projections
                         .iter()
-                        .filter(|slot| {
-                            !slot.claimed
-                                && slot.handle.is_some_and(|handle| {
-                                    completed_child_state(
-                                        sockets.get::<tcp::Socket>(handle).state(),
-                                    )
-                                })
-                        })
+                        .flat_map(|projection| &projection.slots)
+                        .filter(|slot| slot.phase != ListenerSlotPhase::Open)
                         .count();
                     records.push(TcpDiagnosticRecord::from_owner_snapshot(
-                        listener.interface,
+                        None,
                         TcpDiagnosticState::Listen,
                         listener.binding,
                         None,
@@ -47,22 +39,26 @@ impl TcpEndpoints {
                         listener.backlog,
                     ));
 
-                    for slot in &listener.slots {
-                        let Some(handle) = slot.handle else { continue };
-                        let socket = sockets.get::<tcp::Socket>(handle);
-                        if socket.state() != tcp::State::SynReceived
-                            && !completed_child_state(socket.state())
-                        {
-                            continue;
+                    for projection in &listener.projections {
+                        let sockets = sockets_for(projection.interface)
+                            .expect("live TCP listener must retain every interface owner");
+                        for slot in &projection.slots {
+                            let Some(handle) = slot.handle else { continue };
+                            let socket = sockets.get::<tcp::Socket>(handle);
+                            if socket.state() != tcp::State::SynReceived
+                                && slot.phase == ListenerSlotPhase::Open
+                            {
+                                continue;
+                            }
+                            let tuple = engine_connection_tuple(socket)
+                                .expect("passive TCP child must have an owner-normalized tuple");
+                            records.push(connection_record(
+                                projection.interface,
+                                tuple.local,
+                                tuple.peer,
+                                socket,
+                            ));
                         }
-                        let tuple = engine_connection_tuple(socket)
-                            .expect("passive TCP child must have an owner-normalized tuple");
-                        records.push(connection_record(
-                            listener.interface,
-                            tuple.local,
-                            tuple.peer,
-                            socket,
-                        ));
                     }
                 },
                 EndpointRole::Connection(connection) => {
@@ -104,7 +100,7 @@ fn connection_record(
     socket: &tcp::Socket<'static>,
 ) -> TcpDiagnosticRecord {
     TcpDiagnosticRecord::from_owner_snapshot(
-        interface,
+        Some(interface),
         diagnostic_state(socket.state()),
         local,
         Some(peer),

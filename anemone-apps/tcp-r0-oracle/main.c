@@ -612,6 +612,139 @@ static int receive_exact(int fd, void *buffer, size_t length, const char *step)
 	return 0;
 }
 
+static int parse_port(const char *text, uint16_t *port);
+
+static int listener_exchange_local(int listener, uint32_t host_address)
+{
+	static const char request[] = "ANEMONE_LISTENER_LOCAL";
+	static const char reply[] = "ANEMONE_LISTENER_REPLY";
+	struct sockaddr_in address;
+	struct sockaddr_in bound;
+	socklen_t length = sizeof(bound);
+	char request_buffer[sizeof(request)];
+	char reply_buffer[sizeof(reply)];
+	int accepted;
+	int client;
+
+	if (getsockname(listener, (struct sockaddr *)&bound, &length) < 0)
+		return fail("listener-local-name");
+	memset(&address, 0, sizeof(address));
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(host_address);
+	address.sin_port = bound.sin_port;
+	client = socket(AF_INET, SOCK_STREAM, 0);
+	if (client < 0 || connect(client, (struct sockaddr *)&address,
+				 sizeof(address)) < 0)
+		return fail("listener-local-connect");
+	accepted = accept(listener, NULL, NULL);
+	if (accepted < 0 ||
+	    send_all(client, request, sizeof(request), "listener-local-send") ||
+	    receive_exact(accepted, request_buffer, sizeof(request_buffer),
+			  "listener-local-receive") ||
+	    memcmp(request, request_buffer, sizeof(request)) != 0 ||
+	    send_all(accepted, reply, sizeof(reply), "listener-local-reply") ||
+	    receive_exact(client, reply_buffer, sizeof(reply_buffer),
+			  "listener-local-reply-receive") ||
+	    memcmp(reply, reply_buffer, sizeof(reply)) != 0)
+		return fail("listener-local-exchange");
+	close(accepted);
+	close(client);
+	return 0;
+}
+
+static int listener_exchange_external(int listener)
+{
+	static const char request[] = "ANEMONE_LISTENER_EXTERNAL";
+	static const char reply[] = "ANEMONE_LISTENER_REPLY";
+	char request_buffer[sizeof(request)];
+	int accepted = accept(listener, NULL, NULL);
+
+	if (accepted < 0 ||
+	    receive_exact(accepted, request_buffer, sizeof(request_buffer),
+			  "listener-external-receive") ||
+	    memcmp(request, request_buffer, sizeof(request)) != 0 ||
+	    send_all(accepted, reply, sizeof(reply), "listener-external-reply") ||
+	    shutdown(accepted, SHUT_WR) < 0) {
+		if (accepted >= 0)
+			close(accepted);
+		return fail("listener-external-exchange");
+	}
+	close(accepted);
+	return 0;
+}
+
+static int control_acknowledgment(int control)
+{
+	char acknowledgment[5];
+
+	if (receive_exact(control, acknowledgment, sizeof(acknowledgment),
+			  "listener-control-ack") ||
+	    memcmp(acknowledgment, "PASS\n", sizeof(acknowledgment)) != 0)
+		return fail("listener-control-protocol");
+	return 0;
+}
+
+static int control_phase(int control, const char *phase)
+{
+	if (send_all(control, phase, strlen(phase), "listener-control-phase"))
+		return 1;
+	return control_acknowledgment(control);
+}
+
+static int listener_ingress_oracle(const char *host, const char *port_text)
+{
+	static const uint32_t external_address = 0x0a00020fU;
+	struct sockaddr_in control_address;
+	struct sockaddr_in listener_address;
+	uint16_t control_port;
+	int flags;
+	int listener;
+	int control;
+
+	memset(&control_address, 0, sizeof(control_address));
+	control_address.sin_family = AF_INET;
+	if (parse_port(port_text, &control_port) ||
+	    inet_pton(AF_INET, host, &control_address.sin_addr) != 1)
+		return fail("listener-control-address");
+	control_address.sin_port = htons(control_port);
+	control = socket(AF_INET, SOCK_STREAM, 0);
+	if (control < 0 || connect(control, (struct sockaddr *)&control_address,
+				  sizeof(control_address)) < 0)
+		return fail("listener-control-connect");
+
+	listener = make_listener_at(&listener_address, INADDR_ANY, 26010);
+	if (listener < 0 || listener_exchange_local(listener, external_address) ||
+	    send_all(control, "WILDCARD\n", 9, "listener-control-wildcard") ||
+	    listener_exchange_external(listener) ||
+	    control_acknowledgment(control))
+		return fail("listener-wildcard");
+	close(listener);
+
+	listener = make_listener_at(&listener_address, external_address, 26011);
+	if (listener < 0 || listener_exchange_local(listener, external_address) ||
+	    send_all(control, "EXTERNAL\n", 9, "listener-control-external") ||
+	    listener_exchange_external(listener) ||
+	    control_acknowledgment(control))
+		return fail("listener-external-specific");
+	close(listener);
+
+	listener = make_listener_at(&listener_address, INADDR_LOOPBACK, 26012);
+	if (listener < 0 || listener_exchange_local(listener, INADDR_LOOPBACK) ||
+	    control_phase(control, "LOOPBACK\n"))
+		return fail("listener-loopback-specific");
+	flags = fcntl(listener, F_GETFL);
+	if (flags < 0 || fcntl(listener, F_SETFL, flags | O_NONBLOCK) < 0)
+		return fail("listener-loopback-nonblock");
+	errno = 0;
+	if (expect_errno(accept(listener, NULL, NULL), EAGAIN,
+			 "listener-loopback-external-rejected"))
+		return 1;
+	close(listener);
+	close(control);
+	puts("TPASS: tcp_r0_listener_ingress");
+	return 0;
+}
+
 static int self_external_oracle(void)
 {
 	static const char request[] = "ANEMONE_TCP_SELF_REQUEST";
@@ -771,13 +904,15 @@ int main(int argc, char **argv)
 {
 	if (argc == 2 && strcmp(argv[1], "--self-external") == 0)
 		return self_external_oracle();
+	if (argc == 4 && strcmp(argv[1], "--listener-ingress") == 0)
+		return listener_ingress_oracle(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "--remote-external") == 0)
 		return remote_external_oracle(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "--remote-reset") == 0)
 		return remote_reset_oracle(argv[2], argv[3]);
 	if (argc != 1) {
 		fprintf(stderr,
-			"usage: %s [--self-external | --remote-external HOST PORT | --remote-reset HOST PORT]\n",
+			"usage: %s [--self-external | --listener-ingress HOST PORT | --remote-external HOST PORT | --remote-reset HOST PORT]\n",
 			argv[0]);
 		return 2;
 	}

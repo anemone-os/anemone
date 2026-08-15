@@ -418,20 +418,26 @@ mod kunits {
         assert!(entries.iter().any(|name| name == "ptmx"));
         assert!(entries.iter().any(|name| name == "null"));
         assert!(entries.iter().any(|name| name == "zero"));
+        assert!(entries.iter().any(|name| name == "full"));
+        assert!(entries.iter().any(|name| name == "urandom"));
         assert!(entries.iter().any(|name| name.starts_with("ram")));
 
         unmount_devfs(&mountpoint);
     }
 
     #[kunit]
-    fn test_devfs_char_device_io_and_attrs() {
+    fn test_devfs_memory_char_device_io_readiness_and_attrs() {
         let mountpoint = mount_devfs("char-io");
 
         let null_path = format!("{mountpoint}/null");
         let zero_path = format!("{mountpoint}/zero");
+        let full_path = format!("{mountpoint}/full");
+        let urandom_path = format!("{mountpoint}/urandom");
 
         let null = vfs_open(Path::new(null_path.as_str())).unwrap();
         let zero = vfs_open(Path::new(zero_path.as_str())).unwrap();
+        let full = vfs_open(Path::new(full_path.as_str())).unwrap();
+        let urandom = vfs_open(Path::new(urandom_path.as_str())).unwrap();
 
         let null_attr = vfs_get_attr(Path::new(null_path.as_str())).unwrap();
         assert_eq!(null_attr.mode.ty(), InodeType::Char);
@@ -446,6 +452,19 @@ mod kunits {
             )
         );
 
+        let full_attr = vfs_get_attr(Path::new(full_path.as_str())).unwrap();
+        assert_eq!(full_attr.mode.ty(), InodeType::Char);
+        assert_eq!(
+            full_attr.rdev,
+            DeviceId::Number(
+                CharDevNum::new(
+                    MajorNum::new(devnum::char::major::MEMORY),
+                    MinorNum::new(devnum::char::minor::FULL)
+                )
+                .number()
+            )
+        );
+
         assert_eq!(null.write(b"abc").unwrap(), 3);
         let mut buf = [0u8; 8];
         assert_eq!(null.read(&mut buf).unwrap(), 0);
@@ -454,8 +473,35 @@ mod kunits {
         assert_eq!(zero.read(&mut zero_buf).unwrap(), 8);
         assert_eq!(zero_buf, [0u8; 8]);
 
+        let mut full_buf = [0xffu8; 8];
+        assert_eq!(full.read(&mut full_buf).unwrap(), 8);
+        assert_eq!(full_buf, [0u8; 8]);
+        assert_eq!(full.write(b"abc"), Err(SysError::NoSpace));
+
+        for file in [&null, &zero, &full, &urandom] {
+            assert_eq!(
+                file.poll(&PollRequest::snapshot(PollEvent::READABLE))
+                    .unwrap(),
+                PollRegisterResult::Ready(PollEvent::READABLE)
+            );
+            assert_eq!(
+                file.poll(&PollRequest::snapshot(PollEvent::WRITABLE))
+                    .unwrap(),
+                PollRegisterResult::Ready(PollEvent::WRITABLE)
+            );
+            assert_eq!(
+                file.poll(&PollRequest::snapshot(
+                    PollEvent::READABLE | PollEvent::WRITABLE | PollEvent::ERROR,
+                ))
+                .unwrap(),
+                PollRegisterResult::Ready(PollEvent::READABLE | PollEvent::WRITABLE)
+            );
+        }
+
         drop(null);
         drop(zero);
+        drop(full);
+        drop(urandom);
 
         unmount_devfs(&mountpoint);
     }

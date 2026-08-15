@@ -68,7 +68,7 @@ impl Stack {
             protocols.complete_egress(active, id, &entry.protocols, &entry.sockets);
         // Deferred TCP resources stay engine-owned until a pump has emitted
         // their final protocol work; only then may the old generation detach.
-        protocols.reclaim_tcp(id, &mut entry.sockets);
+        let tcp_progression = protocols.reclaim_tcp(id, &mut entry.sockets);
         // A TCP timer may commit a terminal state before an exhausted TX
         // provider prevents smoltcp from reporting SocketStateChanged. This is
         // a conservative recheck hint; endpoint facts remain the sole truth.
@@ -84,7 +84,11 @@ impl Stack {
             // Repeating the same round cannot progress until its durable
             // completion/link edge requests a recheck.
             RoundContinuation::AwaitProviderEdge
-        } else if ingress_may_remain || egress_may_remain || protocol_egress_may_remain {
+        } else if ingress_may_remain
+            || egress_may_remain
+            || protocol_egress_may_remain
+            || tcp_progression
+        {
             RoundContinuation::Runnable
         } else {
             RoundContinuation::Quiescent
@@ -266,7 +270,7 @@ mod tests {
         let mut stack = Stack::with_policy(StackPolicy::new(
             UdpNamespacePolicy::new(4, 30000, 30003),
             IcmpRawNamespacePolicy::new(4),
-            TcpPolicy::new(4, 4, 1, 64, 64, 4, 1, 60_000, 40000, 40003),
+            TcpPolicy::new(4, 4, 1, 2, 64, 64, 4, 1, 60_000, 40000, 40003),
         ));
         let mut provider = UnavailableProvider { transmit_calls: 0 };
         let interface = stack.add_interface(

@@ -60,3 +60,21 @@ pub type TaskContext = <SchedArch as SchedArchTrait>::TaskContext;
 pub type TaskArchProperties = <SchedArch as SchedArchTrait>::TaskProperties;
 pub type LocalClockSource = <TimeArch as TimeArchTrait>::LocalClockSource;
 pub type LocalClockEvent = <TimeArch as TimeArchTrait>::LocalClockEvent;
+
+/// Architecture-owned address width exposed to read-only diagnostic consumers.
+pub(crate) const fn address_bits() -> u32 {
+    usize::BITS
+}
+
+/// Architecture-owned native byte order exposed to read-only diagnostic
+/// consumers.
+pub(crate) const fn cpu_byteorder() -> &'static str {
+    #[cfg(target_endian = "little")]
+    {
+        "little"
+    }
+    #[cfg(target_endian = "big")]
+    {
+        "big"
+    }
+}
