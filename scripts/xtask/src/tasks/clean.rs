@@ -9,6 +9,7 @@ const GENERATED_KERNEL_INPUTS: &[&str] = &[
     "anemone-kernel/src/platform_defs.rs",
     "anemone-kernel/src/boot_defs.rs",
     "anemone-kernel/src/network_defs.rs",
+    "anemone-kernel/src/nemophila_defs.rs",
 ];
 
 pub fn run() -> anyhow::Result<()> {
@@ -36,6 +37,7 @@ mod tests {
     #[test]
     fn clean_removes_every_generated_kernel_input() {
         assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/network_defs.rs"));
-        assert_eq!(GENERATED_KERNEL_INPUTS.len(), 4);
+        assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/nemophila_defs.rs"));
+        assert_eq!(GENERATED_KERNEL_INPUTS.len(), 5);
     }
 }

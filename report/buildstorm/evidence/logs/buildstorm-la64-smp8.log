@@ -1,0 +1,1152 @@
+[1;36m     RESOLVE[0m selection source=explicit-tuple target=qemu-virt-la64-final platform=qemu-virt-la64 kernel-config=conf/kconfs/default.toml profile=release
+[1;36m        BIND[0m disk-x0=build/runtime/final-la64/disk-x0.img
+[1;36m        BIND[0m smp=8
+[1;36m        BIND[0m memory=8G
+[1;36m        BIND[0m net-user-options=hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555
+[1;36m        BIND[0m kernel-image=build/anemone.elf
+[1;36m        QEMU[0m Launching QEMU emulator...
+$ qemu-system-loongarch64 -machine virt -smp 8 -m 8G -nographic -serial mon:stdio -rtc base=utc -accel tcg,thread=multi -no-reboot -device pcie-root-port,id=pcie.1,bus=pcie.0 -device virtio-net-pci,netdev=net0 -cpu la464 -netdev user,id=net0,hostfwd=tcp::5555-:5555,hostfwd=udp::5555-:5555 -kernel build/anemone.elf -drive file=build/runtime/final-la64/disk-x0.img,format=raw,if=none,id=x0 -device virtio-blk-pci-transitional,drive=x0,bus=pcie.0
+[1m-- KUnit Test Runner --[0m
+[1mRunning 619 tests...[0m
+anemone_kernel::debug::printk::kunits::macro_callsite_payload_and_single_policy_snapshot...[32;1mok[0m
+anemone_kernel::debug::printk::kunits::compile_disabled_macro_does_not_evaluate_arguments...[32;1mok[0m
+anemone_kernel::debug::printk::kunits::long_utf8_record_stays_visible_and_marks_truncation...[   12.637106] [[1;31m  EMERG[0m] anemone_kernel::debug::printk::kunits:280: 界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界 [truncated]
+[32;1mok[0m
+anemone_kernel::utils::ring_buffer::kunits::heap_ring_wrap_exposes_two_readable_slices...[32;1mok[0m
+anemone_kernel::utils::ring_buffer::kunits::heap_ring_rejects_invalid_capacity_and_is_exact...[32;1mok[0m
+anemone_kernel::utils::ring_buffer::kunits::heap_ring_single_and_bulk_operations_preserve_fifo...[32;1mok[0m
+anemone_kernel::device::rtc::kunits::registry_admits_unique_origins_and_seals_once...[32;1mok[0m
+anemone_kernel::device::rtc::kunits::selection_preference_and_ambiguity_are_deterministic...[32;1mok[0m
+anemone_kernel::device::rtc::kunits::preference_miss_and_empty_registry_keep_zero_fallback...[32;1mok[0m
+anemone_kernel::device::rtc::kunits::explicit_failure_does_not_fallback_or_repeat_and_clock_reads_do_not_reenter...[32;1mok[0m
+anemone_kernel::exception::ipi::kunits::test_broadcast_copy_reconstructs_only_eligible_payloads...[32;1mok[0m
+anemone_kernel::net::domain::stack::kunits::typed_recheck_routes_share_storage_rules_without_sharing_endpoint_truth...[32;1mok[0m
+anemone_kernel::task::jobctl::group::kunits::test_continue_cancels_stopping_without_report...[32;1mok[0m
+anemone_kernel::task::jobctl::group::kunits::test_terminal_transaction_clears_all_exposure...[32;1mok[0m
+anemone_kernel::task::jobctl::group::kunits::test_conditional_stop_rejects_stale_continue_epoch...[32;1mok[0m
+anemone_kernel::debug::printk::presentation::kunits::live_and_replay_formatter_share_exact_presentation...[32;1mok[0m
+anemone_kernel::device::bus::pcie::ls_pcie_bus...
+pcie bus:
+  device: pci0000:00
+  driver: pcie-bridge-driver
+  driver: virtio-pcie-transport
+[32;1mok[0m
+anemone_kernel::device::bus::virtio::ls_virtio_devices...
+virtio bus:
+  device: 0000:00:02.00
+  device: 0000:00:03.00
+  driver: virtio-net
+  driver: virtio-blk
+[32;1mok[0m
+anemone_kernel::device::bus::platform::ls_platform_bus...
+platform bus:
+  device: platform-bus@16000000
+  device: poweroff
+  device: reboot
+  device: ged@100e001c
+  device: rtc@100d0100
+  device: serial@1fe001e0
+  device: serial@1fe002e0
+  device: serial@1fe003e0
+  device: serial@1fe004e0
+  device: pcie@20000000
+  device: msi@2ff00000
+  device: eiointc@1400
+  device: cpuic
+  device: flash@1c000000
+  device: fw_cfg@1e020000
+  driver: dw-mshc
+  driver: goldfish-rtc
+  driver: uart16550
+  driver: uart16550-dw
+  driver: virtio-mmio-transport
+  driver: ahci
+  driver: pci-host-ecam-generic
+  driver: ls7a-rtc
+[32;1mok[0m
+anemone_kernel::device::mmc::registry::host_device_parent_identity_and_lookup...[32;1mok[0m
+anemone_kernel::driver::mmc::sd_memory::block_range_is_checked...[32;1mok[0m
+anemone_kernel::driver::mmc::sd_memory::endpoint_identity_uses_one_local_id...[32;1mok[0m
+anemone_kernel::driver::mmc::sd_memory::single_block_io_uses_capacity_addressing_and_status...[32;1mok[0m
+anemone_kernel::driver::ahci::port::fatal_interrupts_have_stable_error_priority...[32;1mok[0m
+anemone_kernel::driver::ahci::regs::capability_fields_are_encoded_plus_one...[32;1mok[0m
+anemone_kernel::driver::ahci::regs::mapping_length_and_port_windows_are_generic...[32;1mok[0m
+anemone_kernel::device::mmc::discovery::sd::csd_v2_capacity_is_checked...[32;1mok[0m
+anemone_kernel::device::mmc::discovery::sd::command_address_uses_card_capacity_mode...[32;1mok[0m
+anemone_kernel::device::mmc::discovery::sd::r1_check_rejects_every_card_status_error...[32;1mok[0m
+anemone_kernel::device::mmc::discovery::sd::csd_v1_capacity_and_block_length_are_checked...[32;1mok[0m
+anemone_kernel::device::tty::endpoint::kunits::deterministic_identity_mapping_and_selection...[32;1mok[0m
+anemone_kernel::device::tty::endpoint::kunits::endpoint_minor_overflow_is_rejected_before_publication...[32;1mok[0m
+anemone_kernel::fs::epoll::api::epoll_ctl::kunits::epollrdhup_is_a_real_delivery_interest...[32;1mok[0m
+anemone_kernel::arch::loongarch64::exception::unaligned::access::extends_signed_and_unsigned_loads...[32;1mok[0m
+anemone_kernel::arch::loongarch64::exception::unaligned::decode::rejects_non_emulated_instructions...[32;1mok[0m
+anemone_kernel::arch::loongarch64::exception::unaligned::decode::decodes_integer_instruction_formats...[32;1mok[0m
+anemone_kernel::task::api::futex::futex::kunits::realtime_flag_is_limited_to_wait_bitset...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_linux_nice_weight_table...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_heap_min_pass_and_sequence_order...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_stride_delta_arithmetic_and_bounds...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_current_block_exit_and_same_fair_arrival...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_weighted_charge_preserves_ready_snapshot...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_tick_peer_continue_and_delayed_pick_accounting...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_pick_set_gap_preserves_floor_for_fresh_and_wake...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_fresh_wake_clamp_debt_and_empty_floor_persistence...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_preempt_and_handoff_refresh_only_final_post_state...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_option_pass_initializes_once_and_survives_lifecycle...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_fair_transition_factory_uses_current_placement_floor...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_equal_weight_round_order_and_no_double_preempt_charge...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_preplaced_transition_enqueue_reclamps_and_gets_new_sequence...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_yield_peer_first_no_peer_self_pick_and_high_weight_counterexample...[32;1mok[0m
+anemone_kernel::sched::class::fair::stride::kunits::test_reconfigure_clear_preserves_minimum_current_floor_until_final_union...[32;1mok[0m
+anemone_kernel::device::ls_devices...
+devices : platform device
+	resources: []
+devices/platform-bus@16000000 : platform device
+	resources: []
+devices/poweroff : platform device
+	resources: []
+devices/reboot : platform device
+	resources: []
+devices/ged@100e001c : platform device
+	resources: [Mmio { base: PhysAddr(0x100e001c), len: 3 }]
+devices/rtc@100d0100 : platform device
+	resources: [Mmio { base: PhysAddr(0x100d0100), len: 100 }]
+devices/serial@1fe001e0 : platform device
+	resources: [Mmio { base: PhysAddr(0x1fe001e0), len: 100 }]
+devices/serial@1fe002e0 : platform device
+	resources: [Mmio { base: PhysAddr(0x1fe002e0), len: 100 }]
+devices/serial@1fe003e0 : platform device
+	resources: [Mmio { base: PhysAddr(0x1fe003e0), len: 100 }]
+devices/serial@1fe004e0 : platform device
+	resources: [Mmio { base: PhysAddr(0x1fe004e0), len: 100 }]
+devices/pcie@20000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x20000000), len: 8000000 }]
+devices/pci0000:01 : pcie device
+devices/pci0000:00 : pcie device
+devices/pci0000:00/0000:00:01.00 : pcie device
+devices/pci0000:00/0000:00:02.00 : pcie device
+devices/pci0000:00/0000:00:02.00/0000:00:02.00 : virtio device
+devices/pci0000:00/0000:00:03.00 : pcie device
+devices/pci0000:00/0000:00:03.00/0000:00:03.00 : virtio device
+devices/msi@2ff00000 : platform device
+	resources: [Mmio { base: PhysAddr(0x2ff00000), len: 8 }]
+devices/eiointc@1400 : platform device
+	resources: [Mmio { base: PhysAddr(0x1400), len: 800 }]
+devices/cpuic : platform device
+	resources: []
+devices/flash@1c000000 : platform device
+	resources: [Mmio { base: PhysAddr(0x1c000000), len: 1000000 }, Mmio { base: PhysAddr(0x1d000000), len: 1000000 }]
+devices/fw_cfg@1e020000 : platform device
+	resources: [Mmio { base: PhysAddr(0x1e020000), len: 18 }]
+[32;1mok[0m
+anemone_kernel::arch::loongarch64::fpu::lsx_context_round_trip_preserves_full_register_file...[32;1mok[0m
+anemone_kernel::task::task_itimer::kunits::itimer_owner_drop_removes_a_far_future_request...[32;1mok[0m
+anemone_kernel::task::task_itimer::kunits::delayed_periodic_completion_advances_from_the_old_target...[32;1mok[0m
+anemone_kernel::task::task_itimer::kunits::unrepresentable_initial_timeout_saturates_owner_deadline...[32;1mok[0m
+anemone_kernel::task::task_itimer::kunits::replace_cancel_and_stale_completion_keep_one_live_request...[32;1mok[0m
+anemone_kernel::task::task_itimer::kunits::unrepresentable_periodic_interval_saturates_without_panicking...[32;1mok[0m
+anemone_kernel::time::clock::kunits::all_native_clock_ids_have_explicit_read_routes...[32;1mok[0m
+anemone_kernel::time::clock::kunits::ordinary_and_coarse_clocks_use_their_own_resolution_classes...[32;1mok[0m
+anemone_kernel::debug::backtrace::kunits::embedded_table_resolves_a_live_kernel_function...[32;1mok[0m
+anemone_kernel::debug::backtrace::kunits::missing_or_malformed_table_falls_back_to_raw_pc...[32;1mok[0m
+anemone_kernel::debug::backtrace::kunits::formatter_keeps_raw_pc_and_derives_symbol_offset...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_reset_on_fork_config_matrix...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_non_escalating_permit_transition_matrix...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_non_escalating_permit_checks_latest_config...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_sched_config_patch_rejects_parameter_family_mismatch...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_cpu_mask_compile_time_domain_and_online_normalization...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_sched_config_patch_exact_noop_and_supported_projection...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_sched_config_patch_supports_all_discipline_replacements...[32;1mok[0m
+anemone_kernel::sched::config::kunits::test_configured_interval_uses_only_discipline_and_configured_quantum...[32;1mok[0m
+anemone_kernel::sched::request::kunits::test_request_consumes_one_body_and_completes_after_commit...[32;1mok[0m
+anemone_kernel::device::char::kunits::registry_derives_devnum_and_rejects_duplicate_keys...[32;1mok[0m
+anemone_kernel::device::block::ramdisk::endpoint_identity_uses_one_local_id...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::stdout_options_parser...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::stdout_line_control_bits...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::global_leaf_is_not_unmapped...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::traversal_crosses_leaf_table_boundary...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::unmap_single_page_reclaims_empty_tables...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::failed_range_map_rolls_back_only_new_pages...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::canonical_high_half_traversal_sign_extends_vpn...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::change_flags_visits_each_cross_boundary_leaf_once...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::leaf_commit_does_not_hide_replaced_valid_ancestor...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::leaf_commit_classifies_additive_and_present_changes...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::global_huge_leaf_translation_ignores_huge_global_bit...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::unmap_can_transfer_empty_tables_to_remote_retirement...[32;1mok[0m
+anemone_kernel::mm::paging::mapper::kunits::huge_leaf_survives_partial_range_and_unmaps_when_covered...[32;1mok[0m
+anemone_kernel::time::timer::threaded::kunits::threaded_timer_callback_runs_outside_hwirq...[32;1mok[0m
+anemone_kernel::time::timer::threaded::kunits::threaded_timer_burst_completes_in_process_context...[32;1mok[0m
+anemone_kernel::debug::printk::record::kunits::record_preserves_metadata_and_utf8_prefix...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_fifo_tick_does_not_rotate_with_peer...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_rt_priority_bounds_order_and_bucket_mapping...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_arrival_preemption_is_strictly_higher_priority...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_delayed_tick_requeue_preserves_new_rr_remainder...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_higher_priority_arrival_requeues_current_at_head...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_rt_entity_constructor_builds_fresh_typed_payload...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_repeated_expiry_coalesces_one_rotation_obligation...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_rr_tick_decrements_refills_and_distinguishes_peer...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_peer_disappearance_does_not_revoke_committed_rotation...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_yield_handoff_block_and_exit_clear_rotation_obligation...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_highest_priority_pick_preserves_mixed_policy_fifo_order...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_current_rt_priority_change_preserves_budget_and_clears_rotation...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_current_rt_mode_change_installs_fresh_runtime_before_preempt_tail...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_committed_rotation_requeues_rr_at_tail_before_higher_priority_pick...[32;1mok[0m
+anemone_kernel::sched::class::rt::kunits::test_current_generic_patch_preserves_rr_rotation_and_normal_tail_placement...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_actual_cross_class_pick_precedence...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_same_and_cross_class_arrival_decisions...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_config_patch_current_and_queued_fair_roles...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_fair_runqueue_membership_transaction_boundaries...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_queued_fair_rt_transitions_preserve_membership_count...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_exact_noop_and_generic_rt_patch_preserve_physical_role...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_queued_rt_reconfigure_head_tail_and_mode_switch_placement...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_config_patch_detached_runnable_transition_and_latest_permit...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_config_patch_zombie_fails_before_projection_without_mutation...[32;1mok[0m
+anemone_kernel::sched::class::runqueue::kunits::test_current_fair_rt_transitions_attach_and_use_normal_preempt_tail...[32;1mok[0m
+anemone_kernel::fs::proc::tgid::status::kunits::test_cpus_allowed_list_formats_sparse_ranges_and_full_domain...[32;1mok[0m
+anemone_kernel::fs::proc::tgid::status::kunits::test_cpus_allowed_mask_formats_sparse_and_full_compile_time_domain...[32;1mok[0m
+anemone_kernel::sched::api::policy::sched_setscheduler::kunits::test_setscheduler_policy_parameter_and_reset_projection...[32;1mok[0m
+anemone_kernel::sched::api::priority::setpriority::kunits::test_setpriority_local_path_and_partial_progress_folding...[32;1mok[0m
+anemone_kernel::sched::api::policy::attr::sched_setattr::kunits::test_setattr_rejects_unsupported_policy_flag_and_ranges...[32;1mok[0m
+anemone_kernel::sched::api::policy::attr::sched_setattr::kunits::test_setattr_supported_policy_patch_and_inactive_fields...[32;1mok[0m
+anemone_kernel::sched::api::policy::attr::sched_setattr::kunits::test_setattr_util_field_presence_precedes_feature_rejection...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::distinct_fifo_anchors_never_share_runtime_session...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::duplex_endpoint_contributes_and_retires_each_side_once...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::wrapped_bytes_survive_grow_busy_shrink_and_legal_shrink...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::fifo_anchor_reuses_live_session_and_replaces_stale_session...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::rejected_nonblocking_writer_never_publishes_a_partner_generation...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::initial_nonblocking_reader_suppresses_hup_until_a_writer_generation...[32;1mok[0m
+anemone_kernel::fs::pipe::kunits::pending_partner_generation_survives_short_overlap_and_cancel_rolls_back...[32;1mok[0m
+anemone_kernel::arch::loongarch64::sched::task_properties_follow_clone_and_exec_lifecycle...[32;1mok[0m
+anemone_kernel::task::kworker::kunits::system_workers_cover_boot_online_topology...[32;1mok[0m
+anemone_kernel::task::kworker::kunits::system_worker_preserves_fifo_and_executes_once...[32;1mok[0m
+anemone_kernel::task::kworker::kunits::system_worker_callback_resubmission_is_a_new_fifo_entry...[32;1mok[0m
+anemone_kernel::fs::pipe::capacity::kunits::normalization_matches_pipe_abi...[32;1mok[0m
+anemone_kernel::fs::pipe::capacity::kunits::maximum_and_same_size_are_classified_before_allocation...[32;1mok[0m
+anemone_kernel::mm::uspace::residency::kunits::stable_resident_set_tracks_only_joined_cpus...[32;1mok[0m
+anemone_kernel::mm::uspace::residency::kunits::completed_leave_converges_to_remaining_residents...[32;1mok[0m
+anemone_kernel::net::domain::control_plane::kunits::control_plane_publication_is_one_time...[32;1mok[0m
+anemone_kernel::net::domain::control_plane::kunits::ipv4_control_plane_table_and_source_matrix...[32;1mok[0m
+anemone_kernel::net::domain::control_plane::kunits::missing_interface_fails_before_control_publication...[32;1mok[0m
+anemone_kernel::device::net::registry::kunits::publication_identity_facts_and_failures_remain_record_local...[32;1mok[0m
+anemone_kernel::exception::ipi::user_tlb::kunits::source_only_residency_prepares_no_remote_target...[32;1mok[0m
+anemone_kernel::exception::ipi::user_tlb::kunits::preparation_snapshots_only_selected_remote_targets...[32;1mok[0m
+anemone_kernel::exception::ipi::user_tlb::kunits::injected_storage_failure_constructs_no_user_tlb_transport...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::codec::kunits::framing_ignores_alignment_padding_and_continues...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::codec::kunits::inet_diag_v2_uses_linux_states_then_sockid_layout...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::codec::kunits::error_and_done_keep_sequence_port_and_linux_lengths...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::codec::kunits::framing_keeps_valid_prefix_and_silently_stops_invalid_tail...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::codec::kunits::request_envelopes_reject_unpublished_flags_attributes_and_tables...[32;1mok[0m
+anemone_kernel::sched::api::policy::attr::kunits::test_attr_version_sizes_and_copy_bounds...[32;1mok[0m
+anemone_kernel::sched::api::policy::attr::kunits::test_attr_short_prefix_zero_fill_and_exact_encoding...[32;1mok[0m
+anemone_kernel::device::block::r#loop::endpoint_identity_uses_one_local_id...[32;1mok[0m
+anemone_kernel::device::block::r#loop::loop_status_uses_the_canonical_linux_device_codec...[32;1mok[0m
+anemone_kernel::device::block::kunits::registry_derives_devnum_and_rejects_duplicate_keys...[32;1mok[0m
+anemone_kernel::device::block::kunits::batch_endpoints_share_only_their_io_coordination_domain...[32;1mok[0m
+anemone_kernel::fs::api::utimensat::kunits::null_path_matches_linux_futimens_classification...[32;1mok[0m
+anemone_kernel::fs::api::utimensat::kunits::empty_and_nonempty_paths_keep_their_existing_resolution_modes...[32;1mok[0m
+anemone_kernel::mm::api::membarrier::kunits::test_query_exposes_only_global...[32;1mok[0m
+anemone_kernel::mm::api::membarrier::kunits::test_global_memory_barrier_rendezvous_completes...[32;1mok[0m
+anemone_kernel::mm::api::membarrier::kunits::test_unsupported_commands_and_flags_are_rejected...[32;1mok[0m
+anemone_kernel::sched::class::entity::kunits::test_child_factory_inherits_config_but_not_class_runtime...[32;1mok[0m
+anemone_kernel::sched::class::entity::kunits::test_default_constructor_uses_typed_selector_and_fresh_payload...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_status_rejects_odirect...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_byte_write_serial_rmw_keeps_both_writes...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_byte_read_handles_unaligned_offsets_and_eof...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_byte_write_reports_short_write_at_device_end...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_seek_accepts_byte_offsets_within_device_size...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_byte_write_preserves_unaligned_cross_block_edges...[32;1mok[0m
+anemone_kernel::device::block::devfs::kunits::test_block_byte_write_preserves_unaligned_single_block_edges...[32;1mok[0m
+anemone_kernel::device::block::partition::kunits::no_signature_keeps_whole_disk_only...[32;1mok[0m
+anemone_kernel::device::block::partition::kunits::numeric_disk_names_use_p_separator...[32;1mok[0m
+anemone_kernel::device::block::partition::kunits::primary_slots_keep_names_and_translate_io...[32;1mok[0m
+anemone_kernel::device::block::partition::kunits::invalid_and_protective_entries_are_not_published...[32;1mok[0m
+anemone_kernel::fs::socket::api::accept::kunits::accept_flags_do_not_inherit_listener_status...[32;1mok[0m
+anemone_kernel::mm::frame::allocator::allocator_stats::kunits::usage_threshold_is_strictly_greater_and_zero_total_is_inert...[32;1mok[0m
+anemone_kernel::fs::api::args::kunits::test_linux_inode_perm_ignores_file_type_bits...[32;1mok[0m
+anemone_kernel::fs::api::getrandom::kunits::test_getrandom_flags_accept_known_linux_bits...[32;1mok[0m
+anemone_kernel::fs::api::getrandom::kunits::test_stage1_random_bytes_do_not_collapse_to_one_value...[32;1mok[0m
+anemone_kernel::fs::api::getrandom::kunits::test_getrandom_flags_reject_unknown_and_invalid_combinations...[32;1mok[0m
+anemone_kernel::fs::mount::data::kunits::test_mount_data_reject_nonempty_for_backend...[32;1mok[0m
+anemone_kernel::fs::mount::data::kunits::test_mount_data_loop_option_detection_trims_options...[32;1mok[0m
+anemone_kernel::fs::timerfd::abi::kunits::internal_spec_round_trips_linux_layout...[32;1mok[0m
+anemone_kernel::fs::timerfd::abi::kunits::rejects_invalid_or_overflowing_timespec_fields...[32;1mok[0m
+anemone_kernel::mm::uspace::vmo::kunits::byte_write_rejects_a_nonwritable_resolved_frame...[32;1mok[0m
+anemone_kernel::mm::uspace::vmo::kunits::byte_helpers_resolve_each_page_once_and_preserve_partial_edges...[32;1mok[0m
+anemone_kernel::net::domain::interfaces::kunits::logical_membership_reservation_is_monotonic_and_failure_isolated...[32;1mok[0m
+anemone_kernel::task::credentials::cap::kunits::mknod_is_a_supported_linux_capability...[32;1mok[0m
+anemone_kernel::task::credentials::cap::kunits::root_starts_with_mknod_in_all_limit_sets...[32;1mok[0m
+anemone_kernel::time::posix_timer::api::kunits::timer_clock_and_notification_matrices_are_explicit...[32;1mok[0m
+anemone_kernel::time::posix_timer::api::kunits::native_timer_uapi_layout_and_timespec_validation_are_fixed...[32;1mok[0m
+anemone_kernel::debug::api::dbg_log_ctl::kunits::get_set_validation_permission_and_restore...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_mount_data_loop_option_detection...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_mount_flags_accept_plain_remount...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_mount_flags_accept_rdonly_and_silent...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_fstype_alias_stays_in_syscall_adapter...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_loop_data_rejection_precedes_fstype_admission...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_mount_flags_reject_unsupported_operation_bits...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::test_mount_flags_reject_unsupported_attrs_and_unknown_bits...[32;1mok[0m
+anemone_kernel::fs::api::mount::mount::kunits::block_mount_admission_distinguishes_identity_from_provider_lookup...[32;1mok[0m
+anemone_kernel::fs::socket::api::profile::kunits::tcp_profile_publishes_zero_and_canonical_protocol_tuples...[32;1mok[0m
+anemone_kernel::fs::socket::api::profile::kunits::message_publication_is_independent_of_datagram_family_capability...[32;1mok[0m
+anemone_kernel::fs::socket::api::profile::kunits::profile_table_round_trips_every_semantic_type_and_canonical_tuple...[32;1mok[0m
+anemone_kernel::mm::uspace::vmo::shadow::kunits::decommit_masks_overlay_and_parent_contents...[32;1mok[0m
+anemone_kernel::time::clock::api::clock_nanosleep::kunits::sleep_clock_operation_matrix_is_explicit...[32;1mok[0m
+anemone_kernel::sched::api::policy::sched_get_priority_max::kunits::test_priority_max_static_policy_domain...[32;1mok[0m
+anemone_kernel::sched::api::policy::sched_get_priority_min::kunits::test_priority_min_static_policy_domain...[32;1mok[0m
+anemone_kernel::driver::net::virtio::device::kunits::recheck_latch_preserves_fact_without_wake_and_coalesces_publications...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::partial_file_page_and_bss_are_zero_filled...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::writable_pages_are_private_between_images...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::construction_is_lazy_and_fault_is_page_local...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::merges_overlapping_pages_per_page_protection...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::fork_shadows_keep_materialized_writes_private...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::overlapping_segments_compose_bytes_and_union_permissions...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::elf::segment::kunits::discard_drops_only_the_private_page_and_refaults_from_source...[32;1mok[0m
+anemone_kernel::task::sig::mask::kunits::mask_owner_mutation_rearms_return_work...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::regs::interrupt_decoder_preserves_standard_rx_causes...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::regs::interrupt_decoder_separates_ns16550a_and_dw_busy...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::regs::rx_status_preserves_break_fault_and_overrun_dimensions...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::regs::spurious_rx_timeout_clear_is_dw_only_and_preserves_breaks...[32;1mok[0m
+anemone_kernel::debug::perf::api::perf_observe::kunits::codecs_initialize_every_wire_byte_and_preserve_layout...[32;1mok[0m
+anemone_kernel::debug::perf::api::perf_observe::kunits::request_validation_freezes_structure_and_size_precedence...[32;1mok[0m
+anemone_kernel::debug::perf::api::perf_observe::kunits::descriptor_codec_uses_kind_unit_offsets_and_zero_reserved...[32;1mok[0m
+anemone_kernel::debug::perf::api::perf_observe::kunits::set_returns_complete_old_gate_and_rejected_validation_does_not_mutate...[32;1mok[0m
+anemone_kernel::task::task_resource::kunits::nofile_policy_validates_pair_and_system_ceiling...[32;1mok[0m
+anemone_kernel::task::task_resource::kunits::nofile_fork_snapshot_is_an_independent_complete_pair...[32;1mok[0m
+anemone_kernel::task::task_resource::kunits::nofile_update_returns_preupdate_snapshot_and_checks_hard_raise...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::timer::kunits::thread_unqueued_outcomes_control_overrun_commit...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::timer::kunits::thread_target_exit_keeps_periodic_projection_only...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::timer::kunits::periodic_advance_uses_original_target_and_clamps_overrun...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::timer::kunits::snapshot_derives_future_period_without_mutating_schedule...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::namespace::kunits::remove_does_not_cancel_inflight_reservation...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::namespace::kunits::timer_id_reservation_is_invisible_and_reusable...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::namespace::kunits::stale_reservation_cannot_release_or_publish_reused_id...[32;1mok[0m
+anemone_kernel::task::files::episode::kunits::posix_holder_split_changes_only_a_shared_episode...[32;1mok[0m
+anemone_kernel::task::files::episode::kunits::posix_holder_fork_and_share_follow_episode_identity...[32;1mok[0m
+anemone_kernel::task::files::episode::kunits::final_detach_ignores_storage_observers_and_drains_once...[32;1mok[0m
+anemone_kernel::task::files::episode::kunits::posix_binding_rejects_late_commit_and_fd_reuse_gets_a_fresh_slot...[32;1mok[0m
+anemone_kernel::debug::perf::timer::kunits::syscall_guard_completes_one_paired_sample...[32;1mok[0m
+anemone_kernel::debug::perf::timer::kunits::disabled_finish_and_armed_finish_drop_semantics...[32;1mok[0m
+anemone_kernel::fs::api::mount::umount2::kunits::test_umount_flags_accept_zero...[32;1mok[0m
+anemone_kernel::fs::api::mount::umount2::kunits::test_umount_flags_accept_detach_and_nofollow...[32;1mok[0m
+anemone_kernel::fs::api::mount::umount2::kunits::test_umount_flags_reject_unknown_force_and_expire...[32;1mok[0m
+anemone_kernel::fs::api::mount::umount2::kunits::test_umount_flags_reject_expire_invalid_combinations...[32;1mok[0m
+anemone_kernel::fs::iomux::api::ppoll::kunits::unknown_event_bits_remain_rejected...[32;1mok[0m
+anemone_kernel::fs::iomux::api::ppoll::kunits::read_band_is_not_projected_from_ordinary_readiness...[32;1mok[0m
+anemone_kernel::fs::iomux::api::ppoll::kunits::normal_aliases_project_only_the_exact_requested_bits...[32;1mok[0m
+anemone_kernel::fs::iomux::api::ppoll::kunits::normal_and_band_bits_are_accepted_with_owner_defined_mapping...[32;1mok[0m
+anemone_kernel::time::clock::api::clock_settime::kunits::settime_timespec_validation_rejects_invalid_and_overflowing_values...[32;1mok[0m
+anemone_kernel::driver::rtc::ls7a::driver_core::kunits::decodes_unix_epoch_calendar...[32;1mok[0m
+anemone_kernel::driver::rtc::ls7a::driver_core::kunits::rejects_invalid_calendar_and_hardware_range...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::port::kunits::raw_rx_full_queue_drops_new_units...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::port::kunits::tx_batch_returns_partial_progress_at_poll_timeout...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::port::kunits::raw_rx_preserves_fifo_and_notifies_only_on_empty_transition...[32;1mok[0m
+anemone_kernel::driver::serial::ns16550a::port::kunits::rx_sample_drain_classifies_ordered_conditions_and_counts_diagnostics...[32;1mok[0m
+anemone_kernel::mm::frame::alloc_frame_updates_stats_and_refcount...[32;1mok[0m
+anemone_kernel::mm::frame::alloc_frames_updates_stats_and_refcount...[32;1mok[0m
+anemone_kernel::task::task_posix_timer::kunits::replace_disarm_delete_and_bulk_cleanup_return_queue_to_baseline...[32;1mok[0m
+anemone_kernel::sched::oneshot::kunits::test_sched_oneshot_send_registration_windows...[32;1mok[0m
+anemone_kernel::sched::oneshot::kunits::test_sched_oneshot_dormant_and_endpoint_paths...[32;1mok[0m
+anemone_kernel::sched::oneshot::kunits::test_sched_oneshot_payload_drop_is_exactly_once...[32;1mok[0m
+anemone_kernel::sched::oneshot::kunits::test_sched_oneshot_force_from_parked_round_rearms...[32;1mok[0m
+anemone_kernel::sched::oneshot::kunits::test_sched_oneshot_force_windows_rearm_to_terminal...[32;1mok[0m
+anemone_kernel::sched::oneshot::kunits::test_sched_oneshot_force_then_sender_close_and_terminal_race...[32;1mok[0m
+anemone_kernel::driver::ahci::dma::dma_range_checks_mask_boundary...[32;1mok[0m
+anemone_kernel::driver::virtio::kunits::direct_share_reuses_the_kernel_stack_mapping...[32;1mok[0m
+anemone_kernel::driver::virtio::kunits::direct_share_reuses_the_original_contiguous_pages...[32;1mok[0m
+anemone_kernel::fs::inode::ops::kunits::make_node_description_requires_device_number_only_for_device_kinds...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_ignored_timer_signal_is_not_published...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_ordinary_standard_signal_still_uses_one_slot...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_reserved_sigcont_survives_stop_class_cleanup...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_exiting_task_can_retire_reserved_timer_handoff...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_realtime_fifo_spans_ordinary_and_timer_sources...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_standard_timer_signals_keep_per_timer_identity...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_timer_notification_slot_is_reused_only_after_cleanup...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_deleted_timer_stale_generation_only_completes_handoff...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_exit_closes_admission_and_flushes_private_timer_state...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_same_timer_duplicate_updates_pending_episode_and_overrun...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_new_generation_can_queue_while_stale_handoff_is_in_flight...[32;1mok[0m
+anemone_kernel::task::sig::pending::kunits::test_timer_flush_defers_owner_callback_until_after_pending_unlock...[32;1mok[0m
+anemone_kernel::task::sig::delivery::kunits::private_timer_reservation_reaches_trap_fetch_facade...[32;1mok[0m
+anemone_kernel::fs::socket::udp::source::kunits::empty_interest_registers_for_later_mandatory_error...[32;1mok[0m
+anemone_kernel::fs::socket::udp::source::kunits::ready_at_register_keeps_route_for_later_invalidation...[32;1mok[0m
+anemone_kernel::fs::socket::udp::source::kunits::error_projection_is_mandatory_and_clears_with_owner_fact...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::shared_timer_publication_rearms_return_work...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::private_timer_reuses_registration_after_live_ignore...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::timer_pending_owner_binding_uses_exact_weak_identity...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::private_target_exit_closes_all_three_occurrence_stages...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::private_delivery_callback_reenters_after_pending_unlock...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::private_conditional_stop_duplicate_keeps_one_epoch_authority...[32;1mok[0m
+anemone_kernel::task::sig::pending::timer::kunits::private_sigcont_timer_flushes_on_stop_generation_and_requeues...[32;1mok[0m
+anemone_kernel::sched::api::policy::sched_getparam::kunits::test_getparam_projects_only_active_parameter...[32;1mok[0m
+anemone_kernel::sched::api::policy::attr::sched_getattr::kunits::test_getattr_projects_fair_fifo_and_rr_without_inactive_fields...[32;1mok[0m
+anemone_kernel::driver::ahci::endpoint_identity_uses_one_local_id...[32;1mok[0m
+anemone_kernel::driver::block::virtio_blk::endpoint_identity_uses_one_local_id...[32;1mok[0m
+anemone_kernel::syscall::user_access::kunits::typed_copy_capabilities_are_directional...[32;1mok[0m
+anemone_kernel::syscall::user_access::kunits::c_string_batch_preserves_fault_and_utf8_semantics...[32;1mok[0m
+anemone_kernel::syscall::user_access::kunits::raw_user_address_is_bits_not_a_pointer_capability...[32;1mok[0m
+anemone_kernel::syscall::user_access::kunits::c_string_batch_preserves_page_and_length_boundaries...[32;1mok[0m
+anemone_kernel::fs::api::getdents64::kunits::getdents64_buffer_len_preserves_small_requests...[32;1mok[0m
+anemone_kernel::fs::api::getdents64::kunits::getdents64_buffer_len_clamps_without_rejecting_count...[32;1mok[0m
+anemone_kernel::task::files::descriptor::status_flag_kunits::status_update_retries_after_concurrent_commit...[32;1mok[0m
+anemone_kernel::task::files::descriptor::status_flag_kunits::rejected_status_update_leaves_opened_description_unchanged...[32;1mok[0m
+anemone_kernel::fs::epoll::api::wait::kunits::linux_copyout_projects_read_hang_up_independently...[32;1mok[0m
+anemone_kernel::fs::socket::api::socketpair::kunits::resolver_accepts_unix_stream_flags_and_rejects_udp_pair_capability...[32;1mok[0m
+anemone_kernel::fs::socket::api::socket::kunits::resolver_normalizes_udp_protocol_and_creation_flags...[32;1mok[0m
+anemone_kernel::fs::socket::api::socket::kunits::resolver_publishes_only_the_privileged_icmp_raw_tuple...[32;1mok[0m
+anemone_kernel::fs::socket::api::socket::kunits::resolver_rejects_unsupported_capabilities_before_creation...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::lifecycle::kunits::accepted_source_preparation_failure_uses_child_rollback_reason...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::backlog_normalization_matches_linux_unsigned_clamp...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::backlog_zero_admits_one_child_and_pop_restores_capacity...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::public_listener_poll_reuses_accept_predicate_and_routes...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::backlog_growth_and_shrink_recheck_the_single_queue_owner...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::close_withdraws_both_predicates_and_drains_children_once...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::subscribed_connect_wait_observes_client_connection_commit...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::listen_after_endpoint_retirement_reports_lifecycle_outcome...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::subscribed_accept_wait_observes_admission_and_listener_close...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::subscribed_connect_wait_observes_capacity_and_listener_close...[32;1mok[0m
+anemone_kernel::fs::socket::unix::admission::kunits::terminal_register_returns_ready_without_claiming_subscription...[32;1mok[0m
+anemone_kernel::fs::socket::unix::namespace::kunits::exact_identity_lookup_and_generation_safe_removal_fail_closed...[32;1mok[0m
+anemone_kernel::fs::socket::unix::namespace::kunits::admission_rejects_cross_profile_before_exposing_listener_capability...[32;1mok[0m
+anemone_kernel::driver::net::virtio::frame::kunits::owner_local_slot_cancellation_restores_the_prior_state...[32;1mok[0m
+anemone_kernel::exception::intr::irq::flow::kunits::edge_flow_acknowledges_before_handler...[32;1mok[0m
+anemone_kernel::exception::intr::irq::flow::kunits::level_flow_masks_and_completes_around_handler...[32;1mok[0m
+anemone_kernel::exception::intr::irq::flow::kunits::fast_eoi_flow_completes_after_handler_without_masking...[32;1mok[0m
+anemone_kernel::sched::nice::kunits::test_nice_linux_abi_clamp...[32;1mok[0m
+anemone_kernel::sched::nice::kunits::test_nice_internal_constructor_and_index...[32;1mok[0m
+anemone_kernel::device::devnum::kunits::device_number_uses_linux_12_20_domain...[32;1mok[0m
+anemone_kernel::device::devnum::kunits::static_major_namespaces_do_not_overlap...[32;1mok[0m
+anemone_kernel::device::devnum::kunits::typed_keys_explicitly_wrap_the_common_number...[32;1mok[0m
+anemone_kernel::device::devnum::kunits::linux_dev_t_codec_roundtrips_representative_and_boundary_numbers...[32;1mok[0m
+anemone_kernel::driver::ahci::fis::identify_has_no_data_address_fields...[32;1mok[0m
+anemone_kernel::driver::ahci::fis::lba48_fis_encodes_address_and_count...[32;1mok[0m
+anemone_kernel::fs::epoll::watch::kunits::read_hang_up_is_routed_but_only_delivered_when_requested...[32;1mok[0m
+anemone_kernel::fs::dentry::residency::kunits::admission_retains_and_fifo_evicts_at_capacity...[32;1mok[0m
+anemone_kernel::fs::dentry::residency::kunits::drain_releases_all_residents_and_invalidates_prior_tickets...[32;1mok[0m
+anemone_kernel::fs::dentry::residency::kunits::stale_admission_cannot_create_residency_and_forget_releases_current...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_basic...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_invalid...[32;1mok[0m
+anemone_kernel::task::api::execve::binfmt::shebang::kunits::test_nested_argv_rewrite...[32;1mok[0m
+anemone_kernel::mm::uspace::kunits::only_additive_user_return_may_defer_local_completion...[32;1mok[0m
+anemone_kernel::fs::api::fcntl::kunits::dup_minimum_has_command_specific_einval_boundary...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_root_lookup...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_mkdir_link_and_rmdir...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_create_lookup_and_cleanup...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_file_read_write_semantics...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_get_attr_reports_basic_metadata...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_get_attr_tracks_hard_link_counts...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_get_attr_tracks_size_after_writes...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_symlink_relative_parent_traversal...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_symlink_relative_lookup_and_readlink...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_symlink_loop_limit_and_rmdir_nofollow...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_ramfs_directory_rename_and_cycle_guard...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_creation_uses_explicit_owner_and_permission...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_symlink_absolute_and_intermediate_resolution...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_symlink_absolute_target_crosses_mount_boundary...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_vfs_symlink_resolution_flags_propagate_to_parent_lookup...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_resolve_from_root_clamps_parent_traversal_at_logical_root...[32;1mok[0m
+anemone_kernel::fs::vfs::ops::kunits::test_resolve_from_root_uses_logical_root_for_absolute_symlinks...[32;1mok[0m
+anemone_kernel::task::files::opened_description::opened_description_liveness_kunits::aliases_keep_description_live_until_terminal_release...[32;1mok[0m
+anemone_kernel::task::files::opened_description::opened_description_liveness_kunits::terminal_release_cleans_grant_and_blocks_retired_owner_recommit...[32;1mok[0m
+anemone_kernel::task::files::opened_description::opened_description_liveness_kunits::flock_domain_keeps_one_owner_truth_across_aliases_and_conversion...[32;1mok[0m
+anemone_kernel::task::files::table::kunits::reservation_commit_uses_the_existing_slot_claim...[32;1mok[0m
+anemone_kernel::task::files::table::kunits::open_reserve_dup_and_target_dup_share_one_cutoff...[32;1mok[0m
+anemone_kernel::task::files::table::kunits::allocation_range_honors_zero_boundary_and_full_lower_range...[32;1mok[0m
+anemone_kernel::driver::pcie_drivers::platform::kunits::qemu_loongarch_legacy_map_requires_the_exact_container_shape...[32;1mok[0m
+anemone_kernel::sched::api::policy::sched_setparam::kunits::test_setparam_classifies_and_rejects_family_mismatch...[32;1mok[0m
+anemone_kernel::sched::api::priority::getpriority::kunits::test_getpriority_raw_return_encoding...[32;1mok[0m
+anemone_kernel::fs::socket::api::message::recvmsg::kunits::datagram_result_projects_truncation_without_a_second_length_truth...[32;1mok[0m
+anemone_kernel::fs::socket::api::message::recvmsg::kunits::ipv4_error_control_projection_preserves_linux_alignment_and_truncation...[32;1mok[0m
+anemone_kernel::power::kunits::first_publication_freezes_executor_and_intent...[32;1mok[0m
+anemone_kernel::power::kunits::orderly_winner_switches_same_episode_to_emergency...[32;1mok[0m
+anemone_kernel::power::kunits::emergency_is_single_executor_and_machine_action_is_terminal...[32;1mok[0m
+anemone_kernel::fs::socket::kunits::tcp_creation_rollback_and_final_release_retire_the_only_endpoint_capability...[32;1mok[0m
+anemone_kernel::driver::ahci::platform::dma_window_accepts_32_bit_boundary...[32;1mok[0m
+anemone_kernel::driver::ahci::platform::dma_window_accepts_full_width_without_overflow...[32;1mok[0m
+anemone_kernel::driver::ahci::platform::dma_window_rejects_high_memory_and_sparse_masks...[32;1mok[0m
+anemone_kernel::fs::api::umask::kunits::test_normalize_umask_keeps_only_rwx_bits...[32;1mok[0m
+anemone_kernel::fs::lock::posix::kunits::posix_open_ended_query_reports_real_segment...[32;1mok[0m
+anemone_kernel::fs::lock::posix::kunits::posix_conflict_rejects_without_partial_mutation...[32;1mok[0m
+anemone_kernel::fs::lock::posix::kunits::posix_domain_follows_inode_identity_across_hard_links...[32;1mok[0m
+anemone_kernel::fs::lock::posix::kunits::posix_report_tgid_does_not_define_owner_or_coalescing...[32;1mok[0m
+anemone_kernel::fs::lock::posix::kunits::posix_range_assignment_replaces_splits_merges_and_unlocks...[32;1mok[0m
+anemone_kernel::fs::inode::metadata::stat_kunits::none_device_id_projects_as_zero...[32;1mok[0m
+anemone_kernel::fs::inode::metadata::stat_kunits::stat_and_statx_report_the_same_device_parts...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::kunits::backlog_normalization_clamps_before_crossing_the_owner_fence...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::kunits::owner_capacity_exhaustion_remains_typed_at_the_socket_boundary...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::kunits::unpublished_descriptor_projects_tcp_options_without_caching_owner_truth...[32;1mok[0m
+anemone_kernel::fs::socket::udp::kunits::common_socket_inode_projects_linux_socket_type...[32;1mok[0m
+anemone_kernel::fs::socket::udp::kunits::common_creation_guard_retires_udp_before_publication...[32;1mok[0m
+anemone_kernel::fs::socket::udp::kunits::common_file_association_projects_udp_through_static_ops...[32;1mok[0m
+anemone_kernel::fs::socket::udp::kunits::retry_keeps_connected_destination_snapshot_across_reconnect...[32;1mok[0m
+anemone_kernel::fs::socket::front::kunits::static_descriptor_is_the_only_socket_type_witness...[32;1mok[0m
+anemone_kernel::fs::socket::front::kunits::zero_length_stream_requests_preserve_family_semantics...[32;1mok[0m
+anemone_kernel::fs::socket::source::kunits::retire_withdraws_before_unregister_and_wakes_every_route...[32;1mok[0m
+anemone_kernel::fs::socket::source::kunits::invalidation_rechecks_every_interest_and_prunes_retired_routes...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::kunits::multi_request_capacity_publishes_complete_results_in_order...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::kunits::receive_budget_growth_invalidates_registered_writable_waiter...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::kunits::port_registry_wraps_skips_live_and_recycles_released_identity...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::kunits::autobind_error_peek_consume_and_final_release_share_one_transport...[32;1mok[0m
+anemone_kernel::fs::socket::netlink::kunits::creation_rollback_protocol_ports_and_copy_fault_keep_one_lifecycle...[32;1mok[0m
+anemone_kernel::fs::socket::icmp_raw::kunits::common_payload_io_dispatches_raw_as_a_datagram_family...[32;1mok[0m
+anemone_kernel::fs::socket::icmp_raw::kunits::detached_packet_projects_peer_prefix_and_complete_length...[32;1mok[0m
+anemone_kernel::fs::socket::icmp_raw::kunits::association_queries_options_and_disconnect_use_owner_snapshots...[32;1mok[0m
+anemone_kernel::fs::socket::icmp_raw::kunits::descriptor_creation_guard_and_final_release_share_one_lifecycle...[32;1mok[0m
+anemone_kernel::fs::socket::icmp_raw::kunits::blocking_retry_keeps_one_destination_policy_and_selection_snapshot...[32;1mok[0m
+anemone_kernel::debug::printk::ring::kunits::append_and_overwrite_keep_one_sequence_truth...[32;1mok[0m
+anemone_kernel::debug::printk::policy::kunits::packed_policy_rejects_every_invalid_relation...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::fwnode::bus_width_capabilities_are_cumulative...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::fwnode::no_properties_project_to_allowed_kinds...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::fwnode::firmware_clock_range_is_validated_before_capability_publication...[32;1mok[0m
+anemone_kernel::fs::socket::api::getsockopt::kunits::descriptor_and_role_queries_are_family_neutral...[32;1mok[0m
+anemone_kernel::fs::socket::api::setsockopt::kunits::udp_recverr_uses_linux_ipv4_scalar_lengths_and_fault_precedence...[32;1mok[0m
+anemone_kernel::fs::socket::api::setsockopt::kunits::tcp_option_length_and_value_precedence_use_the_production_dispatch...[32;1mok[0m
+anemone_kernel::fs::socket::api::abi::kunits::udp_error_queue_flag_is_recvmsg_only...[32;1mok[0m
+anemone_kernel::fs::socket::api::abi::kunits::unix_input_checks_length_family_abstract_and_nul_boundary...[32;1mok[0m
+anemone_kernel::fs::socket::api::abi::kunits::unix_output_preserves_unnamed_and_linux_terminator_lengths...[32;1mok[0m
+anemone_kernel::fs::socket::api::connect::kunits::blocking_retry_waits_for_an_existing_handshake...[32;1mok[0m
+anemone_kernel::fs::socket::api::message::kunits::message_header_count_name_and_segment_bounds_are_checked_before_operation...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::source::kunits::projection_matches_unconnected_and_failed_connect_linux_categories...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::source::kunits::consumed_terminal_error_still_ends_both_io_predicates_without_error...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::source::kunits::peer_fin_is_readable_and_requested_read_hang_up_without_full_hang_up...[32;1mok[0m
+anemone_kernel::fs::socket::tcp::source::kunits::production_source_rechecks_multiwaiters_and_weak_wait_does_not_retain_lifecycle...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::shutdown_is_idempotent_and_direction_owned...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::prelisten_poll_route_moves_to_listener_owner...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::retired_endpoint_poll_does_not_publish_route...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::dropping_unpublished_pair_aborts_both_endpoints...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::paired_directions_do_not_cross_and_preserve_order...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::preconnection_poll_route_moves_to_connection_owner...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::peek_copies_without_consuming_or_releasing_capacity...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::accepted_name_rejects_bind_before_namespace_preparation...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::copy_fault_and_short_copy_commit_only_the_reported_prefix...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::register_snapshot_and_recheck_follow_direction_predicates...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::role_and_receive_half_close_readiness_are_owner_projections...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::connected_later_bind_is_one_time_and_peer_name_survives_close...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::single_preparation_abort_and_unconnected_operations_are_typed...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::capacity_partial_progress_and_final_close_share_direction_truth...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::retirement_during_bind_preparation_publishes_no_name_or_registration...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::kunits::stream_destination_and_r1_unconnected_shutdown_return_typed_outcomes...[32;1mok[0m
+anemone_kernel::fs::socket::front::file::kunits::tcp_file_read_preserves_not_connected_errno...[32;1mok[0m
+anemone_kernel::fs::socket::icmp_raw::source::kunits::register_rechecks_owner_facts_and_retire_isolates_late_hints...[32;1mok[0m
+anemone_kernel::arch::loongarch64::mm::paging::kunits::ordinary_leaf_ppn_preserves_physical_bit_twelve...[32;1mok[0m
+anemone_kernel::arch::loongarch64::mm::paging::kunits::range_policy_uses_full_flush_at_configured_minimum...[32;1mok[0m
+anemone_kernel::task::api::execve::syscall::kunits::execve_string_array_overflow_reports_argument_too_large...[32;1mok[0m
+anemone_kernel::sched::api::policy::sched_getscheduler::kunits::test_getscheduler_projects_policy_and_legacy_reset_bit...[32;1mok[0m
+anemone_kernel::sched::api::affinity::sched_getaffinity::kunits::test_affinity_native_word_encoding...[32;1mok[0m
+anemone_kernel::sched::api::affinity::sched_getaffinity::kunits::test_affinity_native_word_len_and_raw_return_bytes...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::record::kunits::bounded_capacity_and_source_stability...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::record::kunits::record_boundaries_short_peek_and_truncation...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::record::kunits::copy_fault_and_zero_destination_preserve_head...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::record::kunits::shutdown_preserves_queued_record_and_projects_terminal_events...[32;1mok[0m
+anemone_kernel::fs::socket::unix::endpoint::record::kunits::payload_specific_send_wait_does_not_spin_on_public_writable_hint...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::address_space_admission_reads_the_inode_size_cell_directly...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_writeback_batches_dirty_runs_and_keeps_dirty_sticky...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_read_failure_after_completed_batch_keeps_published_prefix...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_writeback_run_uses_size_sampled_before_its_frame_snapshot...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_sync_range_respects_range_cap_eof_and_existing_errno_order...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_resolution_arms_first_write_before_publishing_writable_frame...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_fill_cache_sticky_dirty_failure_and_accounting_share_one_owner...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::volatile_holes_cross_page_writes_and_truncate_regrow_are_zero_correct...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_read_batch_handles_unaligned_eof_and_failure_before_publication...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_competing_publication_selects_one_frame_and_one_accounting_winner...[32;1mok[0m
+anemone_kernel::fs::address_space::kunits::backed_requested_reads_batch_misses_and_respect_resident_and_cap_boundaries...[32;1mok[0m
+anemone_kernel::task::tid::kunits::test_bitmap_tid_allocator_reuses_released_id...[32;1mok[0m
+anemone_kernel::task::tid::kunits::test_oneshot_tid_allocator_never_reuses_released_id...[32;1mok[0m
+anemone_kernel::time::timekeeper::kunits::ordered_reads_do_not_regress_across_cpus...[32;1mok[0m
+anemone_kernel::time::timekeeper::kunits::coarse_snapshot_advances_only_after_a_bsp_tick...[32;1mok[0m
+anemone_kernel::time::timekeeper::kunits::boot_seed_is_atomic_and_does_not_publish_a_step...[32;1mok[0m
+anemone_kernel::time::timekeeper::kunits::realtime_mutation_is_atomic_nonnegative_and_nonwrapping...[32;1mok[0m
+anemone_kernel::time::timekeeper::kunits::boot_timestamp_readiness_transitions_only_after_all_cpus...[32;1mok[0m
+anemone_kernel::time::timer::kunits::event_identity_exhaustion_fails_without_reuse...[32;1mok[0m
+anemone_kernel::time::timer::kunits::remote_cpu_cancel_removes_only_the_named_request...[32;1mok[0m
+anemone_kernel::time::timer::kunits::cancel_after_irq_dequeue_reports_already_dequeued...[32;1mok[0m
+anemone_kernel::time::timer::kunits::realtime_heap_cancels_only_after_its_armed_sequence...[32;1mok[0m
+anemone_kernel::time::timer::kunits::removing_arbitrary_requests_repairs_the_single_heap...[32;1mok[0m
+anemone_kernel::time::timer::kunits::cancel_drops_callback_after_unlock_and_is_idempotent...[32;1mok[0m
+anemone_kernel::time::timer::kunits::same_deadline_requests_keep_independent_identity_order...[32;1mok[0m
+anemone_kernel::time::timer::kunits::insert_side_recheck_closes_snapshot_registration_window...[32;1mok[0m
+anemone_kernel::time::timer::kunits::repeated_far_future_schedule_cancel_returns_to_baseline...[32;1mok[0m
+anemone_kernel::time::timer::kunits::all_cpu_realtime_recheck_dispatches_on_the_request_owner_lane...[32;1mok[0m
+anemone_kernel::time::timer::kunits::realtime_heap_expires_forward_and_preserves_requests_after_backward_reads...[32;1mok[0m
+anemone_kernel::time::timer::kunits::stale_realtime_scanner_cannot_cancel_a_newer_request_or_move_sequence_back...[32;1mok[0m
+anemone_kernel::debug::perf::kunits::histogram_covers_full_u64_domain...[32;1mok[0m
+anemone_kernel::debug::perf::kunits::elapsed_metric_counts_samples_and_wraps_sum...[32;1mok[0m
+anemone_kernel::debug::perf::kunits::runtime_gate_precedes_argument_evaluation_and_updates_wrap...[32;1mok[0m
+anemone_kernel::sched::event::kunits::early_event_wake_removes_the_wait_timeout_request...[32;1mok[0m
+anemone_kernel::device::tty::kunits::duplicate_identity_is_rejected_until_abort...[32;1mok[0m
+anemone_kernel::device::tty::kunits::notification_after_worker_wait_keeps_rx_progress...[32;1mok[0m
+anemone_kernel::device::tty::kunits::notification_before_worker_wait_keeps_rx_progress...[32;1mok[0m
+anemone_kernel::device::tty::kunits::worker_retries_partial_tx_without_replaying_input...[32;1mok[0m
+anemone_kernel::device::tty::kunits::persistent_raw_predicate_transfers_fifo_batches_once...[32;1mok[0m
+anemone_kernel::device::tty::kunits::prepublish_abort_drops_weak_notifier_and_joins_worker...[32;1mok[0m
+anemone_kernel::fs::api::truncate::kunits::test_inode_truncate_rejects_directory...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::relative_realtime_timer_is_fixed_to_monotonic_domain...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::replace_disarm_and_last_close_remove_queued_requests...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::periodic_accounting_advances_from_the_previous_target...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::overdue_refresh_physically_removes_the_queued_completion...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::stale_clock_change_completion_cannot_cancel_a_replacement...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::poll_route_notifies_after_unlock_and_reuses_stale_capacity...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::settime_old_value_projects_periodic_deadline_without_old_rearm...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::absolute_realtime_cancel_is_physical_and_read_reports_ecanceled_once...[32;1mok[0m
+anemone_kernel::fs::timerfd::core::kunits::cancel_on_set_requires_absolute_realtime_without_mutating_existing_request...[32;1mok[0m
+anemone_kernel::mm::uspace::heap::kunits::brk_shrink_decommits_full_pages_and_preserves_partial_page...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::unmap_middle_of_anonymous_vma_punches_hole...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::protect_range_rejects_holes_and_reservations...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::fixed_replace_and_noreplace_follow_unified_editing...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::anonymous_fork_keeps_shared_backing_and_cow_private...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::protect_range_splits_vma_and_invalidates_present_ptes...[32;1mok[0m
+anemone_kernel::mm::uspace::mmap::kunits::heap_protection_preserves_valid_leaf_and_non_permission_flags...[32;1mok[0m
+anemone_kernel::mm::uspace::fence::kunits::fork_restriction_blocks_immediate_cow_retry_until_ack...[32;1mok[0m
+anemone_kernel::mm::uspace::fence::kunits::heap_decommit_retains_frame_and_blocks_fault_in_until_ack...[32;1mok[0m
+anemone_kernel::mm::uspace::fence::kunits::permission_restriction_blocks_successor_mapping_until_ack...[32;1mok[0m
+anemone_kernel::mm::uspace::fence::kunits::fixed_replace_blocks_added_user_fault_continuation_until_ack...[32;1mok[0m
+anemone_kernel::mm::uspace::fence::kunits::additive_unchanged_and_relaxed_commits_do_not_start_remote_completion...[32;1mok[0m
+anemone_kernel::net::worker::control::kunits::request_after_a_worker_take_survives_for_the_next_bounded_round...[32;1mok[0m
+anemone_kernel::net::worker::control::kunits::explicit_work_is_coalesced_and_late_requests_cannot_restore_admission...[32;1mok[0m
+anemone_kernel::task::kthread::ctx::kunits::wait_for_completes_on_timeout...[32;1mok[0m
+anemone_kernel::task::kthread::ctx::kunits::request_stop_interrupts_wait_for...[32;1mok[0m
+anemone_kernel::debug::perf::registry::kunits::production_registry_is_unique_and_layout_is_complete...[32;1mok[0m
+anemone_kernel::debug::perf::registry::kunits::syscall_metrics_are_elapsed_pairs_and_exclude_nonreturning_control_paths...[32;1mok[0m
+anemone_kernel::device::tty::file::kunits::asm_generic_projection_and_validation_are_atomic...[32;1mok[0m
+anemone_kernel::device::tty::file::kunits::file_read_preserves_records_eof_nonblock_and_zero_length...[32;1mok[0m
+anemone_kernel::device::tty::file::kunits::winsize_defaults_and_updates_without_foreground_relation...[32;1mok[0m
+anemone_kernel::device::tty::file::kunits::file_write_is_binary_reports_short_progress_and_zero_length...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::veof_commits_pending_or_one_empty_boundary...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::disabled_special_characters_leave_nul_as_input...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::tab3_expands_from_the_committed_logical_column...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::canonical_edit_and_short_read_keep_record_boundary...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::signal_control_flushes_and_forms_guards_out_effect...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::drain_completion_requires_empty_queue_and_idle_port...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::output_progress_requires_a_complete_transform_token...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::noncanonical_input_and_icrnl_are_immediately_readable...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::tab3_backpressure_does_not_advance_the_logical_column...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::fault_conditioning_obeys_inpck_ignpar_and_parmrk_matrix...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::normal_byte_conditioning_orders_strip_crnl_and_literal_ff...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::poll_register_before_after_notification_and_stale_cleanup...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::canonical_mode_transitions_preserve_unread_input_and_boundaries...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::break_conditioning_obeys_priority_and_forms_guards_out_interrupt...[32;1mok[0m
+anemone_kernel::device::tty::terminal::kunits::literal_markers_are_atomic_and_do_not_create_canonical_delimiters...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::controller::clock_divider_never_overclocks...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::controller::response_and_data_flags_are_protocol_neutral...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::controller::data_phase_rejects_hardware_lock_and_early_write_completion...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::regs::layout_decodes_single_slot_and_fifo_width...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::regs::layout_decodes_slot_count_as_encoded_plus_one...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::regs::layout_rejects_reserved_fifo_width_and_bad_override...[32;1mok[0m
+anemone_kernel::driver::mmc::dw_mshc::regs::register_window_accepts_exact_and_rejects_short_mapping...[32;1mok[0m
+anemone_kernel::sched::api::affinity::sched_setaffinity::kunits::test_affinity_online_normalization...[32;1mok[0m
+anemone_kernel::sched::api::affinity::sched_setaffinity::kunits::test_affinity_mask_zero_short_exact_and_long_conversion...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_hierarchy_projection...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_mount_and_root_lookup...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_parent_local_admission...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_char_device_io_and_attrs...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_flat_directory_iteration...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_block_device_io_and_attrs...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_remount_after_last_unmount...[32;1mok[0m
+anemone_kernel::fs::devfs::kunits::test_devfs_shared_inode_identity_across_mounts...[32;1mok[0m
+anemone_kernel::task::task_fs::kunits::test_shared_fs_state_observes_umask_mutations...[32;1mok[0m
+anemone_kernel::task::task_fs::kunits::test_fork_copies_umask_without_sharing_mutations...[32;1mok[0m
+anemone_kernel::task::task_fs::kunits::test_umask_masks_creation_permissions_and_preserves_special_bits...[32;1mok[0m
+anemone_kernel::sched::processor::kunits::test_task_construction_cpu_selection_stays_inside_affinity...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_rejects_bare_tmpfile_bit...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_stage1_tmpfile_requires_write_access_mode...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_rejects_unknown_regular_open_flags...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_rejects_creat_directory_combination...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_open_how_path_ignores_other_legacy_open_flags...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_stage1_tmpfile_is_unlinked_but_remains_usable...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_finish_open_readonly_trunc_truncates_regular_file...[32;1mok[0m
+anemone_kernel::fs::api::openat::kunits::test_finish_open_tmpfile_skips_odirectory_result_check...[32;1mok[0m
+anemone_kernel::fs::api::mknodat::kunits::make_node_accepts_full_non_directory_kind_matrix...[32;1mok[0m
+anemone_kernel::fs::api::mknodat::kunits::make_node_admission_requires_mknod_only_for_devices...[32;1mok[0m
+anemone_kernel::fs::api::mknodat::kunits::make_node_normalizes_linux_kind_device_and_permissions...[32;1mok[0m
+anemone_kernel::fs::api::mknodat::kunits::make_node_handles_rejected_kinds_capability_and_umode_width...[32;1mok[0m
+anemone_kernel::fs::api::creation::kunits::regular_creation_clears_sgid_without_group_or_fsetid...[32;1mok[0m
+anemone_kernel::fs::api::creation::kunits::creation_policy_masks_rwx_once_without_clearing_special_bits...[32;1mok[0m
+anemone_kernel::fs::api::creation::kunits::creation_metadata_selects_explicit_owner_and_parent_sgid_group...[32;1mok[0m
+anemone_kernel::fs::api::creation::kunits::creation_policy_strips_sgid_before_umask_removes_group_execute...[32;1mok[0m
+anemone_kernel::fs::api::creation::kunits::directory_creation_replaces_requested_special_bits_with_parent_sgid...[32;1mok[0m
+anemone_kernel::fs::vfs::open::kunits::description_open_keeps_path_only_inert_and_composes_fifo_hooks...[32;1mok[0m
+anemone_kernel::fs::ext4::inode::kunits::ext4_rdev_projection_uses_canonical_linux_codec...[32;1mok[0m
+anemone_kernel::fs::ext4::inode::kunits::ext4_special_open_errno_is_explicit_for_each_persisted_kind...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_mount_cycle_stress...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_root_mount_cannot_unmount...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_multiple_mounts_are_isolated...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_unmount_busy_with_child_mount...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_mount_dot_and_dotdot_traversal...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_direct_multi_mount_stack_stress...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_bind_rejects_file_source_or_target...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_move_mount_preserves_child_subtree...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_namespace_churn_stress_under_mount...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_recursive_bind_clones_child_mounts...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_unmount_busy_with_active_inode_ref...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_plain_bind_does_not_clone_child_mounts...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_remount_rejects_plain_directory_target...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_unmount_nofollow_rejects_final_symlink...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_bind_revalidates_stale_source_and_target...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_plain_bind_creates_independent_mount_view...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_private_propagation_validates_live_target...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_direct_mount_rejects_covered_target_pathref...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_mount_generation_bumps_on_attach_and_detach...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_move_mount_rejects_cycle_and_non_root_source...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_path_mount_same_mountpoint_uses_topmost_target...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_remount_readonly_rechecks_existing_file_writes...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_bind_remount_readonly_does_not_pollute_siblings...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_lazy_unmount_detaches_subtree_and_keeps_old_refs...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_mount_overrides_mountpoint_and_restores_on_unmount...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_move_mount_preserves_identity_attrs_and_generation...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_direct_multi_mount_same_mountpoint_visibility_switch...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_move_mount_lookup_generation_retry_returns_new_state...[32;1mok[0m
+anemone_kernel::fs::mount::tree::kunits::test_vfs_bind_root_parent_and_path_rendering_use_target_boundary...[32;1mok[0m
+anemone_kernel::fs::ramfs::inode::kunits::directory_rename_preserves_type_and_noreplace_errors...[32;1mok[0m
+anemone_kernel::fs::ramfs::inode::kunits::make_node_commits_final_metadata_and_special_open_boundary...[32;1mok[0m
+anemone_kernel::fs::ramfs::inode::kunits::directory_rename_replaces_empty_directory_and_rejects_nonempty...[32;1mok[0m
+anemone_kernel::fs::ramfs::inode::kunits::fifo_and_socket_have_explicit_open_errors_without_rdev_projection...[32;1mok[0m
+anemone_kernel::fs::ramfs::inode::kunits::directory_rename_moves_across_parents_and_updates_dotdot_and_links...[32;1mok[0m
+anemone_kernel::fs::socket::api::shutdown::kunits::linux_shutdown_values_normalize_before_the_family_owner...[32;1mok[0m
+anemone_kernel::arch::loongarch64::exception::trap::user_ptr::validation_matches_only_exact_user_access_instruction...[32;1mok[0m
+anemone_kernel::time::clock::api::clock_adjtime::kunits::native_timex_layout_matches_asm_generic_time64...[32;1mok[0m
+anemone_kernel::time::clock::api::clock_adjtime::kunits::adjtime_query_reports_unsynchronized_real_precision...[32;1mok[0m
+anemone_kernel::time::clock::api::clock_adjtime::kunits::adjtime_mode_matrix_distinguishes_invalid_unsupported_and_setoffset...[32;1mok[0m
+[1mAll tests passed![0m
+busybox-init: started shell 166
+~ # [6ncd /gli~ # cd /glibc/[J
+/glibc # [6n./bui/glibc # ./buildstorm_testcode.sh [J
+#### OS COMP TEST GROUP START buildstorm-glibc ####
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+rustc 1.98.0-nightly (57d06900f 2026-05-27)
+cargo 1.98.0-nightly (fbb61be30 2026-05-26)
+BUILDSTORM_TOOLCHAIN ok
+BUILDSTORM_MINIBUILD ok
+----- pre-build tg-xtask (untimed) -----
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 18.16s
+----- build arceos-helloworld (timed, arch=loongarch64) -----
+BUILDSTORM_BEGIN mode=multi
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.81s
+     Running `target/debug/tg-xtask arceos build -p arceos-helloworld --arch loongarch64`
+[2026-08-10T10:38:27Z INFO  axbuild::context] Workspace root: /work/tgoskits
+Using build config: /work/tgoskits/tmp/axbuild/config/arceos-helloworld/build-loongarch64-unknown-none-softfloat.toml
+[2026-08-10T10:38:30Z INFO  axbuild::build::config_file] Found build config at /work/tgoskits/tmp/axbuild/config/arceos-helloworld/build-loongarch64-unknown-none-softfloat.toml
+Using build config: /work/tgoskits/tmp/axbuild/config/arceos-helloworld/build-loongarch64-unknown-none-softfloat.toml
+[2026-08-10T10:38:33Z INFO  axbuild::build::config_file] Found build config at /work/tgoskits/tmp/axbuild/config/arceos-helloworld/build-loongarch64-unknown-none-softfloat.toml
+[axbuild] cargo build package=arceos-helloworld target=scripts/targets/std/pie/loongarch64-unknown-linux-musl.json config=/work/tgoskits/tmp/axbuild/config/arceos-helloworld/build-loongarch64-unknown-none-softfloat.toml ...
+sh -c /work/tgoskits/tmp/axbuild/std/prebuild/prebuild-loongarch64-unknown-linux-musl-bd8e59296c60d6af.sh
+AR_loongarch64_unknown_linux_musl=loongarch64-linux-musl-ar
+AX_LOG=info
+AX_TARGET=loongarch64-unknown-none-softfloat
+CARGO_UNSTABLE_JSON_TARGET_SPEC=true
+CC_loongarch64_unknown_linux_musl=loongarch64-linux-musl-cc
+CFLAGS_loongarch64_unknown_linux_musl=-mabi=lp64s -msoft-float -fno-stack-protector
+CXXFLAGS_loongarch64_unknown_linux_musl=-mabi=lp64s -msoft-float -fno-stack-protector
+SMP=1
+cargo build --config /work/tgoskits/tmp/axbuild/std/config-loongarch64-unknown-linux-musl-dynamic.toml -p arceos-helloworld --target scripts/targets/std/pie/loongarch64-unknown-linux-musl.json -Z unstable-options --target-dir /work/tgoskits/target --features arceos,ax-std/irq,ax-std/paging,ax-std/smp,ax-std/std-compat -Z json-target-spec --release --message-format json-render-diagnostics
+   Compiling compiler_builtins v0.1.160 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling core v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling libc v0.2.185
+   Compiling std v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/std)
+   Compiling thiserror v2.0.18
+   Compiling heapless v0.9.3
+   Compiling ax-errno v0.6.1 (/work/tgoskits/components/axerrno)
+   Compiling ax-percpu v0.4.14 (/work/tgoskits/components/percpu/percpu)
+   Compiling num-traits v0.2.19
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling libc v0.2.186
+   Compiling radium v0.7.0
+   Compiling rust_decimal v1.42.1
+   Compiling anyhow v1.0.103
+   Compiling ax-alloc v0.8.12 (/work/tgoskits/os/arceos/modules/axalloc)
+   Compiling someboot v0.3.5 (/work/tgoskits/platforms/someboot)
+   Compiling somehal v0.8.0 (/work/tgoskits/platforms/somehal)
+   Compiling ax-driver v0.12.0 (/work/tgoskits/drivers/ax-driver)
+   Compiling axplat-dyn v0.7.12 (/work/tgoskits/platforms/axplat-dyn)
+   Compiling ax-hal v0.5.28 (/work/tgoskits/os/arceos/modules/axhal)
+   Compiling ax-task v0.6.4 (/work/tgoskits/os/arceos/modules/axtask)
+   Compiling ax-runtime v0.10.4 (/work/tgoskits/os/arceos/modules/axruntime)
+   Compiling scope-local v0.4.2 (/work/tgoskits/components/scope-local)
+   Compiling ax-posix-api v0.5.29 (/work/tgoskits/os/arceos/api/arceos_posix_api)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rustc-std-workspace-core v1.99.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/rustc-std-workspace-core)
+   Compiling alloc v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/alloc)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rustc-demangle v0.1.27
+   Compiling cfg-if v1.0.4
+   Compiling panic_abort v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/panic_abort)
+   Compiling rustc-literal-escaper v0.0.7
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling unwind v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/unwind)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rustc-std-workspace-alloc v1.99.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/rustc-std-workspace-alloc)
+   Compiling panic_unwind v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/panic_unwind)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling std_detect v0.1.5 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/std_detect)
+   Compiling hashbrown v0.17.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling proc_macro v0.0.0 (/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/src/rust/library/proc_macro)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling log v0.4.33
+   Compiling bitflags v2.13.0
+   Compiling byteorder v1.5.0
+   Compiling as-any v0.3.2
+   Compiling scopeguard v1.2.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling stable_deref_trait v1.2.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling bit_field v0.10.3
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling lock_api v0.4.14
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-def v0.3.0 (/work/tgoskits/drivers/interface/rdif-def)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-kernel-guard v0.3.11 (/work/tgoskits/components/kernel_guard)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling hash32 v0.3.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-base v0.8.3 (/work/tgoskits/drivers/interface/rdif-base)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-kspin v0.3.15 (/work/tgoskits/components/kspin)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling derive_more v2.1.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling pci_types v0.10.1
+   Compiling tock-registers v0.10.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling irq-framework v0.3.0 (/work/tgoskits/components/irq-framework)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling spin v0.12.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling spinning_top v0.3.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling strum v0.27.2
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-memory-addr v0.6.9 (/work/tgoskits/memory/memory_addr)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-msi v0.2.0 (/work/tgoskits/drivers/interface/rdif-msi)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling mmio-api v0.2.2 (/work/tgoskits/memory/mmio-api)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling futures-sink v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling futures-core v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-clk v0.5.4 (/work/tgoskits/drivers/interface/rdif-clk)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-reset v0.1.0 (/work/tgoskits/drivers/interface/rdif-reset)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-power v0.8.0 (/work/tgoskits/drivers/interface/rdif-power)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling arrayvec v0.7.7
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling acpi v6.1.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-pcie v0.2.5 (/work/tgoskits/drivers/interface/rdif-pcie)
+   Compiling slab v0.4.12
+   Compiling pin-project-lite v0.2.17
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling futures-task v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling futures-channel v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-intc v0.15.0 (/work/tgoskits/drivers/interface/rdif-intc)
+   Compiling futures-util v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling futures-io v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling pcie v0.6.7 (/work/tgoskits/drivers/pci/pcie)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling tap v1.0.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling fdt-raw v0.3.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling wyz v0.5.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling uguid v2.2.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling const-default v1.0.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling const-str v1.1.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling fdt-edit v0.2.3
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling funty v2.0.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-pinctrl v0.1.2 (/work/tgoskits/drivers/interface/rdif-pinctrl)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling bytemuck v1.25.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling num-align v0.1.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rlsf v0.2.2
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rgb v0.8.53
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling uefi-raw v0.14.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdrive v0.23.6 (/work/tgoskits/drivers/rdrive)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling bitvec v1.1.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ranges-ext v0.6.4 (/work/tgoskits/memory/ranges-ext)
+   Compiling spinning_top v0.2.5
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling buddy-slab-allocator v0.4.6 (/work/tgoskits/memory/buddy-slab-allocator)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ucs2 v0.3.3
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling loongArch64 v0.2.6
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling axpanic v0.1.1 (/work/tgoskits/components/axpanic)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling futures v0.3.32
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ptr_meta v0.3.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling mbarrier v0.1.3
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling rdif-serial v0.9.0 (/work/tgoskits/drivers/interface/rdif-serial)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling utf8-width v0.1.8
+   Compiling kernutil v0.2.2 (/work/tgoskits/components/kernutil)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling dma-api v0.9.3 (/work/tgoskits/memory/dma-api)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling byte-unit v5.2.5
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ansi_rgb v0.2.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling page-table-generic v0.7.4 (/work/tgoskits/memory/page-table-generic)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-plat v0.12.0 (/work/tgoskits/platforms/ax-plat)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling uefi v0.37.0
+   Compiling some-serial v0.7.0 (/work/tgoskits/drivers/serial/some-serial)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-page-table-entry v0.8.10 (/work/tgoskits/memory/page_table_entry)
+   Compiling numeric-enum-macro v0.2.0
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling axbacktrace v0.4.5 (/work/tgoskits/components/axbacktrace)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-page-table-multiarch v0.8.13 (/work/tgoskits/memory/page_table_multiarch)
+   Compiling fdt-parser v0.4.19
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-cpu v0.8.3 (/work/tgoskits/components/axcpu)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-memory-set v0.6.12 (/work/tgoskits/memory/memory_set)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-lazyinit v0.4.8 (/work/tgoskits/components/ax-lazyinit)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling aml v0.16.4
+   Compiling axklib v0.7.5 (/work/tgoskits/components/axklib)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-log v0.5.18 (/work/tgoskits/os/arceos/modules/axlog)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling chrono v0.4.45
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-ctor-bare v0.4.8 (/work/tgoskits/components/ctor_bare/ctor_bare)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling memchr v2.8.2
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling linux-raw-sys v0.12.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling bitmaps v3.2.1
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling axpoll v0.5.1 (/work/tgoskits/components/axpoll)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-io v0.6.1 (/work/tgoskits/components/axio)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling flatten_objects v0.2.4
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-mm v0.5.28 (/work/tgoskits/os/arceos/modules/axmm)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-sync v0.5.28 (/work/tgoskits/os/arceos/modules/axsync)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-api v0.7.4 (/work/tgoskits/os/arceos/api/arceos_api)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling ax-std v0.5.28 (/work/tgoskits/os/arceos/ulib/axstd)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+   Compiling arceos-helloworld v0.1.0 (/work/tgoskits/apps/arceos/helloworld)
+<jemalloc>: MADV_DONTNEED does not work (memset will be used instead)
+<jemalloc>: (This is the expected behaviour if you are running under QEMU)
+    Finished `release` profile [optimized] target(s) in 18m 38s
+Converting ELF to BIN format...
+  elf: /work/tgoskits/target/loongarch64-unknown-linux-musl/release/arceos-helloworld
+  bin: /work/tgoskits/target/loongarch64-unknown-linux-musl/release/arceos-helloworld.bin
+/root/.rustup/toolchains/nightly-2026-05-28-loongarch64-unknown-linux-gnu/lib/rustlib/loongarch64-unknown-linux-gnu/bin/llvm-objcopy --strip-all -O binary /work/tgoskits/target/loongarch64-unknown-linux-musl/release/arceos-helloworld /work/tgoskits/target/loongarch64-unknown-linux-musl/release/arceos-helloworld.bin
+[axbuild] cargo build package=arceos-helloworld target=scripts/targets/std/pie/loongarch64-unknown-linux-musl.json config=/work/tgoskits/tmp/axbuild/config/arceos-helloworld/build-loongarch64-unknown-none-softfloat.toml ... done (1132.98s)
+[axbuild] cargo build elf=/work/tgoskits/target/loongarch64-unknown-linux-musl/release/arceos-helloworld
+[axbuild] cargo build artifact_dir=/work/tgoskits/target/loongarch64-unknown-linux-musl/release
+BUILDSTORM_COMPILE mode=multi ok=true elapsed_s=1153.00 cores=8 bytes=1714568 arch=loongarch64
+#### OS COMP TEST GROUP END buildstorm-glibc ####
+/glibc # [6nQEMU: Terminated
+

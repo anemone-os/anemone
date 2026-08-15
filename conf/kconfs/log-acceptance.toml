@@ -19,6 +19,7 @@ remap_shift_gb = 6
 max_logical_cpus = 16
 max_ident_len_bytes = 255
 max_path_len_bytes = 4096
+c_string_batch_bytes = 256
 max_processes = 32768
 epoll_file_max_waiters = 64
 getdents64_buffer_bytes = 2097152

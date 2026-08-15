@@ -31,8 +31,17 @@
 
 ## 当前记录
 
-- [2026-08-08 - Clock controller framework](./2026-08-08-clock-controller-framework.md)
-- [2026-08-08 - Reset controller framework](./2026-08-08-reset-controller-framework.md)
+- [2026-08-15 - Nemophila task lineage auditor](./2026-08-15-nemophila-task-lineage-auditor.md)
+- [2026-08-13 - `/proc/filesystems` registry projection](./2026-08-13-proc-filesystems.md)
+- [2026-08-13 - Char device readiness](./2026-08-13-char-device-readiness.md)
+- [2026-08-13 - Unix peer credentials](./2026-08-13-unix-peer-credentials.md)
+- [2026-08-13 - TTY IUTF8与明确compatibility set](./2026-08-13-tty-iutf8-compat.md)
+- [2026-08-13 - `/dev/console` shared Terminal](./2026-08-13-dev-console-shared-terminal.md)
+- [2026-08-13 - PTY logical cflag profile](./2026-08-13-pty-logical-cflag.md)
+- [2026-08-13 - LA64 runtime firmware FDT](./2026-08-13-la64-runtime-fdt.md)
+- [2026-08-12 - Workspace config locators](./2026-08-12-workspace-config-locators.md)
+- [2026-08-12 - PTY retirement and job-control ordering](./2026-08-12-pty-retirement-job-control-ordering.md)
+- [2026-08-11 - KUnit execution and proof](./2026-08-11-kunit-execution-proof.md)
 - [2026-08-10 - LA64 software-unaligned HWCAP](./2026-08-10-la64-soft-unaligned-hwcap.md)
 - [2026-08-09 - VFS open request](./2026-08-09-vfs-open-request.md)
 - [2026-08-09 - Positive dentry residency](./2026-08-09-positive-dentry-residency.md)
@@ -42,6 +51,8 @@
 - [2026-08-08 - Signal return fast path and syscall profiling](./2026-08-08-signal-return-fast-path-and-syscall-profiling.md)
 - [2026-08-08 - TTY TAB3/XTABS output processing](./2026-08-08-tty-tab3-output.md)
 - [2026-08-08 - RTC provider 与 boot walltime seed](./2026-08-08-rtc-provider-boot-walltime-seed.md)
+- [2026-08-08 - Clock controller framework](./2026-08-08-clock-controller-framework.md)
+- [2026-08-08 - Reset controller framework](./2026-08-08-reset-controller-framework.md)
 - [2026-08-07 - TCP local reverse TIME_WAIT admission](./2026-08-07-tcp-local-time-wait-admission.md)
 - [2026-08-07 - Ext4 single Mutex](./2026-08-07-ext4-single-mutex.md)
 - [2026-08-07 - Ext4 synchronous I/O batching](./2026-08-07-ext4-synchronous-io-batching.md)

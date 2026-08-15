@@ -6,7 +6,7 @@ use crate::tasks::utils::{cmd_echo, log_progress};
 
 pub const RUST_OBJDUMP: &str = "rust-objdump";
 
-impl TargetTriple {
+impl KernelTarget {
     pub fn objdump(&self) -> &'static str {
         RUST_OBJDUMP
     }
@@ -20,12 +20,8 @@ impl TargetTriple {
     /// For an absolute path, convert it to a [std::path::PathBuf] first.
     pub fn spec_json_path(&self) -> &'static Path {
         match self {
-            Self::RiscV64UnknownAnemoneElf => {
-                Path::new("conf/arch/riscv64/riscv64-unknown-anemone-elf.json")
-            },
-            Self::LoongArch64UnknownAnemoneElf => {
-                Path::new("conf/arch/loongarch64/loongarch64-unknown-anemone-elf.json")
-            },
+            Self::RiscV64 => Path::new("conf/arch/riscv64/riscv64-anemone-kernel.json"),
+            Self::LoongArch64 => Path::new("conf/arch/loongarch64/loongarch64-anemone-kernel.json"),
         }
     }
 }

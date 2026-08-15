@@ -1,6 +1,6 @@
 #! Example SystemTarget configuration.
 
-# Canonical Platform reference. The filename slug is the Platform identity.
+# Canonical Platform name or workspace-relative path.
 platform = "example"
 
 # SystemTarget owns root mount and root source selection.

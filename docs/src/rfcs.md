@@ -20,11 +20,14 @@ docs/src/rfcs/<short-slug>/
 - RFC target 在 cutover 前不能覆盖[当前契约](./contracts.md)。
 - `Contract Impact` 只列 `Introduce`、`Refine`、`Replace`、`Remove`、`Scoped Exception`；未变化规则作为 Dependencies 链接，不登记 `Preserve` 流水。
 - RFC 单向链接 current baseline；current contract 不为 pending proposal 维护默认 backlink。
-- Git 保存物理文本历史；RFC `R0`、`R1` 只标记已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
+- Git 保存物理文本历史；RFC `R0`、`R1` 只标记 Closed 前已接受的目标、owner、ABI、contract 或 acceptance 语义变化。
 - 状态使用`Draft`、`Accepted`、`Review Hold`、`Closed`、`Superseded`、`Terminated`；它不代替用户对当前
   实现任务的授权。`Terminated`表示维护者永久取消未满足acceptance/closure的RFC：无active gate、无current
   contract、不得恢复。未来相关工作必须独立重新分类并取得新的授权/Implementation Boundary；只有仍命中RFC
   分级时才新建RFC。
+- `Closed`是不可重新打开或修订的完成终态。RFC目录在closure后冻结为历史资料，不再增加修订、gate或续接
+  transaction；生效共享规则由current contract拥有。后续工作从live source、current contract和register重新建立
+  独立边界并按当前规则分类，旧RFC内要求未来“回到本RFC”、修订或建立follow-up RFC的措辞不具有流程权威。
 
 ## 实现与反馈
 
@@ -34,13 +37,13 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
 
 每次实现收口前都进行架构摩擦扫描。没有具体摩擦或只剩 Safe 时不写占位结论；Euclid 在仍残留时简短报告；Keter/Apollyon 必须在完成声明或 cutover 前停止。不要建立 `friction.md` 或全局摩擦台账。
 
-实现反馈可以在 accepted target 内修正路线；改变 target invariant、owner、ABI、contract、acceptance 或 validation claim 时，必须停止并由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。agent 不能批准自己的 reduced target。
+RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 target invariant、owner、ABI、contract、acceptance 或 validation claim 时，必须停止并由 RFC review 决定 Route Correction、Accepted Reduced Target、Follow-up RFC 或 Not Cut Over。agent 不能批准自己的 reduced target。Closed 后的发现属于新的独立任务，不再触发原 RFC 的 review 或 revision。
 
 ## 导航与历史
 
 新 RFC 更新本页、`docs/src/SUMMARY.md` 和 RFC 内必要链接，使页面可达；导航只提供链接与范围，不复制阶段、验证和问题状态。既有 RFC、transaction、manifest 和历史状态作为 legacy history 保留，不批量迁移。
 
-旧文档可能仍出现 `Accepted for Implementation`、Ready/Active/Closed、逐文件 manifest、强制 transaction 或 `P0/P1/P2/P3` 等历史形状；它们说明当时流程，不覆盖当前[开发工作流](./development-workflow.md)。
+旧文档可能仍出现 `Accepted for Implementation`、Ready/Active/Closed、逐文件 manifest、强制 transaction、`P0/P1/P2/P3`，以及要求未来修订原 RFC / 建立 follow-up RFC 等历史形状；它们说明当时流程，不覆盖当前[开发工作流](./development-workflow.md)。
 
 ## 当前 RFC
 
@@ -50,12 +53,44 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   matching JH7110 GMAC 节点交付 per-node one-time driver、命名 `macirq`、coherent DMA、boot-time Motorcomm
   PHY 初始化、成功 publication candidate 在 attach admission 时连续消费的 `eth<N>` 和现有单接口 static IPv4
   接入。Gate 0--3、VisionFive 2 双 GMAC 实机验收与 `IRQ-FLOW-001` cutover 已完成。
-- [RFC-20260811-dwmac](./rfcs/dwmac/index.md)：Accepted / R6 / Gate 1--2 Closed；Gate 3 Authorized / Active；RFC
-  Not Cut Over。将 JH7110 GMAC 整理为 DWMAC owner，并为 Loongson 2K1000 接入 DWMAC1000。当前 target 固定
-  DTB、capability-admitted enhanced/extended 32-byte descriptor、32-bit DMA admission、CSR5 W1C、one-cell DTB
-  下的 `IrqSense` source table、optional `request_irq` expectation、Route A firmware handoff、PHY P1 和 success-order
-  `eth<N>`。Gate 1--2 已完成 software/hardware closure；Gate 3 已实现同一 owner 的 mandatory in-place attach，
-  IRQ/traffic/lifecycle 与 R2 延期的 VisionFive 2 regression 仍待实机 acceptance。
+- [RFC-20260811-dwmac](./rfcs/dwmac/index.md)：Closed / R7；将 JH7110 GMAC 整理为 DWMAC owner，并为
+  Loongson 2K1000 接入capability-admitted enhanced/extended DWMAC1000、per-port strong-noncache reserved DMA、
+  CSR5 W1C、active-high `IrqSense`与原位production attach。Gate 1--4和三个contract cutover均已关闭。
+- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Closed R6（Nemophila R0）；以 WIT 定义接口、由 kernel
+  使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
+  runtime-owned transactional load、per-instance serial
+  callback、trap containment 与 busy try-unload，并以 task owner 的 clone observer 和同一份 Rust-to-Wasm artifact 完成
+  RV64/LA64 vertical slice。
+  [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
+  [实施路线](./rfcs/nemophila/implementation.md)已关闭 Stage 1、Stage 2与Stage 2 feedback interlude，形成当前第一方
+  interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3与Stage 4各两个Checkpoint均已关闭，形成dormant
+  kernel-internal transactional runtime与完整weave/lifecycle；Stage 5单一Checkpoint 5A已关闭，Stage 6已完成SystemTarget
+  owner-driven rebuild与ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection和
+  双架构acceptance。`NEMOPHILA-R0-CUTOVER`已建立Nemophila current contract并Refine `STM-TARGET-001`；pre-RFC
+  [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
+- [RFC-20260815-kernel-slab-allocator](./rfcs/kernel-slab-allocator/index.md)：Closed R0；在`mm::kmalloc`
+  owner内以slab class、bounded per-CPU local cache和shared central class替换small-object global-lock
+  common path，Talc继续承担bootstrap/span backing与large/special-layout fallback。首版允许任意CPU释放到
+  当前CPU cache，接受按class保留历史峰值span与有界per-CPU滞留，不引入owner CPU、remote-free、主动均衡、
+  span reclaim或frame allocator改造。[目标与不变量](./rfcs/kernel-slab-allocator/invariants.md)定义
+  boot/runtime同域、slot唯一owner、local/central handoff、锁/IRQ、failure与双架构cross-CPU proof obligation；
+  唯一`KERNEL-SLAB-CUTOVER`已Introduce Active `MM-KMALLOC-001/002`并关闭RFC。
+- [RFC-20260814-static-sysfs](./rfcs/static-sysfs/index.md)：Closed R1；接受注册 canonical `sysfs`
+  no-device filesystem，以 persistent singleton static tree 和 `/sys/kernel/{address_bits,cpu_byteorder}`
+  两个只读文本 consumer 原子验证目录、读取与 multi-mount lifetime；明确不接入现有 kobject、动态
+  namespace、device model 或 loop sysfs。实现代码参考 procfs 按职责目录化，但不复用 procfs private
+  entry，也不提前抽取 generic pseudo-filesystem framework；`STATIC-SYSFS-CUTOVER` 已使其成为 Closed R1，
+  `SYSFS-STATIC-001` 与 `SYSFS-MOUNT-001` 已进入 current contract。
+- [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
+  single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
+  directory上的additional view、dynamic slave semantic endpoint、safe-reuse pair/opened-description lifecycle、
+  Linux-default ABI与master-hangup协议；generic dentry freshness继续由VFS register独立拥有，不形成PTY额外Stage或
+  owner-local workaround。
+  [目标与不变量](./rfcs/pty-devpts/invariants.md)展开owner/lifecycle proof，[实施路线](./rfcs/pty-devpts/implementation.md)
+  组织Stage 1--4与全局实现输入，普通PTY Rust test app使用`anemone-rs`并参照`socket-test`形状；pre-RFC定位已归档为
+  [背景材料](./rfcs/pty-devpts/backgrounds/index.md)。tmux为
+  建议性必试、sshd不进入验收标准；Stage 1--3已关闭且未公开PTY namespace，Stage 4 public activation/acceptance仍为
+  Future，当前没有Stage执行授权或contract cutover。
 - [RFC-20260809-user-tlb-residency-targeting](./rfcs/user-tlb-residency-targeting/index.md)：Closed / R1；为全部user
   page-table activation建立唯一residency handoff，使destructive TLB shootdown在稳定状态只覆盖仍可能观察旧translation
   的CPU，同时保留现有同步ack、retirement与dependent continuation边界。
@@ -178,6 +213,11 @@ Implementation Boundary 约束 target、owner、handoff、ABI、contract、accep
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current effective规则见Network与Socket contract，
   register没有新增当前问题。
+- [RFC-20260814-tcp-listener-ingress-publication](./rfcs/tcp-listener-ingress-publication/index.md)：Closed R0；把active-connect
+  egress selection与listener ingress publication分开，由Stack TCP owner将一份logical listener投影到boot-static
+  local/external path，并在每次interface pump后以aggregate admission线性化pending child。target保持一个backlog、
+  opaque child handoff和all-projection cleanup，同时把unscoped logical listener诊断为`idiag_if = 0`；
+  `TCP-LISTENER-INGRESS-CUTOVER`已Refine三项current contract，双架构runtime与独立review闭合，transaction None。
 - [RFC-20260809-read-only-network-diagnostics](./rfcs/read-only-network-diagnostics/index.md)：Closed R0；交付
   initial-domain、IPv4-only、request-time snapshot的只读netlink子集，使未修改`ip link/addr/route show`与
   `ss -tan`可读取logical interface、static control plane与TCP owner facts。既有网络owner不迁移；新增netlink

@@ -29,6 +29,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("permissions-and-unmap", test_permissions_and_unmap),
     ("side-effects-after-efault", test_side_effects_after_efault),
     ("wait4-copyout-order", test_wait4_copyout_order),
+    ("getcpu-copyout", test_getcpu_copyout),
 ];
 
 unsafe fn syscall6(sysno: u64, args: [u64; 6]) -> Result<u64, Errno> {
@@ -427,6 +428,63 @@ fn test_wait4_copyout_order() -> Result<(), Errno> {
         unsafe { syscall6(SYS_WAIT4, [child as u64, 0, 0, 0, 0, 0]) },
         ECHILD,
     );
+    Ok(())
+}
+
+fn test_getcpu_copyout() -> Result<(), Errno> {
+    let mut cpu = u32::MAX;
+    let mut node = u32::MAX;
+    expect_count(
+        "getcpu writes CPU and node while ignoring tcache",
+        unsafe {
+            syscall6(
+                SYS_GETCPU,
+                [
+                    (&mut cpu as *mut u32) as u64,
+                    (&mut node as *mut u32) as u64,
+                    BAD_HIGH,
+                    0,
+                    0,
+                    0,
+                ],
+            )
+        },
+        0,
+    );
+    assert_ne!(cpu, u32::MAX, "getcpu did not write the CPU output");
+    assert_eq!(node, 0, "getcpu returned a NUMA node on a non-NUMA system");
+
+    expect_count(
+        "getcpu accepts both output pointers as null",
+        unsafe { syscall6(SYS_GETCPU, [0, 0, BAD_HIGH, 0, 0, 0]) },
+        0,
+    );
+
+    node = u32::MAX;
+    expect_errno(
+        "getcpu reports a bad CPU pointer",
+        unsafe {
+            syscall6(
+                SYS_GETCPU,
+                [BAD_LOW, (&mut node as *mut u32) as u64, 0, 0, 0, 0],
+            )
+        },
+        EFAULT,
+    );
+    assert_eq!(node, 0, "bad CPU pointer suppressed the node copyout");
+
+    cpu = u32::MAX;
+    expect_errno(
+        "getcpu reports a bad node pointer",
+        unsafe {
+            syscall6(
+                SYS_GETCPU,
+                [(&mut cpu as *mut u32) as u64, BAD_LOW, 0, 0, 0, 0],
+            )
+        },
+        EFAULT,
+    );
+    assert_ne!(cpu, u32::MAX, "bad node pointer suppressed the CPU copyout");
     Ok(())
 }
 

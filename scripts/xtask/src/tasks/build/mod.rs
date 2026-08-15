@@ -3,12 +3,7 @@
 //! Build Anemone kernel for targeted platforms
 //! (e.g., QEMU, or real hardware), and produce bootable images.
 
-use std::{
-    fs::{self, File},
-    io::{BufRead, BufReader},
-    os::unix::fs::PermissionsExt,
-    path::Path,
-};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 use anyhow::Context;
 use clap::Args;
@@ -17,9 +12,9 @@ use xshell::Shell;
 use crate::{
     config::{
         build_preset::CargoProfile,
-        platform::resolve_qemu_provider,
+        platform::{Config as PlatformConfig, DtbDelivery, DtbProvider, resolve_qemu_provider},
         resolve::{ConfigLoader, ResolvedSystemBuild},
-        selection::{BindArgs, SelectionArgs, reject_unconsumed_bindings},
+        selection::{BindArgs, BindValues, SelectionArgs, reject_unconsumed_bindings},
         system_target::InitialProgramSource,
     },
     log_progress,
@@ -55,20 +50,21 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     let mut action =
         ConfigLoader::new(Path::new(".")).resolve_selection(args.selection.into_request()?)?;
     let bindings = args.bindings.into_values()?;
-    if let Some(qemu) = action.system.platform.qemu.as_ref() {
-        let (resolved, consumed) = resolve_qemu_provider(qemu, &bindings, false)?;
-        reject_unconsumed_bindings(&bindings, &consumed)?;
-        action.system.platform.qemu = Some(resolved);
-    } else if let Some(name) = bindings.keys().next() {
-        anyhow::bail!("unknown bind `{name}`");
-    }
+    resolve_build_bindings(&mut action.system.platform, &bindings)?;
     log_progress!(
         "RESOLVE",
         &format!(
-            "selection source={} target={} platform={} kernel-config={} profile={} platform-output={} network={}",
+            "selection source={}{} target={} target-config={} platform={} platform-config={} kernel-config={} profile={} platform-output={} network={}",
             action.selection_source.as_str(),
+            action
+                .selection_source
+                .config_path()
+                .map(|path| format!(" preset-config={}", path.display()))
+                .unwrap_or_default(),
             action.system.target_ref,
+            action.system.target_path.display(),
             action.system.platform_ref,
+            action.system.platform_path.display(),
             action.system.kernel_config_ref,
             action.system.profile.as_str(),
             action
@@ -101,6 +97,30 @@ pub fn run(args: BuildArgs) -> anyhow::Result<()> {
     let context = BuildContext::new(action.system, args.disasm);
     context.build()?;
 
+    Ok(())
+}
+
+fn resolve_build_bindings(
+    platform: &mut PlatformConfig,
+    bindings: &BindValues,
+) -> anyhow::Result<()> {
+    let materializes_qemu_dtb = matches!(
+        platform.dtb.as_ref(),
+        Some(dtb)
+            if dtb.delivery == DtbDelivery::Embedded
+                && dtb.provider == Some(DtbProvider::Qemu)
+    );
+    if materializes_qemu_dtb {
+        let qemu = platform
+            .qemu
+            .as_ref()
+            .expect("validated embedded QEMU DT contract must have a provider");
+        let (resolved, consumed) = resolve_qemu_provider(qemu, &bindings, false)?;
+        reject_unconsumed_bindings(&bindings, &consumed)?;
+        platform.qemu = Some(resolved);
+    } else if let Some(name) = bindings.keys().next() {
+        anyhow::bail!("unknown or unconsumed bind `{name}`");
+    }
     Ok(())
 }
 
@@ -298,7 +318,7 @@ impl BuildContext {
 
             let sh = Shell::new()?;
             let disasm = sh
-                .cmd(&self.resolved.platform.build.arch.target_triple().objdump())
+                .cmd(&self.resolved.platform.build.arch.kernel_target().objdump())
                 .arg("-d")
                 .arg("-S")
                 .arg("build/anemone.elf")
@@ -329,10 +349,13 @@ impl BuildContext {
             ])
             .args(&["-Z", "json-target-spec"])
             .arg("--target")
-            .arg(&format!(
-                "../conf/arch/{}/{}.json",
-                self.resolved.platform.build.arch.as_str(),
-                self.resolved.platform.build.arch.target_triple().as_str()
+            .arg(Path::new("..").join(
+                self.resolved
+                    .platform
+                    .build
+                    .arch
+                    .kernel_target()
+                    .spec_json_path(),
             ))
             .env("RUSTFLAGS", rustflags);
         for arg in self.resolved.profile.as_cargo_arg() {
@@ -391,7 +414,7 @@ impl BuildContext {
     fn cargo_build_dir(&self) -> String {
         format!(
             "target/{}/{}",
-            self.resolved.platform.build.arch.target_triple().as_str(),
+            self.resolved.platform.build.arch.kernel_target().as_str(),
             match self.resolved.profile {
                 CargoProfile::Dev => "debug", // dev builds go to debug/
                 CargoProfile::Release => "release",
@@ -410,10 +433,14 @@ impl BuildContext {
 mod tests {
     use super::*;
     use crate::config::{
+        platform::{Config as PlatformConfig, TEST_QEMU_PLATFORM},
         reference::{BuildPresetRef, KernelConfigRef, SystemTargetRef},
         selection::SelectionRequest,
     };
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        collections::HashMap,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     struct TestDirectory(std::path::PathBuf);
 
@@ -455,6 +482,31 @@ mod tests {
     }
 
     #[test]
+    fn firmware_build_rejects_runtime_topology_bindings_without_requiring_them() {
+        let mut firmware = PlatformConfig::from_str(
+            &TEST_QEMU_PLATFORM
+                .replace("smp = \"1\"", "smp = \"{{smp}}\"")
+                .replace("memory = \"1G\"", "memory = \"{{memory}}\""),
+        )
+        .unwrap();
+        resolve_build_bindings(&mut firmware, &HashMap::new()).unwrap();
+
+        let bindings = HashMap::from([
+            ("smp".to_string(), "8".to_string()),
+            ("memory".to_string(), "8G".to_string()),
+        ]);
+        assert!(resolve_build_bindings(&mut firmware, &bindings).is_err());
+
+        let mut embedded = firmware;
+        embedded.build.arch = crate::config::platform::Arch::LoongArch64;
+        embedded.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
+        resolve_build_bindings(&mut embedded, &bindings).unwrap();
+        let qemu = embedded.qemu.unwrap();
+        assert_eq!(qemu.smp, "8");
+        assert_eq!(qemu.memory, "8G");
+    }
+
+    #[test]
     fn embedded_artifact_requires_one_executable_regular_file() {
         let root = TestDirectory::new();
         let executable = root.artifact("executable", 0o751);
@@ -483,8 +535,9 @@ mod tests {
     }
 
     #[test]
-    fn preset_and_tuple_resolve_the_same_network_target() {
-        let loader = ConfigLoader::new(Path::new("../.."));
+    fn repository_rv64_preset_and_tuple_resolve_the_same_network_target() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let loader = ConfigLoader::new(&repository);
         let preset = loader
             .resolve_selection(SelectionRequest::explicit_preset(
                 BuildPresetRef::new("qemu-virt-rv64-release").unwrap(),

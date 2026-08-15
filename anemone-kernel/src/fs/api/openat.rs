@@ -87,6 +87,7 @@ struct OpenHow {
     status: FileStatusFlags,
     fd: FdFlags,
     compat: LinuxOpenCompat,
+    no_ctty: bool,
     perm: InodePerm,
 }
 
@@ -160,9 +161,6 @@ impl OpenHow {
             getfl_visible_flags |= O_LARGEFILE;
             accepted_noop_flags |= O_LARGEFILE;
         }
-        if flags & O_NOCTTY != 0 {
-            accepted_noop_flags |= O_NOCTTY;
-        }
         if flags & O_ASYNC != 0 {
             // FASYNC / O_ASYNC is a valid Linux open flag and should remain
             // visible through F_GETFL. Real SIGIO delivery is a separate
@@ -198,6 +196,9 @@ impl OpenHow {
             status,
             fd: FdFlags::from_linux_open_flags(flags),
             compat: LinuxOpenCompat::new(getfl_visible_flags, accepted_noop_flags),
+            // O_NOCTTY is an operation-local backend effect, not opened-file
+            // status. Backends without an activation deliberately ignore it.
+            no_ctty: flags & O_NOCTTY != 0,
             perm,
         })
     }
@@ -294,9 +295,10 @@ fn finish_open(
         path,
         how.access,
         how.status.to_file_op_status_flags(),
+        how.no_ctty,
         observed_file_description_ops(),
     )?;
-    let (file, description_ops) = opened.into_parts();
+    let (file, description_ops, activation_commit) = opened.into_parts();
 
     let should_truncate = how.create.trunc && !created && ty == InodeType::Regular;
     if ty == InodeType::Regular && (how.access.can_write() || should_truncate) {
@@ -323,10 +325,14 @@ fn finish_open(
         how.fd,
         description_ops,
     );
-    // FAN_OPEN must be queued before the new fd becomes visible. Once the slot
+    // Backend participation is the last fallible step. FAN_OPEN must be queued
+    // before the new fd becomes visible. Once the slot
     // is published, a CLONE_FILES peer can close it and run the final-release
     // callback; committing after this infallible notification step preserves
     // the observable OPEN-before-CLOSE order for the opened description.
+    if let Some(commit) = activation_commit {
+        commit.commit(file_desc.clone())?;
+    }
     notify_path_event(FanHookEvent::new(FanMask::OPEN, opened_path));
     let fd = reservation.commit(file_desc);
     assert_eq!(

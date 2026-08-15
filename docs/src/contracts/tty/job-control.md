@@ -3,13 +3,13 @@
 **Contract ID：** `TTY-REL-001` / `TTY-JOBCTL-001` / `TTY-LIFE-001` / `TTY-ABI-001`
 **状态：** Active
 **Owner：** `device::tty` controlling-relation 与 terminal-access protocol；task topology、Signal 与 ThreadGroup job control 继续分别拥有 membership、occurrence/action 与 stop/continue/report truth
-**参与领域：** TTY / VFS / task topology / process group / Signal / ThreadGroup job control / task lifecycle
-**覆盖范围：** controlling-terminal relation、caller-relative `/dev/tty`、foreground selector、control-character与serial-break terminal signal、ordinary background read、relation cleanup 与首版 BusyBox ash job-control ABI
-**不覆盖：** PTY/devpts/ptmx、orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、relation-disassociation `SIGHUP`/`SIGCONT`、hardware hangup、runtime line reconfiguration或procfs TTY字段
+**参与领域：** serial TTY / PTY / VFS / task topology / process group / Signal / ThreadGroup job control / task lifecycle
+**覆盖范围：** controlling-terminal relation、caller-relative `/dev/tty`、PTY slave implicit acquisition、foreground selector、terminal signal、ordinary background read、relation cleanup、PTY master-hangup effect与首版 BusyBox ash job-control ABI
+**不覆盖：** orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、非PTY relation-disassociation signal、physical hardware hangup、runtime line reconfiguration或procfs TTY字段
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/task/{jobctl,sig}/`
 **依赖：** [TTY data plane](./data-plane.md)、[process-group signaling](../task/process-group-signaling.md)、[Signal pending/action](../signal/pending-routing.md)、[Unix job control](../task/job-control.md)、[task lifecycle](../task/thread-group-lifecycle.md)、[user entry](../task/user-entry.md)
-**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)
-**最后核验：** 2026-08-08
+**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)
+**最后核验：** 2026-08-13
 
 ## 状态与能力所有权
 
@@ -46,6 +46,10 @@ non-controlling caller取得任意Terminal，或opener identity驱动后续acces
 **验证 / Enforcement：** acquire/query/idempotence、wrong-session、candidate errno、`/dev/tty` caller-relative open、
 detach/reacquire与exit/reuse RV64 matrix；stable identity/generation source audit；relation owner KUnit与assertion。
 
+PTY runtime slave endpoint按stable identity exact enrollment/retirement进入同一registry。pathname open与`TIOCGPTPEER`
+在未设置operation-local `O_NOCTTY`且caller满足session-leader/no-current-CTTY/read-access条件时请求implicit acquire；
+未取得relation不使open失败。pair和devpts不保存relation truth。
+
 ## TTY-JOBCTL-001 — Terminal policy只产生经重验的guards-out effect
 
 **规则：** TTY拥有foreground/background access policy与terminal-effect decision generation；task topology拥有
@@ -69,12 +73,20 @@ group生成signal并返回idempotent restart，本次不消费input；blocked/ig
 Terminal、relation、port与topology guard外才允许Signal publication、Event wake、echo TX与复杂drop。effect request
 不进入持久队列；`SIGCONT` wake只触发重新仲裁，不能携带restart permit或反向驱动relation/job-control truth。
 
+PTY slave read、relation ioctl、master-input control signal与changed winsize signal还必须先在pair owner取得bounded
+effect permit。permit与pair retirement共享仲裁点，但不保存relation、target或signal truth；它可以跨guards-out
+relation/topology/Signal调用，只覆盖一个有界effect operation，并必须在任何blocking wait前释放。retirement先提交时
+slave read按PTY ABI返回EOF，不能使用尚未撤销的relation发布`SIGTTIN`或返回background `EIO`；operation先提交时才允许
+完成本轮job-control effect，master retirement必须等permit排空后再发布hangup `SIGHUP/SIGCONT`。serial TTY不参与该
+pair lifecycle协议。
+
 **违反表现：** session外group收到terminal signal、TTY保存或推进jobctl phase、background policy使用opener/global
 PGID、持TTY guard进入Signal/topology、background read提前消费input，或signal result反向改写relation。
 
 **验证 / Enforcement：** foreground/background `TIOCSPGRP`三分支、`VINTR/VQUIT/VSUSP`、QEMU serial break在
 `ISIG=0`下的flush与foreground `SIGINT`、changed-only winsize、actionable/blocked/ignored background read、
-detach-no-effect与BusyBox ash RV64 matrix；19项Unix job-control focused回归；guard/identity/restart capability source audit。
+detach-no-effect与BusyBox ash RV64 matrix；PTY permit-first/retirement-first KUnit与SMP8 master-close/background-read；
+19项Unix job-control focused回归；guard/identity/restart capability source audit。
 
 ## TTY-LIFE-001 — Relation cleanup先撤销可发现性再执行外部效果
 
@@ -89,11 +101,17 @@ endpoint、devfs node与Terminal不因relation cleanup销毁。
 ThreadGroup terminal lifecycle、first terminal code、job-control terminal precedence与newly orphaned stopped-group
 transition仍由task/jobctl owner持有。hardware hangup/backend fatal不得用node消失、编号复用或Terminal销毁伪装。
 
+PTY master final close是窄例外：pair先不可逆retire并禁止新bounded-effect permit，relation owner再用旧generation与
+stable session-leader identity撤销discoverability。master release不持pair/relation guard等待此前已提交的permit全部
+结束，然后才在guards-out按序向旧session leader thread group提交`SIGHUP`、`SIGCONT`。没有live relation时不生成替代
+target，也不向整个旧foreground process group额外广播；该规则不改变session-leader exit与`TIOCNOTTY`的首版边界。
+
 **违反表现：** detach后`/dev/tty`仍取得旧relation、两个owner重复cleanup effect、TTY覆盖first exit code、foreground
 group消失误删endpoint，或last close销毁仍受session控制的Terminal。
 
 **验证 / Enforcement：** detach后`/dev/tty`与old-effect失效、reacquire、session-leader exit reuse、foreground group
-clear与endpoint persistence RV64 matrix；eager/lazy cleanup、generation与guards-out source/lifecycle audit。
+clear与endpoint persistence RV64 matrix；PTY effect-drain KUnit与SMP8 late-stop recovery oracle；eager/lazy cleanup、
+generation与guards-out source/lifecycle audit。
 
 ## TTY-ABI-001 — 首版兼容包络必须真实可观察
 
@@ -102,9 +120,12 @@ noncanonical `VMIN=1,VTIME=0` input、blocking/nonblocking read、byte-stream wr
 chars/winsize/ioctl、显式`setsid + TIOCSCTTY(arg=0)`、`TIOCGPGRP/TIOCSPGRP/TIOCGSID`、foreground control
 signals、serial `BRKINT` foreground `SIGINT`、changed winsize `SIGWINCH`、普通background read `SIGTTIN`以及
 session-leader detach/exit cleanup。termios input envelope还真实round-trip并执行`IGNBRK`、`BRKINT`、`IGNPAR`、
-`PARMRK`、`INPCK`、`ISTRIP`、`INLCR`、`IGNCR`与`ICRNL`；其它changed unsupported bits继续原子`EINVAL`。
-termios output envelope真实round-trip `TAB0`与`TAB3/XTABS`，并按`TTY-OUTPUT-001`执行TAB3 expansion；
-`TAB1/TAB2`及其它changed unsupported output bits继续原子`EINVAL`。
+`PARMRK`、`INPCK`、`ISTRIP`、`INLCR`、`IGNCR`、`ICRNL`与`IUTF8`；`IUTF8`按`TTY-INPUT-001`与
+`TTY-OUTPUT-001`执行Linux N_TTY continuation-byte erase/column语义。termios output envelope真实round-trip
+`TAB0`与`TAB3/XTABS`并执行TAB3 expansion。精确compatibility set `XCASE`、`FLUSHO`、`PENDIN`、`NLDLY`、
+`CRDLY`、`TAB1/TAB2`、`BSDLY`、`VTDLY`、`FFDLY`、`OFILL`与`OFDEL`按tracked Linux 6.6.32稳定保存，
+但不获得数据面行为；`IMAXBEL`、unknown bits及其它具有Linux-visible行为而未实现的flag继续原子`EINVAL`，
+不得因实现成本降级为success-no-op。
 
 BusyBox ash必须取得真实controlling TTY；`jobs`、Ctrl-Z、`fg`、`bg`、foreground Ctrl-C、background read与shell
 reclaim都必须经过本页的relation/Signal/job-control handoff。BusyBox vi依赖真实raw/canonical切换、readiness与byte
@@ -118,10 +139,17 @@ read或foreground signal重新归入延期范围，也不得成功后丢弃状�
 **违反表现：** ash降级运行、foreground job结束后shell不能reclaim、`TIOCSPGRP`无条件放行或错误拒绝
 blocked/ignored路径、vi依赖fake ioctl、unsupported设置成功无效果，或background read绕过foreground policy。
 GNU `less`因其`TAB3` candidate被拒绝，或`TAB3`被当作success-no-op，也属于违反。
+`IUTF8`只被保存却不改变erase/column，或将compatibility set之外的行为flag静默接纳，同样属于违反。
 
-**验证 / Enforcement：** RV64自动TTY matrix `50/50`、BusyBox vi与ash host oracle、native Python 3.13 basic REPL与
+PTY refine同时交付`/dev/ptmx`与`/dev/pts/N`、`TIOCGPTN`/`TIOCSPTLCK`/`TIOCGPTPEER`、两条slave-open route的
+implicit acquisition、PTY foreground/background policy和master-hangup relation effect。支持的termios/winsize surface是
+`TCGETS`/`TCSETS`/`TCSETSW`/`TCSETSF`、`TIOCGWINSZ`/`TIOCSWINSZ`；legacy `TCGETA`/`TCSETA*`与
+`TCSBRK`/`TCSBRKP`不在首版ABI，必须诚实拒绝而非success-stub。
+
+**验证 / Enforcement：** RV64自动TTY matrix、BusyBox vi与ash host oracle、native Python 3.13 basic REPL与
 PyREPL、用户人工ash checklist、GNU `less 668`进入可用全屏界面并以`q`退出的用户运行证据、404项KUnit、
-TAB3 inline KUnit compile/source audit、19项Unix job-control focused回归、ABI/source/bypass audit与final review。
+IUTF8/TAB3 inline KUnit runtime与public PTY/TTY byte oracle、19项Unix job-control focused回归、ABI/source/bypass
+audit与final review。
 
 ## 跨领域handoff义务
 
@@ -130,19 +158,24 @@ TAB3 inline KUnit compile/source audit、19项Unix job-control focused回归、A
 | Relation lookup/mutation | TTY relation / topology | stable identity snapshot；topology验证后relation generation commit | stale/invalid target retry或fail-close；relation owner撤销 |
 | Terminal signal | Terminal / relation / topology / Signal | Terminal形成request；guard外target revalidation后Signal occurrence commit | 无live target只诊断；不得fallback或持guard publication |
 | Background read | FileOps / relation / Signal / job control | consume前decision；Signal default-stop；user-entry resume后restart | blocked/ignored/no-foreground为`EIO`；actionable路径不提前consume |
-| Lifecycle cleanup | task lifecycle / relation | relation owner先撤销discoverability，再guards-out cleanup | cleanup幂等；不生成首版范围外disassociation signals |
+| Lifecycle cleanup | task lifecycle / PTY pair / relation | relation owner先撤销discoverability，再guards-out cleanup | cleanup幂等；只有PTY master hangup生成本契约定义的session-leader signals |
 
 ## 验证范围与当前接受边界
 
-- 本轮agent-run RV64证据：404项KUnit、TTY `50/50`、QEMU serial break、BusyBox vi/ash、host byte oracle、
+- 2026-08-13 IUTF8 refinement的agent-run RV64证据：两套wrapper均通过633/633 KUnit；PTY SMP8
+  `16/16`，TTY `55/55`、host UTF-8/TAB3 byte oracle与BusyBox vi/ash均PASS并有序关机；双架构app与
+  KUnit-enabled kernel build通过，独立review最终0 Apollyon / 0 Keter / 0 Euclid。LA64 runtime、LTP、tmux与
+  实体UART/hardware为Not Run，build不得外推为runtime proof。
+- 2026-07-24原cutover的agent-run RV64证据：404项KUnit、TTY `50/50`、QEMU serial break、BusyBox vi/ash、host byte oracle、
   native Python 3.13 `-c`/basic REPL/PyREPL、source/lock/bypass audit，独立review最终0 Apollyon / 0 Keter / 0 Euclid。
 - 既有user-run RV64 job-control证据仍为同一contract的历史验证，本轮未重新运行：同一base/candidate、platform、
   BusyBox与kernel hash上的ash checklist完成Ctrl-C、
   `Ctrl-Z -> jobs -> fg -> Ctrl-Z -> bg -> jobs -> fg -> Ctrl-C`、background `cat`的`SIGTTIN` stop、foreground
   input与clean exit，launcher与wrapper均PASS。
 - 2026-08-08维护者在决赛RV64 guest中确认GNU `less 668`进入可用全屏界面，并以`q`退出。
-- 本轮build/runtime acceptance只覆盖RV64。LA64 compile/runtime、实体UART parity/framing injection、hardware与LTP为Not Run；focused pretest中的
+- 2026-07-24原cutover的build/runtime acceptance只覆盖RV64；当时LA64 compile/runtime、实体UART parity/framing
+  injection、hardware与LTP为Not Run。focused pretest中的
   signal/wait profile为`attempted=0`，不是LTP通过证据。
 - relation-disassociation `SIGHUP`/`SIGCONT`、newly orphaned stopped-group policy、orphaned-pgrp errno/effect、
-  `TOSTOP`与其它terminal-modifying background access、PTY/devpts/ptmx、hardware hangup/runtime line change和
+  `TOSTOP`与其它terminal-modifying background access、physical hardware hangup/runtime line change和
   procfs TTY字段仍不在本契约。

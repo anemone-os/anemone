@@ -1,0 +1,10 @@
+name = "nemophila-r0-test"
+targets = ["riscv64", "loongarch64"]
+
+[build]
+workdir = "."
+driver = "cargo"
+args = ["build", "--release"]
+
+[[artifacts]]
+path = "target/${TARGET_TRIPLE}/release/nemophila-r0-test"

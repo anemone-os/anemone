@@ -89,7 +89,9 @@ pub fn anony_open(path: &PathRef) -> Result<File, SysError> {
         file_ops,
         mode,
         prv,
+        description_activation,
     } = path.inode().open()?;
+    assert!(description_activation.is_none());
 
     Ok(File::new_with_mode(path.clone(), file_ops, mode, prv))
 }
@@ -103,7 +105,9 @@ pub fn anony_open_with(path: &PathRef, state: OpenedFile) -> Result<File, SysErr
         file_ops,
         mode,
         prv,
+        description_activation,
     } = state;
+    assert!(description_activation.is_none());
 
     Ok(File::new_with_mode(path.clone(), file_ops, mode, prv))
 }

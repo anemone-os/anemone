@@ -9,12 +9,12 @@
 ## 权威边界
 
 - `docs/src/contracts/` 下的条目只表达已经生效的共享规则。对已经登记的 contract ID，它是当前语义的唯一文档权威。
-- RFC `index.md` / `invariants.md` 表达 accepted target、相对当前契约的 delta，以及只服务该方案或迁移的 RFC-local proof obligations。它们不能在 cutover 前把目标规则写成当前事实。
+- 活动 RFC 的 `index.md` / `invariants.md` 表达 accepted target、相对当前契约的 delta，以及只服务该方案或迁移的 RFC-local proof obligations。它们不能在 cutover 前把目标规则写成当前事实；Closed 后只保留为历史来源，不再承担当前规范权威。
 - 执行证据记录实际 review、验证和 contract cutover，不重新定义规则。单次实现使用 change record/RFC closure 与 Git/PR 即可；只有长期 RFC、多 checkpoint 或多个 cutover 时才需要 transaction。小迭代内部至多两个 execution checkpoint 仍使用同一 change record，不因此创建 transaction。
 - Git 保存所有物理文本历史。契约文档不建立 `v1` / `v2` 副本，也不维护第二套修订号；语义变化由来源 RFC/change record 和生效证据解释。
 - register / current limitations 继续保存当前开放问题和已接受缺口，不承担 contract 或迁移计划。
 
-对于尚未提取到契约层的既有 RFC-local 不变量，原 Closed RFC 仍可作为该方案的历史 accepted source；一旦后续 RFC 要跨文档依赖或改变它，必须先把受影响的最小闭包提取为 contract。新的 contract 条目优先于旧 RFC 中同范围的历史规则，旧 RFC 不需要逐份反向改写。
+对于尚未提取到契约层的既有共享行为，原 Closed RFC 只能作为历史设计证据，不能直接成为新任务的规范依赖。后续工作需要依赖或改变该行为时，必须从 live source、测试与历史证据提取受影响的最小 effective baseline 为 contract，再声明真实 delta；旧 RFC 不需要也不得为此重新打开或反向改写。
 
 ## 按 owner 和 contract surface 组织
 
@@ -96,7 +96,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
 | Draft | 提议 delta 和 target | 保持当前 effective 规则 | Git/review；无需 transaction |
 | Accepted | accepted target | 保持 effective 规则 | commit/PR 或按需 transaction |
 | Cutover | 保留目标和理由 | 原子更新受影响 ID、来源和生效证据 | change record/RFC closure/Git/PR/transaction 中唯一一处 |
-| Closed | 作为决策和迁移历史 | 继续作为当前权威 | 保留原证据链接 |
+| Closed | 冻结为决策和迁移历史 | 继续作为当前权威 | 保留原证据链接，不续写原 RFC/transaction |
 
 若一个 RFC 分阶段切换多个独立 contract ID，可以逐项 cutover；如果中间阶段形成可被其它代码依赖的长期可见规则，它本身必须被明确记录为当前 transitional contract，并带删除 gate。纯文档语义校正、或 RFC/实现/验证在同一原子变更中完成时，接受点可以同时是 cutover，但仍需保留变化原因和证据入口。
 
@@ -104,13 +104,15 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
 
 - RFC 指向当前 contract ID，并声明 delta；不复制未改变的规则。
 - contract 在 cutover 后记录最初引入来源、最近一次语义改变来源和生效证据，不维护 pending proposal 或所有引用者 backlink。
-- Closed RFC 正文不因后续 contract 变化逐份回改。必要的旧页提示可以是轻量导航，但不是 current truth 的维护条件。
+- Closed RFC 正文不因后续 contract 变化逐份回改，也不通过 revision、gate 或 transaction 重新打开。必要的外部导航可以链接历史页，但旧页中的未来工作指令不是 current truth 或流程 authority。
 - contract 被替换时原地维护当前规则；旧规则由 Git 与来源 RFC 恢复。retired ID 只保留 `ID -> successor / removal source` 的短映射，不复制旧正文。
 
 ## 当前登记
 
 契约层从本规则生效后按触达迁移。当前不批量把既有 RFC 的不变量搬入 `docs/src/contracts/`；首个需要跨 RFC 修改或复用既有共享规则的 RFC 或合格的 contract-bearing small change，应按本页提取最小 contract 闭包，并把新入口加入本节和 `docs/src/SUMMARY.md`。
 
+- [KUnit当前契约](./contracts/kunit/index.md)
+  - [Execution and proof](./contracts/kunit/execution-and-proof.md)
 - [VFS 当前契约](./contracts/vfs/index.md)
   - [File kind 与 Linux mode projection](./contracts/vfs/file-kind.md)
   - [Creation policy、make node 与 filesystem-backed rdev](./contracts/vfs/make-node.md)
@@ -132,6 +134,8 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
 - [Procfs 当前契约](./contracts/procfs/index.md)
   - [TGID task-state projection](./contracts/procfs/task-state-projection.md)
+- [Sysfs 当前契约](./contracts/sysfs/index.md)
+  - [Static filesystem](./contracts/sysfs/static-filesystem.md)
 - [Network 当前契约](./contracts/net/index.md)
   - [Frame path](./contracts/net/frame-path.md)
   - [DWMAC concrete backend](./contracts/net/dwmac.md)
@@ -151,12 +155,14 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Unix seqpacket](./contracts/socket/unix-seqpacket.md)
 - [Build Configuration 当前契约](./contracts/configuration/index.md)
   - [System target 与 resolved selection](./contracts/configuration/system-target.md)
+- [Nemophila 当前契约](./contracts/nemophila/index.md)
 - [System Power 当前契约](./contracts/power/index.md)
   - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
 - [Membarrier 当前契约](./contracts/membarrier/index.md)
   - [Global rendezvous](./contracts/membarrier/global-rendezvous.md)
 - [MM 当前契约](./contracts/mm/index.md)
   - [User Address-Space TLB Completion](./contracts/mm/user-fault-local-tlb.md)
+  - [Kernel Heap](./contracts/mm/kernel-heap.md)
   - [OOM policy](./contracts/mm/oom-policy.md)
 - [Scheduler 当前契约](./contracts/scheduler/index.md)
   - [Asynchronous wake delivery](./contracts/scheduler/wake-delivery.md)

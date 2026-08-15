@@ -50,16 +50,23 @@ impl TidAllocPolicy {
 #[derive(Deserialize, Debug, Serialize, PartialEq, Eq)]
 pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
+    pub slab_span_pages: Option<usize>,
+    pub slab_max_object_bytes: Option<usize>,
+    pub slab_local_capacity: Option<usize>,
+    pub slab_transfer_batch: Option<usize>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub print_log_level: Option<u8>,
     pub record_log_level: Option<u8>,
     pub kstack_shift_kb: Option<u64>,
     pub riscv64_tlb_flush_all_threshold_pages: Option<usize>,
+    pub loongarch64_tlb_flush_all_min_pages: Option<usize>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
+    pub nemophila_artifact_max_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
+    pub c_string_batch_bytes: Option<usize>,
     pub execve_max_string_count: Option<usize>,
     pub max_processes: Option<u64>,
     pub epoll_file_max_waiters: Option<usize>,
@@ -101,6 +108,7 @@ pub struct Parameters {
     pub tty_input_capacity_bytes: Option<usize>,
     pub tty_output_capacity_bytes: Option<usize>,
     pub tty_worker_batch_bytes: Option<usize>,
+    pub pty_system_capacity: Option<usize>,
     pub ns16550a_irq_rx_budget_bytes: Option<usize>,
     pub ns16550a_tx_batch_bytes: Option<usize>,
     pub ns16550a_tx_poll_iterations: Option<usize>,
@@ -154,6 +162,7 @@ pub struct Parameters {
     pub net_tcp_endpoint_capacity: Option<usize>,
     pub net_tcp_engine_timer_capacity: Option<usize>,
     pub net_tcp_listener_completed_capacity: Option<usize>,
+    pub net_tcp_listener_projection_capacity: Option<usize>,
     pub net_tcp_rx_buffer_bytes: Option<usize>,
     pub net_tcp_tx_buffer_bytes: Option<usize>,
     pub net_tcp_deferred_reclaim_capacity: Option<usize>,
@@ -184,16 +193,23 @@ impl Parameters {
         }
 
         materialize!(bootstrap_heap_shift_kb);
+        materialize!(slab_span_pages);
+        materialize!(slab_max_object_bytes);
+        materialize!(slab_local_capacity);
+        materialize!(slab_transfer_batch);
         materialize!(log_buffer_shift_kb);
         materialize!(log_record_shift_bytes);
         materialize!(print_log_level);
         materialize!(record_log_level);
         materialize!(kstack_shift_kb);
         materialize!(riscv64_tlb_flush_all_threshold_pages);
+        materialize!(loongarch64_tlb_flush_all_min_pages);
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
+        materialize!(nemophila_artifact_max_bytes);
         materialize!(max_path_len_bytes);
+        materialize!(c_string_batch_bytes);
         materialize!(execve_max_string_count);
         materialize!(max_processes);
         materialize!(epoll_file_max_waiters);
@@ -235,6 +251,7 @@ impl Parameters {
         materialize!(tty_input_capacity_bytes);
         materialize!(tty_output_capacity_bytes);
         materialize!(tty_worker_batch_bytes);
+        materialize!(pty_system_capacity);
         materialize!(ns16550a_irq_rx_budget_bytes);
         materialize!(ns16550a_tx_batch_bytes);
         materialize!(ns16550a_tx_poll_iterations);
@@ -288,6 +305,7 @@ impl Parameters {
         materialize!(net_tcp_endpoint_capacity);
         materialize!(net_tcp_engine_timer_capacity);
         materialize!(net_tcp_listener_completed_capacity);
+        materialize!(net_tcp_listener_projection_capacity);
         materialize!(net_tcp_rx_buffer_bytes);
         materialize!(net_tcp_tx_buffer_bytes);
         materialize!(net_tcp_deferred_reclaim_capacity);
@@ -320,6 +338,14 @@ impl Parameters {
 
 /// Size of bootstrap heap as a power of 2 in KB
 pub const BOOTSTRAP_HEAP_SHIFT_KB: u64 = {};
+/// Pages permanently assigned to one kernel slab size class per span.
+pub const SLAB_SPAN_PAGES: usize = {};
+/// Largest size/alignment served by the kernel slab path.
+pub const SLAB_MAX_OBJECT_BYTES: usize = {};
+/// Maximum free objects retained per CPU and slab class.
+pub const SLAB_LOCAL_CAPACITY: usize = {};
+/// Maximum free objects moved in one local/central handoff.
+pub const SLAB_TRANSFER_BATCH: usize = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
@@ -341,12 +367,17 @@ pub const KSTACK_SHIFT_KB: u64 = {};
 /// RV64 page-range length above which one full local TLB flush replaces
 /// per-page invalidation.
 pub const RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES: usize = {};
+/// Minimum LA64 page-range length at which one full local TLB flush replaces
+/// per-page invalidation.
+pub const LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES: usize = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum number of logical CPUs enabled by this kernel
 pub const MAX_LOGICAL_CPUS: usize = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
+/// Maximum bytes accepted from one embedded or supplied Nemophila artifact.
+pub const NEMOPHILA_ARTIFACT_MAX_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to
 /// MAX_IDENT_LEN_BYTES,
 /// since file names are commonly used as identity strings in kernel
@@ -354,6 +385,8 @@ pub const MAX_IDENT_LEN_BYTES: usize = {};
 pub const MAX_FILE_NAME_LEN_BYTES: usize = MAX_IDENT_LEN_BYTES;
 /// Maximum length of file paths in bytes
 pub const MAX_PATH_LEN_BYTES: usize = {};
+/// Maximum bytes copied per page-bounded direct C-string user-access window.
+pub const C_STRING_BATCH_BYTES: usize = {};
 /// Maximum number of strings accepted in each execve argv or envp vector.
 pub const EXECVE_MAX_STRING_COUNT: usize = {};
 /// Maximum number of processes
@@ -455,6 +488,8 @@ pub const TTY_INPUT_CAPACITY_BYTES: usize = {};
 pub const TTY_OUTPUT_CAPACITY_BYTES: usize = {};
 /// Maximum RX/TX bytes advanced by one endpoint worker batch.
 pub const TTY_WORKER_BATCH_BYTES: usize = {};
+/// Maximum reserved or live Unix98 PTY episodes in the system devpts instance.
+pub const PTY_SYSTEM_CAPACITY: usize = {};
 /// Maximum RX bytes drained by one NS16550A IRQ handler invocation.
 pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = {};
 /// Maximum bytes submitted while holding the NS16550A TX lock.
@@ -560,8 +595,10 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
 pub const NET_TCP_ENDPOINT_CAPACITY: usize = {};
 /// Shared upper bound for TCP engines and their embedded protocol timers.
 pub const NET_TCP_ENGINE_TIMER_CAPACITY: usize = {};
-/// Completed-child engine slots retained by one private TCP listener.
+/// Maximum aggregate pending/claimed backlog owned by one logical TCP listener.
 pub const NET_TCP_LISTENER_COMPLETED_CAPACITY: usize = {};
+/// Maximum ingress projections owned by one logical TCP listener.
+pub const NET_TCP_LISTENER_PROJECTION_CAPACITY: usize = {};
 /// Receive bytes owned by each private TCP engine.
 pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
 /// Transmit bytes owned by each private TCP engine.
@@ -578,16 +615,23 @@ pub const NET_TCP_EPHEMERAL_PORT_FIRST: u16 = {};
 pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
+            resolved!(slab_span_pages),
+            resolved!(slab_max_object_bytes),
+            resolved!(slab_local_capacity),
+            resolved!(slab_transfer_batch),
             resolved!(log_buffer_shift_kb),
             resolved!(log_record_shift_bytes),
             resolved!(print_log_level),
             resolved!(record_log_level),
             resolved!(kstack_shift_kb),
             resolved!(riscv64_tlb_flush_all_threshold_pages),
+            resolved!(loongarch64_tlb_flush_all_min_pages),
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
+            resolved!(nemophila_artifact_max_bytes),
             resolved!(max_path_len_bytes),
+            resolved!(c_string_batch_bytes),
             resolved!(execve_max_string_count),
             resolved!(max_processes),
             resolved!(epoll_file_max_waiters),
@@ -629,6 +673,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(tty_input_capacity_bytes),
             resolved!(tty_output_capacity_bytes),
             resolved!(tty_worker_batch_bytes),
+            resolved!(pty_system_capacity),
             resolved!(ns16550a_irq_rx_budget_bytes),
             resolved!(ns16550a_tx_batch_bytes),
             resolved!(ns16550a_tx_poll_iterations),
@@ -682,6 +727,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_tcp_endpoint_capacity),
             resolved!(net_tcp_engine_timer_capacity),
             resolved!(net_tcp_listener_completed_capacity),
+            resolved!(net_tcp_listener_projection_capacity),
             resolved!(net_tcp_rx_buffer_bytes),
             resolved!(net_tcp_tx_buffer_bytes),
             resolved!(net_tcp_deferred_reclaim_capacity),

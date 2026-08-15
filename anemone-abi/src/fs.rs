@@ -113,6 +113,23 @@ pub mod linux {
         pub const CLOSE_RANGE_CLOEXEC: u32 = 1 << 2;
     }
 
+    pub mod sync_file_range {
+        pub const SYNC_FILE_RANGE_WAIT_BEFORE: u32 = 1;
+        pub const SYNC_FILE_RANGE_WRITE: u32 = 2;
+        pub const SYNC_FILE_RANGE_WAIT_AFTER: u32 = 4;
+        pub const SYNC_FILE_RANGE_VALID_FLAGS: u32 =
+            SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER;
+    }
+
+    pub mod fadvise {
+        pub const POSIX_FADV_NORMAL: i32 = 0;
+        pub const POSIX_FADV_RANDOM: i32 = 1;
+        pub const POSIX_FADV_SEQUENTIAL: i32 = 2;
+        pub const POSIX_FADV_WILLNEED: i32 = 3;
+        pub const POSIX_FADV_DONTNEED: i32 = 4;
+        pub const POSIX_FADV_NOREUSE: i32 = 5;
+    }
+
     pub mod mode {
         pub const S_IFMT: u32 = 0o170000;
         pub const S_IFSOCK: u32 = 0o140000;
@@ -537,6 +554,7 @@ pub mod linux {
     pub mod fcntl {
         use core::mem::{align_of, offset_of, size_of};
 
+        pub const FD_CLOEXEC: u32 = 1;
         pub const F_DUPFD: u32 = 0;
         pub const F_GETFD: u32 = 1;
         pub const F_SETFD: u32 = 2;

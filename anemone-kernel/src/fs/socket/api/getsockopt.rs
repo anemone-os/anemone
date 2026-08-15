@@ -3,10 +3,12 @@ use core::mem::size_of;
 use anemone_abi::{
     net::linux::{
         ICMP_FILTER, IP_RECVERR, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_ACCEPTCONN, SO_DOMAIN,
-        SO_ERROR, SO_PROTOCOL, SO_REUSEADDR, SO_TYPE, SOL_RAW, SOL_SOCKET, TCP_NODELAY,
+        SO_ERROR, SO_PEERCRED, SO_PROTOCOL, SO_REUSEADDR, SO_TYPE, SOL_RAW, SOL_SOCKET,
+        TCP_NODELAY, UCred,
     },
     syscall::SYS_GETSOCKOPT,
 };
+use zerocopy::IntoBytes;
 
 use super::profile::socket_abi_profile;
 
@@ -45,13 +47,15 @@ enum GetOption {
     Descriptor(i32),
     Ipv4Scalar(i32),
     Bytes([u8; size_of::<u32>()]),
+    PeerCredentials(UCred),
 }
 
 impl GetOption {
-    fn bytes(&self) -> [u8; size_of::<u32>()] {
+    fn bytes(&self) -> &[u8] {
         match self {
-            Self::Descriptor(value) | Self::Ipv4Scalar(value) => value.to_ne_bytes(),
-            Self::Bytes(bytes) => *bytes,
+            Self::Descriptor(value) | Self::Ipv4Scalar(value) => value.as_bytes(),
+            Self::Bytes(bytes) => bytes,
+            Self::PeerCredentials(credentials) => credentials.as_bytes(),
         }
     }
 
@@ -63,12 +67,13 @@ impl GetOption {
             {
                 1
             },
+            Self::PeerCredentials(_) => requested.min(size_of::<UCred>()),
             _ => requested.min(size_of::<u32>()),
         }
     }
 
     fn writes_len_first(&self) -> bool {
-        !matches!(self, Self::Descriptor(_))
+        !matches!(self, Self::Descriptor(_) | Self::PeerCredentials(_))
     }
 }
 
@@ -76,6 +81,7 @@ fn map_option_error(error: SocketOptionError) -> SysError {
     match error {
         SocketOptionError::Unsupported => SysError::ProtocolOptionNotSupported,
         SocketOptionError::Retired => SysError::BadFileDescriptor,
+        SocketOptionError::NotConnected => SysError::NotConnected,
         SocketOptionError::InvalidValue => SysError::InvalidArgument,
     }
 }
@@ -95,6 +101,20 @@ fn query_option(socket: &Socket, level: i32, option: i32) -> Result<GetOption, S
             .and_then(|value| match value {
                 SocketOptionValue::PendingError(error) => {
                     Ok(GetOption::Descriptor(error.map_or(0, pending_error_errno)))
+                },
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
+        (SOL_SOCKET, SO_PEERCRED) => socket
+            .query_option(SocketOptionQuery::PeerCredentials)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::PeerCredentials(credentials) => {
+                    let pid = i32::try_from(credentials.tgid).map_err(|_| SysError::Overflow)?;
+                    Ok(GetOption::PeerCredentials(UCred {
+                        pid,
+                        uid: credentials.effective_uid,
+                        gid: credentials.effective_gid,
+                    }))
                 },
                 _ => Err(SysError::ProtocolOptionNotSupported),
             }),

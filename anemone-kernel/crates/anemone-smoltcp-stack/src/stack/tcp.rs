@@ -74,7 +74,7 @@ impl Stack {
             .endpoint(id)
             .ok_or(TcpQueryError::UnknownEndpoint)?;
         let interface = match &endpoint.role {
-            crate::tcp::EndpointRole::Listener(listener) => Some(listener.interface),
+            crate::tcp::EndpointRole::Listener(_) => None,
             crate::tcp::EndpointRole::Connection(connection) => Some(connection.interface),
             crate::tcp::EndpointRole::Idle | crate::tcp::EndpointRole::Bound(_) => None,
             crate::tcp::EndpointRole::Reclaiming { .. } | crate::tcp::EndpointRole::Vacant => {
@@ -286,35 +286,55 @@ impl Stack {
     pub fn listen_tcp_endpoint(
         &mut self,
         id: TcpEndpointId,
-        interface: InterfaceId,
         implicit_address: Ipv4Address,
     ) -> Result<(), TcpListenError> {
         let backlog =
             TcpListenBacklog::new(self.protocols.tcp.policy().listener_completed_capacity());
-        self.listen_tcp_endpoint_with_backlog(id, interface, implicit_address, backlog)
+        self.listen_tcp_endpoint_with_backlog(id, implicit_address, backlog)
     }
 
     pub fn listen_tcp_endpoint_with_backlog(
         &mut self,
         id: TcpEndpointId,
-        interface: InterfaceId,
         implicit_address: Ipv4Address,
         backlog: TcpListenBacklog,
     ) -> Result<(), TcpListenError> {
-        if self.tcp_sockets(interface).is_none() {
-            return Err(TcpListenError::UnknownInterface);
-        }
         let binding = self
             .protocols
             .tcp
             .prepare_binding(id, implicit_address)
             .map_err(map_listen_bind_error)?;
-        self.protocols.tcp.prepare_listener(id, binding, backlog)?;
-        let (tcp_owner, _, sockets) = self
-            .tcp_owner_interface_mut(interface)
-            .expect("validated TCP listener interface disappeared");
-        tcp_owner.commit_listener(sockets, id, interface, binding, backlog);
-        tcp_owner.invalidate(id);
+        let interfaces = self.tcp_listener_interfaces(binding)?;
+        self.protocols
+            .tcp
+            .prepare_listener(id, binding, &interfaces, backlog)?;
+
+        if self.protocols.tcp.listener(id).is_some() {
+            self.protocols.tcp.set_listener_backlog(id, backlog.get());
+            for (projection, interface) in interfaces.into_iter().enumerate() {
+                let (tcp_owner, _, sockets) = self
+                    .tcp_owner_interface_mut(interface)
+                    .expect("validated TCP listener interface disappeared");
+                tcp_owner.resize_listener_projection(sockets, id, projection);
+            }
+        } else {
+            let mut projections = alloc::vec::Vec::with_capacity(interfaces.len());
+            for interface in interfaces {
+                let (tcp_owner, _, sockets) = self
+                    .tcp_owner_interface_mut(interface)
+                    .expect("validated TCP listener interface disappeared");
+                projections.push(tcp_owner.new_listener_projection(
+                    sockets,
+                    interface,
+                    binding,
+                    backlog.get(),
+                ));
+            }
+            self.protocols
+                .tcp
+                .commit_listener(id, binding, backlog.get(), projections);
+        }
+        self.protocols.tcp.invalidate(id);
         Ok(())
     }
 
@@ -322,24 +342,9 @@ impl Stack {
         &mut self,
         listener: TcpEndpointId,
     ) -> Result<Option<TcpPendingChild>, TcpChildError> {
-        let interface = self
-            .protocols
-            .tcp
-            .listener(listener)
-            .ok_or_else(|| {
-                if self.protocols.tcp.endpoint(listener).is_some() {
-                    TcpChildError::WrongRole
-                } else {
-                    TcpChildError::UnknownEndpoint
-                }
-            })?
-            .interface;
-        let (tcp_owner, _, sockets) = self
-            .tcp_owner_interface_mut(interface)
-            .expect("live TCP listener references an attached interface");
-        let child = tcp_owner.claim_pending_child(sockets, listener)?;
+        let child = self.protocols.tcp.claim_pending_child(listener)?;
         if child.is_some() {
-            tcp_owner.invalidate(listener);
+            self.protocols.tcp.invalidate(listener);
         }
         Ok(child)
     }
@@ -348,13 +353,8 @@ impl Stack {
         &mut self,
         child: TcpPendingChild,
     ) -> Result<TcpEndpointId, TcpChildError> {
-        let (listener, _, _) = child.owner_parts();
-        let interface = self
-            .protocols
-            .tcp
-            .listener(listener)
-            .ok_or(TcpChildError::StaleChild)?
-            .interface;
+        let (listener, _, _, _) = child.owner_parts();
+        let interface = self.protocols.tcp.child_interface(child)?;
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP listener references an attached interface");
@@ -368,13 +368,8 @@ impl Stack {
         &mut self,
         child: TcpPendingChild,
     ) -> Result<Option<ProtocolProgression>, TcpChildError> {
-        let (listener, _, _) = child.owner_parts();
-        let interface = self
-            .protocols
-            .tcp
-            .listener(listener)
-            .ok_or(TcpChildError::StaleChild)?
-            .interface;
+        let (listener, _, _, _) = child.owner_parts();
+        let interface = self.protocols.tcp.child_interface(child)?;
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP listener references an attached interface");
@@ -487,28 +482,49 @@ impl Stack {
         &mut self,
         id: TcpEndpointId,
         reason: TcpReleaseReason,
-    ) -> Result<Option<ProtocolProgression>, TcpRetireError> {
+    ) -> Result<alloc::vec::Vec<ProtocolProgression>, TcpRetireError> {
         self.protocols.tcp.invalidate(id);
+        if self.protocols.tcp.listener(id).is_some() {
+            let listener = self.protocols.tcp.begin_listener_release(id)?;
+            let mut affected = alloc::vec::Vec::new();
+            for projection in listener.projections {
+                let interface = projection.interface;
+                let (tcp_owner, _, sockets) = self
+                    .tcp_owner_interface_mut(interface)
+                    .expect("live TCP listener references an attached interface");
+                let mut progressed = false;
+                for slot in projection.slots {
+                    let Some(handle) = slot.handle else { continue };
+                    progressed |= tcp_owner
+                        .retire_listener_engine(sockets, id, interface, handle, slot.tuple);
+                }
+                if progressed {
+                    affected.push(ProtocolProgression::committed(interface));
+                }
+            }
+            self.protocols.tcp.finish_listener_release(id);
+            return Ok(affected);
+        }
         let interface = self
             .protocols
             .tcp
             .connection(id)
-            .map(|connection| connection.interface)
-            .or_else(|| {
-                self.protocols
-                    .tcp
-                    .listener(id)
-                    .map(|listener| listener.interface)
-            });
+            .map(|connection| connection.interface);
         let Some(interface) = interface else {
-            return self.protocols.tcp.retire_without_engine(id).map(|()| None);
+            return self
+                .protocols
+                .tcp
+                .retire_without_engine(id)
+                .map(|()| alloc::vec::Vec::new());
         };
         let (tcp_owner, _, sockets) = self
             .tcp_owner_interface_mut(interface)
             .expect("live TCP Endpoint references an attached interface");
         Ok(tcp_owner
             .begin_release(sockets, id, reason)?
-            .map(ProtocolProgression::committed))
+            .map(ProtocolProgression::committed)
+            .into_iter()
+            .collect())
     }
 
     fn validate_tcp_selection(
@@ -551,6 +567,40 @@ impl Stack {
                     .filter(|local| local.id == id)
                     .map(|local| &local.sockets)
             })
+    }
+
+    fn tcp_listener_interfaces(
+        &self,
+        binding: TcpLocalBinding,
+    ) -> Result<alloc::vec::Vec<InterfaceId>, TcpListenError> {
+        let local = self
+            .local
+            .as_ref()
+            .ok_or(TcpListenError::UnknownInterface)?;
+        let mut interfaces = alloc::vec![local.id];
+        if binding.address().is_loopback() {
+            return Ok(interfaces);
+        }
+        for entry in &self.interfaces {
+            let matches = binding.address().is_unspecified()
+                || entry.interface.ip_addrs().iter().any(|cidr| match cidr {
+                    smoltcp::wire::IpCidr::Ipv4(cidr) => {
+                        cidr.address().octets() == binding.address().octets()
+                    },
+                });
+            let configured = entry
+                .interface
+                .ip_addrs()
+                .iter()
+                .any(|cidr| matches!(cidr, smoltcp::wire::IpCidr::Ipv4(_)));
+            if configured && matches {
+                interfaces.push(entry.id);
+            }
+        }
+        if !binding.address().is_unspecified() && interfaces.len() == 1 {
+            return Err(TcpListenError::UnknownInterface);
+        }
+        Ok(interfaces)
     }
 }
 

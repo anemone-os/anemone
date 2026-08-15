@@ -1,0 +1,7 @@
+name = "clone-observer"
+
+[build]
+workdir = "."
+driver = "cargo"
+manifest = "Cargo.toml"
+artifact = "nemophila_clone_observer.wasm"

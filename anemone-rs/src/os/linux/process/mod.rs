@@ -393,6 +393,18 @@ pub fn getppid() -> Result<Tid, Errno> {
     process::getppid().and_then(|x| Ok(x as Tid))
 }
 
+pub fn getuid() -> Result<u32, Errno> {
+    process::getuid().map(|uid| uid as u32)
+}
+
+pub fn getgid() -> Result<u32, Errno> {
+    process::getgid().map(|gid| gid as u32)
+}
+
+pub fn setuid(uid: u32) -> Result<(), Errno> {
+    process::setuid(uid).map(|_| ())
+}
+
 pub fn setpgid(pid: i32, pgid: i32) -> Result<(), Errno> {
     process::setpgid(pid, pgid).map(|_| ())
 }

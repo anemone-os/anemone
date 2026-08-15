@@ -2,7 +2,7 @@ use core::fmt::Write as _;
 
 use crate::{
     device::{
-        console::ConsoleTerminalIdentity,
+        console::{ConsoleTerminalIdentity, ConsoleTerminalOpen},
         devnum::{self, MINOR_BITS},
     },
     fs::devfs::{DevfsNodeAttr, DevfsNodeOps, DevfsPublish, publish as devfs_publish},
@@ -53,13 +53,16 @@ impl DevfsNodeOps for ControllingTtyNodeOps {
 
 struct PreparedEndpoint {
     endpoint: Arc<TtyEndpoint>,
+    /// Physical identity retained only for deterministic serial publication
+    /// diagnostics; it does not decide semantic terminal identity or liveness.
+    physical_id: TtyPortId,
     devnum: CharDevNum,
     publish: DevfsPublish,
 }
 
 /// Stable boot mapping committed by the TTY owner. `devnum` is intentionally
-/// retained as a stable snapshot because it is the published ABI identity;
-/// the physical identity itself remains authoritative at `endpoint.port.id()`.
+/// retained as a stable snapshot because it is the published ABI identity.
+/// Relation and FileOps identity remains the exact semantic endpoint object.
 struct PublishedEndpoint {
     endpoint: Arc<TtyEndpoint>,
     devnum: CharDevNum,
@@ -67,6 +70,9 @@ struct PublishedEndpoint {
 
 struct PublishedEndpoints {
     endpoints: Vec<PublishedEndpoint>,
+    /// Retirement capabilities kept for the publish-until-reboot serial
+    /// lifecycle. Membership and relation state remain registry-owned.
+    _relations: Vec<relation::RelationParticipant>,
     /// Stable selected-endpoint snapshot used by the anonymous boot inode for
     /// inherited `fstat`/reopen behavior. The indexed endpoint remains the
     /// authoritative source of terminal identity and published device number.
@@ -111,13 +117,41 @@ fn select_identity_index(
     }
 }
 
+fn select_endpoint<'a>(
+    identities: &[TtyPortId],
+    endpoints: &'a [Arc<TtyEndpoint>],
+    selected: Option<&str>,
+) -> Result<(usize, &'a Arc<TtyEndpoint>), SysError> {
+    assert_eq!(
+        identities.len(),
+        endpoints.len(),
+        "TTY physical/semantic attachment snapshot lengths diverged"
+    );
+    let index = select_identity_index(identities, selected)?;
+    let endpoint = endpoints
+        .get(index)
+        .expect("selected TTY identity escaped its semantic endpoint snapshot");
+    Ok((index, endpoint))
+}
+
 pub(crate) struct TtyBootPublication {
     controlling_publish: DevfsPublish,
-    relations: relation::PreparedRelations,
+    relations: Vec<relation::RelationParticipant>,
     endpoints: Vec<PreparedEndpoint>,
     published: Vec<PublishedEndpoint>,
     boot_index: usize,
     boot_files: [File; 3],
+    console_terminal: Arc<dyn ConsoleTerminalOpen>,
+}
+
+struct SelectedConsoleTerminal {
+    endpoint: Arc<TtyEndpoint>,
+}
+
+impl ConsoleTerminalOpen for SelectedConsoleTerminal {
+    fn open(&self) -> Result<OpenedFile, SysError> {
+        opened_endpoint_file(&self.endpoint)
+    }
 }
 
 pub(crate) fn prepare_system_boot(
@@ -139,18 +173,17 @@ pub(crate) fn prepare_system_boot(
         port_count,
         "TTY attachments changed during boot publication preparation"
     );
-    for (identity, endpoint) in ports.iter() {
+    for (identity, pending) in ports.iter() {
         assert!(
             endpoints.len() < endpoints.capacity() && identities.len() < identities.capacity(),
             "TTY attachment snapshot exceeded its reserved capacity"
         );
-        let endpoint = endpoint.upgrade().ok_or(SysError::NotFound)?;
+        let endpoint = pending.endpoint.upgrade().ok_or(SysError::NotFound)?;
         identities.push(identity.clone());
         endpoints.push(endpoint);
     }
     drop(ports);
 
-    let relations = relation::prepare(&endpoints)?;
     let controlling_ops: Arc<dyn DevfsNodeOps> =
         Arc::try_new(ControllingTtyNodeOps).map_err(|_| SysError::OutOfMemory)?;
     let mut controlling_name = String::new();
@@ -178,14 +211,18 @@ pub(crate) fn prepare_system_boot(
         identities.windows(2).all(|pair| pair[0] < pair[1]),
         "TTY attachment registry lost its unique sorted identity invariant"
     );
-    let selected_index =
-        select_identity_index(&identities, selected.map(ConsoleTerminalIdentity::as_str))?;
+    let (selected_index, selected_endpoint) = select_endpoint(
+        &identities,
+        &endpoints,
+        selected.map(ConsoleTerminalIdentity::as_str),
+    )?;
+    let selected_endpoint = selected_endpoint.clone();
 
     let mut prepared = Vec::new();
     prepared
         .try_reserve_exact(endpoints.len())
         .map_err(|_| SysError::OutOfMemory)?;
-    for (index, endpoint) in endpoints.into_iter().enumerate() {
+    for (index, (identity, endpoint)) in identities.into_iter().zip(endpoints).enumerate() {
         let devnum = endpoint_devnum(index)?;
         let name = endpoint_name(index)?;
         let ops: Arc<dyn DevfsNodeOps> = Arc::try_new(TtyNodeOps {
@@ -194,6 +231,7 @@ pub(crate) fn prepare_system_boot(
         .map_err(|_| SysError::OutOfMemory)?;
         prepared.push(PreparedEndpoint {
             endpoint,
+            physical_id: identity,
             devnum,
             publish: DevfsPublish {
                 name,
@@ -210,12 +248,15 @@ pub(crate) fn prepare_system_boot(
     // This detached inode gives boot fd 0/1/2 real TTY FileOps and the selected
     // terminal's rdev without requiring `/dev` to be mounted before init.
     let boot_path = anony_new_inode(InodeType::Char, &BOOT_TTY_INODE_OPS, NilOpaque::new())?;
-    let selected = &prepared[selected_index].endpoint;
     let boot_files = [
-        anony_open_with(&boot_path, opened_endpoint_file(selected)?)?,
-        anony_open_with(&boot_path, opened_endpoint_file(selected)?)?,
-        anony_open_with(&boot_path, opened_endpoint_file(selected)?)?,
+        anony_open_with(&boot_path, opened_endpoint_file(&selected_endpoint)?)?,
+        anony_open_with(&boot_path, opened_endpoint_file(&selected_endpoint)?)?,
+        anony_open_with(&boot_path, opened_endpoint_file(&selected_endpoint)?)?,
     ];
+    let console_terminal: Arc<dyn ConsoleTerminalOpen> = Arc::try_new(SelectedConsoleTerminal {
+        endpoint: selected_endpoint,
+    })
+    .map_err(|_| SysError::OutOfMemory)?;
     let mut published = Vec::new();
     published
         .try_reserve_exact(prepared.len())
@@ -226,6 +267,41 @@ pub(crate) fn prepare_system_boot(
             devnum: endpoint.devnum,
         });
     }
+
+    let mut enrollments = Vec::new();
+    enrollments
+        .try_reserve_exact(prepared.len())
+        .map_err(|_| SysError::OutOfMemory)?;
+    let mut relations = Vec::new();
+    relations
+        .try_reserve_exact(prepared.len())
+        .map_err(|_| SysError::OutOfMemory)?;
+    {
+        let mut ports = super::UNPUBLISHED_PORTS.lock();
+        for prepared in &prepared {
+            let pending = ports
+                .get_mut(&prepared.physical_id)
+                .expect("prepared TTY endpoint lost its attachment registration");
+            assert!(
+                pending
+                    .endpoint
+                    .upgrade()
+                    .is_some_and(|endpoint| { Arc::ptr_eq(&endpoint, &prepared.endpoint) }),
+                "TTY attachment registration changed before relation enrollment"
+            );
+            enrollments.push((
+                pending
+                    .enrollment
+                    .take()
+                    .expect("TTY endpoint relation enrollment consumed twice"),
+                prepared.devnum,
+            ));
+        }
+    }
+
+    for (enrollment, devnum) in enrollments {
+        relations.push(enrollment.commit(devnum)?);
+    }
     Ok(TtyBootPublication {
         controlling_publish,
         relations,
@@ -233,7 +309,16 @@ pub(crate) fn prepare_system_boot(
         published,
         boot_index: selected_index,
         boot_files,
+        console_terminal,
     })
+}
+
+impl TtyBootPublication {
+    /// Return the selected-terminal open capability without exposing the TTY
+    /// registry, endpoint representation, or mutable terminal truth.
+    pub(crate) fn console_terminal(&self) -> Arc<dyn ConsoleTerminalOpen> {
+        self.console_terminal.clone()
+    }
 }
 
 /// Perform the boot-only single-way publication commit in deterministic order.
@@ -249,9 +334,9 @@ impl TtyBootPublication {
             published,
             boot_index,
             boot_files,
+            console_terminal: _,
         } = self;
 
-        relation::install(relations);
         devfs_publish(controlling_publish)?;
 
         for prepared in endpoints {
@@ -264,7 +349,7 @@ impl TtyBootPublication {
                 "TTY: publishing /dev/{} as {} for {}",
                 prepared.publish.name,
                 prepared.devnum,
-                prepared.endpoint.port.id()
+                prepared.physical_id
             );
             devfs_publish(prepared.publish)?;
         }
@@ -276,6 +361,7 @@ impl TtyBootPublication {
         PUBLISHED_ENDPOINTS.init(|slot| {
             slot.write(PublishedEndpoints {
                 endpoints: published,
+                _relations: relations,
                 boot_index,
             });
         });
@@ -346,7 +432,10 @@ static BOOT_TTY_INODE_OPS: InodeOps = InodeOps {
 
 #[cfg(feature = "kunit")]
 mod kunits {
-    use super::*;
+    use super::{
+        super::{TtyLineSnapshot, TtyParity, TtyWakeSource, terminal::Terminal},
+        *,
+    };
 
     #[kunit]
     fn deterministic_identity_mapping_and_selection() {
@@ -390,5 +479,49 @@ mod kunits {
             endpoint_devnum((1 << MINOR_BITS) - TTY_SERIAL_MINOR_BASE),
             Err(SysError::NoSpace)
         );
+    }
+
+    #[kunit]
+    fn selected_endpoint_preserves_the_semantic_terminal() {
+        let source = Arc::new(TtyWakeSource {
+            worker: SpinLock::new(None),
+        });
+        let first_terminal = Terminal::try_new(TtyLineSnapshot {
+            baud: 115200,
+            parity: TtyParity::None,
+            data_bits: 8,
+        })
+        .unwrap();
+        let selected_terminal = Terminal::try_new(TtyLineSnapshot {
+            baud: 9600,
+            parity: TtyParity::Even,
+            data_bits: 7,
+        })
+        .unwrap();
+        let endpoints = [
+            Arc::new(TtyEndpoint {
+                terminal: first_terminal,
+                wake_source: {
+                    let progress: Arc<dyn super::super::TtyProgress> = source.clone();
+                    Arc::downgrade(&progress)
+                },
+            }),
+            Arc::new(TtyEndpoint {
+                terminal: selected_terminal.clone(),
+                wake_source: {
+                    let progress: Arc<dyn super::super::TtyProgress> = source.clone();
+                    Arc::downgrade(&progress)
+                },
+            }),
+        ];
+        let identities = [
+            TtyPortId::try_from("/soc/serial@1000").unwrap(),
+            TtyPortId::try_from("/soc/serial@2000").unwrap(),
+        ];
+
+        let (index, selected) =
+            select_endpoint(&identities, &endpoints, Some("/soc/serial@2000")).unwrap();
+        assert_eq!(index, 1);
+        assert!(Arc::ptr_eq(&selected.terminal, &selected_terminal));
     }
 }

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::terminal::{TerminalOutput, TtyTermios};
+use super::terminal::{TerminalOutput, TtyTermios, is_utf8_continuation};
 
 /// Result of selecting input for a future FileOps read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +25,10 @@ pub(super) struct TtyDiscipline {
     input: VecDeque<u8>,
     canonical_pending_len: usize,
     canonical_records: VecDeque<usize>,
+    /// Output-processor column at the start of the pending canonical edit.
+    /// This remains discipline-owned echo state; it is not a second output
+    /// column truth and is used only to reproduce N_TTY tab erase width.
+    canonical_column: usize,
 }
 
 impl TtyDiscipline {
@@ -44,6 +48,7 @@ impl TtyDiscipline {
             input,
             canonical_pending_len: 0,
             canonical_records,
+            canonical_column: 0,
         })
     }
 
@@ -79,15 +84,19 @@ impl TtyDiscipline {
         }
 
         if termios.matches_control(termios.erase, byte) {
-            if self.canonical_pending_len == 0 {
+            let Some((erase_len, erased_byte)) = self.canonical_erase_span(termios) else {
                 return ReceiveResult::Consumed;
-            }
-            let echo = termios.erase_echo();
+            };
+            let echo = if erased_byte == b'\t' {
+                termios.tab_erase_echo(self.tab_erase_columns(termios))
+            } else {
+                termios.erase_echo()
+            };
             if !output.can_enqueue(&echo, termios) {
                 return ReceiveResult::Backpressured;
             }
-            assert!(self.input.pop_back().is_some());
-            self.canonical_pending_len -= 1;
+            self.input.truncate(self.input.len() - erase_len);
+            self.canonical_pending_len -= erase_len;
             assert!(output.enqueue(&echo, termios));
             return ReceiveResult::Consumed;
         }
@@ -136,10 +145,59 @@ impl TtyDiscipline {
         if !output.can_enqueue(&echo, termios) {
             return ReceiveResult::Backpressured;
         }
+        if self.canonical_pending_len == 0 {
+            self.canonical_column = output.column();
+        }
         self.push_input(byte);
         self.canonical_pending_len += 1;
         assert!(output.enqueue(&echo, termios));
         ReceiveResult::Consumed
+    }
+
+    /// Check whether the exact byte can be admitted without changing either
+    /// input or output state. Blocking PTY writers use this same predicate
+    /// before retrying `receive`, so a wake hint never substitutes for owner
+    /// capacity truth.
+    pub(super) fn can_receive(
+        &self,
+        byte: u8,
+        termios: TtyTermios,
+        output: &TerminalOutput,
+    ) -> bool {
+        if termios.signal_control(byte).is_some() {
+            return true;
+        }
+
+        if !termios.icanon {
+            return self.committed_len() < TTY_INPUT_CAPACITY_BYTES
+                && output.can_enqueue(&termios.echo_for_byte(byte), termios);
+        }
+
+        if termios.matches_control(termios.erase, byte) {
+            let Some((_, erased_byte)) = self.canonical_erase_span(termios) else {
+                return true;
+            };
+            let echo = if erased_byte == b'\t' {
+                termios.tab_erase_echo(self.tab_erase_columns(termios))
+            } else {
+                termios.erase_echo()
+            };
+            return output.can_enqueue(&echo, termios);
+        }
+        if termios.matches_control(termios.kill, byte) {
+            return output.can_enqueue(&termios.kill_echo(), termios);
+        }
+        if termios.matches_control(termios.eof, byte) {
+            return self.can_commit_record(self.canonical_pending_len);
+        }
+        if byte == b'\n' {
+            let record_len = self.canonical_pending_len.saturating_add(1);
+            return self.can_commit_record(record_len)
+                && output.can_enqueue(&termios.echo_for_byte(byte), termios);
+        }
+
+        self.canonical_pending_len < TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
+            && output.can_enqueue(&termios.echo_for_byte(byte), termios)
     }
 
     /// Admit one condition-generated literal token without interpreting any
@@ -147,13 +205,7 @@ impl TtyDiscipline {
     /// Capacity is checked for the complete token before the first byte moves,
     /// so worker retry cannot expose a prefix or duplicate a marker.
     pub(super) fn receive_literal(&mut self, literal: &[u8], termios: TtyTermios) -> ReceiveResult {
-        if termios.icanon {
-            if self.canonical_pending_len.saturating_add(literal.len())
-                > TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
-            {
-                return ReceiveResult::Backpressured;
-            }
-        } else if self.committed_len().saturating_add(literal.len()) > TTY_INPUT_CAPACITY_BYTES {
+        if !self.can_receive_literal(literal.len(), termios) {
             return ReceiveResult::Backpressured;
         }
 
@@ -168,6 +220,15 @@ impl TtyDiscipline {
             self.canonical_pending_len += literal.len();
         }
         ReceiveResult::Consumed
+    }
+
+    pub(super) fn can_receive_literal(&self, len: usize, termios: TtyTermios) -> bool {
+        if termios.icanon {
+            self.canonical_pending_len.saturating_add(len)
+                <= TTY_CANONICAL_LINE_CAPACITY_BYTES.saturating_sub(1)
+        } else {
+            self.committed_len().saturating_add(len) <= TTY_INPUT_CAPACITY_BYTES
+        }
     }
 
     pub(super) fn readable(&self, termios: TtyTermios) -> bool {
@@ -221,6 +282,7 @@ impl TtyDiscipline {
         self.input.clear();
         self.canonical_pending_len = 0;
         self.canonical_records.clear();
+        self.canonical_column = 0;
     }
 
     /// Reconcile unread bytes when ICANON changes without dropping or copying
@@ -233,6 +295,7 @@ impl TtyDiscipline {
         if canonical {
             assert!(self.canonical_records.is_empty());
             assert_eq!(self.canonical_pending_len, 0);
+            self.canonical_column = 0;
             let unread = self.input.len();
             if unread != 0 {
                 self.push_record(unread);
@@ -240,6 +303,7 @@ impl TtyDiscipline {
         } else {
             self.canonical_records.clear();
             self.canonical_pending_len = 0;
+            self.canonical_column = 0;
         }
     }
 
@@ -252,6 +316,7 @@ impl TtyDiscipline {
     fn commit_pending_record(&mut self) {
         let record_len = self.canonical_pending_len;
         self.canonical_pending_len = 0;
+        self.canonical_column = 0;
         self.push_record(record_len);
     }
 
@@ -286,6 +351,47 @@ impl TtyDiscipline {
         let committed = self.committed_len();
         self.input.truncate(committed);
         self.canonical_pending_len = 0;
+        self.canonical_column = 0;
+    }
+
+    /// Linux N_TTY treats every continuation-byte suffix as part of one erase
+    /// unit, without validating the leading byte. A suffix made only of
+    /// continuation bytes is left intact rather than partially erased.
+    fn canonical_erase_span(&self, termios: TtyTermios) -> Option<(usize, u8)> {
+        if self.canonical_pending_len == 0 {
+            return None;
+        }
+        let pending_start = self.input.len() - self.canonical_pending_len;
+        let end = self.input.len();
+        let mut head = end - 1;
+        let mut byte = self.input[head];
+        while termios.iutf8 && is_utf8_continuation(byte) && head != pending_start {
+            head -= 1;
+            byte = self.input[head];
+        }
+        if termios.iutf8 && is_utf8_continuation(byte) {
+            None
+        } else {
+            Some((end - head, byte))
+        }
+    }
+
+    fn tab_erase_columns(&self, termios: TtyTermios) -> usize {
+        let pending_start = self.input.len() - self.canonical_pending_len;
+        let before_erased_tab = self.input.len() - 1;
+        let mut characters = 0;
+        let mut after_tab = false;
+        for &byte in self.input.range(pending_start..before_erased_tab).rev() {
+            if byte == b'\t' {
+                after_tab = true;
+                break;
+            }
+            if !byte.is_ascii_control() && !(termios.iutf8 && is_utf8_continuation(byte)) {
+                characters += 1;
+            }
+        }
+        let base = if after_tab { 0 } else { self.canonical_column };
+        8 - (base + characters) % 8
     }
 
     fn push_record(&mut self, record_len: usize) {

@@ -16,6 +16,7 @@ use crate::{
 
 pub mod exit;
 pub mod exit_group;
+pub(crate) mod nemophila;
 
 /// Exit current task through the user-process lifecycle path.
 pub fn kernel_exit(code: ExitCode) -> ! {
@@ -31,6 +32,18 @@ pub fn kernel_exit(code: ExitCode) -> ! {
                 task.tid()
             );
         }
+
+        assert!(
+            IntrArch::local_intr_enabled(),
+            "user task exit entered cleanup with interrupts disabled"
+        );
+        // This is the last owner-neutral observation window: the task has
+        // committed to a non-returning exit path, but no futex, file, timer,
+        // topology or ThreadGroup cleanup has begun and no private guard is
+        // held across guest execution. Observer failure cannot alter `code` or
+        // any subsequent cleanup/publication decision.
+        nemophila::THREAD_EXIT_OBSERVER
+            .notify(nemophila::ThreadExitObservation::new(task.tid(), code));
 
         if let Some(addr) = task.get_clear_child_tid() {
             let usp = task.clone_uspace_handle();

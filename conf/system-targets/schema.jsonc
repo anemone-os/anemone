@@ -6,8 +6,17 @@
     "properties": {
         "platform": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Canonical Platform filename slug."
+            "minLength": 1,
+            "description": "Canonical Platform name or workspace-relative path."
+        },
+        "nemophila": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Ordered, duplicate-free embedded Nemophila module identities."
         },
         "root": {
             "type": "object",

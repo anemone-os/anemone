@@ -34,8 +34,8 @@ pub fn build_command(
     command.args(extra_args);
     command.current_dir(ctx.workdir);
     command.env("ANEMONE_ARCH", ctx.context.target_name());
-    if let Some(target_triple) = ctx.context.target_triple() {
-        command.env("ANEMONE_TARGET_TRIPLE", target_triple.as_str());
+    if let Some(target_id) = ctx.context.artifact_target_id() {
+        command.env("ANEMONE_TARGET_TRIPLE", target_id.as_str());
     } else {
         // Host is an app-local execution target, not an Anemone compiler
         // target. Remove inherited values so they cannot drive the recipe.

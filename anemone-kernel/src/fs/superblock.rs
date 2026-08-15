@@ -368,6 +368,13 @@ impl SuperBlock {
     ///   the cache uniqueness invariant.
     /// - The reference count of the provided inode is not zero.
     pub(super) fn seed_inode(&self, inode: Arc<Inode>) -> InodeRef {
+        self.try_seed_inode(inode)
+            .expect("seed_inode: failed to reserve inode index storage")
+    }
+
+    /// Fallible form used by prepare-before-publish backends. The cache entry
+    /// is unchanged when index storage cannot be reserved.
+    pub(super) fn try_seed_inode(&self, inode: Arc<Inode>) -> Result<InodeRef, SysError> {
         debug_assert!(
             !inode.indexed(),
             "seed_inode: provided inode is already indexed"
@@ -393,10 +400,14 @@ impl SuperBlock {
             }
         }
 
+        inner
+            .indexed
+            .try_reserve(1)
+            .map_err(|_| SysError::OutOfMemory)?;
         inode.set_indexed(true);
         inner.indexed.insert(ino, inode.clone());
 
-        InodeRef::new(inode)
+        Ok(InodeRef::new(inode))
     }
 
     /// Look up a cached inode by [Ino] without triggering a load.

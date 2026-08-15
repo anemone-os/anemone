@@ -7,19 +7,20 @@ use anemone_abi::process::linux::aux_vec::*;
 
 /// Return the Linux-compatible hardware capability mask exposed to userspace.
 ///
-/// Anemone treats the LoongArch software unaligned-access fallback as providing
-/// the user-visible UAL capability: consumers may issue unaligned accesses, but
-/// the bit does not promise a hardware implementation or a particular cost.
-/// Correctness of that fallback remains owned by the architecture trap handler;
-/// disabling the fallback must also withdraw the advertised capability.
+/// Temporary competition override: every LoongArch build advertises UAL because
+/// the submitted target is QEMU's LA64 platform, which supports unaligned user
+/// accesses without Anemone's software fallback. This is not a portable claim
+/// for physical LoongArch platforms; remove it after the competition or replace
+/// it with a capability handoff from the selected platform/CPU before using
+/// those targets again.
 fn elf_hwcap() -> u64 {
-    #[cfg(all(target_arch = "loongarch64", feature = "soft_unaligned_access"))]
+    #[cfg(target_arch = "loongarch64")]
     {
         const HWCAP_LOONGARCH_UAL: u64 = 1 << 2;
         HWCAP_LOONGARCH_UAL
     }
 
-    #[cfg(not(all(target_arch = "loongarch64", feature = "soft_unaligned_access")))]
+    #[cfg(not(target_arch = "loongarch64"))]
     {
         0
     }

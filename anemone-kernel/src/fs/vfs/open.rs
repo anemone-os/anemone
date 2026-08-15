@@ -14,11 +14,12 @@ use crate::{
 pub(crate) struct FileOpenResult {
     file: File,
     description_ops: FileDescOps,
+    commit: Option<OpenDescriptionCommit>,
 }
 
 impl FileOpenResult {
-    pub(crate) fn into_parts(self) -> (File, FileDescOps) {
-        (self.file, self.description_ops)
+    pub(crate) fn into_parts(self) -> (File, FileDescOps, Option<OpenDescriptionCommit>) {
+        (self.file, self.description_ops, self.commit)
     }
 }
 
@@ -34,6 +35,7 @@ pub(crate) fn vfs_open_description(
     path: PathRef,
     access: OpenAccessMode,
     status_flags: FileOpStatusFlags,
+    no_ctty: bool,
     description_ops: FileDescOps,
 ) -> Result<FileOpenResult, SysError> {
     let access = match access {
@@ -45,19 +47,36 @@ pub(crate) fn vfs_open_description(
             return Ok(FileOpenResult {
                 file: File::path_only(path),
                 description_ops,
+                commit: None,
             });
         },
         OpenAccessMode::Read => FileOpenAccess::Read,
         OpenAccessMode::Write => FileOpenAccess::Write,
         OpenAccessMode::ReadWrite => FileOpenAccess::ReadWrite,
     };
-    let request = FileOpenRequest::new(access, status_flags);
-    let (file, description_ops) = if path.inode().ty() == InodeType::Fifo {
+    let request = FileOpenRequest::new(access, status_flags, no_ctty);
+    let (file, description_ops, commit) = if path.inode().ty() == InodeType::Fifo {
         let can_read = access.can_read();
         let file = open_named_fifo(path, request)?;
-        (file, pipe_file_desc_ops(description_ops, can_read))
+        (file, pipe_file_desc_ops(description_ops, can_read), None)
     } else {
-        (path.open()?, description_ops)
+        let OpenedFile {
+            file_ops,
+            mode,
+            prv,
+            description_activation,
+        } = path.inode().open()?;
+        let (description_ops, commit) = if let Some(activation) = description_activation {
+            let prepared = activation.prepare(request, description_ops)?;
+            (prepared.description_ops, Some(prepared.commit))
+        } else {
+            (description_ops, None)
+        };
+        (
+            File::new_with_mode(path, file_ops, mode, prv),
+            description_ops,
+            commit,
+        )
     };
 
     // FIFO validates the same side-effect-free predicate before joining a
@@ -68,6 +87,7 @@ pub(crate) fn vfs_open_description(
     Ok(FileOpenResult {
         file,
         description_ops,
+        commit,
     })
 }
 
@@ -105,18 +125,21 @@ mod kunits {
             path.clone(),
             OpenAccessMode::Path,
             FileOpStatusFlags::empty(),
+            false,
             observed_description_ops(),
         )
         .unwrap();
-        let (path_only, path_only_ops) = path_only.into_parts();
+        let (path_only, path_only_ops, path_only_commit) = path_only.into_parts();
         assert!(!path_only.is_stream());
         assert!(path_only_ops.final_release.is_some());
         assert!(path_only_ops.read_user_transaction.is_none());
+        assert!(path_only_commit.is_none());
 
         let writer = vfs_open_description(
             path.clone(),
             OpenAccessMode::Write,
             FileOpStatusFlags::NONBLOCK,
+            false,
             observed_description_ops(),
         );
         assert!(matches!(writer, Err(SysError::NoSuchDeviceOrAddress)));
@@ -125,13 +148,15 @@ mod kunits {
             path,
             OpenAccessMode::Read,
             FileOpStatusFlags::NONBLOCK,
+            false,
             observed_description_ops(),
         )
         .unwrap();
-        let (reader, reader_ops) = reader.into_parts();
+        let (reader, reader_ops, reader_commit) = reader.into_parts();
         assert!(reader.is_stream());
         assert!(reader_ops.final_release.is_some());
         assert!(reader_ops.read_user_transaction.is_some());
+        assert!(reader_commit.is_none());
 
         drop(reader);
         drop(path_only);

@@ -3,6 +3,7 @@ pub mod build;
 pub mod clean;
 pub mod conf;
 pub mod fmt;
+pub mod module;
 pub mod qemu;
 pub mod rootfs;
 pub mod xref;

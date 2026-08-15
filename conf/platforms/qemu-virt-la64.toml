@@ -61,6 +61,6 @@ template = [
 ]
 
 [dtb]
-delivery = "embedded"
+delivery = "firmware"
 authority = "provider-derived"
 provider = "qemu"

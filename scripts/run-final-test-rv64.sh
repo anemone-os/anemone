@@ -81,7 +81,7 @@ log_progress "FINAL" "staging disk image"
 cp --remove-destination -- "$disk_image" "$disk_target"
 
 log_progress "FINAL" "building kernel"
-just build "${selection[@]}" "${provider_bindings[@]}"
+just build "${selection[@]}"
 
 log_progress "FINAL" "running qemu"
 just qemu "${selection[@]}" "${provider_bindings[@]}" \

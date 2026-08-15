@@ -12,7 +12,8 @@ use crate::{
 use super::{
     super::{
         SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
-        SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketPairPreparation,
+        SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketOptionError,
+        SocketOptionQuery, SocketOptionValue, SocketPairPreparation, SocketPeerCredentials,
         SocketPreparation, SocketQueryError, SocketReceiveError, SocketReleaseReason,
         SocketSendError, SocketShutdown, SocketShutdownError, SocketType,
     },
@@ -67,6 +68,30 @@ pub(super) enum UnixProfile {
     Seqpacket,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct UnixPeerCredentials(SocketPeerCredentials);
+
+impl UnixPeerCredentials {
+    pub(super) fn for_current() -> Self {
+        let task = get_current_task();
+        let credentials = task.cred();
+        Self(SocketPeerCredentials {
+            tgid: task.tgid().get(),
+            effective_uid: credentials.uid.effective.get(),
+            effective_gid: credentials.gid.effective.get(),
+        })
+    }
+
+    #[cfg(feature = "kunit")]
+    pub(super) const fn for_validation(tgid: u32, effective_uid: u32, effective_gid: u32) -> Self {
+        Self(SocketPeerCredentials {
+            tgid,
+            effective_uid,
+            effective_gid,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum UnixConnection {
     Stream(Arc<UnixStreamConnection>),
@@ -74,10 +99,16 @@ pub(super) enum UnixConnection {
 }
 
 impl UnixConnection {
-    pub(super) fn new(profile: UnixProfile, names: [Arc<EndpointName>; 2]) -> Self {
+    pub(super) fn new(
+        profile: UnixProfile,
+        names: [Arc<EndpointName>; 2],
+        credentials: [UnixPeerCredentials; 2],
+    ) -> Self {
         match profile {
-            UnixProfile::Stream => Self::Stream(UnixStreamConnection::new(names)),
-            UnixProfile::Seqpacket => Self::Seqpacket(UnixSeqpacketConnection::new(names)),
+            UnixProfile::Stream => Self::Stream(UnixStreamConnection::new(names, credentials)),
+            UnixProfile::Seqpacket => {
+                Self::Seqpacket(UnixSeqpacketConnection::new(names, credentials))
+            },
         }
     }
 
@@ -86,6 +117,12 @@ impl UnixConnection {
             Self::Stream(_) => UnixProfile::Stream,
             Self::Seqpacket(_) => UnixProfile::Seqpacket,
         }
+    }
+
+    #[cfg(feature = "kunit")]
+    pub(super) fn new_for_validation(profile: UnixProfile, names: [Arc<EndpointName>; 2]) -> Self {
+        let credentials = UnixPeerCredentials::for_validation(1, 0, 0);
+        Self::new(profile, names, [credentials, credentials])
     }
 
     fn install_routes(&self, side: EndpointSide, routes: Arc<Vec<UnixPollRoute>>) {
@@ -99,6 +136,13 @@ impl UnixConnection {
         match self {
             Self::Stream(connection) => connection.names[side.peer().index()].snapshot(),
             Self::Seqpacket(connection) => connection.names[side.peer().index()].snapshot(),
+        }
+    }
+
+    fn peer_credentials(&self, side: EndpointSide) -> SocketPeerCredentials {
+        match self {
+            Self::Stream(connection) => connection.credentials[side.peer().index()].0,
+            Self::Seqpacket(connection) => connection.credentials[side.peer().index()].0,
         }
     }
 
@@ -463,7 +507,12 @@ fn prepare_unix_pair_profile(profile: UnixProfile) -> Result<SocketPairPreparati
         UnixProfile::Stream => UnixEndpointCore::new_unconnected(),
         UnixProfile::Seqpacket => UnixEndpointCore::new_seqpacket(),
     };
-    let connection = UnixConnection::new(profile, [first.name.clone(), second.name.clone()]);
+    let credentials = UnixPeerCredentials::for_current();
+    let connection = UnixConnection::new(
+        profile,
+        [first.name.clone(), second.name.clone()],
+        [credentials, credentials],
+    );
     first.install_connection(connection.clone(), EndpointSide::First);
     second.install_connection(connection, EndpointSide::Second);
     Ok(SocketPairPreparation {
@@ -614,6 +663,25 @@ fn query_unix_accepting(private: &AnyOpaque) -> Result<bool, SocketQueryError> {
         EndpointAssociation::Retired => Err(SocketQueryError::Retired),
         EndpointAssociation::Unconnected | EndpointAssociation::Connected { .. } => Ok(false),
     }
+}
+
+fn query_unix_option(
+    private: &AnyOpaque,
+    query: SocketOptionQuery,
+) -> Result<SocketOptionValue, SocketOptionError> {
+    if query != SocketOptionQuery::PeerCredentials {
+        return Err(SocketOptionError::Unsupported);
+    }
+    let endpoint = &endpoint(private).core;
+    let (connection, side) = endpoint.connected().map_err(|error| match error {
+        EndpointAccessError::Unconnected | EndpointAccessError::InvalidState => {
+            SocketOptionError::NotConnected
+        },
+        EndpointAccessError::Retired => SocketOptionError::Retired,
+    })?;
+    Ok(SocketOptionValue::PeerCredentials(
+        connection.peer_credentials(side),
+    ))
 }
 
 fn unconnected_poll_events(request: &PollRequest<'_>) -> PollEvent {
@@ -791,7 +859,7 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     local_address: Some(query_unix_local_address),
     peer_address: Some(query_unix_peer_address),
     accepting: query_unix_accepting,
-    query_option: None,
+    query_option: Some(query_unix_option),
     mutate_option: None,
     detach_ipv4_extended_error: None,
     poll: poll_unix_stream,
@@ -815,7 +883,7 @@ pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOp
     local_address: Some(query_unix_local_address),
     peer_address: Some(query_unix_peer_address),
     accepting: query_unix_accepting,
-    query_option: None,
+    query_option: Some(query_unix_option),
     mutate_option: None,
     detach_ipv4_extended_error: None,
     poll: poll_unix_seqpacket,
@@ -1372,7 +1440,7 @@ mod kunits {
         );
 
         let peer = UnixEndpointCore::new_unconnected();
-        let connection = UnixConnection::new(
+        let connection = UnixConnection::new_for_validation(
             UnixProfile::Stream,
             [client.name.clone(), peer.name.clone()],
         );
@@ -1390,6 +1458,59 @@ mod kunits {
         assert_eq!(observer.notifications(), 2);
         final_release_unix_endpoint(&peer_private);
         final_release_unix_endpoint(&prepared.private);
+    }
+
+    #[kunit]
+    fn peer_credentials_are_connection_owned_and_survive_peer_retirement() {
+        for profile in [UnixProfile::Stream, UnixProfile::Seqpacket] {
+            let first = match profile {
+                UnixProfile::Stream => UnixEndpointCore::new_unconnected(),
+                UnixProfile::Seqpacket => UnixEndpointCore::new_seqpacket(),
+            };
+            let second = match profile {
+                UnixProfile::Stream => UnixEndpointCore::new_unconnected(),
+                UnixProfile::Seqpacket => UnixEndpointCore::new_seqpacket(),
+            };
+            let first_credentials = UnixPeerCredentials::for_validation(101, 201, 301);
+            let second_credentials = UnixPeerCredentials::for_validation(102, 202, 302);
+            let connection = UnixConnection::new(
+                profile,
+                [first.name.clone(), second.name.clone()],
+                [first_credentials, second_credentials],
+            );
+            first.install_connection(connection.clone(), EndpointSide::First);
+            second.install_connection(connection, EndpointSide::Second);
+            let first_private = private_from_core(first);
+            let second_private = private_from_core(second.clone());
+
+            assert_eq!(
+                query_unix_option(&first_private, SocketOptionQuery::PeerCredentials),
+                Ok(SocketOptionValue::PeerCredentials(second_credentials.0))
+            );
+            assert_eq!(
+                query_unix_option(&second_private, SocketOptionQuery::PeerCredentials),
+                Ok(SocketOptionValue::PeerCredentials(first_credentials.0))
+            );
+
+            retire_endpoint_core(&second);
+            assert_eq!(
+                query_unix_option(&first_private, SocketOptionQuery::PeerCredentials),
+                Ok(SocketOptionValue::PeerCredentials(second_credentials.0))
+            );
+        }
+    }
+
+    #[kunit]
+    fn peer_credentials_reject_nonconnected_roles() {
+        let prepared = prepare_unix_socket().unwrap();
+        assert_eq!(
+            query_unix_option(&prepared.private, SocketOptionQuery::PeerCredentials),
+            Err(SocketOptionError::NotConnected)
+        );
+        assert_eq!(
+            query_unix_option(&prepared.private, SocketOptionQuery::PendingError),
+            Err(SocketOptionError::Unsupported)
+        );
     }
 
     #[kunit]

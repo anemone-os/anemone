@@ -35,14 +35,17 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
 
 - Confirm whether the command creates or overwrites root `kconfig`.
 - Resolve the explicitly selected target and Platform through the shared resolver.
+- For a path-backed preset, target or Platform, confirm the resolver reports the selected
+  workspace-relative path. A present canonical file must fail closed; only absence permits fallback.
 - Reject bare, partial, or mixed preset/tuple input instead of filling it from local state.
 
 ### Kernel Build
 
 - Confirm which selection source, SystemTarget, Platform, KernelConfig, and kernel Cargo profile were resolved.
 - Check generated inputs before interpreting compiler failures.
-- Provide every binding referenced by selected QEMU provider fields; build rejects runtime-only or otherwise
-  unconsumed values before side effects.
+- For embedded QEMU DT materialization, provide every binding referenced by selected provider fields.
+  Firmware-delivery builds consume no QEMU bindings; build rejects runtime-only or otherwise unconsumed values
+  before side effects.
 - Check that the generated boot definition matches the selected initial-program variant. For `EmbeddedApp`, verify
   the app identity, single executable regular export, reported byte count, and `include_bytes!` dependency all come
   from the current invocation rather than a stale `build/apps/` artifact.
@@ -59,12 +62,13 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
   Cargo/Command/Source driver and the artifacts applicable to that target. Artifact target subsets
   must be non-empty, remain inside the app target list, cover every app target, and produce unique
   export names. `host` is app-local, not a Platform architecture.
-- Treat Cargo as Anemone-target-only: it selects the repository target JSON and bare-metal
+- Treat Cargo as Anemone-target-only: it selects a Rust builtin bare-metal target and repository-owned
   `build-std` parameters. A host Cargo recipe uses Command and remains app-owned.
 - Treat Command as trusted repository build code: execute its non-empty bounded argv directly in
   workdir, append caller extras, override only the target context, and retain the common status,
   artifact validation, export, and diagnostics path. Anemone targets set `ANEMONE_ARCH` and
-  `ANEMONE_TARGET_TRIPLE`; host sets `ANEMONE_ARCH=host` and removes inherited
+  `ANEMONE_TARGET_TRIPLE` as an Anemone artifact identity distinct from Cargo's compiler target;
+  host sets `ANEMONE_ARCH=host` and removes inherited
   `ANEMONE_TARGET_TRIPLE` because no Anemone compiler target exists.
 - Treat Source as a command no-op only: reject manifest or caller driver args, then retain the same
   path expansion, ordinary-file check, export, and explicit post-export diagnostics as Cargo.

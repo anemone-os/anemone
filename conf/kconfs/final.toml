@@ -5,9 +5,9 @@ kunit = false
 fs_ext4 = true
 kernel_preempt = false
 spin_lock_irqsave = true
-soft_unaligned_access = true
-kernel_symbols = true
+soft_unaligned_access = false
+kernel_symbols = false
 perf_observe = false
 
 [parameters]
-max_logical_cpus = 4
+max_logical_cpus = 8

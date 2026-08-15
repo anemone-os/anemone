@@ -1,0 +1,23 @@
+[package]
+name = "nemophila-boot-reject-validation"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+dlmalloc = { version = "=0.2.12", default-features = false, features = ["global"] }
+nemophila-sdk = { path = "../../sdk/rust" }
+
+[profile.nemophila-module]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = "debuginfo"
+
+[workspace]

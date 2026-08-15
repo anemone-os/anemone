@@ -40,6 +40,11 @@ pub(crate) fn init_competition_environment() {
     ensure_dir("/dev");
     mount(Path::new("devfs"), Path::new("/dev"), "devfs")
         .expect("user-test: failed to mount devfs on /dev");
+    // This is the persistent post-chroot /dev view used by the workload. The
+    // pre-chroot devfs mount above remains transport-only and deliberately
+    // does not acquire a devpts view.
+    mount(Path::new("devpts"), Path::new("/dev/pts"), "devpts")
+        .expect("user-test: failed to mount devpts on /dev/pts");
     mount(Path::new("ramfs"), Path::new("/dev/shm"), "ramfs")
         .expect("user-test: failed to mount ramfs on /dev/shm");
 

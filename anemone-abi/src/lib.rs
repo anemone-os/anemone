@@ -60,6 +60,7 @@ pub mod capability;
 pub mod errno;
 pub mod fs;
 pub mod hwprobe;
+pub mod nemophila;
 pub mod net;
 pub mod process;
 pub mod syscall;

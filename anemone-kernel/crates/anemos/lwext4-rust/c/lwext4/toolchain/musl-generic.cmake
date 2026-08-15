@@ -71,11 +71,14 @@ if(ARCH STREQUAL "x86_64")
 elseif(ARCH STREQUAL "aarch64")
     set(ARCH_C_FLAGS "-mgeneral-regs-only")
 elseif(ARCH STREQUAL "riscv64")
-    set(ARCH_C_FLAGS "-march=rv64gc -mabi=lp64d -mcmodel=medany")
+    # lwext4 is linked into the kernel, whose ordinary code must not use the FPU.
+    # Keep the C objects on the same soft-float ABI as the Rust target.
+    set(ARCH_C_FLAGS "-march=rv64imac -mabi=lp64 -mcmodel=medany")
 elseif(ARCH STREQUAL "loongarch64")
     # Static kernel symbols cannot be interposed, so direct external access emits PC-relative relocations instead of GOT loads.
-    # Match the kernel target's -ual contract: LS2K traps on widened loads or stores that are not naturally aligned.
-    set(ARCH_C_FLAGS "-mabi=lp64d -mdirect-extern-access -mstrict-align")
+    # Match the kernel's soft-float and -ual contracts: ordinary C must not use
+    # the FPU, and LS2K traps on widened loads or stores that are not naturally aligned.
+    set(ARCH_C_FLAGS "-mabi=lp64s -msoft-float -mdirect-extern-access -mstrict-align")
 else()
     set(ARCH_C_FLAGS "")
 endif()

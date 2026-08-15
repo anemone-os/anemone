@@ -1,5 +1,30 @@
 # 当前限制
 
+## ANE-20260813-UNIX-PEERCRED-EDGE-SEMANTICS
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** Unix Socket / peer credentials / Linux ABI
+
+**Summary:** 当前`AF_UNIX + SOCK_STREAM/SOCK_SEQPACKET`在首次成功`listen()`时固定listener
+`{tgid,euid,egid}` snapshot；后续重复`listen()`只更新backlog，不按调用者当前身份刷新snapshot。pathname
+connection因此始终观察首次listen身份。另一个明确边界是unconnected、bound与listening socket上的
+`SO_PEERCRED`稳定返回`ENOTCONN`，不发布Linux可能暴露的初始化或调用时身份值。
+
+这两项差异不影响已连接socketpair或pathname connection的目标保证：connection唯一持有两侧immutable snapshot，
+peer退出、close或后续credential变化不改变结果。为复刻偏僻边角而增加listener credential更新协议、query-time
+Task lookup或role-specific伪credentials会制造第二份truth或模糊“peer”的含义，本轮明确不做。
+
+**Exit Condition:** 只有真实Anemone consumer或评分用例要求其中某项Linux边角语义时，才单独重新解析target；方案
+必须保持connection snapshot单一owner，并对重复listen的更新线性化、已有/新connection可见性和非连接role值来源
+给出明确规则及双架构guest验证。不得以动态task lookup或缓存完整credential object绕过该设计。
+
+**Owner:** Unix Socket
+**Last Verified:** 2026-08-13
+**Related:** [Unix peer credentials小迭代](../devlog/changes/2026-08-13-unix-peer-credentials.md),
+[Unix Socket当前契约](../contracts/socket/unix-stream-lifecycle.md#unix-socket-peercred-001--connection拥有稳定对端身份快照)
+
 本页记录当前已接受的限制。这些条目不是未知异常，而是当前阶段明确存在、后续需要系统性收敛的能力缺口。
 
 ## ANE-20260809-NETLINK-EAGER-REPLY-MATERIALIZATION
@@ -622,12 +647,12 @@ reparent下的顺序、cleanup和no-lost-wake；完成独立并发review及定�
 **Severity:** Medium
 **Area:** procfs / task / mm / scheduler
 
-**Summary:** 当前 `/proc/<tgid>/stat` 已提供 Linux 兼容的 52 字段格式，并填入 pid、ppid、pgrp、session、leader status 粗映射、thread 数、CPU usage ticks、starttime、vsize、cmdline/env range、exit signal/code 等已有数据源；但 rss、fault 统计、tty/job-control、ELF segment 边界、signal bitmap、realtime/delay/guest time 等字段仍是 stage-1 占位值。
+**Summary:** 当前 `/proc/<tgid>/stat` 已提供 Linux 兼容的 52 字段格式，并填入 pid、ppid、pgrp、session、leader status 粗映射、thread 数、CPU usage ticks、starttime、vsize、cmdline/env range、exit signal/code 等已有数据源。controlling TTY device number与foreground process group现从live TTY relation投影；rss、fault统计、ELF segment边界、signal bitmap、realtime/delay/guest time等字段仍是stage-1占位值。
 
-**Exit Condition:** 为 resident page accounting、minor/major fault 统计、ELF load/data/brk 边界、signal mask/disposition bitmap、controlling tty / foreground process group 和更完整调度策略字段补齐真实数据源，并用依赖 `/proc/<pid>/stat` 的 LTP / libc 脚本重新验证字段语义。
+**Exit Condition:** 为resident page accounting、minor/major fault统计、ELF load/data/brk边界、signal mask/disposition bitmap和更完整调度策略字段补齐真实数据源，并用依赖`/proc/<pid>/stat`的LTP / libc脚本重新验证字段语义。
 
 **Owner:** doruche
-**Last Verified:** 2026-05-29
+**Last Verified:** 2026-08-14
 **Related:** [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md)
 
 ## ANE-20260531-IOMUX-INFINITE-WAIT-STAGE1
@@ -874,6 +899,53 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Last Verified:** 2026-06-19
 **Related:** [Mount Tree Legacy API 事务日志](../devlog/transactions/2026-06-18-mount-tree-legacy-api.md), [mount-tree-legacy-api RFC](../rfcs/mount-tree-legacy-api/index.md)
 
+## ANE-20260811-PTY-DISTRIBUTION-TTY-PROFILE
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** PTY / devpts / metadata / DAC / LTP
+
+**Summary:** Unix98 PTY首版在allocation时固定slave metadata为allocator `fsuid:fsgid`、mode `0600`、character kind与
+`st_rdev=136:N`。当前不建立system `tty` group、`0620` profile、devpts `uid=`/`gid=`/`mode=` mount options或`pt_chown`
+grant helper；这与常见distribution的`root:tty 0620` profile不同，但pathname DAC与master-capability `TIOCGPTPEER` route
+均按当前contract真实执行。
+
+2026-08-11 focused RV64 LTP中，glibc与musl的`pty01`都观察到实际mode `020600`，而legacy case要求`020620`后以BROK
+停止并把remaining cases标为broken。该mode断言和因此未运行的后续子项不属于R4 target，不阻塞cutover，也不计为PASS；
+metadata/DAC目标由public `pty-test` 12/12中的exact stat与permission matrix证明。
+
+**Exit Condition:** product workload明确要求distribution-style group profile后，由follow-up RFC定义system `tty` group的
+稳定identity/configuration source、mount/grant ABI、credential与namespace边界、existing inode更新规则及双架构runtime
+acceptance；不得在private rootfs上硬编码numeric GID或仅为LTP改成`0620`。
+
+**Owner:** devpts metadata policy / system identity configuration
+**Last Verified:** 2026-08-11
+**Related:** [Unix98 PTY与devpts当前契约](../contracts/tty/pty-devpts.md), [PTY/devpts RFC R4](../rfcs/pty-devpts/index.md), [PTY/devpts transaction](../devlog/transactions/2026-08-11-pty-devpts.md)
+
+## ANE-20260811-PTY-LEGACY-TERMIO-BREAK
+
+**Type:** Limitation
+**Status:** Active / Accepted
+**Severity:** Low
+**Area:** TTY / PTY / ioctl ABI / LTP
+
+**Summary:** 首版TTY/PTY ABI支持`TCGETS`、`TCSETS`、`TCSETSW`、`TCSETSF`、winsize、relation与Unix98 PTY ioctl；不支持
+legacy `termio` layout对应的`TCGETA`/`TCSETA`/`TCSETAW`/`TCSETAF`，也不支持break-control `TCSBRK`/`TCSBRKP`。
+这些命令继续诚实返回unsupported errno，不使用silent-success或test-specific translation伪造语义。
+
+2026-08-11 focused RV64 LTP中，glibc与musl结果一致：`ioctl01`各9个subtests中7个通过，两个legacy `TCGETA`
+pointer-error subtests得到`ENOTTY`而非case要求的`EFAULT`；`ptem01`首先在unsupported `TCGETA`失败，其后legacy binary还
+要求`TCSETA*`与`TCSBRK`。直接对应这些out-of-target命令的子项不阻塞R4 closure，也不计为PASS；没有执行到的后续语义
+不能从早期failure外推。
+
+**Exit Condition:** follow-up边界定义asm-generic `termio` layout与conversion、`TCSETAW/F` drain/flush、break generation/
+duration、post-hangup errno及serial/PTY差异，并由source proof、owner-local tests和双架构focused runtime一起cut over。
+
+**Owner:** TTY ioctl ABI / Terminal operation
+**Last Verified:** 2026-08-11
+**Related:** [Unix98 PTY与devpts当前契约](../contracts/tty/pty-devpts.md), [TTY relation与job-control当前契约](../contracts/tty/job-control.md), [PTY/devpts RFC R4](../rfcs/pty-devpts/index.md), [PTY/devpts transaction](../devlog/transactions/2026-08-11-pty-devpts.md)
+
 ## ANE-20260604-IOCTL-LTP-STAGE1-GAPS
 
 **Type:** Limitation
@@ -881,15 +953,26 @@ nonblocking 和动态 pipe capacity 需要单独设计。
 **Severity:** Medium
 **Area:** ioctl / block / loop / random / procfs / user-test
 
-**Summary:** LTP ioctl 组的直接小缺口已经部分收口：block EOF read 在 EOF 处返回 `0`，通用 block devfs 支持 `BLKRASET` / `BLKRAGET` 读回，`/dev/urandom` 已发布，user-test 为 LTP 的 loop built-in driver 检测安装 `/lib/modules/6.6.32/modules.dep` 和 `modules.builtin` fixture。TTY R1还交付了serial TTY的`TCGETS/TCSETS*`、winsize、controlling relation与foreground process-group ioctl，并由focused RV64自动/人工matrix验证；本次LTP profile为`attempted=0`，所以这不是LTP case通过证据。完整ioctl组仍未闭环：`ioctl01`依赖PTY/devpts/ptmx，`ioctl02`的本地group entry尚未改为upstream wrapper，`ioctl03`仍缺TUN/TAP，`ioctl04`后续还需要可靠mkfs/setup与`BLKROGET/BLKROSET`加只读mount语义，`ioctl07`仍需要`RNDGETENTCNT`和`/proc/sys/kernel/random/entropy_avail`，`ioctl08/ioctl09`分别依赖btrfs、parted、partscan、loop partition nodes和`/sys/block`可观察面。loop扩展ioctl、partscan、direct I/O、autoclear与loop sysfs等真实缺口也继续存在。
+**Summary:** LTP ioctl组的直接小缺口已经部分收口：block EOF read在EOF处返回`0`，通用block devfs支持
+`BLKRASET`/`BLKRAGET`读回，`/dev/urandom`已发布，user-test为LTP的loop built-in driver检测安装module fixture。
+TTY/PTY现已交付`TCGETS/TCSETS*`、winsize、controlling relation、foreground process-group ioctl与public
+PTY/devpts/ptmx；2026-08-11 focused RV64 glibc/musl `ioctl01`均为7/9 subtests通过，剩余两个只要求out-of-target legacy
+`TCGETA` pointer-error语义，转入`ANE-20260811-PTY-LEGACY-TERMIO-BREAK` accepted limitation。因此原`ioctl01`的
+PTY/devpts prerequisite已关闭，但完整ioctl组仍未闭环：`ioctl02`的本地group entry尚未改为upstream wrapper，`ioctl03`
+仍缺TUN/TAP，`ioctl04`还需要可靠mkfs/setup与`BLKROGET/BLKROSET`加只读mount语义，`ioctl07`仍需要
+`RNDGETENTCNT`和`/proc/sys/kernel/random/entropy_avail`，`ioctl08/ioctl09`分别依赖btrfs、parted、partscan、loop
+partition nodes和`/sys/block`可观察面。loop扩展ioctl、partscan、direct I/O、autoclear与loop sysfs等真实缺口也继续存在。
 
 **Decision:** 当前不为 `ioctl_loop01` 单独伪造 `/sys/block/loopN/loop/{partscan,autoclear,backing_file}`，也不把 `LO_FLAGS_PARTSCAN` / `LO_FLAGS_DIRECT_IO` / 未具备释放 hook 的 `LO_FLAGS_AUTOCLEAR` 伪装成成功。补一个只读 `partscan` 文件只能解除首个 `ENOENT`，随后会马上遇到 flag 回显、sysfs 状态、partition node 和真实 partscan 语义要求；这属于 loop sysfs / partition 子域，不纳入本轮实现。
 
-**Exit Condition:** 按子域分阶段补齐并重新验证 ioctl 组：tty/pty wrapper 与基础 tty ioctl、TUN/TAP feature gating、generic block readonly ioctl 与 readonly mount、random ioctl/procfs entropy 面、loop 扩展 ioctl/sysfs/partscan/partition nodes、以及 rootfs 工具与 btrfs/parted 环境边界。每个子域完成后用对应 LTP case 重新归类，避免把 prerequisite false-negative 与真实 ioctl 语义混在一起。
+**Exit Condition:** 按剩余子域分阶段补齐并重新验证ioctl组：TUN/TAP feature gating、generic block readonly ioctl与
+readonly mount、random ioctl/procfs entropy面、loop扩展ioctl/sysfs/partscan/partition nodes，以及rootfs工具与
+btrfs/parted环境边界。legacy termio/break只有在其accepted limitation独立关闭后才重新纳入目标。每个子域完成后用对应
+LTP case重新归类，避免把prerequisite false-negative与真实ioctl语义混在一起。
 
 **Owner:** doruche
-**Last Verified:** 2026-07-24
-**Related:** [TTY job-control当前契约](../contracts/tty/job-control.md), [TTY Subsystem事务日志](../devlog/transactions/2026-07-23-tty-subsystem.md), [开发日志：2026-05-25 至 2026-06-07](../devlog/2026-05-25_to_2026-06-07.md), [IOCTL Loop 事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [rv64 LTP ioctl 运行证据](../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md), [RFC-20260603-IOCTL-LOOP](../rfcs/ioctl-loop/index.md)
+**Last Verified:** 2026-08-11
+**Related:** [Unix98 PTY与devpts当前契约](../contracts/tty/pty-devpts.md), [TTY job-control当前契约](../contracts/tty/job-control.md), [PTY/devpts transaction](../devlog/transactions/2026-08-11-pty-devpts.md), [TTY Subsystem事务日志](../devlog/transactions/2026-07-23-tty-subsystem.md), [IOCTL Loop事务日志](../devlog/transactions/2026-06-04-ioctl-loop.md), [rv64 LTP ioctl运行证据](../rfcs/ioctl-loop/backgrounds/ltp-ioctl-rv64-20260604/index.md), [RFC-20260603-IOCTL-LOOP](../rfcs/ioctl-loop/index.md)
 
 ## ANE-20260607-SIGNAL-LTP-INFRA-STAGE1
 

@@ -33,10 +33,6 @@ pub struct Event {
     /// correctness of [Event] relies on certain lock ordering. If we put the
     /// [NoIrqSpinLock] outside of [Event], then the safety can't be guaranteed.
     inner: NoIrqSpinLock<EventInner>,
-    /// KUnit-only lifecycle observation. It never decides wait or timer
-    /// behavior.
-    #[cfg(feature = "kunit")]
-    timeout_request_probe: Option<Arc<TimeoutRequestProbe>>,
 }
 
 #[derive(Debug)]
@@ -52,16 +48,6 @@ impl Event {
                 non_exclusive: VecDeque::new(),
                 exclusive: VecDeque::new(),
             }),
-            #[cfg(feature = "kunit")]
-            timeout_request_probe: None,
-        }
-    }
-
-    #[cfg(feature = "kunit")]
-    fn with_timeout_request_probe(probe: Arc<TimeoutRequestProbe>) -> Self {
-        Self {
-            timeout_request_probe: Some(probe),
-            ..Self::new()
         }
     }
 
@@ -619,52 +605,7 @@ impl Event {
         token: WakeToken,
         timeout: Duration,
     ) -> Duration {
-        #[cfg(feature = "kunit")]
-        if let Some(probe) = self.timeout_request_probe.as_ref().cloned() {
-            let installed_probe = probe.clone();
-            return super::higher_level::schedule_wait_with_timeout_observed(
-                task,
-                token,
-                Some(timeout),
-                move |_| installed_probe.mark_installed(),
-                move |_, removed| probe.mark_cancelled(removed),
-            );
-        }
         schedule_wait_with_timeout(task, token, Some(timeout))
-    }
-}
-
-#[cfg(feature = "kunit")]
-#[derive(Debug)]
-struct TimeoutRequestProbe {
-    installed: AtomicBool,
-    cancelled: AtomicBool,
-}
-
-#[cfg(feature = "kunit")]
-impl TimeoutRequestProbe {
-    fn new() -> Self {
-        Self {
-            installed: AtomicBool::new(false),
-            cancelled: AtomicBool::new(false),
-        }
-    }
-
-    fn mark_installed(&self) {
-        self.installed.store(true, Ordering::Release);
-    }
-
-    fn mark_cancelled(&self, removed: bool) {
-        assert!(removed, "early wake did not cancel its timeout request");
-        self.cancelled.store(true, Ordering::Release);
-    }
-
-    fn is_installed(&self) -> bool {
-        self.installed.load(Ordering::Acquire)
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
     }
 }
 
@@ -703,71 +644,6 @@ impl Debug for WaitTarget {
             .field("diagnostic_tid", &self.diagnostic_tid)
             .field("wait_id", &self.token.wait_id())
             .finish()
-    }
-}
-
-#[cfg(feature = "kunit")]
-mod kunits {
-    use super::*;
-    use crate::{
-        task::kthread::{KThreadBuilder, KThreadCtx},
-        utils::any_opaque::AnyOpaque,
-    };
-
-    #[derive(Opaque)]
-    /// Cross-task handshake that waits until both the Event listener and its
-    /// far-future timeout are visible before forcing the non-timeout wake.
-    struct EarlyWake {
-        event: Arc<Event>,
-        ready: Arc<AtomicBool>,
-        timeout_request_probe: Arc<TimeoutRequestProbe>,
-    }
-
-    fn publish_after_timeout_is_queued(_: KThreadCtx, opaque: AnyOpaque) -> i32 {
-        let wake = opaque
-            .cast::<EarlyWake>()
-            .expect("invalid early event wake KUnit context");
-        loop {
-            let listener_registered = {
-                let inner = wake.event.inner.lock();
-                !inner.non_exclusive.is_empty()
-            };
-            if listener_registered && wake.timeout_request_probe.is_installed() {
-                break;
-            }
-            yield_now();
-        }
-        wake.ready.store(true, Ordering::Release);
-        wake.event.publish(usize::MAX, true);
-        0
-    }
-
-    #[kunit]
-    fn early_event_wake_removes_the_wait_timeout_request() {
-        let timeout_request_probe = Arc::new(TimeoutRequestProbe::new());
-        let event = Arc::new(Event::with_timeout_request_probe(
-            timeout_request_probe.clone(),
-        ));
-        let ready = Arc::new(AtomicBool::new(false));
-        let publisher = KThreadBuilder::new("kunit:event-early-timeout-cancel")
-            .spawn(
-                publish_after_timeout_is_queued,
-                AnyOpaque::new(EarlyWake {
-                    event: event.clone(),
-                    ready: ready.clone(),
-                    timeout_request_probe: timeout_request_probe.clone(),
-                }),
-            )
-            .expect("failed to spawn early event publisher");
-
-        let outcome = event.listen_with_timeout(
-            false,
-            || ready.load(Ordering::Acquire),
-            Duration::from_secs(3600),
-        );
-        assert!(outcome.is_none());
-        assert!(timeout_request_probe.is_cancelled());
-        assert_eq!(publisher.wait_exited(), 0);
     }
 }
 

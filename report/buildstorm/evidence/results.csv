@@ -1,0 +1,69 @@
+figure,profile,case,series,run,value,unit,source_identity,identity_kind,notes
+P01,rv64-smp1-kstack,kernel stack create/join,baseline,A0,564.723,ms,a2c27c71492d857f0e69f6a60a23fe5145ecd11e5a2a854145bd14e7b0987f3a,patch-sha256,recording disabled median; probe on 821cbb10
+P01,rv64-smp1-kstack,kernel stack create/join,baseline,A1,559.605,ms,a2c27c71492d857f0e69f6a60a23fe5145ecd11e5a2a854145bd14e7b0987f3a,patch-sha256,recording disabled median; probe on 821cbb10
+P01,rv64-smp1-kstack,kernel stack create/join,production,A0,470.433,ms,5d53e7f1e6112b9c39c100186552524fb2751393,git-commit,recording disabled median; formal optimization 0e68c973
+P01,rv64-smp1-kstack,kernel stack create/join,production,A1,476.661,ms,5d53e7f1e6112b9c39c100186552524fb2751393,git-commit,recording disabled median; formal optimization 0e68c973
+P01,rv64-smp1-user-fault,same-boot Cargo,baseline,A1,5.34,s,2b2b2a1de57d28a9ec9bdf4847582af51234a081,git-commit,recording disabled
+P01,rv64-smp1-user-fault,same-boot Cargo,baseline,A2,6.14,s,2b2b2a1de57d28a9ec9bdf4847582af51234a081,git-commit,recording disabled
+P01,rv64-smp1-user-fault,same-boot Cargo,candidate,B1,3.78,s,3edab6a1649773cd4fd6bcdf64f5cb55a3556f04938074c145353cb389a7b529,patch-sha256,exact research patch identity
+P01,rv64-smp1-user-fault,same-boot Cargo,candidate,B2,3.92,s,3edab6a1649773cd4fd6bcdf64f5cb55a3556f04938074c145353cb389a7b529,patch-sha256,exact research patch identity
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-1,4.08,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-2,4.12,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-3,4.13,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-4,4.22,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-5,4.30,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-6,4.31,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A1-7,4.36,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-1,3.68,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-2,3.70,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-3,3.71,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-4,3.72,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-5,3.73,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-6,3.73,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B1-7,3.77,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-1,3.70,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-2,3.71,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-3,3.72,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-4,3.73,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-5,3.79,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-6,3.82,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,production,B2-7,3.83,s,44abcddac727c8f74b953bd8ff41f37de3bfd954,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-1,3.89,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-2,3.92,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-3,3.92,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-4,3.92,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-5,4.06,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-6,4.06,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-dentry,clean Cargo,baseline,A2-7,4.23,s,825d4cc6541687ee750131ad2161d58505ba27d4,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-1,4.18,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-2,3.92,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-3,3.83,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-4,3.84,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-5,3.77,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-6,3.85,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A1-7,3.82,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,production,B1-1,3.81,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B1-2,3.68,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B1-3,3.70,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B1-4,3.70,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B1-5,3.72,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B1-6,3.72,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B1-7,3.71,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-1,3.59,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-2,3.55,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-3,3.51,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-4,3.63,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-5,3.54,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-6,3.60,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,production,B2-7,3.55,s,e980e060d68bc66bd19bffd423b6df3681ba8490e0a82b0541b43f21b397fed7,patch-sha256,recording disabled; formal commit 1d0a525f
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-1,3.70,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-2,3.71,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-3,3.65,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-4,3.73,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-5,3.64,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-6,3.67,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+P02,rv64-smp1-cstring,clean Cargo,baseline,A2-7,3.73,s,f2613a836fc15c7b2fd920b229c9c9757a3f39bf,git-commit,recording disabled
+T05,rv64-smp8-buildstorm,BuildStorm elapsed,final,R1,1788.00,s,27110b6973c597912edd17f12be59db1c98b17d7,git-commit,final-2026 b5ec6ef8; competition-final-rv64-release; final.toml; artifact oracle passed
+T05,rv64-smp8-buildstorm,BuildStorm artifact,final,R1,1681000,byte,27110b6973c597912edd17f12be59db1c98b17d7,git-commit,artifact oracle passed
+T05,la64-smp8-buildstorm,BuildStorm elapsed,supporting,R1,1153.00,s,a0c7bbe6b811da3d68b3be1ac24f851f7c3af8d8,git-commit,complete-run support; final-2026 b5ec6ef8; default.toml
+T05,la64-smp8-buildstorm,BuildStorm artifact,supporting,R1,1714568,byte,a0c7bbe6b811da3d68b3be1ac24f851f7c3af8d8,git-commit,complete-run support; log sha256 8a63a6c58caf490ea790b9987c1f97f61f10a509f9331af2394b76740ead4958

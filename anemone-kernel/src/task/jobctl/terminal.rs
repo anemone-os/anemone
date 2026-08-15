@@ -67,6 +67,31 @@ impl TtyTerminalSignal {
 }
 
 impl TtySession {
+    /// Resolve the exact live session containing a procfs target.
+    ///
+    /// The returned capability carries stable topology identity only. It does
+    /// not cache or expose any controlling-terminal relation state.
+    pub(crate) fn for_thread_group(thread_group: &Arc<ThreadGroup>) -> Option<Self> {
+        if thread_group.ty() != ThreadGroupType::User {
+            return None;
+        }
+        let tgid = thread_group.tgid();
+        let current = get_thread_group(&tgid)?;
+        if !Arc::ptr_eq(thread_group, &current) {
+            return None;
+        }
+
+        let sid = thread_group.sid();
+        let session = get_session(&sid)?;
+        let leader = get_thread_group(&sid)?;
+        let snapshot = Self { session, leader };
+        if thread_group.sid() == sid && snapshot.is_live() {
+            Some(snapshot)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn sid(&self) -> Tid {
         self.session.sid()
     }
@@ -85,6 +110,29 @@ impl TtySession {
                 self.leader.status().life_cycle(),
                 ThreadGroupLifeCycle::Alive
             )
+    }
+
+    /// Deliver the accepted terminal-hangup effect to the exact old session
+    /// leader. Relation ownership has already been withdrawn before this
+    /// guards-out handoff; signal generation remains owned by `ThreadGroup`.
+    pub(crate) fn signal_leader_hangup_continue(&self) {
+        if !self.is_live() {
+            return;
+        }
+        let sender = SigKill {
+            pid: Tid::new(0),
+            uid: Uid::new(0),
+        };
+        self.leader.recv_signal(Signal::new(
+            SigNo::SIGHUP,
+            SiCode::Kernel,
+            SigInfoFields::Kill(sender),
+        ));
+        self.leader.recv_signal(Signal::new(
+            SigNo::SIGCONT,
+            SiCode::Kernel,
+            SigInfoFields::Kill(sender),
+        ));
     }
 }
 

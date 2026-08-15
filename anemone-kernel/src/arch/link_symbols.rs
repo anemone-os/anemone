@@ -86,6 +86,11 @@ unsafe extern "C" {
     /// The end of the static performance metric registry.
     pub fn __eperf_metrics();
 
+    /// The start of the immutable Nemophila provider catalog.
+    pub fn __snemophila_providers();
+    /// The end of the immutable Nemophila provider catalog.
+    pub fn __enemophila_providers();
+
     /// The start of the initcall section for filesystem driver initcalls.
     pub fn __sinitcall_fs();
     /// The end of the initcall section for filesystem driver initcalls.

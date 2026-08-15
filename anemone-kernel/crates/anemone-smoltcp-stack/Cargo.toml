@@ -55,3 +55,8 @@ required-features = ["host-test"]
 name = "icmp_raw"
 path = "tests/icmp_raw.rs"
 required-features = ["host-test"]
+
+[[test]]
+name = "tcp_listener_ingress"
+path = "tests/tcp_listener_ingress.rs"
+required-features = ["host-test"]

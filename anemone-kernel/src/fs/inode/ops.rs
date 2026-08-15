@@ -1,4 +1,8 @@
 use super::*;
+use crate::{
+    fs::FileOpenRequest,
+    task::files::{FileDesc, FileDescOps},
+};
 
 /// VTable an inode must implement to support file system operations.
 ///
@@ -103,6 +107,10 @@ pub struct OpenedFile {
     /// objects must opt in explicitly at their open boundary.
     pub mode: FileMode,
     pub prv: AnyOpaque,
+    /// Optional one-shot activation for an opened description whose backend
+    /// participation must wait until VFS has prepared the complete `FileDesc`.
+    /// VFS never interprets the type-erased backend payload.
+    pub(in crate::fs) description_activation: Option<OpenDescriptionActivation>,
 }
 
 impl OpenedFile {
@@ -115,7 +123,92 @@ impl OpenedFile {
             file_ops,
             mode,
             prv,
+            description_activation: None,
         }
+    }
+
+    pub(crate) fn with_description_activation(
+        file_ops: &'static FileOps,
+        mode: FileMode,
+        prv: AnyOpaque,
+        activation: OpenDescriptionActivation,
+    ) -> Self {
+        Self {
+            file_ops,
+            mode,
+            prv,
+            description_activation: Some(activation),
+        }
+    }
+
+    /// Materialize an opened file that deliberately has no nested userspace
+    /// activation. Device-owned direct-open routes use this without gaining
+    /// access to VFS-private constructors or type-erased fields.
+    pub(crate) fn into_file(self, path: PathRef) -> File {
+        assert!(
+            self.description_activation.is_none(),
+            "direct-open route received a nested description activation"
+        );
+        File::new_with_mode(path, self.file_ops, self.mode, self.prv)
+    }
+}
+
+/// Backend-produced one-shot activation for a userspace opened description.
+///
+/// This is a narrow capability, not a callback registry: one inode open may
+/// provide at most one value, VFS consumes it exactly once, and the backend
+/// receives only normalized open facts plus creation-time static hooks.
+pub(crate) struct OpenDescriptionActivation {
+    state: AnyOpaque,
+    prepare:
+        fn(AnyOpaque, FileOpenRequest, FileDescOps) -> Result<PreparedOpenDescription, SysError>,
+}
+
+impl OpenDescriptionActivation {
+    pub(crate) fn new(
+        state: AnyOpaque,
+        prepare: fn(
+            AnyOpaque,
+            FileOpenRequest,
+            FileDescOps,
+        ) -> Result<PreparedOpenDescription, SysError>,
+    ) -> Self {
+        Self { state, prepare }
+    }
+
+    pub(in crate::fs) fn prepare(
+        self,
+        request: FileOpenRequest,
+        description_ops: FileDescOps,
+    ) -> Result<PreparedOpenDescription, SysError> {
+        (self.prepare)(self.state, request, description_ops)
+    }
+}
+
+pub(crate) struct PreparedOpenDescription {
+    pub(crate) description_ops: FileDescOps,
+    pub(crate) commit: OpenDescriptionCommit,
+}
+
+/// Final backend activation run after `FileDesc` preparation and before the
+/// infallible notification/fd-publication tail. A backend may perform its last
+/// fallible participation transition here; success must leave no later
+/// fallible cleanup obligation.
+pub(crate) struct OpenDescriptionCommit {
+    state: AnyOpaque,
+    commit: fn(AnyOpaque, Arc<FileDesc>) -> Result<(), SysError>,
+}
+
+impl OpenDescriptionCommit {
+    pub(crate) fn new(
+        state: AnyOpaque,
+        commit: fn(AnyOpaque, Arc<FileDesc>) -> Result<(), SysError>,
+    ) -> Self {
+        Self { state, commit }
+    }
+
+    pub(in crate::fs) fn commit(self, description: Arc<FileDesc>) -> Result<(), SysError> {
+        (self.commit)(self.state, description)
     }
 }
 

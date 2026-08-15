@@ -1,0 +1,34 @@
+[build]
+name = "nemophila-r0-validation-la64"
+arch = "loongarch64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/nemophila-r0-test"
+
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/proc"
+
+[[dirs]]
+path = "/tmp"
+
+[[dirs]]
+path = "/modules"
+
+[[apps]]
+name = "nemophila-r0-test"
+installed_dir = "/sbin"
+
+[[files]]
+source = "build/modules/clone-observer/nemophila_clone_observer.wasm"
+installed_path = "/modules/clone-observer.wasm"
+
+[[files]]
+source = "build/modules/clone-observer/nemophila_clone_observer.wasm"
+installed_path = "/modules/clone-observer-mutable.wasm"

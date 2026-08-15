@@ -19,8 +19,8 @@ impl InitStdio {
 /// A failure after the first publish is boot-fatal at the caller; runtime
 /// rollback is deliberately outside the boot endpoint protocol.
 pub(crate) fn finalize(selection: &console::ConsoleSelection) -> Result<InitStdio, SysError> {
-    let console_publication = console::prepare_devfs()?;
     let tty_publication = tty::prepare_system_boot(selection.terminal_identity())?;
+    let console_publication = console::prepare_devfs(tty_publication.console_terminal())?;
 
     console_publication.publish()?;
     let files = tty_publication.publish()?;

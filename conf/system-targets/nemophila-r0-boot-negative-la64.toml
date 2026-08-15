@@ -1,0 +1,10 @@
+platform = "qemu-virt-la64"
+nemophila = ["boot-reject-validation"]
+
+[root]
+fstype = "ramfs"
+source = { type = "pseudo" }
+
+[initial-program]
+type = "embedded-app"
+app = "nemophila-boot-negative-sentinel"

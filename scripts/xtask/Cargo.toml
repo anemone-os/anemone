@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# xshell = "0.2.7"
-xshell = { git = "https://github.com/doruche/xshell", branch = "feature/echo" }
+xshell = { path = "vendor/xshell" }
 anyhow = "1.0.100"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = { version = "0.9.11" }

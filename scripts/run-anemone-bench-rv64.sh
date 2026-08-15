@@ -40,8 +40,8 @@ mkdir -p -- "$(dirname -- "$log_file")"
 
 printf 'ANEMONE-BENCH: rebuilding %s\n' "$rootfs_image"
 just rootfs mkfs "${rootfs_args[@]}"
-printf 'ANEMONE-BENCH: building %s with smp=1 memory=1G\n' "$preset"
-just build --preset "$preset" "${provider_bindings[@]}"
+printf 'ANEMONE-BENCH: building topology-neutral %s\n' "$preset"
+just build --preset "$preset"
 printf 'ANEMONE-BENCH: booting; log=%s\n' "$log_file"
 just qemu --preset "$preset" "${provider_bindings[@]}" \
     --bind kernel-image=build/anemone.elf \

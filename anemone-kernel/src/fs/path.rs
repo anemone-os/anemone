@@ -109,7 +109,15 @@ impl PathRef {
             file_ops,
             mode,
             prv,
+            description_activation,
         } = inode.open()?;
+        if description_activation.is_some() {
+            // Raw kernel opens cannot publish an opened-description activation:
+            // doing so needs a complete FileDesc and an owner-specific commit
+            // tail. Return a stable error after dropping the unpublished
+            // activation instead of exposing a half-participating File.
+            return Err(SysError::NotSupported);
+        }
 
         Ok(File::new_with_mode(self.clone(), file_ops, mode, prv))
     }

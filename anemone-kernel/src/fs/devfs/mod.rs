@@ -106,7 +106,10 @@ fn init() {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::utils::any_opaque::NilOpaque;
+    use crate::{
+        device::devnum::{DeviceNumber, MajorNum, MinorNum},
+        utils::any_opaque::NilOpaque,
+    };
 
     const DEVFS_TEST_SINK_CAPACITY: usize = 64;
 
@@ -362,10 +365,16 @@ mod kunits {
         let shm_path = format!("{mountpoint}/shm");
         let shm_ref = vfs_lookup(Path::new(shm_path.as_str())).unwrap();
         assert_eq!(shm_ref.to_string(), shm_path);
+        let pts_path = format!("{mountpoint}/pts");
+        let pts_ref = vfs_lookup(Path::new(pts_path.as_str())).unwrap();
+        assert_eq!(pts_ref.to_string(), pts_path);
+        let ptmx_path = format!("{mountpoint}/ptmx");
+        let ptmx_ref = vfs_lookup(Path::new(ptmx_path.as_str())).unwrap();
+        assert_eq!(ptmx_ref.to_string(), ptmx_path);
 
         let root_attr = vfs_get_attr(Path::new(mountpoint.as_str())).unwrap();
         assert_eq!(root_attr.mode.ty(), InodeType::Dir);
-        assert_eq!(root_attr.nlink, 3);
+        assert_eq!(root_attr.nlink, 4);
         assert_eq!(root_attr.rdev, DeviceId::None);
 
         let shm_attr = vfs_get_attr(Path::new(shm_path.as_str())).unwrap();
@@ -373,11 +382,25 @@ mod kunits {
         assert_eq!(shm_attr.nlink, 2);
         assert_eq!(shm_attr.rdev, DeviceId::None);
 
+        let pts_attr = vfs_get_attr(Path::new(pts_path.as_str())).unwrap();
+        assert_eq!(pts_attr.mode.ty(), InodeType::Dir);
+        assert_eq!(pts_attr.nlink, 2);
+        assert_eq!(pts_attr.rdev, DeviceId::None);
+
+        let ptmx_attr = vfs_get_attr(Path::new(ptmx_path.as_str())).unwrap();
+        assert_eq!(ptmx_attr.mode.ty(), InodeType::Char);
+        assert_eq!(
+            ptmx_attr.rdev,
+            DeviceId::Number(DeviceNumber::new(MajorNum::new(5), MinorNum::new(2)))
+        );
+
         assert_eq!(
             vfs_lookup(Path::new("/kunit-devfs-mount/missing")).unwrap_err(),
             SysError::NotFound
         );
 
+        drop(ptmx_ref);
+        drop(pts_ref);
         drop(shm_ref);
         drop(root_ref);
         unmount_devfs(&mountpoint);
@@ -391,22 +414,30 @@ mod kunits {
         assert_eq!(entries[0], ".");
         assert_eq!(entries[1], "..");
         assert!(entries.iter().any(|name| name == "shm"));
+        assert!(entries.iter().any(|name| name == "pts"));
+        assert!(entries.iter().any(|name| name == "ptmx"));
         assert!(entries.iter().any(|name| name == "null"));
         assert!(entries.iter().any(|name| name == "zero"));
+        assert!(entries.iter().any(|name| name == "full"));
+        assert!(entries.iter().any(|name| name == "urandom"));
         assert!(entries.iter().any(|name| name.starts_with("ram")));
 
         unmount_devfs(&mountpoint);
     }
 
     #[kunit]
-    fn test_devfs_char_device_io_and_attrs() {
+    fn test_devfs_memory_char_device_io_readiness_and_attrs() {
         let mountpoint = mount_devfs("char-io");
 
         let null_path = format!("{mountpoint}/null");
         let zero_path = format!("{mountpoint}/zero");
+        let full_path = format!("{mountpoint}/full");
+        let urandom_path = format!("{mountpoint}/urandom");
 
         let null = vfs_open(Path::new(null_path.as_str())).unwrap();
         let zero = vfs_open(Path::new(zero_path.as_str())).unwrap();
+        let full = vfs_open(Path::new(full_path.as_str())).unwrap();
+        let urandom = vfs_open(Path::new(urandom_path.as_str())).unwrap();
 
         let null_attr = vfs_get_attr(Path::new(null_path.as_str())).unwrap();
         assert_eq!(null_attr.mode.ty(), InodeType::Char);
@@ -421,6 +452,19 @@ mod kunits {
             )
         );
 
+        let full_attr = vfs_get_attr(Path::new(full_path.as_str())).unwrap();
+        assert_eq!(full_attr.mode.ty(), InodeType::Char);
+        assert_eq!(
+            full_attr.rdev,
+            DeviceId::Number(
+                CharDevNum::new(
+                    MajorNum::new(devnum::char::major::MEMORY),
+                    MinorNum::new(devnum::char::minor::FULL)
+                )
+                .number()
+            )
+        );
+
         assert_eq!(null.write(b"abc").unwrap(), 3);
         let mut buf = [0u8; 8];
         assert_eq!(null.read(&mut buf).unwrap(), 0);
@@ -429,8 +473,35 @@ mod kunits {
         assert_eq!(zero.read(&mut zero_buf).unwrap(), 8);
         assert_eq!(zero_buf, [0u8; 8]);
 
+        let mut full_buf = [0xffu8; 8];
+        assert_eq!(full.read(&mut full_buf).unwrap(), 8);
+        assert_eq!(full_buf, [0u8; 8]);
+        assert_eq!(full.write(b"abc"), Err(SysError::NoSpace));
+
+        for file in [&null, &zero, &full, &urandom] {
+            assert_eq!(
+                file.poll(&PollRequest::snapshot(PollEvent::READABLE))
+                    .unwrap(),
+                PollRegisterResult::Ready(PollEvent::READABLE)
+            );
+            assert_eq!(
+                file.poll(&PollRequest::snapshot(PollEvent::WRITABLE))
+                    .unwrap(),
+                PollRegisterResult::Ready(PollEvent::WRITABLE)
+            );
+            assert_eq!(
+                file.poll(&PollRequest::snapshot(
+                    PollEvent::READABLE | PollEvent::WRITABLE | PollEvent::ERROR,
+                ))
+                .unwrap(),
+                PollRegisterResult::Ready(PollEvent::READABLE | PollEvent::WRITABLE)
+            );
+        }
+
         drop(null);
         drop(zero);
+        drop(full);
+        drop(urandom);
 
         unmount_devfs(&mountpoint);
     }

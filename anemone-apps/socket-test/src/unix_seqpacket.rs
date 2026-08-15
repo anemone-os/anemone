@@ -11,7 +11,7 @@ use anemone_rs::{
         },
         net::linux::{
             AF_UNIX, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN,
-            SO_PROTOCOL, SO_TYPE, SOCK_SEQPACKET, SockAddrUn, socklen_t,
+            SO_PEERCRED, SO_PROTOCOL, SO_TYPE, SOCK_SEQPACKET, SockAddrUn, UCred, socklen_t,
         },
         time::linux::TimeSpec,
     },
@@ -25,7 +25,9 @@ use anemone_rs::{
             getpeername_unix_raw, getsockname_unix_raw, getsockopt_raw, listen, recvfrom_raw,
             sendto_raw, shutdown, socket_raw, socketpair_raw, unix_stream_socket,
         },
-        process::{WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, wait4},
+        process::{
+            WStatus, WStatusRaw, WaitFor, WaitOptions, exit, fork, getgid, getpid, getuid, wait4,
+        },
     },
     prelude::*,
 };
@@ -70,6 +72,21 @@ fn query_socket_option(fd: Fd, option: i32) -> Result<i32, Errno> {
     Ok(value)
 }
 
+fn query_peer_credentials(fd: Fd) -> Result<UCred, Errno> {
+    let mut credentials = UCred::default();
+    let mut len = size_of::<UCred>() as i32;
+    unsafe {
+        getsockopt_raw(
+            fd as i32,
+            SO_PEERCRED,
+            (&mut credentials as *mut UCred).cast(),
+            &mut len,
+        )?;
+    }
+    ensure(len == size_of::<UCred>() as i32)?;
+    Ok(credentials)
+}
+
 fn fdset_with(fd: Fd) -> FdSet {
     let mut set = FdSet::default();
     set.fds_bits[fd as usize / 64] |= 1u64 << (fd as usize % 64);
@@ -108,6 +125,13 @@ fn test_resolver_options_and_records() -> Result<(), Errno> {
     ensure(query_socket_option(first, SO_DOMAIN)? == AF_UNIX)?;
     ensure(query_socket_option(first, SO_PROTOCOL)? == 0)?;
     ensure(query_socket_option(first, SO_ACCEPTCONN)? == 0)?;
+    let current = UCred {
+        pid: getpid()? as i32,
+        uid: getuid()?,
+        gid: getgid()?,
+    };
+    ensure(query_peer_credentials(first)? == current)?;
+    ensure(query_peer_credentials(second)? == current)?;
 
     let mut empty = [0u8; 1];
     expect_errno(read(second, &mut empty), EAGAIN)?;
@@ -287,6 +311,13 @@ fn test_pathname_admission_and_cross_type_rejection() -> Result<(), Errno> {
         &mut peer_len,
         (SocketFlags::NONBLOCK | SocketFlags::CLOEXEC).bits(),
     )?;
+    let current = UCred {
+        pid: getpid()? as i32,
+        uid: getuid()?,
+        gid: getgid()?,
+    };
+    ensure(query_peer_credentials(seq_client)? == current)?;
+    ensure(query_peer_credentials(seq_accepted)? == current)?;
     ensure(peer.sun_family == AF_UNIX as u16 && peer_len == 2)?;
     ensure(fcntl_getfd(seq_accepted)? == 1)?;
     ensure(fcntl_getfl(seq_accepted)? & O_NONBLOCK != 0)?;

@@ -51,6 +51,12 @@ fn char_file_seek(file: &File, pos: &mut usize, from: SeekFrom) -> Result<usize,
         .seek(CharSeekCtx::new(from, pos))
 }
 
+fn char_file_poll(file: &File, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+    get_char_dev(char_file_devnum(file)?)
+        .ok_or(SysError::NotFound)?
+        .poll(request)
+}
+
 // Keep `/dev` as a thin dispatch layer: command ownership lives in `CharDev`,
 // and concrete devices can opt in without seeing the opened fd or task state.
 fn char_file_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
@@ -69,9 +75,7 @@ static CHAR_DEV_FILE_OPS: FileOps = FileOps {
     check_status_flags: accept_file_op_status_flags,
     seek: char_file_seek,
     read_dir: |_, _, _| Err(SysError::NotDir),
-    // Char devices do not have a waitable poll path yet. Report NYI instead of
-    // pretending every device is immediately readable or writable.
-    poll: |_, _| Err(SysError::NotYetImplemented),
+    poll: char_file_poll,
     fcntl: None,
     ioctl: char_file_ioctl,
 };

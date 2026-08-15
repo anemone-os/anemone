@@ -273,6 +273,7 @@ impl SocketReceiveOutcome {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionQuery {
+    PeerCredentials,
     ReuseAddress,
     PendingError,
     ReceiveErrors,
@@ -284,11 +285,24 @@ pub(super) enum SocketOptionQuery {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketOptionValue {
+    PeerCredentials(SocketPeerCredentials),
     Boolean(bool),
     PendingError(Option<SocketPendingError>),
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+}
+
+/// Stable peer identity retained by a local IPC connection owner.
+///
+/// This is an Anemone value rather than Linux `struct ucred`: family owners
+/// retain only the identity fields needed by the capability, while the ABI
+/// adapter owns layout and copyout policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SocketPeerCredentials {
+    pub(super) tgid: u32,
+    pub(super) effective_uid: u32,
+    pub(super) effective_gid: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -307,6 +321,7 @@ pub(super) enum SocketOptionMutation {
 pub(super) enum SocketOptionError {
     Unsupported,
     Retired,
+    NotConnected,
     InvalidValue,
 }
 

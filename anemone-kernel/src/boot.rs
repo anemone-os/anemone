@@ -216,14 +216,14 @@ fn prepare_initial_task(init_stdio: InitStdio) {
     {
         let kinit = get_current_task();
         let [stdin, stdout, stderr] = init_stdio.into_files();
-        let open_stdio = |file: File, access| {
+        let open_stdio = |file: File, access, expected_fd| {
             let status = FileStatusFlags::empty();
             // Boot stdio uses three normal files backed by one shared Terminal;
             // no Linux open flags are accepted here, but keep the status hook
             // boundary explicit.
             file.check_status_flags(status.to_file_op_status_flags())
                 .expect("initial stdio status rejected");
-            kinit
+            let opened_fd = kinit
                 .open_fd(
                     file,
                     access,
@@ -232,10 +232,15 @@ fn prepare_initial_task(init_stdio: InitStdio) {
                     FdFlags::empty(),
                 )
                 .expect("failed to open initial stdio fd");
+            assert_eq!(
+                opened_fd.raw(),
+                expected_fd,
+                "initial stdio fd allocation order changed"
+            );
         };
-        open_stdio(stdin, OpenAccessMode::Read);
-        open_stdio(stdout, OpenAccessMode::Write);
-        open_stdio(stderr, OpenAccessMode::Write);
+        open_stdio(stdin, OpenAccessMode::Read, 0);
+        open_stdio(stdout, OpenAccessMode::Write, 1);
+        open_stdio(stderr, OpenAccessMode::Write, 2);
     }
 
     get_current_task().set_fs_state(FsState::new_root());

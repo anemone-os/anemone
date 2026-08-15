@@ -186,6 +186,17 @@ static CORE_LOCAL: CoreLocal = CoreLocal::ZEROED;
 /// Initialized during [bsp_init].
 static BSP_CPU_ID: MonoOnce<CpuId> = unsafe { MonoOnce::new() };
 
+/// One-way publication that every per-CPU area has been copied and registered.
+///
+/// This is the canonical boot handoff for code that can run before a current
+/// CPU base exists. It does not mean an AP has installed its own base yet; boot
+/// source order must keep allocator callers on each AP after [ap_init].
+static PERCPU_STORAGE_READY: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn storage_ready() -> bool {
+    PERCPU_STORAGE_READY.load(Ordering::Acquire)
+}
+
 /// Get the number of CPUs in the system.
 pub fn ncpus() -> usize {
     let ncpus = cpu_count();
@@ -491,6 +502,8 @@ mod init_routines {
 
                 cur_vpn += (aligned_size / PagingArch::PAGE_SIZE_BYTES) as u64;
             }
+
+            PERCPU_STORAGE_READY.store(true, Ordering::Release);
         }
     }
 

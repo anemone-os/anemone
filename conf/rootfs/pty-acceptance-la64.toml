@@ -1,0 +1,20 @@
+[build]
+name = "pty-acceptance-la64"
+arch = "loongarch64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/pty-test"
+
+[[dirs]]
+path = "/dev"
+
+[[dirs]]
+path = "/tmp"
+
+[[apps]]
+name = "pty-test"
+installed_dir = "/sbin"

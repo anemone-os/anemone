@@ -377,7 +377,6 @@ dependencies = [
 [[package]]
 name = "xshell"
 version = "0.3.0-pre.2"
-source = "git+https://github.com/doruche/xshell?branch=feature%2Fecho#7de2558ebb22f2fdb21e47bc420bdfb6c32db5b2"
 dependencies = [
  "xshell-macros",
 ]
@@ -385,7 +384,6 @@ dependencies = [
 [[package]]
 name = "xshell-macros"
 version = "0.3.0-pre.2"
-source = "git+https://github.com/doruche/xshell?branch=feature%2Fecho#7de2558ebb22f2fdb21e47bc420bdfb6c32db5b2"
 
 [[package]]
 name = "xtask"

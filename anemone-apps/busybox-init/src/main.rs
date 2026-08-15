@@ -125,6 +125,7 @@ fn chmod(path: &str, mode: u32) -> Result<(), Errno> {
 fn prepare_filesystems() -> Result<(), Errno> {
     ensure_dir("/dev", 0o755)?;
     mount_fs("devfs", "/dev", "devfs")?;
+    mount_fs("devpts", "/dev/pts", "devpts")?;
     mount_fs("ramfs", "/dev/shm", "ramfs")?;
     chmod("/dev/shm", 0o1777)?;
 

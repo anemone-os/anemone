@@ -52,6 +52,14 @@ pub fn get_filesystem(name: &str) -> Option<Arc<FileSystem>> {
     None
 }
 
+/// Snapshot registered filesystem types in registration order.
+///
+/// The registry remains the only source of filesystem publication. Observers
+/// must release its lock before formatting or otherwise processing the list.
+pub(in crate::fs) fn registered_filesystems_snapshot() -> Vec<Arc<FileSystem>> {
+    VFS.fs_list.read().clone()
+}
+
 /// Mount a filesystem into visible namespace.
 ///
 /// If no root mount exists yet, the new mount becomes the root mount.

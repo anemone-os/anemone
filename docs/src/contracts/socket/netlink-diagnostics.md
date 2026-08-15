@@ -20,7 +20,7 @@ IPv6 capability、其它netlink protocol、UDP/Unix/raw diag、process ownership
 `NET-CONTROL-PLANE-001`、`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、
 `NET-TCP-LIFECYCLE-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-09；`NETLINK-DIAGNOSTICS-CUTOVER` Effective
+**最后核验：** 2026-08-14；`TCP-LISTENER-INGRESS-CUTOVER` Effective
 
 ## 状态与能力所有权
 
@@ -103,19 +103,23 @@ RV64未修改BusyBox 1.33.1与LA64 final-image `/bin/ip`的`link/addr/route show
 **规则：** `SOCK_DIAG_BY_FAMILY + AF_INET + IPPROTO_TCP` wildcard dump由Stack TCP owner在一个
 observation window内枚举listener、pending/active connection、closing/orphan与尚未reclaim的TIME_WAIT，形成
 不含handle、slot、generation、ring、fd、task或credential的owned records。adapter只做Linux state、tuple、
-ifindex、state-mask与queue projection。listener `Recv-Q`是completed pending child count、`Send-Q`是normalized
-backlog；connection queue分别来自owner RX/TX facts。uid/inode/timer为明确不可用的0，cookie为
+ifindex、state-mask与queue projection。一份logical listener只形成一条aggregate LISTEN record；`Recv-Q`是owner
+已经admit的`Pending + Claimed` child count，`Send-Q`是normalized backlog。没有唯一interface scope的listener投影为
+`idiag_if = 0`；SYN-RECEIVED、accepted/closing connection与deferred record继续报告真实interface。connection queue
+分别来自owner RX/TX facts。uid/inode/timer为明确不可用的0，cookie为
 `INET_DIAG_NOCOOKIE`；不得扫描fd table或伪造稳定identity。
 
 相同wildcard TCP request的`AF_INET6`查询只返回匹配sequence的empty `NLMSG_DONE`，服务当前未修改
 `ss -tan`双family query shape，不发布IPv6 capability。UDP/Unix/raw diag、exact tuple、extension与其它protocol
 稳定拒绝。
 
-**违反表现：** Socket缓存TCP state/queue；diagnostics持有live engine handle或guard跨receive；从readiness bool
-猜listener/queue；恒零queue冒充支持；为uid/inode扫描opened description或task。
+**违反表现：** Socket缓存TCP state/queue；每个private projection各输出一条LISTEN或分别计算queue；diagnostics持有
+live engine handle或guard跨receive；从readiness bool猜listener/queue；恒零queue冒充支持；为uid/inode扫描opened
+description或task。
 
-**验证 / Enforcement：** owner host proof覆盖listener/pending/active/closing/TIME_WAIT、tuple、state mask与queue；
-raw oracle覆盖Linux record/empty-done/error；source audit；RV64/LA64 iproute2 6.1.0 `ss -tan`原始输出人工审阅。
+**验证 / Enforcement：** owner host proof覆盖single logical listener、aggregate pending/claimed queue、真实child interface、
+active/closing/TIME_WAIT、tuple与state mask；raw oracle覆盖`idiag_if = 0`、Linux record/empty-done/error；source audit；
+RV64/LA64 iproute2 6.1.0 `ss -tan`原始输出审阅。
 
 ## 当前接受边界
 
@@ -125,8 +129,12 @@ raw oracle覆盖Linux record/empty-done/error；source audit；RV64/LA64 iproute
   `NETLINKTEST:PASS`，RV64 BusyBox 1.33.1、LA64 final-image `/bin/ip`与双架构iproute2 6.1.0
   `ss -tan`均exit 0，并人工确认logical link、IPv4 address/route、TCP listener/pending/accepted/TIME_WAIT
   tuple及queue字段。
+- 2026-08-14 listener-ingress closure在owner host proof及RV64 `639/639`、LA64 `642/642` KUnit后，由双架构raw
+  sock-diag oracle确认exactly one LISTEN、aggregate queue与`idiag_if = 0`，并由两架构`ss -tan`确认真实consumer仍exit 0。
 - physical hardware、`smp > 1`、其它NIC/platform/deployment、full network LTP、压力/并发矩阵、双libc矩阵、
   其它`ip`/`ss` option与完整final harness均Not Run。
 
 **最初来源 / 当前来源：** [Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-diagnostics/index.md)
-的`NETLINK-DIAGNOSTICS-CUTOVER`、同RFC Closure与同一focused Git/PR evidence。
+的`NETLINK-DIAGNOSTICS-CUTOVER`、同RFC Closure与同一focused Git/PR evidence；
+[TCP listener ingress publication RFC R0](../../rfcs/tcp-listener-ingress-publication/index.md)的
+`TCP-LISTENER-INGRESS-CUTOVER`随后Refine logical listener scope与aggregate queue projection。

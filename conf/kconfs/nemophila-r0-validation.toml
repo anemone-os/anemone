@@ -1,0 +1,15 @@
+#! Focused Nemophila R0 guest validation KernelConfig.
+
+[features]
+kunit = false
+fs_ext4 = true
+kernel_preempt = false
+spin_lock_irqsave = true
+soft_unaligned_access = true
+kernel_symbols = false
+perf_observe = false
+
+[parameters]
+# The canonical module emits registration and callback evidence at Debug.
+print_log_level = 7
+record_log_level = 7

@@ -86,6 +86,16 @@ pub trait CharDev: Send + Sync {
         Err(SysError::IllegalSeek)
     }
 
+    /// Report the device-owned readiness predicate and optionally subscribe
+    /// the request's recheck route.
+    ///
+    /// The default supports snapshot probes but cannot arm a wait. Stateful
+    /// devices must publish the route and read their current predicate under
+    /// the same owner lock before returning `Subscribed`.
+    fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        Ok(request.ready_or_unsupported(PollEvent::empty()))
+    }
+
     /// Handle character-driver private ioctl commands.
     ///
     /// Unknown commands default to `UnsupportedIoctl`, which maps to Linux's

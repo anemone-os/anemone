@@ -26,10 +26,24 @@ impl Arch {
         }
     }
 
-    pub fn target_triple(&self) -> TargetTriple {
+    pub fn kernel_target(&self) -> KernelTarget {
         match self {
-            Arch::RiscV64 => TargetTriple::RiscV64UnknownAnemoneElf,
-            Arch::LoongArch64 => TargetTriple::LoongArch64UnknownAnemoneElf,
+            Arch::RiscV64 => KernelTarget::RiscV64,
+            Arch::LoongArch64 => KernelTarget::LoongArch64,
+        }
+    }
+
+    pub fn cargo_target(&self) -> CargoTarget {
+        match self {
+            Arch::RiscV64 => CargoTarget::RiscV64GcUnknownNoneElf,
+            Arch::LoongArch64 => CargoTarget::LoongArch64UnknownNone,
+        }
+    }
+
+    pub fn artifact_target_id(&self) -> ArtifactTargetId {
+        match self {
+            Arch::RiscV64 => ArtifactTargetId::RiscV64UnknownAnemoneElf,
+            Arch::LoongArch64 => ArtifactTargetId::LoongArch64UnknownAnemoneElf,
         }
     }
 
@@ -51,16 +65,56 @@ pub enum ExecEnv {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum TargetTriple {
+pub enum KernelTarget {
+    RiscV64,
+    LoongArch64,
+}
+
+impl KernelTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RiscV64 => "riscv64-anemone-kernel",
+            Self::LoongArch64 => "loongarch64-anemone-kernel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CargoTarget {
+    RiscV64GcUnknownNoneElf,
+    LoongArch64UnknownNone,
+}
+
+impl CargoTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RiscV64GcUnknownNoneElf => "riscv64gc-unknown-none-elf",
+            Self::LoongArch64UnknownNone => "loongarch64-unknown-none",
+        }
+    }
+
+    pub fn rustflags_env(&self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Self::RiscV64GcUnknownNoneElf => None,
+            Self::LoongArch64UnknownNone => Some((
+                "CARGO_TARGET_LOONGARCH64_UNKNOWN_NONE_RUSTFLAGS",
+                "-C target-feature=-ual",
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ArtifactTargetId {
     RiscV64UnknownAnemoneElf,
     LoongArch64UnknownAnemoneElf,
 }
 
-impl TargetTriple {
+impl ArtifactTargetId {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TargetTriple::RiscV64UnknownAnemoneElf => "riscv64-unknown-anemone-elf",
-            TargetTriple::LoongArch64UnknownAnemoneElf => "loongarch64-unknown-anemone-elf",
+            Self::RiscV64UnknownAnemoneElf => "riscv64-unknown-anemone-elf",
+            Self::LoongArch64UnknownAnemoneElf => "loongarch64-unknown-anemone-elf",
         }
     }
 }
@@ -206,6 +260,16 @@ impl Config {
             })
             .unwrap_or_default();
 
+        let platform_fdt = match self.dtb.as_ref().map(|dtb| dtb.delivery) {
+            Some(DtbDelivery::Embedded) => {
+                r#"PlatformFdt::Embedded(crate::include_bytes_aligned_as!(
+    crate::utils::align::PhantomAligned8,
+    "../../build/generated/device-tree/platform.dtb"
+))"#
+            },
+            Some(DtbDelivery::Firmware) | None => "PlatformFdt::Firmware",
+        };
+
         format!(
             r#"//! Auto-generated platform constants, do not edit manually.
 #![allow(unused)]
@@ -230,6 +294,15 @@ pub const ROOTFS_FS_TYPE: &str = {:?};
 pub const ROOTFS_SOURCE_KIND: &str = {:?};
 /// Root filesystem source path
 pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
+
+/// Platform-selected flattened-device-tree delivery.
+#[derive(Clone, Copy)]
+pub(crate) enum PlatformFdt {{
+    Embedded(&'static [u8]),
+    Firmware,
+}}
+
+pub(crate) static PLATFORM_FDT: PlatformFdt = {platform_fdt};
 "#,
             self.constants.phys_ram_start,
             self.constants.max_phys_ram_size,
@@ -382,44 +455,83 @@ impl Dtb {
         }
 
         match (arch, self.delivery) {
-            (Arch::RiscV64, DtbDelivery::Firmware) | (Arch::LoongArch64, DtbDelivery::Embedded) => {
-            },
+            (Arch::RiscV64, DtbDelivery::Firmware)
+            | (Arch::LoongArch64, DtbDelivery::Embedded | DtbDelivery::Firmware) => {},
             (Arch::RiscV64, DtbDelivery::Embedded) => {
                 anyhow::bail!("riscv64 Platform requires firmware DT delivery")
             },
-            (Arch::LoongArch64, DtbDelivery::Firmware) => {
-                anyhow::bail!("loongarch64 Platform requires embedded DT delivery")
-            },
         }
 
-        match (
-            has_qemu,
-            self.delivery,
-            self.authority,
-            self.provider,
-            self.source.is_some(),
-        ) {
+        let valid_contract = matches!(
+            (
+                has_qemu,
+                self.delivery,
+                self.authority,
+                self.provider,
+                self.source.is_some(),
+            ),
             (
                 true,
                 DtbDelivery::Firmware | DtbDelivery::Embedded,
                 DtAuthority::ProviderDerived,
                 Some(DtbProvider::Qemu),
                 false,
-            )
-            | (
+            ) | (
                 false,
                 DtbDelivery::Firmware,
                 DtAuthority::ProviderDerived,
                 Some(DtbProvider::Firmware),
                 true,
+            ) | (
+                false,
+                DtbDelivery::Embedded,
+                DtAuthority::Normative,
+                None,
+                true
             )
-            | (false, DtbDelivery::Embedded, DtAuthority::Normative, None, true) => Ok(()),
-            _ => anyhow::bail!(
+        );
+        if !valid_contract {
+            anyhow::bail!(
                 "invalid DT contract: QEMU Platforms require provider-derived provider=qemu without source; physical firmware baselines require provider-derived provider=firmware with source; physical embedded Platforms require normative source"
-            ),
+            );
         }
+
+        Ok(())
     }
 }
+
+#[cfg(test)]
+pub(crate) const TEST_QEMU_PLATFORM: &str = r#"
+[build]
+arch = "riscv64"
+exec_env = "sbi"
+
+[constants]
+phys_ram_start = 0x80000000
+max_phys_ram_size = 0x80000000
+kernel_la_base = 0x80200000
+kernel_va_base = 0xffffffff80200000
+max_phys_cpu_id = 3
+frame_section_shift_mb = 7
+
+[qemu]
+machine = "virt"
+cpu = "rv64"
+smp = "1"
+memory = "1G"
+bios = "default"
+args = []
+
+[[qemu.bind]]
+name = "kernel-image"
+optional = false
+template = ["-kernel", "{{kernel-image}}"]
+
+[dtb]
+delivery = "firmware"
+authority = "provider-derived"
+provider = "qemu"
+"#;
 
 #[cfg(test)]
 mod tests {
@@ -427,14 +539,14 @@ mod tests {
 
     #[test]
     fn qemu_cpu_is_required_and_nonempty() {
-        let valid = example_platform_text();
+        let valid = TEST_QEMU_PLATFORM;
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"\n", "")).is_err());
         assert!(Config::from_str(&valid.replace("cpu = \"rv64\"", "cpu = \"\"")).is_err());
     }
 
     #[test]
     fn rejects_incoherent_dtb_contracts() {
-        let valid = example_platform_text();
+        let valid = TEST_QEMU_PLATFORM;
 
         for invalid in [
             valid.replace("provider = \"qemu\"\n", ""),
@@ -449,17 +561,10 @@ mod tests {
             assert!(Config::from_str(&invalid).is_err(), "{invalid}");
         }
 
-        let mut embedded = example_platform();
+        let mut embedded = test_platform();
         embedded.build.arch = Arch::LoongArch64;
         embedded.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
         let embedded = toml::to_string(&embedded).unwrap();
-        assert!(
-            Config::from_str(
-                &embedded.replace("delivery = \"embedded\"", "delivery = \"firmware\"")
-            )
-            .is_err()
-        );
-
         let physical = physical_platform(
             Arch::RiscV64,
             DtbDelivery::Firmware,
@@ -489,11 +594,14 @@ mod tests {
             Config::from_str(&normative.replace("source = \"conf/platforms/example.dts\"\n", ""))
                 .is_err()
         );
+
+        let qemu_firmware = embedded.replace("delivery = \"embedded\"", "delivery = \"firmware\"");
+        Config::from_str(&qemu_firmware).unwrap();
     }
 
     #[test]
     fn validates_qemu_bind_declarations() {
-        let valid = example_platform_text()
+        let valid = TEST_QEMU_PLATFORM.to_string()
             + r#"
 
 [[qemu.bind]]
@@ -522,7 +630,7 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
 
     #[test]
     fn provider_bind_expansion_is_named_and_single_pass() {
-        let mut qemu = example_platform().qemu.unwrap();
+        let mut qemu = test_platform().qemu.unwrap();
         qemu.smp = "{{smp}}".to_string();
         qemu.memory = "{{memory}}".to_string();
         qemu.args = vec!["value={{runtime}}".to_string()];
@@ -546,13 +654,50 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
         assert_eq!(runtime_consumed.len(), 3);
     }
 
-    fn example_platform_text() -> String {
-        std::fs::read_to_string("../../conf/platforms/example.toml")
-            .expect("failed to read example Platform")
+    #[test]
+    fn repository_example_platform_parses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conf/platforms/example.toml");
+        let content = std::fs::read_to_string(path).expect("failed to read example Platform");
+        Config::from_str(&content).expect("repository example Platform must parse");
     }
 
-    fn example_platform() -> Config {
-        Config::from_str(&example_platform_text()).unwrap()
+    #[test]
+    fn repository_la64_delivery_contracts_generate_distinct_fdt_sources() {
+        let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = Root {
+            fstype: "ext4".to_string(),
+            source: super::super::system_target::RootSource::Block {
+                path: "vda".to_string(),
+            },
+        };
+        let qemu = Config::from_str(
+            &std::fs::read_to_string(repository.join("conf/platforms/qemu-virt-la64.toml"))
+                .unwrap(),
+        )
+        .unwrap()
+        .gen_platform_defs(&root);
+        assert!(qemu.contains("PLATFORM_FDT: PlatformFdt = PlatformFdt::Firmware"));
+        assert!(!qemu.contains("platform.dtb"));
+
+        let board = Config::from_str(
+            &std::fs::read_to_string(repository.join("conf/platforms/2k1000-la64.toml")).unwrap(),
+        )
+        .unwrap()
+        .gen_platform_defs(&root);
+        assert!(board.contains("PlatformFdt::Embedded"));
+        assert!(board.contains("platform.dtb"));
+    }
+
+    fn test_platform() -> Config {
+        Config::from_str(TEST_QEMU_PLATFORM).unwrap()
+    }
+
+    fn embedded_test_platform() -> Config {
+        let mut platform = test_platform();
+        platform.build.arch = Arch::LoongArch64;
+        platform.dtb.as_mut().unwrap().delivery = DtbDelivery::Embedded;
+        platform
     }
 
     fn physical_platform(
@@ -561,7 +706,7 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
         authority: DtAuthority,
         provider: Option<DtbProvider>,
     ) -> String {
-        let mut platform = example_platform();
+        let mut platform = test_platform();
         platform.build.arch = arch;
         platform.qemu = None;
         let dtb = platform.dtb.as_mut().unwrap();

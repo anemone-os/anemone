@@ -10,6 +10,16 @@ use la_insc::{
     utils::{mem::MemAccessType, privl::PrivilegeLevel},
 };
 
+const fn use_full_tlb_flush(npages: u64) -> bool {
+    const {
+        assert!(
+            LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES > 0,
+            "LA64 full TLB flush minimum must be nonzero"
+        );
+    }
+    npages >= LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES as u64
+}
+
 /// LoongArch64 paging backend.
 pub struct LA64PagingArch;
 impl LA64PagingArch {
@@ -48,6 +58,17 @@ impl PagingArchTrait for LA64PagingArch {
                 asid: 0,
                 vaddr: vpn.to_virt_addr().get(),
             });
+        }
+    }
+
+    fn tlb_shootdown_range(range: VirtPageRange) {
+        let npages = range.npages();
+        if use_full_tlb_flush(npages) {
+            Self::tlb_shootdown_all();
+        } else {
+            for offset in 0..npages {
+                Self::tlb_shootdown(range.start() + offset);
+            }
         }
     }
 
@@ -461,6 +482,14 @@ impl LA64PteFlags {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
+
+    #[kunit]
+    fn range_policy_uses_full_flush_at_configured_minimum() {
+        let minimum = LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES as u64;
+        assert!(minimum > 0);
+        assert!(!use_full_tlb_flush(minimum - 1));
+        assert!(use_full_tlb_flush(minimum));
+    }
 
     #[kunit]
     fn ordinary_leaf_ppn_preserves_physical_bit_twelve() {

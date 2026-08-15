@@ -18,16 +18,17 @@ use anemone_rs::{
         system::native::power::SHUTDOWN_MAGIC,
         time::linux::TimeSpec,
         tty::linux::{
-            BRKINT, ECHO, ICANON, ICRNL, IGNBRK, IGNCR, IGNPAR, INLCR, INPCK, ISIG, ISTRIP, ONLCR,
-            OPOST, PARMRK, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VTIME, Winsize,
+            BRKINT, BS1, CR3, ECHO, FF1, FLUSHO, ICANON, ICRNL, IGNBRK, IGNCR, IGNPAR, IMAXBEL,
+            INLCR, INPCK, ISIG, ISTRIP, IUTF8, NL1, OFDEL, OFILL, ONLCR, OPOST, PARMRK, PENDIN,
+            TAB2, TAB3, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VT1, VTIME, Winsize, XCASE,
         },
     },
     os::{
         anemone::power::shutdown,
         linux::{
             fs::{
-                AtFd, Fd, PipeFlags, close, dup3, fcntl_getfl, fcntl_setfl, fstat, fstatat, mount,
-                openat, pipe2, ppoll, pselect, read, write,
+                AtFd, Fd, PipeFlags, close, dup3, fcntl_getfl, fcntl_setfl, fstat, fstatat,
+                mkdirat, mount, openat, pipe2, ppoll, pselect, read, write,
             },
             process::{
                 WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, sched_yield,
@@ -193,6 +194,21 @@ fn read_all(path: &str) -> Result<Vec<u8>, Errno> {
     Ok(result)
 }
 
+fn proc_tty_fields(pid: u32) -> Result<(i32, i64), Errno> {
+    let path = format!("/proc/{pid}/stat");
+    let data = read_all(path.as_str())?;
+    let text = str::from_utf8(&data).map_err(|_| EIO)?;
+    let (_, fields) = text.rsplit_once(") ").ok_or(EIO)?;
+    let mut fields = fields.split_ascii_whitespace();
+    // state, ppid, pgrp, session precede tty_nr and tpgid.
+    for _ in 0..4 {
+        fields.next().ok_or(EIO)?;
+    }
+    let tty_nr = fields.next().ok_or(EIO)?.parse().map_err(|_| EIO)?;
+    let tpgid = fields.next().ok_or(EIO)?.parse().map_err(|_| EIO)?;
+    Ok((tty_nr, tpgid))
+}
+
 fn write_file(path: &str, bytes: &[u8]) -> Result<(), Errno> {
     let fd = openat(
         AtFd::Cwd,
@@ -254,12 +270,18 @@ fn wait_child_bounded(pid: u32, options: WaitOptions) -> Result<WStatus, Errno> 
                 kill_and_reap_child_bounded(pid);
                 return Err(EIO);
             },
-            Ok(None) => {
-                if let Err(errno) = nanosleep(CHILD_WAIT_TICK) {
+            Ok(None) => match nanosleep(CHILD_WAIT_TICK) {
+                Ok(()) | Err(EINTR) => {},
+                Err(errno) => {
                     kill_and_reap_child_bounded(pid);
                     return Err(errno);
-                }
+                },
             },
+            // SIGCHLD or another handled signal can interrupt the wait before
+            // the target status is collected. Recheck the authoritative wait
+            // result instead of turning a correct fast child exit into a test
+            // failure.
+            Err(EINTR) => {},
             Err(errno) => {
                 kill_and_reap_child_bounded(pid);
                 return Err(errno);
@@ -271,21 +293,24 @@ fn wait_child_bounded(pid: u32, options: WaitOptions) -> Result<WStatus, Errno> 
 }
 
 fn wait_child_blocking(pid: u32) -> Result<WStatus, Errno> {
-    let mut status = WStatusRaw::EMPTY;
-    match wait4(
-        WaitFor::ChildWithTgid(pid),
-        Some(&mut status),
-        WaitOptions::empty(),
-    ) {
-        Ok(Some(waited)) if waited == pid => Ok(status.read()),
-        Ok(Some(_)) | Ok(None) => {
-            kill_and_reap_child_bounded(pid);
-            Err(EIO)
-        },
-        Err(errno) => {
-            kill_and_reap_child_bounded(pid);
-            Err(errno)
-        },
+    loop {
+        let mut status = WStatusRaw::EMPTY;
+        match wait4(
+            WaitFor::ChildWithTgid(pid),
+            Some(&mut status),
+            WaitOptions::empty(),
+        ) {
+            Ok(Some(waited)) if waited == pid => return Ok(status.read()),
+            Ok(Some(_)) | Ok(None) => {
+                kill_and_reap_child_bounded(pid);
+                return Err(EIO);
+            },
+            Err(EINTR) => {},
+            Err(errno) => {
+                kill_and_reap_child_bounded(pid);
+                return Err(errno);
+            },
+        }
     }
 }
 
@@ -316,6 +341,10 @@ fn run_new_session(body: fn() -> Result<(), Errno>) -> Result<(), Errno> {
 
 fn tty_serial(flags: u32) -> Result<Fd, Errno> {
     openat(AtFd::Cwd, Path::new("/dev/ttyS0"), flags, 0)
+}
+
+fn tty_console(flags: u32) -> Result<Fd, Errno> {
+    openat(AtFd::Cwd, Path::new("/dev/console"), flags, 0)
 }
 
 fn expect_open_dev_tty(errno: Errno) -> Result<(), Errno> {
@@ -409,6 +438,30 @@ fn acquire_query_idempotent_body() -> Result<(), Errno> {
 
 fn test_acquire_query_idempotent(_baseline: &Baseline) -> Result<(), Errno> {
     run_new_session(acquire_query_idempotent_body)
+}
+
+fn proc_tty_projection_body() -> Result<(), Errno> {
+    let pid = getpid()?;
+    expect(proc_tty_fields(pid)? == (0, -1))?;
+
+    let fd = tty_serial(O_RDWR)?;
+    let stat = fstat(fd)?;
+    expect(stat.st_rdev <= u32::MAX as u64)?;
+    tiocsctty(fd, 0)?;
+    expect(proc_tty_fields(pid)? == (stat.st_rdev as u32 as i32, i64::from(pid)))?;
+
+    tiocnotty(fd)?;
+    expect(proc_tty_fields(pid)? == (0, -1))?;
+    close(fd)
+}
+
+fn test_proc_tty_projection(_baseline: &Baseline) -> Result<(), Errno> {
+    match mkdirat(AtFd::Cwd, Path::new("/proc"), 0o755) {
+        Ok(()) | Err(EEXIST) => {},
+        Err(errno) => return Err(errno),
+    }
+    mount(Path::new("proc"), Path::new("/proc"), "proc")?;
+    run_new_session(proc_tty_projection_body)
 }
 
 fn rejected_acquire_body() -> Result<(), Errno> {
@@ -1157,6 +1210,16 @@ fn is_readable(fd: Fd) -> Result<bool, Errno> {
     Ok(count == 1 && pollfd[0].revents & POLLIN != 0)
 }
 
+fn is_writable(fd: Fd) -> Result<bool, Errno> {
+    let mut pollfd = [PollFd {
+        fd: fd as i32,
+        events: POLLOUT,
+        revents: 0,
+    }];
+    let count = ppoll(&mut pollfd, Some(&ZERO_TIMEOUT))?;
+    Ok(count == 1 && pollfd[0].revents & POLLOUT != 0)
+}
+
 fn device_numbers(encoded: u64) -> (u64, u64) {
     let major = (encoded & 0x000f_ff00) >> 8;
     let minor = (encoded & 0xff) | ((encoded >> 12) & 0x000f_ff00);
@@ -1197,6 +1260,47 @@ fn test_boot_shared_terminal(baseline: &Baseline) -> Result<(), Errno> {
     expect(get_winsize(STDERR_FILENO)? == changed_size)?;
     expect(get_winsize(serial)? == changed_size)?;
     close(serial)
+}
+
+fn test_console_shared_terminal(baseline: &Baseline) -> Result<(), Errno> {
+    let console = tty_console(O_RDWR | O_NONBLOCK)?;
+    expect(tcgetattr(console)? == baseline.termios)?;
+    expect(get_winsize(console)? == baseline.winsize)?;
+    expect(is_writable(console)?)?;
+
+    let mut changed = baseline.termios;
+    changed.c_lflag ^= ECHO;
+    tcsetattr(console, SetTermiosWhen::Now, &changed)?;
+    expect(tcgetattr(STDIN_FILENO)? == changed)?;
+    let serial = tty_serial(O_RDWR)?;
+    expect(tcgetattr(serial)? == changed)?;
+    close(serial)?;
+
+    let changed_size = Winsize {
+        ws_row: 41,
+        ws_col: 97,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    set_winsize(console, &changed_size)?;
+    expect(get_winsize(STDIN_FILENO)? == changed_size)?;
+    tcsetattr(console, SetTermiosWhen::DrainFlush, &baseline.termios)?;
+    let mut empty = [0u8; 1];
+    expect(read(console, &mut empty) == Err(EAGAIN))?;
+    expect_open_dev_tty(ENXIO)?;
+    close(console)
+}
+
+fn test_console_binary_write(baseline: &Baseline) -> Result<(), Errno> {
+    let console = tty_console(O_WRONLY)?;
+    let mut raw_output = baseline.termios;
+    raw_output.c_oflag &= !OPOST;
+    tcsetattr(console, SetTermiosWhen::Now, &raw_output)?;
+    println!("@@TTY OUTPUT console-binary-begin@@");
+    expect(write(console, &[0, 0xff, b'C'])? == 3)?;
+    tcsetattr(console, SetTermiosWhen::Drain, &baseline.termios)?;
+    println!("@@TTY OUTPUT console-binary-end@@");
+    close(console)
 }
 
 fn test_canonical_incomplete(baseline: &Baseline) -> Result<(), Errno> {
@@ -1295,6 +1399,46 @@ fn test_input_mode_roundtrip(baseline: &Baseline) -> Result<(), Errno> {
     changed.c_iflag = IGNBRK | BRKINT | IGNPAR | PARMRK | INPCK | ISTRIP | INLCR | IGNCR | ICRNL;
     tcsetattr(STDIN_FILENO, SetTermiosWhen::Drain, &changed)?;
     expect(tcgetattr(STDIN_FILENO)? == changed)
+}
+
+fn test_iutf8_compat_roundtrip(baseline: &Baseline) -> Result<(), Errno> {
+    let shared = tty_serial(O_RDWR)?;
+    let mut changed = baseline.termios;
+    changed.c_iflag |= IUTF8;
+    changed.c_oflag |= OFILL | OFDEL | NL1 | CR3 | TAB2 | BS1 | VT1 | FF1;
+    changed.c_lflag |= XCASE | FLUSHO | PENDIN;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Drain, &changed)?;
+    expect(tcgetattr(shared)? == changed)?;
+
+    let mut unsupported = changed;
+    unsupported.c_iflag |= IMAXBEL;
+    expect(matches!(
+        tcsetattr(shared, SetTermiosWhen::Now, &unsupported),
+        Err(EINVAL)
+    ))?;
+    expect(tcgetattr(STDIN_FILENO)? == changed)
+}
+
+fn test_iutf8_canonical_erase(baseline: &Baseline) -> Result<(), Errno> {
+    let mut termios = baseline.canonical_noecho();
+    termios.c_iflag = IUTF8;
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &termios)?;
+    ready("iutf8-canonical-erase");
+    let mut buffer = [0_u8; 8];
+    let count = read(STDIN_FILENO, &mut buffer)?;
+    expect(&buffer[..count] == b"\n")
+}
+
+fn test_iutf8_tab3_column(baseline: &Baseline) -> Result<(), Errno> {
+    let mut termios = baseline.termios;
+    termios.c_iflag |= IUTF8;
+    termios.c_oflag = OPOST | TAB3;
+    println!("@@TTY OUTPUT iutf8-tab3-begin@@");
+    tcsetattr(STDOUT_FILENO, SetTermiosWhen::Now, &termios)?;
+    expect(write(STDOUT_FILENO, &[0xe4, 0xb8, 0xad, b'\t'])? == 4)?;
+    tcsetattr(STDOUT_FILENO, SetTermiosWhen::Drain, &baseline.termios)?;
+    println!("@@TTY OUTPUT iutf8-tab3-end@@");
+    Ok(())
 }
 
 fn test_python_raw_termios_candidate(baseline: &Baseline) -> Result<(), Errno> {
@@ -1670,6 +1814,12 @@ fn run_auto(baseline: &Baseline) -> Results {
     }
     results.case("endpoint-identity", baseline, test_endpoint_identity);
     results.case("boot-shared-terminal", baseline, test_boot_shared_terminal);
+    results.case(
+        "console-shared-terminal",
+        baseline,
+        test_console_shared_terminal,
+    );
+    results.case("console-binary-write", baseline, test_console_binary_write);
     results.case("canonical-incomplete", baseline, test_canonical_incomplete);
     results.case("canonical-newline", baseline, test_canonical_newline);
     results.case("canonical-erase", baseline, test_canonical_erase);
@@ -1683,6 +1833,17 @@ fn run_auto(baseline: &Baseline) -> Results {
     );
     results.case("icrnl", baseline, test_icrnl);
     results.case("input-mode-roundtrip", baseline, test_input_mode_roundtrip);
+    results.case(
+        "iutf8-compat-roundtrip",
+        baseline,
+        test_iutf8_compat_roundtrip,
+    );
+    results.case(
+        "iutf8-canonical-erase",
+        baseline,
+        test_iutf8_canonical_erase,
+    );
+    results.case("iutf8-tab3-column", baseline, test_iutf8_tab3_column);
     results.case(
         "python-raw-termios-candidate",
         baseline,
@@ -1717,6 +1878,11 @@ fn run_auto(baseline: &Baseline) -> Results {
         "controlling-acquire-query-idempotent",
         baseline,
         test_acquire_query_idempotent,
+    );
+    results.case(
+        "proc-controlling-projection",
+        baseline,
+        test_proc_tty_projection,
     );
     results.case(
         "controlling-rejected-acquire-paths",

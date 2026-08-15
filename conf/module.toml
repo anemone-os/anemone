@@ -1,0 +1,21 @@
+#! Template for nemophila/modules/<module>/module.toml.
+#!
+#! This file is the contract between a Nemophila module and Anemone's build
+#! orchestration. xtask reads the manifest, enters the declared working
+#! directory, runs the selected closed driver, and exports its fresh candidate.
+
+# Stable logical module name. This must match the folder name under
+# nemophila/modules, e.g. nemophila/modules/<module>.
+name = "example"
+
+[build]
+# Working directory relative to this module.toml.
+workdir = "."
+# Build driver used by xtask. Cargo is currently the only supported driver.
+driver = "cargo"
+# Cargo manifest relative to workdir. The selected manifest owns its package or
+# workspace defaults; module.toml does not add a second package selector.
+manifest = "Cargo.toml"
+# Single top-level .wasm candidate produced by Cargo and exported under
+# build/modules/<module>/.
+artifact = "example.wasm"

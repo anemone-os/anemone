@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    task::{execve::binfmt::dispatch_execve, futex::exit_robust_list},
+    task::{execve::binfmt::dispatch_execve, futex::exit_robust_list, name::TaskName},
 };
 
 /// **This function must be run in a process context.**
@@ -98,7 +98,7 @@ pub fn kernel_execve_from_pathref(
 
                 // this must be a user task.
                 let name_part = exec_fn.split('/').last().unwrap_or(exec_fn);
-                let name = (String::from("@user/") + name_part).into_boxed_str();
+                let name = TaskName::user_from_exec(name_part);
                 let flags = TaskFlags::empty();
 
                 IntrArch::local_intr_disable();

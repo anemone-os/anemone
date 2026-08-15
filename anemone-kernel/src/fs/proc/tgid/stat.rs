@@ -1,4 +1,5 @@
 use crate::{
+    device::tty,
     fs::{
         iomux::PollEvent,
         proc::{
@@ -7,6 +8,7 @@ use crate::{
         },
     },
     prelude::*,
+    task::jobctl::TtySession,
     time::duration_to_ticks,
     utils::any_opaque::NilOpaque,
 };
@@ -152,13 +154,12 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
     let cmdline_end = cmdline_start + cmdline_len as u64;
     let env_start = env_start.get();
     let env_end = env_start + env_len as u64;
+    let (tty_nr, tpgid) = proc_tty_fields(tg);
 
     // Stage-1 placeholders:
-    // - tty/fault/rss/ELF-segment/signal/realtime/delay/guest fields are kept
+    // - fault/rss/ELF-segment/signal/realtime/delay/guest fields are kept
     //   parse-compatible even though their backing accounting is not wired yet.
     // - rss intentionally stays 0 until resident accounting is available.
-    let tty_nr = 0;
-    let tpgid = 0;
     let flags = 0;
     let minflt = 0;
     let cminflt = 0;
@@ -247,12 +248,28 @@ fn build_stat_line(inode: &InodeRef) -> Result<String, SysError> {
     ))
 }
 
+fn proc_tty_fields(thread_group: &Arc<ThreadGroup>) -> (i32, i64) {
+    let Some(session) = TtySession::for_thread_group(thread_group) else {
+        return (0, -1);
+    };
+    let Some(snapshot) = tty::proc_snapshot(&session) else {
+        return (0, -1);
+    };
+    let (major, minor) = snapshot.devnum.decompose();
+    // Linux stores new_encode_dev() in the signed `int tty_nr` stat field.
+    let tty_nr =
+        anemone_abi::fs::linux::dev_t::encode(major.get() as u32, minor.get() as u32) as i32;
+    let tpgid = snapshot
+        .foreground_pgid
+        .map(|pgid| i64::from(pgid.get()))
+        .unwrap_or(-1);
+    (tty_nr, tpgid)
+}
+
 pub(super) fn proc_comm(task: &Task) -> String {
-    let name = task.name();
-    let trimmed = name.strip_prefix("@user/").unwrap_or(&name);
-    let trimmed = trimmed.strip_prefix("@kernel/").unwrap_or(trimmed);
-    let comm = trimmed.rsplit('/').next().unwrap_or(trimmed);
-    comm.chars().take(15).collect()
+    // Task keeps raw comm bytes authoritative. This String-backed proc
+    // projection alone replaces invalid UTF-8 sequences for display.
+    String::from_utf8_lossy(&task.comm()).into_owned()
 }
 
 #[derive(Debug, Clone, Copy)]

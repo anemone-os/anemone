@@ -1,6 +1,6 @@
 #! Example build preset configuration.
 
-# Canonical SystemTarget filename slug.
+# Canonical SystemTarget name or workspace-relative path.
 target = "example"
 # Workspace-relative KernelConfig input.
 kernel-config = "conf/kconfs/default.toml"
