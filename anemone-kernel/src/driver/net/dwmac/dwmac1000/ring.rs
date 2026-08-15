@@ -299,6 +299,19 @@ impl Dwmac1000Rings {
         DescriptorSnapshot { rx, tx }
     }
 
+    /// Diagnostic-only view of the live RX cursor, reservation, and descriptor.
+    /// It is read from the ring owner and never participates in admission or
+    /// descriptor ownership transitions. Gate 3 acceptance may remove or
+    /// reduce its callers after hardware traffic is closed.
+    pub(super) fn rx_diagnostic_snapshot(&self) -> RxDiagnosticSnapshot {
+        let index = self.rx_next;
+        RxDiagnosticSnapshot {
+            index,
+            reservation: self.rx_reserved,
+            descriptor: self.read_descriptor(false, index),
+        }
+    }
+
     fn read_descriptor(&self, tx: bool, index: usize) -> EnhancedDescriptor {
         let ptr = self.descriptor_ptr(tx, index);
         // DWMAC clears OWN only after publishing completion fields. Match
@@ -527,6 +540,13 @@ const fn align_up(value: usize, alignment: usize) -> Option<usize> {
 pub(super) struct DescriptorSnapshot {
     pub(super) rx: EnhancedDescriptor,
     pub(super) tx: EnhancedDescriptor,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RxDiagnosticSnapshot {
+    pub(super) index: usize,
+    pub(super) reservation: Option<RxReservation>,
+    pub(super) descriptor: EnhancedDescriptor,
 }
 
 impl DescriptorSnapshot {

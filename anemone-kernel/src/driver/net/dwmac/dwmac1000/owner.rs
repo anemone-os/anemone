@@ -3,8 +3,11 @@ use crate::{prelude::*, time::MonotonicInstant};
 use super::{
     phy::PhyState,
     protocol::{CSR5_W1C_MASK, EnhancedDescriptor, device_cause},
-    regs::{Dwmac1000Regs, ProbeStartSnapshot, QuiesceSnapshot},
-    ring::{DescriptorSnapshot, Dwmac1000Rings, RingError, RxReservation, TxCompletion},
+    regs::{Dwmac1000Regs, ProbeStartSnapshot, QuiesceSnapshot, RuntimeRegisterSnapshot},
+    ring::{
+        DescriptorSnapshot, Dwmac1000Rings, RingError, RxDiagnosticSnapshot, RxReservation,
+        TxCompletion,
+    },
 };
 
 const NORMAL_INTERRUPT: u32 = 1 << 16;
@@ -154,8 +157,10 @@ pub(super) struct Dwmac1000Owner {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct IrqServiceSnapshot {
+    pub(super) csr5_raw: u32,
     pub(super) mac_status: u32,
     pub(super) mac_status_after: u32,
+    pub(super) csr5_raw_after: u32,
     pub(super) csr5: u32,
     pub(super) csr5_after: u32,
 }
@@ -325,20 +330,30 @@ impl Dwmac1000Owner {
         self.regs.start_runtime();
     }
 
+    pub(super) fn runtime_snapshot(&self) -> RuntimeRegisterSnapshot {
+        self.regs.runtime_snapshot()
+    }
+
+    pub(super) fn rx_diagnostic_snapshot(&self) -> RxDiagnosticSnapshot {
+        self.rings.lock_irqsave().rx_diagnostic_snapshot()
+    }
+
     pub(super) fn service_irq(&self) -> IrqServiceSnapshot {
         let (mac_status, mac_status_after) = self.regs.service_mac_interrupts();
         let status = self.regs.status();
         let legal = status & CSR5_W1C_MASK;
-        let csr5_after = if legal != 0 {
-            self.regs.acknowledge_causes(legal) & CSR5_W1C_MASK
+        let raw_after = if legal != 0 {
+            self.regs.acknowledge_causes(legal)
         } else {
-            status & CSR5_W1C_MASK
+            self.regs.status()
         };
         IrqServiceSnapshot {
+            csr5_raw: status,
             mac_status,
             mac_status_after,
+            csr5_raw_after: raw_after,
             csr5: legal,
-            csr5_after,
+            csr5_after: raw_after & CSR5_W1C_MASK,
         }
     }
 

@@ -782,6 +782,22 @@ impl Dwmac1000Regs {
         self.read(DMA_INTERRUPT_ENABLE)
     }
 
+    /// Read-only runtime controls used by Gate 3 diagnostics. These values
+    /// mirror the live MMIO owner and never participate in interrupt or DMA
+    /// decisions; remove or reduce the caller after Gate 3 acceptance.
+    pub(super) fn runtime_snapshot(&self) -> RuntimeRegisterSnapshot {
+        RuntimeRegisterSnapshot {
+            status: self.status(),
+            dma_control: self.read(DMA_CONTROL),
+            interrupt_enable: self.interrupt_enable(),
+            mac_control: self.read(MAC_CONTROL),
+            mac_interrupt_mask: self.read(MAC_INTERRUPT_MASK),
+            mac_address_high: self.read(MAC_ADDR_HIGH),
+            mac_address_low: self.read(MAC_ADDR_LOW),
+            frame_filter: self.read(MAC_FRAME_FILTER),
+        }
+    }
+
     pub(super) fn acknowledge_causes(&self, causes: u32) -> u32 {
         if causes != 0 {
             assert_eq!(causes & !super::protocol::CSR5_W1C_MASK, 0);
@@ -1064,6 +1080,18 @@ pub(super) struct ProbeRegisterSnapshot {
     pub(super) pcs_an_status: u32,
     pub(super) selected_dma_mode: SelectedDmaMode,
     pub(super) status: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RuntimeRegisterSnapshot {
+    pub(super) status: u32,
+    pub(super) dma_control: u32,
+    pub(super) interrupt_enable: u32,
+    pub(super) mac_control: u32,
+    pub(super) mac_interrupt_mask: u32,
+    pub(super) mac_address_high: u32,
+    pub(super) mac_address_low: u32,
+    pub(super) frame_filter: u32,
 }
 
 const fn decode_capabilities(version: u32, hw_feature: u32) -> Dwmac1000Capabilities {
