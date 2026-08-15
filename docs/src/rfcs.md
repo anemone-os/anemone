@@ -61,6 +61,12 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
   owner-driven rebuild与ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection和
   双架构acceptance。`NEMOPHILA-R0-CUTOVER`已建立Nemophila current contract并Refine `STM-TARGET-001`；pre-RFC
   [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
+- [RFC-20260816-frame-order0-magazine](./rfcs/frame-order0-magazine/index.md)：Accepted R0 / Not Effective；在`mm::frame`
+  owner内为order-0 frame引入bounded current-CPU magazine，使local hit不获取shared buddy lock，只在empty / full
+  boundary通过detached batch交换；通过admission的buddy availability miss逐slot sweep全部magazine后retry once。
+  `npages > 1`继续buddy-only，frame RAII、global accounting与OOM observer语义保持；源码审查、owner-local KUnit、
+  KernelConfig拒绝、双架构release build、RV64 SMP2 focused cross-CPU production path与KUnit/ordinary boot构成未来
+  唯一`FRAME-MAGAZINE-CUTOVER`的结构性验收，数值性能由维护者另行测量。implementation仍为Not Started。
 - [RFC-20260815-kernel-slab-allocator](./rfcs/kernel-slab-allocator/index.md)：Closed R0；在`mm::kmalloc`
   owner内以slab class、bounded per-CPU local cache和shared central class替换small-object global-lock
   common path，Talc继续承担bootstrap/span backing与large/special-layout fallback。首版允许任意CPU释放到
