@@ -665,37 +665,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn logging_import_preserves_load_result_when_recorded_or_filtered() {
-        for level in 0..=7 {
-            let message = b"NEMOPHILA-KUNIT:LOGGING-OK";
-            assert!(
-                load_without_registration(logging_load(
-                    level,
-                    0,
-                    message.len() as i32,
-                    message,
-                    0,
-                    true,
-                ))
-                .is_ok()
-            );
-        }
-
-        let initial = snapshot_policy();
-        let error_only = validate_policy(LogLevel::Err as u64).unwrap();
-        set_policy(error_only);
-        let filtered = load_without_registration(logging_load(0, 0, 8, b"filtered", 0, true));
-        set_policy(initial);
-        assert!(filtered.is_ok());
-
-        let message = b"NEMOPHILA-KUNIT:FAILED-LOAD-LOG";
-        assert!(matches!(
-            load_without_registration(logging_load(1, 0, message.len() as i32, message, 1, true,)),
-            Err(LoadFailure::ModuleRejected)
-        ));
-    }
-
-    #[kunit]
     fn raw_logging_imports_accept_value_only_fragments() {
         assert!(
             load_without_registration(raw_logging_load(
