@@ -1,7 +1,7 @@
 # 2026-08-14 - Nemophila
 
 **Status:** Active / R4 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
-Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed / Stage 5 Ready / Not Started
+Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed / Stage 5 Closed
 **Owners:** doruche, Codex
 **Canonical Target:** [RFC-20260814-nemophila R4](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
@@ -14,8 +14,8 @@ Contract Impact、acceptance和Stage路线仍只由canonical RFC及implementatio
 interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage 3前的feedback interlude均已按独立授权关闭；
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
 kernel/app compiler-target owner拆分；Stage 3与Stage 4各两个Checkpoint的授权均已消费并关闭；Stage 4后的单次Feedback
-Interlude也已关闭，只重整内部owner/API/module/WIT维护边界。Stage 5现已解析但Checkpoint 5A执行未授权，Stage 6仍未获解析或
-执行授权。
+Interlude也已关闭，只重整内部owner/API/module/WIT维护边界。Stage 5单一Checkpoint 5A也已授权、消费并关闭；Stage 6仍未获
+解析或执行授权。
 
 ## Checkpoint Log
 
@@ -603,3 +603,60 @@ Stage 2 fixture删除均Not Run。Contract Cutover为None，不更新current con
 
 **Next / Stop:** Stage 5现在是**Resolved / Ready / Not Started**，只有维护者新的明确授权才能激活Checkpoint 5A。Checkpoint 5A关闭
 后也必须停止；Stage 6仍只保留outline，不能由本resolution或未来Stage 5 closure自动解析、激活或cut over。
+
+### 2026-08-15 - Stage 5 Checkpoint 5A implementation and Stage closure
+
+**Execution Authorization:** 维护者授权完成Stage 5；该授权已消费。Stage 6解析/执行与任何contract cutover仍未授权。
+
+**Implementation:** task-owned `CloneObserver` declaration现在无条件产生唯一16-byte production descriptor；共同
+`kernel_clone()`在child publish并enqueue之后、`CLONE_VFORK` wait或普通return之前同步提交creator/child TID值快照。
+publication guard已经由`publish`消费，enqueue返回后没有scheduler-private guard跨入callback；task owner只调用typed point，
+cohort、execution、trap、poison与retirement仍由唯一global Nemophila runtime拥有。
+
+新增默认关闭、KUnit-off的`nemophila_clone_validation` RV64 feature/KernelConfig/SystemTarget/BuildPreset和private activation。
+xtask只在该feature启用时拒绝missing、non-regular或相对module/WIT/SDK inputs陈旧的canonical export，不自动build或repair。
+activation以compile-time immutable bytes走现有`load_and_publish`/`try_unload`，依次完成canonical initial load/unload、两个normal
+instance reload、synthetic trap poison/unload/reload，并把两个normal instance与fresh trap instance留给真实init/user-test clone。
+trap fixture只复用task-owned `PointSpec`的WIT consumer names，没有第二runtime、registry、schema或通用ingress；feature与全部专用
+selection、wrapper、synthetic call均带Stage 6正式ingress/management consumer出现时删除的退出条件。
+
+canonical module在真实kernel load中先成功registration，再以第二个registration取得`AlreadyRegistered`并证明被拒callback environment
+释放；该路径替代Stage 2 fake Host的dynamic-failure cleanup proof。fake Host workspace已经删除，`just test nemophila-module`收敛为
+fresh build/export。`user-test --nemophila-clone-validation`使用现有`fork`和private raw `clone3` adapter分别创建、回收child；stage-owned
+wrapper只编排repository module/rootfs/build/QEMU actions、worktree-local disk copy与log oracle。
+
+**Validation:** `just test xtask`（103/103）、`just test nemophila-module`、`just build --preset
+nemophila-clone-validation-rv64-release`、`just build --preset competition-final-rv64-release`、`just fmt kernel --check`、
+`just fmt modules --check`、`just fmt user-test --check`、`just test nemophila-wasm`（71 unit、54 integration、1 doctest、4 focused
+Miri）、`bash -n scripts/run-nemophila-stage5-rv64.sh`与`git diff --check`通过。freshness fence由probe build真实消费；source audit确认
+validation feature只有专用config启用，default/final selection关闭，tracked fake Host文件全部删除，WIT、SDK、task consumer names同步。
+
+`build/nemophila-stage5-rv64.log`记录21482-byte fresh canonical artifact、identity 1 load/unload、identity 2/3两个normal live
+instances、identity 4 synthetic trap poison并unload、identity 5 trap reload。fixed-string occurrence audit记录三次duplicate registration
+cleanup、synthetic TID pair两次、init `1 -> 9`两次、focused clone `9 -> 10`两次、raw clone3 `9 -> 11`两次，以及恰好两次trap
+warning；因此identity 5在init clone后poison，未进入后续focused cohorts。日志还记录clone3 child 退出、parent精确匹配并reap task 11、
+thread group retirement与PowerOff machine action。
+
+该guest实际完成并关机；初版wrapper随后以`grep -Fc`统计匹配行，因多个printk record相邻在同一serial line而错误返回1。修正后的
+oracle改用`grep -Fo | wc -l`统计occurrence。关机开始前最后两条userspace completion/PASS输出也未排空到serial log；wrapper现在
+优先接受显式completion marker，缺失时要求同一clone3 child的kernel reap与retirement，再要求PowerOff。现有日志逐项满足这一更直接
+oracle，故没有只为取得wrapper零退出重复运行相同guest；这不把总PASS或脚本退出码替代为runtime evidence。
+
+独立probe-off命令`./scripts/run-user-test-rv64.sh etc/preliminary/images/sdcard-rv.img
+build/nemophila-stage5-probe-off-rv64.log`通过：完整KUnit显示`All tests passed!`，socket profile 6/6，随后进入PowerOff。probe-on、
+probe-off KUnit与competition-final RV64 ELF的`__enemophila_providers - __snemophila_providers`均为`0x10`，即只有一个production
+descriptor；final与probe-off binary均没有`NEMOPHILA-STAGE5`、`clone creator=`或duplicate-registration artifact marker。
+
+**Independent Review / Architecture Friction:** 独立review逐项核对notify placement/guards-out、descriptor唯一性、fresh artifact
+provenance、probe-off object fence、global runtime单一真相、trap/fanout continuation、fixture replacement与Stage 6退出条件。唯一初始
+Euclid是关机边界userspace completion marker可能未排空导致wrapper假阴性；改用同一clone3 child的kernel wait/reap、thread-group
+retirement与PowerOff fallback后复核通过，且该oracle比丢失的串行字节更直接。最终Apollyon 0 / Keter 0 / Euclid 0 / Safe 0。
+source scan确认published lifecycle仍只有global runtime一份真相，task point只传TID值，validation probe不拥有runtime私有状态；没有
+owner穿透、private representation泄漏、public API扩张、默认配置/架构特判、第二registry/schema、无退出条件桥、隐含cleanup顺序或
+通过降低oracle换取通过。
+
+**Result / Stop:** Checkpoint 5A与Stage 5 **Closed**，Contract Cutover保持None；不更新current contracts或register。LA64 Stage 5
+kernel build/guest/hardware、management authorization、正式embedded/supplied ingress、public identity/errno、final harness、hardware、
+完整R0 acceptance与`NEMOPHILA-R0-CUTOVER`均Not Run / Not Proven / Not Cut Over。Stage 6保持Outline Only / Not Started / Not
+Authorized，本次严格停止。focused real seam仅为RV64、SMP=1的init/fork/raw clone3；vfork窗口与`CLONE_PARENT` creator规则为
+source proof，不是独立guest case。

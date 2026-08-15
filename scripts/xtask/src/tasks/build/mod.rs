@@ -8,6 +8,7 @@ use std::{
     io::{BufRead, BufReader},
     os::unix::fs::PermissionsExt,
     path::Path,
+    time::SystemTime,
 };
 
 use anyhow::Context;
@@ -162,6 +163,17 @@ impl BuildContext {
                 "WARN",
                 "Rebuilding with cargo cache. Some changes might not be reflected."
             );
+        }
+
+        if self
+            .resolved
+            .kernel_config
+            .features
+            .get("nemophila_clone_validation")
+            .copied()
+            .unwrap_or(false)
+        {
+            validate_nemophila_clone_validation_artifact()?;
         }
 
         Shell::new()?
@@ -379,6 +391,75 @@ impl BuildContext {
         // currently no-op
         Ok(())
     }
+}
+
+/// Fences the temporary Stage 5 validation feature to a repository-exported,
+/// source-current canonical artifact. This deliberately does not build or
+/// repair the module: the stage wrapper must run the module action first, and
+/// Stage 6 must remove this check with the validation feature.
+fn validate_nemophila_clone_validation_artifact() -> anyhow::Result<()> {
+    const ARTIFACT: &str = "build/modules/clone-observer/nemophila_clone_observer.wasm";
+    const INPUTS: &[&str] = &[
+        "conf/module.toml",
+        "nemophila/wit/nemophila.wit",
+        "nemophila/sdk/rust",
+        "nemophila/modules/clone-observer/Cargo.toml",
+        "nemophila/modules/clone-observer/Cargo.lock",
+        "nemophila/modules/clone-observer/module.toml",
+        "nemophila/modules/clone-observer/src",
+    ];
+
+    let artifact_metadata = fs::symlink_metadata(ARTIFACT)
+        .with_context(|| format!("Stage 5 canonical artifact is missing: {ARTIFACT}"))?;
+    if !artifact_metadata.file_type().is_file() {
+        anyhow::bail!("Stage 5 canonical artifact is not an ordinary file: {ARTIFACT}");
+    }
+    let artifact_modified = artifact_metadata
+        .modified()
+        .with_context(|| format!("failed to read Stage 5 artifact timestamp: {ARTIFACT}"))?;
+
+    for input in INPUTS {
+        if newest_regular_file_mtime(Path::new(input))? > artifact_modified {
+            anyhow::bail!(
+                "Stage 5 canonical artifact is stale relative to `{input}`; run `just module build clone-observer` before the kernel build"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn newest_regular_file_mtime(path: &Path) -> anyhow::Result<SystemTime> {
+    let metadata = fs::symlink_metadata(path).with_context(|| {
+        format!(
+            "failed to inspect Stage 5 module input `{}`",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_file() {
+        return metadata
+            .modified()
+            .with_context(|| format!("failed to read timestamp for `{}`", path.display()));
+    }
+    if !metadata.file_type().is_dir() {
+        anyhow::bail!(
+            "Stage 5 module input is not an ordinary file or directory: {}",
+            path.display()
+        );
+    }
+
+    let mut newest = SystemTime::UNIX_EPOCH;
+    for entry in fs::read_dir(path)
+        .with_context(|| format!("failed to enumerate Stage 5 input `{}`", path.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to inspect a Stage 5 input below `{}`",
+                path.display()
+            )
+        })?;
+        newest = newest.max(newest_regular_file_mtime(&entry.path())?);
+    }
+    Ok(newest)
 }
 
 fn validate_embedded_artifact<'a>(

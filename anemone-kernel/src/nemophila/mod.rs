@@ -1,5 +1,7 @@
 //! Nemophila kernel extension runtime.
 
+#[cfg(feature = "nemophila_clone_validation")]
+mod clone_validation;
 mod host;
 mod instance;
 mod load;
@@ -24,6 +26,11 @@ pub(crate) fn load_and_publish(artifact: Box<[u8]>) -> Result<InstanceIdentity, 
 /// Stage 6 remains responsible for authorization and public error encoding.
 pub(crate) fn try_unload(identity: InstanceIdentity) -> Result<(), TryUnloadFailure> {
     RUNTIME.try_unload(identity)
+}
+
+#[cfg(feature = "nemophila_clone_validation")]
+pub(crate) fn activate_clone_validation() {
+    clone_validation::activate();
 }
 
 #[cfg(feature = "kunit")]

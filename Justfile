@@ -46,7 +46,6 @@ test-nemophila-wasm:
 [private]
 test-nemophila-module:
     @just module build clone-observer
-    @cargo run --quiet --locked --manifest-path nemophila/modules/clone-observer/host-fixture/Cargo.toml --target-dir build/fixtures/clone-observer -- build/modules/clone-observer/nemophila_clone_observer.wasm
 
 [private]
 test-virtio-drivers:

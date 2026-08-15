@@ -11,6 +11,9 @@ spin_lock_irqsave = []
 soft_unaligned_access = []
 kernel_symbols = ["dep:symtab"]
 perf_observe = []
+# Temporary Stage 5 candidate activation. Stage 6 must remove this feature
+# when a real embedded/supplied ingress and management consumer exist.
+nemophila_clone_validation = []
 
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }

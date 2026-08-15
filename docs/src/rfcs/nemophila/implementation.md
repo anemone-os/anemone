@@ -6,15 +6,15 @@
 **当前修订：** R4
 **Stage 状态：** Stage 1 / Resolved / Closed；Stage 2 / Resolved / Closed；Stage 2 Feedback Interlude / Resolved / Closed；
 Stage 3 / Resolved / Closed；Stage 4 / Resolved / Closed；Stage 4 Feedback Interlude / Resolved / Closed；
-Stage 5 / Resolved / Ready / Not Started；Stage 6 / Outline Only / Not Started
-**Execution Authorization：** Stage 5 docs-only resolution授权已消费；Checkpoint 5A与Stage 6解析/执行均未授权
+Stage 5 / Resolved / Closed；Stage 6 / Outline Only / Not Started
+**Execution Authorization：** Checkpoint 5A授权已消费；Stage 6解析/执行均未授权
 **Contract Cutover：** None
 
 本页组织父 RFC Accepted R4 Target 的实施顺序、依赖和受保护边界，不另行定义 target、owner、ABI、Contract Impact 或
 acceptance。Stage 1 与 Stage 2 已关闭；进入Stage 3前的feedback interlude已经纠正build/admission owner；Stage 3现已解析为
 两个共享同一Implementation Boundary的execution checkpoint，现均已关闭；Stage 4也已在不改变R4 target的前提下解析为
 两个共享完整lifecycle边界的execution checkpoint，现均已关闭；其Feedback Interlude随后在Stage 5前完成owner surface、
-module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5现已解析为单一Checkpoint 5A且尚未激活，Stage 6仍只有
+module shape与WIT维护边界重整，但不改变Stage 4语义；Stage 5单一Checkpoint 5A现已关闭，Stage 6仍只有
 outline。当前没有Nemophila current contract或cutover。
 
 Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合，execution evidence见
@@ -22,7 +22,7 @@ Stage 1 的 Deliverable、Validation、Cutover 和 Stop / Exit 已按 R2 闭合�
 Stage 2 的 Purpose、Prerequisites、Implementation Boundary、Deliverables、Validation、Cutover 与 Exit / Stop 已闭合，
 execution evidence同样见transaction；feedback interlude不重开Stage 2，而是在后续Stage消费其产物前关闭已发现的owner
 摩擦与R3 target revision。Stage 3与Stage 4的可执行边界、各自两个checkpoint、validation与stop条件已在下文闭合；Stage 5
-的单一Checkpoint 5A、RV64-only validation与stop条件也已解析，只有维护者新的明确授权才能执行。Stage 6仍只保留Purpose、
+的单一Checkpoint 5A、RV64-only validation与stop条件也已闭合。Stage 6仍只保留Purpose、
 Prerequisites和Protected Boundary，关闭Stage 5不自动授权Stage 6解析或执行。
 
 ## 全局 Implementation Boundary
@@ -74,7 +74,7 @@ resolved manifest 或并列实施计划。普通 commit 不形成新 Stage，Sta
 | Stage 3 | Resolved / Closed | 以当前第一方 interpreter source 建立 kernel transactional runtime core | None |
 | Stage 4 | Resolved / Closed | 闭合 weave、并发调用与完整 instance lifecycle | None |
 | Stage 4 Feedback Interlude | Resolved / Closed | 收拢point/provider owner、typed SPI、Host/WIT consumer与Nemophila内部模块边界 | None |
-| Stage 5 | Resolved / Ready / Not Started | 接入真实 clone observer vertical slice | None |
+| Stage 5 | Resolved / Closed | 接入真实 clone observer vertical slice | None |
 | Stage 6 | Outline Only | 激活 management、完成双架构 acceptance 并原子 cut over | `NEMOPHILA-R0-CUTOVER`（Future） |
 
 ## Stage 1 — `nemophila-wasm` 裁剪与适配
@@ -984,9 +984,9 @@ hardware仍Not Run / Not Proven。
 
 ## Stage 5 — Clone observer vertical slice
 
-**Resolution：** Resolved / Ready / Not Started / Checkpoint 5A
+**Resolution：** Resolved / Closed / Checkpoint 5A Closed
 
-**Execution Authorization：** Checkpoint 5A Not Authorized
+**Execution Authorization：** Consumed；Stage 6解析/执行未授权
 
 **Contract Cutover：** None
 
@@ -996,7 +996,7 @@ Stage 2--4 的共同路径完成 registration、callback、logging、trap isolat
 
 **Prerequisites：** Stage 4 关闭并证明完整 invocation/lifecycle protocol；canonical artifact 与 kernel logging handoff 可用；
 task clone live seam 仍满足 child publish/enqueue 后、vfork wait/creator return 前且 owner-private guard 已释放；Checkpoint 5A
-获得维护者新的明确执行授权。
+执行授权已经获得并消费。
 
 **Protected Boundary：** observer 只接收 creator/child TID values，无 task handle 和决策返回；callback absence、normal
 return、trap 及日志过滤/截断/覆盖均不能改变已提交 clone result。不得分别 hook syscall wrapper、移动 point 位置、携带
@@ -1112,13 +1112,36 @@ validation feature不构成effective contract。
 
 ### Exit / Stop
 
-本次docs-only resolution已经把Stage 5解析为单一Checkpoint 5A，但没有授权执行或运行上述validation。只有维护者新的明确授权才能
-激活Checkpoint；关闭后Stage 5停止，Stage 6仍须另行解析和授权。
+维护者已经授权并关闭单一Checkpoint 5A；Stage 5在此停止，Stage 6仍须另行解析和授权。
 
 Checkpoint 5A只有在全部deliverables、RV64 validation、fixture replacement、independent review与Architecture Friction Scan闭合后
 才能关闭。若真实source要求移动point、改变clone结果、保留task handle/private guard、公开management能力、把temporary probe加入
 default/final配置、降低fresh artifact或guest oracle，或改变父RFC target/owner/failure/cleanup/ABI/acceptance/validation claim，
 必须停止并回RFC review / Target Renegotiation。LA64未运行不阻塞本Stage，但必须留给Stage 6且不得外推。
+
+### Result
+
+Checkpoint 5A与Stage 5已关闭。task owner现在贡献唯一production `CloneObserver` descriptor，并在共同`kernel_clone()`成功路径的
+publish/enqueue后、vfork wait或普通return前提交creator/child TID snapshot；notify不持有publication或scheduler-private guard，
+也不改变clone结果。默认关闭的RV64 validation selection经现有global runtime加载fresh canonical artifact，完成initial
+load/unload、两个normal instance reload/fanout、trap poison/unload/reload，并由真实init clone、focused `clone`与raw `clone3`
+闭合seam。Stage 2 fake Host fixture已经删除；`just test nemophila-module`只保留fresh build/export职责。
+
+validation与source/ELF evidence详见
+[transaction](../../devlog/transactions/2026-08-14-nemophila.md)。focused guest日志在进入PowerOff前直接记录canonical
+callback、trap containment、clone3 child exit与父进程精确reap；关机边界没有排空最后两条userspace marker，wrapper已改为在该情形
+要求同一child的kernel reap/retirement证据，而没有为取得wrapper零退出重复运行guest。probe-off KUnit/user-test回归、KUnit-off
+final build、三个RV64 ELF的单一16-byte descriptor audit、format/interpreter/module/xtask regression均通过。
+
+独立review发现的唯一Euclid是关机边界userspace completion marker可能在write返回后仍未排空，从而使wrapper产生假阴性；改用上述
+同一child kernel reap/retirement fallback后复核通过，最终Apollyon 0 / Keter 0 / Euclid 0 / Safe 0。Architecture Friction Scan
+确认published lifecycle仍只有global runtime一份真相，task point只传值，provider/probe不持有runtime私有状态，没有public API扩张、
+默认配置特判、第二registry/schema、无退出条件桥或隐含cleanup顺序。
+
+Contract Cutover保持None；current contracts与register未更新。LA64 Stage 5 kernel build/guest/hardware、management authorization、
+正式embedded/supplied ingress、public identity/errno、final harness、hardware与完整R0 acceptance均Not Run / Not Proven，
+`NEMOPHILA-R0-CUTOVER`仍Not Cut Over。temporary validation feature/module/config/target/preset/wrapper及synthetic call必须在Stage 6
+正式ingress与management consumer出现时删除；Stage 6保持Outline Only / Not Started / Not Authorized。
 
 ## Stage 6 — Management activation 与 R0 cutover
 

@@ -196,6 +196,9 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
 
+    #[cfg(feature = "nemophila_clone_validation")]
+    nemophila::activate_clone_validation();
+
     boot::exec_initial_program(init_stdio);
 }
 

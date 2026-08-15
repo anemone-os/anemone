@@ -1,0 +1,17 @@
+#! Temporary Stage 5 RV64 clone-observer validation KernelConfig.
+#! Stage 6 must remove it with the boot-local validation activation.
+
+[features]
+kunit = false
+fs_ext4 = true
+kernel_preempt = false
+spin_lock_irqsave = true
+soft_unaligned_access = true
+kernel_symbols = false
+perf_observe = false
+nemophila_clone_validation = true
+
+[parameters]
+# The canonical module emits its dynamic-failure cleanup proof at Debug.
+print_log_level = 7
+record_log_level = 7

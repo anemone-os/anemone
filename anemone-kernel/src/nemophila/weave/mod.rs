@@ -11,9 +11,6 @@ use nemophila_wasm::WasmParams;
 pub(super) use binding::CallbackBinding;
 #[cfg(feature = "kunit")]
 pub(super) use catalog::CatalogFailure;
-// Stage 5's task-owned production declaration will consume this same path;
-// Stage 4 ordinary builds intentionally have no production descriptor yet.
-#[allow(unused_imports)]
 pub(crate) use catalog::ProviderDescriptor;
 pub(super) use catalog::{ProviderCatalog, provider_catalog};
 pub(super) use host::WeaveFailure;
@@ -118,7 +115,4 @@ macro_rules! declare_provider {
     };
 }
 
-// Stage 5 activates the first production consumer. The KUnit-only task
-// declaration already proves this sibling-subsystem macro path.
-#[allow(unused_imports)]
 pub(crate) use declare_provider;

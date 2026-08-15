@@ -9,7 +9,7 @@
 Accepted target 不能提前覆盖 `docs/src/contracts/`。解释器与 Nemophila 的 owner 分工属于本页 target；内部类型、具体
 同步原语、算法、crate/file layout 和具体测试路线由独立[实施路线](./implementation.md)在对应 Stage 获得授权后负责。
 Stage 4的kernel-internal weave与完整invocation/lifecycle protocol已关闭；该implementation proof没有使本页任何target ID
-成为effective current contract。Stage 5已解析为Ready / Not Started且执行未授权；Stage 6仍未获解析或执行授权。
+成为effective current contract。Stage 5单一Checkpoint 5A已关闭；Stage 6仍未获解析或执行授权。
 
 ## 规则分类
 

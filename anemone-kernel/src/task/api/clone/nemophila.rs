@@ -53,11 +53,7 @@ impl PointSpec for CloneObserver {
     }
 }
 
-// Stage 4 ordinary builds intentionally contribute no production provider.
-// KUnit proves that a real sibling subsystem can consume the declaration SPI;
-// Stage 5 remains responsible for activating the task-owned production point.
-#[cfg(feature = "kunit")]
 crate::nemophila::weave::declare_provider!(
     pub(crate) static CLONE_OBSERVER: CloneObserver,
-    __KUNIT_CLONE_PROVIDER
+    __CLONE_OBSERVER_PROVIDER
 );

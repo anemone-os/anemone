@@ -449,6 +449,15 @@ pub fn kernel_clone(
     match guard.publish(new_task, binding) {
         Ok(published) => {
             enqueue_new_task(published.clone());
+            // The child is now visible in task topology and runnable, while
+            // the publication guard and scheduler-private enqueue state are no
+            // longer held. Observer failure is intentionally outside clone's
+            // result: the typed point receives only stable TID snapshots before
+            // a possible vfork wait or ordinary return.
+            nemophila::CLONE_OBSERVER.notify(nemophila::CloneObservation::new(
+                current_task.tid(),
+                new_tid,
+            ));
             if flags.contains(CloneFlags::VFORK) {
                 wait_for_vfork_done(&published);
             }

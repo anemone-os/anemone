@@ -51,6 +51,28 @@ impl Module for CloneObserver {
             context.logging().write(LogLevel::Debug, message);
             return Err(error);
         }
+
+        // Stage 5 replaces the temporary fake Host with this real-kernel
+        // composition proof. A duplicate attempt must release its new guest
+        // environment before the typed dynamic failure reaches module code,
+        // while the original registered callback remains the only binding.
+        let duplicate_released = Rc::new(Cell::new(false));
+        let duplicate_probe = ReleaseProbe(duplicate_released.clone());
+        let duplicate =
+            context
+                .weave()
+                .task()
+                .clone_observer()
+                .register(move |_event, _callback| {
+                    let _must_never_be_registered = &duplicate_probe;
+                    unreachable!("duplicate clone observer callback entered guest")
+                });
+        assert_eq!(duplicate, Err(RegistrationError::AlreadyRegistered));
+        assert!(duplicate_released.get());
+        context.logging().write(
+            LogLevel::Debug,
+            "duplicate clone registration rejected; callback environment released",
+        );
         Ok(())
     }
 }
