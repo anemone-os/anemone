@@ -609,6 +609,9 @@ pub enum SinkResult {
 /// Trait instead of concrete struct thus allowing more flexible
 /// implementations. e.g. fixed-capacity array, zero-copy buffer, etc.
 pub trait DirSink {
+    /// Backends may call this while holding filesystem or IRQ-disabling locks.
+    /// Implementations must remain bounded and must not sleep, acquire a
+    /// user-space lock, or re-enter filesystem operations.
     fn push(&mut self, entry: DirEntry) -> Result<SinkResult, SysError>;
 }
 

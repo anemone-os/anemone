@@ -173,13 +173,20 @@ fn ext4_read_dir(
 
     let sb = inode.sb();
     let mut pushed_any = false;
-    loop {
-        let entry = ext4_sb(&sb).with_fs(|fs| {
-            let mut reader = fs
-                .read_dir(inode.ino().get() as u32, *offset as u64)
-                .map_err(map_ext4_error)?;
+    // Keep one reader for the whole bounded sink batch. Recreating it per
+    // entry would reacquire the inode, directory block, and filesystem mutex;
+    // DirSink's lock-context contract makes the handoff safe under this guard.
+    ext4_sb(&sb).with_fs(|fs| {
+        let mut reader = fs
+            .read_dir(inode.ino().get() as u32, *offset as u64)
+            .map_err(map_ext4_error)?;
+        loop {
             let Some(current) = reader.current() else {
-                return Ok(None);
+                return if pushed_any {
+                    Ok(ReadDirResult::Progressed)
+                } else {
+                    Ok(ReadDirResult::Eof)
+                };
             };
             let entry = DirEntry {
                 name: str::from_utf8(current.name())
@@ -189,24 +196,17 @@ fn ext4_read_dir(
                 ty: map_lwext4_inode_type(current.inode_type())?,
             };
             reader.step().map_err(map_ext4_error)?;
-            Ok(Some((entry, reader.offset() as usize)))
-        })?;
+            let next_offset = reader.offset() as usize;
 
-        let Some((entry, next_offset)) = entry else {
-            return if pushed_any {
-                Ok(ReadDirResult::Progressed)
-            } else {
-                Ok(ReadDirResult::Eof)
-            };
-        };
-        match sink.push(entry)? {
-            SinkResult::Accepted => {
-                pushed_any = true;
-                *offset = next_offset;
-            },
-            SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+            match sink.push(entry)? {
+                SinkResult::Accepted => {
+                    pushed_any = true;
+                    *offset = next_offset;
+                },
+                SinkResult::Stop => return Ok(ReadDirResult::Progressed),
+            }
         }
-    }
+    })
 }
 
 pub(super) static EXT4_REG_FILE_OPS: FileOps = FileOps {
