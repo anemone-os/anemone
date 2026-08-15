@@ -6,7 +6,7 @@
 use crate::{
     mm::paging::LeafPteCommit,
     prelude::{
-        vmo::{VmObject, shadow::ShadowObject},
+        vmo::{ResolvedFrame, VmObject, shadow::ShadowObject},
         *,
     },
 };
@@ -234,6 +234,14 @@ impl VmArea {
         self.poffset + (vpn - self.range.start()) as usize
     }
 
+    fn resolved_flags(&self, resolved: &ResolvedFrame) -> PteFlags {
+        let mut flags: PteFlags = PteFlags::from(self.prot) | PteFlags::USER;
+        if !resolved.writable {
+            flags -= PteFlags::WRITE;
+        }
+        flags
+    }
+
     fn map_page(
         &mut self,
         mapper: &mut Mapper,
@@ -248,12 +256,50 @@ impl VmArea {
 
         let pidx = self.vmo_pidx(vpn);
         let resolved = self.backing.resolve_frame(pidx, access)?;
-        let mut flags: PteFlags = PteFlags::from(self.prot) | PteFlags::USER;
-        if !resolved.writable {
-            flags -= PteFlags::WRITE;
-        }
+        let flags = self.resolved_flags(&resolved);
 
         unsafe { mapper.commit_leaf(vpn, resolved.frame.ppn(), flags) }
+    }
+
+    /// Best-effort map absent followers after an exact user fault succeeded.
+    ///
+    /// The caller holds the owning [`UserSpace`] mutex, so the admission
+    /// translation remains stable until each leaf commit. Existing mappings
+    /// terminate the contiguous locality window and are never overwritten.
+    pub(super) fn resolve_page_access_ahead(
+        &mut self,
+        mapper: &mut Mapper,
+        demand_vpn: VirtPageNum,
+        end: VirtPageNum,
+        access: PageFaultType,
+    ) {
+        assert!(self.range.contains(demand_vpn));
+        assert!(demand_vpn < end && end <= self.range.end());
+
+        let request_end = self.poffset + (end - self.range.start()) as usize;
+        let mut vpn = demand_vpn + 1;
+        while vpn < end {
+            if mapper.translate(vpn).is_some() {
+                break;
+            }
+
+            let pidx = self.vmo_pidx(vpn);
+            let resolved = match self.backing.resolve_frame_ahead(pidx, request_end, access) {
+                Ok(Some(resolved)) => resolved,
+                Ok(None) | Err(_) => break,
+            };
+            let flags = self.resolved_flags(&resolved);
+            match unsafe { mapper.commit_leaf(vpn, resolved.frame.ppn(), flags) } {
+                Ok(commit) => assert_eq!(
+                    commit,
+                    LeafPteCommit::Added,
+                    "fault-ahead may only install a previously absent leaf"
+                ),
+                Err(SysError::OutOfMemory) => break,
+                Err(err) => panic!("fault-ahead leaf commit failed unexpectedly: {err:?}"),
+            }
+            vpn += 1;
+        }
     }
 
     /// Resolve one page access in this VMA.
@@ -386,5 +432,130 @@ impl VmArea {
         self.range = VirtPageRange::new(self.range.start(), self.range.npages() - npages as u64);
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    struct AheadObject {
+        frames: Box<[FrameHandle]>,
+        ahead: RwLock<Vec<(usize, usize, PageFaultType)>>,
+        stop_at: Option<usize>,
+    }
+
+    impl AheadObject {
+        fn new(npages: usize, stop_at: Option<usize>) -> Self {
+            let frames = (0..npages)
+                .map(|_| unsafe {
+                    alloc_frame_zeroed()
+                        .expect("fault-ahead KUnit frame allocation should succeed")
+                        .into_frame_handle()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            Self {
+                frames,
+                ahead: RwLock::new(Vec::new()),
+                stop_at,
+            }
+        }
+
+        fn resolved(&self, pidx: usize) -> Result<ResolvedFrame, SysError> {
+            Ok(ResolvedFrame {
+                frame: self.frames.get(pidx).ok_or(SysError::NotMapped)?.clone(),
+                writable: true,
+            })
+        }
+    }
+
+    impl VmObject for AheadObject {
+        fn resolve_frame(
+            &self,
+            pidx: usize,
+            _access: PageFaultType,
+        ) -> Result<ResolvedFrame, SysError> {
+            self.resolved(pidx)
+        }
+
+        fn resolve_frame_ahead(
+            &self,
+            pidx: usize,
+            request_end: usize,
+            access: PageFaultType,
+        ) -> Result<Option<ResolvedFrame>, SysError> {
+            self.ahead.write().push((pidx, request_end, access));
+            if self.stop_at == Some(pidx) {
+                return Ok(None);
+            }
+            self.resolved(pidx).map(Some)
+        }
+    }
+
+    fn test_vma(backing: Arc<dyn VmObject>) -> (VmArea, PageTable, VirtPageNum) {
+        let base = VirtPageNum::new(0x40000);
+        (
+            VmArea::new(
+                VirtPageRange::new(base, 6),
+                3,
+                Protection::READ | Protection::WRITE,
+                ForkPolicy::Shared,
+                VmFlags::empty(),
+                backing,
+            ),
+            PageTable::new().expect("fault-ahead KUnit page table allocation should succeed"),
+            base,
+        )
+    }
+
+    #[kunit]
+    fn ahead_maps_only_absent_added_prefix_with_one_fixed_request_end() {
+        let object = Arc::new(AheadObject::new(9, Some(7)));
+        let (mut vma, mut table, base) = test_vma(object.clone());
+        let mut mapper = table.mapper();
+
+        assert_eq!(
+            vma.resolve_page_access(&mut mapper, base.to_virt_addr(), PageFaultType::Read)
+                .unwrap(),
+            LeafPteCommit::Added
+        );
+        vma.resolve_page_access_ahead(&mut mapper, base, base + 5, PageFaultType::Read);
+
+        for offset in 0..4 {
+            assert!(mapper.translate(base + offset).is_some());
+        }
+        assert!(mapper.translate(base + 4).is_none());
+        assert_eq!(
+            *object.ahead.read(),
+            vec![
+                (4, 8, PageFaultType::Read),
+                (5, 8, PageFaultType::Read),
+                (6, 8, PageFaultType::Read),
+                (7, 8, PageFaultType::Read),
+            ]
+        );
+    }
+
+    #[kunit]
+    fn ahead_stops_before_an_existing_leaf_without_replacing_it() {
+        let object = Arc::new(AheadObject::new(9, None));
+        let (mut vma, mut table, base) = test_vma(object.clone());
+        let mut mapper = table.mapper();
+
+        vma.resolve_page_access(&mut mapper, base.to_virt_addr(), PageFaultType::Write)
+            .unwrap();
+        vma.resolve_page_access(&mut mapper, (base + 2).to_virt_addr(), PageFaultType::Write)
+            .unwrap();
+        let existing = mapper.translate(base + 2).unwrap();
+
+        vma.resolve_page_access_ahead(&mut mapper, base, base + 5, PageFaultType::Write);
+
+        assert!(mapper.translate(base + 1).is_some());
+        let unchanged = mapper.translate(base + 2).unwrap();
+        assert_eq!(unchanged.ppn, existing.ppn);
+        assert_eq!(unchanged.flags, existing.flags);
+        assert!(mapper.translate(base + 3).is_none());
+        assert_eq!(*object.ahead.read(), vec![(4, 8, PageFaultType::Write)]);
     }
 }

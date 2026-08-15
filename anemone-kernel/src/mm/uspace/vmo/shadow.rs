@@ -144,6 +144,56 @@ impl VmObject for ShadowObject {
         }
     }
 
+    fn resolve_frame_ahead(
+        &self,
+        pidx: usize,
+        request_end: usize,
+        access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        assert!(
+            pidx < request_end,
+            "fault-ahead request must contain its page"
+        );
+
+        match access {
+            PageFaultType::Write => Ok(match self.lookup(pidx) {
+                // An existing private overlay is already the authoritative
+                // write frame. Parent and decommitted cases deliberately
+                // decline so speculation never performs COW or consumes a
+                // decommit marker before a real write.
+                ShadowLookup::Resident(frame) => Some(ResolvedFrame {
+                    frame,
+                    writable: true,
+                }),
+                ShadowLookup::Decommitted | ShadowLookup::Parent => None,
+            }),
+            PageFaultType::Read | PageFaultType::Execute => match self.lookup(pidx) {
+                ShadowLookup::Resident(frame) => Ok(Some(ResolvedFrame {
+                    frame,
+                    writable: true,
+                })),
+                ShadowLookup::Decommitted => Ok(Some(shared_zero_frame())),
+                ShadowLookup::Parent => {
+                    // Preserve parent-before-overlay lock ordering. The second
+                    // lookup lets a concurrent local write or decommit win over
+                    // the parent result exactly as demand resolution does.
+                    let parent = self.parent.resolve_frame_ahead(pidx, request_end, access)?;
+                    Ok(match self.lookup(pidx) {
+                        ShadowLookup::Resident(frame) => Some(ResolvedFrame {
+                            frame,
+                            writable: true,
+                        }),
+                        ShadowLookup::Decommitted => Some(shared_zero_frame()),
+                        ShadowLookup::Parent => parent.map(|resolved| ResolvedFrame {
+                            frame: resolved.frame,
+                            writable: false,
+                        }),
+                    })
+                },
+            },
+        }
+    }
+
     fn discard_range(&self, range: core::ops::Range<usize>, retired: &mut RetiredFrames) {
         assert!(
             range.start <= range.end,
@@ -245,5 +295,33 @@ mod kunits {
                 .iter()
                 .all(|byte| *byte == 0xa5)
         );
+    }
+
+    #[kunit]
+    fn write_fault_ahead_neither_copies_parent_nor_consumes_decommit() {
+        let parent: Arc<dyn VmObject> = Arc::new(AnonObject::new(1));
+        parent
+            .resolve_frame(0, PageFaultType::Write)
+            .expect("parent write fault should resolve");
+        let shadow = ShadowObject::new(parent);
+
+        assert!(
+            shadow
+                .resolve_frame_ahead(0, 1, PageFaultType::Write)
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(shadow.lookup(0), ShadowLookup::Parent));
+
+        let mut retired = RetiredFrames::default();
+        unsafe { shadow.decommit_private_range(0..1, &mut retired) }
+            .expect("shadow decommit should succeed");
+        assert!(
+            shadow
+                .resolve_frame_ahead(0, 1, PageFaultType::Write)
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(shadow.lookup(0), ShadowLookup::Decommitted));
     }
 }

@@ -66,7 +66,24 @@ impl PageAccessContinuation {
             (Self::UserReturn, _) | (Self::Immediate, _) => true,
         }
     }
+
+    fn fault_ahead_end(self, demand: VirtPageNum, limit: VirtPageNum) -> Option<VirtPageNum> {
+        assert!(demand < limit);
+        match self {
+            Self::UserReturn => {
+                let configured_end =
+                    VirtPageNum::new(demand.get().saturating_add(USER_FAULT_WINDOW_PAGES as u64));
+                Some(core::cmp::min(configured_end, limit))
+            },
+            Self::Immediate => None,
+        }
+    }
 }
+
+const _: () = assert!(
+    USER_FAULT_WINDOW_PAGES > 0,
+    "actual user-fault window must contain the demand page"
+);
 
 // TODO: these constants should be in KB, not in pages.
 
@@ -899,7 +916,13 @@ impl UserSpace {
                     .get_mut(&heap.svpn)
                     .expect("heap reservation must stay registered");
 
-                heap_vma.resolve_page_access(&mut mapper, addr, access)?
+                let commit = heap_vma.resolve_page_access(&mut mapper, addr, access)?;
+                let demand_vpn = addr.page_down();
+                let accessible_end = core::cmp::min(heap.brk.page_up(), heap_vma.range().end());
+                if let Some(ahead_end) = continuation.fault_ahead_end(demand_vpn, accessible_end) {
+                    heap_vma.resolve_page_access_ahead(&mut mapper, demand_vpn, ahead_end, access);
+                }
+                commit
             },
             Some(VmReservation::Guard) => return Err(SysError::NotMapped),
             None => {
@@ -911,7 +934,14 @@ impl UserSpace {
                 let mut mapper = table.mapper();
                 let other_vma = Self::find_vma_raw_mut(vmas, addr).ok_or(SysError::NotMapped)?;
 
-                other_vma.resolve_page_access(&mut mapper, addr, access)?
+                let commit = other_vma.resolve_page_access(&mut mapper, addr, access)?;
+                let demand_vpn = addr.page_down();
+                if let Some(ahead_end) =
+                    continuation.fault_ahead_end(demand_vpn, other_vma.range().end())
+                {
+                    other_vma.resolve_page_access_ahead(&mut mapper, demand_vpn, ahead_end, access);
+                }
+                commit
             },
         };
 
@@ -951,5 +981,22 @@ mod kunits {
         ] {
             assert!(PageAccessContinuation::Immediate.requires_local_completion(commit));
         }
+    }
+
+    #[kunit]
+    fn only_user_return_gets_a_bounded_fault_ahead_window() {
+        let demand = VirtPageNum::new(0x1000);
+        assert_eq!(
+            PageAccessContinuation::UserReturn.fault_ahead_end(demand, demand + 64),
+            Some(demand + USER_FAULT_WINDOW_PAGES as u64)
+        );
+        assert_eq!(
+            PageAccessContinuation::UserReturn.fault_ahead_end(demand, demand + 3),
+            Some(demand + 3)
+        );
+        assert_eq!(
+            PageAccessContinuation::Immediate.fault_ahead_end(demand, demand + 64),
+            None
+        );
     }
 }

@@ -89,6 +89,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-16 - User fault ahead](./devlog/changes/2026-08-16-user-fault-ahead.md)
 		- [2026-08-15 - Nemophila task lineage auditor](./devlog/changes/2026-08-15-nemophila-task-lineage-auditor.md)
 		- [2026-08-13 - `/proc/filesystems` registry projection](./devlog/changes/2026-08-13-proc-filesystems.md)
 		- [2026-08-13 - Char device readiness](./devlog/changes/2026-08-13-char-device-readiness.md)

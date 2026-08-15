@@ -4,18 +4,20 @@
 **状态：** Active
 **Owner：** MM user address-space activation/completion policy；Mapper拥有leaf PTE commit fact，`UserSpaceHandle`拥有destructive completion ordering与唯一residency truth，IPI transport拥有delivery与acknowledgement
 **参与领域：** MM paging / VMA与VMO / scheduler mapping switch / exec / procfs temporary activation / RV64与LA64 paging / user trap / kernel userptr / futex与explicit fault-in / user-TLB IPI transport
-**覆盖范围：** operation-local leaf PTE commit relation、access continuation分类、user mapping activation/residency、current-core local completion、destructive remote target与ack ordering、retirement lifetime
+**覆盖范围：** operation-local leaf PTE commit relation、actual-fault locality window、access continuation分类、user mapping activation/residency、current-core local completion、destructive remote target与ack ordering、retirement lifetime
 **不覆盖：** runtime CPU hotplug、ASID/PCID、kernel page table shootdown、TLB batching或数值性能保证、COW/VMO自身resolve语义
 **实现位置：** `anemone-kernel/src/mm/{paging/mapper.rs,uspace/}`、`anemone-kernel/src/{sched/switch.rs,task/api/execve/kernel.rs,fs/proc/tgid/}`、`anemone-kernel/src/exception/ipi/user_tlb.rs`、`anemone-kernel/src/arch/{riscv64,loongarch64}/mm/`
 **依赖：** `USER-ENTRY-001/002`
 **Pending Successor：** None
-**最后核验：** 2026-08-11
+**最后核验：** 2026-08-16
 
 ## 状态与能力所有权
 
 | 事实 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
 | leaf PTE与同一次commit的old/new relation | Mapper | VMA取得operation-local relation | 区分`Added`、`Unchanged`、`Relaxed`及replacement/restriction |
+| actual-fault virtual locality window与PTE admission | UserSpace / VMA | demand VPN、continuation、reservation/VMA bound与VMO follower authority | exact success后best-effort安装同一VMA的absent followers |
+| speculative frame、writability与owner-local clean publication | 各VmObject owner | exclusive request end hint；每次只返回当前pidx authority | owner决定是否opt in且不提前发布dirty/COW/decommit等visible fact |
 | access continuation | fault caller选择，UserSpace resolver解释 | `UserReturn`或`Immediate`窄值 | 说明resolver返回后由user hardware retry，还是kernel立即访问/retry |
 | current-core local completion decision | MM UserSpace fault resolver | relation与continuation的单次输入 | 决定本轮是否执行local TLB invalidation |
 | address-space destructive completion ordering | `UserSpaceHandle::completion_ordering` | `UserSpaceGuard`持有线性访问能力 | 串行化destructive commit、remote ack、dependent continuation与retirement |
@@ -40,9 +42,20 @@ ordinary RV64/LA64 user-mode fault使用`UserReturn` continuation。`UserReturn 
 invalidation；hardware若保留invalid或更restrictive translation、已安装leaf保持且原access再次fault，本次commit不再
 是`Added`，resolver必须在再次返回user mode前完成local invalidation。`UserReturn`的其它relation均立即完成。
 
+actual `UserReturn` fault必须先按原语义完成exact demand resolve与commit。exact success后，resolver可以在配置的正数
+上限内向高地址提交same-VMA locality followers；ordinary VMA不得越过VMA end，heap还不得越过`brk.page_up()`，stack
+保持单页。follower只允许在目标translation absent时请求VMO authority并提交`LeafPteCommit::Added`；present mapping立即
+终止连续窗口，不能overwrite、relax或restrict。VMO拒绝、error或OOM只终止best-effort speculation，不能改写exact
+demand result；已发布的owner-local clean cache与成功PTE prefix保持有效，无需destructive rollback或remote round。
+
+VMO必须显式opt in并继续拥有frame/writability与visible state：file Write follower不得提前dirty或获得writable PTE，
+Shadow不得speculative COW或消费decommit marker，SysV shm不得因ahead提前增加visible RSS。exclusive request-end只允许
+owner合并bounded clean work，不授予其它page authority。policy不建立persistent predictor/history、异步队列或第二份
+PTE truth。
+
 kernel userptr recovery、futex、explicit fault-in与non-active address-space probe使用`Immediate` continuation；任一
 relation都必须在resolver返回、kernel access或retry前完成local invalidation。policy只依赖commit relation与
-continuation，不得按QEMU、machine或architecture选择。
+continuation，不得按QEMU、machine或architecture选择；这些`Immediate` caller保持单页，不执行fault ahead。
 
 `Added`、`Unchanged`和`Relaxed`不创建自己的remote round，但这不允许它们越过较早的destructive completion。
 所有published address-space mutation与continuation先取得同一个`completion_ordering`能力；因此successor只有在
@@ -51,11 +64,13 @@ success路径。operation-local `Added`不再承担、也不需要伪装成全�
 
 **违反表现：** 为分类执行第二次walk或缓存relation；把同一次commit中替换的valid leaf/ancestor分类为`Added`；
 `Unchanged` refault、`Immediate`或其它present/destructive relation跳过local completion；按platform/test分叉policy；
+follower越过VMA/heap边界、覆盖present leaf、发布premature dirty/COW/decommit/RSS或让失败改变demand result；
 或任何production caller绕过address-space ordering，使dependent continuation越过未完成的destructive predecessor。
 
 **验证 / Enforcement：** 源码审查闭合Mapper classification、published `UserSpaceHandle` mutation caller和
 `UserSpaceGuard` continuation路径，并核对同一ordering owner覆盖mutex unlock、remote ack与relock。owner-local
-deterministic KUnit覆盖relation/local policy；dependent-continuation ordering由上述owner/caller/happens-before源码审查
+deterministic KUnit覆盖relation/local policy、fault window、absent-only prefix、VMO refusal与clean publication；
+dependent-continuation ordering由上述owner/caller/happens-before源码审查
 enforce。2026-08-09 RV64/LA64 SMP=8 release QEMU中曾有五条forced-interleaving ordering KUnit与六组`userptr`通过；
 这些历史运行事实保持，但对应KUnit因依赖production pause hook和固定yield次数已在2026-08-11删除，不再是当前回归
 机制或并发证明。见[KUnit execution and proof小迭代](../../devlog/changes/2026-08-11-kunit-execution-proof.md)。
@@ -63,7 +78,8 @@ enforce。2026-08-09 RV64/LA64 SMP=8 release QEMU中曾有五条forced-interleav
 **最初来源：** [User fault local TLB completion小迭代](../../devlog/changes/2026-08-08-user-fault-local-tlb.md)。
 
 **当前来源：** [User TLB Completion RFC R2 closure](../../rfcs/user-tlb-completion/index.md#closure)，
-`USER-TLB-COMPLETION-CUTOVER`（2026-08-09）。
+`USER-TLB-COMPLETION-CUTOVER`（2026-08-09）；actual-fault locality refine来自
+[User fault ahead小迭代](../../devlog/changes/2026-08-16-user-fault-ahead.md)（2026-08-16）。
 
 ## MM-TLB-REMOTE-001 — Destructive user mapping在dependent continuation与retirement前完成remote ack
 

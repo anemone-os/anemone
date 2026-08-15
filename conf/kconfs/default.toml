@@ -28,6 +28,7 @@ record_log_level = 5 # Maximum log level recorded: Emerg=0 ... Debug=7; higher l
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 riscv64_tlb_flush_all_threshold_pages = 64 # Full local TLB flush threshold for RV64 page ranges; larger ranges use one full flush.
 loongarch64_tlb_flush_all_min_pages = 128 # Minimum LA64 page-range length that uses one full local TLB flush.
+user_fault_window_pages = 8 # Maximum pages in one actual user-fault locality window, including the demand page.
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_logical_cpus = 8 # Maximum number of logical CPUs enabled by this kernel
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes

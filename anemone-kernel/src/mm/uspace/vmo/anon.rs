@@ -85,6 +85,18 @@ impl VmObject for AnonObject {
         }
     }
 
+    fn resolve_frame_ahead(
+        &self,
+        pidx: usize,
+        _request_end: usize,
+        access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        // Anonymous write speculation may allocate a zeroed private page, but
+        // it cannot copy or dirty any external state. This is the same frame the
+        // later demand write would resolve.
+        self.resolve_frame(pidx, access).map(Some)
+    }
+
     fn discard_range(&self, range: core::ops::Range<usize>, retired: &mut RetiredFrames) {
         assert!(
             range.start < self.max_pages && range.end <= self.max_pages && range.start <= range.end,
