@@ -21,6 +21,7 @@ impl Module for CloneObserver {
     fn load(context: &mut LoadContext<'_>) -> Result<(), RegistrationError> {
         let callback_released = Rc::new(Cell::new(false));
         let release_probe = ReleaseProbe(callback_released.clone());
+        let invocation_count = Rc::new(Cell::new(0u32));
         let mut prefix = Vec::from("clone creator=".as_bytes());
         prefix.reserve(16);
 
@@ -31,9 +32,22 @@ impl Module for CloneObserver {
                 .clone_observer()
                 .register(move |event, callback| {
                     let _retain_until_instance_destroy = &release_probe;
+                    let invocation = invocation_count.get() + 1;
+                    invocation_count.set(invocation);
                     let mut message = String::from_utf8(prefix.clone()).expect("ASCII prefix");
                     message.push_str(&format!("{} child={}", event.creator_tid, event.child_tid));
                     callback.logging().write(LogLevel::Info, &message);
+                    if invocation == 2 {
+                        // The canonical R0 artifact deliberately has one normal
+                        // callback followed by a bounded slow trap. This gives
+                        // the real dual-architecture consumer a deterministic
+                        // in-flight/poison/unload lifecycle without a kernel
+                        // test-control seam. A fresh instance starts over.
+                        for step in 0..100_000u32 {
+                            core::hint::black_box(step);
+                        }
+                        panic!("intentional second-callback trap");
+                    }
                 });
 
         if let Err(error) = registration {
@@ -52,8 +66,7 @@ impl Module for CloneObserver {
             return Err(error);
         }
 
-        // Stage 5 replaces the temporary fake Host with this real-kernel
-        // composition proof. A duplicate attempt must release its new guest
+        // A duplicate attempt must release its new guest
         // environment before the typed dynamic failure reaches module code,
         // while the original registered callback remains the only binding.
         let duplicate_released = Rc::new(Cell::new(false));

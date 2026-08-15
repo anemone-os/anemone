@@ -20,6 +20,7 @@ extern crate alloc;
 
 mod boot;
 mod boot_defs;
+mod nemophila_defs;
 mod network_defs;
 
 pub mod kconfig_defs;
@@ -196,8 +197,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
 
-    #[cfg(feature = "nemophila_clone_validation")]
-    nemophila::activate_clone_validation();
+    nemophila::activate_embedded_modules();
 
     boot::exec_initial_program(init_stdio);
 }

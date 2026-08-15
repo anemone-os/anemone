@@ -1,6 +1,9 @@
 //! Rendering for generated kernel configuration, Platform, and boot inputs.
 
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use anyhow::Context;
 use xshell::Shell;
@@ -8,6 +11,9 @@ use xshell::Shell;
 use crate::{config::system_target::StaticIpv4, log_progress};
 
 use super::BuildContext;
+
+const NEMOPHILA_SNAPSHOTS_DIR: &str = "build/generated/nemophila";
+static NEXT_NEMOPHILA_SNAPSHOT: AtomicU64 = AtomicU64::new(0);
 
 impl BuildContext {
     pub(super) fn gen_rust_defs(&self) -> anyhow::Result<()> {
@@ -24,22 +30,134 @@ impl BuildContext {
                 .as_ref()
                 .map(|value| &value.ipv4),
         );
+        let nemophila_defs = self.gen_nemophila_defs()?;
         // write to both loader and kernel src directories
         let kconfig_defs_path = format!("anemone-kernel/src/kconfig_defs.rs",);
         let platform_defs_path = format!("anemone-kernel/src/platform_defs.rs",);
         let boot_defs_path = "anemone-kernel/src/boot_defs.rs";
         let network_defs_path = "anemone-kernel/src/network_defs.rs";
+        let nemophila_defs_path = "anemone-kernel/src/nemophila_defs.rs";
         log_progress!(
             "GENDEFS",
-            "Generating kconfig_defs.rs, platform_defs.rs, boot_defs.rs, and network_defs.rs"
+            "Generating kconfig_defs.rs, platform_defs.rs, boot_defs.rs, network_defs.rs, and nemophila_defs.rs"
         );
         let sh = Shell::new()?;
         sh.write_file(&kconfig_defs_path, &kconfig_defs)?;
         sh.write_file(&platform_defs_path, &platform_defs)?;
         sh.write_file(boot_defs_path, &boot_defs)?;
         sh.write_file(network_defs_path, &network_defs)?;
+        sh.write_file(nemophila_defs_path, &nemophila_defs)?;
         Ok(())
     }
+
+    fn gen_nemophila_defs(&self) -> anyhow::Result<String> {
+        let limit = self
+            .resolved
+            .kernel_config
+            .parameters
+            .nemophila_artifact_max_bytes
+            .expect("resolved KernelConfig has a Nemophila artifact limit");
+        if self.resolved.target.nemophila.is_empty() {
+            return render_nemophila_defs(&[]);
+        }
+
+        let snapshot_dir = fresh_nemophila_snapshot_dir(Path::new(NEMOPHILA_SNAPSHOTS_DIR))?;
+        let mut modules = Vec::with_capacity(self.resolved.target.nemophila.len());
+        for identity in &self.resolved.target.nemophila {
+            let export = crate::tasks::module::build::build(identity).with_context(|| {
+                format!("failed to build embedded Nemophila module `{identity}`")
+            })?;
+            let snapshot = snapshot_embedded_module(identity, export, &snapshot_dir, limit)?;
+            modules.push((identity.as_str(), snapshot));
+        }
+        render_nemophila_defs(&modules)
+    }
+}
+
+fn fresh_nemophila_snapshot_dir(root: &Path) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(root)?;
+    loop {
+        let sequence = NEXT_NEMOPHILA_SNAPSHOT.fetch_add(1, Ordering::Relaxed);
+        let path = root.join(format!("system-build-{}-{sequence}", std::process::id()));
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to create Nemophila system-build snapshot directory `{}`",
+                        path.display()
+                    )
+                });
+            },
+        }
+    }
+}
+
+fn snapshot_embedded_module(
+    identity: &str,
+    export: crate::tasks::module::build::ModuleExport,
+    snapshot_dir: &Path,
+    limit: usize,
+) -> anyhow::Result<PathBuf> {
+    let metadata = std::fs::symlink_metadata(&export.path).with_context(|| {
+        format!(
+            "failed to inspect Nemophila module `{identity}` export `{}`",
+            export.path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() {
+        anyhow::bail!(
+            "Nemophila module `{identity}` export `{}` is not an ordinary file",
+            export.path.display()
+        );
+    }
+    let byte_count = export.bytes.len();
+    if byte_count > limit {
+        anyhow::bail!(
+            "Nemophila module `{identity}` export is {byte_count} bytes, exceeding KernelConfig limit {limit}"
+        );
+    }
+
+    // The stable module export remains useful to ordinary callers, but it is
+    // replaceable. Pin this invocation's returned byte snapshot at a unique
+    // system-build path before generated Rust can refer to it.
+    let snapshot = snapshot_dir.join(format!("{identity}.wasm"));
+    std::fs::write(&snapshot, &export.bytes).with_context(|| {
+        format!(
+            "failed to snapshot Nemophila module `{identity}` export into `{}`",
+            snapshot.display()
+        )
+    })?;
+    if !std::fs::symlink_metadata(&snapshot)?.file_type().is_file() {
+        anyhow::bail!(
+            "Nemophila module `{identity}` snapshot `{}` is not an ordinary file",
+            snapshot.display()
+        );
+    }
+    Ok(snapshot)
+}
+
+pub(super) fn render_nemophila_defs(
+    modules: &[(&str, std::path::PathBuf)],
+) -> anyhow::Result<String> {
+    let mut entries = String::new();
+    for (identity, path) in modules {
+        let path = path
+            .to_str()
+            .context("Nemophila module export path must be valid UTF-8")?;
+        entries.push_str(&format!(
+            "    EmbeddedModule {{ identity: {identity:?}, bytes: include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../\", {path:?})) }},\n"
+        ));
+    }
+    Ok(format!(
+        "// @generated by `xtask build`; do not edit.\n\
+pub(crate) struct EmbeddedModule {{\n\
+    pub(crate) identity: &'static str,\n\
+    pub(crate) bytes: &'static [u8],\n\
+}}\n\n\
+pub(crate) const EMBEDDED_MODULES: &[EmbeddedModule] = &[\n{entries}];\n"
+    ))
 }
 
 pub(super) fn render_network_defs(ipv4: Option<&StaticIpv4>) -> String {
@@ -185,5 +303,82 @@ mod tests {
         assert!(present.contains("default_gateway: Some([10, 0, 2, 2])"));
         assert!(!present.contains("Platform"));
         assert!(!present.contains("root"));
+    }
+
+    #[test]
+    fn generated_nemophila_defs_preserve_order_and_only_embed_identity_and_bytes() {
+        let modules = vec![
+            (
+                "first",
+                std::path::PathBuf::from(
+                    "build/generated/nemophila/system-build-1-0/first.wasm",
+                ),
+            ),
+            (
+                "second",
+                std::path::PathBuf::from(
+                    "build/generated/nemophila/system-build-1-0/second.wasm",
+                ),
+            ),
+        ];
+        let defs = render_nemophila_defs(&modules).unwrap();
+        assert!(
+            defs.find("identity: \"first\"").unwrap() < defs.find("identity: \"second\"").unwrap()
+        );
+        assert!(defs.contains("include_bytes!"));
+        assert!(!defs.contains("mtime"));
+        assert!(!defs.contains("manifest"));
+    }
+
+    #[test]
+    fn empty_nemophila_selection_generates_an_empty_catalog() {
+        let defs = render_nemophila_defs(&[]).unwrap();
+        assert!(defs.contains("pub(crate) const EMBEDDED_MODULES"));
+        assert!(defs.contains("= &[\n];"));
+        assert!(!defs.contains("include_bytes!"));
+    }
+
+    #[test]
+    fn embedded_nemophila_export_fails_closed_for_invalid_inputs() {
+        let root =
+            std::env::temp_dir().join(format!("anemone-nemophila-catalog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let snapshot_dir = root.join("snapshots");
+        std::fs::create_dir(&snapshot_dir).unwrap();
+        let export = |path, bytes: &[u8]| crate::tasks::module::build::ModuleExport {
+            path,
+            bytes: bytes.into(),
+        };
+        assert!(
+            snapshot_embedded_module(
+                "missing",
+                export(root.join("missing.wasm"), b"fresh"),
+                &snapshot_dir,
+                8,
+            )
+            .is_err()
+        );
+
+        let directory = root.join("directory.wasm");
+        std::fs::create_dir(&directory).unwrap();
+        assert!(
+            snapshot_embedded_module("directory", export(directory, b"fresh"), &snapshot_dir, 8,)
+                .is_err()
+        );
+
+        let oversized = root.join("oversized.wasm");
+        std::fs::write(&oversized, [0u8; 9]).unwrap();
+        assert!(
+            snapshot_embedded_module("oversized", export(oversized, &[0u8; 9]), &snapshot_dir, 8,)
+                .is_err()
+        );
+
+        let valid = root.join("valid.wasm");
+        std::fs::write(&valid, b"replaceable stable export").unwrap();
+        let snapshot =
+            snapshot_embedded_module("valid", export(valid, b"fresh"), &snapshot_dir, 8).unwrap();
+        assert_eq!(std::fs::read(snapshot).unwrap(), b"fresh");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

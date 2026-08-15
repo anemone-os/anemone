@@ -152,6 +152,7 @@ RFC 的 `index.md`（以及按需 `invariants.md`）保存 target delta 和 proo
   - [Unix seqpacket](./contracts/socket/unix-seqpacket.md)
 - [Build Configuration 当前契约](./contracts/configuration/index.md)
   - [System target 与 resolved selection](./contracts/configuration/system-target.md)
+- [Nemophila 当前契约](./contracts/nemophila/index.md)
 - [System Power 当前契约](./contracts/power/index.md)
   - [Shutdown lifecycle](./contracts/power/shutdown-lifecycle.md)
 - [Membarrier 当前契约](./contracts/membarrier/index.md)

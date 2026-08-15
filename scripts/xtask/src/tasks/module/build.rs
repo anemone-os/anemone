@@ -21,6 +21,18 @@ const BUILD_DIR: &str = "build/modules";
 static NEXT_INVOCATION: AtomicU64 = AtomicU64::new(0);
 
 pub fn run(identity: &str) -> anyhow::Result<()> {
+    build(identity).map(|_| ())
+}
+
+pub(crate) struct ModuleExport {
+    pub(crate) path: PathBuf,
+    /// Immutable bytes published by this invocation. Consumers must use this
+    /// handoff instead of reopening `path`, which another module build may
+    /// atomically replace after this function returns.
+    pub(crate) bytes: Box<[u8]>,
+}
+
+pub(crate) fn build(identity: &str) -> anyhow::Result<ModuleExport> {
     validate_identity(identity)?;
     let repository = std::env::current_dir()?.canonicalize()?;
     let module_dir = repository.join(MODULES_DIR).join(identity);
@@ -90,7 +102,13 @@ pub fn run(identity: &str) -> anyhow::Result<()> {
         )
     );
     log_progress!("MODULE", &format!("Exported '{}'", export.display()));
-    Ok(())
+    Ok(ModuleExport {
+        path: export
+            .strip_prefix(&repository)
+            .expect("module export is repository-local")
+            .to_path_buf(),
+        bytes: bytes.into_boxed_slice(),
+    })
 }
 
 fn canonical_directory(path: &Path, field: &str) -> anyhow::Result<PathBuf> {

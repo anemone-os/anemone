@@ -1,36 +1,94 @@
 //! Nemophila kernel extension runtime.
 
-#[cfg(feature = "nemophila_clone_validation")]
-mod clone_validation;
+mod api;
 mod host;
 mod instance;
 mod load;
 mod runtime;
 pub(crate) mod weave;
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 
-use crate::prelude::Lazy;
+use crate::{
+    nemophila_defs::EMBEDDED_MODULES,
+    prelude::{Lazy, kerrln, kinfoln},
+};
 use runtime::Runtime;
-pub(crate) use runtime::{InstanceIdentity, PublishFailure, TryUnloadFailure};
+pub(crate) use runtime::{
+    InstanceIdentity, InstanceOrigin, InstanceSnapshot, LifecycleSnapshot, PublishFailure,
+    TryUnloadFailure,
+};
 
 static RUNTIME: Lazy<Runtime> = Lazy::new(Runtime::new);
 
 /// Loads one immutable artifact snapshot through the common transaction and
 /// atomically publishes the resulting instance in the kernel runtime.
-pub(crate) fn load_and_publish(artifact: Box<[u8]>) -> Result<InstanceIdentity, PublishFailure> {
-    RUNTIME.load_and_publish(artifact)
+pub(crate) fn load_and_publish(
+    artifact: Box<[u8]>,
+    origin: InstanceOrigin,
+) -> Result<InstanceIdentity, PublishFailure> {
+    RUNTIME.load_and_publish(artifact, origin)
 }
 
 /// Attempts irreversible retirement without waiting for admitted callbacks.
-/// Stage 6 remains responsible for authorization and public error encoding.
+/// The management boundary performs authorization and public error encoding.
 pub(crate) fn try_unload(identity: InstanceIdentity) -> Result<(), TryUnloadFailure> {
     RUNTIME.try_unload(identity)
 }
 
-#[cfg(feature = "nemophila_clone_validation")]
-pub(crate) fn activate_clone_validation() {
-    clone_validation::activate();
+pub(crate) fn snapshots() -> Vec<InstanceSnapshot> {
+    RUNTIME.snapshots()
+}
+
+pub(crate) fn snapshot_instance(identity: InstanceIdentity) -> Option<InstanceSnapshot> {
+    RUNTIME.snapshot_instance(identity)
+}
+
+fn embedded_module(identity: &str) -> Option<(&'static str, &'static [u8])> {
+    EMBEDDED_MODULES
+        .iter()
+        .find(|module| module.identity == identity)
+        .map(|module| (module.identity, module.bytes))
+}
+
+pub(crate) fn load_embedded(identity: &str) -> Result<InstanceIdentity, PublishFailure> {
+    let (identity, bytes) = embedded_module(identity).ok_or(PublishFailure::EmbeddedNotFound)?;
+    load_and_publish(bytes.into(), InstanceOrigin::Embedded(identity))
+}
+
+pub(crate) fn activate_embedded_modules() {
+    for (ordinal, module) in EMBEDDED_MODULES.iter().enumerate() {
+        kinfoln!(
+            "Nemophila boot load begin identity={} ordinal={} phase=load",
+            module.identity,
+            ordinal
+        );
+        match load_and_publish(
+            module.bytes.into(),
+            InstanceOrigin::Embedded(module.identity),
+        ) {
+            Ok(instance) => {
+                kinfoln!(
+                    "Nemophila boot load complete identity={} ordinal={} phase=publish instance={}",
+                    module.identity,
+                    ordinal,
+                    instance.raw()
+                );
+            },
+            Err(error) => {
+                kerrln!(
+                    "Nemophila boot load failed identity={} ordinal={} phase=load-and-publish error={:?}",
+                    module.identity,
+                    ordinal,
+                    error
+                );
+                panic!(
+                    "required Nemophila module failed identity={} ordinal={} phase=load-and-publish",
+                    module.identity, ordinal
+                );
+            },
+        }
+    }
 }
 
 #[cfg(feature = "kunit")]
@@ -40,8 +98,8 @@ mod kunits {
         instance::{ModuleTrap, RuntimeInstance},
         load::{LoadFailure, load_unpublished},
         runtime::{
-            Invocation, InvocationOutcome, PublishFailure, RegistrationResult, Runtime,
-            TryUnloadFailure,
+            InstanceOrigin, Invocation, InvocationOutcome, PublishFailure, RegistrationResult,
+            Runtime, TryUnloadFailure,
         },
         weave::{
             BindingPolicy, CatalogFailure, PointIdentity, PointSpec, ProviderCatalog,
@@ -638,8 +696,12 @@ mod kunits {
             (10, code(&[return_i32(0)])),
         ]);
 
-        let first = runtime.load_and_publish(artifact.clone()).unwrap();
-        let second = runtime.load_and_publish(artifact).unwrap();
+        let first = runtime
+            .load_and_publish(artifact.clone(), InstanceOrigin::Supplied)
+            .unwrap();
+        let second = runtime
+            .load_and_publish(artifact, InstanceOrigin::Supplied)
+            .unwrap();
         assert_ne!(first, second);
 
         let identities = runtime.snapshot().identities;
@@ -654,7 +716,7 @@ mod kunits {
         let before = runtime.snapshot();
 
         assert!(matches!(
-            runtime.load_and_publish(simple_load(return_i32(1))),
+            runtime.load_and_publish(simple_load(return_i32(1)), InstanceOrigin::Supplied),
             Err(PublishFailure::Load)
         ));
         assert_eq!(runtime.snapshot(), before);
@@ -682,7 +744,10 @@ mod kunits {
         let fatal_runtime = Runtime::with_catalog(empty_catalog());
         let before = fatal_runtime.snapshot();
         assert!(matches!(
-            fatal_runtime.load_and_publish(fatal_registration(CallbackExport::Correct(Vec::new()))),
+            fatal_runtime.load_and_publish(
+                fatal_registration(CallbackExport::Correct(Vec::new())),
+                InstanceOrigin::Supplied,
+            ),
             Err(PublishFailure::Load)
         ));
         assert_eq!(fatal_runtime.snapshot(), before);
@@ -690,7 +755,7 @@ mod kunits {
         let accepting_runtime = Runtime::with_catalog(empty_catalog());
         assert!(
             accepting_runtime
-                .load_and_publish(accepted_registration_failure())
+                .load_and_publish(accepted_registration_failure(), InstanceOrigin::Supplied)
                 .is_ok()
         );
         let snapshot = accepting_runtime.snapshot();
@@ -706,7 +771,7 @@ mod kunits {
             let runtime = Runtime::new();
             let before = runtime.snapshot();
             assert!(matches!(
-                runtime.load_and_publish(artifact),
+                runtime.load_and_publish(artifact, InstanceOrigin::Supplied),
                 Err(PublishFailure::Load)
             ));
             assert_eq!(runtime.snapshot(), before);
@@ -721,7 +786,7 @@ mod kunits {
         ] {
             let runtime = Runtime::new();
             assert!(matches!(
-                runtime.load_and_publish(artifact),
+                runtime.load_and_publish(artifact, InstanceOrigin::Supplied),
                 Err(PublishFailure::Load)
             ));
             assert!(runtime.snapshot().identities.is_empty());
@@ -746,10 +811,17 @@ mod kunits {
         let runtime = Runtime::new();
         assert!(
             runtime
-                .load_and_publish(fatal_registration(CallbackExport::Correct(Vec::new())))
+                .load_and_publish(
+                    fatal_registration(CallbackExport::Correct(Vec::new())),
+                    InstanceOrigin::Supplied,
+                )
                 .is_ok()
         );
-        assert!(runtime.load_and_publish(duplicate_registration()).is_ok());
+        assert!(
+            runtime
+                .load_and_publish(duplicate_registration(), InstanceOrigin::Supplied)
+                .is_ok()
+        );
         let snapshot = runtime.snapshot();
         assert_eq!(snapshot.identities.len(), 2);
         assert_eq!(snapshot.published_bindings, 2);
@@ -777,8 +849,12 @@ mod kunits {
         assert!(pending.identities.is_empty());
         assert_eq!(pending.transactions, 2);
         assert_eq!(pending.reservations, 2);
-        first.commit(first_instance).unwrap();
-        second.commit(second_instance).unwrap();
+        first
+            .commit(first_instance, InstanceOrigin::Supplied)
+            .unwrap();
+        second
+            .commit(second_instance, InstanceOrigin::Supplied)
+            .unwrap();
         let published = runtime.snapshot();
         assert_eq!(published.identities.len(), 2);
         assert_eq!(published.published_bindings, 2);
@@ -823,7 +899,9 @@ mod kunits {
         drop(second_instance);
         drop(second);
 
-        first.commit(first_instance).unwrap();
+        first
+            .commit(first_instance, InstanceOrigin::Supplied)
+            .unwrap();
         let third = runtime.begin_load().unwrap();
         let third_instance = load_unpublished(
             callback_only_module(Vec::new()),
@@ -861,8 +939,12 @@ mod kunits {
     fn cohort_admission_makes_unload_busy_until_all_ownership_is_released() {
         let runtime = Runtime::new();
         let artifact = fatal_registration(CallbackExport::Correct(Vec::new()));
-        let first = runtime.load_and_publish(artifact.clone()).unwrap();
-        let second = runtime.load_and_publish(artifact).unwrap();
+        let first = runtime
+            .load_and_publish(artifact.clone(), InstanceOrigin::Supplied)
+            .unwrap();
+        let second = runtime
+            .load_and_publish(artifact, InstanceOrigin::Supplied)
+            .unwrap();
 
         let invocations = runtime.select_cohort::<CloneObserver>().into_invocations();
         assert_eq!(invocations.len(), 2);
@@ -892,10 +974,16 @@ mod kunits {
     fn trap_poison_cancels_queued_invocation_and_continues_fanout() {
         let runtime = Runtime::new();
         let trapping = runtime
-            .load_and_publish(fatal_registration(CallbackExport::Correct(vec![0x00])))
+            .load_and_publish(
+                fatal_registration(CallbackExport::Correct(vec![0x00])),
+                InstanceOrigin::Supplied,
+            )
             .unwrap();
         let normal = runtime
-            .load_and_publish(fatal_registration(CallbackExport::Correct(Vec::new())))
+            .load_and_publish(
+                fatal_registration(CallbackExport::Correct(Vec::new())),
+                InstanceOrigin::Supplied,
+            )
             .unwrap();
 
         let mut first_cohort = runtime.select_cohort::<CloneObserver>().into_invocations();
@@ -952,7 +1040,9 @@ mod kunits {
                 .unwrap(),
             RegistrationResult::Registered
         );
-        let poisoned = first.commit(first_instance).unwrap();
+        let poisoned = first
+            .commit(first_instance, InstanceOrigin::Supplied)
+            .unwrap();
         let mut cohort = runtime.select_cohort::<ExclusivePoint>().into_invocations();
         assert_eq!(cohort.len(), 1);
         let InvocationOutcome::Poisoned(diagnostic) =
@@ -1003,15 +1093,19 @@ mod kunits {
                 .unwrap(),
             RegistrationResult::Registered
         );
-        let replacement = replacement.commit(replacement_instance).unwrap();
+        let replacement = replacement
+            .commit(replacement_instance, InstanceOrigin::Supplied)
+            .unwrap();
         assert_eq!(runtime.try_unload(replacement), Ok(()));
     }
 
     #[kunit]
     fn typed_point_executes_real_callback_logging_window() {
-        let identity =
-            super::load_and_publish(logging_callback_module(b"NEMOPHILA-KUNIT:CALLBACK-LOGGING"))
-                .unwrap();
+        let identity = super::load_and_publish(
+            logging_callback_module(b"NEMOPHILA-KUNIT:CALLBACK-LOGGING"),
+            InstanceOrigin::Supplied,
+        )
+        .unwrap();
         CLONE_OBSERVER.notify(clone_observation(u32::MAX, 0));
         let returned = super::RUNTIME.snapshot();
         assert_eq!(returned.in_flight, 0);
@@ -1102,8 +1196,12 @@ mod kunits {
 
         let runtime = Runtime::new();
         let artifact = fatal_registration(CallbackExport::Correct(Vec::new()));
-        let serialized = runtime.load_and_publish(artifact.clone()).unwrap();
-        let independent = runtime.load_and_publish(artifact).unwrap();
+        let serialized = runtime
+            .load_and_publish(artifact.clone(), InstanceOrigin::Supplied)
+            .unwrap();
+        let independent = runtime
+            .load_and_publish(artifact, InstanceOrigin::Supplied)
+            .unwrap();
 
         let mut first_cohort = runtime.select_cohort::<CloneObserver>().into_invocations();
         let held = take_invocation(&mut first_cohort, serialized);

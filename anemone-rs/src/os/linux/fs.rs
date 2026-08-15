@@ -377,6 +377,11 @@ pub fn close(fd: Fd) -> Result<(), Errno> {
     fs::close(fd as u64).map(|_| ())
 }
 
+pub fn getdents64(fd: Fd, buffer: &mut [u8]) -> Result<usize, Errno> {
+    fs::getdents64(fd as u64, buffer.as_mut_ptr() as u64, buffer.len() as u64)
+        .map(|count| count as usize)
+}
+
 pub fn close_range(first: u32, last: u32, flags: u32) -> Result<(), Errno> {
     fs::close_range(first as u64, last as u64, flags as u64).map(|_| ())
 }

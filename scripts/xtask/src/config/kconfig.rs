@@ -60,6 +60,7 @@ pub struct Parameters {
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
+    pub nemophila_artifact_max_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub c_string_batch_bytes: Option<usize>,
     pub execve_max_string_count: Option<usize>,
@@ -187,6 +188,7 @@ impl Parameters {
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
+        materialize!(nemophila_artifact_max_bytes);
         materialize!(max_path_len_bytes);
         materialize!(c_string_batch_bytes);
         materialize!(execve_max_string_count);
@@ -336,6 +338,8 @@ pub const REMAP_SHIFT_GB: u64 = {};
 pub const MAX_LOGICAL_CPUS: usize = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
+/// Maximum bytes accepted from one embedded or supplied Nemophila artifact.
+pub const NEMOPHILA_ARTIFACT_MAX_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to
 /// MAX_IDENT_LEN_BYTES,
 /// since file names are commonly used as identity strings in kernel
@@ -560,6 +564,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
+            resolved!(nemophila_artifact_max_bytes),
             resolved!(max_path_len_bytes),
             resolved!(c_string_batch_bytes),
             resolved!(execve_max_string_count),

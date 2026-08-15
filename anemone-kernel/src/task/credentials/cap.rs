@@ -39,7 +39,7 @@ bitflags! {
         const IPC_LOCK = 1u64 << abi::CAP_IPC_LOCK;
         /// Overrides SysV IPC ownership permission checks.
         const IPC_OWNER = 1u64 << abi::CAP_IPC_OWNER;
-        /// [NYI] Allows loading and unloading kernel modules.
+        /// Allows loading and unloading Nemophila kernel modules.
         const SYS_MODULE = 1u64 << abi::CAP_SYS_MODULE;
         /// [NYI] Allows raw I/O and privileged device access.
         const SYS_RAWIO = 1u64 << abi::CAP_SYS_RAWIO;
@@ -102,6 +102,7 @@ bitflags! {
             | Self::NET_RAW.bits()
             | Self::IPC_LOCK.bits()
             | Self::IPC_OWNER.bits()
+            | Self::SYS_MODULE.bits()
             | Self::SYS_CHROOT.bits()
             | Self::SYS_ADMIN.bits()
             | Self::SYS_NICE.bits()
@@ -287,5 +288,19 @@ mod kunits {
         assert!(caps.bounding().contains(Capability::MKNOD));
         assert!(!caps.inheritable().contains(Capability::MKNOD));
         assert!(!caps.ambient().contains(Capability::MKNOD));
+    }
+
+    #[kunit]
+    fn sys_module_is_supported_and_root_bounded() {
+        assert_eq!(
+            Capability::from_number(abi::CAP_SYS_MODULE),
+            Ok(Capability::SYS_MODULE)
+        );
+        let caps = CredCapabilities::new_root();
+        assert!(caps.permitted().contains(Capability::SYS_MODULE));
+        assert!(caps.effective().contains(Capability::SYS_MODULE));
+        assert!(caps.bounding().contains(Capability::SYS_MODULE));
+        assert!(!caps.inheritable().contains(Capability::SYS_MODULE));
+        assert!(!caps.ambient().contains(Capability::SYS_MODULE));
     }
 }

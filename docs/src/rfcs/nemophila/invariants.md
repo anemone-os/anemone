@@ -1,16 +1,15 @@
 # Nemophila 目标与不变量
 
-**状态：** Accepted Target
+**状态：** Closed R6 Target
 **最后更新：** 2026-08-15
 **父 RFC：** [RFC-20260814-nemophila](./index.md)
-**适用修订：** R5
+**适用修订：** R6
 
-本文只定义 Nemophila R0 的 correctness 与 target proof obligations。当前没有 Nemophila effective contract；Draft 或
-Accepted target 不能提前覆盖 `docs/src/contracts/`。解释器与 Nemophila 的 owner 分工属于本页 target；内部类型、具体
+本文保存 Nemophila R0 的 correctness 与 target proof obligations。Stage 6 closure后生效的共享规则见
+[Nemophila current contract](../../contracts/nemophila/index.md)；本Closed target不再覆盖或扩展current contract。解释器与 Nemophila 的 owner 分工属于本页历史target；内部类型、具体
 同步原语、算法、crate/file layout 和具体测试路线由独立[实施路线](./implementation.md)在对应 Stage 获得授权后负责。
 Stage 4的kernel-internal weave与完整invocation/lifecycle protocol已关闭；该implementation proof没有使本页任何target ID
-成为effective current contract。Stage 5单一Checkpoint 5A已关闭；Stage 6已完成docs-only解析，状态为Resolved / Ready /
-Not Started，execution未授权。
+成为effective current contract。Stage 5单一Checkpoint 5A与Stage 6均已关闭；`NEMOPHILA-R0-CUTOVER`已生效。
 
 ## 规则分类
 
@@ -99,7 +98,8 @@ handle。
 ### NEMOPHILA-ARTIFACT-001 — 两种来源只产生一种 runtime entity
 
 **规则：** source acquisition只形成一种kernel-owned immutable byte snapshot。SystemTarget拥有有序且不重复的required embedded
-identity selection，build resolver/materializer把canonical module fresh export解析为image-local immutable catalog；catalog不保存
+identity selection；system build按resolved顺序调用唯一module build owner并立即把本次fresh ordinary export解析为image-local
+immutable catalog，不读取stale export、不复制module recipe，也不建立mtime/provenance freshness truth；catalog不保存
 live state。userspace single-load syscall以closed `source_kind`选择tagged embedded identity或supplied fd payload，source kind不是
 bitflags，R0 flags/reserved必须为零。supplied source只接受readable non-`O_PATH` regular file，以不改变shared cursor的
 positioned reads从offset 0复制到首次EOF，受KernelConfig-owned共同artifact-size上限约束；copy完成后立即释放operation-local
@@ -112,8 +112,8 @@ module-side `load`与实际callback entry执行typed lookup。malformed/unsuppor
 缺失或类型错误的required entry都在publication前失败；额外exports与custom sections没有R0执行义务，必须被忽略。WIT
 metadata、精确imports/exports集合与custom-section allowlist不得成为第二份compatibility truth。host-side check不能替代kernel
 admission，authority也不能替代interpreter validation。实际provider availability与binding cardinality由module-side `load`
-entry内的registration operation检查并返回类型化结果，不能冒充interpreter或mechanical admission。同一份Wasm artifact用于
-RV64与LA64 acceptance。
+entry内的registration operation检查并返回类型化结果，不能冒充interpreter或mechanical admission。RV64与LA64分别从同一
+source revision fresh build并以content hash证明artifact bytes一致。
 **Owner：** SystemTarget拥有embedded选择，module/build owners拥有fresh artifact materialization，catalog拥有immutable embedded
 bytes，VFS/file owner拥有operation-local fd读取，KernelConfig拥有artifact-size capacity；Nemophila runtime拥有共同admission与
 live entity。
@@ -121,7 +121,7 @@ live entity。
 pathname保留到unload、copy后仍受source mutation影响、将复制期间并发writer伪装为原子snapshot、start在拒绝前已经执行、
 Linker暴露未授权capability、缺失typed entry仍被发布、任一来源复用未受独立生命周期管理的translated artifact、两种来源
 形成不同instance type/authority、catalog维护loaded truth、无consumer的metadata/section allowlist阻断load，或两个架构消费
-不同module build。
+内容不同的artifact bytes。
 **Cutover / Proof：** SystemTarget/catalog/fd source acquisition、immutable handoff、common-path source proof与同一artifact的双架构
 evidence；`NEMOPHILA-R0-CUTOVER`。
 
@@ -152,12 +152,14 @@ replacement或authority；supplied source不保存pathname。procfs不提供load
 `nemophila` app也只组合syscall与proc presentation。retirement撤销procfs backend mapping；generic cached-positive dentry的
 并发freshness限制继续由
 [`ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`](../../register/open-issues.md#ane-20260809-vfs-dynamic-positive-dentry-revocation)
-跟踪，不在本owner建立私有协议。
+跟踪。generic procfs/VFS的dynamic semantic identity并发唯一inode与回收缺口由
+[`ANE-20260815-PROCFS-DYNAMIC-INODE-MATERIALIZATION`](../../register/open-issues.md#ane-20260815-procfs-dynamic-inode-materialization)
+跟踪；R0不证明concurrent first lookup或generic inode-cache lifecycle，也不在本owner建立私有协议或inode registry。
 **Owner：** Nemophila runtime拥有published lifecycle与窄value snapshot；procfs拥有只读namespace/presentation；VFS core拥有
-dentry cache publication/revocation；CLI不拥有kernel state。
+dentry cache publication/revocation与dynamic inode materialization；CLI不拥有kernel state。
 **违反表现：** procfs或CLI缓存可驱动行为的module list、proc inode保存第二份lifecycle/in-flight truth、写proc文件执行mutation、
 supplied pathname成为identity、诊断origin/poison字段决定unload/replacement，或为generic dentry缺口建立Nemophila-private
-freshness/liveness state。
+freshness/liveness state或strong/weak inode registry。
 **Cutover / Proof：** runtime snapshot一致性、proc list/read/retirement backend mapping、只读surface与known VFS limitation audit；
 `NEMOPHILA-R0-CUTOVER`。
 
@@ -389,14 +391,14 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
   记录为Not Proven，不建立owner-local workaround；
 - clone observer 必须经真实 Wasm entry 运行并使用日志 service；正常返回、trap 以及日志过滤、截断或覆盖均不得影响
   clone result；
-- `NEMOPHILA-R0-CUTOVER` 前不创建 effective Nemophila contract；
+- `NEMOPHILA-R0-CUTOVER` 前不创建 effective Nemophila contract；该cutover已在Stage 6 closure原子完成；
 - Stage 顺序与受保护边界由独立[实施路线](./implementation.md)定义；Stage 1 与 Stage 2 route 均已解析并关闭，Stage 2
   feedback interlude已在Stage 3前以R3纠正build/admission owner；R4已收敛integer-only profile与kernel/app compiler-target owner；
   Stage 3的两个Checkpoint均已关闭；LA64按current System Power contract进入末尾halt后的host QEMU终止只作为该平台的
   Stage 3 harness disposition，不形成ordinary power-off capability；Stage 4同一provider/runtime/lifecycle Implementation
   Boundary内的两个Checkpoint均已关闭；
-  Stage 5的RV64-only proof route、test/oracle和命令已闭合；Stage 6已按R5解析为单一原子formal Stage，execution未授权。如果实施路线需要改变
-  本页 invariant、owner、ABI envelope、acceptance 或 validation claim，必须先回 RFC review。
+  Stage 5的RV64-only proof route、test/oracle和命令已闭合；Stage 6单一原子formal Stage也已关闭，实施没有改变
+  本页 invariant、owner、ABI envelope、acceptance 或 validation claim。
 
 ## 禁止退化项
 
@@ -435,4 +437,4 @@ poisoned。`Poisoned` 必须是 admission 可依赖的权威语义状态，具�
 - 不得让embedded ingress绕过kernel admission、把boot list顺序变成source/binding priority、在required module失败后继续initial
   userspace，或以host check/单架构smoke代替真实双架构Wasm evidence；
 - 不得让procfs/CLI拥有lifecycle truth或mutation、保存supplied pathname、让diagnostic snapshot驱动行为，或为dynamic-positive
-  dentry问题引入Nemophila-private freshness state。
+  dentry/dynamic inode materialization问题引入Nemophila-private freshness state或inode registry。

@@ -1,6 +1,4 @@
-#[cfg(feature = "kunit")]
-use alloc::vec::Vec;
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 
 use crate::prelude::{Mutex, SpinLock};
 
@@ -23,13 +21,49 @@ const FIRST_IDENTITY: u64 = 1;
 ///
 /// Its representation is deliberately not exposed outside the kernel. The
 /// runtime only promises never to reuse an allocated value during its own
-/// lifetime; Stage 6 remains responsible for any management ABI encoding.
+/// lifetime; the management ABI exposes the opaque nonzero value as `u64`.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct InstanceIdentity(u64);
+
+impl InstanceIdentity {
+    pub(crate) const fn from_raw(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
+    }
+
+    pub(crate) const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// Diagnostic provenance captured at publication. It never participates in
+/// callback admission, retirement, replacement, or artifact lookup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InstanceOrigin {
+    Embedded(&'static str),
+    Supplied,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LifecycleSnapshot {
+    Live,
+    Poisoned,
+}
+
+/// Narrow owner snapshot used by procfs and management validation. Every
+/// field is copied while holding the runtime state guard and is thereafter
+/// immutable; it is not a capability and cannot drive runtime transitions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct InstanceSnapshot {
+    pub(crate) identity: InstanceIdentity,
+    pub(crate) origin: InstanceOrigin,
+    pub(crate) lifecycle: LifecycleSnapshot,
+    pub(crate) in_flight: usize,
+}
 
 #[derive(Debug)]
 pub(crate) enum PublishFailure {
     Load,
+    EmbeddedNotFound,
     IdentityExhausted,
     TransactionExhausted,
 }
@@ -67,6 +101,9 @@ struct RuntimeInner {
 }
 
 struct PublishedInstance {
+    /// Publication-time provenance for diagnostics only. Runtime decisions
+    /// must continue to use membership, lifecycle, and in-flight state below.
+    origin: InstanceOrigin,
     /// This variant is the only callback-admission and retirement truth. The
     /// optional diagnostic carried by `Poisoned` is never inspected to decide
     /// behavior.
@@ -80,8 +117,13 @@ struct PublishedInstance {
 }
 
 impl PublishedInstance {
-    fn new(instance: RuntimeInstance, bindings: BTreeMap<PointIdentity, CallbackBinding>) -> Self {
+    fn new(
+        instance: RuntimeInstance,
+        origin: InstanceOrigin,
+        bindings: BTreeMap<PointIdentity, CallbackBinding>,
+    ) -> Self {
         Self {
+            origin,
             lifecycle: InstanceLifecycle::Live,
             in_flight: 0,
             bindings,
@@ -136,6 +178,7 @@ impl Runtime {
     pub(super) fn load_and_publish(
         &self,
         artifact: Box<[u8]>,
+        origin: InstanceOrigin,
     ) -> Result<InstanceIdentity, PublishFailure> {
         let transaction = self.begin_load()?;
         // Checked construction and the module-side load entry can be slow and
@@ -144,7 +187,42 @@ impl Runtime {
         // unpublished here.
         let instance = load_unpublished(artifact, transaction.registration_window())
             .map_err(|_failure: LoadFailure| PublishFailure::Load)?;
-        transaction.commit(instance)
+        transaction.commit(instance, origin)
+    }
+
+    pub(super) fn snapshots(&self) -> Vec<InstanceSnapshot> {
+        let inner = self.state.inner.lock();
+        inner
+            .instances
+            .iter()
+            .map(|(identity, instance)| InstanceSnapshot {
+                identity: *identity,
+                origin: instance.origin,
+                lifecycle: if instance.lifecycle.is_live() {
+                    LifecycleSnapshot::Live
+                } else {
+                    LifecycleSnapshot::Poisoned
+                },
+                in_flight: instance.in_flight,
+            })
+            .collect()
+    }
+
+    pub(super) fn snapshot_instance(&self, identity: InstanceIdentity) -> Option<InstanceSnapshot> {
+        let inner = self.state.inner.lock();
+        inner
+            .instances
+            .get(&identity)
+            .map(|instance| InstanceSnapshot {
+                identity,
+                origin: instance.origin,
+                lifecycle: if instance.lifecycle.is_live() {
+                    LifecycleSnapshot::Live
+                } else {
+                    LifecycleSnapshot::Poisoned
+                },
+                in_flight: instance.in_flight,
+            })
     }
 
     /// Returns owner-private publication and reservation facts for conditional

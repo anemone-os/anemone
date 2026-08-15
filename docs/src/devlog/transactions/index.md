@@ -6,9 +6,6 @@
 
 ## Active
 
-- [Nemophila](./2026-08-14-nemophila.md)：Accepted R5 Stage 1--5均已关闭；Stage 6已完成docs-only解析，覆盖SystemTarget
-  ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection与最终双架构cutover，现为
-  Resolved / Ready / Not Started且execution未授权。current contract与cutover仍None / Not Effective。
 - [PTY / devpts](./2026-08-11-pty-devpts.md)：Stage 1--3已关闭，semantic endpoint、runtime relation、owner-private pair与
   hidden devpts/allocation/open/cleanup production route已闭合；Stage 4 public activation/acceptance未授权，全部target
   contract仍Not Effective。
@@ -30,6 +27,9 @@
 
 ## Completed
 
+- [Nemophila](./2026-08-14-nemophila.md)：R6 Stage 1--6与RFC全部关闭；SystemTarget owner-driven fresh rebuild、
+  ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection和双架构acceptance已完成。
+  `NEMOPHILA-R0-CUTOVER`已建立五项Nemophila contract并Refine `STM-TARGET-001`。
 - [Clock Timekeeping 与 POSIX Timers](./2026-08-04-clock-timekeeping-posix-timers.md)：R0 Gate 0--6全部关闭；
   四个cutover使五项clock/time/signal contract delta生效，RV64/LA64 release SMP=2最终通过469/469与
   470/470 KUnit以及完整定向用户态oracle。

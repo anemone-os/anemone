@@ -1,6 +1,6 @@
 use clap::{Args, Subcommand};
 
-mod build;
+pub(crate) mod build;
 mod driver;
 
 #[derive(Args, Debug)]

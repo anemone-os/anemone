@@ -1,5 +1,48 @@
 # 开放问题
 
+## ANE-20260815-PROCFS-DYNAMIC-INODE-MATERIALIZATION
+
+**Type:** Issue
+**Status:** Open / Deferred
+**Severity:** High
+**Area:** fs / procfs / VFS namei / dynamic inode lifecycle
+
+**Symptom / Trigger:** generic namei在parent weak-child map未命中后调用backend `lookup`，再以
+`materialize_child_dentry()`发布结果；该协议要求同一parent/name的并发lookup返回pointer-identical inode，否则winner发布后
+loser会命中identity assertion。procfs目前没有供dynamic value projection复用的“semantic identity到并发唯一inode”能力：
+每次构造fresh unindexed inode会在并发首次lookup时产生不同对象；改用persistent superblock index又需要显式binding/
+unindex lifecycle，否则单调identity的lookup会永久累积indexed inode。
+
+Nemophila `/proc/nemophila/<identity>`是当前暴露该缺口的新consumer。它的runtime membership、retirement与opened text snapshot
+均有唯一owner，但这些事实不能替代generic proc inode materialization owner，也不足以在不建立私有registry的情况下同时闭合
+并发唯一性与回收。
+
+**Impact:** 同一live identity的并发首次pathname lookup可能使kernel在generic dentry identity assertion处panic；若以永久
+indexed inode规避，则反复load/show/unload会形成无界cache residency。现有focused Nemophila证据覆盖普通list/show、opened
+snapshot与retirement backend disappearance，不证明concurrent first lookup或generic inode-cache reclamation。
+
+**Owner:** procfs dynamic inode binding与VFS positive-dentry materialization protocol。Nemophila runtime只拥有instance
+lifecycle/value snapshot，不拥有generic inode/dentry cache。
+
+**Decision / Current Boundary:** 本问题不纳入Nemophila R0 RFC，不为其建立Nemophila-private strong/weak inode registry、
+freshness state或retirement hook。Nemophila R0仍可按其runtime/ABI/boot/proc value-projection target推进；其proc acceptance不外推
+concurrent first-lookup safety或generic inode-cache lifecycle。该处置不表示panic是正确行为，只表示修复必须由独立procfs/VFS
+基础设施迭代拥有。
+
+**Last Verified:** 2026-08-15
+
+**Exit Condition:** procfs/VFS提供可复用的dynamic materialization协议：同一semantic identity并发返回唯一inode，明确强/弱
+residency、backend retirement、迟到publication、identity reuse/non-reuse与multi-mount cleanup，并以deterministic concurrent
+lookup及反复create/lookup/retire验证无panic、无永久cache增长。随后审计`/proc/<tgid>`、Nemophila及其它dynamic consumers并
+移除此条目。
+
+**Related:** [`ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`](#ane-20260809-vfs-dynamic-positive-dentry-revocation)
+记录lookup结果与retirement之间的迟到publication；本条记录同一live mapping的首次并发materialization与inode residency，二者
+不得互相冒充已解决。
+
+**Workaround:** 当前不提供owner-local workaround；避免并发首次lookup同一dynamic proc identity。已打开的Nemophila instance
+文件继续只读其open-time immutable snapshot。
+
 ## ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION
 
 **Type:** Issue

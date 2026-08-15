@@ -7,7 +7,6 @@ mod competition;
 mod file;
 mod guest;
 mod ltp;
-mod nemophila_clone_validation;
 mod oracle;
 mod process;
 mod runtime;
@@ -189,14 +188,6 @@ pub fn main() -> Result<(), Errno> {
     let mut args = anemone_rs::env::args();
     let _program = args.next();
     let first = args.next();
-    if first == Some("--nemophila-clone-validation") {
-        if args.next().is_some() {
-            return Err(EINVAL);
-        }
-        nemophila_clone_validation::run();
-        shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
-        unreachable!("user-test: shutdown returned unexpectedly");
-    }
     if first == Some("--socket-test") {
         if args.next().is_some() {
             return Err(EINVAL);

@@ -1,3 +1,0 @@
-target = "nemophila-clone-validation-rv64"
-kernel-config = "conf/kconfs/nemophila-clone-validation.toml"
-profile = "release"

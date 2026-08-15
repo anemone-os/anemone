@@ -1,12 +1,12 @@
 # 2026-08-14 - Nemophila
 
-**Status:** Active / R5 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
+**Status:** Completed / R6 / Stage 1 Closed / Stage 2 Closed / Stage 2 Feedback Interlude Closed /
 Stage 3 Closed / Stage 4 Closed / Stage 4 Feedback Interlude Closed / Stage 5 Closed /
-Stage 6 Resolved / Ready / Not Started
+Stage 6 Closed / RFC Closed
 **Owners:** doruche, Codex
-**Canonical Target:** [RFC-20260814-nemophila R5](../../rfcs/nemophila/index.md)
+**Canonical Target:** [RFC-20260814-nemophila R6](../../rfcs/nemophila/index.md)
 **Implementation Route:** [Stage 1--6](../../rfcs/nemophila/implementation.md)
-**Contract Delta:** None effective；`NEMOPHILA-R0-CUTOVER`仍为Future
+**Contract Delta:** `NEMOPHILA-R0-CUTOVER` Effective；五项Nemophila contract已Introduce，`STM-TARGET-001`已Refine
 
 ## Scope
 
@@ -16,7 +16,7 @@ interpreter profile/version或current contract。Stage 1、Stage 2与进入Stage
 interlude纠正Stage 2暴露的build/admission owner摩擦并承载R3 target revision。维护者已接受R4 integer-only target与
 kernel/app compiler-target owner拆分；Stage 3与Stage 4各两个Checkpoint的授权均已消费并关闭；Stage 4后的单次Feedback
 Interlude也已关闭，只重整内部owner/API/module/WIT维护边界。Stage 5单一Checkpoint 5A也已授权、消费并关闭；Stage 6
-docs-only解析授权现已消费，状态为Resolved / Ready / Not Started，execution未授权。
+resolution与整体execution授权均已消费，最终cutover与RFC closure已经完成。
 
 ## Checkpoint Log
 
@@ -706,3 +706,77 @@ LTP/final harness、syscall、boot/proc runtime与Stage 5 bridge deletion均Not 
 resolution自动进入implementation或cutover。若execution证据要求改变R5 target、authority/owner、ordered/required boot-fatal
 semantics、single-load ABI/error classes、fd snapshot、proc diagnostic role、Contract Impact、acceptance或validation claim，必须先
 回RFC review / Target Renegotiation。
+
+### 2026-08-15 - Stage 6 execution activation and R6 build handoff
+
+**Authorization / Status:** 维护者授权完成整个Stage 6；该Stage为原子execution且当前Active。实现候选在首次KUnit-off RV64
+boot中证明ordered embedded activation位于rootfs setup之后、initial userspace之前，但同时显示system build会经module owner
+重建selected artifact。维护者明确选择保留rebuild并接受R6，而不是恢复R5的预构建export/staleness handoff。
+
+**R6 Decision:** SystemTarget仍只拥有ordered duplicate-free identity selection；resolved system build按selection调用唯一
+module build owner，立即校验并消费本次fresh ordinary export。system build不复制driver/recipe，不读取stale export，也不建立
+mtime fence或provenance sidecar。invalid/missing identity、module build failure、non-regular与oversized output继续fail closed。
+RV64/LA64分别从同一source revision重建，same-artifact acceptance以export bytes的SHA-256一致性证明；runtime ABI、boot-fatal
+policy、generated catalog shape与acceptance强度不变。
+
+**Evidence / Next:** 专用KUnit-off KernelConfig已使RV64成功日志出现`boot load begin`、module registration、`phase=publish
+instance=1`，随后才exec embedded shutdown并orderly poweroff。该smoke只闭合boot ordering，不替代Stage 6 focused guest matrix。
+implementation继续推进；current contracts与`NEMOPHILA-R0-CUTOVER`仍None / Not Effective。
+
+### 2026-08-15 - Stage 6 implementation, validation and R0 closure
+
+**Implementation:** SystemTarget schema/resolver现拥有ordered duplicate-free Nemophila identity selection；resolved system build按序
+调用唯一module build owner。module owner返回与本次fresh candidate及stable ordinary export相同的immutable bytes，system build
+在KernelConfig上限内校验后固定到唯一`build/generated/nemophila/system-build-<pid>-<sequence>/` snapshot，generated catalog只
+携带identity/order与该build-private bytes路径。后续module action替换ordinary stable export不再改变本次kernel input；空selection
+直接生成空catalog。
+
+boot在rootfs与KUnit完成后、initial userspace前按序required load，失败记录identity/ordinal/phase并panic。management激活
+effective `CAP_SYS_MODULE`，对外只有`nemophila_load`与`nemophila_try_unload`两个native syscall；`api/`按一个syscall一个完整
+`nemophila_*.rs`文件组织，共用wire/source逻辑保留在`api/mod.rs`。supplied regular fd通过positioned reads形成有界owned snapshot，
+两种source进入同一runtime publication owner。runtime提供origin/lifecycle/in-flight value snapshot，procfs只投影
+`/proc/nemophila/<identity>`；`anemone-rs` wrappers与`nemophila` app只组合ABI、fd和presentation，不保存runtime truth。
+
+Stage 5 `nemophila_clone_validation` feature、private activation、KernelConfig/SystemTarget/BuildPreset、user-test consumer与wrapper
+全部删除。R0 validation app挂载devfs/procfs并使用已存在的`/dev/console`，不依赖未成熟的`mknod`能力。
+
+**Validation Evidence:** 现有`build/nemophila-r0-validation-rv64.log`与
+`build/nemophila-r0-validation-la64.log`均到达`NEMOPHILA-R0:VALIDATION:PASS`，覆盖ABI/authorization、embedded与supplied
+load/unload/reload、fd snapshot隔离、proc live/poison/in-flight/open-snapshot/retirement、fork/raw clone3 fanout logging、trap、
+poison、busy与successful retirement。`build/nemophila-r0-boot-negative-{rv64,la64}.log`均记录
+`boot-reject-validation`在ordinal 0、`phase=load-and-publish`失败及required-module panic，且均无
+`NEMOPHILA-R0:NEGATIVE:INITIAL-USERSPACE-REACHED`。RV64 `build/nemophila-r0-kunit-rv64.log`记录654项全部通过。
+
+RV64/LA64 system build从同一source revision分别fresh build的export SHA-256均为
+`2b5f4c13dc4e34dd5f8abb009a9f8d8c60e14efa4efe9bdd8029624d2e3decb5`，完整wrapper最终报告
+`NEMOPHILA-R0:HOST-VALIDATION:PASS`。窄回归已通过`just test nemophila-wasm`、`just test nemophila-module`、
+`just test xtask`（107/107）、双架构`nemophila` app build、repository format与`git diff --check`。
+
+final review发现system build原先只保存stable export路径、真正bytes由后续`include_bytes!`读取的一项Keter；这使另一module
+build可能在handoff窗口替换文件。实现改为上述same-invocation bytes与build-private snapshot，测试fixture也以不同stable-path
+内容证明consumer不再重读。final lifetime review又发现dynamic proc identity inode曾seed进persistent procfs superblock index，
+retirement没有unindex且identity不复用，会形成确定性永久累积。该inode没有按ino反查义务，现直接形成unindexed `InodeRef`，
+但并发首次lookup可产生不同inode并命中generic materialization assertion。维护者判定dynamic semantic identity的并发唯一inode
+与回收属于procfs/VFS基础设施，不允许为本RFC建立Nemophila-private strong/weak registry，要求登记后继续推进。该缺口现由独立
+`ANE-20260815-PROCFS-DYNAMIC-INODE-MATERIALIZATION`跟踪；R0 proc claim明确不包含concurrent first lookup或generic inode-cache
+lifecycle。
+
+维护者明确认为fresh-export source-local修正可由source/owner proof推断结果，不要求重复运行完整wrapper；独立复核确认该Keter
+已neutralize。procfs finding未伪装为已修复，而是按上述owner边界登记。既有双架构runtime日志证明未改变的kernel/runtime路径，
+修正后source与review证明R6 fresh handoff，不把未重跑伪装成新增runtime evidence。
+
+**Architecture Friction Scan:** runtime published map仍是instance/lifecycle/binding/in-flight唯一行为真相；SystemTarget只持selection，
+generated catalog只持immutable projection，proc只持opened snapshot，task point只传TID值，capability由credentials owner实时判断。
+没有owner穿透、private representation泄漏、为local/test需求扩大public API、architecture/test behavior fork、第二catalog/runtime、
+无退出条件temporary bridge或隐含failure/cleanup顺序。review识别的可替换export handoff已在cutover前消除；dynamic proc inode
+finding按维护者确认的generic owner边界进入register，没有增加第二registry。validation claim明确排除该generic并发能力，而非
+把未证明行为写成通过。
+
+**Register / Not Run:** `ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`与新增
+`ANE-20260815-PROCFS-DYNAMIC-INODE-MATERIALIZATION`继续由VFS/procfs owner独立跟踪；Nemophila不增加private namespace state。
+hardware、full LTP、competition final harness、LA64 KUnit suite、concurrent first lookup与额外压力运行Not Run，不外推相应claim。
+
+**Cutover / Result / Stop:** 单一`NEMOPHILA-R0-CUTOVER`原子发布single-load/try-unload ABI、SystemTarget required embedded boot
+semantics与只读proc projection，建立`NEMOPHILA-RUNTIME-001`、`NEMOPHILA-HOST-001`、`NEMOPHILA-WEAVE-001`、
+`NEMOPHILA-CLONE-001`、`NEMOPHILA-ARTIFACT-001`并Refine `STM-TARGET-001`。Stage 6与RFC均Closed，transaction Completed；
+本次严格停止，不进入任何后续gate。

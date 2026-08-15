@@ -5,14 +5,19 @@
 //! fallback.
 
 use serde::Deserialize;
-use std::net::Ipv4Addr;
+use std::{collections::HashSet, net::Ipv4Addr};
 
-use super::reference::{AppRef, PlatformRef};
+use super::{
+    nemophila_module::validate_identity,
+    reference::{AppRef, PlatformRef},
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub platform: PlatformRef,
+    #[serde(default)]
+    pub nemophila: Vec<String>,
     pub root: Root,
     #[serde(rename = "initial-program")]
     pub initial_program: InitialProgramSource,
@@ -24,10 +29,22 @@ impl Config {
         let config: Self = toml::from_str(content)?;
         config.root.validate()?;
         config.initial_program.validate()?;
+        config.validate_nemophila()?;
         if let Some(network) = &config.network {
             network.validate()?;
         }
         Ok(config)
+    }
+
+    fn validate_nemophila(&self) -> anyhow::Result<()> {
+        let mut identities = HashSet::new();
+        for identity in &self.nemophila {
+            validate_identity(identity)?;
+            if !identities.insert(identity) {
+                anyhow::bail!("system target repeats Nemophila module identity `{identity}`");
+            }
+        }
+        Ok(())
     }
 }
 
@@ -213,6 +230,7 @@ mod tests {
     fn parses_rootfs_entry_target() {
         let config = Config::from_str(TEST_SYSTEM_TARGET).unwrap();
         assert_eq!(config.platform.as_str(), "example");
+        assert!(config.nemophila.is_empty());
         assert_eq!(config.root.fstype, "ext4");
         assert!(matches!(config.root.source, RootSource::Block { .. }));
         assert!(matches!(
@@ -220,6 +238,26 @@ mod tests {
             InitialProgramSource::RootfsEntry { argv: None }
         ));
         assert!(config.network.is_none());
+    }
+
+    #[test]
+    fn parses_ordered_duplicate_free_nemophila_modules() {
+        let content = TEST_SYSTEM_TARGET.replacen(
+            "platform = \"example\"",
+            "platform = \"example\"\nnemophila = [\"clone-observer\", \"audit-log\"]",
+            1,
+        );
+        let config = Config::from_str(&content).unwrap();
+        assert_eq!(config.nemophila, ["clone-observer", "audit-log"]);
+
+        let duplicate = content.replace(
+            "[\"clone-observer\", \"audit-log\"]",
+            "[\"clone-observer\", \"clone-observer\"]",
+        );
+        assert!(Config::from_str(&duplicate).is_err());
+
+        let invalid = content.replace("audit-log", "Audit Log");
+        assert!(Config::from_str(&invalid).is_err());
     }
 
     #[test]

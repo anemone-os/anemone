@@ -4,7 +4,8 @@ use alloc::{
 };
 
 use super::{
-    InstanceIdentity, PublishFailure, PublishedInstance, Runtime, RuntimeInstance, RuntimeState,
+    InstanceIdentity, InstanceOrigin, PublishFailure, PublishedInstance, Runtime, RuntimeInstance,
+    RuntimeState,
 };
 use crate::nemophila::weave::{BindingPolicy, CallbackBinding, PointIdentity};
 
@@ -59,6 +60,7 @@ impl LoadTransaction {
     pub(in crate::nemophila) fn commit(
         mut self,
         instance: RuntimeInstance,
+        origin: InstanceOrigin,
     ) -> Result<InstanceIdentity, PublishFailure> {
         let transaction = self
             .identity
@@ -78,7 +80,7 @@ impl LoadTransaction {
             .transactions
             .remove(&transaction)
             .expect("Nemophila load transaction disappeared before commit");
-        let published = PublishedInstance::new(instance, record.bindings);
+        let published = PublishedInstance::new(instance, origin, record.bindings);
         match inner.instances.entry(identity) {
             Entry::Vacant(entry) => {
                 // Removing the unpublished reservation record and inserting
