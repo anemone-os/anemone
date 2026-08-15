@@ -21,7 +21,7 @@ impl Module for CloneObserver {
     fn load(context: &mut LoadContext<'_>) -> Result<(), RegistrationError> {
         let callback_released = Rc::new(Cell::new(false));
         let release_probe = ReleaseProbe(callback_released.clone());
-        let invocation_count = Rc::new(Cell::new(0u32));
+        let mut invocation_count = 0u32;
         let mut prefix = Vec::from("clone creator=".as_bytes());
         prefix.reserve(16);
 
@@ -32,8 +32,8 @@ impl Module for CloneObserver {
                 .clone_observer()
                 .register(move |event, callback| {
                     let _retain_until_instance_destroy = &release_probe;
-                    let invocation = invocation_count.get() + 1;
-                    invocation_count.set(invocation);
+                    invocation_count += 1;
+                    let invocation = invocation_count;
                     let mut message = String::from_utf8(prefix.clone()).expect("ASCII prefix");
                     message.push_str(&format!("{} child={}", event.creator_tid, event.child_tid));
                     callback.logging().write(LogLevel::Info, &message);

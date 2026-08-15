@@ -19,9 +19,11 @@ impl CloneObserverPoint<'_> {
     /// A failed Host registration drops the pending environment before
     /// returning the typed error. A successful registration retains the
     /// callback until the runtime destroys the complete guest instance.
+    /// The runtime serializes callbacks for one instance, so captured state
+    /// can use ordinary mutable access instead of interior mutability.
     pub fn register<F>(&mut self, callback: F) -> Result<(), RegistrationError>
     where
-        F: Fn(CloneEvent, &mut CallbackContext<'_>) + 'static,
+        F: FnMut(CloneEvent, &mut CallbackContext<'_>) + 'static,
     {
         CALLBACK_SLOT.register(Box::new(callback))
     }
@@ -41,7 +43,7 @@ pub enum RegistrationError {
     AlreadyRegistered,
 }
 
-type CloneCallback = dyn Fn(CloneEvent, &mut CallbackContext<'_>);
+type CloneCallback = dyn FnMut(CloneEvent, &mut CallbackContext<'_>);
 
 enum CallbackSlotState {
     Empty,
@@ -113,7 +115,7 @@ impl CallbackSlot {
     fn invoke(&self, event: CloneEvent) {
         // Safety: see the CallbackSlot invariant. Callback dispatch is not
         // permitted until registration has completed successfully.
-        let state = unsafe { &*self.0.get() };
+        let state = unsafe { &mut *self.0.get() };
         let CallbackSlotState::Registered(callback) = state else {
             panic!("clone callback invoked before successful module load")
         };
