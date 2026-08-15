@@ -31,6 +31,12 @@ impl CharDev for Null {
         ctx.set_pos(0);
         Ok(0)
     }
+
+    fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
+        Ok(request.ready_or_unsupported(
+            request.interests() & (PollEvent::READABLE | PollEvent::WRITABLE),
+        ))
+    }
 }
 
 #[initcall(probe)]

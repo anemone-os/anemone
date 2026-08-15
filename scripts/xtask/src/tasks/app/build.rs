@@ -14,7 +14,7 @@ use crate::{
     config::{
         app::{App, AppTarget, Artifact},
         build::RUST_OBJDUMP,
-        platform::{Arch, TargetTriple},
+        platform::{Arch, ArtifactTargetId, CargoTarget},
     },
     log_progress,
     tasks::utils::cmd_echo,
@@ -72,8 +72,12 @@ impl BuildCtx {
         Self { target }
     }
 
-    pub fn target_triple(&self) -> Option<TargetTriple> {
-        self.target.target_triple()
+    pub fn cargo_target(&self) -> Option<CargoTarget> {
+        self.target.cargo_target()
+    }
+
+    pub fn artifact_target_id(&self) -> Option<ArtifactTargetId> {
+        self.target.artifact_target_id()
     }
 
     pub fn target_name(&self) -> &str {
@@ -307,7 +311,7 @@ fn artifact_disasm_path(artifact_path: &Path) -> anyhow::Result<PathBuf> {
 /// app.toml/artifact/path
 fn expand_artifact_path(artifact: &Artifact, context: &BuildCtx) -> anyhow::Result<String> {
     let expanded = artifact.path.replace("${ARCH}", context.target_name());
-    let Some(target_triple) = context.target_triple() else {
+    let Some(cargo_target) = context.cargo_target() else {
         if expanded.contains("${TARGET_TRIPLE}") {
             bail!(
                 "artifact path '{}' cannot expand ${{TARGET_TRIPLE}} for host because host has no Anemone target triple",
@@ -316,7 +320,7 @@ fn expand_artifact_path(artifact: &Artifact, context: &BuildCtx) -> anyhow::Resu
         }
         return Ok(expanded);
     };
-    Ok(expanded.replace("${TARGET_TRIPLE}", target_triple.as_str()))
+    Ok(expanded.replace("${TARGET_TRIPLE}", cargo_target.as_str()))
 }
 
 fn artifact_export_name(artifact: &Artifact, context: &BuildCtx) -> anyhow::Result<String> {
@@ -387,10 +391,10 @@ mod tests {
         let root = TestDirectory::new();
         let workdir = root.0.join("work");
         let out_dir = root.0.join("out");
-        fs::create_dir_all(workdir.join("riscv64/riscv64-unknown-anemone-elf")).unwrap();
+        fs::create_dir_all(workdir.join("riscv64/riscv64gc-unknown-none-elf")).unwrap();
         fs::create_dir_all(&out_dir).unwrap();
 
-        let binary = workdir.join("riscv64/riscv64-unknown-anemone-elf/prebuilt");
+        let binary = workdir.join("riscv64/riscv64gc-unknown-none-elf/prebuilt");
         let script = workdir.join("script.sh");
         fs::write(&binary, b"prebuilt-binary\0bytes").unwrap();
         fs::write(&script, b"#!/bin/sh\nexit 97\n").unwrap();

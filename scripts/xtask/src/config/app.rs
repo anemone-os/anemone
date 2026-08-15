@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use anyhow::Context;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use super::platform::{Arch, TargetTriple};
+use super::platform::{Arch, ArtifactTargetId, CargoTarget};
 
 /// Maximum final Command argv length, including the program and CLI extras.
 ///
@@ -49,9 +49,16 @@ impl AppTarget {
         }
     }
 
-    pub fn target_triple(&self) -> Option<TargetTriple> {
+    pub fn cargo_target(&self) -> Option<CargoTarget> {
         match self {
-            Self::Anemone(arch) => Some(arch.target_triple()),
+            Self::Anemone(arch) => Some(arch.cargo_target()),
+            Self::Host => None,
+        }
+    }
+
+    pub fn artifact_target_id(&self) -> Option<ArtifactTargetId> {
+        match self {
+            Self::Anemone(arch) => Some(arch.artifact_target_id()),
             Self::Host => None,
         }
     }

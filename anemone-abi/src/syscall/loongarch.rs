@@ -74,6 +74,7 @@ pub mod linux {
     pub const SYS_MOUNT: u64 = 40;
 
     pub const SYS_STATFS: u64 = 43;
+    pub const SYS_FSTATFS: u64 = 44;
 
     pub const SYS_TRUNCATE: u64 = 45;
     pub const SYS_FTRUNCATE: u64 = 46;
@@ -207,6 +208,7 @@ pub mod linux {
     pub const SYS_UMASK: u64 = 166;
     pub const SYS_PRCTL: u64 = 167;
 
+    pub const SYS_GETCPU: u64 = 168;
     pub const SYS_GETTIMEOFDAY: u64 = 169;
 
     pub const SYS_GETPID: u64 = 172;
@@ -250,6 +252,7 @@ pub mod linux {
     pub const SYS_CLONE: u64 = 220;
     pub const SYS_EXECVE: u64 = 221;
     pub const SYS_MMAP: u64 = 222;
+    pub const SYS_FADVISE64: u64 = 223;
     pub const SYS_MPROTECT: u64 = 226;
     pub const SYS_MSYNC: u64 = 227;
     pub const SYS_MLOCK: u64 = 228;

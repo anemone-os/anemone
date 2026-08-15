@@ -6,12 +6,14 @@ default:
 xtask *args:
     @cd scripts/xtask && cargo run -q -- {{ args }}
 
-[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `virtio-drivers`, or `lwext4`")]
+[doc("run a repository-owned test suite: `xtask`, `symtab`, `net-host`, `nemophila-wasm`, `nemophila-module`, `virtio-drivers`, or `lwext4`")]
 test suite:
     @case {{ quote(suite) }} in \
         xtask) just test-xtask ;; \
         symtab) just test-symtab ;; \
         net-host) just test-net-host ;; \
+        nemophila-wasm) just test-nemophila-wasm ;; \
+        nemophila-module) just test-nemophila-module ;; \
         virtio-drivers) just test-virtio-drivers ;; \
         lwext4) just test-lwext4 ;; \
         *) echo "unknown test suite:" {{ quote(suite) }} >&2; exit 2 ;; \
@@ -32,6 +34,19 @@ test-net-host:
     @cargo test -p smoltcp --lib --no-default-features --features std,medium-ip,proto-ipv4,socket-tcp socket::tcp::test::
     @cargo test -p anemone-smoltcp-stack --no-default-features --no-run
     @cargo check -p anemone-smoltcp-stack --no-default-features
+
+[private]
+test-nemophila-wasm:
+    @cargo check -p nemophila-wasm --no-default-features --features extra-checks
+    @cargo test -p nemophila-wasm --features host-test
+    @cargo miri test -p nemophila-wasm --features host-test integration::stage1_embedding
+    @cargo rustc -p nemophila-wasm-embed-validation --target riscv64gc-unknown-none-elf -- -C panic=abort
+    @cargo rustc -p nemophila-wasm-embed-validation --target loongarch64-unknown-none -- -C panic=abort
+
+[private]
+test-nemophila-module:
+    @just module build clone-observer
+    @just module build task-lineage-auditor
 
 [private]
 test-virtio-drivers:
@@ -58,7 +73,7 @@ build *args:
 qemu *args:
     @just xtask qemu {{ args }}
 
-[doc("format Rust sources in the explicit `all`, `kernel`, or app scope")]
+[doc("format Rust sources in an explicit `all`, `kernel`, `modules`, app, or module scope")]
 fmt scope *args:
     @just xtask fmt {{ scope }} {{ args }}
 
@@ -69,6 +84,10 @@ conf *args:
 [doc("app related commands. type `just app -h` for more details.")]
 app *args:
     @just xtask app {{ args }}
+
+[doc("build and export a Nemophila module by identity")]
+module *args:
+    @just xtask module {{ args }}
 
 [doc("manage curated external source references")]
 xref *args:

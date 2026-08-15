@@ -1,0 +1,7 @@
+name = "boot-reject-validation"
+
+[build]
+workdir = "."
+driver = "cargo"
+manifest = "Cargo.toml"
+artifact = "nemophila_boot_reject_validation.wasm"

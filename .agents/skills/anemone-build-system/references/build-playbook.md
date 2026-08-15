@@ -62,12 +62,13 @@ Use `--help` to obtain current arguments instead of copying detailed invocations
   Cargo/Command/Source driver and the artifacts applicable to that target. Artifact target subsets
   must be non-empty, remain inside the app target list, cover every app target, and produce unique
   export names. `host` is app-local, not a Platform architecture.
-- Treat Cargo as Anemone-target-only: it selects the repository target JSON and bare-metal
+- Treat Cargo as Anemone-target-only: it selects a Rust builtin bare-metal target and repository-owned
   `build-std` parameters. A host Cargo recipe uses Command and remains app-owned.
 - Treat Command as trusted repository build code: execute its non-empty bounded argv directly in
   workdir, append caller extras, override only the target context, and retain the common status,
   artifact validation, export, and diagnostics path. Anemone targets set `ANEMONE_ARCH` and
-  `ANEMONE_TARGET_TRIPLE`; host sets `ANEMONE_ARCH=host` and removes inherited
+  `ANEMONE_TARGET_TRIPLE` as an Anemone artifact identity distinct from Cargo's compiler target;
+  host sets `ANEMONE_ARCH=host` and removes inherited
   `ANEMONE_TARGET_TRIPLE` because no Anemone compiler target exists.
 - Treat Source as a command no-op only: reject manifest or caller driver args, then retain the same
   path expansion, ordinary-file check, export, and explicit post-export diagnostics as Cargo.

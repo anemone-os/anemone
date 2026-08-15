@@ -58,7 +58,7 @@ impl<'a> UbootPostLink<'a> {
             Uboot::Raw { filename } => (output_dir.join(filename), None),
         };
         Self {
-            objcopy: arch.target_triple().objcopy(),
+            objcopy: arch.kernel_target().objcopy(),
             uboot,
             kernel_elf: kernel_elf.to_owned(),
             raw_output,

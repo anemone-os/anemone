@@ -52,15 +52,16 @@ artifact selector.
 and artifact export contract. `riscv64` and `loongarch64` reference Platform architecture/compiler
 targets; `host` is an app-local build target and must not enter the Platform, rootfs, kernel, or QEMU
 architecture model. Cargo is Anemone-target-only and runs its declared command with repository
-bare-metal parameters and target JSON. A host Cargo invocation therefore uses Command and remains
+bare-metal parameters and a Rust builtin target. A host Cargo invocation therefore uses Command and remains
 app-owned. Command runs a bounded non-empty argv directly in workdir, appends caller extras, and
 inherits the process environment. Anemone targets override `ANEMONE_ARCH` and
-`ANEMONE_TARGET_TRIPLE`; host overrides `ANEMONE_ARCH=host` and removes inherited
+`ANEMONE_TARGET_TRIPLE`; this variable is the Anemone artifact identity rather than Cargo's compiler target.
+Host overrides `ANEMONE_ARCH=host` and removes inherited
 `ANEMONE_TARGET_TRIPLE`. Source accepts no driver args and runs no command; it submits
 already-existing ordinary files to the same path expansion and export path. Host-capable manifests
 may restrict an artifact to a non-empty subset of the app targets; omission applies it to every app
-target, and every declared app target must retain at least one artifact. Only artifacts applicable to
-`host` reject `${TARGET_TRIPLE}`, because host has no Anemone target triple. The selected target's
+target, and every declared app target must retain at least one artifact. `${TARGET_TRIPLE}` expands the Cargo compiler target used for artifact paths; artifacts applicable to
+`host` reject it because host has no Anemone Cargo target. The selected target's
 export names must be unique. No driver proves toolchain availability or runtime compatibility. Keep
 locator name, manifest identity, target list, driver choice, artifact target subset, and artifact path
 coherent.

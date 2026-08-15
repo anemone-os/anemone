@@ -1,7 +1,8 @@
-//! Compatibility stubs for filesystem synchronization syscalls.
+//! Compatibility stubs for filesystem cache and synchronization syscalls.
 
 use crate::{prelude::*, task::files::FileDesc};
 
+pub mod fadvise64;
 pub mod fdatasync;
 pub mod fsync;
 pub mod readahead;

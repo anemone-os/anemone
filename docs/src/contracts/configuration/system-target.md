@@ -5,13 +5,14 @@
 **Owner：** canonical build configuration model；每份配置事实与 derived snapshot 的唯一 owner 见下表
 **参与领域：** architecture / Platform / SystemTarget / KernelConfig / BuildPreset / app-rootfs task /
 `scripts/xtask` resolver与system action
-**覆盖范围：** 配置事实分层、SystemTarget boot/deploy与first-version static IPv4 selection、不可手写的 resolved snapshot
+**覆盖范围：** 配置事实分层、SystemTarget boot/deploy、required Nemophila embedded module与first-version static IPv4 selection、
+不可手写的 resolved snapshot
 **不覆盖：** Platform DT/QEMU delivery、kernel output、具体 action workflow、artifact freshness/provenance、
 runtime topology/reachability验证、runtime network configuration或多个external interface
 **实现位置：** `scripts/xtask/src/config/`、`conf/{platforms,system-targets,kernel-configs,build-presets}/`
 **依赖：** [`BOOT-PROTOCOL-001`](../task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)
 **Pending Successor：** None
-**最后核验：** 2026-07-29
+**最后核验：** 2026-08-15；`NEMOPHILA-R0-CUTOVER` refine Effective
 
 本页在后续network configuration设计首次跨RFC复用时，从已实现并关闭的System Target Model R6提取
 所需的最小current baseline。提取本身不改变schema、resolver、kernel input或runtime behavior；未被本页
@@ -23,7 +24,7 @@ runtime topology/reachability验证、runtime network configuration或多个exte
 | --- | --- | --- | --- |
 | ISA / ABI / target triple / toolchain contract | architecture / compiler target | typed target reference | 编译目标选择 |
 | guest machine topology、boot ABI、DT/QEMU与kernel-output contract | Platform | `PlatformRef`与resolved projection | machine与boot environment |
-| root mount、typed initial-program source、optional static IPv4与boot/deploy requirements | SystemTarget | `SystemTargetRef`与resolved projection | 产品级boot/deploy selection |
+| root mount、typed initial-program source、ordered required Nemophila modules、optional static IPv4与boot/deploy requirements | SystemTarget | `SystemTargetRef`与resolved projection | 产品级boot/deploy selection |
 | kernel feature / policy / capacity | KernelConfig | `KernelConfigRef`与resolved projection | kernel capability与参数 |
 | app/rootfs recipe与artifact source | 对应app/rootfs task或manifest | canonical reference | artifact materialization |
 | target + KernelConfig + kernel-only Cargo profile具名组合 | BuildPreset | `BuildPresetRef` | selection，不覆写被引用对象 |
@@ -61,30 +62,40 @@ KernelConfig与BuildPreset schema validation及system build transaction共同证
 
 ## STM-TARGET-001 — SystemTarget 是 boot/deploy contract
 
-**规则：** SystemTarget引用一个Platform，并拥有root mount、typed Boot Protocol entry source、optional
-first-version static IPv4 deployment与产品级boot/deploy requirements。它可以要求KernelConfig提供capability，但不选择或复制具体KernelConfig参数；
+**规则：** SystemTarget引用一个Platform，并拥有root mount、typed Boot Protocol entry source、ordered duplicate-free required
+Nemophila embedded module identities、optional first-version static IPv4 deployment与产品级boot/deploy requirements。它可以要求
+KernelConfig提供capability，但不选择或复制具体KernelConfig参数；
 可以引用app/root source identity，但不拥有其build recipe；不声明kernel image format、QEMU bind template
 或本次host path。
+
+Nemophila identity引用canonical `nemophila/modules/<identity>/module.toml`。System build按resolved order调用唯一module build owner，
+核对并消费本次fresh ordinary export，在KernelConfig artifact-size上限内生成identity/order/immutable bytes projection；SystemTarget
+不保存module recipe、export path、hash/provenance、loaded state或source priority。空selection产生空catalog并正常启动；non-empty
+selection在initial userspace前按序required load，任一runtime load失败先完成当前transaction rollback，再boot-fatal。
 
 当前effective network schema只允许一个optional `[network.ipv4]`，包含一个external logical interface name、
 unicast non-loopback address、checked prefix与optional unicast non-loopback default gateway。section缺失表示
 loopback-only，不产生implicit external fallback。SystemTarget不证明Platform device topology、interface存在性、
 gateway reachability或backend匹配；这些runtime事实不能回写或替换canonical deployment input。
 
-**违反表现：** SystemTarget保存machine/DTS topology、整份KernelConfig、worktree-local image或QEMU bind；
+**违反表现：** SystemTarget保存machine/DTS topology、整份KernelConfig、worktree-local image、QEMU bind、Nemophila module recipe/
+export/provenance或loaded state；
 Platform、rootfs、Preset或kernel runtime另存一份应由SystemTarget拥有的boot/deploy selection；未cut over的
-RFC target被提前写入tracked schema或称为current behavior。
+RFC target被提前写入tracked schema或称为current behavior；system build读取stale module export、复制module recipe、在required
+load失败后继续initial userspace，或把selection order解释为source/binding priority。
 
-**验证 / Enforcement：** SystemTarget serde/schema拒绝未知或跨层字段及非法interface/address/prefix/gateway；
+**验证 / Enforcement：** SystemTarget serde/schema拒绝未知或跨层字段、非法/重复Nemophila identity及非法interface/address/prefix/gateway；
 tracked target覆盖Platform、root、两类initial-program source和optional static IPv4。preset与完整tuple通过同一
-resolver取得同一target snapshot；build从该snapshot生成private `network_defs.rs`，kernel只消费有限typed input而
-不解析SystemTarget TOML。generated projection被clean/ignore规则覆盖，不成为canonical truth。
+resolver取得同一target snapshot；build从该snapshot生成private `network_defs.rs`与`nemophila_defs.rs`，kernel只消费有限typed
+input而不解析SystemTarget TOML。module build-failure/non-regular/oversized与双架构boot-negative/positive证据闭合required load；
+generated projection被clean/ignore规则覆盖，不成为canonical truth。
 
 **最初来源：** [System Target Model RFC R6](../../rfcs/system-target-model/invariants.md#stm-target-001---system-target-是-bootdeploy-contract)。
 
 **当前来源：** [System Target Model R0-R2 transaction](../../devlog/transactions/2026-07-22-system-target-model.md)、
-[R6 named bind / initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)与
-[Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的`NET-UDP-CONTROL-CUTOVER`。
+[R6 named bind / initial argv](../../devlog/transactions/2026-07-24-system-target-model-r6-bind-argv.md)、
+[Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的`NET-UDP-CONTROL-CUTOVER`与
+[Nemophila closure transaction](../../devlog/transactions/2026-08-14-nemophila.md)的`NEMOPHILA-R0-CUTOVER`。
 
 ## STM-RESOLVE-001 — Resolved build 是不可手写的派生 snapshot
 

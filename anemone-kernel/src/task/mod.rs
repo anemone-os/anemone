@@ -7,6 +7,7 @@ mod topology;
 pub use topology::*;
 mod tid;
 pub use tid::*;
+mod name;
 
 // integration with other subsystems
 pub mod cpu_usage;
@@ -91,19 +92,10 @@ pub struct Task {
     /// Kernel stack owned by this task.
     kstack: KernelStack,
 
-    /// Name of this task.
-    ///
-    /// For kernel threads, it is formated in "@kernel/xxx" style, where "xxx"
-    /// is the name passed when creating the task.
-    ///
-    /// For user processes, it is formated in "@user/xxx" style, where "xxx" is
-    /// the executable name passed to [kernel_execve].
-    ///
-    /// Full user command line is not stored in kernel. instead, kernel only
-    /// stores the address range of the user command line on user's stack.
-    ///
-    /// So this field is almost purely for debugging and logging purpose.
-    name: NoIrqRwLock<Box<str>>,
+    /// Authoritative task name used by diagnostics and Linux `comm` observers.
+    /// Kernel labels and raw user `comm` bytes have distinct representations;
+    /// clone inherits this value and exec replaces it with the executable name.
+    name: NoIrqRwLock<name::TaskName>,
 
     /// Task attribute flags.
     ///
@@ -466,7 +458,7 @@ impl Task {
             tgid,
             create_instant,
             kstack: stack,
-            name: NoIrqRwLock::new((String::from("@kernel/") + name).into_boxed_str()),
+            name: NoIrqRwLock::new(name::TaskName::kernel(name)),
             flags: NoIrqRwLock::new(flags | TaskFlags::KERNEL),
             usp: RwLock::new(None),
             cpuid,
@@ -520,7 +512,7 @@ impl Task {
                 tgid: Tid::IDLE,
                 create_instant: MonotonicInstant::now(),
                 kstack: stack,
-                name: NoIrqRwLock::new(Box::from("@idle")),
+                name: NoIrqRwLock::new(name::TaskName::idle()),
                 flags: NoIrqRwLock::new(TaskFlags::IDLE | TaskFlags::KERNEL),
                 usp: RwLock::new(None),
                 cpuid: cur_cpu_id(),
@@ -636,11 +628,6 @@ impl Task {
         self.create_instant
     }
 
-    /// Get the task name. This introduces a heap allocation. Pay attention.
-    pub fn name(&self) -> Box<str> {
-        self.name.read().clone()
-    }
-
     /// Get the task flags.
     ///
     /// We don't provide wrapers for each flag (something like `is_kernel`) on
@@ -706,13 +693,17 @@ impl Task {
     ///
     /// It's quite obvious. Almost always this function should only be called
     /// when doing an [kernel_execve] or something similar.
-    pub unsafe fn switch_exec_ctx(
+    pub(in crate::task) unsafe fn switch_exec_ctx(
         &self,
-        name: Box<str>,
+        name: name::TaskName,
         uspace: Arc<UserSpaceHandle>,
         flags: TaskFlags,
         fpu_used: bool,
     ) {
+        assert!(
+            !flags.is_kernel() && matches!(&name, name::TaskName::UserComm(_)),
+            "a user execution context requires a user task comm"
+        );
         // NOTE THE LOCK ORDERING
         let mut usp_ptr = self.usp.write();
         let mut flags_ptr = self.flags.write();

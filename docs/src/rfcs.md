@@ -49,6 +49,31 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Closed R6（Nemophila R0）；以 WIT 定义接口、由 kernel
+  使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
+  runtime-owned transactional load、per-instance serial
+  callback、trap containment 与 busy try-unload，并以 task owner 的 clone observer 和同一份 Rust-to-Wasm artifact 完成
+  RV64/LA64 vertical slice。
+  [目标与不变量](./rfcs/nemophila/invariants.md)定义 instance、artifact、weave、clone 与 lifecycle proof；
+  [实施路线](./rfcs/nemophila/implementation.md)已关闭 Stage 1、Stage 2与Stage 2 feedback interlude，形成当前第一方
+  interpreter、WIT/SDK、Cargo module build与canonical artifact；Stage 3与Stage 4各两个Checkpoint均已关闭，形成dormant
+  kernel-internal transactional runtime与完整weave/lifecycle；Stage 5单一Checkpoint 5A已关闭，Stage 6已完成SystemTarget
+  owner-driven rebuild与ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection和
+  双架构acceptance。`NEMOPHILA-R0-CUTOVER`已建立Nemophila current contract并Refine `STM-TARGET-001`；pre-RFC
+  [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
+- [RFC-20260815-kernel-slab-allocator](./rfcs/kernel-slab-allocator/index.md)：Closed R0；在`mm::kmalloc`
+  owner内以slab class、bounded per-CPU local cache和shared central class替换small-object global-lock
+  common path，Talc继续承担bootstrap/span backing与large/special-layout fallback。首版允许任意CPU释放到
+  当前CPU cache，接受按class保留历史峰值span与有界per-CPU滞留，不引入owner CPU、remote-free、主动均衡、
+  span reclaim或frame allocator改造。[目标与不变量](./rfcs/kernel-slab-allocator/invariants.md)定义
+  boot/runtime同域、slot唯一owner、local/central handoff、锁/IRQ、failure与双架构cross-CPU proof obligation；
+  唯一`KERNEL-SLAB-CUTOVER`已Introduce Active `MM-KMALLOC-001/002`并关闭RFC。
+- [RFC-20260814-static-sysfs](./rfcs/static-sysfs/index.md)：Closed R1；接受注册 canonical `sysfs`
+  no-device filesystem，以 persistent singleton static tree 和 `/sys/kernel/{address_bits,cpu_byteorder}`
+  两个只读文本 consumer 原子验证目录、读取与 multi-mount lifetime；明确不接入现有 kobject、动态
+  namespace、device model 或 loop sysfs。实现代码参考 procfs 按职责目录化，但不复用 procfs private
+  entry，也不提前抽取 generic pseudo-filesystem framework；`STATIC-SYSFS-CUTOVER` 已使其成为 Closed R1，
+  `SYSFS-STATIC-001` 与 `SYSFS-MOUNT-001` 已进入 current contract。
 - [RFC-20260810-pty-devpts](./rfcs/pty-devpts/index.md)：Accepted R3；在已关闭的Serial TTY R1之上接受user-mountable
   single-persistent-instance Unix98 PTY/devpts、由devfs预发布且由persistent init挂载的canonical `/dev/pts`、任意已有
   directory上的additional view、dynamic slave semantic endpoint、safe-reuse pair/opened-description lifecycle、
@@ -181,6 +206,11 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
   当前发布正文、[目标与不变量](./rfcs/net-tcp/invariants.md)、[实施计划](./rfcs/net-tcp/implementation.md)及冻结的
   [历史定位共识](./rfcs/net-tcp/backgrounds/positionings.md)；current effective规则见Network与Socket contract，
   register没有新增当前问题。
+- [RFC-20260814-tcp-listener-ingress-publication](./rfcs/tcp-listener-ingress-publication/index.md)：Closed R0；把active-connect
+  egress selection与listener ingress publication分开，由Stack TCP owner将一份logical listener投影到boot-static
+  local/external path，并在每次interface pump后以aggregate admission线性化pending child。target保持一个backlog、
+  opaque child handoff和all-projection cleanup，同时把unscoped logical listener诊断为`idiag_if = 0`；
+  `TCP-LISTENER-INGRESS-CUTOVER`已Refine三项current contract，双架构runtime与独立review闭合，transaction None。
 - [RFC-20260809-read-only-network-diagnostics](./rfcs/read-only-network-diagnostics/index.md)：Closed R0；交付
   initial-domain、IPv4-only、request-time snapshot的只读netlink子集，使未修改`ip link/addr/route show`与
   `ss -tan`可读取logical interface、static control plane与TCP owner facts。既有网络owner不迁移；新增netlink

@@ -28,6 +28,7 @@ pub struct TcpPolicy {
     endpoint_capacity: usize,
     engine_timer_capacity: usize,
     listener_completed_capacity: usize,
+    listener_projection_capacity: usize,
     rx_buffer_bytes: usize,
     tx_buffer_bytes: usize,
     deferred_reclaim_capacity: usize,
@@ -43,6 +44,7 @@ impl TcpPolicy {
         endpoint_capacity: usize,
         engine_timer_capacity: usize,
         listener_completed_capacity: usize,
+        listener_projection_capacity: usize,
         rx_buffer_bytes: usize,
         tx_buffer_bytes: usize,
         deferred_reclaim_capacity: usize,
@@ -55,6 +57,7 @@ impl TcpPolicy {
             endpoint_capacity,
             engine_timer_capacity,
             listener_completed_capacity,
+            listener_projection_capacity,
             rx_buffer_bytes,
             tx_buffer_bytes,
             deferred_reclaim_capacity,
@@ -67,6 +70,10 @@ impl TcpPolicy {
 
     pub(crate) const fn listener_completed_capacity(self) -> usize {
         self.listener_completed_capacity
+    }
+
+    pub(crate) const fn listener_projection_capacity(self) -> usize {
+        self.listener_projection_capacity
     }
 
     pub(crate) const fn connect_timeout_ms(self) -> usize {
@@ -94,19 +101,32 @@ pub(crate) enum EndpointRole {
 }
 
 pub(crate) struct Listener {
-    pub(crate) interface: InterfaceId,
     pub(crate) binding: TcpLocalBinding,
     pub(crate) backlog: usize,
+    pub(crate) projections: Vec<ListenerProjection>,
+}
+
+pub(crate) struct ListenerProjection {
+    pub(crate) interface: InterfaceId,
     pub(crate) slots: Vec<ListenerSlot>,
 }
 
 pub(crate) struct ListenerSlot {
     pub(crate) generation: u64,
     pub(crate) handle: Option<SocketHandle>,
-    pub(crate) claimed: bool,
+    /// The sole logical backlog-occupancy truth. Engine state may form a
+    /// candidate, but only `Pending` and `Claimed` consume aggregate admission.
+    pub(crate) phase: ListenerSlotPhase,
     /// Engine-derived protocol reservation used only while this slot owns the
     /// engine. Stack progression refreshes it before another admission can run.
     pub(crate) tuple: Option<ConnectionTuple>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ListenerSlotPhase {
+    Open,
+    Pending,
+    Claimed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,6 +187,7 @@ pub(crate) struct DeferredReclaim {
 pub(crate) enum ReclaimAction {
     RearmListener {
         listener: TcpEndpointId,
+        projection: usize,
         slot: usize,
         generation: u64,
     },
@@ -385,7 +406,8 @@ mod tests {
 
     const LOCAL: Ipv4Address = Ipv4Address::new([127, 0, 0, 1]);
     const LISTEN_PORT: u16 = 2345;
-    const POLICY: TcpPolicy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 60_000, 60_000, 40000, 40063);
+    const POLICY: TcpPolicy =
+        TcpPolicy::new(64, 64, 10, 2, 32, 32, 64, 60_000, 60_000, 40000, 40063);
 
     fn test_stack(policy: TcpPolicy) -> (Stack, InterfaceId) {
         let mut stack = Stack::with_policy(StackPolicy::new(
@@ -424,7 +446,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -460,7 +481,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -611,7 +631,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -664,7 +683,7 @@ mod tests {
             .unwrap();
         assert_eq!(binding.port(), LISTEN_PORT);
         let _ = stack
-            .listen_tcp_endpoint(listener, interface, Ipv4Address::UNSPECIFIED)
+            .listen_tcp_endpoint(listener, Ipv4Address::UNSPECIFIED)
             .unwrap();
 
         let conflict = stack.create_tcp_endpoint().unwrap();
@@ -822,7 +841,7 @@ mod tests {
     fn every_engine_can_enter_preallocated_reclaim_without_cleanup_failure() {
         const CAPACITY: usize = 12;
         let policy = TcpPolicy::new(
-            16, CAPACITY, 10, 16, 16, CAPACITY, 60_000, 60_000, 41000, 41015,
+            16, CAPACITY, 10, 2, 16, 16, CAPACITY, 60_000, 60_000, 41000, 41015,
         );
         let (mut stack, interface) = test_stack(policy);
         let mut endpoints = Vec::new();
@@ -840,10 +859,10 @@ mod tests {
         assert_eq!(stack.protocols.tcp.engine_count, CAPACITY);
         for endpoint in endpoints {
             assert!(
-                stack
+                !stack
                     .release_tcp_endpoint(endpoint, TcpReleaseReason::CreationRollback)
                     .unwrap()
-                    .is_some()
+                    .is_empty()
             );
         }
         assert_eq!(stack.protocols.tcp.deferred.len(), CAPACITY);
@@ -870,7 +889,7 @@ mod tests {
 
     #[test]
     fn endpoint_engine_and_ephemeral_capacity_fail_typed_and_recover() {
-        let policy = TcpPolicy::new(2, 1, 1, 16, 16, 1, 60_000, 60_000, 43000, 43000);
+        let policy = TcpPolicy::new(2, 1, 1, 2, 16, 16, 1, 60_000, 60_000, 43000, 43000);
         let (mut stack, interface) = test_stack(policy);
         let first = stack.create_tcp_endpoint().unwrap();
         let second = stack.create_tcp_endpoint().unwrap();
@@ -935,7 +954,7 @@ mod tests {
             .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, LISTEN_PORT))
             .unwrap();
         stack
-            .listen_tcp_endpoint(listener, interface, Ipv4Address::UNSPECIFIED)
+            .listen_tcp_endpoint(listener, Ipv4Address::UNSPECIFIED)
             .unwrap();
         let client = stack.create_tcp_endpoint().unwrap();
         let _ = stack
@@ -957,7 +976,7 @@ mod tests {
             stack
                 .release_tcp_endpoint(listener, TcpReleaseReason::ListenerWithdrawal)
                 .unwrap()
-                .is_none()
+                .is_empty()
         );
 
         let contender = stack.create_tcp_endpoint().unwrap();
@@ -981,7 +1000,7 @@ mod tests {
             .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, LISTEN_PORT))
             .unwrap();
         stack
-            .listen_tcp_endpoint(listener, interface, Ipv4Address::UNSPECIFIED)
+            .listen_tcp_endpoint(listener, Ipv4Address::UNSPECIFIED)
             .unwrap();
         let client = stack.create_tcp_endpoint().unwrap();
         let _ = stack
@@ -997,8 +1016,9 @@ mod tests {
             .claim_tcp_pending_child(listener)
             .unwrap()
             .expect("completed child must be claimable");
-        let (_, slot, _) = child.owner_parts();
-        let handle = stack.protocols.tcp.listener(listener).unwrap().slots[slot]
+        let (_, projection, slot, _) = child.owner_parts();
+        let handle = stack.protocols.tcp.listener(listener).unwrap().projections[projection].slots
+            [slot]
             .handle
             .unwrap();
         stack
@@ -1011,14 +1031,15 @@ mod tests {
         let _ = stack.cancel_tcp_child(child).unwrap();
         drive(&mut stack, interface, 128);
         assert!(stack.protocols.tcp.deferred.is_empty());
-        let slot = &stack.protocols.tcp.listener(listener).unwrap().slots[slot];
+        let slot =
+            &stack.protocols.tcp.listener(listener).unwrap().projections[projection].slots[slot];
         assert!(slot.handle.is_some());
-        assert!(!slot.claimed);
+        assert_eq!(slot.phase, ListenerSlotPhase::Open);
     }
 
     #[test]
     fn connecting_timeout_is_preserved_as_a_typed_owner_observation() {
-        let policy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 1, 60_000, 40000, 40063);
+        let policy = TcpPolicy::new(64, 64, 10, 2, 32, 32, 64, 1, 60_000, 40000, 40063);
         let (mut stack, interface) = test_stack(policy);
         let endpoint = stack.create_tcp_endpoint().unwrap();
         let _ = stack
@@ -1080,7 +1101,7 @@ mod tests {
 
     #[test]
     fn normalized_backlog_is_the_only_listener_admission_limit() {
-        let (mut stack, interface) = test_stack(POLICY);
+        let (mut stack, _interface) = test_stack(POLICY);
         let listener = stack.create_tcp_endpoint().unwrap();
         stack
             .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, LISTEN_PORT))
@@ -1090,7 +1111,6 @@ mod tests {
             stack
                 .listen_tcp_endpoint_with_backlog(
                     listener,
-                    interface,
                     Ipv4Address::UNSPECIFIED,
                     TcpListenBacklog::new(expected),
                 )
@@ -1098,7 +1118,7 @@ mod tests {
             let owner = stack.protocols.tcp.listener(listener).unwrap();
             assert_eq!(owner.backlog, expected);
             assert_eq!(
-                owner
+                owner.projections[0]
                     .slots
                     .iter()
                     .filter(|slot| slot.handle.is_some())
@@ -1109,7 +1129,6 @@ mod tests {
         assert_eq!(
             stack.listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(11),
             ),
@@ -1120,7 +1139,7 @@ mod tests {
 
     #[test]
     fn reuse_requires_both_owners_and_never_allows_duplicate_listener() {
-        let (mut stack, interface) = test_stack(POLICY);
+        let (mut stack, _interface) = test_stack(POLICY);
         let wildcard = stack.create_tcp_endpoint().unwrap();
         stack.set_tcp_reuse_address(wildcard, true).unwrap();
         stack
@@ -1142,7 +1161,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 wildcard,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -1150,7 +1168,6 @@ mod tests {
         assert_eq!(
             stack.listen_tcp_endpoint_with_backlog(
                 specific,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             ),
@@ -1160,7 +1177,7 @@ mod tests {
 
     #[test]
     fn implicit_connect_skips_an_exact_reused_tuple() {
-        let policy = TcpPolicy::new(8, 8, 1, 32, 32, 8, 60_000, 60_000, 40000, 40001);
+        let policy = TcpPolicy::new(8, 8, 1, 2, 32, 32, 8, 60_000, 60_000, 40000, 40001);
         let (mut stack, interface) = test_stack(policy);
         let listener = stack.create_tcp_endpoint().unwrap();
         stack
@@ -1169,7 +1186,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -1211,7 +1227,7 @@ mod tests {
 
     #[test]
     fn local_reverse_time_wait_reserves_the_active_ephemeral_tuple() {
-        let policy = TcpPolicy::new(16, 16, 1, 32, 32, 16, 60_000, 60_000, 40000, 40001);
+        let policy = TcpPolicy::new(16, 16, 1, 2, 32, 32, 16, 60_000, 60_000, 40000, 40001);
         let (mut stack, interface) = test_stack(policy);
         let (listener, client, accepted) = connected_pair(&mut stack, interface, 25021, 0);
         let first_port = stack.protocols.tcp.connection(client).unwrap().local.port();
@@ -1303,7 +1319,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -1443,7 +1458,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -1456,9 +1470,10 @@ mod tests {
                 TcpPeer::new(LOCAL, 25021),
             )
             .unwrap();
-        let listener_handle = stack.protocols.tcp.listener(listener).unwrap().slots[0]
-            .handle
-            .unwrap();
+        let listener_handle = stack.protocols.tcp.listener(listener).unwrap().projections[0].slots
+            [0]
+        .handle
+        .unwrap();
         let client_handle = stack.protocols.tcp.connection(client).unwrap().handle;
 
         let mut device = Loopback::new(Medium::Ip);
@@ -1662,7 +1677,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )
@@ -1713,10 +1727,10 @@ mod tests {
 
         let graceful_handle = stack.protocols.tcp.connection(client).unwrap().handle;
         assert!(
-            stack
+            !stack
                 .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
                 .unwrap()
-                .is_some()
+                .is_empty()
         );
         assert!(matches!(
             stack
@@ -1731,10 +1745,10 @@ mod tests {
 
         let rollback_handle = stack.protocols.tcp.connection(accepted).unwrap().handle;
         assert!(
-            stack
+            !stack
                 .release_tcp_endpoint(accepted, TcpReleaseReason::CreationRollback)
                 .unwrap()
-                .is_some()
+                .is_empty()
         );
         assert_eq!(
             stack
@@ -1750,7 +1764,7 @@ mod tests {
 
     #[test]
     fn final_release_timeout_is_engine_owned_and_reclaims_an_orphan() {
-        let policy = TcpPolicy::new(64, 64, 10, 32, 32, 64, 60_000, 1, 40000, 40063);
+        let policy = TcpPolicy::new(64, 64, 10, 2, 32, 32, 64, 60_000, 1, 40000, 40063);
         let (mut stack, interface) = test_stack(policy);
         let (_, client, _accepted) = connected_pair(&mut stack, interface, 25010, 0);
         let handle = stack.protocols.tcp.connection(client).unwrap().handle;
@@ -1767,10 +1781,10 @@ mod tests {
             .unwrap();
 
         assert!(
-            stack
+            !stack
                 .release_tcp_endpoint(client, TcpReleaseReason::FinalRelease)
                 .unwrap()
-                .is_some()
+                .is_empty()
         );
         assert_eq!(
             stack
@@ -1835,7 +1849,6 @@ mod tests {
         stack
             .listen_tcp_endpoint_with_backlog(
                 listener,
-                interface,
                 Ipv4Address::UNSPECIFIED,
                 TcpListenBacklog::new(1),
             )

@@ -5,9 +5,11 @@ use crate::{
         inode::Inode,
         iomux::PollEvent,
         proc::{
-            celf::PROC_SELF_DIR_ENTRY, meminfo::PROC_MEMINFO_DIR_ENTRY,
-            mounts::PROC_MOUNTS_DIR_ENTRY, procfs_sb, read_snapshot_at, root::PROC_ROOT_INO,
-            superblock::alloc_ino, sys::PROC_SYS_DIR_ENTRY, uptime::PROC_UPTIME_DIR_ENTRY,
+            celf::PROC_SELF_DIR_ENTRY, filesystems::PROC_FILESYSTEMS_DIR_ENTRY,
+            meminfo::PROC_MEMINFO_DIR_ENTRY, mounts::PROC_MOUNTS_DIR_ENTRY,
+            nemophila::PROC_NEMOPHILA_DIR_ENTRY, procfs_sb,
+            read_snapshot_at, root::PROC_ROOT_INO, superblock::alloc_ino, sys::PROC_SYS_DIR_ENTRY,
+            uptime::PROC_UPTIME_DIR_ENTRY,
         },
     },
     prelude::*,
@@ -358,7 +360,9 @@ static PROC_ROOT_DIR_ENTRIES: &[&ProcDirEntry] = &[
     &PROC_UPTIME_DIR_ENTRY,
     &PROC_SELF_DIR_ENTRY,
     &PROC_MOUNTS_DIR_ENTRY,
+    &PROC_FILESYSTEMS_DIR_ENTRY,
     &PROC_MEMINFO_DIR_ENTRY,
+    &PROC_NEMOPHILA_DIR_ENTRY,
     &PROC_SYS_DIR_ENTRY,
     // TODO: mounts, interrupts, version, devices, kallsyms, etc.
 ];

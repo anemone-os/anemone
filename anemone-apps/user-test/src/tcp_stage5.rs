@@ -169,6 +169,14 @@ fn run_cagent() -> Result<(), Errno> {
         wait_server_ready(server)?;
         println!("TCPSTAGE5:CAGENT:READY:arch={ARCH_LABEL}:libc=glibc:pid={server}");
 
+        let ss = spawn_in_group("/glibc", "/glibc/ss", &["ss", "-tan"], CAGENT_ENV)?;
+        let ss_status = wait_child_bounded(ss, CHILD_TIMEOUT_US)?;
+        if !matches!(ss_status, WStatus::Exited(0)) {
+            println!("TCPSTAGE5:SS:FAIL:status={ss_status:?}");
+            return Err(EIO);
+        }
+        println!("TCPSTAGE5:SS:PASS:arch={ARCH_LABEL}:libc=glibc");
+
         let argv = [
             "agent_lite",
             "--workspace",

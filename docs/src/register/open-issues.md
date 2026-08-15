@@ -1,5 +1,97 @@
 # 开放问题
 
+## ANE-20260815-PROCFS-DYNAMIC-INODE-MATERIALIZATION
+
+**Type:** Issue
+**Status:** Open / Deferred
+**Severity:** High
+**Area:** fs / procfs / VFS namei / dynamic inode lifecycle
+
+**Symptom / Trigger:** generic namei在parent weak-child map未命中后调用backend `lookup`，再以
+`materialize_child_dentry()`发布结果；该协议要求同一parent/name的并发lookup返回pointer-identical inode，否则winner发布后
+loser会命中identity assertion。procfs目前没有供dynamic value projection复用的“semantic identity到并发唯一inode”能力：
+每次构造fresh unindexed inode会在并发首次lookup时产生不同对象；改用persistent superblock index又需要显式binding/
+unindex lifecycle，否则单调identity的lookup会永久累积indexed inode。
+
+Nemophila `/proc/nemophila/<identity>`是当前暴露该缺口的新consumer。它的runtime membership、retirement与opened text snapshot
+均有唯一owner，但这些事实不能替代generic proc inode materialization owner，也不足以在不建立私有registry的情况下同时闭合
+并发唯一性与回收。
+
+**Impact:** 同一live identity的并发首次pathname lookup可能使kernel在generic dentry identity assertion处panic；若以永久
+indexed inode规避，则反复load/show/unload会形成无界cache residency。现有focused Nemophila证据覆盖普通list/show、opened
+snapshot与retirement backend disappearance，不证明concurrent first lookup或generic inode-cache reclamation。
+
+**Owner:** procfs dynamic inode binding与VFS positive-dentry materialization protocol。Nemophila runtime只拥有instance
+lifecycle/value snapshot，不拥有generic inode/dentry cache。
+
+**Decision / Current Boundary:** 本问题不纳入Nemophila R0 RFC，不为其建立Nemophila-private strong/weak inode registry、
+freshness state或retirement hook。Nemophila R0仍可按其runtime/ABI/boot/proc value-projection target推进；其proc acceptance不外推
+concurrent first-lookup safety或generic inode-cache lifecycle。该处置不表示panic是正确行为，只表示修复必须由独立procfs/VFS
+基础设施迭代拥有。
+
+**Last Verified:** 2026-08-15
+
+**Exit Condition:** procfs/VFS提供可复用的dynamic materialization协议：同一semantic identity并发返回唯一inode，明确强/弱
+residency、backend retirement、迟到publication、identity reuse/non-reuse与multi-mount cleanup，并以deterministic concurrent
+lookup及反复create/lookup/retire验证无panic、无永久cache增长。随后审计`/proc/<tgid>`、Nemophila及其它dynamic consumers并
+移除此条目。
+
+**Related:** [`ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION`](#ane-20260809-vfs-dynamic-positive-dentry-revocation)
+记录lookup结果与retirement之间的迟到publication；本条记录同一live mapping的首次并发materialization与inode residency，二者
+不得互相冒充已解决。
+
+**Workaround:** 当前不提供owner-local workaround；避免并发首次lookup同一dynamic proc identity。已打开的Nemophila instance
+文件继续只读其open-time immutable snapshot。
+## ANE-20260814-VFS-METADATA-MUTATION-OWNER-HANDOFF
+
+**Type:** Issue
+**Status:** Open / Deferred
+**Severity:** Medium
+**Area:** fs / VFS inode metadata / chmod / chown / utimens / pseudo filesystem
+
+**Symptom / Trigger:** `fchmod` / `fchmodat`、`fchown` / `fchownat` 与 `utimensat` 当前在完成
+generic mount/permission admission 后直接改写 `InodeMeta`，没有 filesystem-owned metadata mutation
+handoff。对于把 `InodeMeta` 作为唯一可变 metadata 真相的 ramfs、devfs 与 devpts，该路径至少保持
+stat/DAC projection 自洽；但 static procfs PDE 同时保留 descriptor-owned mode，并在 `get_attr` 中
+投影 descriptor，导致 `chmod` 成功后 DAC 读取新 `InodeMeta::perm`、stat 仍报告旧 PDE mode。static
+sysfs 首版沿用相同的 descriptor / inode-meta 双路径，因此也属于本 generic 缺口的 consumer。
+
+`chown` 当前会进入可见的 inode uid/gid，`utimensat` 对部分 pseudo inode 则可能成功修改 metadata、
+但 `get_attr` 仍按即时值或 descriptor 投影。不同 backend 对同一组 syscall 的 owner、持久化、拒绝与
+stat visibility 没有统一 handoff，不能仅凭某个 guest 的初始 mode 或 write-failure 证明 metadata
+mutation 语义。
+
+**Impact:** static procfs/sysfs 可以出现 descriptor 与 DAC metadata 不一致；其它 filesystem 虽未必
+形成第二真相，也尚未经过完整的 mutation/persistence/errno 审计。当前没有内存安全或资源生命周期
+破坏证据，但成功 syscall 与后续 stat/access observation 可能不一致。
+
+**Owner:** VFS inode metadata mutation admission / handoff；各 filesystem backend 分别拥有是否允许
+mutation、唯一 metadata truth、持久化与 projection。syscall adapter 不应按 filesystem name 特判，
+单个 pseudo filesystem 也不应各自绕过 generic syscall 建立平行入口。
+
+**Decision / Current Boundary:** 本问题由后续独立 VFS metadata 工作系统解决。当前 static sysfs RFC
+只证明 boot publication 时目录 mode `0555`、attribute mode `0444`，以及 namespace structural mutation、
+truncate 与 attribute data write fail closed；它不承诺 `chmod` / `chown` / `utimensat` 后的 owner
+handoff、拒绝 errno、stat/DAC 同步或跨 remount persistence，也不得为本 RFC 新增 VFS hook、filesystem-name
+特判或 sysfs-local metadata mutation workaround。本缺口不阻塞 static sysfs 的既定 mount/read-only
+surface cutover。
+
+**Last Verified:** 2026-08-14
+
+**Exit Condition:** 独立工作定义 typed metadata mutation request 与 filesystem owner handoff，覆盖 mode、
+uid/gid、atime/mtime/ctime、size 以及必要的 credential/mount context；明确 backend 的 allow/reject、
+commit、persistence、stat/DAC truth 与失败后状态。审计 ext4、ramfs、procfs、devfs、devpts、sysfs 及其它
+真实 inode consumer，以 focused syscall tests 验证 chmod/chown/utimens、stat/access、remount/reload 与
+errno；完成 current-contract cutover 后移除此条目。
+
+**Related:** [Static sysfs R1](../rfcs/static-sysfs/index.md)、
+[VFS current contracts](../contracts/vfs/index.md)。Linux 6.6.32 的 generic procfs 通过
+`proc_notify_change()`同步 inode/PDE，kernfs 通过 `kernfs_iop_setattr()`同步 node/inode；这些只作为
+owner-handoff 参照，不预先决定 Anemone 的具体 API。
+
+**Workaround:** 不在单个 filesystem 中增加 fstype 特判或镜像 metadata。使用当前 pseudo filesystem
+时，不把 metadata-mutation 后的 stat/DAC/persistence 行为计入 conformance 证据。
+
 ## ANE-20260809-VFS-DYNAMIC-POSITIVE-DENTRY-REVOCATION
 
 **Type:** Issue

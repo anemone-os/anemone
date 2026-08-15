@@ -77,12 +77,13 @@ impl PreparedPtyPair {
     pub(crate) fn install_cleanup(
         &mut self,
         binding: PtyBindingCapability,
+        devnum: CharDevNum,
     ) -> Result<(), SysError> {
         let enrollment = self
             .enrollment
             .take()
             .expect("PTY relation enrollment consumed more than once");
-        let participant = enrollment.commit()?;
+        let participant = enrollment.commit(devnum)?;
         self.master_description
             .install_cleanup(binding, participant);
         Ok(())
@@ -388,7 +389,10 @@ mod kunits {
         prepared.compose_description_ops(FileDescOps::default());
         let master = Arc::new(materialize(prepared.take_opened_master()));
         prepared
-            .install_cleanup(PtyBindingCapability::new(Arc::new(NoopBinding)))
+            .install_cleanup(
+                PtyBindingCapability::new(Arc::new(NoopBinding)),
+                CharDevNum::new(MajorNum::new(136), MinorNum::new(0)),
+            )
             .unwrap();
         let PreparedPtyPair {
             pair,

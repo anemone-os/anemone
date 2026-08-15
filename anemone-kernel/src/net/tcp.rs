@@ -30,6 +30,7 @@ pub(in crate::net) const TCP_POLICY: TcpPolicy = TcpPolicy::new(
     NET_TCP_ENDPOINT_CAPACITY,
     NET_TCP_ENGINE_TIMER_CAPACITY,
     NET_TCP_LISTENER_COMPLETED_CAPACITY,
+    NET_TCP_LISTENER_PROJECTION_CAPACITY,
     NET_TCP_RX_BUFFER_BYTES,
     NET_TCP_TX_BUFFER_BYTES,
     NET_TCP_DEFERRED_RECLAIM_CAPACITY,
@@ -50,6 +51,19 @@ const fn engine_storage_fits() -> bool {
     total <= isize::MAX as usize
 }
 
+const fn listener_projection_storage_fits() -> bool {
+    let Some(published) =
+        NET_TCP_LISTENER_PROJECTION_CAPACITY.checked_mul(NET_TCP_LISTENER_COMPLETED_CAPACITY)
+    else {
+        return false;
+    };
+    let Some(with_handoff_headroom) = published.checked_add(1) else {
+        return false;
+    };
+    with_handoff_headroom <= NET_TCP_ENGINE_TIMER_CAPACITY
+        && with_handoff_headroom <= NET_TCP_DEFERRED_RECLAIM_CAPACITY
+}
+
 static_assert!(
     NET_TCP_ENDPOINT_CAPACITY > 1,
     "net_tcp_endpoint_capacity must fit one listener and one accepted endpoint"
@@ -63,8 +77,12 @@ static_assert!(
     "net_tcp_listener_completed_capacity must retain at least ten completed children"
 );
 static_assert!(
-    NET_TCP_ENGINE_TIMER_CAPACITY > NET_TCP_LISTENER_COMPLETED_CAPACITY,
-    "net_tcp_engine_timer_capacity must fit one listener and an accepted child"
+    NET_TCP_LISTENER_PROJECTION_CAPACITY >= 2,
+    "net_tcp_listener_projection_capacity must cover local and one external ingress path"
+);
+static_assert!(
+    listener_projection_storage_fits(),
+    "TCP engine and reclaim capacity must fit every listener projection plus handoff headroom"
 );
 static_assert!(
     NET_TCP_RX_BUFFER_BYTES > 0 && NET_TCP_TX_BUFFER_BYTES > 0,
@@ -331,28 +349,13 @@ impl TcpEndpointAccessPort {
                 ListenError::Stack(TcpListenError::UnknownEndpoint)
             },
         })?;
-        let (destination, explicit_source) = match binding {
-            Some(binding) if !binding.address().is_unspecified() => {
-                if !owns_local_address(binding.address()) {
-                    return Err(ListenError::AddressUnavailable);
-                }
-                (binding.address(), Some(binding.address()))
-            },
-            _ => (Ipv4Address::LOOPBACK, None),
-        };
-        let selection = select_ipv4(destination, explicit_source).map_err(|error| match error {
-            ConnectError::NoRoute
-            | ConnectError::SourceUnavailable
-            | ConnectError::InterfaceUnavailable
-            | ConnectError::Stack(_) => ListenError::AddressUnavailable,
-        })?;
+        if binding.is_some_and(|binding| {
+            !binding.address().is_unspecified() && !owns_local_address(binding.address())
+        }) {
+            return Err(ListenError::AddressUnavailable);
+        }
         self.stack
-            .listen_tcp_endpoint_with_backlog(
-                self.id(),
-                selection.interface,
-                Ipv4Address::UNSPECIFIED,
-                backlog,
-            )
+            .listen_tcp_endpoint_with_backlog(self.id(), Ipv4Address::UNSPECIFIED, backlog)
             .map_err(ListenError::Stack)
     }
 

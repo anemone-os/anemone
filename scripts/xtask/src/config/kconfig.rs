@@ -50,6 +50,10 @@ impl TidAllocPolicy {
 #[derive(Deserialize, Debug, Serialize, PartialEq, Eq)]
 pub struct Parameters {
     pub bootstrap_heap_shift_kb: Option<u64>,
+    pub slab_span_pages: Option<usize>,
+    pub slab_max_object_bytes: Option<usize>,
+    pub slab_local_capacity: Option<usize>,
+    pub slab_transfer_batch: Option<usize>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub print_log_level: Option<u8>,
@@ -60,6 +64,7 @@ pub struct Parameters {
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
+    pub nemophila_artifact_max_bytes: Option<usize>,
     pub max_path_len_bytes: Option<usize>,
     pub c_string_batch_bytes: Option<usize>,
     pub execve_max_string_count: Option<usize>,
@@ -147,6 +152,7 @@ pub struct Parameters {
     pub net_tcp_endpoint_capacity: Option<usize>,
     pub net_tcp_engine_timer_capacity: Option<usize>,
     pub net_tcp_listener_completed_capacity: Option<usize>,
+    pub net_tcp_listener_projection_capacity: Option<usize>,
     pub net_tcp_rx_buffer_bytes: Option<usize>,
     pub net_tcp_tx_buffer_bytes: Option<usize>,
     pub net_tcp_deferred_reclaim_capacity: Option<usize>,
@@ -177,6 +183,10 @@ impl Parameters {
         }
 
         materialize!(bootstrap_heap_shift_kb);
+        materialize!(slab_span_pages);
+        materialize!(slab_max_object_bytes);
+        materialize!(slab_local_capacity);
+        materialize!(slab_transfer_batch);
         materialize!(log_buffer_shift_kb);
         materialize!(log_record_shift_bytes);
         materialize!(print_log_level);
@@ -187,6 +197,7 @@ impl Parameters {
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
+        materialize!(nemophila_artifact_max_bytes);
         materialize!(max_path_len_bytes);
         materialize!(c_string_batch_bytes);
         materialize!(execve_max_string_count);
@@ -274,6 +285,7 @@ impl Parameters {
         materialize!(net_tcp_endpoint_capacity);
         materialize!(net_tcp_engine_timer_capacity);
         materialize!(net_tcp_listener_completed_capacity);
+        materialize!(net_tcp_listener_projection_capacity);
         materialize!(net_tcp_rx_buffer_bytes);
         materialize!(net_tcp_tx_buffer_bytes);
         materialize!(net_tcp_deferred_reclaim_capacity);
@@ -306,6 +318,14 @@ impl Parameters {
 
 /// Size of bootstrap heap as a power of 2 in KB
 pub const BOOTSTRAP_HEAP_SHIFT_KB: u64 = {};
+/// Pages permanently assigned to one kernel slab size class per span.
+pub const SLAB_SPAN_PAGES: usize = {};
+/// Largest size/alignment served by the kernel slab path.
+pub const SLAB_MAX_OBJECT_BYTES: usize = {};
+/// Maximum free objects retained per CPU and slab class.
+pub const SLAB_LOCAL_CAPACITY: usize = {};
+/// Maximum free objects moved in one local/central handoff.
+pub const SLAB_TRANSFER_BATCH: usize = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
@@ -336,6 +356,8 @@ pub const REMAP_SHIFT_GB: u64 = {};
 pub const MAX_LOGICAL_CPUS: usize = {};
 /// Maximum length of identity strings in bytes
 pub const MAX_IDENT_LEN_BYTES: usize = {};
+/// Maximum bytes accepted from one embedded or supplied Nemophila artifact.
+pub const NEMOPHILA_ARTIFACT_MAX_BYTES: usize = {};
 /// Maximum length of file names in bytes. This is always equal to
 /// MAX_IDENT_LEN_BYTES,
 /// since file names are commonly used as identity strings in kernel
@@ -532,8 +554,10 @@ pub const NET_ICMP_RAW_DEFAULT_TOS: u8 = {};
 pub const NET_TCP_ENDPOINT_CAPACITY: usize = {};
 /// Shared upper bound for TCP engines and their embedded protocol timers.
 pub const NET_TCP_ENGINE_TIMER_CAPACITY: usize = {};
-/// Completed-child engine slots retained by one private TCP listener.
+/// Maximum aggregate pending/claimed backlog owned by one logical TCP listener.
 pub const NET_TCP_LISTENER_COMPLETED_CAPACITY: usize = {};
+/// Maximum ingress projections owned by one logical TCP listener.
+pub const NET_TCP_LISTENER_PROJECTION_CAPACITY: usize = {};
 /// Receive bytes owned by each private TCP engine.
 pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
 /// Transmit bytes owned by each private TCP engine.
@@ -550,6 +574,10 @@ pub const NET_TCP_EPHEMERAL_PORT_FIRST: u16 = {};
 pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
 "#,
             resolved!(bootstrap_heap_shift_kb),
+            resolved!(slab_span_pages),
+            resolved!(slab_max_object_bytes),
+            resolved!(slab_local_capacity),
+            resolved!(slab_transfer_batch),
             resolved!(log_buffer_shift_kb),
             resolved!(log_record_shift_bytes),
             resolved!(print_log_level),
@@ -560,6 +588,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
+            resolved!(nemophila_artifact_max_bytes),
             resolved!(max_path_len_bytes),
             resolved!(c_string_batch_bytes),
             resolved!(execve_max_string_count),
@@ -647,6 +676,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_tcp_endpoint_capacity),
             resolved!(net_tcp_engine_timer_capacity),
             resolved!(net_tcp_listener_completed_capacity),
+            resolved!(net_tcp_listener_projection_capacity),
             resolved!(net_tcp_rx_buffer_bytes),
             resolved!(net_tcp_tx_buffer_bytes),
             resolved!(net_tcp_deferred_reclaim_capacity),

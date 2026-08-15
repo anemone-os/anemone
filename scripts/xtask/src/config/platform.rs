@@ -26,10 +26,24 @@ impl Arch {
         }
     }
 
-    pub fn target_triple(&self) -> TargetTriple {
+    pub fn kernel_target(&self) -> KernelTarget {
         match self {
-            Arch::RiscV64 => TargetTriple::RiscV64UnknownAnemoneElf,
-            Arch::LoongArch64 => TargetTriple::LoongArch64UnknownAnemoneElf,
+            Arch::RiscV64 => KernelTarget::RiscV64,
+            Arch::LoongArch64 => KernelTarget::LoongArch64,
+        }
+    }
+
+    pub fn cargo_target(&self) -> CargoTarget {
+        match self {
+            Arch::RiscV64 => CargoTarget::RiscV64GcUnknownNoneElf,
+            Arch::LoongArch64 => CargoTarget::LoongArch64UnknownNone,
+        }
+    }
+
+    pub fn artifact_target_id(&self) -> ArtifactTargetId {
+        match self {
+            Arch::RiscV64 => ArtifactTargetId::RiscV64UnknownAnemoneElf,
+            Arch::LoongArch64 => ArtifactTargetId::LoongArch64UnknownAnemoneElf,
         }
     }
 
@@ -51,16 +65,56 @@ pub enum ExecEnv {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum TargetTriple {
+pub enum KernelTarget {
+    RiscV64,
+    LoongArch64,
+}
+
+impl KernelTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RiscV64 => "riscv64-anemone-kernel",
+            Self::LoongArch64 => "loongarch64-anemone-kernel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CargoTarget {
+    RiscV64GcUnknownNoneElf,
+    LoongArch64UnknownNone,
+}
+
+impl CargoTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RiscV64GcUnknownNoneElf => "riscv64gc-unknown-none-elf",
+            Self::LoongArch64UnknownNone => "loongarch64-unknown-none",
+        }
+    }
+
+    pub fn rustflags_env(&self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Self::RiscV64GcUnknownNoneElf => None,
+            Self::LoongArch64UnknownNone => Some((
+                "CARGO_TARGET_LOONGARCH64_UNKNOWN_NONE_RUSTFLAGS",
+                "-C target-feature=-ual",
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ArtifactTargetId {
     RiscV64UnknownAnemoneElf,
     LoongArch64UnknownAnemoneElf,
 }
 
-impl TargetTriple {
+impl ArtifactTargetId {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TargetTriple::RiscV64UnknownAnemoneElf => "riscv64-unknown-anemone-elf",
-            TargetTriple::LoongArch64UnknownAnemoneElf => "loongarch64-unknown-anemone-elf",
+            Self::RiscV64UnknownAnemoneElf => "riscv64-unknown-anemone-elf",
+            Self::LoongArch64UnknownAnemoneElf => "loongarch64-unknown-anemone-elf",
         }
     }
 }

@@ -11,7 +11,7 @@ use anemone_net_api::{
 };
 use smoltcp::{iface::SocketSet, socket::tcp};
 
-use super::{ConnectionPhase, EndpointRole, TcpEndpoints, completed_child_state};
+use super::{ConnectionPhase, EndpointRole, ListenerSlotPhase, TcpEndpoints};
 
 impl TcpEndpoints {
     pub(crate) fn endpoint_facts(
@@ -24,13 +24,11 @@ impl TcpEndpoints {
             EndpointRole::Idle => TcpEndpointFacts::Idle,
             EndpointRole::Bound(_) => TcpEndpointFacts::Bound,
             EndpointRole::Listener(listener) => {
-                let sockets = sockets.expect("TCP listener facts need its engine owner");
-                let has_pending_child = listener.slots.iter().any(|slot| {
-                    slot.handle.is_some_and(|handle| {
-                        !slot.claimed
-                            && completed_child_state(sockets.get::<tcp::Socket>(handle).state())
-                    })
-                });
+                let has_pending_child = listener
+                    .projections
+                    .iter()
+                    .flat_map(|projection| &projection.slots)
+                    .any(|slot| slot.phase == ListenerSlotPhase::Pending);
                 TcpEndpointFacts::Listener { has_pending_child }
             },
             EndpointRole::Connection(connection) => {
@@ -102,7 +100,10 @@ impl TcpEndpoints {
         for index in 0..self.endpoints.len() {
             let endpoint = &self.endpoints[index];
             let id = endpoint.id.filter(|_| match &endpoint.role {
-                EndpointRole::Listener(listener) => listener.interface == interface,
+                EndpointRole::Listener(listener) => listener
+                    .projections
+                    .iter()
+                    .any(|projection| projection.interface == interface),
                 EndpointRole::Connection(connection) => connection.interface == interface,
                 EndpointRole::Reclaiming { .. }
                 | EndpointRole::Idle

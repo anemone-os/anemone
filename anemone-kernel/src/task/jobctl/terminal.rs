@@ -67,6 +67,31 @@ impl TtyTerminalSignal {
 }
 
 impl TtySession {
+    /// Resolve the exact live session containing a procfs target.
+    ///
+    /// The returned capability carries stable topology identity only. It does
+    /// not cache or expose any controlling-terminal relation state.
+    pub(crate) fn for_thread_group(thread_group: &Arc<ThreadGroup>) -> Option<Self> {
+        if thread_group.ty() != ThreadGroupType::User {
+            return None;
+        }
+        let tgid = thread_group.tgid();
+        let current = get_thread_group(&tgid)?;
+        if !Arc::ptr_eq(thread_group, &current) {
+            return None;
+        }
+
+        let sid = thread_group.sid();
+        let session = get_session(&sid)?;
+        let leader = get_thread_group(&sid)?;
+        let snapshot = Self { session, leader };
+        if thread_group.sid() == sid && snapshot.is_live() {
+            Some(snapshot)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn sid(&self) -> Tid {
         self.session.sid()
     }

@@ -93,9 +93,11 @@ impl TcpEndpoints {
                     peer: connection.peer,
                 },
             ),
-            EndpointRole::Listener(listener) => listener.slots.iter().any(|slot| {
-                slot.tuple
-                    .is_some_and(|tuple| conflicts(listener.interface, tuple))
+            EndpointRole::Listener(listener) => listener.projections.iter().any(|projection| {
+                projection.slots.iter().any(|slot| {
+                    slot.tuple
+                        .is_some_and(|tuple| conflicts(projection.interface, tuple))
+                })
             }),
             _ => false,
         }) || self.deferred.iter().any(|reclaim| {

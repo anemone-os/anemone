@@ -5,6 +5,7 @@
 use crate::mm::kmalloc::allocator::KernelAllocator;
 
 pub mod allocator;
+mod slab;
 
 #[global_allocator]
 static KERNEL_ALLOCATOR: KernelAllocator = KernelAllocator::new();

@@ -3,12 +3,7 @@
 //! Build Anemone kernel for targeted platforms
 //! (e.g., QEMU, or real hardware), and produce bootable images.
 
-use std::{
-    fs::{self, File},
-    io::{BufRead, BufReader},
-    os::unix::fs::PermissionsExt,
-    path::Path,
-};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 use anyhow::Context;
 use clap::Args;
@@ -323,7 +318,7 @@ impl BuildContext {
 
             let sh = Shell::new()?;
             let disasm = sh
-                .cmd(&self.resolved.platform.build.arch.target_triple().objdump())
+                .cmd(&self.resolved.platform.build.arch.kernel_target().objdump())
                 .arg("-d")
                 .arg("-S")
                 .arg("build/anemone.elf")
@@ -354,10 +349,13 @@ impl BuildContext {
             ])
             .args(&["-Z", "json-target-spec"])
             .arg("--target")
-            .arg(&format!(
-                "../conf/arch/{}/{}.json",
-                self.resolved.platform.build.arch.as_str(),
-                self.resolved.platform.build.arch.target_triple().as_str()
+            .arg(Path::new("..").join(
+                self.resolved
+                    .platform
+                    .build
+                    .arch
+                    .kernel_target()
+                    .spec_json_path(),
             ))
             .env("RUSTFLAGS", rustflags);
         for arg in self.resolved.profile.as_cargo_arg() {
@@ -416,7 +414,7 @@ impl BuildContext {
     fn cargo_build_dir(&self) -> String {
         format!(
             "target/{}/{}",
-            self.resolved.platform.build.arch.target_triple().as_str(),
+            self.resolved.platform.build.arch.kernel_target().as_str(),
             match self.resolved.profile {
                 CargoProfile::Dev => "debug", // dev builds go to debug/
                 CargoProfile::Release => "release",

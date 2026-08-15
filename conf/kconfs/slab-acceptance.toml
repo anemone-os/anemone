@@ -1,0 +1,18 @@
+#! Focused KernelConfig for the kernel slab allocator closure matrix.
+
+[features]
+kunit = true
+fs_ext4 = true
+kernel_preempt = false
+spin_lock_irqsave = true
+soft_unaligned_access = true
+kernel_symbols = true
+perf_observe = true
+
+[parameters]
+bootstrap_heap_shift_kb = 10
+slab_span_pages = 16
+slab_max_object_bytes = 2048
+slab_local_capacity = 32
+slab_transfer_batch = 16
+max_logical_cpus = 8

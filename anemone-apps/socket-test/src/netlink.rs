@@ -414,7 +414,7 @@ fn sock_diag_oracle() -> Result<(), Errno> {
     };
     send(fd, &request(SOCK_DIAG_BY_FAMILY, 10, bytes_of(&body)))?;
     let records = dump(fd, port, 10, SOCK_DIAG_BY_FAMILY)?;
-    let mut listen_record = false;
+    let mut listen_records = 0;
     let mut established_with_payload = false;
     let mut pending_child = false;
     for record in records {
@@ -423,16 +423,18 @@ fn sock_diag_oracle() -> Result<(), Errno> {
         let peer_port = u16::from_be_bytes(record[6..8].try_into().unwrap());
         let local_address = &record[8..12];
         let peer_address = &record[24..28];
+        let interface = u32::from_ne_bytes(record[40..44].try_into().unwrap());
         let receive_queue = u32::from_ne_bytes(record[56..60].try_into().unwrap());
         let send_queue = u32::from_ne_bytes(record[60..64].try_into().unwrap());
         match record[1] {
             10 => {
-                listen_record = true;
+                listen_records += 1;
                 ensure(
                     local_port == topology.listener_port
                         && peer_port == 0
                         && local_address == [127, 0, 0, 1]
                         && peer_address == [0, 0, 0, 0]
+                        && interface == 0
                         && receive_queue >= 1
                         && send_queue == 4,
                 )?;
@@ -448,7 +450,7 @@ fn sock_diag_oracle() -> Result<(), Errno> {
             _ => {},
         }
     }
-    ensure(listen_record && established_with_payload && pending_child)?;
+    ensure(listen_records == 1 && established_with_payload && pending_child)?;
 
     let mut listen_only = body;
     listen_only.idiag_states = 1 << 10;

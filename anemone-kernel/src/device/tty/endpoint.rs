@@ -289,17 +289,18 @@ pub(crate) fn prepare_system_boot(
                     .is_some_and(|endpoint| { Arc::ptr_eq(&endpoint, &prepared.endpoint) }),
                 "TTY attachment registration changed before relation enrollment"
             );
-            enrollments.push(
+            enrollments.push((
                 pending
                     .enrollment
                     .take()
                     .expect("TTY endpoint relation enrollment consumed twice"),
-            );
+                prepared.devnum,
+            ));
         }
     }
 
-    for enrollment in enrollments {
-        relations.push(enrollment.commit()?);
+    for (enrollment, devnum) in enrollments {
+        relations.push(enrollment.commit(devnum)?);
     }
     Ok(TtyBootPublication {
         controlling_publish,

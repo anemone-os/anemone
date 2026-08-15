@@ -1,7 +1,7 @@
 //! Serialized kernel entrypoints into the Stack-private TCP owner.
 
 use anemone_net_api::{
-    InterfaceId, Ipv4EgressSelection,
+    Ipv4EgressSelection,
     tcp::{
         TcpBindError, TcpBindRequest, TcpChildError, TcpConnectError, TcpConnectResult,
         TcpCreateError, TcpEndpointFacts, TcpEndpointId, TcpEndpointInvalidation, TcpListenBacklog,
@@ -161,23 +161,19 @@ impl DomainStack {
     pub(in crate::net) fn listen_tcp_endpoint(
         &self,
         endpoint: TcpEndpointId,
-        interface: InterfaceId,
         implicit_address: anemone_net_api::Ipv4Address,
     ) -> Result<(), TcpListenError> {
-        self.protocol_transition(|stack| {
-            stack.listen_tcp_endpoint(endpoint, interface, implicit_address)
-        })
+        self.protocol_transition(|stack| stack.listen_tcp_endpoint(endpoint, implicit_address))
     }
 
     pub(in crate::net) fn listen_tcp_endpoint_with_backlog(
         &self,
         endpoint: TcpEndpointId,
-        interface: InterfaceId,
         implicit_address: anemone_net_api::Ipv4Address,
         backlog: TcpListenBacklog,
     ) -> Result<(), TcpListenError> {
         self.protocol_transition(|stack| {
-            stack.listen_tcp_endpoint_with_backlog(endpoint, interface, implicit_address, backlog)
+            stack.listen_tcp_endpoint_with_backlog(endpoint, implicit_address, backlog)
         })
     }
 
@@ -259,9 +255,9 @@ impl DomainStack {
         endpoint: TcpEndpointId,
         reason: TcpReleaseReason,
     ) -> Result<(), TcpRetireError> {
-        let progression =
+        let progressions =
             self.protocol_transition(|stack| stack.release_tcp_endpoint(endpoint, reason))?;
-        if let Some(progression) = progression {
+        for progression in progressions {
             crate::net::submit_protocol_progression(progression);
         }
         Ok(())

@@ -1,0 +1,11 @@
+[package]
+name = "nemophila-wasm-embed-validation"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+nemophila-wasm = { path = "../..", default-features = false, features = ["extra-checks"] }
