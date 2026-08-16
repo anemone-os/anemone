@@ -239,6 +239,16 @@ impl TtyDiscipline {
         }
     }
 
+    /// Bytes a read-side queue query may report without consuming input.
+    ///
+    /// The pending canonical edit is intentionally excluded. An empty VEOF
+    /// record can therefore make the terminal readable while this count is
+    /// zero; readiness and byte count remain distinct projections of the same
+    /// discipline-owned state.
+    pub(super) fn readable_bytes(&self) -> usize {
+        self.committed_len()
+    }
+
     pub(super) fn read(&mut self, termios: TtyTermios, dst: &mut [u8]) -> InputRead {
         if !termios.icanon {
             let count = dst.len().min(self.committed_len());

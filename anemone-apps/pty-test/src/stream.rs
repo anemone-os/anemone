@@ -2,17 +2,20 @@ use anemone_rs::{
     abi::{
         fs::linux::{
             epoll::{EPOLLIN, EPOLLOUT},
+            ioctl::FIONREAD,
             open::{O_NOCTTY, O_NONBLOCK, O_RDWR},
             poll::{POLLIN, POLLOUT, PollFd},
             select::FdSet,
         },
+        syscall::{linux::SYS_IOCTL, syscall},
         time::linux::TimeSpec,
-        tty::linux::Winsize,
+        tty::linux::{ECHO, ICANON, ISIG, ONLCR, OPOST, TIOCINQ, VEOF, Winsize},
     },
     os::linux::{
         fs::{
             EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, epoll_create1, epoll_ctl,
-            epoll_wait, fcntl_getfl, fcntl_setfl, pipe2, ppoll, pselect, read, write,
+            epoll_wait, fcntl_getfl, fcntl_setfl, ioctl_readable_bytes, pipe2, ppoll, pselect,
+            read, write,
         },
         process::{exit, fork},
         tty::{SetTermiosWhen, get_winsize, set_winsize, tcgetattr, tcsetattr},
@@ -114,6 +117,88 @@ pub fn test_stream_and_terminal_state() -> Result<(), Errno> {
     let mut output = [0u8; 15];
     read_exact(pair.master.raw(), &mut output)?;
     ensure(&output == b"slave-to-master")
+}
+
+pub fn test_input_queue_queries() -> Result<(), Errno> {
+    let pair = Pair::allocate()?;
+    pair.unlock()?;
+    let slave = pair.open_path(O_RDWR | O_NOCTTY)?;
+    ensure(TIOCINQ == FIONREAD)?;
+
+    let mut canonical = tcgetattr(slave.raw())?;
+    canonical.c_lflag |= ICANON;
+    canonical.c_lflag &= !(ECHO | ISIG);
+    tcsetattr(slave.raw(), SetTermiosWhen::DrainFlush, &canonical)?;
+
+    write_all(pair.master.raw(), b"abc")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 0)?;
+    write_all(pair.master.raw(), b"\nsecond\n")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 11)?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 11)?;
+    expect_errno(
+        unsafe { syscall(SYS_IOCTL, slave.raw() as u64, FIONREAD as u64, 1, 0, 0, 0) },
+        EFAULT,
+    )?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 11)?;
+
+    let mut prefix = [0u8; 2];
+    ensure(read(slave.raw(), &mut prefix)? == 2 && &prefix == b"ab")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 9)?;
+    let mut delimiter = [0u8; 2];
+    ensure(read(slave.raw(), &mut delimiter)? == 2 && &delimiter == b"c\n")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 7)?;
+    let mut second = [0u8; 7];
+    read_exact(slave.raw(), &mut second)?;
+    ensure(&second == b"second\n" && ioctl_readable_bytes(slave.raw())? == 0)?;
+
+    write_all(pair.master.raw(), &[canonical.c_cc[VEOF]])?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 0)?;
+    let mut readable = [PollFd {
+        fd: slave.raw() as i32,
+        events: POLLIN,
+        revents: 0,
+    }];
+    ensure(ppoll(&mut readable, Some(&ZERO_TIMEOUT))? == 1)?;
+    ensure(readable[0].revents & POLLIN != 0)?;
+    let mut empty = [0u8; 1];
+    ensure(read(slave.raw(), &mut empty)? == 0)?;
+
+    raw_termios(slave.raw())?;
+    write_all(pair.master.raw(), b"raw")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 3)?;
+    let mut byte = [0u8; 1];
+    ensure(read(slave.raw(), &mut byte)? == 1 && byte == [b'r'])?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 2)?;
+    let mut suffix = [0u8; 2];
+    read_exact(slave.raw(), &mut suffix)?;
+    ensure(&suffix == b"aw")?;
+
+    let mut output = tcgetattr(slave.raw())?;
+    output.c_lflag &= !ECHO;
+    output.c_oflag |= OPOST | ONLCR;
+    tcsetattr(slave.raw(), SetTermiosWhen::Now, &output)?;
+    write_all(slave.raw(), b"\nX")?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 3)?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 3)?;
+    expect_errno(
+        unsafe {
+            syscall(
+                SYS_IOCTL,
+                pair.master.raw() as u64,
+                TIOCINQ as u64,
+                1,
+                0,
+                0,
+                0,
+            )
+        },
+        EFAULT,
+    )?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 3)?;
+    ensure(read(pair.master.raw(), &mut byte)? == 1 && byte == [b'\r'])?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 2)?;
+    read_exact(pair.master.raw(), &mut suffix)?;
+    ensure(&suffix == b"\nX" && ioctl_readable_bytes(pair.master.raw())? == 0)
 }
 
 fn test_blocking_read(pair: &Pair, slave: Fd) -> Result<(), Errno> {

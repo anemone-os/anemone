@@ -28,7 +28,7 @@ use anemone_rs::{
         linux::{
             fs::{
                 AtFd, Fd, PipeFlags, close, dup3, fcntl_getfl, fcntl_setfl, fstat, fstatat,
-                mkdirat, mount, openat, pipe2, ppoll, pselect, read, write,
+                ioctl_readable_bytes, mkdirat, mount, openat, pipe2, ppoll, pselect, read, write,
             },
             process::{
                 WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, sched_yield,
@@ -1383,6 +1383,50 @@ fn test_canonical_short_record(baseline: &Baseline) -> Result<(), Errno> {
     expect(&rest[second..second + third] == b"second\n")
 }
 
+fn test_input_queue_query(baseline: &Baseline) -> Result<(), Errno> {
+    tcsetattr(
+        STDIN_FILENO,
+        SetTermiosWhen::DrainFlush,
+        &baseline.canonical_noecho(),
+    )?;
+    ready("fionread-canonical-pending");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+    expect(!is_readable(STDIN_FILENO)?)?;
+
+    ready("fionread-canonical-commit");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 11)?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 11)?;
+    let mut prefix = [0u8; 2];
+    expect(read(STDIN_FILENO, &mut prefix)? == 2 && &prefix == b"ab")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 9)?;
+    let mut delimiter = [0u8; 2];
+    expect(read(STDIN_FILENO, &mut delimiter)? == 2 && &delimiter == b"c\n")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 7)?;
+    let mut second = [0u8; 7];
+    expect(read(STDIN_FILENO, &mut second)? == 7 && &second == b"second\n")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+
+    ready("fionread-empty-eof");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+    expect(is_readable(STDIN_FILENO)?)?;
+    let mut empty = [0u8; 1];
+    expect(read(STDIN_FILENO, &mut empty)? == 0)?;
+
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Now, &baseline.raw_vmin1())?;
+    ready("fionread-raw");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 3)?;
+    let mut byte = [0u8; 1];
+    expect(read(STDIN_FILENO, &mut byte)? == 1 && byte == [b'r'])?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 2)?;
+    let mut suffix = [0u8; 2];
+    expect(read(STDIN_FILENO, &mut suffix)? == 2 && &suffix == b"aw")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)
+}
+
 fn test_icrnl(baseline: &Baseline) -> Result<(), Errno> {
     tcsetattr(
         STDIN_FILENO,
@@ -1833,6 +1877,7 @@ fn run_auto(baseline: &Baseline) -> Results {
         baseline,
         test_canonical_short_record,
     );
+    results.case("input-queue-query", baseline, test_input_queue_query);
     results.case("icrnl", baseline, test_icrnl);
     results.case("input-mode-roundtrip", baseline, test_input_mode_roundtrip);
     results.case(

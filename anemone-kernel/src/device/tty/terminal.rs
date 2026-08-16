@@ -365,6 +365,10 @@ impl TerminalOutput {
         self.queue.available() >= maximum_token_len
     }
 
+    fn readable_bytes(&self) -> usize {
+        self.queue.len()
+    }
+
     fn enqueue_slice(&mut self, source: &[u8], termios: TtyTermios) -> usize {
         let mut consumed = 0;
         for &byte in source {
@@ -812,6 +816,14 @@ impl Terminal {
     pub(super) fn readable(&self) -> bool {
         let inner = self.inner.lock();
         inner.discipline.readable(inner.termios)
+    }
+
+    pub(super) fn input_readable_bytes(&self) -> usize {
+        self.inner.lock().discipline.readable_bytes()
+    }
+
+    pub(super) fn output_readable_bytes(&self) -> usize {
+        self.inner.lock().output.readable_bytes()
     }
 
     fn read_input_quiet(&self, dst: &mut [u8]) -> InputRead {
@@ -1375,6 +1387,61 @@ mod kunits {
         assert_eq!(&dst[..3], b"abc");
         assert_eq!(terminal.read_input(&mut dst), InputRead::Eof);
         assert_eq!(terminal.read_input(&mut dst), InputRead::Empty);
+    }
+
+    #[kunit]
+    fn input_readable_bytes_exclude_pending_and_follow_consumption() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| termios.echo = false);
+        for &byte in b"ab" {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(terminal.input_readable_bytes(), 0);
+        assert!(!terminal.readable());
+
+        for &byte in b"\ncd\n" {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(terminal.input_readable_bytes(), 6);
+        let mut prefix = [0_u8; 2];
+        assert_eq!(terminal.read_input(&mut prefix), InputRead::Bytes(2));
+        assert_eq!(&prefix, b"ab");
+        assert_eq!(terminal.input_readable_bytes(), 4);
+
+        let mut record = [0_u8; 4];
+        assert_eq!(terminal.read_input(&mut record), InputRead::Bytes(1));
+        assert_eq!(terminal.input_readable_bytes(), 3);
+        assert_eq!(terminal.read_input(&mut record), InputRead::Bytes(3));
+        assert_eq!(terminal.input_readable_bytes(), 0);
+
+        assert!(terminal.receive_rx_byte(terminal.termios_snapshot().0.eof));
+        assert!(terminal.readable());
+        assert_eq!(terminal.input_readable_bytes(), 0);
+        assert_eq!(terminal.read_input(&mut record), InputRead::Eof);
+
+        terminal.set_termios_for_test(|termios| termios.icanon = false);
+        for &byte in b"raw" {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(terminal.input_readable_bytes(), 3);
+        let mut byte = [0_u8; 1];
+        assert_eq!(terminal.read_input(&mut byte), InputRead::Bytes(1));
+        assert_eq!(terminal.input_readable_bytes(), 2);
+    }
+
+    #[kunit]
+    fn output_readable_bytes_count_transformed_queue() {
+        let terminal = terminal();
+        assert_eq!(terminal.enqueue_output(b"\n"), 1);
+        assert_eq!(terminal.output_readable_bytes(), 2);
+
+        let mut byte = [0_u8; 1];
+        assert_eq!(terminal.read_output(&mut byte), 1);
+        assert_eq!(byte, [b'\r']);
+        assert_eq!(terminal.output_readable_bytes(), 1);
+        assert_eq!(terminal.read_output(&mut byte), 1);
+        assert_eq!(byte, [b'\n']);
+        assert_eq!(terminal.output_readable_bytes(), 0);
     }
 
     #[kunit]

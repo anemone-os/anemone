@@ -78,6 +78,7 @@ fn run_cases(results: &mut Results) {
     );
     results.case("mount-views", mount::test_mount_views);
     results.case("stream-termios", stream::test_stream_and_terminal_state);
+    results.case("input-queue-query", stream::test_input_queue_queries);
     results.case("termios-cflag-profile", termios::test_cflag_profile);
     results.case("termios-iutf8-compat", termios::test_iutf8_compatibility);
     results.case(

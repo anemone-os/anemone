@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/driver/serial/ns16550a/`、`anemone-kernel/src/device/{boot_io,console,devnum}.rs`、`anemone-kernel/src/main.rs`
 **依赖：** None；本页定义后续 TTY relation/job-control contract 使用的数据面 baseline
 **Companion Contract：** [TTY controlling relation 与 job control](./job-control.md) 中的 `TTY-REL-001`、`TTY-JOBCTL-001`、`TTY-LIFE-001` 与 `TTY-ABI-001`（Active）
-**最后核验：** 2026-08-13
+**最后核验：** 2026-08-17
 
 ## 状态与能力所有权
 
@@ -99,6 +99,10 @@ work truth。一次read只消费所选prefix；显式flush、已记录overflow�
 character、delimiter或echo。一个condition扩展的2/3-byte token必须先通过完整容量检查再一次提交；backpressure
 时worker cursor保留同一unit重试，不得暴露prefix、重复marker或丢失后续unit。
 
+`FIONREAD` / `TIOCINQ`只投影line discipline当前已经提交、可由read消费的byte数，不消费input，也不建立缓存
+counter。canonical pending edit不计入；所有已提交record的剩余bytes计入。空`VEOF` record仍可使read/poll ready而
+count为0，因为readiness还表达EOF record，不能退化为`count > 0`。noncanonical mode报告同一committed byte stream。
+
 canonical `VERASE`在`IUTF8`关闭时删除一个byte；开启时删除最后一个非continuation byte及其后的连续
 continuation suffix，不执行编码合法性检查。若pending suffix全部由continuation bytes组成，则保持完整suffix而不
 部分删除。erase必须先计算完整input跨度与完整echo token并通过容量检查，再在同一个Terminal guard中提交input、
@@ -115,7 +119,7 @@ RV64 matrix；record/queue accounting、read/poll predicate、register-plus-rech
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)；[TTY FIONREAD/TIOCINQ小迭代](../../devlog/changes/2026-08-17-tty-fionread.md)。
 
 **PTY refine：** master write按同一input-conditioning/discipline规则直接提交ordered bytes；master hangup清除committed
 slave input。readiness仍由Terminal input与pair peer predicate组合，pair不建立第二队列。该refine来自
@@ -136,6 +140,10 @@ echo复用同一Terminal transform与port capability，但不在Terminal guard�
 writable、drain、partial write与`TCSETSW`来自真实backend progress。panic/early-console best-effort路径不是普通TTY
 TX truth。普通console record与整次TTY write不承诺相互原子，但都必须经同一个port owner按bounded batch序列化。
 
+PTY master的`FIONREAD` / `TIOCINQ`投影同一个Terminal output queue中已经完成`OPOST`转换、可由master read消费的
+byte数；它不按slave write的源byte计量，也不建立并列output counter。snapshot必须服从pair operation/liveness边界，
+但user copyout不能持有Terminal或pair owner lock。
+
 **违反表现：** binary byte因UTF-8失败、ONLCR/TAB3 partial progress重发输入、TAB3 backpressure改变后续列、
 write wait与poll使用冲突的writable条件、echo持Terminal guard等待、虚构drain，或console/TTY形成两套TX truth。
 
@@ -146,7 +154,7 @@ KUnit及public PTY byte oracle/source audit；GNU `less 668`
 
 **最初来源：** [RFC-20260722-tty-subsystem R1](../../rfcs/tty-subsystem/index.md)。
 
-**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)。
+**当前来源：** [`TTY-DATA-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-2--checkpoint-4-closure与-tty-data-cutover---2026-07-23)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)；[TTY FIONREAD/TIOCINQ小迭代](../../devlog/changes/2026-08-17-tty-fionread.md)。
 
 **PTY refine：** slave write与echo经过同一output processing进入Terminal queue并由master消费；partial progress、drain和
 writability保持Terminal-owned，master不是physical port且不伪造`TtyPort`。该refine来自
