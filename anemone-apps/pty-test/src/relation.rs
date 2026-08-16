@@ -260,7 +260,9 @@ fn no_ctty_and_explicit_body() -> Result<(), Errno> {
     pair.unlock()?;
     let slave = pair.open_path(O_RDWR | O_NOCTTY)?;
     expect_no_controlling_terminal()?;
-    tiocsctty(slave.raw(), 0)?;
+    // `arg=1` requests stealing only after a live conflicting relation is
+    // observed; an unbound PTY slave still follows ordinary acquisition.
+    tiocsctty(slave.raw(), 1)?;
     ensure(tcgetsid(slave.raw())? == leader as i32)?;
     ensure(tcgetpgrp(slave.raw())? == leader as i32)
 }
@@ -313,11 +315,13 @@ fn occupied_endpoint_body() -> Result<(), Errno> {
             setsid()?;
             let noncontrolling = pair.open_peer(O_RDONLY)?;
             expect_no_controlling_terminal()?;
+            expect_errno(tiocsctty(noncontrolling.raw(), 1), EPERM)?;
             expect_errno(tcgetsid(noncontrolling.raw()), ENOTTY)
         })()),
         Some(child) => child,
     };
-    wait_child(child)
+    wait_child(child)?;
+    ensure(tcgetsid(controlling.raw())? == getpid()? as i32)
 }
 
 pub fn test_implicit_negative_matrix() -> Result<(), Errno> {
