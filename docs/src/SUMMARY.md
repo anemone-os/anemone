@@ -91,6 +91,7 @@
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
 		- [2026-08-17 - TTY FIONREAD/TIOCINQ](./devlog/changes/2026-08-17-tty-fionread.md)
+		- [2026-08-17 - Socket SIOCGIFCONF interface query](./devlog/changes/2026-08-17-socket-siocgifconf.md)
 		- [2026-08-17 - Socket FIONREAD typed family dispatch](./devlog/changes/2026-08-17-socket-fionread.md)
 		- [2026-08-17 - Blocked ignored signal generation admission](./devlog/changes/2026-08-17-signal-blocked-ignored-admission.md)
 		- [2026-08-17 - TIOCSCTTY context-sensitive argument](./devlog/changes/2026-08-17-tty-tiocsctty-argument.md)

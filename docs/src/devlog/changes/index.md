@@ -32,6 +32,7 @@
 ## 当前记录
 
 - [2026-08-17 - TTY FIONREAD/TIOCINQ](./2026-08-17-tty-fionread.md)
+- [2026-08-17 - Socket SIOCGIFCONF interface query](./2026-08-17-socket-siocgifconf.md)
 - [2026-08-17 - Socket FIONREAD typed family dispatch](./2026-08-17-socket-fionread.md)
 - [2026-08-17 - Blocked ignored signal generation admission](./2026-08-17-signal-blocked-ignored-admission.md)
 - [2026-08-17 - TIOCSCTTY context-sensitive argument](./2026-08-17-tty-tiocsctty-argument.md)
