@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-17 - Blocked ignored signal generation admission](./2026-08-17-signal-blocked-ignored-admission.md)
 - [2026-08-16 - User fault ahead](./2026-08-16-user-fault-ahead.md)
 - [2026-08-15 - Nemophila task lineage auditor](./2026-08-15-nemophila-task-lineage-auditor.md)
 - [2026-08-13 - `/proc/filesystems` registry projection](./2026-08-13-proc-filesystems.md)

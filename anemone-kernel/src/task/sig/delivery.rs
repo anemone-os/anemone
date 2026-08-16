@@ -136,8 +136,9 @@ impl Task {
     ///
     /// 'masked' here refers to the signal mask of this task.
     ///
-    /// This method relies on the fact that ignored signals won't be delivered
-    /// into [PendingSignals]. See [Task::recv_signal] for details.
+    /// Blocked ignored occurrences may be present in [PendingSignals], but the
+    /// ordinary unmasked scan remains governed by live action selection. See
+    /// [Task::recv_signal] for generation admission.
     pub fn has_unmasked_signal(&self) -> bool {
         let prv_pending = {
             let pending = self.sig_pending.lock();

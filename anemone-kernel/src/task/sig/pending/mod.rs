@@ -20,8 +20,9 @@ struct SequencedSignal {
 
 /// Per task pending signals.
 ///
-/// Ignored signals won't be recorded here. See [Task::recv_signal] and
-/// [ThreadGroup::recv_signal] for details.
+/// Unblocked ignored occurrences are discarded before publication. Blocked
+/// ignored occurrences remain here for synchronous consumption or a later
+/// disposition change. See [Task::recv_signal] and [ThreadGroup::recv_signal].
 #[derive(Debug)]
 pub struct PendingSignals {
     /// Stable handoff target for trap-return delivery.

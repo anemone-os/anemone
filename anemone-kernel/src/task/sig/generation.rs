@@ -17,6 +17,20 @@ pub(super) fn is_job_control_signal(no: SigNo) -> bool {
     )
 }
 
+/// Read the one generation-admission snapshot shared by ordinary, job-control,
+/// and timer sources. The caller holds the destination pending-owner lock, so
+/// this helper preserves the signal leaf order and closes admission with
+/// publication before a concurrent ignored-disposition flush can complete.
+pub(super) fn should_discard_at_generation(admission_task: &Task, no: SigNo) -> bool {
+    let mask = admission_task.sig_mask.lock();
+    let action = admission_task
+        .sig_disposition
+        .read()
+        .get_disposition(no)
+        .action;
+    action.discard_at_generation(mask.current().get(no))
+}
+
 fn is_conditional_stop_signal(no: SigNo) -> bool {
     matches!(no, SigNo::SIGTSTP | SigNo::SIGTTIN | SigNo::SIGTTOU)
 }
@@ -38,8 +52,8 @@ impl Task {
     /// If the signal is masked, task won't be notified, except for [SIGKILL]
     /// and [SIGSTOP].
     ///
-    /// If the disposition of the signal satisfies [SignalAction::is_ignored],
-    /// the signal won't be delivered, even if it is unmasked.
+    /// An ignored signal is discarded at generation only when it is unblocked.
+    /// Blocked occurrences remain available to synchronous signal consumers.
     pub fn recv_signal(self: &Arc<Self>, signal: Signal) {
         kdebugln!("task {} recv_signal: {:?}", self.tid(), signal);
         let no = signal.no;
@@ -54,13 +68,24 @@ impl Task {
             return;
         }
 
-        let disp = self.sig_disposition.read().get_disposition(no);
-        if disp.action.is_ignored() {
+        let admitted = {
+            // Admission and publication share the pending-owner lock. Reading
+            // mask then disposition follows the signal leaf order and makes a
+            // concurrent SIG_IGN update plus pending flush atomic with this
+            // occurrence.
+            let mut pending = self.sig_pending.lock();
+            if should_discard_at_generation(self, no) {
+                false
+            } else {
+                pending.push_signal(signal);
+                true
+            }
+        };
+        if !admitted {
             kdebugln!("signal {:?} is ignored by the task, not queuing", no);
             return;
         }
 
-        self.sig_pending.lock().push_signal(signal);
         let recheck_routes =
             get_thread_group(&self.tgid()).map(|tg| tg.snapshot_signalfd_rechecks());
         // Publish private pending before making the conservative cache visible.
@@ -126,8 +151,8 @@ impl ThreadGroup {
 
     /// Send a signal to this thread group.
     ///
-    /// If the disposition of the signal satisfies [SignalAction::is_ignored],
-    /// the signal won't be delivered.
+    /// An ignored signal is discarded at generation only when the selected
+    /// admission member does not block it.
     pub fn recv_signal(&self, signal: Signal) {
         let no = signal.no;
 
@@ -136,18 +161,29 @@ impl ThreadGroup {
             return;
         }
 
-        let members = self.get_members();
-
-        let Some(first_member) = members.first() else {
-            knoticeln!(
-                "trying to send signal {:?} to a thread group with no members",
-                no
-            );
-            return;
+        // The member snapshot supplies only a transient mask/disposition
+        // admission view. Pending ownership remains exclusively shared.
+        let mut admission_members = self.get_members();
+        let admitted = {
+            let inner = self.inner.read();
+            admission_members.retain(|member| inner.members.contains(&member.tid()));
+            let Some(admission_member) = admission_members.first() else {
+                knoticeln!(
+                    "trying to send signal {:?} to a thread group with no members",
+                    no
+                );
+                return;
+            };
+            let mut pending = inner.sig_pending.lock();
+            if should_discard_at_generation(admission_member, no) {
+                false
+            } else {
+                pending.push_signal(signal);
+                true
+            }
         };
-        let disp = first_member.sig_disposition.read().get_disposition(no);
 
-        if disp.action.is_ignored() {
+        if !admitted {
             kdebugln!(
                 "signal {:?} is ignored by the thread group, not queuing",
                 no
@@ -155,10 +191,6 @@ impl ThreadGroup {
             return;
         }
 
-        {
-            let inner = self.inner.read();
-            inner.sig_pending.lock().push_signal(signal);
-        }
         let recheck_routes = self.snapshot_signalfd_rechecks();
 
         // Snapshot after publication. A member present now is rearmed below;
@@ -350,30 +382,32 @@ impl ThreadGroup {
                     Vec::new()
                 } else {
                     let private_target = route.private_target();
-                    let occurrence_owner = private_target
+                    let admission_member = private_target
                         .cloned()
                         .or_else(|| members.first().cloned())
-                        .expect("jobctl: live ThreadGroup has no signal disposition owner");
-                    let disposition = occurrence_owner.sig_disposition.read().get_disposition(no);
-                    // Linux preserves a blocked default SIGCONT occurrence so
-                    // userspace can install a handler before unblocking it. A
-                    // conditional stop with explicit SIG_IGN follows ordinary
-                    // generation semantics and is discarded after cleanup.
-                    let discard = if no == SigNo::SIGCONT {
-                        disposition.action.is_explicit_ignore()
-                            || disposition.action.is_default_ignore()
-                                && !occurrence_owner.is_current_sig_mask_blocking(no)
+                        .expect("jobctl: live ThreadGroup has no admission member");
+                    let queued = if let Some(target) = private_target {
+                        let mut pending = target.sig_pending.lock();
+                        if should_discard_at_generation(&admission_member, no) {
+                            false
+                        } else {
+                            pending.push_signal(signal);
+                            true
+                        }
                     } else {
-                        assert!(is_conditional_stop_signal(no));
-                        disposition.action.is_ignored()
+                        let mut pending = inner.sig_pending.lock();
+                        if should_discard_at_generation(&admission_member, no) {
+                            false
+                        } else {
+                            pending.push_signal(signal);
+                            true
+                        }
                     };
-                    if discard {
+                    if !queued {
                         Vec::new()
                     } else if let Some(target) = private_target {
-                        target.sig_pending.lock().push_signal(signal);
                         vec![target.clone()]
                     } else {
-                        inner.sig_pending.lock().push_signal(signal);
                         members.to_vec()
                     }
                 };
@@ -542,22 +576,18 @@ impl ThreadGroup {
                     );
                 }
 
-                let disposition_owner = route.private_target().unwrap_or_else(|| {
+                let admission_member = route.private_target().unwrap_or_else(|| {
                     members
                         .first()
-                        .expect("jobctl: live ThreadGroup has no disposition owner")
+                        .expect("jobctl: live ThreadGroup has no admission member")
                 });
-                let disposition = disposition_owner.sig_disposition.read().get_disposition(no);
-                let (discard, stop_epoch, transition) = if no == SigNo::SIGCONT {
-                    let discard = disposition.action.is_explicit_ignore()
-                        || disposition.action.is_default_ignore()
-                            && !disposition_owner.is_current_sig_mask_blocking(no);
+                let (stop_epoch, transition) = if no == SigNo::SIGCONT {
                     let transition = inner
                         .job_control
                         .as_mut()
                         .expect("jobctl: user ThreadGroup lacks control state")
                         .continue_generation(self.tgid());
-                    (discard, None, transition)
+                    (None, transition)
                 } else {
                     assert!(is_conditional_stop_signal(no));
                     let epoch = inner
@@ -566,7 +596,6 @@ impl ThreadGroup {
                         .expect("jobctl: user ThreadGroup lacks control state")
                         .continue_epoch();
                     (
-                        disposition.action.is_ignored(),
                         Some(epoch),
                         crate::task::jobctl::group::JobControlTransition::NONE,
                     )
@@ -580,7 +609,7 @@ impl ThreadGroup {
                             generation,
                             episode,
                             overrun,
-                            discard,
+                            should_discard_at_generation(admission_member, no),
                             stop_epoch,
                         )
                     },
@@ -592,7 +621,7 @@ impl ThreadGroup {
                             generation,
                             episode,
                             overrun,
-                            discard,
+                            should_discard_at_generation(admission_member, no),
                             stop_epoch,
                         )
                     },
@@ -718,5 +747,105 @@ impl<'a> JobControlSignalRoute<'a> {
             Self::Private(target) => Some(target),
             Self::Shared | Self::SharedForExactMember(_) | Self::SharedForProcessGroup(_) => None,
         }
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::task::sig::{
+        disposition::{KSigAction, SaFlags, SignalAction},
+        info::{SiCode, SigInfoFields, SigKill},
+    };
+
+    fn test_signal(target: &Task, no: SigNo) -> Signal {
+        Signal::new(
+            no,
+            SiCode::User,
+            SigInfoFields::Kill(SigKill {
+                pid: target.tid(),
+                uid: Uid::new(0),
+            }),
+        )
+    }
+
+    #[kunit]
+    fn blocked_default_ignore_enters_private_and_shared_pending() {
+        let target = get_current_task();
+        let group = target.get_thread_group();
+        let no = SigNo::SIGCHLD;
+        let set = SigSet::new_with_signos(&[no]);
+        let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target.sig_disposition.read().get_disposition(no);
+
+        group.flush_specific_signals(set);
+        target.sig_disposition.write().set_to_default(no);
+        let mut blocked = old_mask;
+        blocked.set(no);
+        target.set_permanent_sig_mask(blocked);
+
+        target.recv_signal(test_signal(&target, no));
+        assert!(target.pending_signal_set().get(no));
+        assert_eq!(target.fetch_specific_signal(set).unwrap().no, no);
+
+        group.recv_signal(test_signal(&target, no));
+        assert!(group.shared_pending_signal_set().get(no));
+        assert_eq!(target.fetch_specific_signal(set).unwrap().no, no);
+
+        let mut unblocked = old_mask;
+        unblocked.clear(no);
+        target.set_permanent_sig_mask(unblocked);
+        target.recv_signal(test_signal(&target, no));
+        group.recv_signal(test_signal(&target, no));
+        assert!(!target.pending_signal_set().get(no));
+        assert!(!group.shared_pending_signal_set().get(no));
+
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(no, old_action);
+        target.set_permanent_sig_mask(old_mask);
+        group.flush_specific_signals(set);
+    }
+
+    #[kunit]
+    fn blocked_explicit_ignore_job_control_occurrence_is_pending() {
+        let target = get_current_task();
+        let group = target.get_thread_group();
+        let no = SigNo::SIGTSTP;
+        let set = SigSet::new_with_signos(&[no]);
+        let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target.sig_disposition.read().get_disposition(no);
+
+        group.flush_specific_signals(set);
+        target.sig_disposition.write().set_disposition(
+            no,
+            KSigAction {
+                action: SignalAction::Ignore,
+                flags: SaFlags::empty(),
+                restorer: VirtAddr::new(0),
+                mask: SigSet::new(),
+            },
+        );
+        let mut blocked = old_mask;
+        blocked.set(no);
+        target.set_permanent_sig_mask(blocked);
+
+        target.recv_signal(test_signal(&target, no));
+        assert!(target.pending_signal_set().get(no));
+        assert_eq!(target.fetch_specific_signal(set).unwrap().no, no);
+
+        let mut unblocked = old_mask;
+        unblocked.clear(no);
+        target.set_permanent_sig_mask(unblocked);
+        target.recv_signal(test_signal(&target, no));
+        assert!(!target.pending_signal_set().get(no));
+
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(no, old_action);
+        target.set_permanent_sig_mask(old_mask);
+        group.flush_specific_signals(set);
     }
 }

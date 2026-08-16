@@ -16,7 +16,7 @@ use crate::{
         jobctl::group::ContinueEpoch,
         sig::{
             SigNo, Signal, SignalPurpose,
-            generation::is_job_control_signal,
+            generation::{is_job_control_signal, should_discard_at_generation},
             info::{SiCode, SigInfoFields, SigTimer},
             notify_signalfd_rechecks,
             set::SigSet,
@@ -768,19 +768,15 @@ impl PosixTimerSignalRoute {
                 return PosixTimerSignalEnqueue::TargetExited;
             };
 
-            // Preserve the established signal-leaf order: pending precedes the
-            // shared disposition. This makes ignored admission atomic with a
-            // concurrent SIG_IGN update followed by pending flush.
+            // Preserve the established signal-leaf order: pending, selected
+            // member mask, then shared disposition. This makes mask-aware
+            // admission atomic with a concurrent SIG_IGN update followed by
+            // pending flush.
             let mut pending = inner.sig_pending.lock();
             let Some(no) = self.registered_no_locked(&pending) else {
                 return PosixTimerSignalEnqueue::TargetExited;
             };
-            let ignored = disposition_owner
-                .sig_disposition
-                .read()
-                .get_disposition(no)
-                .action
-                .is_ignored();
+            let discard = should_discard_at_generation(disposition_owner, no);
             let PendingSignals {
                 timer,
                 next_arrival,
@@ -793,7 +789,7 @@ impl PosixTimerSignalRoute {
                 generation,
                 episode,
                 overrun,
-                ignored,
+                discard,
             );
             (outcome, no)
         };
@@ -849,12 +845,7 @@ impl PosixTimerSignalRoute {
             let Some(no) = self.registered_no_locked(&pending) else {
                 return PosixTimerSignalEnqueue::TargetExited;
             };
-            let ignored = target
-                .sig_disposition
-                .read()
-                .get_disposition(no)
-                .action
-                .is_ignored();
+            let discard = should_discard_at_generation(target, no);
             let PendingSignals {
                 timer,
                 next_arrival,
@@ -867,7 +858,7 @@ impl PosixTimerSignalRoute {
                 generation,
                 episode,
                 overrun,
-                ignored,
+                discard,
             );
             (outcome, no)
         };
@@ -1147,9 +1138,22 @@ mod kunits {
         let target = get_current_task();
         let thread_group = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target
+            .sig_disposition
+            .read()
+            .get_disposition(SigNo::SIGUSR2);
         let mut blocked = old_mask;
         blocked.set(SigNo::SIGUSR2);
         target.set_permanent_sig_mask(blocked);
+        target.sig_disposition.write().set_disposition(
+            SigNo::SIGUSR2,
+            KSigAction {
+                action: SignalAction::Ignore,
+                flags: SaFlags::empty(),
+                restorer: VirtAddr::new(0),
+                mask: SigSet::new(),
+            },
+        );
         let callback_target = Arc::downgrade(&target);
         let callbacks = Arc::new(AtomicUsize::new(0));
         let callback_count = callbacks.clone();
@@ -1189,6 +1193,10 @@ mod kunits {
         assert_eq!(signal.no, SigNo::SIGUSR2);
         assert_eq!(callbacks.load(Ordering::SeqCst), 1);
         drop(registration);
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(SigNo::SIGUSR2, old_action);
         target.set_permanent_sig_mask(old_mask);
     }
 
@@ -1197,13 +1205,23 @@ mod kunits {
         let target = get_current_task();
         let tg = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target
+            .sig_disposition
+            .read()
+            .get_disposition(SigNo::SIGWINCH);
         let mut blocked = old_mask;
-        blocked.set(SigNo::SIGUSR1);
+        // SIGWINCH is default-ignore. Blocking it proves timer admission uses
+        // the same mask-aware rule as ordinary generation.
+        blocked.set(SigNo::SIGWINCH);
         target.set_permanent_sig_mask(blocked);
+        target
+            .sig_disposition
+            .write()
+            .set_to_default(SigNo::SIGWINCH);
 
         let (_log, callback) = callback_log();
         let registration =
-            PosixTimerSignalRegistration::try_new(&tg, SigNo::SIGUSR1, 92, 0, callback).unwrap();
+            PosixTimerSignalRegistration::try_new(&tg, SigNo::SIGWINCH, 92, 0, callback).unwrap();
         let _ = target.take_signal_return_work();
         assert!(!target.take_signal_return_work());
 
@@ -1214,11 +1232,15 @@ mod kunits {
         assert!(target.take_signal_return_work());
         target.rearm_signal_return_work();
         let signal = target
-            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGUSR1]))
+            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGWINCH]))
             .expect("shared timer signal was not published to the thread group");
-        assert_eq!(signal.no, SigNo::SIGUSR1);
+        assert_eq!(signal.no, SigNo::SIGWINCH);
 
         drop(registration);
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(SigNo::SIGWINCH, old_action);
         target.set_permanent_sig_mask(old_mask);
     }
 
@@ -1227,10 +1249,23 @@ mod kunits {
         let target = get_current_task();
         let tg = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target
+            .sig_disposition
+            .read()
+            .get_disposition(SigNo::SIGCONT);
         let mut blocked = old_mask;
         blocked.set(SigNo::SIGCONT);
         blocked.set(SigNo::SIGTSTP);
         target.set_permanent_sig_mask(blocked);
+        target.sig_disposition.write().set_disposition(
+            SigNo::SIGCONT,
+            KSigAction {
+                action: SignalAction::Ignore,
+                flags: SaFlags::empty(),
+                restorer: VirtAddr::new(0),
+                mask: SigSet::new(),
+            },
+        );
 
         let (log, callback) = callback_log();
         let registration = PosixTimerSignalRegistration::try_new_private(
@@ -1290,6 +1325,10 @@ mod kunits {
         );
 
         drop(registration);
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(SigNo::SIGCONT, old_action);
         target.set_permanent_sig_mask(old_mask);
     }
 
@@ -1345,7 +1384,6 @@ mod kunits {
     fn private_timer_reuses_registration_after_live_ignore() {
         let owner = get_current_task().get_thread_group();
         let target = detached_target(owner.tgid());
-        target.set_permanent_sig_mask(SigSet::new_with_signos(&[SigNo::SIGUSR2]));
         target.sig_disposition.write().set_disposition(
             SigNo::SIGUSR2,
             KSigAction {

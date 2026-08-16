@@ -444,6 +444,70 @@ fn test_dup_and_fork_caller_relative() -> Result<(), Errno> {
     close(fd)
 }
 
+fn test_blocked_ignored_admission_and_sigchld_status() -> Result<(), Errno> {
+    let watched = sigset(&[SigNo::SIGWINCH, SigNo::SIGCHLD]);
+    let mut old_mask = linux_signal::SigSet { bits: 0 };
+    sigprocmask(SigProcMaskHow::Block, Some(&watched), Some(&mut old_mask))?;
+
+    let ignore = linux_signal::SigAction {
+        sighandler: linux_signal::SIG_IGN.into(),
+        sa_flags: 0,
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
+        sa_mask: linux_signal::SigSet { bits: 0 },
+    };
+    let mut previous = linux_signal::SigAction {
+        sighandler: linux_signal::SIG_DFL.into(),
+        sa_flags: 0,
+        sa_restorer: anemone_rs::abi::RawUserAddr64::NULL,
+        sa_mask: linux_signal::SigSet { bits: 0 },
+    };
+    sigaction(SigNo::SIGWINCH, Some(&ignore), Some(&mut previous))?;
+
+    let fd = signalfd(-1, &watched, 0)?;
+    raise(SigNo::SIGWINCH)?;
+    let ignored = read_records::<1>(fd)?[0];
+    require!(
+        ignored.signo == SigNo::SIGWINCH.as_usize() as u32,
+        "blocked-explicit-ignore-record"
+    );
+
+    let child = match fork()? {
+        None => exit(37),
+        Some(pid) => pid,
+    };
+    let child_record = read_records::<1>(fd)?[0];
+    require!(
+        child_record.signo == SigNo::SIGCHLD.as_usize() as u32,
+        "blocked-default-sigchld-signo"
+    );
+    require!(child_record.pid == child, "blocked-default-sigchld-pid");
+    require!(
+        child_record.code == linux_signal::CLD_EXITED,
+        "blocked-default-sigchld-code"
+    );
+    require!(child_record.status == 37, "blocked-default-sigchld-status");
+
+    // signalfd consumes only the signal occurrence. Child status remains with
+    // wait-core and must still be independently reapable.
+    let mut status = WStatusRaw::EMPTY;
+    require!(
+        wait4(
+            WaitFor::ChildWithTgid(child),
+            Some(&mut status),
+            WaitOptions::empty(),
+        )? == Some(child),
+        "blocked-default-sigchld-wait-pid"
+    );
+    require!(
+        matches!(status.read(), WStatus::Exited(37)),
+        "blocked-default-sigchld-wait-status"
+    );
+
+    close(fd)?;
+    sigaction(SigNo::SIGWINCH, Some(&previous), None)?;
+    sigprocmask(SigProcMaskHow::SetMask, Some(&old_mask), None)
+}
+
 fn run() -> Result<(), Errno> {
     match mkdirat(AtFd::Cwd, Path::new("/proc"), 0o755) {
         Ok(()) | Err(EEXIST) => {},
@@ -477,6 +541,8 @@ fn run() -> Result<(), Errno> {
     println!("SIGNALFD:CASE:blocking:pass");
     test_dup_and_fork_caller_relative()?;
     println!("SIGNALFD:CASE:alias-fork:pass");
+    test_blocked_ignored_admission_and_sigchld_status()?;
+    println!("SIGNALFD:CASE:blocked-ignored-sigchld:pass");
 
     sigprocmask(SigProcMaskHow::SetMask, Some(&old_mask), None)?;
     umount(Path::new("/proc"))?;
