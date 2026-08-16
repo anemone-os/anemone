@@ -224,7 +224,7 @@ impl ThreadGroup {
                 });
                 Some(
                     PosixTimerSignalRegistration::try_new_private(
-                        &target, no, id, sigval, callback,
+                        &target, self, no, id, sigval, callback,
                     )
                     .map_err(|error| match error {
                         SysError::NoSuchProcess => SysError::InvalidArgument,

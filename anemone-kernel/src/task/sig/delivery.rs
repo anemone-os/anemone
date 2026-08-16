@@ -857,6 +857,7 @@ mod kunits {
         });
         let registration = PosixTimerSignalRegistration::try_new_private(
             &target,
+            &target.get_thread_group(),
             SigNo::SIGUSR1,
             111,
             0,
@@ -864,7 +865,7 @@ mod kunits {
         )
         .unwrap();
         assert_eq!(
-            registration.enqueue(7, 8, 0),
+            registration.route().enqueue(7, 8, 0),
             PosixTimerSignalEnqueue::Queued
         );
 

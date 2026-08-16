@@ -51,12 +51,13 @@ pub use pending::PendingSignals;
 mod recheck;
 use pending::timer;
 pub(crate) use recheck::{
-    SignalFdRecheckObserver, SignalFdRecheckRoute, SignalFdRecheckRoutes, notify_signalfd_rechecks,
+    SignalFdRecheckBatch, SignalFdRecheckObserver, SignalFdRecheckRoute, SignalFdRecheckRoutes,
+    notify_signalfd_rechecks,
 };
 pub mod set;
 pub(crate) use timer::{
     PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
-    PosixTimerSignalIdentity, PosixTimerSignalRegistration,
+    PosixTimerSignalIdentity, PosixTimerSignalRegistration, PosixTimerSignalRoute,
 };
 mod terminal;
 pub(crate) use terminal::TtyJobControlDisposition;

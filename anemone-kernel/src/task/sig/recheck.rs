@@ -54,6 +54,19 @@ pub(crate) struct SignalFdRecheckRoutes {
     routes: Arc<Vec<SignalFdRecheckRoute>>,
 }
 
+/// Opaque, immutable set of routes detached for guards-out notification.
+#[derive(Debug)]
+pub(crate) struct SignalFdRecheckBatch {
+    routes: Arc<Vec<SignalFdRecheckRoute>>,
+}
+
+impl SignalFdRecheckBatch {
+    #[cfg(feature = "kunit")]
+    fn len(&self) -> usize {
+        self.routes.len()
+    }
+}
+
 impl SignalFdRecheckRoutes {
     pub(crate) fn new() -> Self {
         Self {
@@ -64,7 +77,7 @@ impl SignalFdRecheckRoutes {
     pub(crate) fn replace_with(
         &mut self,
         route: SignalFdRecheckRoute,
-    ) -> Result<Arc<Vec<SignalFdRecheckRoute>>, SysError> {
+    ) -> Result<SignalFdRecheckBatch, SysError> {
         let replacement_key = route.poll_hygiene_key;
         let retained = self
             .routes
@@ -96,11 +109,15 @@ impl SignalFdRecheckRoutes {
         );
         replacement.push(route);
         let replacement = Arc::try_new(replacement).map_err(|_| SysError::OutOfMemory)?;
-        Ok(core::mem::replace(&mut self.routes, replacement))
+        Ok(SignalFdRecheckBatch {
+            routes: core::mem::replace(&mut self.routes, replacement),
+        })
     }
 
-    pub(crate) fn snapshot(&self) -> Arc<Vec<SignalFdRecheckRoute>> {
-        self.routes.clone()
+    pub(crate) fn snapshot(&self) -> SignalFdRecheckBatch {
+        SignalFdRecheckBatch {
+            routes: self.routes.clone(),
+        }
     }
 }
 
@@ -116,15 +133,15 @@ impl ThreadGroup {
         Ok(())
     }
 
-    pub(crate) fn snapshot_signalfd_rechecks(&self) -> Arc<Vec<SignalFdRecheckRoute>> {
+    pub(crate) fn snapshot_signalfd_rechecks(&self) -> SignalFdRecheckBatch {
         self.signalfd_rechecks.lock().snapshot()
     }
 }
 
 /// Notify only after the producer has published pending state and released all
 /// pending/topology guards. Routes carry no readiness or signal identity.
-pub(crate) fn notify_signalfd_rechecks(routes: Arc<Vec<SignalFdRecheckRoute>>) {
-    for route in routes.iter() {
+pub(crate) fn notify_signalfd_rechecks(routes: SignalFdRecheckBatch) {
+    for route in routes.routes.iter() {
         route.notify();
     }
 }

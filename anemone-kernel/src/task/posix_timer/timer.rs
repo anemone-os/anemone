@@ -323,17 +323,22 @@ impl PosixTimer {
         let Some(notification) = notification else {
             return;
         };
-        let outcome = {
+        let route = {
             let registration = self.signal_registration.lock();
             let Some(registration) = registration.as_ref() else {
                 return;
             };
-            registration.enqueue(
-                notification.generation,
-                notification.episode,
-                clamp_overrun(notification.overrun),
-            )
+            registration.route()
         };
+        // The route is generation-tagged and non-owning, so deletion may
+        // revoke it before this attempt reaches Signal. Keeping the timer
+        // registration guard out of Signal avoids callbacks and wakeups under
+        // the timer owner while stale routes fail as TargetExited.
+        let outcome = route.enqueue(
+            notification.generation,
+            notification.episode,
+            clamp_overrun(notification.overrun),
+        );
         match outcome {
             PosixTimerSignalEnqueue::Queued | PosixTimerSignalEnqueue::AlreadyPending => {},
             PosixTimerSignalEnqueue::Ignored => match self.notification_kind {

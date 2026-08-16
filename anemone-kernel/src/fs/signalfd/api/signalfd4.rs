@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::{create_signalfd, description_ops, reconfigure_signalfd, sanitize_mask};
+use super::super::{create_signalfd, description_ops, reconfigure_signalfd, sanitize_mask};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

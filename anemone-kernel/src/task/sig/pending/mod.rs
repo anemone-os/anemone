@@ -943,7 +943,10 @@ mod kunits {
     fn test_exit_closes_admission_and_flushes_private_timer_state() {
         let mut pending = PendingSignals::new();
         let (log, callback) = callback_log();
-        let owner = TimerSignalPendingOwner::Private(Weak::new());
+        let owner = TimerSignalPendingOwner::Private {
+            target: Weak::new(),
+            thread_group: Weak::new(),
+        };
         let slot = pending
             .timer
             .try_register(owner.clone(), SigNo::SIGUSR1, 41, 0, callback.clone())
@@ -962,7 +965,10 @@ mod kunits {
         );
         assert_eq!(
             pending.timer.try_register(
-                TimerSignalPendingOwner::Private(Weak::new()),
+                TimerSignalPendingOwner::Private {
+                    target: Weak::new(),
+                    thread_group: Weak::new(),
+                },
                 SigNo::SIGUSR2,
                 42,
                 0,

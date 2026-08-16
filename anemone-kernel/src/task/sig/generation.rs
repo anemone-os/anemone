@@ -4,8 +4,8 @@ use crate::{
         Task, ThreadGroup, ThreadGroupInner,
         jobctl::group::ContinueEpoch,
         sig::{
-            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, PosixTimerSignalRegistration,
-            SigNo, Signal, disposition::SignalDisposition, notify_signalfd_rechecks, set::SigSet,
+            PosixTimerSignalCompletion, PosixTimerSignalEnqueue, PosixTimerSignalRoute, SigNo,
+            Signal, disposition::SignalDisposition, notify_signalfd_rechecks, set::SigSet,
         },
     },
 };
@@ -89,16 +89,14 @@ impl Task {
     /// generation transaction while retaining private occurrence ownership.
     pub(super) fn enqueue_private_timer_job_control_signal(
         self: &Arc<Self>,
-        registration: &PosixTimerSignalRegistration,
+        thread_group: &Arc<ThreadGroup>,
+        registration: &PosixTimerSignalRoute,
         no: SigNo,
         generation: u64,
         episode: u64,
         overrun: i32,
     ) -> PosixTimerSignalEnqueue {
-        let Some(tg) = get_thread_group(&self.tgid()) else {
-            return PosixTimerSignalEnqueue::TargetExited;
-        };
-        tg.enqueue_timer_job_control_signal_to(
+        thread_group.enqueue_timer_job_control_signal_to(
             TimerJobControlSignalRoute::Private(self),
             registration,
             no,
@@ -416,7 +414,7 @@ impl ThreadGroup {
     /// stays in the timer's preallocated signal slot.
     pub(super) fn enqueue_timer_job_control_signal(
         &self,
-        registration: &PosixTimerSignalRegistration,
+        registration: &PosixTimerSignalRoute,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -435,7 +433,7 @@ impl ThreadGroup {
     fn enqueue_timer_job_control_signal_to(
         &self,
         route: TimerJobControlSignalRoute<'_>,
-        registration: &PosixTimerSignalRegistration,
+        registration: &PosixTimerSignalRoute,
         no: SigNo,
         generation: u64,
         episode: u64,
@@ -473,9 +471,21 @@ impl ThreadGroup {
                 }
 
                 let registration_no = match route {
-                    TimerJobControlSignalRoute::Shared => registration
-                        .registered_no_locked(&inner.sig_pending.lock())
-                        .expect("shared timer signal registration is no longer active"),
+                    TimerJobControlSignalRoute::Shared => {
+                        let pending = inner.sig_pending.lock();
+                        let Some(no) = registration.registered_no_locked(&pending) else {
+                            return (
+                                (
+                                    PosixTimerSignalEnqueue::TargetExited,
+                                    Vec::new(),
+                                    no,
+                                    Vec::new(),
+                                ),
+                                crate::task::jobctl::group::JobControlTransition::NONE,
+                            );
+                        };
+                        no
+                    },
                     TimerJobControlSignalRoute::Private(target) => {
                         let pending = target.sig_pending.lock();
                         let Some(no) = registration.registered_no_locked(&pending) else {
