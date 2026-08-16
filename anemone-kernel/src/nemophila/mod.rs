@@ -10,14 +10,19 @@ pub(crate) mod weave;
 use alloc::{boxed::Box, vec::Vec};
 
 use crate::{
-    nemophila_defs::EMBEDDED_MODULES,
     prelude::{Lazy, kerrln, kinfoln},
+    system_target_defs::EMBEDDED_MODULES,
 };
 use runtime::Runtime;
 pub(crate) use runtime::{
     InstanceIdentity, InstanceOrigin, InstanceSnapshot, LifecycleSnapshot, PublishFailure,
     TryUnloadFailure,
 };
+
+pub(crate) struct EmbeddedModule {
+    pub(crate) identity: &'static str,
+    pub(crate) bytes: &'static [u8],
+}
 
 static RUNTIME: Lazy<Runtime> = Lazy::new(Runtime::new);
 

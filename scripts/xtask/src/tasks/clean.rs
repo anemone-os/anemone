@@ -7,9 +7,7 @@ use crate::log_progress;
 const GENERATED_KERNEL_INPUTS: &[&str] = &[
     "anemone-kernel/src/kconfig_defs.rs",
     "anemone-kernel/src/platform_defs.rs",
-    "anemone-kernel/src/boot_defs.rs",
-    "anemone-kernel/src/network_defs.rs",
-    "anemone-kernel/src/nemophila_defs.rs",
+    "anemone-kernel/src/system_target_defs.rs",
 ];
 
 pub fn run() -> anyhow::Result<()> {
@@ -36,8 +34,9 @@ mod tests {
 
     #[test]
     fn clean_removes_every_generated_kernel_input() {
-        assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/network_defs.rs"));
-        assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/nemophila_defs.rs"));
-        assert_eq!(GENERATED_KERNEL_INPUTS.len(), 5);
+        assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/kconfig_defs.rs"));
+        assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/platform_defs.rs"));
+        assert!(GENERATED_KERNEL_INPUTS.contains(&"anemone-kernel/src/system_target_defs.rs"));
+        assert_eq!(GENERATED_KERNEL_INPUTS.len(), 3);
     }
 }

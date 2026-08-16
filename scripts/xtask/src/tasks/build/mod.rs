@@ -28,7 +28,7 @@ mod generated_defs;
 mod kernel_output;
 pub mod symtab;
 
-use generated_defs::{render_embedded_app_boot_defs, render_rootfs_entry_boot_defs};
+use generated_defs::{render_embedded_app_projection, render_rootfs_entry_projection};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -184,11 +184,11 @@ impl BuildContext {
         Ok(())
     }
 
-    fn gen_boot_defs(&self) -> anyhow::Result<String> {
+    fn gen_initial_program_projection(&self) -> anyhow::Result<String> {
         match &self.resolved.target.initial_program {
             InitialProgramSource::RootfsEntry { argv } => {
                 log_progress!("BOOT", "initial-program=rootfs-entry");
-                Ok(render_rootfs_entry_boot_defs(argv.as_deref()))
+                Ok(render_rootfs_entry_projection(argv.as_deref()))
             },
             InitialProgramSource::EmbeddedApp { app, argv } => {
                 log_progress!("BOOT", &format!("initial-program=embedded-app app={app}"));
@@ -222,7 +222,7 @@ impl BuildContext {
                         artifact.output_path.display()
                     )
                 );
-                render_embedded_app_boot_defs(&artifact.output_path, argv.as_deref())
+                render_embedded_app_projection(&artifact.output_path, argv.as_deref())
             },
         }
     }

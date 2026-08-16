@@ -168,22 +168,6 @@ pub enum RootSource {
     Pseudo,
 }
 
-impl RootSource {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Block { .. } => "block",
-            Self::Pseudo => "pseudo",
-        }
-    }
-
-    pub fn path(&self) -> Option<&str> {
-        match self {
-            Self::Block { path } => Some(path),
-            Self::Pseudo => None,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum InitialProgramSource {

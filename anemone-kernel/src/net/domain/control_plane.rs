@@ -2,9 +2,17 @@
 
 use anemone_net_api::{InterfaceId, Ipv4Address, Ipv4Cidr};
 
-use crate::{network_defs::StaticIpv4Deployment, prelude::*};
+use crate::prelude::*;
 
 use super::LogicalInterfaceSnapshot;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StaticIpv4Deployment {
+    pub(crate) interface: &'static str,
+    pub(crate) address: [u8; 4],
+    pub(crate) prefix: u8,
+    pub(crate) default_gateway: Option<[u8; 4]>,
+}
 
 pub(in crate::net) struct ExternalControlInput {
     logical: LogicalInterfaceSnapshot,
