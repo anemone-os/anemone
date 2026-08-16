@@ -15,6 +15,8 @@ Anemone is a multicore Unix-like monolithic kernel written in Rust, with support
 
 From QEMU to VisionFive 2 and Loongson 2K1000, and from syscall suites to interactive shells, network tools, and large compilation workloads, Anemone is built around a simple proposition: Linux compatibility, cross-architecture portability, and maintainable system design do not have to be traded against one another.
 
+Through Nemophila, Anemone also carries its clear kernel boundaries into runtime extensibility: WebAssembly provides a cross-architecture module format, WIT and Weave constrain how modules enter the kernel, and a unified runtime manages their complete lifecycle.
+
 <img src="../report/kernel-report/assets/anemone-architecture.png" alt="Anemone architecture" width="1000"/>
 
 ## Why Anemone?
@@ -36,6 +38,12 @@ The same core kernel currently covers:
 - VisionFive 2 and Loongson 2K1000 hardware platforms;
 - VirtIO MMIO, VirtIO PCIe, SD card, and AHCI device paths.
 
+### Let the kernel evolve at runtime
+
+[Nemophila](./src/contracts/nemophila/index.md) is Anemone's native managed kernel-extension framework. The same WebAssembly module artifact runs on RISC-V64 and LoongArch64. WIT defines language-neutral interfaces, while Weave lets each kernel subsystem expose typed extension points and project only the values a module needs.
+
+Nemophila uses WebAssembly for cross-architecture code, WIT for constrained interfaces, and Weave to preserve subsystem ownership. Its runtime then manages module loading, atomic publication, callback admission, failure isolation, diagnostics, unloading, and reloading. The first Rust modules already observe task creation and thread exit, with a task-lineage auditor demonstrating the complete vertical path from artifact construction to real kernel events.
+
 ### State ownership as a first-class design rule
 
 The hardest kernel problems are rarely isolated syscalls. They arise when concurrent operations disagree about who owns the current fact, who advances a transition, and who cleans up after failure. Anemone aims to give each class of state one owner and to cross module boundaries using narrow capabilities, tokens, snapshots, and recheck notifications instead of shared private objects or duplicate sources of truth.
@@ -50,6 +58,7 @@ The system can host an interactive shell, a glibc userspace, process and file ut
 
 ## Capability overview
 
+- **Runtime extensions:** the Nemophila WebAssembly runtime, WIT interfaces, typed Weave extension points, boot-time and runtime loading, failure isolation, procfs diagnostics, unload/reload, and a Rust SDK.
 - **Processes and scheduling:** task, thread-group, process-group, and session lifecycles; signals and job control; Fair, FIFO, RR, and Stride scheduling classes; multicore load balancing; and a shared wait core.
 - **Memory management:** physical pages and page tables, address spaces, VMOs, demand paging, COW, shared memory, file-backed mappings, page cache, TLB shootdown, and OOM protection.
 - **Files and devices:** VFS, mount tree, Ext4, tmpfs, procfs, devfs, a common opened-file model, and a bus/device/driver framework.
@@ -96,6 +105,7 @@ The default kernel artifact is published as `build/anemone.elf`. Root filesystem
 ├── anemone-rs/         # Rust userspace support library
 ├── anemone-libc/       # C userspace support library
 ├── anemone-apps/       # init, tests, tools, and example programs
+├── nemophila/          # Module interfaces, Rust SDK, and example modules
 ├── conf/               # KernelConfig, platforms, targets, presets, and rootfs
 ├── scripts/            # xtask, build/run commands, and end-to-end validation
 ├── docs/               # Current contracts, RFCs, development records, register
