@@ -17,6 +17,7 @@ mod sched;
 mod fpu;
 
 pub use backtrace::RiscV64BacktraceArch as BacktraceArch;
+pub(crate) use cpu::proc_cpuinfo_snapshot;
 pub use cpu::RiscV64CpuArch as CpuArch;
 pub use exception::{
     RiscV64IntrArch as IntrArch, RiscV64SignalArch as SignalArch, RiscV64TrapArch as TrapArch,

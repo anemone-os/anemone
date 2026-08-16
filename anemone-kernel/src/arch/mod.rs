@@ -39,12 +39,12 @@ macro_rules! arch_select {
         #[cfg(target_arch = $arch_str)]
         mod $arch;
         #[cfg(target_arch = $arch_str)]
-        pub(crate) use $crate::arch::$arch::machine_init;
-        #[cfg(target_arch = $arch_str)]
         pub use $crate::arch::$arch::{
             BacktraceArch, CpuArch, IntrArch, KernelLayout, PagingArch, SchedArch, SignalArch,
             TimeArch, TrapArch,
         };
+        #[cfg(target_arch = $arch_str)]
+        pub(crate) use $crate::arch::$arch::{machine_init, proc_cpuinfo_snapshot};
     };
 }
 
