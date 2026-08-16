@@ -125,6 +125,12 @@ impl UnixStreamConnection {
         assert!(slot.is_empty(), "Unix connection routes installed twice");
         *slot = routes;
     }
+
+    pub(super) fn readable_bytes(&self, side: EndpointSide) -> usize {
+        self.state.lock().directions[side.peer().index()]
+            .bytes
+            .len()
+    }
 }
 
 fn notify_routes(

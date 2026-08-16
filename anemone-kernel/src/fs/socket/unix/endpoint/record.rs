@@ -141,6 +141,10 @@ impl UnixSeqpacketConnection {
         assert!(slot.is_empty(), "Unix seqpacket routes installed twice");
         *slot = routes;
     }
+
+    pub(super) fn readable_bytes(&self, side: EndpointSide) -> usize {
+        self.state.lock().directions[side.peer().index()].bytes
+    }
 }
 
 fn notify_routes(
@@ -602,8 +606,8 @@ mod kunits {
         fs::{
             iomux::PollObserver,
             socket::{
-                SocketReadSink, SocketReceiveFlags, SocketReceiveRequest, SocketSendRequest,
-                SocketWriteSource,
+                SocketIoctlRequest, SocketIoctlResponse, SocketReadSink, SocketReceiveFlags,
+                SocketReceiveRequest, SocketSendRequest, SocketWriteSource,
             },
         },
         syserror::SysError,
@@ -754,6 +758,26 @@ mod kunits {
         assert_eq!(
             receive(&second, 16, false),
             Err(SocketReceiveError::WouldBlock)
+        );
+        super::super::final_release_unix_endpoint(&first);
+        super::super::final_release_unix_endpoint(&second);
+    }
+
+    #[kunit]
+    fn ioctl_queries_sum_records_without_consuming_them() {
+        let (first, second) = pair();
+        assert_eq!(send(&first, b"one"), Ok(3));
+        assert_eq!(send(&first, b"second"), Ok(6));
+        for _ in 0..2 {
+            assert_eq!(
+                super::super::ioctl_unix_socket(&second, SocketIoctlRequest::ReadableBytes,),
+                Ok(SocketIoctlResponse::ReadableBytes(9))
+            );
+        }
+        assert_eq!(receive(&second, 2, false).unwrap().0.copied(), 2);
+        assert_eq!(
+            super::super::ioctl_unix_socket(&second, SocketIoctlRequest::ReadableBytes),
+            Ok(SocketIoctlResponse::ReadableBytes(6))
         );
         super::super::final_release_unix_endpoint(&first);
         super::super::final_release_unix_endpoint(&second);

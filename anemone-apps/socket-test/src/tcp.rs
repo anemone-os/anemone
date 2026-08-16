@@ -29,8 +29,8 @@ use anemone_rs::{
     os::linux::{
         fs::{
             EpollCreateFlags, EpollCtlOp, Fd, close, dup, epoll_create1, epoll_ctl, epoll_wait,
-            fcntl_getfd, fcntl_getfl, fcntl_setfl, fstat, ppoll, pselect, read, readv, write,
-            writev,
+            fcntl_getfd, fcntl_getfl, fcntl_setfl, fstat, ioctl_readable_bytes, ppoll, pselect,
+            read, readv, write, writev,
         },
         net::{
             SocketFlags, bind_ipv4, connect_ipv4, getpeername_ipv4, getsockname_ipv4,
@@ -581,6 +581,22 @@ fn test_blocking_accept_wait() -> Result<(), Errno> {
     wait_child(child)
 }
 
+fn test_fionread_stream_and_listener_semantics() -> Result<(), Errno> {
+    let (listener, client, accepted) = connected_pair()?;
+    expect_errno(ioctl_readable_bytes(listener), EINVAL)?;
+    ensure(ioctl_readable_bytes(accepted)? == 0)?;
+    ensure(write(client, b"stream")? == 6)?;
+    wait_poll(accepted, POLLIN, POLLIN)?;
+    ensure(ioctl_readable_bytes(accepted)? == 6)?;
+    ensure(ioctl_readable_bytes(accepted)? == 6)?;
+    let mut prefix = [0u8; 2];
+    ensure(read(accepted, &mut prefix)? == 2 && &prefix == b"st")?;
+    ensure(ioctl_readable_bytes(accepted)? == 4)?;
+    close(accepted)?;
+    close(client)?;
+    close(listener)
+}
+
 pub(crate) fn run_cloexec_child(fd: &str) -> Result<(), Errno> {
     let fd = fd.parse::<Fd>().map_err(|_| EINVAL)?;
     expect_errno(getsockname_ipv4(fd), EBADF)
@@ -645,6 +661,10 @@ pub(crate) fn run() -> Result<(), Errno> {
         test_sockaddr_and_stream_fault_boundaries,
     );
     results.case("blocking-accept-wait", test_blocking_accept_wait);
+    results.case(
+        "fionread-stream-listener",
+        test_fionread_stream_and_listener_semantics,
+    );
 
     if results.failed == 0 {
         println!("TCPTEST:SUMMARY:PASS:{}", results.passed);

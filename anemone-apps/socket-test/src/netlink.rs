@@ -17,7 +17,7 @@ use anemone_rs::{
         syscall::{linux::SYS_ACCEPT4, syscall},
     },
     os::linux::{
-        fs::{Fd, close, write},
+        fs::{Fd, close, ioctl_readable_bytes, write},
         net::{
             bind_ipv4, bind_raw, connect_ipv4, getsockname_ipv4, getsockname_raw, listen,
             recvfrom_raw, sendto_raw, setsockopt_level_raw, socket_raw,
@@ -475,6 +475,9 @@ fn sock_diag_oracle() -> Result<(), Errno> {
 
 pub fn run() -> Result<(), Errno> {
     println!("NETLINKTEST:START");
+    let (unsupported, _) = netlink_socket(NETLINK_ROUTE)?;
+    ensure(ioctl_readable_bytes(unsupported) == Err(ENOTTY))?;
+    close(unsupported)?;
     route_oracle()?;
     sock_diag_oracle()?;
     println!("NETLINKTEST:PASS");

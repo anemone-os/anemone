@@ -18,7 +18,8 @@ use anemone_rs::{
     os::linux::{
         fs::{
             AtFd, EpollCreateFlags, EpollCtlOp, Fd, close, epoll_create1, epoll_ctl, epoll_wait,
-            fcntl_getfd, fcntl_getfl, ppoll, pselect, read, readv, unlinkat, write, writev,
+            fcntl_getfd, fcntl_getfl, ioctl_readable_bytes, ppoll, pselect, read, readv, unlinkat,
+            write, writev,
         },
         net::{
             SocketFlags, accept_unix, accept4_unix_raw, bind_unix_path, connect_unix_path,
@@ -38,6 +39,7 @@ const ZERO_TIMEOUT: TimeSpec = TimeSpec {
 };
 const SEQPACKET_PATH: &str = "/mnt/socket-test-seqpacket";
 const STREAM_PATH: &str = "/mnt/socket-test-seqpacket-stream";
+const FIONREAD_PATH: &str = "/mnt/socket-test-seqpacket-fionread";
 
 fn ensure(condition: bool) -> Result<(), Errno> {
     if condition { Ok(()) } else { Err(EIO) }
@@ -220,6 +222,28 @@ fn test_resolver_options_and_records() -> Result<(), Errno> {
     )?;
     close(first)?;
     close(second)
+}
+
+fn test_fionread_record_sum_and_listener_semantics() -> Result<(), Errno> {
+    let (writer, reader) = seqpacket_pair(SocketFlags::empty())?;
+    ensure(ioctl_readable_bytes(reader)? == 0)?;
+    ensure(write(writer, b"one")? == 3)?;
+    ensure(write(writer, b"second")? == 6)?;
+    ensure(ioctl_readable_bytes(reader)? == 9)?;
+    ensure(ioctl_readable_bytes(reader)? == 9)?;
+    let mut prefix = [0u8; 2];
+    ensure(read(reader, &mut prefix)? == 2 && &prefix == b"on")?;
+    ensure(ioctl_readable_bytes(reader)? == 6)?;
+    close(reader)?;
+    close(writer)?;
+
+    unlink_if_present(FIONREAD_PATH)?;
+    let listener = seqpacket_socket(SocketFlags::empty())?;
+    bind_unix_path(listener, FIONREAD_PATH.as_bytes())?;
+    listen(listener, 1)?;
+    expect_errno(ioctl_readable_bytes(listener), EINVAL)?;
+    close(listener)?;
+    unlink_if_present(FIONREAD_PATH)
 }
 
 fn test_zero_length_and_fault_retention_limitation() -> Result<(), Errno> {
@@ -516,6 +540,10 @@ pub(crate) fn run() -> Result<(), Errno> {
     results.case(
         "resolver-options-records",
         test_resolver_options_and_records,
+    );
+    results.case(
+        "fionread-record-sum-listener",
+        test_fionread_record_sum_and_listener_semantics,
     );
     results.case(
         "pathname-admission-cross-type",

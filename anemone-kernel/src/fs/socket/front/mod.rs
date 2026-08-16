@@ -55,6 +55,27 @@ pub(super) enum SocketQueryError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketIoctlError {
+    Unsupported,
+    Retired,
+    InvalidState,
+}
+
+/// A Socket-internal control request after the front has consumed the Linux
+/// command number and user-pointer ABI. Family callbacks must not recover or
+/// reinterpret raw ioctl inputs from this value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketIoctlRequest {
+    ReadableBytes,
+}
+
+/// A family-owned fact whose final Linux representation remains front-owned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketIoctlResponse {
+    ReadableBytes(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SocketListenError {
     Unsupported,
     Retired,
@@ -515,6 +536,10 @@ pub(super) struct SocketOps {
         Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
     pub(super) mutate_option:
         Option<fn(&AnyOpaque, SocketOptionMutation) -> Result<(), SocketOptionError>>,
+    /// Typed family control dispatch. Raw commands, user pointers and
+    /// `IoctlCtx` remain in the common FileOps adapter.
+    pub(super) ioctl:
+        Option<fn(&AnyOpaque, SocketIoctlRequest) -> Result<SocketIoctlResponse, SocketIoctlError>>,
     pub(super) detach_ipv4_extended_error:
         Option<fn(&AnyOpaque) -> Result<SocketIpv4ExtendedError, SocketReceiveError>>,
     pub(super) poll:
@@ -635,6 +660,13 @@ impl Socket {
         self.ops
             .mutate_option
             .ok_or(SocketOptionError::Unsupported)?(&self.private, mutation)
+    }
+
+    pub(super) fn ioctl(
+        &self,
+        request: SocketIoctlRequest,
+    ) -> Result<SocketIoctlResponse, SocketIoctlError> {
+        self.ops.ioctl.ok_or(SocketIoctlError::Unsupported)?(&self.private, request)
     }
 
     pub(super) fn detach_ipv4_extended_error(

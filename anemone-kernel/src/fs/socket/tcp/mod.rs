@@ -11,7 +11,8 @@ use stream::*;
 
 use anemone_net_api::tcp::{
     TcpBindError, TcpChildError, TcpConnectError, TcpConnectResult, TcpCreateError,
-    TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError, TcpQueryError, TcpReleaseReason,
+    TcpEndpointFacts, TcpListenBacklog, TcpListenError, TcpPeer, TcpPendingError, TcpQueryError,
+    TcpReleaseReason,
 };
 
 use crate::{
@@ -23,9 +24,9 @@ use crate::{
 
 use super::{
     SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
-    SocketConnectError, SocketCreation, SocketIoOps, SocketListenError, SocketOps,
-    SocketOptionMutation, SocketOptionQuery, SocketOptionValue, SocketPreparation,
-    SocketQueryError, SocketReleaseReason, SocketType,
+    SocketConnectError, SocketCreation, SocketIoOps, SocketIoctlError, SocketIoctlRequest,
+    SocketIoctlResponse, SocketListenError, SocketOps, SocketOptionMutation, SocketOptionQuery,
+    SocketOptionValue, SocketPreparation, SocketQueryError, SocketReleaseReason, SocketType,
 };
 
 fn bind_tcp_socket(private: &AnyOpaque, address: SocketAddress) -> Result<(), SocketBindError> {
@@ -270,6 +271,28 @@ fn map_child_error(error: TcpChildError) -> SocketAcceptError {
     }
 }
 
+fn ioctl_tcp_socket(
+    private: &AnyOpaque,
+    request: SocketIoctlRequest,
+) -> Result<SocketIoctlResponse, SocketIoctlError> {
+    let SocketIoctlRequest::ReadableBytes = request;
+    let facts = tcp_private(private)
+        .source
+        .endpoint()
+        .ok_or(SocketIoctlError::Retired)?
+        .facts()
+        .map_err(|error| match error {
+            TcpQueryError::UnknownEndpoint => SocketIoctlError::Retired,
+            TcpQueryError::WrongRole => SocketIoctlError::InvalidState,
+        })?;
+    let readable = match facts {
+        TcpEndpointFacts::Idle | TcpEndpointFacts::Bound => 0,
+        TcpEndpointFacts::Listener { .. } => return Err(SocketIoctlError::InvalidState),
+        TcpEndpointFacts::Connection(connection) => connection.received_bytes(),
+    };
+    Ok(SocketIoctlResponse::ReadableBytes(readable))
+}
+
 pub(super) static TCP_SOCKET_OPS: SocketOps = SocketOps {
     io: SocketIoOps::ByteStream {
         socket_type: SocketType::Ipv4Tcp,
@@ -288,6 +311,7 @@ pub(super) static TCP_SOCKET_OPS: SocketOps = SocketOps {
     accepting: tcp_is_accepting,
     query_option: Some(query_tcp_option),
     mutate_option: Some(mutate_tcp_option),
+    ioctl: Some(ioctl_tcp_socket),
     detach_ipv4_extended_error: None,
     poll: poll_tcp_socket,
     final_release: final_release_tcp_socket,
@@ -358,6 +382,20 @@ mod kunits {
         assert_eq!(
             query_tcp_option(&private, SocketOptionQuery::PendingError),
             Err(SocketOptionError::Retired)
+        );
+    }
+
+    #[kunit]
+    fn ioctl_dispatch_projects_idle_tcp_and_rejects_retired_endpoints() {
+        let SocketPreparation { private, creation } = prepare_tcp_socket().unwrap();
+        assert_eq!(
+            ioctl_tcp_socket(&private, SocketIoctlRequest::ReadableBytes),
+            Ok(SocketIoctlResponse::ReadableBytes(0))
+        );
+        drop(creation);
+        assert_eq!(
+            ioctl_tcp_socket(&private, SocketIoctlRequest::ReadableBytes),
+            Err(SocketIoctlError::Retired)
         );
     }
 }

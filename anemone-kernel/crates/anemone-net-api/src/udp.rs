@@ -33,7 +33,7 @@ impl UdpEndpointId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UdpEndpointFacts {
     live: bool,
-    readable: bool,
+    next_datagram_len: Option<usize>,
     writable: bool,
     error: bool,
 }
@@ -41,10 +41,14 @@ pub struct UdpEndpointFacts {
 impl UdpEndpointFacts {
     /// Construct a snapshot at the concrete Endpoint owner boundary.
     #[doc(hidden)]
-    pub const fn from_owner_snapshot(readable: bool, writable: bool, error: bool) -> Self {
+    pub const fn from_owner_snapshot(
+        next_datagram_len: Option<usize>,
+        writable: bool,
+        error: bool,
+    ) -> Self {
         Self {
             live: true,
-            readable,
+            next_datagram_len,
             writable,
             error,
         }
@@ -55,7 +59,13 @@ impl UdpEndpointFacts {
     }
 
     pub const fn is_readable(self) -> bool {
-        self.readable
+        self.next_datagram_len.is_some()
+    }
+
+    /// Length of the next queued payload. `Some(0)` remains distinct from an
+    /// empty queue so readiness and `FIONREAD` share the same owner fact.
+    pub const fn next_datagram_len(self) -> Option<usize> {
+        self.next_datagram_len
     }
 
     pub const fn is_writable(self) -> bool {
