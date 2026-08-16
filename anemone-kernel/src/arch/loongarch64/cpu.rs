@@ -1,7 +1,9 @@
+use core::fmt::Write;
+
 use fdt::nodes::cpus::CpuStatus;
 
 use crate::{
-    device::{finish_cpu_registration, register_cpu},
+    device::{cpu_count, finish_cpu_registration, register_cpu},
     prelude::*,
 };
 
@@ -23,6 +25,25 @@ impl CpuArchTrait for La64CpuArch {
         }
         base
     }
+}
+
+/// Render the Linux LoongArch `/proc/cpuinfo` projection.
+///
+/// The current CPU registry owns topology identity but does not retain the
+/// detailed CPUCFG-derived model and feature data used by Linux. Keep those
+/// hardware-specific fields explicitly unknown instead of publishing zeros as
+/// real capability values.
+pub(crate) fn proc_cpuinfo_snapshot() -> String {
+    let mut out = String::new();
+
+    for logical_id in 0..cpu_count() {
+        writeln!(out, "processor\t\t: {logical_id}").unwrap();
+        out.push_str("CPU Family\t\t: unknown\n");
+        out.push_str("Model Name\t\t: unknown\n");
+        out.push_str("ISA\t\t\t: loongarch64\n\n");
+    }
+
+    out
 }
 
 /// Scan the CPU count from the device tree.
