@@ -30,8 +30,9 @@ use anemone_rs::{
     os::linux::{
         fs::{
             AtFd, EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, dup, epoll_create1,
-            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fcntl_setfl, fstatat, linkat, mkdirat,
-            pipe2, ppoll, pselect, read, readv, unlinkat, write, writev,
+            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fcntl_setfl, fstatat,
+            ioctl_readable_bytes, linkat, mkdirat, pipe2, ppoll, pselect, read, readv, unlinkat,
+            write, writev,
         },
         net::{
             SocketFlags, accept_unix, accept4_unix_raw, bind_unix_path, connect_unix_path,
@@ -82,6 +83,7 @@ const PARALLEL_PATH_B: &str = "/mnt/socket-test-2b-parallel-b";
 const STAGE3A_PATH: &str = "/mnt/socket-test-3a-stream";
 const STAGE3B_PATH: &str = "/mnt/socket-test-3b-readiness";
 const PEERCRED_PATH: &str = "/mnt/socket-test-peercred";
+const FIONREAD_PATH: &str = "/mnt/socket-test-fionread";
 
 extern "C" fn sigpipe_handler(_signo: i32) {
     SIGPIPE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -906,6 +908,27 @@ fn test_resolver_flags_and_pair_rollback() -> Result<(), Errno> {
     ensure(reused == expected)?;
     close(reused.0)?;
     close(reused.1)
+}
+
+fn test_fionread_stream_and_listener_semantics() -> Result<(), Errno> {
+    let (writer, reader) = unix_stream_pair(SocketFlags::empty())?;
+    ensure(ioctl_readable_bytes(reader)? == 0)?;
+    ensure(write(writer, b"unix-stream")? == 11)?;
+    ensure(ioctl_readable_bytes(reader)? == 11)?;
+    ensure(ioctl_readable_bytes(reader)? == 11)?;
+    let mut prefix = [0u8; 4];
+    ensure(read(reader, &mut prefix)? == 4 && &prefix == b"unix")?;
+    ensure(ioctl_readable_bytes(reader)? == 7)?;
+    close(reader)?;
+    close(writer)?;
+
+    unlink_if_present(FIONREAD_PATH, 0)?;
+    let listener = unix_stream_socket(SocketFlags::empty())?;
+    bind_unix_path(listener, FIONREAD_PATH.as_bytes())?;
+    listen(listener, 1)?;
+    expect_errno(ioctl_readable_bytes(listener), EINVAL)?;
+    close(listener)?;
+    unlink_if_present(FIONREAD_PATH, 0)
 }
 
 fn test_bidirectional_vector_and_nonblocking() -> Result<(), Errno> {
@@ -1826,6 +1849,10 @@ pub(crate) fn run() -> Result<(), Errno> {
     results.case(
         "resolver-flags-pair-rollback",
         test_resolver_flags_and_pair_rollback,
+    );
+    results.case(
+        "fionread-stream-listener",
+        test_fionread_stream_and_listener_semantics,
     );
     results.case(
         "single-bind-name-mode",

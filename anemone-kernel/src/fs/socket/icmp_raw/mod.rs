@@ -25,8 +25,9 @@ use crate::{
 
 use super::{
     SocketAddress, SocketAddressSink, SocketBindError, SocketConnectError, SocketCreation,
-    SocketDatagramSendOperation, SocketIoOps, SocketOps, SocketOptionError, SocketOptionMutation,
-    SocketOptionQuery, SocketOptionValue, SocketPreparation, SocketQueryError, SocketReceiveError,
+    SocketDatagramSendOperation, SocketIoOps, SocketIoctlError, SocketIoctlRequest,
+    SocketIoctlResponse, SocketOps, SocketOptionError, SocketOptionMutation, SocketOptionQuery,
+    SocketOptionValue, SocketPreparation, SocketQueryError, SocketReceiveError,
     SocketReceiveOutcome, SocketReceiveRequest, SocketReleaseReason, SocketSendError,
     SocketSendRequest, SocketType,
 };
@@ -423,6 +424,21 @@ fn poll_icmp_raw_socket(
     raw_private(private).source.poll(request)
 }
 
+fn ioctl_icmp_raw_socket(
+    private: &AnyOpaque,
+    request: SocketIoctlRequest,
+) -> Result<SocketIoctlResponse, SocketIoctlError> {
+    let SocketIoctlRequest::ReadableBytes = request;
+    let facts = raw_private(private)
+        .endpoint()
+        .ok_or(SocketIoctlError::Retired)?
+        .facts()
+        .map_err(|_| SocketIoctlError::Retired)?;
+    Ok(SocketIoctlResponse::ReadableBytes(
+        facts.next_packet_len().unwrap_or(0),
+    ))
+}
+
 fn final_release_icmp_raw_socket(private: &AnyOpaque, _reason: SocketReleaseReason) {
     // Source retirement first withdraws association, reverse publication, and
     // routes. No sleeping operation mutex or fd-table lock participates.
@@ -532,6 +548,7 @@ pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     accepting: raw_is_accepting,
     query_option: Some(query_icmp_raw_option),
     mutate_option: Some(mutate_icmp_raw_option),
+    ioctl: Some(ioctl_icmp_raw_socket),
     detach_ipv4_extended_error: None,
     poll: poll_icmp_raw_socket,
     final_release: final_release_icmp_raw_socket,

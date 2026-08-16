@@ -8,8 +8,8 @@
 **不覆盖：** orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、非PTY relation-disassociation signal、physical hardware hangup、runtime line reconfiguration或procfs TTY字段
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/task/{jobctl,sig}/`
 **依赖：** [TTY data plane](./data-plane.md)、[process-group signaling](../task/process-group-signaling.md)、[Signal pending/action](../signal/pending-routing.md)、[Unix job control](../task/job-control.md)、[task lifecycle](../task/thread-group-lifecycle.md)、[user entry](../task/user-entry.md)
-**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)
-**最后核验：** 2026-08-13
+**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)；[`TIOCSCTTY` context-sensitive argument小迭代](../../devlog/changes/2026-08-17-tty-tiocsctty-argument.md)
+**最后核验：** 2026-08-17
 
 ## 状态与能力所有权
 
@@ -117,7 +117,7 @@ generation与guards-out source/lifecycle audit。
 
 **规则：** 首版同时交付稳定`/dev/ttyS0`、caller-relative`/dev/tty`、real Terminal boot fd 0/1/2、canonical与
 noncanonical `VMIN=1,VTIME=0` input、blocking/nonblocking read、byte-stream write、poll/select、目标termios/control
-chars/winsize/ioctl、显式`setsid + TIOCSCTTY(arg=0)`、`TIOCGPGRP/TIOCSPGRP/TIOCGSID`、foreground control
+chars/winsize/ioctl、显式`setsid + TIOCSCTTY` acquisition、`TIOCGPGRP/TIOCSPGRP/TIOCGSID`、foreground control
 signals、serial `BRKINT` foreground `SIGINT`、changed winsize `SIGWINCH`、普通background read `SIGTTIN`以及
 session-leader detach/exit cleanup。termios input envelope还真实round-trip并执行`IGNBRK`、`BRKINT`、`IGNPAR`、
 `PARMRK`、`INPCK`、`ISTRIP`、`INLCR`、`IGNCR`、`ICRNL`与`IUTF8`；`IUTF8`按`TTY-INPUT-001`与
@@ -126,6 +126,12 @@ session-leader detach/exit cleanup。termios input envelope还真实round-trip�
 `CRDLY`、`TAB1/TAB2`、`BSDLY`、`VTDLY`、`FFDLY`、`OFILL`与`OFDEL`按tracked Linux 6.6.32稳定保存，
 但不获得数据面行为；`IMAXBEL`、unknown bits及其它具有Linux-visible行为而未实现的flag继续原子`EINVAL`，
 不得因实现成本降级为success-no-op。
+
+`TIOCSCTTY`参数只在relation owner确认endpoint已由另一live session控制时取得特殊含义：此时`arg=1`
+请求privileged steal；当前没有对应authority与旧session cleanup协议，必须记录notice并返回`EPERM`。endpoint
+未绑定时任意参数都沿普通acquisition，精确relation幂等也先于file access与参数解释成功；caller已有另一
+controlling TTY、非session leader、write-only first acquisition与其它live conflict继续按既有规则返回`EPERM`。
+不得在relation inspection前把任意非零参数直接解释为steal。
 
 BusyBox ash必须取得真实controlling TTY；`jobs`、Ctrl-Z、`fg`、`bg`、foreground Ctrl-C、background read与shell
 reclaim都必须经过本页的relation/Signal/job-control handoff。BusyBox vi依赖真实raw/canonical切换、readiness与byte
@@ -140,6 +146,7 @@ read或foreground signal重新归入延期范围，也不得成功后丢弃状�
 blocked/ignored路径、vi依赖fake ioctl、unsupported设置成功无效果，或background read绕过foreground policy。
 GNU `less`因其`TAB3` candidate被拒绝，或`TAB3`被当作success-no-op，也属于违反。
 `IUTF8`只被保存却不改变erase/column，或将compatibility set之外的行为flag静默接纳，同样属于违反。
+未绑定endpoint上的`TIOCSCTTY(arg=1)`被当作steal拒绝，或unsupported steal替换、破坏既有relation，也属于违反。
 
 PTY refine同时交付`/dev/ptmx`与`/dev/pts/N`、`TIOCGPTN`/`TIOCSPTLCK`/`TIOCGPTPEER`、两条slave-open route的
 implicit acquisition、PTY foreground/background policy和master-hangup relation effect。支持的termios/winsize surface是
@@ -149,7 +156,8 @@ implicit acquisition、PTY foreground/background policy和master-hangup relation
 **验证 / Enforcement：** RV64自动TTY matrix、BusyBox vi与ash host oracle、native Python 3.13 basic REPL与
 PyREPL、用户人工ash checklist、GNU `less 668`进入可用全屏界面并以`q`退出的用户运行证据、404项KUnit、
 IUTF8/TAB3 inline KUnit runtime与public PTY/TTY byte oracle、19项Unix job-control focused回归、ABI/source/bypass
-audit与final review。
+audit与final review；serial与PTY定向matrix覆盖unbound `arg=1` acquisition、nonzero exact-relation idempotence、
+live occupied `arg=1 -> EPERM`与旧relation保持。
 
 ## 跨领域handoff义务
 
@@ -162,6 +170,9 @@ audit与final review。
 
 ## 验证范围与当前接受边界
 
+- 2026-08-17 `TIOCSCTTY` argument refinement的agent-run RV证据：RV64 app/kernel build通过；public PTY
+  SMP8与serial SMP1分别通过692/692 KUnit、PTY `17/17`、TTY `56/56`，serial BusyBox vi/ash与host byte
+  oracle通过，两次均有序关机。LA64 build/runtime、hardware、LTP与真实privileged steal为Not Run。
 - 2026-08-13 IUTF8 refinement的agent-run RV64证据：两套wrapper均通过633/633 KUnit；PTY SMP8
   `16/16`，TTY `55/55`、host UTF-8/TAB3 byte oracle与BusyBox vi/ash均PASS并有序关机；双架构app与
   KUnit-enabled kernel build通过，独立review最终0 Apollyon / 0 Keter / 0 Euclid。LA64 runtime、LTP、tmux与

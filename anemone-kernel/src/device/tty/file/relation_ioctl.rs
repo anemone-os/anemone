@@ -18,17 +18,17 @@ fn controlling_snapshot(
 }
 
 pub(super) fn set_controlling_tty(tty: &TtyFile, ctx: &IoctlCtx<'_>) -> Result<(), SysError> {
-    // Privileged stealing (`arg=1`) is outside the accepted first-version ABI;
-    // rejecting every nonzero value avoids a silent success with weaker effect.
-    if ctx.arg() != 0 {
-        knoticeln!(
-            "TTY: rejecting unsupported TIOCSCTTY steal argument {}",
-            ctx.arg()
-        );
-        return Err(SysError::PermissionDenied);
-    }
+    // Linux interprets `arg=1` as a privileged steal request only when this
+    // endpoint is already controlled by another live session. It does not
+    // change ordinary acquisition or exact-relation idempotence.
+    let steal_if_occupied = ctx.arg() == 1;
     let caller = current_tty_caller()?;
-    relation::acquire(&tty.endpoint, &caller, ctx.target_access().can_read())
+    relation::acquire(
+        &tty.endpoint,
+        &caller,
+        ctx.target_access().can_read(),
+        steal_if_occupied,
+    )
 }
 
 pub(super) fn detach_controlling_tty(tty: &TtyFile) -> Result<(), SysError> {

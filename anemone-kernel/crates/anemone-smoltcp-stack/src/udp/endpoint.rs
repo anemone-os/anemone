@@ -173,7 +173,7 @@ impl Endpoint {
 
     pub(crate) fn facts(&self) -> UdpEndpointFacts {
         UdpEndpointFacts::from_owner_snapshot(
-            !self.received.is_empty(),
+            self.received.front().map(|datagram| datagram.payload.len()),
             matches!(self.tx, TxPhase::Idle),
             self.pending_error.is_some() || !self.errors.is_empty(),
         )

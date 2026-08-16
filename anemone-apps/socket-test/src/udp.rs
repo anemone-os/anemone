@@ -12,13 +12,14 @@ use anemone_rs::{
             statx as linux_statx,
         },
         net::linux::{AF_INET, SOCK_DGRAM, SOCK_SEQPACKET, SockAddrIn, socklen_t},
+        syscall::{linux::SYS_IOCTL, syscall},
         time::linux::TimeSpec,
     },
     os::linux::{
         fs::{
             AtFd, EpollCreateFlags, EpollCtlOp, Fd, PipeFlags, close, dup, epoll_create1,
-            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fstat, pipe2, ppoll, pselect, read,
-            statx, write,
+            epoll_ctl, epoll_wait, fcntl_getfd, fcntl_getfl, fstat, ioctl_readable_bytes,
+            ioctl_set_nonblocking, pipe2, ppoll, pselect, read, statx, write,
         },
         net::{
             MessageFlags, SocketFlags, bind_ipv4, bind_raw, getsockname_ipv4, getsockname_raw,
@@ -696,6 +697,84 @@ fn test_zero_and_short_consume_whole() -> Result<(), Errno> {
     close(server)
 }
 
+fn test_fionread_dispatch_and_queue_semantics() -> Result<(), Errno> {
+    let server = udp_socket(SocketFlags::NONBLOCK)?;
+    ensure(ioctl_readable_bytes(server)? == 0)?;
+    bind_ipv4(server, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    ensure(ioctl_readable_bytes(server)? == 0)?;
+    let server_name = getsockname_ipv4(server)?;
+    let client = udp_socket(SocketFlags::NONBLOCK)?;
+
+    send_to_bound(client, server_name, b"")?;
+    let mut pollfd = [PollFd {
+        fd: server as i32,
+        events: POLLIN,
+        revents: 0,
+    }];
+    ensure(ppoll(&mut pollfd, Some(&SOURCE_TIMEOUT))? == 1)?;
+    ensure(pollfd[0].revents & POLLIN != 0)?;
+    ensure(ioctl_readable_bytes(server)? == 0)?;
+    let mut empty = [];
+    ensure(recv_retry(server, &mut empty)?.0 == 0)?;
+
+    send_to_bound(client, server_name, b"one")?;
+    pollfd[0].revents = 0;
+    ensure(ppoll(&mut pollfd, Some(&SOURCE_TIMEOUT))? == 1)?;
+    ensure(ioctl_readable_bytes(server)? == 3)?;
+    // The backend intentionally has one pending TX slot. Publish the first
+    // datagram before sending the second so this remains an RX-head test.
+    let mut second_sent = false;
+    for _ in 0..DELIVERY_RETRIES {
+        match sendto_ipv4(client, b"second", MessageFlags::empty(), server_name) {
+            Ok(6) => {
+                second_sent = true;
+                break;
+            },
+            Err(EAGAIN) => sched_yield()?,
+            Ok(_) => return Err(EIO),
+            Err(error) => return Err(error),
+        }
+    }
+    ensure(second_sent)?;
+    expect_errno(
+        unsafe {
+            syscall(
+                SYS_IOCTL,
+                server as u64,
+                anemone_rs::abi::fs::linux::ioctl::FIONREAD as u64,
+                1,
+                0,
+                0,
+                0,
+            )
+        },
+        EFAULT,
+    )?;
+    ensure(ioctl_readable_bytes(server)? == 3)?;
+    let mut first = [0u8; 8];
+    ensure(recv_retry(server, &mut first)?.0 == 3 && &first[..3] == b"one")?;
+    let mut second_len = 0;
+    for _ in 0..DELIVERY_RETRIES {
+        second_len = ioctl_readable_bytes(server)?;
+        if second_len == 6 {
+            break;
+        }
+        sched_yield()?;
+    }
+    ensure(second_len == 6)?;
+
+    expect_errno(
+        unsafe { syscall(SYS_IOCTL, server as u64, 0x7fff_1234, 0, 0, 0, 0) },
+        ENOTTY,
+    )?;
+    ioctl_set_nonblocking(server, false)?;
+    ensure(fcntl_getfl(server)? & O_NONBLOCK == 0)?;
+    ioctl_set_nonblocking(server, true)?;
+    ensure(fcntl_getfl(server)? & O_NONBLOCK != 0)?;
+    close(client)?;
+    close(server)
+}
+
 #[derive(Clone, Copy)]
 enum FaultTarget {
     Payload,
@@ -937,6 +1016,10 @@ pub(crate) fn run() -> Result<(), Errno> {
         test_blocking_multi_waiter_and_signal,
     );
     results.case("zero-short-consume", test_zero_and_short_consume_whole);
+    results.case(
+        "fionread-dispatch-queue",
+        test_fionread_dispatch_and_queue_semantics,
+    );
     results.case("fault-consume", test_receive_faults_consume_datagram);
     results.case(
         "concurrent-fault-consume",

@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/fs/socket/{front,api,udp,icmp_raw,tcp,unix,netlink}/`、`anemone-abi/src/net.rs`、`anemone-rs/src/{os,sys}/linux/net.rs`
 **依赖：** `OPENED-DESC-001..003`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`、`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`、`NET-SOCKET-WAIT-001`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-13
+**最后核验：** 2026-08-17
 
 ## 状态与能力所有权
 
@@ -57,6 +57,15 @@ Unix stream/seqpacket的`SO_PEERCRED`由family owner返回normalized `{tgid,euid
 `struct ucred`布局、tgid到signed pid的可表示性检查、native-endian encoding及optlen/copyout policy。成功复制
 `min(requested, sizeof(struct ucred))` bytes并把optlen写为实际复制长度；value fault发生时不先改写optlen。
 非连接Unix role的typed rejection映射`ENOTCONN`，没有peer-credential producer的family映射`ENOPROTOOPT`。
+
+Socket输入队列查询由adapter把数值相同的`FIONREAD`、`TIOCINQ`与`SIOCINQ`解码为
+`SocketIoctlRequest::ReadableBytes`，再经static `SocketOps::ioctl`分发；raw command、argument、Linux signed
+`int`表示、checked conversion、errno与用户copyout不得越过front。family callback只返回现有owner queue/stream的
+瞬时typed fact：UDP为下一datagram payload长度，ICMP raw为下一完整IPv4 packet长度，TCP与Unix stream为累计未读
+stream bytes，Unix seqpacket为全部排队record payload总和。UDP的队首长度与readiness共享同一`Option` truth，
+`Some(0)`表示可读零长datagram而`None`表示空队列。TCP/Unix listener的typed role rejection映射`EINVAL`；Netlink
+不发布该capability，unknown ioctl与Netlink `FIONREAD`保持`ENOTTY`。查询不peek、detach或consume数据，也不缓存
+byte count；`FIONBIO`继续由opened-description status owner处理，不进入family ioctl callback。
 
 UDP发布真实`IP_RECVERR` scalar option、consuming `SO_ERROR`与`MSG_ERRQUEUE` ancillary projection。raw option/header、
 Linux errno、`sock_extended_err`、sockaddr/cmsg alignment与copy ordering只存在于adapter；UDP owner只接收normalized
@@ -112,6 +121,8 @@ rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc re
 Refine；[Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-diagnostics/index.md)的
 `NETLINK-DIAGNOSTICS-CUTOVER`随后增加AF_NETLINK tuple与wire containment；[Unix peer credentials小迭代](../../devlog/changes/2026-08-13-unix-peer-credentials.md)
 的`SOCKET-UNIX-PEERCRED-CUTOVER`增加`SO_PEERCRED` layout/copyout containment。
+随后由[Socket FIONREAD小迭代](../../devlog/changes/2026-08-17-socket-fionread.md) Refine typed ioctl family dispatch与
+输入队列查询语义。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 

@@ -177,9 +177,9 @@ mod kunits {
 
     #[kunit]
     fn error_projection_is_mandatory_and_clears_with_owner_fact() {
-        let error = UdpEndpointFacts::from_owner_snapshot(false, true, true);
+        let error = UdpEndpointFacts::from_owner_snapshot(None, true, true);
         assert_eq!(project_facts(error, PollEvent::empty()), PollEvent::ERROR);
-        let clear = UdpEndpointFacts::from_owner_snapshot(false, true, false);
+        let clear = UdpEndpointFacts::from_owner_snapshot(None, true, false);
         assert_eq!(project_facts(clear, PollEvent::empty()), PollEvent::empty());
     }
 }

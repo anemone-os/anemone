@@ -26,16 +26,16 @@ impl IcmpRawEndpointId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IcmpRawEndpointFacts {
     live: bool,
-    readable: bool,
+    next_packet_len: Option<usize>,
     writable: bool,
 }
 
 impl IcmpRawEndpointFacts {
     #[doc(hidden)]
-    pub const fn from_owner_snapshot(readable: bool, writable: bool) -> Self {
+    pub const fn from_owner_snapshot(next_packet_len: Option<usize>, writable: bool) -> Self {
         Self {
             live: true,
-            readable,
+            next_packet_len,
             writable,
         }
     }
@@ -45,7 +45,11 @@ impl IcmpRawEndpointFacts {
     }
 
     pub const fn is_readable(self) -> bool {
-        self.readable
+        self.next_packet_len.is_some()
+    }
+
+    pub const fn next_packet_len(self) -> Option<usize> {
+        self.next_packet_len
     }
 
     pub const fn is_writable(self) -> bool {

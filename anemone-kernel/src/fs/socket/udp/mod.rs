@@ -11,7 +11,8 @@ use crate::{
 };
 
 use super::{
-    SocketCreation, SocketIoOps, SocketOps, SocketPreparation, SocketReleaseReason, SocketType,
+    SocketCreation, SocketIoOps, SocketIoctlError, SocketIoctlRequest, SocketIoctlResponse,
+    SocketOps, SocketPreparation, SocketReleaseReason, SocketType,
 };
 use datagram::{
     bind_udp_socket, connect_udp_socket, query_udp_peer, query_udp_socket, receive_udp_socket,
@@ -119,6 +120,21 @@ fn poll_udp_socket(
     udp_private(private).source.poll(request)
 }
 
+fn ioctl_udp_socket(
+    private: &AnyOpaque,
+    request: SocketIoctlRequest,
+) -> Result<SocketIoctlResponse, SocketIoctlError> {
+    let SocketIoctlRequest::ReadableBytes = request;
+    let facts = udp_private(private)
+        .endpoint()
+        .ok_or(SocketIoctlError::Retired)?
+        .facts()
+        .map_err(|_| SocketIoctlError::Retired)?;
+    Ok(SocketIoctlResponse::ReadableBytes(
+        facts.next_datagram_len().unwrap_or(0),
+    ))
+}
+
 fn final_release_udp_socket(private: &AnyOpaque, _reason: SocketReleaseReason) {
     // Source retirement first withdraws association, reverse publication and
     // routes. No sleeping operation mutex or fd-table lock participates.
@@ -147,6 +163,7 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     accepting: udp_is_accepting,
     query_option: Some(query_udp_option),
     mutate_option: Some(mutate_udp_option),
+    ioctl: Some(ioctl_udp_socket),
     detach_ipv4_extended_error: Some(detach_udp_extended_error),
     poll: poll_udp_socket,
     final_release: final_release_udp_socket,
@@ -157,7 +174,10 @@ mod kunits {
     use super::{datagram::UdpSendSnapshot, *};
 
     use anemone_abi::fs::linux::{mode, statx};
-    use anemone_net_api::{Ipv4Address, udp::UdpPeer};
+    use anemone_net_api::{
+        Ipv4Address,
+        udp::{UdpEndpointFacts, UdpPeer},
+    };
 
     use crate::{
         fs::socket::{
@@ -200,6 +220,26 @@ mod kunits {
             access: OpenAccessMode::ReadWrite,
             notification_suppressed: true,
         });
+    }
+
+    #[kunit]
+    fn ioctl_dispatch_uses_the_udp_head_fact_without_losing_empty_datagrams() {
+        let zero = UdpEndpointFacts::from_owner_snapshot(Some(0), true, false);
+        assert!(zero.is_readable());
+        assert_eq!(zero.next_datagram_len(), Some(0));
+
+        let (file, creation) =
+            prepare_socket(&UDP_SOCKET_OPS).expect("KUnit UDP endpoint must fit");
+        let socket = socket_from_file(&file).expect("prepared UDP file must be a Socket");
+        assert_eq!(
+            socket.ioctl(SocketIoctlRequest::ReadableBytes),
+            Ok(SocketIoctlResponse::ReadableBytes(0))
+        );
+        drop(creation);
+        assert_eq!(
+            socket.ioctl(SocketIoctlRequest::ReadableBytes),
+            Err(SocketIoctlError::Retired)
+        );
     }
 
     #[kunit]

@@ -12,10 +12,11 @@ use crate::{
 use super::{
     super::{
         SocketAcceptError, SocketAcceptItem, SocketAddress, SocketAddressSink, SocketBindError,
-        SocketConnectError, SocketCreation, SocketListenError, SocketOps, SocketOptionError,
-        SocketOptionQuery, SocketOptionValue, SocketPairPreparation, SocketPeerCredentials,
-        SocketPreparation, SocketQueryError, SocketReceiveError, SocketReleaseReason,
-        SocketSendError, SocketShutdown, SocketShutdownError, SocketType,
+        SocketConnectError, SocketCreation, SocketIoctlError, SocketIoctlRequest,
+        SocketIoctlResponse, SocketListenError, SocketOps, SocketOptionError, SocketOptionQuery,
+        SocketOptionValue, SocketPairPreparation, SocketPeerCredentials, SocketPreparation,
+        SocketQueryError, SocketReceiveError, SocketReleaseReason, SocketSendError, SocketShutdown,
+        SocketShutdownError, SocketType,
     },
     admission::{
         UnixListener, accept, connect, listen, notify_admission_routes, poll_unix_listener,
@@ -143,6 +144,13 @@ impl UnixConnection {
         match self {
             Self::Stream(connection) => connection.credentials[side.peer().index()].0,
             Self::Seqpacket(connection) => connection.credentials[side.peer().index()].0,
+        }
+    }
+
+    fn readable_bytes(&self, side: EndpointSide) -> usize {
+        match self {
+            Self::Stream(connection) => connection.readable_bytes(side),
+            Self::Seqpacket(connection) => connection.readable_bytes(side),
         }
     }
 
@@ -684,6 +692,22 @@ fn query_unix_option(
     ))
 }
 
+fn ioctl_unix_socket(
+    private: &AnyOpaque,
+    request: SocketIoctlRequest,
+) -> Result<SocketIoctlResponse, SocketIoctlError> {
+    let SocketIoctlRequest::ReadableBytes = request;
+    let endpoint = &endpoint(private).core;
+    let state = endpoint.state.lock();
+    let readable = match &state.association {
+        EndpointAssociation::Unconnected => 0,
+        EndpointAssociation::Listening(_) => return Err(SocketIoctlError::InvalidState),
+        EndpointAssociation::Connected { connection, side } => connection.readable_bytes(*side),
+        EndpointAssociation::Retired => return Err(SocketIoctlError::Retired),
+    };
+    Ok(SocketIoctlResponse::ReadableBytes(readable))
+}
+
 fn unconnected_poll_events(request: &PollRequest<'_>) -> PollEvent {
     PollEvent::HANG_UP | (PollEvent::WRITABLE & request.interests())
 }
@@ -861,6 +885,7 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     accepting: query_unix_accepting,
     query_option: Some(query_unix_option),
     mutate_option: None,
+    ioctl: Some(ioctl_unix_socket),
     detach_ipv4_extended_error: None,
     poll: poll_unix_stream,
     final_release: final_release_unix_endpoint_with_reason,
@@ -885,6 +910,7 @@ pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOp
     accepting: query_unix_accepting,
     query_option: Some(query_unix_option),
     mutate_option: None,
+    ioctl: Some(ioctl_unix_socket),
     detach_ipv4_extended_error: None,
     poll: poll_unix_seqpacket,
     final_release: final_release_unix_endpoint_with_reason,
@@ -1181,6 +1207,39 @@ mod kunits {
         );
         assert_eq!(first_read.0, b"second");
         assert_eq!(second_read.0, b"first");
+    }
+
+    #[kunit]
+    fn stream_ioctl_queries_are_non_consuming_and_follow_partial_reads() {
+        let pair = prepare_unix_pair().unwrap();
+        assert_eq!(
+            ioctl_unix_socket(&pair.second_private, SocketIoctlRequest::ReadableBytes),
+            Ok(SocketIoctlResponse::ReadableBytes(0))
+        );
+        assert_eq!(
+            send_stream_for_test(&pair.first_private, &mut WriteBytes(b"hello")),
+            Ok(5)
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                ioctl_unix_socket(&pair.second_private, SocketIoctlRequest::ReadableBytes),
+                Ok(SocketIoctlResponse::ReadableBytes(5))
+            );
+        }
+        let mut prefix = PartialReadCapture {
+            bytes: Vec::new(),
+            limit: 2,
+        };
+        assert_eq!(
+            receive_stream_for_test(&pair.second_private, &mut prefix),
+            Ok(2)
+        );
+        assert_eq!(
+            ioctl_unix_socket(&pair.second_private, SocketIoctlRequest::ReadableBytes),
+            Ok(SocketIoctlResponse::ReadableBytes(3))
+        );
+        final_release_unix_endpoint(&pair.first_private);
+        final_release_unix_endpoint(&pair.second_private);
     }
 
     #[kunit]
