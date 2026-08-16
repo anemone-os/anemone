@@ -20,6 +20,8 @@ use super::{
     pending_error_to_sys_error,
 };
 
+use super::interface_ioctl::{SIOCGIFCONF, get_interface_configuration};
+
 pub(super) fn prepare_socket_file(
     ops: &'static SocketOps,
     private: AnyOpaque,
@@ -387,24 +389,44 @@ fn socket_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(
     Ok(())
 }
 
-fn socket_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
-    let request = match ctx.cmd() {
-        FIONREAD => SocketIoctlRequest::ReadableBytes,
-        _ => return Err(SysError::UnsupportedIoctl),
-    };
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommonSocketIoctl {
+    ReadableBytes,
+    InterfaceConfiguration,
+}
+
+fn decode_common_socket_ioctl(cmd: u32) -> Option<CommonSocketIoctl> {
+    match cmd {
+        FIONREAD => Some(CommonSocketIoctl::ReadableBytes),
+        SIOCGIFCONF => Some(CommonSocketIoctl::InterfaceConfiguration),
+        _ => None,
+    }
+}
+
+fn get_readable_bytes(file: &File, ctx: &IoctlCtx<'_>) -> Result<u64, SysError> {
     let socket = socket_from_file(file)
         .expect("common Socket FileOps ioctl used without Socket private state");
-    let response = socket.ioctl(request).map_err(|error| match error {
-        SocketIoctlError::Unsupported => SysError::UnsupportedIoctl,
-        SocketIoctlError::Retired => SysError::BadFileDescriptor,
-        SocketIoctlError::InvalidState => SysError::InvalidArgument,
-    })?;
+    let response =
+        socket
+            .ioctl(SocketIoctlRequest::ReadableBytes)
+            .map_err(|error| match error {
+                SocketIoctlError::Unsupported => SysError::UnsupportedIoctl,
+                SocketIoctlError::Retired => SysError::BadFileDescriptor,
+                SocketIoctlError::InvalidState => SysError::InvalidArgument,
+            })?;
     let SocketIoctlResponse::ReadableBytes(readable) = response;
     let readable = i32::try_from(readable).map_err(|_| SysError::FileTooLarge)?;
     ctx.uspace().with_usp(|usp| {
         UserWritePtr::<i32>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(readable)
     })?;
     Ok(0)
+}
+
+fn socket_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
+    match decode_common_socket_ioctl(ctx.cmd()).ok_or(SysError::UnsupportedIoctl)? {
+        CommonSocketIoctl::ReadableBytes => get_readable_bytes(file, &ctx),
+        CommonSocketIoctl::InterfaceConfiguration => get_interface_configuration(&ctx),
+    }
 }
 
 static SOCKET_FILE_OPS: FileOps = FileOps {
@@ -464,6 +486,23 @@ mod kunits {
     use super::*;
 
     use crate::fs::socket::{TCP_SOCKET_OPS, prepare_socket, socket_file_desc_ops};
+
+    #[kunit]
+    fn common_socket_ioctl_decode_preserves_existing_boundaries() {
+        assert_eq!(
+            decode_common_socket_ioctl(FIONREAD),
+            Some(CommonSocketIoctl::ReadableBytes)
+        );
+        assert_eq!(
+            decode_common_socket_ioctl(SIOCGIFCONF),
+            Some(CommonSocketIoctl::InterfaceConfiguration)
+        );
+        assert_eq!(
+            decode_common_socket_ioctl(anemone_abi::fs::linux::ioctl::FIONBIO),
+            None
+        );
+        assert_eq!(decode_common_socket_ioctl(u32::MAX), None);
+    }
 
     #[kunit]
     fn tcp_file_read_preserves_not_connected_errno() {

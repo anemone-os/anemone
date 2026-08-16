@@ -1,6 +1,7 @@
 //! Family-neutral Socket front, static dispatch, and opened-description hooks.
 
 mod file;
+mod interface_ioctl;
 mod operation;
 
 use anemone_net_api::Ipv4Address;

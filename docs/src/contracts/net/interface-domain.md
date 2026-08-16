@@ -3,13 +3,13 @@
 **Contract ID：** `NET-IFACE-DOMAIN-001`
 **状态：** Active
 **Owner：** initial-domain logical-interface owner与domain Stack各自拥有的membership/protocol state
-**参与领域：** `device/net` / kernel attach authority / domain Stack / IPv4 control plane
-**覆盖范围：** initial-domain boot identity、logical-interface membership/identity/ifindex/name/kind、external reservation与global-Stack composition
-**不覆盖：** IP address/route/source selection与local packet progression（由`NET-CONTROL-PLANE-001`拥有）、Endpoint/socket/UAPI、runtime detach/retry/reuse或多个network domain
-**实现位置：** `anemone-kernel/src/net/{domain/mod.rs,domain/interfaces.rs,domain/stack.rs,mod.rs}`
+**参与领域：** `device/net` / kernel attach authority / domain Stack / IPv4 control plane / read-only network diagnostics
+**覆盖范围：** initial-domain boot identity、logical-interface membership/identity/ifindex/name/kind、external reservation、read-only identity projection与global-Stack composition
+**不覆盖：** IP address/route/source selection与local packet progression（由`NET-CONTROL-PLANE-001`拥有）、Socket UAPI encoding、runtime detach/retry/reuse或多个network domain
+**实现位置：** `anemone-kernel/src/net/{domain/mod.rs,domain/interfaces.rs,domain/stack.rs,diagnostics.rs,mod.rs}`
 **依赖：** [NETDEV-LIFE-001](./netdev-lifecycle.md#netdev-life-001--boot-time-identity与publication是单向transaction)、[NET-BOUNDARY-001](./frame-path.md#net-boundary-001--frame-slice依赖方向与object-fence)、[NET-STACK-PUMP-001](./frame-path.md#net-stack-pump-001--stack-instance唯一推进protocol-state)
 **Pending Successor：** None；[NET-CONTROL-PLANE-001](./control-plane.md#net-control-plane-001--initial-domain唯一决定ipv4-routesourceinterface)与[UDP Socket contract](./udp-socket.md)均已接入本页logical/domain边界
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-17
 
 ## 状态与身份所有权
 
@@ -40,6 +40,11 @@ initial domain还持有production唯一global protocol Stack composition。raw S
 worker只能取得自己的opaque `ExternalPumpPort`，不能取得logical registry、其它mapping、route、Endpoint或raw
 Stack mutation authority。该composition不把logical identity、protocol mapping和provider resource合并为综合状态。
 
+logical identity可通过request-local owned snapshot供read-only diagnostics使用。`SIOCGIFCONF`只把该snapshot中的
+name与control-plane-owned IPv4 address在Socket ABI adapter投影为Linux record；它不把address写回logical owner，
+不枚举没有IPv4 address的membership，也不提供mutation、runtime configuration或logical/protocol/provider identity
+转换。Linux layout、nested user pointer、capacity、errno与copy ordering不进入本owner。
+
 **失败 / Cleanup：** missing MAC在reservation前失败。reservation后的ordinary attach failure先撤销未发布
 Stack mapping，再abort reservation；terminal admission race还必须在此后停止inactive worker并retain provider。
 unfinished mapping进入cleanup时先fail-close撤销未发布mapping，再暴露protocol bug；logical reservation没有已发布
@@ -59,13 +64,17 @@ shutdown markers。
 **最初来源：** [Network UDP RFC R0](../../rfcs/net-udp/index.md)。
 
 **当前来源：** [Network UDP transaction](../../devlog/transactions/2026-07-29-net-udp.md)的
-`NET-UDP-DOMAIN-CUTOVER`。
+`NET-UDP-DOMAIN-CUTOVER`；[Socket SIOCGIFCONF小迭代](../../devlog/changes/2026-08-17-socket-siocgifconf.md)随后
+Refine read-only identity projection边界。
 
 ## 当前接受边界
 
 - `lo`的membership仍只由logical owner定义；其functional IPv4 path现由独立
   [control-plane contract](./control-plane.md)拥有，不把route或packet truth写回logical registry。
-- external logical facts服务attach record、boot-time control-plane interface match与immutable association；logical
-  owner仍不拥有address/route，且没有用户可见interface query或runtime configuration ABI。
+- external logical facts服务attach record、boot-time control-plane interface match、immutable association与normalized
+  read-only diagnostics；logical owner仍不拥有address/route或UAPI。当前用户可见interface query仅有Socket-front
+  `SIOCGIFCONF`的IPv4 address-bearing record，不含其它`SIOCGIF*`或runtime configuration ABI。
 - production runtime分别验证RV64 QEMU的一张virtio-mmio NIC与LA64 QEMU的一张virtio-pci NIC、functional
   local/remote path和`smp=1`。hardware、其它NIC/deployment与`smp>1`均Not Run。
+- `SIOCGIFCONF`增量在RV64 `smp=1`执行705/705 KUnit并完成release build/orderly shutdown；本轮没有运行LA64、
+  userspace ioctl oracle、Java/Minecraft或runtime interface reconfiguration。
