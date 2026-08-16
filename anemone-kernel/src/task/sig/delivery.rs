@@ -177,6 +177,27 @@ impl Task {
         }
         false
     }
+
+    /// Readiness predicate paired exactly with `fetch_specific_signal`.
+    /// Unlike `has_specific_signal`, this excludes temporary-mask reserved
+    /// delivery so synchronous consumers cannot advertise an unclaimable item.
+    pub(crate) fn has_dequeueable_specific_signal(&self, set: SigSet) -> bool {
+        {
+            let pending = self.sig_pending.lock();
+            if pending.has_dequeueable_specific(set) {
+                return true;
+            }
+        }
+        {
+            let tg = self.get_thread_group();
+            let tg_inner = tg.inner.read();
+            let pending = tg_inner.sig_pending.lock();
+            if pending.has_dequeueable_specific(set) {
+                return true;
+            }
+        }
+        false
+    }
     /// Called when this task is about to return to user-space.
     ///
     /// Masked signals won't be fetched.
@@ -775,8 +796,54 @@ mod kunits {
     use super::*;
     use crate::task::sig::{
         PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
-        PosixTimerSignalRegistration, info::SigInfoFields,
+        PosixTimerSignalRegistration,
+        info::{SiCode, SigInfoFields, SigKill},
     };
+
+    #[kunit]
+    fn specific_dequeue_prefers_private_before_shared() {
+        let target = get_current_task();
+        let group = target.get_thread_group();
+        let set = SigSet::new_with_signos(&[SigNo::SIGUSR2]);
+        group.flush_specific_signals(set);
+
+        let old_mask = target.snapshot_current_sig_mask();
+        let mut blocked = old_mask;
+        blocked.set(SigNo::SIGUSR2);
+        target.set_permanent_sig_mask(blocked);
+
+        target.recv_signal(Signal::new(
+            SigNo::SIGUSR2,
+            SiCode::User,
+            SigInfoFields::Kill(SigKill {
+                pid: Tid::new(61),
+                uid: Uid::new(0),
+            }),
+        ));
+        group.recv_signal(Signal::new(
+            SigNo::SIGUSR2,
+            SiCode::User,
+            SigInfoFields::Kill(SigKill {
+                pid: Tid::new(62),
+                uid: Uid::new(0),
+            }),
+        ));
+
+        let private = target.fetch_specific_signal(set).unwrap();
+        let SigInfoFields::Kill(private) = private.fields else {
+            panic!("private signal lost sender fields")
+        };
+        assert_eq!(private.pid, Tid::new(61));
+        let shared = target.fetch_specific_signal(set).unwrap();
+        let SigInfoFields::Kill(shared) = shared.fields else {
+            panic!("shared signal lost sender fields")
+        };
+        assert_eq!(shared.pid, Tid::new(62));
+        assert!(target.fetch_specific_signal(set).is_none());
+
+        target.set_permanent_sig_mask(old_mask);
+        group.flush_specific_signals(set);
+    }
 
     #[kunit]
     fn private_timer_reservation_reaches_trap_fetch_facade() {

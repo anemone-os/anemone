@@ -48,8 +48,8 @@ use crate::{
         jobctl::group::{ThreadGroupMembers, UserJobControl},
         kthread::KThreadTaskLocal,
         sig::{
-            PendingSignals, SigNo, SignalReturnWork, TaskSigMaskState, altstack::SigAltStack,
-            disposition::SignalDisposition,
+            PendingSignals, SigNo, SignalFdRecheckRoutes, SignalReturnWork, TaskSigMaskState,
+            altstack::SigAltStack, disposition::SignalDisposition,
         },
         task_itimer::ITimers,
         task_posix_timer::PosixTimers,
@@ -278,6 +278,9 @@ pub struct ThreadGroup {
     /// User-process rlimit policy. Presence follows `ty`; it is absent for
     /// kthreads and never acts as a second thread-group type discriminator.
     resource_limits: Option<NoIrqRwLock<task_resource::UserResourceLimits>>,
+    /// Predicate-only routes that ask signalfd consumers to rescan the
+    /// authoritative task-private and thread-group-shared pending owners.
+    signalfd_rechecks: NoIrqSpinLock<SignalFdRecheckRoutes>,
     inner: NoIrqRwLock<ThreadGroupInner>,
 }
 

@@ -163,6 +163,7 @@ impl PublishGuard {
             resource_limits: Some(NoIrqRwLock::new(
                 task_resource::UserResourceLimits::new_default(),
             )),
+            signalfd_rechecks: NoIrqSpinLock::new(SignalFdRecheckRoutes::new()),
             inner: NoIrqRwLock::new(ThreadGroupInner {
                 status: ThreadGroupStatus::new_alive_executed(),
                 pgid: Some(Tid::INIT),
@@ -301,6 +302,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                                 itimers: ITimers::new(),
                                 posix_timers: PosixTimers::new(),
                                 resource_limits: Some(NoIrqRwLock::new(resource_limits)),
+                                signalfd_rechecks: NoIrqSpinLock::new(SignalFdRecheckRoutes::new()),
                                 inner: NoIrqRwLock::new(inner),
                             };
                             assert_thread_group_shape(tgid, &tg);
@@ -347,6 +349,7 @@ fn publish_task(mut task: Task, binding: TaskBinding) -> Result<Arc<Task>, (Task
                 itimers: ITimers::new(),
                 posix_timers: PosixTimers::new(),
                 resource_limits: None,
+                signalfd_rechecks: NoIrqSpinLock::new(SignalFdRecheckRoutes::new()),
                 inner: NoIrqRwLock::new(ThreadGroupInner {
                     status: ThreadGroupStatus::new_alive(),
                     pgid: None,

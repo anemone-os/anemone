@@ -225,6 +225,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../../ltp/groups/signal.txt"),
     },
     LtpGroup {
+        name: "signalfd",
+        cases: include_str!("../../ltp/groups/signalfd.txt"),
+    },
+    LtpGroup {
         name: "socket",
         cases: include_str!("../../ltp/groups/socket.txt"),
     },

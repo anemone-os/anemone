@@ -37,6 +37,60 @@ pub mod linux {
         pub const EFD_NONBLOCK: u32 = O_NONBLOCK;
     }
 
+    pub mod signalfd {
+        use core::mem::{offset_of, size_of};
+
+        use super::open::{O_CLOEXEC, O_NONBLOCK};
+
+        pub const SFD_CLOEXEC: u32 = O_CLOEXEC;
+        pub const SFD_NONBLOCK: u32 = O_NONBLOCK;
+
+        /// Linux `struct signalfd_siginfo` on the supported 64-bit targets.
+        #[derive(
+            Debug,
+            Default,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            zerocopy::FromBytes,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+        )]
+        #[repr(C)]
+        pub struct SignalFdSigInfo {
+            pub signo: u32,
+            pub errno: i32,
+            pub code: i32,
+            pub pid: u32,
+            pub uid: u32,
+            pub fd: i32,
+            pub tid: u32,
+            pub band: u32,
+            pub overrun: u32,
+            pub trapno: u32,
+            pub status: i32,
+            pub int: i32,
+            pub ptr: u64,
+            pub utime: u64,
+            pub stime: u64,
+            pub addr: u64,
+            pub addr_lsb: u16,
+            pub __pad2: u16,
+            pub syscall: i32,
+            pub call_addr: u64,
+            pub arch: u32,
+            pub __pad: [u8; 28],
+        }
+
+        const _: [(); 128] = [(); size_of::<SignalFdSigInfo>()];
+        const _: [(); 0] = [(); offset_of!(SignalFdSigInfo, signo)];
+        const _: [(); 48] = [(); offset_of!(SignalFdSigInfo, ptr)];
+        const _: [(); 84] = [(); offset_of!(SignalFdSigInfo, syscall)];
+        const _: [(); 88] = [(); offset_of!(SignalFdSigInfo, call_addr)];
+        const _: [(); 96] = [(); offset_of!(SignalFdSigInfo, arch)];
+    }
+
     pub mod flock {
         pub const LOCK_SH: u32 = 1;
         pub const LOCK_EX: u32 = 2;

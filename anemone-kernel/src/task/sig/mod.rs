@@ -15,7 +15,10 @@
 //! Much logic relies on the fact that signal numbers are between 0 and 63. We
 //! just hardcoded this fact in many places. We can refactor this later.
 
-use anemone_abi::process::linux::{signal as linux_signal, signal::NSIG};
+use anemone_abi::{
+    fs::linux::signalfd::SignalFdSigInfo,
+    process::linux::{signal as linux_signal, signal::NSIG},
+};
 
 use crate::{
     prelude::*,
@@ -45,7 +48,11 @@ mod mask;
 pub use mask::{TaskSigMaskState, TemporarySigMaskToken};
 mod pending;
 pub use pending::PendingSignals;
+mod recheck;
 use pending::timer;
+pub(crate) use recheck::{
+    SignalFdRecheckObserver, SignalFdRecheckRoute, SignalFdRecheckRoutes, notify_signalfd_rechecks,
+};
 pub mod set;
 pub(crate) use timer::{
     PosixTimerSignalCallback, PosixTimerSignalCompletion, PosixTimerSignalEnqueue,
@@ -244,6 +251,59 @@ impl Signal {
                 fields: kbuf,
             },
         }
+    }
+
+    pub(crate) fn to_signalfd_siginfo(&self) -> SignalFdSigInfo {
+        let mut info = SignalFdSigInfo {
+            signo: self.no.as_usize() as u32,
+            errno: self.errno,
+            code: self.code.to_linux_code(),
+            ..Default::default()
+        };
+
+        match self.fields {
+            SigInfoFields::Kill(info::SigKill { pid, uid })
+            | SigInfoFields::TKill(info::SigKill { pid, uid }) => {
+                info.pid = pid.get();
+                info.uid = uid.get();
+            },
+            SigInfoFields::Rt(info::SigRt { pid, uid, sigval }) => {
+                info.pid = pid.get();
+                info.uid = uid.get();
+                info.int = sigval as u32 as i32;
+                info.ptr = sigval;
+            },
+            SigInfoFields::Timer(info::SigTimer {
+                tid,
+                overrun,
+                sigval,
+                ..
+            }) => {
+                info.tid = tid as u32;
+                info.overrun = overrun as u32;
+                info.int = sigval as u32 as i32;
+                info.ptr = sigval;
+            },
+            SigInfoFields::Chld(info::SigChld {
+                pid,
+                uid,
+                status,
+                utime,
+                stime,
+            }) => {
+                info.pid = pid.get();
+                info.uid = uid.get();
+                info.status = status;
+                info.utime = utime;
+                info.stime = stime;
+            },
+            SigInfoFields::Fault(info::SigFault { addr })
+            | SigInfoFields::Ill(info::SigFault { addr }) => {
+                info.addr = addr.get();
+            },
+        }
+
+        info
     }
 }
 

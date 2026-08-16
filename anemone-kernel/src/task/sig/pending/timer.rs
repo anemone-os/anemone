@@ -18,6 +18,7 @@ use crate::{
             SigNo, Signal, SignalPurpose,
             generation::is_job_control_signal,
             info::{SiCode, SigInfoFields, SigTimer},
+            notify_signalfd_rechecks,
             set::SigSet,
         },
     },
@@ -771,12 +772,14 @@ impl PosixTimerSignalRegistration {
         };
 
         if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+            let recheck_routes = target.snapshot_signalfd_rechecks();
             // Snapshot after publication. A member present now is rearmed;
             // one joining later starts armed and cannot miss shared pending.
             let members = target.get_members();
             for member in &members {
                 member.rearm_signal_return_work();
             }
+            notify_signalfd_rechecks(recheck_routes);
             for member in members {
                 if no == SigNo::SIGKILL || !member.is_current_sig_mask_blocking(no) {
                     notify(&member, no == SigNo::SIGKILL);
@@ -836,9 +839,14 @@ impl PosixTimerSignalRegistration {
         };
 
         if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+            let recheck_routes =
+                get_thread_group(&target.tgid()).map(|tg| tg.snapshot_signalfd_rechecks());
             // Masking suppresses notification, not mandatory user-entry work.
             // Publish the timer slot first, then rearm before any wakeup.
             target.rearm_signal_return_work();
+            if let Some(routes) = recheck_routes {
+                notify_signalfd_rechecks(routes);
+            }
             if no == SigNo::SIGKILL || !target.is_current_sig_mask_blocking(no) {
                 notify(target, no == SigNo::SIGKILL);
             }

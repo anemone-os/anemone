@@ -40,6 +40,12 @@ impl PollRoute {
         // terminal, so this conservative snapshot is sufficient for hygiene.
         self.observer.strong_count() == 0
     }
+
+    /// Resource-hygiene identity only. Sources may use it to replace repeated
+    /// registration by the same observer, never to decide readiness.
+    pub(crate) fn hygiene_key(&self) -> usize {
+        self.observer.as_ptr() as *const () as usize
+    }
 }
 
 impl core::fmt::Debug for PollRoute {

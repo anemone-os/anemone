@@ -475,6 +475,14 @@ impl PendingSignals {
                 return true;
             }
         }
+        self.has_dequeueable_specific(set)
+    }
+
+    /// Match only occurrences available to ordinary synchronous dequeue.
+    /// A temporary-mask reserved target remains exclusively owned by the
+    /// trap-return delivery handoff even though `has_specific` exposes it to
+    /// job-control/user-entry arbitration.
+    pub(super) fn has_dequeueable_specific(&self, set: SigSet) -> bool {
         for no in 1..SIGRTMIN as usize {
             let no = SigNo::new(no);
             if self.unreliable[no.as_usize()].is_some() && set.get(no) {
@@ -989,6 +997,19 @@ mod kunits {
                 .is_empty()
         );
         assert_eq!(pending.reserved_delivery_signo(), Some(SigNo::SIGCONT));
+        let sigcont = SigSet::new_with_signos(&[SigNo::SIGCONT]);
+        assert!(
+            pending.has_specific(sigcont),
+            "user-entry arbitration must still observe the reserved target"
+        );
+        assert!(
+            !pending.has_dequeueable_specific(sigcont),
+            "synchronous readiness must exclude the reserved target"
+        );
+        assert!(
+            pending.fetch_specific(sigcont).is_none(),
+            "ordinary specific dequeue must not compete with reserved delivery"
+        );
 
         let fetched = pending
             .fetch_matching(SigSet::new(), |signal, reserved| {

@@ -1,11 +1,11 @@
 # RFC-20260816-signalfd
 
-**状态：** Accepted
-**修订：** R0
+**状态：** Closed / `SIGNALFD-CUTOVER` Effective
+**修订：** R1
 **负责人：** doruche
 **最后更新：** 2026-08-16
 **领域：** signal / fs / iomux / syscall ABI
-**影响契约：** `SIGNAL-FD-001`、`SIGNAL-FD-002`、`SIGNAL-FD-003`（Proposed Introduce）
+**影响契约：** `SIGNAL-FD-001`、`SIGNAL-FD-002`、`SIGNAL-FD-003`（Introduced）
 **执行记录：** None
 
 ## 摘要
@@ -15,10 +15,13 @@ ThreadGroup-shared pending signal，并通过 blocking read、poll/select 与 ep
 opened file description；实际 pending occurrence 继续只由现有 Signal owner 持有，signalfd 不建立私有 pending queue、
 readable bit 或 creator-task snapshot。
 
-R0 以主流、可直接使用且 ABI 诚实的 signalfd 能力为目标，同时保留实现空间。RFC 固定用户可见 ABI、状态 owner、
+R1 以主流、可直接使用且 ABI 诚实的 signalfd 能力为目标，同时保留实现空间。RFC 固定用户可见 ABI、状态 owner、
 publication/recheck 顺序、failure/cleanup 边界和验证下限，不固定具体 route 类型、容器、锁形状、内部 helper 或文件布局。
 偏僻 Linux 兼容语义、当前 Anemone 无法产生的 siginfo 类别、极端交错下更强的公平性或排序保证，以及需要扩建通用框架
-才能获得的完整性，不自动扩大 R0；只要不破坏本文能力底线，可以在实现证据中明确记录后继续收口。
+才能获得的完整性，不自动扩大当前 target；只要不破坏本文能力底线，可以在实现证据中明确记录后继续收口。R1 在 R0
+基础上只增加 opened-description mask owner 对其活跃 consumer route 的 reconfigure 提示，闭合共享别名跨 ThreadGroup 的
+阻塞读丢唤醒，并让已登记的persistent epoll watch因mask变化进入既有dirty rescan；它不追踪fd holder，也不扩大Signal
+publication的线程组边界。
 
 ## 背景
 
@@ -42,7 +45,7 @@ Linux 6.6.32 的 file mask、caller-relative pending scan、blocking/batch read�
 这些外部实现只作为 ABI 与可见行为参考，不规定 Anemone 的内部数据结构。
 
 Linux signalfd 的 epoll subscription 绑定执行 `EPOLL_CTL_ADD/MOD` 时的 signal domain；fd 随后经 fork 或传递进入其它
-process 时，direct read仍按新caller消费，但继承的epoll watch不保证被新process的signal唤醒。R0接受同一边界：不为单个
+process 时，direct read仍按新caller消费，但继承的epoll watch不保证被新process的signal唤醒。R1接受同一边界：不为单个
 caller-relative source改变现有epoll persistent-watch协议，也不把跨ThreadGroup epoll rebind伪装成已支持能力。
 
 ## 目标
@@ -60,7 +63,7 @@ caller-relative source改变现有epoll persistent-watch协议，也不把跨Thr
 - 以固定 128-byte `signalfd_siginfo` 返回 Anemone 当前 typed `Signal` 已拥有的字段；未使用字段清零，不暴露内核未初始化字节。
 - 为direct poll/select提供caller-relative readable predicate，并以register-before-rescan和guards-out hint关闭普通pending
   publication与入睡之间的lost-wake窗口。epoll exact scan在实际发生时仍读取current caller predicate，但可靠recheck/wake只
-  保证执行`EPOLL_CTL_ADD/MOD`时的ThreadGroup；R0不保证继承或传递到其它ThreadGroup的既有watch报告该组signalfd readiness。
+  保证执行`EPOLL_CTL_ADD/MOD`时的ThreadGroup；R1不保证继承或传递到其它ThreadGroup的既有watch报告该组signalfd readiness。
 - `dup` 与 `fork` 继续共享 opened description、file mask 与 file status flags；各次 read/poll 仍按实际 caller 的 pending
   owner 扫描。多个 caller 竞争同一 shared occurrence 时只允许一个成功消费，不承诺额外公平性。
 - 用一个连续 implementation unit 和唯一 `SIGNALFD-CUTOVER` 完成 syscall、file capability、Signal recheck 协议、
@@ -80,11 +83,13 @@ caller-relative source改变现有epoll persistent-watch协议，也不把跨Thr
 - 不建立通用 event-source、generic signal observer、全局 callback bus或跨 subsystem wait framework；只有出现第二个真实
   consumer 和独立授权时才重新考虑泛化。
 - 不修改现有epoll persistent-watch/ET causality contract，也不为fork或fd passing后的跨ThreadGroup signalfd watch建立
-  rebind、反向holder tracking或全局广播；direct read与direct poll/select的caller-relative语义不受此限制。
+  Signal-publication rebind、反向fd-holder tracking或全局ThreadGroup广播。opened-description mask owner只提示已经向该
+  description登记的活跃non-owning consumer route，包括persistent epoll watch。mask-change hint可令该watch进入既有dirty
+  rescan；这不扩张为跨组signal publication，后续signal arrival仍没有registration域之外的wake或ET dirty保证。
 - 不追求 Linux 内部 restart errno、waitqueue 类型、锁序或 allocation policy 的同形复制；用户可见 interruption 继续通过
   Anemone 现有 read/wait errno carrier 表达。
 - 不要求穷尽所有调度交错、证明公平性，或为 concurrent reconfigure/read/poll/dup/fork/teardown 固定 Linux 的偶然竞争胜者。
-- 不把特定上下文 allocation-free 或逐层 fallible allocation 作为 R0 目标。实现仍不得在不可睡眠上下文引入
+- 不把特定上下文 allocation-free 或逐层 fallible allocation 作为 R1 目标。实现仍不得在不可睡眠上下文引入
   blocking/synchronous reclaim、普通锁、remote placement、复杂 callback/Drop 或日志格式化。
 - 不顺手修复 [`ANE-20260606-RT-SIGTIMEDWAIT-ASYNC-WAITED-SIGNAL-EINTR`](../../register/open-issues.md#ane-20260606-rt-sigtimedwait-async-waited-signal-eintr)
   或其它相邻 Signal LTP 问题。
@@ -99,7 +104,8 @@ caller-relative source改变现有epoll persistent-watch协议，也不把跨Thr
 | ThreadGroup-shared pending occurrence | 当前 `ThreadGroup` 的 Signal pending owner | signalfd只通过窄 scan/dequeue capability访问 | process-directed matching read/readiness |
 | signalfd mask | signalfd opened description | read/poll取得一次coherent snapshot；fd table只持published slot | matching predicate与reconfigure |
 | synchronous dequeue与timer completion | Signal owner | signalfd取得已经完成dequeue handoff的owned occurrence | record projection与exact-once消费 |
-| signalfd recheck registration | Signal侧当前ThreadGroup recheck owner | blocking read/direct iomux或epoll ADD/MOD提供non-owning recheck capability | pending或mask变化后促使同域waiter重扫 |
+| Signal publication recheck | Signal侧当前ThreadGroup recheck owner | blocking read/direct iomux或epoll ADD/MOD提供non-owning recheck capability | pending变化后促使注册域waiter重扫 |
+| mask-change recheck | signalfd opened description | blocking read/direct iomux/epoll ADD/MOD提供non-owning recheck capability | reconfigure后促使该description的活跃consumer重扫 |
 | blocking wait round | scheduler wait/Latch owner | signalfd持有本轮wait capability | signal、force与matching occurrence竞争 |
 | poll/epoll waiter identity | iomux/epoll owner | Signal侧只保存不拥有waiter的route capability | readable hint与stale pruning |
 
@@ -120,11 +126,12 @@ file-mask snapshot或实现等价的coherent规则重新扫描current task priva
 register/rescan或现有epoll coverage协议确认可以park时才允许入睡。wake后继续由live predicate/dequeue形成结果；route hint
 本身不能伪造readable record。
 
-R0使用Signal owner-local动态容器保存non-owning route，不引入固定容量或对应kconfig。注册路径必须在增长前清理stale entry，
+R1使用owner-local动态容器保存non-owning route，不引入固定容量或对应kconfig。注册路径必须在增长前清理stale entry，
 不得让反复timeout/retry留下的tombstone无界累积；live duplicate hint可以保留，但不能成为第二份readiness truth。动态增长失败
 必须让本次注册失败并阻止park，不能把未armed状态静默当作成功。route snapshot的具体容器、pruning批次以及blocking read与
-iomux是否共享内部carrier仍属implementation preference。不允许strong route让已结束wait round或opened description延寿，
-也不要求final release跨全部曾使用该fd的ThreadGroup同步扫描清理。
+iomux是否共享内部carrier仍属implementation preference。route不得延长Task、ThreadGroup、opened description或active wait
+lifecycle；blocking trigger可以暂存retired wait-token backing，但只能形成stale no-op，并必须在下一次registry增长前prune。
+不要求final release跨全部曾使用该fd的ThreadGroup同步扫描清理。
 
 ### Read、dequeue 与 opened-description sharing
 
@@ -133,9 +140,11 @@ shared ordinary pending；temporary-mask reserved target继续只由ordinary tra
 Signal guard 后成为当前 read transaction 的唯一责任；record copyout完成或失败时不得重新发布为第二份 pending truth。
 POSIX timer completion继续由现有 synchronous dequeue handoff负责，signalfd不回调timer私有容器。
 
-mask reconfigure 与并发 read/poll 只要求各操作观察可线性化的 coherent mask，不规定具体锁或 winner。reconfigure 更新共享
-opened-description mask后提示当前调用者的ThreadGroup重扫；R0不为其它曾经继承或接收同一opened description的
-ThreadGroup维护反向持有者列表或跨group广播。其它group在后续scan或signal publication时观察新mask。
+mask reconfigure 与并发 read/poll 只要求各操作观察可线性化的 coherent mask，不规定具体锁或 winner。reconfigure 先更新
+共享opened-description mask，再snapshot并提示已经向该description登记的活跃non-owning consumer route重扫，包括经共享别名
+在其它ThreadGroup阻塞的read round。该registry只由mask owner保存recheck capability，不保存fd holder、ThreadGroup成员、
+pending或readiness truth。mask-change source hint也会令已经登记的persistent epoll watch进入既有dirty rescan；Signal
+publication仍只提示发生publication的ThreadGroup，后续signal arrival不因此获得跨组epoll rebind、wake或ET dirty保证。
 
 ### Failure、interruption 与 cleanup
 
@@ -230,14 +239,14 @@ RFC不把每一种mixed-invalid precedence提升为长期 target invariant。
   carrier是否复用，内部helper、文件布局、模块拆分和适度有界allocation均由实现按最直接可审查的形状选择；RFC中的能力名
   不是待实现类型清单。动态容器、stale-before-growth与失败时禁止park是已接受边界，不得退化为固定隐式上限或unarmed sleep。
 - **工程妥协：** 偏僻Linux语义、极罕见竞争的更强排序、公平性、allocation-free纯度或需要通用框架兜底的完整性，只要
-  位于R0 target之外且不造成ABI谎言、内存/生命周期错误、第二份truth或主路径lost wake，默认记录为current limitation、
+  位于R1 target之外且不造成ABI谎言、内存/生命周期错误、第二份truth或主路径lost wake，默认记录为current limitation、
   open issue或Not Proven后继续；不为单个观察面扭曲owner和代码形状。
-- **停止条件：** 若实现需要改变R0主能力、state/protocol owner、pending/readable真相源、public ABI、contract delta、
+- **停止条件：** 若实现需要改变R1主能力、state/protocol owner、pending/readable真相源、public ABI、contract delta、
   acceptance或validation claim，或必须让Signal依赖fs-private类型、为测试增加production hook、发布create-only部分ABI，
   则在cutover前回到RFC review。该review用于选择直接route correction、明确reduced target或Not Cut Over，不自动授权
   扩建通用框架，也不要求补齐本文已排除的Linux完整性。
 
-R0只使用一个连续implementation unit与唯一`SIGNALFD-CUTOVER`。普通commit和owner内部工作片不构成独立gate；除非后续
+R1仍只使用一个连续implementation unit与唯一`SIGNALFD-CUTOVER`。普通commit和owner内部工作片不构成独立gate；除非后续
 证据证明需要probe、不安全中间态、多个cutover或长期执行历史，否则不创建`implementation.md`或transaction。
 
 ## Acceptance 与 Validation
@@ -254,8 +263,8 @@ syscall，也不改变current contract。只有实现、验证、contract surfac
 - 审计blocking read与direct iomux的register-before-rescan、wake/final-scan、signal/force interruption及route teardown，
   确认matching dequeue先于`EINTR`判断，dynamic route在增长前prune stale、失败时禁止park，且stale route不拥有participant
   lifetime。
-- 审计epoll ADD/MOD subscription、LT/ET scan与fork/fd-passing边界，确认R0没有修改`EPOLL-*` contract，也没有把注册域之外的
-  wake或ET dirty causality写成已支持能力。
+- 审计epoll ADD/MOD subscription、LT/ET scan与fork/fd-passing边界，确认mask-change hint只提示已经登记的watch并沿用既有
+  dirty rescan；Signal publication仍不在registration ThreadGroup之外提供wake或ET dirty causality。
 - 审计private-before-shared ordinary dequeue、reserved-target exclusion、exact-once ownership、timer completion、batch/partial
   copyout与mask reconfigure；确认没有copy-fault rollback queue、creator-task snapshot或second pending/readable cache。
 - 审计`cfg(kunit)`与测试consumer，确认production state/control flow/API不理解测试协议；实现收口执行Architecture
@@ -266,8 +275,9 @@ syscall，也不改变current contract。只有实现、验证、contract surfac
 - 覆盖`signalfd_siginfo` size/alignment、zero initialization、mask清除`SIGKILL/SIGSTOP`和typed variant字段投影。
 - 覆盖private-before-shared matching dequeue、reserved-target exclusion、同signum realtime FIFO和POSIX timer dequeue handoff的
   可直接owner-local部分；不为构造fixture复制production pending state。
-- 覆盖route register/rescan顺序、dynamic growth前的duplicate/stale route pruning、注册失败不park、mask snapshot/reconfigure
-  等纯状态或deterministic protocol。
+- 覆盖route publication、poll-observer duplicate/stale pruning，以及blocking-read route不使用诊断identity去重等纯状态或
+  deterministic protocol。动态注册失败不park与mask reconfigure的并发闭合由源码owner/lifetime审查和product-path app证明；
+  未建立allocation failure injection时不得把KUnit外推为OOM路径实测。
 - 普通KUnit不为本RFC启动live userspace task或用固定yield/sleep模拟交错；并发correctness仍以source owner/caller/lifetime/
   happens-before审查和product-path app为主。
 
@@ -279,8 +289,8 @@ syscall，也不改变current contract。只有实现、验证、contract surfac
 - empty nonblocking `EAGAIN`、blocked self-signal read、private与shared occurrence、已有typed siginfo字段；
 - signal在blocking registration前已pending和registration后到达两类路径，不匹配未屏蔽signal的interruption，以及matching
   occurrence与Signal outcome竞争时final dequeue先于`EINTR`；
-- realtime batch FIFO、short batch、mask reassignment，以及同组reconfigure把已经pending的signal加入mask后唤醒blocked
-  read/direct poll；
+- realtime batch FIFO、short batch、mask reassignment，以及共享opened-description别名的跨ThreadGroup reconfigure把已经
+  pending的signal加入mask后唤醒blocked read并令已登记epoll watch进入dirty rescan；
 - direct poll与同注册ThreadGroup epoll的level-readable/final scan；
 - dup/fork后的shared mask和direct read/poll caller-relative pending view，不把opened description绑定到creator task/group；
   跨ThreadGroup继承/传递的既有epoll watch明确为Not Claimed，不以direct read/poll结果外推其wake或ET dirty语义。
@@ -300,7 +310,7 @@ app使用显式phase/predicate完成多task握手；timeout只作为failure boun
 
 RV64定向运行`signalfd01`、`signalfd4_01`、`signalfd4_02`，记录glibc/musl实际TPASS/TFAIL/TCONF与runner tuple。
 LTP只作为兼容与评分证据；当前case不能覆盖完整read/poll协议，因此不能替代`signalfd-test`或源码审查。LA64 LTP为
-Optional，未运行时明确记录`Not Run`，不阻塞R0 closure。
+Optional，未运行时明确记录`Not Run`，不阻塞R1 closure。
 
 本RFC不要求full LTP、competition harness、physical hardware、长稳压力或穷尽并发interleaving proof。任何未运行项、
 waiver和只由单一architecture形成的证据必须按实际范围报告。
@@ -312,12 +322,13 @@ waiver和只由单一architecture形成的证据必须按实际范围报告。
 - **caller-relative语义与shared file：** opened description共享mask，但pending view属于current caller。缓存creator Task/
   ThreadGroup会形成错误truth；product app用dup/fork覆盖direct read/poll边界。epoll是显式例外：persistent watch只保证
   registration ThreadGroup recheck，不得把该限制误修成creator-bound pending view或全局watch广播。
-- **route lifetime：** 一个fd可以先后被多个ThreadGroup direct poll。R0使用动态non-owning route容器并要求注册增长前清理
-  stale entry，不要求反向持有者tracking；任何无界stale累积、strong lifetime cycle或悬挂访问仍必须修复。
+- **route lifetime：** 一个fd可以先后被多个ThreadGroup direct poll。R1使用动态non-owning route容器并要求注册增长前清理
+  stale entry；description-local registry只保存已登记consumer capability而不追踪holder。任何无界stale累积、strong lifetime
+  cycle或悬挂访问仍必须修复。
 - **copy-fault Linux差异：** 精确consume/retain edge可能受当前direct-user transaction形状影响。若主路径、whole-record
   success、无泄漏与exact-once仍成立，可以记录限制，不为回滚建立镜像pending queue。
 - **框架能力边界：** 如果完整Linux边角要求修改generic iomux/wait/Signal framework，优先保留局部窄能力或明确记录不支持；
-  只有R0主能力本身无法ABI诚实地交付时才回到target review。
+  只有R1主能力本身无法ABI诚实地交付时才回到target review。
 - **LTP证明不足：** 三个直接case主要验证create/reconfigure/flags，不能据其PASS声明blocking、batch或readiness已闭合。
 
 实现反馈若只改变内部route、容器、helper、文件布局、测试组织或其它implementation preference，直接在当前边界内修正，
@@ -335,16 +346,42 @@ waiver和只由单一architecture形成的证据必须按实际范围报告。
 - 外部源码证据：`xref:linux-6.6.32:include/uapi/asm-generic/unistd.h#L198-L199`、
   `xref:linux-6.6.32:include/uapi/linux/signalfd.h#L16-L52`、`xref:linux-6.6.32:fs/signalfd.c#signalfd_poll`、
   `xref:linux-6.6.32:fs/signalfd.c#signalfd_read`、`xref:linux-6.6.32:fs/signalfd.c#do_signalfd4`。
-- commit / PR / optional transaction：None。
+- commit：本次 `signalfd:` cutover commit；未创建 transaction。
 
 ## 修订记录
 
 - **R0（2026-08-16，Accepted）：** 接受native `signalfd4` target、Signal/opened-description/recheck owner、单一cutover与验证
   矩阵；epoll采用Linux registration-ThreadGroup边界，不Refine现有`EPOLL-*` contract；recheck registry选择owner-local动态
-  容器，固定stale-before-growth与注册失败禁止park。实现内部路线、文件布局、验证命令或证据补充不单独增加修订。
+  容器，固定stale-before-growth与注册失败禁止park。
+- **R1（2026-08-16，Accepted / Cut Over）：** mask reconfigure在提交新mask后提示该opened description已经登记的活跃
+  non-owning consumer route，闭合共享别名跨ThreadGroup的blocked-read lost wake。description不追踪fd holder、pending、
+  readiness或ThreadGroup membership；mask-change hint会令已登记epoll watch进入既有dirty rescan，但Signal publication仍保持
+  registration-ThreadGroup边界。R1依据实现中发现的共享mask owner丢唤醒证据，经本轮用户明确条件授权后接受。
 
 ## Closure
 
-Not Started。源码实现、current contract、Architecture Friction Scan、RV64/LA64 build、KUnit、`signalfd-test`和LTP均为
-`Not Run / Not Cut Over`。Closure只在实际交付与验证完成后记录一次，并同时冻结本RFC；后续事实进入live source、current
-contract、register或新的独立任务。
+2026-08-16 Closed at R1。唯一`SIGNALFD-CUTOVER`原子完成RV64/LA64 native `signalfd4(2)`、opened-description-private mask、
+caller-relative private/shared pending消费、whole-record read、blocking wait、poll/epoll recheck、current contract与product/LTP
+acceptance；`SIGNAL-FD-001/002/003`由[`Signal fd当前契约`](../../contracts/signal/signalfd.md)Introduce为Active。实现未建立
+第二份pending/readable truth，未改变ordinary action、temporary-mask reserved delivery、POSIX timer completion、opened-description
+sharing或`IOMUX-*` / `EPOLL-*`既有owner。
+
+验证证据：
+
+- 源码审计闭合RV64/LA64 syscall number与validation transaction、ordinary private/shared、job-control ordinary与POSIX timer
+  publication、register-before-rescan、guards-out trigger、private-before-shared dequeue、reserved exclusion、timer handoff、
+  batching/copyout、reconfigure和epoll registration-ThreadGroup边界。
+- `just build --preset qemu-virt-rv64-release`与`just build --preset qemu-virt-la64-release`通过。
+- RV64 SMP2 KUnit runner报告`Running 691 tests`并`All tests passed`；LA64 product boot对应为694项全部通过。
+- RV64与LA64 `anemone-apps/signalfd-test`均通过全部case并输出`SIGNALFD:PASS`；RV64正常orderly poweroff，LA64因平台
+  无poweroff handler在完成测试后停机，由host timeout结束。
+- RV64定向LTP在同一次runner执行中glibc与musl各通过`signalfd01`、`signalfd4_01`、`signalfd4_02`，共6/6 case、
+  8个TPASS、0 TFAIL、0 TCONF、0 infrastructure failure；同boot的691项KUnit全部通过并正常关机。
+
+Not Run范围：route allocation failure的deterministic fault injection、LA64 LTP（Optional）、full LTP、competition harness、
+physical hardware、长稳压力与穷尽并发interleaving proof。OOM路径仅由fallible registration与禁止park的源码控制流审计支持。
+RFC目录保持单一`index.md`，未创建`implementation.md`或transaction。Architecture Friction Scan与独立final review结论随最终
+cutover commit闭合：pending/readiness仍只有Signal owner truth，Signal与description registry只持recheck capability；没有owner
+穿透、私有表示泄漏、测试特判或无退出条件的临时桥。独立review初轮发现的reserved假就绪、诊断identity去重、R1 owner文本与
+oracle缺口均已修正；final follow-up只剩一条明确措辞修正，已按review给出的边界改写，无未决finding。Closed后本RFC冻结，
+后续事实从live source、current contract、register或新的独立任务重新分类。

@@ -24,6 +24,7 @@
 	- [Signal 当前契约](./contracts/signal/index.md)
 		- [Pending routing 与 ordinary action selection](./contracts/signal/pending-routing.md)
 		- [Temporary-mask delivery handoff](./contracts/signal/temporary-mask-delivery.md)
+		- [Signal fd](./contracts/signal/signalfd.md)
 	- [Procfs 当前契约](./contracts/procfs/index.md)
 		- [TGID task-state projection](./contracts/procfs/task-state-projection.md)
 	- [Sysfs 当前契约](./contracts/sysfs/index.md)

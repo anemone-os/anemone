@@ -110,6 +110,7 @@ pub mod linux {
 
     pub const SYS_PSELECT6: u64 = 72;
     pub const SYS_PPOLL: u64 = 73;
+    pub const SYS_SIGNALFD4: u64 = 74;
     pub const SYS_VMSPLICE: u64 = 75;
     pub const SYS_SPLICE: u64 = 76;
     pub const SYS_TEE: u64 = 77;
