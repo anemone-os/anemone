@@ -215,6 +215,7 @@
 	- [旧 RFC 工作流路径（兼容入口）](./rfc-workflow.md)
 - [公开草案与 RFC](./rfcs.md)
 		- [RFC 模板与实例](./rfc-template.md)
+			- [Signal fd](./rfcs/signalfd/index.md)
 			- [Nemophila](./rfcs/nemophila/index.md)
 				- [目标与不变量](./rfcs/nemophila/invariants.md)
 				- [实施路线](./rfcs/nemophila/implementation.md)

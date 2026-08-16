@@ -49,6 +49,11 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260816-signalfd](./rfcs/signalfd/index.md)：Accepted R0；为RV64/LA64引入native `signalfd4(2)`，让anonymous opened
+  description共享mask，并按current caller同步消费Signal owner的private/shared pending occurrence；blocking read与
+  direct poll通过pending-before-hint、dynamic route、register-before-rescan和live final predicate闭合普通lost wake，epoll
+  保持Linux registration-ThreadGroup边界。R0固定ABI诚实性、owner/handoff与KUnit+源码审查+双架构`signalfd-test`+RV64
+  LTP验证下限，不扩建通用框架，target外的偏僻Linux完整性按证据记录。
 - [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Closed R6（Nemophila R0）；以 WIT 定义接口、由 kernel
   使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
   runtime-owned transactional load、per-instance serial
