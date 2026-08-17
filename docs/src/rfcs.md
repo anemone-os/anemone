@@ -49,6 +49,11 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260817-unix-scm-rights](./rfcs/unix-scm-rights/index.md)：Accepted R0；只为connected native
+  `AF_UNIX + SOCK_STREAM`发布`sendmsg/recvmsg + SCM_RIGHTS`，由Socket ABI adapter、`task::files`
+  opened-description lifecycle与Unix stream direction按单向handoff分别拥有control ABI、semantic transfer reference和
+  byte/rights transaction；同一implementation unit先修复stream/seqpacket endpoint-retirement inbound detach，保持
+  `SHUT_RD`后queued payload可读；明确拒绝传递任何AF_UNIX Socket fd，不引入inflight cycle/GC或generic ancillary framework。
 - [RFC-20260816-signalfd](./rfcs/signalfd/index.md)：Accepted R0；为RV64/LA64引入native `signalfd4(2)`，让anonymous opened
   description共享mask，并按current caller同步消费Signal owner的private/shared pending occurrence；blocking read与
   direct poll通过pending-before-hint、dynamic route、register-before-rescan和live final predicate闭合普通lost wake，epoll
