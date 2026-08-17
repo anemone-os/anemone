@@ -27,6 +27,9 @@
 
 ## Completed
 
+- [DWMAC 多后端与 Loongson 2K1000](./2026-08-11-dwmac.md)：R7 Gate 1--4全部关闭；实机证据修正
+  GMAC polarity为active-high，per-port reserved strong-noncache DMA backing、enhanced descriptor、CSR5 W1C、
+  production attach与三个contract cutover已生效。
 - [Nemophila](./2026-08-14-nemophila.md)：R6 Stage 1--6与RFC全部关闭；SystemTarget owner-driven fresh rebuild、
   ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection和双架构acceptance已完成。
   `NEMOPHILA-R0-CUTOVER`已建立五项Nemophila contract并Refine `STM-TARGET-001`。

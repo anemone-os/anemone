@@ -49,6 +49,13 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260808-jh7110-gmac](./rfcs/jh7110-gmac/index.md)：Closed / R5；为 VisionFive 2 上任意有限数量的
+  matching JH7110 GMAC 节点交付 per-node one-time driver、命名 `macirq`、coherent DMA、boot-time Motorcomm
+  PHY 初始化、成功 publication candidate 在 attach admission 时连续消费的 `eth<N>` 和现有单接口 static IPv4
+  接入。Gate 0--3、VisionFive 2 双 GMAC 实机验收与 `IRQ-FLOW-001` cutover 已完成。
+- [RFC-20260811-dwmac](./rfcs/dwmac/index.md)：Closed / R7；将 JH7110 GMAC 整理为 DWMAC owner，并为
+  Loongson 2K1000 接入capability-admitted enhanced/extended DWMAC1000、per-port strong-noncache reserved DMA、
+  CSR5 W1C、active-high `IrqSense`与原位production attach。Gate 1--4和三个contract cutover均已关闭。
 - [RFC-20260814-nemophila](./rfcs/nemophila/index.md)：Closed R6（Nemophila R0）；以 WIT 定义接口、由 kernel
   使用仓库内第一方通用 Core Wasm interpreter 解释执行 WebAssembly，以 `CAP_SYS_MODULE` 保护 management，建立
   runtime-owned transactional load、per-instance serial

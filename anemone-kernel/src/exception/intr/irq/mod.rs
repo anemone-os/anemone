@@ -10,7 +10,9 @@ pub use flow::IrqFlowType;
 use core::fmt::Debug;
 
 use crate::{
-    device::discovery::fwnode::FwNode,
+    device::discovery::fwnode::{
+        FwNode, InterruptResourceError, InterruptSelector, select_interrupt_resource,
+    },
     prelude::*,
     utils::{any_opaque::AnyOpaque, identity::GeneralIdentity},
 };
@@ -83,7 +85,6 @@ impl IrqDomain {
 pub struct IrqDesc {
     virq: VirtIrq,
     hwirq: HwIrq,
-    trigger: IrqTriggerType,
     flow: IrqFlowType,
     domain: Arc<IrqDomain>,
     handler: &'static IrqHandler,
@@ -103,25 +104,42 @@ impl IrqHandler {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IrqTriggerType {
-    Edge,
-    Level,
+/// Electrical sense reported by the irqchip that owns the source. Request
+/// callers may compare an expectation against this fact, but cannot configure
+/// or override it.
+pub enum IrqSense {
+    LevelHigh,
+    LevelLow,
+    EdgeRising,
+    EdgeFalling,
+    EdgeBoth,
 }
 
-impl IrqTriggerType {
-    pub fn from_linux_convention(value: u32) -> Option<Self> {
+impl IrqSense {
+    pub(crate) fn from_linux_convention(value: u32) -> Option<Self> {
         match value {
-            1 | 2 | 3 => Some(Self::Edge),
-            4 | 8 => Some(Self::Level),
+            1 => Some(Self::EdgeRising),
+            2 => Some(Self::EdgeFalling),
+            3 => Some(Self::EdgeBoth),
+            4 => Some(Self::LevelHigh),
+            8 => Some(Self::LevelLow),
             _ => None,
         }
+    }
+
+    pub(crate) const fn is_edge(self) -> bool {
+        matches!(self, Self::EdgeRising | Self::EdgeFalling | Self::EdgeBoth)
+    }
+
+    pub(crate) const fn is_low(self) -> bool {
+        matches!(self, Self::LevelLow | Self::EdgeFalling)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct InterruptInfo {
     pub hwirq: HwIrq,
-    pub trigger: IrqTriggerType,
+    pub sense: IrqSense,
     pub flow: IrqFlowType,
 }
 
@@ -134,14 +152,10 @@ impl InterruptInfo {
             return None;
         }
         let hwirq = HwIrq::new(u32::from_be_bytes(specifier.raw[0..4].try_into().ok()?) as usize);
-        let trigger_type = IrqTriggerType::from_linux_convention(u32::from_be_bytes(
+        let sense = IrqSense::from_linux_convention(u32::from_be_bytes(
             specifier.raw[4..8].try_into().ok()?,
         ))?;
-        Some(Self {
-            hwirq,
-            trigger: trigger_type,
-            flow,
-        })
+        Some(Self { hwirq, sense, flow })
     }
 }
 
@@ -169,7 +183,8 @@ pub trait IrqChip: Send + Sync {
     fn eoi(&self, irq: HwIrq);
 
     /// Translate the raw interrupt specifier from firmware into the
-    /// corresponding hardware IRQ number, trigger type, and controller flow.
+    /// corresponding hardware IRQ number, electrical sense, and controller
+    /// flow.
     fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo>;
 
     fn as_core_irq_chip(&self) -> Option<&dyn CoreIrqChip> {
@@ -283,29 +298,115 @@ pub fn find_irq_domain_by_fwnode(fwnode: &dyn FwNode) -> Option<Arc<IrqDomain>> 
 }
 
 /// Request an IRQ for the given device, and register the given handler to it.
+/// `expected` is a one-shot admission assertion checked before mapping,
+/// descriptor publication, or unmask; it is never retained as IRQ state.
 pub fn request_irq(
     dev: &dyn Device,
+    expected: Option<IrqSense>,
+    handler: &'static IrqHandler,
+    prv_data: Option<AnyOpaque>,
+) -> Result<(), SysError> {
+    request_irq_inner(dev, None, expected, handler, prv_data)
+}
+
+/// Request one explicitly selected firmware interrupt. Callers for
+/// multi-interrupt DT nodes must use this crate-local path so a whole raw
+/// `interrupts` property cannot reach an irqchip translator. `expected` has the
+/// same assertion-only semantics as [`request_irq`].
+pub(crate) fn request_irq_selected(
+    dev: &dyn Device,
+    selector: InterruptSelector<'_>,
+    expected: Option<IrqSense>,
+    handler: &'static IrqHandler,
+    prv_data: Option<AnyOpaque>,
+) -> Result<(), SysError> {
+    request_irq_inner(dev, Some(selector), expected, handler, prv_data)
+}
+
+fn request_irq_inner(
+    dev: &dyn Device,
+    selector: Option<InterruptSelector<'_>>,
+    expected: Option<IrqSense>,
     handler: &'static IrqHandler,
     prv_data: Option<AnyOpaque>,
 ) -> Result<(), SysError> {
     let fwnode = dev.fwnode().ok_or(SysError::MissingFwNode)?;
     let ic = fwnode.interrupt_parent().ok_or(SysError::NoIrqDomain)?;
     let domain = find_irq_domain_by_fwnode(ic.as_ref()).expect("ic exists but no domain found");
+    let prepared = match prepare_irq_request(fwnode.as_ref(), &domain, selector, expected) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            kerrln!(
+                "request_irq: dev_id={} domain={} admission failed: {:?}",
+                dev.name(),
+                domain.name(),
+                error,
+            );
+            return Err(error);
+        },
+    };
+
+    let virq = commit_irq_request(&domain, prepared, handler, prv_data)?;
+
+    kdebugln!(
+        "request_irq: dev_id={}, domain={}, virq={}, hwirq={:#x}",
+        dev.name(),
+        domain.name(),
+        virq.get(),
+        prepared.hwirq.get()
+    );
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreparedIrq {
+    hwirq: HwIrq,
+    flow: IrqFlowType,
+}
+
+fn prepare_irq_request(
+    fwnode: &dyn FwNode,
+    domain: &IrqDomain,
+    selector: Option<InterruptSelector<'_>>,
+    expected: Option<IrqSense>,
+) -> Result<PreparedIrq, SysError> {
     let ops = domain.ops.read_irqsave();
-    let intr_info_raw = fwnode.interrupt_info().ok_or(SysError::NoInterruptInfo)?;
-    kdebugln!("request intr info");
-    let InterruptInfo {
-        hwirq,
-        trigger,
-        flow,
-    } = ops
+    let selected = match selector {
+        Some(selector) => {
+            select_interrupt_resource(fwnode, selector).map_err(map_interrupt_resource_error)?
+        },
+        None => fwnode
+            .interrupt_info()
+            .map(
+                |specifier| crate::device::discovery::fwnode::InterruptResource {
+                    index: 0,
+                    specifier,
+                },
+            )
+            .ok_or(SysError::NoInterruptInfo)?,
+    };
+    let info = ops
         .xlate(InterruptSpecifier {
-            fwnode: fwnode.as_ref(),
-            raw: intr_info_raw,
+            fwnode,
+            raw: selected.specifier(),
         })
         .ok_or(SysError::InvalidInterruptInfo)?;
     drop(ops);
+    validate_expected_sense(expected, info.hwirq, info.sense)?;
+    Ok(PreparedIrq {
+        hwirq: info.hwirq,
+        flow: info.flow,
+    })
+}
 
+fn commit_irq_request(
+    domain: &Arc<IrqDomain>,
+    prepared: PreparedIrq,
+    handler: &'static IrqHandler,
+    prv_data: Option<AnyOpaque>,
+) -> Result<VirtIrq, SysError> {
+    let hwirq = prepared.hwirq;
     let virq = if let Some(_) = domain.hw2virt(hwirq) {
         return Err(SysError::IrqAlreadyRequested);
     } else {
@@ -315,8 +416,7 @@ pub fn request_irq(
         let desc = IrqDesc {
             virq,
             hwirq,
-            trigger,
-            flow,
+            flow: prepared.flow,
             domain: domain.clone(),
             handler,
             prv_data: unsafe { MonoOnce::new() },
@@ -333,16 +433,42 @@ pub fn request_irq(
     };
 
     domain.ops.read_irqsave().unmask(hwirq);
+    Ok(virq)
+}
 
-    kdebugln!(
-        "request_irq: dev_id={}, domain={}, virq={}, hwirq={:#x}",
-        dev.name(),
-        domain.name(),
-        virq.get(),
-        hwirq.get()
-    );
+fn validate_expected_sense(
+    expected: Option<IrqSense>,
+    hwirq: HwIrq,
+    actual: IrqSense,
+) -> Result<(), SysError> {
+    match expected {
+        None => Ok(()),
+        Some(expected) if expected == actual => Ok(()),
+        Some(expected) => {
+            kerrln!(
+                "request_irq: sense mismatch hwirq={:#x} expected={:?} actual={:?}",
+                hwirq.get(),
+                expected,
+                actual,
+            );
+            Err(SysError::InvalidInterruptInfo)
+        },
+    }
+}
 
-    Ok(())
+fn map_interrupt_resource_error(error: InterruptResourceError) -> SysError {
+    match error {
+        InterruptResourceError::MissingInterrupts => SysError::NoInterruptInfo,
+        InterruptResourceError::MissingParentCells
+        | InterruptResourceError::InvalidCellCount
+        | InterruptResourceError::SpecifierLengthMismatch
+        | InterruptResourceError::IndexOutOfRange
+        | InterruptResourceError::MissingNames
+        | InterruptResourceError::InvalidNames
+        | InterruptResourceError::NameCountMismatch
+        | InterruptResourceError::DuplicateName
+        | InterruptResourceError::NameNotFound => SysError::InvalidInterruptInfo,
+    }
 }
 
 /// Handle the given hardware IRQ from the root interrupt domain.
@@ -379,4 +505,168 @@ pub fn handle_domain_irq(domain: &IrqDomain, hwirq: HwIrq) -> Result<(), SysErro
     });
 
     Ok(())
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+    use crate::{
+        device::discovery::fwnode::{FwNode, StdoutConfig},
+        utils::identity::GeneralIdentity,
+    };
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct RequestNode {
+        parent: Option<Arc<dyn FwNode>>,
+        interrupts: Option<Vec<u8>>,
+        names: Option<Vec<u8>>,
+        cells: Option<u32>,
+    }
+
+    impl FwNode for RequestNode {
+        fn equals(&self, other: &dyn FwNode) -> bool {
+            (other as &dyn core::any::Any)
+                .downcast_ref::<RequestNode>()
+                .is_some_and(|other| core::ptr::eq(self, other))
+        }
+
+        fn prop_read_u32(&self, name: &str) -> Option<u32> {
+            (name == "#interrupt-cells").then_some(self.cells).flatten()
+        }
+
+        fn prop_read_u64(&self, _name: &str) -> Option<u64> {
+            None
+        }
+
+        fn prop_read_str(&self, _name: &str) -> Option<String> {
+            None
+        }
+
+        fn prop_read_present(&self, name: &str) -> bool {
+            self.prop_read_raw(name).is_some()
+        }
+
+        fn prop_read_raw(&self, name: &str) -> Option<&[u8]> {
+            match name {
+                "interrupts" => self.interrupts.as_deref(),
+                "interrupt-names" => self.names.as_deref(),
+                _ => None,
+            }
+        }
+
+        fn interrupt_parent(&self) -> Option<Arc<dyn FwNode>> {
+            self.parent.clone()
+        }
+
+        fn interrupt_info(&self) -> Option<&[u8]> {
+            self.interrupts.as_deref()
+        }
+
+        fn stdout_config(&self) -> Option<StdoutConfig<'_>> {
+            None
+        }
+    }
+
+    struct RequestChip {
+        actual: IrqSense,
+        unmask_count: Arc<AtomicUsize>,
+        translated: Arc<SpinLock<Vec<HwIrq>>>,
+    }
+
+    impl IrqChip for RequestChip {
+        fn mask(&self, _irq: HwIrq) {}
+        fn unmask(&self, _irq: HwIrq) {
+            self.unmask_count.fetch_add(1, Ordering::SeqCst);
+        }
+        fn ack(&self, _irq: HwIrq) {}
+        fn eoi(&self, _irq: HwIrq) {}
+        fn xlate(&self, spec: InterruptSpecifier<'_>) -> Option<InterruptInfo> {
+            let hwirq = HwIrq::new(u32::from_be_bytes(spec.raw[..4].try_into().ok()?) as usize);
+            self.translated.lock_irqsave().push(hwirq);
+            Some(InterruptInfo {
+                hwirq,
+                sense: self.actual,
+                flow: IrqFlowType::LevelMaskEoi,
+            })
+        }
+    }
+
+    fn test_handler(_: &AnyOpaque) {}
+    static TEST_HANDLER: IrqHandler = IrqHandler::new(test_handler);
+
+    #[kunit]
+    fn request_plan_selects_named_macirq_and_rejects_before_commit() {
+        let parent: Arc<dyn FwNode> = Arc::new(RequestNode {
+            parent: None,
+            interrupts: None,
+            names: None,
+            cells: Some(2),
+        });
+        let child: Arc<dyn FwNode> = Arc::new(RequestNode {
+            parent: Some(parent.clone()),
+            interrupts: Some(
+                [0x100_u32, 4, 0x200_u32, 8]
+                    .into_iter()
+                    .flat_map(u32::to_be_bytes)
+                    .collect(),
+            ),
+            names: Some(b"eth_wake_irq\0macirq\0".to_vec()),
+            cells: None,
+        });
+        let unmask_count = Arc::new(AtomicUsize::new(0));
+        let translated = Arc::new(SpinLock::new(Vec::new()));
+        let domain = Arc::new(IrqDomain::new(
+            GeneralIdentity::try_from("request-test").unwrap(),
+            Box::new(RequestChip {
+                actual: IrqSense::LevelLow,
+                unmask_count: unmask_count.clone(),
+                translated: translated.clone(),
+            }),
+            parent,
+        ));
+
+        let selected = prepare_irq_request(
+            child.as_ref(),
+            &domain,
+            Some(InterruptSelector::Name("macirq")),
+            None,
+        )
+        .unwrap();
+        assert_eq!(selected.hwirq, HwIrq::new(0x200));
+        assert_eq!(translated.lock_irqsave().as_slice(), [HwIrq::new(0x200)]);
+        assert_eq!(unmask_count.load(Ordering::SeqCst), 0);
+
+        assert!(
+            prepare_irq_request(
+                child.as_ref(),
+                &domain,
+                Some(InterruptSelector::Name("macirq")),
+                Some(IrqSense::LevelLow),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            prepare_irq_request(
+                child.as_ref(),
+                &domain,
+                Some(InterruptSelector::Name("macirq")),
+                Some(IrqSense::EdgeRising),
+            ),
+            Err(SysError::InvalidInterruptInfo)
+        );
+        assert_eq!(domain.hw2virt(HwIrq::new(0x200)), None);
+        assert_eq!(unmask_count.load(Ordering::SeqCst), 0);
+
+        let prepared = prepare_irq_request(
+            child.as_ref(),
+            &domain,
+            Some(InterruptSelector::Name("macirq")),
+            Some(IrqSense::LevelLow),
+        )
+        .unwrap();
+        commit_irq_request(&domain, prepared, &TEST_HANDLER, None).unwrap();
+        assert_eq!(domain.hw2virt(HwIrq::new(0x200)).is_some(), true);
+        assert_eq!(unmask_count.load(Ordering::SeqCst), 1);
+    }
 }

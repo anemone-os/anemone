@@ -15,7 +15,6 @@ const SOURCES_PER_BANK: usize = u32::BITS as usize;
 const CORE_COUNT: usize = 2;
 const CORE_PENDING_STRIDE: usize = 0x100;
 const PER_CPU_PENDING_BYTES: usize = 0x10;
-
 const REQUIRED_CONTROLLER_BYTES: usize =
     InterruptBank::High as usize + BankRegister::Auto as usize + core::mem::size_of::<u32>();
 const REQUIRED_PER_CPU_BYTES: usize =
@@ -105,6 +104,10 @@ impl InterruptBits {
         Self(self.0 & other.0)
     }
 
+    const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
     const fn first(self) -> Option<usize> {
         if self.0 == 0 {
             None
@@ -146,10 +149,23 @@ struct InitialControllerConfig {
 
 impl InitialControllerConfig {
     fn fixed_to(target: PhysCpuId) -> Self {
+        let mut polarity = InterruptBits::NONE;
+        let mut edge = InterruptBits::NONE;
+        for (irq, sense) in SOURCE_SENSE.iter().copied().enumerate() {
+            let Some(sense) = sense else {
+                continue;
+            };
+            if sense.is_low() {
+                polarity = polarity.union(InterruptBits::single(irq));
+            }
+            if sense.is_edge() {
+                edge = edge.union(InterruptBits::single(irq));
+            }
+        }
         Self {
             route: InterruptRoute::fixed(target, CpuInterruptPin::Int3),
-            polarity: InterruptBits::NONE,
-            edge: dma_edge_mask(),
+            polarity,
+            edge,
             bounce: InterruptBits::NONE,
             auto: InterruptBits::NONE,
         }
@@ -239,8 +255,8 @@ impl Registers {
 impl IrqChip for Loongson2K1000Intc {
     fn mask(&self, irq: HwIrq) {
         let irq = irq.get();
-        if !valid_irq(irq) {
-            kwarningln!("2k1000-icu: refusing to mask invalid hwirq {}", irq);
+        if source_sense(irq).is_none() {
+            kwarningln!("2k1000-icu: refusing to mask unsupported hwirq {}", irq);
             return;
         }
         self.regs().write_irq_bit(irq, BankRegister::EnableClear);
@@ -248,20 +264,41 @@ impl IrqChip for Loongson2K1000Intc {
 
     fn unmask(&self, irq: HwIrq) {
         let irq = irq.get();
-        if !valid_irq(irq) {
-            kwarningln!("2k1000-icu: refusing to unmask invalid hwirq {}", irq);
+        let Some(sense) = source_sense(irq) else {
+            kwarningln!("2k1000-icu: refusing to unmask unsupported hwirq {}", irq);
             return;
+        };
+        let regs = self.regs();
+        if sense == IrqSense::LevelLow {
+            // Diagnostic-only Gate 3 evidence: sample the controller-owned
+            // pending window immediately before each level-source unmask.
+            // Keep this trace until Gate 3 hardware acceptance closes; any
+            // removal or log-level reduction belongs to the later closure
+            // review, not to this implementation boundary.
+            // This must stay in the concrete irqchip; DWMAC does not gain a
+            // controller API or a second pending-state owner.
+            let pending = regs.pending(cur_cpu_id().physical_id());
+            let enabled = regs.read_bank_pair(BankRegister::Enable);
+            kdebugln!(
+                "2k1000-icu: pending-before-unmask hwirq={} pending={:#x} enabled={:#x}",
+                irq,
+                pending.0,
+                enabled.0,
+            );
         }
-        self.regs().write_irq_bit(irq, BankRegister::EnableSet);
+        regs.write_irq_bit(irq, BankRegister::EnableSet);
     }
 
     fn ack(&self, irq: HwIrq) {
         let irq = irq.get();
-        if !valid_irq(irq) {
-            kwarningln!("2k1000-icu: refusing to acknowledge invalid hwirq {}", irq);
+        let Some(sense) = source_sense(irq) else {
+            kwarningln!(
+                "2k1000-icu: refusing to acknowledge unsupported hwirq {}",
+                irq
+            );
             return;
-        }
-        if matches!(trigger_type(irq), IrqTriggerType::Edge) {
+        };
+        if sense.is_edge() {
             let regs = self.regs();
             // INTENCLR also retires the recorded pulse. Re-enable immediately
             // so a pulse arriving during the handler remains observable.
@@ -284,17 +321,17 @@ impl IrqChip for Loongson2K1000Intc {
             return None;
         }
         let irq = u32::from_be_bytes(spec.raw.try_into().ok()?) as usize;
-        if !valid_irq(irq) {
-            kwarningln!("2k1000-icu: invalid hwirq {}", irq);
+        let Some(sense) = source_sense(irq) else {
+            kwarningln!("2k1000-icu: unsupported hwirq {}", irq);
             return None;
-        }
-        let trigger = trigger_type(irq);
+        };
         Some(InterruptInfo {
             hwirq: HwIrq::new(irq),
-            trigger,
-            flow: match trigger {
-                IrqTriggerType::Edge => IrqFlowType::EdgeAck,
-                IrqTriggerType::Level => IrqFlowType::LevelMaskEoi,
+            sense,
+            flow: if sense.is_edge() {
+                IrqFlowType::EdgeAck
+            } else {
+                IrqFlowType::LevelMaskEoi
             },
         })
     }
@@ -403,6 +440,18 @@ impl Loongson2K1000Intc {
         regs.write_bank_pair(BankRegister::Edge, config.edge);
         regs.write_bank_pair(BankRegister::Bounce, config.bounce);
         regs.write_bank_pair(BankRegister::Auto, config.auto);
+        let polarity = regs.read_bank_pair(BankRegister::Polarity);
+        let edge = regs.read_bank_pair(BankRegister::Edge);
+        assert_eq!(
+            polarity, config.polarity,
+            "2k1000-icu polarity readback mismatch"
+        );
+        assert_eq!(edge, config.edge, "2k1000-icu edge readback mismatch");
+        kinfoln!(
+            "2k1000-icu: IrqSense readback EDGE={:#x} POL={:#x}",
+            edge.0,
+            polarity.0
+        );
     }
 }
 
@@ -410,17 +459,80 @@ fn valid_irq(irq: usize) -> bool {
     irq < SOURCE_COUNT
 }
 
-fn dma_edge_mask() -> InterruptBits {
-    InterruptBits((44..=48).fold(0, |mask, irq| mask | (1u64 << irq)))
+// The board DT uses one-cell interrupt specifiers, so it cannot carry Linux
+// trigger flags. This owner-local table is the sole source for electrical
+// sense, EDGE/POL programming, and flow until firmware moves to two cells.
+// Reserved sources, PCIe/MSI sources without an allocation owner, and GPIO
+// sources whose trigger is configurable remain unavailable rather than being
+// assigned the controller reset default as an accidental contract.
+const SOURCE_SENSE: [Option<IrqSense>; SOURCE_COUNT] = {
+    let mut senses = [Some(IrqSense::LevelHigh); SOURCE_COUNT];
+    senses[6] = None;
+    senses[11] = None;
+    // GMAC0/1 macirq and wake lines are active-high. LIOINTC POL=0 selects
+    // active-high; programming these inputs low leaves device RI/NIS asserted
+    // without ever publishing a controller pending bit.
+    senses[12] = Some(IrqSense::LevelHigh);
+    senses[13] = Some(IrqSense::LevelHigh);
+    senses[14] = Some(IrqSense::LevelHigh);
+    senses[15] = Some(IrqSense::LevelHigh);
+    let mut irq = 32;
+    while irq <= 37 {
+        senses[irq] = None;
+        irq += 1;
+    }
+    irq = 44;
+    while irq <= 48 {
+        senses[irq] = Some(IrqSense::EdgeRising);
+        irq += 1;
+    }
+    irq = 58;
+    while irq < SOURCE_COUNT {
+        senses[irq] = None;
+        irq += 1;
+    }
+    senses
+};
+
+fn source_sense(irq: usize) -> Option<IrqSense> {
+    SOURCE_SENSE.get(irq).copied().flatten()
 }
 
-fn trigger_type(irq: usize) -> IrqTriggerType {
-    if (44..=48).contains(&irq) {
-        IrqTriggerType::Edge
-    } else {
-        // PCIe MSI shares the selected target line with ordinary sources, but
-        // MSI allocation is not implemented yet. GPIO trigger selection also
-        // remains level until a GPIO irqchip owns that configuration.
-        IrqTriggerType::Level
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn source_table_owns_sense_and_controller_bits() {
+        assert_eq!(source_sense(12), Some(IrqSense::LevelHigh));
+        assert_eq!(source_sense(15), Some(IrqSense::LevelHigh));
+        assert_eq!(source_sense(44), Some(IrqSense::EdgeRising));
+        assert_eq!(source_sense(48), Some(IrqSense::EdgeRising));
+        assert_eq!(source_sense(6), None);
+        assert_eq!(source_sense(32), None);
+        assert_eq!(source_sense(58), None);
+        assert_eq!(source_sense(SOURCE_COUNT), None);
+
+        let config = InitialControllerConfig::fixed_to(PhysCpuId::new(0));
+        for irq in [12, 13, 14, 15] {
+            assert_eq!(
+                config.edge.intersection(InterruptBits::single(irq)),
+                InterruptBits::NONE
+            );
+            assert_eq!(
+                config.polarity.intersection(InterruptBits::single(irq)),
+                InterruptBits::NONE
+            );
+        }
+        for irq in 44..=48 {
+            assert_eq!(
+                config.edge.intersection(InterruptBits::single(irq)),
+                InterruptBits::single(irq)
+            );
+            assert_eq!(
+                config.polarity.intersection(InterruptBits::single(irq)),
+                InterruptBits::NONE
+            );
+        }
     }
 }

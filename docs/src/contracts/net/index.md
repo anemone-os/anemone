@@ -3,7 +3,7 @@
 **Owner：** `device/net` registry、initial-domain logical-interface owner、concrete frame provider、domain Stack与kernel attach authority各自拥有的network state
 **覆盖范围：** boot-time netdev publication、initial-domain logical membership、static IPv4 control plane、UDP、ICMP raw与TCP Socket/Endpoint protocol、production local/external handoff、frame ownership/progress、bounded global-Stack pump、attach与terminal shutdown handoff
 **不覆盖：** runtime IP reconfiguration、runtime hotplug/detach/restart、完整teardown、connected/IPv6 UDP、IPv6 TCP、任意其它raw protocol、hardware或SMP runtime guarantee
-**最后核验：** 2026-08-06
+**最后核验：** 2026-08-15
 
 本目录登记`net-frame-path` R1和`net-udp` R0已经cut over的最小共享规则，不声称枚举network领域全部不变量。
 各surface明确自己的唯一状态或协议owner；`net`目录不是并列runtime owner，也不保存综合lifecycle truth。
@@ -12,6 +12,8 @@
 
 - [Frame path](./frame-path.md)：`NET-BOUNDARY-001`、`NET-FRAME-OWN-001`、
   `NET-FRAME-PROGRESS-001`与`NET-STACK-PUMP-001`。
+- [DWMAC concrete backend](./dwmac.md)：`DWMAC-NODE-001`、`DWMAC-DESCRIPTOR-001`、
+  `DWMAC-DMA-ADDR-001`与`DWMAC-CAUSE-001`。
 - [Netdev lifecycle](./netdev-lifecycle.md)：`NETDEV-LIFE-001`。
 - [Interface domain](./interface-domain.md)：`NET-IFACE-DOMAIN-001`。
 - [IPv4 control plane](./control-plane.md)：`NET-CONTROL-PLANE-001`。

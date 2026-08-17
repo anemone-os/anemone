@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/exception/intr/irq/`、`anemone-kernel/src/driver/intc/`、注册IRQ的concrete device drivers
 **依赖：** None
 **Pending Successor：** None
-**最后核验：** 2026-07-31
+**最后核验：** 2026-08-15；`DWMAC-IRQ-CUTOVER` Effective
 
 ## `IRQ-FLOW-001` - Controller flow与device cause handoff
 
@@ -27,6 +27,17 @@ IRQ core拥有从已解析descriptor进入flow到handler正常返回后完成con
 descriptor发布后才unmask；翻译失败、重复request或descriptor建立失败不得启用source。当前不支持`free_irq`或
 runtime removal，因此mapping与handler能力持续到reset/power-off。
 
+`request_irq()`允许caller提供`Option<IrqSense>`作为admission expectation。`Some`必须在descriptor
+publication与unmask前和irqchip-owned actual sense比较，mismatch fail closed且不留下mapping；它只断言caller
+协议需求，不写controller、不覆盖source table，也不成为第二份electrical truth。`None`保持无额外expectation的
+既有caller行为。
+
+在 descriptor 建立前，firmware-node / IRQ resource owner 必须按唯一的 interrupt name 或合法 index 选择
+恰好一个 firmware specifier；name 缺失、重复、长度不匹配、index 越界或 specifier 截取失败都必须在
+mapping/unmask 前返回错误。irqchip 只接收选中的单项 specifier，device driver 不解析 controller raw cells，
+也不把当前硬件 IRQ 数值提升为 ABI。该规则由 JH7110 GMAC 的 `macirq` production consumer 在最终
+VisionFive 2 验收中完成 cutover。
+
 device driver唯一拥有device-side cause。启用中断的driver必须在handler内、任何尾部eoi/complete/unmask之前清除、
 消费或以设备协议认可的方式撤销cause；IRQ core和irqchip不得猜测设备寄存器语义。纯polling设备或尚未实现
 device-side enable/ack/disable的功能不得注册空handler占位。若设备在completion后仍保持cause，controller再次投递
@@ -40,7 +51,9 @@ fail-close completion或继续运行。root claim drain上界、shared handler d
 
 - SiFive PLIC：firmware trigger保留level-like事实，controller flow为fast-eoi；claim完成ack，handler后complete；
 - LA7A PCH-PIC/EIOINTC：level flow；handler先撤销设备level，随后EIO pending clear与PCH/EIO reopen；
-- Loongson 2K1000 ICU：DMA edge source选择edge-ack，其余当前level source选择level flow。
+- Loongson 2K1000 ICU：DMA edge source选择edge-ack，其余当前level source选择level flow；实机production
+  pending/traffic证明GMAC source 12--15为active-high level，owner-local table和DWMAC expectation均使用
+  `LevelHigh`。
 
 **违反表现：** PLIC为获得complete而经过generic level mask/unmask；level handler未清设备cause便重新开放；一次
 正常dispatch漏掉或重复ack/eoi/unmask；polling-only或未实现IRQ功能的driver注册空handler；QEMU模型偶然不重投被
@@ -55,11 +68,14 @@ runtime proof。
 **Cutover前baseline：** IRQ core只保存trigger，并由edge/level固定推断flow；PLIC把source翻译成level以获得
 complete，Goldfish RTC在alarm未实现时仍注册空handler。该baseline从未形成stable current contract ID。
 
-**最初来源 / 当前来源：** [IRQ flow protocol小迭代](../../devlog/changes/2026-07-31-irq-flow-protocol.md)。
+**最初来源 / 当前来源：** [IRQ flow protocol小迭代](../../devlog/changes/2026-07-31-irq-flow-protocol.md)；
+JH7110 GMAC `JH7110-GMAC-CUTOVER`（2026-08-10）；DWMAC R7
+[`DWMAC-IRQ-CUTOVER`](../../devlog/transactions/2026-08-11-dwmac.md#r7-gate-3-4-closure-and-contract-cutover---2026-08-15)（2026-08-15）。
 
 ## 当前接受边界
 
-- 当前runtime proof只覆盖RV64 QEMU SiFive PLIC与LA64 QEMU PCH-PIC/EIOINTC上的单CPU VirtIO-Net traffic；
-  hardware、`smp>1`、2K1000 runtime和其它irqchip/device组合均Not Run。
+- 当前runtime proof覆盖RV64 QEMU SiFive PLIC与LA64 QEMU PCH-PIC/EIOINTC上的单CPU VirtIO-Net traffic，
+  用户确认的VisionFive 2 JH7110 GMAC named-`macirq`/device-cause production path，以及2K1000 ICU +
+  DWMAC1000 active-high level IRQ/CSR5 W1C/production network path；`smp>1`和其它irqchip/device组合仍Not Run。
 - controller flow不代替设备driver的cause协议；未来RTC alarm、异步block或新driver必须自行证明enable/ack/disable。
 - 当前一次CPU external interrupt入口只claim一个source；bounded drain、公平性和storm containment不在本契约内。
