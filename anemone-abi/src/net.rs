@@ -30,6 +30,7 @@ pub mod linux {
     pub const IP_TTL: i32 = 2;
     pub const IP_RECVERR: i32 = 11;
     pub const SOL_SOCKET: i32 = 1;
+    pub const SCM_RIGHTS: i32 = 1;
     pub const SOL_NETLINK: i32 = 270;
     pub const SOL_RAW: i32 = 255;
     pub const ICMP_FILTER: i32 = 1;
@@ -53,6 +54,7 @@ pub mod linux {
     pub const MSG_TRUNC: i32 = 0x20;
     pub const MSG_DONTWAIT: i32 = 0x40;
     pub const MSG_ERRQUEUE: i32 = 0x2000;
+    pub const MSG_CMSG_CLOEXEC: i32 = 0x4000_0000;
     pub const MSG_NOSIGNAL: i32 = 0x4000;
     pub const SO_EE_ORIGIN_ICMP: u8 = 2;
 

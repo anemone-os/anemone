@@ -587,16 +587,20 @@ pub(super) fn retire_connection_endpoint(
     let index = side.index();
     let peer_index = side.peer().index();
     let empty_routes = Arc::new(Vec::new());
-    let (own_routes, peer_routes) = {
+    let (own_routes, peer_routes, discarded_records) = {
         let mut state = connection.state.lock();
         state.directions[index].writer_open = false;
-        state.directions[peer_index].reader_open = false;
+        let incoming = &mut state.directions[peer_index];
+        incoming.reader_open = false;
+        let discarded_records = core::mem::take(&mut incoming.records);
+        incoming.bytes = 0;
         let own_routes = core::mem::replace(&mut state.routes[index], empty_routes);
         let peer_routes = state.routes[peer_index].clone();
-        (own_routes, peer_routes)
+        (own_routes, peer_routes, discarded_records)
     };
     notify_routes(&own_routes, None, "record endpoint retirement");
     notify_routes(&peer_routes, None, "record peer final close");
+    drop(discarded_records);
 }
 
 #[cfg(feature = "kunit")]
@@ -704,6 +708,24 @@ mod kunits {
         (
             super::super::private_from_core(first),
             super::super::private_from_core(second),
+        )
+    }
+
+    fn pair_with_connection() -> (AnyOpaque, AnyOpaque, Arc<UnixSeqpacketConnection>) {
+        let first = super::super::UnixEndpointCore::new_seqpacket();
+        let second = super::super::UnixEndpointCore::new_seqpacket();
+        let credentials = UnixPeerCredentials::for_validation(1, 0, 0);
+        let connection = UnixSeqpacketConnection::new(
+            [first.name.clone(), second.name.clone()],
+            [credentials, credentials],
+        );
+        let association = super::super::UnixConnection::Seqpacket(connection.clone());
+        first.install_connection(association.clone(), EndpointSide::First);
+        second.install_connection(association, EndpointSide::Second);
+        (
+            super::super::private_from_core(first),
+            super::super::private_from_core(second),
+            connection,
         )
     }
 
@@ -942,5 +964,29 @@ mod kunits {
         assert!(events.contains(PollEvent::HANG_UP));
         super::super::final_release_unix_endpoint(&first);
         super::super::final_release_unix_endpoint(&second);
+    }
+
+    #[kunit]
+    fn endpoint_retirement_discards_only_inbound_and_zeros_its_record_accounting() {
+        let (first, second, connection) = pair_with_connection();
+        assert_eq!(send(&first, b"unreachable"), Ok(11));
+        assert_eq!(send(&second, b"preserved"), Ok(9));
+
+        super::super::final_release_unix_endpoint(&second);
+        {
+            let state = connection.state.lock();
+            let retired_inbound = &state.directions[EndpointSide::First.index()];
+            assert!(retired_inbound.records.is_empty());
+            assert_eq!(retired_inbound.bytes, 0);
+            let peer_inbound = &state.directions[EndpointSide::Second.index()];
+            assert_eq!(peer_inbound.records.len(), 1);
+            assert_eq!(peer_inbound.bytes, 9);
+        }
+
+        assert_eq!(
+            receive(&first, 16, false),
+            Ok((SocketReceiveOutcome::seqpacket(9, 9), b"preserved".to_vec()))
+        );
+        super::super::final_release_unix_endpoint(&first);
     }
 }

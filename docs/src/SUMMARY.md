@@ -268,6 +268,7 @@
 		- [Socket Abstraction 与 Unix Socket](./rfcs/socket-abstraction-and-unix-socket/index.md)
 			- [目标与不变量](./rfcs/socket-abstraction-and-unix-socket/invariants.md)
 			- [实施路线](./rfcs/socket-abstraction-and-unix-socket/implementation.md)
+		- [Unix SCM_RIGHTS](./rfcs/unix-scm-rights/index.md)
 		- [System Power](./rfcs/system-power/index.md)
 			- [目标与不变量](./rfcs/system-power/invariants.md)
 			- [迁移实施计划](./rfcs/system-power/implementation.md)

@@ -16,7 +16,7 @@
 | 状态 / 能力 | 唯一 Owner | 其它参与方持有什么 | 行为用途 |
 | --- | --- | --- | --- |
 | semantic type与ops association | immutable static `SocketOps` descriptor | Socket保存descriptor引用与匹配的opaque private envelope | family-neutral dispatch与type query |
-| Linux tuple、sockaddr、flags、errno与user copy | Socket ABI adapter | concrete ops只接收normalized value/request并返回typed outcome | containment与Linux-visible mapping |
+| Linux tuple、sockaddr、message/control layout、flags、errno与user copy | Socket ABI adapter | concrete ops只接收normalized value/request/bundle并返回typed outcome | containment与Linux-visible mapping |
 | family role、buffer、namespace、protocol queue与operation predicate | 对应UDP、ICMP raw、TCP、Unix或netlink transport owner | front只持opaque private envelope并调用descriptor capability | operation commit与readiness求值 |
 | fd publication、description status、fd-local flags与final-release trigger | `task::files` opened-description owner | Socket提供unpublished preparation与static final-release hook | creation rollback、dup/fork与exactly-once close |
 | blocking round与iomux/epoll policy | Socket syscall、iomux或epoll各自consumer | family source提供snapshot、route publication与typed not-ready | wait、cancel与最终结果 |
@@ -49,7 +49,20 @@ datagram commit前完成验证。
 
 `sendmmsg`在一个稳定opened description上顺序复用既有family `sendmsg` transaction，并逐项投影`msg_len`；首条失败
 返回errno，已有成功后遇到send或copyout failure返回已完成数，partial stream message停止后续项，`vlen`按Linux上限
-clamp到1024。adapter不建立batch queue、shared commit、family state或跨message原子性。
+clamp到1024。当前元素的send已经commit但`msg_len` copyout失败时仍按同一fail-forward规则返回此前completed count；已提交
+rights不得requeue或跨元素重放。adapter不建立batch queue、shared commit、family state或跨message原子性。
+
+Unix stream native LP64 `sendmsg/recvmsg`由adapter独占`msghdr/cmsghdr` traversal、`CMSG_ALIGN`、overflow、flags、
+errno与user copy。send control只接受一个或多个`SOL_SOCKET/SCM_RIGHTS`，按cmsg与fd输入顺序合并并经`task::files`
+exact capture；malformed control返回`EINVAL`，bad fd返回`EBADF`，任何AF_UNIX Socket fd或unsupported ancillary返回
+`EOPNOTSUPP`，全部发生在payload commit前。static descriptor capability只向Unix stream发布typed rights transaction；
+Unix seqpacket及其它family的capability absence保持永久unsupported，raw ABI/user pointer不进入family或`task::files`。
+
+Unix stream receive支持`MSG_CMSG_CLOEXEC`、`MSG_CTRUNC`与`MSG_PEEK`。adapter按control完整native span和receiver fd
+ceiling选择可安装prefix；短/缺失control与slot不足仍成功返回payload、设置`MSG_CTRUNC`并释放suffix。计划安装的fd先保持
+reserved/unpublished，adapter依次完成peer name、control、`msg_flags`、`msg_controllen`的全部可失败copyout，成功后才
+all-or-none publication；fault返回`EFAULT`并回滚全部reservation。direction已经nonpeek consume的bytes/rights不requeue，
+peek只保留queued original。sender fd-local CLOEXEC不继承，只有`MSG_CMSG_CLOEXEC`为新fd设置receiver-local CLOEXEC。
 
 `SOCK_NONBLOCK`进入shared opened-description status，`SOCK_CLOEXEC`进入fd-local flags。descriptor直接回答`SO_DOMAIN`、`SO_TYPE`、`SO_PROTOCOL`，family role回答`SO_ACCEPTCONN`。ICMP raw额外支持`IP_TTL`、`IP_TOS`与`ICMP_FILTER`的Linux optlen/value/copy policy；TCP发布`SO_REUSEADDR`、`TCP_NODELAY`与真实consuming `SO_ERROR`，option fact与async cause仍由TCP owner唯一保存，common adapter只分发normalized mutation/query，不建立mutable option/error bag。没有对应producer的family与其它未支持option返回`ENOPROTOOPT`，不得以恒零值或pending-error bag冒充支持。
 
@@ -87,9 +100,9 @@ UDP send flags支持`MSG_DONTWAIT | MSG_NOSIGNAL`，ordinary receive支持`MSG_D
 control buffer并输出`msg_controllen = 0`；UDP `MSG_ERRQUEUE`是该规则的具名ancillary producer。`msghdr.msg_flags`不作为send input flag；short receive输出
 `MSG_TRUNC`，syscall input `MSG_TRUNC`只决定返回full packet length还是copied length。
 
-`recvmsg`先完成payload transaction，再按peer name、`msg_flags`、`msg_controllen`顺序写回header字段；non-peek已经
-detach的datagram在后续name/header fault后不requeue，peek路径不改变queue。raw header和user pointer不得进入family
-state或跨blocking retry保留。
+`recvmsg`先完成payload transaction，再按peer name、control、`msg_flags`、`msg_controllen`顺序写回输出；没有control
+producer时该阶段为空。non-peek已经detach的datagram/stream rights在后续name/control/header fault后不requeue，peek路径
+不改变owner queue。raw header和user pointer不得进入family state或跨blocking retry保留。
 
 ICMP raw tuple只接受`AF_INET + SOCK_RAW + IPPROTO_ICMP`，并在任何fd reservation、Endpoint或source preparation前检查current task effective `CAP_NET_RAW`。IPv4 raw bind/connect/disconnect/query、`MSG_PEEK`/`MSG_TRUNC`/`MSG_DONTWAIT`/`MSG_NOSIGNAL`、zero/short/fault与datagram consume均止于adapter；`MSG_NOSIGNAL`只在没有`SIGPIPE` producer的raw family作为有诊断的兼容no-op。
 
@@ -117,12 +130,14 @@ route/TCP projection与allocation/cleanup边界见[Read-only Netlink Diagnostics
 
 **违反表现：** family ops解析Linux bit或返回Linux errno；raw user pointer越过adapter；descriptor与另存type不一致；
 copy fault提交未复制bytes；`SO_ERROR`恒零成功；Socket复制TCP/UDP pending cause；Linux netlink struct或state进入
-Network/TCP owner；`SIOCGIFCONF`下放family callback或建立第二份interface/address registry；`sendmmsg`建立batch-owned
-state或绕过single-message transaction；没有producer却建立error state。
+Network/TCP owner；`SIOCGIFCONF`下放family callback或建立第二份interface/address registry；SCM_RIGHTS raw control进入
+Unix/task owner、fd在copyout完成前publication、copy fault后requeue已detach rights；`sendmmsg`建立batch-owned state或绕过
+single-message transaction；没有producer却建立error state。
 
 **验证 / Enforcement：** tuple/permission/flag、IPv4 connected/unconnected与Unix sockaddr input/output、file/vector/
-message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault、`sendmmsg` partial/copyout/clamp与fd
-rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc resolver、glibc/musl curated Socket LTP；
+message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault、SCM_RIGHTS parser/capture/reservation/
+publication、`sendmmsg` partial/copyout/clamp与fd rollback KUnit/focused oracle；repository-owned C/libc consumer、
+musl/glibc resolver、glibc/musl curated Socket LTP；
 两架构既有Socket/TCP suite、RV64 UDP extended-error deterministic chain、Socket-front `SIOCGIFCONF` layout/codec/
 capacity KUnit与source review，以及双架构netlink raw oracle和未修改
 `ip`/`ss` consumer。
@@ -140,7 +155,8 @@ Refine；[Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-dia
 输入队列查询语义；[Socket SIOCGIFCONF小迭代](../../devlog/changes/2026-08-17-socket-siocgifconf.md)随后Refine
 common interface-query ABI与normalized IPv4-address snapshot projection；
 [TCP Socket Buffer Budgets小迭代](../../devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md)随后Refine通用
-`SO_SNDBUF/SO_RCVBUF` typed dispatch与TCP实际预算投影。
+`SO_SNDBUF/SO_RCVBUF` typed dispatch与TCP实际预算投影；[Unix SCM_RIGHTS RFC R0](../../rfcs/unix-scm-rights/index.md#closure)
+的`UNIX-SCM-RIGHTS-CUTOVER`随后加入native Unix-stream control ABI、static rights capability、fd publication与fail-forward ordering。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 
@@ -164,7 +180,8 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
   `AF_INET + SOCK_STREAM + 0/IPPROTO_TCP`、
   `AF_UNIX + SOCK_STREAM + protocol 0`、`AF_UNIX + SOCK_SEQPACKET + protocol 0`，以及
   `AF_NETLINK + SOCK_RAW + NETLINK_ROUTE/NETLINK_SOCK_DIAG`；message-style
-  success surface发布给IPv4 UDP与TCP，`sendmmsg`只逐条复用这些已发布family transaction；本页不外推通用BSD
+  success surface发布给IPv4 UDP、TCP与Unix stream，其中只有Unix stream发布SCM_RIGHTS control；`sendmmsg`只逐条复用
+  这些已发布family transaction；本页不外推通用BSD
   Socket framework或`recvmmsg`。
 - 既有closure evidence覆盖RV64/LA64 release与guest runtime、UDP/TCP C/libc和musl resolver、raw/seqpacket focused ABI、
   glibc/musl curated Socket LTP、owner-local proof、UDP/Unix regression、TCP external/CAgent及RV64 `smp=4` focused runtime。
@@ -176,3 +193,6 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
   `smp>1`、压力/并发、full network LTP、双libc与完整final harness保持Not Run。
 - `SIOCGIFCONF`增量覆盖tracked Linux 6.6.32 source review、RV64 705/705 KUnit与release build；Java、Minecraft、
   userspace C ioctl oracle、LA64 build/runtime、hardware、network LTP、IPv6/runtime reconfiguration与`smp>1`均Not Run。
+- Unix SCM_RIGHTS增量覆盖RV64 SMP1/SMP4 797/797、LA64 SMP1 801/801 KUnit与三次完整focused guest suite，包含
+  message/control fault、fd ceiling、CLOEXEC/CTRUNC/PEEK、sendmmsg fail-forward和shared-socket race；full Socket/Network
+  LTP、final harness、physical hardware、LA64 `smp>1`、其它SMP拓扑与long pressure均Not Run。
