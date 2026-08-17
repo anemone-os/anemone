@@ -279,6 +279,8 @@ pub mod linux {
 
     pub const SYS_MEMBARRIER: u64 = 283;
 
+    pub const SYS_COPY_FILE_RANGE: u64 = 285;
+
     pub const SYS_PWRITEV2: u64 = 287;
 
     pub const SYS_STATX: u64 = 291;

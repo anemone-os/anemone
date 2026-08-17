@@ -125,6 +125,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../../ltp/groups/clock.txt"),
     },
     LtpGroup {
+        name: "copy-file-range",
+        cases: include_str!("../../ltp/groups/copy-file-range.txt"),
+    },
+    LtpGroup {
         name: "credentials",
         cases: include_str!("../../ltp/groups/credentials.txt"),
     },
