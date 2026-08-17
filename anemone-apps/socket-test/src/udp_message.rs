@@ -193,14 +193,11 @@ fn test_layout_fd_and_family_boundary() -> Result<(), Errno> {
 
     let header = MsgHdr::default();
     let unix = unix_stream_pair(SocketFlags::NONBLOCK)?;
-    expect_errno(
-        unsafe { sendmsg_raw(unix.0 as i32, &header, 0) },
-        EOPNOTSUPP,
-    )?;
+    ensure(unsafe { sendmsg_raw(unix.0 as i32, &header, 0) }? == 0)?;
     let mut recv_header = MsgHdr::default();
     expect_errno(
         unsafe { recvmsg_raw(unix.0 as i32, &mut recv_header, MSG_DONTWAIT) },
-        EOPNOTSUPP,
+        EAGAIN,
     )?;
     close(unix.1)?;
     close(unix.0)?;

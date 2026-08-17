@@ -49,7 +49,7 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
-- [RFC-20260817-unix-scm-rights](./rfcs/unix-scm-rights/index.md)：Accepted R0；只为connected native
+- [RFC-20260817-unix-scm-rights](./rfcs/unix-scm-rights/index.md)：Closed R0；只为connected native
   `AF_UNIX + SOCK_STREAM`发布`sendmsg/recvmsg + SCM_RIGHTS`，由Socket ABI adapter、`task::files`
   opened-description lifecycle与Unix stream direction按单向handoff分别拥有control ABI、semantic transfer reference和
   byte/rights transaction；同一implementation unit先修复stream/seqpacket endpoint-retirement inbound detach，保持

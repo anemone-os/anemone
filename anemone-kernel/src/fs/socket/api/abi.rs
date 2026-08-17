@@ -306,6 +306,7 @@ pub(super) fn validate_send_message_flags(
 pub(super) struct ReceiveMessageFlags {
     pub(super) nonblocking: bool,
     pub(super) peek: bool,
+    pub(super) close_on_exec: bool,
     pub(super) truncate_result: bool,
     pub(super) error_queue: bool,
 }
@@ -322,6 +323,7 @@ fn validate_receive_flags(
     Ok(ReceiveMessageFlags {
         nonblocking: flags & MSG_DONTWAIT != 0,
         peek: flags & MSG_PEEK != 0,
+        close_on_exec: flags & anemone_abi::net::linux::MSG_CMSG_CLOEXEC != 0,
         truncate_result: flags & MSG_TRUNC != 0,
         error_queue: flags & MSG_ERRQUEUE != 0,
     })
@@ -419,6 +421,29 @@ mod kunits {
         assert!(flags.error_queue);
         assert!(flags.nonblocking);
         assert!(flags.truncate_result);
+    }
+
+    #[kunit]
+    fn unix_cmsg_cloexec_is_recvmsg_only_and_preserves_other_flags() {
+        use anemone_abi::net::linux::MSG_CMSG_CLOEXEC;
+
+        assert!(matches!(
+            validate_recvfrom_flags(SocketType::UnixStream, MSG_CMSG_CLOEXEC),
+            Err(SysError::NotSupported)
+        ));
+        let flags = validate_recvmsg_flags(
+            SocketType::UnixStream,
+            MSG_CMSG_CLOEXEC | MSG_DONTWAIT | MSG_PEEK,
+        )
+        .unwrap();
+        assert!(flags.close_on_exec);
+        assert!(flags.nonblocking);
+        assert!(flags.peek);
+        assert!(!flags.truncate_result);
+        assert!(matches!(
+            validate_recvmsg_flags(SocketType::UnixStream, MSG_TRUNC),
+            Err(SysError::NotSupported)
+        ));
     }
 
     fn unix_bytes(path: &[u8]) -> Vec<u8> {

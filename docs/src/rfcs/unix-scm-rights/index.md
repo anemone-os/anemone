@@ -1,12 +1,12 @@
 # RFC-20260817-unix-scm-rights
 
-**状态：** Accepted
+**状态：** Closed
 **修订：** R0
 **负责人：** doruche, Codex
 **最后更新：** 2026-08-17
 **领域：** Socket / Unix IPC / task opened description / syscall ABI
-**影响契约：** Introduce `OPENED-DESC-TRANSFER-001`、`UNIX-SOCKET-RIGHTS-001`；Refine `OPENED-DESC-001`、`OPENED-DESC-003`、`OPENED-DESC-RETIRE-001`、`SOCKET-ABI-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-LIFECYCLE-001`；全部 Pending
-**执行记录：** None；`UNIX-SCM-RIGHTS-CUTOVER` Not Cut Over
+**影响契约：** Introduce `OPENED-DESC-TRANSFER-001`、`UNIX-SOCKET-RIGHTS-001`；Refine `OPENED-DESC-001`、`OPENED-DESC-003`、`OPENED-DESC-RETIRE-001`、`SOCKET-ABI-001`、`UNIX-SOCKET-STREAM-001`、`UNIX-SOCKET-LIFECYCLE-001`；全部 Effective
+**执行记录：** Git commit `scm-rights: implement Unix stream fd passing`；`UNIX-SCM-RIGHTS-CUTOVER` Effective
 
 ## 摘要
 
@@ -285,11 +285,11 @@ malformed input、普通`EBADF/EFAULT/EAGAIN`和receiver truncation不要求噪�
 
 ## Contract Impact
 
-下表只描述未来`UNIX-SCM-RIGHTS-CUTOVER`的target delta；Accepted R0不改变任何current contract。
+下表保存`UNIX-SCM-RIGHTS-CUTOVER`已经生效的delta；“当前规则”列是cutover前的effective baseline。
 
 | Contract ID | 变化 | 当前规则 | Target 摘要 | Cutover |
 | --- | --- | --- | --- | --- |
-| [`OPENED-DESC-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-001--published-slot-refcount-是-final-release-的唯一真相) | Refine | semantic lifetime只由published fd slot references决定 | lifecycle owner统一核算published slots与move-only transfer references；最后一种semantic reference消失才terminal | `UNIX-SCM-RIGHTS-CUTOVER` |
+| [`OPENED-DESC-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-001--semantic-refcount-是-final-release-的唯一真相) | Refine | semantic lifetime只由published fd slot references决定 | lifecycle owner统一核算published slots与move-only transfer references；最后一种semantic reference消失才terminal | `UNIX-SCM-RIGHTS-CUTOVER` |
 | `OPENED-DESC-TRANSFER-001` | Introduce | None | exact fd capture、peek duplication、receiver conversion与abort由`task::files`提供opaque transfer capability；不暴露`ProcFile`/table lock | `UNIX-SCM-RIGHTS-CUTOVER` |
 | [`OPENED-DESC-003`](../../contracts/task/opened-description-lifecycle.md#opened-desc-003--当前-final-release-callback-是创建时固定的单-hook) | Refine | 最后published reference移除后运行static hook | 最后published或transfer semantic reference移除后、owner guards外运行同一static hook；不增加dynamic observer | `UNIX-SCM-RIGHTS-CUTOVER` |
 | [`OPENED-DESC-RETIRE-001`](../../contracts/task/opened-description-lifecycle.md#opened-desc-retire-001--terminal-retirement-固定进入窄-vfs-flock-handoff) | Refine | 最后published reference触发flock retirement与final-release | terminal handoff延后到最后semantic reference；transfer排队/abort/install不重复或跳过flock cleanup | `UNIX-SCM-RIGHTS-CUTOVER` |
@@ -444,7 +444,7 @@ RFC review；agent可以提交成本和reduced-target证据，不能自行把较
   `xref:linux-6.6.32:net/unix/af_unix.c#unix_release_sock`、
   `xref:linux-6.6.32:net/unix/af_unix.c#unix_stream_sendmsg`、
   `xref:linux-6.6.32:net/unix/af_unix.c#unix_stream_read_generic`。
-- commit / PR / optional transaction：None。
+- commit：`scm-rights: implement Unix stream fd passing`；PR / optional transaction：None。
 
 ## 修订记录
 
@@ -456,6 +456,21 @@ RFC review；agent可以提交成本和reduced-target证据，不能自行把较
 
 ## Closure
 
-Accepted R0 / Not Closed / Not Cut Over。当前只有accepted target与公共导航；内核实现、KUnit、guest runtime、current
-contract和register变更均Not Run / Not Applied。后续实现使用一个连续implementation unit与唯一
-`UNIX-SCM-RIGHTS-CUTOVER`，不得把本次acceptance表述为已生效能力。
+Closed R0。唯一`UNIX-SCM-RIGHTS-CUTOVER`原子交付native connected Unix stream `sendmsg/recvmsg + SCM_RIGHTS`、
+opened-description transfer lifecycle、ordered byte/rights transaction、bounded request-sized wait，以及stream/seqpacket
+endpoint-retirement inbound detach；current contracts已同步Introduce/Refine上述八个ID。register审计没有发现target内open
+issue或target外accepted limitation，因此没有新增register处置；未创建supporting page、transaction或后续gate。
+
+源码审查覆盖Socket ABI/static capability、exact capture与all-or-none install、semantic final release、stream marker/wait、
+stream/seqpacket retirement、guard外cleanup及`sendmmsg` fail-forward。独立review最初发现Socket message owner-local KUnit与
+三个guest edge case覆盖不足这一项Keter；补齐capture/reservation/publication/copy-ordering/fail-forward KUnit及短control、
+首项send failure、已完成元素后的`msg_len` fault guest oracle后，复核结果为Apollyon 0、Keter 0、Euclid 0。
+
+agent运行的当前源码证据：RV64 release kernel、LA64 release kernel及双架构`socket-test` build通过；RV64 SMP1与SMP4均
+797/797 KUnit且完整guest suite输出`SCMRIGHTSTST:PASS`，LA64 SMP1为801/801 KUnit且同一suite PASS。RV64两次均orderly
+poweroff；LA64完成marker后进入平台既有“no power off handler succeeded”halt，随后只退出QEMU monitor，不把host退出方式
+外推为guest失败。`just fmt kernel --check`、`just fmt socket-test --check`、`git diff --check`与`mdbook build docs`在最终
+closure检查通过。
+
+full Socket/Network LTP、final harness、physical hardware、LA64 `smp>1`、其它SMP拓扑、long pressure、Unix datagram/
+seqpacket rights、compat32、完整ancillary与cycle GC均Not Run / outside R0，不从本次focused证据外推。

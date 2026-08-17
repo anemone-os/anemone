@@ -3,9 +3,9 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use anemone_abi::net::linux::{
-    AF_INET, AF_NETLINK, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT,
-    MSG_ERRQUEUE, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, NETLINK_ROUTE, NETLINK_SOCK_DIAG, SOCK_DGRAM,
-    SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
+    AF_INET, AF_NETLINK, AF_UNIX, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, MSG_CMSG_CLOEXEC,
+    MSG_DONTWAIT, MSG_ERRQUEUE, MSG_NOSIGNAL, MSG_PEEK, MSG_TRUNC, NETLINK_ROUTE,
+    NETLINK_SOCK_DIAG, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET, SOCK_STREAM,
 };
 
 use crate::{
@@ -187,8 +187,8 @@ static UNIX_STREAM_ABI_PROFILE: SocketAbiProfile = SocketAbiProfile {
     address: SocketAddressAbi::UnixPathname,
     send_flags: MSG_DONTWAIT | MSG_NOSIGNAL,
     ordinary_receive_flags: MSG_DONTWAIT | MSG_PEEK,
-    recvmsg_only_flags: 0,
-    message_io: SocketMessageIo::Unsupported,
+    recvmsg_only_flags: MSG_CMSG_CLOEXEC,
+    message_io: SocketMessageIo::ByteStream,
     required_capability: None,
     no_signal_compatibility: None,
 };
@@ -363,7 +363,7 @@ mod kunits {
         );
         assert_eq!(
             socket_abi_profile(SocketType::UnixStream).message_io(),
-            SocketMessageIo::Unsupported
+            SocketMessageIo::ByteStream
         );
         assert_eq!(
             socket_abi_profile(SocketType::UnixSeqpacket).message_io(),
