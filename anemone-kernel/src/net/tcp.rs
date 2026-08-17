@@ -33,6 +33,8 @@ pub(in crate::net) const TCP_POLICY: TcpPolicy = TcpPolicy::new(
     NET_TCP_LISTENER_PROJECTION_CAPACITY,
     NET_TCP_RX_BUFFER_BYTES,
     NET_TCP_TX_BUFFER_BYTES,
+    NET_TCP_MIN_RX_BUFFER_BYTES,
+    NET_TCP_MIN_TX_BUFFER_BYTES,
     NET_TCP_DEFERRED_RECLAIM_CAPACITY,
     NET_TCP_CONNECT_TIMEOUT_MS,
     NET_TCP_ORPHAN_TIMEOUT_MS,
@@ -87,6 +89,18 @@ static_assert!(
 static_assert!(
     NET_TCP_RX_BUFFER_BYTES > 0 && NET_TCP_TX_BUFFER_BYTES > 0,
     "TCP engine buffers must be nonzero"
+);
+static_assert!(
+    NET_TCP_RX_BUFFER_BYTES <= i32::MAX as usize && NET_TCP_TX_BUFFER_BYTES <= i32::MAX as usize,
+    "TCP engine buffers must remain representable by Linux getsockopt int"
+);
+static_assert!(
+    NET_TCP_MIN_RX_BUFFER_BYTES > 0 && NET_TCP_MIN_RX_BUFFER_BYTES <= NET_TCP_RX_BUFFER_BYTES,
+    "TCP minimum receive budget must fit the receive ring"
+);
+static_assert!(
+    NET_TCP_MIN_TX_BUFFER_BYTES > 0 && NET_TCP_MIN_TX_BUFFER_BYTES <= NET_TCP_TX_BUFFER_BYTES,
+    "TCP minimum send budget must fit the send ring"
 );
 static_assert!(
     NET_TCP_DEFERRED_RECLAIM_CAPACITY >= NET_TCP_ENGINE_TIMER_CAPACITY,
@@ -296,6 +310,22 @@ impl TcpEndpointAccessPort {
 
     pub(crate) fn set_no_delay(&self, enabled: bool) -> Result<(), TcpQueryError> {
         self.stack.set_tcp_no_delay(self.id(), enabled)
+    }
+
+    pub(crate) fn receive_buffer(&self) -> Result<usize, TcpQueryError> {
+        self.stack.tcp_receive_buffer(self.id())
+    }
+
+    pub(crate) fn send_buffer(&self) -> Result<usize, TcpQueryError> {
+        self.stack.tcp_send_buffer(self.id())
+    }
+
+    pub(crate) fn set_receive_buffer_hint(&self, requested: usize) -> Result<(), TcpQueryError> {
+        self.stack.set_tcp_receive_buffer_hint(self.id(), requested)
+    }
+
+    pub(crate) fn set_send_buffer_hint(&self, requested: usize) -> Result<(), TcpQueryError> {
+        self.stack.set_tcp_send_buffer_hint(self.id(), requested)
     }
 
     pub(crate) fn connect(&self, peer: TcpPeer) -> Result<(), ConnectError> {

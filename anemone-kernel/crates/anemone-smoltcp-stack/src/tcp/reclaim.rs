@@ -305,7 +305,7 @@ impl TcpEndpoints {
         }
         let binding = listener.binding;
         assert!(self.ensure_engine_capacity(1));
-        let handle = self.add_listener_engine(sockets, binding);
+        let handle = self.add_listener_engine(sockets, listener_id, binding);
         let projection = &mut self
             .listener_mut(listener_id)
             .expect("TCP listener changed during exclusive rearm")
@@ -372,7 +372,8 @@ impl TcpEndpoints {
                 .saturating_sub(1)
                 < listener.backlog;
             self.remove_engine(sockets, handle);
-            let replacement = replace.then(|| self.add_listener_engine(sockets, binding));
+            let replacement =
+                replace.then(|| self.add_listener_engine(sockets, listener_id, binding));
             let projection = &mut self
                 .listener_mut(listener_id)
                 .expect("TCP listener changed during one reclaim window")
@@ -421,6 +422,8 @@ impl TcpEndpoints {
     }
 
     fn release_endpoint(&mut self, id: TcpEndpointId) {
+        let receive_budget = self.policy.default_receive_budget();
+        let send_budget = self.policy.default_send_budget();
         let slot = self
             .endpoint_mut(id)
             .expect("TCP Endpoint disappeared before owner release");
@@ -428,5 +431,7 @@ impl TcpEndpoints {
         slot.id = None;
         slot.reuse_address = false;
         slot.no_delay = false;
+        slot.receive_budget = receive_budget;
+        slot.send_budget = send_budget;
     }
 }

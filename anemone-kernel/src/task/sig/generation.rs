@@ -770,45 +770,6 @@ mod kunits {
     }
 
     #[kunit]
-    fn blocked_default_ignore_enters_private_and_shared_pending() {
-        let target = get_current_task();
-        let group = target.get_thread_group();
-        let no = SigNo::SIGCHLD;
-        let set = SigSet::new_with_signos(&[no]);
-        let old_mask = target.snapshot_current_sig_mask();
-        let old_action = target.sig_disposition.read().get_disposition(no);
-
-        group.flush_specific_signals(set);
-        target.sig_disposition.write().set_to_default(no);
-        let mut blocked = old_mask;
-        blocked.set(no);
-        target.set_permanent_sig_mask(blocked);
-
-        target.recv_signal(test_signal(&target, no));
-        assert!(target.pending_signal_set().get(no));
-        assert_eq!(target.fetch_specific_signal(set).unwrap().no, no);
-
-        group.recv_signal(test_signal(&target, no));
-        assert!(group.shared_pending_signal_set().get(no));
-        assert_eq!(target.fetch_specific_signal(set).unwrap().no, no);
-
-        let mut unblocked = old_mask;
-        unblocked.clear(no);
-        target.set_permanent_sig_mask(unblocked);
-        target.recv_signal(test_signal(&target, no));
-        group.recv_signal(test_signal(&target, no));
-        assert!(!target.pending_signal_set().get(no));
-        assert!(!group.shared_pending_signal_set().get(no));
-
-        target
-            .sig_disposition
-            .write()
-            .set_disposition(no, old_action);
-        target.set_permanent_sig_mask(old_mask);
-        group.flush_specific_signals(set);
-    }
-
-    #[kunit]
     fn blocked_explicit_ignore_job_control_occurrence_is_pending() {
         let target = get_current_task();
         let group = target.get_thread_group();

@@ -303,6 +303,8 @@ pub(super) enum SocketOptionQuery {
     Ipv4TimeToLive,
     Ipv4TypeOfService,
     IcmpTypeFilter,
+    SendBuffer,
+    ReceiveBuffer,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -313,6 +315,7 @@ pub(super) enum SocketOptionValue {
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+    BufferSize(usize),
 }
 
 /// Stable peer identity retained by a local IPC connection owner.
@@ -335,8 +338,13 @@ pub(super) enum SocketOptionMutation {
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+    // Netlink keeps its accepted exact positive budgets. Ordinary Linux
+    // socket-buffer hints use the variants below and are normalized by the
+    // concrete owner; remove this split if Netlink adopts that same ABI.
     SendBuffer(usize),
     ReceiveBuffer(usize),
+    SendBufferHint(usize),
+    ReceiveBufferHint(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

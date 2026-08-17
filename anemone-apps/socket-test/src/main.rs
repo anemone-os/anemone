@@ -50,6 +50,12 @@ fn main() -> Result<(), Errno> {
             }
             netlink::run()
         },
+        Some("--sockbuf") => {
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            tcp::run_sockbuf()
+        },
         None => {
             let udp_result = udp::run();
             let udp_extension_result = udp_extension::run();

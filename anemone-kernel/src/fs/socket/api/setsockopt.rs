@@ -128,6 +128,24 @@ fn mutate_socket_option(
             }
             SocketOptionMutation::ReceiveBuffer(value as usize)
         },
+        (_, SOL_SOCKET, SO_SNDBUF) => {
+            if len < size_of::<i32>() {
+                return Err(SysError::InvalidArgument);
+            }
+            // Linux first clamps ordinary socket-buffer hints in the unsigned
+            // domain, then doubles them. Thus a negative int requests the
+            // owner's maximum, while zero requests its minimum. Front retains
+            // this scalar ABI shape; the family owner supplies real bounds.
+            let requested = read_scalar(input, size_of::<i32>())? as u32 as usize;
+            SocketOptionMutation::SendBufferHint(requested)
+        },
+        (_, SOL_SOCKET, SO_RCVBUF) => {
+            if len < size_of::<i32>() {
+                return Err(SysError::InvalidArgument);
+            }
+            let requested = read_scalar(input, size_of::<i32>())? as u32 as usize;
+            SocketOptionMutation::ReceiveBufferHint(requested)
+        },
         (SocketType::Ipv4Udp, IPPROTO_IP, IP_RECVERR) => {
             SocketOptionMutation::ReceiveErrors(read_ipv4_scalar(input, len)? != 0)
         },
@@ -283,6 +301,84 @@ mod kunits {
             access: OpenAccessMode::ReadWrite,
             notification_suppressed: true,
         });
+    }
+
+    #[kunit]
+    fn tcp_buffer_hints_use_common_scalar_dispatch_and_owner_clamping() {
+        let (file, creation) = prepare_socket(&TCP_SOCKET_OPS).unwrap();
+        creation.commit();
+        let socket = socket_from_file(&file).unwrap();
+
+        let mut short = ScalarInput::value(4096);
+        assert_eq!(
+            mutate_socket_option(socket, SOL_SOCKET, SO_SNDBUF, 3, &mut short),
+            Err(SysError::InvalidArgument)
+        );
+        assert_eq!(short.reads, 0);
+
+        let mut fault = ScalarInput::fault();
+        assert_eq!(
+            mutate_socket_option(socket, SOL_SOCKET, SO_RCVBUF, 4, &mut fault),
+            Err(SysError::BadAddress)
+        );
+        assert_eq!(fault.reads, 1);
+
+        let mut send = ScalarInput::value(4096);
+        assert_eq!(
+            mutate_socket_option(socket, SOL_SOCKET, SO_SNDBUF, 4, &mut send),
+            Ok(())
+        );
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::SendBuffer),
+            Ok(SocketOptionValue::BufferSize(8192))
+        );
+
+        let mut zero = ScalarInput::value(0);
+        assert_eq!(
+            mutate_socket_option(socket, SOL_SOCKET, SO_RCVBUF, 4, &mut zero),
+            Ok(())
+        );
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::ReceiveBuffer),
+            Ok(SocketOptionValue::BufferSize(
+                crate::kconfig_defs::NET_TCP_MIN_RX_BUFFER_BYTES
+            ))
+        );
+
+        let mut negative = ScalarInput::value(-1);
+        assert_eq!(
+            mutate_socket_option(socket, SOL_SOCKET, SO_SNDBUF, 4, &mut negative),
+            Ok(())
+        );
+        assert_eq!(
+            socket.query_option(SocketOptionQuery::SendBuffer),
+            Ok(SocketOptionValue::BufferSize(
+                crate::kconfig_defs::NET_TCP_TX_BUFFER_BYTES
+            ))
+        );
+
+        let (udp_file, udp_creation) = prepare_socket(&UDP_SOCKET_OPS).unwrap();
+        udp_creation.commit();
+        let mut unsupported = ScalarInput::value(4096);
+        assert_eq!(
+            mutate_socket_option(
+                socket_from_file(&udp_file).unwrap(),
+                SOL_SOCKET,
+                SO_SNDBUF,
+                4,
+                &mut unsupported,
+            ),
+            Err(SysError::ProtocolOptionNotSupported)
+        );
+        assert_eq!(unsupported.reads, 1);
+
+        for released in [&file, &udp_file] {
+            (socket_file_desc_ops().final_release.unwrap())(OpenedFileFinalReleaseCtx {
+                file: released,
+                access: OpenAccessMode::ReadWrite,
+                notification_suppressed: true,
+            });
+        }
     }
 
     #[kunit]

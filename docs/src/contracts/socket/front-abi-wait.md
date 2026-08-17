@@ -102,6 +102,12 @@ blocking/nonblocking connect、accept/accept4、local/peer query和typed async e
 `SIGPIPE`由adapter投递，本次`MSG_NOSIGNAL`只抑制该信号。unsupported flag稳定返回`EOPNOTSUPP`，不得因consumer忽略
 错误而success-no-op。
 
+共同adapter对`SOL_SOCKET + SO_SNDBUF/SO_RCVBUF`先完成`len >= sizeof(int)`、signed `int` copy-in与typed
+hint形成，再由family descriptor决定是否支持；query同样只接收family owner返回的实际有效预算并编码为Linux `int`。
+TCP是当前唯一同时提供query与mutation的consumer：零hint收敛到方向性Kconfig最小值，负hint经Linux的无符号
+上限clamp得到固定TCP ring物理上限，正hint加倍并限制在两者之间。Netlink保留先前的正值exact-budget mutation且仍不提供query；UDP、ICMP raw与Unix继续返回
+`ENOPROTOOPT`。front不得保存buffer value、替family选择容量边界或把不支持family伪装成恒定默认值。
+
 Netlink tuple只接受`AF_NETLINK + SOCK_RAW + NETLINK_ROUTE/NETLINK_SOCK_DIAG`。`sockaddr_nl`、
 `nlmsghdr`、rtnetlink/inet-diag layout、message alignment、sequence、Linux state/flag/errno与user copy均止于
 Socket/netlink adapter；network/TCP owner只提供normalized owned snapshot。`SO_SNDBUF/SO_RCVBUF`分发为
@@ -132,7 +138,9 @@ Refine；[Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-dia
 的`SOCKET-UNIX-PEERCRED-CUTOVER`增加`SO_PEERCRED` layout/copyout containment。
 随后由[Socket FIONREAD小迭代](../../devlog/changes/2026-08-17-socket-fionread.md) Refine typed ioctl family dispatch与
 输入队列查询语义；[Socket SIOCGIFCONF小迭代](../../devlog/changes/2026-08-17-socket-siocgifconf.md)随后Refine
-common interface-query ABI与normalized IPv4-address snapshot projection。
+common interface-query ABI与normalized IPv4-address snapshot projection；
+[TCP Socket Buffer Budgets小迭代](../../devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md)随后Refine通用
+`SO_SNDBUF/SO_RCVBUF` typed dispatch与TCP实际预算投影。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 

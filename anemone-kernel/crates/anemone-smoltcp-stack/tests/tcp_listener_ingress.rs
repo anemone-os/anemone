@@ -181,6 +181,8 @@ fn policy(engine_capacity: usize, backlog_capacity: usize) -> TcpPolicy {
         2,
         128,
         128,
+        8,
+        8,
         engine_capacity,
         60_000,
         60_000,

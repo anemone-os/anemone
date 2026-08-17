@@ -111,6 +111,46 @@ impl DomainStack {
         Ok(())
     }
 
+    pub(in crate::net) fn tcp_receive_buffer(
+        &self,
+        endpoint: TcpEndpointId,
+    ) -> Result<usize, TcpQueryError> {
+        self.stack.lock().tcp_receive_buffer(endpoint)
+    }
+
+    pub(in crate::net) fn tcp_send_buffer(
+        &self,
+        endpoint: TcpEndpointId,
+    ) -> Result<usize, TcpQueryError> {
+        self.stack.lock().tcp_send_buffer(endpoint)
+    }
+
+    pub(in crate::net) fn set_tcp_receive_buffer_hint(
+        &self,
+        endpoint: TcpEndpointId,
+        requested: usize,
+    ) -> Result<(), TcpQueryError> {
+        let progressions = self
+            .protocol_transition(|stack| stack.set_tcp_receive_buffer_hint(endpoint, requested))?;
+        for progression in progressions {
+            crate::net::submit_protocol_progression(progression);
+        }
+        Ok(())
+    }
+
+    pub(in crate::net) fn set_tcp_send_buffer_hint(
+        &self,
+        endpoint: TcpEndpointId,
+        requested: usize,
+    ) -> Result<(), TcpQueryError> {
+        let progressions =
+            self.protocol_transition(|stack| stack.set_tcp_send_buffer_hint(endpoint, requested))?;
+        for progression in progressions {
+            crate::net::submit_protocol_progression(progression);
+        }
+        Ok(())
+    }
+
     pub(in crate::net) fn start_tcp_connect(
         &self,
         endpoint: TcpEndpointId,

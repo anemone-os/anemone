@@ -168,6 +168,8 @@ pub struct Parameters {
     pub net_tcp_listener_projection_capacity: Option<usize>,
     pub net_tcp_rx_buffer_bytes: Option<usize>,
     pub net_tcp_tx_buffer_bytes: Option<usize>,
+    pub net_tcp_min_rx_buffer_bytes: Option<usize>,
+    pub net_tcp_min_tx_buffer_bytes: Option<usize>,
     pub net_tcp_deferred_reclaim_capacity: Option<usize>,
     pub net_tcp_connect_timeout_ms: Option<usize>,
     pub net_tcp_orphan_timeout_ms: Option<usize>,
@@ -314,6 +316,8 @@ impl Parameters {
         materialize!(net_tcp_listener_projection_capacity);
         materialize!(net_tcp_rx_buffer_bytes);
         materialize!(net_tcp_tx_buffer_bytes);
+        materialize!(net_tcp_min_rx_buffer_bytes);
+        materialize!(net_tcp_min_tx_buffer_bytes);
         materialize!(net_tcp_deferred_reclaim_capacity);
         materialize!(net_tcp_connect_timeout_ms);
         materialize!(net_tcp_orphan_timeout_ms);
@@ -616,6 +620,10 @@ pub const NET_TCP_LISTENER_PROJECTION_CAPACITY: usize = {};
 pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
 /// Transmit bytes owned by each private TCP engine.
 pub const NET_TCP_TX_BUFFER_BYTES: usize = {};
+/// Smallest effective TCP receive budget exposed by SO_RCVBUF.
+pub const NET_TCP_MIN_RX_BUFFER_BYTES: usize = {};
+/// Smallest effective TCP transmit budget exposed by SO_SNDBUF.
+pub const NET_TCP_MIN_TX_BUFFER_BYTES: usize = {};
 /// TCP engines awaiting final protocol cleanup after retirement.
 pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
 /// Maximum unanswered active-open interval.
@@ -746,6 +754,8 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_tcp_listener_projection_capacity),
             resolved!(net_tcp_rx_buffer_bytes),
             resolved!(net_tcp_tx_buffer_bytes),
+            resolved!(net_tcp_min_rx_buffer_bytes),
+            resolved!(net_tcp_min_tx_buffer_bytes),
             resolved!(net_tcp_deferred_reclaim_capacity),
             resolved!(net_tcp_connect_timeout_ms),
             resolved!(net_tcp_orphan_timeout_ms),
