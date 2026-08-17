@@ -327,7 +327,6 @@
 		- [PTY / devpts](./rfcs/pty-devpts/index.md)
 			- [目标与不变量](./rfcs/pty-devpts/invariants.md)
 			- [实施路线](./rfcs/pty-devpts/implementation.md)
-			- [事务日志](./devlog/transactions/2026-08-11-pty-devpts.md)
 			- [背景材料](./rfcs/pty-devpts/backgrounds/index.md)
 				- [前置定位共识](./rfcs/pty-devpts/backgrounds/positionings.md)
 	- [Unix Job Control](./rfcs/unix-jobctl/index.md)
