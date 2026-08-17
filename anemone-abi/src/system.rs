@@ -1,4 +1,15 @@
 pub mod linux {
+    pub mod reboot {
+        pub const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
+        pub const LINUX_REBOOT_MAGIC2: u32 = 672_274_793;
+        pub const LINUX_REBOOT_MAGIC2A: u32 = 85_072_278;
+        pub const LINUX_REBOOT_MAGIC2B: u32 = 369_367_448;
+        pub const LINUX_REBOOT_MAGIC2C: u32 = 537_993_216;
+
+        pub const LINUX_REBOOT_CMD_RESTART: u32 = 0x0123_4567;
+        pub const LINUX_REBOOT_CMD_POWER_OFF: u32 = 0x4321_fedc;
+    }
+
     #[derive(
         Debug,
         Clone,
