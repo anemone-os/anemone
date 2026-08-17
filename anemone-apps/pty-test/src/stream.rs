@@ -9,7 +9,10 @@ use anemone_rs::{
         },
         syscall::{linux::SYS_IOCTL, syscall},
         time::linux::TimeSpec,
-        tty::linux::{ECHO, ICANON, ISIG, ONLCR, OPOST, TIOCINQ, VEOF, Winsize},
+        tty::linux::{
+            ECHO, ICANON, ISIG, ONLCR, OPOST, TCFLSH, TCIFLUSH, TCIOFLUSH, TCOFLUSH, TIOCINQ, VEOF,
+            Winsize,
+        },
     },
     os::linux::{
         fs::{
@@ -29,6 +32,10 @@ const ZERO_TIMEOUT: TimeSpec = TimeSpec {
     tv_sec: 0,
     tv_nsec: 0,
 };
+
+fn tcflush(fd: Fd, selector: u64) -> Result<(), Errno> {
+    unsafe { syscall(SYS_IOCTL, fd as u64, TCFLSH as u64, selector, 0, 0, 0) }.map(|_| ())
+}
 
 fn fdset_with(fd: Fd) -> FdSet {
     let mut set = FdSet::default();
@@ -199,6 +206,72 @@ pub fn test_input_queue_queries() -> Result<(), Errno> {
     ensure(ioctl_readable_bytes(pair.master.raw())? == 2)?;
     read_exact(pair.master.raw(), &mut suffix)?;
     ensure(&suffix == b"\nX" && ioctl_readable_bytes(pair.master.raw())? == 0)
+}
+
+pub fn test_tcflush_direction_matrix() -> Result<(), Errno> {
+    let pair = Pair::allocate()?;
+    pair.unlock()?;
+    let slave = pair.open_path(O_RDWR | O_NOCTTY)?;
+    raw_termios(slave.raw())?;
+
+    write_all(pair.master.raw(), b"slave-input-drop")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 16)?;
+    tcflush(slave.raw(), TCIFLUSH)?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 0)?;
+    write_all(pair.master.raw(), b"slave-input-keep")?;
+    let mut slave_input = [0_u8; 16];
+    read_exact(slave.raw(), &mut slave_input)?;
+    ensure(&slave_input == b"slave-input-keep")?;
+
+    write_all(slave.raw(), b"slave-output-drop")?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 17)?;
+    tcflush(slave.raw(), TCOFLUSH)?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 0)?;
+    write_all(slave.raw(), b"slave-output-keep")?;
+    let mut master_input = [0_u8; 17];
+    read_exact(pair.master.raw(), &mut master_input)?;
+    ensure(&master_input == b"slave-output-keep")?;
+
+    write_all(slave.raw(), b"master-input-drop")?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 17)?;
+    tcflush(pair.master.raw(), TCIFLUSH)?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 0)?;
+    write_all(slave.raw(), b"master-input-keep")?;
+    read_exact(pair.master.raw(), &mut master_input)?;
+    ensure(&master_input == b"master-input-keep")?;
+
+    write_all(pair.master.raw(), b"master-output-drop")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 18)?;
+    tcflush(pair.master.raw(), TCOFLUSH)?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 0)?;
+    write_all(pair.master.raw(), b"master-output-keep")?;
+    let mut slave_output = [0_u8; 18];
+    read_exact(slave.raw(), &mut slave_output)?;
+    ensure(&slave_output == b"master-output-keep")?;
+
+    write_all(pair.master.raw(), b"both-input-drop")?;
+    write_all(slave.raw(), b"both-output-drop")?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 15)?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 16)?;
+    tcflush(slave.raw(), TCIOFLUSH)?;
+    ensure(ioctl_readable_bytes(slave.raw())? == 0)?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 0)?;
+
+    expect_errno(tcflush(slave.raw(), TCIOFLUSH + 1), EINVAL)?;
+    write_all(pair.master.raw(), b"both-input-keep")?;
+    write_all(slave.raw(), b"both-output-keep")?;
+    let mut both_input = [0_u8; 15];
+    let mut both_output = [0_u8; 16];
+    read_exact(slave.raw(), &mut both_input)?;
+    read_exact(pair.master.raw(), &mut both_output)?;
+    ensure(&both_input == b"both-input-keep")?;
+    ensure(&both_output == b"both-output-keep")?;
+
+    drop(slave);
+    tcflush(pair.master.raw(), TCIFLUSH)?;
+    tcflush(pair.master.raw(), TCOFLUSH)?;
+    tcflush(pair.master.raw(), TCIOFLUSH)?;
+    expect_errno(tcflush(pair.master.raw(), TCIOFLUSH + 1), EINVAL)
 }
 
 fn test_blocking_read(pair: &Pair, slave: Fd) -> Result<(), Errno> {

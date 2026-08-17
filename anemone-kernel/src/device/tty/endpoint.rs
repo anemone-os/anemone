@@ -10,7 +10,7 @@ use crate::{
     utils::any_opaque::NilOpaque,
 };
 
-use super::{TtyEndpoint, TtyPortId, TtyWakeHandle, file, relation};
+use super::{TtyBackendHandle, TtyEndpoint, TtyPortId, file, relation};
 
 const TTY_SERIAL_MINOR_BASE: usize = 64;
 const TTY_CONTROLLING_MINOR: usize = 0;
@@ -378,12 +378,10 @@ fn selected_endpoint() -> Result<&'static PublishedEndpoint, SysError> {
 }
 
 fn opened_endpoint_file(endpoint: &Arc<TtyEndpoint>) -> Result<OpenedFile, SysError> {
-    let wake_source = endpoint.wake_source.upgrade().ok_or(SysError::NotFound)?;
+    let backend = endpoint.backend.upgrade().ok_or(SysError::NotFound)?;
     Ok(file::opened_file(
         endpoint.clone(),
-        TtyWakeHandle {
-            source: wake_source,
-        },
+        TtyBackendHandle { backend },
     ))
 }
 
@@ -433,9 +431,17 @@ static BOOT_TTY_INODE_OPS: InodeOps = InodeOps {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::{
-        super::{TtyLineSnapshot, TtyParity, TtyWakeSource, terminal::Terminal},
+        super::{TtyBackend, TtyFlushQueues, TtyLineSnapshot, TtyParity, terminal::Terminal},
         *,
     };
+
+    struct NoopBackend;
+
+    impl TtyBackend for NoopBackend {
+        fn wake(&self) {}
+
+        fn flush_queues(&self, _queues: TtyFlushQueues) {}
+    }
 
     #[kunit]
     fn deterministic_identity_mapping_and_selection() {
@@ -483,9 +489,7 @@ mod kunits {
 
     #[kunit]
     fn selected_endpoint_preserves_the_semantic_terminal() {
-        let source = Arc::new(TtyWakeSource {
-            worker: SpinLock::new(None),
-        });
+        let source = Arc::new(NoopBackend);
         let first_terminal = Terminal::try_new(TtyLineSnapshot {
             baud: 115200,
             parity: TtyParity::None,
@@ -501,16 +505,16 @@ mod kunits {
         let endpoints = [
             Arc::new(TtyEndpoint {
                 terminal: first_terminal,
-                wake_source: {
-                    let progress: Arc<dyn super::super::TtyProgress> = source.clone();
-                    Arc::downgrade(&progress)
+                backend: {
+                    let backend: Arc<dyn super::super::TtyBackend> = source.clone();
+                    Arc::downgrade(&backend)
                 },
             }),
             Arc::new(TtyEndpoint {
                 terminal: selected_terminal.clone(),
-                wake_source: {
-                    let progress: Arc<dyn super::super::TtyProgress> = source.clone();
-                    Arc::downgrade(&progress)
+                backend: {
+                    let backend: Arc<dyn super::super::TtyBackend> = source.clone();
+                    Arc::downgrade(&backend)
                 },
             }),
         ];

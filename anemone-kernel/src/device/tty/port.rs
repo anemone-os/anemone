@@ -72,6 +72,13 @@ pub(crate) trait TtyPort: Send + Sync {
     /// make progress here unless another TTY worker already drained the units.
     fn dequeue_rx(&self, dst: &mut [TtyRxUnit]) -> usize;
 
+    /// Discard RX units already admitted to the port-owned software queue.
+    ///
+    /// Hardware samples not yet classified by the IRQ owner may arrive after
+    /// this operation. Worker-local units are retired by the TTY attachment's
+    /// flush generation rather than by the physical owner.
+    fn discard_rx(&self);
+
     /// Submit bytes through the port owner's bounded TX serialization and
     /// return the number accepted before timeout or backpressure.
     fn submit_tx(&self, src: &[u8]) -> usize;

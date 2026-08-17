@@ -58,6 +58,51 @@ pub(super) fn foreground_pgid(tty: &TtyFile) -> Result<i32, SysError> {
     }
 }
 
+/// Apply Linux terminal-modifying access policy before a queue mutation.
+///
+/// Only the caller's exact controlling endpoint participates. Operations on
+/// an unrelated terminal, kernel-internal callers and PTY masters continue
+/// without a job-control effect; the master excludes this helper at dispatch.
+pub(super) fn check_change_access(
+    tty: &TtyFile,
+    operation: Option<&dyn TtyOperation>,
+) -> Result<(), SysError> {
+    loop {
+        let Some(caller) = crate::task::jobctl::TtyCaller::current_user_or_kernel()? else {
+            return Ok(());
+        };
+        let Some(snapshot) = relation::endpoint_snapshot(&tty.endpoint) else {
+            if caller.revalidate() {
+                return Ok(());
+            }
+            continue;
+        };
+        if !snapshot.session().same_identity(caller.session()) {
+            if caller.revalidate() && snapshot.is_current() {
+                return Ok(());
+            }
+            continue;
+        }
+        let decision = caller.sigttou_decision(snapshot.foreground());
+        if !caller.revalidate() || !snapshot.is_current() {
+            continue;
+        }
+        if matches!(decision, crate::task::jobctl::TtySigttouDecision::Continue) {
+            return Ok(());
+        }
+
+        // PTY retirement must arbitrate before the guards-out signal effect;
+        // serial endpoints have no corresponding description lifecycle.
+        let _effect = begin_external_effect(operation)?;
+        if !caller.revalidate() || !snapshot.is_current() {
+            continue;
+        }
+        if caller.signal_process_group_sigttou() {
+            return Err(SysError::RestartSyscall(RestartSyscall::Idempotent));
+        }
+    }
+}
+
 fn begin_set_foreground_effect(
     operation: Option<&dyn TtyOperation>,
 ) -> Result<Option<super::PtyEffectPermit>, SysError> {

@@ -8,7 +8,7 @@
 **不覆盖：** orphaned-process-group errno/effect、`TOSTOP` write、其它 terminal-modifying `SIGTTOU` matrix、非PTY relation-disassociation signal、physical hardware hangup、runtime line reconfiguration或procfs TTY字段
 **实现位置：** `anemone-kernel/src/device/tty/`、`anemone-kernel/src/task/{jobctl,sig}/`
 **依赖：** [TTY data plane](./data-plane.md)、[process-group signaling](../task/process-group-signaling.md)、[Signal pending/action](../signal/pending-routing.md)、[Unix job control](../task/job-control.md)、[task lifecycle](../task/thread-group-lifecycle.md)、[user entry](../task/user-entry.md)
-**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)；[`TIOCSCTTY` context-sensitive argument小迭代](../../devlog/changes/2026-08-17-tty-tiocsctty-argument.md)；[TTY FIONREAD/TIOCINQ小迭代](../../devlog/changes/2026-08-17-tty-fionread.md)
+**当前来源：** [`TTY-JOBCTL-CUTOVER` transaction](../../devlog/transactions/2026-07-23-tty-subsystem.md#stage-4-user-evidence-tty-jobctl-cutover-and-closure---2026-07-24)；[Serial TTY RX conditioning 小迭代](../../devlog/changes/2026-08-03-tty-serial-rx-conditioning.md)；[TTY TAB3/XTABS output processing 小迭代](../../devlog/changes/2026-08-08-tty-tab3-output.md)；[`PTY-DEVPTS-CUTOVER`](./pty-devpts.md)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[TTY IUTF8与明确compatibility set小迭代](../../devlog/changes/2026-08-13-tty-iutf8-compat.md)；[`TIOCSCTTY` context-sensitive argument小迭代](../../devlog/changes/2026-08-17-tty-tiocsctty-argument.md)；[TTY FIONREAD/TIOCINQ小迭代](../../devlog/changes/2026-08-17-tty-fionread.md)；[TTY TCFLSH队列清空小迭代](../../devlog/changes/2026-08-17-tty-tcflush.md)
 **最后核验：** 2026-08-17
 
 ## 状态与能力所有权
@@ -70,6 +70,11 @@ Signal publication失败而回滚，也不得回退到current task、最近reade
 group生成signal并返回idempotent restart，本次不消费input；blocked/ignored或没有live foreground selector时返回
 `EIO`。relation失效或target revalidation失败必须retry/fail-close，不能回退到current task、opener或global PGID。
 
+`TCFLSH`是terminal-modifying operation：serial与PTY slave必须在解释selector之前执行同一non-orphan
+foreground/background检查；actionable background caller先生成`SIGTTOU`并返回restart，本轮不清队列，blocked/ignored
+与foreground caller继续。PTY master不是controlling-terminal view，不参与该检查。PTY slave的signal effect仍必须
+服从pair effect permit与retirement排序。
+
 Terminal、relation、port与topology guard外才允许Signal publication、Event wake、echo TX与复杂drop。effect request
 不进入持久队列；`SIGCONT` wake只触发重新仲裁，不能携带restart permit或反向驱动relation/job-control truth。
 
@@ -86,7 +91,8 @@ PGID、持TTY guard进入Signal/topology、background read提前消费input，�
 **验证 / Enforcement：** foreground/background `TIOCSPGRP`三分支、`VINTR/VQUIT/VSUSP`、QEMU serial break在
 `ISIG=0`下的flush与foreground `SIGINT`、changed-only winsize、actionable/blocked/ignored background read、
 detach-no-effect与BusyBox ash RV64 matrix；PTY permit-first/retirement-first KUnit与SMP8 master-close/background-read；
-19项Unix job-control focused回归；guard/identity/restart capability source audit。
+19项Unix job-control focused回归、`TCFLSH` invalid-selector-before-`SIGTTOU` user oracle；guard/identity/restart
+capability source audit。
 
 ## TTY-LIFE-001 — Relation cleanup先撤销可发现性再执行外部效果
 
@@ -138,6 +144,11 @@ discipline committed-input snapshot，释放owner lock后执行copyout；snapsho
 返回`EFAULT`且不得消费或改变队列。其byte-count语义由`TTY-INPUT-001`定义，PTY master的output projection由
 `TTY-OUTPUT-001`与`PTY-ABI-001`共同定义；该命令不改变`FIONBIO`、readiness、`VMIN/VTIME`或unknown ioctl边界。
 
+`TCFLSH`接受asm-generic scalar selector `TCIFLUSH=0`、`TCOFLUSH=1`与`TCIOFLUSH=2`，其它值返回`EINVAL`。
+serial与PTY slave分别清input、output或两者；PTY master按其read/write view反转input/output投影，both保持不变。
+命令不改变termios、winsize、relation、logical output column或opened-description state；具体queue handoff由
+`TTY-INPUT-001`、`TTY-OUTPUT-001`与`PTY-ABI-001`定义。
+
 BusyBox ash必须取得真实controlling TTY；`jobs`、Ctrl-Z、`fg`、`bg`、foreground Ctrl-C、background read与shell
 reclaim都必须经过本页的relation/Signal/job-control handoff。BusyBox vi依赖真实raw/canonical切换、readiness与byte
 I/O完成启动、编辑、保存和退出。shell prompt、`job control turned off`、unconditional `TIOCSPGRP`、anonymous-console
@@ -153,7 +164,8 @@ GNU `less`因其`TAB3` candidate被拒绝，或`TAB3`被当作success-no-op，�
 `IUTF8`只被保存却不改变erase/column，或将compatibility set之外的行为flag静默接纳，同样属于违反。
 未绑定endpoint上的`TIOCSCTTY(arg=1)`被当作steal拒绝，或unsupported steal替换、破坏既有relation，也属于违反。
 `FIONREAD`消费input、包含canonical pending edit、把空EOF readiness伪装成非零byte或在owner lock内执行user copyout，
-同样属于违反。
+同样属于违反。`TCFLSH`接受非法selector、清错PTY方向、在actionable background检查前返回`EINVAL`或让flush前
+worker-local input重新出现，也属于违反。
 
 PTY refine同时交付`/dev/ptmx`与`/dev/pts/N`、`TIOCGPTN`/`TIOCSPTLCK`/`TIOCGPTPEER`、两条slave-open route的
 implicit acquisition、PTY foreground/background policy和master-hangup relation effect。支持的termios/winsize surface是
@@ -164,7 +176,8 @@ implicit acquisition、PTY foreground/background policy和master-hangup relation
 PyREPL、用户人工ash checklist、GNU `less 668`进入可用全屏界面并以`q`退出的用户运行证据、404项KUnit、
 IUTF8/TAB3 inline KUnit runtime与public PTY/TTY byte oracle、19项Unix job-control focused回归、ABI/source/bypass
 audit与final review；serial与PTY定向matrix覆盖unbound `arg=1` acquisition、nonzero exact-relation idempotence、
-live occupied `arg=1 -> EPERM`与旧relation保持。
+live occupied `arg=1 -> EPERM`与旧relation保持，以及`TCFLSH`三种selector、非法参数、PTY双视图与
+background `SIGTTOU`顺序。
 
 ## 跨领域handoff义务
 
@@ -177,6 +190,10 @@ live occupied `arg=1 -> EPERM`与旧relation保持。
 
 ## 验证范围与当前接受边界
 
+- 2026-08-17 `TCFLSH` refinement的agent-run RV64证据：app/kernel build通过；public PTY SMP8与serial wrapper
+  分别通过784/784 KUnit、PTY `19/19`、TTY `59/59`，三种selector、非法参数、master/slave方向、flush后新输入与
+  actionable background `SIGTTOU`顺序均有user oracle；BusyBox vi/ash与host byte oracle通过，两次均有序关机。
+  focused LTP `ioctl02`在执行目标断言前被既有`/proc/meminfo`解析前置条件阻断；LA64 build/runtime与hardware为Not Run。
 - 2026-08-17 `FIONREAD` / `TIOCINQ` refinement的agent-run RV证据：RV64 app/kernel build通过；public PTY
   SMP8与serial wrapper分别通过701/701 KUnit、PTY `18/18`、TTY `57/57`，新增queue query matrix、serial
   BusyBox vi/ash与host byte oracle通过，两次均有序关机。LA64 build/runtime、hardware与LTP为Not Run。

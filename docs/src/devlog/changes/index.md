@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-17 - TTY TCFLSH 队列清空](./2026-08-17-tty-tcflush.md)
 - [2026-08-17 - TCP socket buffer budgets](./2026-08-17-tcp-socket-buffer-budgets.md)
 - [2026-08-17 - TTY FIONREAD/TIOCINQ](./2026-08-17-tty-fionread.md)
 - [2026-08-17 - Socket SIOCGIFCONF interface query](./2026-08-17-socket-siocgifconf.md)
