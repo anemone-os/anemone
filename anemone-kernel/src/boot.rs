@@ -1,10 +1,10 @@
-//! Initial user-program boot protocol.
+//! Root mount and initial user-program boot protocol.
 
 use crate::{
-    boot_defs::{INITIAL_PROGRAM_SOURCE, InitialProgramSource},
     device::boot_io::InitStdio,
     fs::{RenameFlags, api::fchmod::kernel_fchmod},
     prelude::*,
+    system_target_defs::{INITIAL_PROGRAM_SOURCE, ROOT_MOUNT},
     task::{
         execve::kernel::kernel_execve,
         files::{FdFlags, FileStatusFlags, LinuxOpenCompat, OpenAccessMode},
@@ -12,11 +12,54 @@ use crate::{
     },
 };
 
+pub(crate) struct RootMount {
+    pub(crate) fstype: &'static str,
+    pub(crate) source: RootSource,
+}
+
+pub(crate) enum RootSource {
+    Block { device: &'static str },
+    Pseudo,
+}
+
+pub(crate) enum InitialProgramSource {
+    RootfsEntry {
+        argv: Option<&'static [&'static str]>,
+    },
+    EmbeddedApp {
+        bytes: &'static [u8],
+        argv: Option<&'static [&'static str]>,
+    },
+}
+
 const ROOTFS_ENTRY_METADATA: &str = "/.anemone/init";
 const EMBEDDED_MOUNTPOINT: &str = "/.anemone";
 const EMBEDDED_TEMP_NAME: &str = ".embedded-init.tmp";
 const EMBEDDED_FILE_NAME: &str = "embedded-init";
 const EMBEDDED_PATH: &str = "/.anemone/embedded-init";
+
+pub(crate) fn mount_rootfs() {
+    match ROOT_MOUNT.source {
+        RootSource::Pseudo => {
+            mount_root(
+                ROOT_MOUNT.fstype,
+                MountSource::Pseudo,
+                MountAttrFlags::empty(),
+            )
+            .expect("root mount failed");
+        },
+        RootSource::Block { device } => {
+            let root_dev = crate::device::block::get_block_dev_by_name(device)
+                .unwrap_or_else(|| panic!("rootfs block device not found: {}", device));
+            mount_root(
+                ROOT_MOUNT.fstype,
+                MountSource::Block(root_dev),
+                MountAttrFlags::empty(),
+            )
+            .expect("root mount failed");
+        },
+    }
+}
 
 struct ResolvedInitialProgram {
     path: String,

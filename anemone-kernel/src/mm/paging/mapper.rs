@@ -843,9 +843,10 @@ impl Mapper<'_> {
 
                     // allocate a new pgdir
 
-                    // no need to undo all previous frame allocations if this fails,
-                    // as once OutOfMemory is returned, the callerwill kill the process and thus
-                    // all allocated frames will be deallocated automatically.
+                    // Already-published intermediate page-table frames remain
+                    // owned by the PageTable if a later allocation fails. They
+                    // form valid empty branches that later mappings may reuse,
+                    // so callers need no rollback even when OOM is best-effort.
                     let new_pgdir_ppn = alloc_frame_zeroed().ok_or(SysError::OutOfMemory)?.leak();
 
                     *pte = Pte::new(

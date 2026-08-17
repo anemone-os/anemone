@@ -76,7 +76,7 @@ impl Endpoint {
                 .tx_bytes
                 .checked_add(super::packet::IPV4_HEADER_LEN)
                 .is_some_and(|bytes| bytes <= self.limits.tx_byte_capacity());
-        IcmpRawEndpointFacts::from_owner_snapshot(!self.received.is_empty(), writable)
+        IcmpRawEndpointFacts::from_owner_snapshot(self.received.front().map(Vec::len), writable)
     }
 
     pub(super) fn config(&self) -> IcmpRawEndpointConfig {

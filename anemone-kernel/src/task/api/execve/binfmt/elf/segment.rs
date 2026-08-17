@@ -196,6 +196,57 @@ impl VmObject for ElfLoadObject {
         self.materialize(pidx, recipe)
     }
 
+    fn resolve_frame_ahead(
+        &self,
+        pidx: usize,
+        request_end: usize,
+        access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        assert!(
+            pidx < request_end,
+            "fault-ahead request must contain its page"
+        );
+        let recipe = self.recipe(pidx)?;
+        if let Some(frame) = self.materialized.read().get(&pidx) {
+            return Ok(Some(ResolvedFrame {
+                frame: frame.clone(),
+                writable: true,
+            }));
+        }
+
+        // Speculation must not create private ELF state. Read/execute may
+        // forward a contiguous direct-file run so the inode address space can
+        // use its natural bounded range fill; writes and composed pages wait
+        // for an exact fault.
+        if matches!(access, PageFaultType::Write) {
+            return Ok(None);
+        }
+        let Some(file_pidx) = recipe.direct_file_page() else {
+            return Ok(None);
+        };
+        let mut file_end = file_pidx.checked_add(1).ok_or(SysError::InvalidArgument)?;
+        let mut next = pidx + 1;
+        let object_end = request_end.min(self.recipes.len());
+        while next < object_end {
+            let Some(next_file_pidx) = self.recipes[next].direct_file_page() else {
+                break;
+            };
+            if next_file_pidx != file_end {
+                break;
+            }
+            file_end = file_end.checked_add(1).ok_or(SysError::InvalidArgument)?;
+            next += 1;
+        }
+
+        Ok(self
+            .source
+            .resolve_frame_ahead(file_pidx, file_end, PageFaultType::Read)?
+            .map(|resolved| ResolvedFrame {
+                frame: resolved.frame,
+                writable: false,
+            }))
+    }
+
     fn discard_range(&self, range: core::ops::Range<usize>, retired: &mut RetiredFrames) {
         assert!(
             range.start <= range.end && range.end <= self.recipes.len(),
@@ -357,6 +408,7 @@ mod kunits {
     struct CountingObject {
         pages: Box<[FrameHandle]>,
         resolutions: RwLock<Vec<(usize, PageFaultType)>>,
+        ahead: RwLock<Vec<(usize, usize, PageFaultType)>>,
     }
 
     impl CountingObject {
@@ -374,6 +426,7 @@ mod kunits {
             Self {
                 pages,
                 resolutions: RwLock::new(Vec::new()),
+                ahead: RwLock::new(Vec::new()),
             }
         }
     }
@@ -393,6 +446,16 @@ mod kunits {
                     .clone(),
                 writable: true,
             })
+        }
+
+        fn resolve_frame_ahead(
+            &self,
+            pidx: usize,
+            request_end: usize,
+            access: PageFaultType,
+        ) -> Result<Option<ResolvedFrame>, SysError> {
+            self.ahead.write().push((pidx, request_end, access));
+            self.resolve_frame(pidx, access).map(Some)
         }
     }
 
@@ -441,6 +504,39 @@ mod kunits {
             source.resolutions.read().as_slice(),
             &[(1, PageFaultType::Read)]
         );
+    }
+
+    #[kunit]
+    fn direct_file_fault_ahead_forwards_one_contiguous_clean_run() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let source = Arc::new(CountingObject::new(&[0x11, 0x22, 0x33]));
+        let segments = [seg(
+            0,
+            page_size * 3,
+            0x400000,
+            page_size * 3,
+            Protection::READ | Protection::EXECUTE,
+            page_size * 3,
+        )];
+        let chunks = collect_load_chunks(source.clone(), &segments);
+
+        let resolved = chunks[0]
+            .backing
+            .resolve_frame_ahead(1, 3, PageFaultType::Execute)
+            .unwrap()
+            .expect("direct ELF page should opt in to fault-ahead");
+        assert_eq!(resolved.frame.ppn(), source.pages[1].ppn());
+        assert!(!resolved.writable);
+        assert_eq!(*source.ahead.read(), vec![(1, 3, PageFaultType::Read)]);
+
+        assert!(
+            chunks[0]
+                .backing
+                .resolve_frame_ahead(2, 3, PageFaultType::Write)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(source.ahead.read().len(), 1);
     }
 
     #[kunit]

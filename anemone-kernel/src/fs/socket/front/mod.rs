@@ -1,6 +1,7 @@
 //! Family-neutral Socket front, static dispatch, and opened-description hooks.
 
 mod file;
+mod interface_ioctl;
 mod operation;
 
 use anemone_net_api::Ipv4Address;
@@ -52,6 +53,27 @@ pub(super) enum SocketQueryError {
     Retired,
     NotConnected,
     Copy(SysError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketIoctlError {
+    Unsupported,
+    Retired,
+    InvalidState,
+}
+
+/// A Socket-internal control request after the front has consumed the Linux
+/// command number and user-pointer ABI. Family callbacks must not recover or
+/// reinterpret raw ioctl inputs from this value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketIoctlRequest {
+    ReadableBytes,
+}
+
+/// A family-owned fact whose final Linux representation remains front-owned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SocketIoctlResponse {
+    ReadableBytes(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -281,6 +303,8 @@ pub(super) enum SocketOptionQuery {
     Ipv4TimeToLive,
     Ipv4TypeOfService,
     IcmpTypeFilter,
+    SendBuffer,
+    ReceiveBuffer,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -291,6 +315,7 @@ pub(super) enum SocketOptionValue {
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+    BufferSize(usize),
 }
 
 /// Stable peer identity retained by a local IPC connection owner.
@@ -313,8 +338,13 @@ pub(super) enum SocketOptionMutation {
     Ipv4TimeToLive(u8),
     Ipv4TypeOfService(u8),
     IcmpTypeFilter(u32),
+    // Netlink keeps its accepted exact positive budgets. Ordinary Linux
+    // socket-buffer hints use the variants below and are normalized by the
+    // concrete owner; remove this split if Netlink adopts that same ABI.
     SendBuffer(usize),
     ReceiveBuffer(usize),
+    SendBufferHint(usize),
+    ReceiveBufferHint(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -515,6 +545,10 @@ pub(super) struct SocketOps {
         Option<fn(&AnyOpaque, SocketOptionQuery) -> Result<SocketOptionValue, SocketOptionError>>,
     pub(super) mutate_option:
         Option<fn(&AnyOpaque, SocketOptionMutation) -> Result<(), SocketOptionError>>,
+    /// Typed family control dispatch. Raw commands, user pointers and
+    /// `IoctlCtx` remain in the common FileOps adapter.
+    pub(super) ioctl:
+        Option<fn(&AnyOpaque, SocketIoctlRequest) -> Result<SocketIoctlResponse, SocketIoctlError>>,
     pub(super) detach_ipv4_extended_error:
         Option<fn(&AnyOpaque) -> Result<SocketIpv4ExtendedError, SocketReceiveError>>,
     pub(super) poll:
@@ -635,6 +669,13 @@ impl Socket {
         self.ops
             .mutate_option
             .ok_or(SocketOptionError::Unsupported)?(&self.private, mutation)
+    }
+
+    pub(super) fn ioctl(
+        &self,
+        request: SocketIoctlRequest,
+    ) -> Result<SocketIoctlResponse, SocketIoctlError> {
+        self.ops.ioctl.ok_or(SocketIoctlError::Unsupported)?(&self.private, request)
     }
 
     pub(super) fn detach_ipv4_extended_error(

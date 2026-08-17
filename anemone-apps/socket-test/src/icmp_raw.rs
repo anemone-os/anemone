@@ -19,7 +19,7 @@ use anemone_rs::{
     os::linux::{
         fs::{
             EpollCreateFlags, EpollCtlOp, Fd, close, dup, epoll_create1, epoll_ctl, epoll_wait,
-            fcntl_getfd, fcntl_getfl, ppoll, pselect, read, write,
+            fcntl_getfd, fcntl_getfl, ioctl_readable_bytes, ppoll, pselect, read, write,
         },
         net::{
             MessageFlags, SocketFlags, bind_ipv4, bind_raw, connect_ipv4, connect_raw,
@@ -241,6 +241,30 @@ fn isolate_echo_request_receive(fd: Fd) -> Result<(), Errno> {
     // answered by ordinary ICMP. These request-focused cases exclude that
     // second, legitimate Echo Reply through the Linux ICMP_FILTER ABI.
     set_option(fd, SOL_RAW, ICMP_FILTER, 1 << ECHO_REPLY)
+}
+
+fn test_fionread_reports_the_next_ipv4_packet_without_consuming() -> Result<(), Errno> {
+    let fd = icmp_raw_socket(SocketFlags::NONBLOCK)?;
+    isolate_echo_request_receive(fd)?;
+    ensure(ioctl_readable_bytes(fd)? == 0)?;
+    ensure(send_echo(fd, LOOPBACK, 0xf101, 1)? > 0)?;
+    let mut readable = 0;
+    for _ in 0..RECEIVE_RETRIES {
+        readable = ioctl_readable_bytes(fd)?;
+        if readable != 0 {
+            break;
+        }
+        sched_yield()?;
+    }
+    ensure(readable != 0)?;
+    ensure(ioctl_readable_bytes(fd)? == readable)?;
+    let mut packet = [0u8; 128];
+    let peeked = peek_echo(fd, 0xf101, 1, &mut packet)?;
+    ensure(peeked == readable)?;
+    let received = receive_echo(fd, ECHO_REQUEST, 0xf101, 1, &mut packet)?;
+    ensure(received == readable)?;
+    ensure(ioctl_readable_bytes(fd)? == 0)?;
+    close(fd)
 }
 
 fn test_creation_permission_flags_and_rollback() -> Result<(), Errno> {
@@ -915,6 +939,10 @@ pub(crate) fn run() -> Result<(), Errno> {
     results.case(
         "filter-loopback-roundtrip",
         test_filter_and_loopback_roundtrip,
+    );
+    results.case(
+        "fionread-next-ipv4-packet",
+        test_fionread_reports_the_next_ipv4_packet_without_consuming,
     );
     results.case(
         "dup-fork-cloexec-final-close",

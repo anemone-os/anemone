@@ -86,9 +86,11 @@ load失败后继续initial userspace，或把selection order解释为source/bind
 
 **验证 / Enforcement：** SystemTarget serde/schema拒绝未知或跨层字段、非法/重复Nemophila identity及非法interface/address/prefix/gateway；
 tracked target覆盖Platform、root、两类initial-program source和optional static IPv4。preset与完整tuple通过同一
-resolver取得同一target snapshot；build从该snapshot生成private `network_defs.rs`与`nemophila_defs.rs`，kernel只消费有限typed
-input而不解析SystemTarget TOML。module build-failure/non-regular/oversized与双架构boot-negative/positive证据闭合required load；
-generated projection被clean/ignore规则覆盖，不成为canonical truth。
+resolver取得同一target snapshot；kernel只消费有限typed input而不解析SystemTarget TOML。build将root、initial program、static
+network deployment与Nemophila catalog合并生成private `system_target_defs.rs`；各kernel consumer拥有projection type，生成文件只构造
+immutable value。module
+build-failure/non-regular/oversized与双架构boot-negative/positive证据闭合required load；generated projection被clean/ignore规则覆盖，
+不成为canonical truth，也不参与rustfmt。
 
 **最初来源：** [System Target Model RFC R6](../../rfcs/system-target-model/invariants.md#stm-target-001---system-target-是-bootdeploy-contract)。
 

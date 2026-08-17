@@ -7,7 +7,10 @@ use anemone_rs::{
         time::linux::TimeSpec,
     },
     os::linux::{
-        fs::{AtFd, PipeFlags, close, dup, fstat, fstatat, pipe2, ppoll, read, write},
+        fs::{
+            AtFd, PipeFlags, close, dup, fstat, fstatat, ioctl_readable_bytes, pipe2, ppoll, read,
+            write,
+        },
         process::{exit, fork},
         tty::pty_open_peer,
     },
@@ -85,11 +88,13 @@ pub fn test_description_lifecycle() -> Result<(), Errno> {
     first_alias.close()?;
 
     write_all(second.raw(), b"still-live")?;
+    second.close()?;
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 10)?;
     let mut output = [0u8; 10];
     read_exact(pair.master.raw(), &mut output)?;
     ensure(&output == b"still-live")?;
-    second.close()?;
     let mut absent = [0u8; 1];
+    ensure(ioctl_readable_bytes(pair.master.raw())? == 0)?;
     expect_errno(read(pair.master.raw(), &mut absent), EIO)?;
     let mut peer_state = [PollFd {
         fd: pair.master.raw() as i32,
@@ -115,6 +120,7 @@ pub fn test_description_lifecycle() -> Result<(), Errno> {
     let peer = OwnedFd::new(pty_open_peer(master_alias.raw(), O_RDWR | O_NOCTTY)?);
     peer.close()?;
     master_alias.close()?;
+    expect_errno(ioctl_readable_bytes(reopened.raw()), EIO)?;
     ensure(read(reopened.raw(), &mut absent)? == 0)
 }
 

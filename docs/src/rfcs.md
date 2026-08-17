@@ -49,6 +49,11 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
 
 ### 其它领域
 
+- [RFC-20260816-signalfd](./rfcs/signalfd/index.md)：Accepted R0；为RV64/LA64引入native `signalfd4(2)`，让anonymous opened
+  description共享mask，并按current caller同步消费Signal owner的private/shared pending occurrence；blocking read与
+  direct poll通过pending-before-hint、dynamic route、register-before-rescan和live final predicate闭合普通lost wake，epoll
+  保持Linux registration-ThreadGroup边界。R0固定ABI诚实性、owner/handoff与KUnit+源码审查+双架构`signalfd-test`+RV64
+  LTP验证下限，不扩建通用框架，target外的偏僻Linux完整性按证据记录。
 - [RFC-20260808-jh7110-gmac](./rfcs/jh7110-gmac/index.md)：Closed / R5；为 VisionFive 2 上任意有限数量的
   matching JH7110 GMAC 节点交付 per-node one-time driver、命名 `macirq`、coherent DMA、boot-time Motorcomm
   PHY 初始化、成功 publication candidate 在 attach admission 时连续消费的 `eth<N>` 和现有单接口 static IPv4
@@ -68,6 +73,12 @@ RFC Closed 前，实现反馈可以在 accepted target 内修正路线；改变 
   owner-driven rebuild与ordered boot-fatal embedded load、single tagged-source management/fd snapshot、只读proc projection和
   双架构acceptance。`NEMOPHILA-R0-CUTOVER`已建立Nemophila current contract并Refine `STM-TARGET-001`；pre-RFC
   [定位共识](./rfcs/nemophila/backgrounds/positionings.md)已冻结为不再维护的历史材料。
+- [RFC-20260816-frame-order0-magazine](./rfcs/frame-order0-magazine/index.md)：Accepted R0 / Not Effective；在`mm::frame`
+  owner内为order-0 frame引入bounded current-CPU magazine，使local hit不获取shared buddy lock，只在empty / full
+  boundary通过detached batch交换；通过admission的buddy availability miss逐slot sweep全部magazine后retry once。
+  `npages > 1`继续buddy-only，frame RAII、global accounting与OOM observer语义保持；源码审查、owner-local KUnit、
+  KernelConfig拒绝、双架构release build、RV64 SMP2 focused cross-CPU production path与KUnit/ordinary boot构成未来
+  唯一`FRAME-MAGAZINE-CUTOVER`的结构性验收，数值性能由维护者另行测量。implementation仍为Not Started。
 - [RFC-20260815-kernel-slab-allocator](./rfcs/kernel-slab-allocator/index.md)：Closed R0；在`mm::kmalloc`
   owner内以slab class、bounded per-CPU local cache和shared central class替换small-object global-lock
   common path，Talc继续承担bootstrap/span backing与large/special-layout fallback。首版允许任意CPU释放到

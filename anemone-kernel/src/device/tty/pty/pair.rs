@@ -406,6 +406,14 @@ impl PtyMasterDescription {
         }
     }
 
+    pub(super) fn readable_bytes(&self) -> Result<usize, SysError> {
+        let _operation = self.pair.operation.lock();
+        if !self.is_live() {
+            return Err(SysError::IO);
+        }
+        Ok(self.pair.terminal.output_readable_bytes())
+    }
+
     pub(super) fn write(
         &self,
         source: &[u8],

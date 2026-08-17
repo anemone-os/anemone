@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/crates/anemone-net-api/src/tcp.rs`、`anemone-kernel/crates/anemone-smoltcp-stack/src/tcp/`、`anemone-kernel/src/fs/socket/tcp/`
 **依赖：** `NET-CONTROL-PLANE-001`、`NET-STACK-PUMP-001`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-WAIT-001`、`SOCKET-FRONT-001`、`SOCKET-ABI-001`、`SOCKET-WAIT-001`、`OPENED-DESC-001..003`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-14；`TCP-LISTENER-INGRESS-CUTOVER` Effective
+**最后核验：** 2026-08-17
 
 ## 状态与能力所有权
 
@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | local binding、port reservation、role与connection outcome | Stack TCP owner | opaque Endpoint identity、typed request/outcome | bind/listen/connect与query |
 | logical listener、private ingress projection、pending/claimed child与aggregate backlog admission | Stack TCP owner | accept predicate与一次性child handoff capability | bounded passive-open与accept rollback |
-| RX/TX bytes、FIN/RST、shutdown direction、async cause与option fact | Stack TCP owner | point-in-time facts与operation-local reservation | stream commit、error与readiness |
+| RX/TX bytes、有效buffer预算、FIN/RST、shutdown direction、async cause与option fact | Stack TCP owner | point-in-time facts与operation-local reservation | stream commit、admission、error与readiness |
 | local-address validation及active route、source与interface selection | IPv4 control plane | operation-local immutable selection | bind validation与active egress的唯一policy decision |
 | Linux tuple、sockaddr、flags、copy、errno与signal | Socket ABI adapter | normalized request/value与typed outcome | Linux-visible projection |
 | fd publication与semantic final release | opened-description owner | static final-release hook与unpublished reservation | rollback、dup/fork与exactly-once retirement |
@@ -50,6 +50,10 @@ selection/admission failure保持可区分typed cause，不从merged closed stat
 uniqueness或模拟`SO_REUSEPORT`。capacity full、stale identity与invalid role均返回typed rejection/backpressure，不能
 panic、busy-spin、fallback到private handle或建立第二registry。
 
+每个idle、bound、listener或connection Endpoint还唯一拥有方向性有效send/receive预算；Kconfig固定ring容量只是
+物理上限。accepted child在Stack handoff时复制listener当前预算，之后独立；共享opened description及`dup`只观察同一
+Endpoint truth。engine中的capacity limit只是owner预算的协议投影，不能反向驱动Endpoint query或被其它层独立修改。
+
 **违反表现：** Socket缓存local/peer/role或connect result；control plane拥有port reservation或为listen伪造destination
 selection；per-interface projection分别维护backlog/queue/credit；engine completed state直接成为pending truth；copyout失败后
 child仍可accept；timeout/RST合并后猜errno；或test/caller直接选择engine slot。
@@ -63,7 +67,8 @@ connect、accept/accept4、name/query、fault与fd rollback。
 
 **当前来源：** 同上；Checkpoint 5A closure，以及
 [TCP listener ingress publication RFC R0](../../rfcs/tcp-listener-ingress-publication/index.md)的
-`TCP-LISTENER-INGRESS-CUTOVER`与focused Git/PR evidence。
+`TCP-LISTENER-INGRESS-CUTOVER`与focused Git/PR evidence；随后由
+[TCP Socket Buffer Budgets小迭代](../../devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md) Refine有效预算与accept继承。
 
 ## NET-TCP-STREAM-001 — 字节流commit、terminal precedence与readiness读取owner fact
 
@@ -71,6 +76,12 @@ connect、accept/accept4、name/query、fault与fd rollback。
 pending async cause与`TCP_NODELAY`。send/receive transaction只提交已经成功copy且被owner接受或消费的prefix；operation-
 local receive reservation必须exactly once resolve，不延长opened-description lifecycle。已缓冲receive bytes先于EOF或
 terminal error交付；orderly FIN在buffer耗尽后返回0，established RST产生`ECONNRESET`，不得伪装成EOF。
+
+普通`SO_SNDBUF/SO_RCVBUF`选择的有效预算限制后续send admission与advertised receive window，但不重分配固定ring。
+缩小到current occupancy以下不得丢弃已排队bytes：send admission与advertised receive window保持关闭，直到队列排空
+到新预算以下；此前窗口已授权的in-flight receive bytes仍可进入物理ring。增大必须经既有invalidation/progression使
+blocked sender与receive-window重新检查。`getsockopt`报告owner实际采用的预算而非allocation大小；本契约不据此承诺
+autotuning、sysctl/memcg accounting或内存回收。
 
 connect、accept、send与receive/EOF分别读取对应owner-defined predicate。Socket、poll/select与epoll只使用point-in-
 time fact和`snapshot -> register -> recheck/final scan`；invalidation只提示重算，不携带ready mask、errno或结果。
@@ -91,7 +102,8 @@ blocking路径维护私有phase；notification直接决定return；caller按TCP 
 
 **最初来源：** [IPv4 TCP Socket RFC R0](../../rfcs/net-tcp/index.md)的`NET-TCP-CUTOVER`。
 
-**当前来源：** 同上；Checkpoint 5A closure与focused Git/PR evidence。
+**当前来源：** 同上；Checkpoint 5A closure与focused Git/PR evidence；随后由
+[TCP Socket Buffer Budgets小迭代](../../devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md) Refine有效预算的stream行为。
 
 ## NET-TCP-LIFECYCLE-001 — Socket publication与protocol reclaim分离
 
@@ -122,4 +134,6 @@ invalidation、generation reuse、orphan/TIME_WAIT/deferred reclaim与shutdown-o
 - 原TCP closure evidence覆盖owner host `20/20`、focused smoltcp TCP `178/178`、RV64 KUnit `466/466`、LA64 KUnit `471/471`、四份glibc/musl C consumer、双架构`socket-test` TCP `8/8`、remote peer stream/RST `4/4`、并发CAgent与shared Socket/UDP/ICMP raw/Unix回归。
 - listener-ingress closure新增owner host `10/10`，并通过完整`just test net-host`与xtask `93/93`；RV64 `639/639`、LA64 `642/642` KUnit及双架构双libc focused consumer均通过wildcard/external-specific local self-connect与hostfwd ingress、loopback hostfwd负向case、raw sock-diag、`ss -tan`、remote stream/FIN/RST和CAgent回归。
 - RV64 orderly shutdown且wrapper exit 0；LA64完成`filesystem -> network -> device -> PowerOff`后因无成功power-off handler停在halt并人工终止，不能作为wrapper exit-0证据。
+- TCP socket-buffer预算增量通过public xref Linux 6.6.32 source review、完整`just test net-host`、xtask `109/109`、
+  RV64 KUnit `776/776`与focused `SOCKBUFTEST 2/2`；LA64按本迭代授权Not Run。
 - physical hardware、`smp > 1`、其它NIC/provider/deployment、runtime hotplug、多external interface、IPv6、full network LTP、完整final harness及压力/长时backlog均Not Run。

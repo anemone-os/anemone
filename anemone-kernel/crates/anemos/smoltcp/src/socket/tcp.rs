@@ -490,6 +490,11 @@ pub struct Socket<'a> {
     rx_buffer: SocketBuffer<'a>,
     rx_fin_received: bool,
     tx_buffer: SocketBuffer<'a>,
+    /// Effective payload-byte ceilings selected by the embedding TCP owner.
+    /// `None` derives directly from the ring, avoiding a duplicate default
+    /// capacity truth; `Some` is bounded by that immutable backing limit.
+    rx_capacity_limit: Option<usize>,
+    tx_capacity_limit: Option<usize>,
     /// Interval after which, if no inbound packets are received, the connection
     /// is aborted.
     timeout: Option<Duration>,
@@ -587,7 +592,6 @@ impl<'a> Socket<'a> {
     {
         let (rx_buffer, tx_buffer) = (rx_buffer.into(), tx_buffer.into());
         let rx_capacity = rx_buffer.capacity();
-
         // From RFC 1323:
         // [...] the above constraints imply that 2 * the max window size must be less
         // than 2**31 [...] Thus, the shift count must be limited to 14 (which allows
@@ -607,6 +611,8 @@ impl<'a> Socket<'a> {
             tx_buffer,
             rx_buffer,
             rx_fin_received: false,
+            rx_capacity_limit: None,
+            tx_capacity_limit: None,
             timeout: None,
             keep_alive: None,
             hop_limit: None,
@@ -786,7 +792,7 @@ impl<'a> Socket<'a> {
     /// Used in internal calculations as well as packet generation.
     #[inline]
     fn scaled_window(&self) -> u16 {
-        u16::try_from(self.rx_buffer.window() >> self.remote_win_shift).unwrap_or(u16::MAX)
+        u16::try_from(self.recv_window() >> self.remote_win_shift).unwrap_or(u16::MAX)
     }
 
     /// Return the last window field value, including scaling according to RFC
@@ -1277,19 +1283,43 @@ impl<'a> Socket<'a> {
             return false;
         }
 
-        !self.tx_buffer.is_full()
+        self.send_queue() < self.send_capacity()
     }
 
     /// Return the maximum number of bytes inside the recv buffer.
     #[inline]
     pub fn recv_capacity(&self) -> usize {
-        self.rx_buffer.capacity()
+        self.rx_capacity_limit
+            .unwrap_or_else(|| self.rx_buffer.capacity())
     }
 
     /// Return the maximum number of bytes inside the transmit buffer.
     #[inline]
     pub fn send_capacity(&self) -> usize {
-        self.tx_buffer.capacity()
+        self.tx_capacity_limit
+            .unwrap_or_else(|| self.tx_buffer.capacity())
+    }
+
+    /// Set the effective receive ceiling without reallocating or discarding the
+    /// existing ring. A shrink below current occupancy therefore advertises a
+    /// zero window until userspace drains below the new limit.
+    pub fn set_recv_capacity_limit(&mut self, capacity: usize) {
+        assert!(capacity > 0 && capacity <= self.rx_buffer.capacity());
+        self.rx_capacity_limit = Some(capacity);
+    }
+
+    /// Set the effective send ceiling without reallocating or discarding the
+    /// existing ring. Already queued bytes remain valid after a shrink.
+    pub fn set_send_capacity_limit(&mut self, capacity: usize) {
+        assert!(capacity > 0 && capacity <= self.tx_buffer.capacity());
+        self.tx_capacity_limit = Some(capacity);
+    }
+
+    #[inline]
+    fn recv_window(&self) -> usize {
+        self.rx_buffer
+            .window()
+            .min(self.recv_capacity().saturating_sub(self.rx_buffer.len()))
     }
 
     /// Check whether the receive buffer is not empty.
@@ -1346,7 +1376,13 @@ impl<'a> Socket<'a> {
     where
         F: FnOnce(&'b mut [u8]) -> (usize, R),
     {
-        self.send_impl(|tx_buffer| tx_buffer.enqueue_many_with(f))
+        let available = self.send_capacity().saturating_sub(self.tx_buffer.len());
+        self.send_impl(|tx_buffer| {
+            tx_buffer.enqueue_many_with(|slice| {
+                let length = slice.len().min(available);
+                f(&mut slice[..length])
+            })
+        })
     }
 
     /// Enqueue a sequence of octets to be sent, and fill it from a slice.
@@ -1357,8 +1393,9 @@ impl<'a> Socket<'a> {
     ///
     /// See also [send](#method.send).
     pub fn send_slice(&mut self, data: &[u8]) -> Result<usize, SendError> {
+        let available = self.send_capacity().saturating_sub(self.tx_buffer.len());
         self.send_impl(|tx_buffer| {
-            let size = tx_buffer.enqueue_slice(data);
+            let size = tx_buffer.enqueue_slice(&data[..data.len().min(available)]);
             (size, size)
         })
     }
@@ -2605,7 +2642,7 @@ impl<'a> Socket<'a> {
                 repr.control = TcpControl::Syn;
                 repr.seq_number = self.local_seq_no;
                 // window len must NOT be scaled in SYNs.
-                repr.window_len = u16::try_from(self.rx_buffer.window()).unwrap_or(u16::MAX);
+                repr.window_len = u16::try_from(self.recv_window()).unwrap_or(u16::MAX);
                 if self.state == State::SynSent {
                     repr.ack_number = None;
                     repr.window_scale = Some(self.remote_win_shift);

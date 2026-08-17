@@ -31,6 +31,8 @@ pub struct TcpPolicy {
     listener_projection_capacity: usize,
     rx_buffer_bytes: usize,
     tx_buffer_bytes: usize,
+    min_rx_buffer_bytes: usize,
+    min_tx_buffer_bytes: usize,
     deferred_reclaim_capacity: usize,
     connect_timeout_ms: usize,
     orphan_timeout_ms: usize,
@@ -47,6 +49,8 @@ impl TcpPolicy {
         listener_projection_capacity: usize,
         rx_buffer_bytes: usize,
         tx_buffer_bytes: usize,
+        min_rx_buffer_bytes: usize,
+        min_tx_buffer_bytes: usize,
         deferred_reclaim_capacity: usize,
         connect_timeout_ms: usize,
         orphan_timeout_ms: usize,
@@ -60,6 +64,8 @@ impl TcpPolicy {
             listener_projection_capacity,
             rx_buffer_bytes,
             tx_buffer_bytes,
+            min_rx_buffer_bytes,
+            min_tx_buffer_bytes,
             deferred_reclaim_capacity,
             connect_timeout_ms,
             orphan_timeout_ms,
@@ -79,12 +85,43 @@ impl TcpPolicy {
     pub(crate) const fn connect_timeout_ms(self) -> usize {
         self.connect_timeout_ms
     }
+
+    pub(crate) const fn default_receive_budget(self) -> usize {
+        self.rx_buffer_bytes
+    }
+
+    pub(crate) const fn default_send_budget(self) -> usize {
+        self.tx_buffer_bytes
+    }
+
+    pub(crate) const fn normalize_receive_buffer_hint(self, requested: usize) -> usize {
+        normalize_buffer_hint(requested, self.min_rx_buffer_bytes, self.rx_buffer_bytes)
+    }
+
+    pub(crate) const fn normalize_send_buffer_hint(self, requested: usize) -> usize {
+        normalize_buffer_hint(requested, self.min_tx_buffer_bytes, self.tx_buffer_bytes)
+    }
+}
+
+const fn normalize_buffer_hint(requested: usize, minimum: usize, maximum: usize) -> usize {
+    let doubled = requested.saturating_mul(2);
+    if doubled < minimum {
+        minimum
+    } else if doubled > maximum {
+        maximum
+    } else {
+        doubled
+    }
 }
 
 pub(crate) struct EndpointSlot {
     id: Option<TcpEndpointId>,
     pub(crate) reuse_address: bool,
     pub(crate) no_delay: bool,
+    /// Effective payload-byte budgets owned by this Endpoint. The engine ring
+    /// allocations remain the immutable physical ceilings in `TcpPolicy`.
+    pub(crate) receive_budget: usize,
+    pub(crate) send_budget: usize,
     pub(crate) role: EndpointRole,
 }
 
@@ -210,6 +247,14 @@ pub(crate) struct TcpEndpoints {
 impl TcpEndpoints {
     pub(crate) fn new(policy: TcpPolicy) -> Self {
         assert!(
+            policy.min_rx_buffer_bytes > 0 && policy.min_rx_buffer_bytes <= policy.rx_buffer_bytes,
+            "TCP minimum receive budget must fit the receive ring"
+        );
+        assert!(
+            policy.min_tx_buffer_bytes > 0 && policy.min_tx_buffer_bytes <= policy.tx_buffer_bytes,
+            "TCP minimum send budget must fit the send ring"
+        );
+        assert!(
             policy.deferred_reclaim_capacity >= policy.engine_timer_capacity,
             "TCP deferred reclaim storage must cover every protocol engine"
         );
@@ -219,6 +264,8 @@ impl TcpEndpoints {
                 id: None,
                 reuse_address: false,
                 no_delay: false,
+                receive_budget: policy.default_receive_budget(),
+                send_budget: policy.default_send_budget(),
                 role: EndpointRole::Vacant,
             });
         }
@@ -305,9 +352,15 @@ impl TcpEndpoints {
     pub(crate) fn add_listener_engine(
         &mut self,
         sockets: &mut SocketSet<'static>,
+        listener: TcpEndpointId,
         binding: TcpLocalBinding,
     ) -> SocketHandle {
+        let endpoint = self
+            .endpoint(listener)
+            .expect("TCP listener engine needs a live Endpoint owner");
+        let (receive_budget, send_budget) = (endpoint.receive_budget, endpoint.send_budget);
         let mut socket = tcp_socket(self.policy);
+        apply_socket_budgets(&mut socket, receive_budget, send_budget);
         socket
             .listen(to_smoltcp_listen(binding))
             .expect("owner-validated TCP listener binding must be valid");
@@ -343,6 +396,15 @@ pub(crate) fn tcp_socket(policy: TcpPolicy) -> tcp::Socket<'static> {
         tcp::SocketBuffer::new(vec![0; policy.rx_buffer_bytes]),
         tcp::SocketBuffer::new(vec![0; policy.tx_buffer_bytes]),
     )
+}
+
+pub(crate) fn apply_socket_budgets(
+    socket: &mut tcp::Socket<'_>,
+    receive_budget: usize,
+    send_budget: usize,
+) {
+    socket.set_recv_capacity_limit(receive_budget);
+    socket.set_send_capacity_limit(send_budget);
 }
 
 pub(crate) fn completed_child_state(state: tcp::State) -> bool {
@@ -406,8 +468,9 @@ mod tests {
 
     const LOCAL: Ipv4Address = Ipv4Address::new([127, 0, 0, 1]);
     const LISTEN_PORT: u16 = 2345;
-    const POLICY: TcpPolicy =
-        TcpPolicy::new(64, 64, 10, 2, 32, 32, 64, 60_000, 60_000, 40000, 40063);
+    const POLICY: TcpPolicy = TcpPolicy::new(
+        64, 64, 10, 2, 32, 32, 4, 4, 64, 60_000, 60_000, 40000, 40063,
+    );
 
     fn test_stack(policy: TcpPolicy) -> (Stack, InterfaceId) {
         let mut stack = Stack::with_policy(StackPolicy::new(
@@ -841,7 +904,7 @@ mod tests {
     fn every_engine_can_enter_preallocated_reclaim_without_cleanup_failure() {
         const CAPACITY: usize = 12;
         let policy = TcpPolicy::new(
-            16, CAPACITY, 10, 2, 16, 16, CAPACITY, 60_000, 60_000, 41000, 41015,
+            16, CAPACITY, 10, 2, 16, 16, 2, 2, CAPACITY, 60_000, 60_000, 41000, 41015,
         );
         let (mut stack, interface) = test_stack(policy);
         let mut endpoints = Vec::new();
@@ -889,7 +952,7 @@ mod tests {
 
     #[test]
     fn endpoint_engine_and_ephemeral_capacity_fail_typed_and_recover() {
-        let policy = TcpPolicy::new(2, 1, 1, 2, 16, 16, 1, 60_000, 60_000, 43000, 43000);
+        let policy = TcpPolicy::new(2, 1, 1, 2, 16, 16, 2, 2, 1, 60_000, 60_000, 43000, 43000);
         let (mut stack, interface) = test_stack(policy);
         let first = stack.create_tcp_endpoint().unwrap();
         let second = stack.create_tcp_endpoint().unwrap();
@@ -1039,7 +1102,7 @@ mod tests {
 
     #[test]
     fn connecting_timeout_is_preserved_as_a_typed_owner_observation() {
-        let policy = TcpPolicy::new(64, 64, 10, 2, 32, 32, 64, 1, 60_000, 40000, 40063);
+        let policy = TcpPolicy::new(64, 64, 10, 2, 32, 32, 4, 4, 64, 1, 60_000, 40000, 40063);
         let (mut stack, interface) = test_stack(policy);
         let endpoint = stack.create_tcp_endpoint().unwrap();
         let _ = stack
@@ -1177,7 +1240,7 @@ mod tests {
 
     #[test]
     fn implicit_connect_skips_an_exact_reused_tuple() {
-        let policy = TcpPolicy::new(8, 8, 1, 2, 32, 32, 8, 60_000, 60_000, 40000, 40001);
+        let policy = TcpPolicy::new(8, 8, 1, 2, 32, 32, 4, 4, 8, 60_000, 60_000, 40000, 40001);
         let (mut stack, interface) = test_stack(policy);
         let listener = stack.create_tcp_endpoint().unwrap();
         stack
@@ -1227,7 +1290,7 @@ mod tests {
 
     #[test]
     fn local_reverse_time_wait_reserves_the_active_ephemeral_tuple() {
-        let policy = TcpPolicy::new(16, 16, 1, 2, 32, 32, 16, 60_000, 60_000, 40000, 40001);
+        let policy = TcpPolicy::new(16, 16, 1, 2, 32, 32, 4, 4, 16, 60_000, 60_000, 40000, 40001);
         let (mut stack, interface) = test_stack(policy);
         let (listener, client, accepted) = connected_pair(&mut stack, interface, 25021, 0);
         let first_port = stack.protocols.tcp.connection(client).unwrap().local.port();
@@ -1667,6 +1730,80 @@ mod tests {
     }
 
     #[test]
+    fn socket_buffer_hints_bound_engines_and_inherit_through_accept() {
+        let (mut stack, interface) = test_stack(POLICY);
+        let listener = stack.create_tcp_endpoint().unwrap();
+        assert_eq!(stack.tcp_receive_buffer(listener), Ok(32));
+        assert_eq!(stack.tcp_send_buffer(listener), Ok(32));
+        stack.set_tcp_receive_buffer_hint(listener, 5).unwrap();
+        stack.set_tcp_send_buffer_hint(listener, 6).unwrap();
+        assert_eq!(stack.tcp_receive_buffer(listener), Ok(10));
+        assert_eq!(stack.tcp_send_buffer(listener), Ok(12));
+        stack
+            .bind_tcp_endpoint(listener, TcpBindRequest::new(LOCAL, 25022))
+            .unwrap();
+        stack
+            .listen_tcp_endpoint_with_backlog(
+                listener,
+                Ipv4Address::UNSPECIFIED,
+                TcpListenBacklog::new(1),
+            )
+            .unwrap();
+
+        let client = stack.create_tcp_endpoint().unwrap();
+        stack.set_tcp_receive_buffer_hint(client, 0).unwrap();
+        stack.set_tcp_send_buffer_hint(client, usize::MAX).unwrap();
+        assert_eq!(stack.tcp_receive_buffer(client), Ok(4));
+        assert_eq!(stack.tcp_send_buffer(client), Ok(32));
+        let _ = stack
+            .start_tcp_connect(
+                client,
+                Ipv4EgressSelection::new(interface, LOCAL),
+                TcpPeer::new(LOCAL, 25022),
+            )
+            .unwrap();
+        drive(&mut stack, interface, 0);
+        let child = stack
+            .claim_tcp_pending_child(listener)
+            .unwrap()
+            .expect("buffer inheritance pair must publish a child");
+        let accepted = stack.take_tcp_child(child).unwrap();
+        assert_eq!(stack.tcp_receive_buffer(accepted), Ok(10));
+        assert_eq!(stack.tcp_send_buffer(accepted), Ok(12));
+
+        stack.set_tcp_send_buffer_hint(accepted, 6).unwrap();
+        assert_eq!(stack.send_tcp_stream(accepted, b"12345678").unwrap().0, 8);
+        stack.set_tcp_send_buffer_hint(accepted, 0).unwrap();
+        let connection = stack.protocols.tcp.connection(accepted).unwrap();
+        let socket = stack
+            .local
+            .as_ref()
+            .unwrap()
+            .sockets
+            .get::<tcp::Socket>(connection.handle);
+        assert_eq!(socket.send_capacity(), 4);
+        assert_eq!(socket.send_queue(), 8);
+        assert_eq!(
+            stack.send_tcp_stream(accepted, b"x"),
+            Err(TcpStreamSendError::WouldBlock)
+        );
+        stack
+            .set_tcp_send_buffer_hint(accepted, usize::MAX)
+            .unwrap();
+        assert_eq!(stack.send_tcp_stream(accepted, b"x").unwrap().0, 1);
+
+        stack.set_tcp_receive_buffer_hint(accepted, 0).unwrap();
+        let connection = stack.protocols.tcp.connection(accepted).unwrap();
+        let socket = stack
+            .local
+            .as_ref()
+            .unwrap()
+            .sockets
+            .get::<tcp::Socket>(connection.handle);
+        assert_eq!(socket.recv_capacity(), 4);
+    }
+
+    #[test]
     fn nodelay_and_release_reason_drive_engine_policy_and_cleanup() {
         let (mut stack, interface) = test_stack(POLICY);
         let listener = stack.create_tcp_endpoint().unwrap();
@@ -1764,7 +1901,7 @@ mod tests {
 
     #[test]
     fn final_release_timeout_is_engine_owned_and_reclaims_an_orphan() {
-        let policy = TcpPolicy::new(64, 64, 10, 2, 32, 32, 64, 60_000, 1, 40000, 40063);
+        let policy = TcpPolicy::new(64, 64, 10, 2, 32, 32, 4, 4, 64, 60_000, 1, 40000, 40063);
         let (mut stack, interface) = test_stack(policy);
         let (_, client, _accepted) = connected_pair(&mut stack, interface, 25010, 0);
         let handle = stack.protocols.tcp.connection(client).unwrap().handle;

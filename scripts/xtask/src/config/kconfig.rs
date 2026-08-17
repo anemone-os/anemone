@@ -54,6 +54,8 @@ pub struct Parameters {
     pub slab_max_object_bytes: Option<usize>,
     pub slab_local_capacity: Option<usize>,
     pub slab_transfer_batch: Option<usize>,
+    pub frame_magazine_capacity: Option<usize>,
+    pub frame_magazine_batch: Option<usize>,
     pub log_buffer_shift_kb: Option<u64>,
     pub log_record_shift_bytes: Option<u64>,
     pub print_log_level: Option<u8>,
@@ -61,6 +63,7 @@ pub struct Parameters {
     pub kstack_shift_kb: Option<u64>,
     pub riscv64_tlb_flush_all_threshold_pages: Option<usize>,
     pub loongarch64_tlb_flush_all_min_pages: Option<usize>,
+    pub user_fault_window_pages: Option<usize>,
     pub remap_shift_gb: Option<u64>,
     pub max_logical_cpus: Option<usize>,
     pub max_ident_len_bytes: Option<usize>,
@@ -165,6 +168,8 @@ pub struct Parameters {
     pub net_tcp_listener_projection_capacity: Option<usize>,
     pub net_tcp_rx_buffer_bytes: Option<usize>,
     pub net_tcp_tx_buffer_bytes: Option<usize>,
+    pub net_tcp_min_rx_buffer_bytes: Option<usize>,
+    pub net_tcp_min_tx_buffer_bytes: Option<usize>,
     pub net_tcp_deferred_reclaim_capacity: Option<usize>,
     pub net_tcp_connect_timeout_ms: Option<usize>,
     pub net_tcp_orphan_timeout_ms: Option<usize>,
@@ -197,6 +202,8 @@ impl Parameters {
         materialize!(slab_max_object_bytes);
         materialize!(slab_local_capacity);
         materialize!(slab_transfer_batch);
+        materialize!(frame_magazine_capacity);
+        materialize!(frame_magazine_batch);
         materialize!(log_buffer_shift_kb);
         materialize!(log_record_shift_bytes);
         materialize!(print_log_level);
@@ -204,6 +211,7 @@ impl Parameters {
         materialize!(kstack_shift_kb);
         materialize!(riscv64_tlb_flush_all_threshold_pages);
         materialize!(loongarch64_tlb_flush_all_min_pages);
+        materialize!(user_fault_window_pages);
         materialize!(remap_shift_gb);
         materialize!(max_logical_cpus);
         materialize!(max_ident_len_bytes);
@@ -308,6 +316,8 @@ impl Parameters {
         materialize!(net_tcp_listener_projection_capacity);
         materialize!(net_tcp_rx_buffer_bytes);
         materialize!(net_tcp_tx_buffer_bytes);
+        materialize!(net_tcp_min_rx_buffer_bytes);
+        materialize!(net_tcp_min_tx_buffer_bytes);
         materialize!(net_tcp_deferred_reclaim_capacity);
         materialize!(net_tcp_connect_timeout_ms);
         materialize!(net_tcp_orphan_timeout_ms);
@@ -346,6 +356,10 @@ pub const SLAB_MAX_OBJECT_BYTES: usize = {};
 pub const SLAB_LOCAL_CAPACITY: usize = {};
 /// Maximum free objects moved in one local/central handoff.
 pub const SLAB_TRANSFER_BATCH: usize = {};
+/// Maximum order-0 frames retained in each logical CPU magazine.
+pub const FRAME_MAGAZINE_CAPACITY: usize = {};
+/// Maximum order-0 frames moved in one magazine/buddy handoff.
+pub const FRAME_MAGAZINE_BATCH: usize = {};
 /// Log buffer size as a power of 2 in KB, excluding metadata overhead
 pub const LOG_BUFFER_SHIFT_KB: u64 = {};
 /// Log record size as a power of 2 in bytes
@@ -370,6 +384,9 @@ pub const RISCV64_TLB_FLUSH_ALL_THRESHOLD_PAGES: usize = {};
 /// Minimum LA64 page-range length at which one full local TLB flush replaces
 /// per-page invalidation.
 pub const LOONGARCH64_TLB_FLUSH_ALL_MIN_PAGES: usize = {};
+/// Maximum pages in one actual user-fault locality window, including the
+/// demand page.
+pub const USER_FAULT_WINDOW_PAGES: usize = {};
 /// Remap region size as a power of 2 in GB
 pub const REMAP_SHIFT_GB: u64 = {};
 /// Maximum number of logical CPUs enabled by this kernel
@@ -603,6 +620,10 @@ pub const NET_TCP_LISTENER_PROJECTION_CAPACITY: usize = {};
 pub const NET_TCP_RX_BUFFER_BYTES: usize = {};
 /// Transmit bytes owned by each private TCP engine.
 pub const NET_TCP_TX_BUFFER_BYTES: usize = {};
+/// Smallest effective TCP receive budget exposed by SO_RCVBUF.
+pub const NET_TCP_MIN_RX_BUFFER_BYTES: usize = {};
+/// Smallest effective TCP transmit budget exposed by SO_SNDBUF.
+pub const NET_TCP_MIN_TX_BUFFER_BYTES: usize = {};
 /// TCP engines awaiting final protocol cleanup after retirement.
 pub const NET_TCP_DEFERRED_RECLAIM_CAPACITY: usize = {};
 /// Maximum unanswered active-open interval.
@@ -619,6 +640,8 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(slab_max_object_bytes),
             resolved!(slab_local_capacity),
             resolved!(slab_transfer_batch),
+            resolved!(frame_magazine_capacity),
+            resolved!(frame_magazine_batch),
             resolved!(log_buffer_shift_kb),
             resolved!(log_record_shift_bytes),
             resolved!(print_log_level),
@@ -626,6 +649,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(kstack_shift_kb),
             resolved!(riscv64_tlb_flush_all_threshold_pages),
             resolved!(loongarch64_tlb_flush_all_min_pages),
+            resolved!(user_fault_window_pages),
             resolved!(remap_shift_gb),
             resolved!(max_logical_cpus),
             resolved!(max_ident_len_bytes),
@@ -730,6 +754,8 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(net_tcp_listener_projection_capacity),
             resolved!(net_tcp_rx_buffer_bytes),
             resolved!(net_tcp_tx_buffer_bytes),
+            resolved!(net_tcp_min_rx_buffer_bytes),
+            resolved!(net_tcp_min_tx_buffer_bytes),
             resolved!(net_tcp_deferred_reclaim_capacity),
             resolved!(net_tcp_connect_timeout_ms),
             resolved!(net_tcp_orphan_timeout_ms),

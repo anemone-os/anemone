@@ -4,6 +4,7 @@ mod control_plane;
 mod interfaces;
 mod stack;
 
+pub(crate) use control_plane::StaticIpv4Deployment;
 pub(super) use control_plane::{
     ControlPlaneActivationError, ExternalControlInput, Ipv4ControlPlane, Ipv4Selection,
     SelectionError,
@@ -65,7 +66,7 @@ impl InitialDomain {
 
     pub(super) fn activate_control_plane(
         &mut self,
-        deployment: Option<crate::network_defs::StaticIpv4Deployment>,
+        deployment: Option<StaticIpv4Deployment>,
         external: &[control_plane::ExternalControlInput],
     ) -> Result<(), ControlPlaneActivationError> {
         if self.control_plane.is_some() {

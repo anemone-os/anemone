@@ -16,8 +16,9 @@ use crate::{
         jobctl::group::ContinueEpoch,
         sig::{
             SigNo, Signal, SignalPurpose,
-            generation::is_job_control_signal,
+            generation::{is_job_control_signal, should_discard_at_generation},
             info::{SiCode, SigInfoFields, SigTimer},
+            notify_signalfd_rechecks,
             set::SigSet,
         },
     },
@@ -140,18 +141,6 @@ impl TimerPending {
         })
     }
 
-    fn slot(&self, id: TimerSignalSlotId) -> &TimerSignalSlot {
-        let slot = self
-            .slots
-            .get(id.index)
-            .expect("POSIX timer signal slot index is invalid");
-        assert_eq!(
-            slot.reuse_generation, id.reuse_generation,
-            "stale POSIX timer signal slot identity"
-        );
-        slot
-    }
-
     fn slot_mut(&mut self, id: TimerSignalSlotId) -> &mut TimerSignalSlot {
         let slot = self
             .slots
@@ -164,34 +153,33 @@ impl TimerPending {
         slot
     }
 
-    fn registration(
+    fn active_registration(
         &self,
         id: TimerSignalSlotId,
         expected_owner: &TimerSignalPendingOwner,
-    ) -> &TimerSignalRegistration {
-        let registration = self
-            .slot(id)
-            .registration
-            .as_ref()
-            .expect("POSIX timer signal registration is no longer active");
+    ) -> Option<&TimerSignalRegistration> {
+        if !self.registration_admission_open {
+            return None;
+        }
+        let slot = self.slots.get(id.index)?;
+        if slot.reuse_generation != id.reuse_generation {
+            return None;
+        }
+        let registration = slot.registration.as_ref()?;
         assert!(
             registration.owner.same_target(expected_owner),
             "POSIX timer signal registration used with a foreign pending owner"
         );
-        registration
+        Some(registration)
     }
 
-    fn signal_no(&self, id: TimerSignalSlotId, expected_owner: &TimerSignalPendingOwner) -> SigNo {
-        self.registration(id, expected_owner).no
-    }
-
-    fn admitted_signal_no(
+    fn active_signal_no(
         &self,
         id: TimerSignalSlotId,
         expected_owner: &TimerSignalPendingOwner,
     ) -> Option<SigNo> {
-        self.registration_admission_open
-            .then(|| self.signal_no(id, expected_owner))
+        self.active_registration(id, expected_owner)
+            .map(|registration| registration.no)
     }
 
     pub(super) fn unregister(
@@ -219,20 +207,20 @@ impl TimerPending {
         overrun: i32,
         ignored: bool,
     ) -> PosixTimerSignalEnqueue {
-        if !self.registration_admission_open {
+        let Some(registration) = self.active_registration(id, expected_owner) else {
             return PosixTimerSignalEnqueue::TargetExited;
-        }
-        self.registration(id, expected_owner);
-        let slot = self.slot_mut(id);
-        let registration = slot
-            .registration
-            .as_ref()
-            .expect("POSIX timer signal registration is no longer active");
+        };
         if ignored {
             return PosixTimerSignalEnqueue::Ignored;
         }
 
         let identity = PosixTimerSignalIdentity::new(registration.timer_id, generation, episode);
+        let owner = registration.owner.clone();
+        let no = registration.no;
+        let timer_id = registration.timer_id;
+        let sigval = registration.sigval;
+        let callback = registration.callback.clone();
+        let slot = self.slot_mut(id);
         if let Some(pending) = slot.pending.as_mut() {
             // A settime generation can expire while the timer's preallocated
             // occurrence is still pending. Linux updates that same queue item;
@@ -242,13 +230,8 @@ impl TimerPending {
             return PosixTimerSignalEnqueue::AlreadyPending;
         }
 
-        let owner = registration.owner.clone();
-        let no = registration.no;
-        let timer_id = registration.timer_id;
-        let sigval = registration.sigval;
-        let callback = registration.callback.clone();
         let arrival = allocate_arrival(next_arrival);
-        self.slot_mut(id).pending = Some(PendingTimerSignal {
+        slot.pending = Some(PendingTimerSignal {
             arrival,
             signal: Signal::new_posix_timer(
                 no, timer_id, overrun, sigval, identity, callback, owner, id,
@@ -269,7 +252,7 @@ impl TimerPending {
         discard: bool,
         stop_epoch: Option<ContinueEpoch>,
     ) -> PosixTimerSignalEnqueue {
-        let Some(registration_no) = self.admitted_signal_no(id, expected_owner) else {
+        let Some(registration_no) = self.active_signal_no(id, expected_owner) else {
             return PosixTimerSignalEnqueue::TargetExited;
         };
         assert_eq!(
@@ -509,14 +492,26 @@ pub(crate) type PosixTimerSignalCallback = dyn Fn(PosixTimerSignalIdentity, Posi
 #[derive(Clone)]
 pub(in crate::task::sig) enum TimerSignalPendingOwner {
     Shared(Weak<ThreadGroup>),
-    Private(Weak<Task>),
+    Private {
+        target: Weak<Task>,
+        thread_group: Weak<ThreadGroup>,
+    },
 }
 
 impl TimerSignalPendingOwner {
     fn same_target(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Shared(left), Self::Shared(right)) => Weak::ptr_eq(left, right),
-            (Self::Private(left), Self::Private(right)) => Weak::ptr_eq(left, right),
+            (
+                Self::Private {
+                    target: left_target,
+                    thread_group: left_group,
+                },
+                Self::Private {
+                    target: right_target,
+                    thread_group: right_group,
+                },
+            ) => Weak::ptr_eq(left_target, right_target) && Weak::ptr_eq(left_group, right_group),
             _ => false,
         }
     }
@@ -528,7 +523,7 @@ impl TimerSignalPendingOwner {
                     target.finish_timer_signal_slot(slot);
                 }
             },
-            Self::Private(target) => {
+            Self::Private { target, .. } => {
                 if let Some(target) = target.upgrade() {
                     target.finish_timer_signal_slot(slot);
                 }
@@ -541,7 +536,7 @@ impl Debug for TimerSignalPendingOwner {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Shared(_) => f.write_str("Shared"),
-            Self::Private(_) => f.write_str("Private"),
+            Self::Private { .. } => f.write_str("Private"),
         }
     }
 }
@@ -584,30 +579,33 @@ impl Debug for TimerSignalDelivery {
     }
 }
 
-/// Preallocated capability for one future ThreadGroup-owned POSIX timer.
+/// Preallocated registration for one future shared or task-private POSIX timer.
 ///
 /// Dropping the registration prevents future enqueue attempts but does not
 /// revoke a notification already owned by Signal. Such an occurrence retains
 /// its immutable siginfo and weak-owner callback until normal delivery or
 /// signal-owned flush.
 pub(crate) struct PosixTimerSignalRegistration {
+    route: PosixTimerSignalRoute,
+}
+
+/// Cloneable enqueue-attempt capability for one timer registration.
+///
+/// The route is non-owning: registration `Drop` may revoke its slot at any
+/// time. Every attempt therefore validates the generation-tagged slot under
+/// the Signal pending guard and reports a stale or reused route as target exit.
+#[derive(Clone)]
+pub(crate) struct PosixTimerSignalRoute {
     owner: TimerSignalPendingOwner,
     slot: TimerSignalSlotId,
 }
 
-impl PosixTimerSignalRegistration {
+impl PosixTimerSignalRoute {
     pub(in crate::task::sig) fn registered_no_locked(
         &self,
         pending: &PendingSignals,
     ) -> Option<SigNo> {
-        match self.owner {
-            TimerSignalPendingOwner::Shared(_) => {
-                Some(pending.timer.signal_no(self.slot, &self.owner))
-            },
-            TimerSignalPendingOwner::Private(_) => {
-                pending.timer.admitted_signal_no(self.slot, &self.owner)
-            },
-        }
+        pending.timer.active_signal_no(self.slot, &self.owner)
     }
 
     pub(in crate::task::sig) fn enqueue_job_control_locked(
@@ -637,7 +635,9 @@ impl PosixTimerSignalRegistration {
             stop_epoch,
         )
     }
+}
 
+impl PosixTimerSignalRegistration {
     pub(crate) fn try_new(
         target: &Arc<ThreadGroup>,
         no: SigNo,
@@ -661,23 +661,35 @@ impl PosixTimerSignalRegistration {
             )?
         };
         Ok(Self {
-            owner: TimerSignalPendingOwner::Shared(Arc::downgrade(target)),
-            slot,
+            route: PosixTimerSignalRoute {
+                owner: TimerSignalPendingOwner::Shared(Arc::downgrade(target)),
+                slot,
+            },
         })
     }
 
     /// Reserve a task-private slot while the target still admits registrations.
     ///
     /// The syscall boundary resolves and validates the same-thread-group TID;
-    /// this registration retains only the non-rebinding exact-task capability.
+    /// this registration retains only non-rebinding exact-task and exact-group
+    /// capabilities.
     pub(crate) fn try_new_private(
         target: &Arc<Task>,
+        thread_group: &Arc<ThreadGroup>,
         no: SigNo,
         timer_id: i32,
         sigval: u64,
         callback: Arc<PosixTimerSignalCallback>,
     ) -> Result<Self, SysError> {
-        let owner = TimerSignalPendingOwner::Private(Arc::downgrade(target));
+        assert_eq!(
+            target.tgid(),
+            thread_group.tgid(),
+            "private timer signal registration used a foreign ThreadGroup"
+        );
+        let owner = TimerSignalPendingOwner::Private {
+            target: Arc::downgrade(target),
+            thread_group: Arc::downgrade(thread_group),
+        };
         let slot = target.sig_pending.lock().timer.try_register(
             owner.clone(),
             no,
@@ -685,9 +697,17 @@ impl PosixTimerSignalRegistration {
             sigval,
             callback,
         )?;
-        Ok(Self { owner, slot })
+        Ok(Self {
+            route: PosixTimerSignalRoute { owner, slot },
+        })
     }
 
+    pub(crate) fn route(&self) -> PosixTimerSignalRoute {
+        self.route.clone()
+    }
+}
+
+impl PosixTimerSignalRoute {
     /// Publish or update one expiry episode without exposing pending internals.
     pub(crate) fn enqueue(
         &self,
@@ -702,11 +722,17 @@ impl PosixTimerSignalRegistration {
                 };
                 self.enqueue_shared(&target, generation, episode, overrun)
             },
-            TimerSignalPendingOwner::Private(target) => {
+            TimerSignalPendingOwner::Private {
+                target,
+                thread_group,
+            } => {
                 let Some(target) = target.upgrade() else {
                     return PosixTimerSignalEnqueue::TargetExited;
                 };
-                self.enqueue_private(&target, generation, episode, overrun)
+                let Some(thread_group) = thread_group.upgrade() else {
+                    return PosixTimerSignalEnqueue::TargetExited;
+                };
+                self.enqueue_private(&target, &thread_group, generation, episode, overrun)
             },
         }
     }
@@ -720,8 +746,10 @@ impl PosixTimerSignalRegistration {
     ) -> PosixTimerSignalEnqueue {
         let no = {
             let inner = target.inner.read();
-            self.registered_no_locked(&inner.sig_pending.lock())
-                .expect("shared timer signal registration is no longer active")
+            let Some(no) = self.registered_no_locked(&inner.sig_pending.lock()) else {
+                return PosixTimerSignalEnqueue::TargetExited;
+            };
+            no
         };
         if is_job_control_signal(no) {
             return target.enqueue_timer_job_control_signal(self, no, generation, episode, overrun);
@@ -740,19 +768,15 @@ impl PosixTimerSignalRegistration {
                 return PosixTimerSignalEnqueue::TargetExited;
             };
 
-            // Preserve the established signal-leaf order: pending precedes the
-            // shared disposition. This makes ignored admission atomic with a
-            // concurrent SIG_IGN update followed by pending flush.
+            // Preserve the established signal-leaf order: pending, selected
+            // member mask, then shared disposition. This makes mask-aware
+            // admission atomic with a concurrent SIG_IGN update followed by
+            // pending flush.
             let mut pending = inner.sig_pending.lock();
-            let no = self
-                .registered_no_locked(&pending)
-                .expect("shared timer signal registration is no longer active");
-            let ignored = disposition_owner
-                .sig_disposition
-                .read()
-                .get_disposition(no)
-                .action
-                .is_ignored();
+            let Some(no) = self.registered_no_locked(&pending) else {
+                return PosixTimerSignalEnqueue::TargetExited;
+            };
+            let discard = should_discard_at_generation(disposition_owner, no);
             let PendingSignals {
                 timer,
                 next_arrival,
@@ -765,18 +789,20 @@ impl PosixTimerSignalRegistration {
                 generation,
                 episode,
                 overrun,
-                ignored,
+                discard,
             );
             (outcome, no)
         };
 
         if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+            let recheck_routes = target.snapshot_signalfd_rechecks();
             // Snapshot after publication. A member present now is rearmed;
             // one joining later starts armed and cannot miss shared pending.
             let members = target.get_members();
             for member in &members {
                 member.rearm_signal_return_work();
             }
+            notify_signalfd_rechecks(recheck_routes);
             for member in members {
                 if no == SigNo::SIGKILL || !member.is_current_sig_mask_blocking(no) {
                     notify(&member, no == SigNo::SIGKILL);
@@ -789,6 +815,7 @@ impl PosixTimerSignalRegistration {
     fn enqueue_private(
         &self,
         target: &Arc<Task>,
+        thread_group: &Arc<ThreadGroup>,
         generation: u64,
         episode: u64,
         overrun: i32,
@@ -801,8 +828,14 @@ impl PosixTimerSignalRegistration {
             no
         };
         if is_job_control_signal(no) {
-            return target
-                .enqueue_private_timer_job_control_signal(self, no, generation, episode, overrun);
+            return target.enqueue_private_timer_job_control_signal(
+                thread_group,
+                self,
+                no,
+                generation,
+                episode,
+                overrun,
+            );
         }
 
         let (outcome, no) = {
@@ -812,12 +845,7 @@ impl PosixTimerSignalRegistration {
             let Some(no) = self.registered_no_locked(&pending) else {
                 return PosixTimerSignalEnqueue::TargetExited;
             };
-            let ignored = target
-                .sig_disposition
-                .read()
-                .get_disposition(no)
-                .action
-                .is_ignored();
+            let discard = should_discard_at_generation(target, no);
             let PendingSignals {
                 timer,
                 next_arrival,
@@ -830,15 +858,17 @@ impl PosixTimerSignalRegistration {
                 generation,
                 episode,
                 overrun,
-                ignored,
+                discard,
             );
             (outcome, no)
         };
 
         if matches!(outcome, PosixTimerSignalEnqueue::Queued) {
+            let recheck_routes = thread_group.snapshot_signalfd_rechecks();
             // Masking suppresses notification, not mandatory user-entry work.
             // Publish the timer slot first, then rearm before any wakeup.
             target.rearm_signal_return_work();
+            notify_signalfd_rechecks(recheck_routes);
             if no == SigNo::SIGKILL || !target.is_current_sig_mask_blocking(no) {
                 notify(target, no == SigNo::SIGKILL);
             }
@@ -850,6 +880,14 @@ impl PosixTimerSignalRegistration {
 impl Debug for PosixTimerSignalRegistration {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("PosixTimerSignalRegistration")
+            .field("slot", &self.route.slot)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Debug for PosixTimerSignalRoute {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PosixTimerSignalRoute")
             .field("slot", &self.slot)
             .finish_non_exhaustive()
     }
@@ -860,7 +898,7 @@ impl Drop for PosixTimerSignalRegistration {
         // Registration metadata may own the last callback Arc. Move it out of
         // the signal lock so captured weak owner state is also destroyed
         // unlocked. A pending occurrence keeps its own callback Arc.
-        let registration = match &self.owner {
+        let registration = match &self.route.owner {
             TimerSignalPendingOwner::Shared(target) => {
                 let Some(target) = target.upgrade() else {
                     return;
@@ -870,17 +908,28 @@ impl Drop for PosixTimerSignalRegistration {
                     .sig_pending
                     .lock()
                     .timer
-                    .unregister(self.slot, &self.owner)
+                    .unregister(self.route.slot, &self.route.owner)
             },
-            TimerSignalPendingOwner::Private(target) => {
+            TimerSignalPendingOwner::Private {
+                target,
+                thread_group,
+            } => {
                 let Some(target) = target.upgrade() else {
                     return;
                 };
+                let Some(thread_group) = thread_group.upgrade() else {
+                    return;
+                };
+                // Timer job-control generation holds the write side across its
+                // multi-owner transaction. Revocation takes this read side
+                // before private pending so the route cannot go stale halfway
+                // through a committed control transition.
+                let _inner = thread_group.inner.read();
                 target
                     .sig_pending
                     .lock()
                     .timer
-                    .unregister(self.slot, &self.owner)
+                    .unregister(self.route.slot, &self.route.owner)
             },
         };
         drop(registration);
@@ -1061,24 +1110,50 @@ mod kunits {
     #[kunit]
     fn timer_pending_owner_binding_uses_exact_weak_identity() {
         let target = get_current_task();
+        let thread_group = target.get_thread_group();
         let other = detached_target(target.tgid());
-        let owner = TimerSignalPendingOwner::Private(Arc::downgrade(&target));
+        let owner = TimerSignalPendingOwner::Private {
+            target: Arc::downgrade(&target),
+            thread_group: Arc::downgrade(&thread_group),
+        };
         let same = owner.clone();
-        let other = TimerSignalPendingOwner::Private(Arc::downgrade(&other));
+        let other = TimerSignalPendingOwner::Private {
+            target: Arc::downgrade(&other),
+            thread_group: Arc::downgrade(&thread_group),
+        };
+        let wrong_group = TimerSignalPendingOwner::Private {
+            target: Arc::downgrade(&target),
+            thread_group: Weak::new(),
+        };
         let wrong_variant = TimerSignalPendingOwner::Shared(Weak::new());
 
         assert!(owner.same_target(&same));
         assert!(!owner.same_target(&other));
+        assert!(!owner.same_target(&wrong_group));
         assert!(!owner.same_target(&wrong_variant));
     }
 
     #[kunit]
     fn private_delivery_callback_reenters_after_pending_unlock() {
         let target = get_current_task();
+        let thread_group = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target
+            .sig_disposition
+            .read()
+            .get_disposition(SigNo::SIGUSR2);
         let mut blocked = old_mask;
         blocked.set(SigNo::SIGUSR2);
         target.set_permanent_sig_mask(blocked);
+        target.sig_disposition.write().set_disposition(
+            SigNo::SIGUSR2,
+            KSigAction {
+                action: SignalAction::Ignore,
+                flags: SaFlags::empty(),
+                restorer: VirtAddr::new(0),
+                mask: SigSet::new(),
+            },
+        );
         let callback_target = Arc::downgrade(&target);
         let callbacks = Arc::new(AtomicUsize::new(0));
         let callback_count = callbacks.clone();
@@ -1096,6 +1171,7 @@ mod kunits {
         });
         let registration = PosixTimerSignalRegistration::try_new_private(
             &target,
+            &thread_group,
             SigNo::SIGUSR2,
             91,
             0x91,
@@ -1106,7 +1182,7 @@ mod kunits {
         let _ = target.take_signal_return_work();
         assert!(!target.take_signal_return_work());
         assert_eq!(
-            registration.enqueue(3, 4, 0),
+            registration.route().enqueue(3, 4, 0),
             PosixTimerSignalEnqueue::Queued
         );
         assert!(target.take_signal_return_work());
@@ -1117,6 +1193,10 @@ mod kunits {
         assert_eq!(signal.no, SigNo::SIGUSR2);
         assert_eq!(callbacks.load(Ordering::SeqCst), 1);
         drop(registration);
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(SigNo::SIGUSR2, old_action);
         target.set_permanent_sig_mask(old_mask);
     }
 
@@ -1125,28 +1205,42 @@ mod kunits {
         let target = get_current_task();
         let tg = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target
+            .sig_disposition
+            .read()
+            .get_disposition(SigNo::SIGWINCH);
         let mut blocked = old_mask;
-        blocked.set(SigNo::SIGUSR1);
+        // SIGWINCH is default-ignore. Blocking it proves timer admission uses
+        // the same mask-aware rule as ordinary generation.
+        blocked.set(SigNo::SIGWINCH);
         target.set_permanent_sig_mask(blocked);
+        target
+            .sig_disposition
+            .write()
+            .set_to_default(SigNo::SIGWINCH);
 
         let (_log, callback) = callback_log();
         let registration =
-            PosixTimerSignalRegistration::try_new(&tg, SigNo::SIGUSR1, 92, 0, callback).unwrap();
+            PosixTimerSignalRegistration::try_new(&tg, SigNo::SIGWINCH, 92, 0, callback).unwrap();
         let _ = target.take_signal_return_work();
         assert!(!target.take_signal_return_work());
 
         assert_eq!(
-            registration.enqueue(1, 1, 0),
+            registration.route().enqueue(1, 1, 0),
             PosixTimerSignalEnqueue::Queued
         );
         assert!(target.take_signal_return_work());
         target.rearm_signal_return_work();
         let signal = target
-            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGUSR1]))
+            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGWINCH]))
             .expect("shared timer signal was not published to the thread group");
-        assert_eq!(signal.no, SigNo::SIGUSR1);
+        assert_eq!(signal.no, SigNo::SIGWINCH);
 
         drop(registration);
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(SigNo::SIGWINCH, old_action);
         target.set_permanent_sig_mask(old_mask);
     }
 
@@ -1155,17 +1249,36 @@ mod kunits {
         let target = get_current_task();
         let tg = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
+        let old_action = target
+            .sig_disposition
+            .read()
+            .get_disposition(SigNo::SIGCONT);
         let mut blocked = old_mask;
         blocked.set(SigNo::SIGCONT);
         blocked.set(SigNo::SIGTSTP);
         target.set_permanent_sig_mask(blocked);
+        target.sig_disposition.write().set_disposition(
+            SigNo::SIGCONT,
+            KSigAction {
+                action: SignalAction::Ignore,
+                flags: SaFlags::empty(),
+                restorer: VirtAddr::new(0),
+                mask: SigSet::new(),
+            },
+        );
 
         let (log, callback) = callback_log();
-        let registration =
-            PosixTimerSignalRegistration::try_new_private(&target, SigNo::SIGCONT, 95, 0, callback)
-                .unwrap();
+        let registration = PosixTimerSignalRegistration::try_new_private(
+            &target,
+            &tg,
+            SigNo::SIGCONT,
+            95,
+            0,
+            callback,
+        )
+        .unwrap();
         assert_eq!(
-            registration.enqueue(1, 1, 0),
+            registration.route().enqueue(1, 1, 0),
             PosixTimerSignalEnqueue::Queued
         );
 
@@ -1190,7 +1303,7 @@ mod kunits {
         tg.flush_specific_signals(SigSet::new_with_signos(&[SigNo::SIGTSTP]));
 
         assert_eq!(
-            registration.enqueue(2, 2, 0),
+            registration.route().enqueue(2, 2, 0),
             PosixTimerSignalEnqueue::Queued
         );
         let signal = target
@@ -1212,31 +1325,42 @@ mod kunits {
         );
 
         drop(registration);
+        target
+            .sig_disposition
+            .write()
+            .set_disposition(SigNo::SIGCONT, old_action);
         target.set_permanent_sig_mask(old_mask);
     }
 
     #[kunit]
     fn private_conditional_stop_duplicate_keeps_one_epoch_authority() {
         let target = get_current_task();
+        let thread_group = target.get_thread_group();
         let old_mask = target.snapshot_current_sig_mask();
         let mut blocked = old_mask;
         blocked.set(SigNo::SIGTSTP);
         target.set_permanent_sig_mask(blocked);
 
         let (log, callback) = callback_log();
-        let registration =
-            PosixTimerSignalRegistration::try_new_private(&target, SigNo::SIGTSTP, 97, 0, callback)
-                .unwrap();
+        let registration = PosixTimerSignalRegistration::try_new_private(
+            &target,
+            &thread_group,
+            SigNo::SIGTSTP,
+            97,
+            0,
+            callback,
+        )
+        .unwrap();
         let _ = target.take_signal_return_work();
         assert!(!target.take_signal_return_work());
         assert_eq!(
-            registration.enqueue(1, 1, 0),
+            registration.route().enqueue(1, 1, 0),
             PosixTimerSignalEnqueue::Queued
         );
         assert!(target.take_signal_return_work());
         target.rearm_signal_return_work();
         assert_eq!(
-            registration.enqueue(1, 2, 3),
+            registration.route().enqueue(1, 2, 3),
             PosixTimerSignalEnqueue::AlreadyPending
         );
 
@@ -1260,7 +1384,6 @@ mod kunits {
     fn private_timer_reuses_registration_after_live_ignore() {
         let owner = get_current_task().get_thread_group();
         let target = detached_target(owner.tgid());
-        target.set_permanent_sig_mask(SigSet::new_with_signos(&[SigNo::SIGUSR2]));
         target.sig_disposition.write().set_disposition(
             SigNo::SIGUSR2,
             KSigAction {
@@ -1272,11 +1395,17 @@ mod kunits {
         );
 
         let (log, callback) = callback_log();
-        let registration =
-            PosixTimerSignalRegistration::try_new_private(&target, SigNo::SIGUSR2, 96, 0, callback)
-                .unwrap();
+        let registration = PosixTimerSignalRegistration::try_new_private(
+            &target,
+            &owner,
+            SigNo::SIGUSR2,
+            96,
+            0,
+            callback,
+        )
+        .unwrap();
         assert_eq!(
-            registration.enqueue(1, 1, 0),
+            registration.route().enqueue(1, 1, 0),
             PosixTimerSignalEnqueue::Ignored
         );
         assert!(log.lock().is_empty());
@@ -1288,7 +1417,7 @@ mod kunits {
             .write()
             .set_to_default(SigNo::SIGUSR2);
         assert_eq!(
-            registration.enqueue(2, 2, 0),
+            registration.route().enqueue(2, 2, 0),
             PosixTimerSignalEnqueue::Queued
         );
         let signal = target
@@ -1306,6 +1435,57 @@ mod kunits {
     }
 
     #[kunit]
+    fn stale_timer_route_cannot_enqueue_after_revocation_or_slot_reuse() {
+        let owner = get_current_task().get_thread_group();
+        let target = detached_target(owner.tgid());
+        target.set_permanent_sig_mask(SigSet::new_with_signos(&[SigNo::SIGUSR1]));
+
+        let registration = PosixTimerSignalRegistration::try_new_private(
+            &target,
+            &owner,
+            SigNo::SIGUSR1,
+            98,
+            0,
+            Arc::new(|_, _| None),
+        )
+        .unwrap();
+        let stale_route = registration.route();
+        drop(registration);
+        assert_eq!(
+            stale_route.enqueue(1, 1, 0),
+            PosixTimerSignalEnqueue::TargetExited
+        );
+
+        let replacement = PosixTimerSignalRegistration::try_new_private(
+            &target,
+            &owner,
+            SigNo::SIGUSR1,
+            99,
+            0,
+            Arc::new(|_, _| None),
+        )
+        .unwrap();
+        assert_eq!(stale_route.slot.index, replacement.route.slot.index);
+        assert_ne!(
+            stale_route.slot.reuse_generation,
+            replacement.route.slot.reuse_generation
+        );
+        assert_eq!(
+            stale_route.enqueue(2, 2, 0),
+            PosixTimerSignalEnqueue::TargetExited
+        );
+        assert_eq!(
+            replacement.route().enqueue(3, 3, 0),
+            PosixTimerSignalEnqueue::Queued
+        );
+        let signal = target
+            .fetch_specific_signal(SigSet::new_with_signos(&[SigNo::SIGUSR1]))
+            .expect("replacement timer route did not publish its occurrence");
+        assert_eq!(signal.no, SigNo::SIGUSR1);
+        drop(replacement);
+    }
+
+    #[kunit]
     fn private_target_exit_closes_all_three_occurrence_stages() {
         let owner = get_current_task().get_thread_group();
 
@@ -1317,6 +1497,7 @@ mod kunits {
             Arc::new(|_, _| panic!("pre-expiry target exit must not complete a queued occurrence"));
         let registration = PosixTimerSignalRegistration::try_new_private(
             &before_expiry,
+            &owner,
             SigNo::SIGUSR1,
             101,
             0,
@@ -1325,12 +1506,13 @@ mod kunits {
         .unwrap();
         before_expiry.retire_private_timer_signals_for_exit(&owner);
         assert_eq!(
-            registration.enqueue(1, 1, 0),
+            registration.route().enqueue(1, 1, 0),
             PosixTimerSignalEnqueue::TargetExited
         );
         assert!(matches!(
             PosixTimerSignalRegistration::try_new_private(
                 &before_expiry,
+                &owner,
                 SigNo::SIGUSR1,
                 102,
                 0,
@@ -1348,6 +1530,7 @@ mod kunits {
         let callback_log = pending_log.clone();
         let registration = PosixTimerSignalRegistration::try_new_private(
             &pending_target,
+            &owner,
             SigNo::SIGUSR1,
             103,
             0,
@@ -1358,7 +1541,7 @@ mod kunits {
         )
         .unwrap();
         assert_eq!(
-            registration.enqueue(2, 3, 0),
+            registration.route().enqueue(2, 3, 0),
             PosixTimerSignalEnqueue::Queued
         );
         pending_target.retire_private_timer_signals_for_exit(&owner);
@@ -1379,6 +1562,7 @@ mod kunits {
         let callback_log = dequeued_log.clone();
         let registration = PosixTimerSignalRegistration::try_new_private(
             &dequeued_target,
+            &owner,
             SigNo::SIGUSR1,
             104,
             0,
@@ -1389,7 +1573,7 @@ mod kunits {
         )
         .unwrap();
         assert_eq!(
-            registration.enqueue(4, 5, 0),
+            registration.route().enqueue(4, 5, 0),
             PosixTimerSignalEnqueue::Queued
         );
         let mut signal = dequeued_target

@@ -211,6 +211,29 @@ impl AddressSpace {
         self.load_page_for_request(pidx, requested_page_end)
     }
 
+    fn resolve_frame_for_request(
+        &self,
+        pidx: usize,
+        requested_page_end: usize,
+        access: PageFaultType,
+    ) -> Result<ResolvedFrame, SysError> {
+        if requested_page_end <= pidx {
+            return Err(SysError::InvalidArgument);
+        }
+
+        let page = self.load_page_for_request(pidx, requested_page_end)?;
+        if matches!(access, PageFaultType::Write) {
+            self.mark_dirty(pidx);
+        }
+        // A backed page becomes writable only after the write fault above has
+        // published sticky dirty state. Subsequent PTE stores need no further
+        // faults because the page remains dirty until eviction.
+        Ok(ResolvedFrame {
+            frame: page.frame,
+            writable: self.backend.is_none() || matches!(access, PageFaultType::Write),
+        })
+    }
+
     fn page_for_write(
         &self,
         pidx: usize,
@@ -577,17 +600,27 @@ impl AddressSpace {
 
 impl VmObject for AddressSpace {
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError> {
-        let page = self.load_page(pidx)?;
-        if matches!(access, PageFaultType::Write) {
-            self.mark_dirty(pidx);
-        }
-        // A backed page becomes writable only after the write fault above has
-        // published sticky dirty state. Subsequent PTE stores need no further
-        // faults because the page remains dirty until eviction.
-        Ok(ResolvedFrame {
-            frame: page.frame,
-            writable: self.backend.is_none() || matches!(access, PageFaultType::Write),
-        })
+        let requested_page_end = pidx.checked_add(1).ok_or(SysError::InvalidArgument)?;
+        self.resolve_frame_for_request(pidx, requested_page_end, access)
+    }
+
+    fn resolve_frame_ahead(
+        &self,
+        pidx: usize,
+        request_end: usize,
+        access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        // A speculative backed write may populate clean cache pages, but it
+        // must not publish sticky dirty state before userspace actually writes.
+        // Volatile address spaces have no dirty/writeback fact, so they can
+        // resolve the initiating access directly.
+        let ahead_access = if self.backend.is_some() && matches!(access, PageFaultType::Write) {
+            PageFaultType::Read
+        } else {
+            access
+        };
+        self.resolve_frame_for_request(pidx, request_end, ahead_access)
+            .map(Some)
     }
 
     fn sync_range(&self, range: core::ops::Range<usize>) -> Result<(), SysError> {
@@ -788,6 +821,40 @@ mod kunits {
                 (page_size * 4, page_size)
             ]
         );
+    }
+
+    #[kunit]
+    fn backed_write_fault_ahead_batches_clean_followers_without_premature_dirty() {
+        let page_size = PagingArch::PAGE_SIZE_BYTES;
+        let backend = Arc::new(FakeBackend::new(8));
+        let address_space = AddressSpace::new_backed(
+            Arc::new(AtomicU64::new((page_size * 4) as u64)),
+            backend.clone(),
+        );
+
+        let demand = address_space
+            .resolve_frame(0, PageFaultType::Write)
+            .unwrap();
+        assert!(demand.writable);
+        let follower = address_space
+            .resolve_frame_ahead(1, 4, PageFaultType::Write)
+            .unwrap()
+            .expect("backed address space should opt in to fault-ahead");
+        assert!(!follower.writable);
+        address_space
+            .resolve_frame_ahead(2, 4, PageFaultType::Write)
+            .unwrap()
+            .expect("batched follower should remain resolvable");
+
+        assert_eq!(
+            backend.take_fills(),
+            [(0, page_size), (page_size, page_size * 3)]
+        );
+        let pages = address_space.pages.read();
+        assert!(pages.get(&0).unwrap().dirty);
+        for pidx in 1..4 {
+            assert!(!pages.get(&pidx).unwrap().dirty);
+        }
     }
 
     #[kunit]

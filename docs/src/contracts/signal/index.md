@@ -1,9 +1,9 @@
 # Signal 当前契约
 
 **Owner：** Signal pending / disposition protocol
-**覆盖范围：** signal occurrence 的 private / shared pending 路由、temporary-mask delivery handoff、ordinary action selection，以及 control-signal generation handoff
+**覆盖范围：** signal occurrence 的 private / shared pending 路由、temporary-mask delivery handoff、ordinary action selection、control-signal generation handoff，以及 signalfd 同步消费与 recheck
 **不覆盖：** ThreadGroup-owned job-control phase / report、terminal lifecycle、wait ABI
-**最后核验：** 2026-07-21
+**最后核验：** 2026-08-16
 
 本目录只登记已经从 live code 提取、且会被后续 RFC 跨模块引用的 Signal 规则，不声称枚举 Signal 全部语义。
 
@@ -11,6 +11,7 @@
 
 - [Pending routing 与 ordinary action selection](./pending-routing.md)：private / shared pending 真相源、group-directed routing、ignored admission、ordinary action selection和control-signal generation handoff。
 - [Temporary-mask delivery handoff](./temporary-mask-delivery.md)：task-owned restore slot、reserved delivery target 与 handler / no-frame cleanup。
+- [Signal fd](./signalfd.md)：opened-description mask、caller-relative pending view、同步 dequeue、128-byte record 与 recheck/wait publication。
 
 ## 邻接契约
 

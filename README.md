@@ -17,6 +17,8 @@ Anemone 是一个使用 Rust 实现的多核类 Unix 宏内核，支持 RISC-V64
 
 从 QEMU 到 VisionFive 2 与 Loongson 2K1000，从系统调用测例到交互式 shell、网络工具和大型编译负载，Anemone 希望证明一件事：Linux 兼容性、跨架构可移植性和可维护的系统设计并不互相排斥。
 
+Anemone 还通过 Nemophila 把清晰的内核边界延伸到运行期：以 WebAssembly 承载跨架构扩展，以 WIT 和 Weave 约束模块如何接入内核，并由统一 runtime 管理完整生命周期。
+
 <img src="./report/kernel-report/assets/anemone-architecture.png" alt="Anemone 整体架构" width="1000"/>
 
 ## 为什么是 Anemone？
@@ -38,6 +40,12 @@ Anemone 让内存、异常、调度、信号等使用方子系统定义所需的
 - VisionFive 2 与 Loongson 2K1000 真实硬件平台；
 - VirtIO MMIO、VirtIO PCIe、SD 卡、AHCI 等不同设备路径。
 
+### 让内核在运行期继续演化
+
+[Nemophila](./docs/src/contracts/nemophila/index.md) 是 Anemone 原生的受管理内核扩展框架。同一份 WebAssembly 模块制品可以运行在 RISC-V64 与 LoongArch64 上；WIT 定义语言无关的接口，Weave 则让各内核子系统主动提供类型化扩展点，只向模块投影完成任务所需的值。
+
+Nemophila 用 WebAssembly 承载跨架构代码，用 WIT 约束接口，用 Weave 保留子系统所有权，再由 runtime 管理模块的装载、原子发布、回调准入、故障隔离、状态观测、卸载与重新装载。首批 Rust 模块已经接入任务创建与线程退出路径，并通过任务关系审计模块证明了从制品构建到真实内核事件的完整纵向路径。
+
 ### 状态所有权是一等设计原则
 
 内核中最难维护的往往不是某个 syscall，而是并发操作之间“谁拥有当前事实、谁负责推进状态、失败后谁清理”。Anemone 尽量让每类状态只有一个 owner，并通过窄能力、token、snapshot 和重新检查通知跨越模块边界，避免共享私有对象或维护第二份状态真相。
@@ -52,6 +60,7 @@ Anemone 不只交付一个 ELF——我们给出的是一个完整的、从内�
 
 ## 能力概览
 
+- **动态扩展：** Nemophila WebAssembly runtime、WIT 接口、Weave 类型化扩展点、启动期与运行期装载、故障隔离、procfs 诊断、卸载重载和 Rust SDK。
 - **进程与调度：** task / thread group / process group / session 生命周期，信号与 job control，Fair、FIFO、RR、Stride 调度类，多核负载均衡和统一 wait-core。
 - **内存管理：** 物理页与页表、地址空间、VMO、按需分页、COW、共享内存、file-backed mapping、页缓存、TLB shootdown 与 OOM 防护。
 - **文件与设备：** VFS、mount tree、Ext4、tmpfs、procfs、devfs，统一 opened file object，以及 bus / device / driver 模型。
@@ -99,6 +108,7 @@ just build --preset qemu-virt-la64-release
 ├── anemone-rs/         # Rust 用户态支持库
 ├── anemone-libc/       # C 用户态支持库
 ├── anemone-apps/       # init、测试、工具与示例程序
+├── nemophila/          # 模块接口、Rust SDK 与示例模块
 ├── conf/               # KernelConfig、平台、系统目标、preset 与 rootfs
 ├── scripts/            # xtask、构建运行入口与端到端验证脚本
 ├── docs/               # 当前契约、RFC、开发记录与活动登记册

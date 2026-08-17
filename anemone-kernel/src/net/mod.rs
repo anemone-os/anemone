@@ -13,6 +13,7 @@ mod worker;
 pub(crate) use diagnostics::{
     LinkDiagnostic, LinkDiagnosticKind, TcpDiagnostic, route_diagnostics, tcp_diagnostics,
 };
+pub(crate) use domain::StaticIpv4Deployment;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EventRegistrationError {
@@ -196,7 +197,7 @@ fn activate_initial_control_plane() {
         .iter()
         .map(|path| ExternalControlInput::new(path.logical.clone(), path.interface))
         .collect::<Vec<_>>();
-    let deployment = crate::network_defs::STATIC_IPV4_DEPLOYMENT;
+    let deployment = crate::system_target_defs::STATIC_IPV4_DEPLOYMENT;
     if let Err(error) = authority
         .domain
         .activate_control_plane(deployment, &external)

@@ -157,6 +157,14 @@ pub(super) fn query_tcp_option(
             .no_delay()
             .map(SocketOptionValue::Boolean)
             .map_err(map_query_option_error),
+        SocketOptionQuery::SendBuffer => endpoint
+            .send_buffer()
+            .map(SocketOptionValue::BufferSize)
+            .map_err(map_query_option_error),
+        SocketOptionQuery::ReceiveBuffer => endpoint
+            .receive_buffer()
+            .map(SocketOptionValue::BufferSize)
+            .map_err(map_query_option_error),
         _ => Err(SocketOptionError::Unsupported),
     }
 }
@@ -174,6 +182,12 @@ pub(super) fn mutate_tcp_option(
             .map_err(map_bind_option_error),
         SocketOptionMutation::TcpNoDelay(enabled) => endpoint
             .set_no_delay(enabled)
+            .map_err(map_query_option_error),
+        SocketOptionMutation::SendBufferHint(requested) => endpoint
+            .set_send_buffer_hint(requested)
+            .map_err(map_query_option_error),
+        SocketOptionMutation::ReceiveBufferHint(requested) => endpoint
+            .set_receive_buffer_hint(requested)
             .map_err(map_query_option_error),
         _ => Err(SocketOptionError::Unsupported),
     }

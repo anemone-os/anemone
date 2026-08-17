@@ -270,7 +270,7 @@ mod tests {
         let mut stack = Stack::with_policy(StackPolicy::new(
             UdpNamespacePolicy::new(4, 30000, 30003),
             IcmpRawNamespacePolicy::new(4),
-            TcpPolicy::new(4, 4, 1, 2, 64, 64, 4, 1, 60_000, 40000, 40003),
+            TcpPolicy::new(4, 4, 1, 2, 64, 64, 8, 8, 4, 1, 60_000, 40000, 40003),
         ));
         let mut provider = UnavailableProvider { transmit_calls: 0 };
         let interface = stack.add_interface(

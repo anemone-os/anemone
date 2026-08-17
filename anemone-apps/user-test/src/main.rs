@@ -189,10 +189,14 @@ pub fn main() -> Result<(), Errno> {
     let _program = args.next();
     let first = args.next();
     if first == Some("--socket-test") {
+        let suite = args.next();
         if args.next().is_some() {
             return Err(EINVAL);
         }
-        local_run_cmd("/bin/socket-test", &["socket-test"], &[]);
+        match suite {
+            Some(suite) => local_run_cmd("/bin/socket-test", &["socket-test", suite], &[]),
+            None => local_run_cmd("/bin/socket-test", &["socket-test"], &[]),
+        }
         println!("user-test: focused socket test finished, shutting down.");
         shutdown(SHUTDOWN_MAGIC).expect("user-test: failed to request shutdown");
         unreachable!("user-test: shutdown returned unexpectedly");

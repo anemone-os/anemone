@@ -282,6 +282,11 @@ pub(super) fn write_ioctl_value<T: zerocopy::IntoBytes + zerocopy::Immutable>(
     })
 }
 
+pub(super) fn write_readable_bytes(ctx: &IoctlCtx<'_>, count: usize) -> Result<(), SysError> {
+    let count = i32::try_from(count).map_err(|_| SysError::FileTooLarge)?;
+    write_ioctl_value(ctx, count)
+}
+
 fn tty_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
     let tty = tty_file(file);
     if let Some(description) = &tty.pty_description {
@@ -363,6 +368,11 @@ pub(super) fn terminal_ioctl(
             if changed {
                 tty.wake.wake();
             }
+        },
+        abi::TIOCINQ => {
+            let count =
+                run_terminal_operation(operation, || tty.endpoint.terminal.input_readable_bytes())?;
+            write_readable_bytes(&ctx, count)?;
         },
         abi::TIOCSCTTY if relation_operations => {
             let _effect = begin_external_effect(operation)?;

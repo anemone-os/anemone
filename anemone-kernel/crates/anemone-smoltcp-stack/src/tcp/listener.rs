@@ -78,6 +78,7 @@ impl TcpEndpoints {
     pub(crate) fn new_listener_projection(
         &mut self,
         sockets: &mut SocketSet<'static>,
+        listener: TcpEndpointId,
         interface: InterfaceId,
         binding: TcpLocalBinding,
         backlog: usize,
@@ -86,7 +87,7 @@ impl TcpEndpoints {
         for _ in 0..backlog {
             slots.push(ListenerSlot {
                 generation: 0,
-                handle: Some(self.add_listener_engine(sockets, binding)),
+                handle: Some(self.add_listener_engine(sockets, listener, binding)),
                 phase: ListenerSlotPhase::Open,
                 tuple: None,
             });
@@ -176,7 +177,7 @@ impl TcpEndpoints {
                 .listener(id)
                 .expect("re-listen owner disappeared")
                 .binding;
-            let replacement = self.add_listener_engine(sockets, binding);
+            let replacement = self.add_listener_engine(sockets, id, binding);
             let projection = &mut self
                 .listener_mut(id)
                 .expect("re-listen owner disappeared")
@@ -369,6 +370,14 @@ impl TcpEndpoints {
             .endpoint(listener_id)
             .expect("completed TCP child lost its listener owner")
             .no_delay;
+        let listener_receive_budget = self
+            .endpoint(listener_id)
+            .expect("completed TCP child lost its listener owner")
+            .receive_budget;
+        let listener_send_budget = self
+            .endpoint(listener_id)
+            .expect("completed TCP child lost its listener owner")
+            .send_budget;
 
         let projection = &self
             .listener(listener_id)
@@ -387,7 +396,7 @@ impl TcpEndpoints {
         if replace && !self.ensure_engine_capacity(1) {
             return Err(TcpChildError::EngineCapacity);
         }
-        let replacement = replace.then(|| self.add_listener_engine(sockets, binding));
+        let replacement = replace.then(|| self.add_listener_engine(sockets, listener_id, binding));
         let slot = &mut self
             .listener_mut(listener_id)
             .expect("completed TCP child lost its listener before handoff")
@@ -412,6 +421,8 @@ impl TcpEndpoints {
         endpoint.id = Some(id);
         endpoint.reuse_address = listener_reuse;
         endpoint.no_delay = listener_no_delay;
+        endpoint.receive_budget = listener_receive_budget;
+        endpoint.send_budget = listener_send_budget;
         sockets
             .get_mut::<tcp::Socket>(handle)
             .set_nagle_enabled(!listener_no_delay);

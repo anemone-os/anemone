@@ -541,6 +541,7 @@ pub(super) fn acquire(
     endpoint: &Arc<TtyEndpoint>,
     caller: &TtyCaller,
     readable: bool,
+    steal_if_occupied: bool,
 ) -> Result<(), SysError> {
     if !caller.is_session_leader() || !caller.revalidate() {
         return Err(SysError::PermissionDenied);
@@ -593,6 +594,17 @@ pub(super) fn acquire(
             Inspection::Idempotent => return Ok(()),
             Inspection::Conflict(snapshot) => {
                 if snapshot.session.is_live() {
+                    // `arg=1` becomes a steal request only for an endpoint
+                    // controlled by another live session. Privileged rebind is
+                    // outside the current ABI; remove this rejection only when
+                    // its authority and old-session cleanup are implemented.
+                    if steal_if_occupied && !snapshot.session.same_identity(caller.session()) {
+                        knoticeln!(
+                            "TTY: rejecting unsupported controlling-terminal steal sid={} occupied_sid={}",
+                            caller.session().sid(),
+                            snapshot.session.sid()
+                        );
+                    }
                     return Err(SysError::PermissionDenied);
                 }
                 let removed = remove_if(&snapshot);

@@ -60,6 +60,11 @@ fn master_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
         return Err(SysError::IO);
     }
     match ctx.cmd() {
+        anemone_abi::tty::linux::TIOCINQ => {
+            let count = master.description.readable_bytes()?;
+            tty_file::write_readable_bytes(&ctx, count)?;
+            return Ok(0);
+        },
         anemone_abi::tty::linux::TIOCGPTN => {
             tty_file::write_ioctl_value(&ctx, master.description.index())?;
             return Ok(0);

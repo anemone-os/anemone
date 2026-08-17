@@ -191,6 +191,7 @@ pub mod linux {
     pub const TIOCSPGRP: u32 = 0x5410;
     pub const TIOCGWINSZ: u32 = 0x5413;
     pub const TIOCSWINSZ: u32 = 0x5414;
+    pub const TIOCINQ: u32 = crate::fs::linux::ioctl::FIONREAD;
     pub const TIOCNOTTY: u32 = 0x5422;
     pub const TIOCGSID: u32 = 0x5429;
     pub const TIOCGPTN: u32 = 0x8004_5430;

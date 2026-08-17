@@ -1,7 +1,10 @@
 //! Common Socket file, opened-description, and anonymous-inode integration.
 
+use anemone_abi::fs::linux::ioctl::FIONREAD;
+
 use crate::{
     prelude::*,
+    syscall::user_access::UserWritePtr,
     task::files::{
         FileDescOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx, OpenedFileWriteUserCtx,
     },
@@ -9,13 +12,15 @@ use crate::{
 };
 
 use super::{
-    Socket, SocketDatagramSendOperation, SocketIoOps, SocketOps, SocketReadSink,
-    SocketReceiveError, SocketReceiveFlags, SocketReceiveRequest, SocketReceiveSink,
-    SocketSendError, SocketSendPayload, SocketSendRequest, SocketStreamDestination,
-    SocketWriteSource,
+    Socket, SocketDatagramSendOperation, SocketIoOps, SocketIoctlError, SocketIoctlRequest,
+    SocketIoctlResponse, SocketOps, SocketReadSink, SocketReceiveError, SocketReceiveFlags,
+    SocketReceiveRequest, SocketReceiveSink, SocketSendError, SocketSendPayload, SocketSendRequest,
+    SocketStreamDestination, SocketWriteSource,
     operation::{retry_socket_receive, retry_socket_send},
     pending_error_to_sys_error,
 };
+
+use super::interface_ioctl::{SIOCGIFCONF, get_interface_configuration};
 
 pub(super) fn prepare_socket_file(
     ops: &'static SocketOps,
@@ -384,6 +389,46 @@ fn socket_check_status_flags(_file: &File, flags: FileOpStatusFlags) -> Result<(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommonSocketIoctl {
+    ReadableBytes,
+    InterfaceConfiguration,
+}
+
+fn decode_common_socket_ioctl(cmd: u32) -> Option<CommonSocketIoctl> {
+    match cmd {
+        FIONREAD => Some(CommonSocketIoctl::ReadableBytes),
+        SIOCGIFCONF => Some(CommonSocketIoctl::InterfaceConfiguration),
+        _ => None,
+    }
+}
+
+fn get_readable_bytes(file: &File, ctx: &IoctlCtx<'_>) -> Result<u64, SysError> {
+    let socket = socket_from_file(file)
+        .expect("common Socket FileOps ioctl used without Socket private state");
+    let response =
+        socket
+            .ioctl(SocketIoctlRequest::ReadableBytes)
+            .map_err(|error| match error {
+                SocketIoctlError::Unsupported => SysError::UnsupportedIoctl,
+                SocketIoctlError::Retired => SysError::BadFileDescriptor,
+                SocketIoctlError::InvalidState => SysError::InvalidArgument,
+            })?;
+    let SocketIoctlResponse::ReadableBytes(readable) = response;
+    let readable = i32::try_from(readable).map_err(|_| SysError::FileTooLarge)?;
+    ctx.uspace().with_usp(|usp| {
+        UserWritePtr::<i32>::try_new(VirtAddr::new(ctx.arg()), usp)?.write(readable)
+    })?;
+    Ok(0)
+}
+
+fn socket_ioctl(file: &File, ctx: IoctlCtx<'_>) -> Result<u64, SysError> {
+    match decode_common_socket_ioctl(ctx.cmd()).ok_or(SysError::UnsupportedIoctl)? {
+        CommonSocketIoctl::ReadableBytes => get_readable_bytes(file, &ctx),
+        CommonSocketIoctl::InterfaceConfiguration => get_interface_configuration(&ctx),
+    }
+}
+
 static SOCKET_FILE_OPS: FileOps = FileOps {
     read: socket_read,
     write: socket_write,
@@ -400,7 +445,7 @@ static SOCKET_FILE_OPS: FileOps = FileOps {
             .poll(request)
     },
     fcntl: None,
-    ioctl: |_, _| Err(SysError::UnsupportedIoctl),
+    ioctl: socket_ioctl,
 };
 
 fn socket_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
@@ -441,6 +486,23 @@ mod kunits {
     use super::*;
 
     use crate::fs::socket::{TCP_SOCKET_OPS, prepare_socket, socket_file_desc_ops};
+
+    #[kunit]
+    fn common_socket_ioctl_decode_preserves_existing_boundaries() {
+        assert_eq!(
+            decode_common_socket_ioctl(FIONREAD),
+            Some(CommonSocketIoctl::ReadableBytes)
+        );
+        assert_eq!(
+            decode_common_socket_ioctl(SIOCGIFCONF),
+            Some(CommonSocketIoctl::InterfaceConfiguration)
+        );
+        assert_eq!(
+            decode_common_socket_ioctl(anemone_abi::fs::linux::ioctl::FIONBIO),
+            None
+        );
+        assert_eq!(decode_common_socket_ioctl(u32::MAX), None);
+    }
 
     #[kunit]
     fn tcp_file_read_preserves_not_connected_errno() {

@@ -16,7 +16,7 @@ use smoltcp::{
     wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address as SmoltcpIpv4Address},
 };
 
-use crate::tcp::{TcpEndpoints, tcp_socket};
+use crate::tcp::{TcpEndpoints, apply_socket_budgets, tcp_socket};
 
 use super::{ProtocolProgression, Stack};
 
@@ -130,6 +130,122 @@ impl Stack {
         Ok(progression)
     }
 
+    pub fn tcp_receive_buffer(&self, id: TcpEndpointId) -> Result<usize, TcpQueryError> {
+        self.tcp_buffer_budget(id, TcpBufferDirection::Receive)
+    }
+
+    pub fn tcp_send_buffer(&self, id: TcpEndpointId) -> Result<usize, TcpQueryError> {
+        self.tcp_buffer_budget(id, TcpBufferDirection::Send)
+    }
+
+    pub fn set_tcp_receive_buffer_hint(
+        &mut self,
+        id: TcpEndpointId,
+        requested: usize,
+    ) -> Result<alloc::vec::Vec<ProtocolProgression>, TcpQueryError> {
+        self.set_tcp_buffer_hint(id, requested, TcpBufferDirection::Receive)
+    }
+
+    pub fn set_tcp_send_buffer_hint(
+        &mut self,
+        id: TcpEndpointId,
+        requested: usize,
+    ) -> Result<alloc::vec::Vec<ProtocolProgression>, TcpQueryError> {
+        self.set_tcp_buffer_hint(id, requested, TcpBufferDirection::Send)
+    }
+
+    fn tcp_buffer_budget(
+        &self,
+        id: TcpEndpointId,
+        direction: TcpBufferDirection,
+    ) -> Result<usize, TcpQueryError> {
+        let endpoint = self
+            .protocols
+            .tcp
+            .endpoint(id)
+            .ok_or(TcpQueryError::UnknownEndpoint)?;
+        if matches!(
+            endpoint.role,
+            crate::tcp::EndpointRole::Vacant | crate::tcp::EndpointRole::Reclaiming { .. }
+        ) {
+            return Err(TcpQueryError::UnknownEndpoint);
+        }
+        Ok(match direction {
+            TcpBufferDirection::Receive => endpoint.receive_budget,
+            TcpBufferDirection::Send => endpoint.send_budget,
+        })
+    }
+
+    fn set_tcp_buffer_hint(
+        &mut self,
+        id: TcpEndpointId,
+        requested: usize,
+        direction: TcpBufferDirection,
+    ) -> Result<alloc::vec::Vec<ProtocolProgression>, TcpQueryError> {
+        let policy = self.protocols.tcp.policy();
+        let budget = match direction {
+            TcpBufferDirection::Receive => policy.normalize_receive_buffer_hint(requested),
+            TcpBufferDirection::Send => policy.normalize_send_buffer_hint(requested),
+        };
+        let targets = {
+            let endpoint = self
+                .protocols
+                .tcp
+                .endpoint(id)
+                .ok_or(TcpQueryError::UnknownEndpoint)?;
+            match &endpoint.role {
+                crate::tcp::EndpointRole::Connection(connection) => {
+                    alloc::vec![(connection.interface, connection.handle)]
+                },
+                crate::tcp::EndpointRole::Listener(listener) => listener
+                    .projections
+                    .iter()
+                    .flat_map(|projection| {
+                        projection.slots.iter().filter_map(|slot| {
+                            slot.handle.map(|handle| (projection.interface, handle))
+                        })
+                    })
+                    .collect(),
+                crate::tcp::EndpointRole::Idle | crate::tcp::EndpointRole::Bound(_) => {
+                    alloc::vec::Vec::new()
+                },
+                crate::tcp::EndpointRole::Vacant | crate::tcp::EndpointRole::Reclaiming { .. } => {
+                    return Err(TcpQueryError::UnknownEndpoint);
+                },
+            }
+        };
+        let endpoint = self
+            .protocols
+            .tcp
+            .endpoint_mut(id)
+            .expect("validated TCP buffer owner disappeared before mutation");
+        match direction {
+            TcpBufferDirection::Receive => endpoint.receive_budget = budget,
+            TcpBufferDirection::Send => endpoint.send_budget = budget,
+        }
+
+        let mut progressed = alloc::vec::Vec::new();
+        let mut progressed_interfaces = alloc::vec::Vec::new();
+        for (interface, handle) in targets {
+            let (_, _, sockets) = self
+                .tcp_owner_interface_mut(interface)
+                .expect("live TCP buffer target references an attached interface");
+            let socket = sockets.get_mut::<smoltcp::socket::tcp::Socket>(handle);
+            match direction {
+                TcpBufferDirection::Receive => socket.set_recv_capacity_limit(budget),
+                TcpBufferDirection::Send => socket.set_send_capacity_limit(budget),
+            }
+            if direction == TcpBufferDirection::Receive
+                && !progressed_interfaces.contains(&interface)
+            {
+                progressed_interfaces.push(interface);
+                progressed.push(ProtocolProgression::committed(interface));
+            }
+        }
+        self.protocols.tcp.invalidate(id);
+        Ok(progressed)
+    }
+
     pub fn start_tcp_connect(
         &mut self,
         id: TcpEndpointId,
@@ -148,10 +264,17 @@ impl Stack {
             .tcp
             .no_delay(id)
             .map_err(|_| TcpConnectError::UnknownEndpoint)?;
+        let endpoint = self
+            .protocols
+            .tcp
+            .endpoint(id)
+            .ok_or(TcpConnectError::UnknownEndpoint)?;
+        let (receive_budget, send_budget) = (endpoint.receive_budget, endpoint.send_budget);
         let (tcp_owner, interface, sockets) = self
             .tcp_owner_interface_mut(selection.interface())
             .ok_or(TcpConnectError::UnknownInterface)?;
         let mut socket = tcp_socket(policy);
+        apply_socket_budgets(&mut socket, receive_budget, send_budget);
         socket.set_timeout(Some(smoltcp::time::Duration::from_millis(
             policy.connect_timeout_ms() as u64,
         )));
@@ -325,6 +448,7 @@ impl Stack {
                     .expect("validated TCP listener interface disappeared");
                 projections.push(tcp_owner.new_listener_projection(
                     sockets,
+                    id,
                     interface,
                     binding,
                     backlog.get(),
@@ -602,6 +726,12 @@ impl Stack {
         }
         Ok(interfaces)
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TcpBufferDirection {
+    Receive,
+    Send,
 }
 
 fn map_listen_bind_error(error: TcpBindError) -> TcpListenError {

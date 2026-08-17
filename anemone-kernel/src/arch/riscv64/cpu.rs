@@ -1,7 +1,9 @@
+use core::fmt::Write;
+
 use fdt::nodes::{AsNode, cpus::CpuStatus};
 
 use crate::{
-    device::{finish_cpu_registration, register_cpu},
+    device::{cpu_count, finish_cpu_registration, register_cpu},
     prelude::*,
 };
 
@@ -25,7 +27,7 @@ impl CpuArchTrait for RiscV64CpuArch {
     }
 }
 
-static MINIMUM_REQUIRED_ISA_EXTENSIONS: &[&str] = &["i", "m", "a", "c", "f", "d"];
+static MINIMUM_REQUIRED_ISA_EXTENSIONS: &[&str] = &["i", "m", "a", "f", "d", "c"];
 
 // This behavioral projection is derived once from the immutable CPU admission
 // policy above; it must change together with that policy and never goes stale.
@@ -41,6 +43,31 @@ pub(super) static IMA_EXT_FLAGS: Lazy<u64> = Lazy::new(|| {
     }
     flags
 });
+
+/// Render the Linux RISC-V `/proc/cpuinfo` projection.
+///
+/// CPU admission does not retain complete per-hart ISA, microarchitecture, or
+/// vendor snapshots. Report only the admitted minimum ISA and an explicit
+/// unknown microarchitecture instead of manufacturing hardware identities.
+pub(crate) fn proc_cpuinfo_snapshot() -> String {
+    let mut out = String::new();
+
+    for logical_id in 0..cpu_count() {
+        let cpu_id = CpuId::new(logical_id);
+
+        writeln!(out, "processor\t: {logical_id}").unwrap();
+        writeln!(out, "hart\t\t: {}", cpu_id.physical_id().get()).unwrap();
+        out.push_str("isa\t\t: rv64");
+        for extension in MINIMUM_REQUIRED_ISA_EXTENSIONS {
+            out.push_str(extension);
+        }
+        out.push('\n');
+        writeln!(out, "mmu\t\t: {}", super::mm::SATP_MODE_NAME).unwrap();
+        out.push_str("uarch\t\t: unknown\n\n");
+    }
+
+    out
+}
 
 /// Get the list of ISA extensions from the `riscv,isa` property of a CPU node
 /// in the device tree. Returns `None` if the property is missing or malformed.

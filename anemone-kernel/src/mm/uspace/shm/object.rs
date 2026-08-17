@@ -73,4 +73,24 @@ impl VmObject for ShmObject {
         pages.insert(pidx, frame);
         Ok(resolved)
     }
+
+    fn resolve_frame_ahead(
+        &self,
+        pidx: usize,
+        _request_end: usize,
+        _access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        self.check_pidx(pidx)?;
+        // shm_rss is user-visible accounting, so fault-ahead may map an
+        // already-resident shared frame but must not allocate a new one.
+        Ok(self
+            .pages
+            .read()
+            .get(&pidx)
+            .cloned()
+            .map(|frame| ResolvedFrame {
+                frame,
+                writable: true,
+            }))
+    }
 }

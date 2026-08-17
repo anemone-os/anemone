@@ -3,8 +3,8 @@ use core::mem::size_of;
 use anemone_abi::{
     net::linux::{
         ICMP_FILTER, IP_RECVERR, IP_TOS, IP_TTL, IPPROTO_IP, IPPROTO_TCP, SO_ACCEPTCONN, SO_DOMAIN,
-        SO_ERROR, SO_PEERCRED, SO_PROTOCOL, SO_REUSEADDR, SO_TYPE, SOL_RAW, SOL_SOCKET,
-        TCP_NODELAY, UCred,
+        SO_ERROR, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF, SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOL_RAW,
+        SOL_SOCKET, TCP_NODELAY, UCred,
     },
     syscall::SYS_GETSOCKOPT,
 };
@@ -116,6 +116,24 @@ fn query_option(socket: &Socket, level: i32, option: i32) -> Result<GetOption, S
                         gid: credentials.effective_gid,
                     }))
                 },
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
+        (SOL_SOCKET, SO_SNDBUF) => socket
+            .query_option(SocketOptionQuery::SendBuffer)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::BufferSize(value) => i32::try_from(value)
+                    .map(GetOption::Descriptor)
+                    .map_err(|_| SysError::Overflow),
+                _ => Err(SysError::ProtocolOptionNotSupported),
+            }),
+        (SOL_SOCKET, SO_RCVBUF) => socket
+            .query_option(SocketOptionQuery::ReceiveBuffer)
+            .map_err(map_option_error)
+            .and_then(|value| match value {
+                SocketOptionValue::BufferSize(value) => i32::try_from(value)
+                    .map(GetOption::Descriptor)
+                    .map_err(|_| SysError::Overflow),
                 _ => Err(SysError::ProtocolOptionNotSupported),
             }),
         (SOL_SOCKET, option) => query_value(socket, option).map(GetOption::Descriptor),
@@ -259,8 +277,8 @@ fn sys_getsockopt(fd: Fd, level: i32, option: i32, value: u64, len: u64) -> Resu
 mod kunits {
     use super::*;
     use crate::fs::socket::{
-        ICMP_RAW_SOCKET_OPS, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS, prepare_socket,
-        prepare_socket_pair, socket_from_file,
+        ICMP_RAW_SOCKET_OPS, TCP_SOCKET_OPS, UDP_SOCKET_OPS, UNIX_STREAM_SOCKET_OPS,
+        prepare_socket, prepare_socket_pair, socket_from_file,
     };
     use anemone_abi::net::linux::{
         AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM,
@@ -268,6 +286,20 @@ mod kunits {
 
     #[kunit]
     fn descriptor_and_role_queries_are_family_neutral() {
+        let (tcp_file, tcp_creation) = prepare_socket(&TCP_SOCKET_OPS).unwrap();
+        let tcp = socket_from_file(&tcp_file).unwrap();
+        assert!(matches!(
+            query_option(tcp, SOL_SOCKET, SO_RCVBUF),
+            Ok(GetOption::Descriptor(value))
+                if value == crate::kconfig_defs::NET_TCP_RX_BUFFER_BYTES as i32
+        ));
+        assert!(matches!(
+            query_option(tcp, SOL_SOCKET, SO_SNDBUF),
+            Ok(GetOption::Descriptor(value))
+                if value == crate::kconfig_defs::NET_TCP_TX_BUFFER_BYTES as i32
+        ));
+        drop(tcp_creation);
+
         let (udp_file, creation) = prepare_socket(&UDP_SOCKET_OPS).unwrap();
         let udp = socket_from_file(&udp_file).unwrap();
         assert_eq!(query_value(udp, SO_TYPE), Ok(SOCK_DGRAM));
@@ -298,5 +330,6 @@ mod kunits {
         assert_eq!(query_value(raw, SO_PROTOCOL), Ok(IPPROTO_ICMP));
         assert_eq!(query_value(raw, SO_ACCEPTCONN), Ok(0));
         drop(raw_creation);
+        drop(tcp_file);
     }
 }

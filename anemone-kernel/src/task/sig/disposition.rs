@@ -23,12 +23,11 @@ impl SignalAction {
         }
     }
 
-    pub(super) fn is_explicit_ignore(&self) -> bool {
-        matches!(self, Self::Ignore)
-    }
-
-    pub(super) fn is_default_ignore(&self) -> bool {
-        matches!(self, Self::Default(fp) if *fp as usize == ignore as *const () as usize)
+    /// Whether generation may discard this occurrence before pending
+    /// publication. Linux keeps blocked ignored signals available to
+    /// synchronous consumers and to a disposition change before unblocking.
+    pub(super) fn discard_at_generation(&self, blocked: bool) -> bool {
+        self.is_ignored() && !blocked
     }
 
     pub(super) fn is_default_stop(&self) -> bool {
@@ -238,3 +237,25 @@ mod default_actions {
     }
 }
 pub use default_actions::*;
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn generation_discard_requires_ignored_and_unblocked() {
+        let default_ignored = SignalAction::Default(ignore);
+        let explicit_ignored = SignalAction::Ignore;
+        let actionable_default = SignalAction::Default(terminate);
+        let custom = SignalAction::Custom(VirtAddr::new(0x1000));
+
+        assert!(default_ignored.discard_at_generation(false));
+        assert!(!default_ignored.discard_at_generation(true));
+        assert!(explicit_ignored.discard_at_generation(false));
+        assert!(!explicit_ignored.discard_at_generation(true));
+        assert!(!actionable_default.discard_at_generation(false));
+        assert!(!actionable_default.discard_at_generation(true));
+        assert!(!custom.discard_at_generation(false));
+        assert!(!custom.discard_at_generation(true));
+    }
+}

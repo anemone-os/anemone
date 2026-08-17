@@ -21,13 +21,16 @@ slab_span_pages = 16 # Pages permanently assigned to one kernel slab size class 
 slab_max_object_bytes = 2048 # Largest size/alignment served by the kernel slab path.
 slab_local_capacity = 32 # Maximum free objects retained per CPU and slab class.
 slab_transfer_batch = 16 # Maximum free objects moved in one local/central handoff.
+frame_magazine_capacity = 64 # Maximum order-0 frames retained in each logical CPU magazine.
+frame_magazine_batch = 16 # Maximum order-0 frames moved in one magazine/buddy handoff.
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
-print_log_level = 5 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
-record_log_level = 5 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
+print_log_level = 0 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; must not exceed record_log_level
+record_log_level = 0 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 riscv64_tlb_flush_all_threshold_pages = 64 # Full local TLB flush threshold for RV64 page ranges; larger ranges use one full flush.
 loongarch64_tlb_flush_all_min_pages = 128 # Minimum LA64 page-range length that uses one full local TLB flush.
+user_fault_window_pages = 8 # Maximum pages in one actual user-fault locality window, including the demand page.
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_logical_cpus = 8 # Maximum number of logical CPUs enabled by this kernel
 max_ident_len_bytes = 255 # Maximum length of identity strings in bytes
@@ -132,6 +135,8 @@ net_tcp_listener_completed_capacity = 16 # Maximum aggregate pending/claimed bac
 net_tcp_listener_projection_capacity = 2 # Maximum boot-static ingress paths owned by one logical TCP listener.
 net_tcp_rx_buffer_bytes = 16384 # Receive bytes owned by each private TCP engine.
 net_tcp_tx_buffer_bytes = 16384 # Transmit bytes owned by each private TCP engine.
+net_tcp_min_rx_buffer_bytes = 1024 # Smallest effective TCP receive budget exposed by SO_RCVBUF.
+net_tcp_min_tx_buffer_bytes = 2048 # Smallest effective TCP transmit budget exposed by SO_SNDBUF.
 net_tcp_deferred_reclaim_capacity = 128 # Pre-reserved cleanup entries; must cover every TCP engine.
 net_tcp_connect_timeout_ms = 60000 # Maximum unanswered active-open interval.
 net_tcp_orphan_timeout_ms = 60000 # Maximum peer-silence window bounding orphaned graceful close.

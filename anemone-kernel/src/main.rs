@@ -19,12 +19,15 @@
 extern crate alloc;
 
 mod boot;
-mod boot_defs;
-mod nemophila_defs;
-mod network_defs;
 
+#[rustfmt::skip]
 pub mod kconfig_defs;
+
+#[rustfmt::skip]
 pub mod platform_defs;
+
+#[rustfmt::skip]
+mod system_target_defs;
 
 pub mod prelude;
 
@@ -66,61 +69,6 @@ use crate::{
 static INIT_SYNC_COUNTER: CpuSync = CpuSync::new("init");
 static FINISH_SYNC_COUNTER: CpuSync = CpuSync::new("finish");
 
-fn mount_rootfs() {
-    match ROOTFS_SOURCE_KIND {
-        "pseudo" => {
-            mount_root("ramfs", MountSource::Pseudo, MountAttrFlags::empty())
-                .expect("root mount failed");
-        },
-        "block" => {
-            let rootfs_path = ROOTFS_SOURCE_PATH
-                .expect("rootfs source path must be configured for block-backed rootfs");
-            let root_dev = device::block::get_block_dev_by_name(rootfs_path)
-                .unwrap_or_else(|| panic!("rootfs block device not found: {}", rootfs_path));
-            mount_root(
-                ROOTFS_FS_TYPE,
-                MountSource::Block(root_dev),
-                MountAttrFlags::empty(),
-            )
-            .expect("root mount failed");
-        },
-        other => panic!("unsupported rootfs source kind: {}", other),
-    }
-    ls_dir(Path::new("/"));
-}
-
-// recursively ls
-fn ls_dir(path: &Path) {
-    const MAX_ENTRIES: usize = 256;
-
-    let mut sink = FixedSizeDirSink::<MAX_ENTRIES>::new();
-
-    let Ok(dir) = vfs_open(PathResolution::normal(path)) else {
-        return;
-    };
-
-    loop {
-        sink.clear();
-        match dir.read_dir(&mut sink) {
-            Ok(ReadDirResult::Progressed) => {
-                for DirEntry { name, ino, ty } in sink.entries() {
-                    if name == "." || name == ".." {
-                        continue;
-                    }
-
-                    let path = path.join(name);
-                    kdebugln!("{} ({:?})", path.display(), ty);
-                    if *ty == InodeType::Dir {
-                        ls_dir(&path);
-                    }
-                }
-            },
-            Ok(ReadDirResult::Eof) => break,
-            Err(e) => panic!("failed to read dir {}: {:?}", path.display(), e),
-        }
-    }
-}
-
 /// **System Invariant**
 ///
 /// - When bootstrap processor reaches [bsp_kinit], interrupts are disabled in
@@ -140,7 +88,8 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         fs::activate_public_filesystems();
         driver::register_builtin_drivers();
         unflatten_device_tree(fdt_va);
-        parse_bootargs();
+        of_init_stdout()
+            .unwrap_or_else(|error| panic!("failed to initialize stdout-path: {:?}", error));
         let machine_policy = machine_init();
         of_platform_discovery();
         probe_virtual_devices();
@@ -192,7 +141,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
         init_stdio
     };
 
-    mount_rootfs();
+    boot::mount_rootfs();
 
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
@@ -200,11 +149,6 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     nemophila::activate_embedded_modules();
 
     boot::exec_initial_program(init_stdio);
-}
-
-fn parse_bootargs() {
-    of_init_stdout()
-        .unwrap_or_else(|error| panic!("failed to initialize stdout-path: {:?}", error));
 }
 
 /// **System Invariant**

@@ -3,7 +3,7 @@
 use core::ptr::NonNull;
 
 use crate::{
-    mm::frame::allocator::{FrameAllocator, FrameAllocatorStats},
+    mm::frame::allocator::{AllocFailure, FrameAllocator, FrameAllocatorStats},
     prelude::*,
 };
 
@@ -38,24 +38,33 @@ impl FrameAllocator for BuddyAllocator {
         }
     }
 
-    fn alloc(&mut self, npages: usize) -> Option<PhysPageNum> {
-        let order = (npages.next_power_of_two() as usize).trailing_zeros() as usize;
-        if order > NORDER {
-            return None;
+    fn alloc(&mut self, npages: usize) -> Result<PhysPageNum, AllocFailure> {
+        let Some(block_pages) = npages.checked_next_power_of_two() else {
+            return Err(AllocFailure::Admission);
+        };
+        let order = block_pages.trailing_zeros() as usize;
+        if order >= NORDER {
+            return Err(AllocFailure::Admission);
         }
-        self.buddy.alloc(order).ok().map(|ptr| {
-            // note that the ptr returned by buddy system points to hhdm region, so we need
-            // to convert it back to physical address before returning.
-            let vaddr = VirtAddr::new(ptr.as_ptr() as u64);
-            let paddr = unsafe { vaddr.hhdm_to_phys() };
+        self.buddy
+            .alloc(order)
+            .map_err(|error| match error {
+                buddy_system::BuddyError::OutOfMemory => AllocFailure::Unavailable,
+                _ => panic!("admitted buddy allocation failed: {:?}", error),
+            })
+            .map(|ptr| {
+                // note that the ptr returned by buddy system points to hhdm region, so we need
+                // to convert it back to physical address before returning.
+                let vaddr = VirtAddr::new(ptr.as_ptr() as u64);
+                let paddr = unsafe { vaddr.hhdm_to_phys() };
 
-            // It looks like that,
-            // current return type PhysPageNum is not a goot choice since it
-            // loses the provenance information of the allocated block.
-            // We should refine this later, maybe by introducing a new type that can
-            // carry the provenance information.
-            PhysPageNum::new(paddr.get() >> PagingArch::PAGE_SIZE_BITS as u64)
-        })
+                // It looks like that,
+                // current return type PhysPageNum is not a goot choice since it
+                // loses the provenance information of the allocated block.
+                // We should refine this later, maybe by introducing a new type that can
+                // carry the provenance information.
+                PhysPageNum::new(paddr.get() >> PagingArch::PAGE_SIZE_BITS as u64)
+            })
     }
 
     unsafe fn dealloc(&mut self, range: PhysPageRange) {

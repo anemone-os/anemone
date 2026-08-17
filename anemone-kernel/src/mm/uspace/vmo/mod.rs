@@ -88,6 +88,22 @@ pub trait VmObject: Send + Sync {
     /// [shadow::ShadowObject].
     fn resolve_frame(&self, pidx: usize, access: PageFaultType) -> Result<ResolvedFrame, SysError>;
 
+    /// Optionally resolve one follower in an actual user-fault locality window.
+    ///
+    /// `request_end` is an exclusive object-page hint. Implementations may use
+    /// it to publish additional owner-local clean state, but return authority
+    /// only for `pidx`. Returning `None` declines speculation without changing
+    /// the demand fault result. In particular, an implementation must not infer
+    /// a user write merely because `access` is [`PageFaultType::Write`].
+    fn resolve_frame_ahead(
+        &self,
+        _pidx: usize,
+        _request_end: usize,
+        _access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        Ok(None)
+    }
+
     fn sync_range(&self, _range: core::ops::Range<usize>) -> Result<(), SysError> {
         Ok(())
     }

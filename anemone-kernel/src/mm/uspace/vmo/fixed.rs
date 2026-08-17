@@ -35,6 +35,15 @@ impl VmObject for FixedObject {
         })
     }
 
+    fn resolve_frame_ahead(
+        &self,
+        pidx: usize,
+        _request_end: usize,
+        access: PageFaultType,
+    ) -> Result<Option<ResolvedFrame>, SysError> {
+        self.resolve_frame(pidx, access).map(Some)
+    }
+
     fn exclusive_physical_pages(&self, range: core::ops::Range<usize>) -> usize {
         if range.start > range.end {
             return 0;

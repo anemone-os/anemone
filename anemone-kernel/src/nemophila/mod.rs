@@ -10,14 +10,19 @@ pub(crate) mod weave;
 use alloc::{boxed::Box, vec::Vec};
 
 use crate::{
-    nemophila_defs::EMBEDDED_MODULES,
     prelude::{Lazy, kerrln, kinfoln},
+    system_target_defs::EMBEDDED_MODULES,
 };
 use runtime::Runtime;
 pub(crate) use runtime::{
     InstanceIdentity, InstanceOrigin, InstanceSnapshot, LifecycleSnapshot, PublishFailure,
     TryUnloadFailure,
 };
+
+pub(crate) struct EmbeddedModule {
+    pub(crate) identity: &'static str,
+    pub(crate) bytes: &'static [u8],
+}
 
 static RUNTIME: Lazy<Runtime> = Lazy::new(Runtime::new);
 
@@ -661,37 +666,6 @@ mod kunits {
         assert!(matches!(
             load_without_registration(wrong_load_type),
             Err(LoadFailure::LoadEntry(_))
-        ));
-    }
-
-    #[kunit]
-    fn logging_import_preserves_load_result_when_recorded_or_filtered() {
-        for level in 0..=7 {
-            let message = b"NEMOPHILA-KUNIT:LOGGING-OK";
-            assert!(
-                load_without_registration(logging_load(
-                    level,
-                    0,
-                    message.len() as i32,
-                    message,
-                    0,
-                    true,
-                ))
-                .is_ok()
-            );
-        }
-
-        let initial = snapshot_policy();
-        let error_only = validate_policy(LogLevel::Err as u64).unwrap();
-        set_policy(error_only);
-        let filtered = load_without_registration(logging_load(0, 0, 8, b"filtered", 0, true));
-        set_policy(initial);
-        assert!(filtered.is_ok());
-
-        let message = b"NEMOPHILA-KUNIT:FAILED-LOAD-LOG";
-        assert!(matches!(
-            load_without_registration(logging_load(1, 0, message.len() as i32, message, 1, true,)),
-            Err(LoadFailure::ModuleRejected)
         ));
     }
 

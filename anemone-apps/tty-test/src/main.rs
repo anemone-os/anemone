@@ -28,7 +28,7 @@ use anemone_rs::{
         linux::{
             fs::{
                 AtFd, Fd, PipeFlags, close, dup3, fcntl_getfl, fcntl_setfl, fstat, fstatat,
-                mkdirat, mount, openat, pipe2, ppoll, pselect, read, write,
+                ioctl_readable_bytes, mkdirat, mount, openat, pipe2, ppoll, pselect, read, write,
             },
             process::{
                 WStatus, WStatusRaw, WaitFor, WaitOptions, execve, exit, fork, getpid, sched_yield,
@@ -416,7 +416,8 @@ fn test_plain_open_does_not_attach(_baseline: &Baseline) -> Result<(), Errno> {
 fn acquire_query_idempotent_body() -> Result<(), Errno> {
     let pid = getpid()?;
     let fd = tty_serial(O_RDWR)?;
-    tiocsctty(fd, 0)?;
+    // `arg=1` is ordinary acquisition while the endpoint is unbound.
+    tiocsctty(fd, 1)?;
     expect(tcgetsid(fd)? == pid as i32)?;
     expect(tcgetpgrp(fd)? == pid as i32)?;
     let controlling = openat(AtFd::Cwd, Path::new("/dev/tty"), O_RDWR, 0)?;
@@ -426,7 +427,7 @@ fn acquire_query_idempotent_body() -> Result<(), Errno> {
 
     // Exact-relation idempotence precedes the first-acquire readable check.
     let write_only = tty_serial(O_WRONLY)?;
-    tiocsctty(write_only, 0)?;
+    tiocsctty(write_only, 2)?;
     close(write_only)?;
     match ioctl_noarg(fd, TIOCGSID) {
         Err(EFAULT) => {},
@@ -466,10 +467,6 @@ fn test_proc_tty_projection(_baseline: &Baseline) -> Result<(), Errno> {
 
 fn rejected_acquire_body() -> Result<(), Errno> {
     let fd = tty_serial(O_RDWR)?;
-    match tiocsctty(fd, 1) {
-        Err(EPERM) => {},
-        _ => return Err(EIO),
-    }
     let write_only = tty_serial(O_WRONLY)?;
     match tiocsctty(write_only, 0) {
         Err(EPERM) => {},
@@ -507,6 +504,10 @@ fn occupied_relation_body() -> Result<(), Errno> {
         )),
         None => finish_child((|| {
             let pid = setsid()?;
+            match tiocsctty(fd, 1) {
+                Err(EPERM) => {},
+                _ => return Err(EIO),
+            }
             match tiocsctty(fd, 0) {
                 Err(EPERM) => {},
                 _ => return Err(EIO),
@@ -529,6 +530,7 @@ fn occupied_relation_body() -> Result<(), Errno> {
             }
         })()),
     }
+    .and_then(|()| expect(tcgetsid(fd)? == getpid()? as i32))
 }
 
 fn test_occupied_and_wrong_session(_baseline: &Baseline) -> Result<(), Errno> {
@@ -1381,6 +1383,50 @@ fn test_canonical_short_record(baseline: &Baseline) -> Result<(), Errno> {
     expect(&rest[second..second + third] == b"second\n")
 }
 
+fn test_input_queue_query(baseline: &Baseline) -> Result<(), Errno> {
+    tcsetattr(
+        STDIN_FILENO,
+        SetTermiosWhen::DrainFlush,
+        &baseline.canonical_noecho(),
+    )?;
+    ready("fionread-canonical-pending");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+    expect(!is_readable(STDIN_FILENO)?)?;
+
+    ready("fionread-canonical-commit");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 11)?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 11)?;
+    let mut prefix = [0u8; 2];
+    expect(read(STDIN_FILENO, &mut prefix)? == 2 && &prefix == b"ab")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 9)?;
+    let mut delimiter = [0u8; 2];
+    expect(read(STDIN_FILENO, &mut delimiter)? == 2 && &delimiter == b"c\n")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 7)?;
+    let mut second = [0u8; 7];
+    expect(read(STDIN_FILENO, &mut second)? == 7 && &second == b"second\n")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+
+    ready("fionread-empty-eof");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+    expect(is_readable(STDIN_FILENO)?)?;
+    let mut empty = [0u8; 1];
+    expect(read(STDIN_FILENO, &mut empty)? == 0)?;
+
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Now, &baseline.raw_vmin1())?;
+    ready("fionread-raw");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 3)?;
+    let mut byte = [0u8; 1];
+    expect(read(STDIN_FILENO, &mut byte)? == 1 && byte == [b'r'])?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 2)?;
+    let mut suffix = [0u8; 2];
+    expect(read(STDIN_FILENO, &mut suffix)? == 2 && &suffix == b"aw")?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)
+}
+
 fn test_icrnl(baseline: &Baseline) -> Result<(), Errno> {
     tcsetattr(
         STDIN_FILENO,
@@ -1831,6 +1877,7 @@ fn run_auto(baseline: &Baseline) -> Results {
         baseline,
         test_canonical_short_record,
     );
+    results.case("input-queue-query", baseline, test_input_queue_query);
     results.case("icrnl", baseline, test_icrnl);
     results.case("input-mode-roundtrip", baseline, test_input_mode_roundtrip);
     results.case(

@@ -3,13 +3,13 @@
 **Contract IDs：** `SOCKET-FRONT-001`、`SOCKET-ABI-001`、`SOCKET-WAIT-001`
 **状态：** Active
 **Owner：** general Socket front拥有immutable descriptor/private envelope与共同FileOps/ABI/wait orchestration；concrete family ops拥有family state与operation predicate
-**参与领域：** socket syscall / VFS opened description / UDP / ICMP raw / TCP / Unix IPC / read-only netlink diagnostics / iomux / epoll
-**覆盖范围：** UDP、ICMP raw、IPv4 TCP、Unix stream/seqpacket与read-only netlink diagnostics的共同Socket file association、typed operation boundary、Linux ABI containment、blocking与poll wait/recheck
+**参与领域：** socket syscall / VFS opened description / UDP / ICMP raw / TCP / Unix IPC / read-only network diagnostics / iomux / epoll
+**覆盖范围：** UDP、ICMP raw、IPv4 TCP、Unix stream/seqpacket与read-only network diagnostics的共同Socket file association、typed operation boundary、Linux ABI containment、blocking与poll wait/recheck
 **不覆盖：** family-specific packet/stream transaction、future family registry、通用error queue或通用mutable option bag
 **实现位置：** `anemone-kernel/src/fs/socket/{front,api,udp,icmp_raw,tcp,unix,netlink}/`、`anemone-abi/src/net.rs`、`anemone-rs/src/{os,sys}/linux/net.rs`
-**依赖：** `OPENED-DESC-001..003`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`、`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`、`NET-SOCKET-WAIT-001`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
+**依赖：** `OPENED-DESC-001..003`、`NET-PROTOCOL-BOUNDARY-001`、`NET-SOCKET-ENDPOINT-001`、`NET-UDP-TRANSACTION-001`、`NET-ICMP-RAW-ENDPOINT-001`、`NET-ICMP-RAW-TRANSACTION-001`、`NET-TCP-ENDPOINT-001`、`NET-TCP-STREAM-001`、`NET-TCP-LIFECYCLE-001`、`NET-SOCKET-WAIT-001`、`NET-IFACE-DOMAIN-001`、`NET-CONTROL-PLANE-001`、`IOMUX-POLL-001..003`、`EPOLL-WATCH-001`、`EPOLL-READY-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-13
+**最后核验：** 2026-08-17
 
 ## 状态与能力所有权
 
@@ -58,6 +58,22 @@ Unix stream/seqpacket的`SO_PEERCRED`由family owner返回normalized `{tgid,euid
 `min(requested, sizeof(struct ucred))` bytes并把optlen写为实际复制长度；value fault发生时不先改写optlen。
 非连接Unix role的typed rejection映射`ENOTCONN`，没有peer-credential producer的family映射`ENOPROTOOPT`。
 
+Socket输入队列查询由adapter把数值相同的`FIONREAD`、`TIOCINQ`与`SIOCINQ`解码为
+`SocketIoctlRequest::ReadableBytes`，再经static `SocketOps::ioctl`分发；raw command、argument、Linux signed
+`int`表示、checked conversion、errno与用户copyout不得越过front。family callback只返回现有owner queue/stream的
+瞬时typed fact：UDP为下一datagram payload长度，ICMP raw为下一完整IPv4 packet长度，TCP与Unix stream为累计未读
+stream bytes，Unix seqpacket为全部排队record payload总和。UDP的队首长度与readiness共享同一`Option` truth，
+`Some(0)`表示可读零长datagram而`None`表示空队列。TCP/Unix listener的typed role rejection映射`EINVAL`；Netlink
+不发布该capability，unknown ioctl与Netlink `FIONREAD`保持`ENOTTY`。查询不peek、detach或consume数据，也不缓存
+byte count；`FIONBIO`继续由opened-description status owner处理，不进入family ioctl callback。
+
+read-only `SIOCGIFCONF`由common Socket FileOps直接交给front-owned interface ABI adapter，不经family callback。
+adapter读取LP64 `ifconf`与nested user pointer，从initial-domain normalized owned snapshot只枚举实际拥有IPv4 address的
+logical interface，并编码zero-initialized LP64 `ifreq + sockaddr_in`。NULL buffer报告完整snapshot字节数；非NULL buffer
+只复制capacity可容纳的完整record prefix，先复制records、成功后再更新`ifc_len`，任一copy fault返回`EFAULT`且不回滚
+已完成的copyout。logical membership/name/ifindex与IPv4 address仍由各自network owner拥有；front不建立registry、cached
+truth、family downcast或smoltcp/private provider检查。
+
 UDP发布真实`IP_RECVERR` scalar option、consuming `SO_ERROR`与`MSG_ERRQUEUE` ancillary projection。raw option/header、
 Linux errno、`sock_extended_err`、sockaddr/cmsg alignment与copy ordering只存在于adapter；UDP owner只接收normalized
 enable request并返回typed pending cause或move-only record。`MSG_ERRQUEUE`输出quoted UDP payload、original destination、
@@ -86,6 +102,12 @@ blocking/nonblocking connect、accept/accept4、local/peer query和typed async e
 `SIGPIPE`由adapter投递，本次`MSG_NOSIGNAL`只抑制该信号。unsupported flag稳定返回`EOPNOTSUPP`，不得因consumer忽略
 错误而success-no-op。
 
+共同adapter对`SOL_SOCKET + SO_SNDBUF/SO_RCVBUF`先完成`len >= sizeof(int)`、signed `int` copy-in与typed
+hint形成，再由family descriptor决定是否支持；query同样只接收family owner返回的实际有效预算并编码为Linux `int`。
+TCP是当前唯一同时提供query与mutation的consumer：零hint收敛到方向性Kconfig最小值，负hint经Linux的无符号
+上限clamp得到固定TCP ring物理上限，正hint加倍并限制在两者之间。Netlink保留先前的正值exact-budget mutation且仍不提供query；UDP、ICMP raw与Unix继续返回
+`ENOPROTOOPT`。front不得保存buffer value、替family选择容量边界或把不支持family伪装成恒定默认值。
+
 Netlink tuple只接受`AF_NETLINK + SOCK_RAW + NETLINK_ROUTE/NETLINK_SOCK_DIAG`。`sockaddr_nl`、
 `nlmsghdr`、rtnetlink/inet-diag layout、message alignment、sequence、Linux state/flag/errno与user copy均止于
 Socket/netlink adapter；network/TCP owner只提供normalized owned snapshot。`SO_SNDBUF/SO_RCVBUF`分发为
@@ -95,12 +117,14 @@ route/TCP projection与allocation/cleanup边界见[Read-only Netlink Diagnostics
 
 **违反表现：** family ops解析Linux bit或返回Linux errno；raw user pointer越过adapter；descriptor与另存type不一致；
 copy fault提交未复制bytes；`SO_ERROR`恒零成功；Socket复制TCP/UDP pending cause；Linux netlink struct或state进入
-Network/TCP owner；`sendmmsg`建立batch-owned state或绕过single-message transaction；没有producer却建立error state。
+Network/TCP owner；`SIOCGIFCONF`下放family callback或建立第二份interface/address registry；`sendmmsg`建立batch-owned
+state或绕过single-message transaction；没有producer却建立error state。
 
 **验证 / Enforcement：** tuple/permission/flag、IPv4 connected/unconnected与Unix sockaddr input/output、file/vector/
 message iovec boundary、control/name/header ordering、zero/short/peek/truncate/fault、`sendmmsg` partial/copyout/clamp与fd
 rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc resolver、glibc/musl curated Socket LTP；
-两架构既有Socket/TCP suite、RV64 UDP extended-error deterministic chain，以及双架构netlink raw oracle和未修改
+两架构既有Socket/TCP suite、RV64 UDP extended-error deterministic chain、Socket-front `SIOCGIFCONF` layout/codec/
+capacity KUnit与source review，以及双架构netlink raw oracle和未修改
 `ip`/`ss` consumer。
 
 **最初来源：** [Socket Abstraction 与 Unix Socket RFC R1](../../rfcs/socket-abstraction-and-unix-socket/index.md)。
@@ -112,6 +136,11 @@ rollback KUnit/focused oracle；repository-owned C/libc consumer、musl/glibc re
 Refine；[Read-only Network Diagnostics RFC R0](../../rfcs/read-only-network-diagnostics/index.md)的
 `NETLINK-DIAGNOSTICS-CUTOVER`随后增加AF_NETLINK tuple与wire containment；[Unix peer credentials小迭代](../../devlog/changes/2026-08-13-unix-peer-credentials.md)
 的`SOCKET-UNIX-PEERCRED-CUTOVER`增加`SO_PEERCRED` layout/copyout containment。
+随后由[Socket FIONREAD小迭代](../../devlog/changes/2026-08-17-socket-fionread.md) Refine typed ioctl family dispatch与
+输入队列查询语义；[Socket SIOCGIFCONF小迭代](../../devlog/changes/2026-08-17-socket-siocgifconf.md)随后Refine
+common interface-query ABI与normalized IPv4-address snapshot projection；
+[TCP Socket Buffer Budgets小迭代](../../devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md)随后Refine通用
+`SO_SNDBUF/SO_RCVBUF` typed dispatch与TCP实际预算投影。
 
 ## SOCKET-WAIT-001 — Operation predicate由各自owner定义
 
@@ -145,3 +174,5 @@ source在更新owner truth并取得route snapshot后，必须在guard外notify/d
 - Netlink增量覆盖RV64 609/609、LA64 611/611 KUnit、双架构raw oracle、RV64 BusyBox 1.33.1与
   LA64 final-image `/bin/ip`的`link/addr/route show`，以及双架构iproute2 6.1.0 `ss -tan`；hardware、
   `smp>1`、压力/并发、full network LTP、双libc与完整final harness保持Not Run。
+- `SIOCGIFCONF`增量覆盖tracked Linux 6.6.32 source review、RV64 705/705 KUnit与release build；Java、Minecraft、
+  userspace C ioctl oracle、LA64 build/runtime、hardware、network LTP、IPv6/runtime reconfiguration与`smp>1`均Not Run。

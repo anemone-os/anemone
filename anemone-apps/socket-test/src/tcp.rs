@@ -15,9 +15,9 @@ use anemone_rs::{
         },
         net::linux::{
             AF_INET, IPPROTO_TCP, IPPROTO_UDP, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_PEEK, MsgHdr,
-            SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PROTOCOL, SO_REUSEADDR, SO_TYPE,
-            SOCK_CLOEXEC, SOCK_NONBLOCK, SOCK_STREAM, SOL_SOCKET, SockAddrIn, TCP_NODELAY,
-            socklen_t,
+            SHUT_WR, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PROTOCOL, SO_RCVBUF, SO_REUSEADDR,
+            SO_SNDBUF, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOL_SOCKET,
+            SockAddrIn, TCP_NODELAY, socklen_t,
         },
         process::linux::signal::{SigAction, SigSet},
         syscall::{
@@ -29,8 +29,8 @@ use anemone_rs::{
     os::linux::{
         fs::{
             EpollCreateFlags, EpollCtlOp, Fd, close, dup, epoll_create1, epoll_ctl, epoll_wait,
-            fcntl_getfd, fcntl_getfl, fcntl_setfl, fstat, ppoll, pselect, read, readv, write,
-            writev,
+            fcntl_getfd, fcntl_getfl, fcntl_setfl, fstat, ioctl_readable_bytes, ppoll, pselect,
+            read, readv, write, writev,
         },
         net::{
             SocketFlags, bind_ipv4, connect_ipv4, getpeername_ipv4, getsockname_ipv4,
@@ -55,6 +55,8 @@ const WAIT_TIMEOUT: TimeSpec = TimeSpec {
     tv_nsec: 0,
 };
 static SIGPIPE_COUNT: AtomicUsize = AtomicUsize::new(0);
+const SO_SNDBUFFORCE: i32 = 32;
+const SO_RCVBUFFORCE: i32 = 33;
 
 extern "C" fn sigpipe_handler(_signo: i32) {
     SIGPIPE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -153,6 +155,131 @@ fn get_i32_option(fd: Fd, level: i32, option: i32) -> Result<i32, Errno> {
     }
     ensure(length as usize == core::mem::size_of::<i32>())?;
     Ok(value)
+}
+
+fn test_socket_buffer_option_abi_and_inheritance() -> Result<(), Errno> {
+    let idle = tcp_socket(SocketFlags::empty())?;
+    let default_send = get_i32_option(idle, SOL_SOCKET, SO_SNDBUF)?;
+    let default_receive = get_i32_option(idle, SOL_SOCKET, SO_RCVBUF)?;
+    ensure(default_send > 0 && default_receive > 0)?;
+    set_i32_option(idle, SOL_SOCKET, SO_SNDBUF, 4096)?;
+    set_i32_option(idle, SOL_SOCKET, SO_RCVBUF, 2048)?;
+    ensure(get_i32_option(idle, SOL_SOCKET, SO_SNDBUF)? == 8192)?;
+    ensure(get_i32_option(idle, SOL_SOCKET, SO_RCVBUF)? == 4096)?;
+    set_i32_option(idle, SOL_SOCKET, SO_SNDBUF, 0)?;
+    ensure(get_i32_option(idle, SOL_SOCKET, SO_SNDBUF)? > 0)?;
+    set_i32_option(idle, SOL_SOCKET, SO_RCVBUF, -1)?;
+    ensure(get_i32_option(idle, SOL_SOCKET, SO_RCVBUF)? == default_receive)?;
+
+    let value = 1i32;
+    expect_errno(
+        unsafe {
+            setsockopt_level_raw(
+                idle as i32,
+                SOL_SOCKET,
+                SO_SNDBUF,
+                (&value as *const i32).cast(),
+                3,
+            )
+        },
+        EINVAL,
+    )?;
+    expect_errno(
+        unsafe {
+            setsockopt_level_raw(
+                idle as i32,
+                SOL_SOCKET,
+                SO_RCVBUF,
+                1usize as *const u8,
+                core::mem::size_of::<i32>() as i32,
+            )
+        },
+        EFAULT,
+    )?;
+    expect_errno(
+        set_i32_option(idle, SOL_SOCKET, SO_SNDBUFFORCE, 4096),
+        ENOPROTOOPT,
+    )?;
+    expect_errno(
+        set_i32_option(idle, SOL_SOCKET, SO_RCVBUFFORCE, 4096),
+        ENOPROTOOPT,
+    )?;
+    close(idle)?;
+
+    let udp = unsafe { socket_raw(AF_INET, SOCK_DGRAM, IPPROTO_UDP) }?;
+    expect_errno(
+        set_i32_option(udp, SOL_SOCKET, SO_SNDBUF, 4096),
+        ENOPROTOOPT,
+    )?;
+    expect_errno(get_i32_option(udp, SOL_SOCKET, SO_RCVBUF), ENOPROTOOPT)?;
+    close(udp)?;
+
+    let listener = tcp_socket(SocketFlags::empty())?;
+    set_i32_option(listener, SOL_SOCKET, SO_REUSEADDR, 1)?;
+    set_i32_option(listener, SOL_SOCKET, SO_SNDBUF, 4096)?;
+    set_i32_option(listener, SOL_SOCKET, SO_RCVBUF, 2048)?;
+    bind_ipv4(listener, SockAddrIn::new([127, 0, 0, 1], 0))?;
+    let address = getsockname_ipv4(listener)?;
+    listen(listener, 1)?;
+    let client = tcp_socket(SocketFlags::empty())?;
+    connect_ipv4(client, address)?;
+    let accepted = accept(listener)?;
+    ensure(get_i32_option(accepted, SOL_SOCKET, SO_SNDBUF)? == 8192)?;
+    ensure(get_i32_option(accepted, SOL_SOCKET, SO_RCVBUF)? == 4096)?;
+    let alias = dup(accepted)?;
+    set_i32_option(alias, SOL_SOCKET, SO_SNDBUF, 2048)?;
+    ensure(get_i32_option(accepted, SOL_SOCKET, SO_SNDBUF)? == 4096)?;
+    ensure(get_i32_option(client, SOL_SOCKET, SO_SNDBUF)? == default_send)?;
+    close(alias)?;
+    close(accepted)?;
+    close(client)?;
+    close(listener)
+}
+
+fn test_socket_buffer_io_pressure_and_growth() -> Result<(), Errno> {
+    let (listener, client, accepted) = connected_pair()?;
+    fcntl_setfl(client, fcntl_getfl(client)? | O_NONBLOCK)?;
+    set_i32_option(client, SOL_SOCKET, SO_SNDBUF, 0)?;
+    set_i32_option(accepted, SOL_SOCKET, SO_RCVBUF, 2048)?;
+    let small_send = get_i32_option(client, SOL_SOCKET, SO_SNDBUF)?;
+    let small_receive = get_i32_option(accepted, SOL_SOCKET, SO_RCVBUF)?;
+    ensure(small_send > 0 && small_receive == 4096)?;
+
+    let payload = [0x5au8; 4096];
+    let mut accepted_bytes = 0usize;
+    let mut blocked = false;
+    for _ in 0..128 {
+        match write(client, &payload) {
+            Ok(count) => {
+                ensure(count > 0 && count <= payload.len())?;
+                accepted_bytes += count;
+            },
+            Err(error) if error == EAGAIN => {
+                blocked = true;
+                break;
+            },
+            Err(error) => return Err(error),
+        }
+    }
+    ensure(blocked && accepted_bytes > 0)?;
+
+    set_i32_option(client, SOL_SOCKET, SO_SNDBUF, 4096)?;
+    let grown_send = get_i32_option(client, SOL_SOCKET, SO_SNDBUF)?;
+    ensure(grown_send > small_send)?;
+    ensure(write(client, &payload)? > 0)?;
+    set_i32_option(client, SOL_SOCKET, SO_SNDBUF, 0)?;
+    expect_errno(write(client, b"x"), EAGAIN)?;
+
+    set_i32_option(accepted, SOL_SOCKET, SO_RCVBUF, 8192)?;
+    set_i32_option(client, SOL_SOCKET, SO_SNDBUF, 4096)?;
+    let mut drained = [0u8; 4096];
+    ensure(read(accepted, &mut drained)? > 0)?;
+    wait_poll(client, POLLOUT | POLLERR, POLLOUT)?;
+    ensure(write(client, b"r")? == 1)?;
+
+    close(accepted)?;
+    close(client)?;
+    close(listener)
 }
 
 fn listener(flags: SocketFlags) -> Result<(Fd, SockAddrIn), Errno> {
@@ -581,6 +708,22 @@ fn test_blocking_accept_wait() -> Result<(), Errno> {
     wait_child(child)
 }
 
+fn test_fionread_stream_and_listener_semantics() -> Result<(), Errno> {
+    let (listener, client, accepted) = connected_pair()?;
+    expect_errno(ioctl_readable_bytes(listener), EINVAL)?;
+    ensure(ioctl_readable_bytes(accepted)? == 0)?;
+    ensure(write(client, b"stream")? == 6)?;
+    wait_poll(accepted, POLLIN, POLLIN)?;
+    ensure(ioctl_readable_bytes(accepted)? == 6)?;
+    ensure(ioctl_readable_bytes(accepted)? == 6)?;
+    let mut prefix = [0u8; 2];
+    ensure(read(accepted, &mut prefix)? == 2 && &prefix == b"st")?;
+    ensure(ioctl_readable_bytes(accepted)? == 4)?;
+    close(accepted)?;
+    close(client)?;
+    close(listener)
+}
+
 pub(crate) fn run_cloexec_child(fd: &str) -> Result<(), Errno> {
     let fd = fd.parse::<Fd>().map_err(|_| EINVAL)?;
     expect_errno(getsockname_ipv4(fd), EBADF)
@@ -601,6 +744,19 @@ impl Results {
             Err(errno) => {
                 self.failed += 1;
                 println!("TCPTEST:FAIL:{name}:{errno}");
+            },
+        }
+    }
+
+    fn sockbuf_case(&mut self, name: &str, test: fn() -> Result<(), Errno>) {
+        match test() {
+            Ok(()) => {
+                self.passed += 1;
+                println!("SOCKBUFTEST:PASS:{name}");
+            },
+            Err(errno) => {
+                self.failed += 1;
+                println!("SOCKBUFTEST:FAIL:{name}:{errno}");
             },
         }
     }
@@ -645,6 +801,10 @@ pub(crate) fn run() -> Result<(), Errno> {
         test_sockaddr_and_stream_fault_boundaries,
     );
     results.case("blocking-accept-wait", test_blocking_accept_wait);
+    results.case(
+        "fionread-stream-listener",
+        test_fionread_stream_and_listener_semantics,
+    );
 
     if results.failed == 0 {
         println!("TCPTEST:SUMMARY:PASS:{}", results.passed);
@@ -652,6 +812,32 @@ pub(crate) fn run() -> Result<(), Errno> {
     } else {
         println!(
             "TCPTEST:SUMMARY:FAIL:passed={}:failed={}",
+            results.passed, results.failed
+        );
+        Err(EIO)
+    }
+}
+
+pub(crate) fn run_sockbuf() -> Result<(), Errno> {
+    println!("SOCKBUFTEST:START");
+    let mut results = Results {
+        passed: 0,
+        failed: 0,
+    };
+    results.sockbuf_case(
+        "socket-buffer-abi-inheritance",
+        test_socket_buffer_option_abi_and_inheritance,
+    );
+    results.sockbuf_case(
+        "socket-buffer-io-pressure-growth",
+        test_socket_buffer_io_pressure_and_growth,
+    );
+    if results.failed == 0 {
+        println!("SOCKBUFTEST:SUMMARY:PASS:{}", results.passed);
+        Ok(())
+    } else {
+        println!(
+            "SOCKBUFTEST:SUMMARY:FAIL:passed={}:failed={}",
             results.passed, results.failed
         );
         Err(EIO)

@@ -9,7 +9,7 @@
 **实现位置：** `anemone-kernel/src/task/sig/`、`anemone-kernel/src/arch/{riscv64,loongarch64}/exception/trap/utrap.rs`
 **依赖：** `JOBCTL-SIGNAL-001`、`JOBCTL-STATE-001`
 **Pending Successor：** None
-**最后核验：** 2026-08-06
+**最后核验：** 2026-08-17
 
 ## 状态与能力所有权
 
@@ -18,8 +18,8 @@
 | task-private pending occurrence | 目标 `Task::sig_pending` | sender 只提交 occurrence | task-directed delivery |
 | ThreadGroup-shared pending occurrence | `ThreadGroupInner::sig_pending` | member 只通过 fetch / notification 参与 | process-directed delivery |
 | POSIX timer pending occurrence | shared owner内的per-registration slot，或exact target的private owner内的per-registration slot | timer owner只提交identity/overrun并接收锁外回告 | `SI_TIMER` delivery |
-| live disposition | 共享 `SignalDisposition` | receiver 和 trap-return 读取 snapshot | ignored admission 与 action selection |
-| current signal mask | 目标 task 的 signal-mask owner | pending scan 读取 snapshot | fetch eligibility |
+| live disposition | 共享 `SignalDisposition` | generation 与 trap-return 读取 snapshot | mask-aware ignored admission 与 action selection |
+| current signal mask | 目标 task 的 signal-mask owner | generation admission 与 pending scan 读取 snapshot | ignored admission 与 fetch eligibility |
 
 `Event`、scheduler notification、选中的 member 或 trapframe 都不是 pending occurrence 的第二真相源。
 
@@ -47,17 +47,19 @@
 
 **当前来源：** [RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)；[POSIX Timer Thread-ID RFC Gate 2/3 closure](../../rfcs/posix-timer-thread-id-notification/implementation.md#gate-3-closure--2026-08-06)。
 
-## SIGNAL-ACTION-001 — Ignored disposition 在 pending publication 前生效
+## SIGNAL-ACTION-001 — Ignored generation admission 同时读取 live mask
 
-**规则：** receive path在写入private或shared pending前读取live disposition；显式ignore或default-ignore的ordinary occurrence不进入pending。已经通过target / permission validation的control-signal generation side effect独立线性化：`SIGCONT`无条件执行cleanup / resume后，ordinary occurrence仍按live disposition决定是否进入pending；stop-class generation同样先完成opposite cleanup，`SIGSTOP`再按global-init admission直接请求stop，另外三种conditional stop仍须由后续live action selection决定是否取得DefaultStop authority。
+**规则：** receive path在对应pending owner锁内依次读取selected admission task的live mask与shared disposition；显式ignore或default-ignore只在该task未block signal时于generation丢弃。blocked ignored occurrence进入原有private或shared pending owner，可由signalfd / synchronous wait消费；如果它后来进入ordinary delivery，仍由[`SIGNAL-ACTION-002`](#signal-action-002--ordinary-trap-return-才提交异步-action)读取live action并在仍ignored时丢弃。private occurrence的admission task就是exact target；shared occurrence由当次live member snapshot选出的一个member提供瞬时mask / disposition视图，该member不被保存到pending、不成为第二delivery target或状态真相，也不建立group-wide mask聚合。
 
-**违反表现：** ignored occurrence 留在 pending 并在 disposition 未再次改变时被普通 delivery 消费，或 receiver 在 publication 后才把 occurrence 当作从未发生。
+`rt_sigaction`把action设置为显式ignore或default-ignore时，仍不依赖mask地flush该signal已有的private/shared ordinary与timer pending；pending-owner锁覆盖generation admission与publication，使“发布新disposition后flush”不会遗漏并发生成。已经通过target / permission validation的control-signal generation side effect继续独立线性化：`SIGCONT`无条件执行cleanup / resume，stop-class generation同样先完成opposite cleanup，`SIGSTOP`再按global-init admission直接请求stop；其它ordinary / job-control / timer occurrence统一使用上述mask-aware admission。
 
-**验证 / Enforcement：** `Task::recv_signal()`、`ThreadGroup::recv_signal()` 与 `SignalAction::is_ignored()` 源码审计。
+**违反表现：** blocked ignored occurrence在pending publication前丢失、signalfd伪造不属于Signal pending的occurrence、ignored occurrence绕过live ordinary action selection提交handler / default action，或shared admission member成为持久target truth。
+
+**验证 / Enforcement：** `SignalAction::discard_at_generation()` truth table；`Task::recv_signal()`、`ThreadGroup::recv_signal()`、ordinary / timer job-control path与shared / private timer enqueue源码审计和owner-local KUnit；signalfd acceptance覆盖blocked explicit-ignore `SIGWINCH`、blocked default-ignore child-exit `SIGCHLD`的`signalfd_siginfo`，并验证signalfd dequeue后`wait4`仍持有独立child status。
 
 **最初来源：** 现有 Signal 实现。
 
-**当前来源：** live Signal admission rule；[RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)保持ignored admission并增加control generation handoff；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。
+**当前来源：** [Blocked ignored signal generation admission](../../devlog/changes/2026-08-17-signal-blocked-ignored-admission.md)；[RFC-20260720-unix-jobctl R1](../../rfcs/unix-jobctl/index.md)定义control generation handoff；[Stage 5 cutover事务](../../devlog/transactions/2026-07-20-unix-jobctl.md#stage-5-uj-cutover与事务收口---2026-07-21)。
 
 ## SIGNAL-ACTION-002 — Ordinary trap-return 才提交异步 action
 

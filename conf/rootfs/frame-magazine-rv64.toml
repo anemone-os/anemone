@@ -1,0 +1,17 @@
+[build]
+name = "frame-magazine-rv64"
+arch = "riscv64"
+
+[fs]
+type = "folder"
+fstype = "ext4"
+
+[init]
+path = "/sbin/shutdown"
+
+[[dirs]]
+path = "/dev"
+
+[[apps]]
+name = "shutdown"
+installed_dir = "/sbin"

@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{reference::validate_slug, system_target::Root};
+use super::reference::validate_slug;
 
 #[derive(Deserialize, Debug, Serialize, Clone, PartialEq, Eq)]
 pub enum Arch {
@@ -243,13 +243,7 @@ impl Config {
         }
         Ok(config)
     }
-    pub fn gen_platform_defs(&self, root: &Root) -> String {
-        let rootfs_source_path = root
-            .source
-            .path()
-            .map(|path| format!("Some({path:?})"))
-            .unwrap_or_else(|| "None".to_string());
-
+    pub fn gen_platform_defs(&self) -> String {
         let earlycon_reg = self
             .constants
             .earlycon_reg
@@ -288,13 +282,6 @@ pub const KERNEL_VA_BASE: VirtAddr = VirtAddr::new({:#x});
 pub const MAX_PHYS_CPU_ID: usize = {};
 /// Frame section size shift in megabytes
 pub const FRAME_SECTION_SHIFT_MB: usize = {};
-/// Root filesystem type
-pub const ROOTFS_FS_TYPE: &str = {:?};
-/// Root filesystem source kind
-pub const ROOTFS_SOURCE_KIND: &str = {:?};
-/// Root filesystem source path
-pub const ROOTFS_SOURCE_PATH: Option<&str> = {};
-
 /// Platform-selected flattened-device-tree delivery.
 #[derive(Clone, Copy)]
 pub(crate) enum PlatformFdt {{
@@ -311,9 +298,6 @@ pub(crate) static PLATFORM_FDT: PlatformFdt = {platform_fdt};
             earlycon_reg,
             self.constants.max_phys_cpu_id,
             self.constants.frame_section_shift_mb,
-            root.fstype,
-            root.source.kind(),
-            rootfs_source_path,
         )
     }
 }
@@ -665,18 +649,12 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
     #[test]
     fn repository_la64_delivery_contracts_generate_distinct_fdt_sources() {
         let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let root = Root {
-            fstype: "ext4".to_string(),
-            source: super::super::system_target::RootSource::Block {
-                path: "vda".to_string(),
-            },
-        };
         let qemu = Config::from_str(
             &std::fs::read_to_string(repository.join("conf/platforms/qemu-virt-la64.toml"))
                 .unwrap(),
         )
         .unwrap()
-        .gen_platform_defs(&root);
+        .gen_platform_defs();
         assert!(qemu.contains("PLATFORM_FDT: PlatformFdt = PlatformFdt::Firmware"));
         assert!(!qemu.contains("platform.dtb"));
 
@@ -684,7 +662,7 @@ template = ["-drive", "file={{disk-x0}},backup={{disk-x0}},format=raw"]
             &std::fs::read_to_string(repository.join("conf/platforms/2k1000-la64.toml")).unwrap(),
         )
         .unwrap()
-        .gen_platform_defs(&root);
+        .gen_platform_defs();
         assert!(board.contains("PlatformFdt::Embedded"));
         assert!(board.contains("platform.dtb"));
     }

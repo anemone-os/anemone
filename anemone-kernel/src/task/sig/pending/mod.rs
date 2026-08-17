@@ -20,8 +20,9 @@ struct SequencedSignal {
 
 /// Per task pending signals.
 ///
-/// Ignored signals won't be recorded here. See [Task::recv_signal] and
-/// [ThreadGroup::recv_signal] for details.
+/// Unblocked ignored occurrences are discarded before publication. Blocked
+/// ignored occurrences remain here for synchronous consumption or a later
+/// disposition change. See [Task::recv_signal] and [ThreadGroup::recv_signal].
 #[derive(Debug)]
 pub struct PendingSignals {
     /// Stable handoff target for trap-return delivery.
@@ -475,6 +476,14 @@ impl PendingSignals {
                 return true;
             }
         }
+        self.has_dequeueable_specific(set)
+    }
+
+    /// Match only occurrences available to ordinary synchronous dequeue.
+    /// A temporary-mask reserved target remains exclusively owned by the
+    /// trap-return delivery handoff even though `has_specific` exposes it to
+    /// job-control/user-entry arbitration.
+    pub(super) fn has_dequeueable_specific(&self, set: SigSet) -> bool {
         for no in 1..SIGRTMIN as usize {
             let no = SigNo::new(no);
             if self.unreliable[no.as_usize()].is_some() && set.get(no) {
@@ -935,7 +944,10 @@ mod kunits {
     fn test_exit_closes_admission_and_flushes_private_timer_state() {
         let mut pending = PendingSignals::new();
         let (log, callback) = callback_log();
-        let owner = TimerSignalPendingOwner::Private(Weak::new());
+        let owner = TimerSignalPendingOwner::Private {
+            target: Weak::new(),
+            thread_group: Weak::new(),
+        };
         let slot = pending
             .timer
             .try_register(owner.clone(), SigNo::SIGUSR1, 41, 0, callback.clone())
@@ -954,7 +966,10 @@ mod kunits {
         );
         assert_eq!(
             pending.timer.try_register(
-                TimerSignalPendingOwner::Private(Weak::new()),
+                TimerSignalPendingOwner::Private {
+                    target: Weak::new(),
+                    thread_group: Weak::new(),
+                },
                 SigNo::SIGUSR2,
                 42,
                 0,
@@ -989,6 +1004,19 @@ mod kunits {
                 .is_empty()
         );
         assert_eq!(pending.reserved_delivery_signo(), Some(SigNo::SIGCONT));
+        let sigcont = SigSet::new_with_signos(&[SigNo::SIGCONT]);
+        assert!(
+            pending.has_specific(sigcont),
+            "user-entry arbitration must still observe the reserved target"
+        );
+        assert!(
+            !pending.has_dequeueable_specific(sigcont),
+            "synchronous readiness must exclude the reserved target"
+        );
+        assert!(
+            pending.fetch_specific(sigcont).is_none(),
+            "ordinary specific dequeue must not compete with reserved delivery"
+        );
 
         let fetched = pending
             .fetch_matching(SigSet::new(), |signal, reserved| {
