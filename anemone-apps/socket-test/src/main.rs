@@ -8,6 +8,7 @@ mod udp;
 mod udp_extension;
 mod udp_message;
 mod unix;
+mod unix_rights;
 mod unix_seqpacket;
 
 use anemone_rs::{env, prelude::*};
@@ -38,6 +39,13 @@ fn main() -> Result<(), Errno> {
             }
             tcp::run_cloexec_child(fd)
         },
+        Some("--scm-rights-cloexec-child") => {
+            let fd = args.next().ok_or(EINVAL)?;
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            unix_rights::run_cloexec_child(fd)
+        },
         Some("--limitations") => {
             if args.next().is_some() {
                 return Err(EINVAL);
@@ -56,11 +64,18 @@ fn main() -> Result<(), Errno> {
             }
             tcp::run_sockbuf()
         },
+        Some("--scm-rights") => {
+            if args.next().is_some() {
+                return Err(EINVAL);
+            }
+            unix_rights::run()
+        },
         None => {
             let udp_result = udp::run();
             let udp_extension_result = udp_extension::run();
             let udp_message_result = udp_message::run();
             let unix_result = unix::run();
+            let unix_rights_result = unix_rights::run();
             let seqpacket_result = unix_seqpacket::run();
             let icmp_raw_result = icmp_raw::run();
             let tcp_result = tcp::run();
@@ -69,6 +84,7 @@ fn main() -> Result<(), Errno> {
                 .and(udp_extension_result)
                 .and(udp_message_result)
                 .and(unix_result)
+                .and(unix_rights_result)
                 .and(seqpacket_result)
                 .and(icmp_raw_result)
                 .and(tcp_result)

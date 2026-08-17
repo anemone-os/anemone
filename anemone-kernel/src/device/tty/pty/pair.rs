@@ -6,7 +6,7 @@ use crate::{
 
 use super::{
     super::{
-        TtyProgress,
+        TtyBackend, TtyFlushQueues,
         discipline::{InputRead, TtySignalControl},
         file::TtyOperation,
         port::TtyRxUnit,
@@ -266,8 +266,15 @@ impl Drop for PtyEffectPermit {
     }
 }
 
-impl TtyProgress for PtyPairState {
+impl TtyBackend for PtyPairState {
     fn wake(&self) {
+        self.notify_state_change();
+    }
+
+    fn flush_queues(&self, queues: TtyFlushQueues) {
+        // The FileOps caller holds `operation` and has already revalidated the
+        // exact master/slave description through `TtyOperation`.
+        self.terminal.flush_queues(queues);
         self.notify_state_change();
     }
 }

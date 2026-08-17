@@ -186,6 +186,10 @@ pub mod linux {
     pub const TCSETS: u32 = 0x5402;
     pub const TCSETSW: u32 = 0x5403;
     pub const TCSETSF: u32 = 0x5404;
+    pub const TCFLSH: u32 = 0x540b;
+    pub const TCIFLUSH: u64 = 0;
+    pub const TCOFLUSH: u64 = 1;
+    pub const TCIOFLUSH: u64 = 2;
     pub const TIOCSCTTY: u32 = 0x540e;
     pub const TIOCGPGRP: u32 = 0x540f;
     pub const TIOCSPGRP: u32 = 0x5410;

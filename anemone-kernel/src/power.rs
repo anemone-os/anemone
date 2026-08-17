@@ -381,9 +381,48 @@ pub unsafe fn reboot() -> ! {
 }
 
 mod api {
-    use anemone_abi::system::native::power::SHUTDOWN_MAGIC;
+    use anemone_abi::system::{
+        linux::reboot::{
+            LINUX_REBOOT_CMD_POWER_OFF, LINUX_REBOOT_CMD_RESTART, LINUX_REBOOT_MAGIC1,
+            LINUX_REBOOT_MAGIC2, LINUX_REBOOT_MAGIC2A, LINUX_REBOOT_MAGIC2B, LINUX_REBOOT_MAGIC2C,
+        },
+        native::power::SHUTDOWN_MAGIC,
+    };
 
     use super::*;
+    use crate::task::credentials::cap::Capability;
+
+    // Successful requests never return through the generated wrapper, so they
+    // have no completed invocation for the syscall profiler.
+    #[syscall(SYS_REBOOT, profile = false)]
+    fn sys_reboot(magic1: u32, magic2: u32, cmd: u32, _arg: u64) -> Result<u64, SysError> {
+        if !get_current_task().has_cap(Capability::SYS_BOOT) {
+            return Err(SysError::PermissionDenied);
+        }
+        if magic1 != LINUX_REBOOT_MAGIC1
+            || !matches!(
+                magic2,
+                LINUX_REBOOT_MAGIC2
+                    | LINUX_REBOOT_MAGIC2A
+                    | LINUX_REBOOT_MAGIC2B
+                    | LINUX_REBOOT_MAGIC2C
+            )
+        {
+            return Err(SysError::InvalidArgument);
+        }
+
+        match cmd {
+            LINUX_REBOOT_CMD_RESTART => unsafe { reboot() },
+            LINUX_REBOOT_CMD_POWER_OFF => unsafe { power_off() },
+            // The existing power owner has no halt, Ctrl-Alt-Del, command-string,
+            // suspend, or kexec capability. These commands must remain visibly
+            // unsupported until their observable semantics gain a real owner.
+            _ => {
+                kdebugln!("reboot: unsupported command {:#x}", cmd);
+                Err(SysError::InvalidArgument)
+            },
+        }
+    }
 
     // Successful shutdown never returns through the generated wrapper, so it
     // has no completed invocation for the syscall profiler.

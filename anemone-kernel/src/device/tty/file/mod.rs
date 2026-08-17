@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::{
-    TtyEndpoint, TtyWakeHandle,
+    TtyBackendHandle, TtyEndpoint, TtyFlushQueues,
     discipline::InputRead,
     pty::{PtyEffectPermit, PtySlaveDescription},
     relation,
@@ -21,7 +21,7 @@ mod termios;
 #[derive(Opaque)]
 pub(super) struct TtyFile {
     pub(super) endpoint: Arc<TtyEndpoint>,
-    pub(super) wake: TtyWakeHandle,
+    pub(super) backend: TtyBackendHandle,
     pty_description: Option<Arc<PtySlaveDescription>>,
 }
 
@@ -87,25 +87,35 @@ fn begin_external_effect(
     Ok(permit)
 }
 
-pub(super) fn terminal_file(endpoint: Arc<TtyEndpoint>, wake: TtyWakeHandle) -> TtyFile {
+fn tcflush_queues(selector: u64, reverse: bool) -> Result<TtyFlushQueues, SysError> {
+    let queues = match selector {
+        abi::TCIFLUSH => TtyFlushQueues::Input,
+        abi::TCOFLUSH => TtyFlushQueues::Output,
+        abi::TCIOFLUSH => TtyFlushQueues::Both,
+        _ => return Err(SysError::InvalidArgument),
+    };
+    Ok(if reverse { queues.reverse() } else { queues })
+}
+
+pub(super) fn terminal_file(endpoint: Arc<TtyEndpoint>, backend: TtyBackendHandle) -> TtyFile {
     TtyFile {
         endpoint,
-        wake,
+        backend,
         pty_description: None,
     }
 }
 
-pub(super) fn opened_file(endpoint: Arc<TtyEndpoint>, wake: TtyWakeHandle) -> OpenedFile {
+pub(super) fn opened_file(endpoint: Arc<TtyEndpoint>, backend: TtyBackendHandle) -> OpenedFile {
     OpenedFile::with_mode(
         &TTY_FILE_OPS,
         FileMode::STREAM,
-        AnyOpaque::new(terminal_file(endpoint, wake)),
+        AnyOpaque::new(terminal_file(endpoint, backend)),
     )
 }
 
 pub(super) fn opened_pty_slave_file(
     endpoint: Arc<TtyEndpoint>,
-    wake: TtyWakeHandle,
+    backend: TtyBackendHandle,
     description: Arc<PtySlaveDescription>,
 ) -> OpenedFile {
     OpenedFile::with_mode(
@@ -113,7 +123,7 @@ pub(super) fn opened_pty_slave_file(
         FileMode::STREAM,
         AnyOpaque::new(TtyFile {
             endpoint,
-            wake,
+            backend,
             pty_description: Some(description),
         }),
     )
@@ -174,7 +184,7 @@ fn tty_read(
         match tty.endpoint.terminal.read_input(buf) {
             InputRead::Bytes(count) => {
                 if count != 0 {
-                    tty.wake.wake();
+                    tty.backend.wake();
                 }
                 return Ok(count);
             },
@@ -241,7 +251,7 @@ fn tty_write(file: &File, _pos: &mut usize, buf: &[u8], ctx: FileIoCtx) -> Resul
     loop {
         let written = tty.endpoint.terminal.enqueue_output(buf);
         if written != 0 {
-            tty.wake.wake();
+            tty.backend.wake();
             return Ok(written);
         }
         if ctx.status_flags().contains(FileOpStatusFlags::NONBLOCK) {
@@ -330,6 +340,17 @@ pub(super) fn terminal_ioctl(
             };
             termios::set_termios(tty, operation, candidate, mode)?;
         },
+        abi::TCFLSH => {
+            // Linux applies terminal-modifying job-control policy before
+            // validating the scalar selector. A PTY master is not the
+            // controlling-terminal side even though both views share one
+            // Anemone Terminal identity.
+            if relation_operations {
+                relation_ioctl::check_change_access(tty, operation)?;
+            }
+            let queues = tcflush_queues(ctx.arg(), operation.is_some() && !relation_operations)?;
+            run_terminal_operation(operation, || tty.backend.flush_queues(queues))?;
+        },
         abi::TIOCGWINSZ => {
             let winsize = run_terminal_operation(operation, || tty.endpoint.terminal.winsize())?;
             write_ioctl_value(
@@ -366,7 +387,7 @@ pub(super) fn terminal_ioctl(
                 tty.endpoint.terminal.record_no_foreground_winsize();
             }
             if changed {
-                tty.wake.wake();
+                tty.backend.wake();
             }
         },
         abi::TIOCINQ => {
@@ -428,7 +449,20 @@ use super::{
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::*;
-    use crate::{device::tty::TtyWakeSource, fs::anony_open_with};
+    use crate::{device::tty::TtyBackend, fs::anony_open_with};
+
+    struct DetachedBackend {
+        terminal: Arc<Terminal>,
+    }
+
+    impl TtyBackend for DetachedBackend {
+        fn wake(&self) {}
+
+        fn flush_queues(&self, queues: TtyFlushQueues) {
+            self.terminal.flush_queues(queues);
+            self.terminal.publish_progress();
+        }
+    }
 
     fn line() -> TtyLineSnapshot {
         TtyLineSnapshot {
@@ -439,19 +473,19 @@ mod kunits {
     }
 
     fn no_worker_file(terminal: Arc<Terminal>) -> File {
-        let source = Arc::new(TtyWakeSource {
-            worker: SpinLock::new(None),
+        let source = Arc::new(DetachedBackend {
+            terminal: terminal.clone(),
         });
         let endpoint = Arc::new(TtyEndpoint {
             terminal,
-            wake_source: {
-                let progress: Arc<dyn super::super::TtyProgress> = source.clone();
-                Arc::downgrade(&progress)
+            backend: {
+                let backend: Arc<dyn super::super::TtyBackend> = source.clone();
+                Arc::downgrade(&backend)
             },
         });
-        let wake = TtyWakeHandle { source };
+        let backend = TtyBackendHandle { backend: source };
         let placeholder = crate::device::console::open_console_stdin();
-        anony_open_with(placeholder.path(), opened_file(endpoint, wake)).unwrap()
+        anony_open_with(placeholder.path(), opened_file(endpoint, backend)).unwrap()
     }
 
     #[kunit]
@@ -533,5 +567,21 @@ mod kunits {
             ypixel: 2,
         });
         assert_eq!(terminal.winsize().rows, 40);
+    }
+
+    #[kunit]
+    fn tcflush_selector_codec_projects_slave_and_master_views() {
+        for (selector, slave, master) in [
+            (abi::TCIFLUSH, TtyFlushQueues::Input, TtyFlushQueues::Output),
+            (abi::TCOFLUSH, TtyFlushQueues::Output, TtyFlushQueues::Input),
+            (abi::TCIOFLUSH, TtyFlushQueues::Both, TtyFlushQueues::Both),
+        ] {
+            assert_eq!(tcflush_queues(selector, false), Ok(slave));
+            assert_eq!(tcflush_queues(selector, true), Ok(master));
+        }
+        assert_eq!(
+            tcflush_queues(abi::TCIOFLUSH + 1, false),
+            Err(SysError::InvalidArgument)
+        );
     }
 }

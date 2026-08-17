@@ -85,6 +85,10 @@ impl RawRx {
     fn dequeue(&mut self, dst: &mut [TtyRxUnit]) -> usize {
         self.fifo.try_pop_slice(dst)
     }
+
+    fn clear(&mut self) {
+        self.fifo.clear();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,6 +324,10 @@ impl TtyPort for Uart16550TtyPort {
 
     fn dequeue_rx(&self, dst: &mut [TtyRxUnit]) -> usize {
         self.port.raw_rx.lock_irqsave().dequeue(dst)
+    }
+
+    fn discard_rx(&self) {
+        self.port.raw_rx.lock_irqsave().clear();
     }
 
     fn submit_tx(&self, src: &[u8]) -> usize {
@@ -592,6 +600,22 @@ mod kunits {
                 became_nonempty: false,
             }
         );
+    }
+
+    #[kunit]
+    fn raw_rx_clear_discards_admitted_units_and_accepts_new_input() {
+        let mut raw = RawRx::new();
+        assert_eq!(
+            raw.publish(&[TtyRxUnit::Byte(1), TtyRxUnit::Break])
+                .accepted,
+            2
+        );
+        raw.clear();
+        assert!(raw.fifo.is_empty());
+        assert_eq!(raw.publish(&[TtyRxUnit::Byte(2)]).accepted, 1);
+        let mut observed = [TtyRxUnit::Byte(0); 1];
+        assert_eq!(raw.dequeue(&mut observed), 1);
+        assert_eq!(observed, [TtyRxUnit::Byte(2)]);
     }
 
     #[kunit]

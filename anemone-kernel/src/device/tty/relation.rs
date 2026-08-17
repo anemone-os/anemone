@@ -744,16 +744,18 @@ pub(crate) fn detach_exiting_session(leader: TtySessionLeader) {
 #[cfg(feature = "kunit")]
 mod kunits {
     use super::{super::terminal::Terminal, *};
-    use crate::device::tty::{TtyLineSnapshot, TtyParity, TtyProgress};
+    use crate::device::tty::{TtyBackend, TtyFlushQueues, TtyLineSnapshot, TtyParity};
 
-    struct NoopProgress;
+    struct NoopBackend;
 
-    impl TtyProgress for NoopProgress {
+    impl TtyBackend for NoopBackend {
         fn wake(&self) {}
+
+        fn flush_queues(&self, _queues: TtyFlushQueues) {}
     }
 
     fn endpoint() -> Arc<TtyEndpoint> {
-        let progress: Arc<dyn TtyProgress> = Arc::new(NoopProgress);
+        let backend: Arc<dyn TtyBackend> = Arc::new(NoopBackend);
         Arc::new(TtyEndpoint {
             terminal: Terminal::try_new(TtyLineSnapshot {
                 baud: 115200,
@@ -761,7 +763,7 @@ mod kunits {
                 data_bits: 8,
             })
             .unwrap(),
-            wake_source: Arc::downgrade(&progress),
+            backend: Arc::downgrade(&backend),
         })
     }
 

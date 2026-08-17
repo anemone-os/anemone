@@ -15,12 +15,14 @@ use anemone_rs::{
             select::FdSet,
         },
         process::linux::signal::{self as linux_signal, SigAction, SigSet},
+        syscall::{linux::SYS_IOCTL, syscall},
         system::native::power::SHUTDOWN_MAGIC,
         time::linux::TimeSpec,
         tty::linux::{
             BRKINT, BS1, CR3, ECHO, FF1, FLUSHO, ICANON, ICRNL, IGNBRK, IGNCR, IGNPAR, IMAXBEL,
             INLCR, INPCK, ISIG, ISTRIP, IUTF8, NL1, OFDEL, OFILL, ONLCR, OPOST, PARMRK, PENDIN,
-            TAB2, TAB3, TIOCGSID, Termios, VEOF, VERASE, VKILL, VMIN, VT1, VTIME, Winsize, XCASE,
+            TAB2, TAB3, TCFLSH, TCIFLUSH, TCIOFLUSH, TCOFLUSH, TIOCGSID, Termios, VEOF, VERASE,
+            VKILL, VMIN, VT1, VTIME, Winsize, XCASE,
         },
     },
     os::{
@@ -177,6 +179,10 @@ fn settle_input() -> Result<(), Errno> {
 
 fn expect(condition: bool) -> Result<(), Errno> {
     if condition { Ok(()) } else { Err(EIO) }
+}
+
+fn tcflush(fd: Fd, selector: u64) -> Result<(), Errno> {
+    unsafe { syscall(SYS_IOCTL, fd as u64, TCFLSH as u64, selector, 0, 0, 0) }.map(|_| ())
 }
 
 fn read_all(path: &str) -> Result<Vec<u8>, Errno> {
@@ -631,6 +637,33 @@ fn actionable_sigttou_body() -> Result<(), Errno> {
 
 fn test_actionable_sigttou(_baseline: &Baseline) -> Result<(), Errno> {
     run_new_session(actionable_sigttou_body)
+}
+
+fn tcflush_sigttou_body() -> Result<(), Errno> {
+    let fd = tty_serial(O_RDWR)?;
+    tiocsctty(fd, 0)?;
+    let pid = match fork()? {
+        Some(pid) => pid,
+        None => finish_child((|| {
+            setpgid(0, 0)?;
+            // Linux applies the terminal-modifying job-control check before
+            // rejecting an invalid scalar selector.
+            tcflush(fd, TCIOFLUSH + 1)?;
+            Err(EIO)
+        })()),
+    };
+    let stopped = wait_child_bounded(pid, WaitOptions::UNTRACED)?;
+    let _ = kill(pid as i32, SigNo::SIGKILL);
+    let reaped = wait_child_bounded(pid, WaitOptions::empty());
+    expect(matches!(
+        stopped,
+        WStatus::Stopped(signo) if signo == SigNo::SIGTTOU.as_usize() as i8
+    ))?;
+    expect(matches!(reaped?, WStatus::Signal(_)))
+}
+
+fn test_tcflush_sigttou(_baseline: &Baseline) -> Result<(), Errno> {
+    run_new_session(tcflush_sigttou_body)
 }
 
 fn candidate_errno_body() -> Result<(), Errno> {
@@ -1679,6 +1712,43 @@ fn test_tcsetsf(baseline: &Baseline) -> Result<(), Errno> {
     expect(!is_readable(STDIN_FILENO)?)
 }
 
+fn test_tcflush_input(baseline: &Baseline) -> Result<(), Errno> {
+    let canonical = baseline.canonical_noecho();
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::DrainFlush, &canonical)?;
+
+    ready("tcflush-canonical-pending");
+    settle_input()?;
+    expect(!is_readable(STDIN_FILENO)?)?;
+    tcflush(STDIN_FILENO, TCIFLUSH)?;
+    ready("tcflush-canonical-after-pending");
+    let mut kept = [0_u8; 5];
+    expect(read(STDIN_FILENO, &mut kept)? == kept.len())?;
+    expect(&kept == b"keep\n")?;
+
+    ready("tcflush-canonical-committed");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 5)?;
+    tcflush(STDIN_FILENO, TCIFLUSH)?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+
+    tcsetattr(STDIN_FILENO, SetTermiosWhen::Now, &baseline.raw_vmin1())?;
+    ready("tcflush-raw");
+    settle_input()?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 3)?;
+    tcflush(STDIN_FILENO, TCIOFLUSH)?;
+    expect(ioctl_readable_bytes(STDIN_FILENO)? == 0)?;
+    tcflush(STDIN_FILENO, TCOFLUSH)?;
+    match tcflush(STDIN_FILENO, TCIOFLUSH + 1) {
+        Err(EINVAL) => {},
+        _ => return Err(EIO),
+    }
+
+    ready("tcflush-raw-after");
+    let mut raw = [0_u8; 3];
+    expect(read(STDIN_FILENO, &mut raw)? == raw.len())?;
+    expect(&raw == b"new")
+}
+
 fn test_unsupported_rollback(baseline: &Baseline) -> Result<(), Errno> {
     const IXON: u32 = 0x0000_0400;
 
@@ -1908,6 +1978,7 @@ fn run_auto(baseline: &Baseline) -> Results {
     results.case("opost-onlcr", baseline, test_onlcr);
     results.case("tcsetsw-drain", baseline, test_tcsetsw);
     results.case("tcsetsf-flush", baseline, test_tcsetsf);
+    results.case("tcflush-input", baseline, test_tcflush_input);
     results.case("unsupported-rollback", baseline, test_unsupported_rollback);
     results.case("poll-pselect-readiness", baseline, test_readiness);
     results.case("unknown-ioctl", baseline, test_unknown_ioctl);
@@ -1957,6 +2028,7 @@ fn run_auto(baseline: &Baseline) -> Results {
         baseline,
         test_actionable_sigttou,
     );
+    results.case("tcflush-sigttou-stop", baseline, test_tcflush_sigttou);
     results.case("foreground-candidate-errno", baseline, test_candidate_errno);
     results.case(
         "controlling-detach-reacquire",

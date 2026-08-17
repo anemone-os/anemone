@@ -168,6 +168,18 @@ impl FileTable {
             self.bitmap.clear(idx);
         }
     }
+
+    pub(super) fn commit_reserved_fds(&mut self, entries: Vec<(Fd, Arc<FileDesc>)>) {
+        for (fd, file_desc) in entries {
+            self.commit_reserved_fd(fd, file_desc);
+        }
+    }
+
+    pub(super) fn rollback_reserved_fds(&mut self, fds: &[Fd]) {
+        for &fd in fds {
+            self.rollback_reserved_fd(fd);
+        }
+    }
 }
 
 // operations
@@ -486,7 +498,13 @@ impl Drop for FileTable {
 
 #[cfg(feature = "kunit")]
 mod kunits {
-    use super::*;
+    use super::{super::OpenedDescriptionBundle, *};
+
+    static TRANSFER_FINAL_RELEASES: AtomicUsize = AtomicUsize::new(0);
+
+    fn count_transfer_final_release(_ctx: super::super::OpenedFileFinalReleaseCtx<'_>) {
+        TRANSFER_FINAL_RELEASES.fetch_add(1, Ordering::AcqRel);
+    }
 
     fn ceiling(value: usize) -> FdAllocCeiling {
         FdAllocCeiling::new(value).unwrap()
@@ -595,5 +613,117 @@ mod kunits {
         assert!(!table.reserved_bitmap.test(fd.raw() as usize));
         assert_eq!(table.reserve_fd(ceiling(1)), Err(SysError::NoMoreFd));
         release_all(&mut table);
+    }
+
+    #[kunit]
+    fn transfer_survives_last_sender_close_and_converts_without_a_terminal_gap() {
+        TRANSFER_FINAL_RELEASES.store(0, Ordering::Release);
+        let mut sender = FileTable::new();
+        let source = sender
+            .open_fd_with_description_ops(
+                ceiling(4),
+                root_file(),
+                OpenAccessMode::Read,
+                FileStatusFlags::NONBLOCK,
+                LinuxOpenCompat::empty(),
+                FdFlags::CLOSE_ON_EXEC,
+                FileDescOps {
+                    final_release: Some(count_transfer_final_release),
+                    ..FileDescOps::default()
+                },
+            )
+            .unwrap();
+        let source_desc = sender.get_fd(source).unwrap();
+        let identity = source_desc.opened_description_capability().unwrap();
+        let transfer = source_desc.capture_transfer();
+
+        sender.close_fd(source).unwrap().release_description_ref();
+        assert!(identity.try_lease().is_some());
+        assert_eq!(TRANSFER_FINAL_RELEASES.load(Ordering::Acquire), 0);
+
+        let mut receiver = FileTable::new();
+        let received = receiver.reserve_fd(ceiling(4)).unwrap();
+        receiver.commit_reserved_fd(
+            received,
+            FileDesc::from_transfer(transfer, FdFlags::empty()),
+        );
+        let received_desc = receiver.get_fd(received).unwrap();
+        assert!(identity.same_identity(&received_desc.opened_description_capability().unwrap()));
+        assert_eq!(received_desc.file_flags(), FileStatusFlags::NONBLOCK);
+        assert_eq!(received_desc.fd_flags(), FdFlags::empty());
+        assert_eq!(TRANSFER_FINAL_RELEASES.load(Ordering::Acquire), 0);
+
+        receiver
+            .close_fd(received)
+            .unwrap()
+            .release_description_ref();
+        assert!(identity.try_lease().is_none());
+        assert_eq!(TRANSFER_FINAL_RELEASES.load(Ordering::Acquire), 1);
+    }
+
+    #[kunit]
+    fn transfer_bundle_duplication_abort_and_fd_reuse_keep_exact_identity() {
+        let mut table = FileTable::new();
+        let source = open_root(&mut table, ceiling(4));
+        let original_desc = table.get_fd(source).unwrap();
+        let original_identity = original_desc.opened_description_capability().unwrap();
+        let mut bundle = OpenedDescriptionBundle::try_with_capacity(2).unwrap();
+        bundle.push(original_desc.capture_transfer());
+        bundle.push(original_desc.capture_transfer());
+        let duplicate = bundle.try_duplicate().unwrap();
+
+        table.close_fd(source).unwrap().release_description_ref();
+        let reused = open_root(&mut table, ceiling(4));
+        assert_eq!(reused, source);
+        let reused_identity = table
+            .get_fd(reused)
+            .unwrap()
+            .opened_description_capability()
+            .unwrap();
+        assert!(!original_identity.same_identity(&reused_identity));
+
+        drop(bundle);
+        assert!(original_identity.try_lease().is_some());
+        drop(duplicate);
+        assert!(original_identity.try_lease().is_none());
+        release_all(&mut table);
+    }
+
+    #[kunit]
+    fn multi_transfer_reservation_is_all_or_none_visible_and_preserves_cloexec() {
+        let mut source = FileTable::new();
+        let first = open_root(&mut source, ceiling(4));
+        let second = open_root(&mut source, ceiling(4));
+        let mut bundle = OpenedDescriptionBundle::try_with_capacity(2).unwrap();
+        bundle.push(source.get_fd(first).unwrap().capture_transfer());
+        bundle.push(source.get_fd(second).unwrap().capture_transfer());
+
+        let mut receiver = FileTable::new();
+        let reserved = [
+            receiver.reserve_fd(ceiling(4)).unwrap(),
+            receiver.reserve_fd(ceiling(4)).unwrap(),
+        ];
+        assert!(receiver.opened_fd_numbers_snapshot().is_empty());
+        let entries = reserved
+            .into_iter()
+            .zip(bundle.into_transfers())
+            .map(|(fd, transfer)| {
+                (
+                    fd,
+                    FileDesc::from_transfer(transfer, FdFlags::CLOSE_ON_EXEC),
+                )
+            })
+            .collect();
+        receiver.commit_reserved_fds(entries);
+        assert_eq!(receiver.opened_fd_numbers_snapshot(), reserved);
+        for fd in reserved {
+            assert_eq!(
+                receiver.get_fd(fd).unwrap().fd_flags(),
+                FdFlags::CLOSE_ON_EXEC
+            );
+        }
+
+        release_all(&mut receiver);
+        release_all(&mut source);
     }
 }

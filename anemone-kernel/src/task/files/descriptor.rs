@@ -7,8 +7,8 @@ use crate::{
 };
 
 use super::opened_description::{
-    FileDescOps, OpenedDescriptionCapability, OpenedFileReadUserCtx, OpenedFileWriteUserCtx,
-    ProcFile,
+    FileDescOps, OpenedDescriptionCapability, OpenedDescriptionTransfer, OpenedFileReadUserCtx,
+    OpenedFileWriteUserCtx, ProcFile,
 };
 
 #[derive(Debug)]
@@ -18,6 +18,10 @@ pub struct FileDesc {
     flags: SpinLock<FdFlags>,
     /// True only while this descriptor object occupies a visible fd-table slot.
     published: AtomicBool,
+    /// A transfer-prepared descriptor already owns the semantic reference that
+    /// publication will consume. Ordinary unpublished descriptors acquire at
+    /// publication instead. This bit is never a second liveness truth.
+    unpublished_transfer_ref: AtomicBool,
 }
 
 impl Clone for FileDesc {
@@ -60,7 +64,20 @@ impl FileDesc {
             pfile,
             flags: SpinLock::new(fd_flags),
             published: AtomicBool::new(false),
+            unpublished_transfer_ref: AtomicBool::new(false),
         }
+    }
+
+    pub(super) fn from_transfer(
+        transfer: OpenedDescriptionTransfer,
+        fd_flags: FdFlags,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            pfile: transfer.into_target(),
+            flags: SpinLock::new(fd_flags),
+            published: AtomicBool::new(false),
+            unpublished_transfer_ref: AtomicBool::new(true),
+        })
     }
 
     pub fn new_opened(
@@ -89,7 +106,9 @@ impl FileDesc {
             !already_published,
             "file description published into multiple fd table slots"
         );
-        self.pfile.acquire_description_ref();
+        if !self.unpublished_transfer_ref.swap(false, Ordering::AcqRel) {
+            self.pfile.acquire_description_ref();
+        }
     }
 
     pub(super) fn unpublish_from_fd_table(&self) {
@@ -99,6 +118,14 @@ impl FileDesc {
 
     pub(super) fn release_description_ref(&self) {
         self.pfile.release_description_ref();
+    }
+
+    pub(super) fn capture_transfer(&self) -> OpenedDescriptionTransfer {
+        assert!(
+            self.is_published(),
+            "SCM_RIGHTS capture requires an exact published fd slot"
+        );
+        OpenedDescriptionTransfer::capture(self.pfile.clone())
     }
 
     pub(super) fn is_published(&self) -> bool {
@@ -466,6 +493,21 @@ impl FileDesc {
 
     pub fn poll(&self, request: &PollRequest<'_>) -> Result<PollRegisterResult, SysError> {
         self.pfile.file.poll(request).map_err(|e| e.into())
+    }
+}
+
+impl Drop for FileDesc {
+    fn drop(&mut self) {
+        assert!(
+            !self.published.load(Ordering::Acquire),
+            "published file descriptor dropped before fd-table withdrawal"
+        );
+        if self.unpublished_transfer_ref.swap(false, Ordering::AcqRel) {
+            // A receiver reservation can be abandoned before publication. The
+            // fd-table guard is already gone when this prepared descriptor is
+            // dropped, so terminal VFS/backend cleanup remains guard-out.
+            self.pfile.release_description_ref();
+        }
     }
 }
 

@@ -28,7 +28,7 @@ pub(super) fn set_termios(
         let updated = validate_termios(candidate, current)?;
         let drained_output_generation = if !matches!(mode, SetMode::Now) {
             tty.endpoint.terminal.request_drain_check();
-            tty.wake.wake();
+            tty.backend.wake();
             Some(tty.endpoint.terminal.wait_drain_complete()?)
         } else {
             None
@@ -51,7 +51,7 @@ pub(super) fn set_termios(
             }
         })? {
             observe_no_behavior_compatibility_change(current, updated);
-            tty.wake.wake();
+            tty.backend.wake();
             return Ok(());
         }
     }

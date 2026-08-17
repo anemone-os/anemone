@@ -21,14 +21,151 @@ pub(super) struct ProcFile {
     /// Sole lifecycle truth for this opened file description.
     ///
     /// Zero means never published, `1..RETIRED_DESCRIPTION_REFS` is the live
-    /// published-slot count, and `RETIRED_DESCRIPTION_REFS` is terminal. This
-    /// is deliberately not an `Arc` count: syscall-local borrows and live
-    /// leases must neither delay final release nor revive a retired identity.
+    /// semantic-reference count, and `RETIRED_DESCRIPTION_REFS` is terminal.
+    /// Published slots and move-only transfer references acquire this same
+    /// word. Syscall-local borrows and live leases deliberately do not, so
+    /// neither can delay final release or revive a retired identity.
     description_refs: AtomicUsize,
     pub(super) description_ops: FileDescOps,
 }
 
 const RETIRED_DESCRIPTION_REFS: usize = usize::MAX;
+
+/// One move-only semantic reference captured from an exact published fd slot.
+///
+/// The underlying `ProcFile` never escapes this owner capability. Unix Socket
+/// may queue only `OpenedDescriptionBundle`, while Socket ABI admission may
+/// ask a narrow immutable predicate about the opened file.
+pub(crate) struct OpenedDescriptionTransfer {
+    target: Option<Arc<ProcFile>>,
+}
+
+impl core::fmt::Debug for OpenedDescriptionTransfer {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OpenedDescriptionTransfer")
+            .field("active", &self.target.is_some())
+            .finish()
+    }
+}
+
+impl OpenedDescriptionTransfer {
+    pub(super) fn capture(target: Arc<ProcFile>) -> Self {
+        target.acquire_description_ref();
+        Self {
+            target: Some(target),
+        }
+    }
+
+    fn duplicate(&self) -> Self {
+        let target = self
+            .target
+            .as_ref()
+            .expect("consumed opened-description transfer duplicated")
+            .clone();
+        target.acquire_description_ref();
+        Self {
+            target: Some(target),
+        }
+    }
+
+    fn file_matches(&self, predicate: fn(&File) -> bool) -> bool {
+        predicate(
+            self.target
+                .as_ref()
+                .expect("consumed opened-description transfer inspected")
+                .file
+                .as_ref(),
+        )
+    }
+
+    pub(super) fn into_target(mut self) -> Arc<ProcFile> {
+        self.target
+            .take()
+            .expect("opened-description transfer consumed twice")
+    }
+}
+
+impl Drop for OpenedDescriptionTransfer {
+    fn drop(&mut self) {
+        if let Some(target) = self.target.take() {
+            target.release_description_ref();
+        }
+    }
+}
+
+/// Ordered SCM_RIGHTS payload. Its order is the control-message fd order, not
+/// a second opened-description lifetime truth.
+pub(crate) struct OpenedDescriptionBundle {
+    transfers: Vec<OpenedDescriptionTransfer>,
+}
+
+impl core::fmt::Debug for OpenedDescriptionBundle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OpenedDescriptionBundle")
+            .field("len", &self.transfers.len())
+            .finish()
+    }
+}
+
+impl OpenedDescriptionBundle {
+    pub(super) fn try_with_capacity(capacity: usize) -> Result<Self, SysError> {
+        let mut transfers = Vec::new();
+        transfers
+            .try_reserve_exact(capacity)
+            .map_err(|_| SysError::OutOfMemory)?;
+        Ok(Self { transfers })
+    }
+
+    pub(super) fn push(&mut self, transfer: OpenedDescriptionTransfer) {
+        self.transfers.push(transfer);
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.transfers.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.transfers.is_empty()
+    }
+
+    pub(crate) fn any_file_matches(&self, predicate: fn(&File) -> bool) -> bool {
+        self.transfers
+            .iter()
+            .any(|transfer| transfer.file_matches(predicate))
+    }
+
+    pub(crate) fn try_duplicate(&self) -> Result<Self, SysError> {
+        let mut duplicate = Self::try_with_capacity(self.len())?;
+        for transfer in &self.transfers {
+            duplicate.push(transfer.duplicate());
+        }
+        Ok(duplicate)
+    }
+
+    pub(super) fn into_transfers(self) -> alloc::vec::IntoIter<OpenedDescriptionTransfer> {
+        self.transfers.into_iter()
+    }
+
+    #[cfg(feature = "kunit")]
+    pub(crate) fn for_kunit(count: usize) -> (Self, OpenedDescriptionCapability) {
+        assert!(count > 0);
+        let target = Arc::new(ProcFile::new(
+            vfs_open(Path::new("/")).unwrap(),
+            OpenAccessMode::Read,
+            FileStatusFlags::empty(),
+            LinuxOpenCompat::empty(),
+            FileDescOps::default(),
+        ));
+        let capability = OpenedDescriptionCapability {
+            target: Arc::downgrade(&target),
+        };
+        let mut bundle = Self::try_with_capacity(count).unwrap();
+        for _ in 0..count {
+            bundle.push(OpenedDescriptionTransfer::capture(target.clone()));
+        }
+        (bundle, capability)
+    }
+}
 
 /// Non-owning identity and terminal-liveness capability for an opened file
 /// description.
@@ -106,8 +243,8 @@ pub struct FileDescOps {
     /// event source. Protocol/control fds can use read_user_transaction for
     /// copyout while remaining outside file-content access notification.
     pub notify_read_user_access: bool,
-    /// Runs when the last published fd-table slot for this opened file
-    /// description is removed. Transient syscall refs do not delay it.
+    /// Runs when the last published slot or transfer reference for this opened
+    /// description is released. Transient syscall refs do not delay it.
     pub final_release: Option<for<'a> fn(OpenedFileFinalReleaseCtx<'a>)>,
     /// Generic kernel-only event suppression marker. VFS hooks may inspect this
     /// capability, but task/fd code must not attach feature-specific meaning.

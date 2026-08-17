@@ -4,7 +4,8 @@ use anemone_abi::{
     errno::{EINVAL, Errno},
     net::linux::{
         AF_INET, AF_UNIX, IPPROTO_ICMP, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
-        SOCK_RAW, SOCK_STREAM, SOL_SOCKET, MsgHdr, SockAddrIn, SockAddrUn, UNIX_PATH_MAX, socklen_t,
+        MMsgHdr, SOCK_RAW, SOCK_STREAM, SOL_SOCKET, MsgHdr, SockAddrIn, SockAddrUn, UNIX_PATH_MAX,
+        socklen_t,
     },
 };
 use bitflags::bitflags;
@@ -290,6 +291,22 @@ pub unsafe fn recvfrom_raw(
 pub unsafe fn sendmsg_raw(fd: i32, message: *const MsgHdr, flags: i32) -> Result<usize, Errno> {
     net::sendmsg(fd as i64 as u64, message as u64, flags as i64 as u64)
         .map(|written| written as usize)
+}
+
+/// Raw `sendmmsg(2)` entry for batch fail-forward conformance tests.
+pub unsafe fn sendmmsg_raw(
+    fd: i32,
+    messages: *mut MMsgHdr,
+    count: u32,
+    flags: i32,
+) -> Result<usize, Errno> {
+    net::sendmmsg(
+        fd as i64 as u64,
+        messages as u64,
+        count as u64,
+        flags as i64 as u64,
+    )
+    .map(|sent| sent as usize)
 }
 
 /// Raw `recvmsg(2)` entry for focused message-layout and output-order conformance.

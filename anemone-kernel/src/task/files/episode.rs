@@ -2,7 +2,7 @@ use crate::prelude::*;
 
 use super::{
     Fd, FdAllocCeiling, FdFlags, FileDesc, FileDescOps, FileStatusFlags, FileTable,
-    LinuxOpenCompat, OpenAccessMode,
+    LinuxOpenCompat, OpenAccessMode, OpenedDescriptionBundle,
 };
 
 /// Opaque POSIX record-lock owner identity for one file-table sharing episode.
@@ -309,6 +309,45 @@ impl FileTableObserver {
     fn rollback_reserved_fd(&self, fd: Fd) {
         self.episode.inner.write().table.rollback_reserved_fd(fd);
     }
+
+    fn reserve_fds_up_to(
+        &self,
+        ceiling: FdAllocCeiling,
+        count: usize,
+    ) -> Result<Vec<Fd>, SysError> {
+        let mut fds = Vec::new();
+        fds.try_reserve_exact(count)
+            .map_err(|_| SysError::OutOfMemory)?;
+        let mut inner = self.episode.inner.write();
+        assert!(
+            inner.participants > 0,
+            "cannot reserve fds in a terminal file-table episode"
+        );
+        for _ in 0..count {
+            match inner.table.reserve_fd(ceiling) {
+                Ok(fd) => fds.push(fd),
+                Err(SysError::NoMoreFd) => break,
+                Err(error) => {
+                    inner.table.rollback_reserved_fds(&fds);
+                    return Err(error);
+                },
+            }
+        }
+        Ok(fds)
+    }
+
+    fn commit_reserved_fds(&self, entries: Vec<(Fd, Arc<FileDesc>)>) {
+        let mut inner = self.episode.inner.write();
+        assert!(
+            inner.participants > 0,
+            "cannot publish fds in a terminal file-table episode"
+        );
+        inner.table.commit_reserved_fds(entries);
+    }
+
+    fn rollback_reserved_fds(&self, fds: &[Fd]) {
+        self.episode.inner.write().table.rollback_reserved_fds(fds);
+    }
 }
 
 #[derive(Debug)]
@@ -347,6 +386,68 @@ impl FdReservation {
 }
 
 impl Drop for FdReservation {
+    fn drop(&mut self) {
+        self.rollback_inner();
+    }
+}
+
+/// Receiver-local all-or-none reservation for one SCM_RIGHTS projection.
+///
+/// The plan owns both the unpublished fd slots and the detached transfer
+/// bundle. Failed output copy drops the plan, rolling slots back before any
+/// transfer can run terminal cleanup. Successful commit prepares every
+/// descriptor outside the table guard and publishes the complete prefix in one
+/// table episode.
+#[derive(Debug)]
+pub(crate) struct OpenedDescriptionInstallPlan {
+    table: FileTableObserver,
+    fds: Vec<Fd>,
+    bundle: Option<OpenedDescriptionBundle>,
+    fd_flags: FdFlags,
+    active: bool,
+}
+
+impl OpenedDescriptionInstallPlan {
+    pub(crate) fn fds(&self) -> &[Fd] {
+        &self.fds
+    }
+
+    pub(crate) fn source_count(&self) -> usize {
+        self.bundle
+            .as_ref()
+            .expect("committed transfer install plan inspected")
+            .len()
+    }
+
+    pub(crate) fn commit(mut self) {
+        let bundle = self
+            .bundle
+            .take()
+            .expect("opened-description install plan committed twice");
+        let mut transfers = bundle.into_transfers();
+        let mut entries = Vec::with_capacity(self.fds.len());
+        for &fd in &self.fds {
+            let transfer = transfers
+                .next()
+                .expect("fd reservation exceeded transfer bundle");
+            entries.push((fd, FileDesc::from_transfer(transfer, self.fd_flags)));
+        }
+        // Uninstalled suffixes are intentionally discarded after truncation.
+        // Keep that cleanup outside the fd-table guard.
+        self.table.commit_reserved_fds(entries);
+        self.active = false;
+        drop(transfers);
+    }
+
+    fn rollback_inner(&mut self) {
+        if self.active {
+            self.table.rollback_reserved_fds(&self.fds);
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for OpenedDescriptionInstallPlan {
     fn drop(&mut self) {
         self.rollback_inner();
     }
@@ -490,6 +591,47 @@ impl Task {
         Ok(FdReservation {
             table,
             fd,
+            active: true,
+        })
+    }
+
+    /// Capture exact fd slots under one table episode and return only opaque
+    /// semantic transfer references. Partial capture cleanup happens after the
+    /// table guard is released.
+    pub(crate) fn capture_opened_descriptions(
+        &self,
+        fds: &[Fd],
+    ) -> Result<OpenedDescriptionBundle, SysError> {
+        let mut bundle = OpenedDescriptionBundle::try_with_capacity(fds.len())?;
+        let result = self.with_table(|table| {
+            for &fd in fds {
+                let file_desc = table.get_fd(fd)?;
+                bundle.push(file_desc.capture_transfer());
+            }
+            Ok(())
+        });
+        result?;
+        Ok(bundle)
+    }
+
+    pub(crate) fn prepare_opened_description_install(
+        &self,
+        bundle: OpenedDescriptionBundle,
+        maximum: usize,
+        fd_flags: FdFlags,
+    ) -> Result<OpenedDescriptionInstallPlan, SysError> {
+        let ceiling = self.fd_alloc_ceiling();
+        let files_state = self.files_state.read();
+        let table = files_state
+            .as_ref()
+            .expect("detached task cannot reserve transferred fds")
+            .observer();
+        let fds = table.reserve_fds_up_to(ceiling, maximum.min(bundle.len()))?;
+        Ok(OpenedDescriptionInstallPlan {
+            table,
+            fds,
+            bundle: Some(bundle),
+            fd_flags,
             active: true,
         })
     }
@@ -767,5 +909,67 @@ mod kunits {
                 .opened_fd_numbers_snapshot()
                 .is_empty()
         );
+    }
+
+    #[kunit]
+    fn transfer_install_plan_honors_ceiling_rolls_back_and_commits_cloexec() {
+        let files = FilesState::new_empty();
+        let observer = files.observer();
+        let ceiling = FdAllocCeiling::new(2).unwrap();
+
+        let (aborted_bundle, aborted_identity) = OpenedDescriptionBundle::for_kunit(3);
+        let aborted_fds = observer
+            .reserve_fds_up_to(ceiling, aborted_bundle.len())
+            .unwrap();
+        assert_eq!(aborted_fds, [Fd::new(0).unwrap(), Fd::new(1).unwrap()]);
+        let aborted = OpenedDescriptionInstallPlan {
+            table: observer.clone(),
+            fds: aborted_fds,
+            bundle: Some(aborted_bundle),
+            fd_flags: FdFlags::CLOSE_ON_EXEC,
+            active: true,
+        };
+        assert!(
+            files
+                .with_table(FileTable::opened_fd_numbers_snapshot)
+                .is_empty()
+        );
+        drop(aborted);
+        assert!(
+            files
+                .with_table(FileTable::opened_fd_numbers_snapshot)
+                .is_empty()
+        );
+        assert!(aborted_identity.try_lease().is_none());
+
+        let (committed_bundle, committed_identity) = OpenedDescriptionBundle::for_kunit(3);
+        let committed_fds = observer
+            .reserve_fds_up_to(ceiling, committed_bundle.len())
+            .unwrap();
+        let committed = OpenedDescriptionInstallPlan {
+            table: observer,
+            fds: committed_fds.clone(),
+            bundle: Some(committed_bundle),
+            fd_flags: FdFlags::CLOSE_ON_EXEC,
+            active: true,
+        };
+        committed.commit();
+        assert_eq!(
+            files.with_table(FileTable::opened_fd_numbers_snapshot),
+            committed_fds
+        );
+        files.with_table(|table| {
+            for fd in &committed_fds {
+                assert_eq!(
+                    table.get_fd(*fd).unwrap().fd_flags(),
+                    FdFlags::CLOSE_ON_EXEC
+                );
+            }
+        });
+        // The uninstalled suffix was discarded at commit; the two published
+        // aliases keep the shared description live until final table detach.
+        assert!(committed_identity.try_lease().is_some());
+        release_all(files.detach());
+        assert!(committed_identity.try_lease().is_none());
     }
 }
