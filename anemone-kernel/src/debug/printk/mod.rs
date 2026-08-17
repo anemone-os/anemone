@@ -211,6 +211,12 @@ mod kunits {
     use super::*;
 
     static EVALUATED: AtomicUsize = AtomicUsize::new(0);
+    static LONG_UTF8_CALLSITE: LogCallsite = LogCallsite {
+        level: LogLevel::Emerg,
+        module_path: "kunit::printk::long-utf8",
+        file: "mod.rs",
+        line: 276,
+    };
 
     fn evaluated_argument() -> usize {
         EVALUATED.fetch_add(1, Ordering::Relaxed)
@@ -274,14 +280,23 @@ mod kunits {
 
     #[kunit]
     fn long_utf8_record_stays_visible_and_marks_truncation() {
-        let mut message = "界".repeat(170);
-        message.push('\n');
-        message.push('界');
-        kemerg!("{message}");
-
-        let (_, record) = KERNEL_LOG.iter_weak().last().unwrap();
+        let prefix = "界".repeat(170);
+        let record = LogRecord::from_args(
+            &LONG_UTF8_CALLSITE,
+            BootTimestamp::Unavailable,
+            format_args!("{prefix}\n界"),
+        );
+        let sequence = KERNEL_LOG.append(record);
+        let (_, record) = KERNEL_LOG
+            .iter_weak()
+            .find(|(candidate, _)| *candidate == sequence)
+            .expect("the just-appended printk KUnit record must remain visible");
         assert!(record.flags.contains(LogRecordFlags::TRUNCATED));
         assert!(record.message().ends_with('\n'));
         assert!(record.message().is_char_boundary(record.message().len()));
+
+        let mut rendered = String::new();
+        write_record(&mut rendered, sequence, &record).unwrap();
+        assert!(rendered.ends_with(" [truncated]\n"));
     }
 }

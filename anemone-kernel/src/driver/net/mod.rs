@@ -1,1 +1,2 @@
+mod dwmac;
 mod virtio;

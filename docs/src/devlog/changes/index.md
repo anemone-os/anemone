@@ -57,6 +57,8 @@
 - [2026-08-08 - Signal return fast path and syscall profiling](./2026-08-08-signal-return-fast-path-and-syscall-profiling.md)
 - [2026-08-08 - TTY TAB3/XTABS output processing](./2026-08-08-tty-tab3-output.md)
 - [2026-08-08 - RTC provider 与 boot walltime seed](./2026-08-08-rtc-provider-boot-walltime-seed.md)
+- [2026-08-08 - Clock controller framework](./2026-08-08-clock-controller-framework.md)
+- [2026-08-08 - Reset controller framework](./2026-08-08-reset-controller-framework.md)
 - [2026-08-07 - TCP local reverse TIME_WAIT admission](./2026-08-07-tcp-local-time-wait-admission.md)
 - [2026-08-07 - Ext4 single Mutex](./2026-08-07-ext4-single-mutex.md)
 - [2026-08-07 - Ext4 synchronous I/O batching](./2026-08-07-ext4-synchronous-io-batching.md)

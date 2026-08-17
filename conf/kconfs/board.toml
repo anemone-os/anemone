@@ -18,8 +18,8 @@ kernel_symbols = true # Embed checked text/function symbols for kernel backtrace
 bootstrap_heap_shift_kb = 16 # Size of bootstrap heap as a power of 2 in KB
 log_buffer_shift_kb = 9 # Log buffer size as a power of 2 in KB, excluding metadata overhead
 log_record_shift_bytes = 9 # Log record size as a power of 2 in bytes
-print_log_level = 6 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; capped by record_log_level
-record_log_level = 7 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
+print_log_level = 1 # Maximum log level printed to consoles: Emerg=0 ... Debug=7; capped by record_log_level
+record_log_level = 1 # Maximum log level recorded: Emerg=0 ... Debug=7; higher levels are no-ops
 kstack_shift_kb = 9 # Kernel stack size as a power of 2 in KB
 remap_shift_gb = 6 # Size of remap region as a power of 2 in GB
 max_logical_cpus = 16 # Maximum number of logical CPUs enabled by this kernel
@@ -61,6 +61,7 @@ ahci_command_timeout_ms = 30000 # AHCI ATA command completion deadline in millis
 ahci_read_warn_ms = 100 # Warn when an ATA read remains incomplete for this many milliseconds.
 ahci_read_timeout_ms = 10000 # Panic when an ATA read remains incomplete for this many milliseconds.
 ahci_bounce_kb = 128 # Per-port AHCI DMA bounce buffer size in KiB.
+dwmac1000_ring_size = 64 # Per-port DWMAC1000 enhanced descriptor ring size.
 eevdf_base_slice_us = 3000 # EEVDF-lite base slice in microseconds.
 eevdf_wake_clamp_us = 3000 # EEVDF-lite wake placement clamp window in microseconds.
 eevdf_yield_penalty_us = 3000 # EEVDF-lite bounded yield penalty window in microseconds.

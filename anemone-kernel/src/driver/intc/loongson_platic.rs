@@ -183,7 +183,7 @@ impl IrqChip for LA7A1000Platic {
         }
         Some(InterruptInfo {
             hwirq: HwIrq::new(hwirq),
-            trigger: IrqTriggerType::Level,
+            sense: IrqSense::LevelHigh,
             flow: IrqFlowType::LevelMaskEoi,
         })
     }

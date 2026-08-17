@@ -4,5 +4,11 @@ platform = "visionfive2-rv64"
 fstype = "ext4"
 source = { type = "block", path = "mmcblk0p3" }
 
+[network.ipv4]
+interface = "eth0"
+address = "192.168.2.2"
+prefix = 24
+default-gateway = "192.168.2.1"
+
 [initial-program]
 type = "rootfs-entry"
