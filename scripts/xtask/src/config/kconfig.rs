@@ -117,6 +117,7 @@ pub struct Parameters {
     pub ns16550a_irq_rx_budget_bytes: Option<usize>,
     pub ns16550a_tx_batch_bytes: Option<usize>,
     pub ns16550a_tx_poll_iterations: Option<usize>,
+    pub jh7110_rtc_update_timeout_ms: Option<u64>,
     pub dw_mshc_poll_timeout_ms: Option<u64>,
     pub ahci_hba_reset_timeout_ms: Option<u64>,
     pub ahci_engine_timeout_ms: Option<u64>,
@@ -267,6 +268,7 @@ impl Parameters {
         materialize!(ns16550a_irq_rx_budget_bytes);
         materialize!(ns16550a_tx_batch_bytes);
         materialize!(ns16550a_tx_poll_iterations);
+        materialize!(jh7110_rtc_update_timeout_ms);
         materialize!(dw_mshc_poll_timeout_ms);
         materialize!(ahci_hba_reset_timeout_ms);
         materialize!(ahci_engine_timeout_ms);
@@ -521,6 +523,8 @@ pub const NS16550A_IRQ_RX_BUDGET_BYTES: usize = {};
 pub const NS16550A_TX_BATCH_BYTES: usize = {};
 /// Maximum readiness polls for each NS16550A TX byte.
 pub const NS16550A_TX_POLL_ITERATIONS: usize = {};
+/// Bounded JH7110 RTC calendar-update polling timeout in milliseconds.
+pub const JH7110_RTC_UPDATE_TIMEOUT_MS: u64 = {};
 /// Bounded DW-MSHC register polling timeout in milliseconds.
 pub const DW_MSHC_POLL_TIMEOUT_MS: u64 = {};
 /// AHCI global reset deadline in milliseconds.
@@ -711,6 +715,7 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(ns16550a_irq_rx_budget_bytes),
             resolved!(ns16550a_tx_batch_bytes),
             resolved!(ns16550a_tx_poll_iterations),
+            resolved!(jh7110_rtc_update_timeout_ms),
             resolved!(dw_mshc_poll_timeout_ms),
             resolved!(ahci_hba_reset_timeout_ms),
             resolved!(ahci_engine_timeout_ms),

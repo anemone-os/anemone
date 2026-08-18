@@ -1,0 +1,12 @@
+#!/usr/sbin/openrc-run
+
+description="start the Anemone development shell on the system console"
+supervisor=supervise-daemon
+command=/etc/anemone/console-shell
+pidfile=/run/console-shell.pid
+respawn_period="${respawn_period:-60}"
+
+depend() {
+	after local
+	keyword -prefix
+}

@@ -3,3 +3,4 @@
 
 pub mod goldfish;
 mod ls7a;
+mod starfive;

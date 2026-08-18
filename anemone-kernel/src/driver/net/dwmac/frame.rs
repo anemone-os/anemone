@@ -54,6 +54,85 @@ pub(super) struct DwmacFrameProvider<Q: DwmacFrameQueue> {
     link_state: LinkState,
 }
 
+/// Boot-time placeholder for a DWMAC node whose PHY exists but has no
+/// resolved carrier. It preserves the stable netdev identity without owning
+/// MMIO, DMA backing, an IRQ, or a path that can become available later.
+/// Remove it when DWMAC1000 gains a runtime PHY owner that can safely turn a
+/// post-boot carrier into a configured MAC and live frame provider.
+pub(super) struct UnavailableDwmacProvider {
+    frame_capacity: usize,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum UnavailableDwmacToken {}
+
+impl RxToken for UnavailableDwmacToken {
+    fn consume<R, F>(self, _consume: F) -> R
+    where
+        F: FnOnce(&[u8]) -> R,
+    {
+        match self {}
+    }
+}
+
+impl TxToken for UnavailableDwmacToken {
+    fn capacity(&self) -> usize {
+        match *self {}
+    }
+
+    fn consume<R, F>(self, _length: usize, _fill: F) -> Result<R, FrameSizeError>
+    where
+        F: FnOnce(&mut [u8]) -> R,
+    {
+        match self {}
+    }
+}
+
+impl UnavailableDwmacProvider {
+    pub(super) const fn new(frame_capacity: usize) -> Self {
+        Self { frame_capacity }
+    }
+}
+
+impl FrameProvider for UnavailableDwmacProvider {
+    type RxToken<'a> = UnavailableDwmacToken;
+    type TxToken<'a> = UnavailableDwmacToken;
+
+    fn receive(&mut self, _now: Instant) -> ReceiveOutcome<Self::RxToken<'_>, Self::TxToken<'_>> {
+        ReceiveOutcome::LinkUnavailable
+    }
+
+    fn transmit(&mut self, _now: Instant) -> TransmitOutcome<Self::TxToken<'_>> {
+        TransmitOutcome::LinkUnavailable
+    }
+
+    fn capabilities(&self) -> FrameCapabilities {
+        FrameCapabilities {
+            max_frame_len: self.frame_capacity,
+        }
+    }
+
+    fn link_state(&self) -> LinkState {
+        LinkState::Down
+    }
+}
+
+impl NetdevFrameProvider for UnavailableDwmacProvider {
+    fn install_recheck_wake(&self, _wake: Weak<dyn RecheckWake>) {
+        // This compatibility placeholder is permanently unavailable. A cable
+        // inserted after boot cannot produce a provider edge; rebooting with
+        // carrier is the only transition to the real DWMAC owner.
+    }
+
+    fn recheck_requested(&self) -> bool {
+        false
+    }
+
+    fn take_recheck_requested(&self) -> bool {
+        false
+    }
+}
+
 impl<Q: DwmacFrameQueue> DwmacFrameProvider<Q> {
     pub(super) fn new(queue: Arc<Q>, mac: [u8; 6]) -> Self {
         Self::with_link_state(queue, mac, LinkState::Unknown)
@@ -230,5 +309,27 @@ impl<Q: DwmacFrameQueue> NetdevFrameProvider for DwmacFrameProvider<Q> {
 
     fn take_recheck_requested(&self) -> bool {
         self.queue.take_recheck_requested()
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn unavailable_provider_is_down_and_never_mints_frame_tokens() {
+        let mut provider = UnavailableDwmacProvider::new(1536);
+        assert_eq!(provider.link_state(), LinkState::Down);
+        assert_eq!(provider.capabilities().max_frame_len, 1536);
+        assert_eq!(
+            provider.receive(Instant::ZERO),
+            ReceiveOutcome::LinkUnavailable
+        );
+        assert_eq!(
+            provider.transmit(Instant::ZERO),
+            TransmitOutcome::LinkUnavailable
+        );
+        assert!(!provider.recheck_requested());
+        assert!(!provider.take_recheck_requested());
     }
 }
