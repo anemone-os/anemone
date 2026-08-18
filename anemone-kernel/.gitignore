@@ -1,5 +1,8 @@
 src/platform_defs.rs
 src/kconfig_defs.rs
 src/system_target_defs.rs
+src/boot_defs.rs
+src/nemophila_defs.rs
+src/network_defs.rs
 src/arch/riscv64/generated.*
 src/arch/loongarch64/generated.*
