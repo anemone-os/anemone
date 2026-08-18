@@ -208,18 +208,24 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let sb = inode.sb();
     // VFS metadata is authoritative while the inode is resident; eviction and
     // explicit sync persist the same owner through lwext4's u32 setters.
+    // Regular-file size belongs to that resident inode/address space. Sizes of
+    // directories, symlinks, and special inodes describe lwext4-owned backend
+    // representations, so a load-time VFS snapshot must not be reported after
+    // the backend changes independently.
     let meta = inode.inode().meta_snapshot();
 
-    let rdev = if matches!(inode.ty(), InodeType::Char | InodeType::Block) {
-        let raw = ext4_sb(&sb).with_fs(|fs| {
-            let mut attr = lwext4_rust::FileAttr::default();
-            fs.get_attr(inode.ino().get() as u32, &mut attr)
-                .map_err(map_ext4_error)?;
-            Ok(attr.rdev)
-        })?;
-        decode_ext4_rdev(inode.ty(), raw)
-    } else {
-        DeviceId::None
+    let (rdev, size) = match inode.ty() {
+        InodeType::Anon => unreachable!("anonymous inode kind cannot be loaded from ext4"),
+        InodeType::Regular => (DeviceId::None, meta.size),
+        ty => {
+            let attr = ext4_sb(&sb).with_fs(|fs| {
+                let mut attr = lwext4_rust::FileAttr::default();
+                fs.get_attr(inode.ino().get() as u32, &mut attr)
+                    .map_err(map_ext4_error)?;
+                Ok(attr)
+            })?;
+            (decode_ext4_rdev(ty, attr.rdev), attr.size)
+        },
     };
 
     Ok(InodeStat {
@@ -230,7 +236,7 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         uid: meta.uid,
         gid: meta.gid,
         rdev,
-        size: meta.size,
+        size,
         atime: meta.atime,
         mtime: meta.mtime,
         ctime: meta.ctime,
