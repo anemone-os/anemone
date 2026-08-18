@@ -1,0 +1,7 @@
+# OpenRC does not consume the old BusyBox inittab, so its default runlevel
+# needs an explicit console owner. This development image deliberately enters
+# a root shell without PAM or a password, matching the previous ::respawn
+# boundary. Remove --skip-login/--login-program when the board gains a real
+# login policy.
+term_type="linux"
+agetty_options="--noreset --noclear --skip-login --login-program /bin/sh"

@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-18 - 2K1000 RTC invalid calendar initialization](./2026-08-18-2k1000-rtc-invalid-calendar-init.md)
 - [2026-08-17 - TCP socket buffer budgets](./2026-08-17-tcp-socket-buffer-budgets.md)
 - [2026-08-17 - TTY FIONREAD/TIOCINQ](./2026-08-17-tty-fionread.md)
 - [2026-08-17 - Socket SIOCGIFCONF interface query](./2026-08-17-socket-siocgifconf.md)

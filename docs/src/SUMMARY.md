@@ -91,6 +91,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-18 - 2K1000 RTC invalid calendar initialization](./devlog/changes/2026-08-18-2k1000-rtc-invalid-calendar-init.md)
 		- [2026-08-17 - TCP socket buffer budgets](./devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md)
 		- [2026-08-17 - TTY FIONREAD/TIOCINQ](./devlog/changes/2026-08-17-tty-fionread.md)
 		- [2026-08-17 - Socket SIOCGIFCONF interface query](./devlog/changes/2026-08-17-socket-siocgifconf.md)

@@ -1,10 +1,6 @@
 # VisionFive 2 RootFS
 
-This directory contains the configuration and local inputs used to build the
-VisionFive 2 root filesystem.
-
-The root filesystem is materialized from the folder tree under `base/` plus the
-files declared in `rootfs.toml`. The generated image is written to:
+This directory contains the Anemone bootstrap root filesystem written to:
 
 ```text
 build/rootfs/visionfive2/rootfs.img
@@ -12,17 +8,19 @@ build/rootfs/visionfive2/rootfs.img
 
 ## Disk Layout and Boot Flow
 
-The generated image is the Anemone bootstrap root filesystem. It is written to
-the third partition of the boot disk, which Anemone exposes as `mmcblk0p3`. The
-runtime mount sequence is:
+The bootstrap image is written to the third partition, exposed by Anemone as
+`mmcblk0p3`. The Debian system image is a separate ext4 image written only to
+`mmcblk0p2`. The runtime sequence is:
 
-1. Anemone mounts `mmcblk0p3` as its initial root `/` and starts
-   `/sbin/board-init`.
-2. `board-init` mounts the Linux ext4 image from `mmcblk0p2` at `/linux`.
-3. `board-init` mounts the same `mmcblk0p3` filesystem again at `/linux/home`,
-   so the bootstrap files remain available as Linux `/home`.
-4. After preparing the Linux tree, `board-init` calls `chroot("/linux")` and
-   executes `/usr/sbin/init` inside the Linux image.
+1. Anemone mounts `mmcblk0p3` as `/` and starts `/sbin/board-init`.
+2. `board-init` mounts `mmcblk0p2` at `/linux` and `mmcblk0p3` at
+   `/linux/home`.
+3. `board-init` chroots to `/linux` and runs `/home/init_sys.sh` from
+   `mmcblk0p3`.
+4. The script installs the Anemone overlay and mounts devfs, devpts, proc,
+   sysfs, `/run`, and `/tmp` inside the Debian root.
+5. `board-init` executes Debian `/sbin/init`; OpenRC enters its default
+   runlevel and starts an agetty-owned development shell on `/dev/console`.
 
 The bootable Anemone kernel is installed on the first partition. The rootfs
 manifest also carries the same build output at `/boot/anemoneImage` inside the
@@ -30,14 +28,10 @@ bootstrap image as a fixed-path handoff.
 
 ## Required Inputs
 
-The folder under `base/` must provide a static RISC-V BusyBox at
-`base/bin/busybox` so `board-init` can prepare the Linux root before entering
-the chroot.
-
-The Linux ext4 image on `mmcblk0p2` must contain the complete riscv64 userspace
-used after the chroot. It must provide the LP64D musl interpreter at
-`/lib/ld-musl-riscv64.so.1` and the native GNU tools required by the tests,
-including GCC, binutils, development headers, libraries, and make.
+Write `etc/sdcard-rv-pub.img` to `mmcblk0p2`. It contains the complete Debian
+riscv64 userspace, including OpenRC as `/sbin/init`. The bootstrap tree under
+`base/` provides the static BusyBox and pre-init script used before OpenRC
+starts.
 
 The kernel image is a fixed-path handoff from the Platform build. From the
 repository root, use this order with the same `visionfive2-rv64` selection:
@@ -55,6 +49,6 @@ run `just clean` before the build. `just clean` removes the complete `build/`
 tree, so never run it between the build and rootfs commands above. If the build
 fails, do not run the rootfs command.
 
-`etc/build.sh` installs the Anemone kernel on the first partition and writes
-`build/rootfs/visionfive2/rootfs.img` to the third partition (`mmcblk0p3`). It
-does not modify the Linux root filesystem on `mmcblk0p2`.
+`etc/build.sh` installs the Anemone kernel on the first partition and updates
+only the board-init bootstrap image on `mmcblk0p3`. It never rebuilds or writes
+the stable Debian system image on `mmcblk0p2`.

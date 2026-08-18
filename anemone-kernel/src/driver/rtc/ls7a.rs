@@ -20,6 +20,9 @@ use crate::{
 #[derive(Debug, Opaque)]
 struct Ls7aProvider {
     remap: IoRemap,
+    /// Cached firmware policy needed after probe; this controls only the
+    /// one-shot recovery of a coherent but invalid boot calendar.
+    initialize_invalid_calendar: bool,
 }
 
 #[derive(Opaque)]
@@ -29,15 +32,20 @@ struct Ls7aState {
 }
 
 impl Ls7aProvider {
-    fn new(remap: IoRemap) -> Result<Self, SysError> {
-        let provider = Self { remap };
+    fn new(remap: IoRemap, initialize_invalid_calendar: bool) -> Result<Self, SysError> {
+        let provider = Self {
+            remap,
+            initialize_invalid_calendar,
+        };
         let registers = unsafe {
             driver_core::Ls7aRegisters::from_raw(provider.remap.as_ptr().as_ptr().cast())
         };
-        registers.enable_toy().then_some(provider).ok_or_else(|| {
+        if !registers.enable_toy() {
             kwarningln!("LS7A RTC did not retain the TOY enable bits");
-            SysError::ProbeFailed
-        })
+            return Err(SysError::ProbeFailed);
+        }
+        kinfoln!("Loongson RTC oscillator and TOY counter enabled");
+        Ok(provider)
     }
 }
 
@@ -49,20 +57,58 @@ impl RtcProvider for Ls7aProvider {
             kwarningln!("LS7A RTC could not produce a coherent TOY snapshot");
             RtcReadError::DeviceIo
         })?;
-        driver_core::decode_time(toy, year)
-            .map(RealtimeInstant::from_nanos)
-            .ok_or_else(|| {
+        let epoch_ns = match driver_core::decode_time(toy, year) {
+            Some(epoch_ns) => epoch_ns,
+            None => {
                 kwarningln!(
                     "LS7A RTC returned an invalid calendar: toy={:#010x} year={}",
                     toy,
                     year
                 );
-                RtcReadError::DeviceIo
-            })
+                if !self.initialize_invalid_calendar {
+                    return Err(RtcReadError::DeviceIo);
+                }
+
+                kwarningln!(
+                    "2K1000 RTC calendar is invalid; initializing it to 2001-01-01 00:00:00"
+                );
+                if !registers.write_initial_time() {
+                    kwarningln!("2K1000 RTC did not retain the TOY enable bits after set");
+                    return Err(RtcReadError::DeviceIo);
+                }
+
+                // The previous calendar was already unusable. Failed
+                // verification is fail-forward without rollback, and must not
+                // produce a timekeeper seed.
+                let (verified_toy, verified_year) = registers.read_time().ok_or_else(|| {
+                    kwarningln!("2K1000 RTC set readback did not produce a coherent snapshot");
+                    RtcReadError::DeviceIo
+                })?;
+                let verified_epoch = driver_core::decode_time(verified_toy, verified_year);
+                if verified_epoch != Some(driver_core::INITIAL_EPOCH_NS) {
+                    kwarningln!(
+                        "2K1000 RTC set readback mismatch: toy={:#010x} year={}",
+                        verified_toy,
+                        verified_year
+                    );
+                    return Err(RtcReadError::DeviceIo);
+                }
+
+                kinfoln!("2K1000 RTC successfully set to 2001-01-01 00:00:00");
+                driver_core::INITIAL_EPOCH_NS
+            },
+        };
+        // Log only the final accepted boot sample so diagnostics do not cause
+        // an additional hardware read after probe.
+        knoticeln!("Loongson RTC current time: epoch_ns={}", epoch_ns);
+        Ok(RealtimeInstant::from_nanos(epoch_ns))
     }
 }
 
 mod driver_core {
+    const INVALID_CALENDAR_INIT_COMPATIBLE: &str = "loongson,ls-rtc";
+    const TOY_WRITE0: usize = 0x24;
+    const TOY_WRITE1: usize = 0x28;
     const TOY_READ0: usize = 0x2c;
     const TOY_READ1: usize = 0x30;
     const RTC_CTRL: usize = 0x40;
@@ -78,8 +124,18 @@ mod driver_core {
     const MIN_YEAR: u32 = 2000;
     const MAX_YEAR: u32 = 2099;
 
+    const INITIAL_TOY: u32 = 0x0420_0000;
+    const INITIAL_YEAR_SINCE_1900: u32 = 101;
+    pub(super) const INITIAL_EPOCH_NS: u64 = 978_307_200_000_000_000;
+
     pub struct Ls7aRegisters {
         base: *mut u8,
+    }
+
+    pub(super) fn allows_invalid_calendar_initialization<'a>(
+        mut compatibles: impl Iterator<Item = &'a str>,
+    ) -> bool {
+        compatibles.next() == Some(INVALID_CALENDAR_INIT_COMPATIBLE)
     }
 
     impl Ls7aRegisters {
@@ -105,6 +161,14 @@ mod driver_core {
             let control = self.read_u32(RTC_CTRL);
             self.write_u32(RTC_CTRL, control | TOY_ENABLE_MASK);
             self.read_u32(RTC_CTRL) & TOY_ENABLE_MASK == TOY_ENABLE_MASK
+        }
+
+        /// This is deliberately narrower than a runtime set-time API: the
+        /// driver may write only the fixed boot recovery calendar.
+        pub fn write_initial_time(&self) -> bool {
+            self.write_u32(TOY_WRITE0, INITIAL_TOY);
+            self.write_u32(TOY_WRITE1, INITIAL_YEAR_SINCE_1900);
+            self.enable_toy()
         }
 
         /// Return one calendar snapshot. TOY_READ0 is internally coherent;
@@ -215,6 +279,40 @@ mod driver_core {
             assert_eq!(decode_time(toy(12, 31, 23, 59, 59), 99), None);
             assert_eq!(decode_time(toy(1, 1, 0, 0, 0), 200), None);
         }
+
+        #[kunit]
+        fn initial_calendar_matches_fixed_epoch_and_register_encoding() {
+            assert_eq!(
+                decode_time(INITIAL_TOY, INITIAL_YEAR_SINCE_1900),
+                Some(INITIAL_EPOCH_NS)
+            );
+
+            let mut mmio = [0_u32; REQUIRED_REGISTER_SPAN / core::mem::size_of::<u32>()];
+            let registers = unsafe { Ls7aRegisters::from_raw(mmio.as_mut_ptr().cast()) };
+            assert!(registers.write_initial_time());
+            assert_eq!(mmio[TOY_WRITE0 / core::mem::size_of::<u32>()], INITIAL_TOY);
+            assert_eq!(
+                mmio[TOY_WRITE1 / core::mem::size_of::<u32>()],
+                INITIAL_YEAR_SINCE_1900
+            );
+            assert_eq!(
+                mmio[RTC_CTRL / core::mem::size_of::<u32>()] & TOY_ENABLE_MASK,
+                TOY_ENABLE_MASK
+            );
+        }
+
+        #[kunit]
+        fn invalid_calendar_initialization_is_legacy_2k1000_only() {
+            assert!(!allows_invalid_calendar_initialization(
+                ["loongson,ls7a-rtc", "loongson,ls-rtc"].into_iter()
+            ));
+            assert!(allows_invalid_calendar_initialization(
+                ["loongson,ls-rtc"].into_iter()
+            ));
+            assert!(!allows_invalid_calendar_initialization(
+                ["loongson,ls2k1000-rtc"].into_iter()
+            ));
+        }
     }
 }
 
@@ -243,7 +341,12 @@ impl DriverOps for Ls7aDriver {
             .filter(|(_, len)| *len >= driver_core::REQUIRED_REGISTER_SPAN)
             .ok_or(SysError::MissingResource)?;
 
-        let provider = Arc::new(Ls7aProvider::new(unsafe { ioremap(base, len) }?)?);
+        let initialize_invalid_calendar =
+            driver_core::allows_invalid_calendar_initialization(pdev.compatibles());
+        let provider = Arc::new(Ls7aProvider::new(
+            unsafe { ioremap(base, len) }?,
+            initialize_invalid_calendar,
+        )?);
         let origin = pdev.fwnode().ok_or(SysError::MissingFwNode)?.clone();
         register_provider(origin, provider.clone()).map_err(|error| {
             kwarningln!(
@@ -274,7 +377,10 @@ impl DriverOps for Ls7aDriver {
 
 impl PlatformDriver for Ls7aDriver {
     fn match_table(&self) -> &[&str] {
-        &["loongson,ls7a-rtc"]
+        // The tracked 2K1000 firmware uses this legacy compatible for the
+        // common TOY block. Remove it when that DT ABI moves to the upstream
+        // `loongson,ls2k1000-rtc` name; alarm-specific behavior stays excluded.
+        &["loongson,ls7a-rtc", "loongson,ls-rtc"]
     }
 }
 

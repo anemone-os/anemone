@@ -157,7 +157,7 @@ pub(super) fn initialize_yt8511(
     mii: bool,
     gmii: bool,
     half_duplex: bool,
-) -> Result<PhyState, SysError> {
+) -> Result<Option<PhyState>, SysError> {
     let id1 = regs.mdio_read(address, Clause22Register::PhyId1)?;
     let id2 = regs.mdio_read(address, Clause22Register::PhyId2)?;
     if ((id1 as u32) << 16) | id2 as u32 != PHY_ID_YT8511 {
@@ -169,8 +169,10 @@ pub(super) fn initialize_yt8511(
     let (delay_before, delay_configured) = configure_delay(regs, address, mode)?;
     let autoneg_restarted =
         configure_generic_autoneg(regs, address, max_speed, mii, gmii, half_duplex)?;
-    let link = wait_generic_link(regs, address)?;
-    Ok(PhyState {
+    let Some(link) = wait_generic_link(regs, address)? else {
+        return Ok(None);
+    };
+    Ok(Some(PhyState {
         bmcr: link.bmcr,
         bmsr: link.bmsr,
         advertise: link.advertise,
@@ -181,7 +183,7 @@ pub(super) fn initialize_yt8511(
         link: link.link,
         delay_before,
         delay_configured,
-    })
+    }))
 }
 
 fn configure_generic_autoneg(
@@ -329,7 +331,10 @@ struct GenericLinkSnapshot {
     link: PhyLink,
 }
 
-fn wait_generic_link(regs: &Dwmac1000Regs, address: u8) -> Result<GenericLinkSnapshot, SysError> {
+fn wait_generic_link(
+    regs: &Dwmac1000Regs,
+    address: u8,
+) -> Result<Option<GenericLinkSnapshot>, SysError> {
     let start = MonotonicInstant::now();
     loop {
         let bmcr = regs.mdio_read(address, Clause22Register::BasicControl)?;
@@ -346,7 +351,7 @@ fn wait_generic_link(regs: &Dwmac1000Regs, address: u8) -> Result<GenericLinkSna
             let ctrl1000 = regs.mdio_read(address, Clause22Register::GigabitControl)?;
             let stat1000 = regs.mdio_read(address, Clause22Register::GigabitStatus)?;
             let link = resolve_autoneg(advertise, lpa, ctrl1000, stat1000)?;
-            return Ok(GenericLinkSnapshot {
+            return Ok(Some(GenericLinkSnapshot {
                 bmcr,
                 bmsr,
                 advertise,
@@ -354,17 +359,17 @@ fn wait_generic_link(regs: &Dwmac1000Regs, address: u8) -> Result<GenericLinkSna
                 ctrl1000,
                 stat1000,
                 link,
-            });
+            }));
         }
         if start.elapsed() >= Duration::from_millis(DWMAC1000_PHY_TIMEOUT_MS) {
-            kerrln!(
-                "dwmac1000 stage=phy-link result=fail reason=timeout protocol=generic-clause22 deadline-ms={} phy-address={} bmcr={:#06x} bmsr={:#06x}",
+            kwarningln!(
+                "dwmac1000 stage=phy-link result=unresolved reason=timeout action=publish-placeholder publication-link=down restart-with-carrier-required=true protocol=generic-clause22 deadline-ms={} phy-address={} bmcr={:#06x} bmsr={:#06x}",
                 DWMAC1000_PHY_TIMEOUT_MS,
                 address,
                 bmcr,
                 bmsr,
             );
-            return Err(SysError::Timeout);
+            return Ok(None);
         }
         core::hint::spin_loop();
     }
