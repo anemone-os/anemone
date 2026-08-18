@@ -12,5 +12,4 @@ components = [
 targets = [
     "riscv64gc-unknown-none-elf",
     "loongarch64-unknown-none",
-    "wasm32v1-none",
 ]

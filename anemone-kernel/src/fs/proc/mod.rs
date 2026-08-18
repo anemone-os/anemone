@@ -136,5 +136,6 @@ mod cpuinfo;
 mod filesystems;
 mod meminfo;
 mod mounts;
+#[cfg(feature = "nemophila")]
 mod nemophila;
 mod uptime;

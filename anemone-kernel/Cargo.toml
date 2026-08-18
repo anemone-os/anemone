@@ -11,11 +11,12 @@ spin_lock_irqsave = []
 soft_unaligned_access = []
 kernel_symbols = ["dep:symtab"]
 perf_observe = []
+nemophila = ["dep:nemophila-wasm"]
 [dependencies]
 anemone-abi = { path = "../anemone-abi" }
 anemone-net-api = { path = "crates/anemone-net-api" }
 anemone-smoltcp-stack = { path = "crates/anemone-smoltcp-stack", default-features = false }
-nemophila-wasm = { path = "crates/nemophila-wasm", default-features = false, features = ["extra-checks"] }
+nemophila-wasm = { path = "crates/nemophila-wasm", default-features = false, features = ["extra-checks"], optional = true }
 bitflags = { workspace = true }
 fdt = { workspace = true }
 spin = { workspace = true }

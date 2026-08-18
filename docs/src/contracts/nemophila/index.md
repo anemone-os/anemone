@@ -7,8 +7,9 @@
 **Owner：** Nemophila runtime；各 point / Host service / artifact source 的参与 owner 见下表
 **参与领域：** SystemTarget / module build / task credentials / native syscall ABI / VFS file snapshot /
 Core Wasm interpreter / task clone与exit / printk / procfs
-**覆盖范围：** R0 trusted-good-module 的 artifact acquisition、transactional admission、published instance lifecycle、
-typed weave、clone与thread-exit observer、value-only logging、management ABI 与只读诊断投影
+**覆盖范围：** KernelConfig `nemophila` feature启用的kernel image中，R0 trusted-good-module 的artifact acquisition、
+transactional admission、published instance lifecycle、typed weave、clone与thread-exit observer、value-only logging、
+management ABI 与只读诊断投影；feature关闭时的SystemTarget/build准入
 **不覆盖：** untrusted module execution、执行配额或进度保证、force/automatic unload、source replacement/priority、
 path-based load ABI、并发 writer 原子 snapshot、当前logging之外的新Host service、generic procfs dentry revocation或dynamic inode
 materialization
@@ -19,7 +20,7 @@ materialization
 [`BOOT-PROTOCOL-001`](../task/boot-protocol.md#boot-protocol-001--typed-initial-program-source统一收口到普通-vfs-exec)、
 现有 VFS opened-file / positioned-read 与 kernel logging owner
 **Pending Successor：** None
-**最后核验：** 2026-08-15；`ANE-CHG-20260815-nemophila-task-lineage-auditor` Effective
+**最后核验：** 2026-08-18；Nemophila KernelConfig feature Patch Effective
 
 本页从已经完成双架构 R0 acceptance 的 live implementation 提取后续模块、point、Host service与产品配置可共同依赖的
 最小规则。完整历史 target、取舍与验证边界见
@@ -142,8 +143,10 @@ notification或zombie handoff；task owner不读取runtime私有状态。
 
 ## NEMOPHILA-ARTIFACT-001 — 两种来源汇入同一immutable admission
 
-**规则：** versioned WIT package是logical interface唯一source；module build owner唯一拥有manifest/toolchain/fresh candidate与ordinary
-export。SystemTarget只保存ordered duplicate-free required embedded identities；system build按resolved order调用module build owner，
+**规则：** KernelConfig `nemophila` feature唯一决定kernel image是否包含Nemophila runtime capability。feature关闭时，
+SystemTarget的embedded module selection必须为空；system build在任何module build前拒绝非空selection，且不生成catalog或触发
+Wasm build。feature启用时，versioned WIT package是logical interface唯一source；module build owner唯一拥有manifest/toolchain/
+fresh candidate与ordinary export。SystemTarget只保存ordered duplicate-free required embedded identities；system build按resolved order调用module build owner，
 立即核对ordinary export并消费同一invocation返回的immutable bytes，将其固定到本次system build私有snapshot后，在KernelConfig
 size上限内生成只含identity/order/immutable bytes的kernel input。空selection产生空catalog；build不延后重读可替换stable
 export、不复制module recipe、不建立mtime/provenance sidecar或loaded registry。
@@ -162,11 +165,12 @@ validation/execution；runtime在execution前拒绝malformed/unsupported input�
 required entry。WIT metadata、精确import/export集合与custom-section allowlist不成为第二份admission truth。RV64与LA64从同一
 source revision分别fresh build，只有content hash一致的artifact bytes构成same-artifact acceptance。
 
-**违反表现：** SystemTarget保存recipe或loaded truth；system build使用stale/fallback artifact；boot失败继续initial userspace；
+**违反表现：** feature关闭时仍构建Wasm、静默忽略非空selection或把catalog带入kernel image；SystemTarget保存recipe或loaded truth；
+system build使用stale/fallback artifact；boot失败继续initial userspace；
 embedded/supplied走不同runtime；supplied load保留pathname/file或改变cursor；source mutation改变已完成load；WIT metadata复制
 interpreter validator；不同架构消费内容不同的artifact。
 
-**验证 / Enforcement：** xtask config/module/generated-input tests、boot success/negative双架构oracles、supplied-fd focused cases、
+**验证 / Enforcement：** xtask feature/selection准入与module/generated-input tests、feature-disabled kernel build、boot success/negative双架构oracles、supplied-fd focused cases、
 interpreter/module regression、RV64/LA64 artifact SHA-256一致性与R0 lifecycle wrapper。
 
 ## 已知相邻边界
