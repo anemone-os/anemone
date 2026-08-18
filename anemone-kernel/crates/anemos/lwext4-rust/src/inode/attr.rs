@@ -49,8 +49,23 @@ fn decode_time(time: u32, extra: u32) -> Duration {
 }
 
 impl InodeRef<'_> {
-    pub(crate) fn free_unlinked(mut self) -> crate::Ext4Result<()> {
-        assert_eq!(self.nlink(), 0, "only an unlinked inode may be rolled back");
+    pub(crate) fn free_unpublished(mut self) -> crate::Ext4Result<()> {
+        assert_eq!(
+            self.nlink(),
+            0,
+            "only an unpublished inode may be rolled back"
+        );
+        // Directory preparation and long-symlink writes can allocate blocks
+        // before the parent dirent is published. lwext4's inode allocator does
+        // not release those blocks, so rollback must truncate data first.
+        if self.size() != 0
+            && matches!(
+                self.inode_type(),
+                InodeType::RegularFile | InodeType::Directory | InodeType::Symlink
+            )
+        {
+            self.truncate(0)?;
+        }
         unsafe { ext4_fs_free_inode(self.inner.as_mut()) }
             .context("ext4_fs_free_inode during create rollback")?;
         // The allocator entry no longer exists. Drop must release only the

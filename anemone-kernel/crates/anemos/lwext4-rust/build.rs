@@ -77,10 +77,10 @@ fn generate_bindings_to_rust(executor: &BuildExecutor, toolchain: &Toolchain, ou
             "^ext4_(bcache|blockdev|blockdev_iface|dir_en|dir_iter|dir_search_result|fs|inode|inode_ref|sblock)$",
         )
         .allowlist_function(
-            "^ext4_(bcache_(cleanup|fini_dynamic|init_dynamic)|block_(bind_bcache|cache_flush|cache_write_back|fini|init|readbytes|set_lb_size|writebytes)|blocks_(get_direct|set_direct)|dir_(add_entry|destroy_result|find_entry|iterator_fini|iterator_init|iterator_next|remove_entry)|fs_(alloc_inode|append_inode_dblk|get_inode_dblk_idx|get_inode_ref|init|init_inode_dblk_idx|inode_blocks_init|inode_links_count_inc|put_inode_ref|free_inode|truncate_inode|fini)|inode_(clear_flag|get_dev|get_gid|get_mode|get_size|get_uid|set_del_time|set_dev|set_gid|set_mode|set_size|set_uid))$",
+            "^ext4_(bcache_(cleanup|fini_dynamic|init_dynamic)|block_(bind_bcache|cache_flush|cache_write_back|fini|init|readbytes|set_lb_size|writebytes)|blocks_(get_direct|set_direct)|dir_(add_entry|destroy_result|find_entry|iterator_fini|iterator_init|iterator_next|remove_entry)|fs_(alloc_inode|append_inode_dblk|get_inode_dblk_idx|get_inode_ref|init|init_inode_dblk_idx|inode_blocks_init|inode_links_count_inc|put_inode_ref|free_inode|truncate_inode|fini)|inode_(clear_flag|get_dev|get_gid|get_mode|get_size|get_uid|set_del_time|set_dev|set_gid|set_mode|set_size|set_uid)|sb_write)$",
         )
         .allowlist_var(
-            "^(CONFIG_BLOCK_DEV_CACHE_SIZE|E(IO|ISDIR|NOENT|NOTEMPTY|NOTSUP|OK)|EXT4_(DE_(BLKDEV|CHRDEV|DIR|FIFO|REG_FILE|SOCK|SYMLINK|UNKNOWN)|INODE_(BLOCKS|FLAG_EXTENTS)))$",
+            "^(CONFIG_BLOCK_DEV_CACHE_SIZE|E(EXIST|IO|ISDIR|MLINK|NOENT|NOTDIR|NOTEMPTY|NOTSUP|OK)|EXT4_(DE_(BLKDEV|CHRDEV|DIR|FIFO|REG_FILE|SOCK|SYMLINK|UNKNOWN)|INODE_(BLOCKS|FLAG_EXTENTS)|LINK_MAX))$",
         )
         .parse_callbacks(Box::new(CustomCargoCallbacks));
 

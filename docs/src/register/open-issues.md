@@ -422,6 +422,37 @@ publication线性化点、post-commit failure/rollback和并发lookup语义，�
 中间态与可实施cleanup，并要求复用既有common-create handoff且不新增比touch/mkdir更弱的失败路径；本问题不阻塞
 该RFC cutover。lwext4自身strict failure/crash atomicity由独立accepted limitation承接，不与本跨owner问题混合。
 
+## ANE-20260818-VFS-EXT4-UNLINKED-INODE-LIFECYCLE
+
+**Type:** Issue
+**Status:** Open
+**Area:** VFS inode cache / ext4 / lwext4 / unlink / final close
+
+**Symptom / Trigger:** ext4最后一个dirent被unlink后，`lwext4-rust`会立即truncate data并释放raw inode allocator entry；
+generic `SuperBlock`则把仍有引用的resident inode从index移到ghost，使已打开的file description继续持有VFS inode。后续
+I/O仍按原inode number进入ext4，因此open-unlink场景可能访问已释放或被复用的backend inode。generic raw-inode lookup到
+`iget()`的late materialization也没有与同一namespace transaction建立防复用handoff。
+
+**Impact:** 不能把本轮普通closed-file unlink/rmdir闭合扩大为完整POSIX open-unlink lifetime保证；`O_TMPFILE`现有
+create-open-unlink仿真也继续受这一边界约束。仅把nlink精确投影或把VFS inode移入ghost不能延长backend allocation lifetime。
+
+**Owner:** generic VFS inode materialization/retirement与filesystem backend handoff（待独立设计）；ext4/lwext4只实现该
+handoff的backend一侧，不单独拥有打开引用计数。
+
+**Last Verified:** 2026-08-18
+
+**Exit Condition:** 建立generic VFS协议，使最后dirent removal只撤销namespace publication，并在最后open/mapping/cache引用
+释放时向backend提交唯一retirement；同时防止raw inode number在lookup到`iget()`窗口被释放/复用。以ext4和至少一个
+resident filesystem的open-unlink/read-write/final-close/reuse真实consumer验证。不得用ext4私有引用计数、后台worker、
+`Drop`内I/O或路径名补偿绕过generic owner。
+
+**Related:** [Ext4 link/remove小迭代](../devlog/changes/2026-08-18-ext4-link-remove.md)、
+[`O_TMPFILE` stage-1 limitation](./current-limitations.md#ane-20260522-otmpfile-stage1)
+
+**Severity:** High
+**Workaround:** 不依赖ext4上unlink后继续通过既有open file description访问内容；在generic retirement协议完成前，不把
+该场景作为已支持能力。
+
 ## ANE-20260527-LTP-MKNOD-LEGACY-READDIR
 
 **Type:** Issue

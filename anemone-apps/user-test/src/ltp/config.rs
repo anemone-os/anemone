@@ -141,6 +141,10 @@ pub(super) const LTP_GROUPS: &[LtpGroup] = &[
         cases: include_str!("../../ltp/groups/exec.txt"),
     },
     LtpGroup {
+        name: "ext4-namespace",
+        cases: include_str!("../../ltp/groups/ext4-namespace.txt"),
+    },
+    LtpGroup {
         name: "fadvise",
         cases: include_str!("../../ltp/groups/fadvise.txt"),
     },

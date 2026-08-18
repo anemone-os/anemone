@@ -125,13 +125,22 @@ pub(super) fn map_ext4_error(err: LwExt4Error) -> SysError {
         x if x == EISDIR as i32 => SysError::IsDir,
         x if x == EINVAL as i32 => SysError::InvalidArgument,
         x if x == EIO as i32 => SysError::IO,
+        x if x == ENXIO as i32 => SysError::NoSuchDeviceOrAddress,
+        x if x == ENOMEM as i32 => SysError::OutOfMemory,
+        x if x == ENOSPC as i32 => SysError::NoSpace,
+        x if x == ENAMETOOLONG as i32 => SysError::NameTooLong,
+        x if x == EMLINK as i32 => SysError::TooManyHardLinks,
         x if x == ENOTEMPTY as i32 => SysError::DirNotEmpty,
         x if x == EXDEV as i32 => SysError::CrossDeviceLink,
         x if x == EBUSY as i32 => SysError::Busy,
         x if x == EOPNOTSUPP as i32 => SysError::NotSupported,
         _ => {
+            // An unknown lwext4 status is an internal filesystem failure, not
+            // evidence that the requested operation is unsupported. Keep the
+            // raw status observable and add an explicit arm when a new producer
+            // is introduced.
             kerrln!("unexpected ext4 error: {:?}", err);
-            SysError::NotSupported
+            SysError::IO
         },
     }
 }
@@ -250,5 +259,46 @@ fn init() {
         Err(e) => {
             kerrln!("failed to register ext4: {:?}", e);
         },
+    }
+}
+
+#[cfg(feature = "kunit")]
+mod kunits {
+    use super::*;
+
+    #[kunit]
+    fn ext4_error_mapping_preserves_known_errno_semantics() {
+        let cases = [
+            (EEXIST, SysError::AlreadyExists),
+            (ENOENT, SysError::NotFound),
+            (ENOTDIR, SysError::NotDir),
+            (EISDIR, SysError::IsDir),
+            (EINVAL, SysError::InvalidArgument),
+            (EIO, SysError::IO),
+            (ENXIO, SysError::NoSuchDeviceOrAddress),
+            (ENOMEM, SysError::OutOfMemory),
+            (ENOSPC, SysError::NoSpace),
+            (ENAMETOOLONG, SysError::NameTooLong),
+            (EMLINK, SysError::TooManyHardLinks),
+            (ENOTEMPTY, SysError::DirNotEmpty),
+            (EXDEV, SysError::CrossDeviceLink),
+            (EBUSY, SysError::Busy),
+            (EOPNOTSUPP, SysError::NotSupported),
+        ];
+
+        for (errno, expected) in cases {
+            assert_eq!(
+                map_ext4_error(LwExt4Error::new(errno, "KUnit error mapping")),
+                expected
+            );
+        }
+    }
+
+    #[kunit]
+    fn ext4_unknown_error_is_not_reported_as_unsupported() {
+        assert_eq!(
+            map_ext4_error(LwExt4Error::new(i32::MAX, "KUnit unknown error")),
+            SysError::IO
+        );
     }
 }

@@ -1,0 +1,13 @@
+# Focused ext4 link, unlink, rmdir, and symlink regression matrix.
+
+linkat01
+rmdir01
+rmdir02
+rmdir03
+symlink01
+symlink04
+symlinkat01
+unlink05
+unlink07
+unlink08
+unlinkat01
