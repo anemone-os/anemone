@@ -141,6 +141,8 @@ pub enum SysError {
     IllegalSeek,
     /// Too many symbolic links were encountered in resolving a path.
     TooManyLinks,
+    /// A filesystem inode has reached its hard-link count limit.
+    TooManyHardLinks,
     /// A symbolic link was encountered while doing a path resolution operation
     /// that does not allow symbolic links.
     LinkEncountered,
@@ -294,6 +296,7 @@ impl SysError {
             // ELOOP here might be a bit inaccurate for TooManyLinks, but POSIX actually doesn't
             // specify the error code for this case, so we choose a close enough one.
             SysError::TooManyLinks | SysError::LinkEncountered => ELOOP,
+            SysError::TooManyHardLinks => EMLINK,
             SysError::NameTooLong => ENAMETOOLONG,
             SysError::DriverIncompatible
             | SysError::BusIncompatibleDev

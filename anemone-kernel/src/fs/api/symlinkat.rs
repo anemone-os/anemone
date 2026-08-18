@@ -5,18 +5,20 @@
 
 use super::creation::{KernelCreationPolicy, kernel_symlink_at};
 use crate::{
-    fs::api::args::AtFd,
+    fs::api::args::RawAtFd,
     prelude::{user_access::c_readonly_path, *},
 };
 
-fn kernel_symlinkat(target: &Path, newdirfd: AtFd, linkpath: &Path) -> Result<(), SysError> {
+fn kernel_symlinkat(target: &Path, newdirfd: RawAtFd, linkpath: &Path) -> Result<(), SysError> {
     let policy = KernelCreationPolicy::for_current();
     let checker = policy.checker();
     let task = get_current_task();
     let (parent, name) = if linkpath.is_absolute() {
         task.lookup_parent_path_with_checker(linkpath, ResolveFlags::empty(), checker)?
     } else {
-        let newdir_path = newdirfd.to_pathref(true)?;
+        // Linux ignores newdirfd for an absolute linkpath, so fd validation
+        // must remain delayed until this relative-path branch.
+        let newdir_path = newdirfd.resolve()?.to_pathref(true)?;
         task.lookup_parent_path_from_with_checker(
             &newdir_path,
             linkpath,
@@ -33,7 +35,7 @@ fn kernel_symlinkat(target: &Path, newdirfd: AtFd, linkpath: &Path) -> Result<()
 fn sys_symlinkat(
     // content of link.
     #[validate_with(c_readonly_path)] target: Box<str>,
-    newdirfd: AtFd,
+    newdirfd: RawAtFd,
     // where link itself should be created.
     #[validate_with(c_readonly_path)] linkpath: Box<str>,
 ) -> Result<u64, SysError> {
