@@ -81,6 +81,8 @@ pub struct Parameters {
     pub pipe_capacity_pages: Option<usize>,
     pub pipe_max_capacity_pages: Option<usize>,
     pub unix_stream_direction_capacity_bytes: Option<usize>,
+    pub unix_scm_rights_max_fds_per_message: Option<usize>,
+    pub unix_scm_rights_direction_capacity_fds: Option<usize>,
     pub unix_listener_max_backlog: Option<usize>,
     pub unix_seqpacket_max_payload_bytes: Option<usize>,
     pub unix_seqpacket_direction_capacity_bytes: Option<usize>,
@@ -230,6 +232,8 @@ impl Parameters {
         materialize!(pipe_capacity_pages);
         materialize!(pipe_max_capacity_pages);
         materialize!(unix_stream_direction_capacity_bytes);
+        materialize!(unix_scm_rights_max_fds_per_message);
+        materialize!(unix_scm_rights_direction_capacity_fds);
         materialize!(unix_listener_max_backlog);
         materialize!(unix_seqpacket_max_payload_bytes);
         materialize!(unix_seqpacket_direction_capacity_bytes);
@@ -428,6 +432,10 @@ pub const PIPE_CAPACITY_PAGES: usize = {};
 pub const PIPE_MAX_CAPACITY_PAGES: usize = {};
 /// Fixed byte capacity of each AF_UNIX stream direction.
 pub const UNIX_STREAM_DIRECTION_CAPACITY_BYTES: usize = {};
+/// Maximum file descriptors in one AF_UNIX SCM_RIGHTS message.
+pub const UNIX_SCM_RIGHTS_MAX_FDS_PER_MESSAGE: usize = {};
+/// Maximum queued SCM_RIGHTS descriptors per AF_UNIX stream direction.
+pub const UNIX_SCM_RIGHTS_DIRECTION_CAPACITY_FDS: usize = {};
 /// Maximum normalized listen backlog for AF_UNIX connection-oriented listeners.
 pub const UNIX_LISTENER_MAX_BACKLOG: usize = {};
 /// Maximum payload bytes in one AF_UNIX seqpacket record.
@@ -671,6 +679,8 @@ pub const NET_TCP_EPHEMERAL_PORT_LAST: u16 = {};
             resolved!(pipe_capacity_pages),
             resolved!(pipe_max_capacity_pages),
             resolved!(unix_stream_direction_capacity_bytes),
+            resolved!(unix_scm_rights_max_fds_per_message),
+            resolved!(unix_scm_rights_direction_capacity_fds),
             resolved!(unix_listener_max_backlog),
             resolved!(unix_seqpacket_max_payload_bytes),
             resolved!(unix_seqpacket_direction_capacity_bytes),

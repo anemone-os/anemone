@@ -1,9 +1,9 @@
-use core::mem::{offset_of, size_of};
+use core::mem::{align_of, offset_of, size_of};
 
 use anemone_abi::{
     net::linux::{
-        CMsgHdr, IP_RECVERR, IPPROTO_IP, MSG_CTRUNC, MSG_ERRQUEUE, MSG_TRUNC, MsgHdr,
-        SO_EE_ORIGIN_ICMP, SockAddrIn, SockExtendedErr,
+        CMsgHdr, IP_RECVERR, IPPROTO_IP, MSG_CTRUNC, MSG_ERRQUEUE, MSG_TRUNC, MsgHdr, SCM_RIGHTS,
+        SO_EE_ORIGIN_ICMP, SOL_SOCKET, SockAddrIn, SockExtendedErr,
     },
     syscall::SYS_RECVMSG,
 };
@@ -15,23 +15,71 @@ use crate::{
         socket::{
             SocketAddress, SocketAddressSink, SocketIpv4ExtendedError, SocketReadSink,
             SocketReceiveFlags, SocketReceiveOutcome, SocketReceiveRequest, SocketReceiveSink,
-            front::Socket, pending_error_to_sys_error, retry_socket_receive, socket_from_file,
+            SocketRightsReceiveOutcome, front::Socket, pending_error_to_sys_error,
+            retry_socket_receive, socket_from_file,
         },
     },
     prelude::*,
     syscall::user_access::{UserWritePtr, UserWriteSlice, user_addr},
-    task::files::{Fd, FileStatusFlags},
+    task::files::{Fd, FdFlags, FileStatusFlags},
 };
 
 use super::{message_iovecs, normalized_name_len, read_message_header};
 use crate::fs::socket::api::{
-    abi::{map_receive_error, validate_recvmsg_flags, write_socket_address},
+    abi::{map_query_error, map_receive_error, validate_recvmsg_flags, write_socket_address},
     profile::{SocketMessageIo, socket_abi_profile},
 };
 use zerocopy::IntoBytes;
 
 const IPV4_ERROR_CMSG_LEN: usize =
     size_of::<CMsgHdr>() + size_of::<SockExtendedErr>() + size_of::<SockAddrIn>();
+
+fn cmsg_space(data_len: usize) -> Option<usize> {
+    size_of::<CMsgHdr>()
+        .checked_add(data_len)
+        .and_then(|length| length.checked_add(align_of::<CMsgHdr>() - 1))
+        .map(|length| length & !(align_of::<CMsgHdr>() - 1))
+}
+
+fn control_fd_capacity(header: MsgHdr, source_count: usize) -> Result<usize, SysError> {
+    if header.msg_control.is_null() {
+        return Ok(0);
+    }
+    let capacity = usize::try_from(header.msg_controllen).map_err(|_| SysError::InvalidArgument)?;
+    for count in (1..=source_count).rev() {
+        let data_len = count
+            .checked_mul(size_of::<i32>())
+            .ok_or(SysError::InvalidArgument)?;
+        if cmsg_space(data_len).is_some_and(|span| span <= capacity) {
+            return Ok(count);
+        }
+    }
+    Ok(0)
+}
+
+fn rights_control_bytes(fds: &[Fd]) -> Vec<u8> {
+    assert!(!fds.is_empty());
+    let data_len = fds
+        .len()
+        .checked_mul(size_of::<i32>())
+        .expect("SCM_RIGHTS control data length overflow");
+    let cmsg_len = size_of::<CMsgHdr>()
+        .checked_add(data_len)
+        .expect("SCM_RIGHTS cmsg length overflow");
+    let span = cmsg_space(data_len).expect("SCM_RIGHTS control span overflow");
+    let mut bytes = vec![0u8; span];
+    let header = CMsgHdr {
+        cmsg_len: cmsg_len as u64,
+        cmsg_level: SOL_SOCKET,
+        cmsg_type: SCM_RIGHTS,
+    };
+    bytes[..size_of::<CMsgHdr>()].copy_from_slice(header.as_bytes());
+    for (index, fd) in fds.iter().enumerate() {
+        let start = size_of::<CMsgHdr>() + index * size_of::<i32>();
+        bytes[start..start + size_of::<i32>()].copy_from_slice(&(fd.raw() as i32).to_ne_bytes());
+    }
+    bytes
+}
 
 struct MessageReceiveSink<'a> {
     uspace: &'a UserSpaceHandle,
@@ -228,6 +276,70 @@ impl StreamMessageOutput for UserStreamMessageOutput {
     }
 }
 
+trait UnixRightsMessageOutput {
+    fn write_name(&mut self) -> Result<(), SysError>;
+    fn write_control(&mut self, control: &[u8]) -> Result<(), SysError>;
+    fn write_flags(&mut self, flags: u32) -> Result<(), SysError>;
+    fn write_control_len(&mut self, length: u64) -> Result<(), SysError>;
+}
+
+struct UserUnixRightsMessageOutput<'a> {
+    task: &'a Arc<Task>,
+    socket: &'a Socket,
+    message: u64,
+    header: MsgHdr,
+}
+
+impl UnixRightsMessageOutput for UserUnixRightsMessageOutput<'_> {
+    fn write_name(&mut self) -> Result<(), SysError> {
+        let mut peer = PeerCapture::default();
+        self.socket
+            .copy_peer_address(&mut peer)
+            .map_err(map_query_error)?;
+        let name_len = self
+            .message
+            .checked_add(offset_of!(MsgHdr, msg_namelen) as u64)
+            .ok_or(SysError::BadAddress)?;
+        write_socket_address(
+            self.socket.socket_type(),
+            self.header.msg_name.bits(),
+            name_len,
+            peer.0,
+        )
+    }
+
+    fn write_control(&mut self, control: &[u8]) -> Result<(), SysError> {
+        let address = user_addr(self.header.msg_control.bits())?;
+        let uspace = self.task.clone_uspace_handle();
+        UserWriteSlice::<u8>::try_new(address, control.len(), &mut uspace.lock())?
+            .copy_from_slice(control)
+    }
+
+    fn write_flags(&mut self, flags: u32) -> Result<(), SysError> {
+        write_message_field(self.message, offset_of!(MsgHdr, msg_flags), flags)
+    }
+
+    fn write_control_len(&mut self, length: u64) -> Result<(), SysError> {
+        write_message_field(self.message, offset_of!(MsgHdr, msg_controllen), length)
+    }
+}
+
+fn write_unix_rights_message_output(
+    output: &mut dyn UnixRightsMessageOutput,
+    has_name: bool,
+    control: Option<&[u8]>,
+    truncated: bool,
+) -> Result<(), SysError> {
+    if has_name {
+        output.write_name()?;
+    }
+    if let Some(control) = control {
+        output.write_control(control)?;
+    }
+    output.write_flags(if truncated { MSG_CTRUNC as u32 } else { 0 })?;
+    output.write_control_len(control.map_or(0, |bytes| bytes.len() as u64))
+}
+
 pub(super) fn write_stream_message_output(
     output: &mut dyn StreamMessageOutput,
     has_name: bool,
@@ -267,6 +379,70 @@ pub(super) fn receive_stream_message(
     )
 }
 
+fn receive_unix_stream_message(
+    task: &Arc<Task>,
+    desc: &crate::task::files::FileDesc,
+    socket: &Socket,
+    message: u64,
+    header: MsgHdr,
+    sink: &mut dyn SocketReadSink,
+    flags: i32,
+) -> Result<u64, SysError> {
+    let message_flags = validate_recvmsg_flags(socket.socket_type(), flags)?;
+    let mut outcome: SocketRightsReceiveOutcome = retry_socket_receive(
+        "sys_recvmsg",
+        task,
+        desc.vfs_file(),
+        message_flags.nonblocking || desc.file_flags().contains(FileStatusFlags::NONBLOCK),
+        || {
+            socket.receive_rights(
+                sink,
+                SocketReceiveFlags {
+                    peek: message_flags.peek,
+                },
+            )
+        },
+        map_receive_error,
+    )?;
+
+    // The direction transaction is complete. Name, control and header output
+    // are intentionally fail-forward; no later fault can requeue bytes/rights.
+    let mut install = if let Some(rights) = outcome.take_rights() {
+        let maximum = control_fd_capacity(header, rights.len())?;
+        let fd_flags = if message_flags.close_on_exec {
+            FdFlags::CLOSE_ON_EXEC
+        } else {
+            FdFlags::empty()
+        };
+        Some(task.prepare_opened_description_install(rights, maximum, fd_flags)?)
+    } else {
+        None
+    };
+    let source_count = install.as_ref().map_or(0, |plan| plan.source_count());
+    let installed_count = install.as_ref().map_or(0, |plan| plan.fds().len());
+    let truncated = installed_count < source_count;
+    let control = install
+        .as_ref()
+        .filter(|plan| !plan.fds().is_empty())
+        .map(|plan| rights_control_bytes(plan.fds()));
+    write_unix_rights_message_output(
+        &mut UserUnixRightsMessageOutput {
+            task,
+            socket,
+            message,
+            header,
+        },
+        !header.msg_name.is_null(),
+        control.as_deref(),
+        truncated,
+    )?;
+
+    if let Some(plan) = install.take() {
+        plan.commit();
+    }
+    Ok(outcome.copied() as u64)
+}
+
 pub(super) fn receive_message(fd: Fd, message: u64, flags: i32) -> Result<u64, SysError> {
     let task = get_current_task();
     let desc = task.get_fd(fd)?;
@@ -291,6 +467,17 @@ pub(super) fn receive_message(fd: Fd, message: u64, flags: i32) -> Result<u64, S
                 .map(|iovec| UserBufferSegment::new(iovec.base, iovec.len)),
         );
         let mut stream_sink = UserBufferSink::new(&uspace, &segments);
+        if socket.supports_rights() {
+            return receive_unix_stream_message(
+                &task,
+                &desc,
+                socket,
+                message,
+                header,
+                &mut stream_sink,
+                flags,
+            );
+        }
         let outcome = receive_stream_message(
             &task,
             desc.vfs_file(),
@@ -414,5 +601,120 @@ mod kunits {
         let (_, copied, truncated) = error_control_bytes(&record, size_of::<CMsgHdr>() - 1);
         assert_eq!(copied, 0);
         assert!(truncated);
+    }
+
+    #[kunit]
+    fn rights_control_capacity_uses_complete_native_spans_and_largest_prefix() {
+        let mut header = MsgHdr {
+            msg_control: anemone_abi::RawUserAddr64::from_bits(8),
+            msg_controllen: 0,
+            ..MsgHdr::default()
+        };
+        assert_eq!(control_fd_capacity(header, 3), Ok(0));
+        header.msg_controllen = (size_of::<CMsgHdr>() - 1) as u64;
+        assert_eq!(control_fd_capacity(header, 3), Ok(0));
+        header.msg_controllen = cmsg_space(size_of::<i32>()).unwrap() as u64;
+        assert_eq!(control_fd_capacity(header, 3), Ok(2));
+        header.msg_controllen = cmsg_space(2 * size_of::<i32>()).unwrap() as u64;
+        assert_eq!(control_fd_capacity(header, 3), Ok(2));
+        header.msg_controllen = cmsg_space(3 * size_of::<i32>()).unwrap() as u64;
+        assert_eq!(control_fd_capacity(header, 3), Ok(3));
+
+        header.msg_control = anemone_abi::RawUserAddr64::NULL;
+        assert_eq!(control_fd_capacity(header, 3), Ok(0));
+    }
+
+    #[kunit]
+    fn rights_control_projection_encodes_actual_fd_count_and_zero_padding() {
+        let fds = [
+            Fd::new(3).unwrap(),
+            Fd::new(9).unwrap(),
+            Fd::new(11).unwrap(),
+        ];
+        let bytes = rights_control_bytes(&fds);
+        assert_eq!(bytes.len(), cmsg_space(3 * size_of::<i32>()).unwrap());
+        assert_eq!(
+            u64::from_ne_bytes(bytes[0..8].try_into().unwrap()) as usize,
+            size_of::<CMsgHdr>() + 3 * size_of::<i32>()
+        );
+        assert_eq!(
+            i32::from_ne_bytes(bytes[8..12].try_into().unwrap()),
+            SOL_SOCKET
+        );
+        assert_eq!(
+            i32::from_ne_bytes(bytes[12..16].try_into().unwrap()),
+            SCM_RIGHTS
+        );
+        assert_eq!(i32::from_ne_bytes(bytes[16..20].try_into().unwrap()), 3);
+        assert_eq!(i32::from_ne_bytes(bytes[20..24].try_into().unwrap()), 9);
+        assert_eq!(i32::from_ne_bytes(bytes[24..28].try_into().unwrap()), 11);
+        assert!(bytes[28..].iter().all(|byte| *byte == 0));
+    }
+
+    #[derive(Default)]
+    struct RecordingRightsOutput {
+        calls: Vec<&'static str>,
+        fault_at: Option<&'static str>,
+        flags: Option<u32>,
+        control_len: Option<u64>,
+    }
+
+    impl RecordingRightsOutput {
+        fn record(&mut self, call: &'static str) -> Result<(), SysError> {
+            self.calls.push(call);
+            if self.fault_at == Some(call) {
+                Err(SysError::BadAddress)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl UnixRightsMessageOutput for RecordingRightsOutput {
+        fn write_name(&mut self) -> Result<(), SysError> {
+            self.record("name")
+        }
+
+        fn write_control(&mut self, _control: &[u8]) -> Result<(), SysError> {
+            self.record("control")
+        }
+
+        fn write_flags(&mut self, flags: u32) -> Result<(), SysError> {
+            self.flags = Some(flags);
+            self.record("flags")
+        }
+
+        fn write_control_len(&mut self, length: u64) -> Result<(), SysError> {
+            self.control_len = Some(length);
+            self.record("controllen")
+        }
+    }
+
+    #[kunit]
+    fn unix_rights_output_is_ordered_and_faults_before_fd_publication() {
+        let control = [1u8; 24];
+        let mut output = RecordingRightsOutput::default();
+        write_unix_rights_message_output(&mut output, true, Some(&control), true).unwrap();
+        assert_eq!(output.calls, ["name", "control", "flags", "controllen"]);
+        assert_eq!(output.flags, Some(MSG_CTRUNC as u32));
+        assert_eq!(output.control_len, Some(control.len() as u64));
+
+        for fault in ["name", "control", "flags", "controllen"] {
+            let mut output = RecordingRightsOutput {
+                fault_at: Some(fault),
+                ..RecordingRightsOutput::default()
+            };
+            assert_eq!(
+                write_unix_rights_message_output(&mut output, true, Some(&control), false),
+                Err(SysError::BadAddress)
+            );
+            assert_eq!(output.calls.last(), Some(&fault));
+        }
+
+        let mut absent = RecordingRightsOutput::default();
+        write_unix_rights_message_output(&mut absent, false, None, true).unwrap();
+        assert_eq!(absent.calls, ["flags", "controllen"]);
+        assert_eq!(absent.flags, Some(MSG_CTRUNC as u32));
+        assert_eq!(absent.control_len, Some(0));
     }
 }

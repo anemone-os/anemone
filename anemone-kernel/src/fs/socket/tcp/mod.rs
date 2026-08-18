@@ -312,6 +312,7 @@ pub(super) static TCP_SOCKET_OPS: SocketOps = SocketOps {
     query_option: Some(query_tcp_option),
     mutate_option: Some(mutate_tcp_option),
     ioctl: Some(ioctl_tcp_socket),
+    rights: None,
     detach_ipv4_extended_error: None,
     poll: poll_tcp_socket,
     final_release: final_release_tcp_socket,

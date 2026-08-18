@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-use super::{SocketReceiveError, SocketReceiveOutcome, SocketSendError, SocketWait};
+use super::{SocketReceiveError, SocketSendError, SocketWait};
 
 fn wait_for_socket_source(
     context: &'static str,
@@ -124,14 +124,14 @@ pub(in crate::fs::socket) fn retry_socket_send(
 /// Retries a family-owned receive attempt after the file's owner-defined
 /// readability predicate. A `WouldBlock` result must not retain a family
 /// operation guard; this driver carries no family state across the wait.
-pub(in crate::fs::socket) fn retry_socket_receive(
+pub(in crate::fs::socket) fn retry_socket_receive<T>(
     context: &'static str,
     task: &Arc<Task>,
     file: &File,
     nonblocking: bool,
-    mut attempt: impl FnMut() -> Result<SocketReceiveOutcome, SocketReceiveError>,
+    mut attempt: impl FnMut() -> Result<T, SocketReceiveError>,
     map_error: impl Fn(SocketReceiveError) -> SysError,
-) -> Result<SocketReceiveOutcome, SysError> {
+) -> Result<T, SysError> {
     loop {
         match attempt() {
             Ok(received) => return Ok(received),

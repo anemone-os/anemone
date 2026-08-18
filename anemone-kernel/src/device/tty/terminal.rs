@@ -1,6 +1,7 @@
 use crate::{fs::PollRoute, prelude::*, utils::ring_buffer::RingBuffer};
 
 use super::{
+    TtyFlushQueues,
     discipline::{InputRead, ReceiveResult, TtyDiscipline, TtySignalControl},
     port::{TtyLineSnapshot, TtyRxUnit},
 };
@@ -774,6 +775,20 @@ impl Terminal {
 
     pub(super) fn pty_peer_absent(&self) {
         self.inner.lock().discipline.flush_input();
+    }
+
+    /// Discard the selected owner-local queues without publishing a wake.
+    ///
+    /// The caller owns endpoint-specific worker or PTY lifecycle arbitration
+    /// and publishes progress only after that transaction has committed.
+    pub(super) fn flush_queues(&self, queues: TtyFlushQueues) {
+        let mut inner = self.inner.lock();
+        if queues.includes_input() {
+            inner.discipline.flush_input();
+        }
+        if queues.includes_output() {
+            inner.output.clear();
+        }
     }
 
     pub(super) fn pty_hangup(&self) {
@@ -1675,6 +1690,46 @@ mod kunits {
         assert_eq!(drain_output(&terminal), fill);
         assert_eq!(terminal.enqueue_output(b"\n"), 1);
         assert_eq!(drain_output(&terminal), b"\r\n");
+    }
+
+    #[kunit]
+    fn tcflush_discards_only_selected_queues_and_accepts_new_data() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| termios.echo = false);
+        for &byte in b"committed\npending" {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(terminal.enqueue_output(b"old"), 3);
+
+        terminal.flush_queues(TtyFlushQueues::Input);
+        assert_eq!(terminal.read_input(&mut [0_u8; 16]), InputRead::Empty);
+        assert_eq!(drain_output(&terminal), b"old");
+
+        for &byte in b"new\n" {
+            assert!(terminal.receive_rx_byte(byte));
+        }
+        assert_eq!(read_available(&terminal), b"new\n");
+        assert_eq!(terminal.enqueue_output(b"drop"), 4);
+        terminal.flush_queues(TtyFlushQueues::Output);
+        assert!(drain_output(&terminal).is_empty());
+        assert_eq!(terminal.enqueue_output(b"keep"), 4);
+        assert_eq!(drain_output(&terminal), b"keep");
+
+        assert!(terminal.receive_rx_byte(b'x'));
+        assert_eq!(terminal.enqueue_output(b"both"), 4);
+        terminal.flush_queues(TtyFlushQueues::Both);
+        assert_eq!(terminal.read_input(&mut [0_u8; 16]), InputRead::Empty);
+        assert!(drain_output(&terminal).is_empty());
+    }
+
+    #[kunit]
+    fn tcflush_output_preserves_committed_logical_column() {
+        let terminal = terminal();
+        terminal.set_termios_for_test(|termios| termios.tab_mode = TtyTabMode::Expand);
+        assert_eq!(terminal.enqueue_output(b"abc"), 3);
+        terminal.flush_queues(TtyFlushQueues::Output);
+        assert_eq!(terminal.enqueue_output(b"\t"), 1);
+        assert_eq!(drain_output(&terminal), b"     ");
     }
 
     #[kunit]

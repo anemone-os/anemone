@@ -8,6 +8,7 @@ use anemone_net_api::Ipv4Address;
 
 use crate::{
     prelude::*,
+    task::files::OpenedDescriptionBundle,
     utils::any_opaque::{AnyOpaque, Opaque},
 };
 
@@ -436,6 +437,34 @@ pub(super) enum SocketReceiveRequest<'a> {
     },
 }
 
+pub(super) struct SocketRightsSendRequest<'a> {
+    pub(super) source: &'a mut dyn SocketWriteSource,
+    pub(super) destination: SocketStreamDestination,
+    /// The family takes this bundle exactly when a positive byte prefix and
+    /// its first-byte marker commit together. Would-block and every rejection
+    /// leave it with the syscall owner.
+    pub(super) rights: &'a mut Option<OpenedDescriptionBundle>,
+}
+
+pub(super) struct SocketRightsReceiveOutcome {
+    copied: usize,
+    rights: Option<OpenedDescriptionBundle>,
+}
+
+impl SocketRightsReceiveOutcome {
+    pub(super) const fn new(copied: usize, rights: Option<OpenedDescriptionBundle>) -> Self {
+        Self { copied, rights }
+    }
+
+    pub(super) const fn copied(&self) -> usize {
+        self.copied
+    }
+
+    pub(super) fn take_rights(&mut self) -> Option<OpenedDescriptionBundle> {
+        self.rights.take()
+    }
+}
+
 pub(super) struct SocketPreparation {
     pub(super) private: AnyOpaque,
     pub(super) creation: SocketCreation,
@@ -476,6 +505,18 @@ pub(super) type SocketReceiveOp = for<'a> fn(
     &AnyOpaque,
     SocketReceiveRequest<'a>,
 ) -> Result<SocketReceiveOutcome, SocketReceiveError>;
+
+#[derive(Clone, Copy)]
+pub(super) struct SocketRightsOps {
+    pub(super) send:
+        for<'a> fn(&AnyOpaque, SocketRightsSendRequest<'a>) -> Result<usize, SocketSendError>,
+    pub(super) send_wait: fn(&AnyOpaque, usize) -> SocketWait,
+    pub(super) receive: for<'a> fn(
+        &AnyOpaque,
+        &'a mut dyn SocketReadSink,
+        SocketReceiveFlags,
+    ) -> Result<SocketRightsReceiveOutcome, SocketReceiveError>,
+}
 
 /// Complete type/data-plane capability bundle for one static Socket descriptor.
 ///
@@ -549,6 +590,9 @@ pub(super) struct SocketOps {
     /// `IoctlCtx` remain in the common FileOps adapter.
     pub(super) ioctl:
         Option<fn(&AnyOpaque, SocketIoctlRequest) -> Result<SocketIoctlResponse, SocketIoctlError>>,
+    /// Static capability for typed Unix stream SCM_RIGHTS transactions. Its
+    /// absence is permanent unsupported truth for every other descriptor.
+    pub(super) rights: Option<SocketRightsOps>,
     pub(super) detach_ipv4_extended_error:
         Option<fn(&AnyOpaque) -> Result<SocketIpv4ExtendedError, SocketReceiveError>>,
     pub(super) poll:
@@ -653,6 +697,35 @@ impl Socket {
         (self.ops.io.receive())(&self.private, request)
     }
 
+    pub(super) fn send_rights(
+        &self,
+        request: SocketRightsSendRequest<'_>,
+    ) -> Result<usize, SocketSendError> {
+        (self.ops.rights.ok_or(SocketSendError::Unsupported)?.send)(&self.private, request)
+    }
+
+    pub(super) fn rights_send_wait(&self, rights_count: usize) -> Option<SocketWait> {
+        self.ops
+            .rights
+            .map(|ops| (ops.send_wait)(&self.private, rights_count))
+    }
+
+    pub(super) const fn supports_rights(&self) -> bool {
+        self.ops.rights.is_some()
+    }
+
+    pub(super) fn receive_rights(
+        &self,
+        sink: &mut dyn SocketReadSink,
+        flags: SocketReceiveFlags,
+    ) -> Result<SocketRightsReceiveOutcome, SocketReceiveError> {
+        (self
+            .ops
+            .rights
+            .ok_or(SocketReceiveError::Unsupported)?
+            .receive)(&self.private, sink, flags)
+    }
+
     pub(super) fn query_option(
         &self,
         query: SocketOptionQuery,
@@ -693,6 +766,18 @@ impl Socket {
     fn final_release(&self) {
         (self.ops.final_release)(&self.private, SocketReleaseReason::FinalRelease);
     }
+}
+
+/// Narrow file-kind admission used only by SCM_RIGHTS capture. The transfer
+/// capability supplies the `File` transiently to this predicate; neither the
+/// Unix direction nor task/files learns a Socket representation.
+pub(super) fn is_unix_socket_file(file: &File) -> bool {
+    socket_from_file(file).is_some_and(|socket| {
+        matches!(
+            socket.socket_type(),
+            SocketType::UnixStream | SocketType::UnixSeqpacket
+        )
+    })
 }
 
 /// Owns a consumed accept item until its peer address is copied and its file

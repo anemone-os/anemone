@@ -8,7 +8,7 @@
 **不覆盖：** multiple/private devpts instance、mount-local `ptmx`、mount options、distribution-style `tty:0620`、legacy `termio`/break ioctl、generic VFS cached-positive freshness或完整multi-view concurrency
 **实现位置：** `anemone-kernel/src/device/tty/pty/`、`anemone-kernel/src/fs/devpts/`、`anemone-kernel/src/fs/devfs/`、`anemone-kernel/src/fs/mod.rs`、`anemone-kernel/src/main.rs`
 **依赖：** [TTY data plane](./data-plane.md)、[TTY relation 与 job control](./job-control.md)、[opened-description lifecycle](../task/opened-description-lifecycle.md)、[poll wait](../iomux/poll-wait.md)、[epoll](../epoll/protocol.md)、[mount admission](../vfs/mount-admission.md)
-**当前来源：** [`PTY-DEVPTS-CUTOVER` transaction](../../devlog/transactions/2026-08-11-pty-devpts.md#2026-08-11---stage-4-checkpoint-2-public-activation与pty-devpts-cutover)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[PTY logical cflag profile小迭代](../../devlog/changes/2026-08-13-pty-logical-cflag.md)；[TTY FIONREAD/TIOCINQ小迭代](../../devlog/changes/2026-08-17-tty-fionread.md)
+**当前来源：** [`PTY-DEVPTS-CUTOVER` transaction](../../devlog/transactions/2026-08-11-pty-devpts.md#2026-08-11---stage-4-checkpoint-2-public-activation与pty-devpts-cutover)；[PTY retirement与job-control ordering小迭代](../../devlog/changes/2026-08-12-pty-retirement-job-control-ordering.md)；[PTY logical cflag profile小迭代](../../devlog/changes/2026-08-13-pty-logical-cflag.md)；[TTY FIONREAD/TIOCINQ小迭代](../../devlog/changes/2026-08-17-tty-fionread.md)；[TTY TCFLSH队列清空小迭代](../../devlog/changes/2026-08-17-tty-tcflush.md)
 **最后核验：** 2026-08-17
 
 ## 状态与能力所有权
@@ -73,13 +73,19 @@ queue length报告并可先被读取；队列耗尽后查询报告0，后续mast
 仍打开的slave查询返回`EIO`，与该slave的其它Terminal ioctl一致。master snapshot服从pair operation lock与live
 check，但user copyout在这些owner lock之外完成。
 
+`TCFLSH`在同一个pair operation/liveness admission内清除选定队列。slave `TCIFLUSH`与master `TCOFLUSH`映射
+line-discipline input，slave `TCOFLUSH`与master `TCIFLUSH`映射Terminal output，`TCIOFLUSH`清除两者。flush后
+新写入的数据继续可见；最后一个slave关闭但master仍live时三个selector仍成功，master final retirement或slave
+hangup后的ioctl继续沿既有`EIO`边界。
+
 master final close flushes committed slave input；slave read在buffer清空后返回EOF，slave write和termios/winsize query或
 mutation返回`EIO`，`TIOCSPGRP`保持现有`ENOTTY`边界，poll/select/epoll必须暴露terminal HUP/ERR outcome。首版不支持
 legacy `TCGETA`/`TCSETA*`、`TCSBRK`/`TCSBRKP`，也不以silent success伪造这些命令。
 
-**验证 / Enforcement：** RV64 public `pty-test` 18/18和701/701 KUnit，包含独立cflag初值、master/slave共享、三种
+**验证 / Enforcement：** RV64 public `pty-test` 19/19和784/784 KUnit，包含独立cflag初值、master/slave共享、三种
 `TCSETS*`、normalization、logical input speed/mark parity round-trip、`BOTHER`/unsupported rollback，以及
-`FIONREAD` alias/canonical/raw/transformed-output/partial-read/bad-pointer/retained-output/hangup matrix；focused glibc/musl
+`FIONREAD` alias/canonical/raw/transformed-output/partial-read/bad-pointer/retained-output/hangup matrix，以及`TCFLSH`
+三种selector、非法参数、master/slave方向、flush后数据与last-slave-close matrix；focused glibc/musl
 `hangup01`通过，`ioctl01` overall 7/9，
 两个legacy `TCGETA` pointer-error子项非PASS；legacy probes与distribution metadata差异按register逐项归因，只有实际
 PASS计入证据。
@@ -104,6 +110,10 @@ unmount/remount、metadata/DAC、capacity/churn与retire/reuse matrix；filesyst
 
 ## 当前接受边界
 
+- 2026-08-17 `TCFLSH` refinement的agent-run RV64证据：public PTY SMP8通过784/784 KUnit、`19/19`
+  `pty-test`、新增master/slave input/output/both、非法参数、flush后新数据与last-slave-close matrix并有序关机；serial
+  wrapper也通过784/784 KUnit、`59/59` `tty-test`、BusyBox vi/ash与host byte oracle。LA64 build/runtime与hardware为Not Run；
+  focused LTP在目标断言前被无关`/proc/meminfo`前置条件阻断。
 - 2026-08-17 queue-query refinement的agent-run RV64证据：public PTY SMP8通过701/701 KUnit、`18/18`
   `pty-test`、新增alias/canonical/raw/transformed-output/bad-pointer/hangup matrix与有序关机；serial wrapper也通过
   701/701 KUnit、`57/57` `tty-test`、BusyBox vi/ash与host byte oracle。该refinement的LA64 build/runtime、hardware、

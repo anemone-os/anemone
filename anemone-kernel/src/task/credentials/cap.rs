@@ -51,7 +51,7 @@ bitflags! {
         const SYS_PACCT = 1u64 << abi::CAP_SYS_PACCT;
         /// Allows broad system administration operations such as mount and umount.
         const SYS_ADMIN = 1u64 << abi::CAP_SYS_ADMIN;
-        /// [NYI] Allows reboot and other system boot-control operations.
+        /// Allows reboot and power-off requests through the Linux reboot syscall.
         const SYS_BOOT = 1u64 << abi::CAP_SYS_BOOT;
         /// Allows privileged scheduler priority changes.
         const SYS_NICE = 1u64 << abi::CAP_SYS_NICE;
@@ -105,6 +105,7 @@ bitflags! {
             | Self::SYS_MODULE.bits()
             | Self::SYS_CHROOT.bits()
             | Self::SYS_ADMIN.bits()
+            | Self::SYS_BOOT.bits()
             | Self::SYS_NICE.bits()
             | Self::SYS_RESOURCE.bits()
             | Self::SYS_TIME.bits()

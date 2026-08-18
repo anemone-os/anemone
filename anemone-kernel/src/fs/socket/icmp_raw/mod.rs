@@ -549,6 +549,7 @@ pub(super) static ICMP_RAW_SOCKET_OPS: SocketOps = SocketOps {
     query_option: Some(query_icmp_raw_option),
     mutate_option: Some(mutate_icmp_raw_option),
     ioctl: Some(ioctl_icmp_raw_socket),
+    rights: None,
     detach_ipv4_extended_error: None,
     poll: poll_icmp_raw_socket,
     final_release: final_release_icmp_raw_socket,

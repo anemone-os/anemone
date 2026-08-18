@@ -180,6 +180,7 @@ pub mod linux {
 
     pub const SYS_SETPRIORITY: u64 = 140;
     pub const SYS_GETPRIORITY: u64 = 141;
+    pub const SYS_REBOOT: u64 = 142;
 
     pub const SYS_SETREGID: u64 = 143;
     pub const SYS_SETGID: u64 = 144;
@@ -281,6 +282,8 @@ pub mod linux {
     pub const SYS_EXECVEAT: u64 = 281;
 
     pub const SYS_MEMBARRIER: u64 = 283;
+
+    pub const SYS_COPY_FILE_RANGE: u64 = 285;
 
     pub const SYS_PWRITEV2: u64 = 287;
 

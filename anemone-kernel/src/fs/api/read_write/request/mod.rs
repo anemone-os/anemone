@@ -59,7 +59,7 @@ impl RequestPosition {
     }
 }
 
-const fn clamp_rw_count(count: usize) -> usize {
+pub(in crate::fs::api) const fn clamp_rw_count(count: usize) -> usize {
     if count > MAX_RW_COUNT {
         MAX_RW_COUNT
     } else {

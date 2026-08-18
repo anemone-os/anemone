@@ -164,6 +164,7 @@ pub(super) static UDP_SOCKET_OPS: SocketOps = SocketOps {
     query_option: Some(query_udp_option),
     mutate_option: Some(mutate_udp_option),
     ioctl: Some(ioctl_udp_socket),
+    rights: None,
     detach_ipv4_extended_error: Some(detach_udp_extended_error),
     poll: poll_udp_socket,
     final_release: final_release_udp_socket,

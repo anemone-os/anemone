@@ -15,8 +15,8 @@ use super::{
         SocketConnectError, SocketCreation, SocketIoctlError, SocketIoctlRequest,
         SocketIoctlResponse, SocketListenError, SocketOps, SocketOptionError, SocketOptionQuery,
         SocketOptionValue, SocketPairPreparation, SocketPeerCredentials, SocketPreparation,
-        SocketQueryError, SocketReceiveError, SocketReleaseReason, SocketSendError, SocketShutdown,
-        SocketShutdownError, SocketType,
+        SocketQueryError, SocketReceiveError, SocketReleaseReason, SocketRightsOps,
+        SocketSendError, SocketShutdown, SocketShutdownError, SocketType,
     },
     admission::{
         UnixListener, accept, connect, listen, notify_admission_routes, poll_unix_listener,
@@ -37,8 +37,9 @@ use record::{
 };
 pub(super) use stream::UnixStreamConnection;
 use stream::{
-    poll_connected_unix_stream, receive_unix_stream, retire_connection_endpoint, send_unix_stream,
-    shutdown_unix_stream,
+    poll_connected_unix_stream, prepare_rights_send_wait, receive_unix_stream,
+    receive_unix_stream_rights, retire_connection_endpoint, send_unix_stream,
+    send_unix_stream_rights, shutdown_unix_stream,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -886,6 +887,11 @@ pub(in crate::fs::socket) static UNIX_STREAM_SOCKET_OPS: SocketOps = SocketOps {
     query_option: Some(query_unix_option),
     mutate_option: None,
     ioctl: Some(ioctl_unix_socket),
+    rights: Some(SocketRightsOps {
+        send: send_unix_stream_rights,
+        send_wait: prepare_rights_send_wait,
+        receive: receive_unix_stream_rights,
+    }),
     detach_ipv4_extended_error: None,
     poll: poll_unix_stream,
     final_release: final_release_unix_endpoint_with_reason,
@@ -911,6 +917,7 @@ pub(in crate::fs::socket) static UNIX_SEQPACKET_SOCKET_OPS: SocketOps = SocketOp
     query_option: Some(query_unix_option),
     mutate_option: None,
     ioctl: Some(ioctl_unix_socket),
+    rights: None,
     detach_ipv4_extended_error: None,
     poll: poll_unix_seqpacket,
     final_release: final_release_unix_endpoint_with_reason,

@@ -13,7 +13,8 @@ pub use episode::FdReservation;
 pub(crate) use episode::{FilesState, PosixLockBinding, PosixLockHolder};
 pub use opened_description::{FileDescOps, OpenedFileFinalReleaseCtx, OpenedFileReadUserCtx};
 pub(crate) use opened_description::{
-    OpenedDescriptionCapability, OpenedDescriptionLease, OpenedFileWriteUserCtx,
+    OpenedDescriptionBundle, OpenedDescriptionCapability, OpenedDescriptionLease,
+    OpenedFileWriteUserCtx,
 };
 pub use table::Fd;
 pub(crate) use table::FdAllocCeiling;

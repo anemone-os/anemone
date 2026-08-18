@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    TtyEndpoint, TtyProgress, TtyWakeHandle, file as tty_file,
+    TtyBackend, TtyBackendHandle, TtyEndpoint, file as tty_file,
     relation::{self, RelationEnrollment},
     terminal::Terminal,
 };
@@ -37,10 +37,10 @@ pub(crate) struct PreparedPtyPair {
 pub(crate) fn prepare_pair(index: u32) -> Result<PreparedPtyPair, SysError> {
     let terminal = Terminal::try_new_pty()?;
     let pair = PtyPairState::try_new(terminal.clone())?;
-    let progress: Arc<dyn TtyProgress> = pair.clone();
+    let backend: Arc<dyn TtyBackend> = pair.clone();
     let endpoint = Arc::try_new(TtyEndpoint {
         terminal,
-        wake_source: Arc::downgrade(&progress),
+        backend: Arc::downgrade(&backend),
     })
     .map_err(|_| SysError::OutOfMemory)?;
     let enrollment = RelationEnrollment::new(endpoint.clone());
@@ -50,10 +50,7 @@ pub(crate) fn prepare_pair(index: u32) -> Result<PreparedPtyPair, SysError> {
         &PTY_MASTER_FILE_OPS,
         FileMode::STREAM,
         AnyOpaque::new(PtyMasterFile {
-            terminal_file: tty_file::terminal_file(
-                endpoint.clone(),
-                TtyWakeHandle { source: progress },
-            ),
+            terminal_file: tty_file::terminal_file(endpoint.clone(), TtyBackendHandle { backend }),
             description: master_description.clone(),
         }),
     );
@@ -170,10 +167,10 @@ impl LivePtyPair {
             base_final_release: SpinLock::new(None),
         })
         .map_err(|_| SysError::OutOfMemory)?;
-        let progress: Arc<dyn TtyProgress> = self.pair.clone();
+        let backend: Arc<dyn TtyBackend> = self.pair.clone();
         let opened = tty_file::opened_pty_slave_file(
             self.endpoint.clone(),
-            TtyWakeHandle { source: progress },
+            TtyBackendHandle { backend },
             description.clone(),
         );
         Ok(PreparedPtySlaveDescription {

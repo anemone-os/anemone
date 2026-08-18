@@ -16,6 +16,7 @@ pub mod access;
 pub mod chdir;
 pub mod chroot;
 pub mod close;
+pub mod copy_file_range;
 pub(in crate::fs) mod creation;
 pub mod dup;
 pub mod dup3;
