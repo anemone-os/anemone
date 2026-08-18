@@ -316,7 +316,15 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
 
     pub fn flush(&mut self) -> Ext4Result<()> {
         unsafe {
-            ext4_block_cache_flush(self.bdev.inner.as_mut()).context("ext4_cache_flush")?;
+            let bdev = self.bdev.inner.as_mut();
+            ext4_block_cache_flush(bdev).context("ext4_cache_flush")?;
+
+            // Allocation updates the in-memory superblock outside the block
+            // cache. Persist cached inode/bitmap/group state first, then its
+            // summary counters and checksum. This deliberately writes the
+            // current mounted state (ERROR_FS); only `ext4_fs_fini()` is
+            // allowed to claim a clean finalization.
+            ext4_sb_write(bdev, &mut self.inner.as_mut().sb).context("ext4_sb_write")?;
         }
         Ok(())
     }

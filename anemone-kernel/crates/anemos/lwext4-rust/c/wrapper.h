@@ -4,3 +4,4 @@
 #include "lwext4/include/ext4_errno.h"
 #include "lwext4/include/ext4_fs.h"
 #include "lwext4/include/ext4_inode.h"
+#include "lwext4/include/ext4_super.h"
