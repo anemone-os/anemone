@@ -1,4 +1,3 @@
-use anemone_abi::errno::ENOENT;
 use lwext4_rust::InodeType as LwExt4InodeType;
 
 use crate::{
@@ -66,19 +65,14 @@ fn ext4_create_child(
 ) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let raw_ino = ext4_sb(&sb).with_fs(|fs| {
-        match fs.lookup(dir.ino().get() as u32, name) {
-            Ok(_) => return Err(SysError::AlreadyExists),
-            Err(err) if err.code == ENOENT as i32 => {},
-            Err(err) => return Err(map_ext4_error(err)),
-        }
-
-        fs.create(
-            dir.ino().get() as u32,
-            name,
-            map_vfs_inode_type(ty)?,
-            perm.bits() as u32,
-        )
-        .map_err(map_ext4_error)
+        let result = match ty {
+            InodeType::Regular => {
+                fs.create_regular(dir.ino().get() as u32, name, perm.bits() as u32)
+            },
+            InodeType::Dir => fs.create_directory(dir.ino().get() as u32, name, perm.bits() as u32),
+            _ => unreachable!("ext4_create_child only creates regular files or directories"),
+        };
+        result.map_err(map_ext4_error)
     })?;
     let ino = ext4_ino(raw_ino).expect("internal error: lwext4 returned invalid inode number");
 
@@ -104,11 +98,6 @@ fn ext4_make_node(
     let sb = dir.sb();
     let raw_rdev = encode_ext4_rdev(description.rdev);
     let raw_ino = ext4_sb(&sb).with_fs(|fs| {
-        match fs.lookup(dir.ino().get() as u32, name) {
-            Ok(_) => return Err(SysError::AlreadyExists),
-            Err(err) if err.code == ENOENT as i32 => {},
-            Err(err) => return Err(map_ext4_error(err)),
-        }
         fs.make_node(
             dir.ino().get() as u32,
             name,
@@ -252,25 +241,8 @@ fn ext4_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
 fn ext4_symlink(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let raw_ino = ext4_sb(&sb).with_fs(|fs| {
-        match fs.lookup(dir.ino().get() as u32, name) {
-            Ok(_) => return Err(SysError::AlreadyExists),
-            Err(err) if err.code == ENOENT as i32 => {},
-            Err(err) => return Err(map_ext4_error(err)),
-        }
-
-        let ino = fs
-            .create(
-                dir.ino().get() as u32,
-                name,
-                LwExt4InodeType::Symlink,
-                0o777, // permissions of symlink are mostly ignored
-            )
-            .map_err(map_ext4_error)?;
-
-        fs.set_symlink(ino, target.as_bytes())
-            .map_err(map_ext4_error)?;
-
-        Ok(ino)
+        fs.create_symlink(dir.ino().get() as u32, name, target.as_bytes())
+            .map_err(map_ext4_error)
     })?;
 
     let ino = ext4_ino(raw_ino).expect("internal error: lwext4 returned invalid inode number");

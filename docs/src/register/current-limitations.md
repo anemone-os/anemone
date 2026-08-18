@@ -232,8 +232,9 @@ claim相称的fault/crash或恢复验证后，才能修订make-node target/curre
 forced flush、双状态truth、case-specific compensation或validation-only production hook冒充退出。
 
 **Owner:** lwext4 / `lwext4-rust` integration（待独立事务）
-**Last Verified:** 2026-08-01
+**Last Verified:** 2026-08-18
 **Related:** [VFS Make Node R2](../rfcs/vfs-make-node/index.md),
+[lwext4 create publication小迭代](../devlog/changes/2026-08-18-lwext4-create-publication.md),
 [R2 ordered-publication invariant](../rfcs/vfs-make-node/invariants.md#make-node-atomic-001--backend-local-有序可见性与诚实-cleanup),
 [R2 transaction decision](../devlog/transactions/2026-07-31-vfs-make-node.md#r2-target-renegotiation-and-c2-review-hold---2026-08-01)
 

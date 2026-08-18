@@ -91,6 +91,7 @@
 	- [2026-07-06 至 2026-07-19](./devlog/2026-07-06_to_2026-07-19.md)
 	- [2026-07-20 至 2026-08-02](./devlog/2026-07-20_to_2026-08-02.md)
 	- [小迭代记录](./devlog/changes/index.md)
+		- [2026-08-18 - lwext4 create publication](./devlog/changes/2026-08-18-lwext4-create-publication.md)
 		- [2026-08-18 - Ext4 writeback ownership](./devlog/changes/2026-08-18-ext4-writeback-ownership.md)
 		- [2026-08-17 - TTY TCFLSH 队列清空](./devlog/changes/2026-08-17-tty-tcflush.md)
 		- [2026-08-17 - TCP socket buffer budgets](./devlog/changes/2026-08-17-tcp-socket-buffer-budgets.md)
