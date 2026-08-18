@@ -2,7 +2,9 @@ use crate::{
     arch::riscv64::machine::MachineDesc,
     device::{
         clock_controller::{ClockDomain, register_clock_controller},
-        discovery::open_firmware::{get_of_node, of_with_node_by_path, of_with_root},
+        discovery::open_firmware::{
+            get_of_node, of_with_node_by_full_name_path, of_with_node_by_path, of_with_root,
+        },
         reset::{ResetDomain, register_reset_controller},
     },
     driver::clkc::jh7110::Jh7110ClockController,
@@ -142,5 +144,12 @@ impl MachineDesc for StarFive {
 
         kinfoln!("discovering reset controllers for starfive machine");
         of_with_root(discover);
+    }
+
+    fn preferred_rtc_origin(&self) -> Option<Arc<dyn crate::device::discovery::fwnode::FwNode>> {
+        of_with_node_by_full_name_path("/soc/rtc@17040000", |node| {
+            get_of_node(node.handle()) as Arc<_>
+        })
+        .ok()
     }
 }

@@ -1,0 +1,16 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          mountkernfs
+# Required-Start:
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: Publish Anemone's pre-mounted kernel filesystems
+### END INIT INFO
+
+# board-init runs /home/init_sys.sh before OpenRC, and that script owns the
+# devfs, devpts, procfs, sysfs, /run, and /tmp mounts. Debian's procps service
+# still names the traditional mountkernfs dependency, so this no-op provider
+# keeps the OpenRC dependency graph honest without mounting a second view.
+# Remove it when no installed Debian service requires mountkernfs.
+exit 0

@@ -1,6 +1,0 @@
-# Initialize volatile filesystems on every boot, then keep an interactive shell alive.
-::sysinit:/home/init_sys.sh
-# This direct root shell is the temporary login boundary while Anemone has no
-# getty path. The leading dash asks BusyBox init to acquire stdin as the new
-# session's controlling TTY and starts ash in login mode.
-::respawn:-/bin/sh

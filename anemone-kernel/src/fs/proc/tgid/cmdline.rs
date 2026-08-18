@@ -3,7 +3,7 @@ use crate::{
         iomux::PollEvent,
         proc::tgid::{TgidEntry, default_tgid_entry_prv, validate_tgid_sub_inode},
     },
-    prelude::*,
+    prelude::{user_access::UserReadSlice, *},
     utils::any_opaque::NilOpaque,
 };
 
@@ -63,7 +63,11 @@ fn tgid_cmdline_read(
 
     let usp_handle = leader.clone_uspace_handle();
 
-    let (addr, len) = usp_handle.lock().cmdline_range();
+    // Keep the address-space completion guard from the range snapshot through
+    // the copy: exec/exit can clear mappings while the proc binding and leader
+    // are still observable.
+    let mut usp = usp_handle.lock();
+    let (addr, len) = usp.cmdline_range();
 
     if *pos >= len {
         return Ok(0);
@@ -74,20 +78,25 @@ fn tgid_cmdline_read(
     let _temporary_activation = (usp_handle != cur_usp_handle)
         .then(|| TemporaryUserSpaceActivation::new(cur_usp_handle.as_ref(), usp_handle.as_ref()));
 
-    // The command-line range is placed on the initial user stack together with
-    // environ, so reading it follows the same direct-copy model as environ.
     let to_read = usize::min(buf.len(), len - *pos);
+    let start = addr
+        .get()
+        .checked_add(*pos as u64)
+        .map(VirtAddr::new)
+        .ok_or(SysError::BadAddress)?;
+    let mut source = UserReadSlice::<u8>::try_new(start, to_read, &mut usp)?;
+    let read = match source.copy_to_slice_partial(&mut buf[..to_read]) {
+        Ok(read) => read,
+        Err(error) if error.copied() != 0 => error.copied(),
+        // This address belongs to the remote target, not the read caller. A
+        // target retired before this guard was acquired is observed as EOF.
+        Err(error) if error.error() == SysError::BadAddress => 0,
+        Err(error) => return Err(error.error()),
+    };
 
-    unsafe {
-        let src = (addr.get() as usize + *pos) as *const u8;
-        let dst = buf.as_mut_ptr();
+    *pos += read;
 
-        core::ptr::copy_nonoverlapping(src, dst, to_read);
-    }
-
-    *pos += to_read;
-
-    Ok(to_read)
+    Ok(read)
 }
 
 fn tgid_cmdline_read_at(

@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# util-linux agetty always submits unsupported termios flags before execing its
+# login program. This development path skips getty's termios setup, but still
+# establishes the session/controlling-terminal relation required by shell job
+# control. The waiting setsid parent keeps the shell lifetime supervised.
+export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
+export TERM="${TERM:-linux}"
+cd "$HOME"
+
+exec </dev/console >/dev/console 2>&1
+exec /usr/bin/setsid --fork --wait --ctty \
+    /bin/bash --login -i

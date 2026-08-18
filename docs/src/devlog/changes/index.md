@@ -31,6 +31,7 @@
 
 ## 当前记录
 
+- [2026-08-18 - 2K1000 RTC invalid calendar initialization](./2026-08-18-2k1000-rtc-invalid-calendar-init.md)
 - [2026-08-18 - Ext4 link and remove namespace operations](./2026-08-18-ext4-link-remove.md)
 - [2026-08-18 - lwext4 create publication](./2026-08-18-lwext4-create-publication.md)
 - [2026-08-18 - Ext4 writeback ownership](./2026-08-18-ext4-writeback-ownership.md)

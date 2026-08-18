@@ -10,15 +10,18 @@ mod protocol;
 mod regs;
 mod ring;
 
+use anemone_net_api::{EthernetAddress, FrameProvider};
+
 use crate::{
     device::{
         bus::platform::{self, PlatformDriver},
         kobject::{KObjIdent, KObjectBase, KObjectOps},
+        net::{ReadyNetdev, publish},
     },
     prelude::*,
 };
 
-use super::{compatible_matches, publish_adopted_node};
+use super::{compatible_matches, frame::UnavailableDwmacProvider, publish_adopted_node};
 use fwnode::Dwmac1000Config;
 use irq::{Dwmac1000IrqContext, IRQ_HANDLER};
 use owner::{CharacterizationResult, Dwmac1000Owner, Dwmac1000State, ProbeDisposition};
@@ -205,6 +208,7 @@ impl DriverOps for Driver {
             rings.tx_frame(0),
             1u64 << 32,
         );
+
         let (mdio_clock_range, mdio_clock_source) = match config.mdio_clock_range {
             Some(value) => (value, "firmware-property"),
             None => match regs.mdio_clock_range() {
@@ -250,7 +254,11 @@ impl DriverOps for Driver {
             capabilities.gmii,
             capabilities.half_duplex,
         ) {
-            Ok(state) => state,
+            Ok(Some(state)) => state,
+            Ok(None) => {
+                regs.suppress_interrupts();
+                return publish_placeholder(device.as_ref(), &config);
+            },
             Err(error) => {
                 kerrln!(
                     "dwmac1000 {} stage=phy-p1 result=fail model={} mode={} error={:?}",
@@ -507,6 +515,36 @@ impl DriverOps for Driver {
     fn as_platform_driver(&self) -> Option<&dyn PlatformDriver> {
         Some(self)
     }
+}
+
+fn publish_placeholder(device: &dyn Device, config: &Dwmac1000Config) -> Result<(), SysError> {
+    let origin = crate::utils::identity::AnyIdentity::try_from(config.node_path.as_str())
+        .map_err(|_| SysError::DriverIncompatible)?;
+    let provider = UnavailableDwmacProvider::new(DWMAC1000_FRAME_CAPACITY_BYTES);
+    let ready = ReadyNetdev::new(
+        origin,
+        Some(EthernetAddress::new(config.mac)),
+        provider.capabilities(),
+        provider.link_state(),
+        provider,
+    );
+    let snapshot = match publish(ready) {
+        Ok(snapshot) => snapshot,
+        Err((error, _)) => {
+            kerrln!(
+                "dwmac1000 {} stage=placeholder-publication result=fail error={:?}",
+                device.name(),
+                error,
+            );
+            return Err(SysError::ProbeFailed);
+        },
+    };
+    kwarningln!(
+        "dwmac1000 {} stage=placeholder-publication result=pass netdev={} link=down frame-path=unavailable dma=not-reset irq=not-registered recovery=reboot-with-carrier",
+        device.name(),
+        snapshot.id().index(),
+    );
+    Ok(())
 }
 
 impl PlatformDriver for Driver {

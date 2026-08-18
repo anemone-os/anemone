@@ -49,8 +49,8 @@ just rootfs mkfs -c conf/rootfs/2k1000/rootfs.toml --sudo
 ```
 
 `etc/build-la.sh` installs `build/anemoneImage-la64-raw` on the first partition
-and writes the strict Alpine image to `sda2` and the board-init bootstrap image
-to `sda3`. The Alpine system image intentionally has no `/.anemone/init`; it is
-not a replacement for the `sda3` bootstrap image. The script provisions the
-device identity in the Alpine image immediately before unmounting and writing
-the disk.
+and updates only the board-init bootstrap image on `sda3`. It never rebuilds or
+writes the stable Alpine system image. Use `etc/write-la.sh` explicitly to
+write an already-built, already-provisioned image to `sda2`. The Alpine system
+image intentionally has no `/.anemone/init`; it is not a replacement for the
+`sda3` bootstrap image.
