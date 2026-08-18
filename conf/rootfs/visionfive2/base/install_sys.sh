@@ -8,7 +8,7 @@ ROOT=${1:-/}
 ROOT=${ROOT%/}
 INSTALL_MARKER="$ROOT/etc/.anemone-installed"
 REINSTALL_MARKER=/home/.anemone_need_reinstall
-INSTALL_VERSION=5
+INSTALL_VERSION=6
 
 if [ ! -f "$REINSTALL_MARKER" ] \
     && [ -f "$INSTALL_MARKER" ] \
@@ -30,9 +30,12 @@ echo "Copying configuration files..."
 "$BUSYBOX" cp -Rf /home/root/. "$ROOT/root/"
 "$BUSYBOX" rm -f \
     "$ROOT/etc/init.d/agetty.console" \
-    "$ROOT/etc/runlevels/default/agetty.console"
+    "$ROOT/etc/runlevels/default/agetty.console" \
+    "$ROOT/etc/runlevels/default/ssh"
 "$BUSYBOX" ln -sfn /etc/init.d/console-shell \
     "$ROOT/etc/runlevels/default/console-shell"
+"$BUSYBOX" ln -sfn /etc/init.d/sshd \
+    "$ROOT/etc/runlevels/default/sshd"
 "$BUSYBOX" ln -sf /home/sbin/shutdown "$ROOT/sbin/poweroff"
 echo "$INSTALL_VERSION" > "$INSTALL_MARKER"
 "$BUSYBOX" rm -f "$REINSTALL_MARKER"

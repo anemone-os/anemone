@@ -1,0 +1,19 @@
+#!/usr/sbin/openrc-run
+
+description="start the OpenSSH server"
+supervisor=supervise-daemon
+command=/usr/sbin/sshd
+command_args="-D -e"
+pidfile=/run/sshd-supervise.pid
+respawn_period="${respawn_period:-60}"
+
+depend() {
+	after local
+	use logger
+	keyword -prefix
+}
+
+start_pre() {
+	checkpath --directory --mode 0755 --owner root:root /run/sshd || return 1
+	"$command" -t
+}
