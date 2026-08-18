@@ -90,7 +90,13 @@ fn ext4_sync_inode_inner(inode: &Arc<Inode>) -> Result<(), SysError> {
 
     ext4_sb(&sb).with_fs(|fs| {
         fs.with_inode_ref(ino.get() as u32, |inode_ref| {
-            if inode_ref.size() != meta.size {
+            // A resident regular file's logical size is owned by its VFS
+            // inode/address space and is written back here. Directory size is
+            // owned by lwext4 together with its dirents and HTree; symlink and
+            // special-inode sizes are likewise backend projections. Their
+            // load-time VFS snapshots must never drive `set_len()`, which can
+            // truncate backend-owned blocks when the snapshot is stale.
+            if inode.ty() == InodeType::Regular && inode_ref.size() != meta.size {
                 inode_ref.set_len(meta.size)?;
             }
             inode_ref.set_atime(&meta.atime);
