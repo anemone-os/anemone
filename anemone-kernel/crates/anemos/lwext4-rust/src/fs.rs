@@ -32,6 +32,30 @@ pub struct StatFs {
     pub block_size: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DirectoryCreationOutcome {
+    pub ino: u32,
+    pub parent_nlink: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LinkOutcome {
+    pub nlink: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UnlinkOutcome {
+    pub ino: u32,
+    pub nlink: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RmdirOutcome {
+    pub ino: u32,
+    pub nlink: u16,
+    pub parent_nlink: u16,
+}
+
 pub struct Ext4Filesystem<Dev: BlockDevice> {
     inner: Box<ext4_fs>,
     bdev: Ext4BlockDevice<Dev>,
@@ -49,6 +73,19 @@ struct FilesystemAccess<'fs> {
     _filesystem: PhantomData<&'fs mut ext4_fs>,
 }
 
+#[derive(Clone, Copy)]
+enum RemovalKind {
+    NonDirectory,
+    Directory,
+    Any,
+}
+
+struct RemovalOutcome {
+    ino: u32,
+    nlink: u16,
+    parent_nlink: u16,
+}
+
 impl<'fs> FilesystemAccess<'fs> {
     fn inode_ref(&mut self, ino: u32) -> Ext4Result<InodeRef<'fs>> {
         unsafe {
@@ -57,10 +94,6 @@ impl<'fs> FilesystemAccess<'fs> {
                 .context("ext4_fs_get_inode_ref")?;
             Ok(result)
         }
-    }
-
-    fn clone_ref(&mut self, inode: &InodeRef<'fs>) -> InodeRef<'fs> {
-        self.inode_ref(inode.ino()).expect("inode ref clone failed")
     }
 
     fn alloc_inode(&mut self, ty: InodeType) -> Ext4Result<InodeRef<'fs>> {
@@ -91,45 +124,130 @@ impl<'fs> FilesystemAccess<'fs> {
         self.inode_ref(parent)?.read_dir(offset)
     }
 
-    fn unlink(&mut self, dir: u32, name: &str) -> Ext4Result {
-        let mut dir_ref = self.inode_ref(dir)?;
-        let child = self.clone_ref(&dir_ref).lookup(name)?.entry().ino();
-        let mut child_ref = self.inode_ref(child)?;
+    fn parent_for_new_entry(&mut self, parent: u32, name: &str) -> Ext4Result<InodeRef<'fs>> {
+        if name.len() > u8::MAX as usize {
+            // ENAMETOOLONG; lwext4's ulibc errno subset does not name it.
+            return Err(Ext4Error::new(36, "name exceeds ext4 dirent limit"));
+        }
 
-        if self.clone_ref(&child_ref).has_children()? {
+        match self.lookup(parent, name) {
+            Ok(_) => return Err(Ext4Error::new(EEXIST as _, "entry already exists")),
+            Err(err) if err.code == ENOENT as i32 => {},
+            Err(err) => return Err(err),
+        }
+
+        // Acquire the parent before allocating the child so an acquisition
+        // failure cannot strand a freshly allocated inode.
+        self.inode_ref(parent)
+    }
+
+    fn remove(&mut self, dir: u32, name: &str, kind: RemovalKind) -> Ext4Result<RemovalOutcome> {
+        let child = self.lookup(dir, name)?.entry().ino();
+        let mut dir_ref = self.inode_ref(dir)?;
+        let mut child_ref = self.inode_ref(child)?;
+        let child_type = child_ref.inode_type();
+
+        match (kind, child_type) {
+            (RemovalKind::NonDirectory, InodeType::Directory) => {
+                return Err(Ext4Error::new(EISDIR as _, "unlink target is a directory"));
+            },
+            (RemovalKind::Directory, ty) if ty != InodeType::Directory => {
+                return Err(Ext4Error::new(
+                    ENOTDIR as _,
+                    "rmdir target is not a directory",
+                ));
+            },
+            _ => {},
+        }
+
+        if child_type == InodeType::Directory && self.inode_ref(child)?.has_children()? {
             return Err(Ext4Error::new(ENOTEMPTY as _, None));
         }
-        if child_ref.inode_type() == InodeType::Directory {
-            // According to `ext4_trunc_dir`
-            let bs = unsafe { get_block_size(&(*self.inner).sb) };
-            child_ref.truncate(bs as _)?;
-        }
 
+        // Removing the parent dirent is the namespace commit point. In
+        // particular, an empty directory must not be truncated while it is
+        // still reachable if this mutation fails.
         dir_ref.remove_entry(name, &mut child_ref)?;
 
-        if child_ref.is_dir() {
+        if child_type == InodeType::Directory {
             dir_ref.dec_nlink();
             child_ref.dec_nlink();
         }
-        if child_ref.nlink() == 0 {
+        let nlink = child_ref.nlink();
+        let parent_nlink = dir_ref.nlink();
+        if nlink == 0 {
             // lwext4 only admits regular files, directories, and symlinks to
             // its truncate path. FIFO, device, and socket inodes carry no
             // file data to release, and truncating them would reject an
             // otherwise valid unlink with EINVAL.
-            if matches!(
+            let truncate_succeeded = if matches!(
                 child_ref.inode_type(),
                 InodeType::RegularFile | InodeType::Directory | InodeType::Symlink
             ) {
-                child_ref.truncate(0)?;
-            }
-            unsafe {
-                ext4_inode_set_del_time(child_ref.inner.inode, u32::MAX);
-                child_ref.mark_dirty();
-                ext4_fs_free_inode(child_ref.inner.as_mut());
+                match child_ref.truncate(0) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        // The parent dirent is already gone and cannot be
+                        // rolled back without a journal. Preserve the committed
+                        // namespace outcome; the orphan stays allocated because
+                        // freeing an inode with live data would corrupt storage.
+                        log::error!("ext4 data cleanup after committed remove failed: {}", err);
+                        false
+                    },
+                }
+            } else {
+                true
+            };
+            if truncate_succeeded {
+                let free_result = unsafe {
+                    ext4_inode_set_del_time(child_ref.inner.inode, u32::MAX);
+                    child_ref.mark_dirty();
+                    ext4_fs_free_inode(child_ref.inner.as_mut())
+                };
+                if free_result == EOK as _ {
+                    // The allocator entry no longer exists. Drop must release
+                    // only the reference, not write this dirty inode back into
+                    // the freed slot.
+                    child_ref.inner.dirty = false;
+                } else {
+                    // The parent dirent is already gone and cannot be rolled
+                    // back without a journal. Preserve the committed namespace
+                    // outcome so the caller can project the exact link count;
+                    // the failed orphan cleanup remains observable and may
+                    // leak storage.
+                    log::error!(
+                        "ext4 inode cleanup after committed remove failed: {}",
+                        Ext4Error::new(free_result, None)
+                    );
+                }
             }
         }
-        Ok(())
+        Ok(RemovalOutcome {
+            ino: child,
+            nlink,
+            parent_nlink,
+        })
     }
+}
+
+fn publish_new_inode<'fs>(
+    parent: &mut InodeRef<'fs>,
+    name: &str,
+    mut child: InodeRef<'fs>,
+) -> Ext4Result<u32> {
+    assert_eq!(
+        child.nlink(),
+        0,
+        "a new inode must remain unreachable until final publication"
+    );
+    let ino = child.ino();
+    // Every caller has completed inode-local preparation. This is the only
+    // namespace mutation and therefore the final fallible create step.
+    if let Err(err) = parent.add_entry(name, &mut child) {
+        child.free_unpublished()?;
+        return Err(err);
+    }
+    Ok(ino)
 }
 
 impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
@@ -194,9 +312,6 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
     pub fn set_len(&mut self, ino: u32, len: u64) -> Ext4Result<()> {
         self.access().inode_ref(ino)?.set_len(len)
     }
-    pub fn set_symlink(&mut self, ino: u32, buf: &[u8]) -> Ext4Result<()> {
-        self.access().inode_ref(ino)?.set_symlink(buf)
-    }
     pub fn lookup(&mut self, parent: u32, name: &str) -> Ext4Result<DirLookupResult<'_>> {
         self.access().lookup(parent, name)
     }
@@ -204,19 +319,76 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
         self.access().read_dir(parent, offset)
     }
 
-    pub fn create(&mut self, parent: u32, name: &str, ty: InodeType, mode: u32) -> Ext4Result<u32> {
+    pub fn create_regular(&mut self, parent: u32, name: &str, mode: u32) -> Ext4Result<u32> {
         let mut access = self.access();
-        let mut child = access.alloc_inode(ty)?;
-        let mut parent = access.inode_ref(parent)?;
-        parent.add_entry(name, &mut child)?;
-        if ty == InodeType::Directory {
-            child.add_entry(".", &mut access.clone_ref(&child))?;
-            child.add_entry("..", &mut parent)?;
-            assert_eq!(child.nlink(), 2);
-        }
+        let mut parent = access.parent_for_new_entry(parent, name)?;
+        let mut child = access.alloc_inode(InodeType::RegularFile)?;
         child.set_mode((child.mode() & !0o777) | (mode & 0o777));
 
-        Ok(child.ino())
+        publish_new_inode(&mut parent, name, child)
+    }
+
+    pub fn create_directory(
+        &mut self,
+        parent: u32,
+        name: &str,
+        mode: u32,
+    ) -> Ext4Result<DirectoryCreationOutcome> {
+        let mut access = self.access();
+        let mut parent = access.parent_for_new_entry(parent, name)?;
+        let mut child = access.alloc_inode(InodeType::Directory)?;
+        child.set_mode((child.mode() & !0o777) | (mode & 0o777));
+        let ino = child.ino();
+
+        let dot_result = match access.inode_ref(ino) {
+            Ok(mut child_self) => child.add_entry(".", &mut child_self),
+            Err(err) => Err(err),
+        };
+        if let Err(err) = dot_result {
+            child.free_unpublished()?;
+            return Err(err);
+        }
+
+        let original_parent_nlink = parent.nlink();
+        if let Err(err) = child.add_entry("..", &mut parent) {
+            child.set_nlink(0);
+            child.free_unpublished()?;
+            return Err(err);
+        }
+        assert_eq!(child.nlink(), 1);
+
+        // The parent dirent is the commit point: before this call the new
+        // directory is unreachable and all of its local state can be undone.
+        if let Err(err) = parent.add_entry(name, &mut child) {
+            parent.set_nlink(original_parent_nlink);
+            child.set_nlink(0);
+            child.free_unpublished()?;
+            return Err(err);
+        }
+        assert_eq!(child.nlink(), 2);
+
+        Ok(DirectoryCreationOutcome {
+            ino,
+            parent_nlink: parent.nlink(),
+        })
+    }
+
+    pub fn create_symlink(&mut self, parent: u32, name: &str, target: &[u8]) -> Ext4Result<u32> {
+        let mut access = self.access();
+        let mut parent = access.parent_for_new_entry(parent, name)?;
+        if target.len() > get_block_size(parent.superblock()) as usize {
+            // ENAMETOOLONG; validate before allocating an inode or data block.
+            return Err(Ext4Error::new(36, "symlink target exceeds ext4 limit"));
+        }
+
+        let mut child = access.alloc_inode(InodeType::Symlink)?;
+        child.set_mode((child.mode() & !0o777) | 0o777);
+        if let Err(err) = child.set_symlink(target) {
+            child.free_unpublished()?;
+            return Err(err);
+        }
+
+        publish_new_inode(&mut parent, name, child)
     }
 
     pub fn make_node(
@@ -229,29 +401,17 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
         gid: u32,
         rdev: u32,
     ) -> Ext4Result<u32> {
-        if name.len() > u8::MAX as usize {
-            // ENAMETOOLONG; lwext4's ulibc errno subset does not name it.
-            return Err(Ext4Error::new(
-                36,
-                "make-node name exceeds ext4 dirent limit",
-            ));
-        }
         assert_ne!(ty, InodeType::Directory);
         assert_ne!(ty, InodeType::Symlink);
 
         let mut access = self.access();
-        let mut parent = access.inode_ref(parent)?;
+        let mut parent = access.parent_for_new_entry(parent, name)?;
         let mut child = access.alloc_inode(ty)?;
         child.set_mode((child.mode() & !0o7777) | (mode & 0o7777));
         child.set_owner(uid, gid);
         child.set_device(rdev);
-        let ino = child.ino();
 
-        if let Err(err) = parent.add_entry(name, &mut child) {
-            child.free_unlinked()?;
-            return Err(err);
-        }
-        Ok(ino)
+        publish_new_inode(&mut parent, name, child)
     }
 
     pub fn rename(
@@ -266,7 +426,7 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
         let mut dst_dir_ref = access.inode_ref(dst_dir)?;
 
         // TODO: optimize
-        match access.unlink(dst_dir, dst_name) {
+        match access.remove(dst_dir, dst_name, RemovalKind::Any) {
             Ok(_) => {},
             Err(err) if err.code == ENOENT as i32 => {},
             Err(err) => return Err(err),
@@ -276,7 +436,7 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
 
         let mut src_ref = access.inode_ref(src)?;
         if src_ref.is_dir() {
-            let mut result = access.clone_ref(&src_ref).lookup("..")?;
+            let mut result = access.inode_ref(src)?.lookup("..")?;
             result.set_entry_inode(dst_dir);
             src_dir_ref.dec_nlink();
             dst_dir_ref.inc_nlink();
@@ -287,18 +447,47 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
         Ok(())
     }
 
-    pub fn link(&mut self, dir: u32, name: &str, child: u32) -> Ext4Result {
+    pub fn link(&mut self, dir: u32, name: &str, child: u32) -> Ext4Result<LinkOutcome> {
         let mut access = self.access();
+        let mut parent = access.parent_for_new_entry(dir, name)?;
         let mut child_ref = access.inode_ref(child)?;
         if child_ref.is_dir() {
             return Err(Ext4Error::new(EISDIR as _, "cannot link to directory"));
         }
-        access.inode_ref(dir)?.add_entry(name, &mut child_ref)?;
-        Ok(())
+        if child_ref.nlink() == 0 {
+            return Err(Ext4Error::new(
+                ENOENT as _,
+                "cannot relink an unlinked inode",
+            ));
+        }
+        if child_ref.nlink() >= EXT4_LINK_MAX as u16 {
+            return Err(Ext4Error::new(
+                EMLINK as _,
+                "inode link count limit reached",
+            ));
+        }
+
+        parent.add_entry(name, &mut child_ref)?;
+        Ok(LinkOutcome {
+            nlink: child_ref.nlink(),
+        })
     }
 
-    pub fn unlink(&mut self, dir: u32, name: &str) -> Ext4Result {
-        self.access().unlink(dir, name)
+    pub fn unlink(&mut self, dir: u32, name: &str) -> Ext4Result<UnlinkOutcome> {
+        let outcome = self.access().remove(dir, name, RemovalKind::NonDirectory)?;
+        Ok(UnlinkOutcome {
+            ino: outcome.ino,
+            nlink: outcome.nlink,
+        })
+    }
+
+    pub fn rmdir(&mut self, dir: u32, name: &str) -> Ext4Result<RmdirOutcome> {
+        let outcome = self.access().remove(dir, name, RemovalKind::Directory)?;
+        Ok(RmdirOutcome {
+            ino: outcome.ino,
+            nlink: outcome.nlink,
+            parent_nlink: outcome.parent_nlink,
+        })
     }
 
     pub fn stat(&mut self) -> Ext4Result<StatFs> {
@@ -316,7 +505,15 @@ impl<Dev: BlockDevice> Ext4Filesystem<Dev> {
 
     pub fn flush(&mut self) -> Ext4Result<()> {
         unsafe {
-            ext4_block_cache_flush(self.bdev.inner.as_mut()).context("ext4_cache_flush")?;
+            let bdev = self.bdev.inner.as_mut();
+            ext4_block_cache_flush(bdev).context("ext4_cache_flush")?;
+
+            // Allocation updates the in-memory superblock outside the block
+            // cache. Persist cached inode/bitmap/group state first, then its
+            // summary counters and checksum. This deliberately writes the
+            // current mounted state (ERROR_FS); only `ext4_fs_fini()` is
+            // allowed to claim a clean finalization.
+            ext4_sb_write(bdev, &mut self.inner.as_mut().sb).context("ext4_sb_write")?;
         }
         Ok(())
     }

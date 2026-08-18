@@ -1,4 +1,3 @@
-use anemone_abi::errno::ENOENT;
 use lwext4_rust::InodeType as LwExt4InodeType;
 
 use crate::{
@@ -58,6 +57,22 @@ fn ext4_lookup_child(
     ))
 }
 
+/// Project a committed on-disk link count into an already-resident inode.
+///
+/// Callers hold the ext4 filesystem mutex across both the backend mutation and
+/// this projection. The superblock cache lock never calls into the ext4 backend
+/// while held, so taking it here preserves the existing lock order.
+fn ext4_update_resident_nlink(sb: &SuperBlock, ino: Ino, nlink: u16) {
+    let Some(inode) = sb.try_iget(ino) else {
+        return;
+    };
+
+    inode.inode().set_nlink(nlink as u64);
+    if nlink == 0 {
+        sb.unindex_inode(inode.inode());
+    }
+}
+
 fn ext4_create_child(
     dir: &InodeRef,
     name: &str,
@@ -65,26 +80,21 @@ fn ext4_create_child(
     perm: InodePerm,
 ) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
-    let raw_ino = ext4_sb(&sb).with_fs(|fs| {
-        match fs.lookup(dir.ino().get() as u32, name) {
-            Ok(_) => return Err(SysError::AlreadyExists),
-            Err(err) if err.code == ENOENT as i32 => {},
-            Err(err) => return Err(map_ext4_error(err)),
-        }
-
-        fs.create(
-            dir.ino().get() as u32,
-            name,
-            map_vfs_inode_type(ty)?,
-            perm.bits() as u32,
-        )
-        .map_err(map_ext4_error)
+    let raw_ino = ext4_sb(&sb).with_fs(|fs| match ty {
+        InodeType::Regular => fs
+            .create_regular(dir.ino().get() as u32, name, perm.bits() as u32)
+            .map_err(map_ext4_error),
+        InodeType::Dir => {
+            let outcome = fs
+                .create_directory(dir.ino().get() as u32, name, perm.bits() as u32)
+                .map_err(map_ext4_error)?;
+            dir.inode().set_nlink(outcome.parent_nlink as u64);
+            Ok(outcome.ino)
+        },
+        _ => unreachable!("ext4_create_child only creates regular files or directories"),
     })?;
     let ino = ext4_ino(raw_ino).expect("internal error: lwext4 returned invalid inode number");
 
-    if ty == InodeType::Dir {
-        dir.inode().inc_nlink();
-    }
     Ok(sb.iget(ino)?)
 }
 
@@ -104,11 +114,6 @@ fn ext4_make_node(
     let sb = dir.sb();
     let raw_rdev = encode_ext4_rdev(description.rdev);
     let raw_ino = ext4_sb(&sb).with_fs(|fs| {
-        match fs.lookup(dir.ino().get() as u32, name) {
-            Ok(_) => return Err(SysError::AlreadyExists),
-            Err(err) if err.code == ENOENT as i32 => {},
-            Err(err) => return Err(map_ext4_error(err)),
-        }
         fs.make_node(
             dir.ino().get() as u32,
             name,
@@ -208,18 +213,24 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
     let sb = inode.sb();
     // VFS metadata is authoritative while the inode is resident; eviction and
     // explicit sync persist the same owner through lwext4's u32 setters.
+    // Regular-file size belongs to that resident inode/address space. Sizes of
+    // directories, symlinks, and special inodes describe lwext4-owned backend
+    // representations, so a load-time VFS snapshot must not be reported after
+    // the backend changes independently.
     let meta = inode.inode().meta_snapshot();
 
-    let rdev = if matches!(inode.ty(), InodeType::Char | InodeType::Block) {
-        let raw = ext4_sb(&sb).with_fs(|fs| {
-            let mut attr = lwext4_rust::FileAttr::default();
-            fs.get_attr(inode.ino().get() as u32, &mut attr)
-                .map_err(map_ext4_error)?;
-            Ok(attr.rdev)
-        })?;
-        decode_ext4_rdev(inode.ty(), raw)
-    } else {
-        DeviceId::None
+    let (rdev, size) = match inode.ty() {
+        InodeType::Anon => unreachable!("anonymous inode kind cannot be loaded from ext4"),
+        InodeType::Regular => (DeviceId::None, meta.size),
+        ty => {
+            let attr = ext4_sb(&sb).with_fs(|fs| {
+                let mut attr = lwext4_rust::FileAttr::default();
+                fs.get_attr(inode.ino().get() as u32, &mut attr)
+                    .map_err(map_ext4_error)?;
+                Ok(attr)
+            })?;
+            (decode_ext4_rdev(ty, attr.rdev), attr.size)
+        },
     };
 
     Ok(InodeStat {
@@ -230,7 +241,7 @@ fn ext4_get_attr(inode: &InodeRef) -> Result<InodeStat, SysError> {
         uid: meta.uid,
         gid: meta.gid,
         rdev,
-        size: meta.size,
+        size,
         atime: meta.atime,
         mtime: meta.mtime,
         ctime: meta.ctime,
@@ -246,25 +257,8 @@ fn ext4_lookup(dir: &InodeRef, name: &str) -> Result<InodeRef, SysError> {
 fn ext4_symlink(dir: &InodeRef, name: &str, target: &Path) -> Result<InodeRef, SysError> {
     let sb = dir.sb();
     let raw_ino = ext4_sb(&sb).with_fs(|fs| {
-        match fs.lookup(dir.ino().get() as u32, name) {
-            Ok(_) => return Err(SysError::AlreadyExists),
-            Err(err) if err.code == ENOENT as i32 => {},
-            Err(err) => return Err(map_ext4_error(err)),
-        }
-
-        let ino = fs
-            .create(
-                dir.ino().get() as u32,
-                name,
-                LwExt4InodeType::Symlink,
-                0o777, // permissions of symlink are mostly ignored
-            )
-            .map_err(map_ext4_error)?;
-
-        fs.set_symlink(ino, target.as_bytes())
-            .map_err(map_ext4_error)?;
-
-        Ok(ino)
+        fs.create_symlink(dir.ino().get() as u32, name, target.as_bytes())
+            .map_err(map_ext4_error)
     })?;
 
     let ino = ext4_ino(raw_ino).expect("internal error: lwext4 returned invalid inode number");
@@ -283,61 +277,43 @@ fn ext4_link(dir: &InodeRef, name: &str, target: &InodeRef) -> Result<(), SysErr
     }
 
     ext4_sb(&sb).with_fs(|fs| {
-        fs.link(dir.ino().get() as u32, name, target.ino().get() as u32)
-            .map_err(map_ext4_error)
-    })?;
+        // A target resolved before a racing final unlink remains alive as a
+        // resident object, but it is no longer eligible for publication.
+        if target.nlink() == 0 {
+            return Err(SysError::NotFound);
+        }
 
-    target.inode().inc_nlink();
-    Ok(())
+        let outcome = fs
+            .link(dir.ino().get() as u32, name, target.ino().get() as u32)
+            .map_err(map_ext4_error)?;
+        target.inode().set_nlink(outcome.nlink as u64);
+        Ok(())
+    })
 }
 
 fn ext4_unlink(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
-    let child_ino = ext4_sb(&sb).with_fs(|fs| {
-        let (ino, ty) = ext4_lookup_child(fs, dir, name)?;
-        if ty == InodeType::Dir {
-            return Err(SysError::IsDir);
-        }
-        fs.unlink(dir.ino().get() as u32, name)
+    ext4_sb(&sb).with_fs(|fs| {
+        let outcome = fs
+            .unlink(dir.ino().get() as u32, name)
             .map_err(map_ext4_error)?;
-        Ok(ino)
-    })?;
-
-    if let Some(inode) = sb.try_iget(child_ino) {
-        inode.inode().dec_nlink();
-        if inode.nlink() == 0 {
-            sb.unindex_inode(inode.inode());
-        }
-        drop(inode);
-    }
-
-    Ok(())
+        let ino = ext4_ino(outcome.ino).expect("committed ext4 dirent contained inode zero");
+        ext4_update_resident_nlink(&sb, ino, outcome.nlink);
+        Ok(())
+    })
 }
 
 fn ext4_rmdir(dir: &InodeRef, name: &str) -> Result<(), SysError> {
     let sb = dir.sb();
-    let child_ino = ext4_sb(&sb).with_fs(|fs| {
-        let (ino, ty) = ext4_lookup_child(fs, dir, name)?;
-        if ty != InodeType::Dir {
-            return Err(SysError::NotDir);
-        }
-        // lwext4_rust already handles the case when the target to unlink is a
-        // directory, so we don't need to do extra work here. though this
-        // may seem a bit weird...
-        fs.unlink(dir.ino().get() as u32, name)
+    ext4_sb(&sb).with_fs(|fs| {
+        let outcome = fs
+            .rmdir(dir.ino().get() as u32, name)
             .map_err(map_ext4_error)?;
-        Ok(ino)
-    })?;
-
-    dir.inode().dec_nlink();
-
-    if let Some(inode) = sb.try_iget(child_ino) {
-        inode.inode().set_nlink(0);
-        sb.unindex_inode(inode.inode());
-        drop(inode);
-    }
-
-    Ok(())
+        dir.inode().set_nlink(outcome.parent_nlink as u64);
+        let ino = ext4_ino(outcome.ino).expect("committed ext4 dirent contained inode zero");
+        ext4_update_resident_nlink(&sb, ino, outcome.nlink);
+        Ok(())
+    })
 }
 
 fn ext4_rename(
@@ -347,14 +323,6 @@ fn ext4_rename(
     new_name: &str,
     flags: RenameFlags,
 ) -> Result<(), SysError> {
-    enum RenameOutcome {
-        NoOp,
-        Renamed {
-            src_ty: InodeType,
-            overwritten: Option<(Ino, InodeType)>,
-        },
-    }
-
     if old_dir == new_dir && old_name == new_name {
         return Ok(());
     }
@@ -364,7 +332,7 @@ fn ext4_rename(
         return Err(SysError::CrossDeviceLink);
     }
 
-    let outcome = ext4_sb(&sb).with_fs(|fs| {
+    ext4_sb(&sb).with_fs(|fs| {
         let (src_ino, src_ty) = ext4_lookup_child(fs, old_dir, old_name)?;
 
         let overwritten = match ext4_lookup_child(fs, new_dir, new_name) {
@@ -379,7 +347,7 @@ fn ext4_rename(
 
         if let Some((dst_ino, dst_ty)) = overwritten {
             if dst_ino == src_ino {
-                return Ok(RenameOutcome::NoOp);
+                return Ok(());
             }
 
             match (src_ty, dst_ty) {
@@ -401,45 +369,32 @@ fn ext4_rename(
         )
         .map_err(map_ext4_error)?;
 
-        Ok(RenameOutcome::Renamed {
-            src_ty,
-            overwritten,
-        })
-    })?;
-
-    let RenameOutcome::Renamed {
-        src_ty,
-        overwritten,
-    } = outcome
-    else {
-        return Ok(());
-    };
-
-    if let Some((dst_ino, dst_ty)) = overwritten {
-        if dst_ty == InodeType::Dir {
-            new_dir.inode().dec_nlink();
-        }
-
-        if let Some(inode) = sb.try_iget(dst_ino) {
+        if let Some((dst_ino, dst_ty)) = overwritten {
             if dst_ty == InodeType::Dir {
-                inode.inode().set_nlink(0);
-                sb.unindex_inode(inode.inode());
-            } else {
-                inode.inode().dec_nlink();
-                if inode.nlink() == 0 {
-                    sb.unindex_inode(inode.inode());
-                }
+                new_dir.inode().dec_nlink();
             }
-            drop(inode);
+
+            if let Some(inode) = sb.try_iget(dst_ino) {
+                if dst_ty == InodeType::Dir {
+                    inode.inode().set_nlink(0);
+                    sb.unindex_inode(inode.inode());
+                } else {
+                    inode.inode().dec_nlink();
+                    if inode.nlink() == 0 {
+                        sb.unindex_inode(inode.inode());
+                    }
+                }
+                drop(inode);
+            }
         }
-    }
 
-    if src_ty == InodeType::Dir && old_dir != new_dir {
-        old_dir.inode().dec_nlink();
-        new_dir.inode().inc_nlink();
-    }
+        if src_ty == InodeType::Dir && old_dir != new_dir {
+            old_dir.inode().dec_nlink();
+            new_dir.inode().inc_nlink();
+        }
 
-    Ok(())
+        Ok(())
+    })
 }
 
 fn ext4_read_link(inode: &InodeRef) -> Result<PathBuf, SysError> {

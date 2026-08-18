@@ -221,12 +221,13 @@ mod primitives {
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
 
-    /// Hard link of symlinks is not allowed. So we use [Path] instead of
-    /// [PathResolution] for both, to avoid confusion.
+    /// Resolve both pathnames using the default VFS policy, then hard-link the
+    /// resolved target. Syscall adapters that need final-symlink control use
+    /// [vfs_link_at] after resolving the target themselves.
     pub fn vfs_link(old_path: &Path, new_path: &Path) -> Result<(), SysError> {
         let target = resolve(old_path, ResolveFlags::empty())?;
         if target.inode().ty() == InodeType::Dir {
-            return Err(SysError::IsDir);
+            return Err(SysError::PermissionDenied);
         }
 
         let (parent, name) = resolve_parent(new_path, ResolveFlags::empty())?;
@@ -243,7 +244,7 @@ mod primitives {
         }
 
         if target.inode().ty() == InodeType::Dir {
-            return Err(SysError::IsDir);
+            return Err(SysError::PermissionDenied);
         }
 
         new_parent.mount().ensure_writable()?;
@@ -284,14 +285,12 @@ mod primitives {
         Ok(PathRef::new(parent.mount().clone(), dentry))
     }
 
-    /// See [vfs_link] for the reason why we use [Path] instead of
-    /// [PathResolution] here.
+    /// Unlink never follows the final symlink, so this entry takes a raw path.
     pub fn vfs_unlink(path: &Path) -> Result<(), SysError> {
         vfs_unlink_at(&root_pathref(), path)
     }
 
-    /// See [vfs_link] for the reason why we use [Path] instead of
-    /// [PathResolution] here.
+    /// Unlink never follows the final symlink, so this entry takes a raw path.
     pub fn vfs_unlink_at(dir: &PathRef, rel_path: &Path) -> Result<(), SysError> {
         let (parent, name) = resolve_parent_from(dir, rel_path, ResolveFlags::empty())?;
         parent.mount().ensure_writable()?;
@@ -572,7 +571,7 @@ mod kunits {
         assert_eq!(linked.inode(), file.inode());
         assert_eq!(
             vfs_link(dir_path, Path::new("/kunit-vfs-dir-link")).unwrap_err(),
-            SysError::IsDir
+            SysError::PermissionDenied
         );
 
         vfs_unlink(link_path).unwrap();

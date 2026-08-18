@@ -59,7 +59,7 @@ impl AddressSpaceBackend for Ext4AddressSpaceBackend {
                         self.ino.get(),
                         err
                     );
-                    SysError::InvalidArgument
+                    map_ext4_error(err)
                 })
         })
     }

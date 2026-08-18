@@ -26,5 +26,8 @@ mod util;
 
 pub use blockdev::{BlockDevice, EXT4_DEV_BSIZE};
 pub use error::{Ext4Error, Ext4Result};
-pub use fs::{Ext4Filesystem, FsConfig, StatFs};
+pub use fs::{
+    DirectoryCreationOutcome, Ext4Filesystem, FsConfig, LinkOutcome, RmdirOutcome, StatFs,
+    UnlinkOutcome,
+};
 pub use inode::{DirEntry, DirLookupResult, DirReader, FileAttr, InodeRef, InodeType};
