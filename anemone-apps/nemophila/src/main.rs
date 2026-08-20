@@ -25,39 +25,108 @@ fn open_readonly(path: &str) -> Result<OwnedFd, Errno> {
     openat(AtFd::Cwd, Path::new(path), O_RDONLY, 0).map(OwnedFd)
 }
 
-fn validate_identity(identity: u64) -> Result<u64, Errno> {
-    if identity == 0 {
-        return Err(EINVAL);
-    }
-    Ok(identity)
-}
-
 enum Command<'a> {
+    Help,
     LoadEmbedded(&'a str),
     Load(&'a str),
-    TryUnload(u64),
+    Unload(u64),
     List,
     Show(u64),
 }
 
-fn parse_command<'a>(mut args: impl Iterator<Item = &'a str>) -> Result<Command<'a>, Errno> {
-    let command = args.next().ok_or(EINVAL)?;
+impl Command<'_> {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Help => "help",
+            Self::LoadEmbedded(_) => "load-embedded",
+            Self::Load(_) => "load",
+            Self::Unload(_) => "unload",
+            Self::List => "list",
+            Self::Show(_) => "show",
+        }
+    }
+}
+
+enum CliError<'a> {
+    UnknownCommand(&'a str),
+    MissingArgument(&'static str),
+    UnexpectedArgument(&'a str),
+    InvalidIdentity(&'a str),
+    ZeroIdentity,
+}
+
+fn parse_identity(value: &str) -> Result<u64, CliError<'_>> {
+    let identity = value
+        .parse()
+        .map_err(|_| CliError::InvalidIdentity(value))?;
+    if identity == 0 {
+        return Err(CliError::ZeroIdentity);
+    }
+    Ok(identity)
+}
+
+fn require_argument<'a>(
+    args: &mut impl Iterator<Item = &'a str>,
+    name: &'static str,
+) -> Result<&'a str, CliError<'a>> {
+    args.next().ok_or(CliError::MissingArgument(name))
+}
+
+fn parse_command<'a>(mut args: impl Iterator<Item = &'a str>) -> Result<Command<'a>, CliError<'a>> {
+    let Some(command) = args.next() else {
+        return Ok(Command::Help);
+    };
     let command = match command {
-        "load-embedded" => Ok(Command::LoadEmbedded(args.next().ok_or(EINVAL)?)),
-        "load" => Ok(Command::Load(args.next().ok_or(EINVAL)?)),
-        "try-unload" => Ok(Command::TryUnload(
-            args.next().ok_or(EINVAL)?.parse().map_err(|_| EINVAL)?,
-        )),
-        "list" => Ok(Command::List),
-        "show" => Ok(Command::Show(
-            args.next().ok_or(EINVAL)?.parse().map_err(|_| EINVAL)?,
-        )),
-        _ => Err(EINVAL),
-    }?;
-    if args.next().is_some() {
-        return Err(EINVAL);
+        "help" | "-h" | "--help" => Command::Help,
+        "load-embedded" => Command::LoadEmbedded(require_argument(&mut args, "ARTIFACT")?),
+        "load" => Command::Load(require_argument(&mut args, "PATH")?),
+        "unload" => Command::Unload(parse_identity(require_argument(&mut args, "INSTANCE_ID")?)?),
+        "list" => Command::List,
+        "show" => Command::Show(parse_identity(require_argument(&mut args, "INSTANCE_ID")?)?),
+        _ => return Err(CliError::UnknownCommand(command)),
+    };
+    if let Some(argument) = args.next() {
+        return Err(CliError::UnexpectedArgument(argument));
     }
     Ok(command)
+}
+
+fn print_help() {
+    println!(
+        "Nemophila module management\n\
+         \n\
+         Usage: nemophila <COMMAND> [ARGUMENT]\n\
+         \n\
+         Commands:\n\
+           load-embedded <ARTIFACT>  Load an embedded module by artifact identity\n\
+           load <PATH>               Load a module from a file\n\
+           unload <INSTANCE_ID>      Unload an idle live or poisoned instance\n\
+           list                      List published instance IDs\n\
+           show <INSTANCE_ID>        Show one instance snapshot\n\
+           help                      Print this help\n\
+         \n\
+         Options:\n\
+           -h, --help                Print this help"
+    );
+}
+
+fn report_cli_error(error: CliError<'_>) {
+    match error {
+        CliError::UnknownCommand(command) => {
+            eprintln!("nemophila: unknown command '{command}'")
+        },
+        CliError::MissingArgument(argument) => {
+            eprintln!("nemophila: missing required argument <{argument}>")
+        },
+        CliError::UnexpectedArgument(argument) => {
+            eprintln!("nemophila: unexpected argument '{argument}'")
+        },
+        CliError::InvalidIdentity(identity) => {
+            eprintln!("nemophila: invalid instance ID '{identity}'")
+        },
+        CliError::ZeroIdentity => eprintln!("nemophila: instance ID must be non-zero"),
+    }
+    eprintln!("Try 'nemophila --help' for more information.");
 }
 
 fn print_file(path: &str) -> Result<(), Errno> {
@@ -110,24 +179,31 @@ fn list() -> Result<(), Errno> {
 
 #[anemone_rs::main]
 fn main() -> Result<(), Errno> {
-    match parse_command(args().skip(1))? {
+    let command = match parse_command(args().skip(1)) {
+        Ok(command) => command,
+        Err(error) => {
+            report_cli_error(error);
+            return Err(EINVAL);
+        },
+    };
+    let command_name = command.name();
+    let result = match command {
+        Command::Help => {
+            print_help();
+            Ok(())
+        },
         Command::LoadEmbedded(artifact) => {
-            println!("{}", load_embedded(artifact)?);
+            load_embedded(artifact).map(|instance| println!("{instance}"))
         },
-        Command::Load(path) => {
-            let file = open_readonly(path)?;
-            println!("{}", load_supplied(file.0 as i32)?);
-        },
-        Command::TryUnload(instance) => {
-            try_unload(validate_identity(instance)?)?;
-        },
-        Command::List => {
-            list()?;
-        },
-        Command::Show(instance) => {
-            let identity = validate_identity(instance)?;
-            print_file(&format!("{PROC_ROOT}/{identity}"))?;
-        },
+        Command::Load(path) => open_readonly(path)
+            .and_then(|file| load_supplied(file.0 as i32))
+            .map(|instance| println!("{instance}")),
+        Command::Unload(instance) => try_unload(instance),
+        Command::List => list(),
+        Command::Show(instance) => print_file(&format!("{PROC_ROOT}/{instance}")),
+    };
+    if let Err(errno) = result {
+        eprintln!("nemophila: {command_name} failed: errno {errno}");
     }
-    Ok(())
+    result
 }

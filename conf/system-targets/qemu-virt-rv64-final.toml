@@ -1,4 +1,5 @@
 platform = "qemu-virt-rv64"
+nemophila = ["clone-observer", "task-lineage-auditor"]
 
 [root]
 fstype = "ext4"

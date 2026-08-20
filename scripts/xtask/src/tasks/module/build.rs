@@ -18,7 +18,7 @@ use super::driver::{BuildContext, Candidate, CargoDriver, MODULE_TARGET, ModuleB
 
 const MODULES_DIR: &str = "nemophila/modules";
 const BUILD_DIR: &str = "build/modules";
-static NEXT_INVOCATION: AtomicU64 = AtomicU64::new(0);
+static NEXT_CANDIDATE: AtomicU64 = AtomicU64::new(0);
 
 pub fn run(identity: &str) -> anyhow::Result<()> {
     build(identity).map(|_| ())
@@ -60,7 +60,8 @@ pub(crate) fn build(identity: &str) -> anyhow::Result<ModuleExport> {
 
     let build_root = repository.join(BUILD_DIR);
     fs::create_dir_all(build_root.join(".candidates"))?;
-    let target_dir = fresh_target_dir(&build_root.join(".candidates"), identity)?;
+    let target_dir = module_dir.join("target");
+    let candidate_dir = fresh_candidate_dir(&build_root.join(".candidates"), identity)?;
     let export = build_root.join(identity).join(&manifest.build.artifact);
     remove_stable_export(&export)?;
 
@@ -70,7 +71,7 @@ pub(crate) fn build(identity: &str) -> anyhow::Result<ModuleExport> {
             "Building '{}' with cargo for {} into {}",
             identity,
             MODULE_TARGET,
-            target_dir.display()
+            candidate_dir.display()
         )
     );
     let context = BuildContext {
@@ -79,12 +80,13 @@ pub(crate) fn build(identity: &str) -> anyhow::Result<ModuleExport> {
         workdir: &workdir,
         manifest: &build_manifest,
         target_dir: &target_dir,
+        candidate_dir: &candidate_dir,
     };
     let candidate = match manifest.build.driver {
         DriverKind::Cargo => CargoDriver::default().build(&context),
     }
     .with_context(|| format!("module '{identity}' build driver failed"))?;
-    let candidate = verify_fresh_candidate(&target_dir, candidate)?;
+    let candidate = verify_fresh_candidate(&candidate_dir, candidate)?;
     let bytes = fs::read(&candidate.path).with_context(|| {
         format!(
             "failed to read module candidate '{}'",
@@ -102,10 +104,10 @@ pub(crate) fn build(identity: &str) -> anyhow::Result<ModuleExport> {
         )
     );
     log_progress!("MODULE", &format!("Exported '{}'", export.display()));
-    // The immutable byte handoff and stable export now own this successful
-    // result. Keep failed builds for diagnosis, but do not retain a completed
-    // Cargo target tree under the user-facing build output.
-    cleanup_candidate_dir(&target_dir)?;
+    // Cargo's module-local target tree is the reusable compilation cache. The
+    // immutable byte handoff and stable export now own this invocation's
+    // result, so only its fresh artifact directory is temporary.
+    cleanup_candidate_dir(&candidate_dir)?;
     Ok(ModuleExport {
         path: export
             .strip_prefix(&repository)
@@ -149,9 +151,9 @@ fn ensure_contained(root: &Path, path: &Path, field: &str) -> anyhow::Result<()>
     Ok(())
 }
 
-fn fresh_target_dir(root: &Path, identity: &str) -> anyhow::Result<PathBuf> {
+fn fresh_candidate_dir(root: &Path, identity: &str) -> anyhow::Result<PathBuf> {
     loop {
-        let sequence = NEXT_INVOCATION.fetch_add(1, Ordering::Relaxed);
+        let sequence = NEXT_CANDIDATE.fetch_add(1, Ordering::Relaxed);
         let path = root.join(format!("{identity}-{}-{sequence}", std::process::id()));
         match fs::create_dir(&path) {
             Ok(()) => return path.canonicalize().map_err(Into::into),
@@ -178,7 +180,7 @@ fn remove_stable_export(export: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn verify_fresh_candidate(target_dir: &Path, candidate: Candidate) -> anyhow::Result<Candidate> {
+fn verify_fresh_candidate(candidate_dir: &Path, candidate: Candidate) -> anyhow::Result<Candidate> {
     let metadata = fs::symlink_metadata(&candidate.path).with_context(|| {
         format!(
             "driver returned missing candidate '{}'",
@@ -192,10 +194,10 @@ fn verify_fresh_candidate(target_dir: &Path, candidate: Candidate) -> anyhow::Re
     );
     let path = candidate.path.canonicalize()?;
     ensure!(
-        path.starts_with(target_dir),
+        path.starts_with(candidate_dir),
         "driver returned stale candidate '{}' outside this invocation '{}'",
         path.display(),
-        target_dir.display()
+        candidate_dir.display()
     );
     Ok(Candidate { path, ..candidate })
 }
@@ -318,14 +320,17 @@ mod tests {
     }
 
     #[test]
-    fn completed_candidate_cleanup_removes_the_whole_target_tree() {
+    fn completed_candidate_cleanup_preserves_the_module_cache() {
         let temp = TempDir::new("candidate-cleanup");
         let candidate = temp.0.join("candidate");
-        fs::create_dir_all(candidate.join("wasm32v1-none/deps")).unwrap();
-        fs::write(candidate.join("wasm32v1-none/deps/stale.rmeta"), b"stale").unwrap();
+        let target = temp.0.join("target");
+        fs::create_dir_all(&candidate).unwrap();
+        fs::create_dir_all(target.join("wasm32v1-none/deps")).unwrap();
+        fs::write(target.join("wasm32v1-none/deps/cached.rmeta"), b"cache").unwrap();
 
         cleanup_candidate_dir(&candidate).unwrap();
 
         assert!(!candidate.exists());
+        assert!(target.join("wasm32v1-none/deps/cached.rmeta").is_file());
     }
 }

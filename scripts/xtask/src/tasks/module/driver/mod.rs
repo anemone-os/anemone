@@ -14,6 +14,7 @@ pub struct BuildContext<'a> {
     pub workdir: &'a Path,
     pub manifest: &'a Path,
     pub target_dir: &'a Path,
+    pub candidate_dir: &'a Path,
 }
 
 #[derive(Debug)]
