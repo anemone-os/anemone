@@ -50,6 +50,10 @@ impl ModuleBuildDriver for CargoDriver {
             .arg("--target-dir")
             .arg(context.target_dir)
             .arg("-Z")
+            .arg("unstable-options")
+            .arg("--artifact-dir")
+            .arg(context.candidate_dir)
+            .arg("-Z")
             .arg("build-std=core,alloc");
 
         cmd_echo(&command);
@@ -66,13 +70,14 @@ impl ModuleBuildDriver for CargoDriver {
             context.identity
         );
 
-        let output_dir = context.target_dir.join(MODULE_TARGET).join(MODULE_PROFILE);
-        let path = select_candidate(&output_dir, &context.build.artifact).with_context(|| {
-            format!(
-                "module '{}' Cargo driver did not produce its declared candidate",
-                context.identity
-            )
-        })?;
+        let path = select_candidate(context.candidate_dir, &context.build.artifact).with_context(
+            || {
+                format!(
+                    "module '{}' Cargo driver did not produce its declared candidate",
+                    context.identity
+                )
+            },
+        )?;
         Ok(Candidate {
             path,
             driver: "cargo",
@@ -170,6 +175,7 @@ mod tests {
             workdir: &temp.0,
             manifest: &manifest,
             target_dir: &target_dir,
+            candidate_dir: &temp.0,
         };
 
         let error = CargoDriver::with_program(temp.0.join("missing-cargo"))

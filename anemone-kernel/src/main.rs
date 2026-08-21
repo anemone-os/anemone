@@ -39,6 +39,7 @@ pub mod exception;
 pub mod fs;
 pub mod initcall;
 pub mod mm;
+#[cfg(feature = "nemophila")]
 mod nemophila;
 pub mod net;
 pub mod panic;
@@ -146,6 +147,7 @@ unsafe extern "C" fn bsp_kinit(bsp_id: usize, fdt_va: VirtAddr) {
     #[cfg(feature = "kunit")]
     crate::debug::kunit::kunit_runner();
 
+    #[cfg(feature = "nemophila")]
     nemophila::activate_embedded_modules();
 
     boot::exec_initial_program(init_stdio);

@@ -237,6 +237,7 @@ impl<'a> ConfigLoader<'a> {
         profile: CargoProfile,
     ) -> anyhow::Result<ResolvedSystemBuild> {
         let (target, target_path) = self.load_target_with_path(&target_ref)?;
+        validate_nemophila_selection(&target, &kernel_config)?;
         let platform_ref = target.platform.clone();
         let (platform, platform_path) = self.load_platform_with_path(&platform_ref)?;
         Ok(ResolvedSystemBuild {
@@ -288,6 +289,24 @@ impl<'a> ConfigLoader<'a> {
         KConfig::from_str(&content)
             .with_context(|| format!("failed to parse kernel config `{reference}`"))
     }
+}
+
+fn validate_nemophila_selection(
+    target: &SystemTargetConfig,
+    kernel_config: &KernelConfig,
+) -> anyhow::Result<()> {
+    let enabled = kernel_config
+        .features
+        .get("nemophila")
+        .copied()
+        .unwrap_or(false);
+    if !enabled && !target.nemophila.is_empty() {
+        anyhow::bail!(
+            "SystemTarget selects embedded Nemophila modules {:?}, but KernelConfig feature `nemophila` is disabled",
+            target.nemophila
+        );
+    }
+    Ok(())
 }
 
 pub struct LoadedSystemBuildInputs {
@@ -591,6 +610,49 @@ mod tests {
             "[build]\ntarget = \"example\"\nprofile = \"release\"\ndisasm = false\n\n{default_kconfig}"
         );
         assert!(KConfig::from_str(&legacy).is_err());
+    }
+
+    #[test]
+    fn embedded_nemophila_selection_requires_the_kernel_feature() {
+        let workspace = TestWorkspace::new();
+        let target_path = workspace.root.join("conf/system-targets/example.toml");
+        let target = fs::read_to_string(&target_path).unwrap().replacen(
+            "platform = \"example\"",
+            "platform = \"example\"\nnemophila = [\"clone-observer\"]",
+            1,
+        );
+        fs::write(target_path, target).unwrap();
+        let loader = ConfigLoader::new(&workspace.root);
+
+        let error = loader
+            .resolve_selection(SelectionRequest::explicit_tuple(
+                SystemTargetRef::new("example").unwrap(),
+                KernelConfigRef::new("kconfig").unwrap(),
+                CargoProfile::Release,
+            ))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("feature `nemophila` is disabled"), "{error}");
+
+        let kconfig_path = workspace.root.join("kconfig");
+        let mut kconfig = fs::read_to_string(&kconfig_path)
+            .unwrap()
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        kconfig["features"]["nemophila"] = toml_edit::value(true);
+        fs::write(kconfig_path, kconfig.to_string()).unwrap();
+        let resolved = loader
+            .resolve_selection(SelectionRequest::explicit_tuple(
+                SystemTargetRef::new("example").unwrap(),
+                KernelConfigRef::new("kconfig").unwrap(),
+                CargoProfile::Release,
+            ))
+            .unwrap();
+        assert_eq!(
+            resolved.system.target.nemophila,
+            vec!["clone-observer".to_string()]
+        );
     }
 
     struct TestWorkspace {

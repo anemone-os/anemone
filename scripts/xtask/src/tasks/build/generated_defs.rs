@@ -16,7 +16,13 @@ use crate::{
 use super::BuildContext;
 
 const NEMOPHILA_SNAPSHOTS_DIR: &str = "build/generated/nemophila";
+const NEMOPHILA_SNAPSHOT_PREFIX: &str = "system-build-";
 static NEXT_NEMOPHILA_SNAPSHOT: AtomicU64 = AtomicU64::new(0);
+
+struct GeneratedNemophilaCatalog {
+    rust: String,
+    snapshot_dir: Option<PathBuf>,
+}
 
 impl BuildContext {
     pub(super) fn gen_rust_defs(&self) -> anyhow::Result<()> {
@@ -35,7 +41,7 @@ impl BuildContext {
             &self.resolved.target.root,
             &initial_program,
             &network,
-            &nemophila,
+            &nemophila.rust,
         );
         let kconfig_defs_path = "anemone-kernel/src/kconfig_defs.rs";
         let platform_defs_path = "anemone-kernel/src/platform_defs.rs";
@@ -45,13 +51,44 @@ impl BuildContext {
             "Generating kconfig_defs.rs, platform_defs.rs, and system_target_defs.rs"
         );
         let sh = Shell::new()?;
-        sh.write_file(kconfig_defs_path, &kconfig_defs)?;
-        sh.write_file(platform_defs_path, &platform_defs)?;
-        sh.write_file(system_target_defs_path, &system_target_defs)?;
+        let publication = (|| {
+            sh.write_file(kconfig_defs_path, &kconfig_defs)?;
+            sh.write_file(platform_defs_path, &platform_defs)?;
+            sh.write_file(system_target_defs_path, &system_target_defs)?;
+            Ok::<_, anyhow::Error>(())
+        })();
+        if let Err(error) = publication {
+            if let Some(snapshot_dir) = &nemophila.snapshot_dir {
+                let _ = std::fs::remove_dir_all(snapshot_dir);
+            }
+            return Err(error);
+        }
+        prune_nemophila_snapshots(
+            Path::new(NEMOPHILA_SNAPSHOTS_DIR),
+            nemophila.snapshot_dir.as_deref(),
+        )?;
         Ok(())
     }
 
-    fn gen_nemophila_catalog(&self) -> anyhow::Result<String> {
+    fn gen_nemophila_catalog(&self) -> anyhow::Result<GeneratedNemophilaCatalog> {
+        let enabled = self
+            .resolved
+            .kernel_config
+            .features
+            .get("nemophila")
+            .copied()
+            .unwrap_or(false);
+        if !enabled {
+            assert!(
+                self.resolved.target.nemophila.is_empty(),
+                "resolved SystemTarget selected Nemophila modules while the kernel feature is disabled"
+            );
+            return Ok(GeneratedNemophilaCatalog {
+                rust: String::new(),
+                snapshot_dir: None,
+            });
+        }
+
         let limit = self
             .resolved
             .kernel_config
@@ -59,19 +96,32 @@ impl BuildContext {
             .nemophila_artifact_max_bytes
             .expect("resolved KernelConfig has a Nemophila artifact limit");
         if self.resolved.target.nemophila.is_empty() {
-            return render_nemophila_catalog(&[]);
+            return Ok(GeneratedNemophilaCatalog {
+                rust: render_nemophila_catalog(&[])?,
+                snapshot_dir: None,
+            });
         }
 
-        let snapshot_dir = fresh_nemophila_snapshot_dir(Path::new(NEMOPHILA_SNAPSHOTS_DIR))?;
-        let mut modules = Vec::with_capacity(self.resolved.target.nemophila.len());
-        for identity in &self.resolved.target.nemophila {
-            let export = crate::tasks::module::build::build(identity).with_context(|| {
-                format!("failed to build embedded Nemophila module `{identity}`")
-            })?;
-            let snapshot = snapshot_embedded_module(identity, export, &snapshot_dir, limit)?;
-            modules.push((identity.as_str(), snapshot));
+        let snapshots_root = Path::new(NEMOPHILA_SNAPSHOTS_DIR);
+        let snapshot_dir = fresh_nemophila_snapshot_dir(snapshots_root)?;
+        let result = (|| {
+            let mut modules = Vec::with_capacity(self.resolved.target.nemophila.len());
+            for identity in &self.resolved.target.nemophila {
+                let export = crate::tasks::module::build::build(identity).with_context(|| {
+                    format!("failed to build embedded Nemophila module `{identity}`")
+                })?;
+                let snapshot = snapshot_embedded_module(identity, export, &snapshot_dir, limit)?;
+                modules.push((identity.as_str(), snapshot));
+            }
+            Ok(GeneratedNemophilaCatalog {
+                rust: render_nemophila_catalog(&modules)?,
+                snapshot_dir: Some(snapshot_dir.clone()),
+            })
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_dir_all(snapshot_dir);
         }
-        render_nemophila_catalog(&modules)
+        result
     }
 }
 
@@ -79,7 +129,10 @@ fn fresh_nemophila_snapshot_dir(root: &Path) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(root)?;
     loop {
         let sequence = NEXT_NEMOPHILA_SNAPSHOT.fetch_add(1, Ordering::Relaxed);
-        let path = root.join(format!("system-build-{}-{sequence}", std::process::id()));
+        let path = root.join(format!(
+            "{NEMOPHILA_SNAPSHOT_PREFIX}{}-{sequence}",
+            std::process::id()
+        ));
         match std::fs::create_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -137,6 +190,35 @@ fn snapshot_embedded_module(
         );
     }
     Ok(snapshot)
+}
+
+fn prune_nemophila_snapshots(root: &Path, keep: Option<&Path>) -> anyhow::Result<()> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if keep.is_some_and(|keep| path == keep)
+            || !entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(NEMOPHILA_SNAPSHOT_PREFIX))
+        {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(path)?;
+        } else {
+            std::fs::remove_file(path)?;
+        }
+    }
+    if std::fs::read_dir(root)?.next().is_none() {
+        std::fs::remove_dir(root)?;
+    }
+    Ok(())
 }
 
 pub(super) fn render_nemophila_catalog(
@@ -242,9 +324,11 @@ fn render_system_target_defs(
         r#"// @generated by `xtask build`; do not edit.
 use crate::{{
     boot::{{InitialProgramSource, RootMount, RootSource}},
-    nemophila::EmbeddedModule,
     net::StaticIpv4Deployment,
 }};
+
+#[cfg(feature = "nemophila")]
+use crate::nemophila::EmbeddedModule;
 
 pub(crate) const ROOT_MOUNT: RootMount = {root_mount};
 
@@ -410,5 +494,27 @@ mod tests {
             snapshot_embedded_module("valid", export(valid, b"fresh"), &snapshot_dir, 8).unwrap();
         assert_eq!(std::fs::read(snapshot).unwrap(), b"fresh");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unreachable_snapshots_are_pruned_after_publication() {
+        let root = std::env::temp_dir().join(format!(
+            "anemone-nemophila-snapshot-lifecycle-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let current = root.join(format!("{NEMOPHILA_SNAPSHOT_PREFIX}current"));
+        let stale = root.join(format!("{NEMOPHILA_SNAPSHOT_PREFIX}stale"));
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir(&stale).unwrap();
+        std::fs::write(current.join("current.wasm"), b"current").unwrap();
+        std::fs::write(stale.join("stale.wasm"), b"stale").unwrap();
+
+        prune_nemophila_snapshots(&root, Some(&current)).unwrap();
+        assert!(current.is_dir());
+        assert!(!stale.exists());
+
+        prune_nemophila_snapshots(&root, None).unwrap();
+        assert!(!root.exists());
     }
 }

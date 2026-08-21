@@ -6,12 +6,12 @@ extern crate alloc;
 use alloc::{collections::BTreeMap, format, rc::Rc};
 use core::{alloc::Layout, cell::RefCell, panic::PanicInfo};
 use nemophila_sdk::{
-    LoadContext, Module,
     services::logging::LogLevel,
     weave::task::{
-        RegistrationError,
         thread_exit::{ThreadExitEvent, ThreadExitReason},
+        RegistrationError,
     },
+    LoadContext, Module,
 };
 
 #[global_allocator]
@@ -33,7 +33,7 @@ impl Module for TaskLineageAuditor {
                 let message = clone_audit
                     .borrow_mut()
                     .observe_clone(event.creator_tid, event.child_tid);
-                callback.logging().write(LogLevel::Notice, &message);
+                callback.logging().println(&message);
             })?;
 
         context
@@ -42,7 +42,7 @@ impl Module for TaskLineageAuditor {
             .thread_exit()
             .register(move |event, callback| {
                 let message = audit.borrow_mut().observe_exit(event);
-                callback.logging().write(LogLevel::Notice, &message);
+                callback.logging().println(&message);
             })?;
 
         nemophila_sdk::kprintln!(

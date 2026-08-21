@@ -8,6 +8,7 @@ spin_lock_irqsave = true
 soft_unaligned_access = true
 kernel_symbols = false
 perf_observe = false
+nemophila = true
 
 [parameters]
 # The canonical module emits registration and callback evidence at Debug.

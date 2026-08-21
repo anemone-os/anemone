@@ -3,7 +3,8 @@
 {
     "rust-analyzer.cargo.features": [
         "kunit",
-        "fs_ext4"
+        "fs_ext4",
+        "nemophila"
     ],
     "rust-analyzer.linkedProjects": [
         // kernel

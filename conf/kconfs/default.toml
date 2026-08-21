@@ -10,6 +10,7 @@ spin_lock_irqsave = true # Make ordinary spin locks disable local interrupts
 soft_unaligned_access = true # Emulate supported unaligned user-memory accesses in architecture trap handlers
 kernel_symbols = false # Embed checked text/function symbols for kernel backtraces
 perf_observe = true # Enable native kernel performance observation; runtime recording starts disabled
+nemophila = true # Enable the Nemophila managed kernel-extension runtime
 # virtio_gpu = true # Enable Virtio GPU support
 # smp = true # Enable Symmetric Multiprocessing support
 # intr_stack = true # Enable Interrupt Stack support
