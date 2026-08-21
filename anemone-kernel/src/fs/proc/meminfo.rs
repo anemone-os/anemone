@@ -56,17 +56,23 @@ fn meminfo_string() -> String {
     let total_kib = memory.total_pages * kib_per_page;
     let free_kib = memory.free_pages * kib_per_page;
 
-    // Swap and a separate block-buffer cache are absent. Add Cached,
-    // MemAvailable, Shmem, and Slab only when their owners expose complete
-    // accounting; zero would misrepresent missing accounting as an empty
-    // category.
+    // Keep these Linux keys present for consumers such as LTP that parse
+    // /proc/meminfo during common setup. MemAvailable is a conservative
+    // projection of allocator-owned free pages. Cached, Shmem, and Slab are
+    // compatibility placeholders only: they must not drive allocation or OOM
+    // decisions, and should be replaced once their owners expose complete
+    // accounting. Swap and a separate block-buffer cache are absent.
     format!(
         "MemTotal:\t{total_kib} kB\n\
          MemFree:\t{free_kib} kB\n\
+         MemAvailable:\t{free_kib} kB\n\
          Buffers:\t0 kB\n\
+         Cached:\t0 kB\n\
          SwapTotal:\t0 kB\n\
          SwapCached:\t0 kB\n\
-         SwapFree:\t0 kB\n"
+         SwapFree:\t0 kB\n\
+         Shmem:\t0 kB\n\
+         Slab:\t0 kB\n"
     )
 }
 

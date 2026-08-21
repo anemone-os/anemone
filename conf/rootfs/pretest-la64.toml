@@ -30,25 +30,6 @@ installed_dir = "/sbin"
 name = "user-test"
 installed_dir = "/bin"
 
-[[apps]]
-name = "socket-r1-oracle"
-installed_dir = "/bin"
-
-[[apps]]
-name = "tcp-r0-oracle"
-installed_dir = "/bin"
-
-[[apps]]
-name = "clock_tests"
-installed_dir = "/bin"
-
-[[apps]]
-name = "userptr"
-installed_dir = "/bin"
-
-[[apps]]
-name = "fcntl-test"
-installed_dir = "/bin"
 
 # [[apps]]
 # name = "ioctl-test"
@@ -62,14 +43,6 @@ installed_dir = "/bin"
 # name = "flock-test"
 # installed_dir = "/bin"
 #
-[[apps]]
-name = "socket-test"
-installed_dir = "/bin"
-
-[[apps]]
-name = "rust-command-test"
-installed_dir = "/bin"
-
 # [[apps]]
 # name = "fair-test"
 # installed_dir = "/bin"
